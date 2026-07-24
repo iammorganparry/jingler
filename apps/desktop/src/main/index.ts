@@ -34,6 +34,27 @@ import { initAutoUpdater } from "./updater.js"
 let mainWindow: BrowserWindow | null = null
 
 /**
+ * Development builds keep a redacted Codex lifecycle trace so an intermittent
+ * silent turn leaves evidence after its ten-minute watchdog fires. Packaged
+ * builds and headless e2e remain unchanged; developers can explicitly disable
+ * it with `STARBASE_CODEX_DIAGNOSTICS=0`.
+ */
+const enableCodexDiagnostics = (): void => {
+  if (
+    app.isPackaged ||
+    process.env.STARBASE_E2E_HEADLESS === "1" ||
+    process.env.STARBASE_CODEX_DIAGNOSTICS === "0"
+  ) {
+    return
+  }
+  const home = process.env.STARBASE_HOME ?? app.getPath("home")
+  process.env.STARBASE_CODEX_DIAGNOSTICS_DIR ??= join(home, "starbase", "diagnostics", "codex")
+  console.info(
+    `[codex-diagnostics] redacted traces: ${process.env.STARBASE_CODEX_DIAGNOSTICS_DIR}`
+  )
+}
+
+/**
  * Warm `ModelsService`'s cache before anything asks for it.
  *
  * Discovering models is the slowest read the app makes: it probes for each CLI
@@ -183,6 +204,7 @@ if (!gotPrimaryLock) {
   }
 
   app.whenReady().then(async () => {
+    enableCodexDiagnostics()
     // Force the layer to build so the RPC server + `ipcMain` listener are live
     // before the renderer can send its first frame.
     await runtime.runPromise(Effect.void)

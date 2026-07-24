@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process"
 import type { Readable, Writable } from "node:stream"
 import { stopChild, trackChild } from "./child-registry.js"
+import {
+  boundedCodexStderr,
+  type CodexAppServerDiagnostics
+} from "./codex-app-server-diagnostics.js"
 
 export type JsonRpcId = number | string
 export type JsonRpcMessage = Readonly<Record<string, unknown>>
@@ -23,10 +27,13 @@ interface PendingRequest {
   readonly resolve: (value: unknown) => void
   readonly reject: (cause: Error) => void
   readonly timeout: NodeJS.Timeout
+  readonly method: string
+  readonly startedAt: number
 }
 
 export interface CodexAppServerConnectionOptions {
   readonly requestTimeoutMs?: number
+  readonly diagnostics?: CodexAppServerDiagnostics | null
 }
 
 export interface CodexAppServerRequestOptions {
@@ -47,6 +54,7 @@ export class CodexAppServerConnection {
   readonly #output: Readable
   readonly #closeTransport: () => void
   readonly #requestTimeoutMs: number
+  readonly #diagnostics: CodexAppServerDiagnostics | null
   readonly #pending = new Map<JsonRpcId, PendingRequest>()
   readonly #queued: Array<JsonRpcMessage> = []
   readonly #waiting: Array<(message: JsonRpcMessage | null) => void> = []
@@ -64,8 +72,8 @@ export class CodexAppServerConnection {
     this.#input = input
     this.#output = output
     this.#closeTransport = closeTransport
-    this.#requestTimeoutMs =
-      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    this.#requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    this.#diagnostics = options.diagnostics ?? null
     output.on("data", this.#onData)
     output.on("error", this.#onError)
     output.on("end", this.#onEnd)
@@ -85,6 +93,9 @@ export class CodexAppServerConnection {
       try {
         parsed = JSON.parse(line)
       } catch {
+        this.recordDiagnostic("protocol.invalid_json", {
+          bytes: Buffer.byteLength(line)
+        })
         continue
       }
       if (isRecord(parsed)) this.#receive(parsed)
@@ -103,9 +114,17 @@ export class CodexAppServerConnection {
     const id = messageId(message)
     if (id !== null && message.method === undefined) {
       const pending = this.#pending.get(id)
-      if (pending === undefined) return
+      if (pending === undefined) {
+        this.recordDiagnostic("response.unmatched", { requestId: String(id) })
+        return
+      }
       this.#pending.delete(id)
       clearTimeout(pending.timeout)
+      this.recordDiagnostic(message.error === undefined ? "request.completed" : "request.failed", {
+        method: pending.method,
+        requestId: String(id),
+        durationMs: Date.now() - pending.startedAt
+      })
       if (message.error !== undefined) {
         pending.reject(new Error(errorMessage(message.error)))
       } else {
@@ -114,6 +133,11 @@ export class CodexAppServerConnection {
       return
     }
 
+    this.recordDiagnostic("protocol.message", {
+      method: typeof message.method === "string" ? message.method : "<unknown>",
+      serverRequest: id !== null,
+      queued: this.#waiting.length === 0
+    })
     const waiter = this.#waiting.shift()
     if (waiter !== undefined) waiter(message)
     else this.#queued.push(message)
@@ -123,6 +147,12 @@ export class CodexAppServerConnection {
     if (this.#closed) return
     this.#closed = true
     this.#failure = cause
+    this.recordDiagnostic("transport.closed", {
+      failed: cause !== null,
+      pendingRequests: this.#pending.size,
+      queuedMessages: this.#queued.length,
+      waitingConsumers: this.#waiting.length
+    })
     this.#output.off("data", this.#onData)
     this.#output.off("error", this.#onError)
     this.#output.off("end", this.#onEnd)
@@ -149,16 +179,23 @@ export class CodexAppServerConnection {
     this.#nextId += 1
     const timeoutMs = options.timeoutMs ?? this.#requestTimeoutMs
     return new Promise((resolve, reject) => {
+      const startedAt = Date.now()
       const timeout = setTimeout(() => {
         if (!this.#pending.delete(id)) return
-        reject(
-          new Error(
-            `Codex app-server request "${method}" timed out after ${timeoutMs}ms`
-          )
-        )
+        this.recordDiagnostic("request.timeout", {
+          method,
+          requestId: String(id),
+          durationMs: Date.now() - startedAt
+        })
+        reject(new Error(`Codex app-server request "${method}" timed out after ${timeoutMs}ms`))
       }, timeoutMs)
       timeout.unref()
-      this.#pending.set(id, { resolve, reject, timeout })
+      this.#pending.set(id, { resolve, reject, timeout, method, startedAt })
+      this.recordDiagnostic("request.sent", {
+        method,
+        requestId: String(id),
+        timeoutMs
+      })
       try {
         this.#send({ jsonrpc: "2.0", id, method, params })
       } catch (cause) {
@@ -170,15 +207,36 @@ export class CodexAppServerConnection {
   }
 
   notify(method: string, params: unknown): void {
+    this.recordDiagnostic("notification.sent", { method })
     this.#send({ jsonrpc: "2.0", method, params })
   }
 
   respond(id: JsonRpcId, result: unknown): void {
+    this.recordDiagnostic("server_request.responded", {
+      requestId: String(id),
+      failed: false
+    })
     this.#send({ jsonrpc: "2.0", id, result })
   }
 
   respondError(id: JsonRpcId, code: number, message: string): void {
+    this.recordDiagnostic("server_request.responded", {
+      requestId: String(id),
+      failed: true,
+      errorCode: code
+    })
     this.#send({ jsonrpc: "2.0", id, error: { code, message } })
+  }
+
+  recordDiagnostic(
+    event: string,
+    fields: Readonly<Record<string, boolean | number | string | null | undefined>> = {}
+  ): void {
+    this.#diagnostics?.record(event, fields)
+  }
+
+  get diagnosticsPath(): string | null {
+    return this.#diagnostics?.path ?? null
   }
 
   nextMessage(): Promise<JsonRpcMessage | null> {
@@ -224,6 +282,7 @@ export class CodexAppServerConnection {
 
   close(): void {
     if (this.#closed) return
+    this.recordDiagnostic("transport.close_requested")
     this.#closeTransport()
     this.#finish(null)
   }
@@ -232,6 +291,7 @@ export class CodexAppServerConnection {
 export interface StartCodexAppServerOptions {
   readonly binPath?: string | null
   readonly env?: NodeJS.ProcessEnv
+  readonly diagnostics?: CodexAppServerDiagnostics | null
 }
 
 /** Spawn and initialize one app-server connection for one Starbase run. */
@@ -241,9 +301,12 @@ export const startCodexAppServer = async (
   const child = trackChild(
     spawn(options.binPath || "codex", ["app-server"], {
       env: options.env,
-      stdio: ["pipe", "pipe", "ignore"]
+      stdio: ["pipe", "pipe", "pipe"]
     })
   )
+  options.diagnostics?.record("process.spawned", {
+    pid: child.pid ?? null
+  })
   if (child.stdin === null || child.stdout === null) {
     stopChild(child)
     throw new Error("Codex app-server did not expose stdio")
@@ -251,10 +314,24 @@ export const startCodexAppServer = async (
   const connection = new CodexAppServerConnection(
     child.stdin,
     child.stdout,
-    () => stopChild(child)
+    () => stopChild(child),
+    { diagnostics: options.diagnostics }
   )
-  child.on("error", () => connection.close())
-  child.on("exit", () => connection.close())
+  child.stderr?.on("data", (chunk: Buffer | string) => {
+    options.diagnostics?.record("process.stderr", {
+      text: boundedCodexStderr(chunk.toString())
+    })
+  })
+  child.on("error", (cause) => {
+    options.diagnostics?.record("process.error", {
+      message: boundedCodexStderr(cause.message)
+    })
+    connection.close()
+  })
+  child.on("exit", (code, signal) => {
+    options.diagnostics?.record("process.exit", { code, signal })
+    connection.close()
+  })
 
   try {
     await connection.request("initialize", {

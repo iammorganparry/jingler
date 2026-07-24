@@ -1,9 +1,4 @@
-import type {
-  PermissionMode,
-  Question,
-  QuestionAnswer,
-  ReasoningEffort
-} from "@starbase/core"
+import type { PermissionMode, Question, QuestionAnswer, ReasoningEffort } from "@starbase/core"
 import { CliExecError, resumePlanPrompt } from "@starbase/core"
 import { Effect, Runtime } from "effect"
 import type { AgentContext, SessionSpec } from "./adapter.js"
@@ -19,6 +14,11 @@ import {
   type JsonRpcMessage,
   startCodexAppServer
 } from "./codex-app-server-client.js"
+import {
+  boundedCodexStderr,
+  type CodexAppServerDiagnostics,
+  createCodexAppServerDiagnostics
+} from "./codex-app-server-diagnostics.js"
 import { stageCodexInput, toCodexAppServerInput } from "./codex-input.js"
 import { requireWorktree } from "./cwd.js"
 import { hasPlanBlock, parsePlan } from "./plan-parse.js"
@@ -48,10 +48,7 @@ export const isMissingCodexRolloutError = (cause: unknown): boolean => {
   return message.includes("no rollout found for thread id")
 }
 
-const recordAt = (
-  record: Record<string, unknown>,
-  key: string
-): Record<string, unknown> | null => {
+const recordAt = (record: Record<string, unknown>, key: string): Record<string, unknown> | null => {
   const value = record[key]
   return isRecord(value) ? value : null
 }
@@ -119,17 +116,27 @@ const turnIdFromResponse = (response: unknown): string | null => {
  * assistant, or terminal event starts a fresh window.
  */
 const nextTurnMessage = async (
-  connection: CodexAppServerConnection
+  connection: CodexAppServerConnection,
+  observed: {
+    readonly messageCount: number
+    readonly lastMethod: string | null
+  }
 ): Promise<JsonRpcMessage | null> => {
   let timeout: NodeJS.Timeout | undefined
   try {
     return await Promise.race([
       connection.nextMessage(),
       new Promise<never>((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error("Codex turn produced no events for 10 minutes")),
-          TURN_INACTIVITY_TIMEOUT_MS
-        )
+        timeout = setTimeout(() => {
+          connection.recordDiagnostic("turn.inactivity_timeout", {
+            timeoutMs: TURN_INACTIVITY_TIMEOUT_MS,
+            messageCount: observed.messageCount,
+            lastMethod: observed.lastMethod
+          })
+          const trace =
+            connection.diagnosticsPath === null ? "" : ` Dev trace: ${connection.diagnosticsPath}`
+          reject(new Error(`Codex turn produced no events for 10 minutes.${trace}`))
+        }, TURN_INACTIVITY_TIMEOUT_MS)
         timeout.unref()
       })
     ])
@@ -138,7 +145,9 @@ const nextTurnMessage = async (
   }
 }
 
-const nativeQuestions = (params: Record<string, unknown>): ReadonlyArray<{
+const nativeQuestions = (
+  params: Record<string, unknown>
+): ReadonlyArray<{
   readonly id: string
   readonly question: Question
 }> => {
@@ -211,10 +220,7 @@ const handleServerRequest = async (
     return true
   }
 
-  if (
-    method === "item/commandExecution/requestApproval" ||
-    method === "execCommandApproval"
-  ) {
+  if (method === "item/commandExecution/requestApproval" || method === "execCommandApproval") {
     const commandValue = params.command
     const command = Array.isArray(commandValue)
       ? commandValue.filter((part): part is string => typeof part === "string").join(" ")
@@ -232,7 +238,12 @@ const handleServerRequest = async (
     connection.respond(
       id,
       method === "execCommandApproval"
-        ? { decision: decision === "allow" ? "approved" : { denied: { rejection: "Denied by the operator." } } }
+        ? {
+            decision:
+              decision === "allow"
+                ? "approved"
+                : { denied: { rejection: "Denied by the operator." } }
+          }
         : { decision: decision === "allow" ? "accept" : "decline" }
     )
     return true
@@ -250,7 +261,12 @@ const handleServerRequest = async (
     connection.respond(
       id,
       method === "applyPatchApproval"
-        ? { decision: decision === "allow" ? "approved" : { denied: { rejection: "Denied by the operator." } } }
+        ? {
+            decision:
+              decision === "allow"
+                ? "approved"
+                : { denied: { rejection: "Denied by the operator." } }
+          }
         : { decision: decision === "allow" ? "accept" : "decline" }
     )
     return true
@@ -270,10 +286,7 @@ const handleServerRequest = async (
   return true
 }
 
-const usageRatio = (
-  message: JsonRpcMessage,
-  expectedThreadId: string
-): number | null => {
+const usageRatio = (message: JsonRpcMessage, expectedThreadId: string): number | null => {
   if (message.method !== "thread/tokenUsage/updated") return null
   const params = recordAt(message, "params")
   if (params === null || params.threadId !== expectedThreadId) return null
@@ -291,19 +304,14 @@ const usageRatio = (
     : null
 }
 
-const cumulativeUsage = (
-  message: JsonRpcMessage,
-  expectedThreadId: string
-): number | null => {
+const cumulativeUsage = (message: JsonRpcMessage, expectedThreadId: string): number | null => {
   if (message.method !== "thread/tokenUsage/updated") return null
   const params = recordAt(message, "params")
   if (params === null || params.threadId !== expectedThreadId) return null
   const usage = recordAt(params, "tokenUsage")
   const total = usage === null ? null : recordAt(usage, "total")
   const tokens = total?.totalTokens
-  return typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0
-    ? tokens
-    : null
+  return typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0 ? tokens : null
 }
 
 /**
@@ -318,33 +326,55 @@ export const runCodexAppServer = (
 ): Effect.Effect<void, CliExecError> =>
   Effect.gen(function* () {
     const runtime = yield* Effect.runtime<never>()
-    const runP = <A>(effect: Effect.Effect<A>): Promise<A> =>
-      Runtime.runPromise(runtime)(effect)
+    const runP = <A>(effect: Effect.Effect<A>): Promise<A> => Runtime.runPromise(runtime)(effect)
     const abort = new AbortController()
     let connection: CodexAppServerConnection | null = null
+    let diagnostics: CodexAppServerDiagnostics | null = null
     let activeThreadId: string | null = null
     let activeTurnId: string | null = null
 
     yield* Effect.tryPromise({
       try: async () => {
         const cwd = requireWorktree(spec.cwd, `session ${sessionId}`)
-        const env = harnessEnv(
-          "codex",
-          worktreeEnv(process.env, cwd),
-          hasSubscriptionAuth("codex")
-        )
-        connection = await startCodexAppServer({ binPath: spec.binPath, env })
-        const staged = await stageCodexInput(spec.prompt, spec.images)
+        const env = harnessEnv("codex", worktreeEnv(process.env, cwd), hasSubscriptionAuth("codex"))
+        diagnostics = createCodexAppServerDiagnostics(process.env.STARBASE_CODEX_DIAGNOSTICS_DIR, {
+          sessionId,
+          model: spec.model ?? null,
+          reasoningEffort: mapCodexAppServerReasoning(spec.reasoningEffort) ?? null
+        })
+        diagnostics?.record("run.started", {
+          fresh: spec.fresh === true,
+          mode: spec.mode,
+          readOnly: spec.readOnly ?? false,
+          unattended: spec.unattended ?? false
+        })
+        try {
+          connection = await startCodexAppServer({
+            binPath: spec.binPath,
+            env,
+            diagnostics
+          })
+        } catch (cause) {
+          diagnostics?.record("run.failed", {
+            message: boundedCodexStderr(cause instanceof Error ? cause.message : String(cause))
+          })
+          diagnostics?.close()
+          diagnostics = null
+          throw cause
+        }
+        const staged = await stageCodexInput(spec.prompt, spec.images).catch((cause) => {
+          diagnostics?.record("run.failed", {
+            message: boundedCodexStderr(cause instanceof Error ? cause.message : String(cause))
+          })
+          connection?.close()
+          diagnostics?.close()
+          diagnostics = null
+          throw cause
+        })
         try {
           const prior =
-            spec.fresh === true
-              ? undefined
-              : (resume.get(sessionId) ?? spec.resumeId ?? undefined)
-          let activePolicy = policy(
-            spec.mode,
-            spec.readOnly ?? false,
-            spec.unattended ?? false
-          )
+            spec.fresh === true ? undefined : (resume.get(sessionId) ?? spec.resumeId ?? undefined)
+          let activePolicy = policy(spec.mode, spec.readOnly ?? false, spec.unattended ?? false)
           const threadParams = {
             cwd,
             ...(spec.model ? { model: spec.model } : {}),
@@ -426,7 +456,9 @@ export const runCodexAppServer = (
             }
             if (replayRequiresCompaction) {
               await connection
-                .request("thread/compact/start", { threadId: resumedThreadId })
+                .request("thread/compact/start", {
+                  threadId: resumedThreadId
+                })
                 .catch(() => undefined)
             }
           }
@@ -450,11 +482,18 @@ export const runCodexAppServer = (
               throw new Error("Codex app-server returned no turn id")
             }
 
+            let turnMessageCount = 0
+            let lastTurnMethod: string | null = null
             let terminal: ReturnType<typeof completedTurn> = null
             while (terminal === null) {
               if (abort.signal.aborted) throw new Error("Codex run interrupted")
-              const message = await nextTurnMessage(connection)
+              const message = await nextTurnMessage(connection, {
+                messageCount: turnMessageCount,
+                lastMethod: lastTurnMethod
+              })
               if (message === null) throw new Error("Codex app-server closed during the turn")
+              turnMessageCount += 1
+              lastTurnMethod = typeof message.method === "string" ? message.method : "<unknown>"
               if (await handleServerRequest(connection, message, ctx, runP, sessionId)) {
                 continue
               }
@@ -531,12 +570,13 @@ export const runCodexAppServer = (
               ) {
                 emergencyCompactRequested = true
                 await connection
-                  .request("thread/compact/start", { threadId: activeThreadId })
+                  .request("thread/compact/start", {
+                    threadId: activeThreadId
+                  })
                   .catch(() => undefined)
               }
               const completed = completedTurn(message, activeThreadId)
-              terminal =
-                completed?.turnId === activeTurnId ? completed : null
+              terminal = completed?.turnId === activeTurnId ? completed : null
             }
 
             activeTurnId = null
@@ -561,9 +601,17 @@ export const runCodexAppServer = (
             }
             turnInput = [{ type: "text", text: followUp, text_elements: [] }]
           }
+        } catch (cause) {
+          diagnostics?.record("run.failed", {
+            message: boundedCodexStderr(cause instanceof Error ? cause.message : String(cause))
+          })
+          throw cause
         } finally {
           await staged.cleanup()
           connection.close()
+          diagnostics?.record("run.finished")
+          diagnostics?.close()
+          diagnostics = null
         }
       },
       catch: (cause) =>
@@ -575,11 +623,7 @@ export const runCodexAppServer = (
       Effect.onInterrupt(() =>
         Effect.promise(async () => {
           abort.abort()
-          if (
-            connection !== null &&
-            activeThreadId !== null &&
-            activeTurnId !== null
-          ) {
+          if (connection !== null && activeThreadId !== null && activeTurnId !== null) {
             await connection
               .request(
                 "turn/interrupt",
@@ -591,7 +635,10 @@ export const runCodexAppServer = (
               )
               .catch(() => undefined)
           }
+          diagnostics?.record("run.interrupted")
           connection?.close()
+          diagnostics?.close()
+          diagnostics = null
         })
       )
     )

@@ -8,7 +8,7 @@ import { FileIcon } from "../components/file-icon.js"
 import { SegmentedControl } from "../components/segmented-control.js"
 import { ResizeHandle, useResizableWidth } from "../components/resizable.js"
 import { cn } from "../lib/cn.js"
-import { atLeast, useWidthTier } from "../hooks/width-tier.js"
+import { usePaneWidth } from "../hooks/width-tier.js"
 import { feedbackCounts } from "../lib/review-feedback.js"
 import { ReviewDiff } from "./review-diff.js"
 import { ReviewFileRow } from "./review-file-row.js"
@@ -17,6 +17,13 @@ import { ReviewTray, type ReviewDraft } from "./review-tray.js"
 
 /** Which diff the Code Review is showing — the PR, or the worktree's own changes. */
 export type ReviewSource = "pr" | "local"
+
+/**
+ * Code needs enough room for the two line-number gutters plus a useful run of
+ * source. If the saved rail widths would leave less than this, both rails become
+ * sheets instead of squeezing the diff.
+ */
+const MIN_READABLE_DIFF_WIDTH = 560
 
 export interface CodeReviewViewProps {
   files: readonly PrFileChange[]
@@ -184,6 +191,7 @@ export function CodeReviewView({
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const sectionRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const rafRef = useRef<number | null>(null)
+  const [sheet, setSheet] = useState<"files" | "tray" | null>(null)
   // Cancel any pending scroll-spy frame when the tab unmounts.
   useEffect(() => () => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
@@ -234,6 +242,7 @@ export function CodeReviewView({
         container.scrollTo({ top: container.scrollTop + offset })
       }
       onSelectFile(path)
+      setSheet(null)
     },
     [onSelectFile]
   )
@@ -242,14 +251,19 @@ export function CodeReviewView({
   const fileList = useResizableWidth({ storageKey: "sb.review.files", initial: 212, min: 160, max: 440 })
   const tray = useResizableWidth({ storageKey: "sb.review.tray.v2", initial: 300, min: 260, max: 480 })
 
-  // Below `mid` the two rails stop being columns and become sheets.
+  // Rails stop being columns whenever their persisted widths would leave an
+  // unreadable diff. This must use actual pixels rather than the shared tier:
+  // a split-screen pane can still classify as "wide" while two user-resized
+  // rails consume most of it.
   //
   // Docked, they take a combined 420px minimum off the row before the diff gets
   // a single pixel — and `review-diff.tsx` then spends another 84px on fixed
   // line-number gutters. In a 500px pane that left roughly 70px of actual code,
   // which is not a narrower view of the diff so much as no view of it.
-  const roomy = atLeast(useWidthTier(), "mid")
-  const [sheet, setSheet] = useState<"files" | "tray" | null>(null)
+  const { width: paneWidth } = usePaneWidth()
+  const roomy =
+    paneWidth === 0 ||
+    paneWidth - fileList.width - tray.width - 2 >= MIN_READABLE_DIFF_WIDTH
   // Widening the pane re-docks both rails; a sheet left open across that change
   // would sit on top of the column it just turned back into.
   useEffect(() => {
@@ -278,7 +292,7 @@ export function CodeReviewView({
               title="Changed files"
               onClick={() => setSheet((s) => (s === "files" ? null : "files"))}
               className={cn(
-                "flex size-6 flex-none items-center justify-center rounded transition-colors hover:bg-hairline",
+                "flex size-10 flex-none items-center justify-center rounded transition-colors hover:bg-hairline",
                 sheet === "files" ? "text-blue" : "text-dim hover:text-text-bright"
               )}
             >
@@ -291,7 +305,7 @@ export function CodeReviewView({
               title="Review drafts"
               onClick={() => setSheet((s) => (s === "tray" ? null : "tray"))}
               className={cn(
-                "flex size-6 flex-none items-center justify-center rounded transition-colors hover:bg-hairline",
+                "flex size-10 flex-none items-center justify-center rounded transition-colors hover:bg-hairline",
                 sheet === "tray" ? "text-blue" : "text-dim hover:text-text-bright"
               )}
             >
