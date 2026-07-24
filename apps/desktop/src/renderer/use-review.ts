@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PrFileChange, PrReviewThread, Session } from "@starbase/core"
 import { rpc } from "./rpc-client.js"
 import { getConversationActor } from "./conversation-registry.js"
+import { prKey } from "./use-pull-request.js"
 
 /** Which diff the Code Review is showing. */
 export type ReviewSource = "pr" | "local"
@@ -158,7 +159,7 @@ export function useReview(session: Session): ReviewState {
   // Request tab's. Sharing the key means react-query dedupes — when the PR tab
   // has already fetched, this resolves from cache and costs nothing.
   const threadsQuery = useQuery({
-    queryKey: ["github", "pr", session.id, session.prNumber],
+    queryKey: prKey(session.id, session.prNumber),
     queryFn: () => rpc.githubPr(session.id),
     enabled: session.prNumber != null
   })
@@ -252,7 +253,7 @@ export function useReview(session: Session): ReviewState {
           // them up from one invalidation.
           .then(() =>
             qc.invalidateQueries({
-              queryKey: ["github", "pr", session.id, session.prNumber]
+              queryKey: prKey(session.id, session.prNumber)
             })
           )
           .catch(() => {})
