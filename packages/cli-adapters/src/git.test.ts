@@ -255,6 +255,44 @@ describe("GitService.createWorktree", () => {
     )
     expect(named._tag === "Success" && named.value).toBe("starbase/fix-token-refresh-2")
   })
+
+  it("pins otherwise unreachable detached commits before worktree removal", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "rescue"))
+    const detached = await runExit(
+      GitService.createDetachedWorktree({
+        repoPath,
+        repoName: "rescue",
+        slug: "quiet-curie",
+        baseBranch: "main"
+      }).pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+    if (detached._tag !== "Success") throw new Error("expected detached worktree")
+
+    writeFileSync(join(detached.value.path, "work.ts"), "saved\n")
+    execFileSync("git", ["add", "work.ts"], { cwd: detached.value.path })
+    execFileSync("git", ["commit", "-m", "detached work", "--no-gpg-sign"], {
+      cwd: detached.value.path
+    })
+    const head = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: detached.value.path,
+      encoding: "utf-8"
+    }).trim()
+
+    const preserved = await runExit(
+      GitService.preserveDetachedHead(detached.value.path, "quiet-curie").pipe(
+        Effect.provide(GitService.Default)
+      ),
+      temp.layer
+    )
+    expect(preserved._tag === "Success" && preserved.value).toBe("starbase/quiet-curie")
+    expect(
+      execFileSync("git", ["rev-parse", "starbase/quiet-curie"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe(head)
+  })
 })
 
 /**

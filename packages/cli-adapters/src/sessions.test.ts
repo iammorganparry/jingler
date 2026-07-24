@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { existsSync } from "node:fs"
+import { existsSync, writeFileSync } from "node:fs"
 import { basename, join } from "node:path"
 import { Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -784,6 +784,38 @@ describe("SessionStore", () => {
     expect(existsSync(worktreePath)).toBe(false)
     const worktrees = execFileSync("git", ["worktree", "list"], { cwd: repoPath, encoding: "utf-8" })
     expect(worktrees).not.toContain(worktreePath)
+  })
+
+  it("remove preserves commits made before an untitled session is retitled", async () => {
+    const created = await runExit(
+      SessionStore.create(input({ title: undefined })).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    if (created._tag !== "Success") throw new Error("expected session")
+    const worktreePath = created.value.worktreePath!
+    const rescueBranch = `starbase/${basename(worktreePath)}`
+    writeFileSync(join(worktreePath, "work.ts"), "saved\n")
+    execFileSync("git", ["add", "work.ts"], { cwd: worktreePath })
+    execFileSync("git", ["commit", "-m", "detached work", "--no-gpg-sign"], {
+      cwd: worktreePath
+    })
+    const head = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: worktreePath,
+      encoding: "utf-8"
+    }).trim()
+
+    const removed = await runExit(
+      SessionStore.remove(created.value.id).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(removed._tag).toBe("Success")
+    expect(existsSync(worktreePath)).toBe(false)
+    expect(
+      execFileSync("git", ["rev-parse", rescueBranch], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe(head)
   })
 
   it("createFromPr surfaces the error when allowSharedCheckout is off", async () => {

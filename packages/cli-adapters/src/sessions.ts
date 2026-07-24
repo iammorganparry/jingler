@@ -700,6 +700,19 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const target = (yield* readAll()).find((s) => s.id === id)
           if (!target) return
           if (target.worktreePath) {
+            const fs = yield* FileSystem.FileSystem
+            const worktreeExists = yield* fs
+              .exists(target.worktreePath)
+              .pipe(Effect.orElseSucceed(() => false))
+            // A blank session starts detached until its first generated title.
+            // If it committed before that retitle, deleting the worktree would
+            // otherwise remove the only reference to those commits.
+            if (worktreeExists) {
+              yield* GitService.preserveDetachedHead(
+                target.worktreePath,
+                basename(target.worktreePath)
+              )
+            }
             yield* GitService.removeWorktreeAt(target.worktreePath, target.repoPath).pipe(
               Effect.ignore
             )

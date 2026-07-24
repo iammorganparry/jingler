@@ -334,14 +334,17 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
 
   const connected = ghStatus.available && ghStatus.authenticated
   const autoDetect = connected && (githubConfig?.autoDetectPr ?? true)
+  const sessionsRef = useRef(sessions)
+  sessionsRef.current = sessions
 
   // Continuously resolve the OPEN PR on every live worktree branch. Sessions can
   // outlive a merged PR and open a replacement, so linked sessions stay in the
-  // sweep. A null/error never clears the existing link.
+  // sweep. Read the latest sessions through a ref so ordinary session updates do
+  // not restart the interval and immediately re-scan every worktree.
   useEffect(() => {
     if (!autoDetect) return
     const detect = () => {
-      for (const session of sessions) {
+      for (const session of sessionsRef.current) {
         if (!session.worktreePath || session.archived) continue
         void rpc
           .githubDetectPr(session.id)
@@ -356,7 +359,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     detect()
     const timer = window.setInterval(detect, ARCHIVE_POLL_MS)
     return () => window.clearInterval(timer)
-  }, [autoDetect, sessions, send])
+  }, [autoDetect, send])
 
   // When a session's live run COMPLETES (its live status goes present → absent),
   // do two independent things:

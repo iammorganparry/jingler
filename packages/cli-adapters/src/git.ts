@@ -241,6 +241,32 @@ export class GitService extends Effect.Service<GitService>()(
         })
 
       /**
+       * Keep commits made on a detached session reachable before its worktree is
+       * removed. A detached HEAD already contained by any local or remote ref is
+       * safe; otherwise create a collision-safe `starbase/<slug>` branch at HEAD.
+       */
+      const preserveDetachedHead = (
+        cwd: string,
+        slug: string
+      ): Effect.Effect<string | null, GitError, CommandExecutor.CommandExecutor> =>
+        Effect.gen(function* () {
+          if ((yield* branchAt(cwd)) !== null) return null
+          const containingRefs = yield* runString(
+            "git",
+            "-C",
+            cwd,
+            "for-each-ref",
+            "--contains",
+            "HEAD",
+            "--format=%(refname)",
+            "refs/heads",
+            "refs/remotes"
+          )
+          if (containingRefs?.trim()) return null
+          return yield* createTaskBranch(cwd, slug)
+        })
+
+      /**
        * Check out an existing local `branch` into the worktree at `cwd`, even
        * when that branch is already checked out in ANOTHER SESSION's worktree.
        * `--ignore-other-worktrees` bypasses git's safeguard so a PR whose branch
@@ -397,6 +423,7 @@ export class GitService extends Effect.Service<GitService>()(
         createDetachedWorktree,
         branchAt,
         createTaskBranch,
+        preserveDetachedHead,
         checkoutBranch,
         commitsSince,
         removeWorktreeAt
