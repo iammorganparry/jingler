@@ -158,9 +158,12 @@ class RpcConnection {
   }
 
   receive(message) {
-    const pending = message.method === undefined ? this.pending.get(message.id) : undefined
-    if (pending !== undefined) {
-      this.pending.delete(message.id)
+    const responseId =
+      typeof message.id === "number" || typeof message.id === "string" ? message.id : null
+    if (message.method === undefined && responseId !== null) {
+      const pending = this.pending.get(responseId)
+      if (pending === undefined) return
+      this.pending.delete(responseId)
       clearTimeout(pending.timeout)
       if (message.error !== undefined) {
         pending.reject(new Error(this.errorText(message.error)))
@@ -363,7 +366,7 @@ const executeTurn = async ({ connection, options, threadId, attempt, lifecycle }
     stderrTail: redactCodexDiagnosticText(connection.stderrTail),
     processExit: connection.exit,
     outcome,
-    error: redactCodexDiagnosticText(error)
+    error: error === null ? null : redactCodexDiagnosticText(error)
   }
 }
 
