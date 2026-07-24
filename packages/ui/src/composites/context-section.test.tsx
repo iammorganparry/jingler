@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { CliInfo, ContextConfig, ProvidersConfig } from "@starbase/core"
 import { SettingsView } from "./settings-view.js"
@@ -29,6 +29,14 @@ const CLIS: ReadonlyArray<CliInfo> = [
   cli({ kind: "cursor", label: "Cursor Agent", contextReporting: false }),
   cli({ kind: "opencode", label: "opencode" })
 ]
+
+const harnessRow = (label: string) => {
+  const preview = screen.getByText("Compacts at").parentElement
+  if (preview === null) throw new Error("missing compaction preview")
+  const row = within(preview).getByText(label).parentElement
+  if (row === null) throw new Error(`missing row for ${label}`)
+  return within(row)
+}
 
 const open = (
   props: {
@@ -89,21 +97,20 @@ describe("Settings → Context", () => {
 
   /**
    * The lever only makes sense alongside its consequence. The current Claude
-   * default is a 1M model, so it reaches the 500k quality cap; Codex reaches its
-   * smaller window's safety margin instead.
+   * and Codex defaults are 1M models, so both reach the 500k quality cap.
    */
   it("translates the budget into a per-harness trigger point", () => {
     open()
     expect(screen.getByText(/apply to each harness's default model/)).toBeDefined()
-    expect(screen.getByText("500k of 1M")).toBeDefined()
-    expect(screen.getByText("194k of 258k")).toBeDefined()
+    expect(harnessRow("Claude Code").getByText("500k of 1M")).toBeDefined()
+    expect(harnessRow("Codex CLI").getByText("500k of 1M")).toBeDefined()
   })
 
   it("recomputes the trigger points when the budget moves", () => {
     open()
     fireEvent.change(screen.getByLabelText("Working-set budget"), { target: { value: "256000" } })
     // The configured 256k budget now binds before Claude's 1M window.
-    expect(screen.getByText("256k of 1M")).toBeDefined()
+    expect(harnessRow("Claude Code").getByText("256k of 1M")).toBeDefined()
     expect(screen.getByText("256k tokens")).toBeDefined()
   })
 
@@ -122,7 +129,7 @@ describe("Settings → Context", () => {
         claude: { enabled: true, defaultMode: "accept-edits", defaultModel: "" }
       }
     })
-    expect(screen.getByText("500k of 1M")).toBeDefined()
+    expect(harnessRow("Claude Code").getByText("500k of 1M")).toBeDefined()
   })
 
   it("names harnesses that cannot be measured instead of hiding them", () => {
