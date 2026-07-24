@@ -24,6 +24,7 @@ export type ReviewSource = "pr" | "local"
  * sheets instead of squeezing the diff.
  */
 const MIN_READABLE_DIFF_WIDTH = 560
+const REDOCK_DIFF_WIDTH = 600
 
 export interface CodeReviewViewProps {
   files: readonly PrFileChange[]
@@ -261,9 +262,29 @@ export function CodeReviewView({
   // line-number gutters. In a 500px pane that left roughly 70px of actual code,
   // which is not a narrower view of the diff so much as no view of it.
   const { width: paneWidth } = usePaneWidth()
-  const roomy =
-    paneWidth === 0 ||
-    paneWidth - fileList.width - tray.width - 2 >= MIN_READABLE_DIFF_WIDTH
+  const availableDiffWidth = paneWidth - fileList.width - tray.width - 2
+  const [roomy, setRoomy] = useState(
+    () => paneWidth === 0 || availableDiffWidth >= MIN_READABLE_DIFF_WIDTH
+  )
+  // Undock as soon as the diff becomes unreadable, but require 40px of breathing
+  // room before re-docking. Without this hysteresis, resizing the window around
+  // the boundary can alternate layouts on every pixel.
+  useEffect(() => {
+    if (paneWidth === 0) return
+    setRoomy((docked) =>
+      docked
+        ? availableDiffWidth >= MIN_READABLE_DIFF_WIDTH
+        : availableDiffWidth >= REDOCK_DIFF_WIDTH
+    )
+  }, [availableDiffWidth, paneWidth])
+  const maxFileListWidth =
+    paneWidth === 0
+      ? 440
+      : paneWidth - tray.width - MIN_READABLE_DIFF_WIDTH - 2
+  const maxTrayWidth =
+    paneWidth === 0
+      ? 480
+      : paneWidth - fileList.width - MIN_READABLE_DIFF_WIDTH - 2
   // Widening the pane re-docks both rails; a sheet left open across that change
   // would sit on top of the column it just turned back into.
   useEffect(() => {
@@ -399,7 +420,12 @@ export function CodeReviewView({
           </div>
         </div>
 
-        {roomy && <ResizeHandle onResize={fileList.adjust} aria-label="Resize file list" />}
+        {roomy && (
+          <ResizeHandle
+            onResize={(dx) => fileList.adjust(dx, maxFileListWidth)}
+            aria-label="Resize file list"
+          />
+        )}
 
         {/* Diff center — one continuous scroll through every changed file. Each
             file gets a sticky header; scrolling tracks the current file in the
@@ -521,7 +547,12 @@ export function CodeReviewView({
         </div>
 
         {/* Review tray (resizable) — drag left edge; moving right shrinks it. */}
-        {roomy && <ResizeHandle onResize={(dx) => tray.adjust(-dx)} aria-label="Resize review panel" />}
+        {roomy && (
+          <ResizeHandle
+            onResize={(dx) => tray.adjust(-dx, maxTrayWidth)}
+            aria-label="Resize review panel"
+          />
+        )}
         <div
           style={{ width: roomy ? tray.width : 300 }}
           className={cn(
