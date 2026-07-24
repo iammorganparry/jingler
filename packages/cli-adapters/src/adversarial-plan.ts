@@ -27,6 +27,7 @@ import { CliAdapter, isChildLifecycle, PlanDecision } from "./adapter.js"
 import type { AvailableAgent } from "./adversarial-plan-prompt.js"
 import { critiquePrompt, planAsText, proposalPrompt, revisionPrompt } from "./adversarial-plan-prompt.js"
 import { createCodexAppServerDiagnostics } from "./codex-app-server-diagnostics.js"
+import { mapCodexAppServerReasoning } from "./codex-app-server-run.js"
 import { extractJsonBlock } from "./review.js"
 import { parsePlan } from "./plan-parse.js"
 
@@ -481,7 +482,7 @@ const runRole = (
           {
             sessionId: childSessionId,
             model: who.model,
-            reasoningEffort: input.reasoningEffort ?? null
+            reasoningEffort: mapCodexAppServerReasoning(input.reasoningEffort) ?? null
           }
         )
         diagnostics?.record("planner.role_timeout", {
