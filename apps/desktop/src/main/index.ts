@@ -26,6 +26,7 @@ import {
   parseAuthCallback,
   registerProtocolClient
 } from "./deep-link.js"
+import { starbaseRoot } from "./app-paths.js"
 import { bootBackgroundColor, registerBootThemeChannel, resolveBootTheme } from "./boot-theme.js"
 import { runtime } from "./runtime.js"
 import { initAutoUpdater } from "./updater.js"
@@ -47,8 +48,11 @@ const enableCodexDiagnostics = (): void => {
   ) {
     return
   }
-  const home = process.env.STARBASE_HOME ?? app.getPath("home")
-  process.env.STARBASE_CODEX_DIAGNOSTICS_DIR ??= join(home, "starbase", "diagnostics", "codex")
+  process.env.STARBASE_CODEX_DIAGNOSTICS_DIR ??= join(
+    starbaseRoot,
+    "diagnostics",
+    "codex"
+  )
   console.info(
     `[codex-diagnostics] redacted traces: ${process.env.STARBASE_CODEX_DIAGNOSTICS_DIR}`
   )
