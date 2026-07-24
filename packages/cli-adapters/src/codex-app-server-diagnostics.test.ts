@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   boundedCodexStderr,
   createCodexAppServerDiagnostics,
+  createCodexStderrRecorder,
   redactCodexDiagnosticText
 } from "./codex-app-server-diagnostics.js"
 
@@ -17,7 +18,17 @@ afterEach(async () => {
   )
 })
 
-describe("Codex app-server diagnostics", () => {
+const recorderHarness = () => {
+  const events: Array<{ event: string; fields: Readonly<Record<string, unknown>> }> = []
+  const recorder = createCodexStderrRecorder({
+    path: "/tmp/codex-diagnostics.jsonl",
+    record: (event, fields = {}) => events.push({ event, fields }),
+    close: () => undefined
+  })
+  return { events, recorder }
+}
+
+describe("Codex diagnostic redaction", () => {
   it("redacts credential-shaped stderr before persistence", () => {
     expect(
       redactCodexDiagnosticText(
@@ -43,7 +54,43 @@ describe("Codex app-server diagnostics", () => {
     expect(rendered.length).toBeLessThanOrEqual(4_096)
     expect(rendered).not.toContain("a".repeat(16))
   })
+})
 
+describe("Codex stderr recorder", () => {
+  it("redacts credentials split across stderr chunks", () => {
+    const { events, recorder } = recorderHarness()
+
+    recorder.append("Authorization: Bearer opaque-")
+    expect(events).toStrictEqual([])
+    recorder.append("secret\n")
+
+    expect(events).toStrictEqual([
+      {
+        event: "process.stderr",
+        fields: { text: 'Authorization: "[REDACTED]"' }
+      }
+    ])
+  })
+
+  it("omits an oversized line rather than persisting an unanchored fragment", () => {
+    const { events, recorder } = recorderHarness()
+
+    recorder.append(`sk-${"a".repeat(20_000)}`)
+    recorder.append("\n")
+
+    expect(events).toStrictEqual([
+      {
+        event: "process.stderr",
+        fields: {
+          text: "[stderr line omitted: exceeded 16384 characters]",
+          truncated: true
+        }
+      }
+    ])
+  })
+})
+
+describe("Codex diagnostic persistence", () => {
   it("writes protocol metadata into the configured directory", async () => {
     const directory = mkdtempSync(join(tmpdir(), "starbase-codex-diagnostics-"))
     directories.push(directory)

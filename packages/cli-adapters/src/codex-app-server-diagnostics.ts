@@ -2,6 +2,7 @@ import { createWriteStream, mkdirSync, type WriteStream } from "node:fs"
 import { join } from "node:path"
 
 const STDERR_CHUNK_LIMIT = 4_096
+const STDERR_LINE_LIMIT = 16_384
 
 export interface CodexAppServerDiagnosticContext {
   readonly sessionId: string
@@ -17,6 +18,11 @@ export interface CodexAppServerDiagnostics {
   readonly path: string
   readonly record: (event: string, fields?: CodexAppServerDiagnosticFields) => void
   readonly close: () => void
+}
+
+export interface CodexStderrRecorder {
+  readonly append: (chunk: Buffer | string) => void
+  readonly flush: () => void
 }
 
 const diagnosticFileName = (now: Date): string =>
@@ -45,6 +51,77 @@ export const boundedCodexStderr = (value: string): string => {
   return redacted.length <= STDERR_CHUNK_LIMIT
     ? redacted
     : redacted.slice(redacted.length - STDERR_CHUNK_LIMIT)
+}
+
+/**
+ * Join arbitrary stream chunks before redaction so a credential split across
+ * two `data` events cannot evade the token patterns. Lines are bounded before
+ * persistence; an oversized line is omitted rather than sliced into a fragment
+ * that may no longer contain the credential's recognizable prefix.
+ */
+export const createCodexStderrRecorder = (
+  diagnostics: CodexAppServerDiagnostics | null | undefined
+): CodexStderrRecorder => {
+  let pending = ""
+  let discardingOversizedLine = false
+  let closed = false
+
+  const completeLine = (fragment: string): void => {
+    if (discardingOversizedLine) {
+      discardingOversizedLine = false
+      return
+    }
+    if (pending.length + fragment.length > STDERR_LINE_LIMIT) {
+      pending = ""
+      diagnostics?.record("process.stderr", {
+        text: `[stderr line omitted: exceeded ${STDERR_LINE_LIMIT} characters]`,
+        truncated: true
+      })
+      return
+    }
+    pending += fragment
+    if (pending.length > 0) {
+      diagnostics?.record("process.stderr", { text: boundedCodexStderr(pending) })
+      pending = ""
+    }
+  }
+
+  const appendFragment = (fragment: string): void => {
+    if (discardingOversizedLine) return
+    if (pending.length + fragment.length > STDERR_LINE_LIMIT) {
+      pending = ""
+      discardingOversizedLine = true
+      diagnostics?.record("process.stderr", {
+        text: `[stderr line omitted: exceeded ${STDERR_LINE_LIMIT} characters]`,
+        truncated: true
+      })
+      return
+    }
+    pending += fragment
+  }
+
+  return {
+    append: (chunk) => {
+      if (closed) return
+      const text = chunk.toString()
+      let start = 0
+      for (let index = 0; index < text.length; index += 1) {
+        if (text[index] !== "\n" && text[index] !== "\r") continue
+        completeLine(text.slice(start, index))
+        start = index + 1
+      }
+      appendFragment(text.slice(start))
+    },
+    flush: () => {
+      if (closed) return
+      closed = true
+      if (!discardingOversizedLine && pending.length > 0) {
+        diagnostics?.record("process.stderr", { text: boundedCodexStderr(pending) })
+      }
+      pending = ""
+      discardingOversizedLine = false
+    }
+  }
 }
 
 const writeLine = ({

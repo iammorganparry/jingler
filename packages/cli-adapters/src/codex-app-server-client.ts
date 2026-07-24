@@ -3,7 +3,8 @@ import type { Readable, Writable } from "node:stream"
 import { stopChild, trackChild } from "./child-registry.js"
 import {
   boundedCodexStderr,
-  type CodexAppServerDiagnostics
+  type CodexAppServerDiagnostics,
+  createCodexStderrRecorder
 } from "./codex-app-server-diagnostics.js"
 
 export type JsonRpcId = number | string
@@ -317,18 +318,20 @@ export const startCodexAppServer = async (
     () => stopChild(child),
     { diagnostics: options.diagnostics }
   )
+  const stderrRecorder = createCodexStderrRecorder(options.diagnostics)
   child.stderr?.on("data", (chunk: Buffer | string) => {
-    options.diagnostics?.record("process.stderr", {
-      text: boundedCodexStderr(chunk.toString())
-    })
+    stderrRecorder.append(chunk)
   })
+  child.stderr?.on("end", () => stderrRecorder.flush())
   child.on("error", (cause) => {
+    stderrRecorder.flush()
     options.diagnostics?.record("process.error", {
       message: boundedCodexStderr(cause.message)
     })
     connection.close()
   })
   child.on("exit", (code, signal) => {
+    stderrRecorder.flush()
     options.diagnostics?.record("process.exit", { code, signal })
     connection.close()
   })
