@@ -124,6 +124,7 @@ class RpcConnection {
     this.exit = null
 
     this.child.stdout.on("data", (chunk) => this.onStdout(chunk))
+    this.child.stdin.on("error", (error) => this.finish(error))
     this.child.stderr.on("data", (chunk) => {
       this.stderrTail = boundedAppend(this.stderrTail, chunk.toString(), STDERR_LIMIT)
     })
