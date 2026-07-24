@@ -104,7 +104,7 @@ const DEMO_CLIS: ReadonlyArray<CliInfo> = [
 ]
 
 const DEMO_PROVIDERS: ProvidersConfig = {
-  claude: { enabled: true, defaultMode: "plan", defaultModel: "sonnet", reasoningEffort: "think-hard" },
+  claude: { enabled: true, defaultMode: "plan", defaultModel: "sonnet", reasoningEffort: "high" },
   codex: { enabled: true, defaultMode: "accept-edits", defaultModel: "gpt-5-codex" }
 }
 

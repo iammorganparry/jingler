@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
   streamCb: null as null | ((event: unknown) => void),
   agentRunCalls: [] as Array<{
     sessionId: string
+    chatId: string
     text: string
     images: unknown
     options: unknown
@@ -41,7 +42,7 @@ const h = vi.hoisted(() => ({
   transcriptGate: Promise.resolve() as Promise<void>,
   setHarnessCalls: [] as Array<{ sessionId: string; cli: string; model: string }>,
   planCalls: [] as Array<{ sessionId: string; brief: string | undefined }>,
-  reasoningCalls: [] as Array<string | undefined>,
+  reasoningCalls: [] as Array<unknown>,
   readinessGate: Promise.resolve() as Promise<void>,
   readiness: { ready: true, vendors: [], reason: null } as {
     ready: boolean
@@ -60,6 +61,7 @@ vi.mock("./rpc-client.js", () => ({
       await h.transcriptGate
       return []
     },
+    planCurrent: async () => null,
     skillsList: async () => {
       h.skillsListCalls += 1
       await h.skillsGate
@@ -76,12 +78,13 @@ vi.mock("./rpc-client.js", () => ({
     },
     agentRun: (
       sessionId: string,
+      chatId: string,
       text: string,
       onEvent: (event: unknown) => void,
       images: unknown,
       options: unknown
     ) => {
-      h.agentRunCalls.push({ sessionId, text, images, options })
+      h.agentRunCalls.push({ sessionId, chatId, text, images, options })
       h.streamCb = onEvent
       return () => {
         h.streamCb = null
@@ -91,7 +94,12 @@ vi.mock("./rpc-client.js", () => ({
       await h.readinessGate
       return h.readiness
     },
-    agentResumePlan: (sessionId: string, planId: string, onEvent: (event: unknown) => void) => {
+    agentResumePlan: (
+      sessionId: string,
+      _chatId: string,
+      planId: string,
+      onEvent: (event: unknown) => void
+    ) => {
       h.resumeCalls.push({ sessionId, planId })
       h.streamCb = onEvent
       return () => {
@@ -110,7 +118,12 @@ vi.mock("./rpc-client.js", () => ({
         h.streamCb = null
       }
     },
-    planAdversarial: (sessionId: string, brief: string | undefined, onEvent: (event: unknown) => void) => {
+    planAdversarial: (
+      sessionId: string,
+      _chatId: string,
+      brief: string | undefined,
+      onEvent: (event: unknown) => void
+    ) => {
       h.planCalls.push({ sessionId, brief })
       h.streamCb = onEvent
       return () => {
@@ -126,10 +139,15 @@ vi.mock("./rpc-client.js", () => ({
     agentDecideGate: async () => {},
     agentAnswerQuestion: async () => {},
     agentSetMode: async () => {},
-    agentSetReasoning: async (_sessionId: string, effort: string | undefined) => {
-      h.reasoningCalls.push(effort)
+    agentSetReasoning: async (_sessionId: string, _cli: string, reasoning: unknown) => {
+      h.reasoningCalls.push(reasoning)
     },
-    agentSetHarness: async (sessionId: string, cli: string, model: string) => {
+    agentSetHarness: async (
+      sessionId: string,
+      _chatId: string,
+      cli: string,
+      model: string
+    ) => {
       h.setHarnessCalls.push({ sessionId, cli, model })
     },
     agentCommentPlanStep: async () => {},
@@ -1012,13 +1030,16 @@ describe("conversationMachine — adversarial planning", () => {
   it("applies a changed thinking strength to the next turn", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
-    actor.send({ type: "SET_REASONING", reasoningEffort: "think-hard" })
+    actor.send({
+      type: "SET_REASONING",
+      reasoning: { enabled: true, effort: "high" }
+    })
     actor.send({ type: "SEND", text: "inspect the repo" })
     await waitFor(actor, (s) => s.matches("running"))
 
-    expect(h.reasoningCalls).toEqual(["think-hard"])
+    expect(h.reasoningCalls).toEqual([{ enabled: true, effort: "high" }])
     expect(h.agentRunCalls[0]).toMatchObject({
-      options: { target: "session", reasoningEffort: "think-hard" }
+      options: { target: "session", reasoning: { enabled: true, effort: "high" } }
     })
   })
 

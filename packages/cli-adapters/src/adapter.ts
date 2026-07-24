@@ -30,7 +30,9 @@ export interface SessionSpec {
   readonly mode: PermissionMode
   /** The model id to run, or null to use the harness default. */
   readonly model: string | null
-  /** Semantic thinking strength; absent leaves the harness default untouched. */
+  /** Whether provider thinking is enabled; absent leaves its default untouched. */
+  readonly thinkingEnabled?: boolean
+  /** Provider-native effort; absent leaves the harness default untouched. */
   readonly reasoningEffort?: ReasoningEffort
   /**
    * The harness session id to RESUME from (persisted across app restarts), or

@@ -146,6 +146,16 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
       costUsd: 0,
       tokens: 0,
       updatedAt: now,
+      chats: [{
+        id: SESSION,
+        title: null,
+        createdAt: now,
+        updatedAt: now,
+        model: over.model ?? "claude-opus-4-1",
+        ...(over.contextTokens === undefined ? {} : { contextTokens: over.contextTokens }),
+        ...(over.resumeId === undefined ? {} : { resumeId: over.resumeId })
+      }],
+      activeChatId: SESSION,
       worktreePath: temp.root,
       // A known 200k legacy model keeps the manager's timing scenarios compact;
       // current 1M aliases are covered explicitly below.

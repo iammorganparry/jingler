@@ -9,8 +9,8 @@ const MessageArray = Schema.Array(MessageSchema)
 type TranscriptEnv = FileSystem.FileSystem | Path.Path | AppPaths
 
 /**
- * Per-session conversation transcript, persisted to
- * `~/starbase/transcripts/<sessionId>.json`. Reads are best-effort (a missing or
+ * Per-chat conversation transcript, persisted to
+ * `~/starbase/transcripts/<chatId>.json`. Reads are best-effort (a missing or
  * malformed file yields an empty transcript so the session still opens), matching
  * `SessionStore`. `AgentRunner` writes here as it folds stream events, so
  * reopening a session shows its full history — the same `Message[]` the renderer
@@ -22,20 +22,20 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
     accessors: true,
     sync: () => {
       const fileFor = (
-        sessionId: string
+        chatId: string
       ): Effect.Effect<string, never, Path.Path | AppPaths> =>
         Effect.gen(function* () {
           const path = yield* Path.Path
           const paths = yield* AppPaths
-          return path.join(paths.transcriptsDir, `${sessionId}.json`)
+          return path.join(paths.transcriptsDir, `${chatId}.json`)
         })
 
       const readAll = (
-        sessionId: string
+        chatId: string
       ): Effect.Effect<ReadonlyArray<Message>, never, TranscriptEnv> =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
-          const file = yield* fileFor(sessionId)
+          const file = yield* fileFor(chatId)
           const exists = yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false))
           if (!exists) return []
           const raw = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => ""))
@@ -46,13 +46,13 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
         })
 
       const writeAll = (
-        sessionId: string,
+        chatId: string,
         messages: ReadonlyArray<Message>
       ): Effect.Effect<void, never, TranscriptEnv> =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
           const paths = yield* AppPaths
-          const file = yield* fileFor(sessionId)
+          const file = yield* fileFor(chatId)
           yield* fs.makeDirectory(paths.transcriptsDir, { recursive: true }).pipe(Effect.ignore)
           const encoded = yield* Schema.encode(MessageArray)(messages).pipe(
             Effect.orElseSucceed(() => messages)
@@ -74,22 +74,50 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
             )
         })
 
-      const list = (sessionId: string) => readAll(sessionId)
+      const list = (chatId: string) => readAll(chatId)
+
+      /**
+       * Move a legacy session-keyed transcript into its synthesized first chat.
+       * Rename makes adoption one-shot and atomic; if the chat already has a
+       * transcript it always wins.
+       */
+      const adoptLegacy = (sessionId: string, chatId: string) =>
+        Effect.gen(function* () {
+          if (sessionId === chatId) return
+          const fs = yield* FileSystem.FileSystem
+          const paths = yield* AppPaths
+          const legacyFile = yield* fileFor(sessionId)
+          const chatFile = yield* fileFor(chatId)
+          const [legacyExists, chatExists] = yield* Effect.all([
+            fs.exists(legacyFile).pipe(Effect.orElseSucceed(() => false)),
+            fs.exists(chatFile).pipe(Effect.orElseSucceed(() => false))
+          ])
+          if (!legacyExists || chatExists) return
+          yield* fs.makeDirectory(paths.transcriptsDir, { recursive: true }).pipe(Effect.ignore)
+          yield* fs.rename(legacyFile, chatFile).pipe(Effect.ignore)
+        })
+
+      const remove = (chatId: string) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const file = yield* fileFor(chatId)
+          yield* fs.remove(file).pipe(Effect.ignore)
+        })
 
       /** Append a message to the end of the transcript. */
-      const append = (sessionId: string, message: Message) =>
+      const append = (chatId: string, message: Message) =>
         Effect.gen(function* () {
-          const existing = yield* readAll(sessionId)
-          yield* writeAll(sessionId, [...existing, message])
+          const existing = yield* readAll(chatId)
+          yield* writeAll(chatId, [...existing, message])
         })
 
       /** Replace the last message via `fn` (a no-op when the transcript is empty). */
-      const patchLast = (sessionId: string, fn: (last: Message) => Message) =>
+      const patchLast = (chatId: string, fn: (last: Message) => Message) =>
         Effect.gen(function* () {
-          const existing = yield* readAll(sessionId)
+          const existing = yield* readAll(chatId)
           if (existing.length === 0) return
           const next = [...existing.slice(0, -1), fn(existing[existing.length - 1]!)]
-          yield* writeAll(sessionId, next)
+          yield* writeAll(chatId, next)
         })
 
       /**
@@ -102,19 +130,19 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
        * turns.
        */
       const patchById = (
-        sessionId: string,
+        chatId: string,
         messageId: string,
         fn: (msg: Message) => Message
       ) =>
         Effect.gen(function* () {
-          const existing = yield* readAll(sessionId)
+          const existing = yield* readAll(chatId)
           const idx = existing.findIndex((m) => m.id === messageId)
           if (idx === -1) return
           const next = existing.map((m, i) => (i === idx ? fn(m) : m))
-          yield* writeAll(sessionId, next)
+          yield* writeAll(chatId, next)
         })
 
-      return { list, append, patchLast, patchById }
+      return { list, adoptLegacy, remove, append, patchLast, patchById }
     }
   }
 ) {}

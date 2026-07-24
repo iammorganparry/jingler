@@ -16,10 +16,23 @@ const clis: ReadonlyArray<CliInfo> = [
   { kind: "cursor", label: "Cursor Agent", binPath: "/usr/local/bin/cursor-agent", version: "0.4.2", available: true }
 ]
 
+const session = (
+  value: Omit<Session, "chats" | "activeChatId">
+): Session => ({
+  ...value,
+  chats: [{
+    id: `c_${value.id}_1`,
+    title: null,
+    createdAt: value.updatedAt,
+    updatedAt: value.updatedAt
+  }],
+  activeChatId: `c_${value.id}_1`
+})
+
 const sessions: ReadonlyArray<Session> = [
-  { id: "s1", repo: "trigify/api", branch: "feat/oauth", title: "Refactor auth flow", status: "thinking", cli: "claude", diff: { added: 313, removed: 23 }, prNumber: 482, costUsd: 1.24, tokens: 218000, updatedAt: "2026-07-11T09:41:00Z" },
-  { id: "s2", repo: "trigify/api", branch: "chore/deps", title: "Bump dependencies", status: "idle", cli: "claude", diff: { added: 0, removed: 0 }, prNumber: null, costUsd: 0.12, tokens: 14200, updatedAt: "2026-07-11T08:12:00Z" },
-  { id: "s3", repo: "trigify/web", branch: "main", title: "Fix flaky tests", status: "needs-input", cli: "codex", diff: { added: 47, removed: 9 }, prNumber: null, costUsd: 0.44, tokens: 61800, updatedAt: "2026-07-11T09:05:00Z" }
+  session({ id: "s1", repo: "trigify/api", branch: "feat/oauth", title: "Refactor auth flow", status: "thinking", cli: "claude", diff: { added: 313, removed: 23 }, prNumber: 482, costUsd: 1.24, tokens: 218000, updatedAt: "2026-07-11T09:41:00Z" }),
+  session({ id: "s2", repo: "trigify/api", branch: "chore/deps", title: "Bump dependencies", status: "idle", cli: "claude", diff: { added: 0, removed: 0 }, prNumber: null, costUsd: 0.12, tokens: 14200, updatedAt: "2026-07-11T08:12:00Z" }),
+  session({ id: "s3", repo: "trigify/web", branch: "main", title: "Fix flaky tests", status: "needs-input", cli: "codex", diff: { added: 47, removed: 9 }, prNumber: null, costUsd: 0.44, tokens: 61800, updatedAt: "2026-07-11T09:05:00Z" })
 ]
 
 export const Library: Story = {

@@ -33,6 +33,8 @@ type ConversationActor = ActorRefFrom<typeof conversationMachine>
 type ConversationSnapshot = SnapshotFrom<typeof conversationMachine>
 
 const registry = new Map<string, ConversationActor>()
+const registryKey = (sessionId: string, chatId: string): string =>
+  `${sessionId}:${chatId}`
 
 /** Where the machine is, in the terms `activityOf` reasons about. */
 const phaseOf = (snap: ConversationSnapshot): ActivityPhase => {
@@ -57,11 +59,15 @@ const activityFor = (snap: ConversationSnapshot): SessionActivity | null =>
  * The subscription publishes live status + plan presence for the whole lifetime
  * of the run, independent of whether the conversation pane is mounted.
  */
-export const getConversationActor = (session: Session): ConversationActor => {
-  const existing = registry.get(session.id)
+export const getConversationActor = (
+  session: Session,
+  chatId: string = session.activeChatId
+): ConversationActor => {
+  const key = registryKey(session.id, chatId)
+  const existing = registry.get(key)
   if (existing) return existing
 
-  const actor = createActor(conversationMachine, { input: { session } })
+  const actor = createActor(conversationMachine, { input: { session, chatId } })
   // Previous observation for the edge detector — see `notificationFor`. Held per
   // actor so it dies with the session rather than leaking into the next one.
   let lastSeen: NotifiableState | null = null
@@ -106,17 +112,24 @@ export const getConversationActor = (session: Session): ConversationActor => {
     })
   })
   actor.start()
-  registry.set(session.id, actor)
+  registry.set(key, actor)
   return actor
 }
 
 /** Stop + forget a session's actor (call when the session is deleted). */
 export const disposeConversationActor = (sessionId: string): void => {
-  const actor = registry.get(sessionId)
-  if (!actor) return
-  actor.stop()
-  registry.delete(sessionId)
+  for (const [key, actor] of registry) {
+    if (!key.startsWith(`${sessionId}:`)) continue
+    actor.stop()
+    registry.delete(key)
+  }
   setSessionActivity(sessionId, null)
   setPlanPresent(sessionId, false)
   clearSessionDiff(sessionId)
+}
+
+export const disposeChatActor = (sessionId: string, chatId: string): void => {
+  const key = registryKey(sessionId, chatId)
+  registry.get(key)?.stop()
+  registry.delete(key)
 }

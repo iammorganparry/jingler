@@ -32,10 +32,41 @@ let temp: ReturnType<typeof withTempRoot>
 
 beforeEach(() => {
   temp = withTempRoot()
+  mkdirSync(temp.root, { recursive: true })
+  const now = "2026-07-24T00:00:00.000Z"
+  writeFileSync(
+    join(temp.root, "sessions.json"),
+    JSON.stringify([{
+      id: SESSION,
+      repo: "widget",
+      branch: "starbase/test",
+      title: "Test",
+      status: "idle",
+      cli: "claude",
+      diff: { added: 0, removed: 0 },
+      prNumber: null,
+      costUsd: 0,
+      tokens: 0,
+      updatedAt: now,
+      worktreePath: temp.root,
+      chats: [{ id: SESSION, title: null, createdAt: now, updatedAt: now }],
+      activeChatId: SESSION
+    }])
+  )
 })
 afterEach(() => temp.cleanup())
 
 const SESSION = "s_test"
+const chatForSession = (
+  updatedAt: string,
+  fields: Partial<Session["chats"][number]> = {}
+): Session["chats"][number] => ({
+  id: SESSION,
+  title: null,
+  createdAt: updatedAt,
+  updatedAt,
+  ...fields
+})
 
 /** Run one prompt, auto-answering every gate with `decision`; collect events + transcript. */
 const runPrompt = (mode: PermissionMode, decision: GateDecision) => {
@@ -514,6 +545,8 @@ describe("AgentRunner plan mode", () => {
       costUsd: 0,
       tokens: 0,
       updatedAt: "2026-07-11T10:00:00.000Z",
+      chats: [chatForSession("2026-07-11T10:00:00.000Z", { mode })],
+      activeChatId: SESSION,
       mode
     }
     mkdirSync(temp.root, { recursive: true })
@@ -589,7 +622,8 @@ describe("AgentRunner plan mode", () => {
           ),
           Stream.runDrain
         )
-        return (yield* SessionStore.get(SESSION)).mode
+        const session = yield* SessionStore.get(SESSION)
+        return session.chats.find((chat) => chat.id === session.activeChatId)?.mode
       }).pipe(Effect.provide(base()))
     )
     expect(mode).toBe("accept-edits")
@@ -612,7 +646,8 @@ describe("AgentRunner plan mode", () => {
           ),
           Stream.runDrain
         )
-        return (yield* SessionStore.get(SESSION)).mode
+        const session = yield* SessionStore.get(SESSION)
+        return session.chats.find((chat) => chat.id === session.activeChatId)?.mode
       }).pipe(Effect.provide(base()))
     )
     expect(mode).toBe("auto")
@@ -631,7 +666,8 @@ describe("AgentRunner plan mode", () => {
           ),
           Stream.runDrain
         )
-        return (yield* SessionStore.get(SESSION)).mode
+        const session = yield* SessionStore.get(SESSION)
+        return session.chats.find((chat) => chat.id === session.activeChatId)?.mode
       }).pipe(Effect.provide(base()))
     )
 
@@ -649,7 +685,8 @@ describe("AgentRunner plan mode", () => {
         const runner = yield* AgentRunner
         yield* runner.setMode(SESSION, "auto")
         yield* runner.setMode(SESSION, "plan")
-        return (yield* SessionStore.get(SESSION)).mode
+        const session = yield* SessionStore.get(SESSION)
+        return session.chats.find((chat) => chat.id === session.activeChatId)?.mode
       }).pipe(Effect.provide(base()))
     )
     expect(persisted).toBe("auto") // NOT "plan"
@@ -781,7 +818,9 @@ describe("AgentRunner model", () => {
       prNumber: null,
       costUsd: 0,
       tokens: 0,
-      updatedAt: "2026-07-11T10:00:00.000Z"
+      updatedAt: "2026-07-11T10:00:00.000Z",
+      chats: [chatForSession("2026-07-11T10:00:00.000Z")],
+      activeChatId: SESSION
     }
     mkdirSync(temp.root, { recursive: true })
     writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session]))
@@ -805,7 +844,7 @@ describe("AgentRunner model", () => {
         const runner = yield* AgentRunner
         yield* runner.prompt(SESSION, "hi").pipe(Stream.runDrain)
         const persisted = yield* SessionStore.get(SESSION)
-        return persisted.model
+        return persisted.chats.find((chat) => chat.id === persisted.activeChatId)?.model
       }).pipe(Effect.provide(base))
     )
     expect(model).toBe("opus-live")
@@ -830,6 +869,8 @@ describe("AgentRunner plan library", () => {
       tokens: 0,
       updatedAt: "2026-07-11T10:00:00.000Z",
       worktreePath: WT,
+      chats: [chatForSession("2026-07-11T10:00:00.000Z", { mode })],
+      activeChatId: SESSION,
       mode
     }
     mkdirSync(temp.root, { recursive: true })
@@ -1003,6 +1044,8 @@ describe("AgentRunner resume across restarts", () => {
       costUsd: 0,
       tokens: 0,
       updatedAt: "2026-07-11T10:00:00.000Z",
+      chats: [chatForSession("2026-07-11T10:00:00.000Z", { mode: "auto" })],
+      activeChatId: SESSION,
       mode: "auto"
     }
     mkdirSync(temp.root, { recursive: true })
@@ -1060,7 +1103,9 @@ describe("AgentRunner resume across restarts", () => {
     const persisted = await Effect.runPromise(
       SessionStore.get(SESSION).pipe(Effect.provide(Layer.merge(SessionStore.Default, temp.layer)))
     )
-    expect(persisted.resumeId).toBe("sdk-123")
+    expect(
+      persisted.chats.find((chat) => chat.id === persisted.activeChatId)?.resumeId
+    ).toBe("sdk-123")
 
     // A SECOND run through a FRESH runner (= a restart, empty in-memory map) picks
     // the id up from persistence and hands it to the adapter as spec.resumeId.
@@ -1078,7 +1123,16 @@ describe("AgentRunner resume across restarts", () => {
     seedBareSession()
     const sessionsPath = join(temp.root, "sessions.json")
     const seeded = JSON.parse(readFileSync(sessionsPath, "utf8")) as Array<Session>
-    writeFileSync(sessionsPath, JSON.stringify([{ ...seeded[0]!, resumeId: "normal-before" }]))
+    writeFileSync(
+      sessionsPath,
+      JSON.stringify([{
+        ...seeded[0]!,
+        chats: seeded[0]!.chats.map((chat) => ({
+          ...chat,
+          resumeId: "normal-before"
+        }))
+      }])
+    )
 
     const specs: Array<{
       cli: string
@@ -1152,8 +1206,11 @@ describe("AgentRunner resume across restarts", () => {
     expect(specs[1]).toMatchObject({ resumeId: "normal-before", readOnly: undefined })
     expect(specs[2]).toMatchObject({ resumeId: "gigaplan-1", readOnly: true })
     expect(specs[2]!.prompt).toContain("Also export CSV")
-    expect(persisted.session?.resumeId).toBe("normal-after")
-    expect(persisted.session?.gigaplanResumeId).toBe("gigaplan-2")
+    const active = persisted.session?.chats.find(
+      (chat) => chat.id === persisted.session?.activeChatId
+    )
+    expect(active?.resumeId).toBe("normal-after")
+    expect(active?.gigaplanResumeId).toBe("gigaplan-2")
     expect(persisted.transcript.map((message) => message.source)).toStrictEqual([
       "gigaplan-intake",
       "gigaplan-intake",
@@ -1182,6 +1239,8 @@ describe("AgentRunner plan progress across turns", () => {
       tokens: 0,
       updatedAt: "2026-07-11T10:00:00.000Z",
       worktreePath: WT_X,
+      chats: [chatForSession("2026-07-11T10:00:00.000Z", { mode: "auto" })],
+      activeChatId: SESSION,
       mode: "auto"
     }
     mkdirSync(temp.root, { recursive: true })

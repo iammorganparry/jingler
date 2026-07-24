@@ -67,22 +67,14 @@ const rpcId = (message: JsonRpcMessage): JsonRpcId | null => {
 }
 
 export const mapCodexAppServerReasoning = (
-  effort: ReasoningEffort | undefined
+  effort: ReasoningEffort | undefined,
+  enabled: boolean | undefined = true
 ): string | undefined => {
-  switch (effort) {
-    case "off":
-      // GPT-5.6 Sol/Terra/Luna expose `low` as their lightest supported effort;
-      // sending the SDK-era `minimal` value makes app-server reject the turn.
-      return "low"
-    case "think":
-      return "medium"
-    case "think-hard":
-      return "high"
-    case "ultrathink":
-      return "xhigh"
-    default:
-      return
-  }
+  // GPT-5.6 Sol/Terra/Luna expose `low` as their lightest supported effort;
+  // sending the SDK-era `minimal` value makes app-server reject the turn.
+  if (!enabled || effort === "minimal") return "low"
+  if (effort === "max") return "xhigh"
+  return effort
 }
 
 const policy = (
@@ -441,8 +433,13 @@ export const runCodexAppServer = (
               input: turnInput,
               cwd,
               ...(spec.model ? { model: spec.model } : {}),
-              ...(mapCodexAppServerReasoning(spec.reasoningEffort)
-                ? { effort: mapCodexAppServerReasoning(spec.reasoningEffort) }
+              ...(mapCodexAppServerReasoning(spec.reasoningEffort, spec.thinkingEnabled)
+                ? {
+                    effort: mapCodexAppServerReasoning(
+                      spec.reasoningEffort,
+                      spec.thinkingEnabled
+                    )
+                  }
                 : {})
             })
             activeTurnId = turnIdFromResponse(turnResponse)

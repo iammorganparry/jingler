@@ -33,6 +33,7 @@ import {
   resetSubscriptionCache,
   METERED_ENV_KEYS,
   PlanExecutor,
+  PlanStore,
   PlanRoundStore,
   planReviewPost,
   retitleSession,
@@ -712,6 +713,7 @@ type PlanExecuteEnv =
   | DiscoveryService
   | ModelsService
   | PlanExecutor
+  | PlanStore
   | CliAdapter
   | UsageService
   | FileSystem.FileSystem
@@ -743,7 +745,35 @@ export const planExecute = (
           })
         )
       }
-      const messages = yield* TranscriptStore.list(sessionId).pipe(
+      const worktreePath = session.worktreePath
+      const persistedArtifact = yield* PlanStore.readArtifact(worktreePath)
+      const artifact =
+        persistedArtifact ??
+        (yield* TranscriptStore.list(sessionId).pipe(
+          Effect.orElseSucceed(() => [] as ReadonlyArray<Message>),
+          Effect.map((messages) =>
+            messages
+              .flatMap((message) =>
+                message.parts.flatMap((part) => part._tag === "Plan" ? [part.plan] : [])
+              )
+              .find((plan) => plan.id === planId && plan.structured !== false) ?? null
+          ),
+          Effect.flatMap((legacyPlan) =>
+            legacyPlan === null
+              ? Effect.succeed(null)
+              : PlanStore.promote(sessionId, worktreePath, sessionId, legacyPlan)
+          )
+        ))
+      if (artifact === null || artifact.plan.id !== planId) {
+        return Stream.fail(
+          new PlanError({
+            message:
+              "The structured session plan is unavailable. Regenerate the plan before executing it."
+          })
+        )
+      }
+      const chatId = artifact.producingChatId
+      const messages = yield* TranscriptStore.list(chatId).pipe(
         Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
       )
       const located = messages.reduce<{ plan: Plan; messageId: string } | null>(
@@ -757,10 +787,7 @@ export const planExecute = (
           ),
         null
       )
-      if (located === null) {
-        return Stream.fail(new PlanError({ message: "That plan is no longer in this session." }))
-      }
-      const plan = located.plan
+      const plan = artifact.plan
 
       const clis = yield* DiscoveryService.list()
       const discoveredCatalog = yield* ModelsService.catalog(clis)
@@ -801,19 +828,25 @@ export const planExecute = (
       // time. The execution's own output needs persisting for the same reason
       // the round's did: streaming to the renderer is not a record of anything.
       const txCtx = yield* Effect.context<
-        TranscriptStore | FileSystem.FileSystem | Path.Path | AppPaths
+        TranscriptStore | PlanStore | FileSystem.FileSystem | Path.Path | AppPaths
       >()
-      yield* TranscriptStore.patchById(sessionId, located.messageId, (m) => ({
-        ...m,
-        parts: m.parts.map((p) =>
-          p._tag === "Plan" && p.plan.id === planId
-            ? ({
-                _tag: "Plan",
-                plan: { ...p.plan, status: "approved" as const }
-              } as const)
-            : p
-        )
-      })).pipe(Effect.ignore)
+      yield* PlanStore.updateArtifact(worktreePath, planId, (stored) => ({
+        ...stored,
+        status: "approved"
+      }))
+      if (located !== null) {
+        yield* TranscriptStore.patchById(chatId, located.messageId, (m) => ({
+          ...m,
+          parts: m.parts.map((p) =>
+            p._tag === "Plan" && p.plan.id === planId
+              ? ({
+                  _tag: "Plan",
+                  plan: { ...p.plan, status: "approved" as const }
+                } as const)
+              : p
+          )
+        })).pipe(Effect.ignore)
+      }
 
       const now = yield* Effect.sync(() => new Date().toISOString())
       const maxN = messages.reduce((max, m) => {
@@ -821,47 +854,54 @@ export const planExecute = (
         return Number.isFinite(n) && n > max ? n : max
       }, 0)
       yield* TranscriptStore.append(
-        sessionId,
-        userMessage(`u_${sessionId}_${maxN + 1}`, `Approved: ${plan.summary}`, now, [])
+        chatId,
+        userMessage(`u_${chatId}_${maxN + 1}`, `Approved: ${plan.summary}`, now, [])
       ).pipe(Effect.ignore)
-      const assistantId = `a_${sessionId}_${maxN + 2}`
-      yield* TranscriptStore.append(sessionId, assistantMessage(assistantId, now)).pipe(
+      const assistantId = `a_${chatId}_${maxN + 2}`
+      yield* TranscriptStore.append(chatId, assistantMessage(assistantId, now)).pipe(
         Effect.ignore
       )
       const persist = (event: StreamEvent) =>
-        TranscriptStore.patchById(sessionId, assistantId, (m) => applyStreamEvent(m, event)).pipe(
+        TranscriptStore.patchById(chatId, assistantId, (m) => applyStreamEvent(m, event)).pipe(
           Effect.provide(txCtx),
           Effect.ignore
         )
 
       const executor = yield* PlanExecutor
       if (executionMode !== undefined) {
-        yield* SessionStore.setMode(sessionId, executionMode).pipe(Effect.ignore)
+        yield* SessionStore.setMode(sessionId, chatId, executionMode).pipe(Effect.ignore)
       }
       const persistPlanStep = (
         step: Plan["steps"][number],
         phase: "attempt" | "completion"
-      ) =>
-        TranscriptStore.patchById(sessionId, located.messageId, (m) => ({
-          ...m,
-          parts: m.parts.map((p) =>
-            p._tag === "Plan" && p.plan.id === planId
-              ? ({
-                  _tag: "Plan",
-                  plan: {
-                    ...p.plan,
-                    steps: p.plan.steps.map((stored) =>
-                      stored.id !== step.id
-                        ? stored
-                        : phase === "attempt"
-                          ? { ...step, status: stored.status }
-                          : { ...step, status: "done" }
-                    )
-                  }
-                } as const)
-              : p
+      ) => {
+        const applyStep = (storedPlan: Plan): Plan => ({
+          ...storedPlan,
+          steps: storedPlan.steps.map((stored) =>
+            stored.id !== step.id
+              ? stored
+              : phase === "attempt"
+                ? { ...step, status: stored.status }
+                : { ...step, status: "done" }
           )
-        })).pipe(Effect.provide(txCtx), Effect.ignore)
+        })
+        const updateTranscript =
+          located === null
+            ? Effect.void
+            : TranscriptStore.patchById(chatId, located.messageId, (message) => ({
+                ...message,
+                parts: message.parts.map((part) =>
+                  part._tag === "Plan" && part.plan.id === planId
+                    ? { _tag: "Plan" as const, plan: applyStep(part.plan) }
+                    : part
+                )
+              }))
+        return PlanStore.updateArtifact(worktreePath, planId, applyStep).pipe(
+          Effect.zipRight(updateTranscript),
+          Effect.provide(txCtx),
+          Effect.ignore
+        )
+      }
       return executor
         .run({
           sessionId,
@@ -869,7 +909,10 @@ export const planExecute = (
           branch: session.branch,
           cwd: session.worktreePath,
           plan,
-          context: planExecutionContextFromTranscript(messages, located.messageId),
+          context: planExecutionContextFromTranscript(
+            messages,
+            located?.messageId ?? assistantId
+          ),
           available,
           unavailable,
           // The orchestrator's own model backs any step the plan left unassigned —
@@ -911,6 +954,7 @@ type PlanAdversarialEnv =
   | ModelsService
   | AdversarialPlanService
   | PlanRoundStore
+  | PlanStore
   | CliAdapter
   | CommandExecutor.CommandExecutor
   | FileSystem.FileSystem
@@ -1051,7 +1095,8 @@ const gigaplanImagesFromTranscript = (
 export const planAdversarial = (
   sessionId: string,
   brief?: string,
-  images: ReadonlyArray<Attachment> = []
+  images: ReadonlyArray<Attachment> = [],
+  requestedChatId?: string
 ): Stream.Stream<StreamEvent, PlanError, PlanAdversarialEnv> =>
   Stream.unwrap(
     Effect.gen(function* () {
@@ -1063,7 +1108,15 @@ export const planAdversarial = (
           })
         )
       }
-      const prior = yield* TranscriptStore.list(sessionId).pipe(Effect.orElseSucceed(() => []))
+      const chatId =
+        requestedChatId &&
+        session.chats.some((chat) => chat.id === requestedChatId)
+          ? requestedChatId
+          : sessionId
+      if (requestedChatId !== undefined) {
+        yield* TranscriptStore.adoptLegacy(sessionId, chatId)
+      }
+      const prior = yield* TranscriptStore.list(chatId).pipe(Effect.orElseSucceed(() => []))
       const explicitBrief = brief?.trim() ?? ""
       const roundBrief =
         explicitBrief.length > 0 ? explicitBrief : gigaplanBriefFromTranscript(prior)
@@ -1109,11 +1162,11 @@ export const planAdversarial = (
       // The brief, then an empty turn for the round to fold into — the same two
       // messages an ordinary send appends.
       yield* TranscriptStore.append(
-        sessionId,
+        chatId,
         // Fresh attachments ride on the handoff turn, but transcript-derived
         // fallback images are already durable and must not be appended again.
         userMessage(
-          `u_${sessionId}_${maxN + 1}`,
+          `u_${chatId}_${maxN + 1}`,
           explicitBrief.length > 0
             ? explicitBrief
             : latestGigaplanPlan(prior) !== null
@@ -1124,9 +1177,9 @@ export const planAdversarial = (
           "gigaplan-handoff"
         )
       ).pipe(Effect.ignore)
-      const assistantId = `a_${sessionId}_${maxN + 2}`
+      const assistantId = `a_${chatId}_${maxN + 2}`
       yield* TranscriptStore.append(
-        sessionId,
+        chatId,
         assistantMessage(assistantId, now, "gigaplan-handoff")
       ).pipe(
         Effect.ignore
@@ -1134,7 +1187,7 @@ export const planAdversarial = (
       const persist = (event: StreamEvent) =>
         // By id, not `patchLast`: the round is long, and nothing guarantees this
         // turn is still the final message by the time an event lands.
-        TranscriptStore.patchById(sessionId, assistantId, (m) => applyStreamEvent(m, event)).pipe(
+        TranscriptStore.patchById(chatId, assistantId, (m) => applyStreamEvent(m, event)).pipe(
           Effect.provide(txCtx),
           Effect.ignore
         )
@@ -1159,8 +1212,11 @@ export const planAdversarial = (
             usage,
             affinityEnabled: false
           },
-          ...(session.reasoningEffort
-            ? { reasoningEffort: session.reasoningEffort }
+          ...(session.reasoning?.[session.cli === "codex" ? "codex" : "claude"]?.effort
+            ? {
+                reasoningEffort:
+                  session.reasoning[session.cli === "codex" ? "codex" : "claude"]!.effort
+              }
             : {}),
           // Persistence is wired in here rather than inside the service so the
           // round logic stays free of the filesystem and testable without one.
@@ -1171,7 +1227,18 @@ export const planAdversarial = (
           // watched succeed must not fail because a file could not be written.
           // `ToolDelta` is skipped for the reason `AgentRunner` skips it — it
           // ticks constantly and each patch rewrites the whole file.
-          Stream.tap((event) => (event._tag === "ToolDelta" ? Effect.void : persist(event)))
+          Stream.tap((event) =>
+            event._tag === "PlanProposed"
+              ? PlanStore.promote(
+                  sessionId,
+                  session.worktreePath!,
+                  chatId,
+                  event.plan
+                ).pipe(Effect.zipRight(persist(event)))
+              : event._tag === "ToolDelta"
+                ? Effect.void
+                : persist(event)
+          )
         )
     })
   )
@@ -1551,9 +1618,10 @@ export const createTerminal = (input: {
  */
 export const setReasoning = (
   sessionId: string,
-  reasoningEffort: Parameters<typeof SessionStore.setReasoningEffort>[1]
+  cli: "claude" | "codex" | "opencode",
+  reasoning: Parameters<typeof SessionStore.setReasoning>[2]
 ) =>
-  SessionStore.setReasoningEffort(sessionId, reasoningEffort).pipe(
+  SessionStore.setReasoning(sessionId, cli, reasoning).pipe(
     Effect.tapError((error) =>
       Effect.logWarning(
         `Failed to persist reasoning strength for session ${sessionId}: ${error.message}`
@@ -1599,30 +1667,70 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   // session forever (and a recycled id would read a stranger's findings).
   "Sessions.delete": ({ sessionId }) =>
     SessionStore.remove(sessionId).pipe(Effect.tap(() => ReviewStore.clear(sessionId))),
-  "Sessions.transcript": ({ id }) => TranscriptStore.list(id),
+  "Sessions.createChat": ({ sessionId }) =>
+    SessionStore.createChat(sessionId).pipe(
+      Effect.catchTag("SessionNotFoundError", (cause) =>
+        Effect.fail(new GitError({ message: "Session not found", cause }))
+      )
+    ),
+  "Sessions.selectChat": ({ sessionId, chatId }) =>
+    SessionStore.selectChat(sessionId, chatId).pipe(
+      Effect.catchTag("SessionNotFoundError", (cause) =>
+        Effect.fail(new GitError({ message: "Session not found", cause }))
+      )
+    ),
+  "Sessions.renameChat": ({ sessionId, chatId, title }) =>
+    SessionStore.renameChat(sessionId, chatId, title).pipe(
+      Effect.catchTag("SessionNotFoundError", (cause) =>
+        Effect.fail(new GitError({ message: "Session not found", cause }))
+      )
+    ),
+  "Sessions.closeChat": ({ sessionId, chatId }) =>
+    Effect.gen(function* () {
+      const runner = yield* AgentRunner
+      yield* runner.stop(sessionId, chatId)
+      yield* TranscriptStore.remove(chatId)
+      return yield* SessionStore.closeChat(sessionId, chatId)
+    }).pipe(
+      Effect.catchTag("SessionNotFoundError", (cause) =>
+        Effect.fail(new GitError({ message: "Session not found", cause }))
+      )
+    ),
+  "Sessions.transcript": ({ sessionId, chatId }) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId)
+      if (!session.chats.some((chat) => chat.id === chatId)) return []
+      yield* TranscriptStore.adoptLegacy(sessionId, chatId)
+      return yield* TranscriptStore.list(chatId)
+    }).pipe(Effect.orElseSucceed(() => [])),
   "Sessions.diff": ({ id }) => sessionDiff(id),
   // The streaming agent seam: unwrap the runner's `Stream<StreamEvent>` so the
   // renderer subscribes to normalized events, harness-agnostic.
-  "Agent.run": ({ sessionId, text, images, target, reasoningEffort }) =>
+  "Agent.run": ({ sessionId, chatId, text, images, target, reasoning }) =>
     Stream.unwrap(
       Effect.map(AgentRunner, (runner) =>
         runner.prompt(
           sessionId,
+          chatId,
           text,
           images ?? [],
           target ?? "session",
-          reasoningEffort
+          reasoning
         )
       )
     ),
-  "Agent.decideGate": ({ sessionId, gateId, decision }) =>
-    Effect.flatMap(AgentRunner, (runner) => runner.decideGate(sessionId, gateId, decision)),
-  "Agent.answerQuestion": ({ sessionId, requestId, answers }) =>
-    Effect.flatMap(AgentRunner, (runner) => runner.answerQuestion(sessionId, requestId, answers)),
-  "Agent.setMode": ({ sessionId, mode }) =>
-    Effect.flatMap(AgentRunner, (runner) => runner.setMode(sessionId, mode)),
-  "Agent.setReasoning": ({ sessionId, reasoningEffort }) =>
-    setReasoning(sessionId, reasoningEffort),
+  "Agent.decideGate": ({ sessionId, chatId, gateId, decision }) =>
+    Effect.flatMap(AgentRunner, (runner) =>
+      runner.decideGate(sessionId, chatId, gateId, decision)
+    ),
+  "Agent.answerQuestion": ({ sessionId, chatId, requestId, answers }) =>
+    Effect.flatMap(AgentRunner, (runner) =>
+      runner.answerQuestion(sessionId, chatId, requestId, answers)
+    ),
+  "Agent.setMode": ({ sessionId, chatId, mode }) =>
+    Effect.flatMap(AgentRunner, (runner) => runner.setMode(sessionId, chatId, mode)),
+  "Agent.setReasoning": ({ sessionId, cli, reasoning }) =>
+    setReasoning(sessionId, cli, reasoning),
   "Agent.commentPlanStep": ({ sessionId, planId, stepId, body }) =>
     Effect.flatMap(AgentRunner, (runner) =>
       runner.commentPlanStep(sessionId, planId, stepId, body)
@@ -1631,11 +1739,16 @@ const HandlersLayer = StarbaseRpcs.toLayer({
     Effect.flatMap(AgentRunner, (runner) => runner.revisePlan(sessionId, planId)),
   "Agent.approvePlan": ({ sessionId, planId, executionMode }) =>
     Effect.flatMap(AgentRunner, (runner) => runner.approvePlan(sessionId, planId, executionMode)),
-  "Agent.resumePlan": ({ sessionId, planId }) =>
-    Stream.unwrap(Effect.map(AgentRunner, (runner) => runner.resumePlan(sessionId, planId))),
-  "Agent.setHarness": ({ sessionId, cli, model }) =>
-    SessionStore.setHarness(sessionId, cli, model).pipe(Effect.ignore),
-  "Agent.stop": ({ sessionId }) => Effect.flatMap(AgentRunner, (runner) => runner.stop(sessionId)),
+  "Agent.resumePlan": ({ sessionId, chatId, planId }) =>
+    Stream.unwrap(
+      Effect.map(AgentRunner, (runner) =>
+        runner.resumePlan(sessionId, chatId, planId)
+      )
+    ),
+  "Agent.setHarness": ({ sessionId, chatId, cli, model }) =>
+    SessionStore.setHarness(sessionId, chatId, cli, model).pipe(Effect.ignore),
+  "Agent.stop": ({ sessionId, chatId }) =>
+    Effect.flatMap(AgentRunner, (runner) => runner.stop(sessionId, chatId)),
   "Skills.list": ({ sessionId }) => skillsList(sessionId),
   "Mcp.list": ({ sessionId, cli }) => mcpList(sessionId, cli),
   "Mcp.status": ({ sessionId, cli, refresh }) => mcpStatus(sessionId, cli, refresh),
@@ -1647,11 +1760,17 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "Opencode.listProviders": () => opencodeListProviders(),
   "Opencode.setAuth": ({ providerId, key }) => opencodeSetAuth(providerId, key),
   "Usage.get": () => Effect.flatMap(DiscoveryService.list(), (clis) => UsageService.get(clis)),
-  "Context.state": ({ sessionId }) => ContextManager.snapshot(sessionId),
+  "Context.state": ({ sessionId, chatId }) =>
+    ContextManager.bind(chatId, sessionId).pipe(
+      Effect.zipRight(ContextManager.snapshot(chatId))
+    ),
   // Fire-and-forget by design: the digest builds on a background fiber and lands
   // on the next turn, so the button returns instantly rather than parking the UI
   // on a summary the user is not waiting for.
-  "Context.compactNow": ({ sessionId }) => ContextManager.compactNow(sessionId),
+  "Context.compactNow": ({ sessionId, chatId }) =>
+    ContextManager.bind(chatId, sessionId).pipe(
+      Effect.zipRight(ContextManager.compactNow(chatId))
+    ),
   "Config.setContext": (context) => ConfigService.setContext(context),
   // Returns the updated session so the renderer can patch its cache without a
   // refetch, matching every other session mutation.
@@ -1712,9 +1831,18 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "Github.files": ({ sessionId }) => githubFiles(sessionId),
   "Github.diff": ({ sessionId }) => githubDiff(sessionId),
   "Github.detectPr": ({ sessionId }) => githubDetectPr(sessionId),
-  "Plan.adversarial": ({ sessionId, brief, images }) =>
-    planAdversarial(sessionId, brief, images ?? []),
+  "Plan.adversarial": ({ sessionId, chatId, brief, images }) =>
+    planAdversarial(sessionId, brief, images ?? [], chatId),
   "Plan.round": ({ sessionId }) => planRound(sessionId),
+  "Plan.current": ({ sessionId }) =>
+    SessionStore.get(sessionId).pipe(
+      Effect.flatMap((session) =>
+        session.worktreePath
+          ? PlanStore.readArtifact(session.worktreePath)
+          : Effect.succeed(null)
+      ),
+      Effect.orElseSucceed(() => null)
+    ),
   "Plan.readiness": () => planReadiness,
   "Plan.execute": ({ sessionId, planId, executionMode }) =>
     planExecute(sessionId, planId, executionMode),

@@ -76,20 +76,12 @@ export const mapCodexPolicy = (
 
 /** Map the composer's semantic strength onto Codex's native thread option. */
 export const mapCodexReasoning = (
-  effort: ReasoningEffort | undefined
+  effort: ReasoningEffort | undefined,
+  enabled: boolean | undefined = true
 ): ModelReasoningEffort | undefined => {
-  switch (effort) {
-    case "off":
-      return "minimal"
-    case "think":
-      return "medium"
-    case "think-hard":
-      return "high"
-    case "ultrathink":
-      return "xhigh"
-    default:
-      return undefined
-  }
+  if (!enabled) return "minimal"
+  if (effort === "max") return "xhigh"
+  return effort
 }
 
 /**
@@ -455,8 +447,13 @@ export const runCodexSdk = (
           workingDirectory: requireWorktree(spec.cwd, `session ${sessionId}`),
           skipGitRepoCheck: true,
           ...(spec.model ? { model: spec.model } : {}),
-          ...(mapCodexReasoning(spec.reasoningEffort)
-            ? { modelReasoningEffort: mapCodexReasoning(spec.reasoningEffort) }
+          ...(mapCodexReasoning(spec.reasoningEffort, spec.thinkingEnabled)
+            ? {
+                modelReasoningEffort: mapCodexReasoning(
+                  spec.reasoningEffort,
+                  spec.thinkingEnabled
+                )
+              }
             : {}),
           ...mapCodexPolicy(spec.mode, spec.readOnly ?? false, spec.unattended ?? false)
         }

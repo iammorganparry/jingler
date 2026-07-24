@@ -12,6 +12,7 @@ import type {
   QuestionAnswer,
   QuestionRequest,
   ReasoningEffort,
+  ReasoningSetting,
   Skill
 } from "@starbase/core"
 import { useVirtualizer } from "@tanstack/react-virtual"
@@ -153,7 +154,8 @@ export interface ConversationViewProps {
   onDecideGate?: (gateId: string, decision: GateDecision) => void
   onSetMode?: (mode: PermissionMode) => void
   reasoningEffort?: ReasoningEffort
-  onSetReasoning?: (reasoningEffort?: ReasoningEffort) => void
+  thinkingEnabled?: boolean
+  onSetReasoning?: (reasoning?: ReasoningSetting) => void
   /** Adversarial-planning availability + reason; absent hides the entry entirely. */
   adversarialPlanning?: { readonly ready: boolean; readonly reason: string | null }
   /** Explicitly hand the Gigaplan intake thread to the adversarial planners. */
@@ -242,6 +244,7 @@ export function ConversationView({
   onDecideGate,
   onSetMode,
   reasoningEffort,
+  thinkingEnabled,
   onSetReasoning,
   adversarialPlanning,
   onHandoffPlan,
@@ -527,6 +530,7 @@ export function ConversationView({
                 mode={mode}
                 onSetMode={onSetMode}
                 reasoningEffort={reasoningEffort}
+                thinkingEnabled={thinkingEnabled}
                 onSetReasoning={onSetReasoning}
                 adversarialPlanning={adversarialPlanning}
                 onHandoffPlan={onHandoffPlan}

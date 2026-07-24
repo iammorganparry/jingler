@@ -16,6 +16,7 @@ import {
   resetSubscriptionCache,
   AdversarialPlanService,
   PlanExecutor,
+  PlanStore,
   PlanRoundStore,
   SessionStore,
   TranscriptStore,
@@ -269,12 +270,12 @@ describe("RPC handlers", () => {
       )
       const failedStore = SessionStore.make({
         ...store,
-        setReasoningEffort: () =>
+        setReasoning: () =>
           Effect.fail(new GitError({ message: "test sessions.json write failed" }))
       })
 
       await Effect.runPromise(
-        setReasoning("session-1", "think-hard").pipe(
+        setReasoning("session-1", "claude", { enabled: true, effort: "high" }).pipe(
           Effect.provide(Layer.succeed(SessionStore, failedStore)),
           Effect.provide(Logger.replace(Logger.defaultLogger, logger)),
           Effect.provide(base)
@@ -1435,6 +1436,7 @@ describe("Gigaplan round persistence", () => {
       ConfigService.Default,
       GitService.Default,
       TranscriptStore.Default,
+      PlanStore.Default,
       PlanRoundStore.Default,
       SessionStore.Default,
       Layer.succeed(

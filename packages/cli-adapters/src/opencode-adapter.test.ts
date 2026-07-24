@@ -32,10 +32,10 @@ const ev = (e: unknown): Event => e as Event
 describe("mapOpencodeReasoning", () => {
   it("leaves default unset and maps semantic strength to model variants", () => {
     expect(mapOpencodeReasoning(undefined)).toBeUndefined()
-    expect(mapOpencodeReasoning("off")).toBe("minimal")
-    expect(mapOpencodeReasoning("think")).toBe("medium")
-    expect(mapOpencodeReasoning("think-hard")).toBe("high")
-    expect(mapOpencodeReasoning("ultrathink")).toBe("xhigh")
+    expect(mapOpencodeReasoning("xhigh", false)).toBe("minimal")
+    expect(mapOpencodeReasoning("medium")).toBe("medium")
+    expect(mapOpencodeReasoning("high")).toBe("high")
+    expect(mapOpencodeReasoning("xhigh")).toBe("xhigh")
   })
 })
 
@@ -43,7 +43,7 @@ describe("opencodePromptBody", () => {
   it("carries the selected variant through the live request boundary", () => {
     expect(
       opencodePromptBody(
-        { model: "openai/gpt-5", reasoningEffort: "ultrathink" },
+        { model: "openai/gpt-5", reasoningEffort: "xhigh" },
         "Inspect the repository",
         false
       )

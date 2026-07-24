@@ -1,4 +1,5 @@
 import type {
+  Chat,
   CliKind,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -6,6 +7,7 @@ import type {
   IssueAutomations,
   PermissionMode,
   ReasoningEffort,
+  ReasoningSetting,
   Session,
   SettledSessionStatus
 } from "@starbase/core"
@@ -14,13 +16,127 @@ import { Session as SessionSchema } from "@starbase/core"
 import { basename } from "node:path"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
-import { Effect, Schema } from "effect"
+import { Effect, Either, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
 import { freeCreativeName } from "./creative-name.js"
 import { GhService } from "./gh.js"
 import { GitService } from "./git.js"
 
 const SessionArray = Schema.Array(SessionSchema)
+
+type JsonRecord = Record<string, unknown>
+
+const isRecord = (value: unknown): value is JsonRecord =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const chatIdFor = (sessionId: string, suffix: string): string => `c_${sessionId}_${suffix}`
+
+const legacyMode = (value: unknown): PermissionMode | undefined => {
+  switch (value) {
+    case "ask":
+    case "accept-edits":
+    case "auto":
+    case "plan":
+    case "gigaplan":
+      return value
+    default:
+      return undefined
+  }
+}
+
+const initialChat = (
+  sessionId: string,
+  now: string,
+  legacy: JsonRecord = {}
+): Chat => ({
+  id: chatIdFor(sessionId, "1"),
+  title: null,
+  createdAt: now,
+  updatedAt: now,
+  ...(typeof legacy.resumeId === "string" ? { resumeId: legacy.resumeId } : {}),
+  ...(typeof legacy.gigaplanResumeId === "string"
+    ? { gigaplanResumeId: legacy.gigaplanResumeId }
+    : {}),
+  ...(legacyMode(legacy.mode) === undefined ? {} : { mode: legacyMode(legacy.mode) }),
+  ...(Array.isArray(legacy.allowlist) &&
+  legacy.allowlist.every((entry) => typeof entry === "string")
+    ? { allowlist: legacy.allowlist }
+    : {}),
+  ...(typeof legacy.model === "string" ? { model: legacy.model } : {})
+})
+
+const migrateReasoning = (value: unknown): ReasoningSetting | undefined => {
+  switch (value) {
+    case "off":
+      return { enabled: false }
+    case "think":
+      return { enabled: true, effort: "low" }
+    case "think-hard":
+      return { enabled: true, effort: "high" }
+    case "ultrathink":
+      return { enabled: true, effort: "xhigh" }
+    case "minimal":
+    case "low":
+    case "medium":
+    case "high":
+    case "xhigh":
+    case "max":
+      return { enabled: true, effort: value }
+    case undefined:
+      return undefined
+    default:
+      return { enabled: true }
+  }
+}
+
+const reasoningKey = (cli: unknown): "claude" | "codex" | "opencode" | null =>
+  cli === "claude" || cli === "codex" || cli === "opencode" ? cli : null
+
+/**
+ * Upgrade the old one-session/one-transcript shape before schema decoding.
+ * The transformation is deterministic, so a legacy file can be read repeatedly
+ * before the next mutation persists the upgraded representation.
+ */
+export const migrateSessionChats = (value: unknown): unknown => {
+  if (!isRecord(value) || typeof value.id !== "string") return value
+  const now = typeof value.updatedAt === "string" ? value.updatedAt : new Date(0).toISOString()
+  const chats =
+    Array.isArray(value.chats) && value.chats.length > 0
+      ? value.chats
+      : [initialChat(value.id, now, value)]
+  const chatIds = new Set(
+    chats.flatMap((chat) =>
+      isRecord(chat) && typeof chat.id === "string" ? [chat.id] : []
+    )
+  )
+  const activeChatId =
+    typeof value.activeChatId === "string" && chatIds.has(value.activeChatId)
+      ? value.activeChatId
+      : (chatIds.values().next().value ?? chatIdFor(value.id, "1"))
+  const key = reasoningKey(value.cli)
+  const migratedReasoning = migrateReasoning(value.reasoningEffort)
+  const reasoning =
+    isRecord(value.reasoning)
+      ? value.reasoning
+      : key !== null && migratedReasoning !== undefined
+        ? { [key]: migratedReasoning }
+        : undefined
+  const {
+    resumeId: _resumeId,
+    gigaplanResumeId: _gigaplanResumeId,
+    mode: _mode,
+    allowlist: _allowlist,
+    model: _model,
+    reasoningEffort: _reasoningEffort,
+    ...session
+  } = value
+  return {
+    ...session,
+    chats,
+    activeChatId,
+    ...(reasoning === undefined ? {} : { reasoning })
+  }
+}
 
 /**
  * The longest slug we will put on disk.
@@ -104,9 +220,16 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             .readFileString(paths.sessionsFile)
             .pipe(Effect.orElseSucceed(() => ""))
           if (raw.trim().length === 0) return []
-          return yield* Schema.decodeUnknown(Schema.parseJson(SessionArray))(raw).pipe(
-            Effect.orElseSucceed(() => [] as ReadonlyArray<Session>)
+          const parsed = yield* Schema.decodeUnknown(Schema.parseJson(Schema.Unknown))(raw).pipe(
+            Effect.orElseSucceed(() => null)
           )
+          if (!Array.isArray(parsed)) return []
+          const sessions: Array<Session> = []
+          for (const value of parsed) {
+            const decoded = Schema.decodeUnknownEither(SessionSchema)(migrateSessionChats(value))
+            if (Either.isRight(decoded)) sessions.push(decoded.right)
+          }
+          return sessions
         })
 
       const writeAll = (
@@ -243,8 +366,14 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                   slug,
                   baseBranch: input.baseBranch
                 })
+          const id = `s_${slug}`
+          const chat = initialChat(id, now, {
+            mode: options.defaultMode,
+            model: options.defaultModel
+          })
+          const providerKey = reasoningKey(input.cli)
           const session: Session = {
-            id: `s_${slug}`,
+            id,
             repo: input.repoName,
             branch: worktree.branch,
             title,
@@ -256,15 +385,17 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             costUsd: 0,
             tokens: 0,
             updatedAt: now,
+            chats: [chat],
+            activeChatId: chat.id,
             worktreePath: worktree.path,
             repoPath: worktree.repoPath,
             baseBranch: input.baseBranch,
-            // Seed the session's permission mode / model from the provider's
-            // configured defaults (omitted → the harness falls back on its own).
-            ...(options.defaultMode ? { mode: options.defaultMode } : {}),
-            ...(options.defaultModel ? { model: options.defaultModel } : {}),
-            ...(options.defaultReasoningEffort
-              ? { reasoningEffort: options.defaultReasoningEffort }
+            ...(providerKey !== null && options.defaultReasoningEffort
+              ? {
+                  reasoning: {
+                    [providerKey]: { enabled: true, effort: options.defaultReasoningEffort }
+                  }
+                }
               : {})
           }
           // `existing` was read above (for the friendly-name collision check).
@@ -350,8 +481,14 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const branch = (yield* GitService.branchAt(worktree.path)) ?? input.pr.headRefName
           const now = yield* Effect.sync(() => new Date().toISOString())
           const stamp = yield* Effect.sync(() => Date.now().toString(36))
+          const id = `s_${slug}_${stamp}`
+          const chat = initialChat(id, now, {
+            mode: opts.defaultMode,
+            model: opts.defaultModel
+          })
+          const providerKey = reasoningKey(input.cli)
           const session: Session = {
-            id: `s_${slug}_${stamp}`,
+            id,
             repo: input.repoName,
             branch,
             title: input.pr.title,
@@ -362,13 +499,17 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             costUsd: 0,
             tokens: 0,
             updatedAt: now,
+            chats: [chat],
+            activeChatId: chat.id,
             worktreePath: worktree.path,
             repoPath: worktree.repoPath,
             baseBranch: input.pr.baseRefName,
-            ...(opts.defaultMode ? { mode: opts.defaultMode } : {}),
-            ...(opts.defaultModel ? { model: opts.defaultModel } : {}),
-            ...(opts.defaultReasoningEffort
-              ? { reasoningEffort: opts.defaultReasoningEffort }
+            ...(providerKey !== null && opts.defaultReasoningEffort
+              ? {
+                  reasoning: {
+                    [providerKey]: { enabled: true, effort: opts.defaultReasoningEffort }
+                  }
+                }
               : {})
           }
           const existing = yield* readAll()
@@ -433,11 +574,17 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               .map((s) => s.trim())
               .filter((s) => s.length > 0)
               .join("\n\n")
+          const id = `s_${slug}_${stamp}`
+          const chat = initialChat(id, now, {
+            mode: options.defaultMode,
+            model: options.defaultModel
+          })
+          const providerKey = reasoningKey(input.cli)
           const session: Session = {
             // Stamp the id (like `createFromPr`) so a delete-then-recreate of the
             // same issue can't collide with the old session's persisted data; the
             // worktree slug stays deterministic for the one-session-per-issue guard.
-            id: `s_${slug}_${stamp}`,
+            id,
             repo: input.repoName,
             branch: worktree.branch,
             // Seed (and pin) the title from the issue.
@@ -456,13 +603,17 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             costUsd: 0,
             tokens: 0,
             updatedAt: now,
+            chats: [chat],
+            activeChatId: chat.id,
             worktreePath: worktree.path,
             repoPath: worktree.repoPath,
             baseBranch: input.baseBranch,
-            ...(options.defaultMode ? { mode: options.defaultMode } : {}),
-            ...(options.defaultModel ? { model: options.defaultModel } : {}),
-            ...(options.defaultReasoningEffort
-              ? { reasoningEffort: options.defaultReasoningEffort }
+            ...(providerKey !== null && options.defaultReasoningEffort
+              ? {
+                  reasoning: {
+                    [providerKey]: { enabled: true, effort: options.defaultReasoningEffort }
+                  }
+                }
               : {})
           }
           // Re-read INSIDE the lock rather than reusing the list read before
@@ -491,18 +642,151 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           })
         )
 
-      /** Persist the session's HITL permission mode. */
-      const setMode = (id: string, mode: PermissionMode) => update(id, (s) => ({ ...s, mode }))
+      const updateChat = (
+        sessionId: string,
+        chatId: string,
+        patch: (chat: Chat) => Chat
+      ) =>
+        update(sessionId, (session) => ({
+          ...session,
+          chats: session.chats.map((chat) => (chat.id === chatId ? patch(chat) : chat))
+        }))
 
-      /** Persist the session's harness model. */
-      const setModel = (id: string, model: string) => update(id, (s) => ({ ...s, model }))
+      const createChat = (sessionId: string) =>
+        Effect.gen(function* () {
+          const now = new Date().toISOString()
+          const chat: Chat = {
+            id: chatIdFor(sessionId, `${Date.now().toString(36)}_${nextOpId()}`),
+            title: null,
+            createdAt: now,
+            updatedAt: now
+          }
+          yield* update(sessionId, (session) => ({
+            ...session,
+            chats: [...session.chats, chat],
+            activeChatId: chat.id,
+            updatedAt: now
+          }))
+          return yield* get(sessionId)
+        })
 
-      /** Persist a per-session thinking override, or remove it to use the harness default. */
-      const setReasoningEffort = (id: string, reasoningEffort: ReasoningEffort | undefined) =>
-        update(id, (s) => {
-          if (reasoningEffort !== undefined) return { ...s, reasoningEffort }
-          const { reasoningEffort: _reasoningEffort, ...rest } = s
-          return rest
+      const selectChat = (sessionId: string, chatId: string) =>
+        Effect.gen(function* () {
+          yield* update(sessionId, (session) =>
+            session.chats.some((chat) => chat.id === chatId)
+              ? { ...session, activeChatId: chatId }
+              : session
+          )
+          return yield* get(sessionId)
+        })
+
+      const renameChat = (sessionId: string, chatId: string, title: string) =>
+        Effect.gen(function* () {
+          const trimmed = title.trim()
+          if (trimmed.length > 0) {
+            const now = new Date().toISOString()
+            yield* updateChat(sessionId, chatId, (chat) => ({
+              ...chat,
+              title: trimmed,
+              updatedAt: now
+            }))
+          }
+          return yield* get(sessionId)
+        })
+
+      const closeChat = (sessionId: string, chatId: string) =>
+        Effect.gen(function* () {
+          const now = new Date().toISOString()
+          yield* update(sessionId, (session) => {
+            const index = session.chats.findIndex((chat) => chat.id === chatId)
+            if (index < 0) return session
+            const remaining = session.chats.filter((chat) => chat.id !== chatId)
+            const chats =
+              remaining.length > 0
+                ? remaining
+                : [initialChat(session.id, now)]
+            const activeChatId =
+              session.activeChatId === chatId
+                ? chats[Math.min(index, chats.length - 1)]!.id
+                : session.activeChatId
+            return { ...session, chats, activeChatId, updatedAt: now }
+          })
+          return yield* get(sessionId)
+        })
+
+      /** Persist one chat's HITL permission mode. */
+      const setMode = (
+        id: string,
+        chatIdOrMode: string,
+        maybeMode?: PermissionMode
+      ) =>
+        update(id, (session) => {
+          const chatId = maybeMode === undefined ? session.activeChatId : chatIdOrMode
+          const mode = maybeMode ?? legacyMode(chatIdOrMode)
+          if (mode === undefined) return session
+          return {
+            ...session,
+            mode,
+            chats: session.chats.map((chat) =>
+              chat.id === chatId ? { ...chat, mode } : chat
+            )
+          }
+        })
+
+      /** Persist one chat's harness model. */
+      const setModel = (id: string, chatIdOrModel: string, maybeModel?: string) =>
+        update(id, (session) => {
+          const chatId = maybeModel === undefined ? session.activeChatId : chatIdOrModel
+          const model = maybeModel ?? chatIdOrModel
+          return {
+            ...session,
+            model,
+            chats: session.chats.map((chat) =>
+              chat.id === chatId ? { ...chat, model } : chat
+            )
+          }
+        })
+
+      /** Persist a provider-native session reasoning choice. */
+      const setReasoning = (
+        id: string,
+        cli: "claude" | "codex" | "opencode",
+        reasoning: ReasoningSetting | undefined
+      ) =>
+        update(id, (session) => ({
+          ...session,
+          reasoning: {
+            ...session.reasoning,
+            [cli]: reasoning
+          }
+        }))
+
+      /** Temporary compatibility shim for callers being migrated to `setReasoning`. */
+      const setReasoningEffort = (
+        id: string,
+        reasoningEffort:
+          | ReasoningEffort
+          | "off"
+          | "think"
+          | "think-hard"
+          | "ultrathink"
+          | undefined
+      ) =>
+        update(id, (session) => {
+          const key = reasoningKey(session.cli)
+          const migrated = migrateReasoning(reasoningEffort)
+          return {
+            ...session,
+            reasoningEffort,
+            ...(key === null
+              ? {}
+              : {
+                  reasoning: {
+                    ...session.reasoning,
+                    [key]: migrated
+                  }
+                })
+          }
         })
 
       /**
@@ -538,26 +822,78 @@ export class SessionStore extends Effect.Service<SessionStore>()(
        * than handing the runner a mode the new harness cannot honour — which on
        * Codex would have meant a "planning" turn with write access.
        */
-      const setHarness = (id: string, cli: CliKind, model: string) =>
+      const setHarness = (
+        id: string,
+        chatIdOrCli: string,
+        cliOrModel: CliKind | string,
+        maybeModel?: string
+      ) =>
         update(id, (s) =>
+          {
+            const chatId = maybeModel === undefined ? s.activeChatId : chatIdOrCli
+            const cli = (maybeModel === undefined ? chatIdOrCli : cliOrModel) as CliKind
+            const model = maybeModel ?? cliOrModel
+            return (
           s.cli === cli
-            ? { ...s, model }
+            ? {
+                ...s,
+                model,
+                chats: s.chats.map((chat) =>
+                  chat.id === chatId ? { ...chat, model } : chat
+                )
+              }
             : {
                 ...s,
                 cli,
-                model,
-                // `optional`, not nullable — undefined drops the key on write.
-                resumeId: undefined,
-                mode: s.mode === "plan" && !supportsPlanMode(cli) ? "ask" : s.mode
+                chats: s.chats.map((chat) =>
+                  chat.id === chatId
+                    ? {
+                        ...chat,
+                        model,
+                        resumeId: undefined,
+                        mode:
+                          chat.mode === "plan" && !supportsPlanMode(cli)
+                            ? "ask"
+                            : chat.mode
+                      }
+                    : chat
+                )
               }
+            )
+          }
         )
 
       /** Persist the harness session id so the conversation resumes after a restart. */
-      const setResumeId = (id: string, resumeId: string) => update(id, (s) => ({ ...s, resumeId }))
+      const setResumeId = (id: string, chatIdOrResumeId: string, maybeResumeId?: string) =>
+        update(id, (session) => {
+          const chatId = maybeResumeId === undefined ? session.activeChatId : chatIdOrResumeId
+          const resumeId = maybeResumeId ?? chatIdOrResumeId
+          return {
+            ...session,
+            resumeId,
+            chats: session.chats.map((chat) =>
+              chat.id === chatId ? { ...chat, resumeId } : chat
+            )
+          }
+        })
 
       /** Persist the independent Gigaplan intake conversation id. */
-      const setGigaplanResumeId = (id: string, gigaplanResumeId: string) =>
-        update(id, (s) => ({ ...s, gigaplanResumeId }))
+      const setGigaplanResumeId = (
+        id: string,
+        chatIdOrResumeId: string,
+        maybeResumeId?: string
+      ) =>
+        update(id, (session) => {
+          const chatId = maybeResumeId === undefined ? session.activeChatId : chatIdOrResumeId
+          const gigaplanResumeId = maybeResumeId ?? chatIdOrResumeId
+          return {
+            ...session,
+            gigaplanResumeId,
+            chats: session.chats.map((chat) =>
+              chat.id === chatId ? { ...chat, gigaplanResumeId } : chat
+            )
+          }
+        })
 
       /**
        * Drop the harness session id so the NEXT turn starts a fresh conversation.
@@ -567,7 +903,17 @@ export class SessionStore extends Effect.Service<SessionStore>()(
        * than null because `resumeId` is `optional` — writing null would persist a
        * key the schema rejects on the next read.
        */
-      const clearResumeId = (id: string) => update(id, (s) => ({ ...s, resumeId: undefined }))
+      const clearResumeId = (id: string, chatId?: string) =>
+        update(id, (session) => {
+          const target = chatId ?? session.activeChatId
+          return {
+            ...session,
+            resumeId: undefined,
+            chats: session.chats.map((chat) =>
+              chat.id === target ? { ...chat, resumeId: undefined } : chat
+            )
+          }
+        })
 
       /**
        * Persist the session's latest context-window OCCUPANCY.
@@ -585,6 +931,23 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const setContextTokens = (id: string, contextTokens: number) =>
         update(id, (s) =>
           Number.isFinite(contextTokens) && contextTokens >= 0 ? { ...s, contextTokens } : s
+        )
+
+      const setChatContextTokens = (
+        id: string,
+        chatId: string,
+        contextTokens: number
+      ) =>
+        update(id, (session) =>
+          Number.isFinite(contextTokens) && contextTokens >= 0
+            ? {
+                ...session,
+                contextTokens,
+                chats: session.chats.map((chat) =>
+                  chat.id === chatId ? { ...chat, contextTokens } : chat
+                )
+              }
+            : session
         )
 
       /**
@@ -619,11 +982,24 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         update(id, (s) => (s.archived ? s : { ...s, status }))
 
       /** Add a command to the session's "always allow" list (deduped). */
-      const addAllowlist = (id: string, label: string) =>
-        update(id, (s) => ({
-          ...s,
-          allowlist: [...new Set([...(s.allowlist ?? []), label])]
-        }))
+      const addAllowlist = (id: string, chatIdOrLabel: string, maybeLabel?: string) =>
+        update(id, (session) => {
+          const chatId = maybeLabel === undefined ? session.activeChatId : chatIdOrLabel
+          const label = maybeLabel ?? chatIdOrLabel
+          const allowlist = [...new Set([...(session.allowlist ?? []), label])]
+          return {
+            ...session,
+            allowlist,
+            chats: session.chats.map((chat) =>
+              chat.id === chatId
+                ? {
+                    ...chat,
+                    allowlist: [...new Set([...(chat.allowlist ?? []), label])]
+                  }
+                : chat
+            )
+          }
+        })
 
       /** Link (or clear) the session's pull-request number. */
       const setPrNumber = (id: string, prNumber: number | null) =>
@@ -736,8 +1112,13 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         create,
         createFromPr,
         createFromIssue,
+        createChat,
+        selectChat,
+        renameChat,
+        closeChat,
         setMode,
         setModel,
+        setReasoning,
         setReasoningEffort,
         addUsage,
         setHarness,
@@ -745,6 +1126,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setGigaplanResumeId,
         clearResumeId,
         setContextTokens,
+        setChatContextTokens,
         setAutoCompact,
         setTitle,
         setTitleAndBranch,

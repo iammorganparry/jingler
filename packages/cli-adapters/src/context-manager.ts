@@ -149,6 +149,14 @@ export class ContextManager extends Effect.Service<ContextManager>()(
       const states = yield* Ref.make(new Map<string, SessionContext>())
       /** Live digest fibers, so a stopped or deleted session can cancel its own. */
       const fibers = yield* Ref.make(new Map<string, Fiber.RuntimeFiber<void, never>>())
+      /** Chat context key → owning session id. Legacy callers use the same id. */
+      const owners = yield* Ref.make(new Map<string, string>())
+
+      const bind = (contextId: string, sessionId: string): Effect.Effect<void> =>
+        Ref.update(owners, (map) => new Map(map).set(contextId, sessionId))
+
+      const ownerOf = (contextId: string): Effect.Effect<string> =>
+        Effect.map(Ref.get(owners), (map) => map.get(contextId) ?? contextId)
 
       /**
        * Harness discovery, memoised for 30s.
@@ -205,20 +213,26 @@ export class ContextManager extends Effect.Service<ContextManager>()(
        */
       const settingsFor = (sessionId: string) =>
         Effect.gen(function* () {
-          const session = yield* SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
+          const ownerId = yield* ownerOf(sessionId)
+          const session = yield* SessionStore.get(ownerId).pipe(Effect.orElseSucceed(() => null))
           if (session === null) return null
+          const chat =
+            session.chats.find((candidate) => candidate.id === sessionId) ??
+            session.chats.find((candidate) => candidate.id === session.activeChatId) ??
+            session.chats[0]
+          if (chat === undefined) return null
           const state = yield* stateOf(sessionId)
           const reported = state.window
           // What this session has demonstrably held. A guess below it is not a
           // conservative guess, it is a disproven one.
-          const peak = Math.max(state.peakTokens, session.contextTokens ?? 0)
+          const peak = Math.max(state.peakTokens, chat.contextTokens ?? 0)
 
           const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
           const ctx = config?.context ?? DEFAULT_CONTEXT_CONFIG
           const provider = config?.providers?.[session.cli]
 
           const cli = (yield* listClis()).find((c) => c.kind === session.cli)
-          const inferredWindow = contextWindowFor(session.cli, session.model ?? null)
+          const inferredWindow = contextWindowFor(session.cli, chat.model ?? null)
           const measuredWindow = resolveWindow(inferredWindow, reported)
 
           // A harness that reports no usage gives us nothing to measure, so it is
@@ -230,6 +244,8 @@ export class ContextManager extends Effect.Service<ContextManager>()(
 
           return {
             session,
+            chat,
+            ownerId,
             auto,
             budget: ctx.budgetTokens,
             // The user's explicit Settings value stays on top because it is the
@@ -246,7 +262,7 @@ export class ContextManager extends Effect.Service<ContextManager>()(
             // every single turn while the harness is perfectly comfortable.
             window: reconcileWindow(
               provider?.contextWindow !== undefined && provider.contextWindow !== null
-                ? contextWindowFor(session.cli, session.model ?? null, provider.contextWindow)
+                ? contextWindowFor(session.cli, chat.model ?? null, provider.contextWindow)
                 : measuredWindow,
               peak
             ),
@@ -440,7 +456,8 @@ export class ContextManager extends Effect.Service<ContextManager>()(
           }))
           // Persist so the reading survives a restart — otherwise a session
           // reopened at 290k reads as 0 and runs to the ceiling.
-          yield* SessionStore.setContextTokens(sessionId, tokens).pipe(Effect.ignore)
+          const ownerId = yield* ownerOf(sessionId)
+          yield* SessionStore.setChatContextTokens(ownerId, sessionId, tokens).pipe(Effect.ignore)
         })
 
       /**
@@ -472,7 +489,7 @@ export class ContextManager extends Effect.Service<ContextManager>()(
           // harness, and passing it here is what made compaction fire every turn.
           // Falling back to the persisted value keeps a session that was reopened
           // near its ceiling from reading as empty on its first turn.
-          const tokens = state.tokens > 0 ? state.tokens : settings.session.contextTokens ?? 0
+          const tokens = state.tokens > 0 ? state.tokens : settings.chat.contextTokens ?? 0
           if (!Number.isFinite(tokens) || tokens <= 0) return
 
           // A session that has failed repeatedly stops trying, rather than
@@ -538,12 +555,12 @@ export class ContextManager extends Effect.Service<ContextManager>()(
             settings === null ||
             !settings.auto ||
             settings.session.cli !== "codex" ||
-            settings.session.resumeId === null
+            settings.chat.resumeId === undefined
           ) {
             return
           }
           const state = yield* stateOf(sessionId)
-          const persisted = settings.session.contextTokens ?? 0
+          const persisted = settings.chat.contextTokens ?? 0
           if (state.tokens > 0 || persisted > 0 || state.status === "ready") return
 
           const messages = yield* TranscriptStore.list(sessionId).pipe(
@@ -579,7 +596,8 @@ export class ContextManager extends Effect.Service<ContextManager>()(
         TranscriptStore | BackgroundTaskStore | FileSystem.FileSystem | Path.Path | AppPaths
       > =>
         Effect.gen(function* () {
-          const tasks = yield* BackgroundTaskStore.list(sessionId).pipe(
+          const ownerId = yield* ownerOf(sessionId)
+          const tasks = yield* BackgroundTaskStore.list(ownerId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<BackgroundTask>)
           )
           if (tasks.some((t) => t.status === "running" || t.status === "stopping")) return true
@@ -632,8 +650,10 @@ export class ContextManager extends Effect.Service<ContextManager>()(
           const state = yield* stateOf(sessionId)
           if (state.status !== "ready" || state.digest === null) return null
           const at = yield* Effect.sync(() => new Date().toISOString())
-          const session = yield* SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
-          const tokensBefore = state.tokens > 0 ? state.tokens : session?.contextTokens ?? 0
+          const ownerId = yield* ownerOf(sessionId)
+          const session = yield* SessionStore.get(ownerId).pipe(Effect.orElseSucceed(() => null))
+          const chat = session?.chats.find((candidate) => candidate.id === sessionId)
+          const tokensBefore = state.tokens > 0 ? state.tokens : chat?.contextTokens ?? 0
 
           // Would swapping RIGHT NOW cost more than it saves? The digest is not
           // discarded when it would — it stays ready and is re-offered next turn,
@@ -651,7 +671,8 @@ export class ContextManager extends Effect.Service<ContextManager>()(
               localHold: yield* midFlowLocally(sessionId),
               tokens: tokensBefore,
               window:
-                state.window ?? contextWindowFor(session?.cli ?? "claude", session?.model ?? null),
+                state.window ??
+                  contextWindowFor(session?.cli ?? "claude", chat?.model ?? null),
               deferrals: state.deferrals
             })
           if (hold) {
@@ -685,7 +706,7 @@ export class ContextManager extends Effect.Service<ContextManager>()(
           // The persisted copy is what `settle` and `snapshot` fall back to when
           // no live reading has arrived yet, so clearing only the in-memory one
           // would let the stale number come straight back on the next turn.
-          yield* SessionStore.setContextTokens(sessionId, 0).pipe(Effect.ignore)
+          yield* SessionStore.setChatContextTokens(ownerId, sessionId, 0).pipe(Effect.ignore)
           return { digest: state.digest, tokensBefore }
         })
 
@@ -752,7 +773,7 @@ export class ContextManager extends Effect.Service<ContextManager>()(
           const settings = yield* settingsFor(sessionId)
           // Prefer the live in-memory reading, fall back to the persisted one so a
           // freshly reopened session shows its real size before its first turn.
-          const tokens = state.tokens > 0 ? state.tokens : settings?.session.contextTokens ?? 0
+          const tokens = state.tokens > 0 ? state.tokens : settings?.chat.contextTokens ?? 0
           const window = settings?.window ?? null
           const budget = settings?.budget ?? DEFAULT_CONTEXT_CONFIG.budgetTokens
           return {
@@ -783,6 +804,7 @@ export class ContextManager extends Effect.Service<ContextManager>()(
         })
 
       return {
+        bind,
         observe,
         settle,
         applyIfReady,

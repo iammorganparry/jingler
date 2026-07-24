@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
-  CreateSessionInput
+  CreateSessionInput,
+  Session
 } from "@starbase/core"
 import { GhService } from "./gh.js"
 import { GitService } from "./git.js"
@@ -20,6 +21,9 @@ import {
   withTempRoot
 } from "./test-support.js"
 import type { FakeCommandHandler } from "./test-support.js"
+
+const activeChat = (session: Session) =>
+  session.chats.find((chat) => chat.id === session.activeChatId)!
 
 /**
  * SessionStore persists sessions to disk and forks a real worktree per session.
@@ -101,7 +105,7 @@ describe("SessionStore", () => {
       expect(result._tag).toBe("Success")
       if (result._tag !== "Success") return
       expect(result.value.map((s) => s.title)).toEqual(["Keeper"])
-      expect(result.value[0]!.model).toBe("opus")
+      expect(activeChat(result.value[0]!).model).toBe("opus")
     })
   })
 
@@ -181,20 +185,51 @@ describe("SessionStore", () => {
     expect(s.diff).toStrictEqual({ added: 0, removed: 0 })
   })
 
+  it("persists chat create, rename, selection, and adjacent close fallback", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Multi chat" }))
+        const firstChatId = created.activeChatId
+        const withSecond = yield* SessionStore.createChat(created.id)
+        const secondChatId = withSecond.activeChatId
+        yield* SessionStore.renameChat(created.id, secondChatId, "Review migrations")
+        yield* SessionStore.selectChat(created.id, firstChatId)
+        const selected = yield* SessionStore.get(created.id)
+        yield* SessionStore.closeChat(created.id, firstChatId)
+        const closed = yield* SessionStore.get(created.id)
+        yield* SessionStore.closeChat(created.id, secondChatId)
+        const replaced = yield* SessionStore.get(created.id)
+        return { firstChatId, secondChatId, selected, closed, replaced }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.selected.activeChatId).toBe(exit.value.firstChatId)
+    expect(exit.value.closed.chats.map((chat) => chat.title)).toStrictEqual([
+      "Review migrations"
+    ])
+    expect(exit.value.closed.activeChatId).toBe(exit.value.secondChatId)
+    expect(exit.value.replaced.chats).toHaveLength(1)
+    expect(exit.value.replaced.chats[0]!.title).toBeNull()
+    expect(exit.value.replaced.activeChatId).toBe(exit.value.replaced.chats[0]!.id)
+  })
+
   it("stamps provider mode, model, and reasoning defaults when supplied", async () => {
     const withDefaults = await runExit(
       SessionStore.create(input(), {
         defaultMode: "plan",
         defaultModel: "opus",
-        defaultReasoningEffort: "think-hard"
+        defaultReasoningEffort: "high"
       }).pipe(Effect.provide(services)),
       temp.layer
     )
     expect(withDefaults._tag).toBe("Success")
     if (withDefaults._tag === "Success") {
-      expect(withDefaults.value.mode).toBe("plan")
-      expect(withDefaults.value.model).toBe("opus")
-      expect(withDefaults.value.reasoningEffort).toBe("think-hard")
+      expect(activeChat(withDefaults.value).mode).toBe("plan")
+      expect(activeChat(withDefaults.value).model).toBe("opus")
+      expect(withDefaults.value.reasoning?.claude?.effort).toBe("high")
     }
 
     const noDefaults = await runExit(
@@ -203,8 +238,8 @@ describe("SessionStore", () => {
     )
     expect(noDefaults._tag).toBe("Success")
     if (noDefaults._tag === "Success") {
-      expect(noDefaults.value.mode).toBeUndefined()
-      expect(noDefaults.value.model).toBeUndefined()
+      expect(activeChat(noDefaults.value).mode).toBeUndefined()
+      expect(activeChat(noDefaults.value).model).toBeUndefined()
       expect(noDefaults.value.reasoningEffort).toBeUndefined()
     }
   })
@@ -225,12 +260,15 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value.configured.resumeId).toBe("normal-thread")
-    expect(exit.value.configured.gigaplanResumeId).toBe("intake-thread")
-    expect(exit.value.configured.reasoningEffort).toBe("ultrathink")
-    expect(exit.value.cleared.resumeId).toBe("normal-thread")
-    expect(exit.value.cleared.gigaplanResumeId).toBe("intake-thread")
-    expect(exit.value.cleared.reasoningEffort).toBeUndefined()
+    expect(activeChat(exit.value.configured).resumeId).toBe("normal-thread")
+    expect(activeChat(exit.value.configured).gigaplanResumeId).toBe("intake-thread")
+    expect(exit.value.configured.reasoning?.claude).toStrictEqual({
+      enabled: true,
+      effort: "xhigh"
+    })
+    expect(activeChat(exit.value.cleared).resumeId).toBe("normal-thread")
+    expect(activeChat(exit.value.cleared).gigaplanResumeId).toBe("intake-thread")
+    expect(exit.value.cleared.reasoning?.claude).toBeUndefined()
   })
 
   it("falls back to the 'session' slug when the title has no alphanumerics", async () => {
@@ -390,8 +428,8 @@ describe("SessionStore", () => {
     )
     expect(reread._tag).toBe("Success")
     if (reread._tag === "Success") {
-      expect(reread.value.mode).toBe("auto")
-      expect(reread.value.model).toBe("sonnet")
+      expect(activeChat(reread.value).mode).toBe("auto")
+      expect(activeChat(reread.value).model).toBe("sonnet")
     }
   })
 
@@ -476,7 +514,7 @@ describe("SessionStore", () => {
       )
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
-      expect(exit.value.resumeId).toBeUndefined()
+      expect(activeChat(exit.value).resumeId).toBeUndefined()
       // The session itself is otherwise intact — only the thread pointer went.
       expect(exit.value.title).toBe("Reseeded")
       expect(exit.value.cli).toBe("claude")
@@ -496,10 +534,10 @@ describe("SessionStore", () => {
       )
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
-      expect(exit.value.model).toBe("haiku")
+      expect(activeChat(exit.value).model).toBe("haiku")
       expect(exit.value.cli).toBe("claude")
       // Same harness → the thread is still valid, so continuation must survive.
-      expect(exit.value.resumeId).toBe("thread_from_claude")
+      expect(activeChat(exit.value).resumeId).toBe("thread_from_claude")
     })
 
     it("drops the resume id when the harness changes", async () => {
@@ -515,8 +553,8 @@ describe("SessionStore", () => {
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
       expect(exit.value.cli).toBe("codex")
-      expect(exit.value.model).toBe("gpt-5.6-sol")
-      expect(exit.value.resumeId).toBeUndefined()
+      expect(activeChat(exit.value).model).toBe("gpt-5.6-sol")
+      expect(activeChat(exit.value).resumeId).toBeUndefined()
     })
 
     /**
@@ -536,7 +574,7 @@ describe("SessionStore", () => {
       )
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
-      expect(exit.value.mode).toBe("plan")
+      expect(activeChat(exit.value).mode).toBe("plan")
     })
 
     /**
@@ -556,7 +594,7 @@ describe("SessionStore", () => {
       )
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
-      expect(exit.value.mode).toBe("ask")
+      expect(activeChat(exit.value).mode).toBe("ask")
     })
 
     it("leaves plan mode alone when staying on Claude", async () => {
@@ -571,7 +609,7 @@ describe("SessionStore", () => {
       )
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
-      expect(exit.value.mode).toBe("plan")
+      expect(activeChat(exit.value).mode).toBe("plan")
     })
 
     it("does not disturb a non-plan mode on switch", async () => {
@@ -586,7 +624,7 @@ describe("SessionStore", () => {
       )
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
-      expect(exit.value.mode).toBe("auto")
+      expect(activeChat(exit.value).mode).toBe("auto")
     })
   })
 

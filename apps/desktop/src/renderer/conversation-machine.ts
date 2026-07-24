@@ -20,7 +20,7 @@ import type {
   PlanComment,
   ProviderModels,
   QuestionAnswer,
-  ReasoningEffort,
+  ReasoningSetting,
   ReviewPhase,
   Session,
   SessionStatus,
@@ -66,6 +66,7 @@ const messageSourceFor = (target: AgentTarget) =>
 
 export interface ConversationContext {
   readonly session: Session
+  readonly chatId: string
   readonly messages: ReadonlyArray<Message>
   readonly mode: PermissionMode
   /** Last concrete harness permission mode, retained while Plan/Gigaplan is selected. */
@@ -87,8 +88,8 @@ export interface ConversationContext {
   readonly pendingImages: ReadonlyArray<Attachment>
   /** Harness target for the pending turn; Gigaplan intake has its own thread. */
   readonly agentTarget: AgentTarget
-  /** Semantic thinking strength for the next and subsequent turns. */
-  readonly reasoningEffort?: ReasoningEffort
+  /** Provider-native thinking state for the next and subsequent turns. */
+  readonly reasoning?: ReasoningSetting
   /**
    * Messages the operator sent while the agent was busy — held FIFO and sent, one
    * turn at a time, as soon as the current run (and its diff refresh) settles.
@@ -186,7 +187,7 @@ type ConversationEvent =
   | { type: "ANSWER_QUESTION"; requestId: string; answers: ReadonlyArray<QuestionAnswer> }
   | { type: "SET_MODE"; mode: PermissionMode }
   | { type: "SET_HARNESS"; cli: CliKind; model: string }
-  | { type: "SET_REASONING"; reasoningEffort?: ReasoningEffort }
+  | { type: "SET_REASONING"; reasoning?: ReasoningSetting }
   | { type: "SKILLS_LOADED"; skills: ReadonlyArray<Skill> }
   | { type: "CATALOG_LOADED"; catalog: ReadonlyArray<ProviderModels> }
   | { type: "READINESS_LOADED"; readiness: PlanningReadiness }
@@ -216,9 +217,13 @@ interface LoadedData {
  * including SEND, which is to say the composer looks alive but does nothing.
  * The `/` menu just fills itself in a beat later.
  */
-const loadConversation = fromPromise<LoadedData, { session: Session }>(async ({ input }) => {
-  const [rawTranscript, files, patch] = await Promise.all([
-    rpc.sessionsTranscript(input.session.id),
+const loadConversation = fromPromise<
+  LoadedData,
+  { session: Session; chatId: string }
+>(async ({ input }) => {
+  const [rawTranscript, artifact, files, patch] = await Promise.all([
+    rpc.sessionsTranscript(input.session.id, input.chatId),
+    rpc.planCurrent(input.session.id),
     input.session.worktreePath
       ? rpc.workspaceFiles(input.session.worktreePath)
       : Promise.resolve([] as ReadonlyArray<string>),
@@ -228,7 +233,26 @@ const loadConversation = fromPromise<LoadedData, { session: Session }>(async ({ 
   // app was closed mid-response) so it doesn't show the typing indicator forever,
   // and resolve orphaned approval gates / questions whose live run has died (their
   // approve/deny buttons would otherwise be dead no-ops).
-  const transcript = rawTranscript.map(settleLoaded)
+  const hasSharedPlan =
+    artifact === null ||
+    rawTranscript.some((message) =>
+      message.parts.some(
+        (part) => part._tag === "Plan" && part.plan.id === artifact.plan.id
+      )
+    )
+  const withSharedPlan = hasSharedPlan
+    ? rawTranscript
+    : [
+        ...rawTranscript,
+        applyStreamEvent(
+          assistantMessage(
+            `a_shared_plan_${artifact!.revision}`,
+            artifact!.updatedAt
+          ),
+          { _tag: "PlanProposed", plan: artifact!.plan }
+        )
+      ]
+  const transcript = withSharedPlan.map(settleLoaded)
   return { transcript, files, patch }
 })
 
@@ -250,8 +274,8 @@ const refreshDiff = fromPromise<string, { session: Session }>(({ input }) =>
  * belt to that braces: waiting here means the next run is not merely
  * unkillable-by-mistake, it does not exist yet.
  */
-const stopAgent = fromPromise<void, { sessionId: string }>(({ input }) =>
-  rpc.agentStop(input.sessionId)
+const stopAgent = fromPromise<void, { sessionId: string; chatId: string }>(({ input }) =>
+  rpc.agentStop(input.sessionId, input.chatId)
 )
 
 /**
@@ -269,6 +293,7 @@ const agentStream = fromCallback<
   ConversationEvent,
   {
     sessionId: string
+    chatId: string
     text: string
     images: ReadonlyArray<Attachment>
     resumePlanId: string | null
@@ -276,7 +301,7 @@ const agentStream = fromCallback<
     executePlanId: string | null
     executePlanMode: ExecutionMode | null
     agentTarget: "session" | "orchestrator"
-    reasoningEffort?: ReasoningEffort
+    reasoning?: ReasoningSetting
   }
 >(({ sendBack, input }) => {
   const onEvent = (event: StreamEvent) => sendBack({ type: "STREAM_EVENT", event })
@@ -291,6 +316,7 @@ const agentStream = fromCallback<
       // "build this mockup", and the roles run headless with no other way to see it.
       rpc.planAdversarial(
         input.sessionId,
+        input.chatId,
         input.adversarialBrief.length > 0 ? input.adversarialBrief : undefined,
         onEvent,
         input.images
@@ -298,10 +324,10 @@ const agentStream = fromCallback<
     : input.executePlanId
       ? rpc.planExecute(input.sessionId, input.executePlanId, input.executePlanMode, onEvent)
       : input.resumePlanId
-        ? rpc.agentResumePlan(input.sessionId, input.resumePlanId, onEvent)
-        : rpc.agentRun(input.sessionId, input.text, onEvent, input.images, {
+        ? rpc.agentResumePlan(input.sessionId, input.chatId, input.resumePlanId, onEvent)
+        : rpc.agentRun(input.sessionId, input.chatId, input.text, onEvent, input.images, {
             target: input.agentTarget,
-            reasoningEffort: input.reasoningEffort ?? null
+            reasoning: input.reasoning ?? null
           })
   return cancel
 })
@@ -345,7 +371,7 @@ export const conversationMachine = setup({
   types: {
     context: {} as ConversationContext,
     events: {} as ConversationEvent,
-    input: {} as { session: Session }
+    input: {} as { session: Session; chatId?: string }
   },
   actors: { loadConversation, agentStream, refreshDiff, reviewStream, stopAgent },
   guards: {
@@ -596,28 +622,40 @@ export const conversationMachine = setup({
     ),
     optimisticGate: assign(({ context, event }) => {
       if (event.type !== "DECIDE_GATE") return {}
-      void rpc.agentDecideGate(context.session.id, event.gateId, event.decision)
+      void rpc.agentDecideGate(
+        context.session.id,
+        context.chatId,
+        event.gateId,
+        event.decision
+      )
       const status = gateStatusFor(event.decision)
       return { messages: context.messages.map((m) => setGateStatus(m, event.gateId, status)) }
     }),
     optimisticAnswer: assign(({ context, event }) => {
       if (event.type !== "ANSWER_QUESTION") return {}
-      void rpc.agentAnswerQuestion(context.session.id, event.requestId, event.answers)
+      void rpc.agentAnswerQuestion(
+        context.session.id,
+        context.chatId,
+        event.requestId,
+        event.answers
+      )
       return {
         messages: context.messages.map((m) => setQuestionAnswers(m, event.requestId, event.answers))
       }
     }),
     persistMode: assign(({ context, event }) => {
       if (event.type !== "SET_MODE") return {}
-      void rpc.agentSetMode(context.session.id, event.mode)
+      void rpc.agentSetMode(context.session.id, context.chatId, event.mode)
       return isExecutionMode(event.mode)
         ? { mode: event.mode, executionMode: event.mode }
         : { mode: event.mode }
     }),
     persistReasoning: assign(({ context, event }) => {
       if (event.type !== "SET_REASONING") return {}
-      void rpc.agentSetReasoning(context.session.id, event.reasoningEffort)
-      return { reasoningEffort: event.reasoningEffort }
+      if (context.cli === "claude" || context.cli === "codex" || context.cli === "opencode") {
+        void rpc.agentSetReasoning(context.session.id, context.cli, event.reasoning)
+      }
+      return { reasoning: event.reasoning }
     }),
     // Plan mode (optimistic + fire-and-forget, like the gate/question actions).
     // The runner echoes a `PlanUpdated` so the authoritative state reconciles.
@@ -702,7 +740,12 @@ export const conversationMachine = setup({
     persistHarness: assign(({ context, event, self }) => {
       if (event.type !== "SET_HARNESS") return {}
       const switched = event.cli !== context.cli
-      void rpc.agentSetHarness(context.session.id, event.cli, event.model)
+      void rpc.agentSetHarness(
+        context.session.id,
+        context.chatId,
+        event.cli,
+        event.model
+      )
       if (!switched) return { model: event.model }
 
       void rpc
@@ -903,44 +946,67 @@ export const conversationMachine = setup({
     REVIEW_EVENT: { actions: "applyReview" },
     SET_REASONING: { actions: "persistReasoning" }
   },
-  context: ({ input }) => ({
-    session: input.session,
-    messages: [],
-    mode: input.session.mode ?? "accept-edits",
-    executionMode:
-      input.session.mode && isExecutionMode(input.session.mode)
-        ? input.session.mode
-        : "accept-edits",
-    skills: [],
-    files: [],
-    cli: input.session.cli,
-    model: input.session.model ?? defaultModel(input.session.cli),
-    catalog: [],
-    patch: "",
-    pendingText: "",
-    pendingImages: [],
-    agentTarget: "session",
-    reasoningEffort: input.session.reasoningEffort,
-    queued: [],
-    subagents: [],
-    resumePlanId: null,
-    adversarialBrief: null,
-    executePlanId: null,
-    executePlanMode: null,
-    planReadiness: null,
-    // Rehydrate the last measured working set immediately. ContextManager owns
-    // the trigger/phase snapshot, but the view reads this live field for the
-    // meter's numerator; starting at zero hid the whole component after every
-    // app restart until Codex happened to emit another Usage event.
-    tokens: input.session.contextTokens ?? 0,
-    runStartedAt: null,
-    lastOutcome: null,
-    persistedStatus: input.session.status,
-    loaded: false,
-    reviewer: null,
-    reviewPhase: "starting",
-    reviewStartedAt: null
-  }),
+  context: ({ input }) => {
+    const persistedChats = input.session.chats ?? []
+    const chat =
+      persistedChats.find(
+        (candidate) => candidate.id === (input.chatId ?? input.session.activeChatId)
+      ) ??
+      persistedChats[0] ?? {
+        id: input.chatId ?? input.session.activeChatId ?? input.session.id,
+        title: null,
+        createdAt: input.session.updatedAt,
+        updatedAt: input.session.updatedAt,
+        mode: input.session.mode,
+        model: input.session.model,
+        contextTokens: input.session.contextTokens
+      }
+    const reasoning =
+      input.session.cli === "claude" ||
+      input.session.cli === "codex" ||
+      input.session.cli === "opencode"
+        ? input.session.reasoning?.[input.session.cli]
+        : undefined
+    return {
+      session: input.session,
+      chatId: chat.id,
+      messages: [],
+      mode: chat.mode ?? "accept-edits",
+      executionMode:
+        chat.mode && isExecutionMode(chat.mode)
+          ? chat.mode
+          : "accept-edits",
+      skills: [],
+      files: [],
+      cli: input.session.cli,
+      model: chat.model ?? defaultModel(input.session.cli),
+      catalog: [],
+      patch: "",
+      pendingText: "",
+      pendingImages: [],
+      agentTarget: "session",
+      reasoning,
+      queued: [],
+      subagents: [],
+      resumePlanId: null,
+      adversarialBrief: null,
+      executePlanId: null,
+      executePlanMode: null,
+      planReadiness: null,
+      // Rehydrate the last measured working set immediately. ContextManager owns
+      // the trigger/phase snapshot, but the view reads this live field for the
+      // meter's numerator; starting at zero hid the whole component after every
+      // app restart until Codex happened to emit another Usage event.
+      tokens: chat.contextTokens ?? 0,
+      runStartedAt: null,
+      lastOutcome: null,
+      persistedStatus: input.session.status,
+      loaded: false,
+      reviewer: null,
+      reviewPhase: "starting",
+      reviewStartedAt: null
+    }
+  },
   states: {
     loading: {
       /**
@@ -965,7 +1031,10 @@ export const conversationMachine = setup({
       },
       invoke: {
         src: "loadConversation",
-        input: ({ context }) => ({ session: context.session }),
+        input: ({ context }) => ({
+          session: context.session,
+          chatId: context.chatId
+        }),
         // A prompt sent while loading starts its turn as soon as the transcript
         // settles; otherwise we go idle. The transcript is applied either way.
         onDone: [
@@ -1044,6 +1113,7 @@ export const conversationMachine = setup({
         src: "agentStream",
         input: ({ context }) => ({
           sessionId: context.session.id,
+          chatId: context.chatId,
           text: context.pendingText,
           images: context.pendingImages,
           resumePlanId: context.resumePlanId,
@@ -1051,7 +1121,7 @@ export const conversationMachine = setup({
           executePlanId: context.executePlanId,
           executePlanMode: context.executePlanMode,
           agentTarget: context.agentTarget,
-          reasoningEffort: context.reasoningEffort
+          reasoning: context.reasoning
         })
       },
       on: {
@@ -1102,7 +1172,10 @@ export const conversationMachine = setup({
     stopping: {
       invoke: {
         src: "stopAgent",
-        input: ({ context }) => ({ sessionId: context.session.id }),
+        input: ({ context }) => ({
+          sessionId: context.session.id,
+          chatId: context.chatId
+        }),
         onDone: { target: "refreshingDiff" },
         // A failed stop still means we are no longer streaming: the turn was
         // already settled by `settleStoppedRun` on the way in.

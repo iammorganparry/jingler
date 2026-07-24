@@ -46,11 +46,12 @@ import type {
   ProviderConfig,
   PullRequest,
   QuestionAnswer,
-  ReasoningEffort,
+  ReasoningSetting,
   Repo,
   ReviewComment,
   ReviewSubmitKind,
   Session,
+  SessionPlanArtifact,
   SettledSessionStatus,
   Skill,
   StreamEvent,
@@ -195,8 +196,16 @@ export const rpc = {
     run((c) => c.Sessions.setStatus({ sessionId, status })),
   sessionsDelete: (sessionId: string): Promise<void> =>
     run((c) => c.Sessions.delete({ sessionId })),
-  sessionsTranscript: (id: string): Promise<ReadonlyArray<Message>> =>
-    run((c) => c.Sessions.transcript({ id })),
+  sessionsCreateChat: (sessionId: string): Promise<Session> =>
+    run((c) => c.Sessions.createChat({ sessionId })),
+  sessionsSelectChat: (sessionId: string, chatId: string): Promise<Session> =>
+    run((c) => c.Sessions.selectChat({ sessionId, chatId })),
+  sessionsRenameChat: (sessionId: string, chatId: string, title: string): Promise<Session> =>
+    run((c) => c.Sessions.renameChat({ sessionId, chatId, title })),
+  sessionsCloseChat: (sessionId: string, chatId: string): Promise<Session> =>
+    run((c) => c.Sessions.closeChat({ sessionId, chatId })),
+  sessionsTranscript: (sessionId: string, chatId: string): Promise<ReadonlyArray<Message>> =>
+    run((c) => c.Sessions.transcript({ sessionId, chatId })),
   sessionsDiff: (id: string): Promise<string> => run((c) => c.Sessions.diff({ id })),
   workspaceFiles: (repoPath: string): Promise<ReadonlyArray<string>> =>
     run((c) => c.Workspace.files({ repoPath })),
@@ -234,36 +243,45 @@ export const rpc = {
     run((c) => c.Opencode.setAuth({ providerId, key })),
   usageGet: (): Promise<Usage> => run((c) => c.Usage.get()),
   /** A session's context accounting — drives the meter and the Settings list. */
-  contextState: (sessionId: string): Promise<ContextSnapshot> =>
-    run((c) => c.Context.state({ sessionId })),
+  contextState: (sessionId: string, chatId: string): Promise<ContextSnapshot> =>
+    run((c) => c.Context.state({ sessionId, chatId })),
   /**
    * Compact now. Resolves as soon as the request is accepted, NOT when the
    * summary is ready — the digest builds in the background and applies on the
    * next turn, so the UI must not park on it.
    */
-  contextCompactNow: (sessionId: string): Promise<void> =>
-    run((c) => c.Context.compactNow({ sessionId })),
+  contextCompactNow: (sessionId: string, chatId: string): Promise<void> =>
+    run((c) => c.Context.compactNow({ sessionId, chatId })),
   configSetContext: (context: ContextConfig): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setContext(context)),
   sessionsSetAutoCompact: (id: string, autoCompact: boolean | null): Promise<Session> =>
     run((c) => c.Sessions.setAutoCompact({ id, autoCompact })),
-  agentDecideGate: (sessionId: string, gateId: string, decision: GateDecision): Promise<void> =>
-    run((c) => c.Agent.decideGate({ sessionId, gateId, decision })),
+  agentDecideGate: (
+    sessionId: string,
+    chatId: string,
+    gateId: string,
+    decision: GateDecision
+  ): Promise<void> =>
+    run((c) => c.Agent.decideGate({ sessionId, chatId, gateId, decision })),
   agentAnswerQuestion: (
     sessionId: string,
+    chatId: string,
     requestId: string,
     answers: ReadonlyArray<QuestionAnswer>
-  ): Promise<void> => run((c) => c.Agent.answerQuestion({ sessionId, requestId, answers })),
-  agentSetMode: (sessionId: string, mode: PermissionMode): Promise<void> =>
-    run((c) => c.Agent.setMode({ sessionId, mode })),
+  ): Promise<void> =>
+    run((c) => c.Agent.answerQuestion({ sessionId, chatId, requestId, answers })),
+  agentSetMode: (sessionId: string, chatId: string, mode: PermissionMode): Promise<void> =>
+    run((c) => c.Agent.setMode({ sessionId, chatId, mode })),
   agentSetReasoning: (
     sessionId: string,
-    reasoningEffort: ReasoningEffort | undefined
+    cli: "claude" | "codex" | "opencode",
+    reasoning: ReasoningSetting | undefined
   ): Promise<void> =>
     run((c) =>
       c.Agent.setReasoning({
         sessionId,
-        ...(reasoningEffort === undefined ? {} : { reasoningEffort })
+        cli,
+        ...(reasoning === undefined ? {} : { reasoning })
       })
     ),
   agentCommentPlanStep: (sessionId: string, planId: string, stepId: string, body: string): Promise<void> =>
@@ -276,9 +294,10 @@ export const rpc = {
     executionMode?: ExecutionMode
   ): Promise<void> =>
     run((c) => c.Agent.approvePlan({ sessionId, planId, executionMode })),
-  agentSetHarness: (sessionId: string, cli: CliKind, model: string): Promise<void> =>
-    run((c) => c.Agent.setHarness({ sessionId, cli, model })),
-  agentStop: (sessionId: string): Promise<void> => run((c) => c.Agent.stop({ sessionId })),
+  agentSetHarness: (sessionId: string, chatId: string, cli: CliKind, model: string): Promise<void> =>
+    run((c) => c.Agent.setHarness({ sessionId, chatId, cli, model })),
+  agentStop: (sessionId: string, chatId: string): Promise<void> =>
+    run((c) => c.Agent.stop({ sessionId, chatId })),
 
   configSetGithub: (github: GithubConfig): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setGithub(github)),
@@ -404,12 +423,13 @@ export const rpc = {
    */
   agentRun: (
     sessionId: string,
+    chatId: string,
     text: string,
     onEvent: (event: StreamEvent) => void,
     images: ReadonlyArray<Attachment> = [],
     options: {
       readonly target?: "session" | "orchestrator"
-      readonly reasoningEffort?: ReasoningEffort | null
+      readonly reasoning?: ReasoningSetting | null
     } = {}
   ): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
@@ -417,7 +437,7 @@ export const rpc = {
     void clientPromise.then((client) => {
       if (cancelled) return
       fiber = runtime.runFork(
-        drainRun(client.Agent.run({ sessionId, text, images, ...options }), onEvent)
+        drainRun(client.Agent.run({ sessionId, chatId, text, images, ...options }), onEvent)
       )
     })
     return () => {
@@ -427,6 +447,7 @@ export const rpc = {
   },
   agentResumePlan: (
     sessionId: string,
+    chatId: string,
     planId: string,
     onEvent: (event: StreamEvent) => void
   ): (() => void) => {
@@ -435,7 +456,7 @@ export const rpc = {
     void clientPromise.then((client) => {
       if (cancelled) return
       fiber = runtime.runFork(
-        drainRun(client.Agent.resumePlan({ sessionId, planId }), onEvent)
+        drainRun(client.Agent.resumePlan({ sessionId, chatId, planId }), onEvent)
       )
     })
     return () => {
@@ -526,6 +547,7 @@ export const rpc = {
    */
   planAdversarial: (
     sessionId: string,
+    chatId: string,
     brief: string | undefined,
     onEvent: (event: StreamEvent) => void,
     images: ReadonlyArray<Attachment> = []
@@ -536,6 +558,7 @@ export const rpc = {
       if (cancelled) return
       fiber = runtime.runFork(drainRun(client.Plan.adversarial({
         sessionId,
+        chatId,
         ...(brief === undefined ? {} : { brief }),
         images
       }), onEvent))
@@ -551,6 +574,8 @@ export const rpc = {
 
   planRound: (sessionId: string): Promise<PlanRound | null> =>
     run((c) => c.Plan.round({ sessionId })),
+  planCurrent: (sessionId: string): Promise<SessionPlanArtifact | null> =>
+    run((c) => c.Plan.current({ sessionId })),
 
   /** Whether adversarial planning is offerable here, and the reason when not. */
   planReadiness: (): Promise<PlanningReadiness> => run((c) => c.Plan.readiness({})),
