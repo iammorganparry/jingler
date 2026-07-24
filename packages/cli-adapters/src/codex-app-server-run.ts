@@ -16,6 +16,7 @@ import {
 } from "./codex-app-server-client.js"
 import {
   boundedCodexStderr,
+  type CodexAppServerDiagnosticFields,
   type CodexAppServerDiagnostics,
   createCodexAppServerDiagnostics
 } from "./codex-app-server-diagnostics.js"
@@ -330,8 +331,19 @@ export const runCodexAppServer = (
     const abort = new AbortController()
     let connection: CodexAppServerConnection | null = null
     let diagnostics: CodexAppServerDiagnostics | null = null
+    let diagnosticsEnded = false
     let activeThreadId: string | null = null
     let activeTurnId: string | null = null
+    const endDiagnostics = (
+      event: "run.failed" | "run.finished" | "run.interrupted",
+      fields: CodexAppServerDiagnosticFields = {}
+    ): void => {
+      if (diagnosticsEnded) return
+      diagnosticsEnded = true
+      diagnostics?.record(event, fields)
+      diagnostics?.close()
+      diagnostics = null
+    }
 
     yield* Effect.tryPromise({
       try: async () => {
@@ -355,20 +367,16 @@ export const runCodexAppServer = (
             diagnostics
           })
         } catch (cause) {
-          diagnostics?.record("run.failed", {
+          endDiagnostics("run.failed", {
             message: boundedCodexStderr(cause instanceof Error ? cause.message : String(cause))
           })
-          diagnostics?.close()
-          diagnostics = null
           throw cause
         }
         const staged = await stageCodexInput(spec.prompt, spec.images).catch((cause) => {
-          diagnostics?.record("run.failed", {
+          endDiagnostics("run.failed", {
             message: boundedCodexStderr(cause instanceof Error ? cause.message : String(cause))
           })
           connection?.close()
-          diagnostics?.close()
-          diagnostics = null
           throw cause
         })
         try {
@@ -601,28 +609,29 @@ export const runCodexAppServer = (
             }
             turnInput = [{ type: "text", text: followUp, text_elements: [] }]
           }
-        } catch (cause) {
-          diagnostics?.record("run.failed", {
-            message: boundedCodexStderr(cause instanceof Error ? cause.message : String(cause))
-          })
-          throw cause
         } finally {
-          await staged.cleanup()
-          connection.close()
-          diagnostics?.record("run.finished")
-          diagnostics?.close()
-          diagnostics = null
+          try {
+            await staged.cleanup()
+          } finally {
+            connection.close()
+          }
         }
+        endDiagnostics("run.finished")
       },
-      catch: (cause) =>
-        new CliExecError({
+      catch: (cause) => {
+        endDiagnostics("run.failed", {
+          message: boundedCodexStderr(cause instanceof Error ? cause.message : String(cause))
+        })
+        return new CliExecError({
           kind: spec.cli,
           message: cause instanceof Error ? cause.message : String(cause)
         })
+      },
     }).pipe(
       Effect.onInterrupt(() =>
         Effect.promise(async () => {
           abort.abort()
+          endDiagnostics("run.interrupted")
           if (connection !== null && activeThreadId !== null && activeTurnId !== null) {
             await connection
               .request(
@@ -635,10 +644,7 @@ export const runCodexAppServer = (
               )
               .catch(() => undefined)
           }
-          diagnostics?.record("run.interrupted")
           connection?.close()
-          diagnostics?.close()
-          diagnostics = null
         })
       )
     )

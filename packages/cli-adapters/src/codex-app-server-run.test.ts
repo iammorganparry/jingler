@@ -1,6 +1,6 @@
 import type { Plan, QuestionRequest, StreamEvent } from "@starbase/core"
 import { Effect, Fiber } from "effect"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentContext, PlanDecision as PlanDecisionType, SessionSpec } from "./adapter.js"
 import { PlanDecision } from "./adapter.js"
 
@@ -23,6 +23,8 @@ const server = vi.hoisted(() => {
     resumeError: null as Error | null,
     turnNumber: 0,
     hangMessages: false,
+    pendingMessageResolver: null as ((message: null) => void) | null,
+    diagnosticsCloseCount: 0,
     closed: false
   }
   const connection = {
@@ -53,12 +55,16 @@ const server = vi.hoisted(() => {
     respondError: vi.fn(),
     nextMessage: () =>
       state.hangMessages
-        ? new Promise<null>(() => undefined)
+        ? new Promise<null>((resolve) => {
+            state.pendingMessageResolver = resolve
+          })
         : Promise.resolve(state.messages.shift() ?? null),
     nextMessageWithin: () => Promise.resolve(state.delayedReplay.shift() ?? null),
     drainMessages: () => state.replay.splice(0),
     close: () => {
       state.closed = true
+      state.pendingMessageResolver?.(null)
+      state.pendingMessageResolver = null
     }
   }
   return { state, connection }
@@ -67,6 +73,26 @@ const server = vi.hoisted(() => {
 vi.mock("./codex-app-server-client.js", () => ({
   startCodexAppServer: () => Promise.resolve(server.connection)
 }))
+
+vi.mock("./codex-app-server-diagnostics.js", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("./codex-app-server-diagnostics.js")>()
+  return {
+    ...original,
+    createCodexAppServerDiagnostics: (directory: string | undefined) =>
+      directory === undefined
+        ? null
+        : {
+            path: "/tmp/codex-app-server-test.jsonl",
+            record: (event: string, fields: Readonly<Record<string, unknown>> = {}) => {
+              server.state.diagnostics.push({ event, fields })
+            },
+            close: () => {
+              server.state.diagnosticsCloseCount += 1
+            }
+          }
+  }
+})
 
 const { mapCodexAppServerReasoning, runCodexAppServer } = await import("./codex-app-server-run.js")
 
@@ -118,11 +144,18 @@ beforeEach(() => {
   server.state.resumeError = null
   server.state.turnNumber = 0
   server.state.hangMessages = false
+  server.state.pendingMessageResolver = null
+  server.state.diagnosticsCloseCount = 0
   server.state.closed = false
+})
+
+afterEach(() => {
+  vi.unstubAllEnvs()
 })
 
 describe("runCodexAppServer", () => {
   it("replaces a persisted thread whose local rollout no longer exists", async () => {
+    vi.stubEnv("STARBASE_CODEX_DIAGNOSTICS_DIR", "/tmp")
     server.state.threadId = "replacement-thread"
     server.state.resumeError = new Error(
       "thread/resume failed: no rollout found for thread id stale-thread (code -32600)"
@@ -153,6 +186,12 @@ describe("runCodexAppServer", () => {
       _tag: "Started",
       sessionId: "replacement-thread"
     })
+    expect(
+      server.state.diagnostics
+        .filter(({ event }) => event.startsWith("run.") && event !== "run.started")
+        .map(({ event }) => event)
+    ).toStrictEqual(["run.finished"])
+    expect(server.state.diagnosticsCloseCount).toBe(1)
   })
 
   it("does not replace a resumed thread after an unrelated error", async () => {
@@ -434,6 +473,7 @@ describe("runCodexAppServer", () => {
   })
 
   it("bounds the interrupt request before closing a wedged server", async () => {
+    vi.stubEnv("STARBASE_CODEX_DIAGNOSTICS_DIR", "/tmp")
     server.state.hangMessages = true
     const { ctx } = harness()
     const fiber = Effect.runFork(runCodexAppServer("s1", spec(), ctx, new Map()))
@@ -449,9 +489,19 @@ describe("runCodexAppServer", () => {
       options: { timeoutMs: 2_000 }
     })
     expect(server.state.closed).toBe(true)
+    await vi.waitFor(() => {
+      expect(
+        server.state.diagnostics.filter(({ event }) => event.startsWith("run."))
+      ).toStrictEqual([
+        expect.objectContaining({ event: "run.started" }),
+        expect.objectContaining({ event: "run.interrupted" })
+      ])
+    })
+    expect(server.state.diagnosticsCloseCount).toBe(1)
   })
 
   it("fails instead of waiting forever when an active turn stops emitting events", async () => {
+    vi.stubEnv("STARBASE_CODEX_DIAGNOSTICS_DIR", "/tmp")
     vi.useFakeTimers()
     try {
       server.state.hangMessages = true
@@ -475,6 +525,12 @@ describe("runCodexAppServer", () => {
           lastMethod: null
         }
       })
+      expect(
+        server.state.diagnostics
+          .filter(({ event }) => event.startsWith("run.") && event !== "run.started")
+          .map(({ event }) => event)
+      ).toStrictEqual(["run.failed"])
+      expect(server.state.diagnosticsCloseCount).toBe(1)
     } finally {
       vi.useRealTimers()
     }
