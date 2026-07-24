@@ -14,9 +14,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const sent: Array<{ type: string; text: string }> = []
 const markRoutedCalls: Array<string> = []
 let markRoutedImpl: () => Promise<string | null> = async () => "2026-07-17T10:00:00.000Z"
+let sessionsGetImpl: (id: string) => Promise<Session>
 
 vi.mock("./rpc-client.js", () => ({
-  rpc: { reviewMarkRouted: () => markRoutedImpl() }
+  rpc: {
+    reviewMarkRouted: () => markRoutedImpl(),
+    sessionsGet: (id: string) => sessionsGetImpl(id)
+  }
 }))
 
 vi.mock("./conversation-registry.js", () => ({
@@ -26,12 +30,13 @@ vi.mock("./conversation-registry.js", () => ({
 }))
 
 vi.mock("./routed-store.js", () => ({
-  markRouted: (_sessionId: string, key: string) => markRoutedCalls.push(key)
+  markRouted: (_sessionId: string, _prNumber: number, key: string) =>
+    markRoutedCalls.push(key)
 }))
 
-const { routeReviewToAgent } = await import("./auto-route.js")
+const { routeReviewToAgent, routeReviewToCurrentAgent } = await import("./auto-route.js")
 
-const session = { id: "s1", title: "Refactor auth" } as unknown as Session
+const session = { id: "s1", title: "Refactor auth", prNumber: 7 } as unknown as Session
 
 const finding = (id: string, severity: ReviewSeverity): ReviewFinding => ({
   id,
@@ -68,6 +73,28 @@ beforeEach(() => {
   sent.length = 0
   markRoutedCalls.length = 0
   markRoutedImpl = async () => "2026-07-17T10:00:00.000Z"
+  sessionsGetImpl = async () => session
+})
+
+describe("routeReviewToCurrentAgent", () => {
+  it("routes with the current session resolved from the review identity", async () => {
+    const current = { ...session, prNumber: 8 } as Session
+    sessionsGetImpl = async (id) => {
+      expect(id).toBe("s1")
+      return current
+    }
+
+    await routeReviewToCurrentAgent(review({ prNumber: 8, headSha: "h-current" }), qc)
+    expect(sent).toHaveLength(1)
+  })
+
+  it("does not route a completed review after the session moves to another PR", async () => {
+    sessionsGetImpl = async () => ({ ...session, prNumber: 8 }) as Session
+
+    await routeReviewToCurrentAgent(review({ prNumber: 7, headSha: "h-replaced" }), qc)
+    expect(sent).toHaveLength(0)
+    expect(markRoutedCalls).toHaveLength(0)
+  })
 })
 
 describe("routeReviewToAgent", () => {
@@ -81,6 +108,12 @@ describe("routeReviewToAgent", () => {
   it("does nothing for a review already stamped routed", async () => {
     await routeReviewToAgent(session, review({ headSha: "h-two", routedAt: "2026-07-17T09:00:00.000Z" }), qc)
     expect(sent).toHaveLength(0)
+  })
+
+  it("does nothing for a stored review from a previous PR", async () => {
+    await routeReviewToAgent(session, review({ headSha: "h-old-pr", prNumber: 6 }), qc)
+    expect(sent).toHaveLength(0)
+    expect(markRoutedCalls).toHaveLength(0)
   })
 
   /**
@@ -182,7 +215,7 @@ describe("routeReviewToAgent", () => {
 
   it("latches each routed finding's UI state, namespaced by head SHA", async () => {
     await routeReviewToAgent(session, review({ headSha: "h-nine" }), qc)
-    expect(markRoutedCalls).toStrictEqual(["review:h-nine:f1"])
+    expect(markRoutedCalls).toStrictEqual(["review:7:h-nine:f1"])
   })
 
   /**

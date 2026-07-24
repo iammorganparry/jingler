@@ -28,7 +28,8 @@ import { findingLocation } from "@starbase/core"
  * import each other's neighbourhood; this module is the shared, dependency-free
  * seam both already reach for.
  */
-export const reviewQueryKey = (sessionId: string) => ["review", sessionId] as const
+export const reviewQueryKey = (sessionId: string, prNumber: number | null) =>
+  ["review", sessionId, prNumber] as const
 
 /**
  * The routed-store key for a finding.
@@ -37,8 +38,8 @@ export const reviewQueryKey = (sessionId: string) => ["review", sessionId] as co
  * a review — they're positional (`f1`, `f2`, …). A bare id would make the next
  * review's `f1` render as already-sent the moment it arrived.
  */
-export const routedKey = (headSha: string, findingId: string): string =>
-  `review:${headSha}:${findingId}`
+export const routedKey = (prNumber: number, headSha: string, findingId: string): string =>
+  `review:${prNumber}:${headSha}:${findingId}`
 
 /** Stable empty set, so `resolveSentIds` keeps a stable identity when there's no review. */
 const EMPTY_IDS: ReadonlySet<string> = new Set()
@@ -59,7 +60,7 @@ export const resolveSentIds = (
     ? EMPTY_IDS
     : new Set(
         review.findings
-          .filter((f) => routedKeys.has(routedKey(review.headSha, f.id)))
+          .filter((f) => routedKeys.has(routedKey(review.prNumber, review.headSha, f.id)))
           .map((f) => f.id)
       )
 

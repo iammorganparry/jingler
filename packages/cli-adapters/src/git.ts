@@ -24,6 +24,66 @@ type GitEnv =
   | Path.Path
   | CommandExecutor.CommandExecutor
 
+/** The current branch name checked out at `cwd`, or null (detached / error). */
+export const branchAt = (
+  cwd: string
+): Effect.Effect<string | null, never, CommandExecutor.CommandExecutor> =>
+  gitLine(cwd, "rev-parse", "--abbrev-ref", "HEAD").pipe(
+    Effect.map((branch) => (branch === null || branch === "HEAD" ? null : branch))
+  )
+
+/** Switch a detached worktree, or return the branch a concurrent switch activated. */
+const switchTaskBranch = (
+  cwd: string,
+  branch: string
+): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
+  runGit(cwd, ["switch", "-c", branch]).pipe(
+    Effect.as(branch),
+    Effect.catchAll((error) =>
+      branchAt(cwd).pipe(
+        Effect.flatMap((winner) =>
+          winner === null ? Effect.fail(error) : Effect.succeed(winner)
+        )
+      )
+    )
+  )
+
+const claimTaskBranch = (
+  cwd: string,
+  slug: string,
+  suffix: number
+): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> => {
+  const branch = `starbase/${slug}${suffix === 1 ? "" : `-${suffix}`}`
+  return gitLine(cwd, "show-ref", "--verify", `refs/heads/${branch}`).pipe(
+    Effect.flatMap((existing) => {
+      if (existing !== null) return claimTaskBranch(cwd, slug, suffix + 1)
+      return branchAt(cwd).pipe(
+        Effect.flatMap((active) =>
+          active === null ? switchTaskBranch(cwd, branch) : Effect.succeed(active)
+        )
+      )
+    })
+  )
+}
+
+/**
+ * Name a detached session from its task without moving its HEAD.
+ *
+ * `git switch -c` creates the ref at the current detached commit and keeps both
+ * uncommitted changes and detached commits in place. Existing names receive a
+ * deterministic numeric suffix. Concurrent activations converge on the branch
+ * that first became live instead of creating another suffix.
+ */
+const createTaskBranch = (
+  cwd: string,
+  slug: string
+): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
+  branchAt(cwd).pipe(
+    Effect.flatMap((active) =>
+      active === null ? claimTaskBranch(cwd, slug, 1) : Effect.succeed(active)
+    )
+  )
+
 /**
  * Whether `branch` is checked out in the repo's MAIN working tree, per the
  * output of `git worktree list --porcelain`.
@@ -177,11 +237,9 @@ export class GitService extends Effect.Service<GitService>()(
         })
 
       /**
-       * Add a worktree with a DETACHED HEAD at `baseBranch` (no new branch). Used
-       * as the landing pad for a "session from PR" flow: the caller then runs
-       * `gh pr checkout <n>` inside it, which switches this worktree onto the PR's
-       * head branch. Detaching first avoids a name collision between
-       * `git worktree add -b` and the PR head branch it's about to check out.
+       * Add a worktree with a DETACHED HEAD at the fresh base tip (no new
+       * branch). Used both for unnamed sessions awaiting their generated task
+       * name and as the landing pad for a "session from PR" flow.
        */
       const createDetachedWorktree = (
         input: CreateWorktreeInput
@@ -189,12 +247,14 @@ export class GitService extends Effect.Service<GitService>()(
         Effect.gen(function* () {
           const worktreePath = yield* resolveWorktreePath(input)
           yield* reclaimStaleWorktree(input.repoPath, worktreePath)
+          yield* fetchBase(input.repoPath, input.baseBranch)
+          const startPoint = yield* resolveStartPoint(input.repoPath, input.baseBranch)
           yield* runGit(input.repoPath, [
             "worktree",
             "add",
             "--detach",
             worktreePath,
-            input.baseBranch
+            startPoint
           ])
           // `branch` is a placeholder — the caller overwrites it with the real
           // head branch after `gh pr checkout` moves this worktree's HEAD.
@@ -206,13 +266,31 @@ export class GitService extends Effect.Service<GitService>()(
           }
         })
 
-      /** The current branch name checked out at `cwd`, or null (detached / error). */
-      const branchAt = (
-        cwd: string
-      ): Effect.Effect<string | null, never, CommandExecutor.CommandExecutor> =>
-        gitLine(cwd, "rev-parse", "--abbrev-ref", "HEAD").pipe(
-          Effect.map((b) => (b === null || b === "HEAD" ? null : b))
-        )
+      /**
+       * Keep commits made on a detached session reachable before its worktree is
+       * removed. A detached HEAD already contained by any local or remote ref is
+       * safe; otherwise create a collision-safe `starbase/<slug>` branch at HEAD.
+       */
+      const preserveDetachedHead = (
+        cwd: string,
+        slug: string
+      ): Effect.Effect<string | null, GitError, CommandExecutor.CommandExecutor> =>
+        Effect.gen(function* () {
+          if ((yield* branchAt(cwd)) !== null) return null
+          const containingRefs = yield* runString(
+            "git",
+            "-C",
+            cwd,
+            "for-each-ref",
+            "--contains",
+            "HEAD",
+            "--format=%(refname)",
+            "refs/heads",
+            "refs/remotes"
+          )
+          if (containingRefs?.trim()) return null
+          return yield* createTaskBranch(cwd, slug)
+        })
 
       /**
        * Check out an existing local `branch` into the worktree at `cwd`, even
@@ -370,6 +448,8 @@ export class GitService extends Effect.Service<GitService>()(
         createWorktree,
         createDetachedWorktree,
         branchAt,
+        createTaskBranch,
+        preserveDetachedHead,
         checkoutBranch,
         commitsSince,
         removeWorktreeAt

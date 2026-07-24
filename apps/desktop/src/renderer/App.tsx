@@ -43,6 +43,7 @@ import { useSessionDiffs } from "./diff-presence.js"
 import { usePlanSessions } from "./plan-presence.js"
 import { disposeConversationActor } from "./conversation-registry.js"
 import { clearDraft } from "./draft-store.js"
+import { clearViewedPaths } from "./viewed-store.js"
 import { onSessionUpdate } from "./session-updates.js"
 import { setVisibleSessionIds } from "./active-session.js"
 import { prNotification } from "./notifier.js"
@@ -329,26 +330,38 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     // Same reasoning for the composer draft — it outlives the pane by design, so
     // nothing else would ever collect it (and it's persisted).
     clearDraft(sessionId)
+    clearViewedPaths(sessionId)
     send({ type: "SESSION_DELETED", sessionId })
   }
 
   const connected = ghStatus.available && ghStatus.authenticated
   const autoDetect = connected && (githubConfig?.autoDetectPr ?? true)
+  const sessionsRef = useRef(sessions)
+  sessionsRef.current = sessions
 
-  // Opportunistically link PRs already open on a session's branch, so the sidebar
-  // badge + PR/Code Review tabs light up without opening the PR tab first. Runs
-  // once per session id (guarded), best-effort, only when GitHub auto-detect is on.
-  const detectedRef = useRef<Set<string>>(new Set())
+  // Continuously resolve the OPEN PR on every live worktree branch. Sessions can
+  // outlive a merged PR and open a replacement, so linked sessions stay in the
+  // sweep. Read the latest sessions through a ref so ordinary session updates do
+  // not restart the interval and immediately re-scan every worktree.
   useEffect(() => {
     if (!autoDetect) return
-    for (const s of sessions) {
-      if (s.prNumber != null || !s.worktreePath || detectedRef.current.has(s.id)) continue
-      detectedRef.current.add(s.id)
-      void rpc.githubDetectPr(s.id).then((n) => {
-        if (n != null) send({ type: "SESSION_PR_LINKED", sessionId: s.id, prNumber: n })
-      })
+    const detect = () => {
+      for (const session of sessionsRef.current) {
+        if (!session.worktreePath || session.archived) continue
+        void rpc
+          .githubDetectPr(session.id)
+          .then((prNumber) => {
+            if (prNumber !== null && prNumber !== session.prNumber) {
+              send({ type: "SESSION_PR_LINKED", sessionId: session.id, prNumber })
+            }
+          })
+          .catch(() => {})
+      }
     }
-  }, [autoDetect, sessions, send])
+    detect()
+    const timer = window.setInterval(detect, ARCHIVE_POLL_MS)
+    return () => window.clearInterval(timer)
+  }, [autoDetect, send])
 
   // When a session's live run COMPLETES (its live status goes present → absent),
   // do two independent things:
@@ -377,7 +390,6 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     for (const id of completed) {
       void rpc.githubDetectPr(id).then((n) => {
         if (n != null) {
-          detectedRef.current.add(id) // keep the once-per-session guard in sync
           send({ type: "SESSION_PR_LINKED", sessionId: id, prNumber: n })
         }
       })
@@ -499,7 +511,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   // appear without the user having to click Review.
   useEffect(() => {
     for (const { id, review } of autoReviews) {
-      qc.setQueryData(reviewQueryKey(id), review)
+      qc.setQueryData(reviewQueryKey(id, review.prNumber), review)
     }
   }, [autoReviews, qc])
 
@@ -688,10 +700,20 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       )}
       renderIssue={(session) => <IssuePane session={session} onUnlink={unlinkIssue} />}
       renderReview={(session, ctx) => (
-        <ReviewPane session={session} connected={connected} onConnectGithub={ctx.onConnectGithub} />
+        <ReviewPane
+          key={`${session.id}:${session.prNumber ?? "none"}`}
+          session={session}
+          connected={connected}
+          onConnectGithub={ctx.onConnectGithub}
+        />
       )}
       renderCode={(session, ctx) => (
-        <ReviewPane session={session} connected={connected} onConnectGithub={ctx.onConnectGithub} />
+        <ReviewPane
+          key={`${session.id}:${session.prNumber ?? "none"}`}
+          session={session}
+          connected={connected}
+          onConnectGithub={ctx.onConnectGithub}
+        />
       )}
       terminalDockSide={termDock.side}
       renderTerminalDock={(session) => (

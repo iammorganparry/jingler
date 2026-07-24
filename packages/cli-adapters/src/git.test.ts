@@ -187,6 +187,155 @@ describe("GitService.createWorktree", () => {
     const occurrences = list.split("\n").filter((l) => l.includes(second.value.path)).length
     expect(occurrences).toBe(1)
   })
+
+  it("creates a task branch from detached HEAD without losing commits or dirty files", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "named"))
+    const detached = await runExit(
+      GitService.createDetachedWorktree({
+        repoPath,
+        repoName: "named",
+        slug: "landing-pad",
+        baseBranch: "main"
+      }).pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+    expect(detached._tag).toBe("Success")
+    if (detached._tag !== "Success") return
+
+    const cwd = detached.value.path
+    writeFileSync(join(cwd, "committed.ts"), "committed\n")
+    execFileSync("git", ["add", "committed.ts"], { cwd })
+    execFileSync("git", ["commit", "-m", "detached work", "--no-gpg-sign"], { cwd })
+    writeFileSync(join(cwd, "dirty.ts"), "dirty\n")
+    const detachedHead = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd,
+      encoding: "utf-8"
+    }).trim()
+
+    const named = await runExit(
+      GitService.createTaskBranch(cwd, "fix-token-refresh").pipe(
+        Effect.provide(GitService.Default)
+      ),
+      temp.layer
+    )
+    expect(named._tag).toBe("Success")
+    if (named._tag !== "Success") return
+    expect(named.value).toBe("starbase/fix-token-refresh")
+    expect(
+      execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe(named.value)
+    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf-8" }).trim()).toBe(
+      detachedHead
+    )
+    expect(existsSync(join(cwd, "dirty.ts"))).toBe(true)
+  })
+
+  it("uses a deterministic suffix when the task branch already exists", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "collision"))
+    execFileSync("git", ["branch", "starbase/fix-token-refresh"], { cwd: repoPath })
+    const detached = await runExit(
+      GitService.createDetachedWorktree({
+        repoPath,
+        repoName: "collision",
+        slug: "landing-pad",
+        baseBranch: "main"
+      }).pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+    if (detached._tag !== "Success") throw new Error("expected detached worktree")
+
+    const named = await runExit(
+      GitService.createTaskBranch(detached.value.path, "fix-token-refresh").pipe(
+        Effect.provide(GitService.Default)
+      ),
+      temp.layer
+    )
+    expect(named._tag === "Success" && named.value).toBe("starbase/fix-token-refresh-2")
+  })
+
+  it("reuses the live branch when task activation is triggered twice", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "double-retitle"))
+    const detached = await runExit(
+      GitService.createDetachedWorktree({
+        repoPath,
+        repoName: "double-retitle",
+        slug: "landing-pad",
+        baseBranch: "main"
+      }).pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+    if (detached._tag !== "Success") throw new Error("expected detached worktree")
+
+    const first = await runExit(
+      GitService.createTaskBranch(detached.value.path, "fix-token-refresh").pipe(
+        Effect.provide(GitService.Default)
+      ),
+      temp.layer
+    )
+    const second = await runExit(
+      GitService.createTaskBranch(detached.value.path, "fix-token-refresh").pipe(
+        Effect.provide(GitService.Default)
+      ),
+      temp.layer
+    )
+
+    expect(first._tag === "Success" && first.value).toBe("starbase/fix-token-refresh")
+    expect(second._tag === "Success" && second.value).toBe("starbase/fix-token-refresh")
+    expect(
+      execFileSync(
+        "git",
+        [
+          "for-each-ref",
+          "--format=%(refname:short)",
+          "refs/heads/starbase/fix-token-refresh"
+        ],
+        { cwd: repoPath, encoding: "utf-8" }
+      )
+        .trim()
+        .split("\n")
+    ).toStrictEqual(["starbase/fix-token-refresh"])
+  })
+
+  it("pins otherwise unreachable detached commits before worktree removal", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "rescue"))
+    const detached = await runExit(
+      GitService.createDetachedWorktree({
+        repoPath,
+        repoName: "rescue",
+        slug: "quiet-curie",
+        baseBranch: "main"
+      }).pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+    if (detached._tag !== "Success") throw new Error("expected detached worktree")
+
+    writeFileSync(join(detached.value.path, "work.ts"), "saved\n")
+    execFileSync("git", ["add", "work.ts"], { cwd: detached.value.path })
+    execFileSync("git", ["commit", "-m", "detached work", "--no-gpg-sign"], {
+      cwd: detached.value.path
+    })
+    const head = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: detached.value.path,
+      encoding: "utf-8"
+    }).trim()
+
+    const preserved = await runExit(
+      GitService.preserveDetachedHead(detached.value.path, "quiet-curie").pipe(
+        Effect.provide(GitService.Default)
+      ),
+      temp.layer
+    )
+    expect(preserved._tag === "Success" && preserved.value).toBe("starbase/quiet-curie")
+    expect(
+      execFileSync("git", ["rev-parse", "starbase/quiet-curie"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe(head)
+  })
 })
 
 /**

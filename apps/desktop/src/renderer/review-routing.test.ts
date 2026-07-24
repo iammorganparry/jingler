@@ -45,7 +45,7 @@ const review = (
 
 describe("resolveSentIds", () => {
   it("is empty when there is no review", () => {
-    expect(resolveSentIds(null, new Set(["review:abc:f1"])).size).toBe(0)
+    expect(resolveSentIds(null, new Set(["review:1:abc:f1"])).size).toBe(0)
   })
 
   it("is empty when nothing has been routed", () => {
@@ -53,7 +53,7 @@ describe("resolveSentIds", () => {
   })
 
   it("resolves a routed key to the plain finding id the UI compares against", () => {
-    const ids = resolveSentIds(review("abc", ["f1", "f2"]), new Set(["review:abc:f1"]))
+    const ids = resolveSentIds(review("abc", ["f1", "f2"]), new Set(["review:1:abc:f1"]))
     // The UI does `sentFindingIds.has(finding.id)` — plain "f1", not the key.
     expect(ids.has("f1")).toBe(true)
     expect(ids.has("f2")).toBe(false)
@@ -62,26 +62,26 @@ describe("resolveSentIds", () => {
   // The bug this file exists for: both sets are ReadonlySet<string>, so handing
   // the raw keys to the UI type-checks cleanly and silently never matches.
   it("never returns the namespaced keys themselves", () => {
-    const ids = resolveSentIds(review("abc", ["f1"]), new Set(["review:abc:f1"]))
-    expect(ids.has("review:abc:f1")).toBe(false)
+    const ids = resolveSentIds(review("abc", ["f1"]), new Set(["review:1:abc:f1"]))
+    expect(ids.has("review:1:abc:f1")).toBe(false)
     expect([...ids]).toStrictEqual(["f1"])
   })
 
   it("does not carry a previous review's Sent state onto the same positional id", () => {
     // f1 was routed on head "abc"; the branch has since moved to "def".
-    const ids = resolveSentIds(review("def", ["f1", "f2"]), new Set(["review:abc:f1"]))
+    const ids = resolveSentIds(review("def", ["f1", "f2"]), new Set(["review:1:abc:f1"]))
     expect(ids.size).toBe(0)
   })
 
   it("ignores routed keys for findings not in this review", () => {
-    const ids = resolveSentIds(review("abc", ["f1"]), new Set(["review:abc:f9"]))
+    const ids = resolveSentIds(review("abc", ["f1"]), new Set(["review:1:abc:f9"]))
     expect(ids.size).toBe(0)
   })
 
   it("resolves several routed findings at once", () => {
     const ids = resolveSentIds(
       review("abc", ["f1", "f2", "f3"]),
-      new Set(["review:abc:f1", "review:abc:f3"])
+      new Set(["review:1:abc:f1", "review:1:abc:f3"])
     )
     expect([...ids].sort()).toStrictEqual(["f1", "f3"])
   })
@@ -153,8 +153,9 @@ describe("agentBatchPrompt", () => {
  * re-fires every poll tick. One definition, pinned here.
  */
 describe("reviewQueryKey", () => {
-  it("is namespaced per session", () => {
-    expect(reviewQueryKey("s1")).toStrictEqual(["review", "s1"])
-    expect(reviewQueryKey("s2")).not.toStrictEqual(reviewQueryKey("s1"))
+  it("is namespaced per session and PR", () => {
+    expect(reviewQueryKey("s1", 7)).toStrictEqual(["review", "s1", 7])
+    expect(reviewQueryKey("s1", 8)).not.toStrictEqual(reviewQueryKey("s1", 7))
+    expect(reviewQueryKey("s2", 7)).not.toStrictEqual(reviewQueryKey("s1", 7))
   })
 })

@@ -87,6 +87,7 @@ import type {
   PrMergeMethod,
   ReviewComment,
   ReviewSubmitKind,
+  Session,
   SettledSessionStatus,
   ProviderModels,
   ProvidersConfig,
@@ -219,6 +220,17 @@ export const sessionDiff = (id: string) =>
 /** Resolve a session (best-effort; unknown → null) for the GitHub handlers. */
 const resolveSession = (sessionId: string) =>
   SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
+
+type SessionWithPr = Session & { readonly prNumber: number }
+
+const hasActivePr = (session: Session | null): session is SessionWithPr =>
+  session !== null && session.prNumber !== null
+
+/** Resolve a session only when it has an active pull request. */
+const sessionWithPr = (sessionId: string) =>
+  resolveSession(sessionId).pipe(
+    Effect.map((session): SessionWithPr | null => (hasActivePr(session) ? session : null))
+  )
 
 /**
  * `Sessions.createFromPr` handler. Reads the git "share checked-out branches"
@@ -521,8 +533,14 @@ export const githubDiff = (sessionId: string) =>
     return yield* GhService.prDiff(session.worktreePath, session.prNumber)
   })
 
-/** `Review.get` handler — the last stored adversarial review, or null. */
-export const reviewGet = (sessionId: string) => ReviewStore.get(sessionId)
+/** `Review.get` handler — the stored review for the active PR, or null. */
+export const reviewGet = (sessionId: string) =>
+  Effect.gen(function* () {
+    const session = yield* sessionWithPr(sessionId)
+    if (session === null) return null
+    const review = yield* ReviewStore.get(sessionId)
+    return review?.prNumber === session.prNumber ? review : null
+  })
 
 /**
  * Whether an installed provider is honest to advertise as executable.
@@ -1173,8 +1191,10 @@ export const planAdversarial = (
  */
 export const reviewMarkRouted = (sessionId: string) =>
   Effect.gen(function* () {
+    const session = yield* sessionWithPr(sessionId)
+    if (session === null) return null
     const review = yield* ReviewStore.get(sessionId)
-    if (review === null) return null
+    if (review === null || review.prNumber !== session.prNumber) return null
     if (review.routedAt !== null) return review.routedAt
     const now = yield* Effect.sync(() => new Date().toISOString())
     yield* ReviewStore.set(sessionId, { ...review, routedAt: now }).pipe(Effect.ignore)
@@ -1197,12 +1217,10 @@ export const reviewMarkRouted = (sessionId: string) =>
  */
 export const reviewReconcile = (sessionId: string) =>
   Effect.gen(function* () {
-    const review = yield* ReviewStore.get(sessionId)
-    if (review === null) return null
-    const session = yield* resolveSession(sessionId).pipe(
-      Effect.catchAll(() => Effect.succeed(null))
-    )
+    const session = yield* sessionWithPr(sessionId)
     if (!session?.worktreePath) return null
+    const review = yield* ReviewStore.get(sessionId)
+    if (review === null || review.prNumber !== session.prNumber) return null
 
     const commits = yield* GitService.commitsSince(session.worktreePath, review.headSha)
     const now = yield* Effect.sync(() => new Date().toISOString())
@@ -1228,10 +1246,8 @@ export const reviewReconcile = (sessionId: string) =>
  */
 export const reviewRun = (sessionId: string, force: boolean) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId).pipe(
-      Effect.catchAll(() => Effect.succeed(null))
-    )
-    if (!session?.worktreePath || session.prNumber === null) {
+    const session = yield* sessionWithPr(sessionId)
+    if (!session?.worktreePath) {
       return yield* Effect.fail(
         new ReviewError({
           message: "This session has no linked pull request to review."
@@ -1251,7 +1267,14 @@ export const reviewRun = (sessionId: string, force: boolean) =>
     // The de-dupe. Note it runs BEFORE the diff read and the agent spawn — the
     // whole point is that an unchanged head is nearly free.
     const prior = yield* ReviewStore.get(sessionId)
-    if (!force && prior !== null && prior.headSha === headSha) return prior
+    if (
+      !force &&
+      prior !== null &&
+      prior.prNumber === session.prNumber &&
+      prior.headSha === headSha
+    ) {
+      return prior
+    }
 
     const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
     const cli = config?.github?.reviewCli ?? "claude"
@@ -1338,7 +1361,9 @@ export const githubDetectPr = (sessionId: string) =>
     // Resolve against the worktree's live branch — the stored `session.branch`
     // drifts once the agent checks out / creates a different branch there.
     const n = yield* GhService.prForWorktree(session.worktreePath)
-    if (n !== null) yield* SessionStore.setPrNumber(session.id, n).pipe(Effect.ignore)
+    if (n !== null && n !== session.prNumber) {
+      yield* SessionStore.setPrNumber(session.id, n).pipe(Effect.ignore)
+    }
     return n
   })
 
