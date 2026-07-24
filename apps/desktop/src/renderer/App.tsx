@@ -43,6 +43,7 @@ import { useSessionDiffs } from "./diff-presence.js"
 import { usePlanSessions } from "./plan-presence.js"
 import { disposeConversationActor } from "./conversation-registry.js"
 import { clearDraft } from "./draft-store.js"
+import { clearViewedPaths } from "./viewed-store.js"
 import { onSessionUpdate } from "./session-updates.js"
 import { setVisibleSessionIds } from "./active-session.js"
 import { prNotification } from "./notifier.js"
@@ -329,6 +330,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     // Same reasoning for the composer draft — it outlives the pane by design, so
     // nothing else would ever collect it (and it's persisted).
     clearDraft(sessionId)
+    clearViewedPaths(sessionId)
     send({ type: "SESSION_DELETED", sessionId })
   }
 

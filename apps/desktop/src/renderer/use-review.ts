@@ -10,6 +10,7 @@ import type { PrFileChange, PrReviewThread, Session } from "@starbase/core"
 import { rpc } from "./rpc-client.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { prKey } from "./use-pull-request.js"
+import { readViewedPaths, viewedStorageKey } from "./viewed-store.js"
 
 /** Which diff the Code Review is showing. */
 export type ReviewSource = "pr" | "local"
@@ -97,27 +98,13 @@ export interface ReviewState {
 
 const localKey = (sessionId: string) => ["local", "diff", sessionId] as const
 
-/** localStorage key for the set of paths marked "viewed" in a session's review. */
-const viewedStorageKey = (sessionId: string, prNumber: number | null) =>
-  `sb.review.viewed.${sessionId}.${prNumber ?? "none"}`
-
-const readViewed = (sessionId: string, prNumber: number | null): ReadonlySet<string> => {
-  try {
-    const raw = localStorage.getItem(viewedStorageKey(sessionId, prNumber))
-    const arr = raw ? (JSON.parse(raw) as unknown) : []
-    return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [])
-  } catch {
-    return new Set()
-  }
-}
-
 export function useReview(session: Session): ReviewState {
   const qc = useQueryClient()
   const [source, setSourceRaw] = useState<ReviewSource>("pr")
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<ReadonlyArray<ReviewDraft>>([])
   const [viewedPaths, setViewedPaths] = useState<ReadonlySet<string>>(() =>
-    readViewed(session.id, session.prNumber)
+    readViewedPaths(session.id, session.prNumber)
   )
   const seq = useRef(0)
 
