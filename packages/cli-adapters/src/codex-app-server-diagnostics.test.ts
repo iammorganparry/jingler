@@ -1,9 +1,10 @@
 import { mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, expectTypeOf, it } from "vitest"
 import {
   boundedCodexStderr,
+  type CodexAppServerDiagnosticFields,
   createCodexAppServerDiagnostics,
   createCodexStderrRecorder,
   redactCodexDiagnosticText
@@ -91,6 +92,12 @@ describe("Codex stderr recorder", () => {
 })
 
 describe("Codex diagnostic persistence", () => {
+  it("reserves trace envelope keys from event-specific fields", () => {
+    expectTypeOf<{ event: string }>().not.toMatchTypeOf<CodexAppServerDiagnosticFields>()
+    expectTypeOf<{ model: string }>().not.toMatchTypeOf<CodexAppServerDiagnosticFields>()
+    expectTypeOf<{ method: string }>().toMatchTypeOf<CodexAppServerDiagnosticFields>()
+  })
+
   it("writes protocol metadata into the configured directory", async () => {
     const directory = mkdtempSync(join(tmpdir(), "starbase-codex-diagnostics-"))
     directories.push(directory)

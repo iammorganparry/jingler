@@ -10,8 +10,21 @@ export interface CodexAppServerDiagnosticContext {
   readonly reasoningEffort: string | null
 }
 
-export interface CodexAppServerDiagnosticFields {
-  readonly [key: string]: boolean | number | string | null | undefined
+type CodexAppServerDiagnosticValue = boolean | number | string | null | undefined
+
+/**
+ * Event-specific fields remain flat for grep-friendly JSONL, but envelope keys
+ * belong exclusively to the recorder. The `never` properties turn accidental
+ * collisions into type errors instead of silently replacing caller data.
+ */
+export type CodexAppServerDiagnosticFields = Readonly<
+  Record<string, CodexAppServerDiagnosticValue>
+> & {
+  readonly timestamp?: never
+  readonly event?: never
+  readonly sessionId?: never
+  readonly model?: never
+  readonly reasoningEffort?: never
 }
 
 export interface CodexAppServerDiagnostics {
