@@ -1611,6 +1611,8 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "Agent.setHarness": ({ sessionId, cli, model }) =>
     SessionStore.setHarness(sessionId, cli, model).pipe(Effect.ignore),
   "Agent.stop": ({ sessionId }) => Effect.flatMap(AgentRunner, (runner) => runner.stop(sessionId)),
+  "Agent.steer": ({ sessionId, text, images }) =>
+    Effect.flatMap(AgentRunner, (runner) => runner.steer(sessionId, text, images)),
   "Skills.list": ({ sessionId }) => skillsList(sessionId),
   "Mcp.list": ({ sessionId, cli }) => mcpList(sessionId, cli),
   "Mcp.status": ({ sessionId, cli, refresh }) => mcpStatus(sessionId, cli, refresh),

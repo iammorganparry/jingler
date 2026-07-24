@@ -104,7 +104,19 @@ const threadIdFromResponse = (response: unknown): string | null => {
 
 const turnIdFromResponse = (response: unknown): string | null => {
   if (!isRecord(response)) return null
+  const direct = stringAt(response, "turnId")
+  if (direct !== null) return direct
   const turn = recordAt(response, "turn")
+  return turn === null ? null : stringAt(turn, "id")
+}
+
+const startedTurnId = (message: JsonRpcMessage, expectedThreadId: string): string | null => {
+  if (message.method !== "turn/started") return null
+  const params = recordAt(message, "params")
+  if (params === null) return null
+  const threadId = stringAt(params, "threadId")
+  if (threadId !== null && threadId !== expectedThreadId) return null
+  const turn = recordAt(params, "turn")
   return turn === null ? null : stringAt(turn, "id")
 }
 
@@ -315,6 +327,42 @@ const cumulativeUsage = (message: JsonRpcMessage, expectedThreadId: string): num
   return typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0 ? tokens : null
 }
 
+const awaitNativeCompaction = async (
+  connection: CodexAppServerConnection,
+  threadId: string,
+  ctx: AgentContext,
+  runP: <A>(effect: Effect.Effect<A>) => Promise<A>,
+  sessionId: string,
+  setActiveTurnId: (turnId: string | null) => void
+): Promise<void> => {
+  try {
+    await connection.request("thread/compact/start", { threadId })
+    const state = makeCodexAppServerEventState()
+    let messageCount = 0
+    let lastMethod: string | null = null
+    for (;;) {
+      const message = await nextTurnMessage(connection, { messageCount, lastMethod })
+      if (message === null) throw new Error("Codex app-server closed during compaction")
+      messageCount += 1
+      lastMethod = typeof message.method === "string" ? message.method : "<unknown>"
+      const started = startedTurnId(message, threadId)
+      if (started !== null) setActiveTurnId(started)
+      if (await handleServerRequest(connection, message, ctx, runP, sessionId)) continue
+      for (const event of codexAppServerMessageToStreamEvents(message, threadId, state)) {
+        if (event._tag === "Usage") await runP(ctx.emit(event))
+      }
+      const terminal = completedTurn(message, threadId)
+      if (terminal === null) continue
+      if (terminal.status === "failed") {
+        throw new Error(terminal.error ?? "Codex native compaction failed")
+      }
+      return
+    }
+  } finally {
+    setActiveTurnId(null)
+  }
+}
+
 /**
  * Run Codex through app-server so resident context is observable during turns.
  */
@@ -421,6 +469,28 @@ export const runCodexAppServer = (
           onActivated?.()
           if (spec.fresh !== true) resume.set(sessionId, activeThreadId)
           await runP(ctx.emit({ _tag: "Started", sessionId: activeThreadId }))
+          if (ctx.registerTurnSteer !== undefined) {
+            await runP(
+              ctx.registerTurnSteer(async (text, images) => {
+                if (connection === null || activeThreadId === null || activeTurnId === null) {
+                  return "deferred"
+                }
+                const steered = await stageCodexInput(text, images)
+                try {
+                  const response = await connection.request("turn/steer", {
+                    threadId: activeThreadId,
+                    expectedTurnId: activeTurnId,
+                    input: toCodexAppServerInput(steered.input)
+                  })
+                  return turnIdFromResponse(response) === activeTurnId ? "accepted" : "deferred"
+                } catch {
+                  return "deferred"
+                } finally {
+                  await steered.cleanup()
+                }
+              })
+            )
+          }
 
           let turnInput = toCodexAppServerInput(staged.input)
           let baselineSpend: number | null = resumed ? null : 0
@@ -463,11 +533,16 @@ export const runCodexAppServer = (
               await consumeReplay(message)
             }
             if (replayRequiresCompaction) {
-              await connection
-                .request("thread/compact/start", {
-                  threadId: resumedThreadId
-                })
-                .catch(() => undefined)
+              await awaitNativeCompaction(
+                connection,
+                resumedThreadId,
+                ctx,
+                runP,
+                sessionId,
+                (turnId) => {
+                  activeTurnId = turnId
+                }
+              )
             }
           }
           let questionRound = 0
@@ -475,7 +550,7 @@ export const runCodexAppServer = (
           for (;;) {
             const state = makeCodexAppServerEventState()
             let followUp: string | null = null
-            let emergencyCompactRequested = false
+            let emergencyCompactionNeeded = false
             const turnResponse = await connection.request("turn/start", {
               threadId: activeThreadId,
               input: turnInput,
@@ -574,20 +649,27 @@ export const runCodexAppServer = (
               if (
                 ratio !== null &&
                 ratio >= EMERGENCY_COMPACTION_RATIO &&
-                !emergencyCompactRequested
+                !emergencyCompactionNeeded
               ) {
-                emergencyCompactRequested = true
-                await connection
-                  .request("thread/compact/start", {
-                    threadId: activeThreadId
-                  })
-                  .catch(() => undefined)
+                emergencyCompactionNeeded = true
               }
               const completed = completedTurn(message, activeThreadId)
               terminal = completed?.turnId === activeTurnId ? completed : null
             }
 
             activeTurnId = null
+            if (emergencyCompactionNeeded) {
+              await awaitNativeCompaction(
+                connection,
+                activeThreadId,
+                ctx,
+                runP,
+                sessionId,
+                (turnId) => {
+                  activeTurnId = turnId
+                }
+              )
+            }
             if (terminal.status === "failed") {
               await runP(
                 ctx.emit({
@@ -613,6 +695,9 @@ export const runCodexAppServer = (
           try {
             await staged.cleanup()
           } finally {
+            if (ctx.registerTurnSteer !== undefined) {
+              await runP(ctx.registerTurnSteer(null))
+            }
             connection.close()
           }
         }

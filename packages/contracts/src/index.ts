@@ -383,6 +383,28 @@ export class StarbaseRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
+  /**
+   * Add input to a live Codex turn. Compaction temporarily defers it; harnesses
+   * without native steering report unsupported so the renderer can stop/replay.
+   */
+  Rpc.make("Agent.steer", {
+    success: Schema.Union(
+      Schema.Struct({
+        status: Schema.Literal("accepted"),
+        user: Message,
+        assistant: Message
+      }),
+      Schema.Struct({
+        status: Schema.Literal("deferred", "unsupported")
+      })
+    ),
+    payload: {
+      sessionId: Schema.String,
+      text: Schema.String,
+      images: Schema.Array(Attachment)
+    }
+  }),
+
   /** List the skills/slash-commands the session's harness exposes (the `/` menu). */
   Rpc.make("Skills.list", {
     success: Schema.Array(Skill),

@@ -279,6 +279,8 @@ export const rpc = {
   agentSetHarness: (sessionId: string, cli: CliKind, model: string): Promise<void> =>
     run((c) => c.Agent.setHarness({ sessionId, cli, model })),
   agentStop: (sessionId: string): Promise<void> => run((c) => c.Agent.stop({ sessionId })),
+  agentSteer: (sessionId: string, text: string, images: ReadonlyArray<Attachment>) =>
+    run((c) => c.Agent.steer({ sessionId, text, images: [...images] })),
 
   configSetGithub: (github: GithubConfig): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setGithub(github)),

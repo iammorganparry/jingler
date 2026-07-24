@@ -157,6 +157,12 @@ export type ProposePlan = (plan: Plan) => Effect.Effect<PlanDecision>
  */
 export type StopBackgroundTask = (taskId: string) => Promise<void>
 
+export type TurnSteerResult = "accepted" | "deferred"
+export type SteerTurn = (
+  text: string,
+  images: ReadonlyArray<Attachment>
+) => Promise<TurnSteerResult>
+
 export interface AgentContext {
   readonly emit: (event: StreamEvent) => Effect.Effect<void>
   readonly canUseTool: CanUseTool
@@ -169,6 +175,11 @@ export interface AgentContext {
    * unsupported rather than offering a button that does nothing.
    */
   readonly registerBackgroundStop: (stop: StopBackgroundTask) => Effect.Effect<void>
+  /**
+   * Publish Codex's live `turn/steer` handle. Passing null marks phases such as
+   * native compaction where direct input is temporarily unavailable.
+   */
+  readonly registerTurnSteer?: (steer: SteerTurn | null) => Effect.Effect<void>
 }
 
 /**

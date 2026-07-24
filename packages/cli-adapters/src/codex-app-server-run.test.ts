@@ -23,7 +23,10 @@ const server = vi.hoisted(() => {
     resumeError: null as Error | null,
     turnNumber: 0,
     hangMessages: false,
-    pendingMessageResolver: null as ((message: null) => void) | null,
+    pendingMessageResolver: null as ((message: Record<string, unknown> | null) => void) | null,
+    autoCompleteCompaction: true,
+    compactionNumber: 0,
+    turnSteer: null as import("./adapter.js").SteerTurn | null,
     diagnosticsCloseCount: 0,
     closed: false
   }
@@ -42,6 +45,37 @@ const server = vi.hoisted(() => {
         state.turnNumber += 1
         return Promise.resolve({ turn: { id: `turn-${state.turnNumber}` } })
       }
+      if (method === "turn/steer") {
+        return Promise.resolve({ turnId: `turn-${state.turnNumber}` })
+      }
+      if (method === "thread/compact/start") {
+        state.compactionNumber += 1
+        if (state.autoCompleteCompaction) {
+          state.messages.unshift(
+            {
+              method: "turn/started",
+              params: {
+                threadId: state.threadId,
+                turn: {
+                  id: `compact-${state.compactionNumber}`,
+                  status: "inProgress"
+                }
+              }
+            },
+            {
+              method: "turn/completed",
+              params: {
+                threadId: state.threadId,
+                turn: {
+                  id: `compact-${state.compactionNumber}`,
+                  status: "completed",
+                  error: null
+                }
+              }
+            }
+          )
+        }
+      }
       return Promise.resolve({})
     },
     notify: vi.fn(),
@@ -55,7 +89,7 @@ const server = vi.hoisted(() => {
     respondError: vi.fn(),
     nextMessage: () =>
       state.hangMessages
-        ? new Promise<null>((resolve) => {
+        ? new Promise<Record<string, unknown> | null>((resolve) => {
             state.pendingMessageResolver = resolve
           })
         : Promise.resolve(state.messages.shift() ?? null),
@@ -128,7 +162,11 @@ const harness = (decision: PlanDecisionType = PlanDecision.Reject()) => {
         proposed.push(plan)
         return decision
       }),
-    registerBackgroundStop: () => Effect.void
+    registerBackgroundStop: () => Effect.void,
+    registerTurnSteer: (steer) =>
+      Effect.sync(() => {
+        server.state.turnSteer = steer
+      })
   }
   return { ctx, emitted, proposed, asked }
 }
@@ -145,6 +183,9 @@ beforeEach(() => {
   server.state.turnNumber = 0
   server.state.hangMessages = false
   server.state.pendingMessageResolver = null
+  server.state.autoCompleteCompaction = true
+  server.state.compactionNumber = 0
+  server.state.turnSteer = null
   server.state.diagnosticsCloseCount = 0
   server.state.closed = false
 })
@@ -395,6 +436,92 @@ describe("runCodexAppServer", () => {
       tokens: 206_000,
       window: 258_400
     })
+  })
+
+  it("waits for native compaction to finish before replaying the prompt exactly once", async () => {
+    server.state.autoCompleteCompaction = false
+    server.state.hangMessages = true
+    server.state.replay = [
+      {
+        method: "thread/tokenUsage/updated",
+        params: {
+          threadId: "thread-1",
+          turnId: "previous-turn",
+          tokenUsage: {
+            total: { totalTokens: 900_000 },
+            last: { totalTokens: 206_000 },
+            modelContextWindow: 258_400
+          }
+        }
+      }
+    ]
+    const { ctx } = harness()
+    const running = Effect.runPromise(
+      runCodexAppServer("s1", spec({ resumeId: "thread-1" }), ctx, new Map())
+    )
+
+    await vi.waitFor(() => {
+      expect(server.state.requests.some((request) => request.method === "thread/compact/start")).toBe(
+        true
+      )
+    })
+    expect(server.state.requests.some((request) => request.method === "turn/start")).toBe(false)
+
+    server.state.hangMessages = false
+    server.state.messages.push({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: null }
+      }
+    })
+    server.state.pendingMessageResolver?.({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "compact-delayed", status: "completed", error: null }
+      }
+    })
+    await running
+
+    expect(
+      server.state.requests.filter((request) => request.method === "turn/start")
+    ).toHaveLength(1)
+    expect(
+      server.state.requests.find((request) => request.method === "turn/start")?.params
+    ).toMatchObject({
+      input: [{ type: "text", text: "inspect the repository", text_elements: [] }]
+    })
+  })
+
+  it("steers a live regular turn through the registered handle", async () => {
+    server.state.hangMessages = true
+    const { ctx } = harness()
+    const running = Effect.runPromise(runCodexAppServer("s1", spec(), ctx, new Map()))
+
+    await vi.waitFor(() => {
+      expect(server.state.turnSteer).not.toBeNull()
+      expect(server.state.requests.some((request) => request.method === "turn/start")).toBe(true)
+    })
+    await expect(server.state.turnSteer?.("new operator input", [])).resolves.toBe("accepted")
+    expect(server.state.requests).toContainEqual({
+      method: "turn/steer",
+      params: {
+        threadId: "thread-1",
+        expectedTurnId: "turn-1",
+        input: [{ type: "text", text: "new operator input", text_elements: [] }]
+      }
+    })
+
+    server.state.pendingMessageResolver?.({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: null }
+      }
+    })
+    await running
+    expect(server.state.turnSteer).toBeNull()
   })
 
   it("waits for delayed replay usage before starting a resumed turn", async () => {
