@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, test } from "./fixtures.js"
 
+const FRIENDLY_WORKTREE_RE = /[\\/][a-z]+-[a-z]+$/
+
 /**
  * The full ⌘N create-session flow, end to end against real git: open the dialog,
  * name the session, pick a base branch, hit Create, and verify the real outcomes
@@ -50,6 +52,55 @@ test("creating a session forks a real worktree and persists it", async ({ launch
     encoding: "utf-8"
   })
   expect(branches).toContain(persisted[0].branch)
+})
+
+/**
+ * Blank creation takes the staging path the agent later names: the session is
+ * persisted as auto-titled, but its friendly-named worktree remains detached at
+ * the selected base until the first generated task title activates a branch.
+ */
+test("creating a blank session stages a detached worktree for agent naming", async ({
+  launchApp
+}) => {
+  const { window, home } = await launchApp({ configured: true, withRepo: true })
+
+  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await window.locator('button[title="New session"]').click()
+  await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
+
+  const noHarness = await window.getByText("No coding CLI found", { exact: false }).count()
+  test.skip(noHarness > 0, "no coding CLI installed on this host")
+
+  // Leave Name blank: this is the agent-naming fallback, not the explicit-title
+  // branch path exercised above.
+  await expect(window.getByPlaceholder("Leave blank for agent naming")).toHaveValue("")
+  const create = window.getByRole("button", { name: "Create" })
+  await expect(create).toBeEnabled()
+  await create.click()
+
+  await expect(window.getByText("Untitled session")).toBeVisible()
+
+  const persisted = JSON.parse(
+    readFileSync(join(home, "starbase", "sessions.json"), "utf-8")
+  )
+  expect(persisted).toHaveLength(1)
+  expect(persisted[0]).toMatchObject({
+    title: "Untitled session",
+    autoTitle: true,
+    branch: "main",
+    baseBranch: "main",
+    repo: "widget",
+    status: "idle",
+    prNumber: null
+  })
+  expect(persisted[0].worktreePath).toMatch(FRIENDLY_WORKTREE_RE)
+  expect(existsSync(persisted[0].worktreePath)).toBe(true)
+
+  const liveBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd: persisted[0].worktreePath,
+    encoding: "utf-8"
+  }).trim()
+  expect(liveBranch).toBe("HEAD")
 })
 
 /**
