@@ -14,7 +14,7 @@ import { rpc } from "./rpc-client.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { markRouted, useRoutedEntries } from "./routed-store.js"
 import { resolveSentIds, reviewQueryKey, routedKey } from "./review-routing.js"
-import { routeReviewToAgent } from "./auto-route.js"
+import { routeReviewToCurrentAgent } from "./auto-route.js"
 
 /** Format a finding as the instruction handed to the session's agent. */
 const findingPrompt = (finding: ReviewFinding): string => {
@@ -80,14 +80,15 @@ export function useAdversarialReview(
   // fresh opinion, and silently handing back a cached review would read as a bug.
   const runMutation = useMutation({
     mutationFn: () => rpc.reviewRun(session.id, true),
-    onSuccess: (review) => {
-      qc.setQueryData(reviewQueryKey(session.id, session.prNumber), review)
+    onSuccess: async (review) => {
+      qc.setQueryData(reviewQueryKey(review.sessionId, review.prNumber), review)
       // Route here as well as from the auto-review poll: a manual run reaches
       // this callback directly, and the poll is only mounted when auto-review is
       // switched ON. Without this, clicking "Review again" with the toggle off
-      // would find critical bugs and hand them to nobody. `routeReviewToAgent`
-      // de-dupes, so the two paths overlapping is harmless.
-      void routeReviewToAgent(session, review, qc)
+      // would find critical bugs and hand them to nobody. Resolve the session
+      // again because this closure can predate a PR relink during the run.
+      // Routing de-dupes, so the two paths overlapping is harmless.
+      await routeReviewToCurrentAgent(review, qc)
     }
   })
 
@@ -142,7 +143,7 @@ export function useAdversarialReview(
       .reviewReconcile(session.id)
       .then((next) => {
         if (!cancelled && next !== null) {
-          qc.setQueryData(reviewQueryKey(session.id, session.prNumber), next)
+          qc.setQueryData(reviewQueryKey(next.sessionId, next.prNumber), next)
         }
       })
       // Best-effort: attribution is a nicety layered over a review that is already

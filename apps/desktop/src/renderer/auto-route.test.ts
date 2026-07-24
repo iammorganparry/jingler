@@ -14,9 +14,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const sent: Array<{ type: string; text: string }> = []
 const markRoutedCalls: Array<string> = []
 let markRoutedImpl: () => Promise<string | null> = async () => "2026-07-17T10:00:00.000Z"
+let sessionsGetImpl: (id: string) => Promise<Session>
 
 vi.mock("./rpc-client.js", () => ({
-  rpc: { reviewMarkRouted: () => markRoutedImpl() }
+  rpc: {
+    reviewMarkRouted: () => markRoutedImpl(),
+    sessionsGet: (id: string) => sessionsGetImpl(id)
+  }
 }))
 
 vi.mock("./conversation-registry.js", () => ({
@@ -30,7 +34,7 @@ vi.mock("./routed-store.js", () => ({
     markRoutedCalls.push(key)
 }))
 
-const { routeReviewToAgent } = await import("./auto-route.js")
+const { routeReviewToAgent, routeReviewToCurrentAgent } = await import("./auto-route.js")
 
 const session = { id: "s1", title: "Refactor auth", prNumber: 7 } as unknown as Session
 
@@ -69,6 +73,28 @@ beforeEach(() => {
   sent.length = 0
   markRoutedCalls.length = 0
   markRoutedImpl = async () => "2026-07-17T10:00:00.000Z"
+  sessionsGetImpl = async () => session
+})
+
+describe("routeReviewToCurrentAgent", () => {
+  it("routes with the current session resolved from the review identity", async () => {
+    const current = { ...session, prNumber: 8 } as Session
+    sessionsGetImpl = async (id) => {
+      expect(id).toBe("s1")
+      return current
+    }
+
+    await routeReviewToCurrentAgent(review({ prNumber: 8, headSha: "h-current" }), qc)
+    expect(sent).toHaveLength(1)
+  })
+
+  it("does not route a completed review after the session moves to another PR", async () => {
+    sessionsGetImpl = async () => ({ ...session, prNumber: 8 }) as Session
+
+    await routeReviewToCurrentAgent(review({ prNumber: 7, headSha: "h-replaced" }), qc)
+    expect(sent).toHaveLength(0)
+    expect(markRoutedCalls).toHaveLength(0)
+  })
 })
 
 describe("routeReviewToAgent", () => {

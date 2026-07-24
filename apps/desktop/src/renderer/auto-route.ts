@@ -51,6 +51,28 @@ import { agentBatchPrompt, reviewQueryKey, routedKey } from "./review-routing.js
 const claimed = new Set<string>()
 
 /**
+ * Resolve the session again after a multi-minute review run, then route only
+ * when that session still owns the PR the result describes.
+ *
+ * The renderer object that started a mutation can be stale by completion time.
+ * Looking up by the review's own identity handles a newly linked PR without
+ * weakening `routeReviewToAgent`'s protection against sending old-PR findings
+ * into the current worktree.
+ */
+export const routeReviewToCurrentAgent = async (
+  review: AdversarialReview,
+  qc: QueryClient
+): Promise<void> => {
+  try {
+    const session = await rpc.sessionsGet(review.sessionId)
+    if (session.prNumber !== review.prNumber) return
+    await routeReviewToAgent(session, review, qc)
+  } catch {
+    // Best-effort automation: the review remains visible and can be sent manually.
+  }
+}
+
+/**
  * Route `review`'s critical/major findings to `session`'s agent, if they haven't
  * been already.
  *
