@@ -24,6 +24,14 @@ type GitEnv =
   | Path.Path
   | CommandExecutor.CommandExecutor
 
+/** The current branch name checked out at `cwd`, or null (detached / error). */
+export const branchAt = (
+  cwd: string
+): Effect.Effect<string | null, never, CommandExecutor.CommandExecutor> =>
+  gitLine(cwd, "rev-parse", "--abbrev-ref", "HEAD").pipe(
+    Effect.map((branch) => (branch === null || branch === "HEAD" ? null : branch))
+  )
+
 /**
  * Whether `branch` is checked out in the repo's MAIN working tree, per the
  * output of `git worktree list --porcelain`.
@@ -205,14 +213,6 @@ export class GitService extends Effect.Service<GitService>()(
             repoPath: input.repoPath
           }
         })
-
-      /** The current branch name checked out at `cwd`, or null (detached / error). */
-      const branchAt = (
-        cwd: string
-      ): Effect.Effect<string | null, never, CommandExecutor.CommandExecutor> =>
-        gitLine(cwd, "rev-parse", "--abbrev-ref", "HEAD").pipe(
-          Effect.map((b) => (b === null || b === "HEAD" ? null : b))
-        )
 
       /**
        * Name a detached session from its task without moving its HEAD.

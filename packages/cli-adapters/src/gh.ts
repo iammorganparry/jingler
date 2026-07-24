@@ -23,6 +23,7 @@ import { Command } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Effect, Option, Schema, Stream } from "effect"
 import { runGh, runGhInput, runString, which } from "./command.js"
+import { branchAt } from "./git.js"
 
 const UNAVAILABLE: GhStatus = {
   available: false,
@@ -77,6 +78,24 @@ const rec = (v: unknown): Json => (typeof v === "object" && v !== null ? (v as J
 const arr = (v: unknown): ReadonlyArray<Json> => (Array.isArray(v) ? (v as ReadonlyArray<Json>) : [])
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null)
 const num = (v: unknown): number | null => (typeof v === "number" ? v : null)
+
+/** The number of an open PR on `branch`, or null when there is none. */
+const prForBranch = (
+  cwd: string,
+  branch: string
+): Effect.Effect<number | null, never, CommandExecutor.CommandExecutor> =>
+  ghJson(cwd, [
+    "pr",
+    "list",
+    "--state",
+    "open",
+    "--head",
+    branch,
+    "--json",
+    "number",
+    "--limit",
+    "1"
+  ]).pipe(Effect.map((raw) => num(arr(raw)[0]?.number ?? null)))
 
 /**
  * Declaratively build a `gh` argv: a fixed `base` followed by optional pieces.
@@ -736,14 +755,7 @@ export class GhService extends Effect.Service<GhService>()(
 
       // ── Pull-request reads (never fail; fold to null / empty) ──────────────
 
-      /** The number of a PR open on `branch`, or null when there is none. */
-      prForBranch: (
-        cwd: string,
-        branch: string
-      ): Effect.Effect<number | null, never, CommandExecutor.CommandExecutor> =>
-        ghJson(cwd, ["pr", "list", "--head", branch, "--json", "number", "--limit", "1"]).pipe(
-          Effect.map((raw) => num(arr(raw)[0]?.number ?? null))
-        ),
+      prForBranch,
 
       /**
        * The number of the PR open on the worktree's *current* branch, or null.
@@ -753,22 +765,10 @@ export class GhService extends Effect.Service<GhService>()(
       prForWorktree: (
         cwd: string
       ): Effect.Effect<number | null, never, CommandExecutor.CommandExecutor> =>
-        runString("git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD").pipe(
+        branchAt(cwd).pipe(
           Effect.flatMap((branch) => {
-            const live = branch?.trim()
-            if (!live || live === "HEAD") return Effect.succeed(null)
-            return ghJson(cwd, [
-              "pr",
-              "list",
-              "--state",
-              "open",
-              "--head",
-              live,
-              "--json",
-              "number",
-              "--limit",
-              "1"
-            ]).pipe(Effect.map((raw) => num(arr(raw)[0]?.number ?? null)))
+            if (branch === null) return Effect.succeed(null)
+            return prForBranch(cwd, branch)
           })
         ),
 
