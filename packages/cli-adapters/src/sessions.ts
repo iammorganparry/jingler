@@ -37,7 +37,7 @@ const SessionArray = Schema.Array(SessionSchema)
 const MAX_SLUG = 100
 
 /** Lowercase, collapse non-alphanumeric runs to single dashes, trim; fallback "session". */
-const kebab = (input: string): string =>
+export const taskSlug = (input: string): string =>
   input
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -191,7 +191,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           // nicer as a branch/worktree, and picked to be unique within this repo.
           let slug: string
           if (explicit.length > 0) {
-            slug = `${kebab(explicit)}-${stamp}`
+            slug = `${taskSlug(explicit)}-${stamp}`
           } else {
             const usedSlugs = new Set(
               existing
@@ -211,7 +211,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             // `rm -rf` the first's worktree. Mixing in a per-process counter
             // makes the seed differ even when the clock does not.
             const seed = yield* Effect.sync(() => Date.now() + nextOpId() * 7919)
-            slug = freeCreativeName(usedSlugs, seed, `${kebab(title)}-${stamp}`)
+            slug = freeCreativeName(usedSlugs, seed, `${taskSlug(title)}-${stamp}`)
           }
           // Refuse if a live session already owns this path — the same guard
           // `createFromPr` and `createFromIssue` carry, and for the same reason:
@@ -229,12 +229,20 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               new GitError({ message: "A session already exists for this branch name." })
             )
           }
-          const worktree = yield* GitService.createWorktree({
-            repoPath: input.repoPath,
-            repoName: input.repoName,
-            slug,
-            baseBranch: input.baseBranch
-          })
+          const worktree =
+            explicit.length > 0
+              ? yield* GitService.createWorktree({
+                  repoPath: input.repoPath,
+                  repoName: input.repoName,
+                  slug,
+                  baseBranch: input.baseBranch
+                })
+              : yield* GitService.createDetachedWorktree({
+                  repoPath: input.repoPath,
+                  repoName: input.repoName,
+                  slug,
+                  baseBranch: input.baseBranch
+                })
           const session: Session = {
             id: `s_${slug}`,
             repo: input.repoName,
@@ -305,7 +313,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           // to the same worktree path and the second would be refused. Including
           // the number keeps the slug stable per PR (so re-opening the same PR is
           // idempotent — see the guard below) while staying unique across PRs.
-          const slug = `${kebab(input.pr.title)}-${input.pr.number}`
+          const slug = `${taskSlug(input.pr.title)}-${input.pr.number}`
           // Refuse if a live session already owns this worktree path — otherwise
           // the reclaim step below would delete its worktree. (A leftover dir
           // from a failed attempt is NOT a live session, so retries still work.)
@@ -403,7 +411,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         Effect.gen(function* () {
           const now = yield* Effect.sync(() => new Date().toISOString())
           const stamp = yield* Effect.sync(() => Date.now().toString(36))
-          const slug = `${input.issue.number}-${kebab(input.issue.title)}`
+          const slug = `${input.issue.number}-${taskSlug(input.issue.title)}`
           // Guard: one session per issue worktree (the slug is deterministic).
           const worktreePath = yield* GitService.worktreePathFor(input.repoName, slug)
           const prior = yield* readAll()
@@ -594,6 +602,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       /** Persist an auto-generated title (leaves `autoTitle` untouched). */
       const setTitle = (id: string, title: string) => update(id, (s) => ({ ...s, title }))
 
+      /** Persist the title and live branch after a successful context switch. */
+      const setTitleAndBranch = (id: string, title: string, branch: string) =>
+        update(id, (s) => ({ ...s, title, branch }))
+
       /** Manual rename — pins the title so the agent stops auto-retitling it. */
       const renameTitle = (id: string, title: string) =>
         update(id, (s) => ({ ...s, title, autoTitle: false }))
@@ -722,6 +734,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setContextTokens,
         setAutoCompact,
         setTitle,
+        setTitleAndBranch,
         renameTitle,
         setStatus,
         addAllowlist,

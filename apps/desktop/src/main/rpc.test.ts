@@ -907,6 +907,19 @@ describe("RPC handlers", () => {
       expect(review.model).toBe("claude-fable-5")
     })
 
+    it("does not expose or stamp a stored review after the active PR changes", async () => {
+      withSession({ prNumber: 42 })
+      const { layer } = countingAdapter()
+      const env = envFor("sha-one", layer)
+      await Effect.runPromise(reviewRun("s1", false).pipe(Effect.provide(env)))
+
+      withSession({ prNumber: 43 })
+      const visible = await Effect.runPromise(reviewGet("s1").pipe(Effect.provide(env)))
+      const stamp = await Effect.runPromise(reviewMarkRouted("s1").pipe(Effect.provide(env)))
+      expect(visible).toBeNull()
+      expect(stamp).toBeNull()
+    })
+
     /**
      * Reconciliation credits the commits that fixed findings. What matters here
      * is the NULL contract: the renderer calls this after every settled turn, so
@@ -1013,6 +1026,17 @@ describe("RPC handlers", () => {
         const out = await Effect.runPromise(
           reviewReconcile("s1").pipe(Effect.provide(gitEnv("sha-one", "", layer)))
         )
+        expect(out).toBeNull()
+      })
+
+      it("does not reconcile a stored review from a previous PR", async () => {
+        withSession({ prNumber: 42 })
+        const { layer } = countingAdapter()
+        const env = gitEnv("sha-one", "", layer)
+        await Effect.runPromise(reviewRun("s1", false).pipe(Effect.provide(env)))
+
+        withSession({ prNumber: 43 })
+        const out = await Effect.runPromise(reviewReconcile("s1").pipe(Effect.provide(env)))
         expect(out).toBeNull()
       })
     })

@@ -1,7 +1,8 @@
 import type { Message } from "@starbase/core"
 import { GitError, buildTitlePrompt, cleanTitle, fallbackTitle } from "@starbase/core"
 import { Effect } from "effect"
-import { SessionStore } from "./sessions.js"
+import { SessionStore, taskSlug } from "./sessions.js"
+import { GitService } from "./git.js"
 import { TranscriptStore } from "./transcripts.js"
 
 /**
@@ -64,8 +65,8 @@ export const claudeTitleGenerator: TitleGenerator = {
 /**
  * Regenerate a session's title from its transcript and persist it, returning the
  * updated record. A pinned session (`autoTitle === false`, set by a manual
- * rename) is left untouched with no LLM call. Only the `title` field changes —
- * branch/worktree/id are immutable.
+ * rename) is left untouched with no LLM call. The first generated title also
+ * names a detached session's branch; established branches are never renamed.
  */
 export const retitleSession = (sessionId: string, gen: TitleGenerator) =>
   Effect.gen(function* () {
@@ -75,8 +76,22 @@ export const retitleSession = (sessionId: string, gen: TitleGenerator) =>
     if (session.autoTitle !== true) return session
     const messages = yield* TranscriptStore.list(sessionId).pipe(Effect.orElseSucceed(() => []))
     const title = yield* gen.generate(messages)
-    if (title !== session.title) yield* SessionStore.setTitle(sessionId, title).pipe(Effect.ignore)
-    return { ...session, title }
+    if (!session.worktreePath) {
+      if (title !== session.title) yield* SessionStore.setTitle(sessionId, title)
+      return { ...session, title }
+    }
+
+    const liveBranch = yield* GitService.branchAt(session.worktreePath)
+    if (liveBranch !== null) {
+      if (title !== session.title || liveBranch !== session.branch) {
+        yield* SessionStore.setTitleAndBranch(sessionId, title, liveBranch)
+      }
+      return { ...session, title, branch: liveBranch }
+    }
+
+    const branch = yield* GitService.createTaskBranch(session.worktreePath, taskSlug(title))
+    yield* SessionStore.setTitleAndBranch(sessionId, title, branch)
+    return { ...session, title, branch }
   }).pipe(
     Effect.catchTag("SessionNotFoundError", () => Effect.fail(new GitError({ message: "Session not found" })))
   )

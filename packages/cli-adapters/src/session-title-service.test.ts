@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { execFileSync } from "node:child_process"
 import type { CreateSessionInput } from "@starbase/core"
 import { fallbackTitle, userMessage } from "@starbase/core"
 import { Effect, Layer } from "effect"
@@ -57,7 +58,15 @@ describe("retitleSession", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     expect(exit.value.updated.title).toBe("Add response caching")
+    expect(exit.value.updated.branch).toBe("starbase/add-response-caching")
     expect(exit.value.persisted.title).toBe("Add response caching")
+    expect(exit.value.persisted.branch).toBe("starbase/add-response-caching")
+    expect(
+      execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd: exit.value.persisted.worktreePath,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe("starbase/add-response-caching")
   })
 
   it("falls back to the first user message when the generator yields the heuristic", async () => {
@@ -94,6 +103,23 @@ describe("retitleSession", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag === "Success") expect(exit.value.title).toBe("Pinned name")
     expect(called).toBe(false)
+  })
+
+  it("retitles an established branch without renaming it", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const session = yield* SessionStore.create(input())
+        const first = yield* retitleSession(session.id, fixed("First task"))
+        const second = yield* retitleSession(session.id, fixed("Different task"))
+        return { first, second }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.first.branch).toBe("starbase/first-task")
+    expect(exit.value.second.title).toBe("Different task")
+    expect(exit.value.second.branch).toBe("starbase/first-task")
   })
 
   it("fails with GitError for an unknown session id", async () => {

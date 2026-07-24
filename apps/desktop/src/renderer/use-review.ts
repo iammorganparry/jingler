@@ -97,11 +97,12 @@ export interface ReviewState {
 const localKey = (sessionId: string) => ["local", "diff", sessionId] as const
 
 /** localStorage key for the set of paths marked "viewed" in a session's review. */
-const viewedStorageKey = (sessionId: string) => `sb.review.viewed.${sessionId}`
+const viewedStorageKey = (sessionId: string, prNumber: number | null) =>
+  `sb.review.viewed.${sessionId}.${prNumber ?? "none"}`
 
-const readViewed = (sessionId: string): ReadonlySet<string> => {
+const readViewed = (sessionId: string, prNumber: number | null): ReadonlySet<string> => {
   try {
-    const raw = localStorage.getItem(viewedStorageKey(sessionId))
+    const raw = localStorage.getItem(viewedStorageKey(sessionId, prNumber))
     const arr = raw ? (JSON.parse(raw) as unknown) : []
     return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [])
   } catch {
@@ -114,7 +115,9 @@ export function useReview(session: Session): ReviewState {
   const [source, setSourceRaw] = useState<ReviewSource>("pr")
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<ReadonlyArray<ReviewDraft>>([])
-  const [viewedPaths, setViewedPaths] = useState<ReadonlySet<string>>(() => readViewed(session.id))
+  const [viewedPaths, setViewedPaths] = useState<ReadonlySet<string>>(() =>
+    readViewed(session.id, session.prNumber)
+  )
   const seq = useRef(0)
 
   // "Viewed" is a reviewer-local marker (gh/git don't report it) — persist it per
@@ -126,18 +129,21 @@ export function useReview(session: Session): ReviewState {
         if (viewed) next.add(path)
         else next.delete(path)
         try {
-          localStorage.setItem(viewedStorageKey(session.id), JSON.stringify([...next]))
+          localStorage.setItem(
+            viewedStorageKey(session.id, session.prNumber),
+            JSON.stringify([...next])
+          )
         } catch {
           /* ignore */
         }
         return next
       })
     },
-    [session.id]
+    [session.id, session.prNumber]
   )
 
   const prQuery = useQuery({
-    queryKey: ["github", "review", session.id],
+    queryKey: ["github", "review", session.id, session.prNumber],
     queryFn: async () => {
       const [files, diff] = await Promise.all([rpc.githubFiles(session.id), rpc.githubDiff(session.id)])
       return { files, diff }
@@ -152,7 +158,7 @@ export function useReview(session: Session): ReviewState {
   // Request tab's. Sharing the key means react-query dedupes — when the PR tab
   // has already fetched, this resolves from cache and costs nothing.
   const threadsQuery = useQuery({
-    queryKey: ["github", "pr", session.id],
+    queryKey: ["github", "pr", session.id, session.prNumber],
     queryFn: () => rpc.githubPr(session.id),
     enabled: session.prNumber != null
   })
@@ -244,7 +250,11 @@ export function useReview(session: Session): ReviewState {
           // The new threads only exist on GitHub until the PR is refetched, and
           // this key is shared with the Pull Request tab — so both panes pick
           // them up from one invalidation.
-          .then(() => qc.invalidateQueries({ queryKey: ["github", "pr", session.id] }))
+          .then(() =>
+            qc.invalidateQueries({
+              queryKey: ["github", "pr", session.id, session.prNumber]
+            })
+          )
           .catch(() => {})
       }
       setDrafts([])

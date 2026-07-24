@@ -10,13 +10,16 @@ let routed: Record<string, ReadonlySet<string>> = {}
 const listeners = new Set<() => void>()
 const EMPTY: ReadonlySet<string> = new Set()
 
-/** Record that `entryId` has been routed to `sessionId`'s agent; notifies subscribers. */
-export const markRouted = (sessionId: string, entryId: string): void => {
-  const current = routed[sessionId] ?? EMPTY
+const scope = (sessionId: string, prNumber: number) => `${sessionId}:${prNumber}`
+
+/** Record that `entryId` has been routed for this session + PR scope. */
+export const markRouted = (sessionId: string, prNumber: number, entryId: string): void => {
+  const key = scope(sessionId, prNumber)
+  const current = routed[key] ?? EMPTY
   if (current.has(entryId)) return
   const next = new Set(current)
   next.add(entryId)
-  routed = { ...routed, [sessionId]: next }
+  routed = { ...routed, [key]: next }
   for (const listener of listeners) listener()
 }
 
@@ -26,9 +29,14 @@ const subscribe = (listener: () => void): (() => void) => {
 }
 
 /** The set of entry ids already routed for a session (reactive). */
-export const useRoutedEntries = (sessionId: string): ReadonlySet<string> =>
-  useSyncExternalStore(
+export const useRoutedEntries = (
+  sessionId: string,
+  prNumber: number | null
+): ReadonlySet<string> => {
+  const key = prNumber === null ? null : scope(sessionId, prNumber)
+  return useSyncExternalStore(
     subscribe,
-    () => routed[sessionId] ?? EMPTY,
-    () => routed[sessionId] ?? EMPTY
+    () => (key === null ? EMPTY : (routed[key] ?? EMPTY)),
+    () => (key === null ? EMPTY : (routed[key] ?? EMPTY))
   )
+}

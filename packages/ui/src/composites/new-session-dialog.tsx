@@ -24,6 +24,7 @@ import {
   DialogTitle
 } from "../components/dialog.js"
 import { Eyebrow } from "../components/eyebrow.js"
+import { Input } from "../components/input.js"
 import { RepoPicker } from "./repo-picker.js"
 import {
   Select,
@@ -163,6 +164,7 @@ export function NewSessionDialog({
   const {
     mode,
     repoPath,
+    title,
     cli,
     base,
     branches,
@@ -285,7 +287,19 @@ export function NewSessionDialog({
               />
             </div>
 
-            {/* No title field — the agent auto-names each session from the work. */}
+            {mode === "blank" && (
+              <div className="flex flex-col gap-1.5">
+                <Eyebrow>Name</Eyebrow>
+                <Input
+                  value={title}
+                  placeholder="Leave blank for agent naming"
+                  onChange={(event) =>
+                    send({ type: "SET_TITLE", title: event.currentTarget.value })
+                  }
+                  autoFocus
+                />
+              </div>
+            )}
 
             {/*
               No harness picker. It asked the same question every time and got

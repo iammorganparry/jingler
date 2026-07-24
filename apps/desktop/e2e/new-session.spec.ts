@@ -22,32 +22,26 @@ test("creating a session forks a real worktree and persists it", async ({ launch
   const noHarness = await window.getByText("No coding CLI found", { exact: false }).count()
   test.skip(noHarness > 0, "no coding CLI installed on this host")
 
-  // There is no title field anymore — the agent auto-names the session. Repo,
-  // harness and base branch all default from discovery, so Create is enabled with
-  // no manual input. (Regression guard: the base-branch default used to be cleared
-  // by a spurious Radix Select change.)
+  // Naming is optional. Supplying one pins the title and creates the accurate
+  // readable branch immediately; blank sessions take the agent-naming path.
+  await window.getByPlaceholder("Leave blank for agent naming").fill("Fix token refresh")
   const create = window.getByRole("button", { name: "Create" })
   await expect(create).toBeEnabled()
   await create.click()
 
-  // The new session appears in the sidebar as "Untitled session" (until the agent
-  // names it after the first turn).
-  await expect(window.getByText("Untitled session")).toBeVisible()
+  await expect(window.getByText("Fix token refresh")).toBeVisible()
 
-  // Real outcome: the session was persisted with an auto title + a unique,
-  // stamp-suffixed branch/worktree.
+  // Real outcome: the trimmed operator title is pinned and its branch is
+  // readable immediately.
   const persisted = JSON.parse(readFileSync(join(home, "starbase", "sessions.json"), "utf-8"))
   expect(persisted).toHaveLength(1)
   expect(persisted[0]).toMatchObject({
-    title: "Untitled session",
+    title: "Fix token refresh",
     repo: "widget",
     status: "idle",
-    autoTitle: true
+    autoTitle: false
   })
-  // Untitled sessions get a friendly Docker-style "<adjective>-<name>" slug
-  // (e.g. "gentle-maxwell"), not "untitled-session-<stamp>".
-  expect(persisted[0].branch).toMatch(/^starbase\/[a-z]+-[a-z]+$/)
-  expect(persisted[0].branch).not.toContain("untitled")
+  expect(persisted[0].branch).toMatch(/^starbase\/fix-token-refresh-[a-z0-9]+$/)
 
   // Real outcome: that branch + worktree actually exist on disk.
   expect(existsSync(persisted[0].worktreePath)).toBe(true)

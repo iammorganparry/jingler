@@ -335,19 +335,27 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   const connected = ghStatus.available && ghStatus.authenticated
   const autoDetect = connected && (githubConfig?.autoDetectPr ?? true)
 
-  // Opportunistically link PRs already open on a session's branch, so the sidebar
-  // badge + PR/Code Review tabs light up without opening the PR tab first. Runs
-  // once per session id (guarded), best-effort, only when GitHub auto-detect is on.
-  const detectedRef = useRef<Set<string>>(new Set())
+  // Continuously resolve the OPEN PR on every live worktree branch. Sessions can
+  // outlive a merged PR and open a replacement, so linked sessions stay in the
+  // sweep. A null/error never clears the existing link.
   useEffect(() => {
     if (!autoDetect) return
-    for (const s of sessions) {
-      if (s.prNumber != null || !s.worktreePath || detectedRef.current.has(s.id)) continue
-      detectedRef.current.add(s.id)
-      void rpc.githubDetectPr(s.id).then((n) => {
-        if (n != null) send({ type: "SESSION_PR_LINKED", sessionId: s.id, prNumber: n })
-      })
+    const detect = () => {
+      for (const session of sessions) {
+        if (!session.worktreePath || session.archived) continue
+        void rpc
+          .githubDetectPr(session.id)
+          .then((prNumber) => {
+            if (prNumber !== null && prNumber !== session.prNumber) {
+              send({ type: "SESSION_PR_LINKED", sessionId: session.id, prNumber })
+            }
+          })
+          .catch(() => {})
+      }
     }
+    detect()
+    const timer = window.setInterval(detect, ARCHIVE_POLL_MS)
+    return () => window.clearInterval(timer)
   }, [autoDetect, sessions, send])
 
   // When a session's live run COMPLETES (its live status goes present → absent),
@@ -377,7 +385,6 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     for (const id of completed) {
       void rpc.githubDetectPr(id).then((n) => {
         if (n != null) {
-          detectedRef.current.add(id) // keep the once-per-session guard in sync
           send({ type: "SESSION_PR_LINKED", sessionId: id, prNumber: n })
         }
       })
@@ -499,7 +506,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   // appear without the user having to click Review.
   useEffect(() => {
     for (const { id, review } of autoReviews) {
-      qc.setQueryData(reviewQueryKey(id), review)
+      qc.setQueryData(reviewQueryKey(id, review.prNumber), review)
     }
   }, [autoReviews, qc])
 
@@ -688,10 +695,20 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       )}
       renderIssue={(session) => <IssuePane session={session} onUnlink={unlinkIssue} />}
       renderReview={(session, ctx) => (
-        <ReviewPane session={session} connected={connected} onConnectGithub={ctx.onConnectGithub} />
+        <ReviewPane
+          key={`${session.id}:${session.prNumber ?? "none"}`}
+          session={session}
+          connected={connected}
+          onConnectGithub={ctx.onConnectGithub}
+        />
       )}
       renderCode={(session, ctx) => (
-        <ReviewPane session={session} connected={connected} onConnectGithub={ctx.onConnectGithub} />
+        <ReviewPane
+          key={`${session.id}:${session.prNumber ?? "none"}`}
+          session={session}
+          connected={connected}
+          onConnectGithub={ctx.onConnectGithub}
+        />
       )}
       terminalDockSide={termDock.side}
       renderTerminalDock={(session) => (

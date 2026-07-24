@@ -753,8 +753,23 @@ export class GhService extends Effect.Service<GhService>()(
       prForWorktree: (
         cwd: string
       ): Effect.Effect<number | null, never, CommandExecutor.CommandExecutor> =>
-        ghJson(cwd, ["pr", "view", "--json", "number"]).pipe(
-          Effect.map((raw) => num(rec(raw).number))
+        runString("git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD").pipe(
+          Effect.flatMap((branch) => {
+            const live = branch?.trim()
+            if (!live || live === "HEAD") return Effect.succeed(null)
+            return ghJson(cwd, [
+              "pr",
+              "list",
+              "--state",
+              "open",
+              "--head",
+              live,
+              "--json",
+              "number",
+              "--limit",
+              "1"
+            ]).pipe(Effect.map((raw) => num(arr(raw)[0]?.number ?? null)))
+          })
         ),
 
       /**

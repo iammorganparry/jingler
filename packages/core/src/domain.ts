@@ -1174,8 +1174,8 @@ export const CreateSessionInput = Schema.Struct({
   repoName: Schema.String,
   /**
    * Optional session title. When omitted/blank the session is auto-named by the
-   * agent (and the branch slug falls back to "untitled-session-<stamp>"); when
-   * provided it seeds the title (pinned) and a readable branch slug.
+   * agent from a detached fresh-base worktree; when provided it seeds the title
+   * (pinned) and creates a readable branch immediately.
    */
   title: Schema.optional(Schema.String),
   /** Which CLI will drive the session. */

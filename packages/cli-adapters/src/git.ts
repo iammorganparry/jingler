@@ -177,11 +177,9 @@ export class GitService extends Effect.Service<GitService>()(
         })
 
       /**
-       * Add a worktree with a DETACHED HEAD at `baseBranch` (no new branch). Used
-       * as the landing pad for a "session from PR" flow: the caller then runs
-       * `gh pr checkout <n>` inside it, which switches this worktree onto the PR's
-       * head branch. Detaching first avoids a name collision between
-       * `git worktree add -b` and the PR head branch it's about to check out.
+       * Add a worktree with a DETACHED HEAD at the fresh base tip (no new
+       * branch). Used both for unnamed sessions awaiting their generated task
+       * name and as the landing pad for a "session from PR" flow.
        */
       const createDetachedWorktree = (
         input: CreateWorktreeInput
@@ -189,12 +187,14 @@ export class GitService extends Effect.Service<GitService>()(
         Effect.gen(function* () {
           const worktreePath = yield* resolveWorktreePath(input)
           yield* reclaimStaleWorktree(input.repoPath, worktreePath)
+          yield* fetchBase(input.repoPath, input.baseBranch)
+          const startPoint = yield* resolveStartPoint(input.repoPath, input.baseBranch)
           yield* runGit(input.repoPath, [
             "worktree",
             "add",
             "--detach",
             worktreePath,
-            input.baseBranch
+            startPoint
           ])
           // `branch` is a placeholder — the caller overwrites it with the real
           // head branch after `gh pr checkout` moves this worktree's HEAD.
@@ -213,6 +213,32 @@ export class GitService extends Effect.Service<GitService>()(
         gitLine(cwd, "rev-parse", "--abbrev-ref", "HEAD").pipe(
           Effect.map((b) => (b === null || b === "HEAD" ? null : b))
         )
+
+      /**
+       * Name a detached session from its task without moving its HEAD.
+       *
+       * `git switch -c` creates the ref at the current detached commit and keeps
+       * both uncommitted changes and detached commits in place. Existing names
+       * receive a deterministic numeric suffix.
+       */
+      const createTaskBranch = (
+        cwd: string,
+        slug: string
+      ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
+        Effect.gen(function* () {
+          for (let suffix = 1; ; suffix += 1) {
+            const branch = `starbase/${slug}${suffix === 1 ? "" : `-${suffix}`}`
+            const existing = yield* gitLine(
+              cwd,
+              "show-ref",
+              "--verify",
+              `refs/heads/${branch}`
+            )
+            if (existing !== null) continue
+            yield* runGit(cwd, ["switch", "-c", branch])
+            return branch
+          }
+        })
 
       /**
        * Check out an existing local `branch` into the worktree at `cwd`, even
@@ -370,6 +396,7 @@ export class GitService extends Effect.Service<GitService>()(
         createWorktree,
         createDetachedWorktree,
         branchAt,
+        createTaskBranch,
         checkoutBranch,
         commitsSince,
         removeWorktreeAt

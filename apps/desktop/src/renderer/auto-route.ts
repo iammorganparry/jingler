@@ -29,7 +29,7 @@ import { agentBatchPrompt, reviewQueryKey, routedKey } from "./review-routing.js
  *     the Code Review tab mounted on one session — or StrictMode double-invoking
  *     — would both see `routedAt: null` and both send.
  *  2. **A stale review object, minutes later.** The stamp is written with
- *     `setQueryData(reviewQueryKey(id))`, but App.tsx's auto-review poll caches
+ *     `setQueryData(reviewQueryKey(id, prNumber))`, but App.tsx's auto-review poll caches
  *     its own copy under `["auto-review", id, prNumber]` — a DIFFERENT key that
  *     nothing backfills. That copy keeps `routedAt: null` until its next refetch
  *     (up to a minute), and TWO independent things re-fire the routing effect
@@ -81,12 +81,12 @@ export const routeReviewToAgent = async (
    * Cheap, total, and checked BEFORE the claim is staked, so a mispaired call
    * neither sends nor burns the guard key for the legitimate pairing.
    */
-  if (review.sessionId !== session.id) return
+  if (review.sessionId !== session.id || review.prNumber !== session.prNumber) return
 
   // Already routed for this head — the whole point of persisting the stamp.
   if (review.routedAt !== null) return
 
-  const guard = `${session.id}:${review.headSha}`
+  const guard = `${session.id}:${review.prNumber}:${review.headSha}`
   if (claimed.has(guard)) return
   claimed.add(guard)
 
@@ -109,7 +109,11 @@ export const routeReviewToAgent = async (
       // positional (`f1`, `f2`), so a bare id would make the NEXT review's `f1`
       // render as already-sent the moment it arrived.
       for (const finding of toAgent) {
-        markRouted(session.id, routedKey(review.headSha, finding.id))
+        markRouted(
+          session.id,
+          review.prNumber,
+          routedKey(review.prNumber, review.headSha, finding.id)
+        )
       }
     }
 
@@ -119,7 +123,7 @@ export const routeReviewToAgent = async (
     // the user has already seen resolved.
     const routedAt = await rpc.reviewMarkRouted(session.id)
     if (routedAt !== null) {
-      qc.setQueryData(reviewQueryKey(session.id), { ...review, routedAt })
+      qc.setQueryData(reviewQueryKey(session.id, review.prNumber), { ...review, routedAt })
     }
   } catch {
     /**

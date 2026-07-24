@@ -26,12 +26,13 @@ vi.mock("./conversation-registry.js", () => ({
 }))
 
 vi.mock("./routed-store.js", () => ({
-  markRouted: (_sessionId: string, key: string) => markRoutedCalls.push(key)
+  markRouted: (_sessionId: string, _prNumber: number, key: string) =>
+    markRoutedCalls.push(key)
 }))
 
 const { routeReviewToAgent } = await import("./auto-route.js")
 
-const session = { id: "s1", title: "Refactor auth" } as unknown as Session
+const session = { id: "s1", title: "Refactor auth", prNumber: 7 } as unknown as Session
 
 const finding = (id: string, severity: ReviewSeverity): ReviewFinding => ({
   id,
@@ -81,6 +82,12 @@ describe("routeReviewToAgent", () => {
   it("does nothing for a review already stamped routed", async () => {
     await routeReviewToAgent(session, review({ headSha: "h-two", routedAt: "2026-07-17T09:00:00.000Z" }), qc)
     expect(sent).toHaveLength(0)
+  })
+
+  it("does nothing for a stored review from a previous PR", async () => {
+    await routeReviewToAgent(session, review({ headSha: "h-old-pr", prNumber: 6 }), qc)
+    expect(sent).toHaveLength(0)
+    expect(markRoutedCalls).toHaveLength(0)
   })
 
   /**
@@ -182,7 +189,7 @@ describe("routeReviewToAgent", () => {
 
   it("latches each routed finding's UI state, namespaced by head SHA", async () => {
     await routeReviewToAgent(session, review({ headSha: "h-nine" }), qc)
-    expect(markRoutedCalls).toStrictEqual(["review:h-nine:f1"])
+    expect(markRoutedCalls).toStrictEqual(["review:7:h-nine:f1"])
   })
 
   /**

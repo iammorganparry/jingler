@@ -313,14 +313,41 @@ describe("GhService pull-request reads", () => {
     expect(bad._tag === "Success" && bad.value).toBe(null)
   })
 
-  it("prForWorktree resolves the current branch's PR via `gh pr view`", async () => {
-    const hit = await providePr(GhService.prForWorktree("/wt"), (cmd, args) =>
-      cmd === "gh" && args[1] === "view" ? { stdout: '{"number":482}' } : undefined
-    )
+  it("prForWorktree resolves only an open PR for the live branch", async () => {
+    const calls: ReadonlyArray<string>[] = []
+    const hit = await providePr(GhService.prForWorktree("/wt"), (cmd, args) => {
+      calls.push([cmd, ...args])
+      if (cmd === "git") return { stdout: "feat/oauth" }
+      if (cmd === "gh") return { stdout: '[{"number":482}]' }
+      return undefined
+    })
     expect(hit._tag === "Success" && hit.value).toBe(482)
+    expect(calls).toContainEqual([
+      "gh",
+      "pr",
+      "list",
+      "--state",
+      "open",
+      "--head",
+      "feat/oauth",
+      "--json",
+      "number",
+      "--limit",
+      "1"
+    ])
 
-    const miss = await providePr(GhService.prForWorktree("/wt"), () => ({ exitCode: 1, stderr: "no pr" }))
+    const miss = await providePr(GhService.prForWorktree("/wt"), (cmd) =>
+      cmd === "git" ? { stdout: "feat/oauth" } : { stdout: "[]" }
+    )
     expect(miss._tag === "Success" && miss.value).toBe(null)
+
+    let ghCalled = false
+    const detached = await providePr(GhService.prForWorktree("/wt"), (cmd) => {
+      if (cmd === "gh") ghCalled = true
+      return { stdout: "HEAD" }
+    })
+    expect(detached._tag === "Success" && detached.value).toBe(null)
+    expect(ghCalled).toBe(false)
   })
 
   it("prState maps MERGED / CLOSED / OPEN and folds anything else to null", async () => {

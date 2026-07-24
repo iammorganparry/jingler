@@ -242,7 +242,7 @@ describe("SessionStore", () => {
     if (exit._tag === "Success") expect(exit.value.branch).toMatch(/^starbase\/session-[a-z0-9]+$/)
   })
 
-  it("auto-names a session with no title (Untitled + autoTitle true + friendly Docker-style slug)", async () => {
+  it("stages an untitled session in a detached friendly-named worktree", async () => {
     const exit = await runExit(
       SessionStore.create(input({ title: undefined })).pipe(Effect.provide(services)),
       temp.layer
@@ -251,12 +251,15 @@ describe("SessionStore", () => {
     if (exit._tag !== "Success") return
     expect(exit.value.title).toBe("Untitled session")
     expect(exit.value.autoTitle).toBe(true)
-    // A friendly "<adjective>-<name>" worktree/branch, not "untitled-session-<id>".
-    expect(exit.value.branch).toMatch(/^starbase\/[a-z]+-[a-z]+$/)
-    expect(exit.value.branch).not.toContain("untitled")
+    expect(basename(exit.value.worktreePath ?? "")).toMatch(/^[a-z]+-[a-z]+$/)
+    const live = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: exit.value.worktreePath,
+      encoding: "utf-8"
+    }).trim()
+    expect(live).toBe("HEAD")
   })
 
-  it("gives two blank sessions DISTINCT branches (no starbase/session collision)", async () => {
+  it("gives two blank sessions distinct worktrees while both remain detached", async () => {
     const created = await runExit(
       Effect.gen(function* () {
         const a = yield* SessionStore.create(input({ title: undefined }))
@@ -268,9 +271,16 @@ describe("SessionStore", () => {
     expect(created._tag).toBe("Success")
     if (created._tag !== "Success") return
     const [a, b] = created.value
-    expect(a.branch).not.toBe(b.branch)
     expect(a.id).not.toBe(b.id)
     expect(a.worktreePath).not.toBe(b.worktreePath)
+    for (const session of [a, b]) {
+      expect(
+        execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+          cwd: session.worktreePath,
+          encoding: "utf-8"
+        }).trim()
+      ).toBe("HEAD")
+    }
   })
 
   it("setTitle changes only the title; renameTitle also pins it — branch/id/worktree stay put", async () => {
@@ -625,7 +635,9 @@ describe("SessionStore", () => {
     // Sequence: detached worktree → gh pr checkout → resolve the head branch.
     const detach = calls.findIndex((c) => c.includes("worktree add --detach"))
     const checkout = calls.findIndex((c) => c.startsWith("gh pr checkout 482"))
-    const revparse = calls.findIndex((c) => c.includes("rev-parse"))
+    const revparse = calls.findIndex(
+      (c, index) => index > checkout && c.includes("rev-parse")
+    )
     expect(detach).toBeGreaterThanOrEqual(0)
     expect(checkout).toBeGreaterThan(detach)
     expect(revparse).toBeGreaterThan(checkout)

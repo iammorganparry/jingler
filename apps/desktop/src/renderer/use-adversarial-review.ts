@@ -65,7 +65,7 @@ export function useAdversarialReview(
   const hasPr = session.prNumber != null
 
   const query = useQuery({
-    queryKey: reviewQueryKey(session.id),
+    queryKey: reviewQueryKey(session.id, session.prNumber),
     queryFn: () => rpc.reviewGet(session.id),
     // Nothing to read until there's a PR to have reviewed.
     enabled: hasPr && connected,
@@ -81,7 +81,7 @@ export function useAdversarialReview(
   const runMutation = useMutation({
     mutationFn: () => rpc.reviewRun(session.id, true),
     onSuccess: (review) => {
-      qc.setQueryData(reviewQueryKey(session.id), review)
+      qc.setQueryData(reviewQueryKey(session.id, session.prNumber), review)
       // Route here as well as from the auto-review poll: a manual run reaches
       // this callback directly, and the poll is only mounted when auto-review is
       // switched ON. Without this, clicking "Review again" with the toggle off
@@ -141,7 +141,9 @@ export function useAdversarialReview(
     void rpc
       .reviewReconcile(session.id)
       .then((next) => {
-        if (!cancelled && next !== null) qc.setQueryData(reviewQueryKey(session.id), next)
+        if (!cancelled && next !== null) {
+          qc.setQueryData(reviewQueryKey(session.id, session.prNumber), next)
+        }
       })
       // Best-effort: attribution is a nicety layered over a review that is already
       // readable, so a failure must leave the pane exactly as it was.
@@ -149,9 +151,9 @@ export function useAdversarialReview(
     return () => {
       cancelled = true
     }
-  }, [agentBusy, hasPr, connected, session.id, qc])
+  }, [agentBusy, hasPr, connected, session.id, session.prNumber, qc])
 
-  const routedKeys = useRoutedEntries(session.id)
+  const routedKeys = useRoutedEntries(session.id, session.prNumber)
 
   // Resolve the namespaced keys down to plain ids for THIS review, so the UI
   // never has to reconstruct a key format it doesn't own.
@@ -165,7 +167,11 @@ export function useAdversarialReview(
       const finding = review?.findings.find((f) => f.id === findingId)
       if (!finding || review === null) return
       getConversationActor(session).send({ type: "SEND", text: findingPrompt(finding) })
-      markRouted(session.id, routedKey(review.headSha, findingId))
+      markRouted(
+        session.id,
+        review.prNumber,
+        routedKey(review.prNumber, review.headSha, findingId)
+      )
     },
     [review, session]
   )
