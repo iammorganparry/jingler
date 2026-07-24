@@ -27,13 +27,22 @@ export type ProviderModels = Schema.Schema.Type<typeof ProviderModels>
  */
 export const FALLBACK_MODELS: Record<CliKind, ReadonlyArray<ModelOption>> = {
   claude: [
-    { id: "opus", label: "opus" },
-    { id: "sonnet", label: "sonnet" },
-    { id: "haiku", label: "haiku" },
+    // Claude Code's own model picker is the source for these ids. Keep the
+    // moving `opus` alias first: `defaultModel` uses index 0, and existing
+    // sessions expect the default to follow Claude Code's current Opus release.
+    { id: "opus", label: "Opus 5" },
+    { id: "claude-opus-4-8", label: "Opus 4.8" },
+    { id: "claude-opus-4-8[1m]", label: "Opus 4.8 1M" },
+    { id: "claude-opus-4-7[1m]", label: "Opus 4.7 1M" },
+    { id: "claude-opus-4-6[1m]", label: "Opus 4.6 1M" },
+    { id: "sonnet[1m]", label: "Sonnet 5 1M" },
+    { id: "claude-sonnet-4-6[1m]", label: "Sonnet 4.6 1M" },
+    { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
+    { id: "haiku", label: "Haiku 4.5" },
     // Fable is the adversarial reviewer's default (see `DEFAULT_REVIEW_MODEL`).
     // It is deliberately NOT first: `defaultModel` takes index 0, so promoting it
     // would silently switch every new *session* onto the priciest tier.
-    { id: "claude-fable-5", label: "fable" }
+    { id: "claude-fable-5", label: "Fable 5" }
   ],
   // Codex's real catalogue comes from the CLI itself (`codex app-server` →
   // `model/list`), which is authoritative and needs no API key. These are only

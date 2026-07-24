@@ -75,11 +75,16 @@ const WINDOW_PREFIXES: Partial<Record<CliKind, ReadonlyArray<readonly [string, n
     // so every legacy release family below must beat these current aliases.
     ["opus-4-5", 1_000_000],
     ["opus-4.5", 1_000_000],
+    ["opus-4-6[1m]", 1_000_000],
+    ["opus-4-7[1m]", 1_000_000],
+    ["opus-4-8[1m]", 1_000_000],
     ["opus-4-8", 1_000_000],
     ["opus-4.8", 1_000_000],
     ["opus-5", 1_000_000],
+    ["sonnet-4-6[1m]", 1_000_000],
     ["sonnet-4-5", 1_000_000],
     ["sonnet-4.5", 1_000_000],
+    ["sonnet[1m]", 1_000_000],
     ["sonnet-5", 1_000_000],
     // Older Claude generations and the 4.0/4.1 release line are 200k. Some
     // harnesses omit `claude-` from the id, so both shapes have explicit floors.
