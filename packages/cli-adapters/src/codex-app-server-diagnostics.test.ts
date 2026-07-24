@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, describe, expect, expectTypeOf, it } from "vitest"
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest"
 import {
   boundedCodexStderr,
   type CodexAppServerDiagnosticFields,
@@ -116,12 +116,13 @@ describe("Codex diagnostic persistence", () => {
       requestId: 3
     })
     diagnostics?.close()
-    await new Promise((resolve) => setTimeout(resolve, 10))
 
-    const lines = readFileSync(join(directory, "codex-app-server-2026-07-24.jsonl"), "utf8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line))
+    const lines = await vi.waitFor(() =>
+      readFileSync(join(directory, "codex-app-server-2026-07-24.jsonl"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+    )
     expect(lines).toStrictEqual([
       {
         timestamp: "2026-07-24T12:00:00.000Z",
