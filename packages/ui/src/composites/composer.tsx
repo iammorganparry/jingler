@@ -7,7 +7,15 @@ import type {
   ReasoningEffort,
   Skill
 } from "@starbase/core"
-import { Brain, ImagePlus, Plus, WandSparkles } from "lucide-react"
+import {
+  Content as DropdownMenuContent,
+  Item as DropdownMenuItem,
+  Portal as DropdownMenuPortal,
+  Root as DropdownMenuRoot,
+  Separator as DropdownMenuSeparator,
+  Trigger as DropdownMenuTrigger
+} from "@radix-ui/react-dropdown-menu"
+import { Brain, GitBranch, ImagePlus, Plug, Plus, Sparkles, WandSparkles } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { modeAccent } from "../tokens.js"
@@ -75,6 +83,7 @@ const REASONING_OPTIONS: ReadonlyArray<ChipOption<ReasoningChoice>> = [
 ]
 
 type MenuState = { kind: "slash" | "mention"; query: string; start: number }
+const TRAILING_SPACE = /\s$/
 
 /** The trigger token (`/…` or `@…`) immediately before the caret, if any. */
 const activeToken = (value: string, caret: number): MenuState | null => {
@@ -102,6 +111,7 @@ export function Composer({
   files = [],
   onSend,
   onStop,
+  branch,
   cli,
   model,
   catalog = [],
@@ -134,6 +144,8 @@ export function Composer({
   onSend?: (text: string, images?: ReadonlyArray<Attachment>) => void
   /** Halt the running agent. Given one, the button becomes Stop while `busy`. */
   onStop?: () => void
+  /** Git branch backing this session's worktree. */
+  branch?: string
   /** Seed the draft once on mount (e.g. a task prefilled from a linked issue). */
   initialValue?: string
   /**
@@ -374,6 +386,15 @@ export function Composer({
     setMenu(null)
   }
 
+  const openSkills = () => {
+    const separator = value.length > 0 && !TRAILING_SPACE.test(value) ? " " : ""
+    const next = `${value}${separator}/`
+    setValue(next)
+    setMenu({ kind: "slash", query: "", start: next.length - 1 })
+    setActiveIndex(0)
+    requestAnimationFrame(() => ref.current?.focus())
+  }
+
   // Pasting an image (e.g. a screenshot) attaches it instead of dropping a blob.
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"))
@@ -564,23 +585,88 @@ export function Composer({
           a composer toolbar is a set of unrelated controls, not a sequence, so a
           second line costs nothing but 26px of height.
         */}
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
-{/* Enabled in Gigaplan too: `Plan.adversarial` now carries `images`,
-              and every role's SessionSpec gets them, so a screenshot attached
-              here really does reach the round. It was disabled while that
-              payload was brief-only — accepting an attachment the round would
-              silently drop reads as "the model saw my screenshot" when it did
-              not. The rule is the channel, not the mode. */}
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={paused}
-            aria-label="Attach an image"
-            title="Attach an image"
-            className="flex min-h-10 min-w-10 flex-none items-center justify-center rounded-md text-cyan outline-none transition-colors hover:bg-surface disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ImagePlus size={14} />
-          </button>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-0.5 gap-y-1 [&>button]:min-h-8">
+          <DropdownMenuRoot>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Composer menu"
+                title="Add context"
+                disabled={paused}
+                className="flex size-8 flex-none items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-surface hover:text-text-bright disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Plus size={17} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuPortal>
+              <DropdownMenuContent
+                side="top"
+                align="start"
+                sideOffset={7}
+                collisionPadding={8}
+                className="z-50 flex min-w-[220px] flex-col gap-0.5 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl"
+              >
+                <DropdownMenuItem
+                  onSelect={() => fileInputRef.current?.click()}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-[12.5px] text-text-body outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
+                >
+                  <ImagePlus size={15} className="flex-none text-muted-foreground" />
+                  <span className="flex-1">Add image</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={skills.length === 0}
+                  onSelect={openSkills}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-[12.5px] text-text-body outline-none data-[disabled]:cursor-default data-[disabled]:opacity-40 data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
+                >
+                  <Sparkles size={15} className="flex-none text-muted-foreground" />
+                  <span className="flex-1">Skills</span>
+                  {skills.length > 0 && (
+                    <span className="font-mono text-[10.5px] text-dim">{skills.length}</span>
+                  )}
+                </DropdownMenuItem>
+                {onOpenMcp && (
+                  <>
+                    <DropdownMenuSeparator className="my-1 h-px bg-line" />
+                    <DropdownMenuItem
+                      onSelect={onOpenMcp}
+                      className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-[12.5px] text-text-body outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
+                    >
+                      <Plug size={15} className="flex-none text-muted-foreground" />
+                      <span className="flex-1">MCP connectors</span>
+                      {mcp !== undefined && (
+                        <span className="flex items-center gap-1.5 font-mono text-[10.5px] text-dim">
+                          <StatusDot
+                            tone={
+                              !mcp.probed
+                                ? "bg-line-strong"
+                                : mcp.failed > 0
+                                  ? "bg-yellow"
+                                  : "bg-green"
+                            }
+                            size={6}
+                            glow={false}
+                          />
+                          {mcp.failed > 0 ? `${mcp.failed}/${mcp.total} down` : mcp.total}
+                        </span>
+                      )}
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenuPortal>
+          </DropdownMenuRoot>
+          {branch && (
+            <span
+              title={`Working branch: ${branch}`}
+              className={cn(
+                "flex h-8 min-w-0 flex-none items-center gap-1 rounded-md px-1.5 font-mono text-[10.5px] text-dim",
+                roomy ? "max-w-[180px]" : "max-w-[100px]"
+              )}
+            >
+              <GitBranch size={12} className="flex-none" />
+              <span className="truncate">{branch}</span>
+            </span>
+          )}
           {/* Gone while Gigaplan is driving: it assigns a model per step from
               the plan it had reviewed, so a model chip here would be a control
               that is silently overridden. It returns the moment the mode
@@ -644,36 +730,6 @@ export function Composer({
             icon={<Brain size={13} className="flex-none" />}
             className="max-w-[112px]"
           />
-          {mcp !== undefined && mcp.total > 0 && (
-            <button
-              type="button"
-              onClick={onOpenMcp}
-              // The NAME stays constant while the label shortens — same rule the
-              // attach button above states: what a control IS shouldn't change
-              // with what it's currently reporting. Keeping it fixed is also
-              // what lets a by-name lookup find this chip at any width.
-              title="MCP server status"
-              aria-label="MCP server status"
-              className="inline-flex min-h-10 flex-none items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 text-[11px] text-muted-foreground outline-none transition-colors hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {/* Neutral until a probe has actually run — a green dot before we've
-                  checked anything would claim a health we don't know. */}
-              <StatusDot
-                tone={!mcp.probed ? "bg-line-strong" : mcp.failed > 0 ? "bg-yellow" : "bg-green"}
-                size={6}
-                glow={false}
-              />
-              {/* Narrow drops the prose, not the information: "1/3 MCP" still
-                  says how many are down, and the yellow dot beside it still says
-                  that some are. Only the eight characters of " of " and " down"
-                  go, which is the difference between fitting and wrapping. */}
-              {mcp.probed && mcp.failed > 0
-                ? roomy
-                  ? `${mcp.failed} of ${mcp.total} MCP down`
-                  : `${mcp.failed}/${mcp.total} MCP`
-                : `${mcp.total} MCP`}
-            </button>
-          )}
           {orchestrated && onHandoffPlan && (
             <Button
               variant="ghost"

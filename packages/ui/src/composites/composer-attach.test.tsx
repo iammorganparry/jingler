@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { Composer } from "./composer.js"
 
@@ -19,30 +19,38 @@ import { Composer } from "./composer.js"
  */
 afterEach(cleanup)
 
+const IMAGES_NOT_SENT = /images aren't sent/i
+
+const attachmentItem = () => {
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Composer menu" }), {
+    button: 0,
+    ctrlKey: false
+  })
+  return screen.getByRole("menuitem", { name: "Add image" })
+}
+
 describe("Composer attachments in Gigaplan", () => {
   it("allows attaching — the round carries images now", () => {
     render(<Composer mode="gigaplan" />)
-    const attach = screen.getByLabelText("Attach an image")
-    expect((attach as HTMLButtonElement).disabled).toBe(false)
+    expect(attachmentItem().getAttribute("data-disabled")).toBeNull()
   })
 
   it("keeps one stable accessible name, so it can't answer to another control's", () => {
     // Regression: the explanation used to BE the name, which made this button
     // match a by-name lookup for the Gigaplan mode chip.
     render(<Composer mode="gigaplan" />)
-    expect(screen.getByLabelText("Attach an image")).toBeTruthy()
+    expect(attachmentItem()).toBeTruthy()
   })
 
   it("says the same thing it says everywhere else — no mode-specific excuse", () => {
     render(<Composer mode="gigaplan" />)
-    expect(screen.getByTitle("Attach an image")).toBeTruthy()
-    expect(screen.queryByTitle(/images aren't sent/i)).toBe(null)
+    expect(attachmentItem()).toBeTruthy()
+    expect(screen.queryByTitle(IMAGES_NOT_SENT)).toBe(null)
   })
 
   it("leaves every other mode alone", () => {
     render(<Composer mode="accept-edits" />)
-    const attach = screen.getByTitle("Attach an image")
-    expect((attach as HTMLButtonElement).disabled).toBe(false)
+    expect(attachmentItem().getAttribute("data-disabled")).toBeNull()
   })
 
   it("labels Codex ask mode by its safe read-only behaviour", () => {

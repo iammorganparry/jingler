@@ -1,9 +1,11 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
 import { Composer } from "./composer.js"
 
 afterEach(cleanup)
+
+const MCP_ITEM = /MCP connectors/
 
 const renderAt = (width: number, props: Partial<React.ComponentProps<typeof Composer>> = {}) =>
   render(
@@ -11,6 +13,12 @@ const renderAt = (width: number, props: Partial<React.ComponentProps<typeof Comp
       <Composer {...props} />
     </WidthTierValue>
   )
+
+const openMenu = () =>
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Composer menu" }), {
+    button: 0,
+    ctrlKey: false
+  })
 
 describe("Composer at width", () => {
   it("keeps decorative keyboard hints out even when there is room", () => {
@@ -29,17 +37,20 @@ describe("Composer at width", () => {
     }
   })
 
-  it("shortens the MCP label without losing the failure count", () => {
-    renderAt(450, { mcp: { total: 3, failed: 1, probed: true } })
-    const chip = screen.getByTitle("MCP server status")
-    expect(chip.textContent).toContain("1/3")
-    expect(chip.textContent).not.toContain("down")
+  it("keeps MCP status in the menu without losing the failure count", () => {
+    renderAt(450, {
+      mcp: { total: 3, failed: 1, probed: true },
+      onOpenMcp: () => {}
+    })
+    openMenu()
+    expect(screen.getByRole("menuitem", { name: MCP_ITEM }).textContent).toContain("1/3 down")
   })
 
-  it("keeps the MCP chip findable by the same name at any width", () => {
-    // The NAME is constant while the label shortens — what a control IS must not
-    // change with what it currently reports.
-    renderAt(1200, { mcp: { total: 3, failed: 1, probed: true } })
-    expect(screen.getByTitle("MCP server status").textContent).toContain("1 of 3 MCP down")
+  it("keeps the composer menu findable by the same name at any width", () => {
+    for (const width of [1200, 450, 320]) {
+      cleanup()
+      renderAt(width)
+      expect(screen.getByRole("button", { name: "Composer menu" })).toBeTruthy()
+    }
   })
 })

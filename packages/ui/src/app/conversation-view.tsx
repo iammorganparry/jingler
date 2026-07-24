@@ -102,6 +102,8 @@ export interface ConversationViewProps {
   skills?: ReadonlyArray<Skill>
   files?: ReadonlyArray<string>
   paused?: boolean
+  /** Git branch backing the session's worktree, shown in the composer. */
+  branch?: string
   /** Current harness model id + every installed harness's models (model chip). */
   model?: string
   catalog?: ReadonlyArray<ProviderModels>
@@ -215,6 +217,7 @@ export function ConversationView({
   skills = [],
   files = [],
   paused = false,
+  branch,
   model,
   catalog = [],
   onSetHarness,
@@ -515,6 +518,7 @@ export function ConversationView({
                 skills={skills}
                 files={files}
                 paused={paused}
+                branch={branch}
                 busy={busy}
                 cli={cli}
                 model={model}

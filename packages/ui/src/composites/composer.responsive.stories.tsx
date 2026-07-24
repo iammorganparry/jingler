@@ -32,14 +32,16 @@ const loaded = {
   mode: "accept-edits" as const,
   onSetMode: () => {},
   allowPlan: true,
+  branch: "starbase/wandering-watt",
+  skills: [{ name: "/review", description: "Review current changes", source: "skill" as const }],
   mcp: { total: 3, failed: 1, probed: true },
   onOpenMcp: () => {},
   onSend: () => {}
 }
 
 /**
- * The toolbar at four widths, fully loaded: attach, model chip, mode chip, MCP
- * status, keyboard hint and Send.
+ * The toolbar at four widths, fully loaded: tools menu, branch, model, mode,
+ * thinking and Send.
  *
  * Eight controls in a row with no `flex-wrap` and — this is the actual bug —
  * not one `min-w-0` anywhere in the file. Two of them carry variable-length text
@@ -50,11 +52,9 @@ export const Ladder: Story = {
   render: () => (
     <div className="min-h-screen bg-canvas">
       <LookFor>
-        <strong className="text-text-bright">Look for:</strong> the <code>/ · @ · paste image</code>{" "}
-        hint disappearing below 780. The model chip truncating with an ellipsis (hover for the full
-        id) rather than growing. <code>1 of 3 MCP down</code> shortening to <code>1/3 MCP</code>.
-        Send staying full-size and never crossing the dashed outline — at the narrowest width the
-        row should WRAP and put Send on its own line.
+        <strong className="text-text-bright">Look for:</strong> the branch and model truncating with
+        an ellipsis rather than growing, compact gaps between controls, and Send staying full-size.
+        The <code>+</code> menu should contain images, skills, and MCP status at every width.
       </LookFor>
       <WidthLadder height={200} render={() => <Composer {...loaded} />} />
     </div>
@@ -67,8 +67,8 @@ export const Boundaries: Story = {
     <div className="min-h-screen bg-canvas">
       <LookFor>
         <strong className="text-text-bright">Look for:</strong> 780/779 is the only pair that
-        should differ — the hint goes, the model chip's cap drops from 220px to 128px, and the MCP
-        label shortens. Below that the row only wraps, which is CSS rather than a tier decision.
+        should differ — the branch and model caps shrink. Below that the row only wraps, which is
+        CSS rather than a tier decision.
       </LookFor>
       <WidthLadder widths={BOUNDARY_WIDTHS} height={210} render={() => <Composer {...loaded} />} />
     </div>
