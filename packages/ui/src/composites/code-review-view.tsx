@@ -313,7 +313,7 @@ export function CodeReviewView({
               title="Changed files"
               onClick={() => setSheet((s) => (s === "files" ? null : "files"))}
               className={cn(
-                "flex size-10 flex-none items-center justify-center rounded transition-colors hover:bg-hairline",
+                "flex size-6 flex-none items-center justify-center rounded transition-colors hover:bg-hairline",
                 sheet === "files" ? "text-blue" : "text-dim hover:text-text-bright"
               )}
             >
@@ -326,7 +326,7 @@ export function CodeReviewView({
               title="Review drafts"
               onClick={() => setSheet((s) => (s === "tray" ? null : "tray"))}
               className={cn(
-                "flex size-10 flex-none items-center justify-center rounded transition-colors hover:bg-hairline",
+                "flex size-6 flex-none items-center justify-center rounded transition-colors hover:bg-hairline",
                 sheet === "tray" ? "text-blue" : "text-dim hover:text-text-bright"
               )}
             >
