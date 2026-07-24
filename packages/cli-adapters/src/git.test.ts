@@ -256,6 +256,49 @@ describe("GitService.createWorktree", () => {
     expect(named._tag === "Success" && named.value).toBe("starbase/fix-token-refresh-2")
   })
 
+  it("reuses the live branch when task activation is triggered twice", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "double-retitle"))
+    const detached = await runExit(
+      GitService.createDetachedWorktree({
+        repoPath,
+        repoName: "double-retitle",
+        slug: "landing-pad",
+        baseBranch: "main"
+      }).pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+    if (detached._tag !== "Success") throw new Error("expected detached worktree")
+
+    const first = await runExit(
+      GitService.createTaskBranch(detached.value.path, "fix-token-refresh").pipe(
+        Effect.provide(GitService.Default)
+      ),
+      temp.layer
+    )
+    const second = await runExit(
+      GitService.createTaskBranch(detached.value.path, "fix-token-refresh").pipe(
+        Effect.provide(GitService.Default)
+      ),
+      temp.layer
+    )
+
+    expect(first._tag === "Success" && first.value).toBe("starbase/fix-token-refresh")
+    expect(second._tag === "Success" && second.value).toBe("starbase/fix-token-refresh")
+    expect(
+      execFileSync(
+        "git",
+        [
+          "for-each-ref",
+          "--format=%(refname:short)",
+          "refs/heads/starbase/fix-token-refresh"
+        ],
+        { cwd: repoPath, encoding: "utf-8" }
+      )
+        .trim()
+        .split("\n")
+    ).toStrictEqual(["starbase/fix-token-refresh"])
+  })
+
   it("pins otherwise unreachable detached commits before worktree removal", async () => {
     const repoPath = initGitRepo(join(repos.dir, "rescue"))
     const detached = await runExit(

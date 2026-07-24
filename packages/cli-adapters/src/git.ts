@@ -32,6 +32,58 @@ export const branchAt = (
     Effect.map((branch) => (branch === null || branch === "HEAD" ? null : branch))
   )
 
+/** Switch a detached worktree, or return the branch a concurrent switch activated. */
+const switchTaskBranch = (
+  cwd: string,
+  branch: string
+): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
+  runGit(cwd, ["switch", "-c", branch]).pipe(
+    Effect.as(branch),
+    Effect.catchAll((error) =>
+      branchAt(cwd).pipe(
+        Effect.flatMap((winner) =>
+          winner === null ? Effect.fail(error) : Effect.succeed(winner)
+        )
+      )
+    )
+  )
+
+const claimTaskBranch = (
+  cwd: string,
+  slug: string,
+  suffix: number
+): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> => {
+  const branch = `starbase/${slug}${suffix === 1 ? "" : `-${suffix}`}`
+  return gitLine(cwd, "show-ref", "--verify", `refs/heads/${branch}`).pipe(
+    Effect.flatMap((existing) => {
+      if (existing !== null) return claimTaskBranch(cwd, slug, suffix + 1)
+      return branchAt(cwd).pipe(
+        Effect.flatMap((active) =>
+          active === null ? switchTaskBranch(cwd, branch) : Effect.succeed(active)
+        )
+      )
+    })
+  )
+}
+
+/**
+ * Name a detached session from its task without moving its HEAD.
+ *
+ * `git switch -c` creates the ref at the current detached commit and keeps both
+ * uncommitted changes and detached commits in place. Existing names receive a
+ * deterministic numeric suffix. Concurrent activations converge on the branch
+ * that first became live instead of creating another suffix.
+ */
+const createTaskBranch = (
+  cwd: string,
+  slug: string
+): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
+  branchAt(cwd).pipe(
+    Effect.flatMap((active) =>
+      active === null ? claimTaskBranch(cwd, slug, 1) : Effect.succeed(active)
+    )
+  )
+
 /**
  * Whether `branch` is checked out in the repo's MAIN working tree, per the
  * output of `git worktree list --porcelain`.
@@ -211,32 +263,6 @@ export class GitService extends Effect.Service<GitService>()(
             branch: input.baseBranch,
             baseBranch: input.baseBranch,
             repoPath: input.repoPath
-          }
-        })
-
-      /**
-       * Name a detached session from its task without moving its HEAD.
-       *
-       * `git switch -c` creates the ref at the current detached commit and keeps
-       * both uncommitted changes and detached commits in place. Existing names
-       * receive a deterministic numeric suffix.
-       */
-      const createTaskBranch = (
-        cwd: string,
-        slug: string
-      ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
-        Effect.gen(function* () {
-          for (let suffix = 1; ; suffix += 1) {
-            const branch = `starbase/${slug}${suffix === 1 ? "" : `-${suffix}`}`
-            const existing = yield* gitLine(
-              cwd,
-              "show-ref",
-              "--verify",
-              `refs/heads/${branch}`
-            )
-            if (existing !== null) continue
-            yield* runGit(cwd, ["switch", "-c", branch])
-            return branch
           }
         })
 
