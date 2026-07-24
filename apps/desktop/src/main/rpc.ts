@@ -87,6 +87,7 @@ import type {
   PrMergeMethod,
   ReviewComment,
   ReviewSubmitKind,
+  Session,
   SettledSessionStatus,
   ProviderModels,
   ProvidersConfig,
@@ -219,6 +220,17 @@ export const sessionDiff = (id: string) =>
 /** Resolve a session (best-effort; unknown → null) for the GitHub handlers. */
 const resolveSession = (sessionId: string) =>
   SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
+
+type SessionWithPr = Session & { readonly prNumber: number }
+
+const hasActivePr = (session: Session | null): session is SessionWithPr =>
+  session !== null && session.prNumber !== null
+
+/** Resolve a session only when it has an active pull request. */
+const sessionWithPr = (sessionId: string) =>
+  resolveSession(sessionId).pipe(
+    Effect.map((session): SessionWithPr | null => (hasActivePr(session) ? session : null))
+  )
 
 /**
  * `Sessions.createFromPr` handler. Reads the git "share checked-out branches"
@@ -524,10 +536,8 @@ export const githubDiff = (sessionId: string) =>
 /** `Review.get` handler — the stored review for the active PR, or null. */
 export const reviewGet = (sessionId: string) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId).pipe(
-      Effect.catchAll(() => Effect.succeed(null))
-    )
-    if (!session || session.prNumber === null) return null
+    const session = yield* sessionWithPr(sessionId)
+    if (session === null) return null
     const review = yield* ReviewStore.get(sessionId)
     return review?.prNumber === session.prNumber ? review : null
   })
@@ -1181,10 +1191,8 @@ export const planAdversarial = (
  */
 export const reviewMarkRouted = (sessionId: string) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId).pipe(
-      Effect.catchAll(() => Effect.succeed(null))
-    )
-    if (!session || session.prNumber === null) return null
+    const session = yield* sessionWithPr(sessionId)
+    if (session === null) return null
     const review = yield* ReviewStore.get(sessionId)
     if (review === null || review.prNumber !== session.prNumber) return null
     if (review.routedAt !== null) return review.routedAt
@@ -1209,10 +1217,8 @@ export const reviewMarkRouted = (sessionId: string) =>
  */
 export const reviewReconcile = (sessionId: string) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId).pipe(
-      Effect.catchAll(() => Effect.succeed(null))
-    )
-    if (!session?.worktreePath || session.prNumber === null) return null
+    const session = yield* sessionWithPr(sessionId)
+    if (!session?.worktreePath) return null
     const review = yield* ReviewStore.get(sessionId)
     if (review === null || review.prNumber !== session.prNumber) return null
 
@@ -1240,10 +1246,8 @@ export const reviewReconcile = (sessionId: string) =>
  */
 export const reviewRun = (sessionId: string, force: boolean) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId).pipe(
-      Effect.catchAll(() => Effect.succeed(null))
-    )
-    if (!session?.worktreePath || session.prNumber === null) {
+    const session = yield* sessionWithPr(sessionId)
+    if (!session?.worktreePath) {
       return yield* Effect.fail(
         new ReviewError({
           message: "This session has no linked pull request to review."
