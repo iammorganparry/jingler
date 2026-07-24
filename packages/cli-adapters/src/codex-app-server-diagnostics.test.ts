@@ -27,6 +27,17 @@ describe("Codex app-server diagnostics", () => {
     ).toBe('session_id="[REDACTED]" Authorization: "[REDACTED]" [REDACTED_TOKEN]')
   })
 
+  it("redacts opaque bearer and refresh credentials", () => {
+    expect(
+      redactCodexDiagnosticText(
+        "Authorization: Bearer opaque-secret access_token=access-secret refresh-token: refresh-secret"
+      )
+    ).toBe(
+      // biome-ignore lint/security/noSecrets: Expected redaction markers, not credentials.
+      'Authorization: "[REDACTED]" access_token="[REDACTED]" refresh-token: "[REDACTED]"'
+    )
+  })
+
   it("bounds stderr after redaction", () => {
     const rendered = boundedCodexStderr(`${`sk-${"a".repeat(100)}`} ${"x".repeat(4_050)}`)
     expect(rendered.length).toBeLessThanOrEqual(4_096)

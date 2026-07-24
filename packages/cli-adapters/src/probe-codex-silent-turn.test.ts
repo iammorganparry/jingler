@@ -3,14 +3,14 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const probePath = fileURLToPath(
-  new URL("../scripts/probe-codex-silent-turn.mjs", import.meta.url)
+  new URL("../scripts/probe-codex-silent-turn.ts", import.meta.url)
 )
 
 describe("probe-codex-silent-turn arguments", () => {
   it("accepts a flag-shaped --bin-arg value", () => {
     const result = spawnSync(
       process.execPath,
-      [probePath, "--bin-arg", "--config", "--help"],
+      ["--import", "tsx", probePath, "--bin-arg", "--config", "--help"],
       { encoding: "utf8" }
     )
 
@@ -22,7 +22,7 @@ describe("probe-codex-silent-turn arguments", () => {
   it("still rejects a missing value for ordinary options", () => {
     const result = spawnSync(
       process.execPath,
-      [probePath, "--model", "--help"],
+      ["--import", "tsx", probePath, "--model", "--help"],
       { encoding: "utf8" }
     )
 

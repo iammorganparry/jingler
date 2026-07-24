@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process"
+import { redactCodexDiagnosticText } from "../src/codex-app-server-diagnostics.js"
 
 const PROMPT =
   "Reply with exactly PONG. Do not call tools, inspect files, browse, or perform any other action."
@@ -106,21 +107,6 @@ const boundedAppend = (current, addition, limit) => {
   return combined.length <= limit ? combined : combined.slice(combined.length - limit)
 }
 
-const redactDiagnostic = (value) => {
-  if (typeof value !== "string") return value
-  return value
-    .replace(
-      /\b(session_id|authorization|api[_-]?key)(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|\S+)/gi,
-      // biome-ignore lint/security/noSecrets: This literal is the replacement marker, not a credential.
-      '$1$2"[REDACTED]"'
-    )
-    .replace(
-      /\b(?:Bearer\s+)?eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "[REDACTED_TOKEN]"
-    )
-    .replace(/\bsk-[A-Za-z0-9_-]{16,}\b/g, "[REDACTED_TOKEN]")
-}
-
 class RpcConnection {
   constructor(options) {
     this.child = spawn(options.bin, [...options.binArgs, "app-server"], {
@@ -161,7 +147,7 @@ class RpcConnection {
 
   onLine(line) {
     if (line.trim().length === 0) return
-    let message
+    let message: unknown
     try {
       message = JSON.parse(line)
     } catch {
@@ -373,10 +359,10 @@ const executeTurn = async ({ connection, options, threadId, attempt, lifecycle }
     completedMs: outcome === "completed" ? Math.round(elapsedMs(turnStartedAt)) : null,
     contextTokens,
     methods,
-    stderrTail: redactDiagnostic(connection.stderrTail),
+    stderrTail: redactCodexDiagnosticText(connection.stderrTail),
     processExit: connection.exit,
     outcome,
-    error: redactDiagnostic(error)
+    error: redactCodexDiagnosticText(error)
   }
 }
 
@@ -439,34 +425,29 @@ const main = async () => {
       }
     }
 
-    let sample
-    try {
-      sample = await executeTurn({
-        connection,
-        options,
-        threadId,
-        attempt,
-        lifecycle: options.lifecycle
-      })
-    } catch (cause) {
-      sample = {
-        type: "sample",
-        timestamp: new Date().toISOString(),
-        attempt,
-        lifecycle: options.lifecycle,
-        model: options.model,
-        effort: options.effort,
-        requestMs: {},
-        firstEventMs: null,
-        completedMs: null,
-        contextTokens: null,
-        methods: [],
-        stderrTail: redactDiagnostic(connection.stderrTail),
-        processExit: connection.exit,
-        outcome: "probe-error",
-        error: redactDiagnostic(cause instanceof Error ? cause.message : String(cause))
-      }
-    }
+    const sample = await executeTurn({
+      connection,
+      options,
+      threadId,
+      attempt,
+      lifecycle: options.lifecycle
+    }).catch((cause) => ({
+      type: "sample",
+      timestamp: new Date().toISOString(),
+      attempt,
+      lifecycle: options.lifecycle,
+      model: options.model,
+      effort: options.effort,
+      requestMs: {},
+      firstEventMs: null,
+      completedMs: null,
+      contextTokens: null,
+      methods: [],
+      stderrTail: redactCodexDiagnosticText(connection.stderrTail),
+      processExit: connection.exit,
+      outcome: "probe-error",
+      error: redactCodexDiagnosticText(cause instanceof Error ? cause.message : String(cause))
+    }))
     sample.requestMs = { ...connection.probeTimings, ...sample.requestMs }
     process.stdout.write(`${JSON.stringify(sample)}\n`)
     if (sample.outcome !== "completed") stalls += 1
