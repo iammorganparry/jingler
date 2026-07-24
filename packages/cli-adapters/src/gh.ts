@@ -98,6 +98,21 @@ const prForBranch = (
   ]).pipe(Effect.map((raw) => num(arr(raw)[0]?.number ?? null)))
 
 /**
+ * Resolve an open PR configured for the checked-out branch. `gh pr checkout`
+ * records enough fork context for this path to distinguish identically named
+ * branches owned by different repositories.
+ */
+const configuredOpenPr = (
+  cwd: string
+): Effect.Effect<number | null, never, CommandExecutor.CommandExecutor> =>
+  ghJson(cwd, ["pr", "view", "--json", "number,state"]).pipe(
+    Effect.map((raw) => {
+      const pr = rec(raw)
+      return str(pr.state)?.toUpperCase() === "OPEN" ? num(pr.number) : null
+    })
+  )
+
+/**
  * Declaratively build a `gh` argv: a fixed `base` followed by optional pieces.
  * Each optional is `[flag, value]` (emitted as `flag value` only when `value`
  * is a non-empty string) or a bare `[flag]` (emitted only when `flag` is set).
@@ -768,7 +783,11 @@ export class GhService extends Effect.Service<GhService>()(
         branchAt(cwd).pipe(
           Effect.flatMap((branch) => {
             if (branch === null) return Effect.succeed(null)
-            return prForBranch(cwd, branch)
+            return configuredOpenPr(cwd).pipe(
+              Effect.flatMap((configured) =>
+                configured === null ? prForBranch(cwd, branch) : Effect.succeed(configured)
+              )
+            )
           })
         ),
 
