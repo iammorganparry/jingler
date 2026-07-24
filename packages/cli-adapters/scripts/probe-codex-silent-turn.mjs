@@ -58,7 +58,7 @@ const parseArguments = (argv) => {
       process.exit(0)
     }
     const value = argv[index + 1]
-    if (value === undefined || value.startsWith("--")) {
+    if (value === undefined || (argument !== "--bin-arg" && value.startsWith("--"))) {
       failArgument(`${argument} requires a value`)
     }
     index += 1
