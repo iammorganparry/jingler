@@ -804,6 +804,9 @@ export const rpc = {
   pluginsAuthSessions: (): Promise<ReadonlyArray<AuthSessionInfo>> =>
     run((c) => c.Plugins.authSessions()),
 
+  pluginsAuthRevoke: (pluginId: string, providerId: string): Promise<void> =>
+    run((c) => c.Plugins.authRevoke({ pluginId, providerId })),
+
   /**
    * Subscribe to `~/starbase/plugins` changing on disk — the same live-reload
    * contract themes have, and the reason a plugin author can edit a file and see

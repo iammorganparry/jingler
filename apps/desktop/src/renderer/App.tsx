@@ -58,6 +58,7 @@ import { useConnectorCenter } from "./use-connector-center.js"
 import { useOpenConnector } from "./use-open-connector.js"
 import { useInjectionTargets } from "./use-injection-targets.js"
 import { PluginProvider, usePluginTabs } from "./plugin-registry.js"
+import { usePlugins } from "./use-plugins.js"
 
 const GH_UNKNOWN: GhStatus = {
   available: false,
@@ -89,6 +90,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   // Merged with the built-ins inside `SessionPane`, through the same registry —
   // a plugin tab is not a separate region of the tab bar.
   const pluginTabs = usePluginTabs()
+  const plugins = usePlugins()
 
   // The conversation machine persists a session's settled status by itself, with
   // no route back here. Fold those records into the list, or the sidebar keeps
@@ -658,6 +660,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       adhdMode={adhdMode}
       onSaveAdhdMode={saveAdhdMode}
       themes={themeSettings}
+      plugins={plugins}
       providersConfig={providersConfig}
       onSaveProvider={saveProvider}
       defaultCli={defaultCli}

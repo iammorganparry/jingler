@@ -37,6 +37,7 @@ import type { ConnectorCenterProps } from "../composites/connector-center.js"
 import type { InjectionTargetsProps } from "../composites/injection-targets.js"
 import type { OpenConnectorSectionProps } from "../composites/open-connector-section.js"
 import type { ThemesSettingsProps } from "../composites/themes-settings.js"
+import type { PluginsSettingsProps } from "../composites/plugins-settings.js"
 import { type ConversationPaneCtx, SessionConversation } from "../screens/session-conversation.js"
 import { useSplitLayout } from "./use-split-layout.js"
 import { MAX_PANES } from "./split-layout.js"
@@ -126,6 +127,8 @@ export interface StarbaseAppProps {
    * the section's stub.
    */
   themes?: ThemesSettingsProps
+  /** Everything Settings › Plugins needs. Absent renders the stub. */
+  plugins?: PluginsSettingsProps
   /** Re-run `gh auth status` (the settings "Recheck" button); may be async. */
   onRecheckGh?: () => Promise<void> | void
   /** Persisted per-CLI provider defaults (Settings · Providers view). */
@@ -283,6 +286,7 @@ export function StarbaseApp({
   onSavePlanAutoRun,
   adhdMode,
   themes,
+  plugins,
   onSaveAdhdMode,
   onRecheckGh,
   providersConfig,
@@ -647,6 +651,7 @@ export function StarbaseApp({
               adhdMode={adhdMode}
               onSaveAdhdMode={onSaveAdhdMode}
               themes={themes}
+              plugins={plugins}
               onClose={() => setSettingsOpen(false)}
             />
           ) : undefined
