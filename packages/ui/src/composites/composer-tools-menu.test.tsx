@@ -21,34 +21,17 @@ describe("Composer tools menu", () => {
     expect(screen.getByTitle("Working branch: starbase/wandering-watt")).toBeTruthy()
   })
 
-  it("folds attachments, skills, and MCP connectors behind one plus button", () => {
+  it("folds attachments and skills behind one plus button", () => {
     render(
-      <Composer
-        skills={[{ name: "/deploy", description: "Deploy the app", source: "skill" }]}
-        mcp={{ total: 3, failed: 0, probed: true }}
-        onOpenMcp={() => {}}
-      />
+      <Composer skills={[{ name: "/deploy", description: "Deploy the app", source: "skill" }]} />
     )
 
     expect(screen.queryByLabelText("Attach an image")).toBeNull()
     openMenu()
     expect(screen.getByRole("menuitem", { name: ADD_IMAGE_ITEM })).toBeTruthy()
     expect(screen.getByRole("menuitem", { name: SKILLS_ITEM })).toBeTruthy()
-    expect(screen.getByRole("menuitem", { name: MCP_ITEM })).toBeTruthy()
-  })
-
-  it("opens MCP connectors from the menu", () => {
-    const onOpenMcp = vi.fn()
-    render(
-      <Composer
-        mcp={{ total: 2, failed: 1, probed: true }}
-        onOpenMcp={onOpenMcp}
-      />
-    )
-
-    openMenu()
-    fireEvent.click(screen.getByRole("menuitem", { name: MCP_ITEM }))
-    expect(onOpenMcp).toHaveBeenCalledOnce()
+    // MCP now lives ONLY in Settings › Connectors (OpenConnector), never the composer.
+    expect(screen.queryByRole("menuitem", { name: MCP_ITEM })).toBeNull()
   })
 
   it("opens the existing skill palette from the menu", () => {

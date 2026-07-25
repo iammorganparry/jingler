@@ -16,7 +16,6 @@ import {
   BackgroundTaskOutput,
   ConversationView,
   MAIN_AGENT,
-  McpStatusDialog,
   PlanReview,
   ResizeHandle,
   SubagentView,
@@ -32,7 +31,6 @@ import {
 import { clearDraft, getDraft, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
 import { useConversation } from "./use-conversation.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
-import { useMcp } from "./use-mcp.js"
 
 export function ConversationPane({
   session,
@@ -79,10 +77,6 @@ export function ConversationPane({
     session.chats[0]!
   const convo = useConversation(session, activeChat.id)
   const chatActivities = useChatActivities(session.id)
-  // `convo.cli` rather than `session.cli`: the harness can change mid-session, and
-  // MCP config is a property of the harness.
-  const mcp = useMcp(session.id, convo.cli)
-  const [mcpOpen, setMcpOpen] = useState(false)
 
   // Declared unconditionally (hook order) — the plan column only reads it in the
   // `split` view, but the `plan` view returns early above.
@@ -392,13 +386,6 @@ export function ConversationPane({
           model={convo.model}
           catalog={convo.catalog}
           onSetHarness={convo.setHarness}
-          mcp={mcp.summary}
-          onOpenMcp={() => {
-            setMcpOpen(true)
-            // Probe on open (cached server-side), so the dialog has something to
-            // show without the operator having to ask twice.
-            mcp.check(false)
-          }}
           onSend={sendPrompt}
           onStop={convo.stop}
           onDecideGate={convo.decideGate}
@@ -465,18 +452,6 @@ export function ConversationPane({
           setViewingTaskId(taskId)
           void bgTasks.output(taskId).then(setTaskOutput)
         }}
-      />
-      <McpStatusDialog
-        open={mcpOpen}
-        cli={convo.cli}
-        servers={mcp.servers}
-        statuses={mcp.statuses}
-        loading={mcp.checking}
-        checkedAt={mcp.checkedAt}
-        // Refresh always forces a re-probe: the operator clicked *because* they
-        // want a fresh answer, so handing back the cache would read as a bug.
-        onRefresh={() => mcp.check(true)}
-        onClose={() => setMcpOpen(false)}
       />
       </div>
 

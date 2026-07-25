@@ -23,7 +23,6 @@ import {
   ReviewService,
   ReviewStore,
   SessionStore,
-  McpService,
   OpenConnectorService,
   OpenConnectorApi,
   SkillsService,
@@ -108,7 +107,6 @@ const AppLayer = RpcServerLive.pipe(
   Layer.provide(
     Layer.mergeAll(
       SkillsService.Default,
-      McpService.Default,
       OpenConnectorService.Default,
       OpenConnectorApi.Default
     )

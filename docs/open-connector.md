@@ -17,6 +17,36 @@ every harness. Two halves:
 2. **Connector Center** — an in-app Settings surface to browse the instance's
    provider catalog and connect providers (OAuth / API-key / custom credential).
 
+## Settings › Connectors — one section, gated on a live connection
+
+There is exactly **one** MCP entry in Settings: **Connectors**
+(`ConnectorsSettings`, `packages/ui/src/composites/connectors-settings.tsx`). It
+composes the connection setup (`OpenConnectorSection`) and the catalog
+(`ConnectorCenter`) behind a **live probe**: opening the section runs
+`OpenConnector.test`, and the catalog only appears once `state === "connected"`.
+Until then the operator sees the setup view plus the failure reason — never an
+empty "Search 0 providers" catalog that can't be told apart from a broken
+instance. A **Manage connection** toggle reveals the setup again to change
+instance.
+
+Below the connection, **Agents receiving these tools** lists every harness with
+the endpoint it will actually be launched with, resolved by
+`OpenConnector.injection` → `OpenConnectorService.injectionTargets` — the same
+`injection(cli)` the agent runner calls at spawn, so the readout cannot drift from
+the launch. Four distinct "no" states are named rather than collapsed: `disabled`
+(master switch/endpoint), `opted-out` (`perCli[cli] === false`, toggled per row),
+`no-token`, and `no-run-path` (cursor — Starbase never launches it). The bearer
+never crosses the RPC boundary; each row carries header *names* only.
+
+This replaced three sections (*MCP servers*, *Unified MCP*, *Connector Center*).
+The read-only **MCP servers** view — which displayed each harness's OWN MCP
+config — is **gone**, along with `McpService`, the `Mcp.list`/`Mcp.status` RPCs,
+`McpStatusDialog`/`McpServerRow`, the composer's *MCP connectors* chip, and the
+harness-config parsers in `mcp-config.ts`. Starbase no longer shows a harness's
+non-OpenConnector MCP config: **OpenConnector is the single source of truth.**
+`mcp-config.ts` keeps only the write-side injection helpers (`codexMcpOverrides`,
+`opencodeMcpConfig`, `ParsedMcpServer`, `McpLaunch`, `normalizeEndpoint`).
+
 ## Architecture at a glance
 
 | Concern | Where |
@@ -26,7 +56,7 @@ every harness. Two halves:
 | Injection resolver + live probe | `OpenConnectorService` — `packages/cli-adapters/src/open-connector.ts` |
 | Connector-Center HTTP client | `OpenConnectorApi` — `packages/cli-adapters/src/open-connector-api.ts` |
 | RPC contracts | `OpenConnector.*` + `Connector.*` — `packages/contracts/src/index.ts` |
-| Settings UI | `OpenConnectorSection` + `ConnectorCenter` — `packages/ui/src/composites/` |
+| Settings UI | `ConnectorsSettings` (gate) → `OpenConnectorSection` + `ConnectorCenter` — `packages/ui/src/composites/` |
 | Self-host | `infra/open-connector/` + repo-root `docker-compose.yml` |
 
 ## Per-harness injection (none touches the worktree)
@@ -39,8 +69,7 @@ passes it on `SessionSpec.openConnector`; each adapter registers it in its own w
   spawn (`codexMcpOverrides` → `startCodexAppServer.configOverrides`).
 - **opencode** — a remote `mcp` block merged into `OPENCODE_CONFIG_CONTENT`
   (`opencodeMcpConfig`, `opencode-adapter.ts`).
-- **Cursor** — read-only in Settings; Starbase has no cursor run path, so nothing
-  to inject.
+- **Cursor** — Starbase has no cursor run path, so nothing to inject.
 
 ## Onboarding (auto-setup)
 
@@ -69,6 +98,17 @@ Defaults are resolved in the main process (`openConnectorDefaults` in
   secret — enforced by tests.
 - OAuth consent opens the system browser via `shell.openExternal`, guarded to
   `http(s)://` only; OpenConnector's own callback stores the grant.
+
+> **The instance itself does not authenticate.** Verified against
+> `ghcr.io/oomol-lab/open-connector:latest`: `GET /v1/providers` and `POST /mcp`
+> return **200 with a wrong bearer, or none at all** — `OPEN_CONNECTOR_API_TOKEN`
+> gates nothing on those routes. Anything that can reach the port can drive every
+> provider you have connected (your Slack, your GitHub). So compose publishes it as
+> `127.0.0.1:3000:3000`, **not** `3000:3000`: on the original binding a laptop on a
+> shared network was serving its credentials to that network. Any real deployment
+> must put the instance behind its own authenticating proxy — Starbase sending a
+> bearer is not a substitute, because the far end ignores it. `e2e/open-connector-live.spec.ts`
+> documents this in place of the wrong-token test one would expect to find there.
 
 ## Documentation TODO — the task
 

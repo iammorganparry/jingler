@@ -31,7 +31,7 @@ import type {
   Issue,
   IssueAutomations,
   IssueSummary,
-  McpServer,
+  McpInjectionTarget,
   McpServerStatus,
   OpenConnectorConfig,
   OpenConnectorDefaults,
@@ -225,19 +225,6 @@ export const rpc = {
   ): Promise<void> => run((c) => c.Workspace.revertLines({ sessionId, path, startLine, endLine })),
   skillsList: (sessionId: string): Promise<ReadonlyArray<Skill>> =>
     run((c) => c.Skills.list({ sessionId })),
-  /**
-   * MCP servers the harness will load. Pass a `sessionId` to include the session's
-   * project/local scope; pass null + `cli` from Settings, which has no worktree and
-   * therefore sees user scope only.
-   */
-  mcpList: (sessionId: string | null, cli?: CliKind): Promise<ReadonlyArray<McpServer>> =>
-    run((c) => c.Mcp.list({ sessionId, cli })),
-  /** Live probe of those servers. `refresh` bypasses the cache (the dialog's refresh). */
-  mcpStatus: (
-    sessionId: string | null,
-    cli?: CliKind,
-    refresh?: boolean
-  ): Promise<ReadonlyArray<McpServerStatus>> => run((c) => c.Mcp.status({ sessionId, cli, refresh })),
   /** The unified OpenConnector settings + hasToken + env-aware onboarding defaults. */
   openConnectorGet: (): Promise<{
     config: OpenConnectorConfig
@@ -251,6 +238,9 @@ export const rpc = {
   openConnectorTest: (): Promise<McpServerStatus> => run((c) => c.OpenConnector.test()),
   /** One-click onboarding: apply the environment default (dev = local, prod = hosted). */
   openConnectorAutoSetup: (): Promise<void> => run((c) => c.OpenConnector.autoSetup()),
+  /** Which harnesses actually receive the unified server, and why not when they don't. */
+  openConnectorInjection: (): Promise<ReadonlyArray<McpInjectionTarget>> =>
+    run((c) => c.OpenConnector.injection()),
   /** The OpenConnector provider catalog (Connector Center). */
   connectorProviders: (): Promise<ReadonlyArray<ConnectorProvider>> =>
     run((c) => c.Connector.providers()),

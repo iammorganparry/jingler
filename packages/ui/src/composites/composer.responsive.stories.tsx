@@ -34,8 +34,6 @@ const loaded = {
   allowPlan: true,
   branch: "starbase/wandering-watt",
   skills: [{ name: "/review", description: "Review current changes", source: "skill" as const }],
-  mcp: { total: 3, failed: 1, probed: true },
-  onOpenMcp: () => {},
   onSend: () => {}
 }
 

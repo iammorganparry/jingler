@@ -37,13 +37,10 @@ describe("Composer at width", () => {
     }
   })
 
-  it("keeps MCP status in the menu without losing the failure count", () => {
-    renderAt(450, {
-      mcp: { total: 3, failed: 1, probed: true },
-      onOpenMcp: () => {}
-    })
+  it("no longer offers MCP in the menu at any width (it lives in Settings › Connectors)", () => {
+    renderAt(450)
     openMenu()
-    expect(screen.getByRole("menuitem", { name: MCP_ITEM }).textContent).toContain("1/3 down")
+    expect(screen.queryByRole("menuitem", { name: MCP_ITEM })).toBeNull()
   })
 
   it("keeps the composer menu findable by the same name at any width", () => {

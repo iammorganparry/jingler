@@ -134,7 +134,14 @@ export function ConnectorCenter({
         aria-label="Search providers"
       />
 
-      <div ref={scrollRef} className="max-h-[360px] overflow-y-auto rounded-lg border border-line">
+      {/* A named region: "GitHub" is also a Settings nav entry, so the catalog needs
+          to be addressable on its own — by a screen reader and by a test alike. */}
+      <div
+        ref={scrollRef}
+        role="group"
+        aria-label="Provider catalog"
+        className="max-h-[360px] overflow-y-auto rounded-lg border border-line"
+      >
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualizer.getVirtualItems().map((item) => {
             const provider = filtered[item.index]
@@ -189,6 +196,9 @@ function ProviderRow({
     <button
       type="button"
       onClick={onOpen}
+      // The row's text is name + id + action count + a Connect/Manage affordance;
+      // the provider's NAME is what the operator is actually picking.
+      aria-label={provider.name}
       className="flex w-full items-center gap-2.5 border-b border-line px-3 py-2 text-left hover:bg-hover"
     >
       <span className="flex size-[26px] flex-none items-center justify-center overflow-hidden rounded-md border border-line bg-sunken text-[12px] text-text-bright">

@@ -32,7 +32,7 @@ import {
   ExecutionMode,
   PermissionMode,
   PrFileChange,
-  McpServer,
+  McpInjectionTarget,
   McpServerStatus,
   OpenConnectorConfig,
   OpenConnectorDefaults,
@@ -468,29 +468,6 @@ export class StarbaseRpcs extends RpcGroup.make(
   }),
 
   /**
-   * List the MCP servers the harness will load. `sessionId` resolves the harness
-   * and worktree (so project/local scope is included); pass it null from Settings,
-   * which has no session and therefore sees user scope only.
-   */
-  Rpc.make("Mcp.list", {
-    success: Schema.Array(McpServer),
-    payload: { sessionId: Schema.NullOr(Schema.String), cli: Schema.optional(CliKind) }
-  }),
-
-  /**
-   * Live status for those servers — the real MCP handshake, not just "configured".
-   * Cached per server; `refresh` forces a re-probe (the dialog's refresh button).
-   */
-  Rpc.make("Mcp.status", {
-    success: Schema.Array(McpServerStatus),
-    payload: {
-      sessionId: Schema.NullOr(Schema.String),
-      cli: Schema.optional(CliKind),
-      refresh: Schema.optional(Schema.Boolean)
-    }
-  }),
-
-  /**
    * The unified OpenConnector settings plus whether a bearer token is stored.
    * `hasToken` is a bool, never the token itself — the secret stays in the main
    * process, so the panel can show "configured" without the value crossing over.
@@ -536,6 +513,21 @@ export class StarbaseRpcs extends RpcGroup.make(
    */
   Rpc.make("OpenConnector.test", {
     success: McpServerStatus,
+    error: ConfigError
+  }),
+
+  /**
+   * What each harness would ACTUALLY be launched with — resolved through the same
+   * `OpenConnectorService.injection(cli)` the runner calls, not re-derived from the
+   * config in the renderer.
+   *
+   * Without this, "the tools reach every agent" was a claim the UI made and nothing
+   * checked: the master switch, the per-harness opt-out, a missing token and a
+   * harness with no run path all produce the same green settings screen. Each row
+   * carries the reason it is off, so the answer is diagnosable rather than boolean.
+   */
+  Rpc.make("OpenConnector.injection", {
+    success: Schema.Array(McpInjectionTarget),
     error: ConfigError
   }),
 

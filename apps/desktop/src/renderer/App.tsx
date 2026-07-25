@@ -56,6 +56,7 @@ import { rpc } from "./rpc-client.js"
 import { themeCatalogKey, useTheme } from "./use-theme.js"
 import { useConnectorCenter } from "./use-connector-center.js"
 import { useOpenConnector } from "./use-open-connector.js"
+import { useInjectionTargets } from "./use-injection-targets.js"
 
 const GH_UNKNOWN: GhStatus = {
   available: false,
@@ -121,6 +122,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   const { activeId: activeThemeId, catalog: themeCatalog } = useThemeCatalog()
   const connector = useConnectorCenter()
   const unifiedMcp = useOpenConnector()
+  const injectionTargets = useInjectionTargets(unifiedMcp.config)
 
   // Renderer-side rpc reads, via react-query.
   const configQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
@@ -667,10 +669,12 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       loadModels={rpc.modelsList}
       loadOpencodeProviders={rpc.opencodeListProviders}
       onSetOpencodeAuth={rpc.opencodeSetAuth}
-      // Settings has no session, so MCP config resolves to user scope only.
-      loadMcpServers={(cli) => rpc.mcpList(null, cli)}
-      loadMcpStatus={(cli, refresh) => rpc.mcpStatus(null, cli, refresh)}
       unifiedMcp={unifiedMcp}
+      injection={{
+        targets: injectionTargets.targets,
+        loading: injectionTargets.loading,
+        onToggle: injectionTargets.setEnabled
+      }}
       connector={connector}
       onRecheckGh={recheckGh}
       loadBranches={rpc.workspaceBranches}

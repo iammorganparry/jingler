@@ -109,10 +109,6 @@ export interface ConversationViewProps {
   model?: string
   catalog?: ReadonlyArray<ProviderModels>
   onSetHarness?: (cli: CliKind, model: string) => void
-  /** MCP summary for the composer chip; undefined until status arrives. */
-  mcp?: { readonly total: number; readonly failed: number; readonly probed: boolean }
-  /** Open the session's MCP status dialog. */
-  onOpenMcp?: () => void
   onSend?: (text: string, images?: ReadonlyArray<Attachment>) => void
   /** Halt the running agent — the Stop button, and Escape outside the composer. */
   onStop?: () => void
@@ -223,8 +219,6 @@ export function ConversationView({
   model,
   catalog = [],
   onSetHarness,
-  mcp,
-  onOpenMcp,
   onSend,
   onStop,
   busy = false,
@@ -537,8 +531,6 @@ export function ConversationView({
                 hasGigaplanIntake={hasGigaplanIntake(messages)}
                 hasPlan={plan !== null && hasGigaplanPlan(messages)}
                 allowPlan={supportsPlanMode(cli)}
-                mcp={mcp}
-                onOpenMcp={onOpenMcp}
                 onSend={onSend}
                 onStop={onStop}
                 initialValue={initialDraft}

@@ -7,7 +7,6 @@ import { PhaseNode } from "./phase-node.js"
 import { AgentCard } from "./agent-card.js"
 import { ApprovalGate } from "./approval-gate.js"
 import { SlashCommandRow } from "./slash-command-row.js"
-import { McpServerRow } from "./mcp-server-row.js"
 import { Composer } from "./composer.js"
 import { Callout } from "../components/callout.js"
 import { TerminalDock, type DockSide, type TerminalTab } from "../app/terminal-panel.js"
@@ -83,7 +82,6 @@ export const Rows: Story = {
   render: () => (
     <div className="flex w-80 flex-col gap-2">
       <SlashCommandRow name="review" description="Review the current diff" badge="built-in" active />
-      <McpServerRow name="Linear" transport="stdio" meta="6 tools · project" />
     </div>
   )
 }

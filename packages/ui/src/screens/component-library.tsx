@@ -18,7 +18,6 @@ import { PhaseNode } from "../composites/phase-node.js"
 import { AgentCard } from "../composites/agent-card.js"
 import { ApprovalGate } from "../composites/approval-gate.js"
 import { SlashCommandRow } from "../composites/slash-command-row.js"
-import { McpServerRow } from "../composites/mcp-server-row.js"
 import { SessionRow } from "../composites/session-row.js"
 import { Composer } from "../composites/composer.js"
 import { DiffHunk } from "../diff/diff-hunk.js"
@@ -231,9 +230,6 @@ export function ComponentLibrary() {
             badge="workflow"
             badgeTone="purple"
           />
-        </Spec>
-        <Spec title="McpServerRow">
-          <McpServerRow name="Linear" transport="stdio" meta="6 tools · project" />
         </Spec>
         <Spec title="SessionRow">
           <SessionRow session={demoSession} active />

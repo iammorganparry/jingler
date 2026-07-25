@@ -1,4 +1,10 @@
-import type { CliKind, McpServer, OpenConnectorConfig } from "@starbase/core"
+import type {
+  CliKind,
+  McpInjectionSkip,
+  McpInjectionTarget,
+  McpServer,
+  OpenConnectorConfig
+} from "@starbase/core"
 import { OPEN_CONNECTOR_DEFAULT } from "@starbase/core"
 import { Effect } from "effect"
 import { ConfigService } from "./config.js"
@@ -28,6 +34,19 @@ const AUTH_HEADER = "Authorization"
 
 /** The `/mcp` endpoint URL for a base, via the shared endpoint normaliser. */
 const mcpUrl = (endpoint: string): string => `${normalizeEndpoint(endpoint)}/mcp`
+
+/**
+ * Every harness the Settings readout accounts for — including `cursor`, which is
+ * listed precisely so its absence is stated rather than inferred from a gap.
+ */
+const INJECTION_TARGETS: ReadonlyArray<CliKind> = ["claude", "codex", "cursor", "opencode"]
+
+/**
+ * The harnesses Starbase actually launches. `cursor` has no run path, so config
+ * alone would say "injected" for a harness that never starts — a green row for
+ * tools no agent will ever load.
+ */
+const RUNNABLE_CLIS: ReadonlyArray<CliKind> = ["claude", "codex", "opencode"]
 
 /**
  * Build both halves of the injectable server from config + token. The redacted
@@ -128,6 +147,51 @@ export class OpenConnectorService extends Effect.Service<OpenConnectorService>()
         })
 
       /**
+       * Where the unified server actually lands, harness by harness.
+       *
+       * Resolved through `injection` itself rather than re-read from the config, so
+       * the Settings readout cannot drift from what the runner does — the whole
+       * point is to answer "will a codex session really get these tools?" with the
+       * code that decides it. The skip reason is derived separately because
+       * `injection` collapses every "no" to `null`, and an operator staring at a
+       * harness that isn't receiving tools needs to know WHICH no it is.
+       */
+      const injectionTargets = Effect.gen(function* () {
+        const cfg = yield* ConfigService.get()
+        const config = cfg?.openConnector
+        const token = yield* (yield* SecretStore).getOpenConnectorToken
+        const hasToken = token !== null && token.length > 0
+        const serverName = config?.serverName ?? OPEN_CONNECTOR_DEFAULT.serverName
+
+        return yield* Effect.forEach(INJECTION_TARGETS, (cli) =>
+          injection(cli).pipe(
+            Effect.map((entry): McpInjectionTarget => {
+              if (entry !== null && RUNNABLE_CLIS.includes(cli)) {
+                return {
+                  cli,
+                  serverName: entry.server.name,
+                  injected: true,
+                  url: entry.server.target,
+                  headerKeys: entry.server.headerKeys,
+                  skipped: null
+                }
+              }
+              const skipped: McpInjectionSkip = !RUNNABLE_CLIS.includes(cli)
+                ? "no-run-path"
+                : !config?.enabled || config.endpoint.length === 0
+                  ? "disabled"
+                  : config.perCli?.[cli] === false
+                    ? "opted-out"
+                    : !hasToken
+                      ? "no-token"
+                      : "disabled"
+              return { cli, serverName, injected: false, url: null, headerKeys: [], skipped }
+            })
+          )
+        )
+      })
+
+      /**
        * Live probe of the configured endpoint, regardless of the enabled toggles,
        * so the Settings panel's "Test" button works before the operator switches
        * the feature on. Returns a `failed` status (never throws) when unconfigured.
@@ -149,7 +213,7 @@ export class OpenConnectorService extends Effect.Service<OpenConnectorService>()
           return yield* probeServer(remoteEntry(config, token, "claude"), null, now)
         })
 
-      return { get, set, injection, test }
+      return { get, set, injection, injectionTargets, test }
     })
   }
 ) {}

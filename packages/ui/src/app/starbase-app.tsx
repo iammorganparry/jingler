@@ -14,8 +14,6 @@ import type {
   NotificationsConfig,
   DiffStat,
   IssueSummary,
-  McpServer,
-  McpServerStatus,
   ModelOption,
   OpencodeProviderInfo,
   SessionPrStatus,
@@ -36,6 +34,7 @@ import { NewSessionDialog } from "../composites/new-session-dialog.js"
 import { UsageModal } from "../composites/usage-modal.js"
 import { SettingsView } from "../composites/settings-view.js"
 import type { ConnectorCenterProps } from "../composites/connector-center.js"
+import type { InjectionTargetsProps } from "../composites/injection-targets.js"
 import type { OpenConnectorSectionProps } from "../composites/open-connector-section.js"
 import type { ThemesSettingsProps } from "../composites/themes-settings.js"
 import { type ConversationPaneCtx, SessionConversation } from "../screens/session-conversation.js"
@@ -149,14 +148,12 @@ export interface StarbaseAppProps {
   loadOpencodeProviders?: () => Promise<ReadonlyArray<OpencodeProviderInfo>>
   /** Store an API key in opencode's own credential file. */
   onSetOpencodeAuth?: (providerId: string, key: string) => Promise<boolean>
-  /** MCP servers the given harness will load (Settings → MCP servers; user scope). */
-  loadMcpServers?: (cli: CliKind) => Promise<ReadonlyArray<McpServer>>
-  /** Live probe of those servers; `refresh` bypasses the cache. */
-  loadMcpStatus?: (cli: CliKind, refresh: boolean) => Promise<ReadonlyArray<McpServerStatus>>
-  /** Unified MCP (OpenConnector) settings (Settings → Unified MCP). */
+  /** Unified MCP (OpenConnector) connection settings (Settings → Connectors). */
   unifiedMcp?: OpenConnectorSectionProps
   /** MCP Connector Center data + actions (Settings → Connector Center). */
   connector?: ConnectorCenterProps
+  /** Per-harness injection readout (Settings → Connectors). */
+  injection?: InjectionTargetsProps
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */
@@ -291,10 +288,9 @@ export function StarbaseApp({
   loadModels,
   loadOpencodeProviders,
   onSetOpencodeAuth,
-  loadMcpServers,
-  loadMcpStatus,
   unifiedMcp,
   connector,
+  injection,
   renderPullRequest,
   renderReview,
   renderCode,
@@ -621,10 +617,9 @@ export function StarbaseApp({
               loadModels={loadModels ?? (async () => [])}
               loadOpencodeProviders={loadOpencodeProviders}
               onSetOpencodeAuth={onSetOpencodeAuth}
-              loadMcpServers={loadMcpServers}
-              loadMcpStatus={loadMcpStatus}
               unifiedMcp={unifiedMcp}
               connector={connector}
+              injection={injection}
               ghStatus={ghStatus ?? GH_UNAVAILABLE}
               github={githubConfig}
               git={gitConfig}

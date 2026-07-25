@@ -34,7 +34,11 @@ services:
     container_name: starbase-open-connector
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      # Bound to LOOPBACK, not 0.0.0.0. `OPEN_CONNECTOR_API_TOKEN` is not enforced
+      # by this image — `curl` with a wrong bearer, or none at all, gets 200 — so
+      # publishing 3000 on every interface served every credential connected here
+      # (Slack, GitHub, …) to anything on the same network.
+      - "127.0.0.1:3000:3000"
     environment:
       # Dev defaults — override in a real deployment. Not secret for local use.
       OPEN_CONNECTOR_ENCRYPTION_KEY: ${OPEN_CONNECTOR_ENCRYPTION_KEY:-dev-encryption-key-change-me}

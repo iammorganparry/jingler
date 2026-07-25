@@ -125,7 +125,14 @@ export function OpenConnectorSection({
             Inject the shared server into every agent and unlock the Connector Center.
           </div>
         </div>
-        <Toggle checked={enabled} onCheckedChange={setEnabled} className="mt-0.5" />
+        <Toggle
+          checked={enabled}
+          onCheckedChange={setEnabled}
+          // Named because it is no longer the only switch on this screen — the
+          // per-harness injection rows each carry one too.
+          aria-label="Enable the shared MCP server"
+          className="mt-0.5"
+        />
       </div>
 
       <div className="flex items-center gap-2">
