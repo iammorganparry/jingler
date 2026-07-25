@@ -303,4 +303,39 @@ describe("BackgroundTaskStore", () => {
     expect(a?.status).toBe("running")
     expect(b?.status).toBe("running")
   })
+
+  // A closed chat must not strand its rows: nothing else sweeps a chat that
+  // never runs again, so closeChat calls clearChat to drop its tasks + handle.
+  it("clears one chat's tasks and stop handle, leaving other chats' intact", async () => {
+    const [gone, kept] = await run(
+      Effect.gen(function* () {
+        yield* BackgroundTaskStore.registerStop("s1", "c1", async () => {})
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
+        yield* BackgroundTaskStore.registerStop("s1", "c2", async () => {})
+        yield* BackgroundTaskStore.ingest("s1", "c2", started("t2"))
+        // Close chat c1.
+        yield* BackgroundTaskStore.clearChat("s1", "c1")
+        const remaining = yield* BackgroundTaskStore.list("s1")
+        return [remaining.find((t) => t.id === "t1"), remaining.find((t) => t.id === "t2")] as const
+      })
+    )
+    expect(gone).toBeUndefined()
+    expect(kept?.id).toBe("t2")
+  })
+
+  it("routing a stop still works for a surviving chat after another is cleared", async () => {
+    const asked: string[] = []
+    await run(
+      Effect.gen(function* () {
+        yield* BackgroundTaskStore.registerStop("s1", "c1", async () => {})
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
+        yield* BackgroundTaskStore.registerStop("s1", "c2", async (id) => void asked.push(id))
+        yield* BackgroundTaskStore.ingest("s1", "c2", started("t2"))
+        yield* BackgroundTaskStore.clearChat("s1", "c1")
+        // c2's handle is untouched by clearing c1.
+        yield* BackgroundTaskStore.stop("s1", "t2")
+      })
+    )
+    expect(asked).toStrictEqual(["t2"])
+  })
 })

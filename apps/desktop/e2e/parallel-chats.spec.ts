@@ -63,12 +63,15 @@ test("two chats in one session run their agents concurrently", async ({ launchAp
   await composer2.pressSequentially("Add rate limiting to the settings endpoint.")
   await composer2.press("Enter")
 
-  // The refusal must NOT appear — the discriminating assertion. Before the guard
-  // was lifted, this exact text replaced chat 2's turn.
-  await expect(window.getByText(/Another chat or plan/)).toHaveCount(0)
-
-  // Chat 2 genuinely ran: its own turn streamed to its own command gate.
+  // The discriminating assertion: chat 2 genuinely ran concurrently — its own
+  // turn streamed to its own command gate. Before the guard was lifted, chat 2
+  // could not run while chat 1 was live, so this gate would never appear (the
+  // refusal replaced its turn instead).
   await expect(window.getByText("Approval needed · run a command")).toBeVisible({ timeout: 20_000 })
+
+  // And now that chat 2's turn has round-tripped, the refusal text is absent —
+  // asserted AFTER the gate so it has had time to render had it been going to.
+  await expect(window.getByText(/Another chat or plan/)).toHaveCount(0)
 
   // Chat 1's run survived the switch and is still live: its gate is pending and
   // actionable, which only holds if the run was never torn down for chat 2.

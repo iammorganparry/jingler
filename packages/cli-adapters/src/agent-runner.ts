@@ -1608,6 +1608,29 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
         return yield* run.steer(text, images)
       })
 
+    /**
+     * Forget a chat's per-chat state (the chat was closed). The caller stops the
+     * run first, so `fibers`/`active` are already torn down; this drops the maps
+     * keyed by chatId that otherwise grow for the life of the process — most
+     * importantly `locks`, one semaphore of which is minted per chat and never
+     * otherwise removed.
+     */
+    const forgetChat = (chatId: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const drop = <V>(ref: Ref.Ref<Map<string, V>>) =>
+          Ref.update(ref, (m) => {
+            if (!m.has(chatId)) return m
+            const next = new Map(m)
+            next.delete(chatId)
+            return next
+          })
+        yield* drop(locks)
+        yield* drop(modes)
+        yield* drop(allowlists)
+        yield* drop(priorModes)
+        yield* drop(execDefaults)
+      })
+
     return {
       /**
        * Whether any session is mid-run. Read by the learning daemon so a
@@ -1625,7 +1648,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
       commentPlanStep,
       revisePlan,
       approvePlan,
-      resumePlan
+      resumePlan,
+      forgetChat
     } as const
   })
 }) {}

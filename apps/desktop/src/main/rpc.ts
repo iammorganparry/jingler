@@ -1772,6 +1772,12 @@ const HandlersLayer = StarbaseRpcs.toLayer({
       if (!session.chats.some((chat) => chat.id === chatId)) return session
       const runner = yield* AgentRunner
       yield* runner.stop(sessionId, chatId)
+      // Drop the closed chat's per-chat state so it can't leak or strand rows:
+      // its background-task rows + stop handle (nothing else sweeps a chat that
+      // never runs again), and the runner's per-chat maps (the lock in particular
+      // grows one-per-chat for the life of the process).
+      yield* BackgroundTaskStore.clearChat(sessionId, chatId)
+      yield* runner.forgetChat(chatId)
       const updated = yield* SessionStore.closeChat(sessionId, chatId)
       yield* TranscriptStore.remove(chatId)
       yield* ContextManager.forget(chatId)
