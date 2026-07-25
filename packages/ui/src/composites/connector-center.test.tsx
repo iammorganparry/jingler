@@ -18,7 +18,7 @@ vi.mock("@tanstack/react-virtual", () => ({
   })
 }))
 
-import { ConnectorCenter } from "./connector-center.js"
+import { ConnectorCenter, columnsForWidth } from "./connector-center.js"
 
 /**
  * The Connector Center browses ~1,100 providers as a grid and opens one at a
@@ -228,6 +228,24 @@ describe("ConnectorCenter", () => {
     // And it stays out of the Connected tab.
     fireEvent.click(screen.getByRole("tab", { name: /Connected 1/ }))
     expect(catalog().queryByRole("button", { name: "GitHub" })).toBeNull()
+  })
+
+  /**
+   * The column count is measured off the CONTAINER, and these thresholds assume
+   * that. Settings puts a fixed 216px nav rail beside this pane, so measuring the
+   * window instead would fire each breakpoint ~240px early and pick a 3-up for a
+   * container that fits 2.
+   */
+  it("picks a column count a container that wide can actually fit", () => {
+    // n columns need n * 280 + (n - 1) * 8.
+    expect(columnsForWidth(567)).toBe(1)
+    expect(columnsForWidth(568)).toBe(2)
+    expect(columnsForWidth(855)).toBe(2)
+    expect(columnsForWidth(856)).toBe(3)
+
+    // The case the old window-measured version got wrong: a 1100px window with
+    // the nav rail open leaves ~836px of pane. That fits 2, not 3.
+    expect(columnsForWidth(1100 - 216 - 48)).toBe(2)
   })
 
   it("shows the not-configured callout when unconfigured", () => {

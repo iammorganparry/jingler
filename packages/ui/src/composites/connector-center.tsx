@@ -108,7 +108,10 @@ export function ConnectorCenter({
   const [status, setStatus] = React.useState<StatusFilter>("all")
   const [category, setCategory] = React.useState<string>(ALL_CATEGORIES)
   const [active, setActive] = React.useState<ConnectorProvider | null>(null)
-  const columns = useGridColumns()
+  // Declared before `useGridColumns` because that hook measures this element —
+  // the grid's width comes from the pane it sits in, not from the window.
+  const scrollRef = React.useRef<HTMLDivElement>(null)
+  const columns = useGridColumns(scrollRef)
 
   /**
    * Per service: how many connections are actually USABLE versus merely started.
@@ -166,7 +169,6 @@ export function ConnectorCenter({
   }, [scoped, status, isConnected])
 
   const rowCount = Math.ceil(filtered.length / columns)
-  const scrollRef = React.useRef<HTMLDivElement>(null)
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => scrollRef.current,
@@ -308,25 +310,40 @@ export function ConnectorCenter({
 }
 
 /**
- * Column count from the scroll container's width. The Connector Center sits in
- * a settings pane that resizes with the window, so a fixed 3-up either overflows
- * narrow or wastes wide — and the virtualizer needs the number as state, not as
- * a CSS `auto-fill` the JS can't see.
+ * How many cards fit across a container this wide.
+ *
+ * Thresholds are derived from a ~280px comfortable card and the grid's 8px gap
+ * (`gap-2`): n columns need `n * 280 + (n - 1) * 8`. Exported for the test —
+ * the arithmetic is the part worth pinning; the observer around it is plumbing.
  */
-function useGridColumns(): number {
+export const columnsForWidth = (width: number): number =>
+  width < 2 * 280 + 8 ? 1 : width < 3 * 280 + 16 ? 2 : 3
+
+/**
+ * Column count from the SCROLL CONTAINER's width — not the window's.
+ *
+ * The distinction is load-bearing: Settings puts a fixed 216px nav rail beside
+ * this pane, so the catalog is always ~240px narrower than the viewport. Measured
+ * against `document.documentElement` the breakpoints fire early by that much and
+ * a 3-up is chosen for a container that fits 2, cramming the cards — and the
+ * row-slice maths downstream is built on the same wrong number.
+ *
+ * The virtualizer needs this as state rather than a CSS `auto-fill`, because it
+ * slices `filtered` into rows of exactly `columns` and the JS has to know.
+ */
+function useGridColumns(ref: React.RefObject<HTMLElement | null>): number {
   const [columns, setColumns] = React.useState(3)
   React.useEffect(() => {
+    const el = ref.current
     // jsdom and Storybook's docs frame have no ResizeObserver in some setups;
     // the 3-up default is a fine answer when we can't measure.
-    if (typeof ResizeObserver === "undefined") return
-    const el = document.documentElement
-    const observer = new ResizeObserver(() => {
-      const w = el.clientWidth
-      setColumns(w < 720 ? 1 : w < 1080 ? 2 : 3)
-    })
+    if (el === null || typeof ResizeObserver === "undefined") return
+    // Fires once on observe with the current size, so the first paint is measured
+    // rather than guessed.
+    const observer = new ResizeObserver(() => setColumns(columnsForWidth(el.clientWidth)))
     observer.observe(el)
     return () => observer.disconnect()
-  }, [])
+  }, [ref])
   return columns
 }
 
