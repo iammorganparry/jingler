@@ -39,6 +39,8 @@ const h = vi.hoisted(() => ({
   stopGate: Promise.resolve() as Promise<void>,
   steerCalls: [] as Array<{ sessionId: string; chatId: string; text: string }>,
   steerStatus: "unsupported" as "accepted" | "deferred" | "unsupported",
+  // Held to make a steer's reply land AFTER the turn it was aimed at ended.
+  steerGate: Promise.resolve() as Promise<void>,
   // Drives the "a stop that rejects must still let the session move on" case.
   stopFails: false,
   /** Push reviewer events into the machine, as ReviewService's stream would. */
@@ -166,6 +168,9 @@ vi.mock("./rpc-client.js", () => ({
     agentApprovePlan: async () => {},
     agentSteer: async (sessionId: string, chatId: string, text: string) => {
       h.steerCalls.push({ sessionId, chatId, text })
+      // Lets a test hold the reply so the turn's terminal event overtakes it —
+      // the RPC response and the event stream are different paths in the real app.
+      await h.steerGate
       return h.steerStatus === "accepted"
         ? {
             status: "accepted" as const,
@@ -209,6 +214,7 @@ beforeEach(() => {
   h.stopGate = Promise.resolve()
   h.steerCalls.length = 0
   h.steerStatus = "unsupported"
+  h.steerGate = Promise.resolve()
   h.stopFails = false
   h.setHarnessCalls.length = 0
   h.catalogGate = Promise.resolve()
@@ -459,10 +465,10 @@ describe("conversationMachine — queue while busy", () => {
     await waitFor(actor, () => h.steerCalls.length === 1, { timeout: 3000 })
 
     expect(h.steerCalls[0]).toMatchObject({ text: "also update the README" })
+    await waitFor(actor, (s) => s.context.queued.length === 0, { timeout: 3000 })
     // Steered INTO the turn: no stop, no replay as a second run.
     expect(h.stopCalls).toEqual([])
     expect(h.agentRunCalls).toHaveLength(1)
-    expect(actor.getSnapshot().context.queued).toEqual([])
     actor.stop()
   })
 
@@ -476,7 +482,7 @@ describe("conversationMachine — queue while busy", () => {
     actor.send({ type: "SEND", text: "one" })
     actor.send({ type: "SEND", text: "two" })
     emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
-    await waitFor(actor, () => h.steerCalls.length === 1, { timeout: 3000 })
+    await waitFor(actor, (s) => s.context.queued.length === 1, { timeout: 3000 })
     expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["two"])
 
     emit({ _tag: "ToolEnd", id: "t2", status: "success", meta: null, diff: null, preview: null })
@@ -502,6 +508,68 @@ describe("conversationMachine — queue while busy", () => {
     expect(actor.getSnapshot().value).toBe("running")
     // Still queued, so it runs as the next turn exactly as before.
     expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["later is fine"])
+    actor.stop()
+  })
+
+  /**
+   * The steer's reply and the turn's `Done` travel different paths (an RPC
+   * response vs the event stream), so the reply can land after the turn ended.
+   * Handled only in `running`, it was silently dropped — and a dropped `accepted`
+   * left the message in the queue, so the next dequeue REPLAYED a message the
+   * agent had already answered.
+   */
+  it("does not replay a message the agent accepted, when the reply lands after the turn", async () => {
+    h.steerStatus = "accepted"
+    let release = () => {}
+    h.steerGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "also update the README" })
+    emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 1, { timeout: 3000 })
+
+    // The turn ends while the steer's reply is still in flight.
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    release()
+
+    await waitFor(actor, (s) => s.context.queued.length === 0, { timeout: 3000 })
+    await waitFor(actor, (s) => s.matches(idle), { timeout: 3000 })
+    // One run, not two: the accepted message was delivered inside the first turn.
+    expect(h.agentRunCalls).toHaveLength(1)
+    actor.stop()
+  })
+
+  it("does not latch the steer guard when the reply lands after the turn", async () => {
+    // A latched `steerPending` disables BOTH the automatic flush and "Send now"
+    // for the rest of this chat's life — silently, with no error anywhere.
+    h.steerStatus = "deferred"
+    let release = () => {}
+    h.steerGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "later is fine" })
+    emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 1, { timeout: 3000 })
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    release()
+
+    // The queued message runs as the next turn; its own boundary must flush again.
+    await waitFor(actor, () => h.agentRunCalls.length === 2, { timeout: 3000 })
+    expect(actor.getSnapshot().context.steerPending).toBe(false)
+
+    actor.send({ type: "SEND", text: "and one more" })
+    emit({ _tag: "ToolEnd", id: "t2", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 2, { timeout: 3000 })
     actor.stop()
   })
 

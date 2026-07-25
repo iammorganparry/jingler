@@ -419,6 +419,26 @@ export const conversationMachine = setup({
       (event.event._tag === "Done" || event.event._tag === "Failed"),
     hasQueued: ({ context }) => context.queued.length > 0,
     /**
+     * Ready to start the next queued turn — nothing queued is still in flight.
+     *
+     * `hasQueued` alone is not enough once the queue can steer. The head stays in
+     * the queue until its steer's reply says `accepted`, and that reply races the
+     * turn's own end: when the diff refresh wins, dequeuing here replays a message
+     * the agent HAS already been given, and the operator's correction runs twice.
+     * So a pending steer parks the queue instead, and its reply restarts it (see
+     * `awaitingInput`'s `STEER_RESULT`).
+     */
+    hasSettledQueue: ({ context }) => context.queued.length > 0 && !context.steerPending,
+    /**
+     * Whether anything is left to run once THIS steer result is applied — asked of
+     * the event, because the guard runs before `settleLateSteer` removes an
+     * accepted message from the queue.
+     */
+    queueSurvivesSteer: ({ context, event }) => {
+      if (event.type !== "STEER_RESULT") return false
+      return context.queued.length > (event.result.status === "accepted" ? 1 : 0)
+    },
+    /**
      * Whether this stream event is a tool boundary we may flush the queue into.
      *
      * Deliberately narrow. Steering must be NATIVE (`supportsSteer`) — otherwise
@@ -482,6 +502,9 @@ export const conversationMachine = setup({
         pendingText: text,
         pendingImages: images,
         agentTarget: target,
+        // See `dequeueTurn`: a new run must never inherit the previous turn's
+        // in-flight steer guard.
+        steerPending: false,
         // A fresh turn starts with no sub-agents (any from a prior turn are gone).
         subagents: [],
         reviewer: keepReviewer(context.reviewer),
@@ -647,6 +670,35 @@ export const conversationMachine = setup({
       }
     }),
     finishSteer: assign(() => ({ steerPending: false })),
+    /**
+     * A steer's reply that arrived AFTER the turn it belonged to had ended.
+     *
+     * The reply and the turn's terminal event travel different paths (an RPC
+     * response vs the event stream), so the `Done` can land first and leave this
+     * event to be handled in `refreshingDiff`/`stopping`/`awaitingInput` instead
+     * of `running`. Unhandled it does real damage, not nothing: `steerPending`
+     * latches true forever, which silently disables BOTH the automatic flush and
+     * "Send now" for the rest of the chat's life; and an `accepted` message never
+     * leaves the queue, so the next dequeue replays a message the agent already
+     * answered — the operator's correction runs twice.
+     *
+     * Messages are deliberately NOT appended here. The agent took this text
+     * inside the turn that just ended, so its answer is already in the transcript
+     * (folded into that turn's assistant message), and main has appended the pair
+     * to the stored transcript. Adding them again would duplicate the prompt and
+     * leave an empty assistant bubble streaming forever, since no further events
+     * are coming.
+     */
+    settleLateSteer: assign(({ context, event }) => {
+      if (event.type !== "STEER_RESULT") return { steerPending: false }
+      return {
+        steerPending: false,
+        queued:
+          event.result.status === "accepted"
+            ? context.queued.filter((queued) => queued !== event.queued)
+            : context.queued
+      }
+    }),
     clearQueue: assign(() => ({ queued: [] })),
     // Pop the head of the queue into a fresh turn — the same shape `appendTurns`
     // produces for a live SEND, so `running` streams it exactly as a normal turn.
@@ -660,6 +712,10 @@ export const conversationMachine = setup({
         pendingText: next.text,
         pendingImages: next.images,
         agentTarget: next.target,
+        // A new run starts UNLATCHED. `steerPending` guards one in-flight steer
+        // against the turn it was aimed at; carrying it into the next turn would
+        // disable the flush and "Send now" for a reply that can no longer come.
+        steerPending: false,
         subagents: [],
         reviewer: keepReviewer(context.reviewer),
         resumePlanId: null,
@@ -1317,6 +1373,23 @@ export const conversationMachine = setup({
         // Gigaplan sends continue its orchestrator intake thread. The separate
         // handoff below is the only path that spends on an adversarial round.
         SEND: { target: "running", actions: "appendTurns" },
+        /**
+         * The parked queue's release valve.
+         *
+         * A steer still in flight when the turn ended parks the queue here rather
+         * than replaying it (see `hasSettledQueue`). Its reply is what decides:
+         * `accepted` means the agent already has the message, so only what remains
+         * behind it runs; anything else means it was never delivered, so it starts
+         * its turn now — which is exactly the behaviour before the queue could steer.
+         */
+        STEER_RESULT: [
+          {
+            guard: "queueSurvivesSteer",
+            target: "running",
+            actions: ["settleLateSteer", "dequeueTurn"]
+          },
+          { actions: "settleLateSteer" }
+        ],
         // Approving a finished Gigaplan runs it per-step; anything else
         // re-drives a stale plan on the session's own harness. Both arrive here
         // rather than in `running` because neither has a live run to resume:
@@ -1452,6 +1525,8 @@ export const conversationMachine = setup({
         UNQUEUE: { actions: "removeQueued" },
         EDIT_QUEUED: { actions: "editQueued" },
         SEND_NOW: { actions: "promoteQueued" },
+        // A steer's reply can outlive the turn it was aimed at. See `settleLateSteer`.
+        STEER_RESULT: { actions: "settleLateSteer" },
         // The run is already being halted; a second STOP only clears the queue.
         STOP: { actions: ["clearQueue", "clearSubagents"] },
         PATCH_UPDATED: { actions: "applyLivePatch" },
@@ -1469,14 +1544,14 @@ export const conversationMachine = setup({
         // we return to idle. The diff is applied either way.
         onDone: [
           {
-            guard: "hasQueued",
+            guard: "hasSettledQueue",
             target: "running",
             actions: [assign(({ event }) => ({ patch: event.output })), "dequeueTurn"]
           },
           { target: "awaitingInput", actions: assign(({ event }) => ({ patch: event.output })) }
         ],
         onError: [
-          { guard: "hasQueued", target: "running", actions: "dequeueTurn" },
+          { guard: "hasSettledQueue", target: "running", actions: "dequeueTurn" },
           { target: "awaitingInput" }
         ]
       },
@@ -1488,6 +1563,9 @@ export const conversationMachine = setup({
         // The turn already ended — just jump the picked message to the head so the
         // pending dequeue (on refresh settle) runs it next.
         SEND_NOW: { actions: "promoteQueued" },
+        // The most likely landing spot for a late steer reply: the turn's `Done`
+        // moved us here while the RPC was still in flight. See `settleLateSteer`.
+        STEER_RESULT: { actions: "settleLateSteer" },
         // A late live diff read may still resolve here — apply it (the authoritative
         // refresh's onDone runs last, so it wins).
         PATCH_UPDATED: { actions: "applyLivePatch" },
