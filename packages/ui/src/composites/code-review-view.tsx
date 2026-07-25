@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { AdversarialReview, PrFileChange, PrReviewThread, ReviewFinding } from "@starbase/core"
-import { MessageSquare, PanelLeft, PanelRight, Undo2 } from "lucide-react"
+import { MessageSquare, PanelLeft, PanelRight, Sparkles, Undo2 } from "lucide-react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { DiffStat } from "../components/diff-stat.js"
@@ -417,8 +417,6 @@ export function CodeReviewView({
                 feedback={feedback.byPath.get(file.path) ?? 0}
                 onSelect={() => scrollToFile(file.path)}
                 onToggleViewed={(v) => onToggleViewed(file.path, v)}
-                onDeslop={onDeslopFile ? () => onDeslopFile(file.path) : undefined}
-                deslopDisabled={deslopAtCap}
               />
             ))}
           </div>
@@ -488,6 +486,23 @@ export function CodeReviewView({
                     className="flex-none text-[10.5px]"
                   />
                   <div className="min-w-[8px] flex-1" />
+                  {onDeslopFile && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="gap-1.5"
+                      disabled={deslopAtCap}
+                      title={
+                        deslopAtCap
+                          ? "Max concurrent Deslop sessions reached"
+                          : "Deslop — refactor this file for DRY / cleanup in a new session"
+                      }
+                      onClick={() => onDeslopFile(file.path)}
+                    >
+                      <Sparkles size={13} />
+                      Deslop
+                    </Button>
+                  )}
                   {isLocal
                     ? onRevertFile && (
                         <Button

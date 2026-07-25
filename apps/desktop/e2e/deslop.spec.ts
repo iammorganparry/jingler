@@ -48,10 +48,8 @@ test("Deslop button spawns an isolated cleanup session for a file", async ({ lau
   await window.getByText("Deslop source session").click()
   // No PR yet, so the local worktree diff lives on the "Changes" tab.
   await window.getByText("Changes").first().click()
-  // At this window width the changed-files rail is collapsed behind a toggle;
-  // open it so the per-file rows (which carry the Deslop button) are visible.
-  await window.getByRole("button", { name: "Changed files" }).click()
 
+  // The Deslop button sits in each file's sticky header, beside Revert file.
   const deslop = window.getByRole("button", { name: "Deslop" }).first()
   await expect(deslop).toBeVisible({ timeout: 30_000 })
   await deslop.click()

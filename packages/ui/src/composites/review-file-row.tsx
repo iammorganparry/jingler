@@ -1,5 +1,5 @@
 import type { PrFileChange } from "@starbase/core"
-import { Check, MessageSquare, Sparkles } from "lucide-react"
+import { Check, MessageSquare } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { FileIcon } from "../components/file-icon.js"
@@ -18,9 +18,7 @@ export function ReviewFileRow({
   active,
   feedback = 0,
   onSelect,
-  onToggleViewed,
-  onDeslop,
-  deslopDisabled = false
+  onToggleViewed
 }: {
   file: PrFileChange
   active: boolean
@@ -28,10 +26,6 @@ export function ReviewFileRow({
   feedback?: number
   onSelect: () => void
   onToggleViewed: (viewed: boolean) => void
-  /** Spawn an isolated cleanup session for this file. Absent hides the button. */
-  onDeslop?: () => void
-  /** The concurrent-deslop cap is reached — the button renders disabled. */
-  deslopDisabled?: boolean
 }) {
   const name = file.path.split("/").pop() ?? file.path
   return (
@@ -66,30 +60,6 @@ export function ReviewFileRow({
           <MessageSquare size={11} strokeWidth={2.25} />
           <span className="font-mono text-[9.5px] tabular-nums leading-none">{feedback}</span>
         </span>
-      )}
-      {onDeslop && (
-        <button
-          type="button"
-          aria-label="Deslop"
-          title={
-            deslopDisabled
-              ? "Max concurrent Deslop sessions reached"
-              : "Deslop — refactor this file for DRY / cleanup in a new session"
-          }
-          disabled={deslopDisabled}
-          onClick={(e) => {
-            e.stopPropagation()
-            onDeslop()
-          }}
-          className={cn(
-            "flex size-[15px] flex-none items-center justify-center rounded-[3px] border",
-            deslopDisabled
-              ? "border-line text-dim opacity-40"
-              : "border-line text-dim hover:border-line-strong hover:text-blue"
-          )}
-        >
-          <Sparkles size={11} />
-        </button>
       )}
       <button
         type="button"
