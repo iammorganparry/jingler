@@ -62,6 +62,10 @@ test("browse, connect, and disconnect a provider through the Connector Center", 
     await expect(catalog.getByRole("button", { name: "GitHub" })).toBeVisible()
     await expect(catalog.getByRole("button", { name: "Slack" })).toBeVisible()
 
+    // The `no_auth` provider is connected on arrival — it needs no credential, so
+    // the split is 1 connected / 3 not before the operator does anything.
+    await expect(app.window.getByRole("tab", { name: /Connected 1/ })).toBeVisible()
+
     // Search filters.
     await app.window.getByLabel("Search providers").fill("git")
     await expect(catalog.getByRole("button", { name: "Slack" })).toHaveCount(0)
@@ -69,12 +73,21 @@ test("browse, connect, and disconnect a provider through the Connector Center", 
     // Connect GitHub with an API key.
     await catalog.getByRole("button", { name: "GitHub" }).click()
     const dialog = app.window.getByRole("dialog")
-    // "API key" is the FALLBACK field label: a real api_key provider arrives with
-    // an auth TYPE and no field list, so this is the input the operator really sees.
-    await dialog.getByPlaceholder("API key").fill(SECRET)
+    // The provider's OWN placeholder, fetched from `/api/providers/github`. It is
+    // not the generic "API key" fallback: that fallback is what every provider
+    // used to get, because the catalog LIST response carries no field list at all.
+    await dialog.getByPlaceholder("ghp_...").fill(SECRET)
     await dialog.getByRole("button", { name: "Connect" }).click()
 
-    // The connection appears (GET /api/connections now returns it).
+    // The connection appears (GET /api/connections now returns it). The tab counts
+    // are scoped to the SEARCH, so clear it first — with "git" still typed,
+    // "Connected 1" would be the honest answer and prove nothing about the total.
+    await app.window.getByLabel("Search providers").fill("")
+    await expect(app.window.getByRole("tab", { name: /Connected 2/ })).toBeVisible()
+
+    // Reopen the card: the account name is read out of the response's nested
+    // `profile`, which the mapper used to look for at the root and render blank.
+    await catalog.getByRole("button", { name: "GitHub" }).click()
     await expect(app.window.getByText("github account")).toBeVisible()
 
     // The API key must never surface as rendered text (the value is write-only). A

@@ -1896,6 +1896,7 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "OpenConnector.autoSetup": () => openConnectorAutoSetup(),
   "OpenConnector.injection": () => openConnectorInjection(),
   "Connector.providers": () => OpenConnectorApi.listProviders(),
+  "Connector.provider": ({ service }) => OpenConnectorApi.getProvider(service),
   "Connector.connections": () => OpenConnectorApi.listConnections(),
   "Connector.oauthConfigs": () => OpenConnectorApi.oauthConfigs(),
   "Connector.connect": ({ service, authType, values, connectionName }) =>

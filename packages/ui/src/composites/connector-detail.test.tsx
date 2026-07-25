@@ -1,0 +1,222 @@
+import type {
+  ConnectorConnection,
+  ConnectorProvider,
+  ConnectorProviderDetail
+} from "@starbase/core"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
+
+import { ConnectorDetail } from "./connector-detail.js"
+
+/**
+ * The detail sheet is where a provider's REAL connect form lives. Before it, the
+ * catalog carried no auth fields at all and every provider fell through to one
+ * generic "API key" box — so these tests are mostly about the form matching what
+ * the provider actually accepts: OAuth only, key only, both, or neither.
+ */
+
+afterEach(cleanup)
+
+const card = (over: Partial<ConnectorProvider> = {}): ConnectorProvider => ({
+  id: "linear",
+  name: "Linear",
+  icon: null,
+  categories: ["Productivity"],
+  homepageUrl: "https://linear.app",
+  authTypes: ["oauth2", "api_key"],
+  actionCount: 34,
+  ...over
+})
+
+const detail = (over: Partial<ConnectorProviderDetail> = {}): ConnectorProviderDetail => ({
+  id: "linear",
+  name: "Linear",
+  categories: ["Productivity"],
+  homepageUrl: "https://linear.app",
+  authTypes: ["oauth2", "api_key"],
+  fields: [
+    {
+      name: "apiKey",
+      label: "Personal API Key",
+      kind: "password",
+      required: true,
+      placeholder: "lin_api_..."
+    }
+  ],
+  oauthScopes: ["read", "write", "issues:create"],
+  actionCount: 34,
+  description: null,
+  ...over
+})
+
+const base = () => ({
+  provider: card(),
+  detail: detail(),
+  detailLoading: false,
+  detailError: null,
+  connections: [] as ReadonlyArray<ConnectorConnection>,
+  oauthInfo: undefined,
+  onClose: vi.fn(),
+  onConnect: vi.fn(async () => {}),
+  onDisconnect: vi.fn(async () => {}),
+  onSetOauthConfig: vi.fn(async () => {}),
+  onStartOauth: vi.fn(async () => {})
+})
+
+describe("ConnectorDetail", () => {
+  it("defaults a dual-auth provider to OAuth and keeps the key form one click away", async () => {
+    const props = base()
+    render(<ConnectorDetail {...props} />)
+
+    expect(screen.getByRole("button", { name: "Connect with OAuth" })).toBeTruthy()
+    // The OAuth pane is showing, so the key field must not be — otherwise the
+    // operator sees two competing ways to connect at once.
+    expect(screen.queryByPlaceholderText("lin_api_...")).toBeNull()
+
+    fireEvent.click(screen.getByRole("tab", { name: "API key" }))
+    expect(screen.getByPlaceholderText("lin_api_...")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Connect with OAuth" })).toBeNull()
+  })
+
+  it("lists the OAuth scopes the provider's actions will request", () => {
+    render(<ConnectorDetail {...base()} />)
+    expect(screen.getByText("issues:create")).toBeTruthy()
+    expect(screen.getByText("write")).toBeTruthy()
+  })
+
+  it("offers no key form for an oauth-only provider", () => {
+    render(
+      <ConnectorDetail
+        {...base()}
+        provider={card({ id: "slack", name: "Slack", authTypes: ["oauth2"] })}
+        detail={detail({ id: "slack", name: "Slack", authTypes: ["oauth2"], fields: [] })}
+      />
+    )
+    expect(screen.getByRole("button", { name: "Connect with OAuth" })).toBeTruthy()
+    expect(screen.queryByRole("tab", { name: "API key" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull()
+  })
+
+  it("offers no OAuth button for a key-only provider", () => {
+    render(
+      <ConnectorDetail
+        {...base()}
+        provider={card({ id: "github", name: "GitHub", authTypes: ["api_key"] })}
+        detail={detail({
+          id: "github",
+          name: "GitHub",
+          authTypes: ["api_key"],
+          oauthScopes: [],
+          fields: [
+            { name: "apiKey", label: "Personal access token", kind: "password", required: true }
+          ]
+        })}
+      />
+    )
+    expect(screen.queryByRole("button", { name: "Connect with OAuth" })).toBeNull()
+    expect(screen.getByPlaceholderText("Personal access token")).toBeTruthy()
+  })
+
+  it("shows a no_auth provider as ready, with nothing to fill in", () => {
+    render(
+      <ConnectorDetail
+        {...base()}
+        provider={card({ id: "hackernews", name: "Hacker News", authTypes: ["no_auth"] })}
+        detail={detail({
+          id: "hackernews",
+          name: "Hacker News",
+          authTypes: ["no_auth"],
+          fields: [],
+          oauthScopes: []
+        })}
+      />
+    )
+    expect(screen.getByText(/No auth needed/)).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Connect with OAuth" })).toBeNull()
+  })
+
+  it("sends a named alias only when it differs from the default connection", async () => {
+    const props = base()
+    render(<ConnectorDetail {...props} />)
+    fireEvent.click(screen.getByRole("tab", { name: "API key" }))
+    fireEvent.change(screen.getByPlaceholderText("lin_api_..."), {
+      target: { value: "lin_api_secret" }
+    })
+
+    // As shipped the field reads "default", which OpenConnector addresses by
+    // omitting the name — sending it would create a SECOND connection.
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    await waitFor(() =>
+      expect(props.onConnect).toHaveBeenCalledWith(
+        "linear",
+        "api_key",
+        { apiKey: "lin_api_secret" },
+        undefined
+      )
+    )
+  })
+
+  it("passes a real alias through when the operator names the connection", async () => {
+    const props = base()
+    render(<ConnectorDetail {...props} />)
+    fireEvent.click(screen.getByRole("tab", { name: "API key" }))
+    fireEvent.change(screen.getByPlaceholderText("default"), { target: { value: "work" } })
+    fireEvent.change(screen.getByPlaceholderText("lin_api_..."), {
+      target: { value: "lin_api_secret" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    await waitFor(() =>
+      expect(props.onConnect).toHaveBeenCalledWith(
+        "linear",
+        "api_key",
+        { apiKey: "lin_api_secret" },
+        "work"
+      )
+    )
+  })
+
+  it("collects OAuth client credentials before offering to connect", () => {
+    render(
+      <ConnectorDetail
+        {...base()}
+        oauthInfo={{
+          provider: "linear",
+          expectedRedirectUri: "http://localhost:3000/oauth/callback",
+          hasClient: false,
+          clientFields: []
+        }}
+      />
+    )
+    expect(screen.getByText("http://localhost:3000/oauth/callback")).toBeTruthy()
+    expect(screen.getByPlaceholderText("Client ID")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Connect with OAuth" })).toBeNull()
+  })
+
+  it("disconnects a NAMED connection by its alias, not as the default one", async () => {
+    const props = base()
+    render(
+      <ConnectorDetail
+        {...props}
+        connections={[
+          {
+            service: "linear",
+            accountId: "acct_1",
+            displayName: "Acme",
+            grantedScopes: ["read", "write"],
+            connectionName: "work",
+            status: "connected"
+          }
+        ]}
+      />
+    )
+    expect(screen.getByText(/2 scopes/)).toBeTruthy()
+    fireEvent.click(screen.getByText("Disconnect"))
+    await waitFor(() => expect(props.onDisconnect).toHaveBeenCalledWith("linear", "work"))
+  })
+
+  it("renders nothing when no provider is open", () => {
+    render(<ConnectorDetail {...base()} provider={null} />)
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+})

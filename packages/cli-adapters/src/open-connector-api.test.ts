@@ -70,6 +70,153 @@ describe("OpenConnectorApi", () => {
     expect(init.headers).toMatchObject({ authorization: "Bearer tok_123" })
   })
 
+  /**
+   * The live catalog's exact list shape, captured from
+   * `GET /v1/providers` on `ghcr.io/oomol-lab/open-connector`. Two things it
+   * pins: `iconUrl` is null (so the UI must derive a logo from `homepageUrl`),
+   * and `categories` are objects, not strings.
+   */
+  it("maps the live catalog shape — categories, homepage, and no_auth", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                service: "linear",
+                displayName: "Linear",
+                iconUrl: null,
+                homepageUrl: "https://linear.app",
+                categories: [
+                  { id: "Productivity", displayName: "Productivity" },
+                  { id: "Developer Tools", displayName: "Developer Tools" }
+                ],
+                authTypes: ["oauth2", "api_key"]
+              },
+              {
+                service: "hackernews",
+                displayName: "Hacker News",
+                iconUrl: null,
+                homepageUrl: "https://news.ycombinator.com",
+                categories: [{ id: "Data", displayName: "Data" }],
+                authTypes: ["no_auth"]
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const exit = await configured(() => OpenConnectorApi.listProviders(), fetchMock)
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    const [linear, hn] = exit.value
+    expect(linear).toMatchObject({
+      id: "linear",
+      name: "Linear",
+      icon: null,
+      homepageUrl: "https://linear.app",
+      categories: ["Productivity", "Developer Tools"],
+      authTypes: ["oauth2", "api_key"]
+    })
+    // The bug this pins: `no_auth` used to be dropped from the union and default
+    // to `api_key`, putting a credential form in front of a provider with none.
+    expect(hn?.authTypes).toEqual(["no_auth"])
+  })
+
+  /**
+   * The per-service detail is where the connect form's real shape comes from.
+   * Captured from `GET /api/providers/linear`: a provider that offers BOTH modes,
+   * with the api-key label/placeholder at the descriptor level and the OAuth
+   * scopes on a sibling entry.
+   */
+  it("folds a provider's auth descriptors into a form, keeping oauth scopes separate", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            service: "linear",
+            displayName: "Linear",
+            categories: ["Productivity"],
+            authTypes: ["oauth2", "api_key"],
+            homepageUrl: "https://linear.app",
+            auth: [
+              {
+                type: "oauth2",
+                authorizationUrl: "https://linear.app/oauth/authorize",
+                scopes: ["read", "write", "issues:create"]
+              },
+              {
+                type: "api_key",
+                label: "Personal API Key",
+                placeholder: "lin_api_...",
+                description: "Create it from Settings > Account > Security & Access.",
+                extraFields: []
+              }
+            ],
+            actions: [{ id: "linear.create_linear_issue" }, { id: "linear.create_linear_comment" }]
+          }),
+          { status: 200 }
+        )
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const exit = await configured(() => OpenConnectorApi.getProvider("linear"), fetchMock)
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.fields).toEqual([
+      { name: "apiKey", label: "Personal API Key", kind: "password", required: true, placeholder: "lin_api_..." }
+    ])
+    // The oauth2 descriptor's scopes must NOT leak into the key form — they are
+    // client config, collected separately.
+    expect(exit.value.oauthScopes).toEqual(["read", "write", "issues:create"])
+    expect(exit.value.actionCount).toBe(2)
+    const [url] = fetchMock.mock.calls[0] as unknown as [string]
+    // Never `/api/providers` — the list form of this endpoint is ~5 MB.
+    expect(url).toBe("https://oc.test/api/providers/linear")
+  })
+
+  /**
+   * The live connection shape nests the account under `profile`. Reading it at
+   * the root — which is what the mapper used to do — silently produced an empty
+   * account name and zero scopes on every connected row.
+   */
+  it("reads a connection's account out of its nested profile", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "linear:work",
+                service: "linear",
+                connectionName: "work",
+                authType: "oauth2",
+                configured: true,
+                profile: {
+                  accountId: "acct_1",
+                  displayName: "Acme Engineering",
+                  grantedScopes: ["read", "write"]
+                }
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const exit = await configured(() => OpenConnectorApi.listConnections(), fetchMock)
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value[0]).toEqual({
+      service: "linear",
+      accountId: "acct_1",
+      displayName: "Acme Engineering",
+      grantedScopes: ["read", "write"],
+      connectionName: "work",
+      status: "connected"
+    })
+  })
+
   it("sends the credential OUT on the PUT body and never returns it", async () => {
     const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }))
     vi.stubGlobal("fetch", fetchMock)

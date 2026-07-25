@@ -4,6 +4,7 @@ import type {
   ConnectorAuthType,
   ConnectorConnection,
   ConnectorProvider,
+  ConnectorProviderDetail,
   OAuthClientInfo
 } from "@starbase/core"
 import { ConnectorError } from "@starbase/core"
@@ -54,9 +55,27 @@ const jsonBody = (method: string, payload: unknown): RequestInit => ({
 /** OpenConnector wraps success payloads in `{ success, message, data, meta }`. */
 const envelope = (body: unknown): unknown => (isRecord(body) && "data" in body ? body.data : body)
 
-const AUTH_TYPES: ReadonlyArray<ConnectorAuthType> = ["oauth2", "api_key", "custom_credential"]
+const AUTH_TYPES: ReadonlyArray<ConnectorAuthType> = [
+  "oauth2",
+  "api_key",
+  "custom_credential",
+  // Real, and easy to lose: ~8 providers take no credential and are `configured`
+  // on arrival. Dropping it here would fall through to the `["api_key"]` default
+  // below and put a credential form in front of a provider that has none.
+  "no_auth"
+]
 const asAuthType = (v: unknown): ConnectorAuthType | undefined =>
   AUTH_TYPES.find((t) => t === v)
+
+/**
+ * Category ids. The list endpoint sends `[{ id, displayName }]`; the per-service
+ * detail sends bare `["Productivity"]`. Accept both — the grid's filter keys off
+ * the id either way.
+ */
+const mapCategories = (v: unknown): ReadonlyArray<string> =>
+  mapArray(v, (raw) =>
+    typeof raw === "string" ? raw : isRecord(raw) ? (str(raw.id) ?? str(raw.displayName)) : undefined
+  )
 
 const mapField = (raw: unknown): ConnectorAuthField | undefined => {
   if (!isRecord(raw)) return undefined
@@ -81,42 +100,109 @@ const DEFAULT_CLIENT_FIELDS: ReadonlyArray<ConnectorAuthField> = [
   { name: "clientSecret", label: "Client secret", kind: "password", required: true }
 ]
 
+/**
+ * The union of auth kinds a catalog entry advertises. Prefers the flat
+ * `authTypes: ["oauth2", "api_key"]` the live instance sends, and falls back to
+ * reading the `type` off each `auth[]` descriptor for shapes that only carry
+ * the richer form. Empty means "we could not tell" — `api_key` is the safe guess.
+ */
+const mapAuthTypes = (raw: Record<string, unknown>): ReadonlyArray<ConnectorAuthType> => {
+  const flat = mapArray(raw.authTypes, asAuthType)
+  if (flat.length > 0) return flat
+  const fromDescriptors = mapArray(raw.auth, (a) => (isRecord(a) ? asAuthType(a.type) : undefined))
+  return fromDescriptors.length > 0 ? fromDescriptors : ["api_key"]
+}
+
 const mapProvider = (raw: unknown): ConnectorProvider | undefined => {
   if (!isRecord(raw)) return undefined
   const id = str(raw.id) ?? str(raw.service) ?? str(raw.slug)
   if (id === undefined) return undefined
-  // `auth` may be an array of { type, fields } descriptors; flatten to the union.
-  const authEntries = arr(raw.auth)
-  const authTypes = authEntries
-    .map((a) => (isRecord(a) ? asAuthType(a.type) : undefined))
-    .filter((t): t is ConnectorAuthType => t !== undefined)
-  // Only api-key / custom-credential descriptors contribute to the connect FORM.
-  // An oauth2 descriptor's fields are client-config (id/secret), collected
-  // separately from `oauthConfigs`, so folding them in here would corrupt the
-  // key form for a provider that offers both.
-  const fields = authEntries.flatMap((a) =>
-    isRecord(a) && a.type !== "oauth2" ? mapFields(a.fields) : []
-  )
   return {
     id,
     name: str(raw.name) ?? str(raw.displayName) ?? id,
     icon: str(raw.icon) ?? str(raw.iconUrl) ?? null,
-    authTypes: authTypes.length > 0 ? authTypes : ["api_key"],
-    fields,
+    categories: mapCategories(raw.categories),
+    homepageUrl: str(raw.homepageUrl) ?? str(raw.homepage) ?? null,
+    authTypes: mapAuthTypes(raw),
     actionCount: num(raw.actionCount) ?? num(raw.actions) ?? null
   }
 }
 
+/**
+ * One provider's full descriptor (`GET /api/providers/{service}`).
+ *
+ * Only api-key / custom-credential descriptors contribute to the connect FORM.
+ * An oauth2 descriptor's fields are CLIENT config (id/secret), collected
+ * separately via `oauthConfigs`, so folding them in here would corrupt the key
+ * form for a provider that offers both — which is most of the ones anyone
+ * actually connects.
+ */
+const mapProviderDetail = (raw: unknown): ConnectorProviderDetail | undefined => {
+  if (!isRecord(raw)) return undefined
+  const id = str(raw.id) ?? str(raw.service) ?? str(raw.slug)
+  if (id === undefined) return undefined
+  const authEntries = arr(raw.auth)
+  const keyEntries = authEntries.filter(
+    (a): a is Record<string, unknown> => isRecord(a) && a.type !== "oauth2" && a.type !== "no_auth"
+  )
+  // A key descriptor is usually ONE labelled secret (`label`/`placeholder` at the
+  // descriptor level) plus optional `extraFields`; a custom_credential descriptor
+  // instead carries a `fields` array. Both collapse to the same form.
+  const fields = keyEntries.flatMap((a) => {
+    const declared = [...mapFields(a.fields), ...mapFields(a.extraFields)]
+    const label = str(a.label)
+    if (label === undefined) return declared
+    const named: ConnectorAuthField = {
+      name: "apiKey",
+      label,
+      kind: "password",
+      required: true,
+      ...(str(a.placeholder) !== undefined ? { placeholder: str(a.placeholder) } : {})
+    }
+    return [named, ...declared]
+  })
+  const oauthScopes = authEntries.flatMap((a) =>
+    isRecord(a) && a.type === "oauth2" ? strArray(a.scopes) : []
+  )
+  const description = keyEntries.map((a) => str(a.description)).find((d) => d !== undefined)
+  return {
+    id,
+    name: str(raw.name) ?? str(raw.displayName) ?? id,
+    categories: mapCategories(raw.categories),
+    homepageUrl: str(raw.homepageUrl) ?? str(raw.homepage) ?? null,
+    authTypes: mapAuthTypes(raw),
+    fields,
+    oauthScopes,
+    actionCount: Array.isArray(raw.actions)
+      ? raw.actions.length
+      : (num(raw.actionCount) ?? null),
+    description: description ?? str(raw.description) ?? null
+  }
+}
+
+/**
+ * The live instance nests the account under `profile` — `{ service, …, profile:
+ * { accountId, displayName, grantedScopes } }` — while the flatter shape shows
+ * up in older payloads and in the e2e fake. Read `profile` first, fall back to
+ * the root.
+ *
+ * Reading only the root is why every connected row used to render an empty
+ * account name and zero scopes: the fields were there, one level down.
+ */
 const mapConnection = (raw: unknown): ConnectorConnection | undefined => {
   if (!isRecord(raw)) return undefined
   const service = str(raw.service) ?? str(raw.provider)
   if (service === undefined) return undefined
+  const profile = isRecord(raw.profile) ? raw.profile : raw
   return {
     service,
-    accountId: str(raw.accountId) ?? str(raw.id) ?? "",
-    displayName: str(raw.displayName) ?? str(raw.accountName) ?? null,
-    grantedScopes: strArray(raw.grantedScopes ?? raw.scopes),
-    connectionName: str(raw.connectionName) ?? str(raw.alias) ?? null
+    accountId: str(profile.accountId) ?? str(raw.accountId) ?? str(raw.id) ?? "",
+    displayName: str(profile.displayName) ?? str(profile.accountName) ?? str(raw.displayName) ?? null,
+    grantedScopes: strArray(profile.grantedScopes ?? profile.scopes ?? raw.grantedScopes ?? raw.scopes),
+    connectionName: str(raw.connectionName) ?? str(raw.alias) ?? null,
+    // `configured` is the instance's own word for "this credential is usable".
+    // Absent (the flat/fake shape) means the entry only exists because it works.
+    status: raw.configured === false ? "pending" : "connected"
   }
 }
 
@@ -124,7 +210,12 @@ const mapOAuthConfig = (raw: unknown): OAuthClientInfo | undefined => {
   if (!isRecord(raw)) return undefined
   const provider = str(raw.provider) ?? str(raw.service)
   if (provider === undefined) return undefined
-  const clientFields = mapFields(raw.clientConfigFields ?? raw.clientFields)
+  // A handful of providers declare extra client-config inputs, and they hang off
+  // the nested `auth` descriptor rather than the root.
+  const auth = isRecord(raw.auth) ? raw.auth : {}
+  const clientFields = mapFields(
+    raw.clientConfigFields ?? raw.clientFields ?? auth.clientConfigFields
+  )
   return {
     provider,
     expectedRedirectUri: str(raw.expectedRedirectUri) ?? "",
@@ -192,6 +283,26 @@ export class OpenConnectorApi extends Effect.Service<OpenConnectorApi>()(
       const listProviders = () =>
         call("/v1/providers").pipe(Effect.map((data) => mapArray(data, mapProvider)))
 
+      /**
+       * One provider's connect-form shape, fetched when its card is opened.
+       *
+       * There IS a list endpoint carrying this (`GET /api/providers`) and it must
+       * never be called: it inlines every action's JSON Schema for all ~1,100
+       * providers and weighs 5 MB. `/v1/providers` (250 KB) feeds the grid; this
+       * per-service call (~40 KB) feeds the dialog.
+       */
+      const getProvider = (service: string) =>
+        call(`/api/providers/${encodeURIComponent(service)}`).pipe(
+          Effect.flatMap((data) => {
+            const detail = mapProviderDetail(data)
+            return detail === undefined
+              ? Effect.fail(
+                  new ConnectorError({ message: `OpenConnector has no provider "${service}".` })
+                )
+              : Effect.succeed(detail)
+          })
+        )
+
       const listConnections = () =>
         call("/api/connections").pipe(Effect.map((data) => mapArray(data, mapConnection)))
 
@@ -246,6 +357,7 @@ export class OpenConnectorApi extends Effect.Service<OpenConnectorApi>()(
 
       return {
         listProviders,
+        getProvider,
         listConnections,
         oauthConfigs,
         putConnection,

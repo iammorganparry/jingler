@@ -1,35 +1,55 @@
 import type {
-  ConnectorAuthField,
+  ConnectorAuthType,
   ConnectorConnection,
   ConnectorProvider,
+  ConnectorProviderDetail,
   OAuthClientInfo
 } from "@starbase/core"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as React from "react"
-import { cn } from "../lib/cn.js"
-import { AsyncButton } from "../components/async-button.js"
 import { Badge } from "../components/badge.js"
 import { Callout } from "../components/callout.js"
-import { Input } from "../components/input.js"
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from "../components/dialog.js"
+import { ConnectorLogo } from "../components/connector-logo.js"
+import { SearchInput } from "../components/search-input.js"
+import { SegmentedControl } from "../components/segmented-control.js"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/select.js"
+import { StatusDot } from "../components/status-dot.js"
+import { cn } from "../lib/cn.js"
+import { ConnectorDetail } from "./connector-detail.js"
 
 /**
- * The MCP Connector Center — browse the OpenConnector provider catalog and connect
- * providers (OAuth or API-key) in-app. PRESENTATIONAL: it renders from props and
- * calls back on actions, so it lives in `@starbase/ui` (storybookable, no rpc). The
- * desktop renderer wires `useConnectorCenter()` into `ConnectorCenterProps`.
+ * The MCP Connector Center — browse the OpenConnector provider catalog as a grid
+ * of logo cards and connect providers (OAuth or API key) in-app.
  *
- * Secrets flow one way — form values go OUT through `onConnect` / `onSetOauthConfig`
- * and are never read back; the props carry no credential (see core `connector.ts`).
+ * PRESENTATIONAL: it renders from props and calls back on actions, so it lives
+ * in `@starbase/ui` (storybookable, no rpc). The desktop renderer wires
+ * `useConnectorCenter()` into `ConnectorCenterProps`.
+ *
+ * The catalog is ~1,100 providers, so the grid is virtualized BY ROW rather than
+ * by card: the row count is `ceil(n / columns)` and each virtual item lays its
+ * own row out with a plain CSS grid. Virtualizing per-card would need a second
+ * axis for no gain, and virtualizing nothing would mount 1,100 `<img>`s.
+ *
+ * Secrets flow one way — form values go OUT through `onConnect` /
+ * `onSetOauthConfig` and are never read back; the props carry no credential
+ * (see core `connector.ts`).
  */
+
+type StatusFilter = "all" | "connected" | "not-connected"
+
+/** Every category, or one of the catalog's own ids. */
+const ALL_CATEGORIES = "__all__"
+
+/** Card height + gap, in px. Feeds the virtualizer's size estimate. */
+const ROW_HEIGHT = 76
+
+const AUTH_LABEL: Record<ConnectorAuthType, string> = {
+  oauth2: "OAuth",
+  api_key: "API key",
+  custom_credential: "Credentials",
+  no_auth: "No auth"
+}
+
 export interface ConnectorCenterProps {
   readonly providers: ReadonlyArray<ConnectorProvider>
   readonly connections: ReadonlyArray<ConnectorConnection>
@@ -37,10 +57,17 @@ export interface ConnectorCenterProps {
   readonly loading: boolean
   /** A read error (e.g. OpenConnector not configured / unreachable), or null. */
   readonly error: string | null
+  /** The opened provider's detail, or null while it loads. */
+  readonly detail: ConnectorProviderDetail | null
+  readonly detailLoading: boolean
+  readonly detailError: string | null
+  /** Told which provider's card was opened, so the detail can be fetched lazily. */
+  readonly onOpenProvider: (service: string | null) => void
   readonly onConnect: (
     service: string,
     authType: "api_key" | "custom_credential",
-    values: Record<string, string>
+    values: Record<string, string>,
+    connectionName?: string
   ) => Promise<void>
   readonly onDisconnect: (service: string, connectionName: string | null) => Promise<void>
   readonly onSetOauthConfig: (
@@ -48,15 +75,8 @@ export interface ConnectorCenterProps {
     clientId: string,
     clientSecret: string
   ) => Promise<void>
-  readonly onStartOauth: (service: string) => Promise<void>
+  readonly onStartOauth: (service: string, connectionName?: string) => Promise<void>
   readonly onRefresh: () => void
-}
-
-const FALLBACK_FIELD: ConnectorAuthField = {
-  name: "apiKey",
-  label: "API key",
-  kind: "password",
-  required: true
 }
 
 export function ConnectorCenter({
@@ -65,6 +85,10 @@ export function ConnectorCenter({
   oauthConfigs,
   loading,
   error,
+  detail,
+  detailLoading,
+  detailError,
+  onOpenProvider,
   onConnect,
   onDisconnect,
   onSetOauthConfig,
@@ -72,34 +96,73 @@ export function ConnectorCenter({
   onRefresh
 }: ConnectorCenterProps) {
   const [query, setQuery] = React.useState("")
+  const [status, setStatus] = React.useState<StatusFilter>("all")
+  const [category, setCategory] = React.useState<string>(ALL_CATEGORIES)
   const [active, setActive] = React.useState<ConnectorProvider | null>(null)
+  const columns = useGridColumns()
 
-  const connectedIds = React.useMemo(
-    () => new Set(connections.map((c) => c.service)),
-    [connections]
+  /** How many connections each service holds — 0 means "not connected". */
+  const connectionCount = React.useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const c of connections) counts.set(c.service, (counts.get(c.service) ?? 0) + 1)
+    return counts
+  }, [connections])
+
+  const categories = React.useMemo(() => {
+    const seen = new Set<string>()
+    for (const p of providers) for (const c of p.categories) seen.add(c)
+    return [...seen].sort((a, b) => a.localeCompare(b))
+  }, [providers])
+
+  /** Status counts are over the CATEGORY+SEARCH result, so the tabs describe
+      what switching to them would actually show, not the whole catalog. */
+  const scoped = React.useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return providers.filter((p) => {
+      if (category !== ALL_CATEGORIES && !p.categories.includes(category)) return false
+      if (q.length === 0) return true
+      return p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)
+    })
+  }, [providers, query, category])
+
+  const connectedCount = React.useMemo(
+    () => scoped.filter((p) => (connectionCount.get(p.id) ?? 0) > 0).length,
+    [scoped, connectionCount]
   )
 
   const filtered = React.useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (q.length === 0) return providers
-    return providers.filter(
-      (p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)
-    )
-  }, [providers, query])
+    if (status === "all") return scoped
+    const wantConnected = status === "connected"
+    return scoped.filter((p) => ((connectionCount.get(p.id) ?? 0) > 0) === wantConnected)
+  }, [scoped, status, connectionCount])
 
+  const rowCount = Math.ceil(filtered.length / columns)
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const virtualizer = useVirtualizer({
-    count: filtered.length,
+    count: rowCount,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 52,
-    getItemKey: (i) => filtered[i]?.id ?? i,
-    overscan: 8
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 3
   })
 
+  const open = (provider: ConnectorProvider) => {
+    setActive(provider)
+    onOpenProvider(provider.id)
+  }
+  const close = () => {
+    setActive(null)
+    onOpenProvider(null)
+  }
+
+  const activeConnections = React.useMemo(
+    () => (active ? connections.filter((c) => c.service === active.id) : []),
+    [active, connections]
+  )
+
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
           <h3 className="text-[13px] font-semibold text-text-bright">Connector Center</h3>
           <p className="mt-0.5 text-[11px] text-dim">
             Connect providers once — every agent draws them from the shared OpenConnector.
@@ -108,74 +171,106 @@ export function ConnectorCenter({
         <button
           type="button"
           onClick={onRefresh}
-          className="rounded-md border border-line bg-panel px-2.5 py-1 text-[11px] text-text hover:border-line-strong hover:bg-surface"
+          className="flex-none rounded-md border border-line bg-panel px-2.5 py-1 text-[11px] text-text hover:border-line-strong hover:bg-surface"
         >
           Refresh
         </button>
       </div>
 
-      {error && providers.length === 0 ? (
-        <Callout tone="blue">{error}</Callout>
-      ) : null}
+      {error && providers.length === 0 ? <Callout tone="blue">{error}</Callout> : null}
 
-      {connections.length > 0 ? (
-        <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-medium text-muted-foreground">Connected</span>
-          {connections.map((c) => (
-            <ConnectionRow key={`${c.service}:${c.connectionName ?? ""}`} connection={c} onDisconnect={onDisconnect} />
-          ))}
-        </div>
-      ) : null}
-
-      <Input
+      <SearchInput
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={setQuery}
         placeholder={loading ? "Loading providers…" : `Search ${providers.length} providers…`}
         aria-label="Search providers"
       />
 
-      {/* A named region: "GitHub" is also a Settings nav entry, so the catalog needs
-          to be addressable on its own — by a screen reader and by a test alike. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SegmentedControl
+          value={status}
+          onChange={setStatus}
+          items={[
+            { value: "all", label: `All ${scoped.length}` },
+            { value: "connected", label: `Connected ${connectedCount}` },
+            { value: "not-connected", label: `Not connected ${scoped.length - connectedCount}` }
+          ]}
+        />
+        {categories.length > 0 ? (
+          <Select value={category} onValueChange={setCategory}>
+            <SelectTrigger aria-label="Filter by category" className="w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_CATEGORIES}>All categories</SelectItem>
+              {categories.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
+      </div>
+
+      {/* A named region: "GitHub" is also a Settings nav entry, so the catalog
+          needs to be addressable on its own — by a screen reader and by a test
+          alike. */}
       <div
         ref={scrollRef}
         role="group"
         aria-label="Provider catalog"
-        className="max-h-[360px] overflow-y-auto rounded-lg border border-line"
+        className="max-h-[420px] overflow-y-auto rounded-lg border border-line p-2"
       >
-        <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-          {virtualizer.getVirtualItems().map((item) => {
-            const provider = filtered[item.index]
-            if (!provider) return null
-            return (
-              <div
-                key={item.key}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  transform: `translateY(${item.start}px)`
-                }}
-              >
-                <ProviderRow
-                  provider={provider}
-                  connected={connectedIds.has(provider.id)}
-                  onOpen={() => setActive(provider)}
-                />
-              </div>
-            )
-          })}
-          {filtered.length === 0 && !loading ? (
-            <div className="px-3 py-6 text-center text-[12px] text-dim">No providers match “{query}”.</div>
-          ) : null}
-        </div>
+        {filtered.length === 0 && !loading ? (
+          <div className="px-3 py-8 text-center text-[12px] text-dim">
+            {query.trim().length > 0
+              ? `No providers match “${query}”.`
+              : "No providers match these filters."}
+          </div>
+        ) : (
+          <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+            {virtualizer.getVirtualItems().map((row) => {
+              const start = row.index * columns
+              return (
+                <div
+                  key={row.key}
+                  className="grid gap-2"
+                  style={{
+                    gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: ROW_HEIGHT,
+                    transform: `translateY(${row.start}px)`
+                  }}
+                >
+                  {filtered.slice(start, start + columns).map((provider) => (
+                    <ConnectorCard
+                      key={provider.id}
+                      provider={provider}
+                      connectionCount={connectionCount.get(provider.id) ?? 0}
+                      onOpen={() => open(provider)}
+                    />
+                  ))}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
-      <ConnectDialog
+      <ConnectorDetail
         provider={active}
+        detail={detail}
+        detailLoading={detailLoading}
+        detailError={detailError}
+        connections={activeConnections}
         oauthInfo={active ? oauthConfigs.find((o) => o.provider === active.id) : undefined}
-        onClose={() => setActive(null)}
+        onClose={close}
         onConnect={onConnect}
+        onDisconnect={onDisconnect}
         onSetOauthConfig={onSetOauthConfig}
         onStartOauth={onStartOauth}
       />
@@ -183,207 +278,86 @@ export function ConnectorCenter({
   )
 }
 
-function ProviderRow({
+/**
+ * Column count from the scroll container's width. The Connector Center sits in
+ * a settings pane that resizes with the window, so a fixed 3-up either overflows
+ * narrow or wastes wide — and the virtualizer needs the number as state, not as
+ * a CSS `auto-fill` the JS can't see.
+ */
+function useGridColumns(): number {
+  const [columns, setColumns] = React.useState(3)
+  React.useEffect(() => {
+    // jsdom and Storybook's docs frame have no ResizeObserver in some setups;
+    // the 3-up default is a fine answer when we can't measure.
+    if (typeof ResizeObserver === "undefined") return
+    const el = document.documentElement
+    const observer = new ResizeObserver(() => {
+      const w = el.clientWidth
+      setColumns(w < 720 ? 1 : w < 1080 ? 2 : 3)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+  return columns
+}
+
+function ConnectorCard({
   provider,
-  connected,
+  connectionCount,
   onOpen
 }: {
   provider: ConnectorProvider
-  connected: boolean
+  connectionCount: number
   onOpen: () => void
 }) {
+  const connected = connectionCount > 0
   return (
     <button
       type="button"
       onClick={onOpen}
-      // The row's text is name + id + action count + a Connect/Manage affordance;
-      // the provider's NAME is what the operator is actually picking.
+      // The card's text is name + id + category + auth chips; the provider's
+      // NAME is what the operator is actually picking.
       aria-label={provider.name}
-      className="flex w-full items-center gap-2.5 border-b border-line px-3 py-2 text-left hover:bg-hover"
+      className={cn(
+        "flex h-[68px] w-full items-center gap-2.5 rounded-lg border bg-sunken px-3 text-left transition-colors",
+        connected ? "border-green/30 hover:border-green/50" : "border-line hover:border-line-strong",
+        "hover:bg-hover"
+      )}
     >
-      <span className="flex size-[26px] flex-none items-center justify-center overflow-hidden rounded-md border border-line bg-sunken text-[12px] text-text-bright">
-        {provider.icon ? (
-          <img src={provider.icon} alt="" className="size-full object-contain" />
-        ) : (
-          provider.name.charAt(0).toUpperCase()
-        )}
-      </span>
+      <ConnectorLogo
+        homepageUrl={provider.homepageUrl}
+        iconUrl={provider.icon}
+        name={provider.name}
+        size={30}
+      />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="truncate text-[12.5px] font-medium text-text-bright">{provider.name}</span>
-          {connected ? (
+          <span className="truncate text-[12.5px] font-medium text-text-bright">
+            {provider.name}
+          </span>
+          {connectionCount > 1 ? (
             <Badge tone="green" size="xs">
-              connected
+              {connectionCount}
             </Badge>
           ) : null}
         </div>
-        <div className="font-mono text-[10px] text-dim">
-          {provider.id}
-          {provider.actionCount !== null ? ` · ${provider.actionCount} actions` : ""}
+        <div className="mt-1 flex items-center gap-1">
+          {provider.authTypes.slice(0, 2).map((t) => (
+            <Badge key={t} tone={t === "no_auth" ? "green" : "neutral"} size="xs">
+              {AUTH_LABEL[t]}
+            </Badge>
+          ))}
+          {provider.categories[0] ? (
+            <span className="truncate text-[10px] text-dim">{provider.categories[0]}</span>
+          ) : null}
         </div>
       </div>
-      <span className="text-[11px] text-blue">{connected ? "Manage" : "Connect"}</span>
+      <span className="flex flex-none items-center gap-1.5">
+        <StatusDot tone={connected ? "bg-green" : "bg-line-strong"} size={7} />
+        <span className={cn("text-[11px]", connected ? "text-green" : "text-blue")}>
+          {connected ? "Manage" : "Connect"}
+        </span>
+      </span>
     </button>
-  )
-}
-
-function ConnectionRow({
-  connection,
-  onDisconnect
-}: {
-  connection: ConnectorConnection
-  onDisconnect: (service: string, connectionName: string | null) => Promise<void>
-}) {
-  return (
-    <div className="flex items-center gap-2.5 rounded-lg border border-line bg-sunken px-[11px] py-[9px]">
-      <div className="min-w-0 flex-1">
-        <span className="text-[12.5px] font-semibold text-text-bright">{connection.service}</span>
-        <div className="font-mono text-[10px] text-dim">
-          {connection.displayName ?? connection.accountId}
-          {connection.grantedScopes.length > 0 ? ` · ${connection.grantedScopes.length} scopes` : ""}
-        </div>
-      </div>
-      <AsyncButton
-        variant="danger"
-        size="sm"
-        pendingLabel="Removing…"
-        // Pass the alias so a NAMED connection isn't deleted as the default one.
-        onClick={() => onDisconnect(connection.service, connection.connectionName)}
-      >
-        Disconnect
-      </AsyncButton>
-    </div>
-  )
-}
-
-function ConnectDialog({
-  provider,
-  oauthInfo,
-  onClose,
-  onConnect,
-  onSetOauthConfig,
-  onStartOauth
-}: {
-  provider: ConnectorProvider | null
-  oauthInfo: OAuthClientInfo | undefined
-  onClose: () => void
-  onConnect: (
-    service: string,
-    authType: "api_key" | "custom_credential",
-    values: Record<string, string>
-  ) => Promise<void>
-  onSetOauthConfig: (provider: string, clientId: string, clientSecret: string) => Promise<void>
-  onStartOauth: (service: string) => Promise<void>
-}) {
-  const [values, setValues] = React.useState<Record<string, string>>({})
-  const [clientId, setClientId] = React.useState("")
-  const [clientSecret, setClientSecret] = React.useState("")
-
-  // Reset the form whenever a different provider's dialog opens.
-  React.useEffect(() => {
-    setValues({})
-    setClientId("")
-    setClientSecret("")
-  }, [provider?.id])
-
-  if (!provider) return null
-
-  const supportsOauth = provider.authTypes.includes("oauth2")
-  const apiAuthType = provider.authTypes.includes("custom_credential") ? "custom_credential" : "api_key"
-  const fields = provider.fields.length > 0 ? provider.fields : [FALLBACK_FIELD]
-  const needsClient = supportsOauth && oauthInfo && !oauthInfo.hasClient
-
-  return (
-    <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Connect {provider.name}</DialogTitle>
-          <DialogDescription>
-            Credentials are stored by OpenConnector, never in Starbase.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody className="flex flex-col gap-4">
-          {supportsOauth ? (
-            <div className="flex flex-col gap-2">
-              {needsClient ? (
-                <div className="flex flex-col gap-2 rounded-md border border-line bg-sunken p-2.5">
-                  <span className="text-[11px] text-dim">
-                    Register an OAuth app first. Redirect URI:{" "}
-                    <span className="font-mono text-text">{oauthInfo?.expectedRedirectUri}</span>
-                  </span>
-                  <Input
-                    placeholder="Client ID"
-                    value={clientId}
-                    onChange={(e) => setClientId(e.target.value)}
-                  />
-                  <Input
-                    type="password"
-                    placeholder="Client secret"
-                    value={clientSecret}
-                    onChange={(e) => setClientSecret(e.target.value)}
-                  />
-                  <AsyncButton
-                    pendingLabel="Saving…"
-                    disabled={clientId.length === 0 || clientSecret.length === 0}
-                    onClick={() => onSetOauthConfig(provider.id, clientId, clientSecret)}
-                  >
-                    Save OAuth app
-                  </AsyncButton>
-                </div>
-              ) : (
-                <AsyncButton
-                  pendingLabel="Opening browser…"
-                  onClick={async () => {
-                    await onStartOauth(provider.id)
-                    onClose()
-                  }}
-                >
-                  Connect with OAuth
-                </AsyncButton>
-              )}
-            </div>
-          ) : null}
-
-          {supportsOauth && provider.authTypes.length > 1 ? (
-            <div className="text-center text-[10px] uppercase tracking-wide text-dim">or use an API key</div>
-          ) : null}
-
-          {!supportsOauth || provider.authTypes.length > 1 ? (
-            <div className="flex flex-col gap-2">
-              {fields.map((f) => (
-                <label key={f.name} className="flex flex-col gap-1">
-                  <span className="text-[11px] text-muted-foreground">{f.label}</span>
-                  <Input
-                    type={f.kind === "password" ? "password" : "text"}
-                    placeholder={f.placeholder ?? f.label}
-                    value={values[f.name] ?? ""}
-                    onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
-                  />
-                </label>
-              ))}
-              <AsyncButton
-                pendingLabel="Connecting…"
-                disabled={fields.some((f) => f.required && (values[f.name] ?? "").length === 0)}
-                onClick={async () => {
-                  await onConnect(provider.id, apiAuthType, values)
-                  onClose()
-                }}
-              >
-                Connect
-              </AsyncButton>
-            </div>
-          ) : null}
-        </DialogBody>
-        <DialogFooter>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md border border-line bg-panel px-3 py-1.5 text-[12px] text-text hover:bg-surface"
-          >
-            Close
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   )
 }
