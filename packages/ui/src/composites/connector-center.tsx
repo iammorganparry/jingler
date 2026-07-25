@@ -184,7 +184,7 @@ export function ConnectorCenter({
   )
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-[13px] font-semibold text-text-bright">Connector Center</h3>
@@ -240,11 +240,14 @@ export function ConnectorCenter({
       {/* A named region: "GitHub" is also a Settings nav entry, so the catalog
           needs to be addressable on its own — by a screen reader and by a test
           alike. */}
+      {/* Fills the pane rather than capping at a fixed height: with ~1,100
+          providers the list is always longer than the window, so a 420px box
+          inside a full-height pane just wasted the rest of it. */}
       <div
         ref={scrollRef}
         role="group"
         aria-label="Provider catalog"
-        className="max-h-[420px] overflow-y-auto rounded-lg border border-line p-2"
+        className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-line p-2"
       >
         {filtered.length === 0 && !loading ? (
           <div className="px-3 py-8 text-center text-[12px] text-dim">
@@ -402,9 +405,10 @@ function ConnectorCard({
               {AUTH_LABEL[t]}
             </Badge>
           ))}
-          {provider.categories[0] ? (
-            <span className="truncate text-[10px] text-dim">{provider.categories[0]}</span>
-          ) : null}
+          {/* No category here. At the card widths this grid actually gets it
+              truncated to initials ("D.", "P."), which is noise, not
+              information — and the category is already a filter one row above,
+              where it can be acted on rather than just read. */}
         </div>
       </div>
       <span className="flex flex-none items-center gap-1.5">

@@ -675,7 +675,14 @@ export function SettingsView({
           />
         </div>
       ) : section === "connectors" ? (
-        <ConnectorsSettings unifiedMcp={unifiedMcp} connector={connector} injection={injection} />
+        // Same wrapper every other section uses. Without `flex-1` this pane is a
+        // shrink-to-fit child of the settings flex ROW, so the catalog sized to
+        // its content and left the rest of the window empty — and the grid, which
+        // picks its column count from the container it measures, saw a width the
+        // window never actually constrained it to.
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-editor p-6">
+          <ConnectorsSettings unifiedMcp={unifiedMcp} connector={connector} injection={injection} />
+        </div>
       ) : section === "themes" ? (
         themes ? (
           <ThemesSettings {...themes} />

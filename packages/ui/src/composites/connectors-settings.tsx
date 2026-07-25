@@ -67,7 +67,9 @@ export function ConnectorsSettings({ unifiedMcp, connector, injection }: Connect
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    // `min-h-0 flex-1` so the catalog below can claim the leftover height
+    // instead of sitting in a fixed-height box inside a tall empty pane.
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {/* The probe result follows the operator into the catalog. It used to live
           only on the setup screen — the one place they leave the moment it turns
           green — so "which instance am I on, and does it have any tools?" had no
