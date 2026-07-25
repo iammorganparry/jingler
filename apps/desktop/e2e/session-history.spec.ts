@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs"
+import { readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, showSessions, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
@@ -184,10 +184,29 @@ test("history written during a run is still there after a restart", async ({ lau
   ).toBeVisible()
 
   // Let the scripted harness finish and the transcript settle on disk.
-  const transcriptPath = join(first.home, "starbase", "transcripts", "s_run.json")
-  await expect
-    .poll(() => JSON.parse(readFileSync(transcriptPath, "utf8")).length, { timeout: 20_000 })
-    .toBeGreaterThan(0)
+  //
+  // The read has to tolerate "not there yet". `expect.poll` retries on a failed
+  // ASSERTION, not on a thrown callback — so a bare `readFileSync` turned the
+  // ordinary case of polling before the first write into an instant ENOENT
+  // failure, ~1s into a 20s budget, and made a timing gap look like a lost
+  // transcript. Absent and empty both mean "keep waiting".
+  // Written under the CHAT id, not the session id — `~/starbase/transcripts/
+  // <chatId>.json`. A session seeded without chats migrates to one called
+  // `c_<sessionId>_1`, so the old hardcoded `s_run.json` is a file the app has had
+  // no reason to write since multi-chat landed. Count every file this session owns
+  // (the legacy session-id name included) rather than guessing which one it is.
+  const transcriptsDir = join(first.home, "starbase", "transcripts")
+  const turnsOnDisk = (): number => {
+    let total = 0
+    for (const name of readdirSync(transcriptsDir)) {
+      if (name !== "s_run.json" && !name.startsWith("c_s_run_")) continue
+      const raw = readFileSync(join(transcriptsDir, name), "utf8")
+      if (raw.trim() === "") continue
+      total += (JSON.parse(raw) as ReadonlyArray<unknown>).length
+    }
+    return total
+  }
+  await expect.poll(turnsOnDisk, { timeout: 20_000 }).toBeGreaterThan(0)
   await first.app.close()
 
   const second = await launchApp({

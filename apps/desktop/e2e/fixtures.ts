@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process"
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { test as base } from "@playwright/test"
+import { expect, test as base } from "@playwright/test"
 import type { ElectronApplication, Page } from "@playwright/test"
 import { _electron as electron } from "playwright"
 import { startFakeAuthServer, type FakeAuthServer } from "./fake-auth.js"
@@ -48,10 +48,15 @@ export const showSessions = async (
   status: "Active" | "Archived" | "All"
 ): Promise<void> => {
   await window.getByTestId("session-filter-menu").click()
-  await window.getByRole("menuitem", { name: "Status" }).click()
-  await window.getByRole("menuitem", { name: status, exact: true }).click()
+  // Both rows are matched by PREFIX, never exactly: the axis trigger appends the
+  // current value ("Status Active") so it can state the filter while shut, and
+  // each option appends its match count ("Archived 1"). An exact matcher finds
+  // neither.
+  await window.getByRole("menuitem", { name: /^Status/ }).click()
+  await window.getByRole("menuitem", { name: new RegExp(`^${status}`) }).click()
   // Close the menu so it cannot sit over the rows the caller is about to assert on.
   await window.keyboard.press("Escape")
+  await expect(window.getByTestId("session-filter-menu")).toBeVisible()
 }
 
 /** A seeded session written to sessions.json (valid `Session` shape). */

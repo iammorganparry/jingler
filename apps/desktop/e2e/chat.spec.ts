@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { ALT_CLAUDE_MODEL, DEFAULT_CLAUDE_MODEL, expect, showSessions, test } from "./fixtures.js"
 import type { Page } from "@playwright/test"
-import { reasoningEffortsFor } from "@starbase/ui"
+import { reasoningEffortsFor } from "../../../packages/ui/src/lib/reasoning-options.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
