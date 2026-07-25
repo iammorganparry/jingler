@@ -51,7 +51,7 @@ const json = (raw: string): unknown => {
   }
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> =>
+export const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v)
 
 /** The only place a secret-bearing map is read for its VALUES. */
@@ -62,10 +62,18 @@ const stringMap = (v: unknown): Readonly<Record<string, string>> => {
   return out
 }
 
-const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined)
+export const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined)
 
-const strArray = (v: unknown): ReadonlyArray<string> =>
+export const strArray = (v: unknown): ReadonlyArray<string> =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []
+
+/**
+ * Normalise an OpenConnector base URL: strip trailing slashes so `${base}${path}`
+ * never doubles up. The SINGLE home for endpoint normalisation — both `mcpUrl`
+ * (open-connector.ts) and the Connector-Center API client build on it, so a future
+ * rule (e.g. dropping a pasted `/mcp` suffix) lands in one place.
+ */
+export const normalizeEndpoint = (endpoint: string): string => endpoint.replace(/\/+$/, "")
 
 /**
  * A remote server's declared transport. Claude/Cursor use `type: "http" | "sse"`;

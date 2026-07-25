@@ -4,6 +4,7 @@ import { Effect } from "effect"
 import { ConfigService } from "./config.js"
 import { SecretStore } from "./secret-store.js"
 import type { ParsedMcpServer } from "./mcp-config.js"
+import { normalizeEndpoint } from "./mcp-config.js"
 import { probeServer } from "./mcp-probe.js"
 
 /**
@@ -25,9 +26,8 @@ import { probeServer } from "./mcp-probe.js"
 /** The header the bearer is sent under. A constant so redaction + injection agree. */
 const AUTH_HEADER = "Authorization"
 
-const TRAILING_SLASHES = /\/+$/
-/** Strip a trailing slash so `${endpoint}/mcp` never doubles up. */
-const mcpUrl = (endpoint: string): string => `${endpoint.replace(TRAILING_SLASHES, "")}/mcp`
+/** The `/mcp` endpoint URL for a base, via the shared endpoint normaliser. */
+const mcpUrl = (endpoint: string): string => `${normalizeEndpoint(endpoint)}/mcp`
 
 /**
  * Build both halves of the injectable server from config + token. The redacted

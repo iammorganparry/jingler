@@ -10,6 +10,7 @@ import { ConnectorError } from "@starbase/core"
 import { Effect } from "effect"
 import { ConfigService } from "./config.js"
 import { SecretStore } from "./secret-store.js"
+import { isRecord, normalizeEndpoint, str, strArray } from "./mcp-config.js"
 
 /**
  * Typed HTTP client for the self-hosted OpenConnector instance that backs the MCP
@@ -31,14 +32,10 @@ import { SecretStore } from "./secret-store.js"
 /** Per-request wall-clock cap, matching `mcp-probe.ts`'s probe timeout. */
 const REQUEST_TIMEOUT = "15 seconds"
 
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v)
-
-const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined)
+// isRecord / str / strArray / normalizeEndpoint are shared from mcp-config.ts.
+// `num` and `arr` are local — no equivalent lives in the shared module yet.
 const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined)
 const arr = (v: unknown): ReadonlyArray<unknown> => (Array.isArray(v) ? v : [])
-const strArray = (v: unknown): ReadonlyArray<string> =>
-  arr(v).filter((x): x is string => typeof x === "string")
 
 /** Map a JSON array through `fn`, dropping entries that don't parse. */
 const mapArray = <T>(data: unknown, fn: (raw: unknown) => T | undefined): ReadonlyArray<T> =>
@@ -158,7 +155,7 @@ export class OpenConnectorApi extends Effect.Service<OpenConnectorApi>()(
               new ConnectorError({ message: "OpenConnector is not configured — set an endpoint and token in Settings." })
             )
           }
-          const url = `${base.replace(/\/+$/, "")}${path}`
+          const url = `${normalizeEndpoint(base)}${path}`
           const res = yield* Effect.tryPromise({
             // `signal` is aborted when the effect is interrupted (e.g. the timeout
             // below fires), so a hung instance actually cancels the socket rather
