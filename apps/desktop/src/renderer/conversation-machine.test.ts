@@ -39,6 +39,8 @@ const h = vi.hoisted(() => ({
   stopGate: Promise.resolve() as Promise<void>,
   steerCalls: [] as Array<{ sessionId: string; chatId: string; text: string }>,
   steerStatus: "unsupported" as "accepted" | "deferred" | "unsupported",
+  // Held to make a steer's reply land AFTER the turn it was aimed at ended.
+  steerGate: Promise.resolve() as Promise<void>,
   // Drives the "a stop that rejects must still let the session move on" case.
   stopFails: false,
   /** Push reviewer events into the machine, as ReviewService's stream would. */
@@ -166,6 +168,9 @@ vi.mock("./rpc-client.js", () => ({
     agentApprovePlan: async () => {},
     agentSteer: async (sessionId: string, chatId: string, text: string) => {
       h.steerCalls.push({ sessionId, chatId, text })
+      // Lets a test hold the reply so the turn's terminal event overtakes it —
+      // the RPC response and the event stream are different paths in the real app.
+      await h.steerGate
       return h.steerStatus === "accepted"
         ? {
             status: "accepted" as const,
@@ -196,6 +201,14 @@ const session = {
 
 const emit = (event: StreamEvent) => h.streamCb?.(event)
 const start = () => createActor(conversationMachine, { input: { session } }).start()
+/**
+ * The id of the nth queued message, read off the live snapshot — exactly what the
+ * view does. Queue actions address a message by id, never by position: the queue
+ * removes its own head mid-run, so a position captured at render time can point at
+ * a different message by the time the operator clicks.
+ */
+const queuedId = (actor: ReturnType<typeof start>, n: number): string =>
+  actor.getSnapshot().context.queued[n]?.id ?? `missing-${n}`
 const idle = "awaitingInput" as const
 
 beforeEach(() => {
@@ -209,6 +222,7 @@ beforeEach(() => {
   h.stopGate = Promise.resolve()
   h.steerCalls.length = 0
   h.steerStatus = "unsupported"
+  h.steerGate = Promise.resolve()
   h.stopFails = false
   h.setHarnessCalls.length = 0
   h.catalogGate = Promise.resolve()
@@ -296,7 +310,9 @@ describe("conversationMachine — queue while busy", () => {
 
     // Sent while the agent is busy → queued, not dispatched.
     actor.send({ type: "SEND", text: "second" })
-    expect(actor.getSnapshot().context.queued).toEqual([
+    // `toMatchObject`, because each queued message also carries the stable id its
+    // row actions address it by (see `queuedId`).
+    expect(actor.getSnapshot().context.queued).toMatchObject([
       { text: "second", images: [], target: "session" }
     ])
     expect(h.agentRunCalls).toHaveLength(1)
@@ -346,7 +362,7 @@ describe("conversationMachine — queue while busy", () => {
     actor.send({ type: "SEND", text: "b" })
     expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["a", "b"])
 
-    actor.send({ type: "UNQUEUE", index: 0 })
+    actor.send({ type: "UNQUEUE", id: queuedId(actor, 0) })
     expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["b"])
     actor.stop()
   })
@@ -361,7 +377,7 @@ describe("conversationMachine — queue while busy", () => {
     // Queue two; steer to the second one ("b") mid-run.
     actor.send({ type: "SEND", text: "a" })
     actor.send({ type: "SEND", text: "b" })
-    actor.send({ type: "SEND_NOW", index: 1 })
+    actor.send({ type: "SEND_NOW", id: queuedId(actor, 1) })
 
     // The current turn is interrupted and "b" runs next, ahead of "a".
     await waitFor(actor, () => h.agentRunCalls.length === 2, { timeout: 3000 })
@@ -379,7 +395,7 @@ describe("conversationMachine — queue while busy", () => {
     await waitFor(actor, (s) => s.matches("running"))
 
     actor.send({ type: "SEND", text: "steer this" })
-    actor.send({ type: "SEND_NOW", index: 0 })
+    actor.send({ type: "SEND_NOW", id: queuedId(actor, 0) })
 
     await waitFor(actor, (s) => s.context.messages.at(-1)?.id === "a-steered")
     expect(h.stopCalls).toEqual([])
@@ -400,13 +416,201 @@ describe("conversationMachine — queue while busy", () => {
     await waitFor(actor, (s) => s.matches("running"))
 
     actor.send({ type: "SEND", text: "after compaction" })
-    actor.send({ type: "SEND_NOW", index: 0 })
+    actor.send({ type: "SEND_NOW", id: queuedId(actor, 0) })
     await waitFor(actor, () => h.steerCalls.length === 1)
 
     expect(h.stopCalls).toEqual([])
     expect(actor.getSnapshot().context.queued.map((queued) => queued.text)).toEqual([
       "after compaction"
     ])
+    actor.stop()
+  })
+
+  it("EDIT_QUEUED rewrites a queued message in place, keeping its position", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "a" })
+    actor.send({ type: "SEND", text: "b" })
+    actor.send({ type: "EDIT_QUEUED", id: queuedId(actor, 0), text: "a, but properly" })
+
+    // Position is load-bearing: every row is addressed by index, so an edit that
+    // reordered the queue would make the NEXT click hit a different message.
+    expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["a, but properly", "b"])
+    actor.stop()
+  })
+
+  it("EDIT_QUEUED to nothing drops the message rather than queueing a blank turn", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "never mind" })
+    actor.send({ type: "EDIT_QUEUED", id: queuedId(actor, 0), text: "   " })
+    expect(actor.getSnapshot().context.queued).toEqual([])
+    actor.stop()
+  })
+
+  /**
+   * The queue's automatic flush. Holding a message until the whole turn settled
+   * meant a correction typed 10 seconds in was answered minutes later, against
+   * the work it was meant to redirect — so the head goes to the live turn at the
+   * first tool boundary, Claude-Code style.
+   */
+  it("hands the head of the queue to the live turn at the next tool boundary", async () => {
+    h.steerStatus = "accepted"
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "also update the README" })
+    // Nothing has happened yet — a queued message must not interrupt mid-tool.
+    expect(h.steerCalls).toEqual([])
+
+    emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 1, { timeout: 3000 })
+
+    expect(h.steerCalls[0]).toMatchObject({ text: "also update the README" })
+    await waitFor(actor, (s) => s.context.queued.length === 0, { timeout: 3000 })
+    // Steered INTO the turn: no stop, no replay as a second run.
+    expect(h.stopCalls).toEqual([])
+    expect(h.agentRunCalls).toHaveLength(1)
+    actor.stop()
+  })
+
+  it("flushes one message per boundary, never a burst", async () => {
+    h.steerStatus = "accepted"
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "one" })
+    actor.send({ type: "SEND", text: "two" })
+    emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, (s) => s.context.queued.length === 1, { timeout: 3000 })
+    expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["two"])
+
+    emit({ _tag: "ToolEnd", id: "t2", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 2, { timeout: 3000 })
+    expect(h.steerCalls.map((c) => c.text)).toEqual(["one", "two"])
+    actor.stop()
+  })
+
+  it("an automatic flush the harness cannot take NEVER stops the turn", async () => {
+    // The operator asked for nothing here, so the stop-and-replay fallback that
+    // "Send now" uses would be an unprompted interruption at every tool call.
+    h.steerStatus = "unsupported"
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "later is fine" })
+    emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 1, { timeout: 3000 })
+
+    expect(h.stopCalls).toEqual([])
+    expect(actor.getSnapshot().value).toBe("running")
+    // Still queued, so it runs as the next turn exactly as before.
+    expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["later is fine"])
+    actor.stop()
+  })
+
+  /**
+   * The steer's reply and the turn's `Done` travel different paths (an RPC
+   * response vs the event stream), so the reply can land after the turn ended.
+   * Handled only in `running`, it was silently dropped — and a dropped `accepted`
+   * left the message in the queue, so the next dequeue REPLAYED a message the
+   * agent had already answered.
+   */
+  it("does not replay a message the agent accepted, when the reply lands after the turn", async () => {
+    h.steerStatus = "accepted"
+    let release = () => {}
+    h.steerGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "also update the README" })
+    emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 1, { timeout: 3000 })
+
+    // The turn ends while the steer's reply is still in flight.
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    release()
+
+    await waitFor(actor, (s) => s.context.queued.length === 0, { timeout: 3000 })
+    await waitFor(actor, (s) => s.matches(idle), { timeout: 3000 })
+    // One run, not two: the accepted message was delivered inside the first turn.
+    expect(h.agentRunCalls).toHaveLength(1)
+    actor.stop()
+  })
+
+  it("does not latch the steer guard when the reply lands after the turn", async () => {
+    // A latched `steeringId` disables BOTH the automatic flush and "Send now"
+    // for the rest of this chat's life — silently, with no error anywhere.
+    h.steerStatus = "deferred"
+    let release = () => {}
+    h.steerGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "later is fine" })
+    emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 1, { timeout: 3000 })
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    release()
+
+    // The queued message runs as the next turn; its own boundary must flush again.
+    await waitFor(actor, () => h.agentRunCalls.length === 2, { timeout: 3000 })
+    expect(actor.getSnapshot().context.steeringId).toBeNull()
+
+    actor.send({ type: "SEND", text: "and one more" })
+    emit({ _tag: "ToolEnd", id: "t2", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 2, { timeout: 3000 })
+    actor.stop()
+  })
+
+  it("does not run a message twice when it is edited while its steer is in flight", async () => {
+    // The queue used to be filtered by object identity, and an edit replaces the
+    // object — so the edited copy survived the filter and ran again after the
+    // agent had already been given it.
+    h.steerStatus = "accepted"
+    let release = () => {}
+    h.steerGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "also update the README" })
+    const id = queuedId(actor, 0)
+    emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 1, { timeout: 3000 })
+
+    // Edited after the steer left, before its reply came back.
+    actor.send({ type: "EDIT_QUEUED", id, text: "also update the CHANGELOG" })
+    expect(actor.getSnapshot().context.queued.map((q) => q.id)).toEqual([id])
+    release()
+
+    await waitFor(actor, (s) => s.context.queued.length === 0, { timeout: 3000 })
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    await waitFor(actor, (s) => s.matches(idle), { timeout: 3000 })
+    expect(h.agentRunCalls).toHaveLength(1)
     actor.stop()
   })
 
@@ -452,7 +656,7 @@ describe("conversationMachine — nothing gates the transcript on a CLI probe", 
     actor.send({ type: "SEND", text: "typed on open" })
     // Held, not dispatched — there's no transcript to append it to yet.
     expect(h.agentRunCalls).toHaveLength(0)
-    expect(actor.getSnapshot().context.queued).toEqual([
+    expect(actor.getSnapshot().context.queued).toMatchObject([
       { text: "typed on open", images: [], target: "session" }
     ])
 
@@ -1110,7 +1314,7 @@ describe("conversationMachine — stop", () => {
     await waitFor(actor, (s) => s.matches("running"))
     actor.send({ type: "SEND", text: "next" })
 
-    actor.send({ type: "SEND_NOW", index: 0 })
+    actor.send({ type: "SEND_NOW", id: queuedId(actor, 0) })
 
     // Not `running` yet — the promoted message must not start until the stop
     // has been acknowledged. This is the assertion the old code failed.

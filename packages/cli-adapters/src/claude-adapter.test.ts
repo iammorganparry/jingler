@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { PermissionMode, Question, QuestionAnswer } from "@starbase/core"
 import type { Attachment } from "@starbase/core"
 import {
-  buildPromptInput,
+  makeLiveInput,
   editStats,
   formatQuestionAnswer,
   PLAN_REFORMAT,
@@ -83,7 +83,7 @@ describe("PLAN_REFORMAT", () => {
   })
 })
 
-describe("buildPromptInput", () => {
+describe("makeLiveInput", () => {
   const spec = (over: Partial<SessionSpec>): SessionSpec => ({
     cli: "claude",
     repo: "",
@@ -99,15 +99,25 @@ describe("buildPromptInput", () => {
   })
   const image = (name: string): Attachment => ({ id: name, name, mediaType: "image/png", data: "aGk=" })
 
-  it("returns the plain string prompt when there are no attachments", () => {
-    expect(buildPromptInput(spec({}), undefined)).toBe("do the thing")
+  /** Drain the channel to completion (it only ends once `finish()` is called). */
+  const drain = async (input: AsyncIterable<unknown>): Promise<Array<Record<string, unknown>>> => {
+    const msgs: Array<Record<string, unknown>> = []
+    for await (const m of input) msgs.push(m as Record<string, unknown>)
+    return msgs
+  }
+
+  it("yields the prompt as a plain string message when there are no attachments", async () => {
+    const live = makeLiveInput(spec({}), undefined)
+    live.finish()
+    const msgs = await drain(live.iterable)
+    expect(msgs).toHaveLength(1)
+    expect((msgs[0]!.message as { content: unknown }).content).toBe("do the thing")
   })
 
   it("interleaves the text with base64 image blocks in a single user message", async () => {
-    const input = buildPromptInput(spec({ images: [image("a.png"), image("b.png")] }), "sess-42")
-    expect(typeof input).not.toBe("string")
-    const msgs: Array<Record<string, unknown>> = []
-    for await (const m of input as AsyncIterable<Record<string, unknown>>) msgs.push(m)
+    const live = makeLiveInput(spec({ images: [image("a.png"), image("b.png")] }), "sess-42")
+    live.finish()
+    const msgs = await drain(live.iterable)
     expect(msgs).toHaveLength(1)
     const message = msgs[0]!
     expect(message.type).toBe("user")
@@ -122,12 +132,89 @@ describe("buildPromptInput", () => {
   })
 
   it("omits the text block for an image-only prompt", async () => {
-    const input = buildPromptInput(spec({ prompt: "", images: [image("a.png")] }), undefined)
-    const msgs: Array<Record<string, unknown>> = []
-    for await (const m of input as AsyncIterable<Record<string, unknown>>) msgs.push(m)
+    const live = makeLiveInput(spec({ prompt: "", images: [image("a.png")] }), undefined)
+    live.finish()
+    const msgs = await drain(live.iterable)
     const content = (msgs[0]!.message as { content: Array<Record<string, unknown>> }).content
     expect(content).toHaveLength(1)
     expect(content[0]!.type).toBe("image")
+  })
+
+  /**
+   * The steer path. The channel exists so a queued message can enter a turn that
+   * is ALREADY running — if a push after the first message failed to surface, the
+   * queue's tool-boundary flush would report "sent" for a message nobody read.
+   */
+  it("delivers a message pushed after the consumer has caught up", async () => {
+    const live = makeLiveInput(spec({}), "sess-1")
+    const iterator = live.iterable[Symbol.asyncIterator]()
+    expect((await iterator.next()).done).toBe(false)
+    // Parked on an empty queue: this is the mid-turn moment a steer arrives in.
+    const parked = iterator.next()
+    expect(live.push("actually, use pnpm", [])).toBe(true)
+    const second = await parked
+    expect(second.done).toBe(false)
+    expect((second.value!.message as { content: unknown }).content).toBe("actually, use pnpm")
+  })
+
+  it("reports a steer as refused once the turn is finishing, and never loses it", async () => {
+    const live = makeLiveInput(spec({}), undefined)
+    live.finish()
+    // False is what `Agent.steer` turns into `deferred`, which keeps the message
+    // in the renderer's queue — the alternative (accepting it into a closed
+    // channel) silently drops the operator's message.
+    expect(live.push("too late", [])).toBe(false)
+    const msgs = await drain(live.iterable)
+    expect(msgs).toHaveLength(1)
+  })
+
+  /**
+   * The question the adapter actually asks at each `result`. `hasUnread` alone is
+   * not enough: the consumer pulls a push out within a microtask, so the channel
+   * looks empty long before the CLI has acted on the message — and probing the
+   * real harness in that state showed it answers in a SECOND turn.
+   */
+  it("reports a steer for the turn it was pushed into, even once drained", async () => {
+    const live = makeLiveInput(spec({}), undefined)
+    const iterator = live.iterable[Symbol.asyncIterator]()
+    await iterator.next() // the opening prompt
+    expect(live.takeSteered()).toBe(false)
+
+    const parked = iterator.next()
+    live.push("also this", [])
+    await parked // drained: the channel is empty again
+    expect(live.hasUnread()).toBe(false)
+    // Still true, which is what holds the turn's `Done` back until we know
+    // whether a continuation follows.
+    expect(live.takeSteered()).toBe(true)
+    // One-shot: a stale true would swallow the real end of the run.
+    expect(live.takeSteered()).toBe(false)
+  })
+
+  /**
+   * `hasUnread` is asked at every `result`, and it decides whether the run is over.
+   * The real harness answers a message it has ALREADY read inside the running turn
+   * (one `result`, verified by `scripts/probe-claude-steer.ts`) — so "was anything
+   * ever steered?" is the wrong question: it would hold the channel open waiting
+   * for a continuation that never comes. Only an UNREAD message extends the turn.
+   */
+  it("reports a pushed message as unread only until the consumer takes it", async () => {
+    const live = makeLiveInput(spec({}), undefined)
+    const iterator = live.iterable[Symbol.asyncIterator]()
+    // The opening prompt itself is unread until pulled.
+    expect(live.hasUnread()).toBe(true)
+    await iterator.next()
+    expect(live.hasUnread()).toBe(false)
+
+    live.push("also this", [])
+    expect(live.hasUnread()).toBe(true)
+    await iterator.next()
+    expect(live.hasUnread()).toBe(false)
+  })
+
+  it("refuses an empty push rather than sending a blank turn", () => {
+    const live = makeLiveInput(spec({}), undefined)
+    expect(live.push("", [])).toBe(false)
   })
 })
 

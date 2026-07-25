@@ -17,7 +17,7 @@ import type {
 } from "@starbase/core"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useHotkeys } from "react-hotkeys-hook"
-import { ImageIcon, Lock, RotateCcw, X, Zap } from "lucide-react"
+import { Lock, RotateCcw } from "lucide-react"
 import type { ArchiveReason, ContextPhase } from "@starbase/core"
 import { supportsPlanMode } from "@starbase/core"
 import { cn } from "../lib/cn.js"
@@ -25,6 +25,7 @@ import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"
 import { Composer } from "../composites/composer.js"
 import { QuestionCard } from "../composites/question-card.js"
+import { QueuedMessageRow } from "../composites/queued-message-row.js"
 import { MessageTurn } from "../composites/message-turn.js"
 import { ArchivedBanner } from "../composites/archived-banner.js"
 import { ContextMeter } from "../composites/context-meter.js"
@@ -138,15 +139,37 @@ export interface ConversationViewProps {
   onCompactNow?: () => void
   /** Epoch ms the current run started, or null when idle — drives the elapsed timer. */
   runStartedAt?: number | null
-  /** Messages the operator queued while the agent was busy (sent FIFO once it's free). */
-  queued?: ReadonlyArray<{ text: string; images: ReadonlyArray<Attachment> }>
-  /** Drop a queued message before it's sent (by its index in `queued`). */
-  onUnqueue?: (index: number) => void
   /**
-   * Interrupt the current turn and run a queued message now (by index) — lets the
-   * operator steer mid-stream instead of waiting for the turn to finish.
+   * Messages the operator queued while the agent was busy (sent FIFO once it's
+   * free). Each carries a stable `id`, and every action below addresses it —
+   * never a position. The queue mutates itself while these rows are on screen (a
+   * message is handed to the running turn at each tool boundary), so an index
+   * captured at render time can point at a different message by the time it is used.
    */
-  onSendNow?: (index: number) => void
+  queued?: ReadonlyArray<{ id: string; text: string; images: ReadonlyArray<Attachment> }>
+  /** Drop a queued message before it's sent. */
+  onUnqueue?: (id: string) => void
+  /**
+   * Interrupt the current turn and run a queued message now — lets the operator
+   * steer mid-stream instead of waiting for the turn to finish.
+   */
+  onSendNow?: (id: string) => void
+  /**
+   * Fork a queued message into a FRESH chat on the operator's default model
+   * instead of running it in this conversation — the escape hatch for "this is a
+   * separate job that shouldn't inherit 200k tokens of unrelated context".
+   */
+  onHandoffQueued?: (id: string) => void
+  /** Rewrite a queued message in place, before it is ever sent. */
+  onEditQueued?: (id: string, text: string) => void
+  /** What the hand-off targets, for its tooltip (e.g. "a new chat on Opus 4.6"). */
+  handoffHint?: string
+  /**
+   * The queued message being handed to the running turn right now, if any. Its
+   * row drops every action: the agent already has the text, so acting on it would
+   * run the same prompt twice.
+   */
+  steeringId?: string | null
   onDecideGate?: (gateId: string, decision: GateDecision) => void
   onSetMode?: (mode: PermissionMode) => void
   reasoningEffort?: ReasoningEffort
@@ -235,6 +258,10 @@ export function ConversationView({
   queued = [],
   onUnqueue,
   onSendNow,
+  onHandoffQueued,
+  onEditQueued,
+  handoffHint,
+  steeringId = null,
   onDecideGate,
   onSetMode,
   reasoningEffort,
@@ -458,46 +485,37 @@ export function ConversationView({
                     index intact, which matters: `onSendNow`/`onUnqueue` address
                     the queue positionally.
                   */}
-                  {queued.slice(0, queueLimit).map((item, i) => (
-                    <div
-                      key={`${i}-${item.text.slice(0, 24)}`}
-                      className="flex items-center gap-2 rounded-lg border border-line bg-sunken/60 px-3 py-1.5 text-[12.5px] text-muted-foreground"
-                    >
-                      <span className="flex-none font-mono text-[10px] uppercase tracking-wide text-dim">
-                        Queued
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-text-body">
-                        {item.text || <span className="text-dim">(image only)</span>}
-                      </span>
-                      {item.images.length > 0 && (
-                        <span className="flex flex-none items-center gap-1 font-mono text-[10.5px] text-cyan">
-                          <ImageIcon size={11} />
-                          {item.images.length}
-                        </span>
-                      )}
-                      {onSendNow && busy && (
-                        <button
-                          type="button"
-                          onClick={() => onSendNow(i)}
-                          title="Send now — steer the agent immediately"
-                          className="flex flex-none items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-blue outline-none transition-colors hover:bg-blue/10 hover:text-blue focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                          <Zap size={11} />
-                          Send now
-                        </button>
-                      )}
-                      {onUnqueue && (
-                        <button
-                          type="button"
-                          onClick={() => onUnqueue(i)}
-                          title="Remove from queue"
-                          className="flex size-5 flex-none items-center justify-center rounded text-dim outline-none transition-colors hover:bg-surface hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                          <X size={12} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                  {/*
+                    Keyed by id, not by position. A positional key remounts every
+                    row below the head each time the queue flushes one into the
+                    running turn — which throws away the text of a row the operator
+                    is part-way through editing, at a moment they did not cause.
+                  */}
+                  {queued.slice(0, queueLimit).map((item) => {
+                    // In flight: the row still shows (nothing is confirmed yet) but
+                    // every action is withheld, because the agent already has this
+                    // text and acting on it would run the prompt a second time.
+                    const sending = item.id === steeringId
+                    return (
+                      <QueuedMessageRow
+                        key={item.id}
+                        text={item.text}
+                        images={item.images.length}
+                        handoffHint={handoffHint}
+                        sending={sending}
+                        {...(onSendNow && busy && !sending
+                          ? { onSendNow: () => onSendNow(item.id) }
+                          : {})}
+                        {...(onHandoffQueued && !sending
+                          ? { onHandoff: () => onHandoffQueued(item.id) }
+                          : {})}
+                        {...(onEditQueued && !sending
+                          ? { onEdit: (text: string) => onEditQueued(item.id, text) }
+                          : {})}
+                        {...(onUnqueue && !sending ? { onRemove: () => onUnqueue(item.id) } : {})}
+                      />
+                    )
+                  })}
                   {queued.length > QUEUE_PREVIEW && (
                     <button
                       type="button"

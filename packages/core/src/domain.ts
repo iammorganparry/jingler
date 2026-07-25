@@ -238,6 +238,21 @@ export const supportsPlanMode = (cli: CliKind): boolean =>
   cli === "claude" || cli === "codex" || cli === "opencode"
 
 /**
+ * Whether the harness can take new input INTO a live turn (`Agent.steer`).
+ *
+ * Claude (streaming-input `query()`) and Codex (`turn/steer`) both can; the rest
+ * have no channel into a running turn, so a steer there is answered
+ * `unsupported` and the renderer falls back to stop-and-replay.
+ *
+ * This gates the queue's automatic flush, which is why it is a predicate rather
+ * than a try-it-and-see: auto-flushing into a harness that cannot steer would
+ * KILL the running turn at every tool boundary, turning "your message will be
+ * picked up shortly" into "your agent keeps getting interrupted".
+ */
+export const supportsSteer = (cli: CliKind): boolean =>
+  cli === "claude" || cli === "codex"
+
+/**
  * Automations for a session linked to a GitHub issue (design I2 toggles).
  * Defined before `Session` so it can be referenced inline below.
  */

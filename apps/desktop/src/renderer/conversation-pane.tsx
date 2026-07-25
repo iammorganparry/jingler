@@ -25,6 +25,7 @@ import { rpc } from "./rpc-client.js"
 import { publishSessionUpdate } from "./session-updates.js"
 import {
   disposeChatActor,
+  getConversationActor,
   rehomeSharedPlan,
   useChatActivities
 } from "./conversation-registry.js"
@@ -86,6 +87,14 @@ export function ConversationPane({
   // only Claude reports a live task set and accepts a per-task stop, so the dock
   // stays hidden elsewhere rather than offering a button with nothing to aim at.
   const clisQuery = useQuery({ queryKey: ["clis"], queryFn: () => rpc.discoveryList() })
+  /**
+   * The model a handed-off message runs on: the operator's own default for this
+   * harness (Settings · Providers), NOT this chat's pinned model — the point of
+   * handing off is to escape this chat's setup. Null when they've never set one,
+   * which means "leave the new chat on whatever it starts with".
+   */
+  const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
+  const handoffModel = providersQuery.data?.providers?.[convo.cli]?.defaultModel ?? null
   const backgroundTasksSupported =
     clisQuery.data?.find((c) => c.kind === convo.cli)?.backgroundTasks ?? false
   const bgTasks = useBackgroundTasks(session.id, backgroundTasksSupported)
@@ -184,6 +193,50 @@ export function ConversationPane({
 
   const createChat = () => {
     void rpc.sessionsCreateChat(session.id).then(publishSessionUpdate)
+  }
+
+  /**
+   * Hand a queued message to a FRESH chat instead of this one.
+   *
+   * The queue's other actions all answer "when should this run here?"; this one
+   * answers "this shouldn't run here at all". A follow-up that is really its own
+   * job would otherwise inherit the whole of this conversation's context (and
+   * whatever model this chat was pinned to), so hand-off starts a clean chat in
+   * the SAME worktree, on the operator's configured default model, and sends the
+   * message there.
+   *
+   * The message leaves this queue LAST, in the same tick as the send to the new
+   * chat. Unqueuing first read as the safer order — no window where the same
+   * prompt sits in two places — but the window it opened was worse: a failed
+   * `createChat` left the operator's text deleted with nothing on screen to say
+   * so. Nothing is dropped until there is somewhere for it to land.
+   */
+  const handoffQueued = (id: string) => {
+    if (!convo.queued.some((queued) => queued.id === id)) return
+    void rpc
+      .sessionsCreateChat(session.id)
+      .then((updated) => {
+        // Re-read the queue: creating the chat took a round trip, and the running
+        // turn's next tool boundary may have handed this very message to the agent
+        // in the meantime. Handing it off as well would run it twice.
+        const item = convo.queued.find((queued) => queued.id === id)
+        publishSessionUpdate(updated)
+        if (item === undefined) return
+        const actor = getConversationActor(updated, updated.activeChatId)
+        // `createChat` activates the new chat, so this is the chat the operator is
+        // now looking at. Put it on the default model before the send, so the very
+        // first turn runs on the intended harness rather than switching under it.
+        if (handoffModel !== null && handoffModel !== convo.model) {
+          actor.send({ type: "SET_HARNESS", cli: convo.cli, model: handoffModel })
+        }
+        actor.send({ type: "SEND", text: item.text, images: item.images })
+        convo.unqueue(id)
+      })
+      // The chat was never created, so the message is still queued exactly where
+      // the operator left it — the hand-off simply didn't happen. Swallowing the
+      // rejection is deliberate: there is nothing to recover, and an unhandled
+      // one would surface as a console error for a no-op.
+      .catch(() => {})
   }
   const selectChat = (chatId: string) => {
     if (chatId === activeChat.id) return
@@ -383,6 +436,14 @@ export function ConversationPane({
           queued={convo.queued}
           onUnqueue={convo.unqueue}
           onSendNow={convo.sendNow}
+          onEditQueued={convo.editQueued}
+          onHandoffQueued={handoffQueued}
+          steeringId={convo.steeringId}
+          handoffHint={
+            handoffModel
+              ? `Hand off — run this in a new chat on ${handoffModel}`
+              : "Hand off — run this in a new chat"
+          }
           model={convo.model}
           catalog={convo.catalog}
           onSetHarness={convo.setHarness}
