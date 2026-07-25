@@ -166,8 +166,12 @@ function DetailBody({
     detail && detail.fields.length > 0 ? detail.fields : keyAuthType ? [FALLBACK_FIELD] : []
   const needsClient = supportsOauth && oauthInfo !== undefined && !oauthInfo.hasClient
   const host = logoHost(provider.homepageUrl)
-  // An alias of exactly "default" IS the default connection, which OpenConnector
-  // addresses by omitting the name — sending it explicitly creates a second one.
+  // An alias of exactly "default" IS the default connection: OpenConnector
+  // documents `connectionName` as "defaults to default" and echoes that name back
+  // when the parameter is omitted, so the two forms address the SAME connection.
+  // We send the omitted form because it is the canonical one — every layer below
+  // then agrees on a single representation, rather than one path saying "default"
+  // and another saying nothing for the same thing.
   const alias = connectionName.trim()
   const namedAlias = alias.length === 0 || alias === DEFAULT_CONNECTION ? undefined : alias
 

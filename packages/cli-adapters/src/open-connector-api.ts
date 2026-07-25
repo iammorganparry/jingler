@@ -188,18 +188,27 @@ const mapProviderDetail = (raw: unknown): ConnectorProviderDetail | undefined =>
  *
  * Reading only the root is why every connected row used to render an empty
  * account name and zero scopes: the fields were there, one level down.
+ *
+ * `connectionName` is normalized: the instance names the default connection
+ * "default" rather than omitting it, but `ConnectorConnection` documents null as
+ * the default. Passing the string through left one representation on the read
+ * path and another on the write path for the same connection — harmless today
+ * (the instance resolves both to the same record), and exactly the kind of
+ * two-spellings-for-one-thing that the next reader has to re-derive.
  */
+const DEFAULT_CONNECTION_NAME = "default"
 const mapConnection = (raw: unknown): ConnectorConnection | undefined => {
   if (!isRecord(raw)) return undefined
   const service = str(raw.service) ?? str(raw.provider)
   if (service === undefined) return undefined
   const profile = isRecord(raw.profile) ? raw.profile : raw
+  const alias = str(raw.connectionName) ?? str(raw.alias) ?? null
   return {
     service,
     accountId: str(profile.accountId) ?? str(raw.accountId) ?? str(raw.id) ?? "",
     displayName: str(profile.displayName) ?? str(profile.accountName) ?? str(raw.displayName) ?? null,
     grantedScopes: strArray(profile.grantedScopes ?? profile.scopes ?? raw.grantedScopes ?? raw.scopes),
-    connectionName: str(raw.connectionName) ?? str(raw.alias) ?? null,
+    connectionName: alias === DEFAULT_CONNECTION_NAME ? null : alias,
     // `configured` is the instance's own word for "this credential is usable".
     // Absent (the flat/fake shape) means the entry only exists because it works.
     status: raw.configured === false ? "pending" : "connected"

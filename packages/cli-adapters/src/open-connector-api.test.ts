@@ -217,6 +217,47 @@ describe("OpenConnectorApi", () => {
     })
   })
 
+  /**
+   * The instance NAMES its default connection "default"; `ConnectorConnection`
+   * documents null for it. Without normalizing, the read path spells the default
+   * connection one way and the write path another — the instance resolves both to
+   * the same record, so nothing breaks, but the domain type stops being true and
+   * the next reader has to discover that for themselves.
+   */
+  it("normalizes the default connection's alias to null", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                service: "hackernews",
+                connectionName: "default",
+                authType: "no_auth",
+                configured: true,
+                virtual: true,
+                profile: { accountId: "hackernews:public", displayName: "Hacker News Public", grantedScopes: [] }
+              },
+              {
+                service: "linear",
+                connectionName: "work",
+                configured: true,
+                profile: { accountId: "acct_1", displayName: "Acme", grantedScopes: [] }
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const exit = await configured(() => OpenConnectorApi.listConnections(), fetchMock)
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value[0]?.connectionName).toBeNull()
+    // A real alias is untouched — normalizing it away would delete the wrong one.
+    expect(exit.value[1]?.connectionName).toBe("work")
+  })
+
   it("sends the credential OUT on the PUT body and never returns it", async () => {
     const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }))
     vi.stubGlobal("fetch", fetchMock)

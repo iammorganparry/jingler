@@ -144,8 +144,9 @@ describe("ConnectorDetail", () => {
       target: { value: "lin_api_secret" }
     })
 
-    // As shipped the field reads "default", which OpenConnector addresses by
-    // omitting the name — sending it would create a SECOND connection.
+    // As shipped the field reads "default". OpenConnector resolves that to the
+    // same connection as an omitted name, and omitted is the canonical form —
+    // so the whole app spells the default connection exactly one way.
     fireEvent.click(screen.getByRole("button", { name: "Connect" }))
     await waitFor(() =>
       expect(props.onConnect).toHaveBeenCalledWith(
