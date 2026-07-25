@@ -8,6 +8,8 @@ import type { CliAdapterShape, SessionSpec } from "./adapter.js"
 import { AgentRunner } from "./agent-runner.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { ConfigService } from "./config.js"
+import { InMemorySecretStoreLive } from "./secret-store.js"
+import { OpenConnectorService } from "./open-connector.js"
 import { ContextManager } from "./context-manager.js"
 import { DiscoveryService } from "./discovery.js"
 import { PlanStore } from "./plan-store.js"
@@ -76,6 +78,8 @@ const adapter: Layer.Layer<CliAdapter> = Layer.succeed(
 const layers = () =>
   Layer.mergeAll(
     AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
     ContextManager.Default,
     SessionStore.Default,
     TranscriptStore.Default,

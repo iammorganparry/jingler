@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliAdapter } from "./adapter.js"
 import type { CliAdapterShape } from "./adapter.js"
 import { ConfigService } from "./config.js"
+import { InMemorySecretStoreLive } from "./secret-store.js"
+import { OpenConnectorService } from "./open-connector.js"
 import { AgentRunner } from "./agent-runner.js"
 import { ContextManager } from "./context-manager.js"
 import { DiscoveryService } from "./discovery.js"
@@ -65,6 +67,8 @@ const settlingAdapter: Layer.Layer<CliAdapter> = Layer.succeed(
 const run = (adapter: Layer.Layer<CliAdapter>) => {
   const base = Layer.mergeAll(
     AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
     ConfigService.Default,
     SessionStore.Default,
     TranscriptStore.Default,

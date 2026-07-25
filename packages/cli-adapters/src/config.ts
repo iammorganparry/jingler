@@ -5,6 +5,7 @@ import type {
   GitConfig,
   GithubConfig,
   NotificationsConfig,
+  OpenConnectorConfig,
   ProviderConfig
 } from "@starbase/core"
 import { DEFAULT_THEME_ID, WorkspaceConfig } from "@starbase/core"
@@ -72,6 +73,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.planAutoRun !== undefined ? { planAutoRun: existing.planAutoRun } : {}),
             ...(existing?.adhdMode !== undefined ? { adhdMode: existing.adhdMode } : {}),
             ...(existing?.theme ? { theme: existing.theme } : {}),
+            ...(existing?.openConnector ? { openConnector: existing.openConnector } : {}),
             // MANDATORY: omit a section here and every unrelated save silently
             // drops it, because `patch` is a whole-object read-modify-write.
             ...patch
@@ -140,6 +142,9 @@ export class ConfigService extends Effect.Service<ConfigService>()(
           })
         })
 
+      /** Persist the unified OpenConnector settings (endpoint, toggles). Token is NOT here. */
+      const setOpenConnector = (openConnector: OpenConnectorConfig) => patch({ openConnector })
+
       /** Replace the override layer wholesale, keeping the active theme id. */
       const setThemeCustomizations = (colorCustomizations: Record<string, string>) =>
         Effect.gen(function* () {
@@ -194,7 +199,8 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setOrchestrator,
         setGigaplanRouting,
         setActiveTheme,
-        setThemeCustomizations
+        setThemeCustomizations,
+        setOpenConnector
       }
     }
   }

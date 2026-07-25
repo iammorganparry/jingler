@@ -969,11 +969,28 @@ export const runClaude = (
           ? undefined
           : (resume.get(sessionId) ?? spec.resumeId ?? undefined)
 
+        // The unified OpenConnector server, passed INLINE (not via `.mcp.json`) so
+        // it bypasses Claude's project-approval prompt — the operator already
+        // opted in through Starbase's Settings. `launch.url` is always set for a
+        // remote (http) entry; the `??` is just to satisfy the optional type.
+        const oc = spec.openConnector
+        const mcpServers =
+          oc && oc.launch.url
+            ? {
+                [oc.server.name]: {
+                  type: "http" as const,
+                  url: oc.launch.url,
+                  headers: oc.launch.headers
+                }
+              }
+            : undefined
+
         // With attached images this switches to the SDK's streaming-input form
         // (text + base64 image blocks); without images it stays the string prompt.
         const iterator = query({
           prompt: buildPromptInput(spec, resumeId),
           options: {
+            ...(mcpServers ? { mcpServers } : {}),
             // Never `|| undefined`: an empty cwd makes the SDK inherit the app's
             // working directory, pointing the agent at whatever repo Starbase itself
             // was launched from instead of the session's worktree.

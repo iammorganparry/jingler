@@ -63,6 +63,20 @@ export class ConfigError extends Schema.TaggedError<ConfigError>()(
 ) {}
 
 /**
+ * Raised when a call to the self-hosted OpenConnector instance fails — not
+ * configured (no endpoint/token), unreachable, or a non-OK response. A
+ * `Schema.TaggedError` because it is the error channel for the `Connector.*` RPCs
+ * that back the MCP Connector Center.
+ */
+export class ConnectorError extends Schema.TaggedError<ConnectorError>()(
+  "ConnectorError",
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Unknown)
+  }
+) {}
+
+/**
  * Raised when a git operation (branch lookup, `worktree add`, repo scan) fails.
  * A `Schema.TaggedError` — it is the error channel for the worktree/branch RPCs.
  */

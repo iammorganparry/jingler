@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliAdapter, makeScriptedCliAdapter, scriptedPlan } from "./adapter.js"
 import type { CliAdapterShape, PermissionDecision } from "./adapter.js"
 import { ConfigService } from "./config.js"
+import { InMemorySecretStoreLive } from "./secret-store.js"
+import { OpenConnectorService } from "./open-connector.js"
 import {
   AgentRunner,
   isCodexSkillInvocation,
@@ -41,6 +43,8 @@ const SESSION = "s_test"
 const runPrompt = (mode: PermissionMode, decision: GateDecision) => {
   const base = Layer.mergeAll(
     AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
     ConfigService.Default,
     SessionStore.Default,
     TranscriptStore.Default,
@@ -185,6 +189,8 @@ describe("AgentRunner HITL gating", () => {
     }
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -268,6 +274,8 @@ describe("AgentRunner sub-agents", () => {
   const runSubagentPrompt = () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -314,6 +322,8 @@ describe("AgentRunner image attachments", () => {
   it("persists attached images on the user turn alongside the text", async () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -348,6 +358,8 @@ describe("AgentRunner AskUserQuestion", () => {
   it("emits QuestionRequested, resumes on answer, and records it in the transcript", async () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -401,6 +413,8 @@ describe("AgentRunner ids", () => {
   it("does not reuse message ids across a runner restart", async () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -440,6 +454,8 @@ describe("AgentRunner allowlist", () => {
   it('"always allow" a command means the next run does not gate it', async () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -481,6 +497,8 @@ describe("AgentRunner plan mode", () => {
   const base = () =>
     Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -788,6 +806,8 @@ describe("AgentRunner model", () => {
 
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -854,6 +874,8 @@ describe("AgentRunner plan library", () => {
     seedSessionWithWorktree("plan")
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -890,6 +912,8 @@ describe("AgentRunner plan library", () => {
     const captured: { prompt: string | null } = { prompt: null }
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -929,6 +953,8 @@ describe("AgentRunner plan library", () => {
     const captured: { prompt: string | null } = { prompt: null }
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -960,6 +986,8 @@ describe("AgentRunner plan library", () => {
     const captured: { prompt: string | null } = { prompt: null }
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -1033,6 +1061,8 @@ describe("AgentRunner resume across restarts", () => {
     const captured: { resumeId: string | null } = { resumeId: null }
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -1112,6 +1142,8 @@ describe("AgentRunner resume across restarts", () => {
     )
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -1228,6 +1260,8 @@ describe("AgentRunner plan progress across turns", () => {
   const runTwoTurns = (edit: string, plan?: (p: Plan) => Plan) => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -1356,6 +1390,8 @@ describe("AgentRunner failures", () => {
     )
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       ContextManager.Default,
       SessionStore.Default,
@@ -1431,6 +1467,8 @@ describe("AgentRunner stop", () => {
       const interrupted = yield* Deferred.make<boolean>()
       const base = Layer.mergeAll(
         AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
         TranscriptStore.Default,
@@ -1522,6 +1560,8 @@ describe("AgentRunner stop", () => {
       )
       const base = Layer.mergeAll(
         AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
         TranscriptStore.Default,
@@ -1590,6 +1630,8 @@ describe("AgentRunner first-event watchdog", () => {
       )
       const base = Layer.mergeAll(
         AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
         TranscriptStore.Default,
@@ -1639,6 +1681,8 @@ describe("AgentRunner first-event watchdog", () => {
       )
       const base = Layer.mergeAll(
         AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
         TranscriptStore.Default,
@@ -1687,6 +1731,8 @@ describe("AgentRunner live tool output", () => {
   it("streams ToolDelta to the consumer but never persists it to the transcript", async () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
       TranscriptStore.Default,
@@ -1749,6 +1795,8 @@ describe("AgentRunner on the Starbase harness", () => {
 
       const base = Layer.mergeAll(
         AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
         ConfigService.Default,
         ContextManager.Default,
         SessionStore.Default,
@@ -1811,6 +1859,8 @@ describe("AgentRunner usage accrual", () => {
   it("adds each finished turn's usage to the session's running total", async () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
+    OpenConnectorService.Default,
+    InMemorySecretStoreLive,
       ConfigService.Default,
       ContextManager.Default,
       SessionStore.Default,

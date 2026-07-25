@@ -25,6 +25,9 @@ import {
   GitService,
   McpService,
   ModelsService,
+  OpenConnectorService,
+  OpenConnectorApi,
+  SecretStoreUnavailable,
   planDraftPost,
   billingPath,
   isScriptedEnv,
@@ -55,6 +58,7 @@ import { dirname, resolve } from "node:path"
 import {
   applyStreamEvent,
   assistantMessage,
+  ConfigError,
   GhError,
   GitError,
   latestPlan,
@@ -75,6 +79,7 @@ import type {
   CliKind,
   ExecutionMode,
   Message,
+  OpenConnectorConfig,
   Plan,
   PlanRound,
   StreamEvent,
@@ -202,6 +207,36 @@ export const mcpStatus = (
 ) =>
   Effect.flatMap(mcpSpec(sessionId, cli), (spec) =>
     McpService.status(spec, { refresh: refresh ?? false })
+  )
+
+/** `OpenConnector.get` handler — settings + a `hasToken` bool (never the token). */
+export const openConnectorGet = () => OpenConnectorService.get
+
+/**
+ * `OpenConnector.set` handler. The token can fail to persist when the OS vault is
+ * unavailable; that surfaces as `SecretStoreUnavailable`, which is not an RPC
+ * error type, so it's folded into `ConfigError` (the channel the panel handles).
+ */
+export const openConnectorSet = (config: OpenConnectorConfig, token: string | null | undefined) =>
+  OpenConnectorService.set(config, token).pipe(
+    Effect.catchIf(
+      (e): e is SecretStoreUnavailable => e instanceof SecretStoreUnavailable,
+      (e) => new ConfigError({ message: e.message, cause: e })
+    )
+  )
+
+/** `OpenConnector.test` handler — live probe of the configured endpoint. */
+export const openConnectorTest = () => OpenConnectorService.test
+
+// ── MCP Connector Center handlers ────────────────────────────────────────────
+
+/** `Connector.startOauth` — begin OAuth, opening the consent URL in the system browser. */
+export const connectorStartOauth = (service: string, connectionName: string | undefined) =>
+  OpenConnectorApi.startAuthorization(service, connectionName).pipe(
+    // The URL can carry a `state` secret, so it is opened in the main process and
+    // never returned to the renderer; OpenConnector's own callback stores the grant.
+    Effect.flatMap((url) => Effect.promise(() => shell.openExternal(url))),
+    Effect.as({ ok: true, message: null } as const)
   )
 
 /**
@@ -1641,6 +1676,19 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "Skills.list": ({ sessionId }) => skillsList(sessionId),
   "Mcp.list": ({ sessionId, cli }) => mcpList(sessionId, cli),
   "Mcp.status": ({ sessionId, cli, refresh }) => mcpStatus(sessionId, cli, refresh),
+  "OpenConnector.get": () => openConnectorGet(),
+  "OpenConnector.set": ({ config, token }) => openConnectorSet(config, token),
+  "OpenConnector.test": () => openConnectorTest(),
+  "Connector.providers": () => OpenConnectorApi.listProviders(),
+  "Connector.connections": () => OpenConnectorApi.listConnections(),
+  "Connector.oauthConfigs": () => OpenConnectorApi.oauthConfigs(),
+  "Connector.connect": ({ service, authType, values, connectionName }) =>
+    OpenConnectorApi.putConnection(service, authType, { ...values }, connectionName),
+  "Connector.disconnect": ({ service, connectionName }) =>
+    OpenConnectorApi.deleteConnection(service, connectionName),
+  "Connector.setOauthConfig": ({ provider, clientId, clientSecret, extra }) =>
+    OpenConnectorApi.putOauthConfig(provider, clientId, clientSecret, extra ? { ...extra } : undefined),
+  "Connector.startOauth": ({ service, connectionName }) => connectorStartOauth(service, connectionName),
   // Discovery supplies the CLI's resolved binary path — a GUI-launched Electron
   // app has a threadbare PATH, so Codex's own model list is only reachable via
   // the absolute path discovery found.

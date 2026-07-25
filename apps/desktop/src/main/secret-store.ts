@@ -34,7 +34,18 @@ export const PlaintextSecretStoreLive = Layer.effect(
         fs
           .writeFileString(paths.authFile, token)
           .pipe(Effect.mapError(() => new SecretStoreUnavailable({ message: "e2e write failed" }))),
-      clear: fs.remove(paths.authFile).pipe(Effect.ignore)
+      clear: fs.remove(paths.authFile).pipe(Effect.ignore),
+      getOpenConnectorToken: fs
+        .readFileString(paths.openConnectorFile)
+        .pipe(
+          Effect.map((raw) => (raw.trim().length > 0 ? raw.trim() : null)),
+          Effect.orElseSucceed(() => null)
+        ),
+      setOpenConnectorToken: (token: string) =>
+        fs
+          .writeFileString(paths.openConnectorFile, token)
+          .pipe(Effect.mapError(() => new SecretStoreUnavailable({ message: "e2e write failed" }))),
+      clearOpenConnectorToken: fs.remove(paths.openConnectorFile).pipe(Effect.ignore)
     }
   })
 )
@@ -66,7 +77,31 @@ export const SecretStoreLive = Layer.effect(
           : Effect.fail(
               new SecretStoreUnavailable({ message: "OS encryption is unavailable on this host" })
             ),
-      clear: fs.remove(paths.authFile).pipe(Effect.ignore)
+      clear: fs.remove(paths.authFile).pipe(Effect.ignore),
+      getOpenConnectorToken: Effect.gen(function* () {
+        const exists = yield* fs
+          .exists(paths.openConnectorFile)
+          .pipe(Effect.orElseSucceed(() => false))
+        if (!exists || !safeStorage.isEncryptionAvailable()) return null
+        const bytes = yield* fs.readFile(paths.openConnectorFile).pipe(Effect.orElseSucceed(() => null))
+        if (!bytes) return null
+        return yield* Effect.try(() => safeStorage.decryptString(Buffer.from(bytes))).pipe(
+          Effect.orElseSucceed(() => null)
+        )
+      }),
+      setOpenConnectorToken: (token: string) =>
+        safeStorage.isEncryptionAvailable()
+          ? fs
+              .writeFile(paths.openConnectorFile, safeStorage.encryptString(token))
+              .pipe(
+                Effect.mapError(
+                  () => new SecretStoreUnavailable({ message: "failed to write encrypted token" })
+                )
+              )
+          : Effect.fail(
+              new SecretStoreUnavailable({ message: "OS encryption is unavailable on this host" })
+            ),
+      clearOpenConnectorToken: fs.remove(paths.openConnectorFile).pipe(Effect.ignore)
     }
   })
 )

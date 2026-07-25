@@ -559,6 +559,52 @@ export const DEFAULT_CONTEXT_CONFIG: ContextConfig = {
 }
 
 /**
+ * The self-hosted OpenConnector instance every agent draws its MCP tools from.
+ *
+ * Starbase runs `claude` / `codex` / `cursor` / `opencode` as separate sessions,
+ * each of which would otherwise have to configure MCP servers independently. This
+ * points all of them at ONE central OpenConnector `/mcp` endpoint, so a provider
+ * connected once (in OpenConnector's own console) is available to every agent.
+ *
+ * SECURITY: this struct is persisted to `config.json` and crosses the RPC
+ * boundary, so it carries NO secret. The instance's bearer token lives only in
+ * `SecretStore` (a sibling of the auth `auth.enc`) and is joined in at spawn.
+ */
+export const OpenConnectorConfig = Schema.Struct({
+  /**
+   * Base URL of the instance, without the `/mcp` suffix, e.g.
+   * `https://mcp.internal`. The injected server targets `${endpoint}/mcp`.
+   */
+  endpoint: Schema.String,
+  /** Master switch. Off means no agent receives the server, regardless of `perCli`. */
+  enabled: Schema.Boolean,
+  /**
+   * The name the unified server is registered under in every harness. Stable so
+   * repeated worktree writes stay idempotent and the Settings list is recognisable.
+   */
+  serverName: Schema.optionalWith(Schema.String, { default: () => "open-connector" }),
+  /**
+   * Per-harness opt-out. A CLI absent from the map defaults to ENABLED (when the
+   * master switch is on); only an explicit `false` withholds the server from that
+   * harness. `starbase` is never a real launch target, so its entry is ignored.
+   *
+   * Keyed by a bare string, not `CliKind`, on purpose: a `Record` over a literal
+   * union is exhaustive under `Schema.encode` (every harness key would be
+   * mandatory), which defeats the "absent ⇒ enabled" default. Lookups still pass a
+   * `CliKind`, so the looser key costs no call-site safety.
+   */
+  perCli: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Boolean }))
+})
+export type OpenConnectorConfig = Schema.Schema.Type<typeof OpenConnectorConfig>
+
+/** The default before an operator configures anything: present but switched off. */
+export const OPEN_CONNECTOR_DEFAULT: OpenConnectorConfig = {
+  endpoint: "",
+  enabled: false,
+  serverName: "open-connector"
+}
+
+/**
  * Persisted app configuration, stored at `~/starbase/config.json`. `reposDir` is
  * null until the user completes first-run setup by choosing a repos directory.
  */
@@ -670,7 +716,13 @@ export const WorkspaceConfig = Schema.Struct({
    * bundled presets or files under `~/starbase/themes`, because a theme is
    * kilobytes of colour table and `config.json` is read on every settings save.
    */
-  theme: Schema.optional(ThemeConfig)
+  theme: Schema.optional(ThemeConfig),
+  /**
+   * The self-hosted OpenConnector instance all agents draw MCP tools from. Absent
+   * on older configs, which means the feature is off (`OPEN_CONNECTOR_DEFAULT`);
+   * the bearer token is NEVER stored here — it lives in `SecretStore`.
+   */
+  openConnector: Schema.optional(OpenConnectorConfig)
 })
 export type WorkspaceConfig = Schema.Schema.Type<typeof WorkspaceConfig>
 
