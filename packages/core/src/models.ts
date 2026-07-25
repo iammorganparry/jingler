@@ -27,13 +27,29 @@ export type ProviderModels = Schema.Schema.Type<typeof ProviderModels>
  */
 export const FALLBACK_MODELS: Record<CliKind, ReadonlyArray<ModelOption>> = {
   claude: [
-    { id: "opus", label: "opus" },
-    { id: "sonnet", label: "sonnet" },
-    { id: "haiku", label: "haiku" },
+    // Claude Code's own model picker is the source for these ids. Keep the
+    // moving `opus` alias first: `defaultModel` uses index 0, and existing
+    // sessions expect the default to follow Claude Code's current Opus release.
+    { id: "opus", label: "Opus 5" },
+    // Pinned alongside the alias on purpose. Claude Code's `/model` shortlist
+    // lags a release — Opus 5 shipped reachable via `--model claude-opus-5`
+    // before it appeared in the picker — so a session that wants *this* release
+    // rather than "whatever Opus resolves to next" needs an explicit id. Opus 5
+    // is 1M by default and maximum, so unlike 4.8/4.7/4.6 there is no `[1m]`
+    // variant to offer.
+    { id: "claude-opus-5", label: "Opus 5 (pinned)" },
+    { id: "claude-opus-4-8", label: "Opus 4.8" },
+    { id: "claude-opus-4-8[1m]", label: "Opus 4.8 1M" },
+    { id: "claude-opus-4-7[1m]", label: "Opus 4.7 1M" },
+    { id: "claude-opus-4-6[1m]", label: "Opus 4.6 1M" },
+    { id: "sonnet[1m]", label: "Sonnet 5 1M" },
+    { id: "claude-sonnet-4-6[1m]", label: "Sonnet 4.6 1M" },
+    { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
+    { id: "haiku", label: "Haiku 4.5" },
     // Fable is the adversarial reviewer's default (see `DEFAULT_REVIEW_MODEL`).
     // It is deliberately NOT first: `defaultModel` takes index 0, so promoting it
     // would silently switch every new *session* onto the priciest tier.
-    { id: "claude-fable-5", label: "fable" }
+    { id: "claude-fable-5", label: "Fable 5" }
   ],
   // Codex's real catalogue comes from the CLI itself (`codex app-server` →
   // `model/list`), which is authoritative and needs no API key. These are only

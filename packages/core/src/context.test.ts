@@ -60,7 +60,20 @@ describe("contextWindowFor", () => {
   it("reads a 1M window for modern Opus", () => {
     expect(contextWindowFor("claude", "claude-opus-4-5")).toBe(1_000_000)
     expect(contextWindowFor("claude", "claude-opus-4-8")).toBe(1_000_000)
+    expect(contextWindowFor("claude", "claude-opus-5")).toBe(1_000_000)
     expect(contextWindowFor("claude", "claude-opus-4-5-20251101")).toBe(1_000_000)
+  })
+
+  it("recognises Claude Code's explicit 1M model variants", () => {
+    for (const model of [
+      "claude-opus-4-6[1m]",
+      "claude-opus-4-7[1m]",
+      "claude-opus-4-8[1m]",
+      "claude-sonnet-4-6[1m]",
+      "sonnet[1m]"
+    ]) {
+      expect(contextWindowFor("claude", model)).toBe(1_000_000)
+    }
   })
 
   // Any 1M over-estimate can never reconcile down, so known historic release

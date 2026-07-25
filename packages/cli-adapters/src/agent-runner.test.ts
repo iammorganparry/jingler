@@ -21,6 +21,7 @@ import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore } from "./plan-store.js"
+import { reserveSessionRun } from "./run-coordinator.js"
 import { withTempRoot } from "./test-support.js"
 
 /**
@@ -1622,6 +1623,53 @@ describe("AgentRunner stop", () => {
       _tag: "Failed",
       message: expect.stringContaining("already running")
     })
+  })
+
+  /**
+   * The other half of single-flight: a refusal must mean a run is ACTUALLY
+   * live, not merely that one was once reserved.
+   *
+   * The reservation is released by a finalizer on the stream's scope, and a
+   * renderer that dies without interrupting the stream (window reload, HMR full
+   * reload, crash) never closes it. The main process — and the reservation map
+   * — outlive the renderer, so the chat was refused forever, with no stop
+   * button on the reloaded page to clear it. Killing the app was the only
+   * recovery. A reservation with no live fiber is proof of exactly that, since
+   * `fibers` is written under the same chat lock immediately after reserving.
+   */
+  it("reclaims a reservation stranded with no live run", async () => {
+    const events = await Effect.gen(function* () {
+      const base = Layer.mergeAll(
+        AgentRunner.Default,
+        OpenConnectorService.Default,
+        InMemorySecretStoreLive,
+        ConfigService.Default,
+        SessionStore.Default,
+        TranscriptStore.Default,
+        BackgroundTaskStore.Default,
+        PlanStore.Default,
+        ContextManager.Default,
+        makeScriptedCliAdapter(0),
+        noHarnesses,
+        temp.layer
+      )
+      return yield* Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "auto")
+        // Strand a reservation the way an abandoned stream does: reserved, but
+        // with no fiber ever registered against it.
+        expect(yield* reserveSessionRun(SESSION, SESSION)).toBe(true)
+        const seen: Array<StreamEvent> = []
+        yield* runner
+          .prompt(SESSION, SESSION, "go")
+          .pipe(Stream.runForEach((ev) => Effect.sync(() => seen.push(ev))))
+        return seen
+      }).pipe(Effect.provide(base))
+    }).pipe(Effect.runPromise)
+
+    // The run proceeded rather than being refused.
+    expect(events.some((ev) => ev._tag === "Failed" && ev.message.includes("already running"))).toBe(false)
+    expect(events.length).toBeGreaterThan(0)
   })
 
   /**

@@ -2168,8 +2168,45 @@ const ServerProtocolLive = Layer.effect(
       const disconnects = yield* Mailbox.make<number>()
       const runFork = Runtime.runFork(yield* Effect.runtime<never>())
 
+      /**
+       * Tell the server a renderer is gone, so it interrupts that client's
+       * in-flight handler fibers and their finalizers run.
+       *
+       * Load-bearing, not hygiene. A handler's scope closes on a terminal
+       * event, on a client `Interrupt` frame, or on this signal — and a
+       * renderer that dies without unmounting (reload, HMR full reload, crash)
+       * sends no Interrupt frame. The main process outlives it, so without
+       * this the handler fiber runs forever holding whatever its finalizers
+       * were meant to release. `AgentRunner`'s run reservation is exactly that:
+       * a stranded one refuses the chat permanently with "already running",
+       * and the reloaded renderer shows the chat idle, so there is no stop
+       * button to clear it. Only killing the app recovered it.
+       *
+       * Listeners attach once per `WebContents` — `webContentsWatched` is
+       * keyed by id because `sender` is reassigned on every inbound frame.
+       */
+      const webContentsWatched = new Set<number>()
+      const watch = (contents: WebContents) => {
+        if (webContentsWatched.has(contents.id)) return
+        webContentsWatched.add(contents.id)
+        const gone = () => disconnects.unsafeOffer(contents.id)
+        contents.on("destroyed", () => {
+          webContentsWatched.delete(contents.id)
+          gone()
+        })
+        contents.on("render-process-gone", gone)
+        // Covers reload: a reloading renderer keeps its `WebContents` (and so
+        // its client id), so nothing else marks the old page's requests dead.
+        // Same-document navigations are excluded — those keep the JS context,
+        // and the client's fibers with it.
+        contents.on("did-start-navigation", (details) => {
+          if (details.isMainFrame && !details.isSameDocument) gone()
+        })
+      }
+
       ipcMain.on(RPC_CHANNEL, (event, data: FromClientEncoded) => {
         sender = event.sender
+        watch(event.sender)
         runFork(writeRequest(event.sender.id, data))
       })
 
