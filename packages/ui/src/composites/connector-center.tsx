@@ -43,6 +43,15 @@ const ALL_CATEGORIES = "__all__"
 /** Card height + gap, in px. Feeds the virtualizer's size estimate. */
 const ROW_HEIGHT = 76
 
+/** A service's connections, split by whether they can actually run an action. */
+interface ConnectionCounts {
+  readonly connected: number
+  readonly pending: number
+}
+
+/** Shared so every unconnected card gets the same object, not a fresh one. */
+const EMPTY_COUNTS: ConnectionCounts = { connected: 0, pending: 0 }
+
 const AUTH_LABEL: Record<ConnectorAuthType, string> = {
   oauth2: "OAuth",
   api_key: "API key",
@@ -101,12 +110,32 @@ export function ConnectorCenter({
   const [active, setActive] = React.useState<ConnectorProvider | null>(null)
   const columns = useGridColumns()
 
-  /** How many connections each service holds — 0 means "not connected". */
+  /**
+   * Per service: how many connections are actually USABLE versus merely started.
+   *
+   * The two are counted apart because they mean different things to the operator.
+   * A `pending` connection — an OAuth grant begun but not yet consented — is
+   * listed but cannot run an action, so folding it into "connected" would put a
+   * green dot and a "Manage" affordance on a provider that does not work yet, and
+   * inflate the Connected tab with it.
+   */
   const connectionCount = React.useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const c of connections) counts.set(c.service, (counts.get(c.service) ?? 0) + 1)
+    const counts = new Map<string, { connected: number; pending: number }>()
+    // Mutated in place while building, then read as a readonly ConnectionCounts.
+    for (const c of connections) {
+      const entry = counts.get(c.service) ?? { connected: 0, pending: 0 }
+      if (c.status === "pending") entry.pending += 1
+      else entry.connected += 1
+      counts.set(c.service, entry)
+    }
     return counts
   }, [connections])
+
+  /** A service is "connected" only when at least one connection is usable. */
+  const isConnected = React.useCallback(
+    (service: string) => (connectionCount.get(service)?.connected ?? 0) > 0,
+    [connectionCount]
+  )
 
   const categories = React.useMemo(() => {
     const seen = new Set<string>()
@@ -126,15 +155,15 @@ export function ConnectorCenter({
   }, [providers, query, category])
 
   const connectedCount = React.useMemo(
-    () => scoped.filter((p) => (connectionCount.get(p.id) ?? 0) > 0).length,
-    [scoped, connectionCount]
+    () => scoped.filter((p) => isConnected(p.id)).length,
+    [scoped, isConnected]
   )
 
   const filtered = React.useMemo(() => {
     if (status === "all") return scoped
     const wantConnected = status === "connected"
-    return scoped.filter((p) => ((connectionCount.get(p.id) ?? 0) > 0) === wantConnected)
-  }, [scoped, status, connectionCount])
+    return scoped.filter((p) => isConnected(p.id) === wantConnected)
+  }, [scoped, status, isConnected])
 
   const rowCount = Math.ceil(filtered.length / columns)
   const scrollRef = React.useRef<HTMLDivElement>(null)
@@ -250,7 +279,7 @@ export function ConnectorCenter({
                     <ConnectorCard
                       key={provider.id}
                       provider={provider}
-                      connectionCount={connectionCount.get(provider.id) ?? 0}
+                      counts={connectionCount.get(provider.id) ?? EMPTY_COUNTS}
                       onOpen={() => open(provider)}
                     />
                   ))}
@@ -303,14 +332,18 @@ function useGridColumns(): number {
 
 function ConnectorCard({
   provider,
-  connectionCount,
+  counts,
   onOpen
 }: {
   provider: ConnectorProvider
-  connectionCount: number
+  counts: ConnectionCounts
   onOpen: () => void
 }) {
-  const connected = connectionCount > 0
+  const connected = counts.connected > 0
+  // Pending is only worth surfacing when nothing usable exists yet. A provider
+  // with a working connection AND a half-finished second one reads as connected,
+  // because it is — the operator can run actions against it right now.
+  const pending = !connected && counts.pending > 0
   return (
     <button
       type="button"
@@ -320,7 +353,11 @@ function ConnectorCard({
       aria-label={provider.name}
       className={cn(
         "flex h-[68px] w-full items-center gap-2.5 rounded-lg border bg-sunken px-3 text-left transition-colors",
-        connected ? "border-green/30 hover:border-green/50" : "border-line hover:border-line-strong",
+        connected
+          ? "border-green/30 hover:border-green/50"
+          : pending
+            ? "border-yellow/30 hover:border-yellow/50"
+            : "border-line hover:border-line-strong",
         "hover:bg-hover"
       )}
     >
@@ -335,9 +372,9 @@ function ConnectorCard({
           <span className="truncate text-[12.5px] font-medium text-text-bright">
             {provider.name}
           </span>
-          {connectionCount > 1 ? (
+          {counts.connected > 1 ? (
             <Badge tone="green" size="xs">
-              {connectionCount}
+              {counts.connected}
             </Badge>
           ) : null}
         </div>
@@ -353,9 +390,17 @@ function ConnectorCard({
         </div>
       </div>
       <span className="flex flex-none items-center gap-1.5">
-        <StatusDot tone={connected ? "bg-green" : "bg-line-strong"} size={7} />
-        <span className={cn("text-[11px]", connected ? "text-green" : "text-blue")}>
-          {connected ? "Manage" : "Connect"}
+        <StatusDot
+          tone={connected ? "bg-green" : pending ? "bg-yellow" : "bg-line-strong"}
+          size={7}
+        />
+        <span
+          className={cn(
+            "text-[11px]",
+            connected ? "text-green" : pending ? "text-yellow" : "text-blue"
+          )}
+        >
+          {connected ? "Manage" : pending ? "Pending" : "Connect"}
         </span>
       </span>
     </button>

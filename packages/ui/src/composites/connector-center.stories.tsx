@@ -154,3 +154,24 @@ export const Empty: Story = {
 export const DetailLoading: Story = {
   args: { detailLoading: true }
 }
+
+/**
+ * An OAuth grant begun but not consented. It is listed, so it would read as
+ * connected if the grid counted rows rather than usable ones — the amber dot and
+ * "Pending" exist to keep "started" and "working" apart.
+ */
+export const PendingConnection: Story = {
+  args: {
+    connections: [
+      ...CONNECTIONS,
+      {
+        service: "slack",
+        accountId: "",
+        displayName: null,
+        grantedScopes: [],
+        connectionName: null,
+        status: "pending"
+      }
+    ]
+  }
+}

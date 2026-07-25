@@ -191,6 +191,43 @@ describe("ConnectorCenter", () => {
     await waitFor(() => expect(props.onDisconnect).toHaveBeenCalledWith("slack", null))
   })
 
+  /**
+   * A `pending` connection is listed but cannot run an action — an OAuth grant
+   * begun and not yet consented. Counting it as connected would put a green dot
+   * and a "Manage" affordance on a provider that does not work, and inflate the
+   * Connected tab with it.
+   */
+  it("counts a pending connection as not connected, and says so on the card", () => {
+    const props = base()
+    render(
+      <ConnectorCenter
+        {...props}
+        connections={[
+          {
+            service: "github",
+            accountId: "",
+            displayName: null,
+            grantedScopes: [],
+            connectionName: null,
+            status: "pending"
+          },
+          ...connections
+        ]}
+      />
+    )
+    // Slack is genuinely connected; GitHub's grant is only half-finished.
+    expect(screen.getByRole("tab", { name: /Connected 1/ })).toBeTruthy()
+    expect(screen.getByRole("tab", { name: /Not connected 2/ })).toBeTruthy()
+
+    const card = catalog().getByRole("button", { name: "GitHub" })
+    expect(within(card).getByText("Pending")).toBeTruthy()
+    expect(within(card).queryByText("Manage")).toBeNull()
+
+    // And it stays out of the Connected tab.
+    fireEvent.click(screen.getByRole("tab", { name: /Connected 1/ }))
+    expect(catalog().queryByRole("button", { name: "GitHub" })).toBeNull()
+  })
+
   it("shows the not-configured callout when unconfigured", () => {
     render(<ConnectorCenter {...base()} providers={[]} error="OpenConnector is not configured." />)
     expect(screen.getByText("OpenConnector is not configured.")).toBeTruthy()
