@@ -31,6 +31,13 @@ export const FALLBACK_MODELS: Record<CliKind, ReadonlyArray<ModelOption>> = {
     // moving `opus` alias first: `defaultModel` uses index 0, and existing
     // sessions expect the default to follow Claude Code's current Opus release.
     { id: "opus", label: "Opus 5" },
+    // Pinned alongside the alias on purpose. Claude Code's `/model` shortlist
+    // lags a release — Opus 5 shipped reachable via `--model claude-opus-5`
+    // before it appeared in the picker — so a session that wants *this* release
+    // rather than "whatever Opus resolves to next" needs an explicit id. Opus 5
+    // is 1M by default and maximum, so unlike 4.8/4.7/4.6 there is no `[1m]`
+    // variant to offer.
+    { id: "claude-opus-5", label: "Opus 5 (pinned)" },
     { id: "claude-opus-4-8", label: "Opus 4.8" },
     { id: "claude-opus-4-8[1m]", label: "Opus 4.8 1M" },
     { id: "claude-opus-4-7[1m]", label: "Opus 4.7 1M" },

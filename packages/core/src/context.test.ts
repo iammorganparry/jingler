@@ -60,6 +60,7 @@ describe("contextWindowFor", () => {
   it("reads a 1M window for modern Opus", () => {
     expect(contextWindowFor("claude", "claude-opus-4-5")).toBe(1_000_000)
     expect(contextWindowFor("claude", "claude-opus-4-8")).toBe(1_000_000)
+    expect(contextWindowFor("claude", "claude-opus-5")).toBe(1_000_000)
     expect(contextWindowFor("claude", "claude-opus-4-5-20251101")).toBe(1_000_000)
   })
 

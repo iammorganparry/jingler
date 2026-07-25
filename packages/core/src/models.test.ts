@@ -41,6 +41,7 @@ describe("FALLBACK_MODELS / defaultModel", () => {
   it("offers the current Claude Code model picker catalogue", () => {
     expect(FALLBACK_MODELS.claude).toStrictEqual([
       { id: "opus", label: "Opus 5" },
+      { id: "claude-opus-5", label: "Opus 5 (pinned)" },
       { id: "claude-opus-4-8", label: "Opus 4.8" },
       { id: "claude-opus-4-8[1m]", label: "Opus 4.8 1M" },
       { id: "claude-opus-4-7[1m]", label: "Opus 4.7 1M" },
