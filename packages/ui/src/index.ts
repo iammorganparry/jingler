@@ -8,6 +8,7 @@ export * from "./tokens.js"
 
 // Atoms / primitives (shadcn base)
 export * from "./components/status-dot.js"
+export * from "./components/signal-bars.js"
 export * from "./components/kbd.js"
 export * from "./components/badge.js"
 export * from "./components/pill.js"
