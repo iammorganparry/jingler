@@ -18,6 +18,7 @@ import {
 } from "@radix-ui/react-dropdown-menu"
 import { ArrowUp, GitBranch, ImagePlus, Plus, Sparkles, Square, WandSparkles } from "lucide-react"
 import { cn } from "../lib/cn.js"
+import { downscaleImage } from "../lib/image-downscale.js"
 import { reasoningEffortsFor } from "../lib/reasoning-options.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { modeAccent } from "../tokens.js"
@@ -35,23 +36,37 @@ import { MentionMenu } from "./mention-menu.js"
 /** Cap the number of attached images so the prompt payload stays sane. */
 const MAX_ATTACHMENTS = 8
 
-/** Read an image `File` into a base64 `Attachment` (null if it isn't an image). */
-const readAttachment = (file: File, id: string): Promise<Attachment | null> =>
+/** Read a `File` as raw base64 — the original bytes, no resizing. */
+const readOriginal = (file: File): Promise<string> =>
   new Promise((resolve) => {
-    if (!file.type.startsWith("image/")) {
-      resolve(null)
-      return
-    }
     const reader = new FileReader()
     reader.onload = () => {
       const result = typeof reader.result === "string" ? reader.result : ""
       const comma = result.indexOf(",")
-      const data = comma >= 0 ? result.slice(comma + 1) : ""
-      resolve(data ? { id, name: file.name || "pasted-image.png", mediaType: file.type, data } : null)
+      resolve(comma >= 0 ? result.slice(comma + 1) : "")
     }
-    reader.onerror = () => resolve(null)
+    reader.onerror = () => resolve("")
     reader.readAsDataURL(file)
   })
+
+/**
+ * Read an image `File` into a base64 `Attachment` (null if it isn't an image).
+ *
+ * Downscaled on the way in — a pasted Retina screenshot is several megabytes of
+ * base64 that gets persisted into the transcript forever and decoded to a ~23MB
+ * bitmap to paint a 58px tile, and the harness does not use the extra pixels
+ * either. See `image-downscale.ts`. Anything the resize declines (a GIF, an image
+ * already within the cap, a re-encode that came out larger) falls through to the
+ * original bytes, so an attachment is never lost to the optimisation.
+ */
+const readAttachment = async (file: File, id: string): Promise<Attachment | null> => {
+  if (!file.type.startsWith("image/")) return null
+  const name = file.name || "pasted-image.png"
+  const shrunk = await downscaleImage(file, file.type)
+  if (shrunk !== null) return { id, name, mediaType: shrunk.mediaType, data: shrunk.data }
+  const data = await readOriginal(file)
+  return data === "" ? null : { id, name, mediaType: file.type, data }
+}
 
 const MODE_OPTIONS: ReadonlyArray<ChipOption<PermissionMode>> = [
   { value: "ask", label: "ask" },
