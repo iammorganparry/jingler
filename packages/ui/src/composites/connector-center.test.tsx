@@ -243,15 +243,20 @@ describe("ConnectorCenter", () => {
    * container that fits 2.
    */
   it("picks a column count a container that wide can actually fit", () => {
-    // n columns need n * 280 + (n - 1) * 8.
-    expect(columnsForWidth(567)).toBe(1)
-    expect(columnsForWidth(568)).toBe(2)
-    expect(columnsForWidth(855)).toBe(2)
-    expect(columnsForWidth(856)).toBe(3)
+    // n columns need n * 240 + (n - 1) * 8.
+    expect(columnsForWidth(487)).toBe(1)
+    expect(columnsForWidth(488)).toBe(2)
+    expect(columnsForWidth(735)).toBe(2)
+    expect(columnsForWidth(736)).toBe(3)
 
-    // The case the old window-measured version got wrong: a 1100px window with
-    // the nav rail open leaves ~836px of pane. That fits 2, not 3.
-    expect(columnsForWidth(1100 - 216 - 48)).toBe(2)
+    // The width Settings actually hands this pane. It shipped rendering a single
+    // column here because the two-column threshold sat ten pixels above it — a
+    // grid that was never a grid in the one place it ships.
+    expect(columnsForWidth(558)).toBe(2)
+
+    // And the case the original window-measured version got wrong: a 1100px
+    // window with the nav rail open leaves ~836px of pane.
+    expect(columnsForWidth(1100 - 216 - 48)).toBe(3)
   })
 
   it("shows the not-configured callout when unconfigured", () => {

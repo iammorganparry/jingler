@@ -305,12 +305,20 @@ export function ConnectorCenter({
 /**
  * How many cards fit across a container this wide.
  *
- * Thresholds are derived from a ~280px comfortable card and the grid's 8px gap
- * (`gap-2`): n columns need `n * 280 + (n - 1) * 8`. Exported for the test —
- * the arithmetic is the part worth pinning; the observer around it is plumbing.
+ * `n` columns need `n * CARD_MIN + (n - 1) * 8` (the grid's `gap-2`). Exported
+ * for the test — the arithmetic is the part worth pinning; the observer around
+ * it is plumbing.
+ *
+ * CARD_MIN is 240, not the 280 this first shipped with. Settings hands this pane
+ * about 558px, and 280 put the two-column threshold at 568 — ten pixels above
+ * what the pane actually has, so the "grid" rendered as a single column in the
+ * only place it ships. A card holds a 30px logo, a truncating name and two short
+ * chips; 275px each (what 558 gives at two columns) is comfortable.
  */
+const CARD_MIN = 240
+
 export const columnsForWidth = (width: number): number =>
-  width < 2 * 280 + 8 ? 1 : width < 3 * 280 + 16 ? 2 : 3
+  width < 2 * CARD_MIN + 8 ? 1 : width < 3 * CARD_MIN + 16 ? 2 : 3
 
 /**
  * Column count from the SCROLL CONTAINER's width — not the window's.
