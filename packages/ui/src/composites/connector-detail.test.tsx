@@ -216,6 +216,46 @@ describe("ConnectorDetail", () => {
     await waitFor(() => expect(props.onDisconnect).toHaveBeenCalledWith("linear", "work"))
   })
 
+  /**
+   * The one that matters most here. Swapping provider A for provider B WITHOUT
+   * passing through null is a plain re-render — React reconciles the same element
+   * type in the same position and keeps its state — so without a key on the form,
+   * a typed api key survives into the other provider's form. The grid can't
+   * currently perform that swap (its dialog is modal), but this component is
+   * exported, so the guarantee has to hold on its own.
+   */
+  it("carries no typed secret across a direct provider swap", () => {
+    const props = base()
+    const { rerender } = render(<ConnectorDetail {...props} />)
+    fireEvent.click(screen.getByRole("tab", { name: "API key" }))
+    fireEvent.change(screen.getByPlaceholderText("default"), { target: { value: "work" } })
+    fireEvent.change(screen.getByPlaceholderText("lin_api_..."), {
+      target: { value: "lin_api_secret" }
+    })
+
+    // Straight from Linear to GitHub — no null in between.
+    const github = { id: "github", name: "GitHub", authTypes: ["api_key" as const] }
+    rerender(
+      <ConnectorDetail
+        {...props}
+        provider={card(github)}
+        detail={detail({
+          ...github,
+          oauthScopes: [],
+          fields: [
+            { name: "apiKey", label: "Personal access token", kind: "password", required: true }
+          ]
+        })}
+      />
+    )
+
+    const field = screen.getByPlaceholderText("Personal access token") as HTMLInputElement
+    expect(field.value).toBe("")
+    // The connection alias resets too — "work" belonged to the other provider.
+    expect((screen.getByPlaceholderText("default") as HTMLInputElement).value).toBe("default")
+    expect(screen.queryByDisplayValue("lin_api_secret")).toBeNull()
+  })
+
   it("renders nothing when no provider is open", () => {
     render(<ConnectorDetail {...base()} provider={null} />)
     expect(screen.queryByRole("dialog")).toBeNull()

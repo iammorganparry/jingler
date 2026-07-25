@@ -111,7 +111,17 @@ export function ConnectorDetail({
     <Dialog open={provider !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
       <DialogContent className="max-w-lg">
         {provider ? (
+          // Keyed by provider so React REMOUNTS the form on any provider change,
+          // not just when `provider` happens to pass through null on close.
+          // Without the key, an A→B swap reconciles the same instance and carries
+          // a typed api key — plus the connection name and the chosen auth mode —
+          // straight into the other provider's form. The grid can't do that swap
+          // today (the dialog is modal, so a card is unclickable while one is
+          // open), but this component is exported, and "safe because of how the
+          // one current caller behaves" is not a property worth relying on for a
+          // credential.
           <DetailBody
+            key={provider.id}
             provider={provider}
             detail={detail}
             detailLoading={detailLoading}
@@ -131,9 +141,15 @@ export function ConnectorDetail({
 }
 
 /**
- * Split from the wrapper so the whole form remounts (and every field resets)
- * when a different provider is opened — a `useEffect` reset on `provider.id`
- * would leave a typed secret alive for one render against the wrong provider.
+ * The form itself, split from the wrapper so that mounting it is conditional and
+ * it can be keyed. Both matter: the split alone would NOT reset anything on an
+ * A→B provider swap (React reconciles the same element type in the same position
+ * and keeps its state) — the `key={provider.id}` at the call site is what forces
+ * the remount, and every field with it.
+ *
+ * A `useEffect` reset on `provider.id` was the obvious alternative and is worse:
+ * effects run AFTER paint, so the previous provider's typed secret would live for
+ * one render inside the new provider's form.
  */
 function DetailBody({
   provider,
