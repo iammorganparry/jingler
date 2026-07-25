@@ -37,6 +37,11 @@ import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Schedule, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
+import {
+  composeTurnPrompt,
+  leadsWithCommand,
+  planPointerNote
+} from "./turn-prompt.js"
 import { buildGate, makeApprovals, verdict } from "./approvals.js"
 import { runLifetime } from "./run-lifetime.js"
 import { planNote } from "./plan-prompt.js"
@@ -141,43 +146,6 @@ export const isContextOverflowFailure = (message: string): boolean =>
     message
   )
 
-/**
- * A concise context note prepended to a run when the session's worktree has saved
- * plan(s). It does two jobs: (1) anchor the agent to its worktree, and (2) hand it
- * the plan file path(s).
- *
- * (1) matters because the plan library lives OUTSIDE the worktree
- * (`~/starbase/.starbase/…`): without being told its working directory, an agent
- * that reads the plan file can mistake the plan's parent for the project root and
- * `cd` out of its worktree (even into the origin checkout) — corrupting the wrong
- * tree. So we state the worktree path explicitly and forbid treating the plan's
- * location as the repo. Phrased so the agent only acts on the plan when the turn
- * is actually about it.
- */
-const planPointerNote = (worktreePath: string, planFiles: ReadonlyArray<string>): string =>
-  [
-    "<session-context>",
-    `Working directory (this session's git worktree — the project root): ${worktreePath}`,
-    "Do ALL work here: every file read/edit and shell command runs in this directory. Do NOT `cd` out of it, and never treat any other directory as the project — in particular, the plan file below lives OUTSIDE the project, so its parent directory is NOT the repo.",
-    "",
-    "Saved plan for this session (a read-only reference document, not part of the project):",
-    ...planFiles.map((f) => `  - ${f}`),
-    "If this message asks you to implement, continue, or pick up the plan, read that file to recall the full plan, then do the work in the working directory above. Otherwise ignore this note.",
-    "</session-context>"
-  ].join("\n")
-
-/**
- * Does this turn open with a slash command (`/babysit-pr …`)?
- *
- * Harnesses only expand a command when it leads the message, so anything we
- * prepend silently demotes it to prose. Deliberately narrow: a bare `/` or a
- * path like `/Users/...` is not a command.
- */
-export const isSlashCommand = (text: string): boolean => /^\/[A-Za-z][\w:-]*(\s|$)/.test(text.trimStart())
-
-/** Codex's explicit skill syntax; like slash commands, it must lead the composed prompt. */
-export const isCodexSkillInvocation = (text: string): boolean =>
-  /^\$[A-Za-z][\w:-]*(\s|$)/.test(text.trimStart())
 
 /** A proposed plan awaiting the operator's decision; the `Deferred` resumes the agent. */
 interface PendingPlan {
@@ -771,13 +739,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
 
           // Renamed from `planNote` when the plan-mode protocol note arrived: two
           // different plan-related prefixes with one name is a trap.
-          const planPointer = savedPlans.length > 0 ? `${planPointerNote(worktreePath, savedPlans)}\n\n` : ""
-          const primer = digest === null ? "" : `${renderPrimer(digest, tail)}\n\n`
+          const planPointer = savedPlans.length > 0 ? planPointerNote(worktreePath, savedPlans) : null
+          const primer = digest === null ? null : renderPrimer(digest, tail)
           // ADHD mode rides in the same per-turn prefix as the primer and the plan
           // pointer. There is no system-prompt hook that every harness shares, and
           // a setting the operator can flip mid-session has to apply to the NEXT
           // turn — which a session-start injection could not do.
-          const adhd = adhdMode ? `${adhdNote(cli)}\n\n` : ""
+          const adhd = adhdMode ? adhdNote(cli) : null
           // Not optional, and not a setting: an agent that asks in prose is an
           // agent whose question never reaches the operator. Claude has the
           // `AskUserQuestion` tool the adapter intercepts, Codex has the fenced
@@ -786,13 +754,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           // an unanswerable paragraph. Rides the same per-turn prefix as ADHD
           // mode, for the same reason: no system-prompt hook is shared by every
           // harness, and this has to survive a mid-session harness switch.
-          const ask = `${questionNote(cli)}\n\n`
+          const ask = questionNote(cli)
           // How this harness submits a plan. Null for Claude — the adapter passes
           // `planModeInstructions` as a real SDK option there, and saying it twice
           // would compete with the `ExitPlanMode` tool the harness is steered
           // toward. Everything else is told to end its reply with the block.
           const planProtocol = !orchestrating && mode === "plan" ? planNote(cli) : null
-          const planning = planProtocol === null ? "" : `${planProtocol}\n\n`
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
@@ -828,11 +795,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             // turned `/babysit-pr …` into prose, and the turn came back instantly
             // with nothing to say — the empty "CLAUDE" block. When the operator
             // opens with a command, the context rides along AFTER it instead.
-            prompt:
-              !orchestrating &&
-              (isSlashCommand(promptText) || (cli === "codex" && isCodexSkillInvocation(promptText)))
-              ? `${promptText}\n\n${primer}${planPointer}${adhd}${ask}${planning}`.trimEnd()
-              : `${primer}${planPointer}${adhd}${ask}${planning}${promptText}`,
+            prompt: composeTurnPrompt(
+              promptText,
+              { primer, planPointer, adhd, ask, planProtocol },
+              // The orchestrator's intake prompt is generated, never typed, so it
+              // can never be a command the harness has to see first.
+              { leadWithText: !orchestrating && leadsWithCommand(cli, promptText) }
+            ),
             images,
             binPath,
             mode,

@@ -25,7 +25,7 @@ const none = new Set<string>()
 /** A real gate card, built the way the runner builds it. */
 const gateFor = (command: string) => buildGate("g1", cmd(command))
 
-const run = <A>(effect: Effect.Effect<A>) => Effect.runPromise(effect)
+const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect)
 
 describe("verdict", () => {
   it("runs everything in auto", () => {
@@ -186,7 +186,7 @@ describe("the approvals registry", () => {
   })
 
   it("answers a parked question group", async () => {
-    const given: ReadonlyArray<QuestionAnswer> = [{ questionId: "q1", answer: "yes" }]
+    const given: ReadonlyArray<QuestionAnswer> = [{ selected: ["yes"], other: null }]
     const answers = await run(
       Effect.gen(function* () {
         const approvals = yield* makeApprovals

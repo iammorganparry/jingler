@@ -11,7 +11,6 @@ import { InMemorySecretStoreLive } from "./secret-store.js"
 import { OpenConnectorService } from "./open-connector.js"
 import {
   AgentRunner,
-  isCodexSkillInvocation,
   isContextOverflowFailure,
   resolveIntakeHarness
 } from "./agent-runner.js"
@@ -110,12 +109,6 @@ const gates = (events: ReadonlyArray<StreamEvent>) =>
 const ranTool = (events: ReadonlyArray<StreamEvent>, id: string) =>
   events.some((e) => e._tag === "ToolStart" && e.id === id)
 
-describe("isCodexSkillInvocation", () => {
-  it("recognises explicit Codex skill tokens without treating paths as skills", () => {
-    expect(isCodexSkillInvocation("$babysit-pr get it to main")).toBe(true)
-    expect(isCodexSkillInvocation("/Users/morgan/repo")).toBe(false)
-  })
-})
 
 describe("isContextOverflowFailure", () => {
   it("recognises Codex and API context exhaustion without matching ordinary failures", () => {
