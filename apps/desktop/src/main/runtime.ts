@@ -24,6 +24,8 @@ import {
   ReviewStore,
   SessionStore,
   McpService,
+  OpenConnectorService,
+  OpenConnectorApi,
   SkillsService,
   TerminalService,
   ThemeService,
@@ -103,7 +105,14 @@ const AppLayer = RpcServerLive.pipe(
   Layer.provideMerge(ThemeService.Default),
   // Merged into one stage purely to stay inside `pipe`'s 20-argument limit;
   // neither depends on the other, so the composition is unchanged.
-  Layer.provide(Layer.mergeAll(SkillsService.Default, McpService.Default)),
+  Layer.provide(
+    Layer.mergeAll(
+      SkillsService.Default,
+      McpService.Default,
+      OpenConnectorService.Default,
+      OpenConnectorApi.Default
+    )
+  ),
   // provideMerge: the `Models.*` handlers consume ModelsService AND the startup
   // prefetch reaches the very same instance — a different one would warm a cache
   // nobody reads, so the merge is what makes the prefetch actually count. The

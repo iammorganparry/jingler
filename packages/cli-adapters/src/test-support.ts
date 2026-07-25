@@ -49,7 +49,8 @@ export const appPathsFor = (root: string): AppPathsShape => ({
   planRoundsDir: join(root, "plan-rounds"),
   plansDir: join(root, ".starbase"),
   themesDir: join(root, "themes"),
-  authFile: join(root, "auth.enc")
+  authFile: join(root, "auth.enc"),
+  openConnectorFile: join(root, "open-connector.enc")
 })
 
 /** Make a fresh OS temp dir; returns its path + a recursive cleanup. */

@@ -1,0 +1,32 @@
+# Self-hosted OpenConnector — the ONE central MCP store every Starbase agent
+# (claude / codex / cursor / opencode) draws its tools from. A provider connected
+# once here (via the web console at :3000) is available to all of them.
+#
+# Usage:
+#   cp .env.example .env      # then fill in the secrets
+#   docker compose up -d
+#   open http://localhost:3000            # web console — connect providers here
+#   # MCP endpoint the app points agents at:  http://localhost:3000/mcp
+#
+# The image is pinned by digest-less tag on purpose for local dev; pin to a digest
+# for anything shared. See https://github.com/oomol-lab/open-connector.
+
+services:
+  open-connector:
+    image: ghcr.io/oomol-lab/open-connector:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      # SQLite lives here — persisted so connected providers survive a restart.
+      - open-connector-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/openapi.json"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  open-connector-data:

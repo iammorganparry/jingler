@@ -60,6 +60,13 @@ export interface AppPathsShape {
    * here; see `SecretStore`.
    */
   readonly authFile: string
+  /**
+   * `~/starbase/open-connector.enc` — the self-hosted OpenConnector instance's
+   * bearer token, encrypted with the OS credential vault. A sibling of `authFile`
+   * (never the same file) so the MCP token and the sign-in token are independent:
+   * signing out must not drop the instance credential. Only ciphertext is written.
+   */
+  readonly openConnectorFile: string
 }
 
 export class AppPaths extends Context.Tag("@starbase/AppPaths")<AppPaths, AppPathsShape>() {}

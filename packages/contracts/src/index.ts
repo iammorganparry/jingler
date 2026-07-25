@@ -34,6 +34,11 @@ import {
   PrFileChange,
   McpServer,
   McpServerStatus,
+  OpenConnectorConfig,
+  ConnectorProvider,
+  ConnectorConnection,
+  ConnectorActionResult,
+  OAuthClientInfo,
   PrMergeMethod,
   BackgroundTask,
   PrState,
@@ -67,6 +72,7 @@ import {
   AuthError,
   BrowserPreviewError,
   ConfigError,
+  ConnectorError,
   DiscoveryError,
   GhError,
   GitError,
@@ -480,6 +486,112 @@ export class StarbaseRpcs extends RpcGroup.make(
       sessionId: Schema.NullOr(Schema.String),
       cli: Schema.optional(CliKind),
       refresh: Schema.optional(Schema.Boolean)
+    }
+  }),
+
+  /**
+   * The unified OpenConnector settings plus whether a bearer token is stored.
+   * `hasToken` is a bool, never the token itself — the secret stays in the main
+   * process, so the panel can show "configured" without the value crossing over.
+   */
+  Rpc.make("OpenConnector.get", {
+    success: Schema.Struct({ config: OpenConnectorConfig, hasToken: Schema.Boolean }),
+    error: ConfigError
+  }),
+
+  /**
+   * Save the settings and, optionally, the bearer token. `token` omitted leaves
+   * the stored token untouched (a settings-only save); null/empty clears it; a
+   * string replaces it. The token is write-only — it never comes back out.
+   */
+  Rpc.make("OpenConnector.set", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: {
+      config: OpenConnectorConfig,
+      token: Schema.optional(Schema.NullOr(Schema.String))
+    }
+  }),
+
+  /**
+   * Live probe of the configured endpoint (regardless of the enabled toggles), so
+   * the panel's "Test" button verifies the URL + token before switching it on.
+   * Reuses the MCP status shape; never fails — an unreachable server is `failed`.
+   */
+  Rpc.make("OpenConnector.test", {
+    success: McpServerStatus,
+    error: ConfigError
+  }),
+
+  // ── MCP Connector Center — browse + connect OpenConnector providers ─────────
+
+  /** The provider catalog from the configured instance (`GET /v1/providers`). */
+  Rpc.make("Connector.providers", {
+    success: Schema.Array(ConnectorProvider),
+    error: ConnectorError
+  }),
+
+  /** The operator's established connections (`GET /api/connections`). No secrets. */
+  Rpc.make("Connector.connections", {
+    success: Schema.Array(ConnectorConnection),
+    error: ConnectorError
+  }),
+
+  /** OAuth-client metadata per provider — whether client creds exist + the redirect URI. */
+  Rpc.make("Connector.oauthConfigs", {
+    success: Schema.Array(OAuthClientInfo),
+    error: ConnectorError
+  }),
+
+  /**
+   * Create/replace an api-key or custom-credential connection. `values` carries the
+   * secret INBOUND only (renderer→main→OpenConnector); the result never echoes it.
+   */
+  Rpc.make("Connector.connect", {
+    success: ConnectorActionResult,
+    error: ConnectorError,
+    payload: {
+      service: Schema.String,
+      authType: Schema.Literal("api_key", "custom_credential"),
+      values: Schema.Record({ key: Schema.String, value: Schema.String }),
+      connectionName: Schema.optional(Schema.String)
+    }
+  }),
+
+  /** Remove a connection (`DELETE /api/connections/:service`). */
+  Rpc.make("Connector.disconnect", {
+    success: ConnectorActionResult,
+    error: ConnectorError,
+    payload: {
+      service: Schema.String,
+      connectionName: Schema.optional(Schema.String)
+    }
+  }),
+
+  /** Store OAuth client id/secret for a provider — secret INBOUND only. */
+  Rpc.make("Connector.setOauthConfig", {
+    success: ConnectorActionResult,
+    error: ConnectorError,
+    payload: {
+      provider: Schema.String,
+      clientId: Schema.String,
+      clientSecret: Schema.String,
+      extra: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String }))
+    }
+  }),
+
+  /**
+   * Begin an OAuth flow. The main process opens the provider consent URL in the
+   * system browser; OpenConnector's own callback stores the grant, so the renderer
+   * just re-polls `Connector.connections`. The URL is NOT returned (it may carry a
+   * state secret) — success is a plain acknowledgement.
+   */
+  Rpc.make("Connector.startOauth", {
+    success: ConnectorActionResult,
+    error: ConnectorError,
+    payload: {
+      service: Schema.String,
+      connectionName: Schema.optional(Schema.String)
     }
   }),
 

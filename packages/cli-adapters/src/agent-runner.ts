@@ -54,6 +54,8 @@ import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
 import { readDefaultMode } from "./default-mode.js"
 import { DiscoveryService } from "./discovery.js"
+import { OpenConnectorService } from "./open-connector.js"
+import { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
@@ -321,6 +323,8 @@ type PromptEnv =
   | DiscoveryService
   | ContextManager
   | ConfigService
+  | OpenConnectorService
+  | SecretStore
   | CommandExecutor.CommandExecutor
   | FileSystem.FileSystem
   | Path.Path
@@ -894,6 +898,18 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           const resolvedReasoning =
             reasoning === undefined ? providerReasoning : reasoning
 
+          // Resolve the unified OpenConnector server once, here, where the full
+          // service context is available — the adapters run in `R = never` async
+          // code and cannot reach a service. Best-effort: a config/secret read
+          // failure yields null (no server) rather than failing the whole turn.
+          // Accessor (not a captured instance) so this stays in the METHOD's
+          // requirement channel (`PromptEnv`) rather than becoming a build-time
+          // dependency of `AgentRunner.Default` — the latter is a singleton whose
+          // construction must stay `R = never` for the layer graph and tests.
+          const openConnectorServer = yield* OpenConnectorService.injection(cli).pipe(
+            Effect.orElseSucceed(() => null)
+          )
+
           const spec: SessionSpec = {
             cli,
             repo: session?.repo ?? "",
@@ -940,7 +956,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
                   : chat.resumeId ?? null
                 : null,
             ...(digest === null ? {} : { fresh: true }),
-            ...(orchestrating ? { readOnly: true } : {})
+            ...(orchestrating ? { readOnly: true } : {}),
+            ...(openConnectorServer ? { openConnector: openConnectorServer } : {})
           }
 
           // Clear the PERSISTED id too, so a crash between here and the harness

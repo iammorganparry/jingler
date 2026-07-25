@@ -21,6 +21,7 @@ import {
   createCodexAppServerDiagnostics
 } from "./codex-app-server-diagnostics.js"
 import { stageCodexInput, toCodexAppServerInput } from "./codex-input.js"
+import { codexMcpOverrides } from "./mcp-config.js"
 import { requireWorktree } from "./cwd.js"
 import { hasPlanBlock, parsePlan } from "./plan-parse.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
@@ -404,7 +405,9 @@ export const runCodexAppServer = (
           connection = await startCodexAppServer({
             binPath: spec.binPath,
             env,
-            diagnostics
+            diagnostics,
+            // Inject the unified OpenConnector server as a remote MCP via `-c`.
+            configOverrides: codexMcpOverrides(spec.openConnector)
           })
         } catch (cause) {
           endDiagnostics("run.failed", {

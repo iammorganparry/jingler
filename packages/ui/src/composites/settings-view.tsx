@@ -41,6 +41,7 @@ import {
   Cpu,
   Keyboard,
   Palette,
+  Plug,
   RotateCcw,
   Server,
   ShieldCheck,
@@ -71,6 +72,8 @@ import { SegmentedControl } from "../components/segmented-control.js"
 import { StatusDot } from "../components/status-dot.js"
 import { Toggle } from "../components/toggle.js"
 import { McpServerRow, mcpServerMeta, statusForServer } from "./mcp-server-row.js"
+import { ConnectorCenter, type ConnectorCenterProps } from "./connector-center.js"
+import { OpenConnectorSection, type OpenConnectorSectionProps } from "./open-connector-section.js"
 import { ProviderCard } from "./provider-card.js"
 
 // ── Section registry ─────────────────────────────────────────────────────────
@@ -83,6 +86,8 @@ type SectionKey =
   | "agents"
   | "permissions"
   | "mcp"
+  | "unified-mcp"
+  | "connectors"
   | "github"
   | "themes"
   | "keybindings"
@@ -103,6 +108,8 @@ const NAV: ReadonlyArray<NavItem> = [
   { key: "agents", label: "Agents & skills", icon: <Sparkles size={14} />, ready: false },
   { key: "permissions", label: "Permissions", icon: <ShieldCheck size={14} />, ready: false },
   { key: "mcp", label: "MCP servers", icon: <Server size={14} />, ready: true },
+  { key: "unified-mcp", label: "Unified MCP", icon: <Server size={14} />, ready: true },
+  { key: "connectors", label: "Connector Center", icon: <Plug size={14} />, ready: true },
   { key: "github", label: "GitHub", icon: <GithubMark size={14} />, ready: true },
   { key: "themes", label: "Themes", icon: <Palette size={14} />, ready: true },
   { key: "keybindings", label: "Keybindings", icon: <Keyboard size={14} />, ready: false }
@@ -480,6 +487,13 @@ export interface SettingsViewProps {
   loadMcpServers?: (cli: CliKind) => Promise<ReadonlyArray<McpServer>>
   /** Live status for those servers; `refresh` re-probes rather than reading the cache. */
   loadMcpStatus?: (cli: CliKind, refresh: boolean) => Promise<ReadonlyArray<McpServerStatus>>
+  /** Unified MCP (OpenConnector) endpoint/token/enable settings (from `useOpenConnector`). */
+  unifiedMcp?: OpenConnectorSectionProps
+  /**
+   * MCP Connector Center data + actions (from `useConnectorCenter`). Absent renders
+   * a stub — the section only works once an OpenConnector endpoint is configured.
+   */
+  connector?: ConnectorCenterProps
   /** Auto-compaction levers (master switch + working-set budget). */
   context?: ContextConfig | null
   onSaveContext?: (config: ContextConfig) => void
@@ -539,6 +553,8 @@ export function SettingsView({
   onSetOpencodeAuth,
   loadMcpServers,
   loadMcpStatus,
+  unifiedMcp,
+  connector,
   context,
   onSaveContext,
   contextSessions,
@@ -671,6 +687,10 @@ export function SettingsView({
         </div>
       ) : section === "mcp" ? (
         <McpSection clis={clis} loadMcpServers={loadMcpServers} loadMcpStatus={loadMcpStatus} />
+      ) : section === "unified-mcp" ? (
+        unifiedMcp ? <OpenConnectorSection {...unifiedMcp} /> : <StubSection label="Unified MCP" />
+      ) : section === "connectors" ? (
+        connector ? <ConnectorCenter {...connector} /> : <StubSection label="Connector Center" />
       ) : section === "themes" ? (
         themes ? (
           <ThemesSettings {...themes} />

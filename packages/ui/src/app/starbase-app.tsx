@@ -35,6 +35,8 @@ import { AppShell } from "./app-shell.js"
 import { NewSessionDialog } from "../composites/new-session-dialog.js"
 import { UsageModal } from "../composites/usage-modal.js"
 import { SettingsView } from "../composites/settings-view.js"
+import type { ConnectorCenterProps } from "../composites/connector-center.js"
+import type { OpenConnectorSectionProps } from "../composites/open-connector-section.js"
 import type { ThemesSettingsProps } from "../composites/themes-settings.js"
 import { type ConversationPaneCtx, SessionConversation } from "../screens/session-conversation.js"
 import { useSplitLayout } from "./use-split-layout.js"
@@ -151,6 +153,10 @@ export interface StarbaseAppProps {
   loadMcpServers?: (cli: CliKind) => Promise<ReadonlyArray<McpServer>>
   /** Live probe of those servers; `refresh` bypasses the cache. */
   loadMcpStatus?: (cli: CliKind, refresh: boolean) => Promise<ReadonlyArray<McpServerStatus>>
+  /** Unified MCP (OpenConnector) settings (Settings → Unified MCP). */
+  unifiedMcp?: OpenConnectorSectionProps
+  /** MCP Connector Center data + actions (Settings → Connector Center). */
+  connector?: ConnectorCenterProps
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */
@@ -287,6 +293,8 @@ export function StarbaseApp({
   onSetOpencodeAuth,
   loadMcpServers,
   loadMcpStatus,
+  unifiedMcp,
+  connector,
   renderPullRequest,
   renderReview,
   renderCode,
@@ -615,6 +623,8 @@ export function StarbaseApp({
               onSetOpencodeAuth={onSetOpencodeAuth}
               loadMcpServers={loadMcpServers}
               loadMcpStatus={loadMcpStatus}
+              unifiedMcp={unifiedMcp}
+              connector={connector}
               ghStatus={ghStatus ?? GH_UNAVAILABLE}
               github={githubConfig}
               git={gitConfig}

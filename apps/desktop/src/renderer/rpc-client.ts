@@ -33,6 +33,11 @@ import type {
   IssueSummary,
   McpServer,
   McpServerStatus,
+  OpenConnectorConfig,
+  ConnectorProvider,
+  ConnectorConnection,
+  OAuthClientInfo,
+  ConnectorActionResult,
   Message,
   ModelOption,
   OpencodeProviderInfo,
@@ -232,6 +237,45 @@ export const rpc = {
     cli?: CliKind,
     refresh?: boolean
   ): Promise<ReadonlyArray<McpServerStatus>> => run((c) => c.Mcp.status({ sessionId, cli, refresh })),
+  /** The unified OpenConnector settings + whether a bearer token is stored (never the token). */
+  openConnectorGet: (): Promise<{ config: OpenConnectorConfig; hasToken: boolean }> =>
+    run((c) => c.OpenConnector.get()),
+  /** Save settings, and optionally the token (omit to keep, null/"" to clear). */
+  openConnectorSet: (config: OpenConnectorConfig, token?: string | null): Promise<void> =>
+    run((c) => c.OpenConnector.set({ config, token })),
+  /** Live probe of the configured endpoint (for the panel's Test button). */
+  openConnectorTest: (): Promise<McpServerStatus> => run((c) => c.OpenConnector.test()),
+  /** The OpenConnector provider catalog (Connector Center). */
+  connectorProviders: (): Promise<ReadonlyArray<ConnectorProvider>> =>
+    run((c) => c.Connector.providers()),
+  /** The operator's established connections (no secrets). */
+  connectorConnections: (): Promise<ReadonlyArray<ConnectorConnection>> =>
+    run((c) => c.Connector.connections()),
+  /** OAuth-client metadata per provider (whether client creds are stored + redirect URI). */
+  connectorOauthConfigs: (): Promise<ReadonlyArray<OAuthClientInfo>> =>
+    run((c) => c.Connector.oauthConfigs()),
+  /** Create/replace an api-key or custom-credential connection. Secret goes IN only. */
+  connectorConnect: (
+    service: string,
+    authType: "api_key" | "custom_credential",
+    values: Record<string, string>,
+    connectionName?: string
+  ): Promise<ConnectorActionResult> =>
+    run((c) => c.Connector.connect({ service, authType, values, connectionName })),
+  /** Remove a connection. */
+  connectorDisconnect: (service: string, connectionName?: string): Promise<ConnectorActionResult> =>
+    run((c) => c.Connector.disconnect({ service, connectionName })),
+  /** Store OAuth client id/secret for a provider. Secret goes IN only. */
+  connectorSetOauthConfig: (
+    provider: string,
+    clientId: string,
+    clientSecret: string,
+    extra?: Record<string, string>
+  ): Promise<ConnectorActionResult> =>
+    run((c) => c.Connector.setOauthConfig({ provider, clientId, clientSecret, extra })),
+  /** Begin OAuth — the main process opens the consent URL in the system browser. */
+  connectorStartOauth: (service: string, connectionName?: string): Promise<ConnectorActionResult> =>
+    run((c) => c.Connector.startOauth({ service, connectionName })),
   modelsList: (cli: CliKind): Promise<ReadonlyArray<ModelOption>> =>
     run((c) => c.Models.list({ cli })),
   modelsCatalog: (): Promise<ReadonlyArray<ProviderModels>> => run((c) => c.Models.catalog()),

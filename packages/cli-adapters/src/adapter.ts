@@ -14,6 +14,7 @@ import {
   GIGAPLAN_CRITIQUE_PROMPT_MARKER,
   GIGAPLAN_PROPOSAL_PROMPT_MARKER
 } from "./adversarial-plan-prompt.js"
+import type { ParsedMcpServer } from "./mcp-config.js"
 
 /** Parameters for starting a new agent turn against a CLI. */
 export interface SessionSpec {
@@ -66,6 +67,20 @@ export interface SessionSpec {
    * Hence intent lives here rather than a list of Claude's tool names: a spec
    * field only one adapter understands is a guarantee only one adapter keeps.
    */
+  /**
+   * The unified OpenConnector server to inject into this run, already resolved
+   * (config + secret joined) by `AgentRunner`, or absent when the feature is off
+   * for this harness. Carries the secret-bearing `launch` half, so it stays inside
+   * the main process — each adapter registers it in its own vocabulary, none of
+   * which touches the worktree (see `codexMcpOverrides` / `opencodeMcpConfig`):
+   *   - Claude   → the SDK `mcpServers` option;
+   *   - Codex    → `-c mcp_servers.<name>.*` overrides on the app-server spawn;
+   *   - opencode → the `mcp` block baked into `OPENCODE_CONFIG_CONTENT`.
+   * Resolved in the runner rather than the adapter so the adapters keep
+   * `R = never` and don't each grow a service dependency.
+   */
+  readonly openConnector?: ParsedMcpServer | null
+
   readonly readOnly?: boolean
   /**
    * This agent runs with nobody watching, so apply the protections that implies.
