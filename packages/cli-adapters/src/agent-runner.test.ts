@@ -1522,6 +1522,8 @@ describe("AgentRunner stop", () => {
    * long after `Done` in order to receive the task's `task_notification` bookend.
    * The turn is over; the fiber is not.
    */
+  const BG_TASK = "bgtask_probe"
+
   const settledThenLingeringAdapter = (
     settled: Deferred.Deferred<boolean>,
     interrupted: Deferred.Deferred<boolean>
@@ -1531,6 +1533,27 @@ describe("AgentRunner stop", () => {
       CliAdapter.of({
         run: (_sessionId, _spec, ctx) =>
           Effect.gen(function* () {
+            // Register the stop handle the dock's button reaches, exactly as a real
+            // adapter does: settling happens through the harness's own signals.
+            yield* ctx.registerBackgroundStop((id) =>
+              Effect.runPromise(
+                ctx.emit({
+                  _tag: "BackgroundTaskSettled",
+                  id,
+                  status: "stopped",
+                  summary: "Stopped by the operator.",
+                  outputFile: null
+                })
+              )
+            )
+            yield* ctx.emit({
+              _tag: "BackgroundTaskStarted",
+              id: BG_TASK,
+              description: "Watching the test suite",
+              taskType: "bash",
+              subagentType: null,
+              toolUseId: null
+            })
             yield* ctx.emit({ _tag: "Assistant", text: "started a watcher" })
             yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
             yield* Deferred.succeed(settled, true)
@@ -1653,6 +1676,109 @@ describe("AgentRunner stop", () => {
       message: expect.stringContaining("already running")
     })
   })
+
+  /**
+   * Background work must outlive the turn that started it.
+   *
+   * The run used to be forked into the REQUEST stream's scope, and the renderer
+   * leaves `running` the moment `Done` lands — so detaching killed the harness at
+   * turn end, every time. The dock went on listing the task as "running" with the
+   * process servicing it already dead, and its stop button addressed a handle into
+   * nothing. Backgrounding is the one feature that is defined by outliving a turn,
+   * so this is the whole thing working or not.
+   */
+  it("keeps the harness alive after the renderer detaches, while a task runs", async () => {
+    const alive = await Effect.gen(function* () {
+      const settled = yield* Deferred.make<boolean>()
+      const interrupted = yield* Deferred.make<boolean>()
+      const base = Layer.mergeAll(
+        AgentRunner.Default,
+        OpenConnectorService.Default,
+        InMemorySecretStoreLive,
+        ConfigService.Default,
+        SessionStore.Default,
+        TranscriptStore.Default,
+        BackgroundTaskStore.Default,
+        PlanStore.Default,
+        ContextManager.Default,
+        settledThenLingeringAdapter(settled, interrupted),
+        noHarnesses,
+        temp.layer
+      )
+      return yield* Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "auto")
+        // Consume exactly as the renderer does: stop at the terminal event.
+        yield* runner
+          .prompt(SESSION, SESSION, "watch the tests")
+          .pipe(
+            Stream.takeUntil((ev) => ev._tag === "Done" || ev._tag === "Failed"),
+            Stream.runCollect,
+            Effect.timeout("10 seconds")
+          )
+        // Well past the drain supervisor's grace: if detaching were still fatal,
+        // the interrupt would have landed by now.
+        yield* Effect.sleep("7 seconds")
+        const dead = yield* Deferred.isDone(interrupted)
+        const tasks = yield* BackgroundTaskStore.list(SESSION)
+        return { dead, running: tasks.filter((t) => t.status === "running").length }
+      }).pipe(Effect.provide(base))
+    }).pipe(Effect.runPromise)
+
+    expect(alive.dead).toBe(false)
+    // And the dock's row is telling the truth: a live task with a live harness.
+    expect(alive.running).toBe(1)
+  }, 30_000)
+
+  /**
+   * ...and it must not linger once the work is done.
+   *
+   * The other half of the lifetime: a harness kept alive for a task that has
+   * finished is an orphaned process holding a chat's slot. Settling the task is
+   * what ends the run, so the two are the same decision.
+   */
+  it("ends the run once the last background task settles", async () => {
+    const outcome = await Effect.gen(function* () {
+      const settled = yield* Deferred.make<boolean>()
+      const interrupted = yield* Deferred.make<boolean>()
+      const base = Layer.mergeAll(
+        AgentRunner.Default,
+        OpenConnectorService.Default,
+        InMemorySecretStoreLive,
+        ConfigService.Default,
+        SessionStore.Default,
+        TranscriptStore.Default,
+        BackgroundTaskStore.Default,
+        PlanStore.Default,
+        ContextManager.Default,
+        settledThenLingeringAdapter(settled, interrupted),
+        noHarnesses,
+        temp.layer
+      )
+      return yield* Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "auto")
+        yield* runner
+          .prompt(SESSION, SESSION, "watch the tests")
+          .pipe(
+            Stream.takeUntil((ev) => ev._tag === "Done" || ev._tag === "Failed"),
+            Stream.runCollect,
+            Effect.timeout("10 seconds")
+          )
+        // Settle it the way the dock's stop button does — through the handle the
+        // adapter registered, not by writing to the registry behind its back.
+        yield* BackgroundTaskStore.stop(SESSION, BG_TASK)
+        // The supervisor notices on its next poll and lets the harness go.
+        return yield* Deferred.await(interrupted).pipe(
+          Effect.timeout("15 seconds"),
+          Effect.as("ended" as const),
+          Effect.orElseSucceed(() => "still-running" as const)
+        )
+      }).pipe(Effect.provide(base))
+    }).pipe(Effect.runPromise)
+
+    expect(outcome).toBe("ended")
+  }, 30_000)
 
   /**
    * A settled turn must not hold the chat, however long its harness lives on.

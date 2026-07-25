@@ -329,7 +329,31 @@ export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
           })
         })
 
-      return { list, ingest, registerStop, stop, dismiss, clear, clearChat }
+      /**
+       * How many of a CHAT's tasks are still working.
+       *
+       * The runner needs this to decide when a harness may exit: once the turn has
+       * settled, the only thing left keeping the process alive is unfinished
+       * background work, and when that reaches zero the run should end rather than
+       * linger. `list` cannot answer it — it is session-scoped and a
+       * `BackgroundTask` does not carry its chat — so the ownership map is read
+       * directly here.
+       *
+       * `stopping` counts as live: the harness is the thing being asked to stop it,
+       * so killing the process first would strand the task mid-settle.
+       */
+      const liveFor = (sessionId: string, chatId: string): Effect.Effect<number> =>
+        Effect.gen(function* () {
+          let live = 0
+          for (const [, entry] of yield* forSession(sessionId)) {
+            if (entry.chatId !== chatId) continue
+            const { status } = snapshot(entry.actor)
+            if (status === "running" || status === "stopping") live += 1
+          }
+          return live
+        })
+
+      return { list, ingest, registerStop, stop, dismiss, clear, clearChat, liveFor }
     })
   }
 ) {}

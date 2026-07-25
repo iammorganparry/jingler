@@ -35,7 +35,7 @@ import {
 } from "@starbase/core"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
-import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Stream } from "effect"
+import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Schedule, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
 import { planNote } from "./plan-prompt.js"
 import { questionNote } from "./question-prompt.js"
@@ -1046,6 +1046,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
            * behaviour and cannot fail a run (`Effect.ignore` at the call site).
            */
           const sawTerminal = yield* Ref.make(false)
+          /**
+           * Resolved when the turn reaches its terminal event.
+           *
+           * A Deferred beside the Ref rather than polling it: the drain supervisor
+           * below has to WAIT for the turn to settle before it starts asking about
+           * background tasks, and a settled turn is a one-way edge.
+           */
+          const turnSettled = yield* Deferred.make<void>()
           const eventCount = yield* Ref.make(0)
           const lastEvent = yield* Ref.make<string>("<none>")
           const wasInterrupted = yield* Ref.make(false)
@@ -1162,6 +1170,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               if (event._tag === "Done" || event._tag === "Failed") {
                 if (yield* Ref.get(sawTerminal)) return
                 yield* Ref.set(sawTerminal, true)
+                yield* Deferred.succeed(turnSettled, void 0)
               }
               // Tracked before the early returns below, so background-task and
               // sub-agent events still count toward "what did this run actually
@@ -1528,9 +1537,83 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             ),
             Effect.ensuring(out.end)
           )
-          const fiber = yield* Effect.forkScoped(run)
+          /**
+           * Forked DETACHED, not into the request stream's scope.
+           *
+           * The renderer leaves `running` the moment `Done` lands, which stops the
+           * invoked stream and closes its scope — so a scoped fork meant the
+           * harness was killed at turn end, every time. That silently made the
+           * dock a liar: a backgrounded task went on being listed as "running"
+           * while the process servicing it was already dead, and its stop button
+           * addressed a handle into nothing. Background work has to outlive the
+           * turn that started it or the feature does not exist.
+           */
+          const fiber = yield* Effect.forkDaemon(run)
           yield* Ref.update(fibers, (m) =>
             new Map(m).set(chatId, { sessionId, chatId, fiber, token, settled: sawTerminal })
+          )
+
+          /**
+           * Detaching MID-TURN still stops the agent.
+           *
+           * Only a settled turn earns the right to run on. A stream abandoned
+           * before its terminal event is a turn nobody is watching and nobody
+           * asked to background — leaving it alive would burn tokens invisibly,
+           * which is the behaviour the scoped fork got right.
+           *
+           * The mailbox is ended either way: once nothing is reading it, every
+           * further event is a write into a buffer that will never be drained.
+           */
+          yield* Effect.addFinalizer(() =>
+            Effect.gen(function* () {
+              if (!(yield* Ref.get(sawTerminal))) yield* Fiber.interrupt(fiber)
+              yield* out.end
+            })
+          )
+
+          /**
+           * Once the turn has settled the run exists only to service background
+           * tasks, so it ends when the last one does.
+           *
+           * Polled rather than pushed because settlement arrives through the
+           * harness's own signals (a `task_notification` bookend, an operator
+           * stop), which land in the registry — there is no completion channel to
+           * await. A second is far below human patience for "is it finished yet"
+           * and costs one map read.
+           *
+           * Interrupting is safe here precisely because the turn has settled:
+           * `onInterrupt` only writes its "Stopped." note when the turn has no
+           * terminal event yet, so this cannot overwrite the real outcome.
+           */
+          yield* Effect.forkDaemon(
+            Effect.gen(function* () {
+              yield* Deferred.await(turnSettled)
+              yield* Effect.repeat(
+                Effect.void,
+                Schedule.spaced("1 seconds").pipe(
+                  Schedule.untilInputEffect(() =>
+                    Effect.map(
+                      BackgroundTaskStore.liveFor(sessionId, chatId).pipe(
+                        Effect.provide(env),
+                        Effect.orElseSucceed(() => 0)
+                      ),
+                      (live) => live === 0
+                    )
+                  )
+                )
+              )
+              // Let the run finish on its OWN first. A harness that ends its
+              // stream at turn end — the scripted adapter, and any real one with
+              // nothing left to report — is already unwinding, and interrupting it
+              // here would race its finalizers: the transcript is persisted in
+              // them, so insisting too early truncates the very turn just
+              // completed. Only a run that is still alive after that grace is
+              // genuinely lingering, and only that one gets interrupted.
+              yield* Fiber.await(fiber).pipe(
+                Effect.timeout("5 seconds"),
+                Effect.catchAll(() => Fiber.interrupt(fiber))
+              )
+            })
           )
 
           // Watchdog the FIRST event.
