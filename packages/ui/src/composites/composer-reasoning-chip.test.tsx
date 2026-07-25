@@ -12,20 +12,20 @@ describe("Composer thinking strength", () => {
     )
   })
 
-  it("reports a semantic strength and can restore the default", () => {
+  it("reports a provider-native strength and can restore the default", () => {
     const onSetReasoning = vi.fn()
     const { rerender } = render(
-      <Composer reasoningEffort="think" onSetReasoning={onSetReasoning} />
+      <Composer reasoningEffort="low" onSetReasoning={onSetReasoning} />
     )
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "Thinking strength" }), {
       button: 0,
       ctrlKey: false
     })
-    fireEvent.click(screen.getByRole("menuitem", { name: "ultrathink" }))
-    expect(onSetReasoning).toHaveBeenCalledWith("ultrathink")
+    fireEvent.click(screen.getByRole("menuitem", { name: "xhigh" }))
+    expect(onSetReasoning).toHaveBeenCalledWith({ enabled: true, effort: "xhigh" })
 
-    rerender(<Composer reasoningEffort="think" onSetReasoning={onSetReasoning} />)
+    rerender(<Composer reasoningEffort="low" onSetReasoning={onSetReasoning} />)
     fireEvent.pointerDown(screen.getByRole("button", { name: "Thinking strength" }), {
       button: 0,
       ctrlKey: false

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { AdversarialReview, PrFileChange, PrReviewThread, ReviewFinding } from "@starbase/core"
-import { MessageSquare, PanelLeft, PanelRight, Undo2 } from "lucide-react"
+import { MessageSquare, PanelLeft, PanelRight, Sparkles, Undo2 } from "lucide-react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { DiffStat } from "../components/diff-stat.js"
@@ -71,6 +71,11 @@ export interface CodeReviewViewProps {
   onSendFindingToAgent?: (findingId: string) => void
   /** Ids of findings already sent to the agent — their action stays "Sent". */
   sentFindingIds?: ReadonlySet<string>
+  /**
+   * Hand a file to this session's agent for a "Deslop" cleanup pass (a normal
+   * turn on the session's own worktree). Absent hides the per-file button.
+   */
+  onDeslopFile?: (path: string) => void
 }
 
 /**
@@ -100,7 +105,8 @@ export function CodeReviewView({
   onRevertFile,
   review,
   onSendFindingToAgent,
-  sentFindingIds
+  sentFindingIds,
+  onDeslopFile
 }: CodeReviewViewProps) {
   const isLocal = source === "local"
 
@@ -477,6 +483,18 @@ export function CodeReviewView({
                     className="flex-none text-[10.5px]"
                   />
                   <div className="min-w-[8px] flex-1" />
+                  {onDeslopFile && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="gap-1.5"
+                      title="Deslop — hand this file to the agent for a DRY / cleanup pass"
+                      onClick={() => onDeslopFile(file.path)}
+                    >
+                      <Sparkles size={13} />
+                      Deslop
+                    </Button>
+                  )}
                   {isLocal
                     ? onRevertFile && (
                         <Button

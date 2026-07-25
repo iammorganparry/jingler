@@ -51,6 +51,7 @@ import {
   X
 } from "lucide-react"
 import { cn } from "../lib/cn.js"
+import { reasoningEffortsFor } from "../lib/reasoning-options.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
@@ -137,11 +138,12 @@ const modeItemsFor = (
       )
     : MODE_ITEMS
 
-const REASONING_ITEMS: ReadonlyArray<{ value: ReasoningEffort; label: string }> = [
+type ReasoningChoice = "off" | ReasoningEffort
+const reasoningItemsFor = (
+  cli: CliKind
+): ReadonlyArray<{ value: ReasoningChoice; label: string }> => [
   { value: "off", label: "Off" },
-  { value: "think", label: "Think" },
-  { value: "think-hard", label: "Think hard" },
-  { value: "ultrathink", label: "Ultrathink" }
+  ...reasoningEffortsFor(cli).map((value) => ({ value, label: value }))
 ]
 
 const OUTPUT_ITEMS: ReadonlyArray<{ value: OutputStyle; label: string }> = [
@@ -164,8 +166,11 @@ function summarize(cli: CliKind, cfg: ProviderConfig, installed: boolean): strin
   const modeLabel =
     modeItemsFor(cli).find((m) => m.value === cfg.defaultMode)?.label ?? cfg.defaultMode
   const parts = [cfg.defaultModel ?? "harness default", modeLabel]
-  const reasoning = REASONING_ITEMS.find((r) => r.value === cfg.reasoningEffort)?.label
-  if (reasoning && cfg.reasoningEffort !== "off") parts.push(reasoning)
+  const reasoning = reasoningItemsFor(cli).find(
+    (r) => r.value === cfg.reasoningEffort
+  )?.label
+  if (cfg.thinkingEnabled === false) parts.push("Thinking off")
+  else if (reasoning) parts.push(reasoning)
   return parts.join(" · ")
 }
 
@@ -911,9 +916,17 @@ function ProvidersSection({
           {/* reasoning effort */}
           <Field label="Reasoning effort" flag="thinking budget">
             <SegmentedControl
-              items={REASONING_ITEMS}
-              value={draft.reasoningEffort ?? "off"}
-              onChange={(reasoningEffort) => patch({ reasoningEffort })}
+              items={reasoningItemsFor(selected)}
+              value={
+                draft.thinkingEnabled === false
+                  ? "off"
+                  : (draft.reasoningEffort ?? (selected === "claude" ? "high" : "medium"))
+              }
+              onChange={(value) =>
+                value === "off"
+                  ? patch({ thinkingEnabled: false })
+                  : patch({ thinkingEnabled: true, reasoningEffort: value })
+              }
             />
           </Field>
 

@@ -94,27 +94,24 @@ export const mapPermissionMode = (mode: PermissionMode): SdkPermissionMode =>
   // reading is the right one for a turn the operator expected to be a plan.
   mode === "accept-edits" ? "acceptEdits" : mode === "plan" ? "plan" : "default"
 
-/** Map Starbase's stable semantic levels onto Claude's adaptive-thinking API. */
+/** Validate provider-native values for Claude's adaptive-thinking API. */
 export const mapClaudeReasoning = (
-  effort: ReasoningEffort | undefined
+  effort: ReasoningEffort | undefined,
+  enabled: boolean | undefined = true
 ):
   | Record<never, never>
   | {
       thinking: { type: "disabled" } | { type: "adaptive" }
       effort?: "low" | "high" | "max"
     } => {
-  switch (effort) {
-    case "off":
-      return { thinking: { type: "disabled" } }
-    case "think":
-      return { thinking: { type: "adaptive" }, effort: "low" }
-    case "think-hard":
-      return { thinking: { type: "adaptive" }, effort: "high" }
-    case "ultrathink":
-      return { thinking: { type: "adaptive" }, effort: "max" }
-    default:
-      return {}
-  }
+  if (!enabled) return { thinking: { type: "disabled" } }
+  return effort === "low" ||
+    effort === "medium" ||
+    effort === "high" ||
+    effort === "xhigh" ||
+    effort === "max"
+    ? { thinking: { type: "adaptive" }, effort }
+    : {}
 }
 
 /**
@@ -1014,7 +1011,7 @@ export const runClaude = (
             ...(spec.unattended === true ? { sandbox: unattendedSandbox() } : {}),
             model: spec.model ?? undefined,
             permissionMode: mapPermissionMode(spec.mode),
-            ...mapClaudeReasoning(spec.reasoningEffort),
+            ...mapClaudeReasoning(spec.reasoningEffort, spec.thinkingEnabled),
             ...(spec.mode === "plan" ? { planModeInstructions } : {}),
             ...(spec.readOnly ? { disallowedTools: [...READ_ONLY_DISALLOWED] } : {}),
             includePartialMessages: true,

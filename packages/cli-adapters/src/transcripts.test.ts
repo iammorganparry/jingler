@@ -41,6 +41,67 @@ describe("TranscriptStore", () => {
     expect(messages).toStrictEqual([user])
   })
 
+  it("keeps sibling chat transcripts isolated", async () => {
+    const first = userMessage("u1", "Implement parser", "2026-07-11T10:00:00.000Z")
+    const second = userMessage("u2", "Review migrations", "2026-07-11T10:00:01.000Z")
+    const messages = await run(
+      Effect.gen(function* () {
+        yield* TranscriptStore.append("c1", first)
+        yield* TranscriptStore.append("c2", second)
+        return yield* Effect.all([
+          TranscriptStore.list("c1"),
+          TranscriptStore.list("c2")
+        ])
+      })
+    )
+
+    expect(messages[0]).toStrictEqual([first])
+    expect(messages[1]).toStrictEqual([second])
+  })
+
+  it("keeps untrusted transcript keys inside the transcript directory", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const paths = yield* AppPaths
+        yield* TranscriptStore.append(
+          "../config",
+          userMessage("u1", "contained", "2026-07-11T10:00:00.000Z")
+        )
+        return {
+          escaped: yield* fs
+            .exists(path.join(paths.root, "config.json"))
+            .pipe(Effect.orElseSucceed(() => false)),
+          entries: yield* fs
+            .readDirectory(paths.transcriptsDir)
+            .pipe(Effect.orElseSucceed(() => []))
+        }
+      })
+    )
+
+    expect(result.escaped).toBe(false)
+    expect(result.entries).toStrictEqual(["..%2Fconfig.json"])
+  })
+
+  it("adopts a legacy session transcript into the synthesized first chat once", async () => {
+    const legacy = userMessage("u1", "Legacy turn", "2026-07-11T10:00:00.000Z")
+    const result = await run(
+      Effect.gen(function* () {
+        yield* TranscriptStore.append("s1", legacy)
+        yield* TranscriptStore.adoptLegacy("s1", "c_s1_1")
+        yield* TranscriptStore.adoptLegacy("s1", "c_s1_1")
+        return {
+          legacy: yield* TranscriptStore.list("s1"),
+          adopted: yield* TranscriptStore.list("c_s1_1")
+        }
+      })
+    )
+
+    expect(result.legacy).toStrictEqual([])
+    expect(result.adopted).toStrictEqual([legacy])
+  })
+
   it("patchLast replaces the last (streaming) turn in place", async () => {
     const user = userMessage("u1", "hi", "2026-07-11T10:00:00.000Z")
     const assistant = assistantMessage("a1", "2026-07-11T10:00:01.000Z")

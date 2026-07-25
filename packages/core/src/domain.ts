@@ -159,13 +159,55 @@ export type DiffStat = Schema.Schema.Type<typeof DiffStat>
 export const PermissionMode = Schema.Literal("ask", "accept-edits", "auto", "plan", "gigaplan")
 export type PermissionMode = Schema.Schema.Type<typeof PermissionMode>
 
+/** Claude's provider-native adaptive-thinking effort values. */
+export const ClaudeReasoningEffort = Schema.Literal("low", "medium", "high", "xhigh", "max")
+export type ClaudeReasoningEffort = Schema.Schema.Type<typeof ClaudeReasoningEffort>
+
+/** Codex's provider-native model reasoning effort values. */
+export const CodexReasoningEffort = Schema.Literal("minimal", "low", "medium", "high", "xhigh")
+export type CodexReasoningEffort = Schema.Schema.Type<typeof CodexReasoningEffort>
+
 /**
- * Extended-thinking / reasoning budget for a harness, mapped from the design's
- * "thinking budget" segments. Harness-specific in meaning; persisted per provider
- * and optionally overridden per session.
+ * Provider-native effort values accepted at the shared adapter boundary.
+ *
+ * Thinking being disabled is deliberately not an effort value. Providers model
+ * it independently, and treating "off" as the bottom rung made it possible to
+ * send incompatible combinations such as disabled thinking with maximum effort.
  */
-export const ReasoningEffort = Schema.Literal("off", "think", "think-hard", "ultrathink")
+export const ReasoningEffort = Schema.Literal(
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max"
+)
 export type ReasoningEffort = Schema.Schema.Type<typeof ReasoningEffort>
+
+export const ReasoningSetting = Schema.Struct({
+  enabled: Schema.Boolean,
+  effort: Schema.optional(ReasoningEffort)
+})
+export type ReasoningSetting = Schema.Schema.Type<typeof ReasoningSetting>
+
+export const ClaudeReasoningSetting = Schema.Struct({
+  enabled: Schema.Boolean,
+  effort: Schema.optional(ClaudeReasoningEffort)
+})
+export type ClaudeReasoningSetting = Schema.Schema.Type<typeof ClaudeReasoningSetting>
+
+export const CodexReasoningSetting = Schema.Struct({
+  enabled: Schema.Boolean,
+  effort: Schema.optional(CodexReasoningEffort)
+})
+export type CodexReasoningSetting = Schema.Schema.Type<typeof CodexReasoningSetting>
+
+export const SessionReasoning = Schema.Struct({
+  claude: Schema.optional(ReasoningSetting),
+  codex: Schema.optional(ReasoningSetting),
+  opencode: Schema.optional(ReasoningSetting)
+})
+export type SessionReasoning = Schema.Schema.Type<typeof SessionReasoning>
 
 /** Concrete harness permission modes that can execute an approved plan. */
 export const ExecutionMode = Schema.Literal("ask", "accept-edits", "auto")
@@ -208,6 +250,25 @@ export const IssueAutomations = Schema.Struct({
 export type IssueAutomations = Schema.Schema.Type<typeof IssueAutomations>
 
 /** A single agent session shown in the sidebar and opened in the main pane. */
+/** One isolated conversation inside a session's shared worktree. */
+export const Chat = Schema.Struct({
+  id: Schema.String,
+  /** Null until the first message provides an automatic title. */
+  title: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+  /** Provider thread identities belong to the chat, not the shared worktree. */
+  resumeId: Schema.optional(Schema.String),
+  gigaplanResumeId: Schema.optional(Schema.String),
+  /** Permission and model choices are restored independently for each chat. */
+  mode: Schema.optional(PermissionMode),
+  allowlist: Schema.optional(Schema.Array(Schema.String)),
+  model: Schema.optional(Schema.String),
+  contextTokens: Schema.optional(Schema.Number)
+})
+export type Chat = Schema.Schema.Type<typeof Chat>
+export type ChatId = Chat["id"]
+
 export const Session = Schema.Struct({
   id: Schema.String,
   /** owner/repo, e.g. "trigify/api". */
@@ -255,6 +316,10 @@ export const Session = Schema.Struct({
   contextTokens: Schema.optional(Schema.Number),
   /** ISO-8601 last-activity timestamp. */
   updatedAt: Schema.String,
+  /** Ordered conversations sharing this session's worktree and review state. */
+  chats: Schema.Array(Chat),
+  /** The chat restored when the session is next opened. */
+  activeChatId: Schema.String,
   /** Absolute path to this session's isolated git worktree, when one exists. */
   worktreePath: Schema.optional(Schema.String),
   /**
@@ -271,29 +336,23 @@ export const Session = Schema.Struct({
   repoPath: Schema.optional(Schema.String),
   /** The branch this session's worktree was forked from. */
   baseBranch: Schema.optional(Schema.String),
+  /** Per-provider reasoning choices, retained when the session changes harness. */
+  reasoning: Schema.optional(SessionReasoning),
   /**
-   * The harness's own session id for this conversation (Claude/Codex), persisted
-   * so the agent RESUMES its full memory across app restarts — the in-memory
-   * resume map is otherwise lost on quit, and "continue" would start the harness
-   * fresh (re-reading the plan, re-checking state) despite the visible transcript.
+   * Legacy single-chat aliases accepted during the rolling migration.
+   * New code reads/writes the active `Chat`; `SessionStore` strips these on read.
    */
   resumeId: Schema.optional(Schema.String),
-  /**
-   * The configured Gigaplan orchestrator's own conversation id.
-   *
-   * Kept separate from `resumeId`: Gigaplan intake may run on another harness,
-   * and letting its thread id overwrite the ordinary session thread would make
-   * switching modes resume the wrong provider.
-   */
   gigaplanResumeId: Schema.optional(Schema.String),
-  /** HITL permission mode; defaults to "accept-edits" when absent. */
   mode: Schema.optional(PermissionMode),
-  /** Commands the operator chose to "Always allow" for this session. */
   allowlist: Schema.optional(Schema.Array(Schema.String)),
-  /** The harness model id for this session; defaults to the harness default. */
   model: Schema.optional(Schema.String),
-  /** Per-session thinking strength; absent leaves the harness default untouched. */
-  reasoningEffort: Schema.optional(ReasoningEffort),
+  reasoningEffort: Schema.optional(
+    Schema.Union(
+      ReasoningEffort,
+      Schema.Literal("off", "think", "think-hard", "ultrathink")
+    )
+  ),
   /**
    * Per-session auto-compaction override. Absent = follow the global setting.
    *
@@ -450,7 +509,9 @@ export const ProviderConfig = Schema.Struct({
    * harness ships a model whose window we don't know yet.
    */
   contextWindow: Schema.optional(Schema.Number),
-  /** Extended-thinking budget; absent = the harness default. */
+  /** Whether extended thinking is enabled; absent preserves the provider default. */
+  thinkingEnabled: Schema.optional(Schema.Boolean),
+  /** Provider-native effort; absent = the harness default. */
   reasoningEffort: Schema.optional(ReasoningEffort),
   /** Reply tone/verbosity preset; absent = the harness default. */
   outputStyle: Schema.optional(OutputStyle),

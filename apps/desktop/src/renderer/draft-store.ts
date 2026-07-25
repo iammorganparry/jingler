@@ -1,5 +1,5 @@
 /**
- * Per-session composer drafts, hoisted out of the component tree.
+ * Per-chat composer drafts, hoisted out of the component tree.
  *
  * The conversation pane is mounted keyed by the active session (see
  * `StarbaseApp`), so switching sessions UNMOUNTS the composer and its local
@@ -22,13 +22,13 @@ export interface Draft {
 /** Shared empty snapshot — a stable reference, so `useSyncExternalStore` settles. */
 export const EMPTY_DRAFT: Draft = { text: "", attachments: [] }
 
-const storageKey = (sessionId: string): string => `sb.draft.${sessionId}`
+const storageKey = (draftId: string): string => `sb.draft.${draftId}`
 
 let drafts: Record<string, Draft> = {}
 const listeners = new Set<() => void>()
-/** Sessions already read back from localStorage (hydration is once-per-session). */
+/** Chats already read back from localStorage (hydration is once per draft id). */
 const hydrated = new Set<string>()
-/** Sessions whose one-shot prefill has been offered — see `seedDraftOnce`. */
+/** Session-level one-shot prefill keys already offered — see `seedDraftOnce`. */
 const seeded = new Set<string>()
 
 const notify = (): void => {
@@ -161,7 +161,7 @@ export const clearDraft = (sessionId: string): void => {
 export const getDraft = (sessionId: string): Draft => snapshot(sessionId)
 
 /**
- * Prefill a session's draft from its linked-issue task — at most once per session,
+ * Prefill a chat draft from its linked-issue task — at most once per session,
  * ever, and never over existing text.
  *
  * Both guards matter. The session's `initialPrompt` is cleared asynchronously (on
@@ -169,22 +169,26 @@ export const getDraft = (sessionId: string): Draft => snapshot(sessionId)
  * would resurrect the prompt the user just sent. And without the empty check, a
  * real draft could be clobbered by the seed.
  */
-export const seedDraftOnce = (sessionId: string, text: string): void => {
-  if (seeded.has(sessionId)) return
-  seeded.add(sessionId)
-  const current = snapshot(sessionId)
+export const seedDraftOnce = (
+  draftId: string,
+  text: string,
+  seedKey: string = draftId
+): void => {
+  if (seeded.has(seedKey)) return
+  seeded.add(seedKey)
+  const current = snapshot(draftId)
   if (current.text !== "") return
   // Only the TEXT is empty — carry any attachments through. A draft can hold
   // images with no words yet, and the seed must not eat them.
-  setDraft(sessionId, { text, attachments: current.attachments })
+  setDraft(draftId, { text, attachments: current.attachments })
 }
 
-/** A session's live draft (reactive). */
-export const useDraft = (sessionId: string): Draft =>
+/** A chat's live draft (reactive). */
+export const useDraft = (draftId: string): Draft =>
   useSyncExternalStore(
     subscribe,
-    () => snapshot(sessionId),
-    () => snapshot(sessionId)
+    () => snapshot(draftId),
+    () => snapshot(draftId)
   )
 
 /** Test-only: drop all in-memory state so suites don't leak into each other. */

@@ -48,11 +48,15 @@ import {
   ProviderModels,
   PullRequest,
   QuestionAnswer,
+  ClaudeReasoningSetting,
+  CodexReasoningSetting,
   ReasoningEffort,
+  ReasoningSetting,
   Repo,
   ReviewComment,
   ReviewSubmitKind,
   Session,
+  SessionPlanArtifact,
   SettledSessionStatus,
   Skill,
   StreamEvent,
@@ -267,10 +271,38 @@ export class StarbaseRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
-  /** Load a session's persisted conversation transcript. */
+  /** Create and activate a fresh chat inside a session. */
+  Rpc.make("Sessions.createChat", {
+    success: Session,
+    error: GitError,
+    payload: { sessionId: Schema.String }
+  }),
+
+  /** Persist which chat is active for the session. */
+  Rpc.make("Sessions.selectChat", {
+    success: Session,
+    error: GitError,
+    payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
+  /** Rename one chat without changing the session title. */
+  Rpc.make("Sessions.renameChat", {
+    success: Session,
+    error: GitError,
+    payload: { sessionId: Schema.String, chatId: Schema.String, title: Schema.String }
+  }),
+
+  /** Close one chat; closing the last creates a fresh Chat 1 replacement. */
+  Rpc.make("Sessions.closeChat", {
+    success: Session,
+    error: GitError,
+    payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
+  /** Load a chat's persisted conversation transcript. */
   Rpc.make("Sessions.transcript", {
     success: Schema.Array(Message),
-    payload: { id: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
   /** The session worktree's unified working diff, for the Changes rail. */
@@ -289,6 +321,7 @@ export class StarbaseRpcs extends RpcGroup.make(
     stream: true,
     payload: {
       sessionId: Schema.String,
+      chatId: Schema.String,
       text: Schema.String,
       /** Images the operator attached as context (optional; omitted → none). */
       images: Schema.optional(Schema.Array(Attachment)),
@@ -301,7 +334,7 @@ export class StarbaseRpcs extends RpcGroup.make(
        * Per-turn override. Null deliberately means native default, which lets a
        * just-cleared composer value win even if its persistence RPC is in flight.
        */
-      reasoningEffort: Schema.optional(Schema.NullOr(ReasoningEffort))
+      reasoning: Schema.optional(Schema.NullOr(ReasoningSetting))
     }
   }),
 
@@ -309,6 +342,7 @@ export class StarbaseRpcs extends RpcGroup.make(
   Rpc.make("Agent.decideGate", {
     payload: {
       sessionId: Schema.String,
+      chatId: Schema.String,
       gateId: Schema.String,
       decision: GateDecision
     }
@@ -318,6 +352,7 @@ export class StarbaseRpcs extends RpcGroup.make(
   Rpc.make("Agent.answerQuestion", {
     payload: {
       sessionId: Schema.String,
+      chatId: Schema.String,
       requestId: Schema.String,
       answers: Schema.Array(QuestionAnswer)
     }
@@ -325,15 +360,23 @@ export class StarbaseRpcs extends RpcGroup.make(
 
   /** Change a session's HITL permission mode (ask / accept-edits / auto / plan). */
   Rpc.make("Agent.setMode", {
-    payload: { sessionId: Schema.String, mode: PermissionMode }
+    payload: { sessionId: Schema.String, chatId: Schema.String, mode: PermissionMode }
   }),
 
-  /** Change this session's thinking strength; absent restores the harness default. */
+  /** Change the current provider's native thinking settings. */
   Rpc.make("Agent.setReasoning", {
-    payload: {
-      sessionId: Schema.String,
-      reasoningEffort: Schema.optional(ReasoningEffort)
-    }
+    payload: Schema.Union(
+      Schema.Struct({
+        sessionId: Schema.String,
+        cli: Schema.Literal("claude"),
+        reasoning: Schema.optional(ClaudeReasoningSetting)
+      }),
+      Schema.Struct({
+        sessionId: Schema.String,
+        cli: Schema.Literal("codex", "opencode"),
+        reasoning: Schema.optional(CodexReasoningSetting)
+      })
+    )
   }),
 
   /** Comment on a plan step (plan mode) — accumulates on the plan, doesn't resume. */
@@ -368,7 +411,7 @@ export class StarbaseRpcs extends RpcGroup.make(
   Rpc.make("Agent.resumePlan", {
     success: StreamEvent,
     stream: true,
-    payload: { sessionId: Schema.String, planId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String, planId: Schema.String }
   }),
 
   /**
@@ -381,12 +424,17 @@ export class StarbaseRpcs extends RpcGroup.make(
    * Claude) so the new harness starts a fresh thread.
    */
   Rpc.make("Agent.setHarness", {
-    payload: { sessionId: Schema.String, cli: CliKind, model: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      cli: CliKind,
+      model: Schema.String
+    }
   }),
 
   /** Stop a running agent (denies any pending gate). */
   Rpc.make("Agent.stop", {
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
   /**
@@ -406,6 +454,7 @@ export class StarbaseRpcs extends RpcGroup.make(
     ),
     payload: {
       sessionId: Schema.String,
+      chatId: Schema.String,
       text: Schema.String,
       images: Schema.Array(Attachment)
     }
@@ -599,7 +648,7 @@ export class StarbaseRpcs extends RpcGroup.make(
    */
   Rpc.make("Context.state", {
     success: ContextSnapshot,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
   /**
@@ -611,7 +660,7 @@ export class StarbaseRpcs extends RpcGroup.make(
    * feature exists to remove.
    */
   Rpc.make("Context.compactNow", {
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
   /** Persist the auto-compaction levers (master switch + working-set budget). */
@@ -784,6 +833,7 @@ export class StarbaseRpcs extends RpcGroup.make(
     error: PlanError,
     payload: {
       sessionId: Schema.String,
+      chatId: Schema.String,
       /**
        * An explicit brief is retained for automation/tests. The composer omits it
        * so main derives the handoff from the accumulated intake transcript.
@@ -808,6 +858,12 @@ export class StarbaseRpcs extends RpcGroup.make(
    */
   Rpc.make("Plan.round", {
     success: Schema.NullOr(PlanRound),
+    payload: { sessionId: Schema.String }
+  }),
+
+  /** The structured plan shared by every chat in this session. */
+  Rpc.make("Plan.current", {
+    success: Schema.NullOr(SessionPlanArtifact),
     payload: { sessionId: Schema.String }
   }),
 

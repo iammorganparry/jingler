@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { StreamEvent } from "@starbase/core"
 import { Effect, Layer, Stream } from "effect"
@@ -34,6 +34,27 @@ let temp: ReturnType<typeof withTempRoot>
 
 beforeEach(() => {
   temp = withTempRoot()
+  mkdirSync(temp.root, { recursive: true })
+  const now = "2026-07-24T00:00:00.000Z"
+  writeFileSync(
+    join(temp.root, "sessions.json"),
+    JSON.stringify([{
+      id: SESSION,
+      repo: "widget",
+      branch: "starbase/unsettled",
+      title: "Unsettled",
+      status: "idle",
+      cli: "claude",
+      diff: { added: 0, removed: 0 },
+      prNumber: null,
+      costUsd: 0,
+      tokens: 0,
+      updatedAt: now,
+      worktreePath: temp.root,
+      chats: [{ id: SESSION, title: null, createdAt: now, updatedAt: now }],
+      activeChatId: SESSION
+    }])
+  )
 })
 afterEach(() => temp.cleanup())
 
@@ -83,7 +104,7 @@ const run = (adapter: Layer.Layer<CliAdapter>) => {
     const runner = yield* AgentRunner
     const events: Array<StreamEvent> = []
     yield* runner
-      .prompt(SESSION, "go")
+      .prompt(SESSION, SESSION, "go")
       .pipe(Stream.runForEach((ev) => Effect.sync(() => events.push(ev))))
     const transcript = yield* TranscriptStore.list(SESSION)
     return { events, transcript }

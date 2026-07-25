@@ -1,5 +1,11 @@
-import type { Plan, Session, StreamEvent } from "@starbase/core"
-import { assistantMessage, latestPlan, STOPPED_NOTE, userMessage } from "@starbase/core"
+import type { Message, Plan, Session, SessionPlanArtifact, StreamEvent } from "@starbase/core"
+import {
+  applyStreamEvent,
+  assistantMessage,
+  latestPlan,
+  STOPPED_NOTE,
+  userMessage
+} from "@starbase/core"
 import { createActor, waitFor } from "xstate"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { conversationMachine } from "./conversation-machine.js"
@@ -18,6 +24,7 @@ const h = vi.hoisted(() => ({
   streamCb: null as null | ((event: unknown) => void),
   agentRunCalls: [] as Array<{
     sessionId: string
+    chatId: string
     text: string
     images: unknown
     options: unknown
@@ -30,7 +37,7 @@ const h = vi.hoisted(() => ({
   skillsListCalls: 0,
   stopCalls: [] as Array<string>,
   stopGate: Promise.resolve() as Promise<void>,
-  steerCalls: [] as Array<{ sessionId: string; text: string }>,
+  steerCalls: [] as Array<{ sessionId: string; chatId: string; text: string }>,
   steerStatus: "unsupported" as "accepted" | "deferred" | "unsupported",
   // Drives the "a stop that rejects must still let the session move on" case.
   stopFails: false,
@@ -42,9 +49,11 @@ const h = vi.hoisted(() => ({
   skillsGate: Promise.resolve() as Promise<void>,
   // Lets a test hold the transcript load, to drive the "typed before it lands" race.
   transcriptGate: Promise.resolve() as Promise<void>,
+  transcript: [] as ReadonlyArray<Message>,
+  currentPlan: null as SessionPlanArtifact | null,
   setHarnessCalls: [] as Array<{ sessionId: string; cli: string; model: string }>,
   planCalls: [] as Array<{ sessionId: string; brief: string | undefined }>,
-  reasoningCalls: [] as Array<string | undefined>,
+  reasoningCalls: [] as Array<unknown>,
   readinessGate: Promise.resolve() as Promise<void>,
   readiness: { ready: true, vendors: [], reason: null } as {
     ready: boolean
@@ -61,8 +70,9 @@ vi.mock("./rpc-client.js", () => ({
   rpc: {
     sessionsTranscript: async () => {
       await h.transcriptGate
-      return []
+      return h.transcript
     },
+    planCurrent: async () => h.currentPlan,
     skillsList: async () => {
       h.skillsListCalls += 1
       await h.skillsGate
@@ -79,12 +89,13 @@ vi.mock("./rpc-client.js", () => ({
     },
     agentRun: (
       sessionId: string,
+      chatId: string,
       text: string,
       onEvent: (event: unknown) => void,
       images: unknown,
       options: unknown
     ) => {
-      h.agentRunCalls.push({ sessionId, text, images, options })
+      h.agentRunCalls.push({ sessionId, chatId, text, images, options })
       h.streamCb = onEvent
       return () => {
         h.streamCb = null
@@ -94,7 +105,12 @@ vi.mock("./rpc-client.js", () => ({
       await h.readinessGate
       return h.readiness
     },
-    agentResumePlan: (sessionId: string, planId: string, onEvent: (event: unknown) => void) => {
+    agentResumePlan: (
+      sessionId: string,
+      _chatId: string,
+      planId: string,
+      onEvent: (event: unknown) => void
+    ) => {
       h.resumeCalls.push({ sessionId, planId })
       h.streamCb = onEvent
       return () => {
@@ -113,7 +129,12 @@ vi.mock("./rpc-client.js", () => ({
         h.streamCb = null
       }
     },
-    planAdversarial: (sessionId: string, brief: string | undefined, onEvent: (event: unknown) => void) => {
+    planAdversarial: (
+      sessionId: string,
+      _chatId: string,
+      brief: string | undefined,
+      onEvent: (event: unknown) => void
+    ) => {
       h.planCalls.push({ sessionId, brief })
       h.streamCb = onEvent
       return () => {
@@ -129,17 +150,22 @@ vi.mock("./rpc-client.js", () => ({
     agentDecideGate: async () => {},
     agentAnswerQuestion: async () => {},
     agentSetMode: async () => {},
-    agentSetReasoning: async (_sessionId: string, effort: string | undefined) => {
-      h.reasoningCalls.push(effort)
+    agentSetReasoning: async (_sessionId: string, _cli: string, reasoning: unknown) => {
+      h.reasoningCalls.push(reasoning)
     },
-    agentSetHarness: async (sessionId: string, cli: string, model: string) => {
+    agentSetHarness: async (
+      sessionId: string,
+      _chatId: string,
+      cli: string,
+      model: string
+    ) => {
       h.setHarnessCalls.push({ sessionId, cli, model })
     },
     agentCommentPlanStep: async () => {},
     agentRevisePlan: async () => {},
     agentApprovePlan: async () => {},
-    agentSteer: async (sessionId: string, text: string) => {
-      h.steerCalls.push({ sessionId, text })
+    agentSteer: async (sessionId: string, chatId: string, text: string) => {
+      h.steerCalls.push({ sessionId, chatId, text })
       return h.steerStatus === "accepted"
         ? {
             status: "accepted" as const,
@@ -188,6 +214,8 @@ beforeEach(() => {
   h.catalogGate = Promise.resolve()
   h.skillsGate = Promise.resolve()
   h.transcriptGate = Promise.resolve()
+  h.transcript = []
+  h.currentPlan = null
   h.reviewCb = null
   h.planCalls.length = 0
   h.reasoningCalls.length = 0
@@ -338,7 +366,7 @@ describe("conversationMachine — queue while busy", () => {
     // The current turn is interrupted and "b" runs next, ahead of "a".
     await waitFor(actor, () => h.agentRunCalls.length === 2, { timeout: 3000 })
     expect(h.agentRunCalls[1]!.text).toBe("b")
-    expect(h.steerCalls).toEqual([{ sessionId: "s1", text: "b" }])
+    expect(h.steerCalls).toEqual([{ sessionId: "s1", chatId: "s1", text: "b" }])
     expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["a"])
     actor.stop()
   })
@@ -955,6 +983,76 @@ describe("conversationMachine — PlanUpdated across turns", () => {
     expect(plan?.steps[0]!.status).toBe("done")
     actor.stop()
   })
+
+  it("uses the shared artifact revision when the transcript has the same plan id", async () => {
+    h.transcript = [
+      applyStreamEvent(
+        assistantMessage("a_plan", "2026-07-25T00:00:00.000Z"),
+        { _tag: "PlanProposed", plan: planFixture("proposed") }
+      )
+    ]
+    h.currentPlan = {
+      sessionId: session.id,
+      producingChatId: session.id,
+      revision: 1,
+      plan: planFixture("done"),
+      updatedAt: "2026-07-25T00:01:00.000Z"
+    }
+
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+
+    expect(latestPlan(actor.getSnapshot().context.messages)?.steps[0]?.status).toBe("done")
+    actor.stop()
+  })
+
+  it("applies a shared plan broadcast to an existing chat actor", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+
+    actor.send({
+      type: "SHARED_PLAN_UPDATED",
+      plan: planFixture("done"),
+      producingChatId: "c_other"
+    })
+
+    expect(latestPlan(actor.getSnapshot().context.messages)?.steps[0]?.status).toBe("done")
+    expect(actor.getSnapshot().context.sharedPlanChatId).toBe("c_other")
+    actor.stop()
+  })
+})
+
+describe("conversationMachine — persisted session reconciliation", () => {
+  it("refreshes provider, model, mode, and reasoning on an existing actor", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    const updated = {
+      ...session,
+      cli: "codex",
+      model: "gpt-5.6-sol",
+      mode: "auto",
+      activeChatId: session.id,
+      chats: [{
+        id: session.id,
+        title: "Chat 1",
+        createdAt: "2026-07-25T00:00:00.000Z",
+        updatedAt: "2026-07-25T00:00:00.000Z",
+        mode: "auto",
+        model: "gpt-5.6-sol"
+      }],
+      reasoning: { codex: { enabled: false, effort: "high" } }
+    } as Session
+
+    actor.send({ type: "SESSION_UPDATED", session: updated })
+
+    expect(actor.getSnapshot().context).toMatchObject({
+      cli: "codex",
+      model: "gpt-5.6-sol",
+      mode: "auto",
+      reasoning: { enabled: false, effort: "high" }
+    })
+    actor.stop()
+  })
 })
 
 describe("conversationMachine — stop", () => {
@@ -1075,13 +1173,16 @@ describe("conversationMachine — adversarial planning", () => {
   it("applies a changed thinking strength to the next turn", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
-    actor.send({ type: "SET_REASONING", reasoningEffort: "think-hard" })
+    actor.send({
+      type: "SET_REASONING",
+      reasoning: { enabled: true, effort: "high" }
+    })
     actor.send({ type: "SEND", text: "inspect the repo" })
     await waitFor(actor, (s) => s.matches("running"))
 
-    expect(h.reasoningCalls).toEqual(["think-hard"])
+    expect(h.reasoningCalls).toEqual([{ enabled: true, effort: "high" }])
     expect(h.agentRunCalls[0]).toMatchObject({
-      options: { target: "session", reasoningEffort: "think-hard" }
+      options: { target: "session", reasoning: { enabled: true, effort: "high" } }
     })
   })
 

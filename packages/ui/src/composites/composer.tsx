@@ -5,6 +5,7 @@ import type {
   PermissionMode,
   ProviderModels,
   ReasoningEffort,
+  ReasoningSetting,
   Skill
 } from "@starbase/core"
 import {
@@ -17,6 +18,7 @@ import {
 } from "@radix-ui/react-dropdown-menu"
 import { Brain, GitBranch, ImagePlus, Plug, Plus, Sparkles, WandSparkles } from "lucide-react"
 import { cn } from "../lib/cn.js"
+import { reasoningEffortsFor } from "../lib/reasoning-options.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { modeAccent } from "../tokens.js"
 import { AttachmentThumb } from "../components/attachment-thumb.js"
@@ -74,12 +76,12 @@ const GIGAPLAN_OPTION: ChipOption<PermissionMode> = { value: "gigaplan", label: 
 const PLAN_OPTION: ChipOption<PermissionMode> = { value: "plan", label: "plan" }
 
 type ReasoningChoice = "default" | ReasoningEffort
-const REASONING_OPTIONS: ReadonlyArray<ChipOption<ReasoningChoice>> = [
+const reasoningOptionsFor = (
+  cli: CliKind | undefined
+): ReadonlyArray<ChipOption<ReasoningChoice | "off">> => [
   { value: "default", label: "default" },
   { value: "off", label: "off" },
-  { value: "think", label: "think" },
-  { value: "think-hard", label: "think hard" },
-  { value: "ultrathink", label: "ultrathink" }
+  ...reasoningEffortsFor(cli).map((value) => ({ value, label: value }))
 ]
 
 type MenuState = { kind: "slash" | "mention"; query: string; start: number }
@@ -119,6 +121,7 @@ export function Composer({
   mode = "accept-edits",
   onSetMode,
   reasoningEffort,
+  thinkingEnabled,
   onSetReasoning,
   allowPlan = false,
   adversarialPlanning,
@@ -172,7 +175,8 @@ export function Composer({
   onSetMode?: (mode: PermissionMode) => void
   /** Per-session thinking strength; absent preserves the harness default. */
   reasoningEffort?: ReasoningEffort
-  onSetReasoning?: (reasoningEffort?: ReasoningEffort) => void
+  thinkingEnabled?: boolean
+  onSetReasoning?: (reasoning?: ReasoningSetting) => void
   /** Offer the Plan mode option (harnesses that pass `supportsPlanMode`). */
   allowPlan?: boolean
   /**
@@ -722,9 +726,17 @@ export function Composer({
             className={cn("max-w-[104px]", accent.chip)}
           />
           <ChipMenu
-            value={reasoningEffort ?? "default"}
-            options={REASONING_OPTIONS}
-            onSelect={(value) => onSetReasoning?.(value === "default" ? undefined : value)}
+            value={thinkingEnabled === false ? "off" : (reasoningEffort ?? "default")}
+            options={reasoningOptionsFor(cli)}
+            onSelect={(value) =>
+              onSetReasoning?.(
+                value === "default"
+                  ? undefined
+                  : value === "off"
+                    ? { enabled: false }
+                    : { enabled: true, effort: value }
+              )
+            }
             appearance="quiet"
             ariaLabel="Thinking strength"
             icon={<Brain size={13} className="flex-none" />}
