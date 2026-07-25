@@ -20,12 +20,7 @@ const run = <A>(effect: Effect.Effect<A, never, BackgroundTaskStore>) =>
  * `TestClock.adjust` moves the grace period without any real elapsed time.
  */
 const runClocked = <A>(effect: Effect.Effect<A, never, BackgroundTaskStore>) =>
-  Effect.runPromise(
-    effect.pipe(Effect.provide(BackgroundTaskStore.Default), Effect.provide(TestContext.TestContext))
-  )
-
-const settled = (id: string, status: "completed" | "failed" | "stopped") =>
-  ({ _tag: "BackgroundTaskSettled", id, status, summary: null, outputFile: null }) satisfies StreamEvent
+  run(effect.pipe(Effect.provide(TestContext.TestContext)))
 
 const started = (id: string, over: Partial<Extract<StreamEvent, { _tag: "BackgroundTaskStarted" }>> = {}) =>
   ({
@@ -38,6 +33,17 @@ const started = (id: string, over: Partial<Extract<StreamEvent, { _tag: "Backgro
     ...over
   }) satisfies StreamEvent
 
+const settled = (
+  id: string,
+  status: "completed" | "failed" | "stopped",
+  over: Partial<Extract<StreamEvent, { _tag: "BackgroundTaskSettled" }>> = {}
+) =>
+  ({ _tag: "BackgroundTaskSettled", id, status, summary: null, outputFile: null, ...over }) satisfies StreamEvent
+
+/** The harness's live-set level signal — authoritative for which tasks still run. */
+const changed = (...ids: string[]) =>
+  ({ _tag: "BackgroundTasksChanged", ids }) satisfies StreamEvent
+
 describe("BackgroundTaskStore", () => {
   it("has no tasks for an unknown session", async () => {
     expect(await run(BackgroundTaskStore.list("nope"))).toStrictEqual([])
@@ -46,7 +52,7 @@ describe("BackgroundTaskStore", () => {
   it("records a started task as running", async () => {
     const tasks = await run(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.ingest("s1", started("t1"))
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
         return yield* BackgroundTaskStore.list("s1")
       })
     )
@@ -57,8 +63,8 @@ describe("BackgroundTaskStore", () => {
   it("keeps sessions independent", async () => {
     const [a, b] = await run(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.ingest("s1", started("t1"))
-        yield* BackgroundTaskStore.ingest("s2", started("t2"))
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
+        yield* BackgroundTaskStore.ingest("s2", "c2", started("t2"))
         return [yield* BackgroundTaskStore.list("s1"), yield* BackgroundTaskStore.list("s2")] as const
       })
     )
@@ -70,8 +76,8 @@ describe("BackgroundTaskStore", () => {
     // The harness can drop a settle entirely; the level is authoritative.
     const [task] = await run(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.ingest("s1", started("t1"))
-        yield* BackgroundTaskStore.ingest("s1", { _tag: "BackgroundTasksChanged", ids: [] })
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
+        yield* BackgroundTaskStore.ingest("s1", "c1", changed())
         return yield* BackgroundTaskStore.list("s1")
       })
     )
@@ -81,7 +87,7 @@ describe("BackgroundTaskStore", () => {
   it("creates a placeholder for a live id it never saw start", async () => {
     const [task] = await run(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.ingest("s1", { _tag: "BackgroundTasksChanged", ids: ["ghost"] })
+        yield* BackgroundTaskStore.ingest("s1", "c1", changed("ghost"))
         return yield* BackgroundTaskStore.list("s1")
       })
     )
@@ -93,8 +99,8 @@ describe("BackgroundTaskStore", () => {
     // confirms via a later bookend. The row must still reflect the click.
     const [returned, listed] = await run(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.registerStop("s1", () => new Promise<void>(() => {}))
-        yield* BackgroundTaskStore.ingest("s1", started("t1"))
+        yield* BackgroundTaskStore.registerStop("s1", "c1", () => new Promise<void>(() => {}))
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
         const returned = yield* BackgroundTaskStore.stop("s1", "t1")
         return [returned, yield* BackgroundTaskStore.list("s1")] as const
       })
@@ -107,8 +113,8 @@ describe("BackgroundTaskStore", () => {
     const asked: string[] = []
     await run(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.registerStop("s1", async (taskId) => void asked.push(taskId))
-        yield* BackgroundTaskStore.ingest("s1", started("t1"))
+        yield* BackgroundTaskStore.registerStop("s1", "c1", async (taskId) => void asked.push(taskId))
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
         yield* BackgroundTaskStore.stop("s1", "t1")
       })
     )
@@ -120,8 +126,8 @@ describe("BackgroundTaskStore", () => {
     // rejected request must not take down the caller or settle the row falsely.
     const [task] = await run(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.registerStop("s1", () => Promise.reject(new Error("nope")))
-        yield* BackgroundTaskStore.ingest("s1", started("t1"))
+        yield* BackgroundTaskStore.registerStop("s1", "c1", () => Promise.reject(new Error("nope")))
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
         yield* BackgroundTaskStore.stop("s1", "t1")
         return yield* BackgroundTaskStore.list("s1")
       })
@@ -134,7 +140,7 @@ describe("BackgroundTaskStore", () => {
     // dead. Leaving it `stopping` would strand a row that can never settle.
     const returned = await run(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.ingest("s1", started("t1"))
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
         return yield* BackgroundTaskStore.stop("s1", "t1")
       })
     )
@@ -151,8 +157,8 @@ describe("BackgroundTaskStore", () => {
     // resolve to anything stoppable.
     const [task] = await run(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.ingest("s1", started("t1"))
-        yield* BackgroundTaskStore.registerStop("s1", async () => {})
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
+        yield* BackgroundTaskStore.registerStop("s1", "c1", async () => {})
         return yield* BackgroundTaskStore.list("s1")
       })
     )
@@ -162,15 +168,13 @@ describe("BackgroundTaskStore", () => {
   it("keeps settled tasks readable across a restart", async () => {
     const [task] = await run(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.ingest("s1", started("t1"))
-        yield* BackgroundTaskStore.ingest("s1", {
-          _tag: "BackgroundTaskSettled",
-          id: "t1",
-          status: "completed",
-          summary: "done",
-          outputFile: "/tmp/t1.jsonl"
-        })
-        yield* BackgroundTaskStore.registerStop("s1", async () => {})
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
+        yield* BackgroundTaskStore.ingest(
+          "s1",
+          "c1",
+          settled("t1", "completed", { summary: "done", outputFile: "/tmp/t1.jsonl" })
+        )
+        yield* BackgroundTaskStore.registerStop("s1", "c1", async () => {})
         return yield* BackgroundTaskStore.list("s1")
       })
     )
@@ -183,8 +187,8 @@ describe("BackgroundTaskStore", () => {
     // enough to be READ, hence a grace period rather than an instant drop.
     const [duringGrace, afterGrace] = await runClocked(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.ingest("s1", started("t1"))
-        yield* BackgroundTaskStore.ingest("s1", settled("t1", "completed"))
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
+        yield* BackgroundTaskStore.ingest("s1", "c1", settled("t1", "completed"))
         yield* TestClock.adjust("5 seconds")
         const during = yield* BackgroundTaskStore.list("s1")
         yield* TestClock.adjust("6 seconds")
@@ -198,7 +202,7 @@ describe("BackgroundTaskStore", () => {
   it("never evicts a running task, however long it runs", async () => {
     const tasks = await runClocked(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.ingest("s1", started("t1"))
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
         yield* TestClock.adjust("1 hour")
         return yield* BackgroundTaskStore.list("s1")
       })
@@ -212,8 +216,8 @@ describe("BackgroundTaskStore", () => {
     // outlives the grace period and leaves only by the operator's own hand.
     const [held, dismissed] = await runClocked(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.ingest("s1", started("t1"))
-        yield* BackgroundTaskStore.ingest("s1", settled("t1", "failed"))
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
+        yield* BackgroundTaskStore.ingest("s1", "c1", settled("t1", "failed"))
         yield* TestClock.adjust("1 hour")
         const stillThere = yield* BackgroundTaskStore.list("s1")
         yield* BackgroundTaskStore.dismiss("s1", "t1")
@@ -228,7 +232,7 @@ describe("BackgroundTaskStore", () => {
     // A click racing the poll that just evicted the row must not fail.
     const tasks = await runClocked(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.ingest("s1", started("t1"))
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
         yield* BackgroundTaskStore.dismiss("s1", "ghost")
         yield* BackgroundTaskStore.dismiss("nope", "t1")
         return yield* BackgroundTaskStore.list("s1")
@@ -240,11 +244,98 @@ describe("BackgroundTaskStore", () => {
   it("drops a deleted session's tasks entirely", async () => {
     const tasks = await run(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.ingest("s1", started("t1"))
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
         yield* BackgroundTaskStore.clear("s1")
         return yield* BackgroundTaskStore.list("s1")
       })
     )
     expect(tasks).toStrictEqual([])
+  })
+
+  // Concurrent chats in one session: a new run in chat B must not disturb
+  // chat A's still-running background work. Before per-chat stop handles, chat
+  // B's registerStop orphaned every task in the session and stole the handle.
+  it("a chat's new run does not orphan another chat's tasks", async () => {
+    const [a, b] = await run(
+      Effect.gen(function* () {
+        yield* BackgroundTaskStore.registerStop("s1", "c1", async () => {})
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
+        // Chat B starts a run in the same session — registering its own handle.
+        yield* BackgroundTaskStore.registerStop("s1", "c2", async () => {})
+        yield* BackgroundTaskStore.ingest("s1", "c2", started("t2"))
+        const all = yield* BackgroundTaskStore.list("s1")
+        return [all.find((t) => t.id === "t1"), all.find((t) => t.id === "t2")] as const
+      })
+    )
+    // t1 (chat A) stays running — chat B did not orphan it.
+    expect(a?.status).toBe("running")
+    expect(b?.status).toBe("running")
+  })
+
+  it("routes a stop to the chat that produced the task", async () => {
+    const asked: Array<[string, string]> = []
+    await run(
+      Effect.gen(function* () {
+        yield* BackgroundTaskStore.registerStop("s1", "c1", async (id) => void asked.push(["c1", id]))
+        yield* BackgroundTaskStore.registerStop("s1", "c2", async (id) => void asked.push(["c2", id]))
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
+        yield* BackgroundTaskStore.ingest("s1", "c2", started("t2"))
+        yield* BackgroundTaskStore.stop("s1", "t2")
+      })
+    )
+    // Only chat B's handle is asked, and with chat B's task id.
+    expect(asked).toStrictEqual([["c2", "t2"]])
+  })
+
+  it("a chat's level signal never settles another chat's tasks", async () => {
+    // The `BackgroundTasksChanged` level comes from ONE chat's harness query, so
+    // a concurrent chat's tasks are simply not in it and must not be swept.
+    const [a, b] = await run(
+      Effect.gen(function* () {
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
+        yield* BackgroundTaskStore.ingest("s1", "c2", started("t2"))
+        // Chat A reports only its own task as live — chat B's t2 is absent here.
+        yield* BackgroundTaskStore.ingest("s1", "c1", changed("t1"))
+        const all = yield* BackgroundTaskStore.list("s1")
+        return [all.find((t) => t.id === "t1"), all.find((t) => t.id === "t2")] as const
+      })
+    )
+    expect(a?.status).toBe("running")
+    expect(b?.status).toBe("running")
+  })
+
+  // A closed chat must not strand its rows: nothing else sweeps a chat that
+  // never runs again, so closeChat calls clearChat to drop its tasks + handle.
+  it("clears one chat's tasks and stop handle, leaving other chats' intact", async () => {
+    const [gone, kept] = await run(
+      Effect.gen(function* () {
+        yield* BackgroundTaskStore.registerStop("s1", "c1", async () => {})
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
+        yield* BackgroundTaskStore.registerStop("s1", "c2", async () => {})
+        yield* BackgroundTaskStore.ingest("s1", "c2", started("t2"))
+        // Close chat c1.
+        yield* BackgroundTaskStore.clearChat("s1", "c1")
+        const remaining = yield* BackgroundTaskStore.list("s1")
+        return [remaining.find((t) => t.id === "t1"), remaining.find((t) => t.id === "t2")] as const
+      })
+    )
+    expect(gone).toBeUndefined()
+    expect(kept?.id).toBe("t2")
+  })
+
+  it("routing a stop still works for a surviving chat after another is cleared", async () => {
+    const asked: string[] = []
+    await run(
+      Effect.gen(function* () {
+        yield* BackgroundTaskStore.registerStop("s1", "c1", async () => {})
+        yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
+        yield* BackgroundTaskStore.registerStop("s1", "c2", async (id) => void asked.push(id))
+        yield* BackgroundTaskStore.ingest("s1", "c2", started("t2"))
+        yield* BackgroundTaskStore.clearChat("s1", "c1")
+        // c2's handle is untouched by clearing c1.
+        yield* BackgroundTaskStore.stop("s1", "t2")
+      })
+    )
+    expect(asked).toStrictEqual(["t2"])
   })
 })

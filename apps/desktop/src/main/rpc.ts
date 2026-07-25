@@ -765,13 +765,15 @@ export const planExecute = (
         )
       }
       const worktreePath = session.worktreePath
+      // A plan is single-flight: a double-click on approve or a re-send would run
+      // two executors over the same steps in the shared worktree, applying every
+      // edit and command twice. Distinct chats/plans reserve distinct owners and
+      // still run concurrently.
       const reservation = `plan:${planId}`
-      const reserved = yield* reserveSessionRun(sessionId, reservation)
-      if (!reserved) {
+      const admitted = yield* reserveSessionRun(sessionId, reservation)
+      if (!admitted) {
         return Stream.fail(
-          new PlanError({
-            message: "Another chat or plan is already running in this session."
-          })
+          new PlanError({ message: "This plan is already executing." })
         )
       }
       yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, reservation))
@@ -1168,12 +1170,18 @@ export const planAdversarial = (
         session.chats.some((chat) => chat.id === requestedChatId)
           ? requestedChatId
           : session.activeChatId
-      const reservation = `planning:${chatId}`
-      const reserved = yield* reserveSessionRun(sessionId, reservation)
-      if (!reserved) {
+      // Planning is single-flight PER SESSION, not per chat: PlanStore keeps one
+      // current-plan artifact per worktree (which a session's chats share), so
+      // two concurrent planning rounds would clobber it — the second chat's
+      // `promote` replaces the first's, and approving the first then fails with
+      // the artifact gone. A constant owner refuses any second round in the
+      // session until the artifact can hold more than one plan.
+      const reservation = "planning"
+      const admitted = yield* reserveSessionRun(sessionId, reservation)
+      if (!admitted) {
         return Stream.fail(
           new PlanError({
-            message: "Another chat or plan is already running in this session."
+            message: "A planning round is already running in this session."
           })
         )
       }
@@ -1764,6 +1772,12 @@ const HandlersLayer = StarbaseRpcs.toLayer({
       if (!session.chats.some((chat) => chat.id === chatId)) return session
       const runner = yield* AgentRunner
       yield* runner.stop(sessionId, chatId)
+      // Drop the closed chat's per-chat state so it can't leak or strand rows:
+      // its background-task rows + stop handle (nothing else sweeps a chat that
+      // never runs again), and the runner's per-chat maps (the lock in particular
+      // grows one-per-chat for the life of the process).
+      yield* BackgroundTaskStore.clearChat(sessionId, chatId)
+      yield* runner.forgetChat(chatId)
       const updated = yield* SessionStore.closeChat(sessionId, chatId)
       yield* TranscriptStore.remove(chatId)
       yield* ContextManager.forget(chatId)

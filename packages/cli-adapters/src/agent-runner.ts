@@ -364,7 +364,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     // client hanging up its stream does NOT tear the run down (verified: the run
     // survives its consumer). Without this handle a "stopped" agent keeps running.
     const fibers = yield* Ref.make(new Map<string, RunFiber>())
-    // sessionId → a mutex serialising `stop` against `prompt`'s SETUP.
+    // chatId → a mutex serialising `stop` against `prompt`'s SETUP.
     //
     // Without it, a stop and the next turn race for the same `fibers` slot, and
     // the stop loses: the renderer fires `agentStop` and moves on, `prompt`
@@ -376,18 +376,22 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     // A token check alone cannot fix it: by the time the stop reads the map, the
     // only entry that ever existed for that read IS run B's. The read and the
     // registration have to be ordered, which is what this lock does.
+    //
+    // Keyed by chatId, NOT sessionId: the `fibers` slot it protects is per-chat,
+    // so two chats in the same session must not serialise against each other —
+    // that is exactly the concurrency this feature enables.
     const locks = yield* Ref.make(new Map<string, Effect.Semaphore>())
-    /** The session's mutex, created on first use. */
-    const sessionLock = (sessionId: string) =>
+    /** The chat's mutex, created on first use. */
+    const chatLock = (chatId: string) =>
       Effect.gen(function* () {
-        const existing = (yield* Ref.get(locks)).get(sessionId)
+        const existing = (yield* Ref.get(locks)).get(chatId)
         if (existing !== undefined) return existing
         const made = yield* Effect.makeSemaphore(1)
         // `Ref.modify` is atomic, so two concurrent first-users agree on one
         // semaphore — the loser's freshly made one is simply dropped.
         return yield* Ref.modify(locks, (m) => {
-          const current = m.get(sessionId)
-          return current !== undefined ? [current, m] : [made, new Map(m).set(sessionId, made)]
+          const current = m.get(chatId)
+          return current !== undefined ? [current, m] : [made, new Map(m).set(chatId, made)]
         })
       })
 
@@ -397,6 +401,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
 
     const persistMode = (sessionId: string, chatId: string, mode: PermissionMode) =>
       SessionStore.setMode(sessionId, chatId, mode).pipe(Effect.ignore)
+
+    /** A session by id, or null when it isn't in the store (never fails). */
+    const getSessionOrNull = (sessionId: string) =>
+      SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
 
     const setMode = (
       sessionId: string,
@@ -410,10 +418,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
         if (mode === "plan") {
           const current =
             (yield* Ref.get(modes)).get(chatId) ??
-            (yield* SessionStore.get(sessionId).pipe(
-              Effect.map((s) => s.chats.find((chat) => chat.id === chatId)?.mode),
-              Effect.orElseSucceed(() => undefined)
-            ))
+            (yield* getSessionOrNull(sessionId))?.chats.find((chat) => chat.id === chatId)?.mode
           const configDefault = (yield* Ref.get(execDefaults)).get(chatId) ?? "accept-edits"
           const prior: PermissionMode = current && current !== "plan" ? current : configDefault
           yield* Ref.update(priorModes, (m) => new Map(m).set(chatId, prior))
@@ -491,14 +496,25 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
         yield* Deferred.succeed(entry.deferred, decision)
       })
 
-    /** Thread a comment onto a plan step (persisted + streamed); doesn't resume the agent. */
-    const commentPlanStep = (sessionId: string, planId: string, stepId: string, body: string) =>
+    /**
+     * A pending plan (by id) and its live run, gated on session ownership — the
+     * lookup the comment / revise / approve handlers all begin with. `run` is
+     * undefined when the plan isn't this session's or its run has already gone.
+     */
+    const pendingPlanRun = (sessionId: string, planId: string) =>
       Effect.gen(function* () {
         const pending = (yield* Ref.get(plans)).get(planId)
         const run =
           pending?.sessionId === sessionId
             ? (yield* Ref.get(active)).get(pending.chatId)
             : undefined
+        return { pending, run } as const
+      })
+
+    /** Thread a comment onto a plan step (persisted + streamed); doesn't resume the agent. */
+    const commentPlanStep = (sessionId: string, planId: string, stepId: string, body: string) =>
+      Effect.gen(function* () {
+        const { run } = yield* pendingPlanRun(sessionId, planId)
         if (run === undefined) return
         const cn = yield* nextId
         const now = yield* Effect.sync(() => new Date().toISOString())
@@ -513,11 +529,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     /** Route the open comments back to the agent as a revision and resume planning. */
     const revisePlan = (sessionId: string, planId: string) =>
       Effect.gen(function* () {
-        const pending = (yield* Ref.get(plans)).get(planId)
-        const run =
-          pending?.sessionId === sessionId
-            ? (yield* Ref.get(active)).get(pending.chatId)
-            : undefined
+        const { run } = yield* pendingPlanRun(sessionId, planId)
         if (run === undefined) return
         const plan = yield* run.readPlan(planId)
         if (plan === null) return
@@ -534,11 +546,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     /** Approve a plan: mark it approved, restore the exec mode, and start execution. */
     const approvePlan = (sessionId: string, planId: string, executionMode?: ExecutionMode) =>
       Effect.gen(function* () {
-        const pending = (yield* Ref.get(plans)).get(planId)
-        const run =
-          pending?.sessionId === sessionId
-            ? (yield* Ref.get(active)).get(pending.chatId)
-            : undefined
+        const { pending, run } = yield* pendingPlanRun(sessionId, planId)
         if (run !== undefined) yield* run.applyPlan(planId, (p) => ({ ...p, status: "approved" }))
         // Engage the mode they were actually running this session in before
         // planning (`priorModes`, e.g. "auto") — that's their real intent for this
@@ -565,10 +573,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
      */
     const resolveExecMode = (sessionId: string): Effect.Effect<PermissionMode, never, PromptEnv> =>
       Effect.gen(function* () {
-        const session = yield* SessionStore.get(sessionId).pipe(
-          Effect.map((s): Session | null => s),
-          Effect.orElseSucceed(() => null)
-        )
+        const session = yield* getSessionOrNull(sessionId)
         const pathSvc = yield* Path.Path
         const appPaths = yield* AppPaths
         return yield* readDefaultMode(session?.cli ?? "claude", pathSvc.dirname(appPaths.root))
@@ -612,10 +617,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           // is never persisted, so `session.mode` is their real exec mode (e.g.
           // "auto"); fall back to the CLI-config default only if it's absent or a
           // legacy "plan". This keeps a stale-plan re-drive from re-gating.
-          const persisted = yield* SessionStore.get(sessionId).pipe(
-            Effect.map((s) => s.chats.find((chat) => chat.id === chatId)?.mode),
-            Effect.orElseSucceed(() => undefined)
-          )
+          const persisted = (yield* getSessionOrNull(sessionId))?.chats.find(
+            (chat) => chat.id === chatId
+          )?.mode
           const restore =
             persisted && persisted !== "plan" ? persisted : yield* resolveExecMode(sessionId)
           yield* setMode(sessionId, chatId, restore)
@@ -690,7 +694,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
         // long enough that holding the lock for all of it would read as the app
         // ignoring the operator's next message. After the cap we stop WAITING;
         // the interrupt itself has already been delivered.
-        const lock = yield* sessionLock(sessionId)
+        const lock = yield* chatLock(chatId)
         yield* lock.withPermits(1)(
           Effect.gen(function* () {
             const running = (yield* Ref.get(fibers)).get(chatId)
@@ -734,10 +738,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
       Effect.suspend(() =>
         Effect.gen(function* () {
           const adapter = yield* CliAdapter
-          const session: Session | null = yield* SessionStore.get(sessionId).pipe(
-            Effect.map((s): Session | null => s),
-            Effect.orElseSucceed(() => null)
-          )
+          const session: Session | null = yield* getSessionOrNull(sessionId)
           const chat =
             session?.chats.find((candidate) => candidate.id === chatId) ??
             (chatId === sessionId
@@ -1145,7 +1146,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               // the dock updates live, but never persisted onto a message —
               // that would pin a still-running task to a finished turn.
               if (isBackgroundTaskEvent(event)) {
-                yield* BackgroundTaskStore.ingest(sessionId, event).pipe(Effect.provide(env), Effect.ignore)
+                yield* BackgroundTaskStore.ingest(sessionId, chatId, event).pipe(Effect.provide(env), Effect.ignore)
                 yield* out.offer(event)
                 return
               }
@@ -1370,11 +1371,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           /** Identifies THIS run, so its cleanup can't evict a successor's fiber. */
           const token: RunToken = {}
 
-          // Publish this run's per-task stop handle. Registering also orphans
-          // anything the previous harness process left running — the live set is
-          // per-process, so those ids no longer resolve to anything stoppable.
+          // Publish this run's per-task stop handle for THIS chat. Registering
+          // also orphans this chat's own previously-registered tasks — their
+          // handle is being replaced and no longer resolves to anything stoppable.
           const registerBackgroundStop = (stop: StopBackgroundTask) =>
-            BackgroundTaskStore.registerStop(sessionId, stop).pipe(Effect.provide(env), Effect.ignore)
+            BackgroundTaskStore.registerStop(sessionId, chatId, stop).pipe(Effect.provide(env), Effect.ignore)
           const registerTurnSteer = (handler: SteerTurn | null) => Ref.set(turnSteer, handler)
 
           // Record the compaction on THIS turn, before the harness says anything.
@@ -1547,14 +1548,21 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     ): Stream.Stream<StreamEvent, never, PromptEnv> {
       return Stream.unwrapScoped(
         Effect.gen(function* () {
-          const lock = yield* sessionLock(sessionId)
+          const lock = yield* chatLock(chatId)
           return yield* lock.withPermits(1)(
             Effect.gen(function* () {
-              const acquired = yield* reserveSessionRun(sessionId, chatId)
-              if (!acquired) {
+              // Concurrent chats in one session are allowed, but a single chat is
+              // single-flight: two runs on ONE chatId would race the `fibers`
+              // slot (line ~1503) — run A's fiber orphaned and unstoppable since
+              // `stop` reads only the latest — and both would mint positional
+              // message ids from the same transcript snapshot, colliding. Refuse
+              // the second (a racing double-send, a second window). Distinct
+              // chats reserve distinct owners and are always admitted.
+              const admitted = yield* reserveSessionRun(sessionId, chatId)
+              if (!admitted) {
                 return Stream.fromIterable<StreamEvent>([{
                   _tag: "Failed",
-                  message: "Another chat or plan in this session is running. Stop it before starting this chat."
+                  message: "This chat is already running. Wait for it to finish or stop it before sending again."
                 }])
               }
               yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, chatId))
@@ -1593,13 +1601,34 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
       Effect.gen(function* () {
         const run = (yield* Ref.get(active)).get(chatId)
         if (run === undefined) return { status: "unsupported" } as const
-        const session = yield* SessionStore.get(sessionId).pipe(
-          Effect.orElseSucceed(() => null)
-        )
+        const session = yield* getSessionOrNull(sessionId)
         if (!session?.chats.some((chat) => chat.id === chatId)) {
           return { status: "unsupported" } as const
         }
         return yield* run.steer(text, images)
+      })
+
+    /**
+     * Forget a chat's per-chat state (the chat was closed). The caller stops the
+     * run first, so `fibers`/`active` are already torn down; this drops the maps
+     * keyed by chatId that otherwise grow for the life of the process — most
+     * importantly `locks`, one semaphore of which is minted per chat and never
+     * otherwise removed.
+     */
+    const forgetChat = (chatId: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const drop = <V>(ref: Ref.Ref<Map<string, V>>) =>
+          Ref.update(ref, (m) => {
+            if (!m.has(chatId)) return m
+            const next = new Map(m)
+            next.delete(chatId)
+            return next
+          })
+        yield* drop(locks)
+        yield* drop(modes)
+        yield* drop(allowlists)
+        yield* drop(priorModes)
+        yield* drop(execDefaults)
       })
 
     return {
@@ -1619,7 +1648,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
       commentPlanStep,
       revisePlan,
       approvePlan,
-      resumePlan
+      resumePlan,
+      forgetChat
     } as const
   })
 }) {}
