@@ -1,7 +1,7 @@
 import type { Plan, RoutingContext, StreamEvent, VendorReach } from "@starbase/core"
 import { CliExecError, GIGAPLAN_ROUTING_POLICY_VERSION } from "@starbase/core"
 import { Effect, Fiber, Layer, Stream, TestClock, TestContext } from "effect"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { ParsedCritique } from "./adversarial-plan.js"
 import { CliAdapter } from "./adapter.js"
 import {
@@ -16,6 +16,45 @@ import {
 } from "./adversarial-plan.js"
 import { formatQuestionAnswer } from "./claude-adapter.js"
 import { parsePlan } from "./plan-parse.js"
+
+const diagnosticTrace = vi.hoisted(() => ({
+  contexts: [] as Array<{
+    sessionId: string
+    model: string | null
+    reasoningEffort: string | null
+  }>,
+  events: [] as string[]
+}))
+
+vi.mock("./codex-app-server-diagnostics.js", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("./codex-app-server-diagnostics.js")>()
+  return {
+    ...original,
+    createCodexAppServerDiagnostics: (
+      directory: string | undefined,
+      context: {
+        sessionId: string
+        model: string | null
+        reasoningEffort: string | null
+      }
+    ) => {
+      if (directory === undefined) return null
+      diagnosticTrace.contexts.push(context)
+      return {
+        path: "/tmp/codex-app-server-test.jsonl",
+        record: (event: string) => diagnosticTrace.events.push(event),
+        close: () => undefined
+      }
+    }
+  }
+})
+
+afterEach(() => {
+  diagnosticTrace.contexts = []
+  diagnosticTrace.events = []
+  vi.unstubAllEnvs()
+})
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -541,6 +580,7 @@ describe("unattendedAnswers", () => {
 
 describe("a role that never finishes", () => {
   it("fails the round with a timeout, rather than hanging forever", async () => {
+    vi.stubEnv("STARBASE_CODEX_DIAGNOSTICS_DIR", "/tmp")
     // What shipped: the proposer looped on AskUserQuestion, the round never
     // ended, and the session sat at "Idle" with nothing on screen to say it had
     // died. A bound turns that into a visible failure.
@@ -554,10 +594,11 @@ describe("a role that never finishes", () => {
             branch: "starbase/x",
             cwd: "/tmp/wt",
             brief: "Add a tier column",
-            vendors: [ANTHROPIC, OPENAI],
+            vendors: [OPENAI, MOONSHOT],
             binPathFor: () => "/usr/bin/fake",
             assignAgents: false,
-            routing: routingFor([ANTHROPIC, OPENAI])
+            routing: routingFor([OPENAI, MOONSHOT]),
+            reasoning: { enabled: true, effort: "medium" }
           })
           .pipe(Stream.runCollect, Effect.map((c) => [...c]))
       )
@@ -574,5 +615,13 @@ describe("a role that never finishes", () => {
 
     const failed = events.find((e) => e._tag === "Failed")
     expect(failed?._tag === "Failed" && failed.message).toMatch(/gave up after/)
+    expect(diagnosticTrace.contexts).toStrictEqual([
+      {
+        sessionId: "plan_propose_s1",
+        model: "gpt-5.6-sol",
+        reasoningEffort: "medium"
+      }
+    ])
+    expect(diagnosticTrace.events).toStrictEqual(["planner.role_timeout"])
   })
 })

@@ -63,7 +63,7 @@ export interface Conversation {
   readonly runStartedAt: number | null
   /** Drop a queued message before it's sent (by index). */
   readonly unqueue: (index: number) => void
-  /** Interrupt the current turn and run a queued message now (steer mid-stream). */
+  /** Steer supported live turns; otherwise interrupt and replay the queued message. */
   readonly sendNow: (index: number) => void
   /** A pending AskUserQuestion group (the composer is replaced while set), or null. */
   readonly question: QuestionRequest | null

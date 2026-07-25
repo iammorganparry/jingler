@@ -95,6 +95,8 @@ export interface ConversationContext {
    * turn at a time, as soon as the current run (and its diff refresh) settles.
    */
   readonly queued: ReadonlyArray<QueuedMessage>
+  /** Prevents two rapid Send-now clicks from racing native steer responses. */
+  readonly steerPending: boolean
   /**
    * Live sub-agents (harness `Task` spawns) for the current turn — each a
    * watch-only tab. Populated from `agentId`-tagged + `Subagent*` events, dropped
@@ -178,10 +180,15 @@ export interface QueuedMessage {
   readonly target: AgentTarget
 }
 
+type SteerResult =
+  | { readonly status: "accepted"; readonly user: Message; readonly assistant: Message }
+  | { readonly status: "deferred" | "unsupported" }
+
 type ConversationEvent =
   | { type: "SEND"; text: string; images?: ReadonlyArray<Attachment> }
   | { type: "UNQUEUE"; index: number }
   | { type: "SEND_NOW"; index: number }
+  | { type: "STEER_RESULT"; queued: QueuedMessage; result: SteerResult }
   | { type: "STREAM_EVENT"; event: StreamEvent }
   | { type: "PATCH_UPDATED"; patch: string }
   | { type: "DECIDE_GATE"; gateId: string; decision: GateDecision }
@@ -526,6 +533,42 @@ export const conversationMachine = setup({
       const rest = context.queued.filter((_, i) => i !== event.index)
       return { queued: [picked, ...rest] }
     }),
+    promoteAndSteer: assign(({ context, event, self }) => {
+      if (event.type !== "SEND_NOW" || context.steerPending) return {}
+      const picked = context.queued[event.index]
+      if (picked === undefined) return {}
+      const rest = context.queued.filter((_, i) => i !== event.index)
+      void rpc
+        .agentSteer(context.session.id, context.chatId, picked.text, picked.images)
+        .then((result) => self.send({ type: "STEER_RESULT", queued: picked, result }))
+        .catch(() =>
+          self.send({
+            type: "STEER_RESULT",
+            queued: picked,
+            result: { status: "unsupported" }
+          })
+        )
+      return { queued: [picked, ...rest], steerPending: true }
+    }),
+    acceptSteer: assign(({ context, event }) => {
+      if (
+        event.type !== "STEER_RESULT" ||
+        event.result.status !== "accepted"
+      ) {
+        return {}
+      }
+      const last = context.messages.at(-1)
+      const prior =
+        last?.role === "assistant"
+          ? [...context.messages.slice(0, -1), settleStreaming(last)]
+          : context.messages
+      return {
+        queued: context.queued.filter((queued) => queued !== event.queued),
+        messages: [...prior, event.result.user, event.result.assistant],
+        steerPending: false
+      }
+    }),
+    finishSteer: assign(() => ({ steerPending: false })),
     clearQueue: assign(() => ({ queued: [] })),
     // Pop the head of the queue into a fresh turn — the same shape `appendTurns`
     // produces for a live SEND, so `running` streams it exactly as a normal turn.
@@ -1094,6 +1137,7 @@ export const conversationMachine = setup({
       agentTarget: "session",
       reasoning,
       queued: [],
+      steerPending: false,
       subagents: [],
       resumePlanId: null,
       sharedPlanChatId: null,
@@ -1250,9 +1294,20 @@ export const conversationMachine = setup({
         // through `stopping` so the halt has landed before the next turn starts;
         // refreshingDiff dequeues it (the rest of the queue follows).
         SEND_NOW: {
-          target: "stopping",
-          actions: ["promoteQueued", "settleStoppedRun"]
+          actions: "promoteAndSteer"
         },
+        STEER_RESULT: [
+          {
+            guard: ({ event }) => event.result.status === "unsupported",
+            target: "stopping",
+            actions: ["finishSteer", "settleStoppedRun"]
+          },
+          {
+            guard: ({ event }) => event.result.status === "accepted",
+            actions: "acceptSteer"
+          },
+          { actions: "finishSteer" }
+        ],
         DECIDE_GATE: { actions: "optimisticGate" },
         ANSWER_QUESTION: { actions: "optimisticAnswer" },
         COMMENT_PLAN_STEP: { actions: "optimisticPlanComment" },

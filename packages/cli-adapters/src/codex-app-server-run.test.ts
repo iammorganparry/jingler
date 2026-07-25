@@ -1,11 +1,7 @@
 import type { Plan, QuestionRequest, StreamEvent } from "@starbase/core"
 import { Effect, Fiber } from "effect"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import type {
-  AgentContext,
-  PlanDecision as PlanDecisionType,
-  SessionSpec
-} from "./adapter.js"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { AgentContext, PlanDecision as PlanDecisionType, SessionSpec } from "./adapter.js"
 import { PlanDecision } from "./adapter.js"
 
 const server = vi.hoisted(() => {
@@ -19,18 +15,23 @@ const server = vi.hoisted(() => {
       options?: { timeoutMs?: number }
     }>,
     responses: [] as Array<{ id: number | string; result: unknown }>,
+    diagnostics: [] as Array<{
+      event: string
+      fields: Readonly<Record<string, unknown>>
+    }>,
     threadId: "thread-1",
     resumeError: null as Error | null,
     turnNumber: 0,
     hangMessages: false,
+    pendingMessageResolver: null as ((message: Record<string, unknown> | null) => void) | null,
+    autoCompleteCompaction: true,
+    compactionNumber: 0,
+    turnSteer: null as import("./adapter.js").SteerTurn | null,
+    diagnosticsCloseCount: 0,
     closed: false
   }
   const connection = {
-    request: (
-      method: string,
-      params: unknown,
-      options?: { timeoutMs?: number }
-    ) => {
+    request: (method: string, params: unknown, options?: { timeoutMs?: number }) => {
       state.requests.push({ method, params, ...(options ? { options } : {}) })
       if (method === "thread/resume" && state.resumeError !== null) {
         const error = state.resumeError
@@ -44,22 +45,60 @@ const server = vi.hoisted(() => {
         state.turnNumber += 1
         return Promise.resolve({ turn: { id: `turn-${state.turnNumber}` } })
       }
+      if (method === "turn/steer") {
+        return Promise.resolve({ turnId: `turn-${state.turnNumber}` })
+      }
+      if (method === "thread/compact/start") {
+        state.compactionNumber += 1
+        if (state.autoCompleteCompaction) {
+          state.messages.unshift(
+            {
+              method: "turn/started",
+              params: {
+                threadId: state.threadId,
+                turn: {
+                  id: `compact-${state.compactionNumber}`,
+                  status: "inProgress"
+                }
+              }
+            },
+            {
+              method: "turn/completed",
+              params: {
+                threadId: state.threadId,
+                turn: {
+                  id: `compact-${state.compactionNumber}`,
+                  status: "completed",
+                  error: null
+                }
+              }
+            }
+          )
+        }
+      }
       return Promise.resolve({})
     },
     notify: vi.fn(),
+    diagnosticsPath: "/tmp/codex-app-server-test.jsonl",
+    recordDiagnostic: (event: string, fields: Readonly<Record<string, unknown>> = {}) => {
+      state.diagnostics.push({ event, fields })
+    },
     respond: (id: number | string, result: unknown) => {
       state.responses.push({ id, result })
     },
     respondError: vi.fn(),
     nextMessage: () =>
       state.hangMessages
-        ? new Promise<null>(() => undefined)
+        ? new Promise<Record<string, unknown> | null>((resolve) => {
+            state.pendingMessageResolver = resolve
+          })
         : Promise.resolve(state.messages.shift() ?? null),
-    nextMessageWithin: () =>
-      Promise.resolve(state.delayedReplay.shift() ?? null),
+    nextMessageWithin: () => Promise.resolve(state.delayedReplay.shift() ?? null),
     drainMessages: () => state.replay.splice(0),
     close: () => {
       state.closed = true
+      state.pendingMessageResolver?.(null)
+      state.pendingMessageResolver = null
     }
   }
   return { state, connection }
@@ -69,9 +108,27 @@ vi.mock("./codex-app-server-client.js", () => ({
   startCodexAppServer: () => Promise.resolve(server.connection)
 }))
 
-const { mapCodexAppServerReasoning, runCodexAppServer } = await import(
-  "./codex-app-server-run.js"
-)
+vi.mock("./codex-app-server-diagnostics.js", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("./codex-app-server-diagnostics.js")>()
+  return {
+    ...original,
+    createCodexAppServerDiagnostics: (directory: string | undefined) =>
+      directory === undefined
+        ? null
+        : {
+            path: "/tmp/codex-app-server-test.jsonl",
+            record: (event: string, fields: Readonly<Record<string, unknown>> = {}) => {
+              server.state.diagnostics.push({ event, fields })
+            },
+            close: () => {
+              server.state.diagnosticsCloseCount += 1
+            }
+          }
+  }
+})
+
+const { mapCodexAppServerReasoning, runCodexAppServer } = await import("./codex-app-server-run.js")
 
 const spec = (over: Partial<SessionSpec> = {}): SessionSpec =>
   ({
@@ -105,7 +162,11 @@ const harness = (decision: PlanDecisionType = PlanDecision.Reject()) => {
         proposed.push(plan)
         return decision
       }),
-    registerBackgroundStop: () => Effect.void
+    registerBackgroundStop: () => Effect.void,
+    registerTurnSteer: (steer) =>
+      Effect.sync(() => {
+        server.state.turnSteer = steer
+      })
   }
   return { ctx, emitted, proposed, asked }
 }
@@ -116,15 +177,26 @@ beforeEach(() => {
   server.state.delayedReplay = []
   server.state.requests = []
   server.state.responses = []
+  server.state.diagnostics = []
   server.state.threadId = "thread-1"
   server.state.resumeError = null
   server.state.turnNumber = 0
   server.state.hangMessages = false
+  server.state.pendingMessageResolver = null
+  server.state.autoCompleteCompaction = true
+  server.state.compactionNumber = 0
+  server.state.turnSteer = null
+  server.state.diagnosticsCloseCount = 0
   server.state.closed = false
+})
+
+afterEach(() => {
+  vi.unstubAllEnvs()
 })
 
 describe("runCodexAppServer", () => {
   it("replaces a persisted thread whose local rollout no longer exists", async () => {
+    vi.stubEnv("STARBASE_CODEX_DIAGNOSTICS_DIR", "/tmp")
     server.state.threadId = "replacement-thread"
     server.state.resumeError = new Error(
       "thread/resume failed: no rollout found for thread id stale-thread (code -32600)"
@@ -142,12 +214,7 @@ describe("runCodexAppServer", () => {
     const { ctx, emitted } = harness()
 
     await Effect.runPromise(
-      runCodexAppServer(
-        "s1",
-        spec({ resumeId: "stale-thread" }),
-        ctx,
-        resume
-      )
+      runCodexAppServer("s1", spec({ resumeId: "stale-thread" }), ctx, resume)
     )
 
     expect(server.state.requests.slice(0, 3).map((request) => request.method)).toStrictEqual([
@@ -160,6 +227,12 @@ describe("runCodexAppServer", () => {
       _tag: "Started",
       sessionId: "replacement-thread"
     })
+    expect(
+      server.state.diagnostics
+        .filter(({ event }) => event.startsWith("run.") && event !== "run.started")
+        .map(({ event }) => event)
+    ).toStrictEqual(["run.finished"])
+    expect(server.state.diagnosticsCloseCount).toBe(1)
   })
 
   it("does not replace a resumed thread after an unrelated error", async () => {
@@ -167,19 +240,10 @@ describe("runCodexAppServer", () => {
     const { ctx } = harness()
 
     await expect(
-      Effect.runPromise(
-        runCodexAppServer(
-          "s1",
-          spec({ resumeId: "thread-1" }),
-          ctx,
-          new Map()
-        )
-      )
+      Effect.runPromise(runCodexAppServer("s1", spec({ resumeId: "thread-1" }), ctx, new Map()))
     ).rejects.toThrow("permission denied")
 
-    expect(server.state.requests.map((request) => request.method)).toStrictEqual([
-      "thread/resume"
-    ])
+    expect(server.state.requests.map((request) => request.method)).toStrictEqual(["thread/resume"])
   })
 
   it("uses GPT-5.6's lightest supported effort for reasoning-off", () => {
@@ -327,7 +391,11 @@ describe("runCodexAppServer", () => {
     expect(
       server.state.requests.filter((request) => request.method === "thread/compact/start")
     ).toHaveLength(0)
-    expect(emitted).toContainEqual({ _tag: "Usage", tokens: 250_000, window: 400_000 })
+    expect(emitted).toContainEqual({
+      _tag: "Usage",
+      tokens: 250_000,
+      window: 400_000
+    })
   })
 
   it("compacts an overloaded resumed thread before starting its next turn", async () => {
@@ -356,14 +424,7 @@ describe("runCodexAppServer", () => {
     ]
     const { ctx, emitted } = harness()
 
-    await Effect.runPromise(
-      runCodexAppServer(
-        "s1",
-        spec({ resumeId: "thread-1" }),
-        ctx,
-        new Map()
-      )
-    )
+    await Effect.runPromise(runCodexAppServer("s1", spec({ resumeId: "thread-1" }), ctx, new Map()))
 
     expect(server.state.requests.map((request) => request.method).slice(0, 3)).toStrictEqual([
       "thread/resume",
@@ -375,6 +436,92 @@ describe("runCodexAppServer", () => {
       tokens: 206_000,
       window: 258_400
     })
+  })
+
+  it("waits for native compaction to finish before replaying the prompt exactly once", async () => {
+    server.state.autoCompleteCompaction = false
+    server.state.hangMessages = true
+    server.state.replay = [
+      {
+        method: "thread/tokenUsage/updated",
+        params: {
+          threadId: "thread-1",
+          turnId: "previous-turn",
+          tokenUsage: {
+            total: { totalTokens: 900_000 },
+            last: { totalTokens: 206_000 },
+            modelContextWindow: 258_400
+          }
+        }
+      }
+    ]
+    const { ctx } = harness()
+    const running = Effect.runPromise(
+      runCodexAppServer("s1", spec({ resumeId: "thread-1" }), ctx, new Map())
+    )
+
+    await vi.waitFor(() => {
+      expect(server.state.requests.some((request) => request.method === "thread/compact/start")).toBe(
+        true
+      )
+    })
+    expect(server.state.requests.some((request) => request.method === "turn/start")).toBe(false)
+
+    server.state.hangMessages = false
+    server.state.messages.push({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: null }
+      }
+    })
+    server.state.pendingMessageResolver?.({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "compact-delayed", status: "completed", error: null }
+      }
+    })
+    await running
+
+    expect(
+      server.state.requests.filter((request) => request.method === "turn/start")
+    ).toHaveLength(1)
+    expect(
+      server.state.requests.find((request) => request.method === "turn/start")?.params
+    ).toMatchObject({
+      input: [{ type: "text", text: "inspect the repository", text_elements: [] }]
+    })
+  })
+
+  it("steers a live regular turn through the registered handle", async () => {
+    server.state.hangMessages = true
+    const { ctx } = harness()
+    const running = Effect.runPromise(runCodexAppServer("s1", spec(), ctx, new Map()))
+
+    await vi.waitFor(() => {
+      expect(server.state.turnSteer).not.toBeNull()
+      expect(server.state.requests.some((request) => request.method === "turn/start")).toBe(true)
+    })
+    await expect(server.state.turnSteer?.("new operator input", [])).resolves.toBe("accepted")
+    expect(server.state.requests).toContainEqual({
+      method: "turn/steer",
+      params: {
+        threadId: "thread-1",
+        expectedTurnId: "turn-1",
+        input: [{ type: "text", text: "new operator input", text_elements: [] }]
+      }
+    })
+
+    server.state.pendingMessageResolver?.({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: null }
+      }
+    })
+    await running
+    expect(server.state.turnSteer).toBeNull()
   })
 
   it("waits for delayed replay usage before starting a resumed turn", async () => {
@@ -403,9 +550,7 @@ describe("runCodexAppServer", () => {
     ]
     const { ctx } = harness()
 
-    await Effect.runPromise(
-      runCodexAppServer("s1", spec({ resumeId: "thread-1" }), ctx, new Map())
-    )
+    await Effect.runPromise(runCodexAppServer("s1", spec({ resumeId: "thread-1" }), ctx, new Map()))
 
     expect(server.state.requests.map((request) => request.method).slice(0, 3)).toStrictEqual([
       "thread/resume",
@@ -428,7 +573,11 @@ describe("runCodexAppServer", () => {
         params: {
           threadId: "thread-1",
           turnId: "turn-1",
-          item: { type: "agentMessage", id: "m1", text: "Active turn finished." }
+          item: {
+            type: "agentMessage",
+            id: "m1",
+            text: "Active turn finished."
+          }
         }
       },
       {
@@ -443,20 +592,20 @@ describe("runCodexAppServer", () => {
 
     await Effect.runPromise(runCodexAppServer("s1", spec(), ctx, new Map()))
 
-    expect(emitted).toContainEqual({ _tag: "Assistant", text: "Active turn finished." })
+    expect(emitted).toContainEqual({
+      _tag: "Assistant",
+      text: "Active turn finished."
+    })
     expect(emitted.filter((event) => event._tag === "Done")).toHaveLength(1)
   })
 
   it("bounds the interrupt request before closing a wedged server", async () => {
+    vi.stubEnv("STARBASE_CODEX_DIAGNOSTICS_DIR", "/tmp")
     server.state.hangMessages = true
     const { ctx } = harness()
-    const fiber = Effect.runFork(
-      runCodexAppServer("s1", spec(), ctx, new Map())
-    )
+    const fiber = Effect.runFork(runCodexAppServer("s1", spec(), ctx, new Map()))
     await vi.waitFor(() => {
-      expect(
-        server.state.requests.some((request) => request.method === "turn/start")
-      ).toBe(true)
+      expect(server.state.requests.some((request) => request.method === "turn/start")).toBe(true)
     })
 
     await Effect.runPromise(Fiber.interrupt(fiber))
@@ -467,9 +616,19 @@ describe("runCodexAppServer", () => {
       options: { timeoutMs: 2_000 }
     })
     expect(server.state.closed).toBe(true)
+    await vi.waitFor(() => {
+      expect(
+        server.state.diagnostics.filter(({ event }) => event.startsWith("run."))
+      ).toStrictEqual([
+        expect.objectContaining({ event: "run.started" }),
+        expect.objectContaining({ event: "run.interrupted" })
+      ])
+    })
+    expect(server.state.diagnosticsCloseCount).toBe(1)
   })
 
   it("fails instead of waiting forever when an active turn stops emitting events", async () => {
+    vi.stubEnv("STARBASE_CODEX_DIAGNOSTICS_DIR", "/tmp")
     vi.useFakeTimers()
     try {
       server.state.hangMessages = true
@@ -479,14 +638,26 @@ describe("runCodexAppServer", () => {
       ).rejects.toThrow("Codex turn produced no events")
 
       await vi.waitFor(() => {
-        expect(
-          server.state.requests.some((request) => request.method === "turn/start")
-        ).toBe(true)
+        expect(server.state.requests.some((request) => request.method === "turn/start")).toBe(true)
       })
       await vi.runAllTimersAsync()
 
       await run
       expect(server.state.closed).toBe(true)
+      expect(server.state.diagnostics).toContainEqual({
+        event: "turn.inactivity_timeout",
+        fields: {
+          timeoutMs: 600_000,
+          messageCount: 0,
+          lastMethod: null
+        }
+      })
+      expect(
+        server.state.diagnostics
+          .filter(({ event }) => event.startsWith("run.") && event !== "run.started")
+          .map(({ event }) => event)
+      ).toStrictEqual(["run.failed"])
+      expect(server.state.diagnosticsCloseCount).toBe(1)
     } finally {
       vi.useRealTimers()
     }
@@ -518,9 +689,7 @@ describe("runCodexAppServer", () => {
     ]
     const { ctx } = harness()
 
-    await Effect.runPromise(
-      runCodexAppServer("s1", spec({ resumeId: "thread-1" }), ctx, new Map())
-    )
+    await Effect.runPromise(runCodexAppServer("s1", spec({ resumeId: "thread-1" }), ctx, new Map()))
 
     expect(server.state.requests.map((request) => request.method).slice(0, 2)).toStrictEqual([
       "thread/resume",
@@ -567,7 +736,9 @@ describe("runCodexAppServer", () => {
         result: { answers: { database: { answers: ["Postgres"] } } }
       }
     ])
-    expect(server.state.requests.filter((request) => request.method === "turn/start")).toHaveLength(1)
+    expect(server.state.requests.filter((request) => request.method === "turn/start")).toHaveLength(
+      1
+    )
   })
 
   it("reopens an approved plan with write access and continues on the same thread", async () => {
@@ -612,13 +783,9 @@ describe("runCodexAppServer", () => {
         }
       }
     ]
-    const { ctx, proposed, emitted } = harness(
-      PlanDecision.Approve({ mode: "accept-edits" })
-    )
+    const { ctx, proposed, emitted } = harness(PlanDecision.Approve({ mode: "accept-edits" }))
 
-    await Effect.runPromise(
-      runCodexAppServer("s1", spec({ mode: "plan" }), ctx, new Map())
-    )
+    await Effect.runPromise(runCodexAppServer("s1", spec({ mode: "plan" }), ctx, new Map()))
 
     expect(proposed).toHaveLength(1)
     expect(
@@ -631,7 +798,9 @@ describe("runCodexAppServer", () => {
         })
       })
     )
-    expect(server.state.requests.filter((request) => request.method === "turn/start")).toHaveLength(2)
+    expect(server.state.requests.filter((request) => request.method === "turn/start")).toHaveLength(
+      2
+    )
     expect(emitted.some((event) => event._tag === "Assistant")).toBe(true)
   })
 })

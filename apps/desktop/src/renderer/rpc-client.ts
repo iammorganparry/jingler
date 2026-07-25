@@ -323,6 +323,13 @@ export const rpc = {
     run((c) => c.Agent.setHarness({ sessionId, chatId, cli, model })),
   agentStop: (sessionId: string, chatId: string): Promise<void> =>
     run((c) => c.Agent.stop({ sessionId, chatId })),
+  agentSteer: (
+    sessionId: string,
+    chatId: string,
+    text: string,
+    images: ReadonlyArray<Attachment>
+  ) =>
+    run((c) => c.Agent.steer({ sessionId, chatId, text, images: [...images] })),
 
   configSetGithub: (github: GithubConfig): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setGithub(github)),

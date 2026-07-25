@@ -40,7 +40,7 @@ test("shows live Codex context and compacts an overloaded resume before the turn
 
   const composer = window.getByPlaceholder("Message Codex…")
   await expect(composer).toBeVisible()
-  await composer.fill("Continue the implementation.")
+  await composer.fill("Exercise native steering.")
   await composer.press("Enter")
 
   await expect
@@ -50,14 +50,22 @@ test("shows live Codex context and compacts an overloaded resume before the turn
   // The app-server publishes 120k while the turn is still open. Seeing both the
   // meter and Stop proves the reading was not deferred until Done.
   await expect(window.getByRole("button", { name: "Stop" })).toBeVisible({ timeout: 20_000 })
+  const queueComposer = window.getByPlaceholder("Queue a message while the agent works…")
+  await queueComposer.fill("Focus on the failing tests first.")
+  await queueComposer.press("Enter")
+  await window.getByRole("button", { name: "Send now" }).click()
+  await expect
+    .poll(() => codexCalls(), { timeout: 10_000 })
+    .toEqual(expect.arrayContaining(["turn/steer"]))
+
   const meter = window.getByRole("button", { name: "Compact now" })
   await expect(meter).toContainText("120k", { timeout: 20_000 })
-
-  await expect(window.getByText("Codex E2E complete.")).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByRole("button", { name: "Send now" })).toHaveCount(0)
 
   const calls = codexCalls()
   expect(calls.indexOf("thread/resume")).toBeLessThan(calls.indexOf("thread/compact/start"))
   expect(calls.indexOf("thread/compact/start")).toBeLessThan(calls.indexOf("turn/start"))
+  expect(calls).not.toContain("turn/interrupt")
 })
 
 test("compacts a large legacy Codex resume when persisted occupancy is unknown", async ({

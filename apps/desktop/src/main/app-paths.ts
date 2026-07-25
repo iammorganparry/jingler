@@ -13,18 +13,18 @@ import { app } from "electron"
 import { AppPaths } from "@starbase/cli-adapters"
 import { Layer } from "effect"
 
-const home = process.env.STARBASE_HOME ?? app.getPath("home")
-const root = join(home, "starbase")
+/** The shared root for every Starbase-owned file in the desktop app. */
+export const starbaseRoot = join(process.env.STARBASE_HOME ?? app.getPath("home"), "starbase")
 
 export const AppPathsLive = Layer.succeed(AppPaths, {
-  root,
-  configFile: join(root, "config.json"),
-  sessionsFile: join(root, "sessions.json"),
-  worktreesDir: join(root, "worktrees"),
-  transcriptsDir: join(root, "transcripts"),
-  reviewsDir: join(root, "reviews"),
-  planRoundsDir: join(root, "plan-rounds"),
-  plansDir: join(root, ".starbase"),
-  themesDir: join(root, "themes"),
-  authFile: join(root, "auth.enc")
+  root: starbaseRoot,
+  configFile: join(starbaseRoot, "config.json"),
+  sessionsFile: join(starbaseRoot, "sessions.json"),
+  worktreesDir: join(starbaseRoot, "worktrees"),
+  transcriptsDir: join(starbaseRoot, "transcripts"),
+  reviewsDir: join(starbaseRoot, "reviews"),
+  planRoundsDir: join(starbaseRoot, "plan-rounds"),
+  plansDir: join(starbaseRoot, ".starbase"),
+  themesDir: join(starbaseRoot, "themes"),
+  authFile: join(starbaseRoot, "auth.enc")
 })

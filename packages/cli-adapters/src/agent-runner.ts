@@ -28,6 +28,7 @@ import {
   PLAN_AUTO_RUN_DEFAULT,
   resumePlanPrompt,
   setQuestionAnswers,
+  settleStreaming,
   STOPPED_NOTE,
   userMessage,
   resolveOrchestrator
@@ -42,7 +43,13 @@ import { gigaplanIntakePrompt } from "./gigaplan-intake-prompt.js"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
 import { CliAdapter, PlanDecision } from "./adapter.js"
-import type { PermissionDecision, PermissionRequest, SessionSpec, StopBackgroundTask } from "./adapter.js"
+import type {
+  PermissionDecision,
+  PermissionRequest,
+  SessionSpec,
+  SteerTurn,
+  StopBackgroundTask
+} from "./adapter.js"
 import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
 import { readDefaultMode } from "./default-mode.js"
@@ -209,6 +216,13 @@ interface RunFiber {
 interface ActiveRun {
   readonly readPlan: (planId: string) => Effect.Effect<Plan | null>
   readonly applyPlan: (planId: string, f: (plan: Plan) => Plan) => Effect.Effect<void>
+  readonly steer: (
+    text: string,
+    images: ReadonlyArray<Attachment>
+  ) => Effect.Effect<
+    | { readonly status: "accepted"; readonly user: Message; readonly assistant: Message }
+    | { readonly status: "deferred" | "unsupported" }
+  >
 }
 
 /** Windows separators → POSIX, so path comparison has one shape to reason about. */
@@ -977,6 +991,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           const an = yield* nextId
           const acc = yield* Ref.make(assistantMessage(`a_${chatId}_${an}`, now, source))
           yield* TranscriptStore.append(chatId, yield* Ref.get(acc))
+          const turnSteer = yield* Ref.make<SteerTurn | null>(null)
+          const turnMutation = yield* Effect.makeSemaphore(1)
 
           const out = yield* Mailbox.make<StreamEvent>()
 
@@ -1104,9 +1120,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             })
 
           // Fold each event into the assistant message + persist, then surface it.
-          // Runs on the single producer fiber, so transcript order is preserved.
+          // Native steering enters from an RPC fiber, so serialize it with the
+          // adapter's event producer. A turn/completed notification arriving in
+          // the same stdout chunk as the steer response must land on the NEW
+          // assistant placeholder, never race it and leave that placeholder open.
           const emit = (event: StreamEvent): Effect.Effect<void> =>
-            Effect.gen(function* () {
+            turnMutation.withPermits(1)(Effect.gen(function* () {
               // Codex can surface one app-server failure as both `turn.failed`
               // and `error`. The first terminal owns the turn; folding the
               // second printed the same context-overflow message twice.
@@ -1226,7 +1245,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
                   waitForReady: true
                 }).pipe(Effect.ignore)
               }
-            }).pipe(Effect.provide(env), Effect.asVoid)
+            })).pipe(Effect.provide(env), Effect.asVoid)
 
           const canUseTool = (req: PermissionRequest): Effect.Effect<PermissionDecision> =>
             Effect.gen(function* () {
@@ -1316,7 +1335,37 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
 
           // Publish live handles so comment/revise/approve can reach this run;
           // torn down when the run ends so out-of-band calls become no-ops.
-          yield* Ref.update(active, (m) => new Map(m).set(chatId, { readPlan, applyPlan }))
+          const steer = (
+            text: string,
+            images: ReadonlyArray<Attachment>
+          ): Effect.Effect<
+            | { readonly status: "accepted"; readonly user: Message; readonly assistant: Message }
+            | { readonly status: "deferred" | "unsupported" }
+          > =>
+            turnMutation.withPermits(1)(Effect.gen(function* () {
+              const handler = yield* Ref.get(turnSteer)
+              if (handler === null) {
+                return { status: cli === "codex" ? "deferred" : "unsupported" } as const
+              }
+              const outcome = yield* Effect.tryPromise(() => handler(text, images)).pipe(
+                Effect.orElseSucceed(() => "deferred" as const)
+              )
+              if (outcome !== "accepted") return { status: outcome } as const
+
+              const at = yield* Effect.sync(() => new Date().toISOString())
+              const settled = settleStreaming(yield* Ref.get(acc))
+              const user = userMessage(`u_${chatId}_${yield* nextId}`, text, at, images, source)
+              const assistant = assistantMessage(`a_${chatId}_${yield* nextId}`, at, source)
+              yield* Ref.set(acc, assistant)
+              yield* TranscriptStore.patchLast(chatId, () => settled).pipe(Effect.ignore)
+              yield* TranscriptStore.append(chatId, user)
+              yield* TranscriptStore.append(chatId, assistant)
+              return { status: "accepted", user, assistant } as const
+            })).pipe(Effect.provide(env))
+
+          yield* Ref.update(active, (m) =>
+            new Map(m).set(chatId, { readPlan, applyPlan, steer })
+          )
 
           /** Identifies THIS run, so its cleanup can't evict a successor's fiber. */
           const token: RunToken = {}
@@ -1326,6 +1375,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           // per-process, so those ids no longer resolve to anything stoppable.
           const registerBackgroundStop = (stop: StopBackgroundTask) =>
             BackgroundTaskStore.registerStop(sessionId, stop).pipe(Effect.provide(env), Effect.ignore)
+          const registerTurnSteer = (handler: SteerTurn | null) => Ref.set(turnSteer, handler)
 
           // Record the compaction on THIS turn, before the harness says anything.
           //
@@ -1346,7 +1396,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             canUseTool,
             askQuestion,
             proposePlan,
-            registerBackgroundStop
+            registerBackgroundStop,
+            registerTurnSteer
           }).pipe(
             // An operator stop arrives as an interruption. Record it as the turn's
             // terminal event so the message settles (and the transcript says why)
@@ -1533,6 +1584,24 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
       )
     }
 
+    const steer = (
+      sessionId: string,
+      chatId: string,
+      text: string,
+      images: ReadonlyArray<Attachment> = []
+    ) =>
+      Effect.gen(function* () {
+        const run = (yield* Ref.get(active)).get(chatId)
+        if (run === undefined) return { status: "unsupported" } as const
+        const session = yield* SessionStore.get(sessionId).pipe(
+          Effect.orElseSucceed(() => null)
+        )
+        if (!session?.chats.some((chat) => chat.id === chatId)) {
+          return { status: "unsupported" } as const
+        }
+        return yield* run.steer(text, images)
+      })
+
     return {
       /**
        * Whether any session is mid-run. Read by the learning daemon so a
@@ -1545,6 +1614,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
       decideGate,
       answerQuestion,
       setMode,
+      steer,
       stop,
       commentPlanStep,
       revisePlan,

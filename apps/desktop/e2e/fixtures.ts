@@ -284,11 +284,25 @@ process.stdin.on("data", (chunk) => {
       }
       if (msg.method === "thread/compact/start") {
         send({ id: msg.id, result: {} })
+        setTimeout(
+          () =>
+            send({
+              method: "turn/completed",
+              params: {
+                threadId: "thread-e2e",
+                turn: { id: "compact-e2e", status: "completed", error: null }
+              }
+            }),
+          20
+        )
       }
       if (msg.method === "turn/start") {
         send({ id: msg.id, result: { turn: { id: "turn-e2e" } } })
         const isDigest = JSON.stringify(msg.params?.input ?? "").includes(
           "You are compacting a coding session's context"
+        )
+        const holdForSteer = JSON.stringify(msg.params?.input ?? "").includes(
+          "Exercise native steering"
         )
         const reply = isDigest
           ? '{"goal":"Continue the legacy Codex session.","recentWork":["Loaded the existing session transcript."],"nextStep":"Continue the implementation.","decisions":[],"filesTouched":[],"openThreads":["The implementation is still active."],"preferences":[],"midFlow":true,"midFlowReason":"The implementation is still active."}'
@@ -322,8 +336,11 @@ process.stdin.on("data", (chunk) => {
                 turn: { id: "turn-e2e", status: "completed", error: null }
               }
             }),
-          isDigest ? 40 : 3000
+          isDigest ? 40 : holdForSteer ? 60000 : 3000
         )
+      }
+      if (msg.method === "turn/steer") {
+        send({ id: msg.id, result: { turnId: msg.params?.expectedTurnId } })
       }
       if (msg.method === "turn/interrupt") {
         send({ id: msg.id, result: {} })

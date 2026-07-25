@@ -102,11 +102,11 @@ export const CodeReview: Story = {
   render: () => (
     <div className="min-h-screen bg-canvas">
       <LookFor>
-        <strong className="text-text-bright">Look for:</strong> both rails docked at 1240 and 720.
-        At 500 and 380 they unmount from the row and two toggle buttons appear in the header —
-        clicking either floats it as a sheet OVER the diff. The diff column should never fall below
-        a readable width, and the header should wrap rather than clip its &quot;Finish review&quot;
-        button.
+        <strong className="text-text-bright">Look for:</strong> both rails docked only while their
+        saved widths leave at least 560px for the diff. Otherwise two toggle buttons appear in the
+        header — clicking either floats it as a sheet OVER the diff. The diff column should never
+        fall below a readable width, and the header should wrap rather than clip its &quot;Finish
+        review&quot; button.
       </LookFor>
       <WidthLadder height={420} render={() => <CodeReviewPane />} />
     </div>

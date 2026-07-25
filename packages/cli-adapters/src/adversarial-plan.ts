@@ -26,6 +26,8 @@ import type { AgentContext, SessionSpec } from "./adapter.js"
 import { CliAdapter, isChildLifecycle, PlanDecision } from "./adapter.js"
 import type { AvailableAgent } from "./adversarial-plan-prompt.js"
 import { critiquePrompt, planAsText, proposalPrompt, revisionPrompt } from "./adversarial-plan-prompt.js"
+import { createCodexAppServerDiagnostics } from "./codex-app-server-diagnostics.js"
+import { mapCodexAppServerReasoning } from "./codex-app-server-run.js"
 import { extractJsonBlock } from "./review.js"
 import { parsePlan } from "./plan-parse.js"
 
@@ -382,6 +384,7 @@ const runRole = (
     const collected = yield* Ref.make<ReadonlyArray<string>>([])
     const childFailure = yield* Ref.make<string | null>(null)
     const agentId = ROLE_IDS[role]
+    const childSessionId = `${agentId}_${input.sessionId}`
 
     const spec: SessionSpec = {
       cli: who.cli,
@@ -458,7 +461,7 @@ const runRole = (
       cli: who.cli
     })
     const outcome = yield* adapter
-      .run(`${agentId}_${input.sessionId}`, spec, ctx)
+      .run(childSessionId, spec, ctx)
       .pipe(
         // Bounded so a role that never terminates fails the round LOUDLY rather
         // than leaving the session at "Idle" forever. `Effect.either` below is
@@ -480,6 +483,21 @@ const runRole = (
       // Name WHICH failure. "The Proposing step failed" sends you to the logs;
       // "gave up after 8 minutes" tells you it stalled rather than errored.
       const timedOut = outcome.left._tag === "RoleTimedOut"
+      if (timedOut && who.cli === "codex") {
+        const diagnostics = createCodexAppServerDiagnostics(
+          process.env.STARBASE_CODEX_DIAGNOSTICS_DIR,
+          {
+            sessionId: childSessionId,
+            model: who.model,
+            reasoningEffort: mapCodexAppServerReasoning(input.reasoning?.effort) ?? null
+          }
+        )
+        diagnostics?.record("planner.role_timeout", {
+          role,
+          timeout: ROLE_TIMEOUT
+        })
+        diagnostics?.close()
+      }
       return yield* Effect.fail(
         new PlanError({
           message: timedOut
