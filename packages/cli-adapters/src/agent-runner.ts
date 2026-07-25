@@ -60,8 +60,10 @@ import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore } from "./plan-store.js"
+import type { RunHolder } from "./run-coordinator.js"
 import {
   anySessionRunActive,
+  reclaimSessionRun,
   releaseSessionRun,
   reserveSessionRun
 } from "./run-coordinator.js"
@@ -207,6 +209,16 @@ interface RunFiber {
   readonly chatId: string
   readonly fiber: Fiber.RuntimeFiber<void, never>
   readonly token: RunToken
+  /**
+   * Whether this run has already emitted its terminal event.
+   *
+   * A live fiber does NOT mean a live turn. The real Claude adapter's `for await`
+   * over the SDK never breaks on `result`, so a run keeps consuming after `Done`
+   * for as long as a background task keeps the session open — minutes or hours.
+   * Single-flight is about TURNS, so the refusal has to read this rather than
+   * fiber liveness, or a backgrounded task locks its chat for its whole lifetime.
+   */
+  readonly settled: Ref.Ref<boolean>
 }
 
 /**
@@ -1518,7 +1530,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           )
           const fiber = yield* Effect.forkScoped(run)
           yield* Ref.update(fibers, (m) =>
-            new Map(m).set(chatId, { sessionId, chatId, fiber, token })
+            new Map(m).set(chatId, { sessionId, chatId, fiber, token, settled: sawTerminal })
           )
 
           // Watchdog the FIRST event.
@@ -1575,7 +1587,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               // message ids from the same transcript snapshot, colliding. Refuse
               // the second (a racing double-send, a second window). Distinct
               // chats reserve distinct owners and are always admitted.
-              const admitted = yield* reserveSessionRun(sessionId, chatId)
+              // This run's identity as the reservation holder. Minted here, not
+              // reused from `RunToken`, because the slot is claimed before the run
+              // (and its token) exists — and because a reclaim must be able to
+              // supersede a holder that is still unwinding.
+              const holder: RunHolder = {}
+              const admitted = yield* reserveSessionRun(sessionId, chatId, holder)
               if (!admitted) {
                 // A refusal is only legitimate while a run is actually live.
                 // The reservation is released by a finalizer on the STREAM's
@@ -1593,19 +1610,27 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
                 // reservation outlived its run. Reclaim it rather than making
                 // the operator restart the app.
                 const running = (yield* Ref.get(fibers)).get(chatId)
+                // A run whose turn has SETTLED holds nothing worth protecting.
+                // Single-flight exists so two turns can't race one chat's
+                // transcript and `fibers` slot; once the terminal event is out,
+                // that turn is over and the next prompt is not a race with it.
+                // Reading fiber liveness alone made a backgrounded task — which
+                // deliberately keeps the harness consuming long past `Done` —
+                // refuse its own chat for as long as the task ran, with the
+                // composer showing an idle send button and nothing to stop.
                 const stale =
                   running === undefined ||
-                  Option.isSome(yield* Fiber.poll(running.fiber))
+                  Option.isSome(yield* Fiber.poll(running.fiber)) ||
+                  (yield* Ref.get(running.settled))
                 if (!stale) {
                   return Stream.fromIterable<StreamEvent>([{
                     _tag: "Failed",
                     message: "This chat is already running. Wait for it to finish or stop it before sending again."
                   }])
                 }
-                yield* releaseSessionRun(sessionId, chatId)
-                yield* reserveSessionRun(sessionId, chatId)
+                yield* reclaimSessionRun(sessionId, chatId, holder)
               }
-              yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, chatId))
+              yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, chatId, holder))
               return yield* promptSetup(
                 sessionId,
                 chatId,

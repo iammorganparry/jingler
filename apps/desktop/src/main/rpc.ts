@@ -805,13 +805,14 @@ export const planExecute = (
       // edit and command twice. Distinct chats/plans reserve distinct owners and
       // still run concurrently.
       const reservation = `plan:${planId}`
-      const admitted = yield* reserveSessionRun(sessionId, reservation)
+      const holder = {}
+      const admitted = yield* reserveSessionRun(sessionId, reservation, holder)
       if (!admitted) {
         return Stream.fail(
           new PlanError({ message: "This plan is already executing." })
         )
       }
-      yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, reservation))
+      yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, reservation, holder))
       const persistedArtifact = yield* PlanStore.readArtifact(worktreePath)
       const migrationChat = session.chats.find(
         (chat) => chat.id === `c_${session.id}_1`
@@ -1212,7 +1213,8 @@ export const planAdversarial = (
       // the artifact gone. A constant owner refuses any second round in the
       // session until the artifact can hold more than one plan.
       const reservation = "planning"
-      const admitted = yield* reserveSessionRun(sessionId, reservation)
+      const holder = {}
+      const admitted = yield* reserveSessionRun(sessionId, reservation, holder)
       if (!admitted) {
         return Stream.fail(
           new PlanError({
@@ -1220,7 +1222,7 @@ export const planAdversarial = (
           })
         )
       }
-      yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, reservation))
+      yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, reservation, holder))
       if (chatId === `c_${session.id}_1`) {
         yield* TranscriptStore.adoptLegacy(sessionId, chatId)
       }

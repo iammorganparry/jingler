@@ -387,6 +387,35 @@ Add the existing limiter to the refund route and verify its rejection path.`
         return
       }
 
+      /**
+       * A harness that is STILL ALIVE after the turn it just ended.
+       *
+       * This is what the real Claude adapter does and the plain `[[background]]`
+       * marker does not: its `for await` over the SDK never breaks on `result`, so
+       * `run` keeps consuming — that is how a backgrounded task's
+       * `task_notification` bookend arrives after `Done`. The scripted harness
+       * returning immediately made that whole window untestable, and the window is
+       * exactly where the chat's run reservation is still held while the renderer,
+       * which went idle on `Done`, shows a send button.
+       */
+      if (spec.prompt.includes("[[background-live-harness]]")) {
+        yield* emit({
+          _tag: "BackgroundTaskStarted",
+          id: `bglive_${sessionId}`,
+          description: "Watching the test suite",
+          taskType: "bash",
+          subagentType: null,
+          toolUseId: null
+        })
+        yield* emit({ _tag: "BackgroundTasksChanged", ids: [`bglive_${sessionId}`] })
+        yield* emit({ _tag: "Assistant", text: "Started a watcher in the background." })
+        yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        // Deliberately no `return`: the turn has settled but the harness has not
+        // exited, which is the real adapter's shape.
+        yield* Effect.sleep("60 seconds")
+        return
+      }
+
       if (spec.prompt.includes("[[background]]")) {
         const taskId = `bgtask_${sessionId}`
         yield* registerBackgroundStop(async (id) => {
