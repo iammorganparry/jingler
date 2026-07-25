@@ -416,6 +416,40 @@ Add the existing limiter to the refund route and verify its rejection path.`
         return
       }
 
+      /**
+       * A background task that FINISHES on its own, after its turn is over.
+       *
+       * The bookend is the whole point: a real harness reports settlement through a
+       * later `task_notification`, which only arrives if the process is still
+       * consuming — so this is the case that proves the run outlives the turn and
+       * the dock learns the outcome without the operator prompting again.
+       */
+      if (spec.prompt.includes("[[background-completes]]")) {
+        const taskId = `bgdone_${sessionId}`
+        yield* emit({
+          _tag: "BackgroundTaskStarted",
+          id: taskId,
+          description: "Watching the test suite",
+          taskType: "bash",
+          subagentType: null,
+          toolUseId: null
+        })
+        yield* emit({ _tag: "BackgroundTasksChanged", ids: [taskId] })
+        yield* emit({ _tag: "Assistant", text: "Started a watcher in the background." })
+        yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        // The turn is over. The work is not.
+        yield* Effect.sleep("2 seconds")
+        yield* emit({
+          _tag: "BackgroundTaskSettled",
+          id: taskId,
+          status: "completed",
+          summary: "42 tests passed.",
+          outputFile: null
+        })
+        yield* emit({ _tag: "BackgroundTasksChanged", ids: [] })
+        return
+      }
+
       if (spec.prompt.includes("[[background]]")) {
         const taskId = `bgtask_${sessionId}`
         yield* registerBackgroundStop(async (id) => {

@@ -207,3 +207,62 @@ test("a reloaded window can still talk to a chat whose background task runs on",
   await expect(window.getByText(/This chat is already running/)).toHaveCount(0)
   await expect(window.getByText("src/routes/billing.ts").first()).toBeVisible({ timeout: 20_000 })
 })
+
+test("a task that finishes after its turn reports its outcome, unprompted", async ({
+  launchApp
+}) => {
+  // "Aware of when it's done": the operator backgrounds something, carries on, and
+  // the dock tells them how it went WITHOUT another prompt.
+  //
+  // This is the case that could not work before. A real harness reports settlement
+  // through a later `task_notification`, which only arrives while the process is
+  // still consuming — and the run used to be killed the moment the renderer left
+  // `running` on `Done`. The row stayed "running" forever over a dead process.
+  const { window } = await launch(launchApp)
+  await window.getByText("Background session").click()
+  await window
+    .getByPlaceholder(/message claude/i)
+    .fill("watch the tests [[background-completes]]")
+  await window.getByRole("button", { name: /send/i }).click()
+
+  // The turn is over and the work is still going.
+  await expect(window.getByText("Started a watcher in the background.")).toBeVisible()
+  await expect(window.getByText("1 running")).toBeVisible()
+
+  await expandDock(window)
+  const row = window.locator("[data-testid^='bg-task-']").first()
+  await expect(row).toHaveAttribute("data-status", "running")
+
+  // Nothing is sent from here on: the outcome has to arrive on its own.
+  await expect(row).toHaveAttribute("data-status", "completed", { timeout: 20_000 })
+  await expect(row).toContainText("42 tests passed.")
+  await expect(window.getByText("1 running")).toHaveCount(0)
+})
+
+test("the chat is usable while a task runs, and reports the task's outcome after", async ({
+  launchApp
+}) => {
+  // The two halves together, which is what the operator actually experiences:
+  // talk to the agent while the work runs, and still be told how the work ended.
+  const { window } = await launch(launchApp)
+  await window.getByText("Background session").click()
+  await window
+    .getByPlaceholder(/message claude/i)
+    .fill("watch the tests [[background-completes]]")
+  await window.getByRole("button", { name: /send/i }).click()
+  await expect(window.getByText("1 running")).toBeVisible()
+
+  // Talk to the main agent mid-task.
+  await window.getByPlaceholder(/message claude/i).fill("summarise the repo")
+  await window.getByRole("button", { name: /send/i }).click()
+  await expect(window.getByText(/This chat is already running/)).toHaveCount(0)
+  await expect(window.getByText("src/routes/billing.ts").first()).toBeVisible({ timeout: 20_000 })
+
+  // And the background work still reports its outcome.
+  await expandDock(window)
+  await expect(window.locator("[data-testid^='bg-task-']").first()).toHaveAttribute(
+    "data-status",
+    "completed",
+    { timeout: 20_000 }
+  )
+})

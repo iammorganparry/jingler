@@ -37,6 +37,7 @@ import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Schedule, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
+import { runLifetime } from "./run-lifetime.js"
 import { planNote } from "./plan-prompt.js"
 import { questionNote } from "./question-prompt.js"
 import { gigaplanIntakePrompt } from "./gigaplan-intake-prompt.js"
@@ -1554,63 +1555,61 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           )
 
           /**
-           * Detaching MID-TURN still stops the agent.
+           * How long a settled run is given to finish under its own steam.
            *
-           * Only a settled turn earns the right to run on. A stream abandoned
-           * before its terminal event is a turn nobody is watching and nobody
-           * asked to background — leaving it alive would burn tokens invisibly,
-           * which is the behaviour the scoped fork got right.
+           * A harness that ends its stream at turn end is already unwinding, and
+           * interrupting it there races the finalizers that persist the transcript
+           * — insisting too early truncates the very turn just completed. Only a
+           * run still alive after this is genuinely lingering.
+           */
+          const SELF_EXIT_GRACE = "5 seconds"
+
+          /** Unsettled background tasks belonging to this chat, right now. */
+          const liveTasks = BackgroundTaskStore.liveFor(sessionId, chatId).pipe(
+            Effect.provide(env),
+            Effect.orElseSucceed(() => 0)
+          )
+
+          /** Read the run's fate from the policy in `run-lifetime.ts`. */
+          const fate = (consumerAttached: boolean) =>
+            Effect.gen(function* () {
+              return runLifetime({
+                turnSettled: yield* Ref.get(sawTerminal),
+                consumerAttached,
+                liveBackgroundTasks: yield* liveTasks
+              })
+            })
+
+          /**
+           * Detaching mid-turn stops the agent; detaching after it settled does not.
            *
-           * The mailbox is ended either way: once nothing is reading it, every
+           * The mailbox is ended either way — once nothing is reading it, every
            * further event is a write into a buffer that will never be drained.
            */
           yield* Effect.addFinalizer(() =>
             Effect.gen(function* () {
-              if (!(yield* Ref.get(sawTerminal))) yield* Fiber.interrupt(fiber)
+              const decision = yield* fate(false)
+              if (decision.verdict === "end") yield* Fiber.interrupt(fiber)
               yield* out.end
             })
           )
 
           /**
-           * Once the turn has settled the run exists only to service background
-           * tasks, so it ends when the last one does.
+           * Outlive the turn for as long as there is background work, then stop.
            *
-           * Polled rather than pushed because settlement arrives through the
-           * harness's own signals (a `task_notification` bookend, an operator
-           * stop), which land in the registry — there is no completion channel to
-           * await. A second is far below human patience for "is it finished yet"
-           * and costs one map read.
-           *
-           * Interrupting is safe here precisely because the turn has settled:
-           * `onInterrupt` only writes its "Stopped." note when the turn has no
-           * terminal event yet, so this cannot overwrite the real outcome.
+           * Polled because settlement arrives through the harness's own signals (a
+           * completion bookend, an operator stop) which land in the task registry —
+           * there is no completion channel to await. A second is far below human
+           * patience for "is it finished yet" and costs one map read.
            */
           yield* Effect.forkDaemon(
             Effect.gen(function* () {
               yield* Deferred.await(turnSettled)
-              yield* Effect.repeat(
-                Effect.void,
-                Schedule.spaced("1 seconds").pipe(
-                  Schedule.untilInputEffect(() =>
-                    Effect.map(
-                      BackgroundTaskStore.liveFor(sessionId, chatId).pipe(
-                        Effect.provide(env),
-                        Effect.orElseSucceed(() => 0)
-                      ),
-                      (live) => live === 0
-                    )
-                  )
-                )
-              )
-              // Let the run finish on its OWN first. A harness that ends its
-              // stream at turn end — the scripted adapter, and any real one with
-              // nothing left to report — is already unwinding, and interrupting it
-              // here would race its finalizers: the transcript is persisted in
-              // them, so insisting too early truncates the very turn just
-              // completed. Only a run that is still alive after that grace is
-              // genuinely lingering, and only that one gets interrupted.
+              while ((yield* fate(true)).verdict === "run") {
+                yield* Effect.sleep("1 seconds")
+              }
               yield* Fiber.await(fiber).pipe(
-                Effect.timeout("5 seconds"),
+                Effect.timeout(SELF_EXIT_GRACE),
                 Effect.catchAll(() => Fiber.interrupt(fiber))
               )
             })
