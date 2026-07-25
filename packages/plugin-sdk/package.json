@@ -3,14 +3,19 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Types and helpers for writing a Starbase plugin — the renderer half (`.`) and the extension-host half (`./host`).",
+  "description": "Types and helpers for writing a Starbase plugin \u2014 the renderer half (`.`) and the extension-host half (`./host`).",
   "exports": {
     ".": "./src/index.ts",
     "./host": "./src/host.ts",
-    "./vite": "./src/vite.ts"
+    "./vite": {
+      "types": "./vite.d.ts",
+      "default": "./vite.mjs"
+    }
   },
   "files": [
     "src",
+    "vite.mjs",
+    "vite.d.ts",
     "starbase.plugin.schema.json",
     "AGENTS.md",
     "api-digest.md"
