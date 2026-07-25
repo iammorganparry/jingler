@@ -1801,21 +1801,44 @@ const pluginStorageGet = (pluginId: string, key: string) =>
     Effect.orElseSucceed(() => null)
   )
 
-const pluginStorageSet = (pluginId: string, key: string, value: unknown) =>
+/** Write the whole blob back. Shared by set and delete. */
+const pluginStorageWrite = (pluginId: string, all: Record<string, unknown>) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const { root, file } = yield* pluginStorageFile(pluginId)
-    const all = yield* pluginStorageRead(pluginId)
     yield* fs.makeDirectory(root, { recursive: true }).pipe(Effect.ignore)
-    yield* fs
-      .writeFileString(file, JSON.stringify({ ...all, [key]: value }, null, 2))
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new PluginError({ pluginId, reason: `could not write plugin storage`, cause })
-        )
+    yield* fs.writeFileString(file, JSON.stringify(all, null, 2)).pipe(
+      Effect.mapError(
+        (cause) => new PluginError({ pluginId, reason: "could not write plugin storage", cause })
       )
+    )
   })
+
+const pluginStorageSet = (pluginId: string, key: string, value: unknown) =>
+  Effect.flatMap(pluginStorageRead(pluginId), (all) =>
+    pluginStorageWrite(pluginId, { ...all, [key]: value })
+  )
+
+/**
+ * Remove a key.
+ *
+ * Not `set(key, null)`: a key present with a null value still appears in
+ * `storageKeys`, so folding the two together would make a deleted key show up
+ * in a listing forever.
+ */
+const pluginStorageDelete = (pluginId: string, key: string) =>
+  Effect.flatMap(pluginStorageRead(pluginId), (all) => {
+    if (!(key in all)) return Effect.void
+    const { [key]: _removed, ...rest } = all
+    return pluginStorageWrite(pluginId, rest)
+  })
+
+/** Declared never-failing: an unreadable store lists nothing, same as an empty one. */
+const pluginStorageKeys = (pluginId: string) =>
+  pluginStorageRead(pluginId).pipe(
+    Effect.map((all) => Object.keys(all)),
+    Effect.orElseSucceed(() => [] as Array<string>)
+  )
 
 /**
  * Handlers for every procedure in the group. Each one delegates straight to an
@@ -2220,6 +2243,10 @@ const HandlersLayer = StarbaseRpcs.toLayer({
 
   "Plugins.storageSet": ({ pluginId, key, value }) =>
     pluginStorageSet(pluginId, key, value),
+
+  "Plugins.storageDelete": ({ pluginId, key }) => pluginStorageDelete(pluginId, key),
+
+  "Plugins.storageKeys": ({ pluginId }) => pluginStorageKeys(pluginId),
 
   // No grants can exist until the host can request them, so the honest answer
   // is an empty list rather than a failure — Settings renders "nothing granted".

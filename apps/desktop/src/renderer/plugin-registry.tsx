@@ -127,7 +127,9 @@ export function PluginProvider({ children }: { children: ReactNode }) {
         // Every plugin body is wrapped HERE rather than in the loader, so the
         // boundary is guaranteed present no matter who built the contribution.
         render: (session: Parameters<typeof tab.render>[0], ctx: Parameters<typeof tab.render>[1]) => (
-          <PluginTabHost pluginId={plugin.id}>{tab.render(session, ctx)}</PluginTabHost>
+          <PluginTabHost pluginId={plugin.id} session={session}>
+            {tab.render(session, ctx)}
+          </PluginTabHost>
         )
       }))
     )

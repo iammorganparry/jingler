@@ -65,5 +65,16 @@ export type {
 
 export type { Disposable, PluginStorage, SessionSnapshot } from "./common.js"
 
-export type { HostBridge } from "./hooks.js"
 export { useCommand, useHost, usePluginStorage, useSession } from "./hooks.js"
+export type { HostBridge, PluginViewValue } from "./context.js"
+
+/**
+ * Starbase's own wiring. A plugin never imports these — the host uses them to
+ * scope the hooks above to one rendered view.
+ *
+ * Exported from the public entrypoint rather than a private path because the
+ * renderer resolves `@starbase/plugin-sdk` to this exact module, and plugins
+ * resolve it to a shim over the same instance. One module, one context object;
+ * a second copy would make `useContext` silently return null in every plugin.
+ */
+export { PluginViewContext, PluginViewProvider } from "./context.js"

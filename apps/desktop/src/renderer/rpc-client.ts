@@ -792,6 +792,15 @@ export const rpc = {
   pluginsStorageSet: (pluginId: string, key: string, value: unknown): Promise<void> =>
     run((c) => c.Plugins.storageSet({ pluginId, key, value })),
 
+  pluginsStorageDelete: (pluginId: string, key: string): Promise<void> =>
+    run((c) => c.Plugins.storageDelete({ pluginId, key })),
+
+  pluginsStorageKeys: (pluginId: string): Promise<ReadonlyArray<string>> =>
+    run((c) => c.Plugins.storageKeys({ pluginId })),
+
+  pluginsInvoke: (pluginId: string, commandId: string, arg?: unknown): Promise<unknown> =>
+    run((c) => c.Plugins.invoke({ pluginId, commandId, arg })),
+
   pluginsAuthSessions: (): Promise<ReadonlyArray<AuthSessionInfo>> =>
     run((c) => c.Plugins.authSessions()),
 

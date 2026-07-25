@@ -1,71 +1,39 @@
 /**
  * The hooks a plugin's UI half calls.
  *
- * ## Why these are declarations, not implementations
+ * All four resolve through {@link PluginViewContext}, which Starbase provides
+ * around every plugin view. See `context.ts` for why that is a context rather
+ * than the module-level "current plugin" this originally used — the short
+ * version is that a split window renders several plugins at once, and a global
+ * would hand every one of them whichever rendered last.
  *
- * A plugin does not construct its own bridge to Starbase — it is handed one.
- * The app publishes the real implementations onto a runtime object before React
- * mounts, and the `@starbase/plugin-sdk` specifier in a plugin's bundle resolves
- * (through an importmap) to a generated shim that re-exports off it.
- *
- * So these functions are thin lookups against that runtime. The alternative —
- * having the SDK import Starbase's internals — would make every plugin bundle
- * carry a copy of the app, and would mean a plugin built against one version
- * silently ran against another's data structures.
- *
- * The named error below matters more than it looks: without it, a plugin that
- * somehow loads before the runtime is published fails with
- * `Cannot read properties of undefined`, three frames into someone else's
- * component, with nothing naming Starbase at all.
+ * The thrown error below is load-bearing. Without it, calling a hook outside a
+ * plugin view fails with `Cannot read properties of null`, several frames into
+ * someone else's component, naming nothing that would help.
  */
+import { useContext, useMemo } from "react"
 import type { PluginStorage, SessionSnapshot } from "./common.js"
+import { PluginViewContext, type HostBridge, type PluginViewValue } from "./context.js"
 
-/** What a plugin's UI half can ask the app for. */
-export interface HostBridge {
-  /**
-   * Run a command registered by this plugin's host half, and get its result.
-   *
-   * This is the only route from a plugin's UI to anything outside the renderer:
-   * the network, a CLI, the filesystem. The renderer's CSP does not allow a
-   * plugin to make requests directly, by design.
-   *
-   * @example
-   * ```ts
-   * const issues = await useHost().invoke<Issue[]>("linear.sync")
-   * ```
-   */
-  invoke<T = unknown>(commandId: string, arg?: unknown): Promise<T>
-  /** This plugin's private key/value store, shared with its host half. */
-  readonly storage: PluginStorage
-  /** Open a URL in the operator's real browser. */
-  openExternal(url: string): Promise<void>
-}
-
-interface PluginRuntime {
-  readonly bridge: (pluginId: string) => HostBridge
-  readonly session: () => SessionSnapshot
-  readonly pluginId: () => string
-}
-
-const runtime = (): PluginRuntime => {
-  const found = (globalThis as { __STARBASE_PLUGIN_API__?: PluginRuntime })
-    .__STARBASE_PLUGIN_API__
-  if (!found) {
+const useView = (hook: string): PluginViewValue => {
+  const value = useContext(PluginViewContext)
+  if (!value) {
     throw new Error(
-      "Starbase plugin API is unavailable. A plugin hook was called outside a plugin view, or before the app finished booting."
+      `${hook}() was called outside a Starbase plugin view. Plugin hooks only work inside a component rendered by a contributed tab or pane.`
     )
   }
-  return found
+  return value
 }
 
 /**
  * The bridge to this plugin's host half and its storage.
  *
- * Call inside a view rendered by Starbase — the plugin's identity comes from
- * the surrounding render, so there is nothing to pass in.
+ * The plugin's identity comes from the surrounding render, so there is nothing
+ * to pass in — and nothing a plugin can pass that would let it reach another
+ * plugin's commands or storage.
  *
  * @example
- * ```ts
+ * ```tsx
  * function IssuesTab({ session }: TabProps) {
  *   const host = useHost()
  *   const [issues, setIssues] = useState<Issue[]>([])
@@ -79,26 +47,27 @@ const runtime = (): PluginRuntime => {
  * @throws If called outside a plugin view.
  */
 export function useHost(): HostBridge {
-  const api = runtime()
-  return api.bridge(api.pluginId())
+  return useView("useHost").bridge
 }
 
 /**
- * The session this tab is decorating.
+ * The session this view is decorating.
  *
  * The same value a view receives as `props.session` — useful in a nested
  * component that would otherwise have to thread it down.
  *
  * @example
- * ```ts
+ * ```tsx
  * function Header() {
  *   const session = useSession()
  *   return <h2 className="text-text">{session.repo}</h2>
  * }
  * ```
+ *
+ * @throws If called outside a plugin view.
  */
 export function useSession(): SessionSnapshot {
-  return runtime().session()
+  return useView("useSession").session
 }
 
 /**
@@ -106,33 +75,42 @@ export function useSession(): SessionSnapshot {
  *
  * Namespaced to the plugin and shared with its host half, so a value written
  * during `activate` is readable here. Survives restarts; the plugin never learns
- * where it lands on disk.
+ * where it lands on disk, which is what stops one plugin reaching another's keys.
  *
  * @example
  * ```ts
  * const store = usePluginStorage()
  * await store.set("lastSync", new Date().toISOString())
+ * const last = await store.get<string>("lastSync")
  * ```
+ *
+ * @throws If called outside a plugin view.
  */
 export function usePluginStorage(): PluginStorage {
-  return useHost().storage
+  return useView("usePluginStorage").bridge.storage
 }
 
 /**
  * A bound callable for one of this plugin's host commands.
  *
- * Sugar over {@link useHost}'s `invoke` for the common case of wiring a button
- * to a command.
+ * Sugar over {@link useHost}'s `invoke` for the common case of wiring a control
+ * to a command. The returned function is referentially stable for a given
+ * command id, so it is safe in a dependency array.
  *
  * @example
- * ```ts
+ * ```tsx
  * const sync = useCommand<void>("linear.sync")
  * return <button type="button" onClick={() => void sync()}>Sync</button>
  * ```
+ *
+ * @throws If called outside a plugin view.
  */
 export function useCommand<T = unknown>(
   commandId: string
 ): (arg?: unknown) => Promise<T> {
-  const host = useHost()
-  return (arg?: unknown) => host.invoke<T>(commandId, arg)
+  const { bridge } = useView("useCommand")
+  return useMemo(
+    () => (arg?: unknown) => bridge.invoke<T>(commandId, arg),
+    [bridge, commandId]
+  )
 }

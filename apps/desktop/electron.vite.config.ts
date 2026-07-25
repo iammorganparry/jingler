@@ -23,7 +23,8 @@ const workspacePackages = [
   "@starbase/contracts",
   "@starbase/cli-adapters",
   "@starbase/themes",
-  "@starbase/ui"
+  "@starbase/ui",
+  "@starbase/plugin-sdk"
 ]
 
 export default defineConfig({

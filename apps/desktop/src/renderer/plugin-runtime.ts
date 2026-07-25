@@ -26,17 +26,21 @@
  */
 import * as React from "react"
 import * as jsxRuntime from "react/jsx-runtime"
+import * as sdkModule from "@starbase/plugin-sdk"
 
 /** What the generated shims destructure. Keys match `RUNTIME_MODULES`. */
 export interface StarbaseRuntime {
   readonly react: typeof React
   readonly jsxRuntime: typeof jsxRuntime
   /**
-   * The plugin SDK's renderer half.
+   * The plugin SDK's renderer half — this app's instance of it.
    *
-   * Populated by `publishPluginSdk` rather than imported here, because the SDK
-   * needs hooks that read this app's contexts — importing it at module scope
-   * would make the dependency circular.
+   * Publishing the app's own copy is the whole point. The SDK owns the React
+   * context the hooks read, and a context object is only meaningful to the
+   * module that created it: if a plugin got a second copy of the SDK, its
+   * `useHost()` would read a DIFFERENT context, find null, and throw "called
+   * outside a plugin view" from inside a plugin view. One SDK instance, reached
+   * through the shim, is what makes the hooks work at all.
    */
   readonly sdk: Record<string, unknown>
 }
@@ -46,32 +50,23 @@ declare global {
   var __STARBASE_RUNTIME__: StarbaseRuntime | undefined
 }
 
-const sdk: Record<string, unknown> = {}
-
 /**
  * Publish the runtime. Idempotent, and safe to call before anything mounts.
  *
- * The `sdk` object is installed by reference and filled in later, so a plugin
- * that imported the SDK shim during boot still observes the finished surface —
- * replacing the object wholesale would leave early importers holding an empty
- * one.
+ * Everything is available at module scope — React, the JSX runtime and the SDK
+ * are all ordinary imports — so there is nothing to fill in later and no window
+ * in which a plugin could observe a half-built surface. An earlier draft had a
+ * `publishPluginSdk` that populated the `sdk` object after the fact, which was
+ * both unnecessary and a bug waiting to happen: nothing ever called it, so every
+ * plugin's `import { useHost } from "@starbase/plugin-sdk"` resolved to
+ * `undefined`.
  */
 export const publishPluginRuntime = (): void => {
   globalThis.__STARBASE_RUNTIME__ ??= {
     react: React,
     jsxRuntime,
-    sdk
+    sdk: sdkModule as unknown as Record<string, unknown>
   }
-}
-
-/**
- * Fill in the SDK surface plugins import as `@starbase/plugin-sdk`.
- *
- * Mutates in place — see the note on {@link publishPluginRuntime}.
- */
-export const publishPluginSdk = (surface: Record<string, unknown>): void => {
-  publishPluginRuntime()
-  Object.assign(sdk, surface)
 }
 
 // Published on import, so `import "./plugin-runtime.js"` in main.tsx is enough

@@ -1562,6 +1562,23 @@ export class StarbaseRpcs extends RpcGroup.make(
   }),
 
   /**
+   * Remove a key from a plugin's store.
+   *
+   * Distinct from writing `null`: a key present with a null value still shows up
+   * in `storageKeys`, so folding delete into set would make the two disagree.
+   */
+  Rpc.make("Plugins.storageDelete", {
+    error: PluginError,
+    payload: { pluginId: PluginId, key: Schema.String }
+  }),
+
+  /** Every key currently set for a plugin. Empty when the store has never been written. */
+  Rpc.make("Plugins.storageKeys", {
+    success: Schema.Array(Schema.String),
+    payload: { pluginId: PluginId }
+  }),
+
+  /**
    * The granted auth sessions, for the Settings list that lets the operator see
    * and revoke what each plugin holds. Returns metadata only — `AuthSessionInfo`
    * has no token field, and that absence is the security boundary, not an

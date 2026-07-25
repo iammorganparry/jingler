@@ -146,6 +146,53 @@ describe("handlePluginRequest", () => {
     expect(source).not.toContain("import ")
   })
 
+  it("re-exports every SDK hook, derived from the real module rather than a list", async () => {
+    // The regression this exists for: the shim's bindings were once hand-listed,
+    // so adding an export to the SDK would compile, ship, and hand plugins
+    // `undefined` for a function that plainly exists.
+    const { handlePluginRequest } = await load()
+    const Sdk = await import("@starbase/plugin-sdk")
+    const source = await (
+      await handlePluginRequest("starbase-plugin://runtime/sdk.js")
+    ).text()
+
+    for (const name of Object.keys(Sdk).filter((n) => n !== "default")) {
+      expect(source, `${name} is re-exported`).toContain(`export const ${name} =`)
+    }
+    // And specifically the four hooks a plugin cannot work without.
+    for (const hook of ["useHost", "useSession", "usePluginStorage", "useCommand"]) {
+      expect(source).toContain(`export const ${hook} =`)
+    }
+  })
+
+  it("re-exports the SDK's context, without which every plugin hook throws", async () => {
+    // `PluginViewProvider` is how the app scopes the hooks to one view. If the
+    // shim dropped it, a plugin's `useHost()` would read a context the app never
+    // filled and report being outside a plugin view from inside one.
+    const { handlePluginRequest } = await load()
+    const source = await (
+      await handlePluginRequest("starbase-plugin://runtime/sdk.js")
+    ).text()
+    expect(source).toContain("export const PluginViewContext =")
+    expect(source).toContain("export const PluginViewProvider =")
+  })
+
+  it("emits only valid identifiers, so the shim parses as a module", async () => {
+    const { handlePluginRequest } = await load()
+    for (const mod of ["react.js", "jsx-runtime.js", "sdk.js"]) {
+      const source = await (
+        await handlePluginRequest(`starbase-plugin://runtime/${mod}`)
+      ).text()
+      // A namespace carries `default` and may carry `__esModule`; neither is
+      // legal after `export const`, and one slipping through is a syntax error
+      // that takes out every plugin at once.
+      expect(source).not.toMatch(/export const (default|__esModule)\b/)
+      for (const [, name] of source.matchAll(/export const ([^\s=]+) =/g)) {
+        expect(name).toMatch(/^[A-Za-z_$][A-Za-z0-9_$]*$/)
+      }
+    }
+  })
+
   it("serves the jsx-runtime shim, which every compiled plugin component needs", async () => {
     const { handlePluginRequest } = await load()
     const response = await handlePluginRequest("starbase-plugin://runtime/jsx-runtime.js")

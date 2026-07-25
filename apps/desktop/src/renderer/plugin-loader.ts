@@ -30,6 +30,7 @@
  */
 import { createElement, type ComponentType } from "react"
 import type { LoadedPlugin, Session } from "@starbase/core"
+import { useSession, type SessionSnapshot } from "@starbase/plugin-sdk"
 import {
   PLUGIN_TAB_ORDER,
   type TabContribution,
@@ -46,9 +47,33 @@ export interface PluginModule {
 
 /** What a plugin's view component is handed. */
 export interface PluginViewProps {
-  readonly session: Session
+  readonly session: SessionSnapshot
   readonly pluginId: string
 }
+
+/**
+ * Narrow an internal `Session` to the subset a plugin may see.
+ *
+ * Starbase's `Session` carries ~25 fields — cost meters, token accounting, chat
+ * arrays, worktree bookkeeping — and handing the whole thing to third-party code
+ * would make every one of them a de-facto public API that cannot be reshaped
+ * without breaking plugins. `SessionSnapshot` is the deliberately small, stable
+ * subset the SDK documents, and this function is the only place the two meet.
+ *
+ * Built field-by-field rather than spread-and-omit on purpose: a new field added
+ * to `Session` should NOT silently become visible to plugins, and a spread would
+ * make it so.
+ */
+export const toSessionSnapshot = (session: Session): SessionSnapshot => ({
+  id: session.id,
+  repo: session.repo,
+  branch: session.branch,
+  title: session.title,
+  cli: session.cli,
+  prNumber: session.prNumber ?? null,
+  ...(session.issueNumber != null ? { issueNumber: session.issueNumber } : {}),
+  ...(session.worktreePath != null ? { worktreePath: session.worktreePath } : {})
+})
 
 /** A plugin that loaded, with the contributions it actually provided. */
 export interface ActivePlugin {
@@ -123,6 +148,20 @@ export const pluginModuleUrl = (plugin: LoadedPlugin): string =>
   `starbase-plugin://${plugin.manifest.id}/${(plugin.manifest.ui ?? "").replace(/^\.?\//, "")}?v=${encodeURIComponent(plugin.manifest.version)}`
 
 /**
+ * Renders a plugin's view with the props the SDK documents.
+ *
+ * Exists so the snapshot is read from context rather than threaded through the
+ * contribution's `render` argument — see the note at the call site.
+ */
+const PluginViewMount = ({
+  View,
+  pluginId
+}: {
+  View: ComponentType<PluginViewProps>
+  pluginId: string
+}) => createElement(View, { session: useSession(), pluginId })
+
+/**
  * Import one plugin's UI module and build its contributions.
  *
  * Never throws. Every failure comes back as `{ ok: false }` carrying a message
@@ -190,9 +229,15 @@ export const loadPluginUi = async (
       icon: resolveIcon(declared.icon),
       order: declared.order ?? PLUGIN_TAB_ORDER,
       when: visibilityPredicate(declared.when),
-      // `createElement` rather than JSX so this module stays a plain `.ts` —
-      // it is a loader, and the one element it builds is not worth the syntax.
-      render: (session) => createElement(View, { session, pluginId: manifest.id })
+      // The session comes from context, not from this argument. `PluginTabHost`
+      // wraps every plugin body and is the one place an internal `Session` is
+      // narrowed to a `SessionSnapshot`; taking it from the argument here would
+      // mean converting twice and, worse, leaving two definitions of what a
+      // plugin can see.
+      //
+      // `createElement` rather than JSX so this module stays a plain `.ts` — it
+      // is a loader, and the one element it builds is not worth the syntax.
+      render: () => createElement(PluginViewMount, { View, pluginId: manifest.id })
     })
   }
 

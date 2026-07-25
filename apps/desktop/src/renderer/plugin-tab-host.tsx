@@ -13,9 +13,15 @@
  */
 import { Component, type ErrorInfo, type ReactNode } from "react"
 import { TriangleAlert } from "lucide-react"
+import type { Session } from "@starbase/core"
+import { PluginViewProvider } from "@starbase/plugin-sdk"
+import { pluginBridge } from "./plugin-bridge.js"
+import { toSessionSnapshot } from "./plugin-loader.js"
 
 interface Props {
   readonly pluginId: string
+  /** The internal session. Narrowed to a `SessionSnapshot` before it is exposed. */
+  readonly session: Session
   readonly children: ReactNode
 }
 
@@ -51,7 +57,24 @@ export class PluginTabHost extends Component<Props, State> {
   }
 
   override render(): ReactNode {
-    if (this.state.message === null) return this.props.children
+    if (this.state.message === null) {
+      // The provider sits INSIDE the boundary, so a throw while building the
+      // context is caught by the same card as a throw in the plugin's own
+      // render. It is also the single place an internal `Session` is narrowed
+      // to the `SessionSnapshot` the SDK documents — a plugin never sees the
+      // other ~20 fields, which is what keeps them free to change.
+      return (
+        <PluginViewProvider
+          value={{
+            pluginId: this.props.pluginId,
+            session: toSessionSnapshot(this.props.session),
+            bridge: pluginBridge(this.props.pluginId)
+          }}
+        >
+          {this.props.children}
+        </PluginViewProvider>
+      )
+    }
 
     return (
       <div
