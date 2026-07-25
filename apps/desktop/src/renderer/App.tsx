@@ -18,7 +18,7 @@ import type {
   SessionActivity,
   User
 } from "@starbase/core"
-import { DEFAULT_THEME_ID } from "@starbase/core"
+import { DEFAULT_THEME_ID, MAX_CONCURRENT_SUBAGENTS_DEFAULT } from "@starbase/core"
 import {
   ConfirmDialog,
   LoadingScreen,
@@ -136,6 +136,8 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   // Absent means off — ADHD mode rewrites the voice of every session, so it is
   // opt-in rather than a default the operator has to discover and undo.
   const adhdMode = configQuery.data?.adhdMode ?? false
+  const maxConcurrentSubAgents =
+    configQuery.data?.maxConcurrentSubAgents ?? MAX_CONCURRENT_SUBAGENTS_DEFAULT
   const providersConfig = configQuery.data?.providers ?? null
   // Absent means "the first installed harness" — resolved downstream by
   // `newSessionCli`, so a fresh install creates sessions without a visit to
@@ -169,6 +171,10 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     })
   const saveAdhdMode = (value: boolean) =>
     rpc.configSetAdhdMode(value).then((saved) => {
+      qc.setQueryData(["config"], saved)
+    })
+  const saveMaxConcurrentSubAgents = (value: number) =>
+    rpc.configSetMaxConcurrentSubAgents(value).then((saved) => {
       qc.setQueryData(["config"], saved)
     })
 
@@ -643,6 +649,8 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       onSavePlanAutoRun={savePlanAutoRun}
       adhdMode={adhdMode}
       onSaveAdhdMode={saveAdhdMode}
+      maxConcurrentSubAgents={maxConcurrentSubAgents}
+      onSaveMaxConcurrentSubAgents={saveMaxConcurrentSubAgents}
       themes={themeSettings}
       providersConfig={providersConfig}
       onSaveProvider={saveProvider}
@@ -705,6 +713,8 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
           session={session}
           connected={connected}
           onConnectGithub={ctx.onConnectGithub}
+          onCreateSession={createSession}
+          maxConcurrentSubAgents={maxConcurrentSubAgents}
         />
       )}
       renderCode={(session, ctx) => (
@@ -713,6 +723,8 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
           session={session}
           connected={connected}
           onConnectGithub={ctx.onConnectGithub}
+          onCreateSession={createSession}
+          maxConcurrentSubAgents={maxConcurrentSubAgents}
         />
       )}
       terminalDockSide={termDock.side}

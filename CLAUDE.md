@@ -131,6 +131,8 @@ Desktop state is **JSON files under `~/starbase`** (no ORM) — see `apps/deskto
 
 ## Conventions & gotchas
 
+- **Every new user-facing feature ships an e2e test** — a Playwright `_electron`
+  spec under `apps/desktop/e2e/`. See `AGENTS.md` for the full rule.
 - **Effect-TS is the backend idiom.** cli-adapters services are `Effect.Service` with `accessors: true`; errors are `Schema.TaggedError` so they encode across the RPC boundary. Prefer Effect over raw async in that layer.
 - **Git hooks auto-sync deps.** `prepare` sets `core.hooksPath .githooks`; `post-checkout`/`post-merge` run `pnpm install` when the lockfile changes — so switching branches may reinstall.
 - **Biome is the linter, and only the linter.** `biome.json` sets

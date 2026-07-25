@@ -71,6 +71,13 @@ export interface CodeReviewViewProps {
   onSendFindingToAgent?: (findingId: string) => void
   /** Ids of findings already sent to the agent — their action stays "Sent". */
   sentFindingIds?: ReadonlySet<string>
+  /**
+   * Spawn an isolated cleanup ("Deslop") session for a file. Absent hides the
+   * per-file Deslop button (e.g. a session with no origin repo to fork from).
+   */
+  onDeslopFile?: (path: string) => void
+  /** The concurrent-deslop cap is reached — the button renders disabled. */
+  deslopAtCap?: boolean
 }
 
 /**
@@ -100,7 +107,9 @@ export function CodeReviewView({
   onRevertFile,
   review,
   onSendFindingToAgent,
-  sentFindingIds
+  sentFindingIds,
+  onDeslopFile,
+  deslopAtCap
 }: CodeReviewViewProps) {
   const isLocal = source === "local"
 
@@ -408,6 +417,8 @@ export function CodeReviewView({
                 feedback={feedback.byPath.get(file.path) ?? 0}
                 onSelect={() => scrollToFile(file.path)}
                 onToggleViewed={(v) => onToggleViewed(file.path, v)}
+                onDeslop={onDeslopFile ? () => onDeslopFile(file.path) : undefined}
+                deslopDisabled={deslopAtCap}
               />
             ))}
           </div>

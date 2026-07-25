@@ -23,6 +23,8 @@ export interface SeedSession {
   readonly contextTokens?: number
   readonly updatedAt: string
   readonly worktreePath?: string
+  /** Absolute path to the origin repo this session was forked from. */
+  readonly repoPath?: string
   readonly baseBranch?: string
   readonly model?: string
   readonly resumeId?: string

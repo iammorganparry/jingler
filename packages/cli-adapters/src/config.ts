@@ -71,6 +71,9 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             // `false` is a real setting and must survive an unrelated write.
             ...(existing?.planAutoRun !== undefined ? { planAutoRun: existing.planAutoRun } : {}),
             ...(existing?.adhdMode !== undefined ? { adhdMode: existing.adhdMode } : {}),
+            ...(existing?.maxConcurrentSubAgents !== undefined
+              ? { maxConcurrentSubAgents: existing.maxConcurrentSubAgents }
+              : {}),
             ...(existing?.theme ? { theme: existing.theme } : {}),
             // MANDATORY: omit a section here and every unrelated save silently
             // drops it, because `patch` is a whole-object read-modify-write.
@@ -92,6 +95,10 @@ export class ConfigService extends Effect.Service<ConfigService>()(
 
       /** Whether every agent turn is asked to shape its reply for an ADHD reader. */
       const setAdhdMode = (adhdMode: boolean) => patch({ adhdMode })
+
+      /** Cap on how many "Deslop" cleanup sub-agent sessions run concurrently. */
+      const setMaxConcurrentSubAgents = (maxConcurrentSubAgents: number) =>
+        patch({ maxConcurrentSubAgents })
 
       const setStarredRepos = (starredRepos: ReadonlyArray<string>) =>
         patch({ starredRepos })
@@ -185,6 +192,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setNotifications,
         setPlanAutoRun,
         setAdhdMode,
+        setMaxConcurrentSubAgents,
         setStarredRepos,
         setCollapsedRepos,
         setLastRepoPath,

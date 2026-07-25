@@ -294,6 +294,9 @@ export const rpc = {
   /** Persist ADHD mode; resolves with the whole updated config. */
   configSetAdhdMode: (adhdMode: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setAdhdMode({ adhdMode })),
+  /** Persist the concurrent-deslop cap; resolves with the whole updated config. */
+  configSetMaxConcurrentSubAgents: (maxConcurrentSubAgents: number): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setMaxConcurrentSubAgents({ maxConcurrentSubAgents })),
   /** Which harness new sessions start on (Settings · Providers). */
   configSetDefaultCli: (cli: CliKind): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setDefaultCli({ cli })),
