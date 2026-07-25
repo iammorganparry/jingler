@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { FALLBACK_MODELS } from "@starbase/core"
 import { expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
@@ -10,6 +11,27 @@ import type { SeedSession } from "./fixtures.js"
  * skips the gate; and the `/` (skills) and `@` (code) palettes work. We assert on
  * what the operator sees, never on internals.
  */
+
+/**
+ * Model labels read from the catalogue rather than written out here.
+ *
+ * `FALLBACK_MODELS` is what the app shows when live discovery has no credentials,
+ * which is exactly the e2e's situation — so these ARE the labels on screen. Taking
+ * them from the source matters because they move: one commit re-cased and
+ * re-versioned the whole Claude list (`opus` → `Opus 5`, and the bare `sonnet` id
+ * became `sonnet[1m]`/"Sonnet 5 1M") without touching a spec, and because this
+ * suite is not in CI nothing noticed that three model tests had gone red. Derived
+ * labels track the catalogue instead of lagging behind it.
+ */
+const CLAUDE_MODELS = FALLBACK_MODELS.claude
+/** The chip's initial reading: `defaultModel` takes index 0. */
+const DEFAULT_CLAUDE_MODEL = CLAUDE_MODELS[0]!.label
+/**
+ * A different Claude model to switch to. Selected by id prefix rather than label
+ * because ids are the stable half of the catalogue, and from index 1 onwards so it
+ * stays distinct from the default even if Sonnet is ever promoted to first.
+ */
+const ALT_CLAUDE_MODEL = CLAUDE_MODELS.slice(1).find((m) => m.id.startsWith("sonnet"))!.label
 
 const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [
   {
@@ -197,16 +219,16 @@ test("the model chip shows the harness model and switches", async ({ launchApp }
   await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
   await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
 
-  // Default Claude model is opus (fallback list; no API key in e2e).
-  const modelChip = window.getByRole("button", { name: /opus/ })
+  // The chip opens on the harness's default model (fallback list; no API key in e2e).
+  const modelChip = window.getByRole("button", { name: DEFAULT_CLAUDE_MODEL, exact: true })
   await expect(modelChip).toBeVisible()
   await modelChip.click()
 
-  // The menu lists EVERY installed harness's models grouped by provider, so
-  // `sonnet` must be matched exactly — Cursor also offers a `sonnet-4.5`, and a
-  // substring match resolves to both.
-  await window.getByRole("menuitem", { name: "sonnet", exact: true }).click()
-  await expect(window.getByRole("button", { name: /sonnet/ })).toBeVisible()
+  // The menu lists EVERY installed harness's models grouped by provider, so the
+  // label must be matched exactly — other harnesses ship near-identical names
+  // (Cursor's `sonnet-4.5`), and a substring match resolves to several.
+  await window.getByRole("menuitem", { name: ALT_CLAUDE_MODEL, exact: true }).click()
+  await expect(window.getByRole("button", { name: ALT_CLAUDE_MODEL, exact: true })).toBeVisible()
 })
 
 /**
@@ -223,7 +245,7 @@ test("the model chip switches provider", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
   await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
 
-  await window.getByRole("button", { name: /opus/ }).click()
+  await window.getByRole("button", { name: DEFAULT_CLAUDE_MODEL, exact: true }).click()
   await expect(window.getByText("Codex CLI", { exact: true })).toBeVisible()
 
   // The catalogue comes from the CLI itself, so assert the shape of an id
