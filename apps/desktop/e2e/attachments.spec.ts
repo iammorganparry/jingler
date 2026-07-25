@@ -65,7 +65,13 @@ test("attaching an image shows a thumbnail and persists it on the sent turn", as
   await composer.pressSequentially("Here is the failing screen.")
   await composer.press("Enter")
 
-  await expect(window.getByText("Here is the failing screen.")).toBeVisible()
+  // Scoped to the transcript: multi-chat renames an untitled chat after its first
+  // prompt, so this string becomes the chat tab's label too — asynchronously, which
+  // made the unscoped matcher a RACE rather than a clean failure. It passed while
+  // the rename was in flight and tripped strict mode once it landed.
+  await expect(
+    window.getByTestId("conversation-scroll").getByText("Here is the failing screen.")
+  ).toBeVisible()
   // The image persists on the sent turn (still visible after the composer clears).
   await expect(window.getByRole("img", { name: "login.png" })).toBeVisible()
 })

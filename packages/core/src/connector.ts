@@ -11,8 +11,22 @@ import { Schema } from "effect"
  * home for one.
  */
 
-/** How a provider is connected. Mirrors OpenConnector's `authType` values. */
-export const ConnectorAuthType = Schema.Literal("oauth2", "api_key", "custom_credential")
+/**
+ * How a provider is connected. Mirrors OpenConnector's `authType` values.
+ *
+ * `no_auth` is not a placeholder — eight catalogued providers (arXiv, Hacker
+ * News, Docsend2pdf…) take no credential at all and arrive from the instance
+ * already `configured: true, virtual: true`. Leaving it out of this union is
+ * indistinguishable from "unknown auth type", which the mapper defaults to
+ * `api_key` — so those eight rendered a credential form for a credential that
+ * does not exist.
+ */
+export const ConnectorAuthType = Schema.Literal(
+  "oauth2",
+  "api_key",
+  "custom_credential",
+  "no_auth"
+)
 export type ConnectorAuthType = Schema.Schema.Type<typeof ConnectorAuthType>
 
 /**
@@ -33,25 +47,91 @@ export const ConnectorAuthField = Schema.Struct({
 })
 export type ConnectorAuthField = Schema.Schema.Type<typeof ConnectorAuthField>
 
-/** One provider in the catalog (`GET /v1/providers`). */
+/**
+ * One provider in the catalog (`GET /v1/providers`) — the LIST shape, ~1,100 of
+ * them, and the only thing the grid needs.
+ *
+ * It deliberately carries no auth `fields`: the list endpoint does not send
+ * them, and the endpoint that does (`GET /api/providers`) inlines every action's
+ * JSON Schema for every provider and weighs 5 MB. Fields live on
+ * `ConnectorProviderDetail`, fetched one provider at a time.
+ */
 export const ConnectorProvider = Schema.Struct({
   /** The service slug OpenConnector knows it by, e.g. "github". */
   id: Schema.String,
   /** Display name, e.g. "GitHub". */
   name: Schema.String,
-  /** Icon URL from the catalog, or null when none is supplied. */
+  /**
+   * Icon URL from the catalog. The live instance returns null for every
+   * provider, so the UI derives a logo from `homepageUrl` instead — but a
+   * self-hosted catalog may populate it, and then it wins.
+   */
   icon: Schema.NullOr(Schema.String),
+  /** Category ids, e.g. ["Productivity", "Developer Tools"]. Drives the filter. */
+  categories: Schema.Array(Schema.String),
+  /** The provider's own site — the logo source, and the "Homepage" link. */
+  homepageUrl: Schema.NullOr(Schema.String),
   /** How this provider can be connected (may offer more than one). */
   authTypes: Schema.Array(ConnectorAuthType),
-  /**
-   * Fields the api-key / custom-credential form must collect. Empty when the
-   * catalog does not declare them — the UI falls back to a single `apiKey` field.
-   */
-  fields: Schema.Array(ConnectorAuthField),
   /** Count of Actions the provider exposes, for the catalog row. Null if unknown. */
   actionCount: Schema.NullOr(Schema.Number)
 })
 export type ConnectorProvider = Schema.Schema.Type<typeof ConnectorProvider>
+
+/**
+ * ONE way to connect with a stored credential — a single form.
+ *
+ * A provider can offer several, and they are ALTERNATIVES, not parts of one
+ * form: Elasticsearch takes either an encoded API key or a username/password
+ * pair, each alongside its own `baseUrl`. Flattening them together produced a
+ * form demanding both, submitted under one `authType` — and the instance
+ * rejects a field the chosen type never declared
+ * (`Unexpected credential field: apiKey.`), so those providers could not be
+ * connected at all.
+ */
+export const ConnectorAuthMode = Schema.Struct({
+  /** The `authType` this mode's connect PUT must declare. */
+  type: Schema.Literal("api_key", "custom_credential"),
+  /**
+   * The catalog's own name for this mode ("Encoded API Key", "Webhook Key"),
+   * or null. Used to tell two modes apart when a provider offers both.
+   */
+  label: Schema.NullOr(Schema.String),
+  /** Prose from the catalog on where to create the credential, or null. */
+  description: Schema.NullOr(Schema.String),
+  /** The inputs this mode collects. Names are unique within a mode. */
+  fields: Schema.Array(ConnectorAuthField)
+})
+export type ConnectorAuthMode = Schema.Schema.Type<typeof ConnectorAuthMode>
+
+/**
+ * One provider's detail (`GET /api/providers/{service}`), fetched only when its
+ * card is opened. This is where the connect form gets its REAL shape — Linear's
+ * `lin_api_…` placeholder, Notion's "Internal Integration Secret" label, a
+ * custom-credential provider's host+password pair — instead of the single
+ * generic `apiKey` box every provider used to fall back to.
+ *
+ * Same redaction contract as the rest of this file: it describes how to
+ * connect, never a value.
+ */
+export const ConnectorProviderDetail = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  categories: Schema.Array(Schema.String),
+  homepageUrl: Schema.NullOr(Schema.String),
+  authTypes: Schema.Array(ConnectorAuthType),
+  /**
+   * The credential forms this provider offers, one per mode. Usually one; a few
+   * providers offer a choice, and the UI must present them as a choice rather
+   * than merging them.
+   */
+  keyModes: Schema.Array(ConnectorAuthMode),
+  /** Scopes the OAuth grant will request, for the "Scopes" readout. */
+  oauthScopes: Schema.Array(Schema.String),
+  /** How many Actions the provider exposes. Null if the catalog omits them. */
+  actionCount: Schema.NullOr(Schema.Number)
+})
+export type ConnectorProviderDetail = Schema.Schema.Type<typeof ConnectorProviderDetail>
 
 /** An established connection (`GET /api/connections`). Carries no credential. */
 export const ConnectorConnection = Schema.Struct({
@@ -64,7 +144,24 @@ export const ConnectorConnection = Schema.Struct({
   /** Scopes the grant covers (OAuth); empty for api-key connections. */
   grantedScopes: Schema.Array(Schema.String),
   /** The named-connection alias, or null for the default connection. */
-  connectionName: Schema.NullOr(Schema.String)
+  connectionName: Schema.NullOr(Schema.String),
+  /**
+   * Whether there is a stored credential to remove.
+   *
+   * False for what the instance calls a `virtual` connection: a `no_auth`
+   * provider is listed as connected because it needs no credential, so there is
+   * nothing to delete. `DELETE` on one answers 200 with `configured: true` and
+   * leaves it in place — a success the app would otherwise report while the row
+   * stayed put, so the UI hides the Disconnect affordance instead.
+   */
+  removable: Schema.Boolean,
+  /**
+   * Whether the credential is actually usable yet. A `no_auth` provider is
+   * `connected` the moment it is catalogued; an OAuth grant that has been
+   * started but not consented is `pending`. The grid's status dot reads this,
+   * so "listed" and "working" stay distinguishable.
+   */
+  status: Schema.Literal("connected", "pending")
 })
 export type ConnectorConnection = Schema.Schema.Type<typeof ConnectorConnection>
 

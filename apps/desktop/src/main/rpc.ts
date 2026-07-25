@@ -1896,6 +1896,7 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "OpenConnector.autoSetup": () => openConnectorAutoSetup(),
   "OpenConnector.injection": () => openConnectorInjection(),
   "Connector.providers": () => OpenConnectorApi.listProviders(),
+  "Connector.provider": ({ service }) => OpenConnectorApi.getProvider(service),
   "Connector.connections": () => OpenConnectorApi.listConnections(),
   "Connector.oauthConfigs": () => OpenConnectorApi.oauthConfigs(),
   "Connector.connect": ({ service, authType, values, connectionName }) =>
@@ -1914,14 +1915,14 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "Opencode.setAuth": ({ providerId, key }) => opencodeSetAuth(providerId, key),
   "Usage.get": () => Effect.flatMap(DiscoveryService.list(), (clis) => UsageService.get(clis)),
   "Context.state": ({ sessionId, chatId }) =>
-    ContextManager.bind(chatId, sessionId).pipe(
+    ContextManager.bindContext(chatId, sessionId).pipe(
       Effect.zipRight(ContextManager.snapshot(chatId))
     ),
   // Fire-and-forget by design: the digest builds on a background fiber and lands
   // on the next turn, so the button returns instantly rather than parking the UI
   // on a summary the user is not waiting for.
   "Context.compactNow": ({ sessionId, chatId }) =>
-    ContextManager.bind(chatId, sessionId).pipe(
+    ContextManager.bindContext(chatId, sessionId).pipe(
       Effect.zipRight(ContextManager.compactNow(chatId))
     ),
   "Config.setContext": (context) => ConfigService.setContext(context),

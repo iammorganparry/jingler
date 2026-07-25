@@ -36,6 +36,7 @@ import type {
   OpenConnectorConfig,
   OpenConnectorDefaults,
   ConnectorProvider,
+  ConnectorProviderDetail,
   ConnectorConnection,
   OAuthClientInfo,
   ConnectorActionResult,
@@ -244,6 +245,9 @@ export const rpc = {
   /** The OpenConnector provider catalog (Connector Center). */
   connectorProviders: (): Promise<ReadonlyArray<ConnectorProvider>> =>
     run((c) => c.Connector.providers()),
+  /** ONE provider's connect-form shape — fields, OAuth scopes, action count. */
+  connectorProvider: (service: string): Promise<ConnectorProviderDetail> =>
+    run((c) => c.Connector.provider({ service })),
   /** The operator's established connections (no secrets). */
   connectorConnections: (): Promise<ReadonlyArray<ConnectorConnection>> =>
     run((c) => c.Connector.connections()),

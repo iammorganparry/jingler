@@ -44,8 +44,9 @@ const connector = (over: Partial<ConnectorCenterProps> = {}): ConnectorCenterPro
       id: "linear",
       name: "Linear",
       icon: null,
+      categories: ["Productivity"],
+      homepageUrl: "https://linear.app",
       authTypes: ["oauth2"],
-      fields: [],
       actionCount: 6
     }
   ],
@@ -53,6 +54,10 @@ const connector = (over: Partial<ConnectorCenterProps> = {}): ConnectorCenterPro
   oauthConfigs: [],
   loading: false,
   error: null,
+  detail: null,
+  detailLoading: false,
+  detailError: null,
+  onOpenProvider: () => {},
   onConnect: async () => {},
   onDisconnect: async () => {},
   onSetOauthConfig: async () => {},

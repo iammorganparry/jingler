@@ -2,7 +2,7 @@ import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import type { Page } from "@playwright/test"
 import { GIGAPLAN_ROUTING_POLICY_VERSION } from "@starbase/core"
-import { expect, test } from "./fixtures.js"
+import { DEFAULT_CLAUDE_MODEL, expect, test } from "./fixtures.js"
 import type { LaunchOptions, SeedSession } from "./fixtures.js"
 
 const GIGAPLAN_SETTINGS = /^Gigaplan/
@@ -93,7 +93,7 @@ test("selecting Gigaplan takes the model picker away, and changing mode brings i
   // back, though: the operator's own choice was never discarded.
   const { window } = await openSession(launchApp)
 
-  const modelChip = window.getByRole("button", { name: /opus/ })
+  const modelChip = window.getByRole("button", { name: DEFAULT_CLAUDE_MODEL, exact: true })
   await expect(modelChip).toBeVisible()
 
   const ordinaryMode = window.getByRole("button", { name: "accept edits" })
@@ -107,7 +107,7 @@ test("selecting Gigaplan takes the model picker away, and changing mode brings i
   // Back to an ordinary mode → the picker returns, on the same model.
   await window.getByRole("button", { name: "Gigaplan" }).click()
   await window.getByRole("menuitem", { name: "ask" }).click()
-  await expect(window.getByRole("button", { name: /opus/ })).toBeVisible()
+  await expect(window.getByRole("button", { name: DEFAULT_CLAUDE_MODEL, exact: true })).toBeVisible()
 })
 
 test("Gigaplan follow-ups stay conversational until Create plan is clicked", async ({
@@ -175,7 +175,7 @@ test("Starbase is no longer a harness you can pick a model from", async ({ launc
   // be selected in order to be ignored. One way to ask, not two.
   const { window } = await openSession(launchApp)
 
-  await window.getByRole("button", { name: /opus/ }).click()
+  await window.getByRole("button", { name: DEFAULT_CLAUDE_MODEL, exact: true }).click()
   // Scoped to the open menu: "Starbase" is the app's own name and appears in
   // the window chrome, so a page-wide text assertion would fail for the wrong
   // reason.
@@ -417,7 +417,7 @@ test("switching harness mid-plan keeps plan mode instead of dropping it", async 
   await window.getByRole("menuitem", { name: "plan", exact: true }).click()
   await expect(window.locator("[data-mode]").first()).toHaveAttribute("data-mode", "plan")
 
-  await window.getByRole("button", { name: /opus/ }).click()
+  await window.getByRole("button", { name: DEFAULT_CLAUDE_MODEL, exact: true }).click()
   // The catalogue comes from the CLI itself, so match the shape of an id
   // (`GPT-5.…`) rather than a specific one — it moves upstream.
   await window.getByRole("menuitem").filter({ hasText: /^GPT-5\./ }).first().click()

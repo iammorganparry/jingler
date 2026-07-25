@@ -822,7 +822,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             worktreePath.length > 0
               ? yield* PlanStore.list(worktreePath).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>))
               : []
-          yield* ContextManager.bind(chatId, sessionId)
+          yield* ContextManager.bindContext(chatId, sessionId)
           /**
            * Consume a ready digest, if the context manager has one waiting.
            *
