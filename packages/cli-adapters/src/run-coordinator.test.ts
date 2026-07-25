@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest"
 import { anySessionRunActive, releaseSessionRun, reserveSessionRun } from "./run-coordinator.js"
 
 /**
- * The session run coordinator no longer gates concurrency — multiple chats (and
- * plan/planning runs) may run against one session's shared worktree at once,
- * matching Conductor's shared-workspace model. These tests pin that a second
- * reservation is admitted, and that `anySessionRunActive` still reflects
+ * The session run coordinator gates concurrency PER OWNER, not per session:
+ * distinct owners (a chat per chatId, `plan:<id>`, `planning`) run concurrently
+ * against one session's shared worktree, but a single owner is single-flight — a
+ * second run for an owner already live is refused. `anySessionRunActive` reflects
  * liveness so the learning daemon backs off while any run is in flight.
  *
  * The reservation map is module-level; every test releases what it reserves so
@@ -16,12 +16,24 @@ import { anySessionRunActive, releaseSessionRun, reserveSessionRun } from "./run
 const run = <A>(effect: Effect.Effect<A>) => Effect.runSync(effect)
 
 describe("run-coordinator", () => {
-  it("admits a second concurrent owner in the same session", () => {
+  it("admits distinct owners in the same session concurrently", () => {
+    // Two different chats (distinct owners) both run at once — the feature.
     expect(run(reserveSessionRun("admit", "chatA"))).toBe(true)
-    // The old guard returned false here; concurrency means it is admitted.
     expect(run(reserveSessionRun("admit", "chatB"))).toBe(true)
     run(releaseSessionRun("admit", "chatA"))
     run(releaseSessionRun("admit", "chatB"))
+  })
+
+  it("refuses a second run for the SAME owner, then re-admits after release", () => {
+    // A racing double-send on one chat, or a double-click on approve for one
+    // plan, must not start a second run over the same fiber slot / artifact.
+    expect(run(reserveSessionRun("single", "chatA"))).toBe(true)
+    expect(run(reserveSessionRun("single", "chatA"))).toBe(false)
+    run(releaseSessionRun("single", "chatA"))
+    // Once the first run ends, the same owner can start again.
+    expect(run(reserveSessionRun("single", "chatA"))).toBe(true)
+    run(releaseSessionRun("single", "chatA"))
+    expect(run(anySessionRunActive)).toBe(false)
   })
 
   it("stays active until the LAST owner releases", () => {

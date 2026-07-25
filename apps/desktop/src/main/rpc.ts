@@ -765,9 +765,17 @@ export const planExecute = (
         )
       }
       const worktreePath = session.worktreePath
+      // A plan is single-flight: a double-click on approve or a re-send would run
+      // two executors over the same steps in the shared worktree, applying every
+      // edit and command twice. Distinct chats/plans reserve distinct owners and
+      // still run concurrently.
       const reservation = `plan:${planId}`
-      // Concurrent runs in one session are allowed; reserve only book-keeps.
-      yield* reserveSessionRun(sessionId, reservation)
+      const admitted = yield* reserveSessionRun(sessionId, reservation)
+      if (!admitted) {
+        return Stream.fail(
+          new PlanError({ message: "This plan is already executing." })
+        )
+      }
       yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, reservation))
       const persistedArtifact = yield* PlanStore.readArtifact(worktreePath)
       const migrationChat = session.chats.find(
@@ -1162,9 +1170,21 @@ export const planAdversarial = (
         session.chats.some((chat) => chat.id === requestedChatId)
           ? requestedChatId
           : session.activeChatId
-      const reservation = `planning:${chatId}`
-      // Concurrent runs in one session are allowed; reserve only book-keeps.
-      yield* reserveSessionRun(sessionId, reservation)
+      // Planning is single-flight PER SESSION, not per chat: PlanStore keeps one
+      // current-plan artifact per worktree (which a session's chats share), so
+      // two concurrent planning rounds would clobber it — the second chat's
+      // `promote` replaces the first's, and approving the first then fails with
+      // the artifact gone. A constant owner refuses any second round in the
+      // session until the artifact can hold more than one plan.
+      const reservation = "planning"
+      const admitted = yield* reserveSessionRun(sessionId, reservation)
+      if (!admitted) {
+        return Stream.fail(
+          new PlanError({
+            message: "A planning round is already running in this session."
+          })
+        )
+      }
       yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, reservation))
       if (chatId === `c_${session.id}_1`) {
         yield* TranscriptStore.adoptLegacy(sessionId, chatId)

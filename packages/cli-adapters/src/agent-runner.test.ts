@@ -1534,6 +1534,57 @@ describe("AgentRunner stop", () => {
   })
 
   /**
+   * Concurrent chats in a session are allowed, but a single chat is
+   * single-flight. Two runs on ONE chatId would race the `fibers` slot (the
+   * first fiber orphaned and unstoppable, since `stop` reads only the latest)
+   * and mint colliding positional message ids from the same transcript
+   * snapshot. A racing double-send on one chat must be refused, not admitted.
+   */
+  it("refuses a second run on a chat that is already running", async () => {
+    const events = await Effect.gen(function* () {
+      const started = yield* Deferred.make<boolean>()
+      const interrupted = yield* Deferred.make<boolean>()
+      const base = Layer.mergeAll(
+        AgentRunner.Default,
+        ConfigService.Default,
+        SessionStore.Default,
+        TranscriptStore.Default,
+        BackgroundTaskStore.Default,
+        PlanStore.Default,
+        ContextManager.Default,
+        hangingAdapter(started, interrupted),
+        noHarnesses,
+        temp.layer
+      )
+      return yield* Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "auto")
+        // First run hangs until interrupted; consume it in a fiber so it stays live.
+        const first = yield* Effect.fork(
+          runner.prompt(SESSION, SESSION, "go").pipe(Stream.runDrain)
+        )
+        yield* Deferred.await(started).pipe(Effect.timeout("5 seconds"))
+        // Second prompt on the SAME chat, while the first is still running.
+        const seen: Array<StreamEvent> = []
+        yield* runner
+          .prompt(SESSION, SESSION, "again")
+          .pipe(Stream.runForEach((ev) => Effect.sync(() => seen.push(ev))))
+        // Clean up the hanging first run.
+        yield* runner.stop(SESSION)
+        yield* Fiber.join(first).pipe(Effect.timeout("5 seconds"), Effect.ignore)
+        return seen
+      }).pipe(Effect.provide(base))
+    }).pipe(Effect.runPromise)
+
+    // The refused run emits exactly one terminal Failed event — nothing streamed.
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      _tag: "Failed",
+      message: expect.stringContaining("already running")
+    })
+  })
+
+  /**
    * The invariant behind the regression this change exists for.
    *
    * `stop` used to read a session's run by id alone, so an interrupt that landed

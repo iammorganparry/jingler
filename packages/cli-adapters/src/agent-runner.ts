@@ -1551,10 +1551,20 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           const lock = yield* chatLock(chatId)
           return yield* lock.withPermits(1)(
             Effect.gen(function* () {
-              // Concurrent chats in one session are allowed — reserve only
-              // records that this chat is live (for `anyRunning`); it never
-              // refuses. Runs share the worktree; conflicts are the operator's.
-              yield* reserveSessionRun(sessionId, chatId)
+              // Concurrent chats in one session are allowed, but a single chat is
+              // single-flight: two runs on ONE chatId would race the `fibers`
+              // slot (line ~1503) — run A's fiber orphaned and unstoppable since
+              // `stop` reads only the latest — and both would mint positional
+              // message ids from the same transcript snapshot, colliding. Refuse
+              // the second (a racing double-send, a second window). Distinct
+              // chats reserve distinct owners and are always admitted.
+              const admitted = yield* reserveSessionRun(sessionId, chatId)
+              if (!admitted) {
+                return Stream.fromIterable<StreamEvent>([{
+                  _tag: "Failed",
+                  message: "This chat is already running. Wait for it to finish or stop it before sending again."
+                }])
+              }
               yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, chatId))
               return yield* promptSetup(
                 sessionId,
