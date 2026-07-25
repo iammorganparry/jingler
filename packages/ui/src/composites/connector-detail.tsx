@@ -180,6 +180,28 @@ function DetailBody({
 
   const fields =
     detail && detail.fields.length > 0 ? detail.fields : keyAuthType ? [FALLBACK_FIELD] : []
+
+  /**
+   * Only the fields actually on screen, and only the ones with a typed value.
+   *
+   * `values` outlives the field set it was typed into. While `detail` loads, a
+   * key-bearing provider renders the generic `apiKey` fallback — editable, since
+   * only the Connect BUTTON is disabled during the fetch — and when the real
+   * descriptors land (`host` + `password` for a custom_credential provider) that
+   * stale `apiKey` entry is still in state. OpenConnector declares
+   * `additionalProperties: false` and rejects unknown credential keys, so sending
+   * it turns a correctly-filled form into a 400 with nothing on screen to explain
+   * it.
+   *
+   * Filtering on `!== undefined` rather than mapping every field keeps the
+   * existing shape: an optional field the operator never touched stays absent
+   * instead of being submitted as an empty string.
+   */
+  const submitValues = Object.fromEntries(
+    fields
+      .filter((f) => values[f.name] !== undefined)
+      .map((f) => [f.name, values[f.name] as string])
+  )
   const needsClient = supportsOauth && oauthInfo !== undefined && !oauthInfo.hasClient
   const host = logoHost(provider.homepageUrl)
   // An alias of exactly "default" IS the default connection: OpenConnector
@@ -357,7 +379,7 @@ function DetailBody({
                     fields.some((f) => f.required && (values[f.name] ?? "").length === 0)
                   }
                   onClick={async () => {
-                    await onConnect(provider.id, keyAuthType, values, namedAlias)
+                    await onConnect(provider.id, keyAuthType, submitValues, namedAlias)
                     onClose()
                   }}
                 >

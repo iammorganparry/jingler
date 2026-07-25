@@ -256,6 +256,53 @@ describe("ConnectorDetail", () => {
     expect(screen.queryByDisplayValue("lin_api_secret")).toBeNull()
   })
 
+  /**
+   * The generic `apiKey` fallback is editable while the detail loads — only the
+   * Connect button is disabled, not the input. So a value typed into it can
+   * outlive the field set it was typed into, and OpenConnector rejects unknown
+   * credential keys outright (`additionalProperties: false`), which would turn a
+   * correctly-filled form into an unexplained 400.
+   */
+  it("drops a value typed into the fallback field before the real fields arrive", async () => {
+    const props = base()
+    const postgres = { id: "postgres", name: "Postgres", authTypes: ["custom_credential" as const] }
+    const { rerender } = render(
+      <ConnectorDetail {...props} provider={card(postgres)} detail={null} detailLoading />
+    )
+
+    // Detail hasn't landed, so this is the generic fallback box.
+    fireEvent.change(screen.getByPlaceholderText("API key"), { target: { value: "typed-too-early" } })
+
+    // The real descriptors arrive and replace it with host + password.
+    rerender(
+      <ConnectorDetail
+        {...props}
+        provider={card(postgres)}
+        detail={detail({
+          ...postgres,
+          oauthScopes: [],
+          fields: [
+            { name: "host", label: "Host", kind: "text", required: true, placeholder: "localhost" },
+            { name: "password", label: "Password", kind: "password", required: true }
+          ]
+        })}
+      />
+    )
+    fireEvent.change(screen.getByPlaceholderText("localhost"), { target: { value: "db.internal" } })
+    fireEvent.change(screen.getByPlaceholderText("Password"), { target: { value: "pw" } })
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+
+    await waitFor(() =>
+      expect(props.onConnect).toHaveBeenCalledWith(
+        "postgres",
+        "custom_credential",
+        // No stray `apiKey` — the instance would reject the whole request for it.
+        { host: "db.internal", password: "pw" },
+        undefined
+      )
+    )
+  })
+
   it("renders nothing when no provider is open", () => {
     render(<ConnectorDetail {...base()} provider={null} />)
     expect(screen.queryByRole("dialog")).toBeNull()
