@@ -12,10 +12,19 @@ stored in the OS keychain via `SecretStore`, never in `config.json`.
 
 ## Run it
 
+Local dev — it's in the repo-root `docker-compose.yml`, so from the repo root:
+
+```bash
+docker compose up -d open-connector   # or `docker compose up -d` for the whole stack
+open http://localhost:3000            # web console — connect providers here
+```
+
+That uses zero-setup dev defaults (API token `local-dev-token`). Standalone /
+production self-hosting uses this directory's compose + real secrets:
+
 ```bash
 cp .env.example .env          # fill in the two generated secrets
 docker compose up -d
-open http://localhost:3000     # web console — connect providers here
 ```
 
 - **Web console / API docs:** http://localhost:3000 (`/docs` for the OpenAPI ref)
@@ -27,7 +36,7 @@ open http://localhost:3000     # web console — connect providers here
 In the desktop app → **Settings → Unified MCP**:
 
 1. **Endpoint:** `http://localhost:3000` (no `/mcp` suffix — the app appends it)
-2. **Token:** the `OPEN_CONNECTOR_API_TOKEN` from your `.env`
+2. **Token:** the `OPEN_CONNECTOR_API_TOKEN` — `local-dev-token` with the root compose defaults, or the value from your `.env`
 3. **Enable**, then hit **Test** to confirm the handshake and tool count.
 
 Once enabled, the server is injected into each agent as it launches:

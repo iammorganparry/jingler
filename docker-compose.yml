@@ -1,5 +1,9 @@
-# Local dev Postgres for @starbase/server (auth backend).
-# `docker compose up -d db` then `pnpm --filter @starbase/server db:migrate`.
+# Local dev services for Starbase.
+#   docker compose up -d              # everything (Postgres + OpenConnector)
+#   docker compose up -d db           # just the auth backend's Postgres
+#   docker compose up -d open-connector
+#
+# Auth Postgres: `pnpm --filter @starbase/server db:migrate` after `up -d db`.
 # Port 5433 avoids clashing with any host Postgres on the default 5432.
 services:
   db:
@@ -20,5 +24,31 @@ services:
       timeout: 5s
       retries: 10
 
+  # Self-hosted OpenConnector — the ONE central MCP store every agent draws from.
+  # Console + API at http://localhost:3000, MCP endpoint at http://localhost:3000/mcp.
+  # Boots with zero setup via the dev defaults below; in Starbase, open
+  # Settings > Unified MCP and paste: endpoint http://localhost:3000, token below.
+  # Deeper self-hosting notes live in infra/open-connector/README.md.
+  open-connector:
+    image: ghcr.io/oomol-lab/open-connector:latest
+    container_name: starbase-open-connector
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Dev defaults — override in a real deployment. Not secret for local use.
+      OPEN_CONNECTOR_ENCRYPTION_KEY: ${OPEN_CONNECTOR_ENCRYPTION_KEY:-dev-encryption-key-change-me}
+      OPEN_CONNECTOR_API_TOKEN: ${OPEN_CONNECTOR_API_TOKEN:-local-dev-token}
+      OPEN_CONNECTOR_BASE_URL: ${OPEN_CONNECTOR_BASE_URL:-http://localhost:3000}
+    volumes:
+      # SQLite lives here — connected providers survive a restart.
+      - starbase-open-connector-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/openapi.json"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
 volumes:
   starbase-db-data:
+  starbase-open-connector-data:
