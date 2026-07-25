@@ -16,7 +16,7 @@ import {
   Separator as DropdownMenuSeparator,
   Trigger as DropdownMenuTrigger
 } from "@radix-ui/react-dropdown-menu"
-import { Brain, GitBranch, ImagePlus, Plug, Plus, Sparkles, WandSparkles } from "lucide-react"
+import { ArrowUp, GitBranch, ImagePlus, Plug, Plus, Sparkles, Square, WandSparkles } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { reasoningEffortsFor } from "../lib/reasoning-options.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
@@ -27,6 +27,7 @@ import { ChipMenu, type ChipOption } from "../components/chip-menu.js"
 import { CodeChip } from "../components/code-chip.js"
 import { Pill } from "../components/pill.js"
 import { PROVIDER_LABEL } from "../components/provider-icon.js"
+import { SignalBars } from "../components/signal-bars.js"
 import { StatusDot } from "../components/status-dot.js"
 import { CommandMenu } from "./command-menu.js"
 import { MentionMenu } from "./mention-menu.js"
@@ -83,6 +84,17 @@ const reasoningOptionsFor = (
   { value: "off", label: "off" },
   ...reasoningEffortsFor(cli).map((value) => ({ value, label: value }))
 ]
+/**
+ * Filled bars for a reasoning choice — its rung on the PROVIDER'S ladder, not a
+ * fixed scale. Claude's runs low…max and Codex's minimal…xhigh, so the same word
+ * ("low") is the first rung on one and the second on the other; the bars follow
+ * the list the operator is actually choosing from.
+ *
+ * Both `default` and `off` fill nothing: neither is a strength. `off` is told
+ * apart by the slash (see `SignalBars`), and the chip's label carries the rest.
+ */
+const reasoningLevel = (cli: CliKind | undefined, choice: ReasoningChoice | "off"): number =>
+  choice === "default" || choice === "off" ? 0 : reasoningEffortsFor(cli).indexOf(choice) + 1
 
 type MenuState = { kind: "slash" | "mention"; query: string; start: number }
 const TRAILING_SPACE = /\s$/
@@ -238,6 +250,10 @@ export function Composer({
     ...(adversarialPlanning?.ready === true ? [GIGAPLAN_OPTION] : [])
   ]
   const accent = modeAccent[mode]
+  // The chip's value and its bar count are the same fact; deriving it once keeps
+  // the glyph from drifting out of step with the label beside it.
+  const reasoningChoice: ReasoningChoice | "off" =
+    thinkingEnabled === false ? "off" : (reasoningEffort ?? "default")
 
   // The pane's tier (see `session-pane.tsx`). The composer sits in a 760px
   // reading column, so above `wide` it always has its full width; below it, the
@@ -659,18 +675,6 @@ export function Composer({
               </DropdownMenuContent>
             </DropdownMenuPortal>
           </DropdownMenuRoot>
-          {branch && (
-            <span
-              title={`Working branch: ${branch}`}
-              className={cn(
-                "flex h-8 min-w-0 flex-none items-center gap-1 rounded-md px-1.5 font-mono text-[10.5px] text-dim",
-                roomy ? "max-w-[180px]" : "max-w-[100px]"
-              )}
-            >
-              <GitBranch size={12} className="flex-none" />
-              <span className="truncate">{branch}</span>
-            </span>
-          )}
           {/* Gone while Gigaplan is driving: it assigns a model per step from
               the plan it had reviewed, so a model chip here would be a control
               that is silently overridden. It returns the moment the mode
@@ -726,7 +730,7 @@ export function Composer({
             className={cn("max-w-[104px]", accent.chip)}
           />
           <ChipMenu
-            value={thinkingEnabled === false ? "off" : (reasoningEffort ?? "default")}
+            value={reasoningChoice}
             options={reasoningOptionsFor(cli)}
             onSelect={(value) =>
               onSetReasoning?.(
@@ -739,7 +743,13 @@ export function Composer({
             }
             appearance="quiet"
             ariaLabel="Thinking strength"
-            icon={<Brain size={13} className="flex-none" />}
+            icon={
+              <SignalBars
+                level={reasoningLevel(cli, reasoningChoice)}
+                total={reasoningEffortsFor(cli).length}
+                slashed={thinkingEnabled === false}
+              />
+            }
             className="max-w-[112px]"
           />
           {orchestrated && onHandoffPlan && (
@@ -765,6 +775,23 @@ export function Composer({
               `flex-1` on a wrapped line collapses to nothing and the send button
               ends up butted against the last chip. */}
           <div className="min-w-[8px] flex-1" />
+          {/* The branch rides with the send button rather than leading the row:
+              it's the answer to "where is this about to land?", which is a
+              question you ask at the moment you send, not while picking a model.
+              `min-w-0` + `truncate` so a long branch gives ground first — it is
+              the only control here that can lose characters and stay useful. */}
+          {branch && (
+            <span
+              title={`Working branch: ${branch}`}
+              className={cn(
+                "flex h-8 min-w-0 items-center gap-1 rounded-md px-1.5 font-mono text-[10.5px] text-dim",
+                roomy ? "max-w-[180px]" : "max-w-[100px]"
+              )}
+            >
+              <GitBranch size={12} className="flex-none" />
+              <span className="truncate">{branch}</span>
+            </span>
+          )}
           {/* The send/stop control is `flex-none` and LAST in DOM order, which
               together decide what a squeeze does: the row wraps the chips above
               it and the primary action keeps its full size on the trailing line,
@@ -779,13 +806,31 @@ export function Composer({
                away — it moves to the keyboard: ↵ still queues a follow-up, which
                is what the placeholder advertises. No "⎋" hint here: Escape only
                fires while the composer is UNfocused, so it wouldn't work from
-               where the cursor is when you're reading this button. */
-            <Button variant="danger" size="sm" onClick={onStop}>
-              Stop
+               where the cursor is when you're reading this button.
+
+               Icon-only, so `aria-label` IS the accessible name — the label the
+               tests and screen readers both read. `title` carries the longer
+               form the visible text used to. */
+            <Button
+              variant="danger"
+              size="icon"
+              className="size-8"
+              aria-label="Stop"
+              title="Stop the agent"
+              onClick={onStop}
+            >
+              <Square size={12} fill="currentColor" />
             </Button>
           ) : (
-            <Button variant="primary" size="sm" onClick={send}>
-              {busy ? "Queue ↵" : "Send ↵"}
+            <Button
+              variant="primary"
+              size="icon"
+              className="size-8"
+              aria-label={busy ? "Queue ↵" : "Send ↵"}
+              title={busy ? "Queue this message (↵)" : "Send (↵)"}
+              onClick={send}
+            >
+              <ArrowUp size={16} />
             </Button>
           )}
           </span>
