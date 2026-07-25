@@ -66,6 +66,18 @@ test("browse, connect, and disconnect a provider through the Connector Center", 
     // the split is 1 connected / 3 not before the operator does anything.
     await expect(app.window.getByRole("tab", { name: /Connected 1/ })).toBeVisible()
 
+    // It is `virtual`: nothing is stored, so there is nothing to disconnect. The
+    // instance answers DELETE with 200 and leaves the connection in place, so a
+    // Disconnect button here would report success and visibly do nothing.
+    await catalog.getByRole("button", { name: "Hacker News" }).click()
+    const virtualSheet = app.window.getByRole("dialog")
+    await expect(virtualSheet.getByText("built in")).toBeVisible()
+    await expect(virtualSheet.getByRole("button", { name: "Disconnect" })).toHaveCount(0)
+    // Escape rather than a "Close" button: the sheet has two (the footer's and
+    // Radix's own dismiss), so naming one is ambiguous.
+    await app.window.keyboard.press("Escape")
+    await expect(virtualSheet).toHaveCount(0)
+
     // Search filters.
     await app.window.getByLabel("Search providers").fill("git")
     await expect(catalog.getByRole("button", { name: "Slack" })).toHaveCount(0)

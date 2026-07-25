@@ -206,6 +206,7 @@ describe("ConnectorDetail", () => {
             displayName: "Acme",
             grantedScopes: ["read", "write"],
             connectionName: "work",
+            removable: true,
             status: "connected"
           }
         ]}
@@ -301,6 +302,44 @@ describe("ConnectorDetail", () => {
         undefined
       )
     )
+  })
+
+  /**
+   * A `no_auth` provider is listed as connected because it needs no credential —
+   * the instance calls it `virtual`. DELETE on one answers 200 with
+   * `configured: true` and leaves it listed, so a Disconnect button here is the
+   * worst kind of dead control: it looks destructive, the app reports success,
+   * and the row is still there with no error to explain it.
+   */
+  it("offers no Disconnect for a connection with nothing stored to remove", () => {
+    const props = base()
+    render(
+      <ConnectorDetail
+        {...props}
+        provider={card({ id: "hackernews", name: "Hacker News", authTypes: ["no_auth"] })}
+        detail={detail({
+          id: "hackernews",
+          name: "Hacker News",
+          authTypes: ["no_auth"],
+          fields: [],
+          oauthScopes: []
+        })}
+        connections={[
+          {
+            service: "hackernews",
+            accountId: "hackernews:public",
+            displayName: "Hacker News Public",
+            grantedScopes: [],
+            connectionName: null,
+            removable: false,
+            status: "connected"
+          }
+        ]}
+      />
+    )
+    expect(screen.getByText("Hacker News Public")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Disconnect" })).toBeNull()
+    expect(screen.getByText("built in")).toBeTruthy()
   })
 
   it("renders nothing when no provider is open", () => {

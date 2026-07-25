@@ -118,6 +118,16 @@ export const ConnectorConnection = Schema.Struct({
   /** The named-connection alias, or null for the default connection. */
   connectionName: Schema.NullOr(Schema.String),
   /**
+   * Whether there is a stored credential to remove.
+   *
+   * False for what the instance calls a `virtual` connection: a `no_auth`
+   * provider is listed as connected because it needs no credential, so there is
+   * nothing to delete. `DELETE` on one answers 200 with `configured: true` and
+   * leaves it in place — a success the app would otherwise report while the row
+   * stayed put, so the UI hides the Disconnect affordance instead.
+   */
+  removable: Schema.Boolean,
+  /**
    * Whether the credential is actually usable yet. A `no_auth` provider is
    * `connected` the moment it is catalogued; an OAuth grant that has been
    * started but not consented is `pending`. The grid's status dot reads this,

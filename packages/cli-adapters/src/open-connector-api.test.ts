@@ -213,6 +213,8 @@ describe("OpenConnectorApi", () => {
       displayName: "Acme Engineering",
       grantedScopes: ["read", "write"],
       connectionName: "work",
+      // Not `virtual`, so there IS a stored credential to remove.
+      removable: true,
       status: "connected"
     })
   })
@@ -256,6 +258,12 @@ describe("OpenConnectorApi", () => {
     expect(exit.value[0]?.connectionName).toBeNull()
     // A real alias is untouched — normalizing it away would delete the wrong one.
     expect(exit.value[1]?.connectionName).toBe("work")
+
+    // A `virtual` connection has no stored credential, so nothing to delete.
+    // Verified against a live instance: DELETE on one answers 200 with
+    // `configured: true` and the connection is still listed afterwards.
+    expect(exit.value[0]?.removable).toBe(false)
+    expect(exit.value[1]?.removable).toBe(true)
   })
 
   it("sends the credential OUT on the PUT body and never returns it", async () => {

@@ -69,6 +69,7 @@ const connections: ReadonlyArray<ConnectorConnection> = [
     displayName: "acme",
     grantedScopes: [],
     connectionName: null,
+    removable: true,
     status: "connected"
   }
 ]
@@ -209,6 +210,7 @@ describe("ConnectorCenter", () => {
             displayName: null,
             grantedScopes: [],
             connectionName: null,
+            removable: true,
             status: "pending"
           },
           ...connections

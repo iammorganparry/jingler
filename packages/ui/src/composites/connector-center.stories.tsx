@@ -84,14 +84,18 @@ const CONNECTIONS: ReadonlyArray<ConnectorConnection> = [
     displayName: "octocat",
     grantedScopes: ["repo", "read:org"],
     connectionName: null,
+    removable: true,
     status: "connected"
   },
+  // Virtual: it needs no credential, so there is nothing stored to disconnect.
+  // Its row shows a "built in" chip where the danger button would be.
   {
     service: "hackernews",
     accountId: "hackernews:public",
     displayName: "Hacker News Public",
     grantedScopes: [],
-    connectionName: "default",
+    connectionName: null,
+    removable: false,
     status: "connected"
   }
 ]
@@ -170,6 +174,7 @@ export const PendingConnection: Story = {
         displayName: null,
         grantedScopes: [],
         connectionName: null,
+        removable: true,
         status: "pending"
       }
     ]

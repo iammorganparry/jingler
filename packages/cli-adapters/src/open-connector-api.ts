@@ -209,6 +209,11 @@ const mapConnection = (raw: unknown): ConnectorConnection | undefined => {
     displayName: str(profile.displayName) ?? str(profile.accountName) ?? str(raw.displayName) ?? null,
     grantedScopes: strArray(profile.grantedScopes ?? profile.scopes ?? raw.grantedScopes ?? raw.scopes),
     connectionName: alias === DEFAULT_CONNECTION_NAME ? null : alias,
+    // The instance's `virtual` flag, read as what it means to the UI: there is no
+    // stored credential, so there is nothing DELETE could remove. Verified against
+    // a live instance — DELETE on a virtual connection answers 200 with
+    // `configured: true` and the connection is still listed afterwards.
+    removable: raw.virtual !== true,
     // `configured` is the instance's own word for "this credential is usable".
     // Absent (the flat/fake shape) means the entry only exists because it works.
     status: raw.configured === false ? "pending" : "connected"

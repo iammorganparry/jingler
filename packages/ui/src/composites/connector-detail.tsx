@@ -454,15 +454,25 @@ function ConnectionRow({
             : ""}
         </div>
       </div>
-      <AsyncButton
-        variant="danger"
-        size="sm"
-        pendingLabel="Removing…"
-        // Pass the alias so a NAMED connection isn't deleted as the default one.
-        onClick={() => onDisconnect(connection.service, connection.connectionName)}
-      >
-        Disconnect
-      </AsyncButton>
+      {connection.removable ? (
+        <AsyncButton
+          variant="danger"
+          size="sm"
+          pendingLabel="Removing…"
+          // Pass the alias so a NAMED connection isn't deleted as the default one.
+          onClick={() => onDisconnect(connection.service, connection.connectionName)}
+        >
+          Disconnect
+        </AsyncButton>
+      ) : (
+        // Nothing is stored, so there is nothing to disconnect. Offering the
+        // button anyway would be the worst kind: DELETE answers 200, the app
+        // reports success, the list refetches — and the row is still there, with
+        // no error to explain why the destructive action did nothing.
+        <Badge tone="neutral" size="xs">
+          built in
+        </Badge>
+      )}
     </div>
   )
 }
