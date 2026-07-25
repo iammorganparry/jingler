@@ -20,12 +20,7 @@ const run = <A>(effect: Effect.Effect<A, never, BackgroundTaskStore>) =>
  * `TestClock.adjust` moves the grace period without any real elapsed time.
  */
 const runClocked = <A>(effect: Effect.Effect<A, never, BackgroundTaskStore>) =>
-  Effect.runPromise(
-    effect.pipe(Effect.provide(BackgroundTaskStore.Default), Effect.provide(TestContext.TestContext))
-  )
-
-const settled = (id: string, status: "completed" | "failed" | "stopped") =>
-  ({ _tag: "BackgroundTaskSettled", id, status, summary: null, outputFile: null }) satisfies StreamEvent
+  run(effect.pipe(Effect.provide(TestContext.TestContext)))
 
 const started = (id: string, over: Partial<Extract<StreamEvent, { _tag: "BackgroundTaskStarted" }>> = {}) =>
   ({
@@ -37,6 +32,17 @@ const started = (id: string, over: Partial<Extract<StreamEvent, { _tag: "Backgro
     toolUseId: null,
     ...over
   }) satisfies StreamEvent
+
+const settled = (
+  id: string,
+  status: "completed" | "failed" | "stopped",
+  over: Partial<Extract<StreamEvent, { _tag: "BackgroundTaskSettled" }>> = {}
+) =>
+  ({ _tag: "BackgroundTaskSettled", id, status, summary: null, outputFile: null, ...over }) satisfies StreamEvent
+
+/** The harness's live-set level signal — authoritative for which tasks still run. */
+const changed = (...ids: string[]) =>
+  ({ _tag: "BackgroundTasksChanged", ids }) satisfies StreamEvent
 
 describe("BackgroundTaskStore", () => {
   it("has no tasks for an unknown session", async () => {
@@ -71,7 +77,7 @@ describe("BackgroundTaskStore", () => {
     const [task] = await run(
       Effect.gen(function* () {
         yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
-        yield* BackgroundTaskStore.ingest("s1", "c1", { _tag: "BackgroundTasksChanged", ids: [] })
+        yield* BackgroundTaskStore.ingest("s1", "c1", changed())
         return yield* BackgroundTaskStore.list("s1")
       })
     )
@@ -81,7 +87,7 @@ describe("BackgroundTaskStore", () => {
   it("creates a placeholder for a live id it never saw start", async () => {
     const [task] = await run(
       Effect.gen(function* () {
-        yield* BackgroundTaskStore.ingest("s1", "c1", { _tag: "BackgroundTasksChanged", ids: ["ghost"] })
+        yield* BackgroundTaskStore.ingest("s1", "c1", changed("ghost"))
         return yield* BackgroundTaskStore.list("s1")
       })
     )
@@ -163,13 +169,11 @@ describe("BackgroundTaskStore", () => {
     const [task] = await run(
       Effect.gen(function* () {
         yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
-        yield* BackgroundTaskStore.ingest("s1", "c1", {
-          _tag: "BackgroundTaskSettled",
-          id: "t1",
-          status: "completed",
-          summary: "done",
-          outputFile: "/tmp/t1.jsonl"
-        })
+        yield* BackgroundTaskStore.ingest(
+          "s1",
+          "c1",
+          settled("t1", "completed", { summary: "done", outputFile: "/tmp/t1.jsonl" })
+        )
         yield* BackgroundTaskStore.registerStop("s1", "c1", async () => {})
         return yield* BackgroundTaskStore.list("s1")
       })
@@ -291,7 +295,7 @@ describe("BackgroundTaskStore", () => {
         yield* BackgroundTaskStore.ingest("s1", "c1", started("t1"))
         yield* BackgroundTaskStore.ingest("s1", "c2", started("t2"))
         // Chat A reports only its own task as live — chat B's t2 is absent here.
-        yield* BackgroundTaskStore.ingest("s1", "c1", { _tag: "BackgroundTasksChanged", ids: ["t1"] })
+        yield* BackgroundTaskStore.ingest("s1", "c1", changed("t1"))
         const all = yield* BackgroundTaskStore.list("s1")
         return [all.find((t) => t.id === "t1"), all.find((t) => t.id === "t2")] as const
       })
