@@ -6,6 +6,10 @@ const harness = (requestTimeoutMs?: number) => {
   const clientInput = new PassThrough()
   const clientOutput = new PassThrough()
   const sent: Array<Record<string, unknown>> = []
+  const diagnostics: Array<{
+    event: string
+    fields: Readonly<Record<string, unknown>>
+  }> = []
   let buffer = ""
   clientInput.on("data", (chunk: Buffer) => {
     buffer += chunk.toString()
@@ -29,9 +33,16 @@ const harness = (requestTimeoutMs?: number) => {
       clientInput.end()
       clientOutput.end()
     },
-    requestTimeoutMs === undefined ? undefined : { requestTimeoutMs }
+    {
+      ...(requestTimeoutMs === undefined ? {} : { requestTimeoutMs }),
+      diagnostics: {
+        path: "/tmp/codex-diagnostics.jsonl",
+        record: (event, fields = {}) => diagnostics.push({ event, fields }),
+        close: () => undefined
+      }
+    }
   )
-  return { connection, output: clientOutput, sent }
+  return { connection, diagnostics, output: clientOutput, sent }
 }
 
 describe("CodexAppServerConnection", () => {
@@ -43,8 +54,47 @@ describe("CodexAppServerConnection", () => {
     output.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { thread: { id: "t1" } } })}\n`)
     await expect(request).resolves.toStrictEqual({ thread: { id: "t1" } })
 
-    output.write(`${JSON.stringify({ jsonrpc: "2.0", method: "turn/started", params: { threadId: "t1" } })}\n`)
-    await expect(connection.nextMessage()).resolves.toMatchObject({ method: "turn/started" })
+    output.write(
+      `${JSON.stringify({ jsonrpc: "2.0", method: "turn/started", params: { threadId: "t1" } })}\n`
+    )
+    await expect(connection.nextMessage()).resolves.toMatchObject({
+      method: "turn/started"
+    })
+    connection.close()
+  })
+
+  it("records protocol metadata without request or response contents", async () => {
+    const { connection, diagnostics, output } = harness()
+    const request = connection.request("turn/start", {
+      prompt: "sensitive prompt"
+    })
+    output.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        result: { secretOutput: "sensitive response" }
+      })}\n`
+    )
+    await request
+    output.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        method: "item/completed",
+        params: { output: "sensitive tool output" }
+      })}\n`
+    )
+    await connection.nextMessage()
+
+    expect(diagnostics.map(({ event }) => event)).toStrictEqual([
+      "request.sent",
+      "request.completed",
+      "protocol.message"
+    ])
+    expect(JSON.stringify(diagnostics)).not.toContain("sensitive")
+    expect(diagnostics.at(-1)?.fields).toMatchObject({
+      method: "item/completed",
+      serverRequest: false
+    })
     connection.close()
   })
 
@@ -52,8 +102,17 @@ describe("CodexAppServerConnection", () => {
     const { connection, output } = harness()
     output.write(
       [
-        JSON.stringify({ jsonrpc: "2.0", method: "thread/tokenUsage/updated", params: { threadId: "t1" } }),
-        JSON.stringify({ jsonrpc: "2.0", id: "approval-1", method: "item/fileChange/requestApproval", params: {} })
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "thread/tokenUsage/updated",
+          params: { threadId: "t1" }
+        }),
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "approval-1",
+          method: "item/fileChange/requestApproval",
+          params: {}
+        })
       ].join("\n") + "\n"
     )
 
@@ -116,9 +175,7 @@ describe("CodexAppServerConnection", () => {
   it("supports a shorter deadline for teardown requests", async () => {
     const { connection } = harness(30_000)
 
-    await expect(
-      connection.request("turn/interrupt", {}, { timeoutMs: 10 })
-    ).rejects.toThrow(
+    await expect(connection.request("turn/interrupt", {}, { timeoutMs: 10 })).rejects.toThrow(
       'Codex app-server request "turn/interrupt" timed out after 10ms'
     )
     connection.close()

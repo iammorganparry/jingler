@@ -16,7 +16,9 @@ const readStored = (key: string): number | null => {
 /**
  * A persisted, drag-resizable width. `adjust(dx)` nudges the width by a pixel
  * delta (from a drag handle), clamped to `[min, max]` and mirrored to
- * localStorage so the size survives reloads.
+ * localStorage so the size survives reloads. Callers may provide a smaller
+ * effective maximum when the surrounding layout needs to preserve space for
+ * another pane.
  */
 export function useResizableWidth({
   storageKey,
@@ -34,8 +36,8 @@ export function useResizableWidth({
   ref.current = width
 
   const adjust = React.useCallback(
-    (dx: number) => {
-      const next = clamp(ref.current + dx, min, max)
+    (dx: number, effectiveMax: number = max) => {
+      const next = clamp(ref.current + dx, min, Math.max(min, Math.min(max, effectiveMax)))
       ref.current = next
       setWidth(next)
       try {
@@ -86,6 +88,11 @@ export function ResizeHandle({
     return () => {
       window.removeEventListener("pointermove", move)
       window.removeEventListener("pointerup", up)
+      if (dragging.current) {
+        dragging.current = false
+        document.body.style.cursor = ""
+        document.body.style.userSelect = ""
+      }
     }
   }, [onResize])
 

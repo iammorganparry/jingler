@@ -482,7 +482,7 @@ export function ConversationView({
                         <button
                           type="button"
                           onClick={() => onSendNow(i)}
-                          title="Send now — interrupts the current turn to steer the agent"
+                          title="Send now — steer the agent immediately"
                           className="flex flex-none items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-blue outline-none transition-colors hover:bg-blue/10 hover:text-blue focus-visible:ring-2 focus-visible:ring-ring"
                         >
                           <Zap size={11} />

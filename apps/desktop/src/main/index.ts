@@ -26,12 +26,37 @@ import {
   parseAuthCallback,
   registerProtocolClient
 } from "./deep-link.js"
+import { starbaseRoot } from "./app-paths.js"
 import { bootBackgroundColor, registerBootThemeChannel, resolveBootTheme } from "./boot-theme.js"
 import { runtime } from "./runtime.js"
 import { initAutoUpdater } from "./updater.js"
 
 /** The single renderer window (kept so deep-link callbacks can reach + focus it). */
 let mainWindow: BrowserWindow | null = null
+
+/**
+ * Development builds keep a redacted Codex lifecycle trace so an intermittent
+ * silent turn leaves evidence after its ten-minute watchdog fires. Packaged
+ * builds and headless e2e remain unchanged; developers can explicitly disable
+ * it with `STARBASE_CODEX_DIAGNOSTICS=0`.
+ */
+const enableCodexDiagnostics = (): void => {
+  if (
+    app.isPackaged ||
+    process.env.STARBASE_E2E_HEADLESS === "1" ||
+    process.env.STARBASE_CODEX_DIAGNOSTICS === "0"
+  ) {
+    return
+  }
+  process.env.STARBASE_CODEX_DIAGNOSTICS_DIR ??= join(
+    starbaseRoot,
+    "diagnostics",
+    "codex"
+  )
+  console.info(
+    `[codex-diagnostics] redacted traces: ${process.env.STARBASE_CODEX_DIAGNOSTICS_DIR}`
+  )
+}
 
 /**
  * Warm `ModelsService`'s cache before anything asks for it.
@@ -183,6 +208,7 @@ if (!gotPrimaryLock) {
   }
 
   app.whenReady().then(async () => {
+    enableCodexDiagnostics()
     // Force the layer to build so the RPC server + `ipcMain` listener are live
     // before the renderer can send its first frame.
     await runtime.runPromise(Effect.void)

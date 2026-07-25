@@ -1,5 +1,5 @@
 import type { Plan, Session, StreamEvent } from "@starbase/core"
-import { latestPlan, STOPPED_NOTE } from "@starbase/core"
+import { assistantMessage, latestPlan, STOPPED_NOTE, userMessage } from "@starbase/core"
 import { createActor, waitFor } from "xstate"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { conversationMachine } from "./conversation-machine.js"
@@ -29,6 +29,9 @@ const h = vi.hoisted(() => ({
   statusWrites: [] as Array<string>,
   skillsListCalls: 0,
   stopCalls: [] as Array<string>,
+  stopGate: Promise.resolve() as Promise<void>,
+  steerCalls: [] as Array<{ sessionId: string; text: string }>,
+  steerStatus: "unsupported" as "accepted" | "deferred" | "unsupported",
   // Drives the "a stop that rejects must still let the session move on" case.
   stopFails: false,
   /** Push reviewer events into the machine, as ReviewService's stream would. */
@@ -135,8 +138,19 @@ vi.mock("./rpc-client.js", () => ({
     agentCommentPlanStep: async () => {},
     agentRevisePlan: async () => {},
     agentApprovePlan: async () => {},
+    agentSteer: async (sessionId: string, text: string) => {
+      h.steerCalls.push({ sessionId, text })
+      return h.steerStatus === "accepted"
+        ? {
+            status: "accepted" as const,
+            user: userMessage("u-steered", text, "2026-07-24T10:00:00.000Z"),
+            assistant: assistantMessage("a-steered", "2026-07-24T10:00:00.000Z")
+          }
+        : { status: h.steerStatus }
+    },
     agentStop: async (sessionId: string) => {
       h.stopCalls.push(sessionId)
+      await h.stopGate
       if (h.stopFails) throw new Error("stop failed")
     },
     sessionsSetStatus: async (_id: string, status: string) => {
@@ -166,6 +180,9 @@ beforeEach(() => {
   h.statusWrites.length = 0
   h.skillsListCalls = 0
   h.stopCalls.length = 0
+  h.stopGate = Promise.resolve()
+  h.steerCalls.length = 0
+  h.steerStatus = "unsupported"
   h.stopFails = false
   h.setHarnessCalls.length = 0
   h.catalogGate = Promise.resolve()
@@ -321,7 +338,47 @@ describe("conversationMachine — queue while busy", () => {
     // The current turn is interrupted and "b" runs next, ahead of "a".
     await waitFor(actor, () => h.agentRunCalls.length === 2, { timeout: 3000 })
     expect(h.agentRunCalls[1]!.text).toBe("b")
+    expect(h.steerCalls).toEqual([{ sessionId: "s1", text: "b" }])
     expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["a"])
+    actor.stop()
+  })
+
+  it("SEND_NOW steers a live Codex turn without stopping or replaying it", async () => {
+    h.steerStatus = "accepted"
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "steer this" })
+    actor.send({ type: "SEND_NOW", index: 0 })
+
+    await waitFor(actor, (s) => s.context.messages.at(-1)?.id === "a-steered")
+    expect(h.stopCalls).toEqual([])
+    expect(h.agentRunCalls).toHaveLength(1)
+    expect(actor.getSnapshot().context.queued).toEqual([])
+    expect(actor.getSnapshot().context.messages.slice(-2).map((message) => message.id)).toEqual([
+      "u-steered",
+      "a-steered"
+    ])
+    actor.stop()
+  })
+
+  it("SEND_NOW keeps input queued while Codex is compacting", async () => {
+    h.steerStatus = "deferred"
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "after compaction" })
+    actor.send({ type: "SEND_NOW", index: 0 })
+    await waitFor(actor, () => h.steerCalls.length === 1)
+
+    expect(h.stopCalls).toEqual([])
+    expect(actor.getSnapshot().context.queued.map((queued) => queued.text)).toEqual([
+      "after compaction"
+    ])
     actor.stop()
   })
 
@@ -945,6 +1002,10 @@ describe("conversationMachine — stop", () => {
    * through `stopping` means the halt has landed before anything can start.
    */
   it("waits in `stopping` until the halt lands, before any next turn", async () => {
+    let releaseStop = () => {}
+    h.stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve
+    })
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
     actor.send({ type: "SEND", text: "go" })
@@ -955,10 +1016,12 @@ describe("conversationMachine — stop", () => {
 
     // Not `running` yet — the promoted message must not start until the stop
     // has been acknowledged. This is the assertion the old code failed.
+    await waitFor(actor, (s) => s.matches("stopping"))
     expect(actor.getSnapshot().matches("stopping")).toBe(true)
     expect(h.stopCalls).toContain("s1")
 
     // …and once it has, the promoted message runs as normal.
+    releaseStop()
     await waitFor(actor, (s) => s.matches("running"))
     expect(actor.getSnapshot().context.pendingText).toBe("next")
     actor.stop()
