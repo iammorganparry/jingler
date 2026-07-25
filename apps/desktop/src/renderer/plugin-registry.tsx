@@ -14,15 +14,18 @@
  * a file and watches nothing happen. `pluginModuleUrl` puts the manifest version
  * in the query string and this file re-imports whenever that key changes — which
  * is why bumping `version` is the documented way to force a reload.
+ *
+ * ## Two queries, not two `useState`s
+ *
+ * Both halves are react-query, matching `use-theme.ts`: a catalog query the
+ * watch stream seeds directly, and a module-loading query keyed by the plugin
+ * set's id@version fingerprint. The second is a cache keyed on identity, which
+ * is what react-query already is — so skipping a redundant re-import is the
+ * default rather than a hand-written effect guard, in-flight loads dedupe, and
+ * "loading" and "settled" stop being two pieces of state to keep in step.
  */
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode
-} from "react"
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PluginCatalog } from "@starbase/core"
 import type { TabContribution } from "@starbase/ui"
 import { rpc } from "./rpc-client.js"
@@ -43,66 +46,79 @@ interface PluginRegistryValue {
 }
 
 const EMPTY: PluginRegistryValue = { tabs: [], errors: [], catalog: null }
+const EMPTY_MODULES: {
+  active: ReadonlyArray<ActivePlugin>
+  errors: ReadonlyArray<PluginLoadError>
+} = { active: [], errors: [] }
 
 const PluginRegistryContext = createContext<PluginRegistryValue>(EMPTY)
 
-/** One stable key per loaded plugin set — see the note on versions above. */
-const catalogKey = (catalog: PluginCatalog | null): string =>
+export const pluginCatalogKey = ["plugins"] as const
+
+/**
+ * One stable key per loaded plugin set — see the note on versions above.
+ *
+ * This is the *query key* for the module-loading query, which is what makes
+ * react-query do the memoisation: two catalogs that name the same plugins at
+ * the same versions hit the same cache entry, so a watch re-emit that changed
+ * nothing relevant (a disabled plugin's mtime, say) does not re-import every
+ * module and remount every plugin tab under the operator.
+ */
+const catalogKey = (catalog: PluginCatalog | undefined): string =>
   (catalog?.plugins ?? [])
     .filter((p) => p.enabled)
     .map((p) => `${p.manifest.id}@${p.manifest.version}`)
     .join(",")
 
 export function PluginProvider({ children }: { children: ReactNode }) {
-  const [catalog, setCatalog] = useState<PluginCatalog | null>(null)
-  const [loaded, setLoaded] = useState<{
-    active: ReadonlyArray<ActivePlugin>
-    errors: ReadonlyArray<PluginLoadError>
-  }>({ active: [], errors: [] })
+  const queryClient = useQueryClient()
 
-  // One read at mount, then live updates. The initial read matters: `watch`
-  // only emits on CHANGE, so without it the app would show no plugins until the
-  // operator happened to touch the directory.
-  useEffect(() => {
-    let cancelled = false
-    void rpc
-      .pluginsList()
-      .then((next) => {
-        if (!cancelled) setCatalog(next)
-      })
-      // A failure here means no plugins, not a broken app. The operator sees an
-      // empty list, which is also what "none installed" looks like — acceptable,
-      // because the alternative is a modal about a subsystem they never used.
-      .catch(() => {
-        if (!cancelled) setCatalog({ plugins: [], failed: [] })
-      })
+  // The read at mount matters: `watch` only emits on CHANGE, so on its own the
+  // app would show no plugins until the operator happened to touch the
+  // directory.
+  const { data: catalog } = useQuery({
+    queryKey: pluginCatalogKey,
+    queryFn: () => rpc.pluginsList(),
+    // The catalog only changes through writes this app makes or through the
+    // watch stream below, both of which seed the cache directly — the same
+    // reasoning as the theme catalog. Refetching on focus would re-read every
+    // manifest off disk each time the window is clicked, for a result already
+    // known to be current.
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchOnWindowFocus: false
+  })
 
-    const unsubscribe = rpc.pluginsWatch((next) => {
-      if (!cancelled) setCatalog(next)
-    })
+  useEffect(
+    () =>
+      rpc.pluginsWatch((next) => {
+        // Seed rather than invalidate: the stream already carries the whole
+        // catalog, so invalidating would round-trip for a payload we hold.
+        queryClient.setQueryData(pluginCatalogKey, next)
+      }),
+    [queryClient]
+  )
 
-    return () => {
-      cancelled = true
-      unsubscribe()
-    }
-  }, [])
-
-  const key = catalogKey(catalog)
-
-  useEffect(() => {
-    if (!catalog) return
-    let cancelled = false
-    void loadPlugins(catalog.plugins).then((next) => {
-      if (!cancelled) setLoaded(next)
-    })
-    return () => {
-      cancelled = true
-    }
-    // Keyed by id@version rather than by `catalog` identity: a watch re-emit
-    // that changed nothing relevant (a disabled plugin's mtime, say) must not
-    // re-import every module and remount every plugin tab under the operator.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key])
+  /**
+   * Importing the modules is its own query, keyed by id@version.
+   *
+   * A query rather than an effect because the work is a cache keyed on
+   * identity, which is exactly what react-query is: re-importing is skipped for
+   * free when the key is unchanged, in-flight loads are deduped, and the
+   * "loading" and "settled" states stop being two `useState`s to keep in step.
+   * It also removes the `exhaustive-deps` suppression the effect needed, since
+   * the dependency is now the key itself rather than a value the linter cannot
+   * see through.
+   */
+  const { data: loaded = EMPTY_MODULES } = useQuery({
+    queryKey: ["plugin-modules", catalogKey(catalog)] as const,
+    queryFn: () => loadPlugins(catalog?.plugins ?? []),
+    enabled: catalog !== undefined,
+    // `loadPlugins` never rejects — it partitions into active and errors — so a
+    // retry could only repeat identical work.
+    retry: false,
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchOnWindowFocus: false
+  })
 
   const value = useMemo<PluginRegistryValue>(() => {
     const tabs = loaded.active.flatMap((plugin) =>
@@ -123,7 +139,12 @@ export function PluginProvider({ children }: { children: ReactNode }) {
         ...loaded.errors,
         ...(catalog?.failed ?? []).map((f) => ({ id: f.dir, message: f.message }))
       ],
-      catalog
+      // `undefined` (not loaded yet) and a failed read both present as `null`
+      // here. That collapse is deliberate: consumers only ever ask "what is
+      // installed?", and "nothing yet" and "the read failed" both answer
+      // "nothing to show" — a modal about a subsystem the operator may never
+      // have used would be worse than an empty list.
+      catalog: catalog ?? null
     }
   }, [loaded, catalog])
 
