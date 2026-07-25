@@ -1304,3 +1304,69 @@ describe("ContextManager.snapshot", () => {
     expect(snap.lastCompactedAt).not.toBeNull()
   })
 })
+
+/**
+ * The chat-scoped path, where a chat context id differs from its session id.
+ *
+ * Every other test in this file drives the manager with `SESSION` for both, which
+ * is the legacy shape — and on that shape `ownerOf` falls through to the id it was
+ * given and happens to be right, so the owner mapping is never actually needed.
+ * That is precisely how a broken binder shipped unnoticed: `ContextManager.bind`
+ * collided with `Function.prototype.bind`, the generated accessor was skipped, and
+ * the call silently did nothing. Nothing threw, because a bound class still
+ * inherits the Tag's `pipe` and `[Symbol.iterator]`.
+ *
+ * On a real multi-chat session the consequence was total: `SessionStore.get` was
+ * handed `c_<id>_1`, failed, and every snapshot came back with `window: null` —
+ * no context meter, no Compact now, and `auto` false so nothing ever compacted.
+ */
+describe("chat-scoped context", () => {
+  const CHAT = `c_${SESSION}_1`
+
+  /** Seed a session whose only chat carries an id of its own, as multi-chat does. */
+  const seedChat = () =>
+    Effect.gen(function* () {
+      const now = new Date().toISOString()
+      return yield* seed({
+        chats: [
+          { id: CHAT, title: null, createdAt: now, updatedAt: now, model: "claude-opus-4-1" }
+        ],
+        activeChatId: CHAT
+      })
+    })
+
+  it("resolves a bound chat to its owning session, so the meter gets a window", async () => {
+    const snap = await run(
+      Effect.gen(function* () {
+        yield* seedChat()
+        yield* ContextManager.bindContext(CHAT, SESSION)
+        return yield* ContextManager.snapshot(CHAT)
+      }),
+      recordingAdapter(GOOD_REPLY, recorder())
+    )
+
+    // The whole feature hangs off these two being non-null: `ContextMeter` renders
+    // nothing without a trigger point, and `contextPhase` refuses to escalate
+    // without a window.
+    expect(snap.window).toBe(200_000)
+    expect(snap.triggerAt).not.toBeNull()
+    expect(snap.phase).not.toBe("unknown")
+  })
+
+  it("reports an unknown window for a chat it was never told the owner of", async () => {
+    // The negative control, and the exact shape of the bug: with no binding there
+    // is no session to read settings from, and the manager says so rather than
+    // guessing. Asserting it here means the test above is proving the BINDING and
+    // not merely that a window can be computed.
+    const snap = await run(
+      Effect.gen(function* () {
+        yield* seedChat()
+        return yield* ContextManager.snapshot(CHAT)
+      }),
+      recordingAdapter(GOOD_REPLY, recorder())
+    )
+
+    expect(snap.window).toBeNull()
+    expect(snap.triggerAt).toBeNull()
+  })
+})
