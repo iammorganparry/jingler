@@ -4,15 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--
-      `https://www.google.com` is the favicon service the Connector Center derives
-      provider logos from: OpenConnector's catalog returns `iconUrl: null` for all
-      ~1,100 providers but a `homepageUrl` for each, so the logo is
-      `s2/favicons?domain=<host>`. Images only — no script, style or connect
-      origin is widened.
+      The Connector Center derives provider logos from a favicon service:
+      OpenConnector's catalog returns `iconUrl: null` for all ~1,100 providers but
+      a `homepageUrl` for each, so the logo is `s2/favicons?domain=<host>`.
+
+      BOTH origins are required. `www.google.com/s2/favicons` answers 301 and
+      redirects to `t{0..3}.gstatic.com/faviconV2?…`, and CSP is enforced against
+      the REDIRECT TARGET — allowing only google.com blocks every logo, which the
+      component then reports as a load error and silently falls back to an
+      initial-letter tile. Storybook has no CSP, so this failure is invisible
+      there and only appears in the packaged renderer.
+
+      Images only — no script, style or connect origin is widened.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https://github.com https://*.githubusercontent.com https://www.google.com"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https://github.com https://*.githubusercontent.com https://www.google.com https://*.gstatic.com"
     />
     <title>Starbase</title>
   </head>
