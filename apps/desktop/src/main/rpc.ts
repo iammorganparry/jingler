@@ -84,6 +84,7 @@ import type {
   ExecutionMode,
   Message,
   OpenConnectorConfig,
+  OpenConnectorDefaults,
   Plan,
   PlanRound,
   StreamEvent,
@@ -112,7 +113,7 @@ import { RpcServer } from "@effect/rpc"
 import type { FromClientEncoded, FromServerEncoded } from "@effect/rpc/RpcMessage"
 import { Effect, Layer, Mailbox, Option, Runtime, Stream } from "effect"
 import type { WebContents } from "electron"
-import { BrowserWindow, ipcMain, shell } from "electron"
+import { app, BrowserWindow, ipcMain, shell } from "electron"
 import { showNotification, shouldNotify } from "./notifications.js"
 import { BrowserPreviewService } from "./browser-preview.js"
 import { DialogService } from "./dialog.js"
@@ -215,8 +216,41 @@ export const mcpStatus = (
     McpService.status(spec, { refresh: refresh ?? false })
   )
 
-/** `OpenConnector.get` handler — settings + a `hasToken` bool (never the token). */
-export const openConnectorGet = () => OpenConnectorService.get
+/**
+ * The Starbase-hosted OpenConnector URL used by packaged (prod) builds, overridable
+ * via env for staging. PLACEHOLDER until the hosted instance ships — the mechanism
+ * is here so prod points at it automatically the moment the URL is real.
+ */
+const HOSTED_OPEN_CONNECTOR_URL = process.env.STARBASE_OPEN_CONNECTOR_URL ?? "https://connect.starbase.app"
+
+/** The dev instance the repo-root docker-compose serves, with its zero-setup token. */
+const DEV_OPEN_CONNECTOR_URL = process.env.OPEN_CONNECTOR_BASE_URL ?? "http://localhost:3000"
+const DEV_OPEN_CONNECTOR_TOKEN = process.env.OPEN_CONNECTOR_API_TOKEN ?? "local-dev-token"
+
+/**
+ * Environment-aware onboarding defaults. Only the main process knows
+ * `app.isPackaged`, so this lives here rather than in the cli-adapters service.
+ */
+export const openConnectorDefaults = (): OpenConnectorDefaults =>
+  // `app?.` because the unit-test env has no Electron `app`; there, dev is correct.
+  app?.isPackaged
+    ? { endpoint: HOSTED_OPEN_CONNECTOR_URL, kind: "hosted", hasDevToken: false }
+    : { endpoint: DEV_OPEN_CONNECTOR_URL, kind: "local", hasDevToken: true }
+
+/** `OpenConnector.get` handler — settings + a `hasToken` bool + onboarding defaults. */
+export const openConnectorGet = () =>
+  OpenConnectorService.get.pipe(Effect.map((r) => ({ ...r, defaults: openConnectorDefaults() })))
+
+/**
+ * `OpenConnector.autoSetup` handler — one-click onboarding. Dev fills the local
+ * endpoint + dev token and enables; prod points at the hosted endpoint but leaves
+ * it disabled (its token is provisioned separately — see docs/open-connector.md).
+ */
+export const openConnectorAutoSetup = () => {
+  const d = openConnectorDefaults()
+  const config = { endpoint: d.endpoint, enabled: d.kind === "local", serverName: "open-connector" }
+  return openConnectorSet(config, d.hasDevToken ? DEV_OPEN_CONNECTOR_TOKEN : undefined)
+}
 
 /**
  * `OpenConnector.set` handler. The token can fail to persist when the OS vault is
@@ -1907,6 +1941,7 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "OpenConnector.get": () => openConnectorGet(),
   "OpenConnector.set": ({ config, token }) => openConnectorSet(config, token),
   "OpenConnector.test": () => openConnectorTest(),
+  "OpenConnector.autoSetup": () => openConnectorAutoSetup(),
   "Connector.providers": () => OpenConnectorApi.listProviders(),
   "Connector.connections": () => OpenConnectorApi.listConnections(),
   "Connector.oauthConfigs": () => OpenConnectorApi.oauthConfigs(),

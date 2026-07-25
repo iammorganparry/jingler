@@ -666,6 +666,26 @@ export const OPEN_CONNECTOR_DEFAULT: OpenConnectorConfig = {
 }
 
 /**
+ * Environment-aware onboarding defaults for OpenConnector, resolved in the main
+ * process (it alone knows `app.isPackaged`). The Settings panel prefills from these
+ * and offers a one-click "Set up automatically":
+ *
+ * - `local` (dev builds) → the docker-compose instance on localhost, whose known
+ *   dev token (`hasDevToken`) the app can fill in for the operator.
+ * - `hosted` (packaged builds) → the Starbase-managed instance; the endpoint is
+ *   filled but the token is provisioned separately (no shipped dev token).
+ */
+export const OpenConnectorDefaults = Schema.Struct({
+  /** The default endpoint to prefill (no `/mcp` suffix). */
+  endpoint: Schema.String,
+  /** Which onboarding path applies to this build. */
+  kind: Schema.Literal("local", "hosted"),
+  /** True when the build ships a known token the app can auto-fill (dev only). */
+  hasDevToken: Schema.Boolean
+})
+export type OpenConnectorDefaults = Schema.Schema.Type<typeof OpenConnectorDefaults>
+
+/**
  * Persisted app configuration, stored at `~/starbase/config.json`. `reposDir` is
  * null until the user completes first-run setup by choosing a repos directory.
  */
