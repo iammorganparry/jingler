@@ -46,20 +46,11 @@ export { splitModelId }
 
 /** OpenCode exposes model-defined reasoning variants as a string per prompt. */
 export const mapOpencodeReasoning = (
-  effort: ReasoningEffort | undefined
+  effort: ReasoningEffort | undefined,
+  enabled: boolean | undefined = true
 ): string | undefined => {
-  switch (effort) {
-    case "off":
-      return "minimal"
-    case "think":
-      return "medium"
-    case "think-hard":
-      return "high"
-    case "ultrathink":
-      return "xhigh"
-    default:
-      return undefined
-  }
+  if (!enabled) return "minimal"
+  return effort === "max" ? "xhigh" : effort
 }
 
 /**
@@ -176,11 +167,11 @@ type OpencodePromptBody =
  * schema prevents an object spread from hiding future request-shape drift.
  */
 export const opencodePromptBody = (
-  spec: Pick<SessionSpec, "model" | "reasoningEffort">,
+  spec: Pick<SessionSpec, "model" | "reasoningEffort" | "thinkingEnabled">,
   prompt: string,
   planning: boolean
 ): OpencodePromptBody => {
-  const variant = mapOpencodeReasoning(spec.reasoningEffort)
+  const variant = mapOpencodeReasoning(spec.reasoningEffort, spec.thinkingEnabled)
   return {
     ...(spec.model === null ? {} : { model: splitModelId(spec.model) }),
     ...(variant === undefined ? {} : { variant }),

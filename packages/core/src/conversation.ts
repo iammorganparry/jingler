@@ -474,6 +474,16 @@ export const Plan = Schema.Struct({
 })
 export type Plan = Schema.Schema.Type<typeof Plan>
 
+/** The session-level plan currently shared by every chat in Plan Review. */
+export const SessionPlanArtifact = Schema.Struct({
+  sessionId: Schema.String,
+  producingChatId: Schema.String,
+  revision: Schema.Number,
+  plan: Plan,
+  updatedAt: Schema.String
+})
+export type SessionPlanArtifact = Schema.Schema.Type<typeof SessionPlanArtifact>
+
 // ── Content parts (ordered, interleaved) ─────────────────────────────────────
 
 export const TextPart = Schema.TaggedStruct("Text", { text: Schema.String })

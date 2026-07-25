@@ -32,10 +32,41 @@ let temp: ReturnType<typeof withTempRoot>
 
 beforeEach(() => {
   temp = withTempRoot()
+  mkdirSync(temp.root, { recursive: true })
+  const now = "2026-07-24T00:00:00.000Z"
+  writeFileSync(
+    join(temp.root, "sessions.json"),
+    JSON.stringify([{
+      id: SESSION,
+      repo: "widget",
+      branch: "starbase/test",
+      title: "Test",
+      status: "idle",
+      cli: "claude",
+      diff: { added: 0, removed: 0 },
+      prNumber: null,
+      costUsd: 0,
+      tokens: 0,
+      updatedAt: now,
+      worktreePath: temp.root,
+      chats: [{ id: SESSION, title: null, createdAt: now, updatedAt: now }],
+      activeChatId: SESSION
+    }])
+  )
 })
 afterEach(() => temp.cleanup())
 
 const SESSION = "s_test"
+const chatForSession = (
+  updatedAt: string,
+  fields: Partial<Session["chats"][number]> = {}
+): Session["chats"][number] => ({
+  id: SESSION,
+  title: null,
+  createdAt: updatedAt,
+  updatedAt,
+  ...fields
+})
 
 /** Run one prompt, auto-answering every gate with `decision`; collect events + transcript. */
 const runPrompt = (mode: PermissionMode, decision: GateDecision) => {
@@ -56,7 +87,7 @@ const runPrompt = (mode: PermissionMode, decision: GateDecision) => {
     const runner = yield* AgentRunner
     yield* runner.setMode(SESSION, mode)
     const events: Array<StreamEvent> = []
-    yield* runner.prompt(SESSION, "Add rate limiting to the refund endpoint.").pipe(
+    yield* runner.prompt(SESSION, SESSION, "Add rate limiting to the refund endpoint.").pipe(
       Stream.tap((ev) =>
         ev._tag === "GateRequested" ? runner.decideGate(SESSION, ev.gate.id, decision) : Effect.void
       ),
@@ -199,7 +230,7 @@ describe("AgentRunner HITL gating", () => {
       Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.setMode(SESSION, mode)
-        yield* runner.prompt(SESSION, "how does auth work?").pipe(
+        yield* runner.prompt(SESSION, SESSION, "how does auth work?").pipe(
           // Deny anything that does gate, so a gate is visible as a denial rather
           // than a hang.
           Stream.tap((ev) =>
@@ -284,7 +315,7 @@ describe("AgentRunner sub-agents", () => {
       const runner = yield* AgentRunner
       yield* runner.setMode(SESSION, "auto")
       const events: Array<StreamEvent> = []
-      yield* runner.prompt(SESSION, "fan out").pipe(Stream.runForEach((ev) => Effect.sync(() => events.push(ev))))
+      yield* runner.prompt(SESSION, SESSION, "fan out").pipe(Stream.runForEach((ev) => Effect.sync(() => events.push(ev))))
       const transcript = yield* TranscriptStore.list(SESSION)
       return { events, transcript }
     })
@@ -330,7 +361,7 @@ describe("AgentRunner image attachments", () => {
     const program = Effect.gen(function* () {
       const runner = yield* AgentRunner
       yield* runner.setMode(SESSION, "auto")
-      yield* runner.prompt(SESSION, "look at this", [image]).pipe(Stream.runDrain)
+      yield* runner.prompt(SESSION, SESSION, "look at this", [image]).pipe(Stream.runDrain)
       return yield* TranscriptStore.list(SESSION)
     })
     const transcript = await Effect.runPromise(program.pipe(Effect.provide(base)))
@@ -363,7 +394,7 @@ describe("AgentRunner AskUserQuestion", () => {
     const program = Effect.gen(function* () {
       const runner = yield* AgentRunner
       const events: Array<StreamEvent> = []
-      yield* runner.prompt(SESSION, "[[ask]] migrate the store").pipe(
+      yield* runner.prompt(SESSION, SESSION, "[[ask]] migrate the store").pipe(
         // Answer each question group as it arrives.
         Stream.tap((ev) =>
           ev._tag === "QuestionRequested"
@@ -420,7 +451,7 @@ describe("AgentRunner ids", () => {
         Effect.gen(function* () {
           const runner = yield* AgentRunner
           yield* runner.setMode(SESSION, "auto")
-          yield* runner.prompt(SESSION, text).pipe(Stream.runDrain)
+          yield* runner.prompt(SESSION, SESSION, text).pipe(Stream.runDrain)
         }).pipe(Effect.provide(base))
       )
 
@@ -457,7 +488,7 @@ describe("AgentRunner allowlist", () => {
       yield* runner.setMode(SESSION, "accept-edits")
 
       // First run: "always allow" the command gate.
-      yield* runner.prompt(SESSION, "first").pipe(
+      yield* runner.prompt(SESSION, SESSION, "first").pipe(
         Stream.tap((ev) =>
           ev._tag === "GateRequested" ? runner.decideGate(SESSION, ev.gate.id, "always") : Effect.void
         ),
@@ -466,7 +497,7 @@ describe("AgentRunner allowlist", () => {
 
       // Second run: the same command should now run without any gate.
       const events: Array<StreamEvent> = []
-      yield* runner.prompt(SESSION, "second").pipe(
+      yield* runner.prompt(SESSION, SESSION, "second").pipe(
         Stream.runForEach((ev) => Effect.sync(() => events.push(ev)))
       )
       return events
@@ -514,6 +545,8 @@ describe("AgentRunner plan mode", () => {
       costUsd: 0,
       tokens: 0,
       updatedAt: "2026-07-11T10:00:00.000Z",
+      chats: [chatForSession("2026-07-11T10:00:00.000Z", { mode })],
+      activeChatId: SESSION,
       mode
     }
     mkdirSync(temp.root, { recursive: true })
@@ -525,7 +558,7 @@ describe("AgentRunner plan mode", () => {
       const runner = yield* AgentRunner
       yield* runner.setMode(SESSION, "plan")
       const events: Array<StreamEvent> = []
-      yield* runner.prompt(SESSION, "[[plan]] refactor auth").pipe(
+      yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
         Stream.tap((ev) =>
           ev._tag === "PlanProposed"
             ? runner
@@ -557,7 +590,7 @@ describe("AgentRunner plan mode", () => {
     const program = Effect.gen(function* () {
       const runner = yield* AgentRunner
       yield* runner.setMode(SESSION, "plan")
-      yield* runner.prompt(SESSION, "[[plan]] refactor auth").pipe(
+      yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
         Stream.tap((ev) => (ev._tag === "PlanProposed" ? runner.approvePlan(SESSION, ev.plan.id) : Effect.void)),
         Stream.runDrain
       )
@@ -583,13 +616,14 @@ describe("AgentRunner plan mode", () => {
         // Start in accept-edits, switch to plan (captures accept-edits as prior).
         yield* runner.setMode(SESSION, "accept-edits")
         yield* runner.setMode(SESSION, "plan")
-        yield* runner.prompt(SESSION, "[[plan]] refactor auth").pipe(
+        yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
           Stream.tap((ev) =>
             ev._tag === "PlanProposed" ? runner.approvePlan(SESSION, ev.plan.id) : Effect.void
           ),
           Stream.runDrain
         )
-        return (yield* SessionStore.get(SESSION)).mode
+        const session = yield* SessionStore.get(SESSION)
+        return session.chats.find((chat) => chat.id === session.activeChatId)?.mode
       }).pipe(Effect.provide(base()))
     )
     expect(mode).toBe("accept-edits")
@@ -606,13 +640,14 @@ describe("AgentRunner plan mode", () => {
         // Running in auto, then switch to plan (captures "auto" as the prior mode).
         yield* runner.setMode(SESSION, "auto")
         yield* runner.setMode(SESSION, "plan")
-        yield* runner.prompt(SESSION, "[[plan]] refactor auth").pipe(
+        yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
           Stream.tap((ev) =>
             ev._tag === "PlanProposed" ? runner.approvePlan(SESSION, ev.plan.id) : Effect.void
           ),
           Stream.runDrain
         )
-        return (yield* SessionStore.get(SESSION)).mode
+        const session = yield* SessionStore.get(SESSION)
+        return session.chats.find((chat) => chat.id === session.activeChatId)?.mode
       }).pipe(Effect.provide(base()))
     )
     expect(mode).toBe("auto")
@@ -625,13 +660,14 @@ describe("AgentRunner plan mode", () => {
         const runner = yield* AgentRunner
         yield* runner.setMode(SESSION, "accept-edits")
         yield* runner.setMode(SESSION, "plan")
-        yield* runner.prompt(SESSION, "[[plan]] refactor auth").pipe(
+        yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
           Stream.tap((ev) =>
             ev._tag === "PlanProposed" ? runner.approvePlan(SESSION, ev.plan.id, "auto") : Effect.void
           ),
           Stream.runDrain
         )
-        return (yield* SessionStore.get(SESSION)).mode
+        const session = yield* SessionStore.get(SESSION)
+        return session.chats.find((chat) => chat.id === session.activeChatId)?.mode
       }).pipe(Effect.provide(base()))
     )
 
@@ -649,7 +685,8 @@ describe("AgentRunner plan mode", () => {
         const runner = yield* AgentRunner
         yield* runner.setMode(SESSION, "auto")
         yield* runner.setMode(SESSION, "plan")
-        return (yield* SessionStore.get(SESSION)).mode
+        const session = yield* SessionStore.get(SESSION)
+        return session.chats.find((chat) => chat.id === session.activeChatId)?.mode
       }).pipe(Effect.provide(base()))
     )
     expect(persisted).toBe("auto") // NOT "plan"
@@ -707,7 +744,7 @@ describe("AgentRunner plan mode", () => {
       yield* runner.setMode(SESSION, "plan")
       const seen: Array<string> = []
       const events: Array<StreamEvent> = []
-      yield* runner.prompt(SESSION, "[[plan]] refactor auth").pipe(
+      yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
         Stream.tap((ev) => {
           if (ev._tag !== "PlanProposed") return Effect.void
           const first = seen.length === 0
@@ -741,7 +778,7 @@ describe("AgentRunner plan mode", () => {
       const runner = yield* AgentRunner
       yield* runner.setMode(SESSION, "plan")
       const events: Array<StreamEvent> = []
-      yield* runner.prompt(SESSION, "[[plan]] refactor auth").pipe(
+      yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
         Stream.tap((ev) => (ev._tag === "PlanProposed" ? runner.stop(SESSION) : Effect.void)),
         Stream.runForEach((e) => Effect.sync(() => events.push(e)))
       )
@@ -781,7 +818,9 @@ describe("AgentRunner model", () => {
       prNumber: null,
       costUsd: 0,
       tokens: 0,
-      updatedAt: "2026-07-11T10:00:00.000Z"
+      updatedAt: "2026-07-11T10:00:00.000Z",
+      chats: [chatForSession("2026-07-11T10:00:00.000Z")],
+      activeChatId: SESSION
     }
     mkdirSync(temp.root, { recursive: true })
     writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session]))
@@ -803,9 +842,9 @@ describe("AgentRunner model", () => {
     const model = await Effect.runPromise(
       Effect.gen(function* () {
         const runner = yield* AgentRunner
-        yield* runner.prompt(SESSION, "hi").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "hi").pipe(Stream.runDrain)
         const persisted = yield* SessionStore.get(SESSION)
-        return persisted.model
+        return persisted.chats.find((chat) => chat.id === persisted.activeChatId)?.model
       }).pipe(Effect.provide(base))
     )
     expect(model).toBe("opus-live")
@@ -830,6 +869,8 @@ describe("AgentRunner plan library", () => {
       tokens: 0,
       updatedAt: "2026-07-11T10:00:00.000Z",
       worktreePath: WT,
+      chats: [chatForSession("2026-07-11T10:00:00.000Z", { mode })],
+      activeChatId: SESSION,
       mode
     }
     mkdirSync(temp.root, { recursive: true })
@@ -870,7 +911,7 @@ describe("AgentRunner plan library", () => {
       Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.setMode(SESSION, "plan")
-        yield* runner.prompt(SESSION, "[[plan]] refactor auth").pipe(
+        yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
           Stream.tap((ev) =>
             ev._tag === "PlanProposed" ? runner.approvePlan(SESSION, ev.plan.id) : Effect.void
           ),
@@ -912,7 +953,7 @@ describe("AgentRunner plan library", () => {
       Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.setMode(SESSION, "auto")
-        yield* runner.prompt(SESSION, "please implement the plan").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "please implement the plan").pipe(Stream.runDrain)
       }).pipe(Effect.provide(base))
     )
     expect(captured.prompt).toContain("<session-context>")
@@ -945,7 +986,7 @@ describe("AgentRunner plan library", () => {
       Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.setMode(SESSION, "auto")
-        yield* runner.prompt(SESSION, "just do X").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "just do X").pipe(Stream.runDrain)
       }).pipe(Effect.provide(base))
     )
     // The standing "ask through your native channel" note prefixes every turn,
@@ -979,7 +1020,7 @@ describe("AgentRunner plan library", () => {
       Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.setMode(SESSION, "auto")
-        yield* runner.prompt(SESSION, "/babysit-pr get it to main").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "/babysit-pr get it to main").pipe(Stream.runDrain)
       }).pipe(Effect.provide(base))
     )
     // Prefixing the pointer demoted the command to prose, and the turn came back
@@ -1003,6 +1044,8 @@ describe("AgentRunner resume across restarts", () => {
       costUsd: 0,
       tokens: 0,
       updatedAt: "2026-07-11T10:00:00.000Z",
+      chats: [chatForSession("2026-07-11T10:00:00.000Z", { mode: "auto" })],
+      activeChatId: SESSION,
       mode: "auto"
     }
     mkdirSync(temp.root, { recursive: true })
@@ -1051,7 +1094,7 @@ describe("AgentRunner resume across restarts", () => {
       Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.setMode(SESSION, "auto")
-        yield* runner.prompt(SESSION, "start").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "start").pipe(Stream.runDrain)
       }).pipe(Effect.provide(base))
     )
     expect(captured.resumeId).toBeNull()
@@ -1060,7 +1103,9 @@ describe("AgentRunner resume across restarts", () => {
     const persisted = await Effect.runPromise(
       SessionStore.get(SESSION).pipe(Effect.provide(Layer.merge(SessionStore.Default, temp.layer)))
     )
-    expect(persisted.resumeId).toBe("sdk-123")
+    expect(
+      persisted.chats.find((chat) => chat.id === persisted.activeChatId)?.resumeId
+    ).toBe("sdk-123")
 
     // A SECOND run through a FRESH runner (= a restart, empty in-memory map) picks
     // the id up from persistence and hands it to the adapter as spec.resumeId.
@@ -1068,7 +1113,7 @@ describe("AgentRunner resume across restarts", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const runner = yield* AgentRunner
-        yield* runner.prompt(SESSION, "continue").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "continue").pipe(Stream.runDrain)
       }).pipe(Effect.provide(base))
     )
     expect(captured.resumeId).toBe("sdk-123")
@@ -1078,7 +1123,16 @@ describe("AgentRunner resume across restarts", () => {
     seedBareSession()
     const sessionsPath = join(temp.root, "sessions.json")
     const seeded = JSON.parse(readFileSync(sessionsPath, "utf8")) as Array<Session>
-    writeFileSync(sessionsPath, JSON.stringify([{ ...seeded[0]!, resumeId: "normal-before" }]))
+    writeFileSync(
+      sessionsPath,
+      JSON.stringify([{
+        ...seeded[0]!,
+        chats: seeded[0]!.chats.map((chat) => ({
+          ...chat,
+          resumeId: "normal-before"
+        }))
+      }])
+    )
 
     const specs: Array<{
       cli: string
@@ -1128,11 +1182,11 @@ describe("AgentRunner resume across restarts", () => {
         yield* ConfigService.setOrchestrator("codex", "gpt-5")
         const runner = yield* AgentRunner
         yield* runner
-          .prompt(SESSION, "Preserve the filters", [], "orchestrator")
+          .prompt(SESSION, SESSION, "Preserve the filters", [], "orchestrator")
           .pipe(Stream.runDrain)
-        yield* runner.prompt(SESSION, "Normal follow-up").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "Normal follow-up").pipe(Stream.runDrain)
         yield* runner
-          .prompt(SESSION, "Also export CSV", [], "orchestrator")
+          .prompt(SESSION, SESSION, "Also export CSV", [], "orchestrator")
           .pipe(Stream.runDrain)
         return {
           session: yield* SessionStore.get(SESSION),
@@ -1152,8 +1206,11 @@ describe("AgentRunner resume across restarts", () => {
     expect(specs[1]).toMatchObject({ resumeId: "normal-before", readOnly: undefined })
     expect(specs[2]).toMatchObject({ resumeId: "gigaplan-1", readOnly: true })
     expect(specs[2]!.prompt).toContain("Also export CSV")
-    expect(persisted.session?.resumeId).toBe("normal-after")
-    expect(persisted.session?.gigaplanResumeId).toBe("gigaplan-2")
+    const active = persisted.session?.chats.find(
+      (chat) => chat.id === persisted.session?.activeChatId
+    )
+    expect(active?.resumeId).toBe("normal-after")
+    expect(active?.gigaplanResumeId).toBe("gigaplan-2")
     expect(persisted.transcript.map((message) => message.source)).toStrictEqual([
       "gigaplan-intake",
       "gigaplan-intake",
@@ -1182,6 +1239,8 @@ describe("AgentRunner plan progress across turns", () => {
       tokens: 0,
       updatedAt: "2026-07-11T10:00:00.000Z",
       worktreePath: WT_X,
+      chats: [chatForSession("2026-07-11T10:00:00.000Z", { mode: "auto" })],
+      activeChatId: SESSION,
       mode: "auto"
     }
     mkdirSync(temp.root, { recursive: true })
@@ -1244,14 +1303,14 @@ describe("AgentRunner plan progress across turns", () => {
       Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.setMode(SESSION, "auto")
-        yield* runner.prompt(SESSION, "plan the refactor").pipe(
+        yield* runner.prompt(SESSION, SESSION, "plan the refactor").pipe(
           Stream.tap((ev) =>
             ev._tag === "PlanProposed" ? runner.approvePlan(SESSION, ev.plan.id) : Effect.void
           ),
           Stream.runDrain
         )
         // A FRESH assistant message: the plan part is now behind us.
-        yield* runner.prompt(SESSION, "now implement it").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "now implement it").pipe(Stream.runDrain)
         return findApprovedPlan(yield* TranscriptStore.list(SESSION))
       }).pipe(Effect.provide(base))
     )
@@ -1370,7 +1429,7 @@ describe("AgentRunner failures", () => {
     const events = await Effect.runPromise(
       Effect.gen(function* () {
         const runner = yield* AgentRunner
-        return yield* runner.prompt(SESSION, "hello").pipe(Stream.runCollect)
+        return yield* runner.prompt(SESSION, SESSION, "hello").pipe(Stream.runCollect)
       }).pipe(Effect.provide(base))
     )
 
@@ -1449,7 +1508,7 @@ describe("AgentRunner stop", () => {
         // Consume in a fiber: this run never ends on its own.
         const consumer = yield* Effect.fork(
           runner
-            .prompt(SESSION, "go")
+            .prompt(SESSION, SESSION, "go")
             .pipe(Stream.runForEach((ev) => Effect.sync(() => events.push(ev))))
         )
         yield* Deferred.await(started).pipe(Effect.timeout("5 seconds"))
@@ -1535,13 +1594,13 @@ describe("AgentRunner stop", () => {
       return yield* Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.setMode(SESSION, "ask")
-        yield* Effect.fork(runner.prompt(SESSION, "first").pipe(Stream.runDrain))
+        yield* Effect.fork(runner.prompt(SESSION, SESSION, "first").pipe(Stream.runDrain))
         yield* Deferred.await(started).pipe(Effect.timeout("5 seconds"))
         // Forked, NOT awaited — this is how the renderer used to fire it, and
         // the whole point is that firing it that way must still be safe.
         yield* Effect.fork(runner.stop(SESSION))
         yield* Effect.sleep("50 millis")
-        yield* runner.prompt(SESSION, "second").pipe(Stream.runDrain, Effect.timeout("5 seconds"))
+        yield* runner.prompt(SESSION, SESSION, "second").pipe(Stream.runDrain, Effect.timeout("5 seconds"))
         return yield* Ref.get(order)
       }).pipe(Effect.provide(base))
     }).pipe(Effect.runPromise)
@@ -1604,7 +1663,7 @@ describe("AgentRunner first-event watchdog", () => {
         const runner = yield* AgentRunner
         const seen: Array<StreamEvent> = []
         const consumer = yield* Effect.fork(
-          runner.prompt(SESSION, "hello?").pipe(Stream.runForEach((e) => Effect.sync(() => seen.push(e))))
+          runner.prompt(SESSION, SESSION, "hello?").pipe(Stream.runForEach((e) => Effect.sync(() => seen.push(e))))
         )
         // The watchdog is forked immediately before the adapter runs, so once
         // the adapter is live the sleep is registered and the clock can jump.
@@ -1653,7 +1712,7 @@ describe("AgentRunner first-event watchdog", () => {
         const runner = yield* AgentRunner
         const seen: Array<StreamEvent> = []
         yield* Effect.fork(
-          runner.prompt(SESSION, "hello?").pipe(Stream.runForEach((e) => Effect.sync(() => seen.push(e))))
+          runner.prompt(SESSION, SESSION, "hello?").pipe(Stream.runForEach((e) => Effect.sync(() => seen.push(e))))
         )
         yield* Deferred.await(spoke)
         yield* TestClock.adjust("121 seconds")
@@ -1705,7 +1764,7 @@ describe("AgentRunner live tool output", () => {
         yield* runner.setMode(SESSION, "auto")
         const collected: Array<StreamEvent> = []
         yield* runner
-          .prompt(SESSION, "run the tests")
+          .prompt(SESSION, SESSION, "run the tests")
           .pipe(Stream.runForEach((ev) => Effect.sync(() => collected.push(ev))))
         return { events: collected, transcript: yield* TranscriptStore.list(SESSION) }
       }).pipe(Effect.provide(base))
@@ -1784,7 +1843,7 @@ describe("AgentRunner on the Starbase harness", () => {
       )
       yield* Effect.gen(function* () {
         const runner = yield* AgentRunner
-        yield* runner.prompt(SESSION, "hello").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "hello").pipe(Stream.runDrain)
       }).pipe(Effect.provide(base))
       return seen as { cli: string; model: string | null } | null
     }).pipe(Effect.runPromise)
@@ -1848,7 +1907,7 @@ describe("AgentRunner usage accrual", () => {
       // The scripted harness gates its edit and its command; nothing else here
       // answers them, so the run would park forever.
       const turn = (text: string) =>
-        runner.prompt(SESSION, text).pipe(
+        runner.prompt(SESSION, SESSION, text).pipe(
           Stream.tap((ev) =>
             ev._tag === "GateRequested"
               ? runner.decideGate(SESSION, ev.gate.id, "allow")

@@ -11,7 +11,7 @@ import type {
   PlanComment,
   QuestionAnswer,
   QuestionRequest,
-  ReasoningEffort,
+  ReasoningSetting,
   Session,
   StreamEvent
 } from "@starbase/core"
@@ -58,6 +58,11 @@ import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore } from "./plan-store.js"
+import {
+  anySessionRunActive,
+  releaseSessionRun,
+  reserveSessionRun
+} from "./run-coordinator.js"
 
 /** Tools that write to disk — a successful one advances the matching plan step. */
 const EDIT_TOOLS = new Set(["Write", "Edit", "Update", "MultiEdit", "NotebookEdit"])
@@ -171,6 +176,7 @@ export const isCodexSkillInvocation = (text: string): boolean =>
 /** A gate awaiting the operator; the `Deferred` unblocks the paused agent. */
 interface PendingGate {
   readonly sessionId: string
+  readonly chatId: string
   readonly deferred: Deferred.Deferred<PermissionDecision>
   /** Token added to the session allowlist on an "always" decision. */
   readonly allowLabel: string | null
@@ -179,12 +185,14 @@ interface PendingGate {
 /** A question group awaiting the user's answers; the `Deferred` resumes the agent. */
 interface PendingQuestion {
   readonly sessionId: string
+  readonly chatId: string
   readonly deferred: Deferred.Deferred<ReadonlyArray<QuestionAnswer>>
 }
 
 /** A proposed plan awaiting the operator's decision; the `Deferred` resumes the agent. */
 interface PendingPlan {
   readonly sessionId: string
+  readonly chatId: string
   readonly deferred: Deferred.Deferred<PlanDecision>
 }
 
@@ -193,6 +201,8 @@ type RunToken = Record<never, never>
 
 /** A session's in-flight run: the fiber to interrupt, and which run owns the slot. */
 interface RunFiber {
+  readonly sessionId: string
+  readonly chatId: string
   readonly fiber: Fiber.RuntimeFiber<void, never>
   readonly token: RunToken
 }
@@ -332,22 +342,22 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     const gates = yield* Ref.make(new Map<string, PendingGate>())
     // requestId → the pending question group (shared across prompt/answerQuestion/stop).
     const questions = yield* Ref.make(new Map<string, PendingQuestion>())
-    // Per-session live HITL state, seeded from the Session record on first use.
+    // Per-chat live HITL state, seeded from the Chat record on first use.
     const modes = yield* Ref.make(new Map<string, PermissionMode>())
     const allowlists = yield* Ref.make(new Map<string, Set<string>>())
     // planId → the pending plan (shared across prompt/approve/revise/stop).
     const plans = yield* Ref.make(new Map<string, PendingPlan>())
-    // sessionId → the exec mode to restore when a plan is approved (captured on
+    // chatId → the exec mode to restore when a plan is approved (captured on
     // the switch into "plan").
     const priorModes = yield* Ref.make(new Map<string, PermissionMode>())
-    // sessionId → the user's default exec mode (read from their claude/codex
+    // chatId → the user's default exec mode (read from their claude/codex
     // config at run start). Used as the restore fallback when there's no prior
     // exec mode to fall back to — so approving a plan lands in the mode they
     // normally run in, not a hardcoded guess.
     const execDefaults = yield* Ref.make(new Map<string, PermissionMode>())
-    // sessionId → live handles onto the current run, for the out-of-band plan RPCs.
+    // chatId → live handles onto the current run, for the out-of-band plan RPCs.
     const active = yield* Ref.make(new Map<string, ActiveRun>())
-    // sessionId → the fiber running the agent, so `stop` can interrupt it.
+    // chatId → the fiber running the agent, so `stop` can interrupt it.
     // Interruption is the ONLY thing that reaches the underlying process: the
     // real adapter aborts its CLI in an `onInterrupt` finalizer. Nothing else
     // gets there — `CliAdapter.stop` is a no-op in every implementation, and a
@@ -380,51 +390,71 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           return current !== undefined ? [current, m] : [made, new Map(m).set(sessionId, made)]
         })
       })
+
     // Monotonic id source — deterministic (no Date.now/random) for stable tests.
     const counter = yield* Ref.make(0)
     const nextId = Ref.updateAndGet(counter, (n) => n + 1)
 
-    const persistMode = (sessionId: string, mode: PermissionMode) =>
-      SessionStore.setMode(sessionId, mode).pipe(Effect.ignore)
+    const persistMode = (sessionId: string, chatId: string, mode: PermissionMode) =>
+      SessionStore.setMode(sessionId, chatId, mode).pipe(Effect.ignore)
 
-    const setMode = (sessionId: string, mode: PermissionMode) =>
+    const setMode = (
+      sessionId: string,
+      chatIdOrMode: string,
+      maybeMode?: PermissionMode
+    ) =>
       Effect.gen(function* () {
+        const chatId = maybeMode === undefined ? sessionId : chatIdOrMode
+        const mode = (maybeMode ?? chatIdOrMode) as PermissionMode
         // Entering plan mode: remember the exec mode to fall back to on approval.
         if (mode === "plan") {
           const current =
-            (yield* Ref.get(modes)).get(sessionId) ??
+            (yield* Ref.get(modes)).get(chatId) ??
             (yield* SessionStore.get(sessionId).pipe(
-              Effect.map((s) => s.mode),
+              Effect.map((s) => s.chats.find((chat) => chat.id === chatId)?.mode),
               Effect.orElseSucceed(() => undefined)
             ))
-          const configDefault = (yield* Ref.get(execDefaults)).get(sessionId) ?? "accept-edits"
+          const configDefault = (yield* Ref.get(execDefaults)).get(chatId) ?? "accept-edits"
           const prior: PermissionMode = current && current !== "plan" ? current : configDefault
-          yield* Ref.update(priorModes, (m) => new Map(m).set(sessionId, prior))
+          yield* Ref.update(priorModes, (m) => new Map(m).set(chatId, prior))
         }
-        yield* Ref.update(modes, (m) => new Map(m).set(sessionId, mode))
+        yield* Ref.update(modes, (m) => new Map(m).set(chatId, mode))
         // Plan mode is TRANSIENT — never persist it to the session. If we did, a
         // restart (or any run with an empty in-memory `modes`) would resurrect
         // plan mode from `session.mode` with no `priorModes` captured, so
         // approving the plan would fall back to "accept-edits" and re-gate every
         // command. Keeping the real exec mode persisted means `session.mode` is
         // always the mode to restore on approval.
-        if (mode !== "plan") yield* persistMode(sessionId, mode)
+        if (mode !== "plan") yield* persistMode(sessionId, chatId, mode)
       })
 
-    const decideGate = (sessionId: string, gateId: string, decision: GateDecision) =>
+    const decideGate = (
+      sessionId: string,
+      chatIdOrGateId: string,
+      gateIdOrDecision: string,
+      maybeDecision?: GateDecision
+    ) =>
       Effect.gen(function* () {
+        const chatId = maybeDecision === undefined ? sessionId : chatIdOrGateId
+        const gateId = maybeDecision === undefined ? chatIdOrGateId : gateIdOrDecision
+        const decision =
+          maybeDecision ?? (gateIdOrDecision as GateDecision)
         const entry = (yield* Ref.get(gates)).get(gateId)
-        if (entry === undefined || entry.sessionId !== sessionId) return
+        if (
+          entry === undefined ||
+          entry.sessionId !== sessionId ||
+          entry.chatId !== chatId
+        ) return
         if (decision === "always" && entry.allowLabel !== null) {
           const label = entry.allowLabel
           yield* Ref.update(allowlists, (m) => {
             const next = new Map(m)
-            const set = new Set(next.get(sessionId) ?? [])
+            const set = new Set(next.get(chatId) ?? [])
             set.add(label)
-            next.set(sessionId, set)
+            next.set(chatId, set)
             return next
           })
-          yield* SessionStore.addAllowlist(sessionId, label).pipe(Effect.ignore)
+          yield* SessionStore.addAllowlist(sessionId, chatId, label).pipe(Effect.ignore)
         }
         yield* Deferred.succeed(entry.deferred, decision === "deny" ? "deny" : "allow")
       })
@@ -432,12 +462,22 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     /** Submit the user's answers to a pending question group, resuming the agent. */
     const answerQuestion = (
       sessionId: string,
-      requestId: string,
-      answers: ReadonlyArray<QuestionAnswer>
+      chatIdOrRequestId: string,
+      requestIdOrAnswers: string | ReadonlyArray<QuestionAnswer>,
+      maybeAnswers?: ReadonlyArray<QuestionAnswer>
     ) =>
       Effect.gen(function* () {
+        const chatId = maybeAnswers === undefined ? sessionId : chatIdOrRequestId
+        const requestId =
+          maybeAnswers === undefined ? chatIdOrRequestId : (requestIdOrAnswers as string)
+        const answers =
+          maybeAnswers ?? (requestIdOrAnswers as ReadonlyArray<QuestionAnswer>)
         const entry = (yield* Ref.get(questions)).get(requestId)
-        if (entry === undefined || entry.sessionId !== sessionId) return
+        if (
+          entry === undefined ||
+          entry.sessionId !== sessionId ||
+          entry.chatId !== chatId
+        ) return
         // The answers are recorded onto the transcript inside `askQuestion` (which
         // owns the run's message accumulator); here we just resume the agent.
         yield* Deferred.succeed(entry.deferred, answers)
@@ -454,7 +494,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     /** Thread a comment onto a plan step (persisted + streamed); doesn't resume the agent. */
     const commentPlanStep = (sessionId: string, planId: string, stepId: string, body: string) =>
       Effect.gen(function* () {
-        const run = (yield* Ref.get(active)).get(sessionId)
+        const pending = (yield* Ref.get(plans)).get(planId)
+        const run =
+          pending?.sessionId === sessionId
+            ? (yield* Ref.get(active)).get(pending.chatId)
+            : undefined
         if (run === undefined) return
         const cn = yield* nextId
         const now = yield* Effect.sync(() => new Date().toISOString())
@@ -469,7 +513,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     /** Route the open comments back to the agent as a revision and resume planning. */
     const revisePlan = (sessionId: string, planId: string) =>
       Effect.gen(function* () {
-        const run = (yield* Ref.get(active)).get(sessionId)
+        const pending = (yield* Ref.get(plans)).get(planId)
+        const run =
+          pending?.sessionId === sessionId
+            ? (yield* Ref.get(active)).get(pending.chatId)
+            : undefined
         if (run === undefined) return
         const plan = yield* run.readPlan(planId)
         if (plan === null) return
@@ -486,7 +534,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     /** Approve a plan: mark it approved, restore the exec mode, and start execution. */
     const approvePlan = (sessionId: string, planId: string, executionMode?: ExecutionMode) =>
       Effect.gen(function* () {
-        const run = (yield* Ref.get(active)).get(sessionId)
+        const pending = (yield* Ref.get(plans)).get(planId)
+        const run =
+          pending?.sessionId === sessionId
+            ? (yield* Ref.get(active)).get(pending.chatId)
+            : undefined
         if (run !== undefined) yield* run.applyPlan(planId, (p) => ({ ...p, status: "approved" }))
         // Engage the mode they were actually running this session in before
         // planning (`priorModes`, e.g. "auto") — that's their real intent for this
@@ -498,11 +550,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
         // mode) the operator picked in the composer, re-gating every command.
         const mode =
           executionMode ??
-          (yield* Ref.get(priorModes)).get(sessionId) ??
-          (yield* Ref.get(execDefaults)).get(sessionId) ??
+          (pending ? (yield* Ref.get(priorModes)).get(pending.chatId) : undefined) ??
+          (pending ? (yield* Ref.get(execDefaults)).get(pending.chatId) : undefined) ??
           "accept-edits"
         // Restore the exec mode live (canUseTool re-reads it) and persist it.
-        yield* setMode(sessionId, mode)
+        if (pending) yield* setMode(sessionId, pending.chatId, mode)
         yield* resolvePlan(sessionId, planId, PlanDecision.Approve({ mode }))
       })
 
@@ -523,8 +575,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
       })
 
     /** The plan with `planId` from a session's persisted transcript, or null. */
-    const sessionPlan = (sessionId: string, planId: string): Effect.Effect<Plan | null, never, PromptEnv> =>
-      TranscriptStore.list(sessionId).pipe(
+    const sessionPlan = (chatId: string, planId: string): Effect.Effect<Plan | null, never, PromptEnv> =>
+      TranscriptStore.list(chatId).pipe(
         Effect.orElseSucceed(() => [] as ReadonlyArray<Message>),
         Effect.map((messages) => messages.reduce<Plan | null>((found, m) => findPlan(m, planId) ?? found, null))
       )
@@ -536,25 +588,41 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
      * the agent with the plan embedded (the harness has no memory of the prior
      * planning conversation across a restart). Returns the run's event stream.
      */
-    const resumePlan = (sessionId: string, planId: string): Stream.Stream<StreamEvent, never, PromptEnv> =>
-      Stream.unwrap(
+    function resumePlan(
+      sessionId: string,
+      planId: string
+    ): Stream.Stream<StreamEvent, never, PromptEnv>
+    function resumePlan(
+      sessionId: string,
+      chatId: string,
+      planId: string
+    ): Stream.Stream<StreamEvent, never, PromptEnv>
+    function resumePlan(
+      sessionId: string,
+      chatIdOrPlanId: string,
+      maybePlanId?: string
+    ): Stream.Stream<StreamEvent, never, PromptEnv> {
+      const chatId = maybePlanId === undefined ? sessionId : chatIdOrPlanId
+      const planId = maybePlanId ?? chatIdOrPlanId
+      return Stream.unwrap(
         Effect.gen(function* () {
-          const plan = yield* sessionPlan(sessionId, planId)
+          const plan = yield* sessionPlan(chatId, planId)
           if (plan === null) return Stream.empty
           // Restore the mode the operator actually runs this session in. Plan mode
           // is never persisted, so `session.mode` is their real exec mode (e.g.
           // "auto"); fall back to the CLI-config default only if it's absent or a
           // legacy "plan". This keeps a stale-plan re-drive from re-gating.
           const persisted = yield* SessionStore.get(sessionId).pipe(
-            Effect.map((s) => s.mode),
+            Effect.map((s) => s.chats.find((chat) => chat.id === chatId)?.mode),
             Effect.orElseSucceed(() => undefined)
           )
           const restore =
             persisted && persisted !== "plan" ? persisted : yield* resolveExecMode(sessionId)
-          yield* setMode(sessionId, restore)
-          return prompt(sessionId, resumePlanPrompt(plan))
+          yield* setMode(sessionId, chatId, restore)
+          return prompt(sessionId, chatId, resumePlanPrompt(plan))
         })
       )
+    }
 
     /**
      * Halt a session's agent: settle whatever it's blocked on, then interrupt the
@@ -571,24 +639,31 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
      * entries, since the code that clears them sits after the `Deferred.await`
      * we'd have just killed.
      */
-    const stop = (sessionId: string) =>
+    const stop = (sessionId: string, requestedChatId?: string) =>
       Effect.gen(function* () {
+        const chatId = requestedChatId ?? sessionId
         const allGates = yield* Ref.get(gates)
         yield* Effect.forEach(
-          [...allGates.values()].filter((g) => g.sessionId === sessionId),
+          [...allGates.values()].filter(
+            (g) => g.sessionId === sessionId && g.chatId === chatId
+          ),
           (g) => Deferred.succeed(g.deferred, "deny"),
           { discard: true }
         )
         const allQuestions = yield* Ref.get(questions)
         yield* Effect.forEach(
-          [...allQuestions.values()].filter((q) => q.sessionId === sessionId),
+          [...allQuestions.values()].filter(
+            (q) => q.sessionId === sessionId && q.chatId === chatId
+          ),
           (q) => Deferred.succeed(q.deferred, []),
           { discard: true }
         )
         const allPlans = yield* Ref.get(plans)
-        const run = (yield* Ref.get(active)).get(sessionId)
+        const run = (yield* Ref.get(active)).get(chatId)
         yield* Effect.forEach(
-          [...allPlans.entries()].filter(([, p]) => p.sessionId === sessionId),
+          [...allPlans.entries()].filter(
+            ([, p]) => p.sessionId === sessionId && p.chatId === chatId
+          ),
           ([planId, p]) =>
             (run ? run.applyPlan(planId, (pl) => ({ ...pl, status: "rejected" })) : Effect.void).pipe(
               Effect.zipRight(Deferred.succeed(p.deferred, PlanDecision.Reject()))
@@ -618,9 +693,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
         const lock = yield* sessionLock(sessionId)
         yield* lock.withPermits(1)(
           Effect.gen(function* () {
-            const running = (yield* Ref.get(fibers)).get(sessionId)
+            const running = (yield* Ref.get(fibers)).get(chatId)
             if (running === undefined) return
-            const current = (yield* Ref.get(fibers)).get(sessionId)
+            const current = (yield* Ref.get(fibers)).get(chatId)
             if (current?.token !== running.token) return
             yield* Fiber.interrupt(running.fiber).pipe(
               Effect.timeout(INTERRUPT_GRACE),
@@ -632,7 +707,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
         // DAEMON fiber, so interrupting the run leaves it alive — an operator who
         // stopped a session would otherwise keep paying for a summary of it, with
         // nothing on screen to say why.
-        yield* ContextManager.cancel(sessionId).pipe(Effect.ignore)
+        yield* ContextManager.cancel(chatId).pipe(Effect.ignore)
       })
 
     /**
@@ -650,10 +725,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
      */
     const promptSetup = (
       sessionId: string,
+      chatId: string,
       text: string,
       images: ReadonlyArray<Attachment>,
       target: AgentRunTarget,
-      reasoningEffort: ReasoningEffort | null | undefined
+      reasoning: ReasoningSetting | null | undefined
     ) =>
       Effect.suspend(() =>
         Effect.gen(function* () {
@@ -662,12 +738,28 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             Effect.map((s): Session | null => s),
             Effect.orElseSucceed(() => null)
           )
+          const chat =
+            session?.chats.find((candidate) => candidate.id === chatId) ??
+            (chatId === sessionId
+              ? session?.chats.find(
+                  (candidate) => candidate.id === session.activeChatId
+                ) ?? null
+              : null)
+          if (session === null || chat === null) {
+            return yield* Effect.fail(
+              new CliExecError({
+                kind: "chat",
+                message: "The selected chat no longer exists."
+              })
+            )
+          }
+          yield* TranscriptStore.adoptLegacy(sessionId, chatId)
 
           const sessionMode =
-            (yield* Ref.get(modes)).get(sessionId) ?? session?.mode ?? "accept-edits"
+            (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? "accept-edits"
           const allow = new Set<string>([
-            ...((yield* Ref.get(allowlists)).get(sessionId) ?? []),
-            ...(session?.allowlist ?? [])
+            ...((yield* Ref.get(allowlists)).get(chatId) ?? []),
+            ...(chat.allowlist ?? [])
           ])
           // `starbase` is not a harness that can run anything — it is us. A
           // session on the orchestrator runs on the ONE model the operator
@@ -686,7 +778,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             resolveOrchestrator(workspaceConfig),
             {
               cli: sessionCli,
-              model: session?.model ?? defaultModel(sessionCli)
+              model: chat.model ?? defaultModel(sessionCli)
             },
             discoveredClis
           )
@@ -705,7 +797,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           // Cache the user's configured default exec mode so approving a plan can
           // restore it.
           const execDefault = yield* resolveExecMode(sessionId)
-          yield* Ref.update(execDefaults, (m) => new Map(m).set(sessionId, execDefault))
+          yield* Ref.update(execDefaults, (m) => new Map(m).set(chatId, execDefault))
           // Resolve the harness binary; null → the dispatcher uses the scripted
           // fallback (also the path when the CLI isn't installed).
           const binPath = discoveredClis.find((c) => c.kind === cli)?.binPath ?? null
@@ -725,6 +817,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             worktreePath.length > 0
               ? yield* PlanStore.list(worktreePath).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>))
               : []
+          yield* ContextManager.bind(chatId, sessionId)
           /**
            * Consume a ready digest, if the context manager has one waiting.
            *
@@ -735,9 +828,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
            * full thread. Sub-agents never reach this top-level path.
            */
           if (!orchestrating) {
-            yield* ContextManager.prepareUnknownCodexResume(sessionId)
+            yield* ContextManager.prepareUnknownCodexResume(chatId)
           }
-          const applied = orchestrating ? null : yield* ContextManager.applyWhenReady(sessionId)
+          const applied = orchestrating ? null : yield* ContextManager.applyWhenReady(chatId)
           const digest = applied?.digest ?? null
           // The WORKING SET at the moment of the swap, straight from the manager.
           //
@@ -759,7 +852,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             digest === null
               ? []
               : tailAfter(
-                  yield* TranscriptStore.list(sessionId).pipe(Effect.orElseSucceed(() => [])),
+                  yield* TranscriptStore.list(chatId).pipe(Effect.orElseSucceed(() => [])),
                   digest.throughMessageId
                 )
 
@@ -787,14 +880,18 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           // toward. Everything else is told to end its reply with the block.
           const planProtocol = !orchestrating && mode === "plan" ? planNote(cli) : null
           const planning = planProtocol === null ? "" : `${planProtocol}\n\n`
-          const priorMessages = yield* TranscriptStore.list(sessionId).pipe(
+          const priorMessages = yield* TranscriptStore.list(chatId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
           const promptText = orchestrating
             ? gigaplanIntakePrompt({ message: text, activePlan: latestPlan(priorMessages) })
             : text
+          const providerReasoning =
+            cli === "claude" || cli === "codex" || cli === "opencode"
+              ? session.reasoning?.[cli]
+              : undefined
           const resolvedReasoning =
-            reasoningEffort === undefined ? session?.reasoningEffort : reasoningEffort
+            reasoning === undefined ? providerReasoning : reasoning
 
           const spec: SessionSpec = {
             cli,
@@ -817,8 +914,17 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             model:
               orchestrating || sessionCli === "starbase"
                 ? orchestrator.model
-                : (session?.model ?? defaultModel(cli)),
-            ...(resolvedReasoning ? { reasoningEffort: resolvedReasoning } : {}),
+                : (chat.model ?? defaultModel(cli)),
+            ...(resolvedReasoning === null
+              ? {}
+              : {
+                  ...(resolvedReasoning?.enabled === undefined
+                    ? {}
+                    : { thinkingEnabled: resolvedReasoning.enabled }),
+                  ...(resolvedReasoning?.effort === undefined
+                    ? {}
+                    : { reasoningEffort: resolvedReasoning.effort })
+                }),
             // The persisted harness session id, so the adapter resumes the full
             // conversation even after a restart cleared its in-memory resume map.
             //
@@ -829,8 +935,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             resumeId:
               digest === null
                 ? orchestrating
-                  ? session?.gigaplanResumeId ?? null
-                  : session?.resumeId ?? null
+                  ? chat.gigaplanResumeId ?? null
+                  : chat.resumeId ?? null
                 : null,
             ...(digest === null ? {} : { fresh: true }),
             ...(orchestrating ? { readOnly: true } : {})
@@ -839,7 +945,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           // Clear the PERSISTED id too, so a crash between here and the harness
           // reporting its new id can't leave the session pointing at a thread
           // whose context we have already decided to abandon.
-          if (digest !== null) yield* SessionStore.clearResumeId(sessionId).pipe(Effect.ignore)
+          if (digest !== null) {
+            yield* SessionStore.clearResumeId(sessionId, chatId).pipe(Effect.ignore)
+          }
 
           // Capture the persistence services so `emit`/`run` handed to the
           // adapter have no residual requirements (R = never).
@@ -877,12 +985,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           const un = yield* nextId
           const source = orchestrating ? ("gigaplan-intake" as const) : undefined
           yield* TranscriptStore.append(
-            sessionId,
-            userMessage(`u_${sessionId}_${un}`, text, now, images, source)
+            chatId,
+            userMessage(`u_${chatId}_${un}`, text, now, images, source)
           )
           const an = yield* nextId
-          const acc = yield* Ref.make(assistantMessage(`a_${sessionId}_${an}`, now, source))
-          yield* TranscriptStore.append(sessionId, yield* Ref.get(acc))
+          const acc = yield* Ref.make(assistantMessage(`a_${chatId}_${an}`, now, source))
+          yield* TranscriptStore.append(chatId, yield* Ref.get(acc))
           const turnSteer = yield* Ref.make<SteerTurn | null>(null)
           const turnMutation = yield* Effect.makeSemaphore(1)
 
@@ -918,7 +1026,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
 
           // The whole transcript, best-effort — the plan under execution usually
           // lives in an EARLIER message than this turn's accumulator.
-          const allMessages: Effect.Effect<ReadonlyArray<Message>> = TranscriptStore.list(sessionId).pipe(
+          const allMessages: Effect.Effect<ReadonlyArray<Message>> = TranscriptStore.list(chatId).pipe(
             Effect.provide(env),
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
@@ -967,11 +1075,18 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               if (located.messageId === cur.id) {
                 const next = patch(cur)
                 yield* Ref.set(acc, next)
-                yield* TranscriptStore.patchLast(sessionId, () => next).pipe(Effect.ignore)
+                yield* TranscriptStore.patchLast(chatId, () => next).pipe(Effect.ignore)
               } else {
                 // The plan is behind us: patch its message directly and leave the
                 // accumulator alone (it holds a different, later message).
-                yield* TranscriptStore.patchById(sessionId, located.messageId, patch).pipe(Effect.ignore)
+                yield* TranscriptStore.patchById(chatId, located.messageId, patch).pipe(Effect.ignore)
+              }
+              if (worktreePath.length > 0) {
+                yield* PlanStore.updateArtifact(
+                  worktreePath,
+                  planId,
+                  () => nextPlan
+                ).pipe(Effect.ignore)
               }
               yield* out.offer({ _tag: "PlanUpdated", plan: nextPlan })
             }).pipe(Effect.provide(env), Effect.asVoid)
@@ -1064,11 +1179,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               }
               const next = applyStreamEvent(yield* Ref.get(acc), event)
               yield* Ref.set(acc, next)
-              yield* TranscriptStore.patchLast(sessionId, () => next).pipe(Effect.ignore)
+              yield* TranscriptStore.patchLast(chatId, () => next).pipe(Effect.ignore)
               // Persist the harness's actual model (reported on init) so the chip
               // reflects reality even when the session hadn't pinned one.
               if (!orchestrating && event._tag === "Started" && event.model) {
-                yield* SessionStore.setModel(sessionId, event.model).pipe(Effect.ignore)
+                yield* SessionStore.setModel(sessionId, chatId, event.model).pipe(Effect.ignore)
               }
               // Persist the harness session id (carried on Started) so the NEXT
               // prompt resumes this conversation — even after an app restart wiped
@@ -1077,8 +1192,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               if (event._tag === "Started" && event.sessionId.length > 0) {
                 yield* (
                   orchestrating
-                    ? SessionStore.setGigaplanResumeId(sessionId, event.sessionId)
-                    : SessionStore.setResumeId(sessionId, event.sessionId)
+                    ? SessionStore.setGigaplanResumeId(sessionId, chatId, event.sessionId)
+                    : SessionStore.setResumeId(sessionId, chatId, event.sessionId)
                 ).pipe(Effect.ignore)
               }
               // Remember an edit's target path so its ToolEnd can tie back to a step.
@@ -1102,7 +1217,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               //
               // `Done` is the only point at which the transcript is coherent.
               if (!orchestrating && event._tag === "Usage") {
-                yield* ContextManager.observe(sessionId, event.tokens, event.window ?? null).pipe(
+                yield* ContextManager.observe(chatId, event.tokens, event.window ?? null).pipe(
                   Effect.ignore
                 )
               }
@@ -1114,7 +1229,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               // that moved with the tool count rather than the context. The
               // manager uses the latest `Usage` reading instead.
               if (!orchestrating && event._tag === "Done") {
-                yield* ContextManager.settle(sessionId).pipe(Effect.ignore)
+                yield* ContextManager.settle(chatId).pipe(Effect.ignore)
               }
               // A hard context failure has no Done event, so the ordinary settle
               // path above can never prepare a digest. Force one from the
@@ -1126,7 +1241,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
                 event._tag === "Failed" &&
                 isContextOverflowFailure(event.message)
               ) {
-                yield* ContextManager.compactNow(sessionId, {
+                yield* ContextManager.compactNow(chatId, {
                   waitForReady: true
                 }).pipe(Effect.ignore)
               }
@@ -1138,14 +1253,19 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               // approval restoring the exec mode) takes effect on this same turn.
               const liveMode = orchestrating
                 ? mode
-                : (yield* Ref.get(modes)).get(sessionId) ?? mode
+                : (yield* Ref.get(modes)).get(chatId) ?? mode
               if (verdict(liveMode, allow, req, planAutoRun) === "allow") return "allow" as const
               const gn = yield* nextId
               const gateId = `g_${sessionId}_${gn}`
               const gate = buildGate(gateId, req)
               const deferred = yield* Deferred.make<PermissionDecision>()
               yield* Ref.update(gates, (m) =>
-                new Map(m).set(gateId, { sessionId, deferred, allowLabel: gate.allowLabel })
+                new Map(m).set(gateId, {
+                  sessionId,
+                  chatId,
+                  deferred,
+                  allowLabel: gate.allowLabel
+                })
               )
               yield* emit({ _tag: "GateRequested", gate })
               const decision = yield* Deferred.await(deferred)
@@ -1162,7 +1282,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           ): Effect.Effect<ReadonlyArray<QuestionAnswer>> =>
             Effect.gen(function* () {
               const deferred = yield* Deferred.make<ReadonlyArray<QuestionAnswer>>()
-              yield* Ref.update(questions, (m) => new Map(m).set(request.id, { sessionId, deferred }))
+              yield* Ref.update(questions, (m) =>
+                new Map(m).set(request.id, { sessionId, chatId, deferred })
+              )
               yield* emit({ _tag: "QuestionRequested", request })
               const answers = yield* Deferred.await(deferred)
               yield* Ref.update(questions, (m) => {
@@ -1174,7 +1296,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               // the live accumulator (so later emits don't clobber it) and the
               // persisted transcript (so a reload doesn't re-show the question).
               yield* Ref.update(acc, (m) => setQuestionAnswers(m, request.id, answers))
-              yield* TranscriptStore.patchLast(sessionId, (m) => setQuestionAnswers(m, request.id, answers)).pipe(
+              yield* TranscriptStore.patchLast(chatId, (m) => setQuestionAnswers(m, request.id, answers)).pipe(
                 Effect.provide(env),
                 Effect.ignore
               )
@@ -1184,13 +1306,23 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           const proposePlan = (plan: Plan): Effect.Effect<PlanDecision> =>
             Effect.gen(function* () {
               const deferred = yield* Deferred.make<PlanDecision>()
-              yield* Ref.update(plans, (m) => new Map(m).set(plan.id, { sessionId, deferred }))
+              yield* Ref.update(plans, (m) =>
+                new Map(m).set(plan.id, { sessionId, chatId, deferred })
+              )
               yield* emit({ _tag: "PlanProposed", plan })
               // Persist the plan to the session's plan library so a later turn or
               // session can pick it back up — the next run points the agent at it.
               // Best-effort: a write failure never blocks plan review.
               if (worktreePath.length > 0) {
                 yield* PlanStore.write(worktreePath, plan).pipe(Effect.provide(env), Effect.ignore)
+                if (plan.structured !== false) {
+                  yield* PlanStore.promote(
+                    sessionId,
+                    worktreePath,
+                    chatId,
+                    plan
+                  ).pipe(Effect.provide(env), Effect.ignore)
+                }
               }
               const decision = yield* Deferred.await(deferred)
               yield* Ref.update(plans, (m) => {
@@ -1222,17 +1354,17 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
 
               const at = yield* Effect.sync(() => new Date().toISOString())
               const settled = settleStreaming(yield* Ref.get(acc))
-              const user = userMessage(`u_${sessionId}_${yield* nextId}`, text, at, images, source)
-              const assistant = assistantMessage(`a_${sessionId}_${yield* nextId}`, at, source)
+              const user = userMessage(`u_${chatId}_${yield* nextId}`, text, at, images, source)
+              const assistant = assistantMessage(`a_${chatId}_${yield* nextId}`, at, source)
               yield* Ref.set(acc, assistant)
-              yield* TranscriptStore.patchLast(sessionId, () => settled).pipe(Effect.ignore)
-              yield* TranscriptStore.append(sessionId, user)
-              yield* TranscriptStore.append(sessionId, assistant)
+              yield* TranscriptStore.patchLast(chatId, () => settled).pipe(Effect.ignore)
+              yield* TranscriptStore.append(chatId, user)
+              yield* TranscriptStore.append(chatId, assistant)
               return { status: "accepted", user, assistant } as const
             })).pipe(Effect.provide(env))
 
           yield* Ref.update(active, (m) =>
-            new Map(m).set(sessionId, { readPlan, applyPlan, steer })
+            new Map(m).set(chatId, { readPlan, applyPlan, steer })
           )
 
           /** Identifies THIS run, so its cleanup can't evict a successor's fiber. */
@@ -1258,7 +1390,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
 
           // A separate adapter key keeps the live resume map isolated too; a
           // Claude intake thread must never displace a Codex session thread.
-          const adapterSessionId = orchestrating ? `${sessionId}:gigaplan` : sessionId
+          const adapterSessionId = orchestrating ? `${chatId}:gigaplan` : chatId
           const run = adapter.run(adapterSessionId, spec, {
             emit,
             canUseTool,
@@ -1303,7 +1435,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             Effect.ensuring(
               Ref.update(active, (m) => {
                 const nextMap = new Map(m)
-                nextMap.delete(sessionId)
+                nextMap.delete(chatId)
                 return nextMap
               })
             ),
@@ -1325,9 +1457,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               // registers, which is a timing construction, not a fact about the
               // code. Reviewed rather than pinned.
               Ref.update(fibers, (m) => {
-                if (m.get(sessionId)?.token !== token) return m
+                if (m.get(chatId)?.token !== token) return m
                 const nextMap = new Map(m)
-                nextMap.delete(sessionId)
+                nextMap.delete(chatId)
                 return nextMap
               })
             ),
@@ -1367,7 +1499,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             Effect.ensuring(out.end)
           )
           const fiber = yield* Effect.forkScoped(run)
-          yield* Ref.update(fibers, (m) => new Map(m).set(sessionId, { fiber, token }))
+          yield* Ref.update(fibers, (m) =>
+            new Map(m).set(chatId, { sessionId, chatId, fiber, token })
+          )
 
           // Watchdog the FIRST event.
           //
@@ -1403,29 +1537,69 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
         })
       )
 
-    const prompt = (
+    function prompt(
       sessionId: string,
+      chatId: string,
       text: string,
       images: ReadonlyArray<Attachment> = [],
       target: AgentRunTarget = "session",
-      reasoningEffort?: ReasoningEffort | null
-    ): Stream.Stream<StreamEvent, never, PromptEnv> =>
-      Stream.unwrapScoped(
-        Effect.flatMap(sessionLock(sessionId), (lock) =>
-          lock.withPermits(1)(promptSetup(sessionId, text, images, target, reasoningEffort))
-        )
+      reasoning?: ReasoningSetting | null
+    ): Stream.Stream<StreamEvent, never, PromptEnv> {
+      return Stream.unwrapScoped(
+        Effect.gen(function* () {
+          const lock = yield* sessionLock(sessionId)
+          return yield* lock.withPermits(1)(
+            Effect.gen(function* () {
+              const acquired = yield* reserveSessionRun(sessionId, chatId)
+              if (!acquired) {
+                return Stream.fromIterable<StreamEvent>([{
+                  _tag: "Failed",
+                  message: "Another chat or plan in this session is running. Stop it before starting this chat."
+                }])
+              }
+              yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, chatId))
+              return yield* promptSetup(
+                sessionId,
+                chatId,
+                text,
+                images,
+                target,
+                reasoning
+              ).pipe(
+                Effect.catchAll((error) =>
+                  Effect.succeed(
+                    Stream.fromIterable<StreamEvent>([{
+                      _tag: "Failed",
+                      message:
+                        error instanceof CliExecError
+                          ? error.message
+                          : "The agent run could not start."
+                    }])
+                  )
+                )
+              )
+            })
+          )
+        })
       )
+    }
 
     const steer = (
       sessionId: string,
+      chatId: string,
       text: string,
       images: ReadonlyArray<Attachment> = []
     ) =>
       Effect.gen(function* () {
-        const run = (yield* Ref.get(active)).get(sessionId)
-        return run === undefined
-          ? ({ status: "unsupported" } as const)
-          : yield* run.steer(text, images)
+        const run = (yield* Ref.get(active)).get(chatId)
+        if (run === undefined) return { status: "unsupported" } as const
+        const session = yield* SessionStore.get(sessionId).pipe(
+          Effect.orElseSucceed(() => null)
+        )
+        if (!session?.chats.some((chat) => chat.id === chatId)) {
+          return { status: "unsupported" } as const
+        }
+        return yield* run.steer(text, images)
       })
 
     return {
@@ -1435,7 +1609,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
        * actively waiting on — the runner already owns this map, so exposing it
        * beats a second source of truth that could disagree.
        */
-      anyRunning: Effect.map(Ref.get(fibers), (m) => m.size > 0),
+      anyRunning: anySessionRunActive,
       prompt,
       decideGate,
       answerQuestion,

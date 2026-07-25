@@ -9,7 +9,7 @@
  * agent keeps working. Attaching to an existing actor also means switching back
  * shows its up-to-date state with no reload.
  */
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import { useSelector } from "@xstate/react"
 import type {
   Attachment,
@@ -22,7 +22,7 @@ import type {
   Plan,
   QuestionAnswer,
   QuestionRequest,
-  ReasoningEffort,
+  ReasoningSetting,
   ReviewPhase,
   Session,
   SessionStatus,
@@ -36,7 +36,7 @@ import { getConversationActor } from "./conversation-registry.js"
 export interface Conversation {
   readonly messages: ReadonlyArray<Message>
   readonly mode: PermissionMode
-  readonly reasoningEffort?: ReasoningEffort
+  readonly reasoning?: ReasoningSetting
   readonly skills: ReadonlyArray<Skill>
   readonly files: ReadonlyArray<string>
   /**
@@ -79,7 +79,7 @@ export interface Conversation {
   readonly sendPrompt: (text: string, images?: ReadonlyArray<Attachment>) => void
   readonly decideGate: (gateId: string, decision: GateDecision) => void
   readonly setMode: (mode: PermissionMode) => void
-  readonly setReasoning: (reasoningEffort?: ReasoningEffort) => void
+  readonly setReasoning: (reasoning?: ReasoningSetting) => void
   /** Whether an adversarial planning round can run, and the reason when it can't. */
   readonly adversarialPlanning: { readonly ready: boolean; readonly reason: string | null } | null
   /** Hand the durable Gigaplan intake thread to the adversarial planners. */
@@ -98,12 +98,21 @@ export interface Conversation {
   readonly refreshDiff: () => void
 }
 
-export function useConversation(session: Session): Conversation {
-  const actor = useMemo(() => getConversationActor(session), [session.id])
+export function useConversation(
+  session: Session,
+  chatId: string = session.activeChatId
+): Conversation {
+  const actor = useMemo(
+    () => getConversationActor(session, chatId),
+    [session.id, chatId]
+  )
+  useEffect(() => {
+    actor.send({ type: "SESSION_UPDATED", session })
+  }, [actor, session])
   const state = useSelector(actor, (s) => s)
   const send = actor.send
   const {
-    messages, mode, reasoningEffort, skills, files, cli, model, catalog, patch, queued, subagents, tokens,
+    messages, mode, reasoning, skills, files, cli, model, catalog, patch, queued, subagents, tokens,
     runStartedAt, reviewer, reviewPhase, reviewStartedAt
   } = state.context
 
@@ -132,7 +141,7 @@ export function useConversation(session: Session): Conversation {
   return {
     messages,
     mode,
-    reasoningEffort,
+    reasoning,
     skills,
     files,
     cli,
@@ -161,7 +170,7 @@ export function useConversation(session: Session): Conversation {
     decideGate: (gateId, decision) => send({ type: "DECIDE_GATE", gateId, decision }),
     answerQuestion: (requestId, answers) => send({ type: "ANSWER_QUESTION", requestId, answers }),
     setMode: (m) => send({ type: "SET_MODE", mode: m }),
-    setReasoning: (effort) => send({ type: "SET_REASONING", reasoningEffort: effort }),
+    setReasoning: (value) => send({ type: "SET_REASONING", reasoning: value }),
     adversarialPlanning: state.context.planReadiness,
     handoffPlan: () => send({ type: "HANDOFF_PLAN" }),
     setHarness: (c, m) => send({ type: "SET_HARNESS", cli: c, model: m }),

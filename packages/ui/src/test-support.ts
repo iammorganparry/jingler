@@ -23,6 +23,13 @@ export const testSession = (over: Partial<Session> & { id: string }): Session =>
     costUsd: 0,
     tokens: 0,
     updatedAt: "2026-07-16T00:00:00.000Z",
+    chats: [{
+      id: `c_${over.id}_1`,
+      title: null,
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:00:00.000Z"
+    }],
+    activeChatId: `c_${over.id}_1`,
     worktreePath: `/tmp/${over.id}`,
     baseBranch: "main",
     mode: "auto",

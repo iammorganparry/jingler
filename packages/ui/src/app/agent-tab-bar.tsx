@@ -1,4 +1,5 @@
-import { ChevronRight, MessagesSquare } from "lucide-react"
+import { useState } from "react"
+import { ChevronRight, MessagesSquare, Plus, X } from "lucide-react"
 import type { SubagentStatus } from "@starbase/core"
 import { cn } from "../lib/cn.js"
 import { StatusDot } from "../components/status-dot.js"
@@ -24,6 +25,30 @@ export interface AgentCrumb {
   name: string
 }
 
+export interface ChatTabItem {
+  id: string
+  title: string
+  running?: boolean
+}
+
+export interface ChatTabBarProps {
+  chats: ReadonlyArray<ChatTabItem>
+  activeChatId: string
+  onSelectChat: (id: string) => void
+  onCreateChat: () => void
+  onRenameChat: (id: string, title: string) => void
+  onCloseChat: (id: string) => void
+}
+
+export interface SubagentTabBarProps {
+  agents: ReadonlyArray<AgentTabItem>
+  trail: ReadonlyArray<AgentCrumb>
+  active: string
+  onChange: (key: string) => void
+  onDrill: (id: string) => void
+  onNavigate: (id: string) => void
+}
+
 /** Status → dot tone + pulse (working pulses like a live run). */
 const DOT: Record<SubagentStatus, { tone: string; pulse: boolean }> = {
   working: { tone: "bg-yellow", pulse: true },
@@ -45,26 +70,14 @@ const DOT: Record<SubagentStatus, { tone: string; pulse: boolean }> = {
  * Presentational only — the pane owns the drill level, derives each level's cells,
  * and owns which cell is active.
  */
-export function AgentTabBar({
+export function SubagentTabBar({
   agents,
   trail,
   active,
   onChange,
   onDrill,
   onNavigate
-}: {
-  /** The agents at the current drill level (the current crumb's children). */
-  agents: ReadonlyArray<AgentTabItem>
-  /** The drilled-into agents below Main, outermost first. Empty = at Main. */
-  trail: ReadonlyArray<AgentCrumb>
-  /** The active cell id — `MAIN_AGENT` or a sub-agent id. */
-  active: string
-  onChange: (key: string) => void
-  /** Descend into an agent's own sub-agents. */
-  onDrill: (id: string) => void
-  /** Jump the drill level to a crumb (`MAIN_AGENT` = back to the top). */
-  onNavigate: (id: string) => void
-}) {
+}: SubagentTabBarProps) {
   return (
     <div className="flex h-8 flex-none items-stretch overflow-x-auto border-b border-hairline bg-editor">
       <button
@@ -147,6 +160,93 @@ export function AgentTabBar({
           </div>
         )
       })}
+    </div>
+  )
+}
+
+export function ChatTabBar({
+  chats,
+  activeChatId,
+  onSelectChat,
+  onCreateChat,
+  onRenameChat,
+  onCloseChat
+}: ChatTabBarProps) {
+  const [editing, setEditing] = useState<string | null>(null)
+  const [draft, setDraft] = useState("")
+  const commit = (id: string) => {
+    if (draft.trim()) onRenameChat(id, draft.trim())
+    setEditing(null)
+  }
+
+  return (
+    <div className="flex h-9 flex-none items-stretch overflow-x-auto border-b border-hairline bg-editor">
+      {chats.map((chat, index) => {
+        const active = chat.id === activeChatId
+        return (
+          <div
+            key={chat.id}
+            className={cn(
+              "group relative flex min-w-[120px] max-w-[220px] flex-none items-center border-r border-hairline",
+              active ? "bg-panel text-text" : "text-muted-foreground hover:bg-panel/60"
+            )}
+          >
+            {active && <span className="absolute inset-x-0 top-0 h-0.5 bg-blue" />}
+            <button
+              type="button"
+              aria-current={active ? "page" : undefined}
+              onClick={() => onSelectChat(chat.id)}
+              onDoubleClick={() => {
+                setDraft(chat.title)
+                setEditing(chat.id)
+              }}
+              className="flex min-w-0 flex-1 items-center gap-2 px-3 text-left text-xs outline-none"
+              title={`${index + 1}. ${chat.title}`}
+            >
+              <StatusDot
+                tone={chat.running ? "bg-yellow" : active ? "bg-blue" : "bg-dim"}
+                pulse={chat.running ?? false}
+                size={7}
+              />
+              {editing === chat.id ? (
+                <input
+                  value={draft}
+                  autoFocus
+                  onChange={(event) => setDraft(event.target.value)}
+                  onBlur={() => commit(chat.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") commit(chat.id)
+                    if (event.key === "Escape") setEditing(null)
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                  className="min-w-0 flex-1 bg-transparent outline-none"
+                  aria-label="Chat title"
+                />
+              ) : (
+                <span className="truncate">{chat.title}</span>
+              )}
+            </button>
+            <button
+              type="button"
+              aria-label={`Close ${chat.title}`}
+              title={`Close ${chat.title}`}
+              onClick={() => onCloseChat(chat.id)}
+              className="mr-1 rounded p-1 text-dim opacity-0 outline-none hover:bg-editor hover:text-text group-hover:opacity-100"
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        )
+      })}
+      <button
+        type="button"
+        aria-label="New chat"
+        title="New chat (⌘T)"
+        onClick={onCreateChat}
+        className="flex flex-none items-center px-3 text-dim outline-none hover:bg-panel hover:text-text"
+      >
+        <Plus className="size-3.5" />
+      </button>
     </div>
   )
 }

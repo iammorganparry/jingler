@@ -232,7 +232,16 @@ describe("Session", () => {
     prNumber: null,
     costUsd: 0,
     tokens: 0,
-    updatedAt: "2026-07-11T10:00:00.000Z"
+    updatedAt: "2026-07-11T10:00:00.000Z",
+    chats: [
+      {
+        id: "c_s_fix-login_abc_1",
+        title: null,
+        createdAt: "2026-07-11T10:00:00.000Z",
+        updatedAt: "2026-07-11T10:00:00.000Z"
+      }
+    ],
+    activeChatId: "c_s_fix-login_abc_1"
   }
 
   it("decodes a session without the optional worktree fields", () => {
@@ -244,8 +253,7 @@ describe("Session", () => {
       ...base,
       worktreePath: "/Users/me/starbase/worktrees/trigify-app/fix-login",
       baseBranch: "main",
-      mode: "auto",
-      model: "opus"
+      chats: [{ ...base.chats[0]!, mode: "auto", model: "opus" }]
     }
     const roundTripped = Schema.decodeUnknownSync(Session)(
       Schema.encodeSync(Session)(withWorktree)

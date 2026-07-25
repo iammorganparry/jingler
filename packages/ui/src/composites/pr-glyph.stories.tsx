@@ -72,6 +72,8 @@ export const InTheSidebar: Story = {
       costUsd: 0,
       tokens: 0,
       updatedAt: "2026-07-21T10:00:00.000Z",
+      chats: [{ id: `c_${id}_1`, title: null, createdAt: "2026-07-21T10:00:00.000Z", updatedAt: "2026-07-21T10:00:00.000Z" }],
+      activeChatId: `c_${id}_1`,
       archived: false,
       ...over
     })

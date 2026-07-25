@@ -10,7 +10,8 @@ import { useQuery } from "@tanstack/react-query"
 import type { Session } from "@starbase/core"
 import { agentChildren, agentPath } from "@starbase/core"
 import {
-  AgentTabBar,
+  ChatTabBar,
+  SubagentTabBar,
   BackgroundTaskDock,
   BackgroundTaskOutput,
   ConversationView,
@@ -22,6 +23,12 @@ import {
   useResizableWidth
 } from "@starbase/ui"
 import { rpc } from "./rpc-client.js"
+import { publishSessionUpdate } from "./session-updates.js"
+import {
+  disposeChatActor,
+  rehomeSharedPlan,
+  useChatActivities
+} from "./conversation-registry.js"
 import { clearDraft, getDraft, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
 import { useConversation } from "./use-conversation.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
@@ -67,7 +74,11 @@ export function ConversationPane({
    */
   paneFocused?: boolean
 }) {
-  const convo = useConversation(session)
+  const activeChat =
+    session.chats.find((chat) => chat.id === session.activeChatId) ??
+    session.chats[0]!
+  const convo = useConversation(session, activeChat.id)
+  const chatActivities = useChatActivities(session.id)
   // `convo.cli` rather than `session.cli`: the harness can change mid-session, and
   // MCP config is a property of the harness.
   const mcp = useMcp(session.id, convo.cli)
@@ -116,8 +127,8 @@ export function ConversationPane({
    */
   const [requested, setRequested] = useState(false)
   const contextQuery = useQuery({
-    queryKey: ["context", session.id, convo.cli, convo.model],
-    queryFn: () => rpc.contextState(session.id),
+    queryKey: ["context", session.id, activeChat.id, convo.cli, convo.model],
+    queryFn: () => rpc.contextState(session.id, activeChat.id),
     enabled: contextReporting,
     /**
      * Poll while a compaction could be happening.
@@ -149,7 +160,7 @@ export function ConversationPane({
   // The composer's draft lives in the store, not the composer — this pane is
   // mounted keyed by session id, so switching sessions unmounts it and any local
   // state goes with it. See `draft-store`.
-  const draft = useDraft(session.id)
+  const draft = useDraft(activeChat.id)
 
   // The prefilled task is one-shot, but we clear it (backend + app state) only
   // once the user actually SENDS — not on mount. Clearing on mount lost the draft
@@ -159,15 +170,73 @@ export function ConversationPane({
   // It now seeds the DRAFT STORE (once ever, never over existing text), so the
   // prefill survives the same unmounts the store was built for.
   useEffect(() => {
-    if (session.initialPrompt) seedDraftOnce(session.id, session.initialPrompt)
-  }, [session.id, session.initialPrompt])
+    if (session.initialPrompt) {
+      seedDraftOnce(activeChat.id, session.initialPrompt, session.id)
+    }
+  }, [activeChat.id, session.id, session.initialPrompt])
 
   const sendPrompt: typeof convo.sendPrompt = (...args) => {
     if (session.initialPrompt) onInitialPromptConsumed?.(session.id)
     // The turn is on its way to the agent — the draft has served its purpose.
-    clearDraft(session.id)
+    clearDraft(activeChat.id)
+    if (activeChat.title === null && args[0].trim()) {
+      const title = args[0].trim().split("\n")[0]!.slice(0, 48)
+      void rpc
+        .sessionsRenameChat(session.id, activeChat.id, title)
+        .then(publishSessionUpdate)
+    }
     return convo.sendPrompt(...args)
   }
+
+  const createChat = () => {
+    void rpc.sessionsCreateChat(session.id).then(publishSessionUpdate)
+  }
+  const selectChat = (chatId: string) => {
+    if (chatId === activeChat.id) return
+    void rpc.sessionsSelectChat(session.id, chatId).then(publishSessionUpdate)
+  }
+  const renameChat = (chatId: string, title: string) => {
+    void rpc.sessionsRenameChat(session.id, chatId, title).then(publishSessionUpdate)
+  }
+  const closeChat = (chatId: string) => {
+    void rpc.sessionsCloseChat(session.id, chatId).then((updated) => {
+      clearDraft(chatId)
+      rehomeSharedPlan(session.id, chatId, updated.activeChatId)
+      disposeChatActor(session.id, chatId)
+      publishSessionUpdate(updated)
+    }).catch(() => {})
+  }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((!event.metaKey && !event.ctrlKey) || event.altKey) return
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT")
+      ) return
+      if (event.key.toLowerCase() === "t") {
+        event.preventDefault()
+        createChat()
+        return
+      }
+      if (event.key.toLowerCase() === "w") {
+        event.preventDefault()
+        closeChat(activeChat.id)
+        return
+      }
+      const index = Number(event.key) - 1
+      if (index >= 0 && index < Math.min(session.chats.length, 9)) {
+        event.preventDefault()
+        selectChat(session.chats[index]!.id)
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [session.id, session.chats, activeChat.id])
 
   // Which sub-agent tab is selected ("main" = the parent conversation). Declared
   // before the Plan Review early-return so hook order stays stable. We derive the
@@ -235,7 +304,29 @@ export function ConversationPane({
     />
   )
 
-  if (view === "plan") return planReview
+  const chatBar = (
+    <ChatTabBar
+      chats={session.chats.map((chat, index) => ({
+        id: chat.id,
+        title: chat.title ?? `Chat ${index + 1}`,
+        running: chatActivities[chat.id] !== undefined
+      }))}
+      activeChatId={activeChat.id}
+      onSelectChat={selectChat}
+      onCreateChat={createChat}
+      onRenameChat={renameChat}
+      onCloseChat={closeChat}
+    />
+  )
+
+  if (view === "plan") {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        {chatBar}
+        {planReview}
+      </div>
+    )
+  }
 
   // Directly beneath the main tab bar, a secondary bar surfaces the turn's live
   // sub-agents (only while some exist). Selecting one swaps the pane to its
@@ -251,8 +342,9 @@ export function ConversationPane({
     // it; this outer row did not, so the constraint stopped one level short.
     <div className="flex min-h-0 min-w-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {chatBar}
       {barAgents.length > 0 && (
-        <AgentTabBar
+        <SubagentTabBar
           agents={barAgents.map((s) => ({
             id: s.id,
             name: s.name,
@@ -289,7 +381,9 @@ export function ConversationPane({
           contextHeldReason={contextQuery.data?.heldReason ?? null}
           onCompactNow={() => {
             setRequested(true)
-            void rpc.contextCompactNow(session.id).catch(() => setRequested(false))
+            void rpc
+              .contextCompactNow(session.id, activeChat.id)
+              .catch(() => setRequested(false))
           }}
           runStartedAt={convo.runStartedAt}
           queued={convo.queued}
@@ -309,7 +403,8 @@ export function ConversationPane({
           onStop={convo.stop}
           onDecideGate={convo.decideGate}
           onSetMode={convo.setMode}
-          reasoningEffort={convo.reasoningEffort}
+          reasoningEffort={convo.reasoning?.effort}
+          thinkingEnabled={convo.reasoning?.enabled}
           onSetReasoning={convo.setReasoning}
           adversarialPlanning={convo.adversarialPlanning ?? undefined}
           onHandoffPlan={convo.handoffPlan}
@@ -323,15 +418,17 @@ export function ConversationPane({
           // Merge against the LIVE draft, never the render-time `draft` closure:
           // on send the composer fires onSend → setValue("") → setAttachments([])
           // in one go, so a stale spread would resurrect the text it just sent.
-          onDraftChange={(text) => setDraft(session.id, { ...getDraft(session.id), text })}
+          onDraftChange={(text) =>
+            setDraft(activeChat.id, { ...getDraft(activeChat.id), text })
+          }
           draftAttachments={draft.attachments}
           onDraftAttachmentsChange={(attachments) =>
-            setDraft(session.id, { ...getDraft(session.id), attachments })
+            setDraft(activeChat.id, { ...getDraft(activeChat.id), attachments })
           }
           // The Plan face returns early above, so reaching here already means the
           // transcript is on screen — only the focused pane still has to be checked.
           autoFocusComposer={paneFocused}
-          focusKey={session.id}
+          focusKey={activeChat.id}
           archived={
             session.archived
               ? {

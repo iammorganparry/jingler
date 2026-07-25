@@ -42,7 +42,16 @@ const demoSession: Session = {
   prNumber: 482,
   costUsd: 1.24,
   tokens: 218000,
-  updatedAt: "2026-07-11T09:41:00.000Z"
+  updatedAt: "2026-07-11T09:41:00.000Z",
+  chats: [
+    {
+      id: "c_demo_1",
+      title: "Refactor auth flow",
+      createdAt: "2026-07-11T09:41:00.000Z",
+      updatedAt: "2026-07-11T09:41:00.000Z"
+    }
+  ],
+  activeChatId: "c_demo_1"
 }
 
 /** Implements Component Library.dc.html — the living design-system gallery. */

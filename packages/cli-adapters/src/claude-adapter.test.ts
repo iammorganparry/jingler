@@ -31,16 +31,18 @@ const msg = (m: unknown): SDKMessage => m as SDKMessage
 describe("mapClaudeReasoning", () => {
   it("preserves native default and maps every explicit strength", () => {
     expect(mapClaudeReasoning(undefined)).toStrictEqual({})
-    expect(mapClaudeReasoning("off")).toStrictEqual({ thinking: { type: "disabled" } })
-    expect(mapClaudeReasoning("think")).toStrictEqual({
+    expect(mapClaudeReasoning("max", false)).toStrictEqual({
+      thinking: { type: "disabled" }
+    })
+    expect(mapClaudeReasoning("low")).toStrictEqual({
       thinking: { type: "adaptive" },
       effort: "low"
     })
-    expect(mapClaudeReasoning("think-hard")).toStrictEqual({
+    expect(mapClaudeReasoning("high")).toStrictEqual({
       thinking: { type: "adaptive" },
       effort: "high"
     })
-    expect(mapClaudeReasoning("ultrathink")).toStrictEqual({
+    expect(mapClaudeReasoning("max")).toStrictEqual({
       thinking: { type: "adaptive" },
       effort: "max"
     })

@@ -111,6 +111,20 @@ const seed = (over: Partial<Session> = {}) =>
       tokens: 49_894_200,
       contextTokens: 290_000,
       updatedAt: now,
+      chats: [{
+        id: SESSION,
+        title: null,
+        createdAt: now,
+        updatedAt: now,
+        model: over.model ?? "sonnet",
+        resumeId: over.resumeId ?? "harness_thread_old",
+        ...("contextTokens" in over
+          ? over.contextTokens === undefined
+            ? {}
+            : { contextTokens: over.contextTokens }
+          : { contextTokens: 290_000 })
+      }],
+      activeChatId: SESSION,
       worktreePath: temp.root,
       model: "sonnet",
       resumeId: "harness_thread_old",
@@ -171,7 +185,7 @@ const compactThenPrompt = (over: Partial<Session> = {}) =>
       const events: Array<StreamEvent> = []
       const runner = yield* AgentRunner
       yield* runner
-        .prompt(SESSION, "and what did we decide about the token bucket?")
+        .prompt(SESSION, SESSION, "and what did we decide about the token bucket?")
         .pipe(Stream.runForEach((e) => Effect.sync(() => events.push(e))))
 
       return {
@@ -273,7 +287,17 @@ describe("compaction swap", () => {
   // A session that has never reported occupancy has nothing honest to quote, and
   // 0 is how the divider is told to hide the clause entirely.
   it("reports 0 rather than a lifetime total when the working set is unknown", async () => {
-    const { events } = await compactThenPrompt({ contextTokens: undefined })
+    const { events } = await compactThenPrompt({
+      contextTokens: undefined,
+      chats: [{
+        id: SESSION,
+        title: null,
+        createdAt: "2026-07-24T00:00:00.000Z",
+        updatedAt: "2026-07-24T00:00:00.000Z",
+        model: "sonnet",
+        resumeId: "harness_thread_old"
+      }]
+    })
     const marker = events.find((e) => e._tag === "ContextCompacted") as { tokensBefore: number }
     expect(marker.tokensBefore).toBe(0)
   })
@@ -286,8 +310,9 @@ describe("compaction swap", () => {
    */
   it("adopts the new harness thread and never the abandoned one", async () => {
     const { session } = await compactThenPrompt()
-    expect(session.resumeId).toBe("harness_thread_new")
-    expect(session.resumeId).not.toBe("harness_thread_old")
+    const chat = session.chats.find((candidate) => candidate.id === session.activeChatId)
+    expect(chat?.resumeId).toBe("harness_thread_new")
+    expect(chat?.resumeId).not.toBe("harness_thread_old")
   })
 
   it("applies only once — the turn after a swap resumes normally", async () => {
@@ -298,9 +323,9 @@ describe("compaction swap", () => {
         yield* ContextManager.compactNow(SESSION)
         yield* awaitDigest()
         const runner = yield* AgentRunner
-        yield* runner.prompt(SESSION, "first").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "first").pipe(Stream.runDrain)
         specs.length = 0
-        yield* runner.prompt(SESSION, "second").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "second").pipe(Stream.runDrain)
         return specs[specs.length - 1]!
       }).pipe(Effect.orDie, Effect.provide(layers())) as Effect.Effect<SessionSpec>
     )
@@ -318,7 +343,7 @@ describe("no compaction pending", () => {
         yield* seed()
         yield* seedTranscript()
         const runner = yield* AgentRunner
-        yield* runner.prompt(SESSION, "just a normal turn").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "just a normal turn").pipe(Stream.runDrain)
         return specs[specs.length - 1]!
       }).pipe(Effect.orDie, Effect.provide(layers())) as Effect.Effect<SessionSpec>
     )

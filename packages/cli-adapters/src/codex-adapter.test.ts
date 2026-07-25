@@ -23,10 +23,10 @@ const ev = (e: unknown): ThreadEvent => e as ThreadEvent
 describe("mapCodexReasoning", () => {
   it("leaves default unset and uses native Codex effort names", () => {
     expect(mapCodexReasoning(undefined)).toBeUndefined()
-    expect(mapCodexReasoning("off")).toBe("minimal")
-    expect(mapCodexReasoning("think")).toBe("medium")
-    expect(mapCodexReasoning("think-hard")).toBe("high")
-    expect(mapCodexReasoning("ultrathink")).toBe("xhigh")
+    expect(mapCodexReasoning("xhigh", false)).toBe("minimal")
+    expect(mapCodexReasoning("medium")).toBe("medium")
+    expect(mapCodexReasoning("high")).toBe("high")
+    expect(mapCodexReasoning("xhigh")).toBe("xhigh")
   })
 })
 

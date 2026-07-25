@@ -15,6 +15,38 @@ import { AppPaths } from "./app-paths.js"
 
 type ConfigEnv = FileSystem.FileSystem | AppPaths
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const migrateProviderReasoning = (value: unknown): unknown => {
+  if (!isRecord(value)) return value
+  switch (value.reasoningEffort) {
+    case "off":
+      return { ...value, thinkingEnabled: false, reasoningEffort: undefined }
+    case "think":
+      return { ...value, thinkingEnabled: true, reasoningEffort: "low" }
+    case "think-hard":
+      return { ...value, thinkingEnabled: true, reasoningEffort: "high" }
+    case "ultrathink":
+      return { ...value, thinkingEnabled: true, reasoningEffort: "xhigh" }
+    default:
+      return value
+  }
+}
+
+export const migrateConfigReasoning = (value: unknown): unknown => {
+  if (!isRecord(value) || !isRecord(value.providers)) return value
+  return {
+    ...value,
+    providers: Object.fromEntries(
+      Object.entries(value.providers).map(([cli, provider]) => [
+        cli,
+        migrateProviderReasoning(provider)
+      ])
+    )
+  }
+}
+
 /**
  * Reads and writes the persisted `WorkspaceConfig` at `~/starbase/config.json`.
  * `get()` returns null until first-run setup writes a repos directory. Backed by
@@ -36,8 +68,15 @@ export class ConfigService extends Effect.Service<ConfigService>()(
           const raw = yield* fs
             .readFileString(paths.configFile)
             .pipe(Effect.mapError((cause) => new ConfigError({ message: "Failed to read config", cause })))
-          return yield* Schema.decodeUnknown(Schema.parseJson(WorkspaceConfig))(raw).pipe(
+          const parsed = yield* Schema.decodeUnknown(Schema.parseJson(Schema.Unknown))(raw).pipe(
             Effect.mapError((cause) => new ConfigError({ message: "Config file is malformed", cause }))
+          )
+          return yield* Schema.decodeUnknown(WorkspaceConfig)(
+            migrateConfigReasoning(parsed)
+          ).pipe(
+            Effect.mapError(
+              (cause) => new ConfigError({ message: "Config file is malformed", cause })
+            )
           )
         })
 

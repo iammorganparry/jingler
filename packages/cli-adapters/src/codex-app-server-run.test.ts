@@ -247,8 +247,8 @@ describe("runCodexAppServer", () => {
   })
 
   it("uses GPT-5.6's lightest supported effort for reasoning-off", () => {
-    expect(mapCodexAppServerReasoning("off")).toBe("low")
-    expect(mapCodexAppServerReasoning("think")).toBe("medium")
+    expect(mapCodexAppServerReasoning("xhigh", false)).toBe("low")
+    expect(mapCodexAppServerReasoning("medium")).toBe("medium")
   })
 
   it("emits context while the turn is active, before its terminal event", async () => {

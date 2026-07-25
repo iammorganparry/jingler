@@ -598,7 +598,7 @@ describe("a role that never finishes", () => {
             binPathFor: () => "/usr/bin/fake",
             assignAgents: false,
             routing: routingFor([OPENAI, MOONSHOT]),
-            reasoningEffort: "think"
+            reasoning: { enabled: true, effort: "medium" }
           })
           .pipe(Stream.runCollect, Effect.map((c) => [...c]))
       )
