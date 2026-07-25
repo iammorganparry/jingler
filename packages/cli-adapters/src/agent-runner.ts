@@ -35,8 +35,17 @@ import {
 } from "@starbase/core"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
-import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Stream } from "effect"
+import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Schedule, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
+import { modeOnApproval, modeToRestore } from "./exec-mode.js"
+import { isTerminal, routeOf } from "./turn-events.js"
+import {
+  composeTurnPrompt,
+  leadsWithCommand,
+  planPointerNote
+} from "./turn-prompt.js"
+import { buildGate, makeApprovals, verdict } from "./approvals.js"
+import { runLifetime } from "./run-lifetime.js"
 import { planNote } from "./plan-prompt.js"
 import { questionNote } from "./question-prompt.js"
 import { gigaplanIntakePrompt } from "./gigaplan-intake-prompt.js"
@@ -60,8 +69,10 @@ import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore } from "./plan-store.js"
+import type { RunHolder } from "./run-coordinator.js"
 import {
   anySessionRunActive,
+  reclaimSessionRun,
   releaseSessionRun,
   reserveSessionRun
 } from "./run-coordinator.js"
@@ -137,66 +148,6 @@ export const isContextOverflowFailure = (message: string): boolean =>
     message
   )
 
-/**
- * A concise context note prepended to a run when the session's worktree has saved
- * plan(s). It does two jobs: (1) anchor the agent to its worktree, and (2) hand it
- * the plan file path(s).
- *
- * (1) matters because the plan library lives OUTSIDE the worktree
- * (`~/starbase/.starbase/…`): without being told its working directory, an agent
- * that reads the plan file can mistake the plan's parent for the project root and
- * `cd` out of its worktree (even into the origin checkout) — corrupting the wrong
- * tree. So we state the worktree path explicitly and forbid treating the plan's
- * location as the repo. Phrased so the agent only acts on the plan when the turn
- * is actually about it.
- */
-const planPointerNote = (worktreePath: string, planFiles: ReadonlyArray<string>): string =>
-  [
-    "<session-context>",
-    `Working directory (this session's git worktree — the project root): ${worktreePath}`,
-    "Do ALL work here: every file read/edit and shell command runs in this directory. Do NOT `cd` out of it, and never treat any other directory as the project — in particular, the plan file below lives OUTSIDE the project, so its parent directory is NOT the repo.",
-    "",
-    "Saved plan for this session (a read-only reference document, not part of the project):",
-    ...planFiles.map((f) => `  - ${f}`),
-    "If this message asks you to implement, continue, or pick up the plan, read that file to recall the full plan, then do the work in the working directory above. Otherwise ignore this note.",
-    "</session-context>"
-  ].join("\n")
-
-/**
- * Does this turn open with a slash command (`/babysit-pr …`)?
- *
- * Harnesses only expand a command when it leads the message, so anything we
- * prepend silently demotes it to prose. Deliberately narrow: a bare `/` or a
- * path like `/Users/...` is not a command.
- */
-export const isSlashCommand = (text: string): boolean => /^\/[A-Za-z][\w:-]*(\s|$)/.test(text.trimStart())
-
-/** Codex's explicit skill syntax; like slash commands, it must lead the composed prompt. */
-export const isCodexSkillInvocation = (text: string): boolean =>
-  /^\$[A-Za-z][\w:-]*(\s|$)/.test(text.trimStart())
-
-/** A gate awaiting the operator; the `Deferred` unblocks the paused agent. */
-interface PendingGate {
-  readonly sessionId: string
-  readonly chatId: string
-  readonly deferred: Deferred.Deferred<PermissionDecision>
-  /** Token added to the session allowlist on an "always" decision. */
-  readonly allowLabel: string | null
-}
-
-/** A question group awaiting the user's answers; the `Deferred` resumes the agent. */
-interface PendingQuestion {
-  readonly sessionId: string
-  readonly chatId: string
-  readonly deferred: Deferred.Deferred<ReadonlyArray<QuestionAnswer>>
-}
-
-/** A proposed plan awaiting the operator's decision; the `Deferred` resumes the agent. */
-interface PendingPlan {
-  readonly sessionId: string
-  readonly chatId: string
-  readonly deferred: Deferred.Deferred<PlanDecision>
-}
 
 /** An opaque per-run identity — object identity is the whole point. */
 type RunToken = Record<never, never>
@@ -207,6 +158,16 @@ interface RunFiber {
   readonly chatId: string
   readonly fiber: Fiber.RuntimeFiber<void, never>
   readonly token: RunToken
+  /**
+   * Whether this run has already emitted its terminal event.
+   *
+   * A live fiber does NOT mean a live turn. The real Claude adapter's `for await`
+   * over the SDK never breaks on `result`, so a run keeps consuming after `Done`
+   * for as long as a background task keeps the session open — minutes or hours.
+   * Single-flight is about TURNS, so the refusal has to read this rather than
+   * fiber liveness, or a backgrounded task locks its chat for its whole lifetime.
+   */
+  readonly settled: Ref.Ref<boolean>
 }
 
 /**
@@ -258,61 +219,6 @@ const revisionText = (plan: Plan, comments: ReadonlyArray<PlanComment>): string 
   return lines.join("\n")
 }
 
-/** The first two words of a command — the "Always allow …" token, e.g. "npm test". */
-const allowLabelOf = (command: string): string => command.trim().split(/\s+/).slice(0, 2).join(" ")
-
-const isAllowlisted = (allow: ReadonlySet<string>, command: string | null): boolean =>
-  command !== null && [...allow].some((a) => command === a || command.startsWith(`${a} `))
-
-const basename = (target: string | null): string => target?.split("/").pop() ?? "file"
-
-/**
- * Decide whether a requested action runs (`"allow"`) or must pause for the
- * operator (`"gate"`), from the session's HITL mode + allowlist:
- * - `auto` — everything runs,
- * - `accept-edits` — edits run, commands gate (unless allowlisted),
- * - `ask` — edits and commands both gate (unless a command is allowlisted).
- */
-const verdict = (
-  mode: PermissionMode,
-  allow: ReadonlySet<string>,
-  req: PermissionRequest,
-  planAutoRun: boolean = PLAN_AUTO_RUN_DEFAULT
-): "allow" | "gate" => {
-  if (mode === "auto") return "allow"
-  if (isAllowlisted(allow, req.command)) return "allow"
-  // Planning is a read-only phase: the harness refuses edits outright, so the
-  // only thing left to approve is a command that cannot change the tree. Running
-  // those unattended is the default; the operator can restore the prompts from
-  // Settings. Edits are NOT covered — they fall through to the rule below and
-  // gate exactly as they always did.
-  if (mode === "plan" && planAutoRun && req.kind === "command") return "allow"
-  if (req.kind === "edit") return mode === "accept-edits" ? "allow" : "gate"
-  return "gate"
-}
-
-const buildGate = (id: string, req: PermissionRequest): ApprovalGate =>
-  req.kind === "command"
-    ? {
-        id,
-        kind: "command",
-        title: "Approval needed · run a command",
-        detail:
-          "Not in your allowlist. Agents never run shell commands until you allow — any file edits above were applied under this mode.",
-        command: req.command,
-        allowLabel: req.command ? allowLabelOf(req.command) : null,
-        status: "pending"
-      }
-    : {
-        id,
-        kind: "edit",
-        title: `Approval needed · edit ${basename(req.target)}`,
-        detail: "Review the change above, then approve to write it to disk.",
-        command: null,
-        allowLabel: null,
-        status: "pending"
-      }
-
 type PromptEnv =
   | CliAdapter
   | ConfigService
@@ -343,14 +249,12 @@ export type AgentRunTarget = "session" | "orchestrator"
 export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentRunner", {
   effect: Effect.gen(function* () {
     // gateId → the pending gate (shared across prompt/decideGate/stop calls).
-    const gates = yield* Ref.make(new Map<string, PendingGate>())
+    /** Human-in-the-loop state, and the rule that decides what needs approval. */
+    const approvals = yield* makeApprovals
     // requestId → the pending question group (shared across prompt/answerQuestion/stop).
-    const questions = yield* Ref.make(new Map<string, PendingQuestion>())
     // Per-chat live HITL state, seeded from the Chat record on first use.
     const modes = yield* Ref.make(new Map<string, PermissionMode>())
-    const allowlists = yield* Ref.make(new Map<string, Set<string>>())
     // planId → the pending plan (shared across prompt/approve/revise/stop).
-    const plans = yield* Ref.make(new Map<string, PendingPlan>())
     // chatId → the exec mode to restore when a plan is approved (captured on
     // the switch into "plan").
     const priorModes = yield* Ref.make(new Map<string, PermissionMode>())
@@ -423,8 +327,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           const current =
             (yield* Ref.get(modes)).get(chatId) ??
             (yield* getSessionOrNull(sessionId))?.chats.find((chat) => chat.id === chatId)?.mode
-          const configDefault = (yield* Ref.get(execDefaults)).get(chatId) ?? "accept-edits"
-          const prior: PermissionMode = current && current !== "plan" ? current : configDefault
+          const prior = modeToRestore(current, (yield* Ref.get(execDefaults)).get(chatId))
           yield* Ref.update(priorModes, (m) => new Map(m).set(chatId, prior))
         }
         yield* Ref.update(modes, (m) => new Map(m).set(chatId, mode))
@@ -446,26 +349,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
       Effect.gen(function* () {
         const chatId = maybeDecision === undefined ? sessionId : chatIdOrGateId
         const gateId = maybeDecision === undefined ? chatIdOrGateId : gateIdOrDecision
-        const decision =
-          maybeDecision ?? (gateIdOrDecision as GateDecision)
-        const entry = (yield* Ref.get(gates)).get(gateId)
-        if (
-          entry === undefined ||
-          entry.sessionId !== sessionId ||
-          entry.chatId !== chatId
-        ) return
-        if (decision === "always" && entry.allowLabel !== null) {
-          const label = entry.allowLabel
-          yield* Ref.update(allowlists, (m) => {
-            const next = new Map(m)
-            const set = new Set(next.get(chatId) ?? [])
-            set.add(label)
-            next.set(chatId, set)
-            return next
-          })
+        const decision = maybeDecision ?? (gateIdOrDecision as GateDecision)
+        // The registry owns the in-memory allowlist and hands back the token to
+        // persist, so the durable write stays here with the rest of the session
+        // state and `approvals` stays free of `SessionStore`.
+        const label = yield* approvals.decide(sessionId, chatId, gateId, decision)
+        if (label !== null) {
           yield* SessionStore.addAllowlist(sessionId, chatId, label).pipe(Effect.ignore)
         }
-        yield* Deferred.succeed(entry.deferred, decision === "deny" ? "deny" : "allow")
       })
 
     /** Submit the user's answers to a pending question group, resuming the agent. */
@@ -481,24 +372,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           maybeAnswers === undefined ? chatIdOrRequestId : (requestIdOrAnswers as string)
         const answers =
           maybeAnswers ?? (requestIdOrAnswers as ReadonlyArray<QuestionAnswer>)
-        const entry = (yield* Ref.get(questions)).get(requestId)
-        if (
-          entry === undefined ||
-          entry.sessionId !== sessionId ||
-          entry.chatId !== chatId
-        ) return
-        // The answers are recorded onto the transcript inside `askQuestion` (which
-        // owns the run's message accumulator); here we just resume the agent.
-        yield* Deferred.succeed(entry.deferred, answers)
+        yield* approvals.answer(sessionId, chatId, requestId, answers)
       })
 
-    /** Resolve a session's pending plan `Deferred` (guards session ownership). */
+    /** Resolve a session's pending plan (guards session ownership). */
     const resolvePlan = (sessionId: string, planId: string, decision: PlanDecision) =>
-      Effect.gen(function* () {
-        const entry = (yield* Ref.get(plans)).get(planId)
-        if (entry === undefined || entry.sessionId !== sessionId) return
-        yield* Deferred.succeed(entry.deferred, decision)
-      })
+      approvals.settlePlan(sessionId, planId, decision)
 
     /**
      * A pending plan (by id) and its live run, gated on session ownership — the
@@ -507,7 +386,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
      */
     const pendingPlanRun = (sessionId: string, planId: string) =>
       Effect.gen(function* () {
-        const pending = (yield* Ref.get(plans)).get(planId)
+        const pending = yield* approvals.pendingPlan(planId)
         const run =
           pending?.sessionId === sessionId
             ? (yield* Ref.get(active)).get(pending.chatId)
@@ -552,19 +431,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
       Effect.gen(function* () {
         const { pending, run } = yield* pendingPlanRun(sessionId, planId)
         if (run !== undefined) yield* run.applyPlan(planId, (p) => ({ ...p, status: "approved" }))
-        // Engage the mode they were actually running this session in before
-        // planning (`priorModes`, e.g. "auto") — that's their real intent for this
-        // session. Fall back to their CLI-config default only when there's no prior
-        // (e.g. a session started directly in plan mode), then a safe default.
-        // NOTE: `priorModes` MUST win over `execDefaults` — the latter is derived
-        // from the harness config file and is "accept-edits" for anyone who hasn't
-        // set a config default, which would silently override the "auto" (or other
-        // mode) the operator picked in the composer, re-gating every command.
-        const mode =
-          executionMode ??
-          (pending ? (yield* Ref.get(priorModes)).get(pending.chatId) : undefined) ??
-          (pending ? (yield* Ref.get(execDefaults)).get(pending.chatId) : undefined) ??
-          "accept-edits"
+        // Precedence lives in `exec-mode.ts`, where the reason `prior` must beat
+        // `configDefault` is stated once — getting that pair the wrong way round
+        // re-gates every command of the execution just approved.
+        const mode = modeOnApproval({
+          explicit: executionMode,
+          prior: pending ? (yield* Ref.get(priorModes)).get(pending.chatId) : undefined,
+          configDefault: pending ? (yield* Ref.get(execDefaults)).get(pending.chatId) : undefined
+        })
         // Restore the exec mode live (canUseTool re-reads it) and persist it.
         if (pending) yield* setMode(sessionId, pending.chatId, mode)
         yield* resolvePlan(sessionId, planId, PlanDecision.Approve({ mode }))
@@ -650,31 +524,20 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     const stop = (sessionId: string, requestedChatId?: string) =>
       Effect.gen(function* () {
         const chatId = requestedChatId ?? sessionId
-        const allGates = yield* Ref.get(gates)
-        yield* Effect.forEach(
-          [...allGates.values()].filter(
-            (g) => g.sessionId === sessionId && g.chatId === chatId
-          ),
-          (g) => Deferred.succeed(g.deferred, "deny"),
-          { discard: true }
-        )
-        const allQuestions = yield* Ref.get(questions)
-        yield* Effect.forEach(
-          [...allQuestions.values()].filter(
-            (q) => q.sessionId === sessionId && q.chatId === chatId
-          ),
-          (q) => Deferred.succeed(q.deferred, []),
-          { discard: true }
-        )
-        const allPlans = yield* Ref.get(plans)
+        // A stopped agent must not stay parked: gates deny, questions answer empty.
+        yield* approvals.releaseChat(sessionId, chatId)
+        // Plans reject, and the rejection is marked on the live turn first so the
+        // transcript says what happened. The registry answers WHICH plans; marking
+        // them stays here, where the run's accumulator lives.
         const run = (yield* Ref.get(active)).get(chatId)
         yield* Effect.forEach(
-          [...allPlans.entries()].filter(
-            ([, p]) => p.sessionId === sessionId && p.chatId === chatId
-          ),
-          ([planId, p]) =>
-            (run ? run.applyPlan(planId, (pl) => ({ ...pl, status: "rejected" })) : Effect.void).pipe(
-              Effect.zipRight(Deferred.succeed(p.deferred, PlanDecision.Reject()))
+          yield* approvals.pendingPlanIds(sessionId, chatId),
+          (planId) =>
+            (run
+              ? run.applyPlan(planId, (pl) => ({ ...pl, status: "rejected" }))
+              : Effect.void
+            ).pipe(
+              Effect.zipRight(approvals.settlePlan(sessionId, planId, PlanDecision.Reject()))
             ),
           { discard: true }
         )
@@ -763,7 +626,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           const sessionMode =
             (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? "accept-edits"
           const allow = new Set<string>([
-            ...((yield* Ref.get(allowlists)).get(chatId) ?? []),
+            ...(yield* approvals.allowlistFor(chatId)),
             ...(chat.allowlist ?? [])
           ])
           // `starbase` is not a harness that can run anything — it is us. A
@@ -863,13 +726,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
 
           // Renamed from `planNote` when the plan-mode protocol note arrived: two
           // different plan-related prefixes with one name is a trap.
-          const planPointer = savedPlans.length > 0 ? `${planPointerNote(worktreePath, savedPlans)}\n\n` : ""
-          const primer = digest === null ? "" : `${renderPrimer(digest, tail)}\n\n`
+          const planPointer = savedPlans.length > 0 ? planPointerNote(worktreePath, savedPlans) : null
+          const primer = digest === null ? null : renderPrimer(digest, tail)
           // ADHD mode rides in the same per-turn prefix as the primer and the plan
           // pointer. There is no system-prompt hook that every harness shares, and
           // a setting the operator can flip mid-session has to apply to the NEXT
           // turn — which a session-start injection could not do.
-          const adhd = adhdMode ? `${adhdNote(cli)}\n\n` : ""
+          const adhd = adhdMode ? adhdNote(cli) : null
           // Not optional, and not a setting: an agent that asks in prose is an
           // agent whose question never reaches the operator. Claude has the
           // `AskUserQuestion` tool the adapter intercepts, Codex has the fenced
@@ -878,13 +741,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           // an unanswerable paragraph. Rides the same per-turn prefix as ADHD
           // mode, for the same reason: no system-prompt hook is shared by every
           // harness, and this has to survive a mid-session harness switch.
-          const ask = `${questionNote(cli)}\n\n`
+          const ask = questionNote(cli)
           // How this harness submits a plan. Null for Claude — the adapter passes
           // `planModeInstructions` as a real SDK option there, and saying it twice
           // would compete with the `ExitPlanMode` tool the harness is steered
           // toward. Everything else is told to end its reply with the block.
           const planProtocol = !orchestrating && mode === "plan" ? planNote(cli) : null
-          const planning = planProtocol === null ? "" : `${planProtocol}\n\n`
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
@@ -920,11 +782,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             // turned `/babysit-pr …` into prose, and the turn came back instantly
             // with nothing to say — the empty "CLAUDE" block. When the operator
             // opens with a command, the context rides along AFTER it instead.
-            prompt:
-              !orchestrating &&
-              (isSlashCommand(promptText) || (cli === "codex" && isCodexSkillInvocation(promptText)))
-              ? `${promptText}\n\n${primer}${planPointer}${adhd}${ask}${planning}`.trimEnd()
-              : `${primer}${planPointer}${adhd}${ask}${planning}${promptText}`,
+            prompt: composeTurnPrompt(
+              promptText,
+              { primer, planPointer, adhd, ask, planProtocol },
+              // The orchestrator's intake prompt is generated, never typed, so it
+              // can never be a command the harness has to see first.
+              { leadWithText: !orchestrating && leadsWithCommand(cli, promptText) }
+            ),
             images,
             binPath,
             mode,
@@ -1034,6 +898,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
            * behaviour and cannot fail a run (`Effect.ignore` at the call site).
            */
           const sawTerminal = yield* Ref.make(false)
+          /**
+           * Resolved when the turn reaches its terminal event.
+           *
+           * A Deferred beside the Ref rather than polling it: the drain supervisor
+           * below has to WAIT for the turn to settle before it starts asking about
+           * background tasks, and a settled turn is a one-way edge.
+           */
+          const turnSettled = yield* Deferred.make<void>()
           const eventCount = yield* Ref.make(0)
           const lastEvent = yield* Ref.make<string>("<none>")
           const wasInterrupted = yield* Ref.make(false)
@@ -1147,9 +1019,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               // Codex can surface one app-server failure as both `turn.failed`
               // and `error`. The first terminal owns the turn; folding the
               // second printed the same context-overflow message twice.
-              if (event._tag === "Done" || event._tag === "Failed") {
+              if (isTerminal(event)) {
                 if (yield* Ref.get(sawTerminal)) return
                 yield* Ref.set(sawTerminal, true)
+                yield* Deferred.succeed(turnSettled, void 0)
               }
               // Tracked before the early returns below, so background-task and
               // sub-agent events still count toward "what did this run actually
@@ -1157,31 +1030,17 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               // vanished is a different failure from one that emitted nothing.
               yield* Ref.update(eventCount, (n) => n + 1)
               yield* Ref.set(lastEvent, event._tag)
-              // Background tasks are SESSION-level: they outlive this turn, so
-              // they fold into the session's task registry (one statechart per
-              // task) rather than into the transcript. Surfaced downstream too so
-              // the dock updates live, but never persisted onto a message —
-              // that would pin a still-running task to a finished turn.
-              if (isBackgroundTaskEvent(event)) {
+              // Where this event belongs, and why, lives in `turn-events.ts`.
+              const route = routeOf(event)
+              if (route === "background-task") {
+                // Into the session's task registry — it outlives this turn — and on
+                // to the renderer so the dock updates live.
                 yield* BackgroundTaskStore.ingest(sessionId, chatId, event).pipe(Effect.provide(env), Effect.ignore)
                 yield* out.offer(event)
                 return
               }
-              // Sub-agent events drive live-only tabs, not the persisted main turn.
-              // Surface them downstream (the renderer keeps per-sub-agent
-              // transcripts) but never fold them into the main assistant message —
-              // that would interleave unrelated agents' output into the transcript.
-              if (isSubagentEvent(event)) {
-                yield* out.offer(event)
-                return
-              }
-              // Live tool output is stream-only. A main-turn `ToolDelta` is NOT a
-              // sub-agent event, so without this it would fall through to
-              // `patchLast` — which does a full-file read+decode+encode+rewrite of
-              // the transcript on EVERY tick. Surface it to the renderer (which
-              // folds it into the running card) and let `ToolEnd` persist the
-              // authoritative final output.
-              if (event._tag === "ToolDelta") {
+              if (route === "subagent" || route === "stream-only") {
+                // Renderer only. Neither belongs on the persisted main turn.
                 yield* out.offer(event)
                 return
               }
@@ -1276,40 +1135,27 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               const gn = yield* nextId
               const gateId = `g_${sessionId}_${gn}`
               const gate = buildGate(gateId, req)
-              const deferred = yield* Deferred.make<PermissionDecision>()
-              yield* Ref.update(gates, (m) =>
-                new Map(m).set(gateId, {
-                  sessionId,
-                  chatId,
-                  deferred,
-                  allowLabel: gate.allowLabel
-                })
+              // `approvals` announces the gate itself, so registration cannot lose
+              // the race against a decision — see `awaitGate`.
+              return yield* approvals.awaitGate(
+                sessionId,
+                chatId,
+                gateId,
+                gate,
+                emit({ _tag: "GateRequested", gate })
               )
-              yield* emit({ _tag: "GateRequested", gate })
-              const decision = yield* Deferred.await(deferred)
-              yield* Ref.update(gates, (m) => {
-                const next = new Map(m)
-                next.delete(gateId)
-                return next
-              })
-              return decision
             })
 
           const askQuestion = (
             request: QuestionRequest
           ): Effect.Effect<ReadonlyArray<QuestionAnswer>> =>
             Effect.gen(function* () {
-              const deferred = yield* Deferred.make<ReadonlyArray<QuestionAnswer>>()
-              yield* Ref.update(questions, (m) =>
-                new Map(m).set(request.id, { sessionId, chatId, deferred })
+              const answers = yield* approvals.awaitAnswers(
+                sessionId,
+                chatId,
+                request.id,
+                emit({ _tag: "QuestionRequested", request })
               )
-              yield* emit({ _tag: "QuestionRequested", request })
-              const answers = yield* Deferred.await(deferred)
-              yield* Ref.update(questions, (m) => {
-                const next = new Map(m)
-                next.delete(request.id)
-                return next
-              })
               // Record the answers onto the assistant turn's question part — both
               // the live accumulator (so later emits don't clobber it) and the
               // persisted transcript (so a reload doesn't re-show the question).
@@ -1323,32 +1169,26 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
 
           const proposePlan = (plan: Plan): Effect.Effect<PlanDecision> =>
             Effect.gen(function* () {
-              const deferred = yield* Deferred.make<PlanDecision>()
-              yield* Ref.update(plans, (m) =>
-                new Map(m).set(plan.id, { sessionId, chatId, deferred })
+              // Announced (and persisted) only once the plan can be answered — see
+              // `awaitPlan`. Persisting to the library lets a later turn or session
+              // pick the plan back up; best-effort, so a write failure never blocks
+              // plan review.
+              return yield* approvals.awaitPlan(
+                sessionId,
+                chatId,
+                plan.id,
+                Effect.gen(function* () {
+                  yield* emit({ _tag: "PlanProposed", plan })
+                  if (worktreePath.length === 0) return
+                  yield* PlanStore.write(worktreePath, plan).pipe(Effect.provide(env), Effect.ignore)
+                  if (plan.structured !== false) {
+                    yield* PlanStore.promote(sessionId, worktreePath, chatId, plan).pipe(
+                      Effect.provide(env),
+                      Effect.ignore
+                    )
+                  }
+                })
               )
-              yield* emit({ _tag: "PlanProposed", plan })
-              // Persist the plan to the session's plan library so a later turn or
-              // session can pick it back up — the next run points the agent at it.
-              // Best-effort: a write failure never blocks plan review.
-              if (worktreePath.length > 0) {
-                yield* PlanStore.write(worktreePath, plan).pipe(Effect.provide(env), Effect.ignore)
-                if (plan.structured !== false) {
-                  yield* PlanStore.promote(
-                    sessionId,
-                    worktreePath,
-                    chatId,
-                    plan
-                  ).pipe(Effect.provide(env), Effect.ignore)
-                }
-              }
-              const decision = yield* Deferred.await(deferred)
-              yield* Ref.update(plans, (m) => {
-                const nextMap = new Map(m)
-                nextMap.delete(plan.id)
-                return nextMap
-              })
-              return decision
             })
 
           // Publish live handles so comment/revise/approve can reach this run;
@@ -1516,9 +1356,81 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             ),
             Effect.ensuring(out.end)
           )
-          const fiber = yield* Effect.forkScoped(run)
+          /**
+           * Forked DETACHED, not into the request stream's scope.
+           *
+           * The renderer leaves `running` the moment `Done` lands, which stops the
+           * invoked stream and closes its scope — so a scoped fork meant the
+           * harness was killed at turn end, every time. That silently made the
+           * dock a liar: a backgrounded task went on being listed as "running"
+           * while the process servicing it was already dead, and its stop button
+           * addressed a handle into nothing. Background work has to outlive the
+           * turn that started it or the feature does not exist.
+           */
+          const fiber = yield* Effect.forkDaemon(run)
           yield* Ref.update(fibers, (m) =>
-            new Map(m).set(chatId, { sessionId, chatId, fiber, token })
+            new Map(m).set(chatId, { sessionId, chatId, fiber, token, settled: sawTerminal })
+          )
+
+          /**
+           * How long a settled run is given to finish under its own steam.
+           *
+           * A harness that ends its stream at turn end is already unwinding, and
+           * interrupting it there races the finalizers that persist the transcript
+           * — insisting too early truncates the very turn just completed. Only a
+           * run still alive after this is genuinely lingering.
+           */
+          const SELF_EXIT_GRACE = "5 seconds"
+
+          /** Unsettled background tasks belonging to this chat, right now. */
+          const liveTasks = BackgroundTaskStore.liveFor(sessionId, chatId).pipe(
+            Effect.provide(env),
+            Effect.orElseSucceed(() => 0)
+          )
+
+          /** Read the run's fate from the policy in `run-lifetime.ts`. */
+          const fate = (consumerAttached: boolean) =>
+            Effect.gen(function* () {
+              return runLifetime({
+                turnSettled: yield* Ref.get(sawTerminal),
+                consumerAttached,
+                liveBackgroundTasks: yield* liveTasks
+              })
+            })
+
+          /**
+           * Detaching mid-turn stops the agent; detaching after it settled does not.
+           *
+           * The mailbox is ended either way — once nothing is reading it, every
+           * further event is a write into a buffer that will never be drained.
+           */
+          yield* Effect.addFinalizer(() =>
+            Effect.gen(function* () {
+              const decision = yield* fate(false)
+              if (decision.verdict === "end") yield* Fiber.interrupt(fiber)
+              yield* out.end
+            })
+          )
+
+          /**
+           * Outlive the turn for as long as there is background work, then stop.
+           *
+           * Polled because settlement arrives through the harness's own signals (a
+           * completion bookend, an operator stop) which land in the task registry —
+           * there is no completion channel to await. A second is far below human
+           * patience for "is it finished yet" and costs one map read.
+           */
+          yield* Effect.forkDaemon(
+            Effect.gen(function* () {
+              yield* Deferred.await(turnSettled)
+              while ((yield* fate(true)).verdict === "run") {
+                yield* Effect.sleep("1 seconds")
+              }
+              yield* Fiber.await(fiber).pipe(
+                Effect.timeout(SELF_EXIT_GRACE),
+                Effect.catchAll(() => Fiber.interrupt(fiber))
+              )
+            })
           )
 
           // Watchdog the FIRST event.
@@ -1575,7 +1487,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               // message ids from the same transcript snapshot, colliding. Refuse
               // the second (a racing double-send, a second window). Distinct
               // chats reserve distinct owners and are always admitted.
-              const admitted = yield* reserveSessionRun(sessionId, chatId)
+              // This run's identity as the reservation holder. Minted here, not
+              // reused from `RunToken`, because the slot is claimed before the run
+              // (and its token) exists — and because a reclaim must be able to
+              // supersede a holder that is still unwinding.
+              const holder: RunHolder = {}
+              const admitted = yield* reserveSessionRun(sessionId, chatId, holder)
               if (!admitted) {
                 // A refusal is only legitimate while a run is actually live.
                 // The reservation is released by a finalizer on the STREAM's
@@ -1593,19 +1510,27 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
                 // reservation outlived its run. Reclaim it rather than making
                 // the operator restart the app.
                 const running = (yield* Ref.get(fibers)).get(chatId)
+                // A run whose turn has SETTLED holds nothing worth protecting.
+                // Single-flight exists so two turns can't race one chat's
+                // transcript and `fibers` slot; once the terminal event is out,
+                // that turn is over and the next prompt is not a race with it.
+                // Reading fiber liveness alone made a backgrounded task — which
+                // deliberately keeps the harness consuming long past `Done` —
+                // refuse its own chat for as long as the task ran, with the
+                // composer showing an idle send button and nothing to stop.
                 const stale =
                   running === undefined ||
-                  Option.isSome(yield* Fiber.poll(running.fiber))
+                  Option.isSome(yield* Fiber.poll(running.fiber)) ||
+                  (yield* Ref.get(running.settled))
                 if (!stale) {
                   return Stream.fromIterable<StreamEvent>([{
                     _tag: "Failed",
                     message: "This chat is already running. Wait for it to finish or stop it before sending again."
                   }])
                 }
-                yield* releaseSessionRun(sessionId, chatId)
-                yield* reserveSessionRun(sessionId, chatId)
+                yield* reclaimSessionRun(sessionId, chatId, holder)
               }
-              yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, chatId))
+              yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, chatId, holder))
               return yield* promptSetup(
                 sessionId,
                 chatId,
@@ -1666,7 +1591,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           })
         yield* drop(locks)
         yield* drop(modes)
-        yield* drop(allowlists)
+        yield* approvals.forgetChat(chatId)
         yield* drop(priorModes)
         yield* drop(execDefaults)
       })

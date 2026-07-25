@@ -387,6 +387,69 @@ Add the existing limiter to the refund route and verify its rejection path.`
         return
       }
 
+      /**
+       * A harness that is STILL ALIVE after the turn it just ended.
+       *
+       * This is what the real Claude adapter does and the plain `[[background]]`
+       * marker does not: its `for await` over the SDK never breaks on `result`, so
+       * `run` keeps consuming — that is how a backgrounded task's
+       * `task_notification` bookend arrives after `Done`. The scripted harness
+       * returning immediately made that whole window untestable, and the window is
+       * exactly where the chat's run reservation is still held while the renderer,
+       * which went idle on `Done`, shows a send button.
+       */
+      if (spec.prompt.includes("[[background-live-harness]]")) {
+        yield* emit({
+          _tag: "BackgroundTaskStarted",
+          id: `bglive_${sessionId}`,
+          description: "Watching the test suite",
+          taskType: "bash",
+          subagentType: null,
+          toolUseId: null
+        })
+        yield* emit({ _tag: "BackgroundTasksChanged", ids: [`bglive_${sessionId}`] })
+        yield* emit({ _tag: "Assistant", text: "Started a watcher in the background." })
+        yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        // Deliberately no `return`: the turn has settled but the harness has not
+        // exited, which is the real adapter's shape.
+        yield* Effect.sleep("60 seconds")
+        return
+      }
+
+      /**
+       * A background task that FINISHES on its own, after its turn is over.
+       *
+       * The bookend is the whole point: a real harness reports settlement through a
+       * later `task_notification`, which only arrives if the process is still
+       * consuming — so this is the case that proves the run outlives the turn and
+       * the dock learns the outcome without the operator prompting again.
+       */
+      if (spec.prompt.includes("[[background-completes]]")) {
+        const taskId = `bgdone_${sessionId}`
+        yield* emit({
+          _tag: "BackgroundTaskStarted",
+          id: taskId,
+          description: "Watching the test suite",
+          taskType: "bash",
+          subagentType: null,
+          toolUseId: null
+        })
+        yield* emit({ _tag: "BackgroundTasksChanged", ids: [taskId] })
+        yield* emit({ _tag: "Assistant", text: "Started a watcher in the background." })
+        yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        // The turn is over. The work is not.
+        yield* Effect.sleep("2 seconds")
+        yield* emit({
+          _tag: "BackgroundTaskSettled",
+          id: taskId,
+          status: "completed",
+          summary: "42 tests passed.",
+          outputFile: null
+        })
+        yield* emit({ _tag: "BackgroundTasksChanged", ids: [] })
+        return
+      }
+
       if (spec.prompt.includes("[[background]]")) {
         const taskId = `bgtask_${sessionId}`
         yield* registerBackgroundStop(async (id) => {

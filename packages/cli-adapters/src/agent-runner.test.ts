@@ -11,7 +11,6 @@ import { InMemorySecretStoreLive } from "./secret-store.js"
 import { OpenConnectorService } from "./open-connector.js"
 import {
   AgentRunner,
-  isCodexSkillInvocation,
   isContextOverflowFailure,
   resolveIntakeHarness
 } from "./agent-runner.js"
@@ -110,12 +109,6 @@ const gates = (events: ReadonlyArray<StreamEvent>) =>
 const ranTool = (events: ReadonlyArray<StreamEvent>, id: string) =>
   events.some((e) => e._tag === "ToolStart" && e.id === id)
 
-describe("isCodexSkillInvocation", () => {
-  it("recognises explicit Codex skill tokens without treating paths as skills", () => {
-    expect(isCodexSkillInvocation("$babysit-pr get it to main")).toBe(true)
-    expect(isCodexSkillInvocation("/Users/morgan/repo")).toBe(false)
-  })
-})
 
 describe("isContextOverflowFailure", () => {
   it("recognises Codex and API context exhaustion without matching ordinary failures", () => {
@@ -1515,6 +1508,58 @@ describe("AgentRunner stop", () => {
     )
 
   /**
+   * A harness that SETTLES its turn and then stays alive.
+   *
+   * This is what a background task does to the real Claude adapter: its
+   * `for await` over the SDK never breaks on `result`, so the run keeps consuming
+   * long after `Done` in order to receive the task's `task_notification` bookend.
+   * The turn is over; the fiber is not.
+   */
+  const BG_TASK = "bgtask_probe"
+
+  const settledThenLingeringAdapter = (
+    settled: Deferred.Deferred<boolean>,
+    interrupted: Deferred.Deferred<boolean>
+  ): Layer.Layer<CliAdapter> =>
+    Layer.succeed(
+      CliAdapter,
+      CliAdapter.of({
+        run: (_sessionId, _spec, ctx) =>
+          Effect.gen(function* () {
+            // Register the stop handle the dock's button reaches, exactly as a real
+            // adapter does: settling happens through the harness's own signals.
+            yield* ctx.registerBackgroundStop((id) =>
+              Effect.runPromise(
+                ctx.emit({
+                  _tag: "BackgroundTaskSettled",
+                  id,
+                  status: "stopped",
+                  summary: "Stopped by the operator.",
+                  outputFile: null
+                })
+              )
+            )
+            yield* ctx.emit({
+              _tag: "BackgroundTaskStarted",
+              id: BG_TASK,
+              description: "Watching the test suite",
+              taskType: "bash",
+              subagentType: null,
+              toolUseId: null
+            })
+            yield* ctx.emit({ _tag: "Assistant", text: "started a watcher" })
+            yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+            yield* Deferred.succeed(settled, true)
+            // The turn has settled. The harness lives on, servicing the task.
+            yield* Effect.never
+          }).pipe(Effect.onInterrupt(() => Deferred.succeed(interrupted, true))) as ReturnType<
+            CliAdapterShape["run"]
+          >,
+        stop: () => Effect.void
+      })
+    )
+
+  /**
    * Drive a run to the point where the agent is genuinely working, then stop it.
    *
    * We wait on `started` rather than sleeping: `prompt` does real I/O (session
@@ -1626,6 +1671,169 @@ describe("AgentRunner stop", () => {
   })
 
   /**
+   * Background work must outlive the turn that started it.
+   *
+   * The run used to be forked into the REQUEST stream's scope, and the renderer
+   * leaves `running` the moment `Done` lands — so detaching killed the harness at
+   * turn end, every time. The dock went on listing the task as "running" with the
+   * process servicing it already dead, and its stop button addressed a handle into
+   * nothing. Backgrounding is the one feature that is defined by outliving a turn,
+   * so this is the whole thing working or not.
+   */
+  it("keeps the harness alive after the renderer detaches, while a task runs", async () => {
+    const alive = await Effect.gen(function* () {
+      const settled = yield* Deferred.make<boolean>()
+      const interrupted = yield* Deferred.make<boolean>()
+      const base = Layer.mergeAll(
+        AgentRunner.Default,
+        OpenConnectorService.Default,
+        InMemorySecretStoreLive,
+        ConfigService.Default,
+        SessionStore.Default,
+        TranscriptStore.Default,
+        BackgroundTaskStore.Default,
+        PlanStore.Default,
+        ContextManager.Default,
+        settledThenLingeringAdapter(settled, interrupted),
+        noHarnesses,
+        temp.layer
+      )
+      return yield* Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "auto")
+        // Consume exactly as the renderer does: stop at the terminal event.
+        yield* runner
+          .prompt(SESSION, SESSION, "watch the tests")
+          .pipe(
+            Stream.takeUntil((ev) => ev._tag === "Done" || ev._tag === "Failed"),
+            Stream.runCollect,
+            Effect.timeout("10 seconds")
+          )
+        // Well past the drain supervisor's grace: if detaching were still fatal,
+        // the interrupt would have landed by now.
+        yield* Effect.sleep("7 seconds")
+        const dead = yield* Deferred.isDone(interrupted)
+        const tasks = yield* BackgroundTaskStore.list(SESSION)
+        return { dead, running: tasks.filter((t) => t.status === "running").length }
+      }).pipe(Effect.provide(base))
+    }).pipe(Effect.runPromise)
+
+    expect(alive.dead).toBe(false)
+    // And the dock's row is telling the truth: a live task with a live harness.
+    expect(alive.running).toBe(1)
+  }, 30_000)
+
+  /**
+   * ...and it must not linger once the work is done.
+   *
+   * The other half of the lifetime: a harness kept alive for a task that has
+   * finished is an orphaned process holding a chat's slot. Settling the task is
+   * what ends the run, so the two are the same decision.
+   */
+  it("ends the run once the last background task settles", async () => {
+    const outcome = await Effect.gen(function* () {
+      const settled = yield* Deferred.make<boolean>()
+      const interrupted = yield* Deferred.make<boolean>()
+      const base = Layer.mergeAll(
+        AgentRunner.Default,
+        OpenConnectorService.Default,
+        InMemorySecretStoreLive,
+        ConfigService.Default,
+        SessionStore.Default,
+        TranscriptStore.Default,
+        BackgroundTaskStore.Default,
+        PlanStore.Default,
+        ContextManager.Default,
+        settledThenLingeringAdapter(settled, interrupted),
+        noHarnesses,
+        temp.layer
+      )
+      return yield* Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "auto")
+        yield* runner
+          .prompt(SESSION, SESSION, "watch the tests")
+          .pipe(
+            Stream.takeUntil((ev) => ev._tag === "Done" || ev._tag === "Failed"),
+            Stream.runCollect,
+            Effect.timeout("10 seconds")
+          )
+        // Settle it the way the dock's stop button does — through the handle the
+        // adapter registered, not by writing to the registry behind its back.
+        yield* BackgroundTaskStore.stop(SESSION, BG_TASK)
+        // The supervisor notices on its next poll and lets the harness go.
+        return yield* Deferred.await(interrupted).pipe(
+          Effect.timeout("15 seconds"),
+          Effect.as("ended" as const),
+          Effect.orElseSucceed(() => "still-running" as const)
+        )
+      }).pipe(Effect.provide(base))
+    }).pipe(Effect.runPromise)
+
+    expect(outcome).toBe("ended")
+  }, 30_000)
+
+  /**
+   * A settled turn must not hold the chat, however long its harness lives on.
+   *
+   * The refusal asks whether a run FIBER is alive. That is the wrong question once
+   * a background task is in play: the real adapter keeps consuming the SDK after
+   * `result` so the task's bookend can arrive, so the fiber outlives the turn by
+   * however long the task runs. Every later prompt is then refused with "already
+   * running" while the composer — which follows the machine, and went idle on
+   * `Done` — shows a send button and nothing to stop. The right question is
+   * whether a TURN is in flight.
+   */
+  it("admits a prompt once the turn has settled, even while the harness lives on", async () => {
+    const events = await Effect.gen(function* () {
+      const settled = yield* Deferred.make<boolean>()
+      const interrupted = yield* Deferred.make<boolean>()
+      const base = Layer.mergeAll(
+        AgentRunner.Default,
+        OpenConnectorService.Default,
+        InMemorySecretStoreLive,
+        ConfigService.Default,
+        SessionStore.Default,
+        TranscriptStore.Default,
+        BackgroundTaskStore.Default,
+        PlanStore.Default,
+        ContextManager.Default,
+        settledThenLingeringAdapter(settled, interrupted),
+        noHarnesses,
+        temp.layer
+      )
+      return yield* Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "auto")
+        // Keep consuming, exactly as a renderer does until it processes `Done`.
+        const first = yield* Effect.fork(
+          runner.prompt(SESSION, SESSION, "watch the tests").pipe(Stream.runDrain)
+        )
+        yield* Deferred.await(settled).pipe(Effect.timeout("5 seconds"))
+
+        // Stop at the terminal event, exactly as the renderer does: a harness kept
+        // alive by a background task never ends its stream on its own.
+        const seen = Array.from(
+          yield* runner
+            .prompt(SESSION, SESSION, "summarise the repo")
+            .pipe(
+              Stream.takeUntil((ev) => ev._tag === "Done" || ev._tag === "Failed"),
+              Stream.runCollect,
+              Effect.timeout("10 seconds")
+            )
+        )
+        yield* runner.stop(SESSION)
+        yield* Fiber.join(first).pipe(Effect.timeout("5 seconds"), Effect.ignore)
+        return seen
+      }).pipe(Effect.provide(base))
+    }).pipe(Effect.runPromise)
+
+    expect(
+      events.some((ev) => ev._tag === "Failed" && ev.message.includes("already running"))
+    ).toBe(false)
+  })
+
+  /**
    * The other half of single-flight: a refusal must mean a run is ACTUALLY
    * live, not merely that one was once reserved.
    *
@@ -1658,7 +1866,7 @@ describe("AgentRunner stop", () => {
         yield* runner.setMode(SESSION, "auto")
         // Strand a reservation the way an abandoned stream does: reserved, but
         // with no fiber ever registered against it.
-        expect(yield* reserveSessionRun(SESSION, SESSION)).toBe(true)
+        expect(yield* reserveSessionRun(SESSION, SESSION, {})).toBe(true)
         const seen: Array<StreamEvent> = []
         yield* runner
           .prompt(SESSION, SESSION, "go")
