@@ -38,6 +38,7 @@ import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Schedule, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
 import { modeOnApproval, modeToRestore } from "./exec-mode.js"
+import { isTerminal, routeOf } from "./turn-events.js"
 import {
   composeTurnPrompt,
   leadsWithCommand,
@@ -1018,7 +1019,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               // Codex can surface one app-server failure as both `turn.failed`
               // and `error`. The first terminal owns the turn; folding the
               // second printed the same context-overflow message twice.
-              if (event._tag === "Done" || event._tag === "Failed") {
+              if (isTerminal(event)) {
                 if (yield* Ref.get(sawTerminal)) return
                 yield* Ref.set(sawTerminal, true)
                 yield* Deferred.succeed(turnSettled, void 0)
@@ -1029,31 +1030,17 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               // vanished is a different failure from one that emitted nothing.
               yield* Ref.update(eventCount, (n) => n + 1)
               yield* Ref.set(lastEvent, event._tag)
-              // Background tasks are SESSION-level: they outlive this turn, so
-              // they fold into the session's task registry (one statechart per
-              // task) rather than into the transcript. Surfaced downstream too so
-              // the dock updates live, but never persisted onto a message —
-              // that would pin a still-running task to a finished turn.
-              if (isBackgroundTaskEvent(event)) {
+              // Where this event belongs, and why, lives in `turn-events.ts`.
+              const route = routeOf(event)
+              if (route === "background-task") {
+                // Into the session's task registry — it outlives this turn — and on
+                // to the renderer so the dock updates live.
                 yield* BackgroundTaskStore.ingest(sessionId, chatId, event).pipe(Effect.provide(env), Effect.ignore)
                 yield* out.offer(event)
                 return
               }
-              // Sub-agent events drive live-only tabs, not the persisted main turn.
-              // Surface them downstream (the renderer keeps per-sub-agent
-              // transcripts) but never fold them into the main assistant message —
-              // that would interleave unrelated agents' output into the transcript.
-              if (isSubagentEvent(event)) {
-                yield* out.offer(event)
-                return
-              }
-              // Live tool output is stream-only. A main-turn `ToolDelta` is NOT a
-              // sub-agent event, so without this it would fall through to
-              // `patchLast` — which does a full-file read+decode+encode+rewrite of
-              // the transcript on EVERY tick. Surface it to the renderer (which
-              // folds it into the running card) and let `ToolEnd` persist the
-              // authoritative final output.
-              if (event._tag === "ToolDelta") {
+              if (route === "subagent" || route === "stream-only") {
+                // Renderer only. Neither belongs on the persisted main turn.
                 yield* out.offer(event)
                 return
               }
