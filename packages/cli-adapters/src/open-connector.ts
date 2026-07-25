@@ -40,7 +40,8 @@ const remoteEntry = (
   cli: CliKind
 ): ParsedMcpServer => {
   const url = mcpUrl(config.endpoint)
-  const name = config.serverName ?? OPEN_CONNECTOR_DEFAULT.serverName ?? "open-connector"
+  // `serverName` is `optionalWith` a default, so the decoded type is a plain string.
+  const name = config.serverName
   const server: McpServer = {
     name,
     cli,
@@ -96,12 +97,17 @@ export class OpenConnectorService extends Effect.Service<OpenConnectorService>()
        */
       const set = (config: OpenConnectorConfig, token?: string | null) =>
         Effect.gen(function* () {
+          // Token FIRST: `setOpenConnectorToken` can fail (`SecretStoreUnavailable`),
+          // and persisting an `enabled` config before it would leave the feature on
+          // with no credential — every request then fails "not configured". If the
+          // vault write fails, the config is never touched.
+          if (token !== undefined) {
+            const secrets = yield* SecretStore
+            yield* token === null || token.length === 0
+              ? secrets.clearOpenConnectorToken
+              : secrets.setOpenConnectorToken(token)
+          }
           yield* ConfigService.setOpenConnector(config)
-          if (token === undefined) return
-          const secrets = yield* SecretStore
-          yield* token === null || token.length === 0
-            ? secrets.clearOpenConnectorToken
-            : secrets.setOpenConnectorToken(token)
         })
 
       /**

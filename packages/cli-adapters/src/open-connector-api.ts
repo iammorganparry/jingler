@@ -28,6 +28,9 @@ import { SecretStore } from "./secret-store.js"
  * missing field degrades to a sensible default rather than failing the panel.
  */
 
+/** Per-request wall-clock cap, matching `mcp-probe.ts`'s probe timeout. */
+const REQUEST_TIMEOUT = "15 seconds"
+
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v)
 
@@ -90,7 +93,13 @@ const mapProvider = (raw: unknown): ConnectorProvider | undefined => {
   const authTypes = authEntries
     .map((a) => (isRecord(a) ? asAuthType(a.type) : undefined))
     .filter((t): t is ConnectorAuthType => t !== undefined)
-  const fields = authEntries.flatMap((a) => (isRecord(a) ? mapFields(a.fields) : []))
+  // Only api-key / custom-credential descriptors contribute to the connect FORM.
+  // An oauth2 descriptor's fields are client-config (id/secret), collected
+  // separately from `oauthConfigs`, so folding them in here would corrupt the
+  // key form for a provider that offers both.
+  const fields = authEntries.flatMap((a) =>
+    isRecord(a) && a.type !== "oauth2" ? mapFields(a.fields) : []
+  )
   return {
     id,
     name: str(raw.name) ?? str(raw.displayName) ?? id,
@@ -151,13 +160,22 @@ export class OpenConnectorApi extends Effect.Service<OpenConnectorApi>()(
           }
           const url = `${base.replace(/\/+$/, "")}${path}`
           const res = yield* Effect.tryPromise({
-            try: () =>
+            // `signal` is aborted when the effect is interrupted (e.g. the timeout
+            // below fires), so a hung instance actually cancels the socket rather
+            // than leaking it — mirroring `mcp-probe.ts`.
+            try: (signal) =>
               fetch(url, {
                 ...init,
+                signal,
                 headers: { authorization: `Bearer ${token}`, ...(init?.headers ?? {}) }
               }),
             catch: () => new ConnectorError({ message: "Couldn't reach the OpenConnector instance." })
-          })
+          }).pipe(
+            Effect.timeoutFail({
+              duration: REQUEST_TIMEOUT,
+              onTimeout: () => new ConnectorError({ message: `OpenConnector timed out on ${path}.` })
+            })
+          )
           if (!res.ok) {
             return yield* Effect.fail(
               new ConnectorError({ message: `OpenConnector returned ${res.status} for ${path}.` })
@@ -165,6 +183,12 @@ export class OpenConnectorApi extends Effect.Service<OpenConnectorApi>()(
           }
           // 204 / empty bodies are a valid success (PUT/DELETE).
           const body = yield* Effect.tryPromise(() => res.json()).pipe(Effect.orElseSucceed(() => ({})))
+          // A 200 can still be a logical failure — the envelope carries `success`.
+          if (isRecord(body) && body.success === false) {
+            return yield* Effect.fail(
+              new ConnectorError({ message: str(body.message) ?? `OpenConnector rejected ${path}.` })
+            )
+          }
           return envelope(body)
         })
 

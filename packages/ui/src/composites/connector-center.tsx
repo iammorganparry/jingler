@@ -42,7 +42,7 @@ export interface ConnectorCenterProps {
     authType: "api_key" | "custom_credential",
     values: Record<string, string>
   ) => Promise<void>
-  readonly onDisconnect: (service: string) => Promise<void>
+  readonly onDisconnect: (service: string, connectionName: string | null) => Promise<void>
   readonly onSetOauthConfig: (
     provider: string,
     clientId: string,
@@ -222,7 +222,7 @@ function ConnectionRow({
   onDisconnect
 }: {
   connection: ConnectorConnection
-  onDisconnect: (service: string) => Promise<void>
+  onDisconnect: (service: string, connectionName: string | null) => Promise<void>
 }) {
   return (
     <div className="flex items-center gap-2.5 rounded-lg border border-line bg-sunken px-[11px] py-[9px]">
@@ -234,10 +234,11 @@ function ConnectionRow({
         </div>
       </div>
       <AsyncButton
-        variant="ghost"
+        variant="danger"
         size="sm"
         pendingLabel="Removing…"
-        onClick={() => onDisconnect(connection.service)}
+        // Pass the alias so a NAMED connection isn't deleted as the default one.
+        onClick={() => onDisconnect(connection.service, connection.connectionName)}
       >
         Disconnect
       </AsyncButton>

@@ -81,7 +81,7 @@ describe("ConnectorCenter", () => {
     const props = base()
     render(<ConnectorCenter {...props} />)
     fireEvent.click(screen.getByText("Disconnect"))
-    await waitFor(() => expect(props.onDisconnect).toHaveBeenCalledWith("slack"))
+    await waitFor(() => expect(props.onDisconnect).toHaveBeenCalledWith("slack", null))
   })
 
   it("shows the not-configured callout when unconfigured", () => {

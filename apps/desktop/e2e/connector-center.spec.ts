@@ -1,6 +1,4 @@
 import { createServer, type Server } from "node:http"
-import { writeFileSync } from "node:fs"
-import { join } from "node:path"
 import type { AddressInfo } from "node:net"
 import { expect, test } from "./fixtures.js"
 
@@ -69,25 +67,36 @@ const startFakeOpenConnector = async (): Promise<{ server: Server; port: number 
 }
 
 /** Open Settings and land on the Connector Center section. */
-const openConnectorCenter = async (window: import("@playwright/test").Page) => {
+const openSettings = async (window: import("@playwright/test").Page) => {
   await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
   await window.getByRole("button", { name: "Account menu" }).click()
   await window.getByRole("menuitem", { name: "Settings" }).click()
   await expect(window.getByRole("button", { name: "Close settings" })).toBeVisible()
-  await window.getByRole("button", { name: /Connector Center/ }).click()
+}
+
+/**
+ * Configure OpenConnector through the Settings UI — the real operator flow. This
+ * also sidesteps a file-seeding race: saving invalidates the shared config query,
+ * which flips the Connector Center's catalog queries on with no restart.
+ */
+const configureUnifiedMcp = async (window: import("@playwright/test").Page, endpoint: string) => {
+  await window.getByRole("button", { name: /Unified MCP/ }).click()
+  await window.getByPlaceholder("https://mcp.internal").fill(endpoint)
+  await window.getByPlaceholder("Paste the instance token").fill("tok_e2e")
+  await window.getByRole("switch").click()
+  await window.getByRole("button", { name: "Save" }).click()
 }
 
 test("browse, connect, and disconnect a provider through the Connector Center", async ({ launchApp }) => {
   const { server, port } = await startFakeOpenConnector()
   try {
-    const app = await launchApp({
-      configured: true,
-      config: { openConnector: { endpoint: `http://127.0.0.1:${port}`, enabled: true, serverName: "open-connector" } }
-    })
-    // Seed the instance bearer (plaintext store in e2e reads open-connector.enc).
-    writeFileSync(join(app.home, "starbase", "open-connector.enc"), "tok_e2e")
+    const app = await launchApp({ configured: true })
 
-    await openConnectorCenter(app.window)
+    await openSettings(app.window)
+    await configureUnifiedMcp(app.window, `http://127.0.0.1:${port}`)
+
+    // Now open the Connector Center — its catalog reads are gated on the config above.
+    await app.window.getByRole("button", { name: /Connector Center/ }).click()
 
     // Catalog loads from the fake instance. `exact` because each row also renders a
     // mono "<id> · N actions" subtitle, so a substring match would resolve to two.
@@ -107,8 +116,10 @@ test("browse, connect, and disconnect a provider through the Connector Center", 
     // The connection appears (GET /api/connections now returns it).
     await expect(app.window.getByText("github account")).toBeVisible()
 
-    // The API key must never reach the DOM.
-    expect(await app.window.content()).not.toContain(SECRET)
+    // The API key must never surface as rendered text (the value is write-only). A
+    // DOM-text check, not page.content() — an <input> value is a live property that
+    // never serialises into the HTML string, so that assertion was vacuous.
+    await expect(app.window.getByText(SECRET, { exact: false })).toHaveCount(0)
 
     // Disconnect.
     await app.window.getByRole("button", { name: "Disconnect" }).click()

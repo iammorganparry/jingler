@@ -41,7 +41,7 @@ export interface ConnectorCenterState {
     authType: "api_key" | "custom_credential",
     values: Record<string, string>
   ) => Promise<void>
-  readonly onDisconnect: (service: string) => Promise<void>
+  readonly onDisconnect: (service: string, connectionName: string | null) => Promise<void>
   readonly onSetOauthConfig: (
     provider: string,
     clientId: string,
@@ -133,7 +133,11 @@ export function useConnectorCenter(): ConnectorCenterState {
     [connectMutation]
   )
   const onDisconnect = useCallback(
-    async (service: string) => void (await disconnectMutation.mutateAsync({ service })),
+    async (service: string, connectionName: string | null) =>
+      void (await disconnectMutation.mutateAsync({
+        service,
+        ...(connectionName ? { connectionName } : {})
+      })),
     [disconnectMutation]
   )
   const onSetOauthConfig = useCallback(
