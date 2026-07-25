@@ -7,6 +7,7 @@ import { effectiveDock } from "./dock-fit.js"
 import { SplitView } from "./split-view.js"
 import { SessionPane, type ConversationPaneCtx } from "../screens/session-pane.js"
 import type { TabContribution } from "./tab-contributions.js"
+import { dockedPanes, type PaneContribution } from "./pane-contributions.js"
 
 export interface SessionSplitProps {
   /** The group on screen — one pane per session. `null` renders the empty state. */
@@ -40,6 +41,14 @@ export interface SessionSplitProps {
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Tabs contributed by plugins, merged with the built-ins in `SessionPane`. */
   tabContributions?: ReadonlyArray<TabContribution>
+  /**
+   * Dock panels contributed by plugins.
+   *
+   * Mounted once beside the terminal and browser docks — NOT inside the pane
+   * loop. A dock belongs to the window; putting one in the loop would render
+   * four copies in a four-way split, all fighting over the same state.
+   */
+  paneContributions?: ReadonlyArray<PaneContribution>
   renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   renderIssue?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
@@ -136,6 +145,17 @@ export function SessionSplit(props: SessionSplitProps) {
   const { width: shellWidth } = usePaneWidth()
   const termSide = effectiveDock(props.terminalDockSide ?? "bottom", shellWidth)
   const browserSide = effectiveDock(props.browserDockSide ?? "right", shellWidth)
+  // Plugin docks go through the SAME placement rule as the built-in ones. A
+  // pane that chose its own side could sit at the bottom while drawing a left
+  // border across the middle of the window.
+  const pluginDocks = dockedPanes(props.paneContributions ?? [], (side) =>
+    effectiveDock(side, shellWidth)
+  )
+  const renderDock = (pane: PaneContribution) => (
+    <div key={pane.id} data-testid={`plugin-dock-${pane.id}`} className="flex min-h-0 min-w-0">
+      {pane.render(dockSession)}
+    </div>
+  )
 
   // RIGHT-docked panes sit beside the whole split; BOTTOM-docked ones stack under
   // that row. Each dock CSS-hides itself when closed, so this holds for 0, 1 or 2
@@ -154,9 +174,11 @@ export function SessionSplit(props: SessionSplitProps) {
         />
         {termSide === "right" ? dock : null}
         {browserSide === "right" ? browserDock : null}
+        {pluginDocks.right.map(renderDock)}
       </div>
       {termSide === "bottom" ? dock : null}
       {browserSide === "bottom" ? browserDock : null}
+      {pluginDocks.bottom.map(renderDock)}
     </div>
   )
 }
