@@ -173,7 +173,18 @@ function DetailBody({
   const bothModes = supportsOauth && keyAuthType !== null
 
   const [mode, setMode] = React.useState<"oauth" | "key">(supportsOauth ? "oauth" : "key")
-  const [connectionName, setConnectionName] = React.useState(DEFAULT_CONNECTION)
+  /**
+   * Blank once a connection exists, pre-filled "default" when none does.
+   *
+   * PUT is create-or-REPLACE, so a name that matches an existing connection
+   * overwrites its credential. Pre-filling "default" under an "Add another
+   * connection" heading therefore aimed the form squarely at the connection the
+   * operator was trying to keep — an empty field they must fill is the only
+   * version where the default answer is the safe one.
+   */
+  const [connectionName, setConnectionName] = React.useState(
+    connections.length > 0 ? "" : DEFAULT_CONNECTION
+  )
   const [values, setValues] = React.useState<Record<string, string>>({})
   const [clientId, setClientId] = React.useState("")
   const [clientSecret, setClientSecret] = React.useState("")
@@ -212,6 +223,22 @@ function DetailBody({
   // and another saying nothing for the same thing.
   const alias = connectionName.trim()
   const namedAlias = alias.length === 0 || alias === DEFAULT_CONNECTION ? undefined : alias
+
+  /**
+   * Which connection this form would actually write to, and whether one is
+   * already there.
+   *
+   * `PUT /api/connections/{service}` is "create or REPLACE", so a name that
+   * matches an existing connection silently overwrites its credential. That is a
+   * legitimate thing to want — rotating an expired key is exactly this — so the
+   * UI warns rather than blocks. What it must not do is arrive at that state by
+   * default.
+   */
+  const targetAlias = alias.length === 0 ? DEFAULT_CONNECTION : alias
+  const existingNames = new Set(connections.map((c) => c.connectionName ?? DEFAULT_CONNECTION))
+  const replacesExisting = existingNames.has(targetAlias)
+  /** Adding alongside an existing connection needs a name that isn't blank. */
+  const nameMissing = connections.length > 0 && alias.length === 0
 
   return (
     <>
@@ -296,12 +323,21 @@ function DetailBody({
               <Input
                 value={connectionName}
                 onChange={(e) => setConnectionName(e.target.value)}
-                placeholder={DEFAULT_CONNECTION}
+                placeholder={connections.length > 0 ? "e.g. work" : DEFAULT_CONNECTION}
               />
               <span className="text-[10px] text-dim">
                 Use this name to select the account when running actions.
               </span>
             </label>
+
+            {/* Replacing is a real thing to want — rotating an expired key is
+                exactly this — so say what will happen rather than block it. */}
+            {replacesExisting ? (
+              <Callout tone="yellow">
+                A connection named <span className="font-mono">{targetAlias}</span> already
+                exists. Connecting will replace its stored credential.
+              </Callout>
+            ) : null}
 
             {bothModes ? (
               <SegmentedControl
@@ -344,6 +380,9 @@ function DetailBody({
               ) : (
                 <AsyncButton
                   pendingLabel="Opening browser…"
+                  // Same guard as the key form: an OAuth grant is written under a
+                  // connection name too, so a blank one would land on the default.
+                  disabled={nameMissing}
                   onClick={async () => {
                     await onStartOauth(provider.id, namedAlias)
                     onClose()
@@ -376,6 +415,7 @@ function DetailBody({
                   pendingLabel="Connecting…"
                   disabled={
                     detailLoading ||
+                    nameMissing ||
                     fields.some((f) => f.required && (values[f.name] ?? "").length === 0)
                   }
                   onClick={async () => {

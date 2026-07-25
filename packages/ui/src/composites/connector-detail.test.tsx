@@ -342,6 +342,89 @@ describe("ConnectorDetail", () => {
     expect(screen.getByText("built in")).toBeTruthy()
   })
 
+  /**
+   * `PUT /api/connections/{service}` is create-or-REPLACE. Under an "Add another
+   * connection" heading, a name field pre-filled "default" aimed the form at the
+   * connection the operator was trying to keep: adding a second account silently
+   * destroyed the first, with the UI promising the opposite.
+   */
+  describe("adding alongside an existing connection", () => {
+    const existing: ReadonlyArray<ConnectorConnection> = [
+      {
+        service: "linear",
+        accountId: "acct_1",
+        displayName: "Acme",
+        grantedScopes: [],
+        connectionName: null,
+        removable: true,
+        status: "connected"
+      }
+    ]
+
+    it("starts the name blank and will not submit until it is filled", () => {
+      render(<ConnectorDetail {...base()} connections={existing} />)
+      fireEvent.click(screen.getByRole("tab", { name: "API key" }))
+      fireEvent.change(screen.getByPlaceholderText("lin_api_..."), {
+        target: { value: "lin_api_secret" }
+      })
+      // Credential filled, name blank — blank would resolve to the default
+      // connection, which is the one already there.
+      expect(screen.getByRole("button", { name: "Connect" })).toHaveProperty("disabled", true)
+    })
+
+    it("blocks the OAuth path on a blank name too", () => {
+      render(<ConnectorDetail {...base()} connections={existing} />)
+      expect(screen.getByRole("button", { name: "Connect with OAuth" })).toHaveProperty(
+        "disabled",
+        true
+      )
+    })
+
+    it("warns before replacing, rather than blocking a deliberate re-auth", async () => {
+      const props = base()
+      render(<ConnectorDetail {...props} connections={existing} />)
+      fireEvent.click(screen.getByRole("tab", { name: "API key" }))
+      fireEvent.change(screen.getByPlaceholderText("e.g. work"), {
+        target: { value: "default" }
+      })
+      fireEvent.change(screen.getByPlaceholderText("lin_api_..."), {
+        target: { value: "rotated_key" }
+      })
+      // Rotating an expired credential IS this operation, so it stays available —
+      // it just says what it will do first.
+      expect(screen.getByText(/will replace its stored credential/)).toBeTruthy()
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+      await waitFor(() =>
+        expect(props.onConnect).toHaveBeenCalledWith(
+          "linear",
+          "api_key",
+          { apiKey: "rotated_key" },
+          undefined
+        )
+      )
+    })
+
+    it("adds a second account under its own name without touching the first", async () => {
+      const props = base()
+      render(<ConnectorDetail {...props} connections={existing} />)
+      fireEvent.click(screen.getByRole("tab", { name: "API key" }))
+      fireEvent.change(screen.getByPlaceholderText("e.g. work"), { target: { value: "personal" } })
+      fireEvent.change(screen.getByPlaceholderText("lin_api_..."), {
+        target: { value: "second_key" }
+      })
+      expect(screen.queryByText(/will replace its stored credential/)).toBeNull()
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+      await waitFor(() =>
+        expect(props.onConnect).toHaveBeenCalledWith(
+          "linear",
+          "api_key",
+          { apiKey: "second_key" },
+          "personal"
+        )
+      )
+    })
+  })
+
   it("renders nothing when no provider is open", () => {
     render(<ConnectorDetail {...base()} provider={null} />)
     expect(screen.queryByRole("dialog")).toBeNull()
