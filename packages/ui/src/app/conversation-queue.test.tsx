@@ -11,8 +11,10 @@ afterEach(cleanup)
  * bottom of the window entirely, which is the regression these pin.
  */
 
+// Ids, not positions, are how every row action addresses its message — the queue
+// removes its own head mid-run, so an index is stale the moment it is captured.
 const queued = (n: number) =>
-  Array.from({ length: n }, (_, i) => ({ text: `message ${i}`, images: [] }))
+  Array.from({ length: n }, (_, i) => ({ id: `q${i}`, text: `message ${i}`, images: [] }))
 
 const rows = () => screen.queryAllByText(/^message \d+$/)
 
@@ -37,16 +39,16 @@ describe("ConversationView — queued messages", () => {
     expect(rows()).toHaveLength(5)
   })
 
-  it("keeps each row's queue INDEX while capped", () => {
-    // The cap is a `slice(0, n)`, so indices survive — but `onUnqueue` addresses
-    // the queue positionally, and an off-by-one here would drop the wrong
+  it("addresses the right message while the list is capped", () => {
+    // The cap is a `slice(0, n)`, so the visible rows are the first n — and each
+    // reports its OWN id. Reporting a position instead would drop the wrong
     // message with no way for the operator to tell.
     const onUnqueue = vi.fn()
     render(
       <ConversationView messages={[]} mode="accept-edits" queued={queued(22)} onUnqueue={onUnqueue} />
     )
     fireEvent.click(screen.getAllByTitle("Remove from queue")[2]!)
-    expect(onUnqueue).toHaveBeenCalledWith(2)
+    expect(onUnqueue).toHaveBeenCalledWith("q2")
   })
 
   it("addresses the right message once expanded past the cap", () => {
@@ -56,10 +58,10 @@ describe("ConversationView — queued messages", () => {
     )
     fireEvent.click(screen.getByText("+17 more queued"))
     fireEvent.click(screen.getAllByTitle("Remove from queue")[20]!)
-    expect(onUnqueue).toHaveBeenCalledWith(20)
+    expect(onUnqueue).toHaveBeenCalledWith("q20")
   })
 
-  it("hands a queued message off by its index", () => {
+  it("hands a queued message off by its id", () => {
     const onHandoffQueued = vi.fn()
     render(
       <ConversationView
@@ -70,10 +72,10 @@ describe("ConversationView — queued messages", () => {
         handoffHint="Hand off — run this in a new chat on opus"
       />
     )
-    // Addressed positionally like every other row action, and the tooltip names
-    // the target model so "hand off" is not a leap of faith.
+    // Addressed by id like every other row action, and the tooltip names the
+    // target model so "hand off" is not a leap of faith.
     fireEvent.click(screen.getAllByTitle("Hand off — run this in a new chat on opus")[2]!)
-    expect(onHandoffQueued).toHaveBeenCalledWith(2)
+    expect(onHandoffQueued).toHaveBeenCalledWith("q2")
   })
 
   it("edits a queued message in place and commits on Enter", () => {
@@ -90,7 +92,7 @@ describe("ConversationView — queued messages", () => {
     const input = screen.getByLabelText("Edit queued message")
     fireEvent.change(input, { target: { value: "message 1, revised" } })
     fireEvent.keyDown(input, { key: "Enter" })
-    expect(onEditQueued).toHaveBeenCalledWith(1, "message 1, revised")
+    expect(onEditQueued).toHaveBeenCalledWith("q1", "message 1, revised")
   })
 
   it("abandons an edit on Escape, leaving the message as it was", () => {
@@ -128,7 +130,7 @@ describe("ConversationView — queued messages", () => {
     fireEvent.change(input, { target: { value: "  " } })
     fireEvent.keyDown(input, { key: "Enter" })
     expect(onEditQueued).not.toHaveBeenCalled()
-    expect(onUnqueue).toHaveBeenCalledWith(0)
+    expect(onUnqueue).toHaveBeenCalledWith("q0")
   })
 
   it("abandons an edit when Cancel is clicked, not just on Escape", () => {
@@ -151,6 +153,26 @@ describe("ConversationView — queued messages", () => {
     expect(screen.getByText("message 0")).toBeDefined()
   })
 
+  it("keeps an in-progress edit when the queue flushes its head", () => {
+    // The queue mutates itself now: the head goes to the running turn at each tool
+    // boundary, at a moment the operator did not cause and cannot predict. With
+    // positional keys every row below it remounts, which threw away text someone
+    // was part-way through typing.
+    const props = { messages: [], mode: "accept-edits" as const, onEditQueued: vi.fn() }
+    const { rerender } = render(<ConversationView {...props} queued={queued(3)} />)
+    fireEvent.click(screen.getAllByTitle("Edit queued message")[1]!)
+    fireEvent.change(screen.getByLabelText("Edit queued message"), {
+      target: { value: "half-typed correction" }
+    })
+
+    rerender(<ConversationView {...props} queued={queued(3).slice(1)} />)
+
+    expect(screen.getByLabelText("Edit queued message")).toHaveProperty(
+      "value",
+      "half-typed correction"
+    )
+  })
+
   it("only offers Send now while the agent is actually busy", () => {
     const onSendNow = vi.fn()
     const props = { messages: [], mode: "accept-edits" as const, queued: queued(2), onSendNow }
@@ -158,6 +180,6 @@ describe("ConversationView — queued messages", () => {
     expect(screen.queryByTitle(/^Send now/)).toBeNull()
     rerender(<ConversationView {...props} busy />)
     fireEvent.click(screen.getAllByTitle(/^Send now/)[1]!)
-    expect(onSendNow).toHaveBeenCalledWith(1)
+    expect(onSendNow).toHaveBeenCalledWith("q1")
   })
 })

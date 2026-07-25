@@ -209,10 +209,10 @@ export function ConversationPane({
    * never leave the same prompt queued in two places — the operator can see the
    * row is gone and retype, whereas a silent duplicate runs twice.
    */
-  const handoffQueued = (index: number) => {
-    const item = convo.queued[index]
+  const handoffQueued = (id: string) => {
+    const item = convo.queued.find((queued) => queued.id === id)
     if (item === undefined) return
-    convo.unqueue(index)
+    convo.unqueue(id)
     void rpc.sessionsCreateChat(session.id).then((updated) => {
       publishSessionUpdate(updated)
       const actor = getConversationActor(updated, updated.activeChatId)

@@ -176,6 +176,18 @@ export interface ConversationContext {
 
 /** A prompt held while busy, including the harness target chosen when it was sent. */
 export interface QueuedMessage {
+  /**
+   * Stable for the message's whole life in the queue — the ONLY safe way to
+   * address a row.
+   *
+   * The queue used to shrink only between turns, so a position was as good as an
+   * identity. It now shrinks mid-run, at a moment nothing on screen predicts: the
+   * automatic flush removes the head whenever the agent hits a tool boundary. A
+   * click carrying a render-time index then lands one row off — the operator
+   * deletes a message they meant to keep. Object identity is no better, because
+   * an edit replaces the object.
+   */
+  readonly id: string
   readonly text: string
   readonly images: ReadonlyArray<Attachment>
   readonly target: AgentTarget
@@ -187,9 +199,10 @@ type SteerResult =
 
 type ConversationEvent =
   | { type: "SEND"; text: string; images?: ReadonlyArray<Attachment> }
-  | { type: "UNQUEUE"; index: number }
-  | { type: "SEND_NOW"; index: number }
-  | { type: "EDIT_QUEUED"; index: number; text: string }
+  // Addressed by id, never by position — see `QueuedMessage.id`.
+  | { type: "UNQUEUE"; id: string }
+  | { type: "SEND_NOW"; id: string }
+  | { type: "EDIT_QUEUED"; id: string; text: string }
   /**
    * A steer came back. `auto` marks the queue's own tool-boundary flush, which
    * must NEVER fall back to stop-and-replay: the operator did not ask for an
@@ -567,28 +580,32 @@ export const conversationMachine = setup({
       const images = event.images ?? []
       if (text.length === 0 && images.length === 0) return {}
       return {
-        queued: [...context.queued, { text, images, target: agentTargetFor(context.mode) }]
+        queued: [
+          ...context.queued,
+          { id: `q_${stamp()}_${context.queued.length}`, text, images, target: agentTargetFor(context.mode) }
+        ]
       }
     }),
     // Drop a still-pending queued message before it's sent.
     removeQueued: assign(({ context, event }) => {
       if (event.type !== "UNQUEUE") return {}
-      return { queued: context.queued.filter((_, i) => i !== event.index) }
+      return { queued: context.queued.filter((queued) => queued.id !== event.id) }
     }),
     // Rewrite a queued message in place. Nothing has been sent yet, so this is a
-    // pure context edit — the position (and therefore every other row's index)
-    // is deliberately preserved.
+    // pure context edit — the position is deliberately preserved, and so is the
+    // id: an edit must not turn one queued message into a different one, or the
+    // steer already in flight for it would stop recognising its own reply.
     editQueued: assign(({ context, event }) => {
       if (event.type !== "EDIT_QUEUED") return {}
-      const picked = context.queued[event.index]
+      const picked = context.queued.find((queued) => queued.id === event.id)
       if (picked === undefined) return {}
       const text = event.text.trim()
       // An emptied message with no images would be sent as a blank turn.
       if (text.length === 0 && picked.images.length === 0) {
-        return { queued: context.queued.filter((_, i) => i !== event.index) }
+        return { queued: context.queued.filter((queued) => queued.id !== event.id) }
       }
       return {
-        queued: context.queued.map((item, i) => (i === event.index ? { ...item, text } : item))
+        queued: context.queued.map((item) => (item.id === event.id ? { ...item, text } : item))
       }
     }),
     // "Send now": jump a queued message to the head so it runs as the very next
@@ -596,16 +613,16 @@ export const conversationMachine = setup({
     // to steer the agent immediately; the remaining queue keeps its order behind it.
     promoteQueued: assign(({ context, event }) => {
       if (event.type !== "SEND_NOW") return {}
-      const picked = context.queued[event.index]
+      const picked = context.queued.find((queued) => queued.id === event.id)
       if (picked === undefined) return {}
-      const rest = context.queued.filter((_, i) => i !== event.index)
+      const rest = context.queued.filter((queued) => queued.id !== event.id)
       return { queued: [picked, ...rest] }
     }),
     promoteAndSteer: assign(({ context, event, self }) => {
       if (event.type !== "SEND_NOW" || context.steerPending) return {}
-      const picked = context.queued[event.index]
+      const picked = context.queued.find((queued) => queued.id === event.id)
       if (picked === undefined) return {}
-      const rest = context.queued.filter((_, i) => i !== event.index)
+      const rest = context.queued.filter((queued) => queued.id !== event.id)
       void rpc
         .agentSteer(context.session.id, context.chatId, picked.text, picked.images)
         .then((result) => self.send({ type: "STEER_RESULT", queued: picked, result }))
@@ -664,7 +681,10 @@ export const conversationMachine = setup({
           ? [...context.messages.slice(0, -1), settleStreaming(last)]
           : context.messages
       return {
-        queued: context.queued.filter((queued) => queued !== event.queued),
+        // By id, not object identity: an edit landing while this steer was in
+        // flight replaces the object, and the message would then survive the
+        // filter and run a SECOND time — the agent already has it.
+        queued: context.queued.filter((queued) => queued.id !== event.queued.id),
         messages: [...prior, event.result.user, event.result.assistant],
         steerPending: false
       }
@@ -695,7 +715,7 @@ export const conversationMachine = setup({
         steerPending: false,
         queued:
           event.result.status === "accepted"
-            ? context.queued.filter((queued) => queued !== event.queued)
+            ? context.queued.filter((queued) => queued.id !== event.queued.id)
             : context.queued
       }
     }),

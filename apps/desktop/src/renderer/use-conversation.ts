@@ -61,12 +61,16 @@ export interface Conversation {
   readonly tokens: number
   /** Epoch ms the current run started, or null when idle — drives the elapsed timer. */
   readonly runStartedAt: number | null
-  /** Drop a queued message before it's sent (by index). */
-  readonly unqueue: (index: number) => void
+  /**
+   * Queue actions address a message by ITS ID, never by position: the automatic
+   * flush removes the head mid-run, so an index captured when the row rendered can
+   * point at a different message by the time the operator clicks.
+   */
+  readonly unqueue: (id: string) => void
   /** Steer supported live turns; otherwise interrupt and replay the queued message. */
-  readonly sendNow: (index: number) => void
-  /** Rewrite a queued message in place before it is ever sent (by index). */
-  readonly editQueued: (index: number, text: string) => void
+  readonly sendNow: (id: string) => void
+  /** Rewrite a queued message in place before it is ever sent. */
+  readonly editQueued: (id: string, text: string) => void
   /** A pending AskUserQuestion group (the composer is replaced while set), or null. */
   readonly question: QuestionRequest | null
   readonly answerQuestion: (requestId: string, answers: ReadonlyArray<QuestionAnswer>) => void
@@ -159,9 +163,9 @@ export function useConversation(
     reviewer,
     reviewPhase,
     reviewStartedAt,
-    unqueue: (index) => send({ type: "UNQUEUE", index }),
-    sendNow: (index) => send({ type: "SEND_NOW", index }),
-    editQueued: (index, text) => send({ type: "EDIT_QUEUED", index, text }),
+    unqueue: (id) => send({ type: "UNQUEUE", id }),
+    sendNow: (id) => send({ type: "SEND_NOW", id }),
+    editQueued: (id, text) => send({ type: "EDIT_QUEUED", id, text }),
     question,
     plan,
     commentPlanStep: (planId, stepId, body) => send({ type: "COMMENT_PLAN_STEP", planId, stepId, body }),

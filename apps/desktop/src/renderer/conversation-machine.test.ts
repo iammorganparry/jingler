@@ -201,6 +201,14 @@ const session = {
 
 const emit = (event: StreamEvent) => h.streamCb?.(event)
 const start = () => createActor(conversationMachine, { input: { session } }).start()
+/**
+ * The id of the nth queued message, read off the live snapshot — exactly what the
+ * view does. Queue actions address a message by id, never by position: the queue
+ * removes its own head mid-run, so a position captured at render time can point at
+ * a different message by the time the operator clicks.
+ */
+const queuedId = (actor: ReturnType<typeof start>, n: number): string =>
+  actor.getSnapshot().context.queued[n]?.id ?? `missing-${n}`
 const idle = "awaitingInput" as const
 
 beforeEach(() => {
@@ -302,7 +310,9 @@ describe("conversationMachine — queue while busy", () => {
 
     // Sent while the agent is busy → queued, not dispatched.
     actor.send({ type: "SEND", text: "second" })
-    expect(actor.getSnapshot().context.queued).toEqual([
+    // `toMatchObject`, because each queued message also carries the stable id its
+    // row actions address it by (see `queuedId`).
+    expect(actor.getSnapshot().context.queued).toMatchObject([
       { text: "second", images: [], target: "session" }
     ])
     expect(h.agentRunCalls).toHaveLength(1)
@@ -352,7 +362,7 @@ describe("conversationMachine — queue while busy", () => {
     actor.send({ type: "SEND", text: "b" })
     expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["a", "b"])
 
-    actor.send({ type: "UNQUEUE", index: 0 })
+    actor.send({ type: "UNQUEUE", id: queuedId(actor, 0) })
     expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["b"])
     actor.stop()
   })
@@ -367,7 +377,7 @@ describe("conversationMachine — queue while busy", () => {
     // Queue two; steer to the second one ("b") mid-run.
     actor.send({ type: "SEND", text: "a" })
     actor.send({ type: "SEND", text: "b" })
-    actor.send({ type: "SEND_NOW", index: 1 })
+    actor.send({ type: "SEND_NOW", id: queuedId(actor, 1) })
 
     // The current turn is interrupted and "b" runs next, ahead of "a".
     await waitFor(actor, () => h.agentRunCalls.length === 2, { timeout: 3000 })
@@ -385,7 +395,7 @@ describe("conversationMachine — queue while busy", () => {
     await waitFor(actor, (s) => s.matches("running"))
 
     actor.send({ type: "SEND", text: "steer this" })
-    actor.send({ type: "SEND_NOW", index: 0 })
+    actor.send({ type: "SEND_NOW", id: queuedId(actor, 0) })
 
     await waitFor(actor, (s) => s.context.messages.at(-1)?.id === "a-steered")
     expect(h.stopCalls).toEqual([])
@@ -406,7 +416,7 @@ describe("conversationMachine — queue while busy", () => {
     await waitFor(actor, (s) => s.matches("running"))
 
     actor.send({ type: "SEND", text: "after compaction" })
-    actor.send({ type: "SEND_NOW", index: 0 })
+    actor.send({ type: "SEND_NOW", id: queuedId(actor, 0) })
     await waitFor(actor, () => h.steerCalls.length === 1)
 
     expect(h.stopCalls).toEqual([])
@@ -424,7 +434,7 @@ describe("conversationMachine — queue while busy", () => {
 
     actor.send({ type: "SEND", text: "a" })
     actor.send({ type: "SEND", text: "b" })
-    actor.send({ type: "EDIT_QUEUED", index: 0, text: "a, but properly" })
+    actor.send({ type: "EDIT_QUEUED", id: queuedId(actor, 0), text: "a, but properly" })
 
     // Position is load-bearing: every row is addressed by index, so an edit that
     // reordered the queue would make the NEXT click hit a different message.
@@ -439,7 +449,7 @@ describe("conversationMachine — queue while busy", () => {
     await waitFor(actor, (s) => s.matches("running"))
 
     actor.send({ type: "SEND", text: "never mind" })
-    actor.send({ type: "EDIT_QUEUED", index: 0, text: "   " })
+    actor.send({ type: "EDIT_QUEUED", id: queuedId(actor, 0), text: "   " })
     expect(actor.getSnapshot().context.queued).toEqual([])
     actor.stop()
   })
@@ -573,6 +583,37 @@ describe("conversationMachine — queue while busy", () => {
     actor.stop()
   })
 
+  it("does not run a message twice when it is edited while its steer is in flight", async () => {
+    // The queue used to be filtered by object identity, and an edit replaces the
+    // object — so the edited copy survived the filter and ran again after the
+    // agent had already been given it.
+    h.steerStatus = "accepted"
+    let release = () => {}
+    h.steerGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "also update the README" })
+    const id = queuedId(actor, 0)
+    emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 1, { timeout: 3000 })
+
+    // Edited after the steer left, before its reply came back.
+    actor.send({ type: "EDIT_QUEUED", id, text: "also update the CHANGELOG" })
+    expect(actor.getSnapshot().context.queued.map((q) => q.id)).toEqual([id])
+    release()
+
+    await waitFor(actor, (s) => s.context.queued.length === 0, { timeout: 3000 })
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    await waitFor(actor, (s) => s.matches(idle), { timeout: 3000 })
+    expect(h.agentRunCalls).toHaveLength(1)
+    actor.stop()
+  })
+
   it("STOP abandons any queued messages", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
@@ -615,7 +656,7 @@ describe("conversationMachine — nothing gates the transcript on a CLI probe", 
     actor.send({ type: "SEND", text: "typed on open" })
     // Held, not dispatched — there's no transcript to append it to yet.
     expect(h.agentRunCalls).toHaveLength(0)
-    expect(actor.getSnapshot().context.queued).toEqual([
+    expect(actor.getSnapshot().context.queued).toMatchObject([
       { text: "typed on open", images: [], target: "session" }
     ])
 
@@ -1273,7 +1314,7 @@ describe("conversationMachine — stop", () => {
     await waitFor(actor, (s) => s.matches("running"))
     actor.send({ type: "SEND", text: "next" })
 
-    actor.send({ type: "SEND_NOW", index: 0 })
+    actor.send({ type: "SEND_NOW", id: queuedId(actor, 0) })
 
     // Not `running` yet — the promoted message must not start until the stop
     // has been acknowledged. This is the assertion the old code failed.

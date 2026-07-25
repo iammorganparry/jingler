@@ -139,23 +139,29 @@ export interface ConversationViewProps {
   onCompactNow?: () => void
   /** Epoch ms the current run started, or null when idle — drives the elapsed timer. */
   runStartedAt?: number | null
-  /** Messages the operator queued while the agent was busy (sent FIFO once it's free). */
-  queued?: ReadonlyArray<{ text: string; images: ReadonlyArray<Attachment> }>
-  /** Drop a queued message before it's sent (by its index in `queued`). */
-  onUnqueue?: (index: number) => void
   /**
-   * Interrupt the current turn and run a queued message now (by index) — lets the
-   * operator steer mid-stream instead of waiting for the turn to finish.
+   * Messages the operator queued while the agent was busy (sent FIFO once it's
+   * free). Each carries a stable `id`, and every action below addresses it —
+   * never a position. The queue mutates itself while these rows are on screen (a
+   * message is handed to the running turn at each tool boundary), so an index
+   * captured at render time can point at a different message by the time it is used.
    */
-  onSendNow?: (index: number) => void
+  queued?: ReadonlyArray<{ id: string; text: string; images: ReadonlyArray<Attachment> }>
+  /** Drop a queued message before it's sent. */
+  onUnqueue?: (id: string) => void
+  /**
+   * Interrupt the current turn and run a queued message now — lets the operator
+   * steer mid-stream instead of waiting for the turn to finish.
+   */
+  onSendNow?: (id: string) => void
   /**
    * Fork a queued message into a FRESH chat on the operator's default model
    * instead of running it in this conversation — the escape hatch for "this is a
    * separate job that shouldn't inherit 200k tokens of unrelated context".
    */
-  onHandoffQueued?: (index: number) => void
-  /** Rewrite a queued message in place, before it is ever sent (by index). */
-  onEditQueued?: (index: number, text: string) => void
+  onHandoffQueued?: (id: string) => void
+  /** Rewrite a queued message in place, before it is ever sent. */
+  onEditQueued?: (id: string, text: string) => void
   /** What the hand-off targets, for its tooltip (e.g. "a new chat on Opus 4.6"). */
   handoffHint?: string
   onDecideGate?: (gateId: string, decision: GateDecision) => void
@@ -472,16 +478,24 @@ export function ConversationView({
                     index intact, which matters: `onSendNow`/`onUnqueue` address
                     the queue positionally.
                   */}
-                  {queued.slice(0, queueLimit).map((item, i) => (
+                  {/*
+                    Keyed by id, not by position. A positional key remounts every
+                    row below the head each time the queue flushes one into the
+                    running turn — which throws away the text of a row the operator
+                    is part-way through editing, at a moment they did not cause.
+                  */}
+                  {queued.slice(0, queueLimit).map((item) => (
                     <QueuedMessageRow
-                      key={`${i}-${item.text.slice(0, 24)}`}
+                      key={item.id}
                       text={item.text}
                       images={item.images.length}
                       handoffHint={handoffHint}
-                      {...(onSendNow && busy ? { onSendNow: () => onSendNow(i) } : {})}
-                      {...(onHandoffQueued ? { onHandoff: () => onHandoffQueued(i) } : {})}
-                      {...(onEditQueued ? { onEdit: (text: string) => onEditQueued(i, text) } : {})}
-                      {...(onUnqueue ? { onRemove: () => onUnqueue(i) } : {})}
+                      {...(onSendNow && busy ? { onSendNow: () => onSendNow(item.id) } : {})}
+                      {...(onHandoffQueued ? { onHandoff: () => onHandoffQueued(item.id) } : {})}
+                      {...(onEditQueued
+                        ? { onEdit: (text: string) => onEditQueued(item.id, text) }
+                        : {})}
+                      {...(onUnqueue ? { onRemove: () => onUnqueue(item.id) } : {})}
                     />
                   ))}
                   {queued.length > QUEUE_PREVIEW && (
