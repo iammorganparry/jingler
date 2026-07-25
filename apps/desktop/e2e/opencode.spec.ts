@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js"
+import { DEFAULT_CLAUDE_MODEL, expect, test } from "./fixtures.js"
 import type { LaunchOptions, SeedSession } from "./fixtures.js"
 
 /**
@@ -265,7 +265,7 @@ test("the model chip lists opencode's models and switches to it", async ({ launc
   })
   await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
 
-  await window.getByRole("button", { name: /opus/ }).click()
+  await window.getByRole("button", { name: DEFAULT_CLAUDE_MODEL, exact: true }).click()
   await expect(window.getByText("opencode", { exact: true }).first()).toBeVisible()
 
   // Labels carry the provider because the menu groups by HARNESS — every

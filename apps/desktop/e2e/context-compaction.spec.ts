@@ -79,7 +79,13 @@ test("compacts a session and keeps its history intact", async ({ launchApp }) =>
   // The earlier turn is STILL THERE. This is the property that distinguishes
   // this from `/compact`: the model's working set shrank, the user's record
   // did not.
-  await expect(window.getByText("Add rate limiting to the refund endpoint.")).toBeVisible()
+  // Scoped to the transcript: multi-chat titles a chat from its first prompt, so
+  // this exact string is now the chat tab's label too. Unscoped it matches both
+  // and trips strict mode — and worse, the tab alone would satisfy the assertion
+  // even if the turn HAD been discarded, which is the one thing being tested.
+  await expect(
+    window.getByTestId("conversation-scroll").getByText("Add rate limiting to the refund endpoint.")
+  ).toBeVisible()
 
   // And the summary is inspectable, so the drop in the meter is explicable.
   await window.getByText("Context compacted").click()
@@ -160,7 +166,13 @@ test("exposes the token levers in Settings", async ({ launchApp }) => {
   // harness. Claude's current default is a 1M-window model, so the new 500k
   // quality budget binds before the model's safety margin.
   await expect(window.getByText("500k tokens")).toBeVisible()
-  await expect(window.getByText("500k of 1M")).toBeVisible()
+  // One row per harness, and Claude is no longer the only 1M family — Codex's
+  // GPT-5.6 reads the same. So assert the reading appears for EVERY harness that
+  // has it rather than picking one arbitrarily, which is the honest version of
+  // the claim and does not quietly stop testing when a third 1M harness lands.
+  const oneMillion = window.getByText("500k of 1M")
+  expect(await oneMillion.count()).toBeGreaterThan(0)
+  for (const row of await oneMillion.all()) await expect(row).toBeVisible()
 
   // The cost answer, stated rather than implied.
   await expect(window.getByText(/no API key/)).toBeVisible()

@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { expect, test } from "./fixtures.js"
+import { expect, showSessions, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -174,7 +174,14 @@ test("history written during a run is still there after a restart", async ({ lau
   await first.window.getByText("Run session").click()
   await first.window.getByPlaceholder(/message claude/i).fill("summarise the repo")
   await first.window.getByRole("button", { name: /send/i }).click()
-  await expect(first.window.getByText("summarise the repo")).toBeVisible()
+  // Scoped to the transcript throughout: multi-chat titles a chat from its first
+  // prompt, so this string is also the chat tab's label. Unscoped it trips strict
+  // mode — and the tab would satisfy the post-restart assertion below even if the
+  // transcript came back EMPTY, which is exactly the regression this test exists
+  // to catch.
+  await expect(
+    first.window.getByTestId("conversation-scroll").getByText("summarise the repo")
+  ).toBeVisible()
 
   // Let the scripted harness finish and the transcript settle on disk.
   const transcriptPath = join(first.home, "starbase", "transcripts", "s_run.json")
@@ -190,7 +197,9 @@ test("history written during a run is still there after a restart", async ({ lau
     withRepo: true
   })
   await second.window.getByText("Run session").click()
-  await expect(second.window.getByText("summarise the repo")).toBeVisible()
+  await expect(
+    second.window.getByTestId("conversation-scroll").getByText("summarise the repo")
+  ).toBeVisible()
 })
 
 test("a session whose PR merged stays in the sidebar instead of auto-archiving", async ({
@@ -225,11 +234,13 @@ test("a session whose PR merged stays in the sidebar instead of auto-archiving",
   // poll actually completed. Asserting "not archived" without it passes trivially
   // — the assertion runs before the sweep has fetched anything, so the test would
   // stay green even if auto-archiving were reinstated.
-  await expect(window.getByText(/#7 Merged/)).toBeVisible({ timeout: 20_000 })
+  // The row states merge state on its leading glyph now, not in text — `⑂ #7` is
+  // the badge and the word lives in the glyph's title.
+  await expect(window.getByTitle("Pull request merged")).toBeVisible({ timeout: 20_000 })
 
-  // Now the interesting part: merged, and STILL an active session.
+  // Now the interesting part: merged, and STILL an active session. With archived
+  // hidden by default, "still listed" IS "still active".
   await expect(window.getByText("Multi PR session")).toBeVisible()
-  await expect(window.getByRole("button", { name: /collapse archived/i })).toHaveCount(0)
   const persisted = JSON.parse(readFileSync(join(home, "starbase", "sessions.json"), "utf8"))
   expect(persisted[0]?.archived ?? false).toBe(false)
 })
@@ -260,7 +271,9 @@ test("the Archived group lists the most recently archived session first", async 
     ]
   })
 
-  await expect(window.getByRole("button", { name: /collapse archived/i })).toBeVisible()
+  // The permanent Archived group is gone — archived is a filter, and it hides by
+  // default. Ordering within it is still the thing under test, so ask for it.
+  await showSessions(window, "All")
   const rows = window.locator("[data-testid^='session-row-']")
   await expect(rows).toHaveCount(2)
   await expect(rows.first()).toContainText("Just archived")

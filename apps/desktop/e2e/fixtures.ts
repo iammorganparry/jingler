@@ -7,6 +7,52 @@ import type { ElectronApplication, Page } from "@playwright/test"
 import { _electron as electron } from "playwright"
 import { startFakeAuthServer, type FakeAuthServer } from "./fake-auth.js"
 import { MAIN_ENTRY } from "./global-setup.js"
+import { FALLBACK_MODELS } from "@starbase/core"
+
+/**
+ * Model labels read from the catalogue rather than written out in each spec.
+ *
+ * `FALLBACK_MODELS` is what the app shows when live discovery has no credentials,
+ * which is exactly the e2e's situation — so these ARE the labels on screen. Taking
+ * them from the source matters because they move: one commit re-cased and
+ * re-versioned the whole Claude list (`opus` → `Opus 5`, and the bare `sonnet` id
+ * became `sonnet[1m]`/"Sonnet 5 1M") without touching a spec, and six assertions
+ * across four specs had been matching `/opus/` case-sensitively ever since.
+ * Because this suite is not in CI, nothing reported it.
+ */
+const CLAUDE_MODELS = FALLBACK_MODELS.claude
+/** The composer chip's initial reading: `defaultModel` takes index 0. */
+export const DEFAULT_CLAUDE_MODEL = CLAUDE_MODELS[0]!.label
+/**
+ * A different Claude model to switch to. Selected by id prefix rather than label
+ * because ids are the stable half of the catalogue, and from index 1 onwards so it
+ * stays distinct from the default even if Sonnet is ever promoted to first.
+ */
+export const ALT_CLAUDE_MODEL = CLAUDE_MODELS.slice(1).find((m) =>
+  m.id.startsWith("sonnet")
+)!.label
+
+/**
+ * Put the sidebar's Status filter on `archived` (or `all`) so archived sessions
+ * are listed at all.
+ *
+ * They used to live in a permanent "Archived" group pinned to the bottom of the
+ * sidebar. That group is gone: archived is a FILTER now, and the default hides it
+ * (see `session-filters.ts` — "one model, and the default hides them"). Specs
+ * written against the old group had been asserting on a heading that no longer
+ * exists, which reads as "archiving is broken" when it is working exactly as
+ * designed. Going through the real menu also tests the route a user actually has.
+ */
+export const showSessions = async (
+  window: Page,
+  status: "Active" | "Archived" | "All"
+): Promise<void> => {
+  await window.getByTestId("session-filter-menu").click()
+  await window.getByRole("menuitem", { name: "Status" }).click()
+  await window.getByRole("menuitem", { name: status, exact: true }).click()
+  // Close the menu so it cannot sit over the rows the caller is about to assert on.
+  await window.keyboard.press("Escape")
+}
 
 /** A seeded session written to sessions.json (valid `Session` shape). */
 export interface SeedSession {

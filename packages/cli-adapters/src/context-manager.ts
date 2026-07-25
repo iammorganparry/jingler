@@ -152,7 +152,26 @@ export class ContextManager extends Effect.Service<ContextManager>()(
       /** Chat context key → owning session id. Legacy callers use the same id. */
       const owners = yield* Ref.make(new Map<string, string>())
 
-      const bind = (contextId: string, sessionId: string): Effect.Effect<void> =>
+      /**
+       * Record which session a chat context belongs to.
+       *
+       * NOT called `bind`. This service is declared with `accessors: true`, and the
+       * accessors are generated as statics on the class — which is a function
+       * object, so `bind` is already taken by `Function.prototype.bind` and the
+       * accessor is silently skipped. `ContextManager.bind(chatId, sessionId)` then
+       * resolves to the built-in, which returns a bound copy of the class rather
+       * than an Effect. That copy still inherits the Tag's static `pipe` and
+       * `[Symbol.iterator]`, so `.pipe(...)` and `yield*` both keep working and
+       * nothing throws — the call is simply a no-op.
+       *
+       * The damage was invisible and total: `owners` stayed empty, so `ownerOf`
+       * fell through to the chat id, `SessionStore.get` was handed `c_<id>_1`
+       * instead of a session id and failed, `settingsFor` returned null, and every
+       * caller saw `window: null`. That silently disabled the whole feature — no
+       * context meter, no Compact now button, and `auto` false so automatic
+       * compaction never ran for any session.
+       */
+      const bindContext = (contextId: string, sessionId: string): Effect.Effect<void> =>
         Ref.update(owners, (map) => new Map(map).set(contextId, sessionId))
 
       const ownerOf = (contextId: string): Effect.Effect<string> =>
@@ -826,7 +845,7 @@ export class ContextManager extends Effect.Service<ContextManager>()(
         })
 
       return {
-        bind,
+        bindContext,
         observe,
         settle,
         applyIfReady,

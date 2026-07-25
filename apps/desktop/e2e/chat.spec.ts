@@ -1,7 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { FALLBACK_MODELS } from "@starbase/core"
-import { expect, test } from "./fixtures.js"
+import { ALT_CLAUDE_MODEL, DEFAULT_CLAUDE_MODEL, expect, showSessions, test } from "./fixtures.js"
+import type { Page } from "@playwright/test"
+import { reasoningEffortsFor } from "@starbase/ui"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -12,26 +13,24 @@ import type { SeedSession } from "./fixtures.js"
  * what the operator sees, never on internals.
  */
 
+
 /**
- * Model labels read from the catalogue rather than written out here.
+ * Assert the Code Review view's changed-file list is there, and open it.
  *
- * `FALLBACK_MODELS` is what the app shows when live discovery has no credentials,
- * which is exactly the e2e's situation — so these ARE the labels on screen. Taking
- * them from the source matters because they move: one commit re-cased and
- * re-versioned the whole Claude list (`opus` → `Opus 5`, and the bare `sonnet` id
- * became `sonnet[1m]`/"Sonnet 5 1M") without touching a spec, and because this
- * suite is not in CI nothing noticed that three model tests had gone red. Derived
- * labels track the catalogue instead of lagging behind it.
+ * The rail is responsive: docked open when the pane is wide, collapsed to a
+ * toggle-and-sheet when it isn't (`code-review-view.responsive.test.tsx` pins both
+ * shapes). The app window is 1320px and the sidebar takes its cut, so the review
+ * pane lands in the collapsed band — which left the old `getByText("Changed
+ * files")` matching the docked heading in the DOM but HIDDEN, and reading as the
+ * whole view being broken. Going through the toggle asserts more than the old
+ * locator did: the rail opens and lists the file.
  */
-const CLAUDE_MODELS = FALLBACK_MODELS.claude
-/** The chip's initial reading: `defaultModel` takes index 0. */
-const DEFAULT_CLAUDE_MODEL = CLAUDE_MODELS[0]!.label
-/**
- * A different Claude model to switch to. Selected by id prefix rather than label
- * because ids are the stable half of the catalogue, and from index 1 onwards so it
- * stays distinct from the default even if Sonnet is ever promoted to first.
- */
-const ALT_CLAUDE_MODEL = CLAUDE_MODELS.slice(1).find((m) => m.id.startsWith("sonnet"))!.label
+const expectFileRail = async (window: Page): Promise<void> => {
+  const heading = window.getByText("Changed files", { exact: true })
+  if (await heading.isVisible()) return
+  await window.getByRole("button", { name: "Changed files" }).click({ timeout: 20_000 })
+  await expect(heading).toBeVisible({ timeout: 20_000 })
+}
 
 const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [
   {
@@ -210,8 +209,13 @@ test("thinking strength is a compact per-session composer control", async ({ lau
 
   await expect(thinking).toContainText("default")
   await thinking.click()
-  await window.getByRole("menuitem", { name: "think hard" }).click()
-  await expect(thinking).toContainText("think hard")
+  // The menu offers the provider's OWN reasoning efforts now, not Claude's
+  // "think"/"think hard" prompt phrases — see `reasoningEffortsFor`, which gives
+  // Claude low/medium/high/xhigh/max. Read the option list from there rather than
+  // naming one, so a provider adding or renaming a tier doesn't silently rot this.
+  const effort = reasoningEffortsFor("claude")[2]!
+  await window.getByRole("menuitem", { name: effort, exact: true }).click()
+  await expect(thinking).toContainText(effort)
 })
 
 test("the model chip shows the harness model and switches", async ({ launchApp }) => {
@@ -459,7 +463,7 @@ test("a worktree session without a PR shows a Changes tab with the Code Review v
   const changesTab = window.getByText("Changes", { exact: true }).first()
   await expect(changesTab).toBeVisible()
   await changesTab.click()
-  await expect(window.getByText("Changed files")).toBeVisible({ timeout: 20_000 })
+  await expectFileRail(window)
   await expect(window.getByText("an uncommitted edit")).toBeVisible({ timeout: 20_000 })
 })
 
@@ -647,7 +651,7 @@ test("Code Review shows the Uncommitted source and reverts a whole file", async 
   // The pane mounts (gh calls for the empty PR source can be slow), the source
   // toggle shows "Uncommitted" selected (the view falls back to the local source),
   // and the local diff renders the changed file + edit.
-  await expect(window.getByText("Changed files")).toBeVisible({ timeout: 20_000 })
+  await expectFileRail(window)
   await expect(window.getByRole("tab", { name: "Uncommitted" })).toBeVisible({ timeout: 20_000 })
   await expect(window.getByText("an uncommitted edit")).toBeVisible({ timeout: 20_000 })
 
@@ -828,8 +832,12 @@ test("an archived session shows in the Archived group, read-only, and restores",
 
   await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
 
-  // The session sits in the "Archived" sidebar group with a Merged pill.
-  await expect(window.getByText("Archived", { exact: true })).toBeVisible()
+  // Archived is a filter now, hidden by default — so the session is out of the
+  // list until it is asked for, and that is the behaviour worth asserting.
+  // Checking it is absent FIRST also proves the filter is doing the hiding, rather
+  // than the seed having silently failed.
+  await expect(window.getByText("Refactor auth flow")).toHaveCount(0)
+  await showSessions(window, "Archived")
   await expect(window.getByText("Merged #482")).toBeVisible()
 
   // It auto-selects → the archived banner + locked composer render (read-only).
@@ -880,16 +888,20 @@ test("sidebar quick-actions: hover a row to archive an active session", async ({
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: twoSessions })
   await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
 
-  // No Archived group yet — both sessions are active.
-  await expect(window.getByText("Archived", { exact: true })).toHaveCount(0)
+  // Both sessions are active, so both are listed under the default filter.
+  await expect(window.getByText("Second session")).toBeVisible()
 
   // Hover the second row to reveal its quick-actions, then Archive it.
   const row = window.getByTestId("session-row-s_act")
   await row.hover()
   await window.getByRole("button", { name: "Archive Second session" }).click()
 
-  // It drops into the Archived group (undoable via Restore).
-  await expect(window.getByText("Archived", { exact: true })).toBeVisible()
+  // Archiving now removes it from the default (active) list — and it is still
+  // there, one filter away, rather than deleted.
+  await expect(window.getByText("Second session")).toHaveCount(0)
+  await expect(window.getByText("First session")).toBeVisible()
+  await showSessions(window, "Archived")
+  await expect(window.getByText("Second session")).toBeVisible()
 })
 
 test("sidebar quick-actions: right-click → Delete removes a session after confirming", async ({
@@ -966,12 +978,18 @@ test("a merged PR badges its linked session but never archives it", async ({ lau
 
   await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
 
-  // Waiting on the badge is what proves the PR-state poll actually ran — without
-  // it, "was not archived" would pass trivially by asserting before the sweep.
-  await expect(window.getByText(/#500 Merged/)).toBeVisible({ timeout: 15_000 })
-  // Still an active session: no Archived group was created for it.
+  // Waiting on the merge signal is what proves the PR-state poll actually ran —
+  // without it, "was not archived" would pass trivially by asserting before the
+  // sweep. The row no longer spells the state out in text: the number is a badge
+  // (`⑂ #500`) and the state moved to the leading glyph, whose title is the only
+  // place the word "merged" still appears.
+  await expect(window.getByTitle("Pull request merged")).toBeVisible({ timeout: 15_000 })
+  await expect(window.getByText("⑂ #500")).toBeVisible()
+
+  // Still an ACTIVE session — which, now that archived is a hidden-by-default
+  // filter, means simply: still listed. That is a stronger check than the old
+  // "no Archived group" one, which would pass even if the session had vanished.
   await expect(window.getByText("Old shipped work")).toBeVisible()
-  await expect(window.getByRole("button", { name: /collapse archived/i })).toHaveCount(0)
 })
 
 /**
