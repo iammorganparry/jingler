@@ -62,6 +62,7 @@ export function QueuedMessageRow({
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(text)
   const inputRef = useRef<HTMLInputElement>(null)
+  const rowRef = useRef<HTMLDivElement>(null)
 
   // Re-seed when the queue shifts a different message into this row: the row is
   // addressed positionally, so the same component can be handed new text.
@@ -95,6 +96,7 @@ export function QueuedMessageRow({
 
   return (
     <div
+      ref={rowRef}
       className={cn(
         "flex items-center gap-2 rounded-lg border border-line bg-sunken/60 px-3 py-1.5 text-[12.5px] text-muted-foreground",
         editing && "border-blue/40",
@@ -129,7 +131,19 @@ export function QueuedMessageRow({
               cancel()
             }
           }}
-          onBlur={commit}
+          /*
+            Commit when focus leaves the ROW, not merely the input. Tab moves it
+            to Save and then Cancel, and committing on that first move made both
+            buttons unreachable from the keyboard: the row left edit mode before
+            either could be activated, so a keyboard-only operator reaching for the
+            visible Cancel control SAVED the edit instead. Escape was the only
+            cancel that worked, and nothing on screen said so.
+          */
+          onBlur={(e) => {
+            const next = e.relatedTarget
+            if (next instanceof Node && rowRef.current?.contains(next)) return
+            commit()
+          }}
           className="min-w-0 flex-1 rounded bg-transparent text-text-bright outline-none"
         />
       ) : (
@@ -163,10 +177,12 @@ export function QueuedMessageRow({
             <Check size={13} />
           </button>
           {/*
-            `onMouseDown` with `preventDefault`, not `onClick`: the input commits
-            on blur, and mousedown on this button blurs it — so a plain click
-            SAVED the edit it was meant to abandon, then unmounted before its own
-            handler could run. Preventing the default stops the blur happening at all.
+            Both handlers, because they cover different inputs. `onMouseDown` with
+            `preventDefault` stops the blur ever happening for a pointer — some
+            browsers do not focus a button on click, so the relatedTarget check
+            above cannot be relied on there. `onClick` is what Enter and Space fire.
+            Whichever runs first wins; the second is a no-op on a row that has
+            already left edit mode.
           */}
           <button
             type="button"
@@ -174,6 +190,7 @@ export function QueuedMessageRow({
               e.preventDefault()
               cancel()
             }}
+            onClick={cancel}
             title="Cancel edit"
             className={cn(ACTION, REMOVE)}
           >

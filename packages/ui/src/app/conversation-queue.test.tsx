@@ -173,6 +173,54 @@ describe("ConversationView — queued messages", () => {
     )
   })
 
+  it("cancels from the keyboard, where there is no mousedown to intercept", () => {
+    // Tab moves focus input → Save → Cancel. Committing on the input's blur made
+    // both buttons unreachable that way: the row left edit mode before either
+    // could fire, so a keyboard-only operator reaching for the visible Cancel
+    // control SAVED the edit instead, with Escape the only working way out.
+    const onEditQueued = vi.fn()
+    render(
+      <ConversationView
+        messages={[]}
+        mode="accept-edits"
+        queued={queued(2)}
+        onEditQueued={onEditQueued}
+      />
+    )
+    fireEvent.click(screen.getAllByTitle("Edit queued message")[0]!)
+    const input = screen.getByLabelText("Edit queued message")
+    fireEvent.change(input, { target: { value: "scrap this" } })
+
+    // Tabbing to Cancel must not commit on the way.
+    const cancel = screen.getByTitle("Cancel edit")
+    fireEvent.blur(input, { relatedTarget: cancel })
+    expect(onEditQueued).not.toHaveBeenCalled()
+
+    // Enter/Space on the focused button arrives as a click, never a mousedown.
+    fireEvent.click(cancel)
+    expect(onEditQueued).not.toHaveBeenCalled()
+    expect(screen.getByText("message 0")).toBeDefined()
+  })
+
+  it("commits when focus leaves the row entirely", () => {
+    // The counterpart: suppressing the commit for intra-row focus must not turn
+    // a genuine click-away into a lost edit.
+    const onEditQueued = vi.fn()
+    render(
+      <ConversationView
+        messages={[]}
+        mode="accept-edits"
+        queued={queued(2)}
+        onEditQueued={onEditQueued}
+      />
+    )
+    fireEvent.click(screen.getAllByTitle("Edit queued message")[0]!)
+    const input = screen.getByLabelText("Edit queued message")
+    fireEvent.change(input, { target: { value: "message 0, revised" } })
+    fireEvent.blur(input, { relatedTarget: document.body })
+    expect(onEditQueued).toHaveBeenCalledWith("q0", "message 0, revised")
+  })
+
   it("withholds every action from the message being handed to the live turn", () => {
     // It is still listed — nothing is confirmed until the harness replies — but
     // the agent already HAS this text. Handing it off would start the same prompt
