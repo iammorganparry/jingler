@@ -356,16 +356,21 @@ export interface LiveInput {
    * landed — `Agent.steer` reports that as `deferred`.
    */
   readonly push: (text: string, images: ReadonlyArray<Attachment>) => boolean
-  /**
-   * Whether a pushed message is still sitting UNREAD in the channel.
-   *
-   * The distinction that matters at the end of a turn: a message the CLI has
-   * already taken was answered inside that turn (verified against the real
-   * harness — see `scripts/probe-claude-steer.ts`), so the turn is genuinely over.
-   * One it has NOT taken yet will open a turn of its own, and closing the channel
-   * on it would discard the operator's message.
-   */
+  /** Whether a pushed message is still sitting unread in the channel. */
   readonly hasUnread: () => boolean
+  /**
+   * Whether anything was pushed since this was last asked — the question that
+   * actually decides whether a turn is over.
+   *
+   * `hasUnread` is not enough: the SDK pulls a pushed message out within a
+   * microtask, so by the time the turn's `result` is handled the channel usually
+   * looks empty even though the CLI has not acted on the message yet. Probing the
+   * real harness (`scripts/probe-claude-steer.ts --at-result --drain-first`)
+   * showed it then answers in a SECOND turn — so treating that result as the end
+   * of the run settles the conversation while a reply is still coming, and the
+   * operator's steered message sits there with no visible answer.
+   */
+  readonly takeSteered: () => boolean
   /** Refuse further pushes and end the input, letting the SDK finish the query. */
   readonly finish: () => void
 }
@@ -391,6 +396,7 @@ export const makeLiveInput = (
 ): LiveInput => {
   const pending: Array<SDKUserMessage> = [userMessageFor(spec.prompt, spec.images, resumeId)]
   let done = false
+  let steered = false
   // Resolver for the consumer parked on an empty queue, so a push wakes it
   // immediately instead of the generator polling.
   let wake: (() => void) | null = null
@@ -420,10 +426,16 @@ export const makeLiveInput = (
       if (done) return false
       if (text.length === 0 && images.length === 0) return false
       pending.push(userMessageFor(text, images, resumeId))
+      steered = true
       bump()
       return true
     },
     hasUnread: () => pending.length > 0,
+    takeSteered: () => {
+      const was = steered
+      steered = false
+      return was
+    },
     finish: () => {
       done = true
       bump()
@@ -899,15 +911,17 @@ export const streamEventsFor = (
 const TEARDOWN_GRACE = "15 seconds"
 
 /**
- * How long the input channel stays open for a steered message the CLI had not yet
- * read when its turn ended, before we give up on the continuation.
+ * How long a steered turn may go quiet before we call it finished.
  *
- * The gap being bounded is the CLI picking up a message already sitting in its
- * stdin and opening a turn for it — milliseconds in practice. Generous by three
- * orders of magnitude, because it exists to break a wedge, not to police pace: on
- * expiry the withheld `Done` is emitted and the message runs as the next turn.
+ * Every steer holds the turn's `Done` back until we know whether the CLI answers
+ * inside this turn or opens another for it — and the two are indistinguishable at
+ * the `result` itself, so the only way to tell them apart is to wait. Probed
+ * against the real harness, the continuation's first message follows the previous
+ * result immediately, so this is generous by an order of magnitude while still
+ * being short enough that a steered turn does not sit visibly "running" after it
+ * is done. Re-armed on every message; on expiry the withheld `Done` is emitted.
  */
-const STEER_CONTINUE_GRACE = 30_000
+const STEER_CONTINUE_GRACE = 2_500
 
 export const runClaude = (
   sessionId: string,
@@ -1208,7 +1222,14 @@ export const runClaude = (
               }
               // Read as LATE as possible: a push that arrives during the probe is
               // then still seen here rather than stranded by the close below.
-              extended = live.hasUnread()
+              //
+              // `takeSteered` OR `hasUnread`, not just the latter: the SDK pulls a
+              // pushed message out of the channel within a microtask, so by now it
+              // usually looks empty whether or not the CLI has acted on it. Probing
+              // the real harness in exactly that state showed a SECOND turn follows,
+              // so a result after any push is treated as a seam until the stream
+              // goes quiet (the watchdog below).
+              extended = live.takeSteered() || live.hasUnread()
               if (extended) {
                 steerWatchdog = setTimeout(() => live.finish(), STEER_CONTINUE_GRACE)
               } else {

@@ -169,6 +169,29 @@ describe("makeLiveInput", () => {
   })
 
   /**
+   * The question the adapter actually asks at each `result`. `hasUnread` alone is
+   * not enough: the consumer pulls a push out within a microtask, so the channel
+   * looks empty long before the CLI has acted on the message — and probing the
+   * real harness in that state showed it answers in a SECOND turn.
+   */
+  it("reports a steer for the turn it was pushed into, even once drained", async () => {
+    const live = makeLiveInput(spec({}), undefined)
+    const iterator = live.iterable[Symbol.asyncIterator]()
+    await iterator.next() // the opening prompt
+    expect(live.takeSteered()).toBe(false)
+
+    const parked = iterator.next()
+    live.push("also this", [])
+    await parked // drained: the channel is empty again
+    expect(live.hasUnread()).toBe(false)
+    // Still true, which is what holds the turn's `Done` back until we know
+    // whether a continuation follows.
+    expect(live.takeSteered()).toBe(true)
+    // One-shot: a stale true would swallow the real end of the run.
+    expect(live.takeSteered()).toBe(false)
+  })
+
+  /**
    * `hasUnread` is asked at every `result`, and it decides whether the run is over.
    * The real harness answers a message it has ALREADY read inside the running turn
    * (one `result`, verified by `scripts/probe-claude-steer.ts`) — so "was anything

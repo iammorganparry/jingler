@@ -25,6 +25,10 @@ import type { SessionSpec } from "../src/adapter.js"
 
 const STEER_WORD = "PINEAPPLE"
 const TIMEOUT_MS = 180_000
+/** Push as the turn's `result` is handled, not mid-turn — the risky window. */
+const atResult = process.argv.includes("--at-result")
+/** Let the SDK drain the push before deciding, so `hasUnread()` reads false. */
+const drainFirst = process.argv.includes("--drain-first")
 
 const spec = {
   cli: "claude",
@@ -59,6 +63,10 @@ const main = async (): Promise<number> => {
     live.finish()
   }, TIMEOUT_MS)
 
+  // The adapter's `STEER_CONTINUE_GRACE`, mirrored so the probe ends the way a
+  // real steered turn does rather than sitting on the deadline.
+  const QUIET_MS = 2_500
+  let quiet: ReturnType<typeof setTimeout> | undefined
   let results = 0
   let steered = false
   let sawSteerWord = false
@@ -66,6 +74,7 @@ const main = async (): Promise<number> => {
 
   try {
     for await (const msg of iterator as AsyncIterable<Record<string, unknown>>) {
+      if (quiet !== undefined) clearTimeout(quiet)
       const type = msg.type as string | undefined
       if (type === "assistant") {
         const content = (msg.message as { content?: unknown } | undefined)?.content
@@ -80,18 +89,34 @@ const main = async (): Promise<number> => {
       }
       // Push once, mid-turn, after the first tool result — the exact moment the
       // renderer's auto-flush fires (`ToolEnd`).
-      if (!steered && type === "user") {
+      //
+      // `--at-result` instead pushes at the WORST possible moment: as the turn's
+      // own `result` is being handled. That is the window a review flagged as a
+      // silent-loss risk — the SDK may have already drained the message out of
+      // `pending`, so `hasUnread()` reads false and the channel closes on input
+      // the CLI never acted on.
+      if (!steered && type === (atResult ? "result" : "user")) {
         steered = live.push(`Also reply with the word ${STEER_WORD}.`, [])
-        console.log(`probe: pushed mid-turn (accepted=${steered})`)
+        console.log(`probe: pushed at ${atResult ? "the result" : "mid-turn"} (accepted=${steered})`)
       }
       if (type === "result") {
         results += 1
+        // `--drain-first` is the review's premise made deterministic: give the SDK
+        // a moment to pull the pushed message out of `pending` (so `hasUnread()`
+        // reads false) BEFORE deciding, then close the channel on it. If the CLI
+        // drops input it has received but not yet acted on, this loses the message.
+        if (drainFirst) await new Promise((resolve) => setTimeout(resolve, 250))
         console.log(
           `probe: result #${results} (steered=${steered}, unread=${live.hasUnread()})`
         )
-        // Exactly what the adapter does: the run is over unless a push is still
-        // sitting unread in the channel.
-        if (!live.hasUnread()) live.finish()
+        // Exactly what the adapter does: any push during this turn makes the
+        // result a seam rather than the end, so the channel stays open for a
+        // continuation — closed by the same quiet window when none comes.
+        if (live.takeSteered() || live.hasUnread()) {
+          quiet = setTimeout(() => live.finish(), QUIET_MS)
+        } else {
+          live.finish()
+        }
       }
     }
   } finally {
@@ -101,15 +126,12 @@ const main = async (): Promise<number> => {
 
   console.log(`probe: results=${results} steerWordSeen=${sawSteerWord}`)
   console.log(`probe: text after steer: ${assistantAfterSteer.slice(0, 200)}`)
-  if (sawSteerWord && results === 1) {
-    console.log("probe: PASS — the mid-turn push was answered inside the running turn")
-    return 0
-  }
+  // Either shape is correct and the adapter handles both: answered inside the
+  // running turn (one result), or in a continuation the CLI opens for it (two).
+  // What must never happen is the message reaching the agent and going unanswered.
   if (sawSteerWord) {
-    console.error(
-      `probe: FAIL — answered, but across ${results} results; the adapter assumes one`
-    )
-    return 2
+    console.log(`probe: PASS — the push was answered (across ${results} result(s))`)
+    return 0
   }
   console.error("probe: FAIL — the steered message never reached the agent")
   return 2
