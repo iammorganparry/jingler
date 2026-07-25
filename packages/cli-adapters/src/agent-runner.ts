@@ -364,7 +364,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     // client hanging up its stream does NOT tear the run down (verified: the run
     // survives its consumer). Without this handle a "stopped" agent keeps running.
     const fibers = yield* Ref.make(new Map<string, RunFiber>())
-    // sessionId → a mutex serialising `stop` against `prompt`'s SETUP.
+    // chatId → a mutex serialising `stop` against `prompt`'s SETUP.
     //
     // Without it, a stop and the next turn race for the same `fibers` slot, and
     // the stop loses: the renderer fires `agentStop` and moves on, `prompt`
@@ -376,18 +376,22 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     // A token check alone cannot fix it: by the time the stop reads the map, the
     // only entry that ever existed for that read IS run B's. The read and the
     // registration have to be ordered, which is what this lock does.
+    //
+    // Keyed by chatId, NOT sessionId: the `fibers` slot it protects is per-chat,
+    // so two chats in the same session must not serialise against each other —
+    // that is exactly the concurrency this feature enables.
     const locks = yield* Ref.make(new Map<string, Effect.Semaphore>())
-    /** The session's mutex, created on first use. */
-    const sessionLock = (sessionId: string) =>
+    /** The chat's mutex, created on first use. */
+    const chatLock = (chatId: string) =>
       Effect.gen(function* () {
-        const existing = (yield* Ref.get(locks)).get(sessionId)
+        const existing = (yield* Ref.get(locks)).get(chatId)
         if (existing !== undefined) return existing
         const made = yield* Effect.makeSemaphore(1)
         // `Ref.modify` is atomic, so two concurrent first-users agree on one
         // semaphore — the loser's freshly made one is simply dropped.
         return yield* Ref.modify(locks, (m) => {
-          const current = m.get(sessionId)
-          return current !== undefined ? [current, m] : [made, new Map(m).set(sessionId, made)]
+          const current = m.get(chatId)
+          return current !== undefined ? [current, m] : [made, new Map(m).set(chatId, made)]
         })
       })
 
@@ -690,7 +694,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
         // long enough that holding the lock for all of it would read as the app
         // ignoring the operator's next message. After the cap we stop WAITING;
         // the interrupt itself has already been delivered.
-        const lock = yield* sessionLock(sessionId)
+        const lock = yield* chatLock(chatId)
         yield* lock.withPermits(1)(
           Effect.gen(function* () {
             const running = (yield* Ref.get(fibers)).get(chatId)
@@ -1145,7 +1149,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               // the dock updates live, but never persisted onto a message —
               // that would pin a still-running task to a finished turn.
               if (isBackgroundTaskEvent(event)) {
-                yield* BackgroundTaskStore.ingest(sessionId, event).pipe(Effect.provide(env), Effect.ignore)
+                yield* BackgroundTaskStore.ingest(sessionId, chatId, event).pipe(Effect.provide(env), Effect.ignore)
                 yield* out.offer(event)
                 return
               }
@@ -1370,11 +1374,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           /** Identifies THIS run, so its cleanup can't evict a successor's fiber. */
           const token: RunToken = {}
 
-          // Publish this run's per-task stop handle. Registering also orphans
-          // anything the previous harness process left running — the live set is
-          // per-process, so those ids no longer resolve to anything stoppable.
+          // Publish this run's per-task stop handle for THIS chat. Registering
+          // also orphans this chat's own previously-registered tasks — their
+          // handle is being replaced and no longer resolves to anything stoppable.
           const registerBackgroundStop = (stop: StopBackgroundTask) =>
-            BackgroundTaskStore.registerStop(sessionId, stop).pipe(Effect.provide(env), Effect.ignore)
+            BackgroundTaskStore.registerStop(sessionId, chatId, stop).pipe(Effect.provide(env), Effect.ignore)
           const registerTurnSteer = (handler: SteerTurn | null) => Ref.set(turnSteer, handler)
 
           // Record the compaction on THIS turn, before the harness says anything.
@@ -1547,16 +1551,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     ): Stream.Stream<StreamEvent, never, PromptEnv> {
       return Stream.unwrapScoped(
         Effect.gen(function* () {
-          const lock = yield* sessionLock(sessionId)
+          const lock = yield* chatLock(chatId)
           return yield* lock.withPermits(1)(
             Effect.gen(function* () {
-              const acquired = yield* reserveSessionRun(sessionId, chatId)
-              if (!acquired) {
-                return Stream.fromIterable<StreamEvent>([{
-                  _tag: "Failed",
-                  message: "Another chat or plan in this session is running. Stop it before starting this chat."
-                }])
-              }
+              // Concurrent chats in one session are allowed — reserve only
+              // records that this chat is live (for `anyRunning`); it never
+              // refuses. Runs share the worktree; conflicts are the operator's.
+              yield* reserveSessionRun(sessionId, chatId)
               yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, chatId))
               return yield* promptSetup(
                 sessionId,

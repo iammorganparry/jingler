@@ -766,14 +766,8 @@ export const planExecute = (
       }
       const worktreePath = session.worktreePath
       const reservation = `plan:${planId}`
-      const reserved = yield* reserveSessionRun(sessionId, reservation)
-      if (!reserved) {
-        return Stream.fail(
-          new PlanError({
-            message: "Another chat or plan is already running in this session."
-          })
-        )
-      }
+      // Concurrent runs in one session are allowed; reserve only book-keeps.
+      yield* reserveSessionRun(sessionId, reservation)
       yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, reservation))
       const persistedArtifact = yield* PlanStore.readArtifact(worktreePath)
       const migrationChat = session.chats.find(
@@ -1169,14 +1163,8 @@ export const planAdversarial = (
           ? requestedChatId
           : session.activeChatId
       const reservation = `planning:${chatId}`
-      const reserved = yield* reserveSessionRun(sessionId, reservation)
-      if (!reserved) {
-        return Stream.fail(
-          new PlanError({
-            message: "Another chat or plan is already running in this session."
-          })
-        )
-      }
+      // Concurrent runs in one session are allowed; reserve only book-keeps.
+      yield* reserveSessionRun(sessionId, reservation)
       yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, reservation))
       if (chatId === `c_${session.id}_1`) {
         yield* TranscriptStore.adoptLegacy(sessionId, chatId)

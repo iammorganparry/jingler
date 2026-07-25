@@ -58,9 +58,17 @@ export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
     accessors: true,
     effect: Effect.gen(function* () {
       const actors = yield* Ref.make(new Map<string, Map<string, TaskActor>>())
-      // Stop handles are per-session and replaced on each run: the handle closes
-      // over the live harness query, so the newest run's is the only valid one.
-      const stops = yield* Ref.make(new Map<string, StopBackgroundTask>())
+      // Stop handles are per-CHAT and replaced on each of that chat's runs: the
+      // handle closes over one run's live harness query, so the newest run for a
+      // given chat is the only valid one. Keyed sessionId → chatId → handle so
+      // two chats running concurrently in one session keep independent handles —
+      // a new run in chat B never invalidates chat A's still-running tasks.
+      const stops = yield* Ref.make(new Map<string, Map<string, StopBackgroundTask>>())
+      // taskId → the chat that produced it, per session. Lets `stop` route a task
+      // to its owning chat's handle and lets `registerStop` orphan only its own
+      // chat's tasks (see registerStop). Task ids can collide across chats in
+      // theory, so this is nested under sessionId alongside `actors`.
+      const taskChat = yield* Ref.make(new Map<string, Map<string, string>>())
 
       // Read from Effect's Clock rather than `new Date()` so the timestamps a task
       // is stamped with and the `now` that `expired` compares them against are the
@@ -77,13 +85,23 @@ export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
 
       /** Stop and forget `taskIds` for a session. */
       const evict = (sessionId: string, taskIds: ReadonlyArray<string>): Effect.Effect<void> =>
-        Ref.update(actors, (m) => {
-          const session = m.get(sessionId)
-          if (session === undefined) return m
-          const next = new Map(session)
-          for (const id of taskIds) next.delete(id)
-          const out = new Map(m)
-          return next.size === 0 ? (out.delete(sessionId), out) : out.set(sessionId, next)
+        Effect.gen(function* () {
+          yield* Ref.update(actors, (m) => {
+            const session = m.get(sessionId)
+            if (session === undefined) return m
+            const next = new Map(session)
+            for (const id of taskIds) next.delete(id)
+            const out = new Map(m)
+            return next.size === 0 ? (out.delete(sessionId), out) : out.set(sessionId, next)
+          })
+          yield* Ref.update(taskChat, (m) => {
+            const session = m.get(sessionId)
+            if (session === undefined) return m
+            const next = new Map(session)
+            for (const id of taskIds) next.delete(id)
+            const out = new Map(m)
+            return next.size === 0 ? (out.delete(sessionId), out) : out.set(sessionId, next)
+          })
         })
 
       /**
@@ -126,9 +144,10 @@ export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
           yield* evict(sessionId, [taskId])
         })
 
-      /** Start (or return) the actor for `taskId`. */
+      /** Start (or return) the actor for `taskId`, recording its owning chat. */
       const ensure = (
         sessionId: string,
+        chatId: string,
         taskId: string,
         init: { description: string; taskType: string; subagentType?: string | null; toolUseId?: string | null }
       ): Effect.Effect<TaskActor> =>
@@ -145,6 +164,12 @@ export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
             session.set(taskId, actor)
             return next.set(sessionId, session)
           })
+          yield* Ref.update(taskChat, (m) => {
+            const next = new Map(m)
+            const session = new Map(next.get(sessionId) ?? [])
+            session.set(taskId, chatId)
+            return next.set(sessionId, session)
+          })
           return actor
         })
 
@@ -155,11 +180,11 @@ export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
           Effect.asVoid
         )
 
-      /** Translate one stream event into machine events for this session. */
-      const ingest = (sessionId: string, event: StreamEvent): Effect.Effect<void> =>
+      /** Translate one stream event into machine events for this session's chat. */
+      const ingest = (sessionId: string, chatId: string, event: StreamEvent): Effect.Effect<void> =>
         Effect.gen(function* () {
           if (event._tag === "BackgroundTaskStarted") {
-            yield* ensure(sessionId, event.id, {
+            yield* ensure(sessionId, chatId, event.id, {
               description: event.description,
               taskType: event.taskType,
               subagentType: event.subagentType,
@@ -197,13 +222,17 @@ export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
             // edge. Better a row with a placeholder label than work running with
             // no row at all.
             for (const id of event.ids) {
-              yield* ensure(sessionId, id, { description: "Background task", taskType: "unknown" })
+              yield* ensure(sessionId, chatId, id, { description: "Background task", taskType: "unknown" })
             }
             // The level is authoritative for liveness: anything still live here
             // but absent from the level has finished, whether or not its bookend
-            // ever arrived.
+            // ever arrived. Scoped to THIS chat's tasks — the level came from one
+            // chat's harness query, so a concurrent chat's tasks are simply not in
+            // it and must not be swept to ABSENT by another chat's signal.
             const stamp = yield* now
+            const owners = (yield* Ref.get(taskChat)).get(sessionId) ?? new Map()
             for (const [id, actor] of yield* forSession(sessionId)) {
+              if (owners.get(id) !== chatId) continue
               const state = actor.getSnapshot().value
               if ((state === "running" || state === "stopping") && !live.has(id)) {
                 yield* Effect.sync(() => actor.send({ type: "ABSENT", now: stamp }))
@@ -213,18 +242,30 @@ export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
         })
 
       /**
-       * Register the current run's stop handle, orphaning anything the PREVIOUS
-       * harness process left running. The live set is per-process and nothing is
-       * emitted at startup, so a row carried across a restart would spin forever
-       * with an id that resolves to nothing.
+       * Register a chat's current run stop handle, orphaning that chat's OWN
+       * still-running tasks — their handle is about to be replaced and closes over
+       * the previous run's harness query, so they become unstoppable. Scoped to
+       * the registering chat: a concurrent chat's tasks keep their own live handle
+       * and must not be orphaned by another chat starting a run.
        */
-      const registerStop = (sessionId: string, stop: StopBackgroundTask): Effect.Effect<void> =>
+      const registerStop = (
+        sessionId: string,
+        chatId: string,
+        stop: StopBackgroundTask
+      ): Effect.Effect<void> =>
         Effect.gen(function* () {
           const stamp = yield* now
-          for (const actor of (yield* forSession(sessionId)).values()) {
+          const owners = (yield* Ref.get(taskChat)).get(sessionId) ?? new Map()
+          for (const [id, actor] of yield* forSession(sessionId)) {
+            if (owners.get(id) !== chatId) continue
             yield* Effect.sync(() => actor.send({ type: "ORPHANED", now: stamp }))
           }
-          yield* Ref.update(stops, (m) => new Map(m).set(sessionId, stop))
+          yield* Ref.update(stops, (m) => {
+            const next = new Map(m)
+            const session = new Map(next.get(sessionId) ?? [])
+            session.set(chatId, stop)
+            return next.set(sessionId, session)
+          })
         })
 
       /**
@@ -240,7 +281,13 @@ export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
           const actor = (yield* forSession(sessionId)).get(taskId)
           if (!actor) return null
           yield* Effect.sync(() => actor.send({ type: "STOP_REQUESTED" }))
-          const handle = (yield* Ref.get(stops)).get(sessionId)
+          // Route to the handle of the chat that produced this task — each
+          // concurrent chat run keeps its own live handle.
+          const ownerChat = (yield* Ref.get(taskChat)).get(sessionId)?.get(taskId)
+          const handle =
+            ownerChat === undefined
+              ? undefined
+              : (yield* Ref.get(stops)).get(sessionId)?.get(ownerChat)
           if (!handle) {
             const stamp = yield* now
             yield* Effect.sync(() => actor.send({ type: "ORPHANED", now: stamp }))
@@ -268,6 +315,11 @@ export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
             return next
           })
           yield* Ref.update(stops, (m) => {
+            const next = new Map(m)
+            next.delete(sessionId)
+            return next
+          })
+          yield* Ref.update(taskChat, (m) => {
             const next = new Map(m)
             next.delete(sessionId)
             return next
