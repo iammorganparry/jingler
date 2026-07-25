@@ -164,6 +164,12 @@ export interface ConversationViewProps {
   onEditQueued?: (id: string, text: string) => void
   /** What the hand-off targets, for its tooltip (e.g. "a new chat on Opus 4.6"). */
   handoffHint?: string
+  /**
+   * The queued message being handed to the running turn right now, if any. Its
+   * row drops every action: the agent already has the text, so acting on it would
+   * run the same prompt twice.
+   */
+  steeringId?: string | null
   onDecideGate?: (gateId: string, decision: GateDecision) => void
   onSetMode?: (mode: PermissionMode) => void
   reasoningEffort?: ReasoningEffort
@@ -255,6 +261,7 @@ export function ConversationView({
   onHandoffQueued,
   onEditQueued,
   handoffHint,
+  steeringId = null,
   onDecideGate,
   onSetMode,
   reasoningEffort,
@@ -484,20 +491,31 @@ export function ConversationView({
                     running turn — which throws away the text of a row the operator
                     is part-way through editing, at a moment they did not cause.
                   */}
-                  {queued.slice(0, queueLimit).map((item) => (
-                    <QueuedMessageRow
-                      key={item.id}
-                      text={item.text}
-                      images={item.images.length}
-                      handoffHint={handoffHint}
-                      {...(onSendNow && busy ? { onSendNow: () => onSendNow(item.id) } : {})}
-                      {...(onHandoffQueued ? { onHandoff: () => onHandoffQueued(item.id) } : {})}
-                      {...(onEditQueued
-                        ? { onEdit: (text: string) => onEditQueued(item.id, text) }
-                        : {})}
-                      {...(onUnqueue ? { onRemove: () => onUnqueue(item.id) } : {})}
-                    />
-                  ))}
+                  {queued.slice(0, queueLimit).map((item) => {
+                    // In flight: the row still shows (nothing is confirmed yet) but
+                    // every action is withheld, because the agent already has this
+                    // text and acting on it would run the prompt a second time.
+                    const sending = item.id === steeringId
+                    return (
+                      <QueuedMessageRow
+                        key={item.id}
+                        text={item.text}
+                        images={item.images.length}
+                        handoffHint={handoffHint}
+                        sending={sending}
+                        {...(onSendNow && busy && !sending
+                          ? { onSendNow: () => onSendNow(item.id) }
+                          : {})}
+                        {...(onHandoffQueued && !sending
+                          ? { onHandoff: () => onHandoffQueued(item.id) }
+                          : {})}
+                        {...(onEditQueued && !sending
+                          ? { onEdit: (text: string) => onEditQueued(item.id, text) }
+                          : {})}
+                        {...(onUnqueue && !sending ? { onRemove: () => onUnqueue(item.id) } : {})}
+                      />
+                    )
+                  })}
                   {queued.length > QUEUE_PREVIEW && (
                     <button
                       type="button"

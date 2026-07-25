@@ -555,7 +555,7 @@ describe("conversationMachine — queue while busy", () => {
   })
 
   it("does not latch the steer guard when the reply lands after the turn", async () => {
-    // A latched `steerPending` disables BOTH the automatic flush and "Send now"
+    // A latched `steeringId` disables BOTH the automatic flush and "Send now"
     // for the rest of this chat's life — silently, with no error anywhere.
     h.steerStatus = "deferred"
     let release = () => {}
@@ -575,7 +575,7 @@ describe("conversationMachine — queue while busy", () => {
 
     // The queued message runs as the next turn; its own boundary must flush again.
     await waitFor(actor, () => h.agentRunCalls.length === 2, { timeout: 3000 })
-    expect(actor.getSnapshot().context.steerPending).toBe(false)
+    expect(actor.getSnapshot().context.steeringId).toBeNull()
 
     actor.send({ type: "SEND", text: "and one more" })
     emit({ _tag: "ToolEnd", id: "t2", status: "success", meta: null, diff: null, preview: null })

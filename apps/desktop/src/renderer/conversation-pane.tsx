@@ -205,25 +205,38 @@ export function ConversationPane({
    * the SAME worktree, on the operator's configured default model, and sends the
    * message there.
    *
-   * The message leaves this queue FIRST, so a failure to create the chat can
-   * never leave the same prompt queued in two places — the operator can see the
-   * row is gone and retype, whereas a silent duplicate runs twice.
+   * The message leaves this queue LAST, in the same tick as the send to the new
+   * chat. Unqueuing first read as the safer order — no window where the same
+   * prompt sits in two places — but the window it opened was worse: a failed
+   * `createChat` left the operator's text deleted with nothing on screen to say
+   * so. Nothing is dropped until there is somewhere for it to land.
    */
   const handoffQueued = (id: string) => {
-    const item = convo.queued.find((queued) => queued.id === id)
-    if (item === undefined) return
-    convo.unqueue(id)
-    void rpc.sessionsCreateChat(session.id).then((updated) => {
-      publishSessionUpdate(updated)
-      const actor = getConversationActor(updated, updated.activeChatId)
-      // `createChat` activates the new chat, so this is the chat the operator is
-      // now looking at. Put it on the default model before the send, so the very
-      // first turn runs on the intended harness rather than switching under it.
-      if (handoffModel !== null && handoffModel !== convo.model) {
-        actor.send({ type: "SET_HARNESS", cli: convo.cli, model: handoffModel })
-      }
-      actor.send({ type: "SEND", text: item.text, images: item.images })
-    })
+    if (!convo.queued.some((queued) => queued.id === id)) return
+    void rpc
+      .sessionsCreateChat(session.id)
+      .then((updated) => {
+        // Re-read the queue: creating the chat took a round trip, and the running
+        // turn's next tool boundary may have handed this very message to the agent
+        // in the meantime. Handing it off as well would run it twice.
+        const item = convo.queued.find((queued) => queued.id === id)
+        publishSessionUpdate(updated)
+        if (item === undefined) return
+        const actor = getConversationActor(updated, updated.activeChatId)
+        // `createChat` activates the new chat, so this is the chat the operator is
+        // now looking at. Put it on the default model before the send, so the very
+        // first turn runs on the intended harness rather than switching under it.
+        if (handoffModel !== null && handoffModel !== convo.model) {
+          actor.send({ type: "SET_HARNESS", cli: convo.cli, model: handoffModel })
+        }
+        actor.send({ type: "SEND", text: item.text, images: item.images })
+        convo.unqueue(id)
+      })
+      // The chat was never created, so the message is still queued exactly where
+      // the operator left it — the hand-off simply didn't happen. Swallowing the
+      // rejection is deliberate: there is nothing to recover, and an unhandled
+      // one would surface as a console error for a no-op.
+      .catch(() => {})
   }
   const selectChat = (chatId: string) => {
     if (chatId === activeChat.id) return
@@ -425,6 +438,7 @@ export function ConversationPane({
           onSendNow={convo.sendNow}
           onEditQueued={convo.editQueued}
           onHandoffQueued={handoffQueued}
+          steeringId={convo.steeringId}
           handoffHint={
             handoffModel
               ? `Hand off — run this in a new chat on ${handoffModel}`

@@ -55,6 +55,14 @@ export interface Conversation {
   readonly paused: boolean
   /** Messages queued while the agent was busy (sent FIFO once it frees up). */
   readonly queued: ReadonlyArray<QueuedMessage>
+  /**
+   * The queued message currently being handed to the live turn, or null.
+   *
+   * It is still in `queued` (it only leaves once the harness confirms it), but it
+   * is no longer the operator's to act on — the agent has it. Every row action
+   * would otherwise run the same prompt a second time.
+   */
+  readonly steeringId: string | null
   /** Live sub-agents (harness `Task` spawns) for the current turn — watch-only tabs. */
   readonly subagents: ReadonlyArray<Subagent>
   /** Tokens currently occupying the main agent's context window. */
@@ -118,7 +126,8 @@ export function useConversation(
   const state = useSelector(actor, (s) => s)
   const send = actor.send
   const {
-    messages, mode, reasoning, skills, files, cli, model, catalog, patch, queued, subagents, tokens,
+    messages, mode, reasoning, skills, files, cli, model, catalog, patch, queued, steeringId,
+    subagents, tokens,
     runStartedAt, reviewer, reviewPhase, reviewStartedAt
   } = state.context
 
@@ -157,6 +166,7 @@ export function useConversation(
     busy,
     paused,
     queued,
+    steeringId,
     subagents,
     tokens,
     runStartedAt,

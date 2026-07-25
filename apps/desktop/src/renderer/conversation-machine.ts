@@ -97,7 +97,16 @@ export interface ConversationContext {
    */
   readonly queued: ReadonlyArray<QueuedMessage>
   /** Prevents two rapid Send-now clicks from racing native steer responses. */
-  readonly steerPending: boolean
+  /**
+   * The id of the queued message whose steer is in flight, or null.
+   *
+   * An id rather than a flag because the row is still on screen while this is
+   * set, and it is no longer a QUEUED message: the agent has been given it and
+   * the reply is on its way back. Offering "hand off" or "remove" on it would run
+   * the same prompt a second time, so the view needs to know WHICH row that is,
+   * not merely that some steer is pending.
+   */
+  readonly steeringId: string | null
   /**
    * Live sub-agents (harness `Task` spawns) for the current turn — each a
    * watch-only tab. Populated from `agentId`-tagged + `Subagent*` events, dropped
@@ -441,7 +450,7 @@ export const conversationMachine = setup({
      * So a pending steer parks the queue instead, and its reply restarts it (see
      * `awaitingInput`'s `STEER_RESULT`).
      */
-    hasSettledQueue: ({ context }) => context.queued.length > 0 && !context.steerPending,
+    hasSettledQueue: ({ context }) => context.queued.length > 0 && context.steeringId === null,
     /**
      * Whether anything is left to run once THIS steer result is applied — asked of
      * the event, because the guard runs before `settleLateSteer` removes an
@@ -464,7 +473,7 @@ export const conversationMachine = setup({
      */
     canAutoFlush: ({ context, event }) => {
       if (event.type !== "STREAM_EVENT" || event.event._tag !== "ToolEnd") return false
-      if (context.steerPending || context.queued.length === 0) return false
+      if (context.steeringId !== null || context.queued.length === 0) return false
       if (!supportsSteer(context.cli)) return false
       if (
         context.resumePlanId !== null ||
@@ -517,7 +526,7 @@ export const conversationMachine = setup({
         agentTarget: target,
         // See `dequeueTurn`: a new run must never inherit the previous turn's
         // in-flight steer guard.
-        steerPending: false,
+        steeringId: null,
         // A fresh turn starts with no sub-agents (any from a prior turn are gone).
         subagents: [],
         reviewer: keepReviewer(context.reviewer),
@@ -619,7 +628,7 @@ export const conversationMachine = setup({
       return { queued: [picked, ...rest] }
     }),
     promoteAndSteer: assign(({ context, event, self }) => {
-      if (event.type !== "SEND_NOW" || context.steerPending) return {}
+      if (event.type !== "SEND_NOW" || context.steeringId !== null) return {}
       const picked = context.queued.find((queued) => queued.id === event.id)
       if (picked === undefined) return {}
       const rest = context.queued.filter((queued) => queued.id !== event.id)
@@ -633,7 +642,7 @@ export const conversationMachine = setup({
             result: { status: "unsupported" }
           })
         )
-      return { queued: [picked, ...rest], steerPending: true }
+      return { queued: [picked, ...rest], steeringId: picked.id }
     }),
     /**
      * Hand the HEAD of the queue to the live turn at a tool boundary — the
@@ -666,7 +675,7 @@ export const conversationMachine = setup({
             auto: true
           })
         )
-      return { steerPending: true }
+      return { steeringId: picked.id }
     }),
     acceptSteer: assign(({ context, event }) => {
       if (
@@ -686,18 +695,18 @@ export const conversationMachine = setup({
         // filter and run a SECOND time — the agent already has it.
         queued: context.queued.filter((queued) => queued.id !== event.queued.id),
         messages: [...prior, event.result.user, event.result.assistant],
-        steerPending: false
+        steeringId: null
       }
     }),
-    finishSteer: assign(() => ({ steerPending: false })),
+    finishSteer: assign(() => ({ steeringId: null })),
     /**
      * A steer's reply that arrived AFTER the turn it belonged to had ended.
      *
      * The reply and the turn's terminal event travel different paths (an RPC
      * response vs the event stream), so the `Done` can land first and leave this
      * event to be handled in `refreshingDiff`/`stopping`/`awaitingInput` instead
-     * of `running`. Unhandled it does real damage, not nothing: `steerPending`
-     * latches true forever, which silently disables BOTH the automatic flush and
+     * of `running`. Unhandled it does real damage, not nothing: `steeringId`
+     * latches forever, which silently disables BOTH the automatic flush and
      * "Send now" for the rest of the chat's life; and an `accepted` message never
      * leaves the queue, so the next dequeue replays a message the agent already
      * answered — the operator's correction runs twice.
@@ -710,9 +719,9 @@ export const conversationMachine = setup({
      * are coming.
      */
     settleLateSteer: assign(({ context, event }) => {
-      if (event.type !== "STEER_RESULT") return { steerPending: false }
+      if (event.type !== "STEER_RESULT") return { steeringId: null }
       return {
-        steerPending: false,
+        steeringId: null,
         queued:
           event.result.status === "accepted"
             ? context.queued.filter((queued) => queued.id !== event.queued.id)
@@ -732,10 +741,10 @@ export const conversationMachine = setup({
         pendingText: next.text,
         pendingImages: next.images,
         agentTarget: next.target,
-        // A new run starts UNLATCHED. `steerPending` guards one in-flight steer
+        // A new run starts UNLATCHED. `steeringId` guards one in-flight steer
         // against the turn it was aimed at; carrying it into the next turn would
         // disable the flush and "Send now" for a reply that can no longer come.
-        steerPending: false,
+        steeringId: null,
         subagents: [],
         reviewer: keepReviewer(context.reviewer),
         resumePlanId: null,
@@ -1291,7 +1300,7 @@ export const conversationMachine = setup({
       agentTarget: "session",
       reasoning,
       queued: [],
-      steerPending: false,
+      steeringId: null,
       subagents: [],
       resumePlanId: null,
       sharedPlanChatId: null,

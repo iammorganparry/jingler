@@ -173,6 +173,32 @@ describe("ConversationView — queued messages", () => {
     )
   })
 
+  it("withholds every action from the message being handed to the live turn", () => {
+    // It is still listed — nothing is confirmed until the harness replies — but
+    // the agent already HAS this text. Handing it off would start the same prompt
+    // again in a fresh chat; removing or editing it would act on a message that
+    // has already gone.
+    render(
+      <ConversationView
+        messages={[]}
+        mode="accept-edits"
+        busy
+        queued={queued(3)}
+        steeringId="q0"
+        onUnqueue={vi.fn()}
+        onSendNow={vi.fn()}
+        onEditQueued={vi.fn()}
+        onHandoffQueued={vi.fn()}
+      />
+    )
+    expect(screen.getByText("Sending")).toBeDefined()
+    // Two rows still act; the one in flight does not.
+    expect(screen.getAllByTitle("Remove from queue")).toHaveLength(2)
+    expect(screen.getAllByTitle("Edit queued message")).toHaveLength(2)
+    expect(screen.getAllByTitle(/^Hand off/)).toHaveLength(2)
+    expect(screen.getAllByTitle(/^Send now/)).toHaveLength(2)
+  })
+
   it("only offers Send now while the agent is actually busy", () => {
     const onSendNow = vi.fn()
     const props = { messages: [], mode: "accept-edits" as const, queued: queued(2), onSendNow }

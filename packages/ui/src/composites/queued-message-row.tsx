@@ -26,6 +26,15 @@ export interface QueuedMessageRowProps {
   readonly onRemove?: () => void
   /** What the hand-off will actually do, for the tooltip (the target model). */
   readonly handoffHint?: string
+  /**
+   * This message is being handed to the running turn right now.
+   *
+   * It stays in the list — it has not been confirmed yet — but it stops being the
+   * operator's to act on, because the agent already has the text. Acting on it
+   * would run the same prompt twice: hand-off in particular would start it again
+   * in a fresh chat.
+   */
+  readonly sending?: boolean
 }
 
 /**
@@ -47,7 +56,8 @@ export function QueuedMessageRow({
   onHandoff,
   onEdit,
   onRemove,
-  handoffHint
+  handoffHint,
+  sending = false
 }: QueuedMessageRowProps) {
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(text)
@@ -87,11 +97,17 @@ export function QueuedMessageRow({
     <div
       className={cn(
         "flex items-center gap-2 rounded-lg border border-line bg-sunken/60 px-3 py-1.5 text-[12.5px] text-muted-foreground",
-        editing && "border-blue/40"
+        editing && "border-blue/40",
+        sending && "border-blue/30"
       )}
     >
-      <span className="flex-none font-mono text-[10px] uppercase tracking-wide text-dim">
-        Queued
+      <span
+        className={cn(
+          "flex-none font-mono text-[10px] uppercase tracking-wide",
+          sending ? "text-blue" : "text-dim"
+        )}
+      >
+        {sending ? "Sending" : "Queued"}
       </span>
       {editing ? (
         <input
@@ -131,7 +147,12 @@ export function QueuedMessageRow({
           `gap-2` would space them like separate controls, which reads as four
           unrelated buttons instead of this message's toolbar. */}
       <div className="-mr-1.5 flex flex-none items-center gap-0.5">
-      {editing ? (
+      {sending ? (
+        // No actions at all while it is in flight. Not disabled buttons: there is
+        // nothing to re-enable, because the next state is the row disappearing.
+        // Anything offered here would act on a message the agent already has.
+        null
+      ) : editing ? (
         <>
           <button
             type="button"
