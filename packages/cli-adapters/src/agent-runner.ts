@@ -37,6 +37,7 @@ import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Schedule, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
+import { modeOnApproval, modeToRestore } from "./exec-mode.js"
 import {
   composeTurnPrompt,
   leadsWithCommand,
@@ -147,13 +148,6 @@ export const isContextOverflowFailure = (message: string): boolean =>
   )
 
 
-/** A proposed plan awaiting the operator's decision; the `Deferred` resumes the agent. */
-interface PendingPlan {
-  readonly sessionId: string
-  readonly chatId: string
-  readonly deferred: Deferred.Deferred<PlanDecision>
-}
-
 /** An opaque per-run identity — object identity is the whole point. */
 type RunToken = Record<never, never>
 
@@ -260,7 +254,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     // Per-chat live HITL state, seeded from the Chat record on first use.
     const modes = yield* Ref.make(new Map<string, PermissionMode>())
     // planId → the pending plan (shared across prompt/approve/revise/stop).
-    const plans = yield* Ref.make(new Map<string, PendingPlan>())
     // chatId → the exec mode to restore when a plan is approved (captured on
     // the switch into "plan").
     const priorModes = yield* Ref.make(new Map<string, PermissionMode>())
@@ -333,8 +326,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           const current =
             (yield* Ref.get(modes)).get(chatId) ??
             (yield* getSessionOrNull(sessionId))?.chats.find((chat) => chat.id === chatId)?.mode
-          const configDefault = (yield* Ref.get(execDefaults)).get(chatId) ?? "accept-edits"
-          const prior: PermissionMode = current && current !== "plan" ? current : configDefault
+          const prior = modeToRestore(current, (yield* Ref.get(execDefaults)).get(chatId))
           yield* Ref.update(priorModes, (m) => new Map(m).set(chatId, prior))
         }
         yield* Ref.update(modes, (m) => new Map(m).set(chatId, mode))
@@ -382,13 +374,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
         yield* approvals.answer(sessionId, chatId, requestId, answers)
       })
 
-    /** Resolve a session's pending plan `Deferred` (guards session ownership). */
+    /** Resolve a session's pending plan (guards session ownership). */
     const resolvePlan = (sessionId: string, planId: string, decision: PlanDecision) =>
-      Effect.gen(function* () {
-        const entry = (yield* Ref.get(plans)).get(planId)
-        if (entry === undefined || entry.sessionId !== sessionId) return
-        yield* Deferred.succeed(entry.deferred, decision)
-      })
+      approvals.settlePlan(sessionId, planId, decision)
 
     /**
      * A pending plan (by id) and its live run, gated on session ownership — the
@@ -397,7 +385,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
      */
     const pendingPlanRun = (sessionId: string, planId: string) =>
       Effect.gen(function* () {
-        const pending = (yield* Ref.get(plans)).get(planId)
+        const pending = yield* approvals.pendingPlan(planId)
         const run =
           pending?.sessionId === sessionId
             ? (yield* Ref.get(active)).get(pending.chatId)
@@ -442,19 +430,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
       Effect.gen(function* () {
         const { pending, run } = yield* pendingPlanRun(sessionId, planId)
         if (run !== undefined) yield* run.applyPlan(planId, (p) => ({ ...p, status: "approved" }))
-        // Engage the mode they were actually running this session in before
-        // planning (`priorModes`, e.g. "auto") — that's their real intent for this
-        // session. Fall back to their CLI-config default only when there's no prior
-        // (e.g. a session started directly in plan mode), then a safe default.
-        // NOTE: `priorModes` MUST win over `execDefaults` — the latter is derived
-        // from the harness config file and is "accept-edits" for anyone who hasn't
-        // set a config default, which would silently override the "auto" (or other
-        // mode) the operator picked in the composer, re-gating every command.
-        const mode =
-          executionMode ??
-          (pending ? (yield* Ref.get(priorModes)).get(pending.chatId) : undefined) ??
-          (pending ? (yield* Ref.get(execDefaults)).get(pending.chatId) : undefined) ??
-          "accept-edits"
+        // Precedence lives in `exec-mode.ts`, where the reason `prior` must beat
+        // `configDefault` is stated once — getting that pair the wrong way round
+        // re-gates every command of the execution just approved.
+        const mode = modeOnApproval({
+          explicit: executionMode,
+          prior: pending ? (yield* Ref.get(priorModes)).get(pending.chatId) : undefined,
+          configDefault: pending ? (yield* Ref.get(execDefaults)).get(pending.chatId) : undefined
+        })
         // Restore the exec mode live (canUseTool re-reads it) and persist it.
         if (pending) yield* setMode(sessionId, pending.chatId, mode)
         yield* resolvePlan(sessionId, planId, PlanDecision.Approve({ mode }))
@@ -542,15 +525,18 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
         const chatId = requestedChatId ?? sessionId
         // A stopped agent must not stay parked: gates deny, questions answer empty.
         yield* approvals.releaseChat(sessionId, chatId)
-        const allPlans = yield* Ref.get(plans)
+        // Plans reject, and the rejection is marked on the live turn first so the
+        // transcript says what happened. The registry answers WHICH plans; marking
+        // them stays here, where the run's accumulator lives.
         const run = (yield* Ref.get(active)).get(chatId)
         yield* Effect.forEach(
-          [...allPlans.entries()].filter(
-            ([, p]) => p.sessionId === sessionId && p.chatId === chatId
-          ),
-          ([planId, p]) =>
-            (run ? run.applyPlan(planId, (pl) => ({ ...pl, status: "rejected" })) : Effect.void).pipe(
-              Effect.zipRight(Deferred.succeed(p.deferred, PlanDecision.Reject()))
+          yield* approvals.pendingPlanIds(sessionId, chatId),
+          (planId) =>
+            (run
+              ? run.applyPlan(planId, (pl) => ({ ...pl, status: "rejected" }))
+              : Effect.void
+            ).pipe(
+              Effect.zipRight(approvals.settlePlan(sessionId, planId, PlanDecision.Reject()))
             ),
           { discard: true }
         )
@@ -1196,32 +1182,26 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
 
           const proposePlan = (plan: Plan): Effect.Effect<PlanDecision> =>
             Effect.gen(function* () {
-              const deferred = yield* Deferred.make<PlanDecision>()
-              yield* Ref.update(plans, (m) =>
-                new Map(m).set(plan.id, { sessionId, chatId, deferred })
+              // Announced (and persisted) only once the plan can be answered — see
+              // `awaitPlan`. Persisting to the library lets a later turn or session
+              // pick the plan back up; best-effort, so a write failure never blocks
+              // plan review.
+              return yield* approvals.awaitPlan(
+                sessionId,
+                chatId,
+                plan.id,
+                Effect.gen(function* () {
+                  yield* emit({ _tag: "PlanProposed", plan })
+                  if (worktreePath.length === 0) return
+                  yield* PlanStore.write(worktreePath, plan).pipe(Effect.provide(env), Effect.ignore)
+                  if (plan.structured !== false) {
+                    yield* PlanStore.promote(sessionId, worktreePath, chatId, plan).pipe(
+                      Effect.provide(env),
+                      Effect.ignore
+                    )
+                  }
+                })
               )
-              yield* emit({ _tag: "PlanProposed", plan })
-              // Persist the plan to the session's plan library so a later turn or
-              // session can pick it back up — the next run points the agent at it.
-              // Best-effort: a write failure never blocks plan review.
-              if (worktreePath.length > 0) {
-                yield* PlanStore.write(worktreePath, plan).pipe(Effect.provide(env), Effect.ignore)
-                if (plan.structured !== false) {
-                  yield* PlanStore.promote(
-                    sessionId,
-                    worktreePath,
-                    chatId,
-                    plan
-                  ).pipe(Effect.provide(env), Effect.ignore)
-                }
-              }
-              const decision = yield* Deferred.await(deferred)
-              yield* Ref.update(plans, (m) => {
-                const nextMap = new Map(m)
-                nextMap.delete(plan.id)
-                return nextMap
-              })
-              return decision
             })
 
           // Publish live handles so comment/revise/approve can reach this run;
