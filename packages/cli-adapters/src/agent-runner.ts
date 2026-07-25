@@ -1577,10 +1577,33 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               // chats reserve distinct owners and are always admitted.
               const admitted = yield* reserveSessionRun(sessionId, chatId)
               if (!admitted) {
-                return Stream.fromIterable<StreamEvent>([{
-                  _tag: "Failed",
-                  message: "This chat is already running. Wait for it to finish or stop it before sending again."
-                }])
+                // A refusal is only legitimate while a run is actually live.
+                // The reservation is released by a finalizer on the STREAM's
+                // scope, and a renderer that abandons the stream without
+                // interrupting it — a window reload, an HMR full reload, a
+                // renderer crash — never closes that scope. The main process
+                // (and this module-level map) outlives the renderer, so the
+                // chat is refused forever, and the operator has no stop button
+                // to press because their reloaded renderer shows the chat idle.
+                //
+                // `fibers` is the authoritative record of a live run, and it is
+                // written under this same chat lock immediately after the
+                // reservation (and cleared in the run's `ensuring`), so
+                // "reserved but no live fiber" is not a race — it is proof the
+                // reservation outlived its run. Reclaim it rather than making
+                // the operator restart the app.
+                const running = (yield* Ref.get(fibers)).get(chatId)
+                const stale =
+                  running === undefined ||
+                  Option.isSome(yield* Fiber.poll(running.fiber))
+                if (!stale) {
+                  return Stream.fromIterable<StreamEvent>([{
+                    _tag: "Failed",
+                    message: "This chat is already running. Wait for it to finish or stop it before sending again."
+                  }])
+                }
+                yield* releaseSessionRun(sessionId, chatId)
+                yield* reserveSessionRun(sessionId, chatId)
               }
               yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, chatId))
               return yield* promptSetup(
