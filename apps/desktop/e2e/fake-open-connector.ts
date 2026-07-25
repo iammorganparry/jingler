@@ -102,6 +102,34 @@ const DEFAULT_PROVIDERS: ReadonlyArray<FakeProvider> = [
     categories: [{ id: "Data", displayName: "Data" }],
     authTypes: ["no_auth"],
     auth: [{ type: "no_auth" }]
+  },
+  // Two ALTERNATIVE credential forms, each wanting its own `baseUrl` — the real
+  // Elasticsearch shape. Merged into one form it demanded every field of both and
+  // submitted under a single authType, which the instance rejects
+  // (`Unexpected credential field: apiKey.`).
+  {
+    service: "elasticsearch",
+    displayName: "Elasticsearch",
+    iconUrl: null,
+    homepageUrl: "https://www.elastic.co",
+    categories: [{ id: "Data", displayName: "Data" }],
+    authTypes: ["api_key", "custom_credential"],
+    auth: [
+      {
+        type: "api_key",
+        label: "Encoded API Key",
+        placeholder: "base64-encoded-id-and-api-key",
+        extraFields: [{ name: "baseUrl", label: "Elasticsearch URL", required: true }]
+      },
+      {
+        type: "custom_credential",
+        fields: [
+          { name: "baseUrl", label: "Elasticsearch URL", required: true },
+          { name: "username", label: "Username", required: true },
+          { name: "password", label: "Password", required: true }
+        ]
+      }
+    ]
   }
 ]
 

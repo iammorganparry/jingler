@@ -1,5 +1,6 @@
 import type {
   ConnectorAuthField,
+  ConnectorAuthMode,
   ConnectorAuthType,
   ConnectorConnection,
   ConnectorProvider,
@@ -67,6 +68,15 @@ const keyAuthTypeOf = (
     : authTypes.includes("api_key")
       ? "api_key"
       : null
+
+/**
+ * A mode's tab label. The catalog's own name ("Encoded API Key", "Webhook Key")
+ * only earns the tab when there is another key mode to tell it apart from —
+ * with one, the generic "API key" reads better and the descriptor's label is
+ * already the field's label directly below.
+ */
+const keyModeLabel = (mode: ConnectorAuthMode, total: number): string =>
+  total > 1 ? (mode.label ?? AUTH_LABEL[mode.type]) : AUTH_LABEL[mode.type]
 
 export interface ConnectorDetailProps {
   /** The catalog entry whose card was opened; null closes the dialog. */
@@ -170,9 +180,32 @@ function DetailBody({
   const supportsOauth = authTypes.includes("oauth2")
   const keyAuthType = keyAuthTypeOf(authTypes)
   const noAuth = authTypes.includes("no_auth") && keyAuthType === null && !supportsOauth
-  const bothModes = supportsOauth && keyAuthType !== null
 
-  const [mode, setMode] = React.useState<"oauth" | "key">(supportsOauth ? "oauth" : "key")
+  /**
+   * The credential forms on offer. Until `detail` lands we only know the auth
+   * TYPES from the catalog list entry, so stand in a single generic form — the
+   * same preview the header shows, replaced the moment the real descriptors
+   * arrive.
+   */
+  const keyModes: ReadonlyArray<ConnectorAuthMode> =
+    detail && detail.keyModes.length > 0
+      ? detail.keyModes
+      : keyAuthType
+        ? [{ type: keyAuthType, label: null, description: null, fields: [FALLBACK_FIELD] }]
+        : []
+
+  /** One tab per way to connect: OAuth, then each credential form. */
+  const tabs = [
+    ...(supportsOauth ? [{ id: "oauth", label: AUTH_LABEL.oauth2 }] : []),
+    ...keyModes.map((m, i) => ({ id: `key:${i}`, label: keyModeLabel(m, keyModes.length) }))
+  ]
+  const [selected, setSelected] = React.useState(tabs[0]?.id ?? "oauth")
+  // The tab set can change under us when `detail` resolves (a second key mode
+  // appears), so never trust the stored id blindly.
+  const activeId = tabs.some((t) => t.id === selected) ? selected : (tabs[0]?.id ?? "oauth")
+  const activeKeyMode = activeId.startsWith("key:")
+    ? keyModes[Number(activeId.slice(4))]
+    : undefined
   /**
    * Blank once a connection exists, pre-filled "default" when none does.
    *
@@ -189,20 +222,19 @@ function DetailBody({
   const [clientId, setClientId] = React.useState("")
   const [clientSecret, setClientSecret] = React.useState("")
 
-  const fields =
-    detail && detail.fields.length > 0 ? detail.fields : keyAuthType ? [FALLBACK_FIELD] : []
+  const fields = activeKeyMode?.fields ?? []
 
   /**
-   * Only the fields actually on screen, and only the ones with a typed value.
+   * Only the fields of the SELECTED mode, and only the ones with a typed value.
    *
-   * `values` outlives the field set it was typed into. While `detail` loads, a
-   * key-bearing provider renders the generic `apiKey` fallback — editable, since
-   * only the Connect BUTTON is disabled during the fetch — and when the real
-   * descriptors land (`host` + `password` for a custom_credential provider) that
-   * stale `apiKey` entry is still in state. OpenConnector declares
-   * `additionalProperties: false` and rejects unknown credential keys, so sending
-   * it turns a correctly-filled form into a 400 with nothing on screen to explain
-   * it.
+   * `values` outlives the field set it was typed into — twice over. While
+   * `detail` loads, a key-bearing provider renders the generic `apiKey` fallback
+   * (editable, since only the Connect BUTTON is disabled during the fetch), and
+   * when the real descriptors land that stale entry is still in state. Switching
+   * between two credential modes does the same thing. OpenConnector rejects any
+   * field the chosen `authType` does not declare — `Unexpected credential field:
+   * apiKey.` — so either would turn a correctly-filled form into a 400 with
+   * nothing on screen to explain it.
    *
    * Filtering on `!== undefined` rather than mapping every field keeps the
    * existing shape: an optional field the operator never touched stays absent
@@ -339,19 +371,18 @@ function DetailBody({
               </Callout>
             ) : null}
 
-            {bothModes ? (
+            {/* Only worth a control when there is a choice — most providers
+                offer exactly one way in. */}
+            {tabs.length > 1 ? (
               <SegmentedControl
                 className="self-start"
-                value={mode}
-                onChange={setMode}
-                items={[
-                  { value: "oauth", label: "OAuth" },
-                  { value: "key", label: AUTH_LABEL[keyAuthType] }
-                ]}
+                value={activeId}
+                onChange={setSelected}
+                items={tabs.map((t) => ({ value: t.id, label: t.label }))}
               />
             ) : null}
 
-            {supportsOauth && (mode === "oauth" || !bothModes) ? (
+            {supportsOauth && activeId === "oauth" ? (
               needsClient ? (
                 <div className="flex flex-col gap-2 rounded-md border border-line bg-sunken p-2.5">
                   <span className="text-[11px] text-dim">
@@ -393,10 +424,12 @@ function DetailBody({
               )
             ) : null}
 
-            {keyAuthType && (mode === "key" || !bothModes) ? (
+            {activeKeyMode ? (
               <div className="flex flex-col gap-2">
-                {detail?.description ? (
-                  <p className="text-[11px] leading-relaxed text-dim">{detail.description}</p>
+                {activeKeyMode.description ? (
+                  <p className="text-[11px] leading-relaxed text-dim">
+                    {activeKeyMode.description}
+                  </p>
                 ) : null}
                 {fields.map((f) => (
                   <label key={f.name} className="flex flex-col gap-1">
@@ -419,7 +452,10 @@ function DetailBody({
                     fields.some((f) => f.required && (values[f.name] ?? "").length === 0)
                   }
                   onClick={async () => {
-                    await onConnect(provider.id, keyAuthType, submitValues, namedAlias)
+                    // The SELECTED mode's type, not the provider's — a provider
+                    // offering both sends each form under its own authType, and
+                    // the instance rejects a field the other one declares.
+                    await onConnect(provider.id, activeKeyMode.type, submitValues, namedAlias)
                     onClose()
                   }}
                 >

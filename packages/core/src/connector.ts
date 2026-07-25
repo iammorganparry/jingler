@@ -79,6 +79,32 @@ export const ConnectorProvider = Schema.Struct({
 export type ConnectorProvider = Schema.Schema.Type<typeof ConnectorProvider>
 
 /**
+ * ONE way to connect with a stored credential — a single form.
+ *
+ * A provider can offer several, and they are ALTERNATIVES, not parts of one
+ * form: Elasticsearch takes either an encoded API key or a username/password
+ * pair, each alongside its own `baseUrl`. Flattening them together produced a
+ * form demanding both, submitted under one `authType` — and the instance
+ * rejects a field the chosen type never declared
+ * (`Unexpected credential field: apiKey.`), so those providers could not be
+ * connected at all.
+ */
+export const ConnectorAuthMode = Schema.Struct({
+  /** The `authType` this mode's connect PUT must declare. */
+  type: Schema.Literal("api_key", "custom_credential"),
+  /**
+   * The catalog's own name for this mode ("Encoded API Key", "Webhook Key"),
+   * or null. Used to tell two modes apart when a provider offers both.
+   */
+  label: Schema.NullOr(Schema.String),
+  /** Prose from the catalog on where to create the credential, or null. */
+  description: Schema.NullOr(Schema.String),
+  /** The inputs this mode collects. Names are unique within a mode. */
+  fields: Schema.Array(ConnectorAuthField)
+})
+export type ConnectorAuthMode = Schema.Schema.Type<typeof ConnectorAuthMode>
+
+/**
  * One provider's detail (`GET /api/providers/{service}`), fetched only when its
  * card is opened. This is where the connect form gets its REAL shape — Linear's
  * `lin_api_…` placeholder, Notion's "Internal Integration Secret" label, a
@@ -94,14 +120,16 @@ export const ConnectorProviderDetail = Schema.Struct({
   categories: Schema.Array(Schema.String),
   homepageUrl: Schema.NullOr(Schema.String),
   authTypes: Schema.Array(ConnectorAuthType),
-  /** Fields the api-key / custom-credential form must collect. */
-  fields: Schema.Array(ConnectorAuthField),
+  /**
+   * The credential forms this provider offers, one per mode. Usually one; a few
+   * providers offer a choice, and the UI must present them as a choice rather
+   * than merging them.
+   */
+  keyModes: Schema.Array(ConnectorAuthMode),
   /** Scopes the OAuth grant will request, for the "Scopes" readout. */
   oauthScopes: Schema.Array(Schema.String),
   /** How many Actions the provider exposes. Null if the catalog omits them. */
-  actionCount: Schema.NullOr(Schema.Number),
-  /** Prose from the catalog's auth descriptor (where to create the key), or null. */
-  description: Schema.NullOr(Schema.String)
+  actionCount: Schema.NullOr(Schema.Number)
 })
 export type ConnectorProviderDetail = Schema.Schema.Type<typeof ConnectorProviderDetail>
 

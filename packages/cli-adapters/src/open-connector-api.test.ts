@@ -163,8 +163,21 @@ describe("OpenConnectorApi", () => {
     const exit = await configured(() => OpenConnectorApi.getProvider("linear"), fetchMock)
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value.fields).toEqual([
-      { name: "apiKey", label: "Personal API Key", kind: "password", required: true, placeholder: "lin_api_..." }
+    expect(exit.value.keyModes).toEqual([
+      {
+        type: "api_key",
+        label: "Personal API Key",
+        description: "Create it from Settings > Account > Security & Access.",
+        fields: [
+          {
+            name: "apiKey",
+            label: "Personal API Key",
+            kind: "password",
+            required: true,
+            placeholder: "lin_api_..."
+          }
+        ]
+      }
     ])
     // The oauth2 descriptor's scopes must NOT leak into the key form — they are
     // client config, collected separately.
@@ -173,6 +186,91 @@ describe("OpenConnectorApi", () => {
     const [url] = fetchMock.mock.calls[0] as unknown as [string]
     // Never `/api/providers` — the list form of this endpoint is ~5 MB.
     expect(url).toBe("https://oc.test/api/providers/linear")
+  })
+
+  /**
+   * Elasticsearch's real descriptors, captured from the live instance. Two key
+   * modes that are ALTERNATIVES — an encoded API key, or a username/password
+   * pair — each wanting its own `baseUrl`.
+   *
+   * Flattened into one form they produced `baseUrl` twice (duplicate React keys,
+   * two inputs sharing one state entry), demanded every field of both
+   * alternatives, and submitted under a single `authType`. Verified against the
+   * instance: `PUT {"authType":"custom_credential","values":{"apiKey":…}}`
+   * answers `Unexpected credential field: apiKey.`, so this provider could not
+   * be connected at all.
+   */
+  it("keeps a provider's alternative credential modes apart", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            service: "elasticsearch",
+            displayName: "Elasticsearch",
+            authTypes: ["api_key", "custom_credential"],
+            auth: [
+              {
+                type: "api_key",
+                label: "Encoded API Key",
+                placeholder: "base64-encoded-id-and-api-key",
+                extraFields: [{ name: "baseUrl", label: "Elasticsearch URL", required: true }]
+              },
+              {
+                type: "custom_credential",
+                fields: [
+                  { name: "baseUrl", label: "Elasticsearch URL", required: true },
+                  { name: "username", label: "Username", required: true },
+                  { name: "password", label: "Password", required: true }
+                ]
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const exit = await configured(() => OpenConnectorApi.getProvider("elasticsearch"), fetchMock)
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+
+    const [byKey, byPassword] = exit.value.keyModes
+    expect(exit.value.keyModes).toHaveLength(2)
+    // Each mode carries only its own fields, and `baseUrl` appears once in each.
+    expect(byKey?.type).toBe("api_key")
+    expect(byKey?.fields.map((f) => f.name)).toEqual(["apiKey", "baseUrl"])
+    expect(byPassword?.type).toBe("custom_credential")
+    expect(byPassword?.fields.map((f) => f.name)).toEqual(["baseUrl", "username", "password"])
+    // The api_key mode has no `username`; the credential mode has no `apiKey`.
+    expect(byKey?.fields.some((f) => f.name === "username")).toBe(false)
+    expect(byPassword?.fields.some((f) => f.name === "apiKey")).toBe(false)
+  })
+
+  /** A descriptor declaring its own `apiKey` must not collide with the synthesised one. */
+  it("de-duplicates field names within a single mode", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            service: "odd",
+            authTypes: ["api_key"],
+            auth: [
+              {
+                type: "api_key",
+                label: "Token",
+                fields: [{ name: "apiKey", label: "Token (again)", required: true }]
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const exit = await configured(() => OpenConnectorApi.getProvider("odd"), fetchMock)
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.keyModes[0]?.fields.map((f) => f.name)).toEqual(["apiKey"])
+    // First occurrence wins: the descriptor-level label is the one shown.
+    expect(exit.value.keyModes[0]?.fields[0]?.label).toBe("Token")
   })
 
   /**

@@ -78,6 +78,18 @@ test("browse, connect, and disconnect a provider through the Connector Center", 
     await app.window.keyboard.press("Escape")
     await expect(virtualSheet).toHaveCount(0)
 
+    // A provider offering two ALTERNATIVE credential forms gets a tab each, and
+    // each shows only its own fields. Merged, the form asked for all of them.
+    await catalog.getByRole("button", { name: "Elasticsearch" }).click()
+    const elastic = app.window.getByRole("dialog")
+    await expect(elastic.getByRole("tab", { name: "Encoded API Key" })).toBeVisible()
+    await expect(elastic.getByPlaceholder("Username")).toHaveCount(0)
+    await elastic.getByRole("tab", { name: "Credentials" }).click()
+    await expect(elastic.getByPlaceholder("Username")).toBeVisible()
+    await expect(elastic.getByPlaceholder("base64-encoded-id-and-api-key")).toHaveCount(0)
+    await app.window.keyboard.press("Escape")
+    await expect(elastic).toHaveCount(0)
+
     // Search filters.
     await app.window.getByLabel("Search providers").fill("git")
     await expect(catalog.getByRole("button", { name: "Slack" })).toHaveCount(0)

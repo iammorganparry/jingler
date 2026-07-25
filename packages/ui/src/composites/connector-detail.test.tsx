@@ -34,7 +34,12 @@ const detail = (over: Partial<ConnectorProviderDetail> = {}): ConnectorProviderD
   categories: ["Productivity"],
   homepageUrl: "https://linear.app",
   authTypes: ["oauth2", "api_key"],
-  fields: [
+  keyModes: [
+    {
+      type: "api_key",
+      label: null,
+      description: null,
+      fields: [
     {
       name: "apiKey",
       label: "Personal API Key",
@@ -42,10 +47,11 @@ const detail = (over: Partial<ConnectorProviderDetail> = {}): ConnectorProviderD
       required: true,
       placeholder: "lin_api_..."
     }
+  ]
+    }
   ],
   oauthScopes: ["read", "write", "issues:create"],
   actionCount: 34,
-  description: null,
   ...over
 })
 
@@ -62,6 +68,43 @@ const base = () => ({
   onSetOauthConfig: vi.fn(async () => {}),
   onStartOauth: vi.fn(async () => {})
 })
+
+/**
+ * Elasticsearch's real shape: two ALTERNATIVE credential forms, each wanting its
+ * own `baseUrl`. Captured from the live instance.
+ */
+const ELASTIC = {
+  id: "elasticsearch",
+  name: "Elasticsearch",
+  authTypes: ["api_key" as const, "custom_credential" as const]
+}
+
+const elasticDetail = (): ConnectorProviderDetail =>
+  detail({
+    ...ELASTIC,
+    oauthScopes: [],
+    keyModes: [
+      {
+        type: "api_key",
+        label: "Encoded API Key",
+        description: null,
+        fields: [
+          { name: "apiKey", label: "Encoded API Key", kind: "password", required: true },
+          { name: "baseUrl", label: "Elasticsearch URL", kind: "text", required: true }
+        ]
+      },
+      {
+        type: "custom_credential",
+        label: null,
+        description: null,
+        fields: [
+          { name: "baseUrl", label: "Elasticsearch URL", kind: "text", required: true },
+          { name: "username", label: "Username", kind: "text", required: true },
+          { name: "password", label: "Password", kind: "password", required: true }
+        ]
+      }
+    ]
+  })
 
 describe("ConnectorDetail", () => {
   it("defaults a dual-auth provider to OAuth and keeps the key form one click away", async () => {
@@ -89,7 +132,7 @@ describe("ConnectorDetail", () => {
       <ConnectorDetail
         {...base()}
         provider={card({ id: "slack", name: "Slack", authTypes: ["oauth2"] })}
-        detail={detail({ id: "slack", name: "Slack", authTypes: ["oauth2"], fields: [] })}
+        detail={detail({ id: "slack", name: "Slack", authTypes: ["oauth2"], keyModes: [] })}
       />
     )
     expect(screen.getByRole("button", { name: "Connect with OAuth" })).toBeTruthy()
@@ -107,8 +150,15 @@ describe("ConnectorDetail", () => {
           name: "GitHub",
           authTypes: ["api_key"],
           oauthScopes: [],
-          fields: [
+          keyModes: [
+            {
+              type: "api_key",
+              label: null,
+              description: null,
+              fields: [
             { name: "apiKey", label: "Personal access token", kind: "password", required: true }
+          ]
+            }
           ]
         })}
       />
@@ -126,7 +176,7 @@ describe("ConnectorDetail", () => {
           id: "hackernews",
           name: "Hacker News",
           authTypes: ["no_auth"],
-          fields: [],
+          keyModes: [],
           oauthScopes: []
         })}
       />
@@ -243,8 +293,15 @@ describe("ConnectorDetail", () => {
         detail={detail({
           ...github,
           oauthScopes: [],
-          fields: [
+          keyModes: [
+            {
+              type: "api_key",
+              label: null,
+              description: null,
+              fields: [
             { name: "apiKey", label: "Personal access token", kind: "password", required: true }
+          ]
+            }
           ]
         })}
       />
@@ -282,9 +339,16 @@ describe("ConnectorDetail", () => {
         detail={detail({
           ...postgres,
           oauthScopes: [],
-          fields: [
+          keyModes: [
+            {
+              type: "custom_credential",
+              label: null,
+              description: null,
+              fields: [
             { name: "host", label: "Host", kind: "text", required: true, placeholder: "localhost" },
             { name: "password", label: "Password", kind: "password", required: true }
+          ]
+            }
           ]
         })}
       />
@@ -321,7 +385,7 @@ describe("ConnectorDetail", () => {
           id: "hackernews",
           name: "Hacker News",
           authTypes: ["no_auth"],
-          fields: [],
+          keyModes: [],
           oauthScopes: []
         })}
         connections={[
@@ -423,6 +487,67 @@ describe("ConnectorDetail", () => {
         )
       )
     })
+  })
+
+  /**
+   * Elasticsearch offers two ALTERNATIVE credential forms. Merged into one they
+   * demanded every field of both and submitted under a single `authType` — and
+   * the instance rejects a field the chosen type never declared
+   * (`Unexpected credential field: apiKey.`), so the provider was unconnectable.
+   */
+  it("submits each credential mode under its own authType", async () => {
+    const props = base()
+    render(<ConnectorDetail {...props} provider={card(ELASTIC)} detail={elasticDetail()} />)
+
+    // Two tabs, named by the catalog's own labels so they can be told apart.
+    expect(screen.getByRole("tab", { name: "Encoded API Key" })).toBeTruthy()
+    expect(screen.getByRole("tab", { name: "Credentials" })).toBeTruthy()
+
+    // The key mode shows only its own fields — no username/password.
+    expect(screen.queryByPlaceholderText("Username")).toBeNull()
+    fireEvent.change(screen.getByPlaceholderText("Encoded API Key"), { target: { value: "enc" } })
+    fireEvent.change(screen.getByPlaceholderText("Elasticsearch URL"), {
+      target: { value: "https://es.internal" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    await waitFor(() =>
+      expect(props.onConnect).toHaveBeenCalledWith(
+        "elasticsearch",
+        "api_key",
+        { apiKey: "enc", baseUrl: "https://es.internal" },
+        undefined
+      )
+    )
+
+  })
+
+  it("carries no field of the other mode when the operator switches", async () => {
+    const props = base()
+    render(<ConnectorDetail {...props} provider={card(ELASTIC)} detail={elasticDetail()} />)
+
+    // Fill the key mode first, then change your mind.
+    fireEvent.change(screen.getByPlaceholderText("Encoded API Key"), { target: { value: "enc" } })
+    fireEvent.click(screen.getByRole("tab", { name: "Credentials" }))
+
+    // The other mode's field is gone from the form...
+    expect(screen.queryByPlaceholderText("Encoded API Key")).toBeNull()
+    fireEvent.change(screen.getByPlaceholderText("Elasticsearch URL"), {
+      target: { value: "https://es.internal" }
+    })
+    fireEvent.change(screen.getByPlaceholderText("Username"), { target: { value: "elastic" } })
+    fireEvent.change(screen.getByPlaceholderText("Password"), { target: { value: "pw" } })
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+
+    // ...and out of the payload. `apiKey` is not a custom_credential field, and
+    // the instance rejects the whole request for one.
+    await waitFor(() =>
+      expect(props.onConnect).toHaveBeenCalledWith(
+        "elasticsearch",
+        "custom_credential",
+        { baseUrl: "https://es.internal", username: "elastic", password: "pw" },
+        undefined
+      )
+    )
   })
 
   it("renders nothing when no provider is open", () => {

@@ -82,7 +82,12 @@ const githubDetail: ConnectorProviderDetail = {
   categories: ["Developer Tools"],
   homepageUrl: "https://github.com/",
   authTypes: ["api_key"],
-  fields: [
+  keyModes: [
+    {
+      type: "api_key",
+      label: null,
+      description: null,
+      fields: [
     {
       name: "apiKey",
       label: "Personal access token",
@@ -90,10 +95,11 @@ const githubDetail: ConnectorProviderDetail = {
       required: true,
       placeholder: "ghp_..."
     }
+  ]
+    }
   ],
   oauthScopes: [],
-  actionCount: 42,
-  description: null
+  actionCount: 42
 }
 
 const base = () => ({

@@ -1,4 +1,5 @@
 import type {
+  ConnectorAuthMode,
   ConnectorActionResult,
   ConnectorAuthField,
   ConnectorAuthType,
@@ -129,6 +130,53 @@ const mapProvider = (raw: unknown): ConnectorProvider | undefined => {
 }
 
 /**
+ * One credential form, from one `auth[]` descriptor.
+ *
+ * Each key-bearing descriptor is a SEPARATE way to connect, not a slice of one
+ * combined form. Elasticsearch offers an encoded API key or a username/password
+ * pair, each wanting its own `baseUrl`; merging them yielded a form that
+ * demanded both alternatives, carried `baseUrl` twice, and submitted under a
+ * single `authType`. The instance rejects a field the chosen type does not
+ * declare — verified live: `PUT {"authType":"custom_credential","values":
+ * {"apiKey":…}}` answers `Unexpected credential field: apiKey.` — so those
+ * providers were unconnectable.
+ *
+ * Shape of a descriptor: an api_key one is usually a single labelled secret
+ * (`label`/`placeholder` at the descriptor level, submitted under `apiKey`) plus
+ * optional `extraFields`; a custom_credential one carries a `fields` array
+ * instead. Names are de-duplicated within the mode, first occurrence winning,
+ * so a descriptor that declares its own `apiKey` field cannot collide with the
+ * synthesised one.
+ */
+const mapKeyMode = (raw: unknown): ConnectorAuthMode | undefined => {
+  if (!isRecord(raw)) return undefined
+  const type =
+    raw.type === "custom_credential" ? "custom_credential" : raw.type === "api_key" ? "api_key" : undefined
+  if (type === undefined) return undefined
+  const label = str(raw.label)
+  const leading: ReadonlyArray<ConnectorAuthField> =
+    label === undefined
+      ? []
+      : [
+          {
+            name: "apiKey",
+            label,
+            kind: "password",
+            required: true,
+            ...(str(raw.placeholder) !== undefined ? { placeholder: str(raw.placeholder) } : {})
+          }
+        ]
+  const seen = new Set<string>()
+  const fields: Array<ConnectorAuthField> = []
+  for (const f of [...leading, ...mapFields(raw.fields), ...mapFields(raw.extraFields)]) {
+    if (seen.has(f.name)) continue
+    seen.add(f.name)
+    fields.push(f)
+  }
+  return { type, label: label ?? null, description: str(raw.description) ?? null, fields }
+}
+
+/**
  * One provider's full descriptor (`GET /api/providers/{service}`).
  *
  * Only api-key / custom-credential descriptors contribute to the connect FORM.
@@ -142,41 +190,21 @@ const mapProviderDetail = (raw: unknown): ConnectorProviderDetail | undefined =>
   const id = str(raw.id) ?? str(raw.service) ?? str(raw.slug)
   if (id === undefined) return undefined
   const authEntries = arr(raw.auth)
-  const keyEntries = authEntries.filter(
-    (a): a is Record<string, unknown> => isRecord(a) && a.type !== "oauth2" && a.type !== "no_auth"
-  )
-  // A key descriptor is usually ONE labelled secret (`label`/`placeholder` at the
-  // descriptor level) plus optional `extraFields`; a custom_credential descriptor
-  // instead carries a `fields` array. Both collapse to the same form.
-  const fields = keyEntries.flatMap((a) => {
-    const declared = [...mapFields(a.fields), ...mapFields(a.extraFields)]
-    const label = str(a.label)
-    if (label === undefined) return declared
-    const named: ConnectorAuthField = {
-      name: "apiKey",
-      label,
-      kind: "password",
-      required: true,
-      ...(str(a.placeholder) !== undefined ? { placeholder: str(a.placeholder) } : {})
-    }
-    return [named, ...declared]
-  })
+  const keyModes = mapArray(authEntries, mapKeyMode)
   const oauthScopes = authEntries.flatMap((a) =>
     isRecord(a) && a.type === "oauth2" ? strArray(a.scopes) : []
   )
-  const description = keyEntries.map((a) => str(a.description)).find((d) => d !== undefined)
   return {
     id,
     name: str(raw.name) ?? str(raw.displayName) ?? id,
     categories: mapCategories(raw.categories),
     homepageUrl: str(raw.homepageUrl) ?? str(raw.homepage) ?? null,
     authTypes: mapAuthTypes(raw),
-    fields,
+    keyModes,
     oauthScopes,
     actionCount: Array.isArray(raw.actions)
       ? raw.actions.length
-      : (num(raw.actionCount) ?? null),
-    description: description ?? str(raw.description) ?? null
+      : (num(raw.actionCount) ?? null)
   }
 }
 
