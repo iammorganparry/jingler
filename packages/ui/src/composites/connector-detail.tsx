@@ -515,12 +515,19 @@ function ConnectionRow({
   connection: ConnectorConnection
   onDisconnect: (service: string, connectionName: string | null) => Promise<void>
 }) {
+  const label = connection.displayName ?? connection.connectionName ?? connection.service
   return (
-    <div className="flex items-center gap-2.5 rounded-lg border border-line bg-sunken px-[11px] py-[9px]">
+    // Named so each row is addressable: a provider can hold several connections,
+    // and their Disconnect buttons are otherwise identical to a screen reader.
+    <div
+      role="group"
+      aria-label={label}
+      className="flex items-center gap-2.5 rounded-lg border border-line bg-sunken px-[11px] py-[9px]"
+    >
       <StatusDot tone={connection.status === "connected" ? "bg-green" : "bg-yellow"} />
       <div className="min-w-0 flex-1">
         <span className="text-[12.5px] font-semibold text-text-bright">
-          {connection.displayName ?? connection.connectionName ?? connection.service}
+          {label}
         </span>
         <div className="truncate font-mono text-[10px] text-dim">
           {connection.connectionName ?? DEFAULT_CONNECTION}

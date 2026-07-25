@@ -119,8 +119,34 @@ test("browse, connect, and disconnect a provider through the Connector Center", 
     // never serialises into the HTML string, so that assertion was vacuous.
     await expect(app.window.getByText(SECRET, { exact: false })).toHaveCount(0)
 
-    // Disconnect.
+    // Add a SECOND account for the same provider. The name field starts blank
+    // here on purpose: reusing "default" would replace the connection above
+    // rather than sit alongside it.
+    await dialog.getByPlaceholder("e.g. work").fill("work")
+    await dialog.getByPlaceholder("ghp_...").fill(`${SECRET}-work`)
+    // `exact` matters: Playwright matches accessible names by substring, so a
+    // plain "Connect" also selects the row's "Disconnect".
+    await dialog.getByRole("button", { name: "Connect", exact: true }).click()
+
+    await expect
+      .poll(() => instance.connections().map((c) => `${c.service}:${c.alias}`).sort())
+      .toEqual(["github:default", "github:work"])
+
+    // Disconnect the NAMED one. It must go by its alias — deleting it as the
+    // default would take the first account with it.
+    await catalog.getByRole("button", { name: "GitHub" }).click()
+    await app.window
+      .getByRole("group", { name: "github work account" })
+      .getByRole("button", { name: "Disconnect" })
+      .click()
+
+    await expect
+      .poll(() => instance.connections().map((c) => `${c.service}:${c.alias}`))
+      .toEqual(["github:default"])
+
+    // Then the default one, addressed by an omitted alias.
     await app.window.getByRole("button", { name: "Disconnect" }).click()
+    await expect.poll(() => instance.connections()).toEqual([])
     await expect(app.window.getByText("github account")).toHaveCount(0)
   } finally {
     await instance.close()
