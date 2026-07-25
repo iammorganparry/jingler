@@ -463,3 +463,52 @@ export const mergeByScope = (
   }
   return [...winner.values()].sort((a, b) => a.server.name.localeCompare(b.server.name))
 }
+
+// ── Unified-MCP injection (write side) ───────────────────────────────────────
+//
+// The INVERSE of the parsers above: given the resolved OpenConnector server
+// (`SessionSpec.openConnector`, a remote `ParsedMcpServer`), render it into each
+// harness's OWN launch vocabulary so every agent loads the same shared server.
+// Claude takes it via the SDK `mcpServers` option (see `claude-adapter.ts`); the
+// two below are the codex + opencode halves. Both are pure so the wiring is
+// unit-tested without spawning a harness.
+
+/**
+ * Codex `-c` config overrides that register the server as a remote MCP for the
+ * app-server spawn: `["-c", 'mcp_servers.<name>.url="…"', "-c", …]`. Empty when
+ * absent or not a remote (http) entry — codex only takes a URL here. Values are
+ * JSON-encoded, which is a valid TOML basic string (same `"`/`\` escapes).
+ */
+export const codexMcpOverrides = (
+  entry: ParsedMcpServer | null | undefined
+): ReadonlyArray<string> => {
+  if (!entry || entry.launch.url === undefined) return []
+  const name = entry.server.name
+  const out = [`mcp_servers.${name}.url=${JSON.stringify(entry.launch.url)}`]
+  for (const [key, value] of Object.entries(entry.launch.headers)) {
+    out.push(`mcp_servers.${name}.http_headers.${key}=${JSON.stringify(value)}`)
+  }
+  return out
+}
+
+/**
+ * The opencode `mcp` config fragment to merge into `OPENCODE_CONFIG_CONTENT`:
+ * `{ mcp: { <name>: { type: "remote", url, enabled, headers? } } }`. Empty when
+ * absent or not a remote entry, so spreading it is a no-op.
+ */
+export const opencodeMcpConfig = (
+  entry: ParsedMcpServer | null | undefined
+): Record<string, unknown> => {
+  if (!entry || entry.launch.url === undefined) return {}
+  const hasHeaders = Object.keys(entry.launch.headers).length > 0
+  return {
+    mcp: {
+      [entry.server.name]: {
+        type: "remote",
+        url: entry.launch.url,
+        enabled: true,
+        ...(hasHeaders ? { headers: entry.launch.headers } : {})
+      }
+    }
+  }
+}

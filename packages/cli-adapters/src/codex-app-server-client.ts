@@ -293,14 +293,24 @@ export interface StartCodexAppServerOptions {
   readonly binPath?: string | null
   readonly env?: NodeJS.ProcessEnv
   readonly diagnostics?: CodexAppServerDiagnostics | null
+  /**
+   * Codex `-c key=value` config overrides, prepended before `app-server` — used to
+   * inject the unified OpenConnector MCP server (see `codexMcpOverrides`). Each
+   * entry becomes a separate `-c <entry>` argv pair. Empty by default.
+   */
+  readonly configOverrides?: ReadonlyArray<string>
 }
 
 /** Spawn and initialize one app-server connection for one Starbase run. */
 export const startCodexAppServer = async (
   options: StartCodexAppServerOptions
 ): Promise<CodexAppServerConnection> => {
+  const args = [
+    ...(options.configOverrides ?? []).flatMap((override) => ["-c", override]),
+    "app-server"
+  ]
   const child = trackChild(
-    spawn(options.binPath || "codex", ["app-server"], {
+    spawn(options.binPath || "codex", args, {
       env: options.env,
       stdio: ["pipe", "pipe", "pipe"]
     })

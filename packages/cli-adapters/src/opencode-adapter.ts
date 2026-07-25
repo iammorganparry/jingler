@@ -9,6 +9,7 @@ import { hasPlanBlock, parsePlan } from "./plan-parse.js"
 import { stopChild, trackChild } from "./child-registry.js"
 import { requireWorktree } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
+import { opencodeMcpConfig } from "./mcp-config.js"
 
 /**
  * Real opencode harness, driven by `@opencode-ai/sdk`'s CLIENT against a server
@@ -736,7 +737,10 @@ const driveOpencode = async (
         // Layers OVER the user's own opencode config rather than replacing it, so
         // their providers/keys/levers survive and we only pin what this run needs.
         OPENCODE_CONFIG_CONTENT: JSON.stringify({
-          permission: mapOpencodePermission(spec.mode, spec.readOnly ?? false)
+          permission: mapOpencodePermission(spec.mode, spec.readOnly ?? false),
+          // Inject the unified OpenConnector server as a remote MCP. Spread, so a
+          // disabled feature adds nothing and the operator's own config still wins.
+          ...opencodeMcpConfig(spec.openConnector)
         })
       },
       stdio: ["ignore", "pipe", "pipe"]

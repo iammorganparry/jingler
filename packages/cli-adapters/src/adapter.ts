@@ -71,10 +71,13 @@ export interface SessionSpec {
    * The unified OpenConnector server to inject into this run, already resolved
    * (config + secret joined) by `AgentRunner`, or absent when the feature is off
    * for this harness. Carries the secret-bearing `launch` half, so it stays inside
-   * the main process — each adapter registers it in its own vocabulary (Claude:
-   * the SDK `mcpServers` option; Codex: a config override; cursor/opencode: the
-   * worktree config file). Resolved in the runner rather than the adapter so the
-   * adapters keep `R = never` and don't each grow a service dependency.
+   * the main process — each adapter registers it in its own vocabulary, none of
+   * which touches the worktree (see `codexMcpOverrides` / `opencodeMcpConfig`):
+   *   - Claude   → the SDK `mcpServers` option;
+   *   - Codex    → `-c mcp_servers.<name>.*` overrides on the app-server spawn;
+   *   - opencode → the `mcp` block baked into `OPENCODE_CONFIG_CONTENT`.
+   * Resolved in the runner rather than the adapter so the adapters keep
+   * `R = never` and don't each grow a service dependency.
    */
   readonly openConnector?: ParsedMcpServer | null
 

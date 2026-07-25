@@ -39,11 +39,14 @@ In the desktop app → **Settings → Unified MCP**:
 2. **Token:** the `OPEN_CONNECTOR_API_TOKEN` — `local-dev-token` with the root compose defaults, or the value from your `.env`
 3. **Enable**, then hit **Test** to confirm the handshake and tool count.
 
-Once enabled, the server is injected into each agent as it launches:
+Once enabled, the server is injected into each agent as it launches — none of these
+touches the worktree:
 
 - **Claude** — inline via the SDK `mcpServers` option (bypasses `.mcp.json` approval).
-- **Codex / Cursor / opencode** — *not yet wired* (see the branch thread / plan step 06);
-  these need their config-format injection verified before shipping.
+- **Codex** — `-c mcp_servers.<name>.*` overrides on the app-server spawn.
+- **opencode** — the `mcp` block baked into `OPENCODE_CONFIG_CONTENT`.
+
+(Cursor is read-only in Settings — Starbase doesn't launch it as a run harness.)
 
 ## Deploying beyond local
 
