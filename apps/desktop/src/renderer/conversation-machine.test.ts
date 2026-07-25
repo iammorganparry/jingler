@@ -410,6 +410,101 @@ describe("conversationMachine — queue while busy", () => {
     actor.stop()
   })
 
+  it("EDIT_QUEUED rewrites a queued message in place, keeping its position", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "a" })
+    actor.send({ type: "SEND", text: "b" })
+    actor.send({ type: "EDIT_QUEUED", index: 0, text: "a, but properly" })
+
+    // Position is load-bearing: every row is addressed by index, so an edit that
+    // reordered the queue would make the NEXT click hit a different message.
+    expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["a, but properly", "b"])
+    actor.stop()
+  })
+
+  it("EDIT_QUEUED to nothing drops the message rather than queueing a blank turn", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "never mind" })
+    actor.send({ type: "EDIT_QUEUED", index: 0, text: "   " })
+    expect(actor.getSnapshot().context.queued).toEqual([])
+    actor.stop()
+  })
+
+  /**
+   * The queue's automatic flush. Holding a message until the whole turn settled
+   * meant a correction typed 10 seconds in was answered minutes later, against
+   * the work it was meant to redirect — so the head goes to the live turn at the
+   * first tool boundary, Claude-Code style.
+   */
+  it("hands the head of the queue to the live turn at the next tool boundary", async () => {
+    h.steerStatus = "accepted"
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "also update the README" })
+    // Nothing has happened yet — a queued message must not interrupt mid-tool.
+    expect(h.steerCalls).toEqual([])
+
+    emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 1, { timeout: 3000 })
+
+    expect(h.steerCalls[0]).toMatchObject({ text: "also update the README" })
+    // Steered INTO the turn: no stop, no replay as a second run.
+    expect(h.stopCalls).toEqual([])
+    expect(h.agentRunCalls).toHaveLength(1)
+    expect(actor.getSnapshot().context.queued).toEqual([])
+    actor.stop()
+  })
+
+  it("flushes one message per boundary, never a burst", async () => {
+    h.steerStatus = "accepted"
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "one" })
+    actor.send({ type: "SEND", text: "two" })
+    emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 1, { timeout: 3000 })
+    expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["two"])
+
+    emit({ _tag: "ToolEnd", id: "t2", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 2, { timeout: 3000 })
+    expect(h.steerCalls.map((c) => c.text)).toEqual(["one", "two"])
+    actor.stop()
+  })
+
+  it("an automatic flush the harness cannot take NEVER stops the turn", async () => {
+    // The operator asked for nothing here, so the stop-and-replay fallback that
+    // "Send now" uses would be an unprompted interruption at every tool call.
+    h.steerStatus = "unsupported"
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "later is fine" })
+    emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 1, { timeout: 3000 })
+
+    expect(h.stopCalls).toEqual([])
+    expect(actor.getSnapshot().value).toBe("running")
+    // Still queued, so it runs as the next turn exactly as before.
+    expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["later is fine"])
+    actor.stop()
+  })
+
   it("STOP abandons any queued messages", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))

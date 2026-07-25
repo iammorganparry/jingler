@@ -47,6 +47,7 @@ import {
   settleStreaming,
   STOPPED_NOTE,
   supportsPlanMode,
+  supportsSteer,
   userMessage
 } from "@starbase/core"
 import { assign, fromCallback, fromPromise, setup } from "xstate"
@@ -188,7 +189,13 @@ type ConversationEvent =
   | { type: "SEND"; text: string; images?: ReadonlyArray<Attachment> }
   | { type: "UNQUEUE"; index: number }
   | { type: "SEND_NOW"; index: number }
-  | { type: "STEER_RESULT"; queued: QueuedMessage; result: SteerResult }
+  | { type: "EDIT_QUEUED"; index: number; text: string }
+  /**
+   * A steer came back. `auto` marks the queue's own tool-boundary flush, which
+   * must NEVER fall back to stop-and-replay: the operator did not ask for an
+   * interruption, so an unsupported/failed auto-flush leaves the message queued.
+   */
+  | { type: "STEER_RESULT"; queued: QueuedMessage; result: SteerResult; auto?: boolean }
   | { type: "STREAM_EVENT"; event: StreamEvent }
   | { type: "PATCH_UPDATED"; patch: string }
   | { type: "DECIDE_GATE"; gateId: string; decision: GateDecision }
@@ -411,6 +418,28 @@ export const conversationMachine = setup({
       event.type === "STREAM_EVENT" &&
       (event.event._tag === "Done" || event.event._tag === "Failed"),
     hasQueued: ({ context }) => context.queued.length > 0,
+    /**
+     * Whether this stream event is a tool boundary we may flush the queue into.
+     *
+     * Deliberately narrow. Steering must be NATIVE (`supportsSteer`) — otherwise
+     * the fallback is stop-and-replay, and doing that at every tool call would
+     * shred the turn. Special runs (a plan re-drive, an adversarial round, a plan
+     * EXECUTION) are excluded: their prompt is machine-generated and a queued
+     * operator message injected mid-flight would derail it. And the head must be
+     * aimed at the same harness thread as the running turn, since a Gigaplan
+     * intake message has no business landing in a normal turn.
+     */
+    canAutoFlush: ({ context, event }) => {
+      if (event.type !== "STREAM_EVENT" || event.event._tag !== "ToolEnd") return false
+      if (context.steerPending || context.queued.length === 0) return false
+      if (!supportsSteer(context.cli)) return false
+      if (
+        context.resumePlanId !== null ||
+        context.adversarialBrief !== null ||
+        context.executePlanId !== null
+      ) return false
+      return context.queued[0]?.target === context.agentTarget
+    },
     canPlanAdversarially: ({ context }) => context.planReadiness?.ready === true,
 
     /**
@@ -523,6 +552,22 @@ export const conversationMachine = setup({
       if (event.type !== "UNQUEUE") return {}
       return { queued: context.queued.filter((_, i) => i !== event.index) }
     }),
+    // Rewrite a queued message in place. Nothing has been sent yet, so this is a
+    // pure context edit — the position (and therefore every other row's index)
+    // is deliberately preserved.
+    editQueued: assign(({ context, event }) => {
+      if (event.type !== "EDIT_QUEUED") return {}
+      const picked = context.queued[event.index]
+      if (picked === undefined) return {}
+      const text = event.text.trim()
+      // An emptied message with no images would be sent as a blank turn.
+      if (text.length === 0 && picked.images.length === 0) {
+        return { queued: context.queued.filter((_, i) => i !== event.index) }
+      }
+      return {
+        queued: context.queued.map((item, i) => (i === event.index ? { ...item, text } : item))
+      }
+    }),
     // "Send now": jump a queued message to the head so it runs as the very next
     // turn. Paired with `callStop` in `running`, this interrupts the current turn
     // to steer the agent immediately; the remaining queue keeps its order behind it.
@@ -549,6 +594,39 @@ export const conversationMachine = setup({
           })
         )
       return { queued: [picked, ...rest], steerPending: true }
+    }),
+    /**
+     * Hand the HEAD of the queue to the live turn at a tool boundary — the
+     * Claude-Code feel the queue was missing.
+     *
+     * The queue used to sit untouched until the whole turn (and its diff refresh)
+     * had settled, so a one-line correction typed 10 seconds in was answered
+     * minutes later, against work it was meant to redirect. Flushing on `ToolEnd`
+     * puts it in front of the agent at the first natural break instead, and the
+     * harness decides when to act on it.
+     *
+     * Guarded by `canAutoFlush`: only where steering is NATIVE, only on ordinary
+     * turns, and only one in flight at a time — an auto-flush that fell back to
+     * stop-and-replay would interrupt the turn at every tool call.
+     */
+    autoFlushQueue: assign(({ context, self }) => {
+      const picked = context.queued[0]
+      if (picked === undefined) return {}
+      void rpc
+        .agentSteer(context.session.id, context.chatId, picked.text, picked.images)
+        .then((result) => self.send({ type: "STEER_RESULT", queued: picked, result, auto: true }))
+        // A failed auto-flush must NOT stop the turn (that is the operator-
+        // initiated path): report it deferred so the message stays queued and is
+        // retried at the next boundary, or run normally once the turn settles.
+        .catch(() =>
+          self.send({
+            type: "STEER_RESULT",
+            queued: picked,
+            result: { status: "deferred" },
+            auto: true
+          })
+        )
+      return { steerPending: true }
     }),
     acceptSteer: assign(({ context, event }) => {
       if (
@@ -1179,7 +1257,13 @@ export const conversationMachine = setup({
         // before the transcript lands — and a dropped one is invisible: the box
         // clears and the operator believes they sent it. Hold it and run it the
         // moment the load settles, exactly as a send during a run is held.
-        SEND: { actions: "enqueue" }
+        SEND: { actions: "enqueue" },
+        // Whatever is held here is ON SCREEN as a queued row (a hand-off lands one
+        // in a chat that is still loading), so its row actions have to work — an
+        // edit or a remove dropped in this window would leave the row claiming the
+        // operator's change had been made.
+        UNQUEUE: { actions: "removeQueued" },
+        EDIT_QUEUED: { actions: "editQueued" }
       },
       invoke: {
         src: "loadConversation",
@@ -1282,13 +1366,21 @@ export const conversationMachine = setup({
       on: {
         STREAM_EVENT: [
           { guard: "isTerminal", target: "refreshingDiff", actions: "foldEvent" },
+          // A tool just finished and something is waiting: hand it to the live
+          // turn now rather than holding it until the turn ends. See `canAutoFlush`.
+          {
+            guard: "canAutoFlush",
+            actions: ["foldEvent", "liveRefreshDiff", "autoFlushQueue"]
+          },
           { actions: ["foldEvent", "liveRefreshDiff"] }
         ],
         // A live diff read resolved — reflect it in the Changes rail.
         PATCH_UPDATED: { actions: "applyLivePatch" },
-        // Sent mid-run: queue it (processed once this turn + its diff refresh settle).
+        // Sent mid-run: queued, then flushed into this turn at the next tool
+        // boundary where the harness can take it (see `canAutoFlush`).
         SEND: { actions: "enqueue" },
         UNQUEUE: { actions: "removeQueued" },
+        EDIT_QUEUED: { actions: "editQueued" },
         // "Send now": interrupt the current turn and run the picked message next,
         // so the operator can steer mid-stream. Promote it to the head, then go
         // through `stopping` so the halt has landed before the next turn starts;
@@ -1298,7 +1390,13 @@ export const conversationMachine = setup({
         },
         STEER_RESULT: [
           {
-            guard: ({ event }) => event.result.status === "unsupported",
+            // Only the OPERATOR's "send now" is allowed to escalate to a stop:
+            // an automatic flush that the harness can't take stays queued and is
+            // retried at the next boundary. See the `auto` flag on the event.
+            guard: ({ event }) =>
+              event.type === "STEER_RESULT" &&
+              event.result.status === "unsupported" &&
+              event.auto !== true,
             target: "stopping",
             actions: ["finishSteer", "settleStoppedRun"]
           },
@@ -1352,6 +1450,7 @@ export const conversationMachine = setup({
         // Keep accepting sends — they run once the diff settles, as elsewhere.
         SEND: { actions: "enqueue" },
         UNQUEUE: { actions: "removeQueued" },
+        EDIT_QUEUED: { actions: "editQueued" },
         SEND_NOW: { actions: "promoteQueued" },
         // The run is already being halted; a second STOP only clears the queue.
         STOP: { actions: ["clearQueue", "clearSubagents"] },
@@ -1385,6 +1484,7 @@ export const conversationMachine = setup({
         // Still accept queued sends while the diff refreshes (a brief window).
         SEND: { actions: "enqueue" },
         UNQUEUE: { actions: "removeQueued" },
+        EDIT_QUEUED: { actions: "editQueued" },
         // The turn already ended — just jump the picked message to the head so the
         // pending dequeue (on refresh settle) runs it next.
         SEND_NOW: { actions: "promoteQueued" },

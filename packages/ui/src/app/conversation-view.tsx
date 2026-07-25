@@ -17,7 +17,7 @@ import type {
 } from "@starbase/core"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useHotkeys } from "react-hotkeys-hook"
-import { ImageIcon, Lock, RotateCcw, X, Zap } from "lucide-react"
+import { Lock, RotateCcw } from "lucide-react"
 import type { ArchiveReason, ContextPhase } from "@starbase/core"
 import { supportsPlanMode } from "@starbase/core"
 import { cn } from "../lib/cn.js"
@@ -25,6 +25,7 @@ import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"
 import { Composer } from "../composites/composer.js"
 import { QuestionCard } from "../composites/question-card.js"
+import { QueuedMessageRow } from "../composites/queued-message-row.js"
 import { MessageTurn } from "../composites/message-turn.js"
 import { ArchivedBanner } from "../composites/archived-banner.js"
 import { ContextMeter } from "../composites/context-meter.js"
@@ -147,6 +148,16 @@ export interface ConversationViewProps {
    * operator steer mid-stream instead of waiting for the turn to finish.
    */
   onSendNow?: (index: number) => void
+  /**
+   * Fork a queued message into a FRESH chat on the operator's default model
+   * instead of running it in this conversation — the escape hatch for "this is a
+   * separate job that shouldn't inherit 200k tokens of unrelated context".
+   */
+  onHandoffQueued?: (index: number) => void
+  /** Rewrite a queued message in place, before it is ever sent (by index). */
+  onEditQueued?: (index: number, text: string) => void
+  /** What the hand-off targets, for its tooltip (e.g. "a new chat on Opus 4.6"). */
+  handoffHint?: string
   onDecideGate?: (gateId: string, decision: GateDecision) => void
   onSetMode?: (mode: PermissionMode) => void
   reasoningEffort?: ReasoningEffort
@@ -235,6 +246,9 @@ export function ConversationView({
   queued = [],
   onUnqueue,
   onSendNow,
+  onHandoffQueued,
+  onEditQueued,
+  handoffHint,
   onDecideGate,
   onSetMode,
   reasoningEffort,
@@ -459,44 +473,16 @@ export function ConversationView({
                     the queue positionally.
                   */}
                   {queued.slice(0, queueLimit).map((item, i) => (
-                    <div
+                    <QueuedMessageRow
                       key={`${i}-${item.text.slice(0, 24)}`}
-                      className="flex items-center gap-2 rounded-lg border border-line bg-sunken/60 px-3 py-1.5 text-[12.5px] text-muted-foreground"
-                    >
-                      <span className="flex-none font-mono text-[10px] uppercase tracking-wide text-dim">
-                        Queued
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-text-body">
-                        {item.text || <span className="text-dim">(image only)</span>}
-                      </span>
-                      {item.images.length > 0 && (
-                        <span className="flex flex-none items-center gap-1 font-mono text-[10.5px] text-cyan">
-                          <ImageIcon size={11} />
-                          {item.images.length}
-                        </span>
-                      )}
-                      {onSendNow && busy && (
-                        <button
-                          type="button"
-                          onClick={() => onSendNow(i)}
-                          title="Send now — steer the agent immediately"
-                          className="flex flex-none items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-blue outline-none transition-colors hover:bg-blue/10 hover:text-blue focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                          <Zap size={11} />
-                          Send now
-                        </button>
-                      )}
-                      {onUnqueue && (
-                        <button
-                          type="button"
-                          onClick={() => onUnqueue(i)}
-                          title="Remove from queue"
-                          className="flex size-5 flex-none items-center justify-center rounded text-dim outline-none transition-colors hover:bg-surface hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                          <X size={12} />
-                        </button>
-                      )}
-                    </div>
+                      text={item.text}
+                      images={item.images.length}
+                      handoffHint={handoffHint}
+                      {...(onSendNow && busy ? { onSendNow: () => onSendNow(i) } : {})}
+                      {...(onHandoffQueued ? { onHandoff: () => onHandoffQueued(i) } : {})}
+                      {...(onEditQueued ? { onEdit: (text: string) => onEditQueued(i, text) } : {})}
+                      {...(onUnqueue ? { onRemove: () => onUnqueue(i) } : {})}
+                    />
                   ))}
                   {queued.length > QUEUE_PREVIEW && (
                     <button

@@ -1363,6 +1363,18 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             turnMutation.withPermits(1)(Effect.gen(function* () {
               const handler = yield* Ref.get(turnSteer)
               if (handler === null) {
+                // Codex publishes and RETRACTS its handle within a run (native
+                // compaction), so "no handle" there is a phase → `deferred`.
+                // Everywhere else it means this run has no channel at all —
+                // including runs that never go through a steering adapter, like a
+                // plan execution — and `unsupported` is what licenses the renderer
+                // to stop and replay, which is the only thing that would work.
+                //
+                // Claude stays on `unsupported` deliberately, even though it CAN
+                // steer: its handle is registered a beat into the run, and the only
+                // caller that can lose that race is the operator's own "Send now",
+                // whose fallback is exactly right. The queue's automatic flush is
+                // unaffected — it marks its steers `auto`, which forbids the stop.
                 return { status: cli === "codex" ? "deferred" : "unsupported" } as const
               }
               const outcome = yield* Effect.tryPromise(() => handler(text, images)).pipe(

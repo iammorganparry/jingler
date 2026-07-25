@@ -1,4 +1,5 @@
 import type {
+  Attachment,
   DiffStat,
   PermissionMode,
   Question,
@@ -320,26 +321,114 @@ export const editStats = (
  * with base64 image blocks — the shape the harness reads images from. Pure +
  * exported so the interleaving is unit-tested without the live SDK.
  */
-export const buildPromptInput = (
+export const userMessageFor = (
+  text: string,
+  images: ReadonlyArray<Attachment>,
+  resumeId: string | undefined
+): SDKUserMessage => {
+  // A bare string is the simpler content shape, but only when there are no
+  // images — the block list is what carries base64 attachments.
+  const content =
+    images.length === 0
+      ? text
+      : [
+          ...(text.length > 0 ? [{ type: "text", text }] : []),
+          ...images.map((img) => ({
+            type: "image",
+            source: { type: "base64" as const, media_type: img.mediaType, data: img.data }
+          }))
+        ]
+  return {
+    type: "user",
+    message: { role: "user", content },
+    parent_tool_use_id: null,
+    session_id: resumeId ?? ""
+  } as SDKUserMessage
+}
+
+/** A turn's input channel: the opening prompt, plus anything steered in later. */
+export interface LiveInput {
+  /** Hand this to `query({ prompt })` — it stays open until `finish()`. */
+  readonly iterable: AsyncIterable<SDKUserMessage>
+  /**
+   * Push a message into the LIVE turn. False means the turn is already closing,
+   * in which case the caller must keep the message queued rather than assume it
+   * landed — `Agent.steer` reports that as `deferred`.
+   */
+  readonly push: (text: string, images: ReadonlyArray<Attachment>) => boolean
+  /**
+   * Whether a pushed message is still sitting UNREAD in the channel.
+   *
+   * The distinction that matters at the end of a turn: a message the CLI has
+   * already taken was answered inside that turn (verified against the real
+   * harness — see `scripts/probe-claude-steer.ts`), so the turn is genuinely over.
+   * One it has NOT taken yet will open a turn of its own, and closing the channel
+   * on it would discard the operator's message.
+   */
+  readonly hasUnread: () => boolean
+  /** Refuse further pushes and end the input, letting the SDK finish the query. */
+  readonly finish: () => void
+}
+
+/**
+ * The prompt as a LIVE channel rather than a fixed value.
+ *
+ * The SDK's streaming-input form keeps the query open until the input iterable
+ * ends, which is the only way to put a message into a turn that is already
+ * running — the whole point of Starbase's queue: a correction typed 10 seconds in
+ * should reach the agent at the next tool boundary, not two minutes later against
+ * work it was meant to redirect. So the adapter opens the channel, yields the
+ * prompt, and holds it open until the turn is genuinely over.
+ *
+ * `finish()` and `push()` are deliberately racy-safe in ONE direction: once
+ * finishing, a push is refused. Losing a message would be far worse than
+ * deferring it — a refused push stays in the renderer's queue and simply runs as
+ * the next turn.
+ */
+export const makeLiveInput = (
   spec: SessionSpec,
   resumeId: string | undefined
-): string | AsyncIterable<SDKUserMessage> => {
-  if (spec.images.length === 0) return spec.prompt
-  const content = [
-    ...(spec.prompt.length > 0 ? [{ type: "text", text: spec.prompt }] : []),
-    ...spec.images.map((img) => ({
-      type: "image",
-      source: { type: "base64" as const, media_type: img.mediaType, data: img.data }
-    }))
-  ]
-  return (async function* () {
-    yield {
-      type: "user",
-      message: { role: "user", content },
-      parent_tool_use_id: null,
-      session_id: resumeId ?? ""
-    } as SDKUserMessage
+): LiveInput => {
+  const pending: Array<SDKUserMessage> = [userMessageFor(spec.prompt, spec.images, resumeId)]
+  let done = false
+  // Resolver for the consumer parked on an empty queue, so a push wakes it
+  // immediately instead of the generator polling.
+  let wake: (() => void) | null = null
+  const bump = () => {
+    const w = wake
+    wake = null
+    w?.()
+  }
+
+  const iterable = (async function* () {
+    for (;;) {
+      const next = pending.shift()
+      if (next !== undefined) {
+        yield next
+        continue
+      }
+      if (done) return
+      await new Promise<void>((resolve) => {
+        wake = resolve
+      })
+    }
   })()
+
+  return {
+    iterable,
+    push: (text, images) => {
+      if (done) return false
+      if (text.length === 0 && images.length === 0) return false
+      pending.push(userMessageFor(text, images, resumeId))
+      bump()
+      return true
+    },
+    hasUnread: () => pending.length > 0,
+    finish: () => {
+      done = true
+      bump()
+    }
+  }
 }
 
 const contentBlocks = (message: unknown): ReadonlyArray<Record<string, unknown>> => {
@@ -809,6 +898,17 @@ export const streamEventsFor = (
  */
 const TEARDOWN_GRACE = "15 seconds"
 
+/**
+ * How long the input channel stays open for a steered message the CLI had not yet
+ * read when its turn ended, before we give up on the continuation.
+ *
+ * The gap being bounded is the CLI picking up a message already sitting in its
+ * stdin and opening a turn for it — milliseconds in practice. Generous by three
+ * orders of magnitude, because it exists to break a wedge, not to police pace: on
+ * expiry the withheld `Done` is emitted and the message runs as the next turn.
+ */
+const STEER_CONTINUE_GRACE = 30_000
+
 export const runClaude = (
   sessionId: string,
   spec: SessionSpec,
@@ -982,10 +1082,13 @@ export const runClaude = (
               }
             : undefined
 
-        // With attached images this switches to the SDK's streaming-input form
-        // (text + base64 image blocks); without images it stays the string prompt.
+        // Always the SDK's streaming-input form, and deliberately so: it is what
+        // keeps the query open for `Agent.steer` to push into (see `makeLiveInput`).
+        // The channel is closed on the turn's `result` below, which is what lets
+        // the query end at all.
+        const live = makeLiveInput(spec, resumeId)
         const iterator = query({
-          prompt: buildPromptInput(spec, resumeId),
+          prompt: live.iterable,
           options: {
             ...(mcpServers ? { mcpServers } : {}),
             // Never `|| undefined`: an empty cwd makes the SDK inherit the app's
@@ -1028,20 +1131,71 @@ export const runClaude = (
         // never fires. The turn was then left with `streaming: true` forever, or
         // re-read as a silent empty assistant block after a reload.
         let terminal = false
+        // Publish the steer handle: from here until the turn closes, a queued
+        // message can be pushed straight into the live turn. Claude delivers it
+        // at the next tool boundary, which is exactly the queue's promise.
+        if (ctx.registerTurnSteer !== undefined) {
+          await runP(
+            ctx.registerTurnSteer(async (text, images) =>
+              live.push(text, images) ? "accepted" : "deferred"
+            )
+          )
+        }
+        /**
+         * The `Done` withheld from a turn a late steer extended, if any.
+         *
+         * Held rather than dropped: if the continuation never materialises, the
+         * stream closes with nothing terminal, and the "ended without responding"
+         * fallback below would report a FAILURE for a turn that actually completed.
+         */
+        let withheldDone: StreamEvent | null = null
+        /**
+         * Safety net for that same case: while a `Done` is withheld, the only thing
+         * that can end the query is a later `result`, so a message the CLI took and
+         * then dropped would park the input generator forever. Re-armed on every
+         * message, so it can only fire in a gap where nothing is arriving at all.
+         */
+        let steerWatchdog: ReturnType<typeof setTimeout> | null = null
+        const disarmWatchdog = () => {
+          if (steerWatchdog === null) return
+          clearTimeout(steerWatchdog)
+          steerWatchdog = null
+        }
         try {
           for await (const msg of iterator) {
+            disarmWatchdog()
             const sid = (msg as { session_id?: unknown }).session_id
             // A `fresh` run must leave no trace in the map, or the NEXT run under
             // this key would resume it.
             if (!spec.fresh && typeof sid === "string" && sid.length > 0) {
               resume.set(sessionId, sid)
             }
-            // The turn is ending: ask the harness how full the window actually
-            // is, and emit that BEFORE the `Done` it belongs to. Ordering is
-            // load-bearing — `Done` is what starts a compaction decision, and
-            // the decision reads the latest `Usage`, so a probe emitted after it
-            // would be one turn late every time.
+            /**
+             * Whether this `result` is the end of the run, or a seam in it.
+             *
+             * A steered message the CLI has ALREADY taken is answered inside the
+             * running turn — probed against the real harness, which emits exactly
+             * one `result` for it (`scripts/probe-claude-steer.ts`). So the common
+             * case is: this result ends the run, emit `Done`, close the channel.
+             *
+             * The exception is a push that landed in the last few milliseconds and
+             * has not been read yet. Closing the channel would discard the
+             * operator's message outright, so instead the channel stays open for
+             * the turn it will open, and this result's `Done` is withheld — it
+             * would settle a conversation that is about to continue.
+             */
+            let extended = false
             if ((msg as { type?: unknown }).type === "result") {
+              // The turn is ending: ask the harness how full the window actually
+              // is, and emit that BEFORE the `Done` it belongs to. Ordering is
+              // load-bearing — `Done` is what starts a compaction decision, and
+              // the decision reads the latest `Usage`, so a probe emitted after it
+              // would be one turn late every time.
+              //
+              // It also goes before `finish()`, while the query is still live: the
+              // probe is a control request to the child, and closing the input
+              // channel starts the SDK shutting that child down, so probing after
+              // the close races the teardown and loses the reading entirely.
               const probe = await probeContextUsage(iterator)
               if (probe !== null) {
                 await runP(
@@ -1052,6 +1206,14 @@ export const runClaude = (
                   })
                 )
               }
+              // Read as LATE as possible: a push that arrives during the probe is
+              // then still seen here rather than stranded by the close below.
+              extended = live.hasUnread()
+              if (extended) {
+                steerWatchdog = setTimeout(() => live.finish(), STEER_CONTINUE_GRACE)
+              } else {
+                live.finish()
+              }
             }
             for (const event of streamEventsFor(msg, tools, bgState)) {
               // A command has finished: its ToolEnd carries the authoritative
@@ -1059,9 +1221,32 @@ export const runClaude = (
               // otherwise a late poll could re-open the settled card. A no-op for
               // any tool that wasn't teed.
               if (event._tag === "ToolEnd") stopTee(event.id)
-              if (event._tag === "Done" || event._tag === "Failed") terminal = true
+              // The continuation's own result will carry the real `Done`; this one
+              // is withheld, not dropped (see `withheldDone`). A `Failed` is never
+              // withheld — the run IS over, and the channel must close or the query
+              // would never end.
+              if (extended && event._tag === "Done") {
+                withheldDone = event
+                continue
+              }
+              if (extended && event._tag === "Failed") {
+                disarmWatchdog()
+                live.finish()
+              }
+              if (event._tag === "Done" || event._tag === "Failed") {
+                terminal = true
+                withheldDone = null
+              }
               await runP(ctx.emit(event))
             }
+          }
+          // A withheld `Done` outlived the turn it belonged to: the continuation we
+          // held the channel open for never came. The turn DID complete, so emit the
+          // real terminal event rather than letting the failure fallback below
+          // report "ended without responding" for a run that answered fine.
+          if (!terminal && withheldDone !== null) {
+            terminal = true
+            await runP(ctx.emit(withheldDone))
           }
           // The stream ended without saying how. An interrupt has its own
           // terminal event (the stop path emits `Failed`), so only a silent
@@ -1079,6 +1264,12 @@ export const runClaude = (
           // End of run (or a throw / interrupt-driven iterator close): tear down
           // any watcher still open — a command whose ToolEnd never arrived, or the
           // operator stopping mid-command — so no timer or temp file outlives it.
+          disarmWatchdog()
+          // Close the input channel and retract the steer handle together: a live
+          // handle after the turn would accept a message into a query that is gone,
+          // reporting `accepted` for a message nothing will ever read.
+          live.finish()
+          if (ctx.registerTurnSteer !== undefined) await runP(ctx.registerTurnSteer(null))
           for (const id of [...teeStreams.keys()]) stopTee(id)
           markSettled()
         }

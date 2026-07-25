@@ -65,6 +65,8 @@ export interface Conversation {
   readonly unqueue: (index: number) => void
   /** Steer supported live turns; otherwise interrupt and replay the queued message. */
   readonly sendNow: (index: number) => void
+  /** Rewrite a queued message in place before it is ever sent (by index). */
+  readonly editQueued: (index: number, text: string) => void
   /** A pending AskUserQuestion group (the composer is replaced while set), or null. */
   readonly question: QuestionRequest | null
   readonly answerQuestion: (requestId: string, answers: ReadonlyArray<QuestionAnswer>) => void
@@ -159,6 +161,7 @@ export function useConversation(
     reviewStartedAt,
     unqueue: (index) => send({ type: "UNQUEUE", index }),
     sendNow: (index) => send({ type: "SEND_NOW", index }),
+    editQueued: (index, text) => send({ type: "EDIT_QUEUED", index, text }),
     question,
     plan,
     commentPlanStep: (planId, stepId, body) => send({ type: "COMMENT_PLAN_STEP", planId, stepId, body }),

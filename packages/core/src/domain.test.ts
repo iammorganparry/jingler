@@ -14,6 +14,7 @@ import {
   newSessionCli,
   startableClis,
   supportsPlanMode,
+  supportsSteer,
   WorkspaceConfig
 } from "./domain.js"
 import { RouteCandidate as ConversationRouteCandidate } from "./conversation.js"
@@ -356,6 +357,29 @@ describe("supportsPlanMode", () => {
 
   it("classifies every CliKind, so a new harness cannot be forgotten", () => {
     for (const cli of CLI_KINDS) expect(typeof supportsPlanMode(cli)).toBe("boolean")
+  })
+})
+
+describe("supportsSteer", () => {
+  /**
+   * This predicate gates the queue's AUTOMATIC flush at tool boundaries. Where
+   * steering isn't native the fallback is stop-and-replay, so a wrong `true` here
+   * doesn't degrade — it interrupts the operator's turn at every tool call.
+   */
+  it("covers the harnesses with a channel into a live turn", () => {
+    // claude via the SDK's streaming input; codex via `turn/steer`.
+    expect(supportsSteer("claude")).toBe(true)
+    expect(supportsSteer("codex")).toBe(true)
+  })
+
+  it("excludes the harnesses whose turn cannot be added to", () => {
+    expect(supportsSteer("cursor")).toBe(false)
+    expect(supportsSteer("opencode")).toBe(false)
+    expect(supportsSteer("starbase")).toBe(false)
+  })
+
+  it("classifies every CliKind, so a new harness cannot be forgotten", () => {
+    for (const cli of CLI_KINDS) expect(typeof supportsSteer(cli)).toBe("boolean")
   })
 })
 
