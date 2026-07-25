@@ -1,16 +1,17 @@
 import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import {
-  AgentTabBar,
+  ChatTabBar,
   MAIN_AGENT,
+  SubagentTabBar,
   type AgentTabItem,
   type ChatTabItem
 } from "./agent-tab-bar.js"
 
 const meta = {
   title: "App/AgentTabBar",
-  component: AgentTabBar
-} satisfies Meta<typeof AgentTabBar>
+  component: ChatTabBar
+} satisfies Meta<typeof ChatTabBar>
 
 export default meta
 type Story = StoryObj<typeof meta>
@@ -35,7 +36,7 @@ export const Interactive: Story = {
     const [chats, setChats] = useState(CHATS)
     const [activeChatId, setActiveChatId] = useState("c1")
     return (
-      <AgentTabBar
+      <ChatTabBar
         chats={chats}
         activeChatId={activeChatId}
         onSelectChat={setActiveChatId}
@@ -104,11 +105,21 @@ const AGENTS: ReadonlyArray<AgentTabItem> = [
 /** Sub-agent drill-in remains beneath the selected top-level chat. */
 export const SubagentDrillIn: Story = {
   args: {
-    agents: AGENTS,
-    trail: [],
-    active: MAIN_AGENT,
-    onChange: () => {},
-    onDrill: () => {},
-    onNavigate: () => {}
-  }
+    chats: CHATS,
+    activeChatId: "c1",
+    onSelectChat: () => {},
+    onCreateChat: () => {},
+    onRenameChat: () => {},
+    onCloseChat: () => {}
+  },
+  render: () => (
+    <SubagentTabBar
+      agents={AGENTS}
+      trail={[]}
+      active={MAIN_AGENT}
+      onChange={() => {}}
+      onDrill={() => {}}
+      onNavigate={() => {}}
+    />
+  )
 }

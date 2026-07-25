@@ -18,6 +18,7 @@
  */
 import type { ActorRefFrom, SnapshotFrom } from "xstate"
 import { createActor } from "xstate"
+import { useSyncExternalStore } from "react"
 import type { ActivityPhase, Session, SessionActivity } from "@starbase/core"
 import { activityOf, latestPlan } from "@starbase/core"
 import { conversationMachine } from "./conversation-machine.js"
@@ -33,6 +34,11 @@ type ConversationActor = ActorRefFrom<typeof conversationMachine>
 type ConversationSnapshot = SnapshotFrom<typeof conversationMachine>
 
 const registry = new Map<string, ConversationActor>()
+const snapshots = new Map<string, ConversationSnapshot>()
+let chatActivities: Record<string, Record<string, SessionActivity>> = {}
+const EMPTY_CHAT_ACTIVITIES: Readonly<Record<string, SessionActivity>> = {}
+const activityListeners = new Set<() => void>()
+const sharedPlanBodies = new Map<string, string>()
 const registryKey = (sessionId: string, chatId: string): string =>
   `${sessionId}:${chatId}`
 
@@ -54,6 +60,52 @@ const phaseOf = (snap: ConversationSnapshot): ActivityPhase => {
 const activityFor = (snap: ConversationSnapshot): SessionActivity | null =>
   activityOf(snap.context.messages, phaseOf(snap))
 
+const activityPriority = (activity: SessionActivity): number =>
+  activity.kind === "needs-input" || activity.kind === "needs-approval" ? 2 : 1
+
+const publishChatActivity = (
+  sessionId: string,
+  chatId: string,
+  activity: SessionActivity | null
+): void => {
+  const previous = chatActivities[sessionId] ?? {}
+  const next = { ...previous }
+  if (activity === null) delete next[chatId]
+  else next[chatId] = activity
+  chatActivities = { ...chatActivities, [sessionId]: next }
+  for (const listener of activityListeners) listener()
+}
+
+const recomputeSession = (sessionId: string, preferred?: ConversationSnapshot): void => {
+  const sessionSnapshots = [...snapshots.entries()]
+    .filter(([key]) => key.startsWith(`${sessionId}:`))
+    .map(([, snapshot]) => snapshot)
+  const activities = sessionSnapshots
+    .map(activityFor)
+    .filter((activity): activity is SessionActivity => activity !== null)
+    .sort((a, b) => activityPriority(b) - activityPriority(a))
+  setSessionActivity(sessionId, activities[0] ?? null)
+  setPlanPresent(
+    sessionId,
+    sessionSnapshots.some((snapshot) => latestPlan(snapshot.context.messages) !== null)
+  )
+  const diffSnapshot = preferred ?? sessionSnapshots[sessionSnapshots.length - 1]
+  if (diffSnapshot === undefined) clearSessionDiff(sessionId)
+  else setSessionDiff(sessionId, diffCounts(diffSnapshot.context.patch))
+}
+
+export const useChatActivities = (
+  sessionId: string
+): Readonly<Record<string, SessionActivity>> =>
+  useSyncExternalStore(
+    (listener) => {
+      activityListeners.add(listener)
+      return () => activityListeners.delete(listener)
+    },
+    () => chatActivities[sessionId] ?? EMPTY_CHAT_ACTIVITIES,
+    () => chatActivities[sessionId] ?? EMPTY_CHAT_ACTIVITIES
+  )
+
 /**
  * Get (creating + starting on first use) the persistent actor for a session.
  * The subscription publishes live status + plan presence for the whole lifetime
@@ -65,7 +117,10 @@ export const getConversationActor = (
 ): ConversationActor => {
   const key = registryKey(session.id, chatId)
   const existing = registry.get(key)
-  if (existing) return existing
+  if (existing) {
+    existing.send({ type: "SESSION_UPDATED", session })
+    return existing
+  }
 
   const actor = createActor(conversationMachine, { input: { session, chatId } })
   // Previous observation for the edge detector — see `notificationFor`. Held per
@@ -76,8 +131,6 @@ export const getConversationActor = (
     // can happen while a component is rendering, since the actor is created inside
     // `useMemo` — doesn't notify the status/plan stores mid-render.
     const activity = activityFor(snap)
-    const planPresent = latestPlan(snap.context.messages) !== null
-    const diff = diffCounts(snap.context.patch)
     // Nothing is announced until the transcript has LOADED, and the first loaded
     // snapshot becomes the baseline rather than an edge.
     //
@@ -91,10 +144,25 @@ export const getConversationActor = (
     const observed: NotifiableState = { activity, outcome: snap.context.lastOutcome }
     const announce = snap.context.loaded ? notificationFor(session.title, lastSeen, observed) : null
     if (snap.context.loaded) lastSeen = observed
+    snapshots.set(key, snap)
+    const plan = latestPlan(snap.context.messages)
+    if (plan !== null) {
+      const body = JSON.stringify(plan)
+      if (sharedPlanBodies.get(session.id) !== body) {
+        sharedPlanBodies.set(session.id, body)
+        for (const [otherKey, otherActor] of registry) {
+          if (otherKey === key || !otherKey.startsWith(`${session.id}:`)) continue
+          otherActor.send({
+            type: "SHARED_PLAN_UPDATED",
+            plan,
+            producingChatId: snap.context.sharedPlanChatId ?? chatId
+          })
+        }
+      }
+    }
     queueMicrotask(() => {
-      setSessionActivity(session.id, activity)
-      setPlanPresent(session.id, planPresent)
-      setSessionDiff(session.id, diff)
+      publishChatActivity(session.id, chatId, activity)
+      recomputeSession(session.id, snap)
       // Fire-and-forget, and deliberately last: a notification that fails must
       // never take the status stores down with it. Main decides whether this
       // actually surfaces (window focus + the operator's prefs).
@@ -122,7 +190,10 @@ export const disposeConversationActor = (sessionId: string): void => {
     if (!key.startsWith(`${sessionId}:`)) continue
     actor.stop()
     registry.delete(key)
+    snapshots.delete(key)
   }
+  delete chatActivities[sessionId]
+  sharedPlanBodies.delete(sessionId)
   setSessionActivity(sessionId, null)
   setPlanPresent(sessionId, false)
   clearSessionDiff(sessionId)
@@ -132,4 +203,26 @@ export const disposeChatActor = (sessionId: string, chatId: string): void => {
   const key = registryKey(sessionId, chatId)
   registry.get(key)?.stop()
   registry.delete(key)
+  snapshots.delete(key)
+  publishChatActivity(sessionId, chatId, null)
+  recomputeSession(sessionId)
+}
+
+/** Point every live copy of a shared plan at its replacement producing chat. */
+export const rehomeSharedPlan = (
+  sessionId: string,
+  fromChatId: string,
+  toChatId: string
+): void => {
+  if (fromChatId === toChatId) return
+  const plan = [...snapshots.entries()]
+    .filter(([key]) => key.startsWith(`${sessionId}:`))
+    .filter(([, snapshot]) => snapshot.context.sharedPlanChatId === fromChatId)
+    .map(([, snapshot]) => latestPlan(snapshot.context.messages))
+    .find((candidate) => candidate !== null)
+  if (plan === undefined || plan === null) return
+  for (const [key, actor] of registry) {
+    if (!key.startsWith(`${sessionId}:`)) continue
+    actor.send({ type: "SHARED_PLAN_UPDATED", plan, producingChatId: toChatId })
+  }
 }

@@ -18,6 +18,7 @@ import {
 } from "@radix-ui/react-dropdown-menu"
 import { Brain, GitBranch, ImagePlus, Plug, Plus, Sparkles, WandSparkles } from "lucide-react"
 import { cn } from "../lib/cn.js"
+import { reasoningEffortsFor } from "../lib/reasoning-options.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { modeAccent } from "../tokens.js"
 import { AttachmentThumb } from "../components/attachment-thumb.js"
@@ -80,10 +81,7 @@ const reasoningOptionsFor = (
 ): ReadonlyArray<ChipOption<ReasoningChoice | "off">> => [
   { value: "default", label: "default" },
   { value: "off", label: "off" },
-  ...(cli === "claude"
-    ? (["low", "medium", "high", "xhigh", "max"] as const)
-    : (["minimal", "low", "medium", "high", "xhigh"] as const)
-  ).map((value) => ({ value, label: value }))
+  ...reasoningEffortsFor(cli).map((value) => ({ value, label: value }))
 ]
 
 type MenuState = { kind: "slash" | "mention"; query: string; start: number }

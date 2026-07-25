@@ -31,7 +31,7 @@ export interface ChatTabItem {
   running?: boolean
 }
 
-interface ChatTabBarProps {
+export interface ChatTabBarProps {
   chats: ReadonlyArray<ChatTabItem>
   activeChatId: string
   onSelectChat: (id: string) => void
@@ -40,7 +40,7 @@ interface ChatTabBarProps {
   onCloseChat: (id: string) => void
 }
 
-interface SubagentTabBarProps {
+export interface SubagentTabBarProps {
   agents: ReadonlyArray<AgentTabItem>
   trail: ReadonlyArray<AgentCrumb>
   active: string
@@ -70,7 +70,7 @@ const DOT: Record<SubagentStatus, { tone: string; pulse: boolean }> = {
  * Presentational only — the pane owns the drill level, derives each level's cells,
  * and owns which cell is active.
  */
-function SubagentTabBar({
+export function SubagentTabBar({
   agents,
   trail,
   active,
@@ -164,7 +164,7 @@ function SubagentTabBar({
   )
 }
 
-function ChatTabBar({
+export function ChatTabBar({
   chats,
   activeChatId,
   onSelectChat,
@@ -249,12 +249,4 @@ function ChatTabBar({
       </button>
     </div>
   )
-}
-
-/**
- * Top-level chat strip. The legacy sub-agent signature remains during the UI
- * migration so nested agent drill-down can use the same visual primitive.
- */
-export function AgentTabBar(props: ChatTabBarProps | SubagentTabBarProps) {
-  return "chats" in props ? <ChatTabBar {...props} /> : <SubagentTabBar {...props} />
 }

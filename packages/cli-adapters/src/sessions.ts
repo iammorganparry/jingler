@@ -62,7 +62,12 @@ const initialChat = (
   legacy.allowlist.every((entry) => typeof entry === "string")
     ? { allowlist: legacy.allowlist }
     : {}),
-  ...(typeof legacy.model === "string" ? { model: legacy.model } : {})
+  ...(typeof legacy.model === "string" ? { model: legacy.model } : {}),
+  ...(typeof legacy.contextTokens === "number" &&
+  Number.isFinite(legacy.contextTokens) &&
+  legacy.contextTokens >= 0
+    ? { contextTokens: legacy.contextTokens }
+    : {})
 })
 
 const migrateReasoning = (value: unknown): ReasoningSetting | undefined => {
@@ -289,7 +294,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         options: {
           defaultMode?: PermissionMode
           defaultModel?: string
-          defaultReasoningEffort?: ReasoningEffort
+          defaultReasoning?: ReasoningSetting
         } = {}
       ): Effect.Effect<
         Session,
@@ -390,10 +395,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             worktreePath: worktree.path,
             repoPath: worktree.repoPath,
             baseBranch: input.baseBranch,
-            ...(providerKey !== null && options.defaultReasoningEffort
+            ...(providerKey !== null && options.defaultReasoning
               ? {
                   reasoning: {
-                    [providerKey]: { enabled: true, effort: options.defaultReasoningEffort }
+                    [providerKey]: options.defaultReasoning
                   }
                 }
               : {})
@@ -426,7 +431,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           allowSharedCheckout?: boolean
           defaultMode?: PermissionMode
           defaultModel?: string
-          defaultReasoningEffort?: ReasoningEffort
+          defaultReasoning?: ReasoningSetting
         } = {}
       ): Effect.Effect<
         Session,
@@ -504,10 +509,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             worktreePath: worktree.path,
             repoPath: worktree.repoPath,
             baseBranch: input.pr.baseRefName,
-            ...(providerKey !== null && opts.defaultReasoningEffort
+            ...(providerKey !== null && opts.defaultReasoning
               ? {
                   reasoning: {
-                    [providerKey]: { enabled: true, effort: opts.defaultReasoningEffort }
+                    [providerKey]: opts.defaultReasoning
                   }
                 }
               : {})
@@ -538,7 +543,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         options: {
           defaultMode?: PermissionMode
           defaultModel?: string
-          defaultReasoningEffort?: ReasoningEffort
+          defaultReasoning?: ReasoningSetting
         } = {}
       ): Effect.Effect<
         Session,
@@ -608,10 +613,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             worktreePath: worktree.path,
             repoPath: worktree.repoPath,
             baseBranch: input.baseBranch,
-            ...(providerKey !== null && options.defaultReasoningEffort
+            ...(providerKey !== null && options.defaultReasoning
               ? {
                   reasoning: {
-                    [providerKey]: { enabled: true, effort: options.defaultReasoningEffort }
+                    [providerKey]: options.defaultReasoning
                   }
                 }
               : {})
@@ -655,18 +660,26 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const createChat = (sessionId: string) =>
         Effect.gen(function* () {
           const now = new Date().toISOString()
-          const chat: Chat = {
-            id: chatIdFor(sessionId, `${Date.now().toString(36)}_${nextOpId()}`),
-            title: null,
-            createdAt: now,
-            updatedAt: now
-          }
-          yield* update(sessionId, (session) => ({
-            ...session,
-            chats: [...session.chats, chat],
-            activeChatId: chat.id,
-            updatedAt: now
-          }))
+          yield* update(sessionId, (session) => {
+            const source =
+              session.chats.find((chat) => chat.id === session.activeChatId) ??
+              session.chats[0]
+            const chat: Chat = {
+              id: chatIdFor(sessionId, `${Date.now().toString(36)}_${nextOpId()}`),
+              title: null,
+              createdAt: now,
+              updatedAt: now,
+              ...(source?.mode === undefined ? {} : { mode: source.mode }),
+              ...(source?.model === undefined ? {} : { model: source.model }),
+              ...(source?.allowlist === undefined ? {} : { allowlist: source.allowlist })
+            }
+            return {
+              ...session,
+              chats: [...session.chats, chat],
+              activeChatId: chat.id,
+              updatedAt: now
+            }
+          })
           return yield* get(sessionId)
         })
 
@@ -701,10 +714,17 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             const index = session.chats.findIndex((chat) => chat.id === chatId)
             if (index < 0) return session
             const remaining = session.chats.filter((chat) => chat.id !== chatId)
-            const chats =
-              remaining.length > 0
-                ? remaining
-                : [initialChat(session.id, now)]
+            const closed = session.chats[index]
+            const replacement: Chat = {
+              id: chatIdFor(session.id, `${Date.now().toString(36)}_${nextOpId()}`),
+              title: null,
+              createdAt: now,
+              updatedAt: now,
+              ...(closed?.mode === undefined ? {} : { mode: closed.mode }),
+              ...(closed?.model === undefined ? {} : { model: closed.model }),
+              ...(closed?.allowlist === undefined ? {} : { allowlist: closed.allowlist })
+            }
+            const chats = remaining.length > 0 ? remaining : [replacement]
             const activeChatId =
               session.activeChatId === chatId
                 ? chats[Math.min(index, chats.length - 1)]!.id
@@ -845,18 +865,19 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             : {
                 ...s,
                 cli,
+                model,
+                resumeId: undefined,
                 chats: s.chats.map((chat) =>
-                  chat.id === chatId
-                    ? {
-                        ...chat,
-                        model,
-                        resumeId: undefined,
-                        mode:
-                          chat.mode === "plan" && !supportsPlanMode(cli)
-                            ? "ask"
-                            : chat.mode
-                      }
-                    : chat
+                  ({
+                    ...chat,
+                    model: chat.id === chatId ? model : undefined,
+                    resumeId: undefined,
+                    gigaplanResumeId: undefined,
+                    mode:
+                      chat.mode === "plan" && !supportsPlanMode(cli)
+                        ? "ask"
+                        : chat.mode
+                  })
                 )
               }
             )

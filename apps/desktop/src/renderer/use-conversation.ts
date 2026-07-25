@@ -9,7 +9,7 @@
  * agent keeps working. Attaching to an existing actor also means switching back
  * shows its up-to-date state with no reload.
  */
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import { useSelector } from "@xstate/react"
 import type {
   Attachment,
@@ -106,6 +106,9 @@ export function useConversation(
     () => getConversationActor(session, chatId),
     [session.id, chatId]
   )
+  useEffect(() => {
+    actor.send({ type: "SESSION_UPDATED", session })
+  }, [actor, session])
   const state = useSelector(actor, (s) => s)
   const send = actor.send
   const {

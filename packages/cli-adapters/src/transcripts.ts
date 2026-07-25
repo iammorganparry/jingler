@@ -21,13 +21,14 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
   {
     accessors: true,
     sync: () => {
+      const lock = Effect.unsafeMakeSemaphore(1)
       const fileFor = (
         chatId: string
       ): Effect.Effect<string, never, Path.Path | AppPaths> =>
         Effect.gen(function* () {
           const path = yield* Path.Path
           const paths = yield* AppPaths
-          return path.join(paths.transcriptsDir, `${chatId}.json`)
+          return path.join(paths.transcriptsDir, `${encodeURIComponent(chatId)}.json`)
         })
 
       const readAll = (
@@ -82,20 +83,22 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
        * transcript it always wins.
        */
       const adoptLegacy = (sessionId: string, chatId: string) =>
-        Effect.gen(function* () {
-          if (sessionId === chatId) return
-          const fs = yield* FileSystem.FileSystem
-          const paths = yield* AppPaths
-          const legacyFile = yield* fileFor(sessionId)
-          const chatFile = yield* fileFor(chatId)
-          const [legacyExists, chatExists] = yield* Effect.all([
-            fs.exists(legacyFile).pipe(Effect.orElseSucceed(() => false)),
-            fs.exists(chatFile).pipe(Effect.orElseSucceed(() => false))
-          ])
-          if (!legacyExists || chatExists) return
-          yield* fs.makeDirectory(paths.transcriptsDir, { recursive: true }).pipe(Effect.ignore)
-          yield* fs.rename(legacyFile, chatFile).pipe(Effect.ignore)
-        })
+        lock.withPermits(1)(
+          Effect.gen(function* () {
+            if (sessionId === chatId) return
+            const fs = yield* FileSystem.FileSystem
+            const paths = yield* AppPaths
+            const legacyFile = yield* fileFor(sessionId)
+            const chatFile = yield* fileFor(chatId)
+            const [legacyExists, chatExists] = yield* Effect.all([
+              fs.exists(legacyFile).pipe(Effect.orElseSucceed(() => false)),
+              fs.exists(chatFile).pipe(Effect.orElseSucceed(() => false))
+            ])
+            if (!legacyExists || chatExists) return
+            yield* fs.makeDirectory(paths.transcriptsDir, { recursive: true }).pipe(Effect.ignore)
+            yield* fs.rename(legacyFile, chatFile).pipe(Effect.ignore)
+          })
+        )
 
       const remove = (chatId: string) =>
         Effect.gen(function* () {

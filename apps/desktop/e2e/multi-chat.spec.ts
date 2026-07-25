@@ -47,4 +47,19 @@ test("chat selection and titles survive a real app restart", async ({ launchApp 
     "aria-current",
     "page"
   )
+  await second.window.getByRole("button", { name: "Close Review migrations" }).click()
+  await expect(second.window.getByTitle("1. Chat 1")).toHaveAttribute("aria-current", "page")
+  await second.window.getByRole("button", { name: "Close Chat 1" }).click()
+  await expect(second.window.getByTitle("1. Chat 1")).toHaveAttribute("aria-current", "page")
+  await second.app.close()
+
+  const third = await launchApp({
+    home: first.home,
+    reposDir: first.reposDir,
+    configured: true,
+    withRepo: true
+  })
+
+  await third.window.getByText("Multi-chat lifecycle").click()
+  await expect(third.window.getByTitle("1. Chat 1")).toHaveAttribute("aria-current", "page")
 })

@@ -764,6 +764,28 @@ export class ContextManager extends Effect.Service<ContextManager>()(
           }))
         })
 
+      /** Cancel and permanently discard all in-memory state for a closed chat. */
+      const forget = (contextId: string): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          const fiber = (yield* Ref.get(fibers)).get(contextId)
+          if (fiber !== undefined) yield* Fiber.interrupt(fiber)
+          yield* Ref.update(fibers, (map) => {
+            const next = new Map(map)
+            next.delete(contextId)
+            return next
+          })
+          yield* Ref.update(states, (map) => {
+            const next = new Map(map)
+            next.delete(contextId)
+            return next
+          })
+          yield* Ref.update(owners, (map) => {
+            const next = new Map(map)
+            next.delete(contextId)
+            return next
+          })
+        })
+
       /** Everything the meter and Settings need to describe a session. */
       const snapshot = (
         sessionId: string
@@ -812,6 +834,7 @@ export class ContextManager extends Effect.Service<ContextManager>()(
         compactNow,
         prepareUnknownCodexResume,
         cancel,
+        forget,
         snapshot
       }
     })

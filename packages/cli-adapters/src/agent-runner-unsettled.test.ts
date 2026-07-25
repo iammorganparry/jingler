@@ -100,7 +100,7 @@ const run = (adapter: Layer.Layer<CliAdapter>) => {
     const runner = yield* AgentRunner
     const events: Array<StreamEvent> = []
     yield* runner
-      .prompt(SESSION, "go")
+      .prompt(SESSION, SESSION, "go")
       .pipe(Stream.runForEach((ev) => Effect.sync(() => events.push(ev))))
     const transcript = yield* TranscriptStore.list(SESSION)
     return { events, transcript }

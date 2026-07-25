@@ -43,6 +43,8 @@ import {
   ProviderModels,
   PullRequest,
   QuestionAnswer,
+  ClaudeReasoningSetting,
+  CodexReasoningSetting,
   ReasoningEffort,
   ReasoningSetting,
   Repo,
@@ -357,11 +359,18 @@ export class StarbaseRpcs extends RpcGroup.make(
 
   /** Change the current provider's native thinking settings. */
   Rpc.make("Agent.setReasoning", {
-    payload: {
-      sessionId: Schema.String,
-      cli: Schema.Literal("claude", "codex", "opencode"),
-      reasoning: Schema.optional(ReasoningSetting)
-    }
+    payload: Schema.Union(
+      Schema.Struct({
+        sessionId: Schema.String,
+        cli: Schema.Literal("claude"),
+        reasoning: Schema.optional(ClaudeReasoningSetting)
+      }),
+      Schema.Struct({
+        sessionId: Schema.String,
+        cli: Schema.Literal("codex", "opencode"),
+        reasoning: Schema.optional(CodexReasoningSetting)
+      })
+    )
   }),
 
   /** Comment on a plan step (plan mode) — accumulates on the plan, doesn't resume. */

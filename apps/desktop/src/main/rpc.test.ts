@@ -1404,6 +1404,7 @@ describe("Gigaplan round persistence", () => {
   })
 
   const SESSION = "s_round"
+  const CHAT = `c_${SESSION}_1`
   const RANKING: RoutingRankingSnapshot = {
     source: "OpenRouter Rankings",
     windowDays: 30,
@@ -1619,7 +1620,7 @@ describe("Gigaplan round persistence", () => {
   it("writes the round's plan into the transcript, so approving it can find it", async () => {
     const found = await Effect.gen(function* () {
       yield* planAdversarial(SESSION, "Add rate limiting to refunds.").pipe(Stream.runDrain)
-      const messages = yield* TranscriptStore.list(SESSION)
+      const messages = yield* TranscriptStore.list(CHAT)
       // The plan must be reachable exactly the way `planExecute` reaches it.
       return messages.flatMap((m) =>
         m.parts.flatMap((p) => (p._tag === "Plan" && p.plan.id === PLAN.id ? [p.plan] : []))
@@ -1633,7 +1634,7 @@ describe("Gigaplan round persistence", () => {
   it("keeps the operator's brief, so a reopened session shows what was asked", async () => {
     const texts = await Effect.gen(function* () {
       yield* planAdversarial(SESSION, "Add rate limiting to refunds.").pipe(Stream.runDrain)
-      const messages = yield* TranscriptStore.list(SESSION)
+      const messages = yield* TranscriptStore.list(CHAT)
       return messages.filter((m) => m.role === "user").map((m) => m.parts)
     }).pipe(Effect.provide(roundLayer(root)), Effect.runPromise)
 
@@ -1652,7 +1653,7 @@ describe("Gigaplan round persistence", () => {
       })
       yield* planAdversarial(SESSION).pipe(Stream.runDrain)
       yield* planAdversarial(SESSION).pipe(Stream.runDrain)
-      const messages = yield* TranscriptStore.list(SESSION)
+      const messages = yield* TranscriptStore.list(CHAT)
       return messages
         .filter((message) => message.role === "user")
         .flatMap((message) =>
@@ -1687,7 +1688,7 @@ describe("Gigaplan round persistence", () => {
         createdAt: "2026-07-22T00:00:00.000Z"
       })
       yield* planAdversarial(SESSION).pipe(Stream.runDrain)
-      const messages = yield* TranscriptStore.list(SESSION)
+      const messages = yield* TranscriptStore.list(CHAT)
       return messages.flatMap((message) =>
         message.parts.flatMap((part) => (part._tag === "Image" ? [part.attachment.id] : []))
       )
@@ -1768,7 +1769,7 @@ describe("Gigaplan round persistence", () => {
         createdAt: "2026-07-19T00:00:00.000Z"
       })
       yield* planExecute(SESSION, PLAN.id).pipe(Stream.runDrain)
-      const messages = yield* TranscriptStore.list(SESSION)
+      const messages = yield* TranscriptStore.list(CHAT)
       return messages.flatMap((m) =>
         m.parts.flatMap((p) => (p._tag === "Plan" && p.plan.id === PLAN.id ? [p.plan.status] : []))
       )
@@ -1787,7 +1788,7 @@ describe("Gigaplan round persistence", () => {
         createdAt: "2026-07-19T00:00:00.000Z"
       })
       yield* planExecute(SESSION, PLAN.id).pipe(Stream.runDrain)
-      const messages = yield* TranscriptStore.list(SESSION)
+      const messages = yield* TranscriptStore.list(CHAT)
       return messages.flatMap((message) =>
         message.parts.flatMap((part) =>
           part._tag === "Plan" && part.plan.id === PLAN.id ? [part.plan] : []
@@ -1846,7 +1847,7 @@ describe("Gigaplan round persistence", () => {
         createdAt: "2026-07-19T00:00:00.000Z"
       })
       yield* planExecute(SESSION, PLAN.id).pipe(Stream.runDrain)
-      const messages = yield* TranscriptStore.list(SESSION)
+      const messages = yield* TranscriptStore.list(CHAT)
       return messages.flatMap((message) =>
         message.parts.flatMap((part) =>
           part._tag === "Plan" && part.plan.id === PLAN.id ? [part.plan] : []
@@ -1917,7 +1918,7 @@ describe("Gigaplan round persistence", () => {
         createdAt: "2026-07-19T00:00:00.000Z"
       })
       yield* planExecute(SESSION, PLAN.id).pipe(Stream.runDrain)
-      const messages = yield* TranscriptStore.list(SESSION)
+      const messages = yield* TranscriptStore.list(CHAT)
       return messages.map((m) => m.role)
     }).pipe(Effect.provide(execLayer(root)), Effect.runPromise)
 
@@ -1939,7 +1940,7 @@ describe("Gigaplan round persistence", () => {
         createdAt: "2026-07-19T00:00:00.000Z"
       })
       yield* planExecute(SESSION, PLAN.id).pipe(Stream.runDrain)
-      const messages = yield* TranscriptStore.list(SESSION)
+      const messages = yield* TranscriptStore.list(CHAT)
       const stored = messages.flatMap((m) =>
         m.parts.flatMap((p) => (p._tag === "Plan" && p.plan.id === PLAN.id ? [p.plan] : []))
       )[0]

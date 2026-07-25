@@ -190,6 +190,18 @@ export const ReasoningSetting = Schema.Struct({
 })
 export type ReasoningSetting = Schema.Schema.Type<typeof ReasoningSetting>
 
+export const ClaudeReasoningSetting = Schema.Struct({
+  enabled: Schema.Boolean,
+  effort: Schema.optional(ClaudeReasoningEffort)
+})
+export type ClaudeReasoningSetting = Schema.Schema.Type<typeof ClaudeReasoningSetting>
+
+export const CodexReasoningSetting = Schema.Struct({
+  enabled: Schema.Boolean,
+  effort: Schema.optional(CodexReasoningEffort)
+})
+export type CodexReasoningSetting = Schema.Schema.Type<typeof CodexReasoningSetting>
+
 export const SessionReasoning = Schema.Struct({
   claude: Schema.optional(ReasoningSetting),
   codex: Schema.optional(ReasoningSetting),

@@ -323,13 +323,16 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     void rpc.sessionsRename(sessionId, title).then((session) => send({ type: "SESSION_UPDATED", session }))
   }
   const deleteSession = async (sessionId: string) => {
+    const chatIds = sessions
+      .find((session) => session.id === sessionId)
+      ?.chats.map((chat) => chat.id) ?? []
     await rpc.sessionsDelete(sessionId)
     // Stop the persistent conversation actor for a deleted session (it's kept
     // running across session switches, so it won't be torn down by unmount).
     disposeConversationActor(sessionId)
     // Same reasoning for the composer draft — it outlives the pane by design, so
     // nothing else would ever collect it (and it's persisted).
-    clearDraft(sessionId)
+    for (const chatId of chatIds) clearDraft(chatId)
     clearViewedPaths(sessionId)
     send({ type: "SESSION_DELETED", sessionId })
   }

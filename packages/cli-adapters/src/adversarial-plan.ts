@@ -9,7 +9,7 @@ import type {
   PlanRound,
   PlanStep,
   QuestionAnswer,
-  ReasoningEffort,
+  ReasoningSetting,
   ReviewSeverity,
   RoutingContext,
   StreamEvent,
@@ -296,8 +296,8 @@ export interface PlanRoundInput {
   readonly assignAgents: boolean
   /** Complete live catalogue plus deterministic workspace routing policy. */
   readonly routing: RoutingContext
-  /** Composer-selected thinking strength for every role in this round. */
-  readonly reasoningEffort?: ReasoningEffort
+  /** Composer-selected provider-native thinking settings for every role. */
+  readonly reasoning?: ReasoningSetting
   /**
    * Where the finished round goes — the plan library wires the store in here.
    * A hook rather than a service dependency so the round logic stays pure of
@@ -398,7 +398,14 @@ const runRole = (
       // its plan out of a fenced block so any harness can hold any role.
       mode: "ask",
       model: who.model,
-      ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+      ...(input.reasoning === undefined
+        ? {}
+        : {
+            thinkingEnabled: input.reasoning.enabled,
+            ...(input.reasoning.effort === undefined
+              ? {}
+              : { reasoningEffort: input.reasoning.effort })
+          }),
       resumeId: null,
       // `resumeId: null` alone is NOT enough — the adapter's in-memory resume map
       // wins over the spec, and our key is stable per session and role, so every

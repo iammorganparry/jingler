@@ -50,6 +50,7 @@ import {
   X
 } from "lucide-react"
 import { cn } from "../lib/cn.js"
+import { reasoningEffortsFor } from "../lib/reasoning-options.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
@@ -135,10 +136,7 @@ const reasoningItemsFor = (
   cli: CliKind
 ): ReadonlyArray<{ value: ReasoningChoice; label: string }> => [
   { value: "off", label: "Off" },
-  ...(cli === "claude"
-    ? (["low", "medium", "high", "xhigh", "max"] as const)
-    : (["minimal", "low", "medium", "high", "xhigh"] as const)
-  ).map((value) => ({ value, label: value }))
+  ...reasoningEffortsFor(cli).map((value) => ({ value, label: value }))
 ]
 
 const OUTPUT_ITEMS: ReadonlyArray<{ value: OutputStyle; label: string }> = [

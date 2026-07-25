@@ -1,5 +1,5 @@
-import type { Plan, Session, StreamEvent } from "@starbase/core"
-import { latestPlan, STOPPED_NOTE } from "@starbase/core"
+import type { Message, Plan, Session, SessionPlanArtifact, StreamEvent } from "@starbase/core"
+import { applyStreamEvent, assistantMessage, latestPlan, STOPPED_NOTE } from "@starbase/core"
 import { createActor, waitFor } from "xstate"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { conversationMachine } from "./conversation-machine.js"
@@ -40,6 +40,8 @@ const h = vi.hoisted(() => ({
   skillsGate: Promise.resolve() as Promise<void>,
   // Lets a test hold the transcript load, to drive the "typed before it lands" race.
   transcriptGate: Promise.resolve() as Promise<void>,
+  transcript: [] as ReadonlyArray<Message>,
+  currentPlan: null as SessionPlanArtifact | null,
   setHarnessCalls: [] as Array<{ sessionId: string; cli: string; model: string }>,
   planCalls: [] as Array<{ sessionId: string; brief: string | undefined }>,
   reasoningCalls: [] as Array<unknown>,
@@ -59,9 +61,9 @@ vi.mock("./rpc-client.js", () => ({
   rpc: {
     sessionsTranscript: async () => {
       await h.transcriptGate
-      return []
+      return h.transcript
     },
-    planCurrent: async () => null,
+    planCurrent: async () => h.currentPlan,
     skillsList: async () => {
       h.skillsListCalls += 1
       await h.skillsGate
@@ -189,6 +191,8 @@ beforeEach(() => {
   h.catalogGate = Promise.resolve()
   h.skillsGate = Promise.resolve()
   h.transcriptGate = Promise.resolve()
+  h.transcript = []
+  h.currentPlan = null
   h.reviewCb = null
   h.planCalls.length = 0
   h.reasoningCalls.length = 0
@@ -914,6 +918,76 @@ describe("conversationMachine — PlanUpdated across turns", () => {
 
     const plan = latestPlan(actor.getSnapshot().context.messages)
     expect(plan?.steps[0]!.status).toBe("done")
+    actor.stop()
+  })
+
+  it("uses the shared artifact revision when the transcript has the same plan id", async () => {
+    h.transcript = [
+      applyStreamEvent(
+        assistantMessage("a_plan", "2026-07-25T00:00:00.000Z"),
+        { _tag: "PlanProposed", plan: planFixture("proposed") }
+      )
+    ]
+    h.currentPlan = {
+      sessionId: session.id,
+      producingChatId: session.id,
+      revision: 1,
+      plan: planFixture("done"),
+      updatedAt: "2026-07-25T00:01:00.000Z"
+    }
+
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+
+    expect(latestPlan(actor.getSnapshot().context.messages)?.steps[0]?.status).toBe("done")
+    actor.stop()
+  })
+
+  it("applies a shared plan broadcast to an existing chat actor", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+
+    actor.send({
+      type: "SHARED_PLAN_UPDATED",
+      plan: planFixture("done"),
+      producingChatId: "c_other"
+    })
+
+    expect(latestPlan(actor.getSnapshot().context.messages)?.steps[0]?.status).toBe("done")
+    expect(actor.getSnapshot().context.sharedPlanChatId).toBe("c_other")
+    actor.stop()
+  })
+})
+
+describe("conversationMachine — persisted session reconciliation", () => {
+  it("refreshes provider, model, mode, and reasoning on an existing actor", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    const updated = {
+      ...session,
+      cli: "codex",
+      model: "gpt-5.6-sol",
+      mode: "auto",
+      activeChatId: session.id,
+      chats: [{
+        id: session.id,
+        title: "Chat 1",
+        createdAt: "2026-07-25T00:00:00.000Z",
+        updatedAt: "2026-07-25T00:00:00.000Z",
+        mode: "auto",
+        model: "gpt-5.6-sol"
+      }],
+      reasoning: { codex: { enabled: false, effort: "high" } }
+    } as Session
+
+    actor.send({ type: "SESSION_UPDATED", session: updated })
+
+    expect(actor.getSnapshot().context).toMatchObject({
+      cli: "codex",
+      model: "gpt-5.6-sol",
+      mode: "auto",
+      reasoning: { enabled: false, effort: "high" }
+    })
     actor.stop()
   })
 })

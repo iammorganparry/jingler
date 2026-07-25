@@ -59,6 +59,31 @@ describe("TranscriptStore", () => {
     expect(messages[1]).toStrictEqual([second])
   })
 
+  it("keeps untrusted transcript keys inside the transcript directory", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const paths = yield* AppPaths
+        yield* TranscriptStore.append(
+          "../config",
+          userMessage("u1", "contained", "2026-07-11T10:00:00.000Z")
+        )
+        return {
+          escaped: yield* fs
+            .exists(path.join(paths.root, "config.json"))
+            .pipe(Effect.orElseSucceed(() => false)),
+          entries: yield* fs
+            .readDirectory(paths.transcriptsDir)
+            .pipe(Effect.orElseSucceed(() => []))
+        }
+      })
+    )
+
+    expect(result.escaped).toBe(false)
+    expect(result.entries).toStrictEqual(["..%2Fconfig.json"])
+  })
+
   it("adopts a legacy session transcript into the synthesized first chat once", async () => {
     const legacy = userMessage("u1", "Legacy turn", "2026-07-11T10:00:00.000Z")
     const result = await run(

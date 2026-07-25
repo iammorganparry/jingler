@@ -185,7 +185,7 @@ const compactThenPrompt = (over: Partial<Session> = {}) =>
       const events: Array<StreamEvent> = []
       const runner = yield* AgentRunner
       yield* runner
-        .prompt(SESSION, "and what did we decide about the token bucket?")
+        .prompt(SESSION, SESSION, "and what did we decide about the token bucket?")
         .pipe(Stream.runForEach((e) => Effect.sync(() => events.push(e))))
 
       return {
@@ -323,9 +323,9 @@ describe("compaction swap", () => {
         yield* ContextManager.compactNow(SESSION)
         yield* awaitDigest()
         const runner = yield* AgentRunner
-        yield* runner.prompt(SESSION, "first").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "first").pipe(Stream.runDrain)
         specs.length = 0
-        yield* runner.prompt(SESSION, "second").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "second").pipe(Stream.runDrain)
         return specs[specs.length - 1]!
       }).pipe(Effect.orDie, Effect.provide(layers())) as Effect.Effect<SessionSpec>
     )
@@ -343,7 +343,7 @@ describe("no compaction pending", () => {
         yield* seed()
         yield* seedTranscript()
         const runner = yield* AgentRunner
-        yield* runner.prompt(SESSION, "just a normal turn").pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, "just a normal turn").pipe(Stream.runDrain)
         return specs[specs.length - 1]!
       }).pipe(Effect.orDie, Effect.provide(layers())) as Effect.Effect<SessionSpec>
     )

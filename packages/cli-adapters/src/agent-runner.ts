@@ -51,6 +51,11 @@ import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore } from "./plan-store.js"
+import {
+  anySessionRunActive,
+  releaseSessionRun,
+  reserveSessionRun
+} from "./run-coordinator.js"
 
 /** Tools that write to disk — a successful one advances the matching plan step. */
 const EDIT_TOOLS = new Set(["Write", "Edit", "Update", "MultiEdit", "NotebookEdit"])
@@ -371,6 +376,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           return current !== undefined ? [current, m] : [made, new Map(m).set(sessionId, made)]
         })
       })
+
     // Monotonic id source — deterministic (no Date.now/random) for stable tests.
     const counter = yield* Ref.make(0)
     const nextId = Ref.updateAndGet(counter, (n) => n + 1)
@@ -1482,68 +1488,25 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
 
     function prompt(
       sessionId: string,
-      text: string,
-      images?: ReadonlyArray<Attachment>,
-      target?: AgentRunTarget,
-      reasoning?: ReasoningSetting | null
-    ): Stream.Stream<StreamEvent, never, PromptEnv>
-    function prompt(
-      sessionId: string,
       chatId: string,
       text: string,
-      images?: ReadonlyArray<Attachment>,
-      target?: AgentRunTarget,
+      images: ReadonlyArray<Attachment> = [],
+      target: AgentRunTarget = "session",
       reasoning?: ReasoningSetting | null
-    ): Stream.Stream<StreamEvent, never, PromptEnv>
-    function prompt(
-      sessionId: string,
-      chatIdOrText: string,
-      textOrImages?: string | ReadonlyArray<Attachment>,
-      imagesOrTarget?: ReadonlyArray<Attachment> | AgentRunTarget,
-      targetOrReasoning?: AgentRunTarget | ReasoningSetting | null,
-      maybeReasoning?: ReasoningSetting | null
     ): Stream.Stream<StreamEvent, never, PromptEnv> {
-      const hasChatId = typeof textOrImages === "string"
-      const chatId = hasChatId ? chatIdOrText : sessionId
-      const text = hasChatId ? textOrImages : chatIdOrText
-      const images = (
-        hasChatId
-          ? Array.isArray(imagesOrTarget) ? imagesOrTarget : []
-          : Array.isArray(textOrImages) ? textOrImages : []
-      ) as ReadonlyArray<Attachment>
-      const target = (
-        hasChatId
-          ? typeof imagesOrTarget === "string"
-            ? imagesOrTarget
-            : typeof targetOrReasoning === "string"
-              ? targetOrReasoning
-              : "session"
-          : typeof imagesOrTarget === "string"
-            ? imagesOrTarget
-            : "session"
-      ) as AgentRunTarget
-      const reasoning = hasChatId
-        ? maybeReasoning ??
-          (typeof targetOrReasoning === "object" ? targetOrReasoning : undefined)
-        : typeof targetOrReasoning === "object"
-          ? targetOrReasoning
-          : undefined
       return Stream.unwrapScoped(
-        Effect.flatMap(sessionLock(sessionId), (lock) =>
-          lock.withPermits(1)(
+        Effect.gen(function* () {
+          const lock = yield* sessionLock(sessionId)
+          return yield* lock.withPermits(1)(
             Effect.gen(function* () {
-              const running = [...(yield* Ref.get(fibers)).values()].find(
-                (entry) => entry.sessionId === sessionId
-              )
-              if (running !== undefined) {
+              const acquired = yield* reserveSessionRun(sessionId, chatId)
+              if (!acquired) {
                 return Stream.fromIterable<StreamEvent>([{
                   _tag: "Failed",
-                  message:
-                    running.chatId === chatId
-                      ? "This chat is already running."
-                      : "Another chat in this session is running. Stop it before starting this chat."
+                  message: "Another chat or plan in this session is running. Stop it before starting this chat."
                 }])
               }
+              yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, chatId))
               return yield* promptSetup(
                 sessionId,
                 chatId,
@@ -1551,22 +1514,22 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
                 images,
                 target,
                 reasoning
-              )
-            }).pipe(
-              Effect.catchAll((error) =>
-                Effect.succeed(
-                  Stream.fromIterable<StreamEvent>([{
-                    _tag: "Failed",
-                    message:
-                      error instanceof CliExecError
-                        ? error.message
-                        : "The agent run could not start."
-                  }])
+              ).pipe(
+                Effect.catchAll((error) =>
+                  Effect.succeed(
+                    Stream.fromIterable<StreamEvent>([{
+                      _tag: "Failed",
+                      message:
+                        error instanceof CliExecError
+                          ? error.message
+                          : "The agent run could not start."
+                    }])
+                  )
                 )
               )
-            )
+            })
           )
-        )
+        })
       )
     }
 
@@ -1577,7 +1540,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
        * actively waiting on — the runner already owns this map, so exposing it
        * beats a second source of truth that could disagree.
        */
-      anyRunning: Effect.map(Ref.get(fibers), (m) => m.size > 0),
+      anyRunning: anySessionRunActive,
       prompt,
       decideGate,
       answerQuestion,

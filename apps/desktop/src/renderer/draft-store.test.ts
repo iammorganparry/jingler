@@ -142,6 +142,14 @@ describe("draft-store", () => {
       expect(getDraft("s1")).toBe(EMPTY_DRAFT)
     })
 
+    it("offers a linked-issue prompt to only one chat in the session", () => {
+      seedDraftOnce("c1", "Fix issue #42", "s1")
+      seedDraftOnce("c2", "Fix issue #42", "s1")
+
+      expect(getDraft("c1").text).toBe("Fix issue #42")
+      expect(getDraft("c2")).toBe(EMPTY_DRAFT)
+    })
+
     it("keeps attachments on a draft that has images but no text yet", () => {
       // The text guard alone would overwrite the whole draft, eating the images.
       setDraft("s1", { text: "", attachments: [IMAGE] })

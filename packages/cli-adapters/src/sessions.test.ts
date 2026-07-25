@@ -188,7 +188,10 @@ describe("SessionStore", () => {
   it("persists chat create, rename, selection, and adjacent close fallback", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
-        const created = yield* SessionStore.create(input({ title: "Multi chat" }))
+        const created = yield* SessionStore.create(input({ title: "Multi chat" }), {
+          defaultMode: "auto",
+          defaultModel: "opus"
+        })
         const firstChatId = created.activeChatId
         const withSecond = yield* SessionStore.createChat(created.id)
         const secondChatId = withSecond.activeChatId
@@ -214,6 +217,9 @@ describe("SessionStore", () => {
     expect(exit.value.replaced.chats).toHaveLength(1)
     expect(exit.value.replaced.chats[0]!.title).toBeNull()
     expect(exit.value.replaced.activeChatId).toBe(exit.value.replaced.chats[0]!.id)
+    expect(exit.value.replaced.activeChatId).not.toBe(exit.value.secondChatId)
+    expect(exit.value.replaced.chats[0]!.mode).toBe("auto")
+    expect(exit.value.replaced.chats[0]!.model).toBe("opus")
   })
 
   it("stamps provider mode, model, and reasoning defaults when supplied", async () => {
@@ -221,7 +227,7 @@ describe("SessionStore", () => {
       SessionStore.create(input(), {
         defaultMode: "plan",
         defaultModel: "opus",
-        defaultReasoningEffort: "high"
+        defaultReasoning: { enabled: false, effort: "high" }
       }).pipe(Effect.provide(services)),
       temp.layer
     )
@@ -229,7 +235,10 @@ describe("SessionStore", () => {
     if (withDefaults._tag === "Success") {
       expect(activeChat(withDefaults.value).mode).toBe("plan")
       expect(activeChat(withDefaults.value).model).toBe("opus")
-      expect(withDefaults.value.reasoning?.claude?.effort).toBe("high")
+      expect(withDefaults.value.reasoning?.claude).toStrictEqual({
+        enabled: false,
+        effort: "high"
+      })
     }
 
     const noDefaults = await runExit(
@@ -242,6 +251,32 @@ describe("SessionStore", () => {
       expect(activeChat(noDefaults.value).model).toBeUndefined()
       expect(noDefaults.value.reasoningEffort).toBeUndefined()
     }
+  })
+
+  it("moves legacy context occupancy onto the synthesized first chat", async () => {
+    const created = await runExit(
+      SessionStore.create(input({ title: "Legacy context" })).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(created._tag).toBe("Success")
+    if (created._tag !== "Success") return
+    const {
+      chats: _chats,
+      activeChatId: _activeChatId,
+      ...legacy
+    } = created.value
+    writeFileSync(
+      join(temp.root, "sessions.json"),
+      JSON.stringify([{ ...legacy, contextTokens: 190_000 }])
+    )
+
+    const reread = await runExit(
+      SessionStore.get(created.value.id).pipe(Effect.provide(SessionStore.Default)),
+      temp.layer
+    )
+    expect(reread._tag).toBe("Success")
+    if (reread._tag !== "Success") return
+    expect(activeChat(reread.value).contextTokens).toBe(190_000)
   })
 
   it("keeps normal and Gigaplan resume ids independent", async () => {
@@ -555,6 +590,40 @@ describe("SessionStore", () => {
       expect(exit.value.cli).toBe("codex")
       expect(activeChat(exit.value).model).toBe("gpt-5.6-sol")
       expect(activeChat(exit.value).resumeId).toBeUndefined()
+    })
+
+    it("normalizes every chat when the session-wide harness changes", async () => {
+      const exit = await runExit(
+        Effect.gen(function* () {
+          const created = yield* SessionStore.create(input({ title: "Multi switch" }), {
+            defaultMode: "plan",
+            defaultModel: "sonnet"
+          })
+          yield* SessionStore.setResumeId(created.id, created.activeChatId, "claude-one")
+          const withSecond = yield* SessionStore.createChat(created.id)
+          yield* SessionStore.setResumeId(created.id, withSecond.activeChatId, "claude-two")
+          yield* SessionStore.setHarness(
+            created.id,
+            withSecond.activeChatId,
+            "cursor",
+            "composer-1"
+          )
+          return yield* SessionStore.get(created.id)
+        }).pipe(Effect.provide(services)),
+        temp.layer
+      )
+      expect(exit._tag).toBe("Success")
+      if (exit._tag !== "Success") return
+      expect(exit.value.cli).toBe("cursor")
+      expect(exit.value.chats.map((chat) => chat.resumeId)).toStrictEqual([
+        undefined,
+        undefined
+      ])
+      expect(exit.value.chats.map((chat) => chat.mode)).toStrictEqual(["ask", "ask"])
+      expect(exit.value.chats.map((chat) => chat.model)).toStrictEqual([
+        undefined,
+        "composer-1"
+      ])
     })
 
     /**

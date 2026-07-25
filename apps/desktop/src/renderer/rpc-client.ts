@@ -277,13 +277,38 @@ export const rpc = {
     cli: "claude" | "codex" | "opencode",
     reasoning: ReasoningSetting | undefined
   ): Promise<void> =>
-    run((c) =>
-      c.Agent.setReasoning({
+    run((c) => {
+      if (cli === "claude") {
+        const effort = reasoning?.effort
+        const compatible = reasoning === undefined
+          ? undefined
+          : {
+              enabled: reasoning.enabled,
+              ...(effort === undefined
+                ? {}
+                : { effort: effort === "minimal" ? "low" as const : effort })
+            }
+        return c.Agent.setReasoning({
+          sessionId,
+          cli,
+          ...(compatible === undefined ? {} : { reasoning: compatible })
+        })
+      }
+      const effort = reasoning?.effort
+      const compatible = reasoning === undefined
+        ? undefined
+        : {
+            enabled: reasoning.enabled,
+            ...(effort === undefined
+              ? {}
+              : { effort: effort === "max" ? "xhigh" as const : effort })
+          }
+      return c.Agent.setReasoning({
         sessionId,
         cli,
-        ...(reasoning === undefined ? {} : { reasoning })
+        ...(compatible === undefined ? {} : { reasoning: compatible })
       })
-    ),
+    }),
   agentCommentPlanStep: (sessionId: string, planId: string, stepId: string, body: string): Promise<void> =>
     run((c) => c.Agent.commentPlanStep({ sessionId, planId, stepId, body })),
   agentRevisePlan: (sessionId: string, planId: string): Promise<void> =>

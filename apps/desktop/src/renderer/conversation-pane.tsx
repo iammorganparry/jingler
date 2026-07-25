@@ -10,7 +10,8 @@ import { useQuery } from "@tanstack/react-query"
 import type { Session } from "@starbase/core"
 import { agentChildren, agentPath } from "@starbase/core"
 import {
-  AgentTabBar,
+  ChatTabBar,
+  SubagentTabBar,
   BackgroundTaskDock,
   BackgroundTaskOutput,
   ConversationView,
@@ -23,7 +24,11 @@ import {
 } from "@starbase/ui"
 import { rpc } from "./rpc-client.js"
 import { publishSessionUpdate } from "./session-updates.js"
-import { disposeChatActor } from "./conversation-registry.js"
+import {
+  disposeChatActor,
+  rehomeSharedPlan,
+  useChatActivities
+} from "./conversation-registry.js"
 import { clearDraft, getDraft, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
 import { useConversation } from "./use-conversation.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
@@ -73,6 +78,7 @@ export function ConversationPane({
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
   const convo = useConversation(session, activeChat.id)
+  const chatActivities = useChatActivities(session.id)
   // `convo.cli` rather than `session.cli`: the harness can change mid-session, and
   // MCP config is a property of the harness.
   const mcp = useMcp(session.id, convo.cli)
@@ -164,8 +170,10 @@ export function ConversationPane({
   // It now seeds the DRAFT STORE (once ever, never over existing text), so the
   // prefill survives the same unmounts the store was built for.
   useEffect(() => {
-    if (session.initialPrompt) seedDraftOnce(activeChat.id, session.initialPrompt)
-  }, [activeChat.id, session.initialPrompt])
+    if (session.initialPrompt) {
+      seedDraftOnce(activeChat.id, session.initialPrompt, session.id)
+    }
+  }, [activeChat.id, session.id, session.initialPrompt])
 
   const sendPrompt: typeof convo.sendPrompt = (...args) => {
     if (session.initialPrompt) onInitialPromptConsumed?.(session.id)
@@ -191,13 +199,17 @@ export function ConversationPane({
     void rpc.sessionsRenameChat(session.id, chatId, title).then(publishSessionUpdate)
   }
   const closeChat = (chatId: string) => {
-    disposeChatActor(session.id, chatId)
-    void rpc.sessionsCloseChat(session.id, chatId).then(publishSessionUpdate)
+    void rpc.sessionsCloseChat(session.id, chatId).then((updated) => {
+      clearDraft(chatId)
+      rehomeSharedPlan(session.id, chatId, updated.activeChatId)
+      disposeChatActor(session.id, chatId)
+      publishSessionUpdate(updated)
+    }).catch(() => {})
   }
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.altKey || event.ctrlKey) return
+      if ((!event.metaKey && !event.ctrlKey) || event.altKey) return
       const target = event.target
       if (
         target instanceof HTMLElement &&
@@ -293,11 +305,11 @@ export function ConversationPane({
   )
 
   const chatBar = (
-    <AgentTabBar
+    <ChatTabBar
       chats={session.chats.map((chat, index) => ({
         id: chat.id,
         title: chat.title ?? `Chat ${index + 1}`,
-        running: chat.id === activeChat.id && convo.busy
+        running: chatActivities[chat.id] !== undefined
       }))}
       activeChatId={activeChat.id}
       onSelectChat={selectChat}
@@ -332,7 +344,7 @@ export function ConversationPane({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {chatBar}
       {barAgents.length > 0 && (
-        <AgentTabBar
+        <SubagentTabBar
           agents={barAgents.map((s) => ({
             id: s.id,
             name: s.name,

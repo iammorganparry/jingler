@@ -188,6 +188,38 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           })
         )
 
+      const rehomeArtifact = (
+        worktreePath: string,
+        sessionId: string,
+        fromChatId: string,
+        toChatId: string
+      ): Effect.Effect<SessionPlanArtifact | null, never, PlanStoreEnv> =>
+        lock.withPermits(1)(
+          Effect.gen(function* () {
+            const prior = yield* readArtifact(worktreePath)
+            if (
+              prior === null ||
+              prior.sessionId !== sessionId ||
+              prior.producingChatId !== fromChatId
+            ) {
+              return prior
+            }
+            return yield* writeArtifact(worktreePath, {
+              ...prior,
+              producingChatId: toChatId,
+              revision: prior.revision + 1,
+              updatedAt: new Date().toISOString()
+            })
+          })
+        )
+
+      const removeAll = (worktreePath: string): Effect.Effect<void, never, PlanStoreEnv> =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const dir = yield* dirFor(worktreePath)
+          yield* fs.remove(dir, { recursive: true }).pipe(Effect.ignore)
+        })
+
       return {
         write,
         list,
@@ -195,7 +227,9 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         fileFor,
         readArtifact,
         promote,
-        updateArtifact
+        updateArtifact,
+        rehomeArtifact,
+        removeAll
       }
     }
   }

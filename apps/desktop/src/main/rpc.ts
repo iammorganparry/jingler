@@ -47,6 +47,8 @@ import {
   ThemeService,
   BackgroundTaskStore,
   RankingService,
+  releaseSessionRun,
+  reserveSessionRun,
   TranscriptStore,
   UsageService,
   WorkspaceService
@@ -86,8 +88,10 @@ import type {
   IssueAutomations,
   IssueSummary,
   PrMergeMethod,
+  ProviderConfig,
   ReviewComment,
   ReviewSubmitKind,
+  ReasoningSetting,
   Session,
   SettledSessionStatus,
   ProviderModels,
@@ -227,6 +231,21 @@ type SessionWithPr = Session & { readonly prNumber: number }
 const hasActivePr = (session: Session | null): session is SessionWithPr =>
   session !== null && session.prNumber !== null
 
+const providerReasoning = (
+  provider: ProviderConfig | undefined
+): ReasoningSetting | undefined => {
+  if (
+    provider === undefined ||
+    (provider.thinkingEnabled === undefined && provider.reasoningEffort === undefined)
+  ) {
+    return undefined
+  }
+  return {
+    enabled: provider.thinkingEnabled ?? true,
+    ...(provider.reasoningEffort === undefined ? {} : { effort: provider.reasoningEffort })
+  }
+}
+
 /** Resolve a session only when it has an active pull request. */
 const sessionWithPr = (sessionId: string) =>
   resolveSession(sessionId).pipe(
@@ -247,7 +266,7 @@ export const createSessionFromPr = (input: CreateSessionFromPrInput) =>
       allowSharedCheckout,
       defaultMode: provider?.defaultMode,
       defaultModel: provider?.defaultModel,
-      defaultReasoningEffort: provider?.reasoningEffort
+      defaultReasoning: providerReasoning(provider)
     })
   })
 
@@ -264,7 +283,7 @@ export const createSession = (input: CreateSessionInput) =>
     return yield* SessionStore.create(input, {
       defaultMode: provider?.defaultMode,
       defaultModel: provider?.defaultModel,
-      defaultReasoningEffort: provider?.reasoningEffort
+      defaultReasoning: providerReasoning(provider)
     })
   })
 
@@ -352,7 +371,7 @@ export const createSessionFromIssue = (input: CreateSessionFromIssueInput) =>
     return yield* SessionStore.createFromIssue(input, {
       defaultMode: provider?.defaultMode,
       defaultModel: provider?.defaultModel,
-      defaultReasoningEffort: provider?.reasoningEffort
+      defaultReasoning: providerReasoning(provider)
     })
   })
 
@@ -735,7 +754,7 @@ export const planExecute = (
   planId: string,
   executionMode?: ExecutionMode
 ): Stream.Stream<StreamEvent, PlanError, PlanExecuteEnv> =>
-  Stream.unwrap(
+  Stream.unwrapScoped(
     Effect.gen(function* () {
       const session = yield* resolveSession(sessionId)
       if (!session?.worktreePath) {
@@ -746,10 +765,34 @@ export const planExecute = (
         )
       }
       const worktreePath = session.worktreePath
+      const reservation = `plan:${planId}`
+      const reserved = yield* reserveSessionRun(sessionId, reservation)
+      if (!reserved) {
+        return Stream.fail(
+          new PlanError({
+            message: "Another chat or plan is already running in this session."
+          })
+        )
+      }
+      yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, reservation))
       const persistedArtifact = yield* PlanStore.readArtifact(worktreePath)
+      const migrationChat = session.chats.find(
+        (chat) => chat.id === `c_${session.id}_1`
+      )
+      if (migrationChat !== undefined) {
+        yield* TranscriptStore.adoptLegacy(session.id, migrationChat.id)
+      }
+      const validPersistedArtifact =
+        persistedArtifact !== null &&
+        persistedArtifact.sessionId === session.id &&
+        session.chats.some((chat) => chat.id === persistedArtifact.producingChatId)
+          ? persistedArtifact
+          : null
       const artifact =
-        persistedArtifact ??
-        (yield* TranscriptStore.list(sessionId).pipe(
+        validPersistedArtifact ??
+        (yield* (migrationChat === undefined
+          ? Effect.succeed([] as ReadonlyArray<Message>)
+          : TranscriptStore.list(migrationChat.id)).pipe(
           Effect.orElseSucceed(() => [] as ReadonlyArray<Message>),
           Effect.map((messages) =>
             messages
@@ -761,7 +804,12 @@ export const planExecute = (
           Effect.flatMap((legacyPlan) =>
             legacyPlan === null
               ? Effect.succeed(null)
-              : PlanStore.promote(sessionId, worktreePath, sessionId, legacyPlan)
+              : PlanStore.promote(
+                  sessionId,
+                  worktreePath,
+                  migrationChat!.id,
+                  legacyPlan
+                )
           )
         ))
       if (artifact === null || artifact.plan.id !== planId) {
@@ -830,10 +878,17 @@ export const planExecute = (
       const txCtx = yield* Effect.context<
         TranscriptStore | PlanStore | FileSystem.FileSystem | Path.Path | AppPaths
       >()
-      yield* PlanStore.updateArtifact(worktreePath, planId, (stored) => ({
+      const approvedArtifact = yield* PlanStore.updateArtifact(worktreePath, planId, (stored) => ({
         ...stored,
         status: "approved"
       }))
+      if (approvedArtifact === null) {
+        return Stream.fail(
+          new PlanError({
+            message: "This plan changed before execution began. Review the current plan and retry."
+          })
+        )
+      }
       if (located !== null) {
         yield* TranscriptStore.patchById(chatId, located.messageId, (m) => ({
           ...m,
@@ -1098,7 +1153,7 @@ export const planAdversarial = (
   images: ReadonlyArray<Attachment> = [],
   requestedChatId?: string
 ): Stream.Stream<StreamEvent, PlanError, PlanAdversarialEnv> =>
-  Stream.unwrap(
+  Stream.unwrapScoped(
     Effect.gen(function* () {
       const session = yield* resolveSession(sessionId)
       if (!session?.worktreePath) {
@@ -1112,8 +1167,18 @@ export const planAdversarial = (
         requestedChatId &&
         session.chats.some((chat) => chat.id === requestedChatId)
           ? requestedChatId
-          : sessionId
-      if (requestedChatId !== undefined) {
+          : session.activeChatId
+      const reservation = `planning:${chatId}`
+      const reserved = yield* reserveSessionRun(sessionId, reservation)
+      if (!reserved) {
+        return Stream.fail(
+          new PlanError({
+            message: "Another chat or plan is already running in this session."
+          })
+        )
+      }
+      yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, reservation))
+      if (chatId === `c_${session.id}_1`) {
         yield* TranscriptStore.adoptLegacy(sessionId, chatId)
       }
       const prior = yield* TranscriptStore.list(chatId).pipe(Effect.orElseSucceed(() => []))
@@ -1212,11 +1277,10 @@ export const planAdversarial = (
             usage,
             affinityEnabled: false
           },
-          ...(session.reasoning?.[session.cli === "codex" ? "codex" : "claude"]?.effort
-            ? {
-                reasoningEffort:
-                  session.reasoning[session.cli === "codex" ? "codex" : "claude"]!.effort
-              }
+          ...(session.cli === "claude" ||
+          session.cli === "codex" ||
+          session.cli === "opencode"
+            ? { reasoning: session.reasoning?.[session.cli] }
             : {}),
           // Persistence is wired in here rather than inside the service so the
           // round logic stays free of the filesystem and testable without one.
@@ -1663,10 +1727,19 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "Sessions.retitle": ({ sessionId }) => retitleSession(sessionId, claudeTitleGenerator),
   "Sessions.rename": ({ sessionId, title }) => renameSession(sessionId, title),
   "Sessions.setStatus": ({ sessionId, status }) => setSessionStatus(sessionId, status),
-  // Drop the stored review too, else ~/starbase/reviews/<id>.json outlives its
-  // session forever (and a recycled id would read a stranger's findings).
   "Sessions.delete": ({ sessionId }) =>
-    SessionStore.remove(sessionId).pipe(Effect.tap(() => ReviewStore.clear(sessionId))),
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId).pipe(
+        Effect.orElseSucceed(() => null)
+      )
+      yield* SessionStore.remove(sessionId)
+      for (const chat of session?.chats ?? []) {
+        yield* TranscriptStore.remove(chat.id)
+        yield* ContextManager.forget(chat.id)
+      }
+      if (session?.worktreePath) yield* PlanStore.removeAll(session.worktreePath)
+      yield* ReviewStore.clear(sessionId)
+    }),
   "Sessions.createChat": ({ sessionId }) =>
     SessionStore.createChat(sessionId).pipe(
       Effect.catchTag("SessionNotFoundError", (cause) =>
@@ -1687,10 +1760,22 @@ const HandlersLayer = StarbaseRpcs.toLayer({
     ),
   "Sessions.closeChat": ({ sessionId, chatId }) =>
     Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId)
+      if (!session.chats.some((chat) => chat.id === chatId)) return session
       const runner = yield* AgentRunner
       yield* runner.stop(sessionId, chatId)
+      const updated = yield* SessionStore.closeChat(sessionId, chatId)
       yield* TranscriptStore.remove(chatId)
-      return yield* SessionStore.closeChat(sessionId, chatId)
+      yield* ContextManager.forget(chatId)
+      if (session.worktreePath) {
+        yield* PlanStore.rehomeArtifact(
+          session.worktreePath,
+          sessionId,
+          chatId,
+          updated.activeChatId
+        )
+      }
+      return updated
     }).pipe(
       Effect.catchTag("SessionNotFoundError", (cause) =>
         Effect.fail(new GitError({ message: "Session not found", cause }))
@@ -1700,7 +1785,9 @@ const HandlersLayer = StarbaseRpcs.toLayer({
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId)
       if (!session.chats.some((chat) => chat.id === chatId)) return []
-      yield* TranscriptStore.adoptLegacy(sessionId, chatId)
+      if (chatId === `c_${session.id}_1`) {
+        yield* TranscriptStore.adoptLegacy(sessionId, chatId)
+      }
       return yield* TranscriptStore.list(chatId)
     }).pipe(Effect.orElseSucceed(() => [])),
   "Sessions.diff": ({ id }) => sessionDiff(id),
@@ -1838,7 +1925,15 @@ const HandlersLayer = StarbaseRpcs.toLayer({
     SessionStore.get(sessionId).pipe(
       Effect.flatMap((session) =>
         session.worktreePath
-          ? PlanStore.readArtifact(session.worktreePath)
+          ? PlanStore.readArtifact(session.worktreePath).pipe(
+              Effect.map((artifact) =>
+                artifact !== null &&
+                artifact.sessionId === session.id &&
+                session.chats.some((chat) => chat.id === artifact.producingChatId)
+                  ? artifact
+                  : null
+              )
+            )
           : Effect.succeed(null)
       ),
       Effect.orElseSucceed(() => null)

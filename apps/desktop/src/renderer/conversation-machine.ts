@@ -107,6 +107,7 @@ export interface ConversationContext {
    * turn starts.
    */
   readonly resumePlanId: string | null
+  readonly sharedPlanChatId: string | null
   /**
    * When set, the running turn is an adversarial planning round for this brief
    * rather than a normal `Agent.run`. Follows `resumePlanId` exactly: one flag on
@@ -188,6 +189,8 @@ type ConversationEvent =
   | { type: "SET_MODE"; mode: PermissionMode }
   | { type: "SET_HARNESS"; cli: CliKind; model: string }
   | { type: "SET_REASONING"; reasoning?: ReasoningSetting }
+  | { type: "SESSION_UPDATED"; session: Session }
+  | { type: "SHARED_PLAN_UPDATED"; plan: Plan; producingChatId: string }
   | { type: "SKILLS_LOADED"; skills: ReadonlyArray<Skill> }
   | { type: "CATALOG_LOADED"; catalog: ReadonlyArray<ProviderModels> }
   | { type: "READINESS_LOADED"; readiness: PlanningReadiness }
@@ -204,6 +207,7 @@ interface LoadedData {
   readonly transcript: ReadonlyArray<Message>
   readonly files: ReadonlyArray<string>
   readonly patch: string
+  readonly sharedPlanChatId: string | null
 }
 
 /**
@@ -233,27 +237,47 @@ const loadConversation = fromPromise<
   // app was closed mid-response) so it doesn't show the typing indicator forever,
   // and resolve orphaned approval gates / questions whose live run has died (their
   // approve/deny buttons would otherwise be dead no-ops).
-  const hasSharedPlan =
+  const settled = rawTranscript.map(settleLoaded)
+  const matchingArtifact =
+    artifact === null
+      ? settled
+      : settled.map((message) => ({
+          ...message,
+          parts: message.parts.map((part) =>
+            part._tag === "Plan" && part.plan.id === artifact.plan.id
+              ? { _tag: "Plan" as const, plan: artifact.plan }
+              : part
+          )
+        }))
+  const hasArtifact =
     artifact === null ||
-    rawTranscript.some((message) =>
+    matchingArtifact.some((message) =>
       message.parts.some(
         (part) => part._tag === "Plan" && part.plan.id === artifact.plan.id
       )
     )
-  const withSharedPlan = hasSharedPlan
-    ? rawTranscript
-    : [
-        ...rawTranscript,
-        applyStreamEvent(
-          assistantMessage(
-            `a_shared_plan_${artifact!.revision}`,
-            artifact!.updatedAt
-          ),
-          { _tag: "PlanProposed", plan: artifact!.plan }
-        )
-      ]
-  const transcript = withSharedPlan.map(settleLoaded)
-  return { transcript, files, patch }
+  const transcript =
+    artifact === null || hasArtifact
+      ? matchingArtifact
+      : [
+          ...matchingArtifact,
+          {
+            ...applyStreamEvent(
+              assistantMessage(
+                `a_shared_plan_${artifact.revision}`,
+                artifact.updatedAt
+              ),
+              { _tag: "PlanProposed", plan: artifact.plan }
+            ),
+            streaming: false
+          }
+        ]
+  return {
+    transcript,
+    files,
+    patch,
+    sharedPlanChatId: artifact?.producingChatId ?? null
+  }
 })
 
 /** Re-read the worktree diff after a turn completes (edits may have landed). */
@@ -294,6 +318,7 @@ const agentStream = fromCallback<
   {
     sessionId: string
     chatId: string
+    resumeChatId: string
     text: string
     images: ReadonlyArray<Attachment>
     resumePlanId: string | null
@@ -324,7 +349,7 @@ const agentStream = fromCallback<
     : input.executePlanId
       ? rpc.planExecute(input.sessionId, input.executePlanId, input.executePlanMode, onEvent)
       : input.resumePlanId
-        ? rpc.agentResumePlan(input.sessionId, input.chatId, input.resumePlanId, onEvent)
+        ? rpc.agentResumePlan(input.sessionId, input.resumeChatId, input.resumePlanId, onEvent)
         : rpc.agentRun(input.sessionId, input.chatId, input.text, onEvent, input.images, {
             target: input.agentTarget,
             reasoning: input.reasoning ?? null
@@ -560,6 +585,12 @@ export const conversationMachine = setup({
           messages: patchLast(context.messages, (last) => applyStreamEvent(last, e))
         }
       }
+      if (e._tag === "PlanProposed") {
+        return {
+          messages: patchLast(context.messages, (last) => applyStreamEvent(last, e)),
+          sharedPlanChatId: context.chatId
+        }
+      }
       // A `PlanUpdated` addresses a plan by id, and that plan part lives in the
       // message of the turn it was PROPOSED in — which, once execution runs on
       // into later turns, is not the last message. Folding it with `patchLast`
@@ -655,7 +686,76 @@ export const conversationMachine = setup({
       if (context.cli === "claude" || context.cli === "codex" || context.cli === "opencode") {
         void rpc.agentSetReasoning(context.session.id, context.cli, event.reasoning)
       }
-      return { reasoning: event.reasoning }
+      const key =
+        context.cli === "claude" || context.cli === "codex" || context.cli === "opencode"
+          ? context.cli
+          : null
+      return {
+        reasoning: event.reasoning,
+        session:
+          key === null
+            ? context.session
+            : {
+                ...context.session,
+                reasoning: {
+                  ...context.session.reasoning,
+                  [key]: event.reasoning
+                }
+              }
+      }
+    }),
+    reconcileSession: assign(({ context, event }) => {
+      if (event.type !== "SESSION_UPDATED") return {}
+      const chat = event.session.chats.find((candidate) => candidate.id === context.chatId)
+      if (chat === undefined) return { session: event.session }
+      const reasoning =
+        event.session.cli === "claude" ||
+        event.session.cli === "codex" ||
+        event.session.cli === "opencode"
+          ? event.session.reasoning?.[event.session.cli]
+          : undefined
+      const mode = chat.mode ?? "accept-edits"
+      return {
+        session: event.session,
+        cli: event.session.cli,
+        model: chat.model ?? defaultModel(event.session.cli),
+        mode,
+        executionMode: isExecutionMode(mode) ? mode : context.executionMode,
+        reasoning,
+        tokens: chat.contextTokens ?? context.tokens,
+        persistedStatus: event.session.status
+      }
+    }),
+    applySharedPlan: assign(({ context, event }) => {
+      if (event.type !== "SHARED_PLAN_UPDATED") return {}
+      const hasPlan = context.messages.some((message) =>
+        message.parts.some(
+          (part) => part._tag === "Plan" && part.plan.id === event.plan.id
+        )
+      )
+      const messages = hasPlan
+        ? context.messages.map((message) => ({
+            ...message,
+            parts: message.parts.map((part) =>
+              part._tag === "Plan" && part.plan.id === event.plan.id
+                ? { _tag: "Plan" as const, plan: event.plan }
+                : part
+            )
+          }))
+        : [
+            ...context.messages,
+            {
+              ...applyStreamEvent(
+                assistantMessage(`a_shared_plan_${stamp()}`, new Date().toISOString()),
+                { _tag: "PlanProposed", plan: event.plan }
+              ),
+              streaming: false
+            }
+          ]
+      return {
+        messages,
+        sharedPlanChatId: event.producingChatId
+      }
     }),
     // Plan mode (optimistic + fire-and-forget, like the gate/question actions).
     // The runner echoes a `PlanUpdated` so the authoritative state reconciles.
@@ -754,12 +854,17 @@ export const conversationMachine = setup({
         .catch(() => {})
 
       const mode = context.mode === "plan" && !supportsPlanMode(event.cli) ? "ask" : context.mode
+      const reasoning =
+        event.cli === "claude" || event.cli === "codex" || event.cli === "opencode"
+          ? context.session.reasoning?.[event.cli]
+          : undefined
       return {
         cli: event.cli,
         model: event.model,
         // Mirror main's write so the UI doesn't lie until the next load.
         session: { ...context.session, cli: event.cli, resumeId: undefined },
         mode,
+        reasoning,
         executionMode: isExecutionMode(mode) ? mode : context.executionMode,
         // Empty until the refetch lands — better a bare `/` menu than one
         // offering the old harness's skills.
@@ -944,7 +1049,9 @@ export const conversationMachine = setup({
     READINESS_LOADED: { actions: "applyReadiness" },
     SKILLS_LOADED: { actions: "applySkills" },
     REVIEW_EVENT: { actions: "applyReview" },
-    SET_REASONING: { actions: "persistReasoning" }
+    SET_REASONING: { actions: "persistReasoning" },
+    SESSION_UPDATED: { actions: "reconcileSession" },
+    SHARED_PLAN_UPDATED: { actions: "applySharedPlan" }
   },
   context: ({ input }) => {
     const persistedChats = input.session.chats ?? []
@@ -989,6 +1096,7 @@ export const conversationMachine = setup({
       queued: [],
       subagents: [],
       resumePlanId: null,
+      sharedPlanChatId: null,
       adversarialBrief: null,
       executePlanId: null,
       executePlanMode: null,
@@ -1046,6 +1154,7 @@ export const conversationMachine = setup({
                 messages: event.output.transcript,
                 files: event.output.files,
                 patch: event.output.patch,
+                sharedPlanChatId: event.output.sharedPlanChatId,
                 loaded: true
               })),
               "dequeueTurn"
@@ -1057,6 +1166,7 @@ export const conversationMachine = setup({
               messages: event.output.transcript,
               files: event.output.files,
               patch: event.output.patch,
+              sharedPlanChatId: event.output.sharedPlanChatId,
               loaded: true
             }))
           }
@@ -1114,6 +1224,7 @@ export const conversationMachine = setup({
         input: ({ context }) => ({
           sessionId: context.session.id,
           chatId: context.chatId,
+          resumeChatId: context.sharedPlanChatId ?? context.chatId,
           text: context.pendingText,
           images: context.pendingImages,
           resumePlanId: context.resumePlanId,
