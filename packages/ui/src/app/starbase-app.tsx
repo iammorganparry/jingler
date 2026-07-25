@@ -14,8 +14,6 @@ import type {
   NotificationsConfig,
   DiffStat,
   IssueSummary,
-  McpServer,
-  McpServerStatus,
   ModelOption,
   OpencodeProviderInfo,
   SessionPrStatus,
@@ -149,11 +147,7 @@ export interface StarbaseAppProps {
   loadOpencodeProviders?: () => Promise<ReadonlyArray<OpencodeProviderInfo>>
   /** Store an API key in opencode's own credential file. */
   onSetOpencodeAuth?: (providerId: string, key: string) => Promise<boolean>
-  /** MCP servers the given harness will load (Settings → MCP servers; user scope). */
-  loadMcpServers?: (cli: CliKind) => Promise<ReadonlyArray<McpServer>>
-  /** Live probe of those servers; `refresh` bypasses the cache. */
-  loadMcpStatus?: (cli: CliKind, refresh: boolean) => Promise<ReadonlyArray<McpServerStatus>>
-  /** Unified MCP (OpenConnector) settings (Settings → Unified MCP). */
+  /** Unified MCP (OpenConnector) connection settings (Settings → Connectors). */
   unifiedMcp?: OpenConnectorSectionProps
   /** MCP Connector Center data + actions (Settings → Connector Center). */
   connector?: ConnectorCenterProps
@@ -291,8 +285,6 @@ export function StarbaseApp({
   loadModels,
   loadOpencodeProviders,
   onSetOpencodeAuth,
-  loadMcpServers,
-  loadMcpStatus,
   unifiedMcp,
   connector,
   renderPullRequest,
@@ -621,8 +613,6 @@ export function StarbaseApp({
               loadModels={loadModels ?? (async () => [])}
               loadOpencodeProviders={loadOpencodeProviders}
               onSetOpencodeAuth={onSetOpencodeAuth}
-              loadMcpServers={loadMcpServers}
-              loadMcpStatus={loadMcpStatus}
               unifiedMcp={unifiedMcp}
               connector={connector}
               ghStatus={ghStatus ?? GH_UNAVAILABLE}

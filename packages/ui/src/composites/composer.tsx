@@ -16,7 +16,7 @@ import {
   Separator as DropdownMenuSeparator,
   Trigger as DropdownMenuTrigger
 } from "@radix-ui/react-dropdown-menu"
-import { Brain, GitBranch, ImagePlus, Plug, Plus, Sparkles, WandSparkles } from "lucide-react"
+import { Brain, GitBranch, ImagePlus, Plus, Sparkles, WandSparkles } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { reasoningEffortsFor } from "../lib/reasoning-options.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
@@ -128,8 +128,6 @@ export function Composer({
   onHandoffPlan,
   hasGigaplanIntake = false,
   hasPlan = false,
-  mcp,
-  onOpenMcp,
   paused = false,
   busy = false,
   placeholder,
@@ -193,15 +191,6 @@ export function Composer({
   hasGigaplanIntake?: boolean
   /** Whether that handoff updates an existing plan rather than creating one. */
   hasPlan?: boolean
-  /**
-   * MCP status for this session, or undefined until it arrives. The chip stays
-   * HIDDEN while undefined rather than rendering "0 servers" — the status lands a
-   * beat after mount, same as the model catalogue, and a momentary "no MCP" would
-   * be a lie about the operator's setup.
-   */
-  mcp?: { readonly total: number; readonly failed: number; readonly probed: boolean }
-  /** Open the MCP status dialog. */
-  onOpenMcp?: () => void
   paused?: boolean
   /**
    * The agent is producing a turn — sends are queued (processed once it's free)
@@ -628,34 +617,6 @@ export function Composer({
                     <span className="font-mono text-[10.5px] text-dim">{skills.length}</span>
                   )}
                 </DropdownMenuItem>
-                {onOpenMcp && (
-                  <>
-                    <DropdownMenuSeparator className="my-1 h-px bg-line" />
-                    <DropdownMenuItem
-                      onSelect={onOpenMcp}
-                      className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-[12.5px] text-text-body outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
-                    >
-                      <Plug size={15} className="flex-none text-muted-foreground" />
-                      <span className="flex-1">MCP connectors</span>
-                      {mcp !== undefined && (
-                        <span className="flex items-center gap-1.5 font-mono text-[10.5px] text-dim">
-                          <StatusDot
-                            tone={
-                              !mcp.probed
-                                ? "bg-line-strong"
-                                : mcp.failed > 0
-                                  ? "bg-yellow"
-                                  : "bg-green"
-                            }
-                            size={6}
-                            glow={false}
-                          />
-                          {mcp.failed > 0 ? `${mcp.failed}/${mcp.total} down` : mcp.total}
-                        </span>
-                      )}
-                    </DropdownMenuItem>
-                  </>
-                )}
               </DropdownMenuContent>
             </DropdownMenuPortal>
           </DropdownMenuRoot>

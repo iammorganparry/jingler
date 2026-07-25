@@ -32,6 +32,34 @@ const startFakeOpenConnector = async (): Promise<{ server: Server; port: number 
       res.statusCode = 401
       return res.end("unauthorized")
     }
+    /**
+     * The `/mcp` endpoint itself. Settings › Connectors gates the catalog on a LIVE
+     * MCP handshake (`OpenConnector.test` → `probeServer`), so the fake has to speak
+     * just enough streamable-HTTP JSON-RPC — `initialize`, the `initialized`
+     * notification, `tools/list` — or the operator never gets past the setup view.
+     */
+    if (req.method === "POST" && url.startsWith("/mcp")) {
+      let body = ""
+      req.on("data", (chunk) => { body += chunk })
+      return req.on("end", () => {
+        const rpc = JSON.parse(body || "{}") as { id?: number; method?: string }
+        // Notifications carry no id and expect no body.
+        if (rpc.id === undefined) {
+          res.statusCode = 202
+          return res.end()
+        }
+        res.setHeader("mcp-session-id", "e2e-session")
+        const result =
+          rpc.method === "initialize"
+            ? {
+                protocolVersion: "2024-11-05",
+                capabilities: { tools: {} },
+                serverInfo: { name: "fake-open-connector", version: "0.0.0" }
+              }
+            : { tools: [{ name: "github_create_issue", inputSchema: { type: "object" } }] }
+        return json(res, { jsonrpc: "2.0", id: rpc.id, result })
+      })
+    }
     if (req.method === "GET" && url.startsWith("/v1/providers")) {
       return json(res, {
         data: [
@@ -78,13 +106,18 @@ const openSettings = async (window: import("@playwright/test").Page) => {
  * Configure OpenConnector through the Settings UI — the real operator flow. This
  * also sidesteps a file-seeding race: saving invalidates the shared config query,
  * which flips the Connector Center's catalog queries on with no restart.
+ *
+ * There is ONE MCP entry now (Connectors); the setup form is what it shows until a
+ * live probe connects, so configuring and passing the gate are the same screen.
  */
 const configureUnifiedMcp = async (window: import("@playwright/test").Page, endpoint: string) => {
-  await window.getByRole("button", { name: /Unified MCP/ }).click()
+  await window.getByRole("button", { name: /Connectors/ }).click()
   await window.getByPlaceholder("https://mcp.internal").fill(endpoint)
   await window.getByPlaceholder("Paste the instance token").fill("tok_e2e")
   await window.getByRole("switch").click()
   await window.getByRole("button", { name: "Save" }).click()
+  // The gate is a live probe, not saved config — Test is what opens the catalog.
+  await window.getByRole("button", { name: /^Test/ }).click()
 }
 
 test("browse, connect, and disconnect a provider through the Connector Center", async ({ launchApp }) => {
@@ -93,10 +126,12 @@ test("browse, connect, and disconnect a provider through the Connector Center", 
     const app = await launchApp({ configured: true })
 
     await openSettings(app.window)
-    await configureUnifiedMcp(app.window, `http://127.0.0.1:${port}`)
 
-    // Now open the Connector Center — its catalog reads are gated on the config above.
-    await app.window.getByRole("button", { name: /Connector Center/ }).click()
+    // Before any connection: the setup view, NOT an empty catalog.
+    await app.window.getByRole("button", { name: /Connectors/ }).click()
+    await expect(app.window.getByLabel("Search providers")).toHaveCount(0)
+
+    await configureUnifiedMcp(app.window, `http://127.0.0.1:${port}`)
 
     // Catalog loads from the fake instance. `exact` because each row also renders a
     // mono "<id> · N actions" subtitle, so a substring match would resolve to two.

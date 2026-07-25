@@ -90,31 +90,6 @@ export interface LaunchOptions {
    * itself (auth.spec).
    */
   readonly signedIn?: boolean
-  /**
-   * Seed a fake harness home for CLAUDE (`~/.claude.json`, `~/.claude/settings.json`)
-   * and point the app at it with `STARBASE_HARNESS_HOME`. Codex/cursor/opencode
-   * seeding does not exist yet — add it here when a spec needs those harnesses.
-   *
-   * Needed because MCP config lives under the operator's REAL home, not
-   * `STARBASE_HOME` — without this override an MCP spec would read the developer's
-   * own `~/.claude.json` and say something different on every machine.
-   */
-  readonly mcp?: {
-    /** Written to `<fake home>/.claude.json` as top-level `mcpServers` (user scope). */
-    readonly userServers?: Record<string, unknown>
-    /** Written to `<fake home>/.claude/settings.json` (user-level settings). */
-    readonly settings?: Record<string, unknown>
-    /**
-     * Written to `<repo>/.claude/settings.local.json` — where Claude actually
-     * records `.mcp.json` approvals in the mainstream flow, so this is the path
-     * that matters for the project-server gate.
-     */
-    readonly projectSettings?: Record<string, unknown>
-    /** Written to `~/.claude.json` as `projects[<repo>]` (what the interactive prompt writes). */
-    readonly projectEntry?: Record<string, unknown>
-    /** Written to `<repo>/.mcp.json` as `mcpServers` (project scope). */
-    readonly projectServers?: Record<string, unknown>
-  }
 
   /**
    * Install a deterministic fake `opencode` on PATH so discovery, the version
@@ -762,44 +737,12 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
       // when the app first scans them.
       options.seed?.({ reposDir, repoPath })
 
-      // Fake harness home for MCP config. Written before launch so the first read
-      // sees it; `STARBASE_HARNESS_HOME` below points the main process here.
-      // A harness home is seeded for EVERY launch, not only the MCP specs.
-      // Anything that probes the harness's own config — MCP servers, and now the
-      // subscription-auth check behind the billing panel — otherwise reads the
-      // developer's real `~` and reports whatever they happen to be signed into,
-      // so the same test says different things on different machines.
-      let mcpEnv: Record<string, string> = {
+      // A fake harness home for EVERY launch. Anything that reads the harness's own
+      // config — now just the subscription-auth check behind the billing panel —
+      // otherwise reads the developer's real `~` and reports whatever they happen to
+      // be signed into, so the same test says different things on different machines.
+      const mcpEnv: Record<string, string> = {
         STARBASE_HARNESS_HOME: join(home, "harness-home")
-      }
-      if (options.mcp) {
-        const harnessHome = join(home, "harness-home")
-        mkdirSync(join(harnessHome, ".claude"), { recursive: true })
-        writeFileSync(
-          join(harnessHome, ".claude.json"),
-          JSON.stringify({
-            mcpServers: options.mcp.userServers ?? {},
-            ...(options.mcp.projectEntry ? { projects: { [repoPath]: options.mcp.projectEntry } } : {})
-          })
-        )
-        writeFileSync(
-          join(harnessHome, ".claude", "settings.json"),
-          JSON.stringify(options.mcp.settings ?? {})
-        )
-        if (options.mcp.projectSettings) {
-          mkdirSync(join(repoPath, ".claude"), { recursive: true })
-          writeFileSync(
-            join(repoPath, ".claude", "settings.local.json"),
-            JSON.stringify(options.mcp.projectSettings)
-          )
-        }
-        if (options.mcp.projectServers) {
-          writeFileSync(
-            join(repoPath, ".mcp.json"),
-            JSON.stringify({ mcpServers: options.mcp.projectServers })
-          )
-        }
-        mcpEnv = { STARBASE_HARNESS_HOME: harnessHome }
       }
 
       // Optional fake `gh` / `opencode` on PATH (offline + deterministic). Both
