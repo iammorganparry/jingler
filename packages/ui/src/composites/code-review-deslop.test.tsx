@@ -6,9 +6,8 @@ import { CodeReviewView } from "./code-review-view.js"
 
 /**
  * The per-file "Deslop" button sits in each file's sticky header, beside Revert.
- * It spawns an isolated cleanup session for that file — so it must call back with
- * the file's path, appear only when a handler is supplied, and go inert at the
- * concurrency cap (where clicking must not fire another spawn).
+ * It hands that file to the session's agent for an in-place cleanup pass — so it
+ * must call back with the file's path, and appear only when a handler is supplied.
  */
 
 const file: PrFileChange = {
@@ -51,19 +50,10 @@ describe("CodeReviewView Deslop button", () => {
     expect(screen.queryByRole("button", { name: "Deslop" })).toBeNull()
   })
 
-  it("spawns a cleanup session for the file's path", () => {
+  it("hands the file's path to the agent", () => {
     const onDeslopFile = vi.fn()
     renderView({ onDeslopFile })
     fireEvent.click(screen.getByRole("button", { name: "Deslop" }))
     expect(onDeslopFile).toHaveBeenCalledExactlyOnceWith(file.path)
-  })
-
-  it("disables the button at the concurrency cap", () => {
-    const onDeslopFile = vi.fn()
-    renderView({ onDeslopFile, deslopAtCap: true })
-    const button = screen.getByRole("button", { name: "Deslop" })
-    expect(button).toHaveProperty("disabled", true)
-    fireEvent.click(button)
-    expect(onDeslopFile).not.toHaveBeenCalled()
   })
 })

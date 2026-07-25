@@ -26,7 +26,6 @@ import {
   BUDGET_RANGE,
   DEFAULT_CONTEXT_CONFIG,
   DEFAULT_REVIEW_MODEL,
-  MAX_CONCURRENT_SUBAGENTS_DEFAULT,
   NOTIFICATIONS_DEFAULT,
   contextWindowFor,
   defaultModel,
@@ -56,7 +55,6 @@ import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { GithubMark } from "../components/github-mark.js"
-import { Input } from "../components/input.js"
 import { ProviderIcon, PROVIDER_LABEL } from "../components/provider-icon.js"
 import { ORCHESTRATOR_DEFAULT } from "@starbase/core"
 import { GigaplanSettings } from "./gigaplan-settings.js"
@@ -507,9 +505,6 @@ export interface SettingsViewProps {
   /** Whether every agent turn is shaped for an ADHD reader; absent means off. */
   adhdMode?: boolean | null
   onSaveAdhdMode?: (adhdMode: boolean) => void | Promise<void>
-  /** Cap on concurrent Deslop sub-agent sessions; absent means the default. */
-  maxConcurrentSubAgents?: number | null
-  onSaveMaxConcurrentSubAgents?: (n: number) => void | Promise<void>
   /** Close the view and return to the active session. */
   onClose?: () => void
 }
@@ -555,8 +550,6 @@ export function SettingsView({
   onSavePlanAutoRun,
   adhdMode,
   onSaveAdhdMode,
-  maxConcurrentSubAgents,
-  onSaveMaxConcurrentSubAgents,
   onClose
 }: SettingsViewProps) {
   const [section, setSection] = React.useState<SectionKey>("providers")
@@ -637,8 +630,6 @@ export function SettingsView({
           onSavePlanAutoRun={onSavePlanAutoRun}
           adhdMode={adhdMode}
           onSaveAdhdMode={onSaveAdhdMode}
-          maxConcurrentSubAgents={maxConcurrentSubAgents}
-          onSaveMaxConcurrentSubAgents={onSaveMaxConcurrentSubAgents}
         />
       ) : section === "providers" ? (
         <ProvidersSection
@@ -1350,9 +1341,7 @@ function GeneralSection({
   planAutoRun,
   onSavePlanAutoRun,
   adhdMode,
-  onSaveAdhdMode,
-  maxConcurrentSubAgents,
-  onSaveMaxConcurrentSubAgents
+  onSaveAdhdMode
 }: {
   notifications?: NotificationsConfig | null
   onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
@@ -1360,8 +1349,6 @@ function GeneralSection({
   onSavePlanAutoRun?: (planAutoRun: boolean) => void | Promise<void>
   adhdMode?: boolean | null
   onSaveAdhdMode?: (adhdMode: boolean) => void | Promise<void>
-  maxConcurrentSubAgents?: number | null
-  onSaveMaxConcurrentSubAgents?: (n: number) => void | Promise<void>
 }) {
   // Absent means ON, matching `PLAN_AUTO_RUN_DEFAULT` in the domain.
   const [planDraft, setPlanDraft] = React.useState<boolean>(planAutoRun ?? true)
@@ -1369,8 +1356,6 @@ function GeneralSection({
   // Absent means OFF, matching `ADHD_MODE_DEFAULT` in the domain.
   const [adhdDraft, setAdhdDraft] = React.useState<boolean>(adhdMode ?? false)
   React.useEffect(() => setAdhdDraft(adhdMode ?? false), [adhdMode])
-  // Absent means the default cap, matching `MAX_CONCURRENT_SUBAGENTS_DEFAULT`.
-  const subAgentCap = maxConcurrentSubAgents ?? MAX_CONCURRENT_SUBAGENTS_DEFAULT
   // Absent config means the DEFAULTS, not silence — an operator who never opened
   // this pane should still be told when an agent needs them.
   const [draft, setDraft] = React.useState<NotificationsConfig>(
@@ -1417,38 +1402,6 @@ function GeneralSection({
               void onSaveAdhdMode?.(next)
             }}
           />
-        </div>
-
-        <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">Sub-agents</span>
-        </div>
-        <div className="divide-y divide-hairline">
-          <div className="flex items-center justify-between gap-4 py-3">
-            <div className="min-w-0">
-              <div className="text-[12.5px] font-medium text-text-body">
-                Max concurrent Deslop sessions
-              </div>
-              <div className="mt-0.5 text-[11.5px] text-dim">
-                Each "Deslop" cleanup runs in its own session. This caps how many run at once.
-              </div>
-            </div>
-            <Input
-              type="number"
-              min={1}
-              max={20}
-              step={1}
-              aria-label="Max concurrent Deslop sessions"
-              defaultValue={subAgentCap}
-              key={subAgentCap}
-              onBlur={(e) => {
-                const next = Math.min(20, Math.max(1, Math.round(Number(e.target.value))))
-                if (Number.isFinite(next) && next !== subAgentCap) {
-                  void onSaveMaxConcurrentSubAgents?.(next)
-                }
-              }}
-              className="w-16 flex-none text-right"
-            />
-          </div>
         </div>
 
         <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">

@@ -1670,8 +1670,6 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "Config.setNotifications": (notifications) => ConfigService.setNotifications(notifications),
   "Config.setPlanAutoRun": ({ planAutoRun }) => ConfigService.setPlanAutoRun(planAutoRun),
   "Config.setAdhdMode": ({ adhdMode }) => ConfigService.setAdhdMode(adhdMode),
-  "Config.setMaxConcurrentSubAgents": ({ maxConcurrentSubAgents }) =>
-    ConfigService.setMaxConcurrentSubAgents(maxConcurrentSubAgents),
   "Config.setDefaultCli": ({ cli }) => ConfigService.setDefaultCli(cli),
   /**
    * Deliver an OS notification. Main decides whether to actually show it: it

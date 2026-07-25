@@ -1,29 +1,20 @@
-import { execFileSync } from "node:child_process"
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
- * The per-file "Deslop" button in the Code Review file list spawns a dedicated,
- * ISOLATED cleanup session (its own worktree + branch), so the refactor runs
- * immediately rather than queuing behind the current session's turn. This drives
- * the real create → run path a user takes; the scripted agent stands in for the
- * harness, so nothing hits the network.
- *
- * The seeded session lives in its OWN worktree on its OWN branch, distinct from
- * the origin repo — the real topology. That matters because the deslop session
- * forks from the current session's branch (where the reviewed changes live), not
- * the origin's default branch.
+ * The per-file "Deslop" button in the Code Review file list hands that file to
+ * the session's agent for an in-place cleanup pass — a normal turn on the
+ * session's OWN worktree, so it works for committed and uncommitted changes
+ * alike. This drives the real path a user takes; the scripted agent stands in
+ * for the harness, so nothing hits the network.
  */
 
-const SESSION_BRANCH = "starbase/deslop-session"
-const WORKTREE_DIRNAME = "deslop-session-wt"
-
-const seeded = (repoPath: string, worktreePath: string): SeedSession => ({
+const seeded = (worktreePath: string): SeedSession => ({
   id: "s_deslop_1",
   repo: "widget",
-  branch: SESSION_BRANCH,
+  branch: "starbase/deslop-session",
   title: "Deslop source session",
   status: "idle",
   cli: "claude",
@@ -32,26 +23,19 @@ const seeded = (repoPath: string, worktreePath: string): SeedSession => ({
   costUsd: 0,
   tokens: 0,
   updatedAt: "2026-07-18T00:00:00.000Z",
-  // The session's own worktree, checked out on its branch — separate from the
-  // origin repo the button forks a fresh cleanup worktree from.
-  worktreePath,
-  repoPath,
-  baseBranch: "main"
+  worktreePath
 })
 
-test("Deslop button spawns an isolated cleanup session for a file", async ({ launchApp }) => {
+test("Deslop button sends the file to the session's agent", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
     withRepo: true,
-    sessions: ({ reposDir, repoPath }) => [seeded(repoPath, join(reposDir, WORKTREE_DIRNAME))],
-    // Put the session on its own branch + worktree (real topology), then leave an
-    // uncommitted change in that worktree so the local "Changes" source lists a file.
-    seed: ({ reposDir, repoPath }) => {
-      const worktree = join(reposDir, WORKTREE_DIRNAME)
-      execFileSync("git", ["-C", repoPath, "branch", SESSION_BRANCH, "main"])
-      execFileSync("git", ["-C", repoPath, "worktree", "add", worktree, SESSION_BRANCH])
+    sessions: ({ repoPath }) => [seeded(repoPath)],
+    // Give the worktree an uncommitted change so the local Code Review source
+    // ("Changes" tab) has a file to list.
+    seed: ({ repoPath }) => {
       writeFileSync(
-        join(worktree, "README.md"),
+        join(repoPath, "README.md"),
         "# e2e repo\n\nconst a = 1\nconst a2 = 1\nconst a3 = 1\n"
       )
     }
@@ -66,6 +50,10 @@ test("Deslop button spawns an isolated cleanup session for a file", async ({ lau
   await expect(deslop).toBeVisible({ timeout: 30_000 })
   await deslop.click()
 
-  // A brand-new session, titled after the file, appears in the sidebar.
-  await expect(window.getByText(/^Deslop README\.md$/)).toBeVisible({ timeout: 30_000 })
+  // The cleanup runs as a turn on THIS session — its prompt lands in the
+  // Conversation tab, not a new session.
+  await window.getByRole("button", { name: "Conversation" }).click()
+  await expect(
+    window.getByText(/Pull repeated logic into shared helpers/).first()
+  ).toBeVisible({ timeout: 30_000 })
 })

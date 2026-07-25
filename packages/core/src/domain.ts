@@ -662,12 +662,6 @@ export const WorkspaceConfig = Schema.Struct({
    */
   adhdMode: Schema.optional(Schema.Boolean),
   /**
-   * How many "Deslop" cleanup sub-agent sessions may run concurrently. Each
-   * deslop spawns its OWN session (so it never queues behind the current turn),
-   * so this caps the fan-out. Absent means `MAX_CONCURRENT_SUBAGENTS_DEFAULT`.
-   */
-  maxConcurrentSubAgents: Schema.optional(Schema.Number.pipe(Schema.between(1, 20))),
-  /**
    * The active colour theme, plus any per-key overrides on top of it.
    *
    * Absent means `DEFAULT_THEME_ID` (One Dark Pro) — which is also what every
@@ -685,9 +679,6 @@ export const PLAN_AUTO_RUN_DEFAULT = true
 
 /** ADHD response shaping is opt-in — it rewrites the voice of every session. */
 export const ADHD_MODE_DEFAULT = false
-
-/** Default cap on concurrent "Deslop" cleanup sub-agent sessions. */
-export const MAX_CONCURRENT_SUBAGENTS_DEFAULT = 5
 
 /** A git repository discovered under the configured repos directory. */
 export const Repo = Schema.Struct({

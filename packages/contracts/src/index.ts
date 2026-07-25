@@ -564,16 +564,6 @@ export class StarbaseRpcs extends RpcGroup.make(
   }),
 
   /**
-   * Persist the cap on concurrent "Deslop" cleanup sub-agent sessions. Returns
-   * the whole config so the renderer can patch its cache without a refetch.
-   */
-  Rpc.make("Config.setMaxConcurrentSubAgents", {
-    success: WorkspaceConfig,
-    error: ConfigError,
-    payload: Schema.Struct({ maxConcurrentSubAgents: Schema.Number })
-  }),
-
-  /**
    * Persist which harness NEW sessions start on. One standing answer, set in
    * Settings · Providers, in place of the New Session dialog's old select.
    */

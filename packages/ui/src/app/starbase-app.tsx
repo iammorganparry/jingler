@@ -118,9 +118,6 @@ export interface StarbaseAppProps {
   /** Whether every agent turn is shaped for an ADHD reader; absent means off. */
   adhdMode?: boolean | null
   onSaveAdhdMode?: (adhdMode: boolean) => Promise<void> | void
-  /** Cap on concurrent Deslop sub-agent sessions; absent means the default. */
-  maxConcurrentSubAgents?: number | null
-  onSaveMaxConcurrentSubAgents?: (n: number) => Promise<void> | void
   /**
    * Everything Settings › Themes needs. Optional so the Storybook shell and the
    * component gallery can mount the app without a theme catalog; absent renders
@@ -275,8 +272,6 @@ export function StarbaseApp({
   adhdMode,
   themes,
   onSaveAdhdMode,
-  maxConcurrentSubAgents,
-  onSaveMaxConcurrentSubAgents,
   onRecheckGh,
   providersConfig,
   onSaveProvider,
@@ -636,8 +631,6 @@ export function StarbaseApp({
               onSavePlanAutoRun={onSavePlanAutoRun}
               adhdMode={adhdMode}
               onSaveAdhdMode={onSaveAdhdMode}
-              maxConcurrentSubAgents={maxConcurrentSubAgents}
-              onSaveMaxConcurrentSubAgents={onSaveMaxConcurrentSubAgents}
               themes={themes}
               onClose={() => setSettingsOpen(false)}
             />

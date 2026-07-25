@@ -72,12 +72,10 @@ export interface CodeReviewViewProps {
   /** Ids of findings already sent to the agent — their action stays "Sent". */
   sentFindingIds?: ReadonlySet<string>
   /**
-   * Spawn an isolated cleanup ("Deslop") session for a file. Absent hides the
-   * per-file Deslop button (e.g. a session with no origin repo to fork from).
+   * Hand a file to this session's agent for a "Deslop" cleanup pass (a normal
+   * turn on the session's own worktree). Absent hides the per-file button.
    */
   onDeslopFile?: (path: string) => void
-  /** The concurrent-deslop cap is reached — the button renders disabled. */
-  deslopAtCap?: boolean
 }
 
 /**
@@ -108,8 +106,7 @@ export function CodeReviewView({
   review,
   onSendFindingToAgent,
   sentFindingIds,
-  onDeslopFile,
-  deslopAtCap
+  onDeslopFile
 }: CodeReviewViewProps) {
   const isLocal = source === "local"
 
@@ -491,12 +488,7 @@ export function CodeReviewView({
                       variant="secondary"
                       size="sm"
                       className="gap-1.5"
-                      disabled={deslopAtCap}
-                      title={
-                        deslopAtCap
-                          ? "Max concurrent Deslop sessions reached"
-                          : "Deslop — refactor this file for DRY / cleanup in a new session"
-                      }
+                      title="Deslop — hand this file to the agent for a DRY / cleanup pass"
                       onClick={() => onDeslopFile(file.path)}
                     >
                       <Sparkles size={13} />
