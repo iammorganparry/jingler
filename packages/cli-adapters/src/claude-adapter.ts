@@ -1165,9 +1165,14 @@ export const runClaude = (
         let withheldDone: StreamEvent | null = null
         /**
          * Safety net for that same case: while a `Done` is withheld, the only thing
-         * that can end the query is a later `result`, so a message the CLI took and
-         * then dropped would park the input generator forever. Re-armed on every
-         * message, so it can only fire in a gap where nothing is arriving at all.
+         * that can end the query is a later `result`, so a continuation that stalls
+         * would park the input generator forever and leave the turn streaming with
+         * no way out.
+         *
+         * Armed and disarmed around EVERY message, not just results — a
+         * continuation is mostly partial and system frames, so arming only at
+         * results meant the first such frame disarmed the net permanently and the
+         * wedge it exists to break went unguarded from there on.
          */
         let steerWatchdog: ReturnType<typeof setTimeout> | null = null
         const disarmWatchdog = () => {
@@ -1228,13 +1233,10 @@ export const runClaude = (
               // usually looks empty whether or not the CLI has acted on it. Probing
               // the real harness in exactly that state showed a SECOND turn follows,
               // so a result after any push is treated as a seam until the stream
-              // goes quiet (the watchdog below).
+              // goes quiet. The wait is bounded by the watchdog armed at the foot of
+              // this loop, once per message, off `withheldDone`.
               extended = live.takeSteered() || live.hasUnread()
-              if (extended) {
-                steerWatchdog = setTimeout(() => live.finish(), STEER_CONTINUE_GRACE)
-              } else {
-                live.finish()
-              }
+              if (!extended) live.finish()
             }
             for (const event of streamEventsFor(msg, tools, bgState)) {
               // A command has finished: its ToolEnd carries the authoritative
@@ -1259,6 +1261,15 @@ export const runClaude = (
                 withheldDone = null
               }
               await runP(ctx.emit(event))
+            }
+            // Re-arm after every message while a `Done` is being withheld, since
+            // the top of the loop disarmed it. A continuation is mostly partial and
+            // system frames, so arming only at results left the FIRST such frame
+            // holding the door open forever: nothing would ever close the input
+            // channel again, and a continuation that stalled would leave the turn
+            // streaming until the operator stopped it by hand.
+            if (withheldDone !== null) {
+              steerWatchdog = setTimeout(() => live.finish(), STEER_CONTINUE_GRACE)
             }
           }
           // A withheld `Done` outlived the turn it belonged to: the continuation we
