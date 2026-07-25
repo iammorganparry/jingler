@@ -241,3 +241,44 @@ export const NeedsOauthClient: Story = {
     }
   }
 }
+
+/**
+ * Slack's real fifteen scopes. Uncapped this list pushed the Close button off
+ * the bottom of the sheet, so it collapses to five behind a `+10 more` toggle.
+ */
+export const ManyScopes: Story = {
+  args: {
+    provider: card({
+      id: "slack",
+      name: "Slack",
+      homepageUrl: "https://slack.com/",
+      authTypes: ["oauth2"]
+    }),
+    detail: {
+      id: "slack",
+      name: "Slack",
+      categories: ["Communication"],
+      homepageUrl: "https://slack.com/",
+      authTypes: ["oauth2"],
+      keyModes: [],
+      actionCount: 22,
+      oauthScopes: [
+        "channels:read",
+        "groups:read",
+        "im:read",
+        "mpim:read",
+        "users:read",
+        "channels:history",
+        "groups:history",
+        "im:history",
+        "mpim:history",
+        "files:read",
+        "reactions:read",
+        "chat:write",
+        "im:write",
+        "files:write",
+        "reactions:write"
+      ]
+    }
+  }
+}

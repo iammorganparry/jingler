@@ -550,6 +550,40 @@ describe("ConnectorDetail", () => {
     )
   })
 
+  /**
+   * Slack asks for fifteen scopes. Rendered in full they pushed the Close button
+   * off the bottom of the sheet while telling the operator nothing actionable, so
+   * the list caps at five with the remainder one click away.
+   */
+  describe("scope list", () => {
+    const many = Array.from({ length: 15 }, (_, i) => `scope:${i}`)
+
+    it("caps the list at five and counts what is hidden", () => {
+      render(<ConnectorDetail {...base()} detail={detail({ oauthScopes: many })} />)
+      expect(screen.getByText("scope:4")).toBeTruthy()
+      expect(screen.queryByText("scope:5")).toBeNull()
+      expect(screen.getByRole("button", { name: "+10 more" })).toBeTruthy()
+    })
+
+    it("expands to all of them and back", () => {
+      render(<ConnectorDetail {...base()} detail={detail({ oauthScopes: many })} />)
+      fireEvent.click(screen.getByRole("button", { name: "+10 more" }))
+      expect(screen.getByText("scope:14")).toBeTruthy()
+
+      fireEvent.click(screen.getByRole("button", { name: "Show less" }))
+      expect(screen.queryByText("scope:14")).toBeNull()
+      expect(screen.getByRole("button", { name: "+10 more" })).toBeTruthy()
+    })
+
+    it("shows no toggle when everything already fits", () => {
+      render(
+        <ConnectorDetail {...base()} detail={detail({ oauthScopes: ["read", "write"] })} />
+      )
+      expect(screen.getByText("write")).toBeTruthy()
+      expect(screen.queryByRole("button", { name: /more$/ })).toBeNull()
+    })
+  })
+
   it("renders nothing when no provider is open", () => {
     render(<ConnectorDetail {...base()} provider={null} />)
     expect(screen.queryByRole("dialog")).toBeNull()

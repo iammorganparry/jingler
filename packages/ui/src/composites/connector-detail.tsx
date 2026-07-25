@@ -481,19 +481,7 @@ function DetailBody({
         )}
 
         {detail && detail.oauthScopes.length > 0 ? (
-          <section className="flex flex-col gap-1.5">
-            <SectionLabel>Scopes</SectionLabel>
-            <p className="text-[10px] text-dim">
-              Requested by this provider&apos;s actions when you connect with OAuth.
-            </p>
-            <div className="flex flex-wrap gap-1">
-              {detail.oauthScopes.map((s) => (
-                <Badge key={s} tone="neutral" size="xs">
-                  {s}
-                </Badge>
-              ))}
-            </div>
-          </section>
+          <ScopeList scopes={detail.oauthScopes} />
         ) : null}
 
         {detailLoading ? (
@@ -511,6 +499,51 @@ function DetailBody({
         </button>
       </DialogFooter>
     </>
+  )
+}
+
+/** How many scopes show before the list collapses behind a toggle. */
+const SCOPE_PREVIEW = 5
+
+/**
+ * The OAuth scopes a grant will request, capped at five with a toggle.
+ *
+ * Uncapped this is a wall: Slack asks for 15, and a long scope list pushed the
+ * Close button off the bottom of the sheet while telling the operator nothing
+ * they could act on. Five is enough to judge the shape of the request; the rest
+ * are one click away for anyone actually auditing it.
+ */
+function ScopeList({ scopes }: { scopes: ReadonlyArray<string> }) {
+  const [expanded, setExpanded] = React.useState(false)
+  const hidden = scopes.length - SCOPE_PREVIEW
+  const shown = expanded ? scopes : scopes.slice(0, SCOPE_PREVIEW)
+
+  return (
+    <section className="flex flex-col gap-1.5">
+      <SectionLabel>Scopes</SectionLabel>
+      <p className="text-[10px] text-dim">
+        Requested by this provider&apos;s actions when you connect with OAuth.
+      </p>
+      <div className="flex flex-wrap items-center gap-1">
+        {shown.map((s) => (
+          <Badge key={s} tone="neutral" size="xs">
+            {s}
+          </Badge>
+        ))}
+        {hidden > 0 ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            // The collapsed label counts what is hidden rather than saying
+            // "Show all", so the operator can tell at a glance whether the
+            // remainder is worth opening.
+            className="rounded-md px-1.5 py-0.5 text-[10px] text-blue transition-colors hover:bg-hover"
+          >
+            {expanded ? "Show less" : `+${hidden} more`}
+          </button>
+        ) : null}
+      </div>
+    </section>
   )
 }
 
