@@ -62,6 +62,34 @@ test("browse, connect, and disconnect a provider through the Connector Center", 
     await expect(catalog.getByRole("button", { name: "GitHub" })).toBeVisible()
     await expect(catalog.getByRole("button", { name: "Slack" })).toBeVisible()
 
+    // The `no_auth` provider is connected on arrival — it needs no credential, so
+    // the split is 1 connected / 3 not before the operator does anything.
+    await expect(app.window.getByRole("tab", { name: /Connected 1/ })).toBeVisible()
+
+    // It is `virtual`: nothing is stored, so there is nothing to disconnect. The
+    // instance answers DELETE with 200 and leaves the connection in place, so a
+    // Disconnect button here would report success and visibly do nothing.
+    await catalog.getByRole("button", { name: "Hacker News" }).click()
+    const virtualSheet = app.window.getByRole("dialog")
+    await expect(virtualSheet.getByText("built in")).toBeVisible()
+    await expect(virtualSheet.getByRole("button", { name: "Disconnect" })).toHaveCount(0)
+    // Escape rather than a "Close" button: the sheet has two (the footer's and
+    // Radix's own dismiss), so naming one is ambiguous.
+    await app.window.keyboard.press("Escape")
+    await expect(virtualSheet).toHaveCount(0)
+
+    // A provider offering two ALTERNATIVE credential forms gets a tab each, and
+    // each shows only its own fields. Merged, the form asked for all of them.
+    await catalog.getByRole("button", { name: "Elasticsearch" }).click()
+    const elastic = app.window.getByRole("dialog")
+    await expect(elastic.getByRole("tab", { name: "Encoded API Key" })).toBeVisible()
+    await expect(elastic.getByPlaceholder("Username")).toHaveCount(0)
+    await elastic.getByRole("tab", { name: "Credentials" }).click()
+    await expect(elastic.getByPlaceholder("Username")).toBeVisible()
+    await expect(elastic.getByPlaceholder("base64-encoded-id-and-api-key")).toHaveCount(0)
+    await app.window.keyboard.press("Escape")
+    await expect(elastic).toHaveCount(0)
+
     // Search filters.
     await app.window.getByLabel("Search providers").fill("git")
     await expect(catalog.getByRole("button", { name: "Slack" })).toHaveCount(0)
@@ -69,12 +97,21 @@ test("browse, connect, and disconnect a provider through the Connector Center", 
     // Connect GitHub with an API key.
     await catalog.getByRole("button", { name: "GitHub" }).click()
     const dialog = app.window.getByRole("dialog")
-    // "API key" is the FALLBACK field label: a real api_key provider arrives with
-    // an auth TYPE and no field list, so this is the input the operator really sees.
-    await dialog.getByPlaceholder("API key").fill(SECRET)
+    // The provider's OWN placeholder, fetched from `/api/providers/github`. It is
+    // not the generic "API key" fallback: that fallback is what every provider
+    // used to get, because the catalog LIST response carries no field list at all.
+    await dialog.getByPlaceholder("ghp_...").fill(SECRET)
     await dialog.getByRole("button", { name: "Connect" }).click()
 
-    // The connection appears (GET /api/connections now returns it).
+    // The connection appears (GET /api/connections now returns it). The tab counts
+    // are scoped to the SEARCH, so clear it first — with "git" still typed,
+    // "Connected 1" would be the honest answer and prove nothing about the total.
+    await app.window.getByLabel("Search providers").fill("")
+    await expect(app.window.getByRole("tab", { name: /Connected 2/ })).toBeVisible()
+
+    // Reopen the card: the account name is read out of the response's nested
+    // `profile`, which the mapper used to look for at the root and render blank.
+    await catalog.getByRole("button", { name: "GitHub" }).click()
     await expect(app.window.getByText("github account")).toBeVisible()
 
     // The API key must never surface as rendered text (the value is write-only). A
@@ -82,8 +119,34 @@ test("browse, connect, and disconnect a provider through the Connector Center", 
     // never serialises into the HTML string, so that assertion was vacuous.
     await expect(app.window.getByText(SECRET, { exact: false })).toHaveCount(0)
 
-    // Disconnect.
+    // Add a SECOND account for the same provider. The name field starts blank
+    // here on purpose: reusing "default" would replace the connection above
+    // rather than sit alongside it.
+    await dialog.getByPlaceholder("e.g. work").fill("work")
+    await dialog.getByPlaceholder("ghp_...").fill(`${SECRET}-work`)
+    // `exact` matters: Playwright matches accessible names by substring, so a
+    // plain "Connect" also selects the row's "Disconnect".
+    await dialog.getByRole("button", { name: "Connect", exact: true }).click()
+
+    await expect
+      .poll(() => instance.connections().map((c) => `${c.service}:${c.alias}`).sort())
+      .toEqual(["github:default", "github:work"])
+
+    // Disconnect the NAMED one. It must go by its alias — deleting it as the
+    // default would take the first account with it.
+    await catalog.getByRole("button", { name: "GitHub" }).click()
+    await app.window
+      .getByRole("group", { name: "github work account" })
+      .getByRole("button", { name: "Disconnect" })
+      .click()
+
+    await expect
+      .poll(() => instance.connections().map((c) => `${c.service}:${c.alias}`))
+      .toEqual(["github:default"])
+
+    // Then the default one, addressed by an omitted alias.
     await app.window.getByRole("button", { name: "Disconnect" }).click()
+    await expect.poll(() => instance.connections()).toEqual([])
     await expect(app.window.getByText("github account")).toHaveCount(0)
   } finally {
     await instance.close()

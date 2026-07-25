@@ -1,10 +1,11 @@
 import type {
   ConnectorConnection,
   ConnectorProvider,
+  ConnectorProviderDetail,
   OAuthClientInfo
 } from "@starbase/core"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useCallback } from "react"
+import { useCallback, useState } from "react"
 import { rpc } from "./rpc-client.js"
 import { openConnectorKey } from "./use-open-connector.js"
 
@@ -23,6 +24,9 @@ import { openConnectorKey } from "./use-open-connector.js"
 export const connectorProvidersKey = ["connector", "providers"] as const
 export const connectorConnectionsKey = ["connector", "connections"] as const
 export const connectorOauthKey = ["connector", "oauth-configs"] as const
+/** Per-provider detail, fetched only while that provider's card is open. */
+export const connectorProviderKey = (service: string) =>
+  ["connector", "provider", service] as const
 
 /**
  * Field names mirror `ConnectorCenterProps` (in `@starbase/ui`) so the hook's
@@ -36,10 +40,17 @@ export interface ConnectorCenterState {
   readonly loading: boolean
   /** Non-null when a read failed (e.g. OpenConnector not configured / unreachable). */
   readonly error: string | null
+  /** The open provider's connect-form shape, or null while it loads. */
+  readonly detail: ConnectorProviderDetail | null
+  readonly detailLoading: boolean
+  readonly detailError: string | null
+  /** Which card is open — `null` on close. Drives the lazy detail fetch. */
+  readonly onOpenProvider: (service: string | null) => void
   readonly onConnect: (
     service: string,
     authType: "api_key" | "custom_credential",
-    values: Record<string, string>
+    values: Record<string, string>,
+    connectionName?: string
   ) => Promise<void>
   readonly onDisconnect: (service: string, connectionName: string | null) => Promise<void>
   readonly onSetOauthConfig: (
@@ -47,13 +58,15 @@ export interface ConnectorCenterState {
     clientId: string,
     clientSecret: string
   ) => Promise<void>
-  readonly onStartOauth: (service: string) => Promise<void>
+  readonly onStartOauth: (service: string, connectionName?: string) => Promise<void>
   /** Force a connections re-poll (the "I've finished connecting" affordance). */
   readonly onRefresh: () => void
 }
 
 export function useConnectorCenter(): ConnectorCenterState {
   const queryClient = useQueryClient()
+  /** The service whose card is open, or null. Only this one's detail is fetched. */
+  const [openService, setOpenService] = useState<string | null>(null)
 
   // The hook is mounted for the whole session (AuthedApp), so the catalog reads
   // must NOT fire until OpenConnector is actually configured — otherwise they fail
@@ -84,6 +97,20 @@ export function useConnectorCenter(): ConnectorCenterState {
     queryFn: () => rpc.connectorOauthConfigs(),
     enabled: ready,
     staleTime: 5 * 60 * 1000
+  })
+
+  /**
+   * ONE provider's detail, and only while its card is open. Deliberately not
+   * folded into the catalog read: the endpoint that returns every provider's
+   * fields inlines each action's JSON Schema and is ~5 MB, so the form's shape
+   * is fetched a provider at a time. `staleTime: Infinity` means reopening the
+   * same card is free — a provider's auth shape doesn't change under us.
+   */
+  const detailQuery = useQuery({
+    queryKey: connectorProviderKey(openService ?? ""),
+    queryFn: () => rpc.connectorProvider(openService as string),
+    enabled: ready && openService !== null,
+    staleTime: Infinity
   })
 
   const refreshConnections = useCallback(() => {
@@ -128,8 +155,18 @@ export function useConnectorCenter(): ConnectorCenterState {
   })
 
   const onConnect = useCallback(
-    async (service: string, authType: "api_key" | "custom_credential", values: Record<string, string>) =>
-      void (await connectMutation.mutateAsync({ service, authType, values })),
+    async (
+      service: string,
+      authType: "api_key" | "custom_credential",
+      values: Record<string, string>,
+      connectionName?: string
+    ) =>
+      void (await connectMutation.mutateAsync({
+        service,
+        authType,
+        values,
+        ...(connectionName ? { connectionName } : {})
+      })),
     [connectMutation]
   )
   const onDisconnect = useCallback(
@@ -146,7 +183,11 @@ export function useConnectorCenter(): ConnectorCenterState {
     [oauthConfigMutation]
   )
   const onStartOauth = useCallback(
-    async (service: string) => void (await startOauthMutation.mutateAsync({ service })),
+    async (service: string, connectionName?: string) =>
+      void (await startOauthMutation.mutateAsync({
+        service,
+        ...(connectionName ? { connectionName } : {})
+      })),
     [startOauthMutation]
   )
 
@@ -163,6 +204,12 @@ export function useConnectorCenter(): ConnectorCenterState {
     oauthConfigs: oauthQuery.data ?? [],
     loading: ready && (providersQuery.isLoading || connectionsQuery.isLoading),
     error,
+    // `?? null` rather than the query's own undefined: the dialog treats null as
+    // "not here yet" and would otherwise have to distinguish two empty states.
+    detail: openService === null ? null : (detailQuery.data ?? null),
+    detailLoading: openService !== null && detailQuery.isLoading,
+    detailError: openService === null ? null : (detailQuery.error?.message ?? null),
+    onOpenProvider: setOpenService,
     onConnect,
     onDisconnect,
     onSetOauthConfig,

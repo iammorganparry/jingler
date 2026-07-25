@@ -37,6 +37,7 @@ import {
   OpenConnectorConfig,
   OpenConnectorDefaults,
   ConnectorProvider,
+  ConnectorProviderDetail,
   ConnectorConnection,
   ConnectorActionResult,
   OAuthClientInfo,
@@ -537,6 +538,18 @@ export class StarbaseRpcs extends RpcGroup.make(
   Rpc.make("Connector.providers", {
     success: Schema.Array(ConnectorProvider),
     error: ConnectorError
+  }),
+
+  /**
+   * ONE provider's connect-form shape (`GET /api/providers/{service}`), fetched
+   * when its card is opened. Deliberately per-service: the equivalent list
+   * endpoint inlines every action's JSON Schema for ~1,100 providers and is 5 MB.
+   * Carries field NAMES and OAuth scopes, never a value.
+   */
+  Rpc.make("Connector.provider", {
+    success: ConnectorProviderDetail,
+    error: ConnectorError,
+    payload: { service: Schema.String }
   }),
 
   /** The operator's established connections (`GET /api/connections`). No secrets. */
