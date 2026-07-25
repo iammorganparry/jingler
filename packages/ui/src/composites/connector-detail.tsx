@@ -262,14 +262,25 @@ function DetailBody({
    */
   const targetAlias = alias.length === 0 ? DEFAULT_CONNECTION : alias
   const existingNames = new Set(connections.map((c) => c.connectionName ?? DEFAULT_CONNECTION))
-  const replacesExisting = existingNames.has(targetAlias)
+  // Only once they have TYPED a colliding name. A blank field also resolves to
+  // the default connection, but warning about it before the operator has touched
+  // anything is noise — and the Connect button is already disabled for blank,
+  // which is the signal that fits an untouched field.
+  const replacesExisting = alias.length > 0 && existingNames.has(targetAlias)
   /** Adding alongside an existing connection needs a name that isn't blank. */
   const nameMissing = connections.length > 0 && alias.length === 0
 
   return (
     <>
-      <DialogHeader>
-        <div className="flex items-center gap-2.5">
+      {/* `DialogHeader` is a ROW by default (`flex items-center gap-3`), which
+          laid the description out BESIDE the provider block and squeezed it
+          until the auth chips wrapped into a column. This header is two stacked
+          bands, so it overrides the axis. */}
+      <DialogHeader className="flex-col items-stretch gap-2">
+        {/* `pr-7` clears the dialog's own close button, which is absolutely
+            positioned at `right-3.5 top-[11px]` and would otherwise sit on top
+            of the Homepage link. */}
+        <div className="flex items-center gap-2.5 pr-7">
           <ConnectorLogo
             homepageUrl={provider.homepageUrl}
             iconUrl={provider.icon}
@@ -317,7 +328,7 @@ function DetailBody({
             </a>
           ) : null}
         </div>
-        <DialogDescription className="mt-2">
+        <DialogDescription>
           Credentials are stored by OpenConnector, never in Starbase.
         </DialogDescription>
       </DialogHeader>
