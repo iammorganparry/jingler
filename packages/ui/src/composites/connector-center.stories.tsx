@@ -154,10 +154,10 @@ export const Empty: Story = {
   args: { connections: [] }
 }
 
-/** What a card looks like mid-fetch: the grid is live, the sheet is still loading. */
-export const DetailLoading: Story = {
-  args: { detailLoading: true }
-}
+// The detail sheet's own states are documented in `connector-detail.stories.tsx`.
+// They cannot live here: the sheet mounts only when a card is open, and the open
+// card is internal state no story arg can reach — so a `detailLoading: true`
+// story here renders identically to Default.
 
 /**
  * An OAuth grant begun but not consented. It is listed, so it would read as

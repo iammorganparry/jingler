@@ -279,9 +279,17 @@ function DetailBody({
           <div className="min-w-0 flex-1">
             <DialogTitle className="flex items-center gap-2">
               <span className="truncate">{provider.name}</span>
-              {connections.length > 0 ? (
+              {/* Status-aware, matching the grid card's dot: a grant that has
+                  been started but not consented is listed, yet cannot run an
+                  action — calling that "connected" in the header while the row
+                  below shows an amber dot contradicts itself. */}
+              {connections.some((c) => c.status === "connected") ? (
                 <Badge tone="green" size="xs">
                   connected
+                </Badge>
+              ) : connections.length > 0 ? (
+                <Badge tone="yellow" size="xs">
+                  pending
                 </Badge>
               ) : null}
             </DialogTitle>
