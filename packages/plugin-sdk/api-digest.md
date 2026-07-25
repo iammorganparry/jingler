@@ -263,18 +263,22 @@ untrusted repo, refuse it.
 
 ```ts
 interface Authentication {
+  // Prompts, and REJECTS if the operator declines.
+  getSession(providerId: string, scopes: readonly string[]): Promise<AuthSession>
+  // Does not prompt; resolves undefined when there is no existing grant.
   getSession(
     providerId: string,
-    scopes: string[],
-    opts?: { createIfNone?: boolean }
-  ): Promise<AuthSession | null>
+    scopes: readonly string[],
+    options: { readonly createIfNone: false }
+  ): Promise<AuthSession | undefined>
   registerProvider(provider: AuthProvider): Disposable
 }
 ```
 
 **There is no manifest permission for credentials.** Ask here; the operator
-consents once per plugin and scope set, and can revoke in Settings. `null` means
-declined — degrade, do not throw.
+consents once per plugin and scope set, and can revoke in Settings. Declining
+rejects, mirroring VS Code; pass `{ createIfNone: false }` to ask without
+prompting and get `undefined` when there is no grant.
 
 `registerProvider` lets your plugin *be* a provider (a self-hosted GitLab, an
 internal tool), which other plugins then request sessions from through the same

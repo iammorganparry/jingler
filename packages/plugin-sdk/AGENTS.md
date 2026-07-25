@@ -96,8 +96,9 @@ export const activate: Activate = async (ctx) => {
 
       // Credentials are requested, not declared. The operator sees a prompt
       // naming this plugin and these scopes, and can revoke later in Settings.
+      // Prompting is the default, so this resolves to a session or REJECTS if
+      // the operator declines — no null check needed on the happy path.
       const session = await ctx.authentication.getSession("github", ["repo"])
-      if (!session) return []          // declined — degrade, do not throw
 
       // Plain `fetch` — the host half is Node, with no CSP in the way. It is
       // the UI half that cannot reach the network, which is why this call
@@ -177,9 +178,14 @@ const session = await ctx.authentication.getSession("github", ["repo"])
 ```
 
 The operator sees a prompt naming your plugin, the provider and the scopes,
-grants once, and can revoke later in Settings. `getSession` returns `null` if
-they decline — **handle that by degrading, not by throwing**. Widening scopes
-later prompts again.
+grants once, and can revoke later in Settings. Widening scopes later prompts
+again.
+
+Declining **rejects** the promise, mirroring VS Code — so a command that needs
+an account fails loudly rather than continuing half-configured. To ask without
+prompting, pass `{ createIfNone: false }`; that resolves `undefined` when there
+is no existing grant, which is the form to use when your tab should render
+something useful either way.
 
 The token never leaves the extension host. Do not try to send it to your UI half;
 there is no route for it, by design.
@@ -278,7 +284,7 @@ a sandbox. Tell users to install plugins they trust.
 2. No hex colours — only `--sb-*` Tailwind tokens
 3. Every contribution id starts with your plugin id
 4. `version` bumped since the last load
-5. `getSession` returning `null` degrades instead of throwing
+5. A declined `getSession` is handled — it rejects unless you pass `createIfNone: false`
 
 ## Where to look next
 

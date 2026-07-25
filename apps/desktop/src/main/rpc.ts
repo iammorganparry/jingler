@@ -37,6 +37,7 @@ import {
   PlanExecutor,
   PlanStore,
   PluginRegistry,
+  PluginHost,
   PlanRoundStore,
   planReviewPost,
   retitleSession,
@@ -1742,6 +1743,32 @@ export const setReasoning = (
   )
 
 /**
+ * Resolve a plugin id against the live catalog.
+ *
+ * Every host operation starts here rather than trusting the id it was handed:
+ * the renderer can ask to invoke a command in a plugin that was uninstalled a
+ * moment ago, and "no such plugin" is a better answer than a process being
+ * asked to activate a directory that is gone.
+ */
+const pluginById = (pluginId: string) =>
+  Effect.flatMap(PluginRegistry.list(), (catalog) => {
+    const found = catalog.plugins.find((p) => p.manifest.id === pluginId)
+    if (!found) {
+      return Effect.fail(
+        new PluginError({ pluginId, reason: `no plugin with id "${pluginId}" is installed` })
+      )
+    }
+    if (!found.enabled) {
+      // A disabled plugin runs no code, and that has to include commands the
+      // renderer still remembers — otherwise the Settings switch is advisory.
+      return Effect.fail(
+        new PluginError({ pluginId, reason: `"${pluginId}" is disabled` })
+      )
+    }
+    return Effect.succeed(found)
+  })
+
+/**
  * The uniform refusal for anything that needs a running extension host.
  *
  * Phrased as a capability the app does not have YET rather than as a fault of
@@ -1795,7 +1822,7 @@ const pluginStorageRead = (pluginId: string) =>
  * `null` — an unreadable store is indistinguishable from an unset key, which is
  * exactly what a caller asking "do you have this?" wants.
  */
-const pluginStorageGet = (pluginId: string, key: string) =>
+export const pluginStorageGet = (pluginId: string, key: string) =>
   pluginStorageRead(pluginId).pipe(
     Effect.map((all) => all[key] ?? null),
     Effect.orElseSucceed(() => null)
@@ -1814,7 +1841,7 @@ const pluginStorageWrite = (pluginId: string, all: Record<string, unknown>) =>
     )
   })
 
-const pluginStorageSet = (pluginId: string, key: string, value: unknown) =>
+export const pluginStorageSet = (pluginId: string, key: string, value: unknown) =>
   Effect.flatMap(pluginStorageRead(pluginId), (all) =>
     pluginStorageWrite(pluginId, { ...all, [key]: value })
   )
@@ -1826,7 +1853,7 @@ const pluginStorageSet = (pluginId: string, key: string, value: unknown) =>
  * `storageKeys`, so folding the two together would make a deleted key show up
  * in a listing forever.
  */
-const pluginStorageDelete = (pluginId: string, key: string) =>
+export const pluginStorageDelete = (pluginId: string, key: string) =>
   Effect.flatMap(pluginStorageRead(pluginId), (all) => {
     if (!(key in all)) return Effect.void
     const { [key]: _removed, ...rest } = all
@@ -1834,7 +1861,7 @@ const pluginStorageDelete = (pluginId: string, key: string) =>
   })
 
 /** Declared never-failing: an unreadable store lists nothing, same as an empty one. */
-const pluginStorageKeys = (pluginId: string) =>
+export const pluginStorageKeys = (pluginId: string) =>
   pluginStorageRead(pluginId).pipe(
     Effect.map((all) => Object.keys(all)),
     Effect.orElseSucceed(() => [] as Array<string>)
@@ -2256,8 +2283,31 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   // not spend its life retrying a channel that is merely quiet.
   "Plugins.events": () => Stream.empty,
 
-  "Plugins.reload": ({ pluginId }) => notYetHosted(pluginId, "reload"),
-  "Plugins.invoke": ({ pluginId }) => notYetHosted(pluginId, "invoke a command in"),
+  "Plugins.invoke": ({ pluginId, commandId, arg }) =>
+    Effect.gen(function* () {
+      const host = yield* PluginHost.get()
+      const plugin = yield* pluginById(pluginId)
+      return yield* Effect.tryPromise({
+        try: () => host.invoke(plugin, commandId, arg),
+        catch: (cause) =>
+          cause instanceof PluginError
+            ? cause
+            : new PluginError({ pluginId, reason: String(cause) })
+      })
+    }),
+
+  "Plugins.reload": ({ pluginId }) =>
+    Effect.gen(function* () {
+      const host = yield* PluginHost.get()
+      const plugin = yield* pluginById(pluginId)
+      yield* Effect.tryPromise({
+        try: () => host.reload(plugin),
+        catch: (cause) =>
+          cause instanceof PluginError
+            ? cause
+            : new PluginError({ pluginId, reason: String(cause) })
+      })
+    }),
   "Plugins.authGrant": ({ pluginId }) =>
     notYetHosted(pluginId, "request credentials for"),
   "Plugins.authRevoke": ({ pluginId }) =>

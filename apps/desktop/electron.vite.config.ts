@@ -33,7 +33,16 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: workspacePackages })],
     build: {
       rollupOptions: {
-        input: { index: resolve(import.meta.dirname, "src/main/index.ts") }
+        input: {
+          index: resolve(import.meta.dirname, "src/main/index.ts"),
+          // The extension host runs in its OWN process, so it needs its own
+          // bundle — it cannot share main's. `.mjs` because utilityProcess
+          // forks it as an ES module.
+          "plugin-host-entry": resolve(
+            import.meta.dirname,
+            "src/main/plugin-host-entry.ts"
+          )
+        }
       }
     }
   },

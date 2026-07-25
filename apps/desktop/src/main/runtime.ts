@@ -19,6 +19,7 @@ import {
   ModelsService,
   PlanStore,
   PluginRegistry,
+  PluginHost,
   PlanExecutor,
   PlanRoundStore,
   ReviewService,
@@ -116,13 +117,20 @@ const AppLayer = RpcServerLive.pipe(
   // prefetch reaches the very same instance — a different one would warm a cache
   // nobody reads, so the merge is what makes the prefetch actually count. The
   // rankings peer is also process-cached and has no dependencies.
-  Layer.provideMerge(Layer.mergeAll(ModelsService.Default, RankingService.Default)),
+  // PluginHost joins this group for two reasons. It needs provideMerge — main
+  // installs the Electron-backed process factory into it at startup, so the RPC
+  // handlers must later reach the SAME instance rather than a second one with
+  // no way to spawn. And `.pipe` tops out at 20 arguments, which a separate
+  // stage would have exceeded; all three are peers with no dependencies, so
+  // merging changes nothing but the argument count.
+  Layer.provideMerge(
+    Layer.mergeAll(ModelsService.Default, RankingService.Default, PluginHost.Default)
+  ),
   Layer.provide(UsageService.Default),
-  // Merged rather than piped separately because `.pipe` tops out at 20
-  // arguments and this was the 21st. They are peers — neither depends on the
-  // other — and both sit above ConfigService/AppPaths/NodeContext here because
-  // those are what they consume: the plugin catalog is a read of `pluginsDir`
-  // filtered by the disabled list in `config.json`.
+  // Peers, merged for the same argument-count reason. Both sit above
+  // ConfigService/AppPaths/NodeContext because those are what they consume —
+  // the plugin catalog is a read of `pluginsDir` filtered by the disabled list
+  // in `config.json`.
   Layer.provide(Layer.mergeAll(GhService.Default, PluginRegistry.Default)),
   // provideMerge: the `Config.*` handlers consume ConfigService AND the boot
   // theme resolution reads the active theme id from it before any window
