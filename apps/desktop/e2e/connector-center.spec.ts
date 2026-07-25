@@ -89,16 +89,17 @@ test("browse, connect, and disconnect a provider through the Connector Center", 
 
     await openConnectorCenter(app.window)
 
-    // Catalog loads from the fake instance.
-    await expect(app.window.getByText("GitHub")).toBeVisible()
-    await expect(app.window.getByText("Slack")).toBeVisible()
+    // Catalog loads from the fake instance. `exact` because each row also renders a
+    // mono "<id> · N actions" subtitle, so a substring match would resolve to two.
+    await expect(app.window.getByText("GitHub", { exact: true })).toBeVisible()
+    await expect(app.window.getByText("Slack", { exact: true })).toBeVisible()
 
     // Search filters.
     await app.window.getByLabel("Search providers").fill("git")
-    await expect(app.window.getByText("Slack")).toHaveCount(0)
+    await expect(app.window.getByText("Slack", { exact: true })).toHaveCount(0)
 
     // Connect GitHub with an API key.
-    await app.window.getByText("GitHub").click()
+    await app.window.getByText("GitHub", { exact: true }).click()
     const dialog = app.window.getByRole("dialog")
     await dialog.getByPlaceholder("Token").fill(SECRET)
     await dialog.getByRole("button", { name: "Connect" }).click()

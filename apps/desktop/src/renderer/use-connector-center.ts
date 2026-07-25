@@ -6,6 +6,7 @@ import type {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback } from "react"
 import { rpc } from "./rpc-client.js"
+import { openConnectorKey } from "./use-open-connector.js"
 
 /**
  * State for the MCP Connector Center: the OpenConnector provider catalog, the
@@ -54,24 +55,47 @@ export interface ConnectorCenterState {
 export function useConnectorCenter(): ConnectorCenterState {
   const queryClient = useQueryClient()
 
+  // The hook is mounted for the whole session (AuthedApp), so the catalog reads
+  // must NOT fire until OpenConnector is actually configured — otherwise they fail
+  // at boot and, with a long staleTime, never recover. This shares the Settings
+  // panel's query key, so saving the config there invalidates it and flips these
+  // queries on without an app restart.
+  const configQuery = useQuery({
+    queryKey: openConnectorKey,
+    queryFn: () => rpc.openConnectorGet(),
+    staleTime: Infinity
+  })
+  const ready = (configQuery.data?.config.enabled ?? false) && (configQuery.data?.hasToken ?? false)
+
   const providersQuery = useQuery({
     queryKey: connectorProvidersKey,
     queryFn: () => rpc.connectorProviders(),
+    enabled: ready,
     // The catalog is stable; don't refetch on every focus.
     staleTime: 5 * 60 * 1000
   })
   const connectionsQuery = useQuery({
     queryKey: connectorConnectionsKey,
-    queryFn: () => rpc.connectorConnections()
+    queryFn: () => rpc.connectorConnections(),
+    enabled: ready
   })
   const oauthQuery = useQuery({
     queryKey: connectorOauthKey,
     queryFn: () => rpc.connectorOauthConfigs(),
+    enabled: ready,
     staleTime: 5 * 60 * 1000
   })
 
   const refreshConnections = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: connectorConnectionsKey })
+  }, [queryClient])
+
+  // The manual "Refresh" affordance re-reads the WHOLE surface (catalog, oauth,
+  // connections) — a connect done in the browser can change any of them.
+  const onRefresh = useCallback(() => {
+    for (const key of [connectorProvidersKey, connectorConnectionsKey, connectorOauthKey]) {
+      void queryClient.invalidateQueries({ queryKey: key })
+    }
   }, [queryClient])
 
   const connectMutation = useMutation({
@@ -122,21 +146,23 @@ export function useConnectorCenter(): ConnectorCenterState {
     [startOauthMutation]
   )
 
-  const error =
-    providersQuery.error ?? connectionsQuery.error ?? oauthQuery.error
-      ? (providersQuery.error ?? connectionsQuery.error ?? oauthQuery.error)?.message ?? "Failed to reach OpenConnector."
+  const queryError = providersQuery.error ?? connectionsQuery.error ?? oauthQuery.error
+  const error = !ready
+    ? "Configure your OpenConnector endpoint and token in Settings › Unified MCP first."
+    : queryError
+      ? queryError.message ?? "Failed to reach OpenConnector."
       : null
 
   return {
     providers: providersQuery.data ?? [],
     connections: connectionsQuery.data ?? [],
     oauthConfigs: oauthQuery.data ?? [],
-    loading: providersQuery.isLoading || connectionsQuery.isLoading,
+    loading: ready && (providersQuery.isLoading || connectionsQuery.isLoading),
     error,
     onConnect,
     onDisconnect,
     onSetOauthConfig,
     onStartOauth,
-    onRefresh: refreshConnections
+    onRefresh
   }
 }

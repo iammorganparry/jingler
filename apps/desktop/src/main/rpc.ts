@@ -59,6 +59,7 @@ import {
   applyStreamEvent,
   assistantMessage,
   ConfigError,
+  ConnectorError,
   GhError,
   GitError,
   latestPlan,
@@ -235,7 +236,18 @@ export const connectorStartOauth = (service: string, connectionName: string | un
   OpenConnectorApi.startAuthorization(service, connectionName).pipe(
     // The URL can carry a `state` secret, so it is opened in the main process and
     // never returned to the renderer; OpenConnector's own callback stores the grant.
-    Effect.flatMap((url) => Effect.promise(() => shell.openExternal(url))),
+    Effect.flatMap((url) =>
+      // The URL is remote-controlled (the OpenConnector instance's response), and
+      // `openExternal` will launch ANY protocol handler — file://, custom schemes.
+      // Refuse anything but http(s), mirroring `index.ts`'s deep-link guard, so a
+      // compromised or MITM'd instance can't drive an arbitrary-URL open.
+      /^https?:\/\//i.test(url)
+        ? Effect.tryPromise({
+            try: () => shell.openExternal(url),
+            catch: () => new ConnectorError({ message: "Couldn't open the authorization URL." })
+          })
+        : Effect.fail(new ConnectorError({ message: "OpenConnector returned a non-http(s) authorization URL." }))
+    ),
     Effect.as({ ok: true, message: null } as const)
   )
 
