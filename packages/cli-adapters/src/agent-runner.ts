@@ -37,6 +37,7 @@ import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Schedule, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
+import { buildGate, makeApprovals, verdict } from "./approvals.js"
 import { runLifetime } from "./run-lifetime.js"
 import { planNote } from "./plan-prompt.js"
 import { questionNote } from "./question-prompt.js"
@@ -178,22 +179,6 @@ export const isSlashCommand = (text: string): boolean => /^\/[A-Za-z][\w:-]*(\s|
 export const isCodexSkillInvocation = (text: string): boolean =>
   /^\$[A-Za-z][\w:-]*(\s|$)/.test(text.trimStart())
 
-/** A gate awaiting the operator; the `Deferred` unblocks the paused agent. */
-interface PendingGate {
-  readonly sessionId: string
-  readonly chatId: string
-  readonly deferred: Deferred.Deferred<PermissionDecision>
-  /** Token added to the session allowlist on an "always" decision. */
-  readonly allowLabel: string | null
-}
-
-/** A question group awaiting the user's answers; the `Deferred` resumes the agent. */
-interface PendingQuestion {
-  readonly sessionId: string
-  readonly chatId: string
-  readonly deferred: Deferred.Deferred<ReadonlyArray<QuestionAnswer>>
-}
-
 /** A proposed plan awaiting the operator's decision; the `Deferred` resumes the agent. */
 interface PendingPlan {
   readonly sessionId: string
@@ -271,61 +256,6 @@ const revisionText = (plan: Plan, comments: ReadonlyArray<PlanComment>): string 
   return lines.join("\n")
 }
 
-/** The first two words of a command — the "Always allow …" token, e.g. "npm test". */
-const allowLabelOf = (command: string): string => command.trim().split(/\s+/).slice(0, 2).join(" ")
-
-const isAllowlisted = (allow: ReadonlySet<string>, command: string | null): boolean =>
-  command !== null && [...allow].some((a) => command === a || command.startsWith(`${a} `))
-
-const basename = (target: string | null): string => target?.split("/").pop() ?? "file"
-
-/**
- * Decide whether a requested action runs (`"allow"`) or must pause for the
- * operator (`"gate"`), from the session's HITL mode + allowlist:
- * - `auto` — everything runs,
- * - `accept-edits` — edits run, commands gate (unless allowlisted),
- * - `ask` — edits and commands both gate (unless a command is allowlisted).
- */
-const verdict = (
-  mode: PermissionMode,
-  allow: ReadonlySet<string>,
-  req: PermissionRequest,
-  planAutoRun: boolean = PLAN_AUTO_RUN_DEFAULT
-): "allow" | "gate" => {
-  if (mode === "auto") return "allow"
-  if (isAllowlisted(allow, req.command)) return "allow"
-  // Planning is a read-only phase: the harness refuses edits outright, so the
-  // only thing left to approve is a command that cannot change the tree. Running
-  // those unattended is the default; the operator can restore the prompts from
-  // Settings. Edits are NOT covered — they fall through to the rule below and
-  // gate exactly as they always did.
-  if (mode === "plan" && planAutoRun && req.kind === "command") return "allow"
-  if (req.kind === "edit") return mode === "accept-edits" ? "allow" : "gate"
-  return "gate"
-}
-
-const buildGate = (id: string, req: PermissionRequest): ApprovalGate =>
-  req.kind === "command"
-    ? {
-        id,
-        kind: "command",
-        title: "Approval needed · run a command",
-        detail:
-          "Not in your allowlist. Agents never run shell commands until you allow — any file edits above were applied under this mode.",
-        command: req.command,
-        allowLabel: req.command ? allowLabelOf(req.command) : null,
-        status: "pending"
-      }
-    : {
-        id,
-        kind: "edit",
-        title: `Approval needed · edit ${basename(req.target)}`,
-        detail: "Review the change above, then approve to write it to disk.",
-        command: null,
-        allowLabel: null,
-        status: "pending"
-      }
-
 type PromptEnv =
   | CliAdapter
   | ConfigService
@@ -356,12 +286,11 @@ export type AgentRunTarget = "session" | "orchestrator"
 export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentRunner", {
   effect: Effect.gen(function* () {
     // gateId → the pending gate (shared across prompt/decideGate/stop calls).
-    const gates = yield* Ref.make(new Map<string, PendingGate>())
+    /** Human-in-the-loop state, and the rule that decides what needs approval. */
+    const approvals = yield* makeApprovals
     // requestId → the pending question group (shared across prompt/answerQuestion/stop).
-    const questions = yield* Ref.make(new Map<string, PendingQuestion>())
     // Per-chat live HITL state, seeded from the Chat record on first use.
     const modes = yield* Ref.make(new Map<string, PermissionMode>())
-    const allowlists = yield* Ref.make(new Map<string, Set<string>>())
     // planId → the pending plan (shared across prompt/approve/revise/stop).
     const plans = yield* Ref.make(new Map<string, PendingPlan>())
     // chatId → the exec mode to restore when a plan is approved (captured on
@@ -459,26 +388,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
       Effect.gen(function* () {
         const chatId = maybeDecision === undefined ? sessionId : chatIdOrGateId
         const gateId = maybeDecision === undefined ? chatIdOrGateId : gateIdOrDecision
-        const decision =
-          maybeDecision ?? (gateIdOrDecision as GateDecision)
-        const entry = (yield* Ref.get(gates)).get(gateId)
-        if (
-          entry === undefined ||
-          entry.sessionId !== sessionId ||
-          entry.chatId !== chatId
-        ) return
-        if (decision === "always" && entry.allowLabel !== null) {
-          const label = entry.allowLabel
-          yield* Ref.update(allowlists, (m) => {
-            const next = new Map(m)
-            const set = new Set(next.get(chatId) ?? [])
-            set.add(label)
-            next.set(chatId, set)
-            return next
-          })
+        const decision = maybeDecision ?? (gateIdOrDecision as GateDecision)
+        // The registry owns the in-memory allowlist and hands back the token to
+        // persist, so the durable write stays here with the rest of the session
+        // state and `approvals` stays free of `SessionStore`.
+        const label = yield* approvals.decide(sessionId, chatId, gateId, decision)
+        if (label !== null) {
           yield* SessionStore.addAllowlist(sessionId, chatId, label).pipe(Effect.ignore)
         }
-        yield* Deferred.succeed(entry.deferred, decision === "deny" ? "deny" : "allow")
       })
 
     /** Submit the user's answers to a pending question group, resuming the agent. */
@@ -494,15 +411,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           maybeAnswers === undefined ? chatIdOrRequestId : (requestIdOrAnswers as string)
         const answers =
           maybeAnswers ?? (requestIdOrAnswers as ReadonlyArray<QuestionAnswer>)
-        const entry = (yield* Ref.get(questions)).get(requestId)
-        if (
-          entry === undefined ||
-          entry.sessionId !== sessionId ||
-          entry.chatId !== chatId
-        ) return
-        // The answers are recorded onto the transcript inside `askQuestion` (which
-        // owns the run's message accumulator); here we just resume the agent.
-        yield* Deferred.succeed(entry.deferred, answers)
+        yield* approvals.answer(sessionId, chatId, requestId, answers)
       })
 
     /** Resolve a session's pending plan `Deferred` (guards session ownership). */
@@ -663,22 +572,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     const stop = (sessionId: string, requestedChatId?: string) =>
       Effect.gen(function* () {
         const chatId = requestedChatId ?? sessionId
-        const allGates = yield* Ref.get(gates)
-        yield* Effect.forEach(
-          [...allGates.values()].filter(
-            (g) => g.sessionId === sessionId && g.chatId === chatId
-          ),
-          (g) => Deferred.succeed(g.deferred, "deny"),
-          { discard: true }
-        )
-        const allQuestions = yield* Ref.get(questions)
-        yield* Effect.forEach(
-          [...allQuestions.values()].filter(
-            (q) => q.sessionId === sessionId && q.chatId === chatId
-          ),
-          (q) => Deferred.succeed(q.deferred, []),
-          { discard: true }
-        )
+        // A stopped agent must not stay parked: gates deny, questions answer empty.
+        yield* approvals.releaseChat(sessionId, chatId)
         const allPlans = yield* Ref.get(plans)
         const run = (yield* Ref.get(active)).get(chatId)
         yield* Effect.forEach(
@@ -776,7 +671,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           const sessionMode =
             (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? "accept-edits"
           const allow = new Set<string>([
-            ...((yield* Ref.get(allowlists)).get(chatId) ?? []),
+            ...(yield* approvals.allowlistFor(chatId)),
             ...(chat.allowlist ?? [])
           ])
           // `starbase` is not a harness that can run anything — it is us. A
@@ -1298,40 +1193,27 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               const gn = yield* nextId
               const gateId = `g_${sessionId}_${gn}`
               const gate = buildGate(gateId, req)
-              const deferred = yield* Deferred.make<PermissionDecision>()
-              yield* Ref.update(gates, (m) =>
-                new Map(m).set(gateId, {
-                  sessionId,
-                  chatId,
-                  deferred,
-                  allowLabel: gate.allowLabel
-                })
+              // `approvals` announces the gate itself, so registration cannot lose
+              // the race against a decision — see `awaitGate`.
+              return yield* approvals.awaitGate(
+                sessionId,
+                chatId,
+                gateId,
+                gate,
+                emit({ _tag: "GateRequested", gate })
               )
-              yield* emit({ _tag: "GateRequested", gate })
-              const decision = yield* Deferred.await(deferred)
-              yield* Ref.update(gates, (m) => {
-                const next = new Map(m)
-                next.delete(gateId)
-                return next
-              })
-              return decision
             })
 
           const askQuestion = (
             request: QuestionRequest
           ): Effect.Effect<ReadonlyArray<QuestionAnswer>> =>
             Effect.gen(function* () {
-              const deferred = yield* Deferred.make<ReadonlyArray<QuestionAnswer>>()
-              yield* Ref.update(questions, (m) =>
-                new Map(m).set(request.id, { sessionId, chatId, deferred })
+              const answers = yield* approvals.awaitAnswers(
+                sessionId,
+                chatId,
+                request.id,
+                emit({ _tag: "QuestionRequested", request })
               )
-              yield* emit({ _tag: "QuestionRequested", request })
-              const answers = yield* Deferred.await(deferred)
-              yield* Ref.update(questions, (m) => {
-                const next = new Map(m)
-                next.delete(request.id)
-                return next
-              })
               // Record the answers onto the assistant turn's question part — both
               // the live accumulator (so later emits don't clobber it) and the
               // persisted transcript (so a reload doesn't re-show the question).
@@ -1773,7 +1655,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           })
         yield* drop(locks)
         yield* drop(modes)
-        yield* drop(allowlists)
+        yield* approvals.forgetChat(chatId)
         yield* drop(priorModes)
         yield* drop(execDefaults)
       })
