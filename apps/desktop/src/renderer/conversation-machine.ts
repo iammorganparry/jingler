@@ -420,6 +420,40 @@ const gateStatusFor = (decision: GateDecision) =>
 const stamp = () => Date.now().toString(36)
 
 /**
+ * Hand a queued message to the live turn, and report back as `STEER_RESULT`.
+ *
+ * Shared by the operator's "Send now" and the queue's automatic flush, which
+ * differ in exactly two ways — and both differences are about what happens when
+ * the harness CANNOT take the message:
+ *
+ * - `auto` marks the flush, which forbids the stop-and-replay fallback. The
+ *   operator did not ask for an interruption, so an automatic steer that fails
+ *   leaves the message queued for the next boundary.
+ * - The failure status follows from that. "Send now" reports `unsupported`,
+ *   which licenses the machine to stop the turn and replay the message — the
+ *   only way to honour "now" on a harness with no live channel. The flush
+ *   reports `deferred`: nothing is wrong, it simply did not land this time.
+ */
+const beginSteer = (
+  context: ConversationContext,
+  self: { send: (event: ConversationEvent) => void },
+  picked: QueuedMessage,
+  auto: boolean
+): void => {
+  void rpc
+    .agentSteer(context.session.id, context.chatId, picked.text, picked.images)
+    .then((result) => self.send({ type: "STEER_RESULT", queued: picked, result, auto }))
+    .catch(() =>
+      self.send({
+        type: "STEER_RESULT",
+        queued: picked,
+        result: { status: auto ? "deferred" : "unsupported" },
+        auto
+      })
+    )
+}
+
+/**
  * A new turn clears the tab bar — but the reviewer is not part of a turn. Keep a
  * working one (sending a message must not cost you sight of a live agent that is
  * still running in the background); drop a finished one, which matches how a
@@ -632,16 +666,7 @@ export const conversationMachine = setup({
       const picked = context.queued.find((queued) => queued.id === event.id)
       if (picked === undefined) return {}
       const rest = context.queued.filter((queued) => queued.id !== event.id)
-      void rpc
-        .agentSteer(context.session.id, context.chatId, picked.text, picked.images)
-        .then((result) => self.send({ type: "STEER_RESULT", queued: picked, result }))
-        .catch(() =>
-          self.send({
-            type: "STEER_RESULT",
-            queued: picked,
-            result: { status: "unsupported" }
-          })
-        )
+      beginSteer(context, self, picked, false)
       return { queued: [picked, ...rest], steeringId: picked.id }
     }),
     /**
@@ -661,20 +686,7 @@ export const conversationMachine = setup({
     autoFlushQueue: assign(({ context, self }) => {
       const picked = context.queued[0]
       if (picked === undefined) return {}
-      void rpc
-        .agentSteer(context.session.id, context.chatId, picked.text, picked.images)
-        .then((result) => self.send({ type: "STEER_RESULT", queued: picked, result, auto: true }))
-        // A failed auto-flush must NOT stop the turn (that is the operator-
-        // initiated path): report it deferred so the message stays queued and is
-        // retried at the next boundary, or run normally once the turn settles.
-        .catch(() =>
-          self.send({
-            type: "STEER_RESULT",
-            queued: picked,
-            result: { status: "deferred" },
-            auto: true
-          })
-        )
+      beginSteer(context, self, picked, true)
       return { steeringId: picked.id }
     }),
     acceptSteer: assign(({ context, event }) => {
