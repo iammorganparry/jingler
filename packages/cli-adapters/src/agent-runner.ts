@@ -402,6 +402,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     const persistMode = (sessionId: string, chatId: string, mode: PermissionMode) =>
       SessionStore.setMode(sessionId, chatId, mode).pipe(Effect.ignore)
 
+    /** A session by id, or null when it isn't in the store (never fails). */
+    const getSessionOrNull = (sessionId: string) =>
+      SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
+
     const setMode = (
       sessionId: string,
       chatIdOrMode: string,
@@ -414,10 +418,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
         if (mode === "plan") {
           const current =
             (yield* Ref.get(modes)).get(chatId) ??
-            (yield* SessionStore.get(sessionId).pipe(
-              Effect.map((s) => s.chats.find((chat) => chat.id === chatId)?.mode),
-              Effect.orElseSucceed(() => undefined)
-            ))
+            (yield* getSessionOrNull(sessionId))?.chats.find((chat) => chat.id === chatId)?.mode
           const configDefault = (yield* Ref.get(execDefaults)).get(chatId) ?? "accept-edits"
           const prior: PermissionMode = current && current !== "plan" ? current : configDefault
           yield* Ref.update(priorModes, (m) => new Map(m).set(chatId, prior))
@@ -495,14 +496,25 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
         yield* Deferred.succeed(entry.deferred, decision)
       })
 
-    /** Thread a comment onto a plan step (persisted + streamed); doesn't resume the agent. */
-    const commentPlanStep = (sessionId: string, planId: string, stepId: string, body: string) =>
+    /**
+     * A pending plan (by id) and its live run, gated on session ownership — the
+     * lookup the comment / revise / approve handlers all begin with. `run` is
+     * undefined when the plan isn't this session's or its run has already gone.
+     */
+    const pendingPlanRun = (sessionId: string, planId: string) =>
       Effect.gen(function* () {
         const pending = (yield* Ref.get(plans)).get(planId)
         const run =
           pending?.sessionId === sessionId
             ? (yield* Ref.get(active)).get(pending.chatId)
             : undefined
+        return { pending, run } as const
+      })
+
+    /** Thread a comment onto a plan step (persisted + streamed); doesn't resume the agent. */
+    const commentPlanStep = (sessionId: string, planId: string, stepId: string, body: string) =>
+      Effect.gen(function* () {
+        const { run } = yield* pendingPlanRun(sessionId, planId)
         if (run === undefined) return
         const cn = yield* nextId
         const now = yield* Effect.sync(() => new Date().toISOString())
@@ -517,11 +529,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     /** Route the open comments back to the agent as a revision and resume planning. */
     const revisePlan = (sessionId: string, planId: string) =>
       Effect.gen(function* () {
-        const pending = (yield* Ref.get(plans)).get(planId)
-        const run =
-          pending?.sessionId === sessionId
-            ? (yield* Ref.get(active)).get(pending.chatId)
-            : undefined
+        const { run } = yield* pendingPlanRun(sessionId, planId)
         if (run === undefined) return
         const plan = yield* run.readPlan(planId)
         if (plan === null) return
@@ -538,11 +546,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     /** Approve a plan: mark it approved, restore the exec mode, and start execution. */
     const approvePlan = (sessionId: string, planId: string, executionMode?: ExecutionMode) =>
       Effect.gen(function* () {
-        const pending = (yield* Ref.get(plans)).get(planId)
-        const run =
-          pending?.sessionId === sessionId
-            ? (yield* Ref.get(active)).get(pending.chatId)
-            : undefined
+        const { pending, run } = yield* pendingPlanRun(sessionId, planId)
         if (run !== undefined) yield* run.applyPlan(planId, (p) => ({ ...p, status: "approved" }))
         // Engage the mode they were actually running this session in before
         // planning (`priorModes`, e.g. "auto") — that's their real intent for this
@@ -569,10 +573,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
      */
     const resolveExecMode = (sessionId: string): Effect.Effect<PermissionMode, never, PromptEnv> =>
       Effect.gen(function* () {
-        const session = yield* SessionStore.get(sessionId).pipe(
-          Effect.map((s): Session | null => s),
-          Effect.orElseSucceed(() => null)
-        )
+        const session = yield* getSessionOrNull(sessionId)
         const pathSvc = yield* Path.Path
         const appPaths = yield* AppPaths
         return yield* readDefaultMode(session?.cli ?? "claude", pathSvc.dirname(appPaths.root))
@@ -616,10 +617,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           // is never persisted, so `session.mode` is their real exec mode (e.g.
           // "auto"); fall back to the CLI-config default only if it's absent or a
           // legacy "plan". This keeps a stale-plan re-drive from re-gating.
-          const persisted = yield* SessionStore.get(sessionId).pipe(
-            Effect.map((s) => s.chats.find((chat) => chat.id === chatId)?.mode),
-            Effect.orElseSucceed(() => undefined)
-          )
+          const persisted = (yield* getSessionOrNull(sessionId))?.chats.find(
+            (chat) => chat.id === chatId
+          )?.mode
           const restore =
             persisted && persisted !== "plan" ? persisted : yield* resolveExecMode(sessionId)
           yield* setMode(sessionId, chatId, restore)
@@ -738,10 +738,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
       Effect.suspend(() =>
         Effect.gen(function* () {
           const adapter = yield* CliAdapter
-          const session: Session | null = yield* SessionStore.get(sessionId).pipe(
-            Effect.map((s): Session | null => s),
-            Effect.orElseSucceed(() => null)
-          )
+          const session: Session | null = yield* getSessionOrNull(sessionId)
           const chat =
             session?.chats.find((candidate) => candidate.id === chatId) ??
             (chatId === sessionId
@@ -1594,9 +1591,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
       Effect.gen(function* () {
         const run = (yield* Ref.get(active)).get(chatId)
         if (run === undefined) return { status: "unsupported" } as const
-        const session = yield* SessionStore.get(sessionId).pipe(
-          Effect.orElseSucceed(() => null)
-        )
+        const session = yield* getSessionOrNull(sessionId)
         if (!session?.chats.some((chat) => chat.id === chatId)) {
           return { status: "unsupported" } as const
         }
