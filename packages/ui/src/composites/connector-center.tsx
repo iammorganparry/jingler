@@ -1,5 +1,4 @@
 import type {
-  ConnectorAuthType,
   ConnectorConnection,
   ConnectorProvider,
   ConnectorProviderDetail,
@@ -15,6 +14,7 @@ import { SegmentedControl } from "../components/segmented-control.js"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/select.js"
 import { StatusDot } from "../components/status-dot.js"
 import { cn } from "../lib/cn.js"
+import { AUTH_LABEL } from "../lib/connector-labels.js"
 import { ConnectorDetail } from "./connector-detail.js"
 
 /**
@@ -51,13 +51,6 @@ interface ConnectionCounts {
 
 /** Shared so every unconnected card gets the same object, not a fresh one. */
 const EMPTY_COUNTS: ConnectionCounts = { connected: 0, pending: 0 }
-
-const AUTH_LABEL: Record<ConnectorAuthType, string> = {
-  oauth2: "OAuth",
-  api_key: "API key",
-  custom_credential: "Credentials",
-  no_auth: "No auth"
-}
 
 export interface ConnectorCenterProps {
   readonly providers: ReadonlyArray<ConnectorProvider>

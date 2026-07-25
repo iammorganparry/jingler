@@ -25,6 +25,7 @@ import {
 import { Input } from "../components/input.js"
 import { SegmentedControl } from "../components/segmented-control.js"
 import { StatusDot } from "../components/status-dot.js"
+import { AUTH_LABEL } from "../lib/connector-labels.js"
 
 /**
  * One provider's detail sheet — the connect form, its OAuth scopes, and any
@@ -51,13 +52,6 @@ const FALLBACK_FIELD: ConnectorAuthField = {
 
 /** OpenConnector's default connection alias — the one used when none is named. */
 const DEFAULT_CONNECTION = "default"
-
-const AUTH_LABEL: Record<ConnectorAuthType, string> = {
-  oauth2: "OAuth",
-  api_key: "API key",
-  custom_credential: "Credentials",
-  no_auth: "No auth"
-}
 
 /** Which key-bearing auth type a provider's connect PUT should declare. */
 const keyAuthTypeOf = (
