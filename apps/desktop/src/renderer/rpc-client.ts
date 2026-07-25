@@ -13,7 +13,10 @@ import type {
   Attachment,
   AuthProvider,
   AuthSession,
+  AuthSessionInfo,
   BrowserBounds,
+  LoadedPlugin,
+  PluginCatalog,
   CliInfo,
   CliKind,
   CreateSessionFromIssueInput,
@@ -757,6 +760,53 @@ export const rpc = {
       if (cancelled) return
       fiber = runtime.runFork(
         client.Theme.watch().pipe(
+          Stream.runForEach((catalog) => Effect.sync(() => onCatalog(catalog)))
+        )
+      )
+    })
+    return () => {
+      cancelled = true
+      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
+    }
+  },
+
+  // ── Plugins ────────────────────────────────────────────────────────────────
+
+  pluginsList: (): Promise<PluginCatalog> => run((c) => c.Plugins.list()),
+
+  pluginsSetEnabled: (pluginId: string, enabled: boolean): Promise<void> =>
+    run((c) => c.Plugins.setEnabled({ pluginId, enabled })),
+
+  pluginsUninstall: (pluginId: string): Promise<void> =>
+    run((c) => c.Plugins.uninstall({ pluginId })),
+
+  pluginsReveal: (pluginId: string): Promise<void> =>
+    run((c) => c.Plugins.reveal({ pluginId })),
+
+  pluginsInstallFromFolder: (sourcePath: string): Promise<LoadedPlugin> =>
+    run((c) => c.Plugins.installFromFolder({ sourcePath })),
+
+  pluginsStorageGet: (pluginId: string, key: string): Promise<unknown> =>
+    run((c) => c.Plugins.storageGet({ pluginId, key })),
+
+  pluginsStorageSet: (pluginId: string, key: string, value: unknown): Promise<void> =>
+    run((c) => c.Plugins.storageSet({ pluginId, key, value })),
+
+  pluginsAuthSessions: (): Promise<ReadonlyArray<AuthSessionInfo>> =>
+    run((c) => c.Plugins.authSessions()),
+
+  /**
+   * Subscribe to `~/starbase/plugins` changing on disk — the same live-reload
+   * contract themes have, and the reason a plugin author can edit a file and see
+   * the tab update without restarting the app.
+   */
+  pluginsWatch: (onCatalog: (catalog: PluginCatalog) => void): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then((client) => {
+      if (cancelled) return
+      fiber = runtime.runFork(
+        client.Plugins.watch().pipe(
           Stream.runForEach((catalog) => Effect.sync(() => onCatalog(catalog)))
         )
       )

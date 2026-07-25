@@ -6,6 +6,7 @@ import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
 import { EmptyConversation } from "./empty-conversation.js"
 import type { ConversationPaneCtx } from "./session-pane.js"
+import type { TabContribution } from "../app/tab-contributions.js"
 
 // The pane ctx is part of this screen's public surface (StarbaseApp types its
 // `renderConversation` callback with it), so keep it importable from here even
@@ -121,6 +122,8 @@ export interface SessionConversationProps {
   onToggleCollapsed?: (repoName: string) => void | Promise<void>
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  /** Tabs contributed by plugins, merged with the built-ins in `SessionPane`. */
+  tabContributions?: ReadonlyArray<TabContribution>
   /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */
   renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Changes tab — the Code Review view over the local worktree diff. */
@@ -230,6 +233,7 @@ export function SessionConversation(props: SessionConversationProps) {
             liveDiff={props.liveDiff}
             onOpenSettings={props.onOpenSettings}
             renderPullRequest={props.renderPullRequest}
+            tabContributions={props.tabContributions}
             renderReview={props.renderReview}
             renderCode={props.renderCode}
             renderIssue={props.renderIssue}

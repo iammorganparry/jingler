@@ -44,10 +44,44 @@ describe("renderer CSP", () => {
     expect(imgSrc).toContain("https://*.githubusercontent.com")
   })
 
-  it("keeps script and connect origins closed", () => {
-    // Widening img-src is the only concession the logo feature needed; a future
-    // edit that loosens script-src should have to delete this line first.
-    expect(directive("script-src")).toBe("script-src 'self'")
+  it("keeps script-src to 'self' plus the local plugin scheme, and nothing else", () => {
+    // Plugin UI is ES modules the renderer imports, so `script-src` had to give
+    // exactly one inch: the `starbase-plugin:` scheme, which the main process
+    // serves ONLY from `~/starbase/plugins`. Pinned as an exact string so that
+    // widening it to a remote origin — the one thing an agent harness must
+    // never do — cannot happen without deleting this assertion first.
+    expect(directive("script-src")).toBe("script-src 'self' starbase-plugin:")
     expect(directive("default-src")).toBe("default-src 'self'")
+  })
+
+  it("does NOT widen connect-src for plugins", () => {
+    // A plugin's renderer half can be loaded from disk but must not be able to
+    // phone home. Outbound traffic belongs in the extension host, where the
+    // operator's consent for a provider and its scopes is recorded and
+    // revocable. `connect-src` is absent, so it inherits `default-src 'self'`.
+    expect(directive("connect-src")).toBe("")
+    expect(directive("default-src")).toBe("default-src 'self'")
+  })
+
+  it("maps every bare specifier a plugin may import to the runtime shim host", () => {
+    // Two copies of React in one tree makes every hook throw "invalid hook
+    // call", and the failure only shows up once a SECOND plugin is installed.
+    // The importmap is what prevents it, so its absence should fail loudly here
+    // rather than quietly in a user's app.
+    const importmap = /<script type="importmap">([\s\S]*?)<\/script>/.exec(html)?.[1]
+    expect(importmap, "renderer index.html declares an importmap").toBeTruthy()
+    const { imports } = JSON.parse(importmap ?? "{}") as {
+      imports: Record<string, string>
+    }
+    for (const specifier of [
+      "react",
+      "react/jsx-runtime",
+      "react/jsx-dev-runtime",
+      "@starbase/plugin-sdk"
+    ]) {
+      expect(imports[specifier], `${specifier} is mapped`).toMatch(
+        /^starbase-plugin:\/\/runtime\//
+      )
+    }
   })
 })

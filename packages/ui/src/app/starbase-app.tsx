@@ -42,6 +42,7 @@ import { useSplitLayout } from "./use-split-layout.js"
 import { MAX_PANES } from "./split-layout.js"
 import { matchSplitShortcut } from "./split-shortcuts.js"
 import { SEED_PATCH } from "../seed.js"
+import type { TabContribution } from "./tab-contributions.js"
 
 const GH_UNAVAILABLE: GhStatus = {
   available: false,
@@ -156,6 +157,14 @@ export interface StarbaseAppProps {
   injection?: InjectionTargetsProps
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  /**
+   * Tabs contributed by plugins.
+   *
+   * Threaded rather than read from a context here because `packages/ui` has no
+   * access to the plugin registry — and should not: the library stays a pure
+   * consumer of contributions, whoever built them.
+   */
+  tabContributions?: ReadonlyArray<TabContribution>
   /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */
   renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Changes tab — the Code Review view over the local worktree diff. */
@@ -292,6 +301,7 @@ export function StarbaseApp({
   connector,
   injection,
   renderPullRequest,
+  tabContributions,
   renderReview,
   renderCode,
   renderIssue,
@@ -647,6 +657,7 @@ export function StarbaseApp({
         collapsedRepoNames={collapsedRepoNames}
         onToggleCollapsed={onToggleCollapsed ? toggleCollapsedByName : undefined}
         renderPullRequest={renderPullRequest}
+        tabContributions={tabContributions}
         renderReview={renderReview}
         renderCode={renderCode}
         renderIssue={renderIssue}

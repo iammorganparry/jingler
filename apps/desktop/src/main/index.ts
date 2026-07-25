@@ -27,6 +27,7 @@ import {
   registerProtocolClient
 } from "./deep-link.js"
 import { starbaseRoot } from "./app-paths.js"
+import { registerPluginProtocolHandler, registerPluginScheme } from "./plugin-protocol.js"
 import { bootBackgroundColor, registerBootThemeChannel, resolveBootTheme } from "./boot-theme.js"
 import { runtime } from "./runtime.js"
 import { initAutoUpdater } from "./updater.js"
@@ -207,8 +208,17 @@ if (!gotPrimaryLock) {
     }
   }
 
+  // Before `whenReady`, and that ordering is load-bearing: Electron reads the
+  // privileged-scheme table when the protocol subsystem starts, so a call made
+  // after ready is silently ignored and every plugin module 404s with nothing
+  // in the log to say why.
+  registerPluginScheme()
+
   app.whenReady().then(async () => {
     enableCodexDiagnostics()
+    // Now that the subsystem is up, attach the handler that actually serves
+    // plugin files (and the runtime shims) out of `~/starbase/plugins`.
+    registerPluginProtocolHandler()
     // Force the layer to build so the RPC server + `ipcMain` listener are live
     // before the renderer can send its first frame.
     await runtime.runPromise(Effect.void)

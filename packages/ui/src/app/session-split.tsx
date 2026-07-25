@@ -6,6 +6,7 @@ import { usePaneWidth } from "../hooks/width-tier.js"
 import { effectiveDock } from "./dock-fit.js"
 import { SplitView } from "./split-view.js"
 import { SessionPane, type ConversationPaneCtx } from "../screens/session-pane.js"
+import type { TabContribution } from "./tab-contributions.js"
 
 export interface SessionSplitProps {
   /** The group on screen — one pane per session. `null` renders the empty state. */
@@ -37,6 +38,8 @@ export interface SessionSplitProps {
   liveDiff?: Record<string, DiffStat>
   onOpenSettings?: () => void
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  /** Tabs contributed by plugins, merged with the built-ins in `SessionPane`. */
+  tabContributions?: ReadonlyArray<TabContribution>
   renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   renderIssue?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
@@ -85,6 +88,7 @@ export function SessionSplit(props: SessionSplitProps) {
         // and `group` is non-null wherever a pane is being rendered at all.
         pane={single ? undefined : { index, focused: index === (group?.focused ?? 0) }}
         renderPullRequest={props.renderPullRequest}
+        tabContributions={props.tabContributions}
         renderReview={props.renderReview}
         renderCode={props.renderCode}
         renderIssue={props.renderIssue}

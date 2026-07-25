@@ -16,6 +16,16 @@ import { Layer } from "effect"
 /** The shared root for every Starbase-owned file in the desktop app. */
 export const starbaseRoot = join(process.env.STARBASE_HOME ?? app.getPath("home"), "starbase")
 
+/**
+ * Where installed plugins live.
+ *
+ * A function, not a const, because the `starbase-plugin://` protocol handler
+ * resolves against it on every request and the e2e suite rewrites
+ * `STARBASE_HOME` between launches — reading it once at module load would pin
+ * the first value and quietly serve the developer's real plugins to a test.
+ */
+export const pluginsRoot = (): string => join(starbaseRoot, "plugins")
+
 export const AppPathsLive = Layer.succeed(AppPaths, {
   root: starbaseRoot,
   configFile: join(starbaseRoot, "config.json"),

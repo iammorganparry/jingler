@@ -3,6 +3,11 @@ import { createRoot } from "react-dom/client"
 import { QueryClientProvider } from "@tanstack/react-query"
 import { THEME_STYLE_ID } from "@starbase/core"
 import "./index.css"
+// Imported for its side effect, and BEFORE `createRoot`: it publishes the React
+// singleton that every plugin's generated `react` shim re-exports. A plugin
+// module evaluated before this runs throws a named error rather than yielding
+// `undefined` — see plugin-runtime.ts.
+import "./plugin-runtime.js"
 import { App } from "./App.js"
 import { queryClient } from "./query-client.js"
 
