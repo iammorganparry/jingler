@@ -57,13 +57,25 @@ export function useOpenConnector(): OpenConnectorState {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: openConnectorKey })
   })
 
+  /**
+   * Keyed on `mutate`/`mutateAsync`, NOT the mutation object.
+   *
+   * React Query returns a NEW result object on every render, so depending on the
+   * whole mutation made these callbacks change identity every render. `Settings ›
+   * Connectors` probes in an effect keyed on `test`, and an unstable `test` turned
+   * that into an unbounded probe loop that pinned the renderer — the window stopped
+   * answering clicks entirely. The `mutate` functions themselves are stable.
+   */
+  const saveFn = saveMutation.mutateAsync
+  const testFn = testMutation.mutate
+  const autoSetupFn = autoSetupMutation.mutateAsync
+
   const save = useCallback(
-    (config: OpenConnectorConfig, token?: string | null) =>
-      saveMutation.mutateAsync({ config, token }),
-    [saveMutation]
+    (config: OpenConnectorConfig, token?: string | null) => saveFn({ config, token }),
+    [saveFn]
   )
-  const test = useCallback(() => testMutation.mutate(), [testMutation])
-  const autoSetup = useCallback(() => autoSetupMutation.mutateAsync(), [autoSetupMutation])
+  const test = useCallback(() => testFn(), [testFn])
+  const autoSetup = useCallback(() => autoSetupFn(), [autoSetupFn])
 
   return {
     config: query.data?.config,

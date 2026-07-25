@@ -216,6 +216,12 @@ export const openConnectorSet = (config: OpenConnectorConfig, token: string | nu
 /** `OpenConnector.test` handler — live probe of the configured endpoint. */
 export const openConnectorTest = () => OpenConnectorService.test
 
+/**
+ * `OpenConnector.injection` handler — what each harness would actually launch with,
+ * resolved by the same service method the agent runner calls.
+ */
+export const openConnectorInjection = () => OpenConnectorService.injectionTargets
+
 // ── MCP Connector Center handlers ────────────────────────────────────────────
 
 /** `Connector.startOauth` — begin OAuth, opening the consent URL in the system browser. */
@@ -1888,6 +1894,7 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "OpenConnector.set": ({ config, token }) => openConnectorSet(config, token),
   "OpenConnector.test": () => openConnectorTest(),
   "OpenConnector.autoSetup": () => openConnectorAutoSetup(),
+  "OpenConnector.injection": () => openConnectorInjection(),
   "Connector.providers": () => OpenConnectorApi.listProviders(),
   "Connector.connections": () => OpenConnectorApi.listConnections(),
   "Connector.oauthConfigs": () => OpenConnectorApi.oauthConfigs(),

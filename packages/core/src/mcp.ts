@@ -76,5 +76,46 @@ export const McpServerStatus = Schema.Struct({
 })
 export type McpServerStatus = Schema.Schema.Type<typeof McpServerStatus>
 
+/**
+ * Why a harness is not receiving the unified server. `null` on an injected target.
+ *
+ * These are the four ways "connected in Settings" fails to mean "the agent has the
+ * tools", and they are indistinguishable from the config alone — which is exactly
+ * why the UI asks the resolver rather than re-deriving them.
+ */
+export const McpInjectionSkip = Schema.Literal(
+  /** The master switch is off, or no endpoint is set. */
+  "disabled",
+  /** `perCli[<harness>] === false` — this harness was opted out. */
+  "opted-out",
+  /** No bearer token is stored, so no request could authenticate. */
+  "no-token",
+  /** Starbase has no run path for this harness, so there is nothing to inject into. */
+  "no-run-path"
+)
+export type McpInjectionSkip = Schema.Schema.Type<typeof McpInjectionSkip>
+
+/**
+ * What ONE harness would actually be launched with, resolved through the same
+ * `OpenConnectorService.injection(cli)` the agent runner calls.
+ *
+ * SECURITY: `url` is the bare `${endpoint}/mcp` and `headerKeys` carries header
+ * NAMES only — the bearer never crosses the RPC boundary, matching `McpServer`.
+ */
+export const McpInjectionTarget = Schema.Struct({
+  cli: CliKind,
+  /** The name the server is registered under in that harness's config. */
+  serverName: Schema.String,
+  /** True when a session on this harness starts with the unified server attached. */
+  injected: Schema.Boolean,
+  /** `${endpoint}/mcp`, or null when nothing would be injected. */
+  url: Schema.NullOr(Schema.String),
+  /** Header names sent to the instance (values deliberately absent). */
+  headerKeys: Schema.Array(Schema.String),
+  /** Why not, when `injected` is false. Null when it is. */
+  skipped: Schema.NullOr(McpInjectionSkip)
+})
+export type McpInjectionTarget = Schema.Schema.Type<typeof McpInjectionTarget>
+
 /** Stable identity for a server across list/status/cache — name alone can collide across scopes. */
 export const mcpServerKey = (scope: McpScope, name: string): string => `${scope}:${name}`

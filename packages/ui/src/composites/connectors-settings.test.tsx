@@ -69,6 +69,26 @@ describe("ConnectorsSettings", () => {
     expect(test).toHaveBeenCalledTimes(1)
   })
 
+  /**
+   * Regression: `useOpenConnector` handed back a NEW `test` every render (a
+   * `useCallback` keyed on React Query's mutation object). Keyed on `test` alone,
+   * the probe effect re-fired on every render — an unbounded loop that pinned the
+   * renderer and made Settings stop answering clicks entirely.
+   */
+  it("still probes only once when the caller hands back a new `test` each render", () => {
+    const test = vi.fn()
+    const { rerender } = render(
+      <ConnectorsSettings unifiedMcp={unified({ test: () => test() })} connector={connector()} />
+    )
+    for (let i = 0; i < 5; i++) {
+      rerender(
+        <ConnectorsSettings unifiedMcp={unified({ test: () => test() })} connector={connector()} />
+      )
+    }
+
+    expect(test).toHaveBeenCalledTimes(1)
+  })
+
   it("shows the connection setup — not the catalog — until the probe connects", () => {
     render(<ConnectorsSettings unifiedMcp={unified()} connector={connector()} />)
 

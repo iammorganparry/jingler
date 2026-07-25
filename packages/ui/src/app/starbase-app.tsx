@@ -34,6 +34,7 @@ import { NewSessionDialog } from "../composites/new-session-dialog.js"
 import { UsageModal } from "../composites/usage-modal.js"
 import { SettingsView } from "../composites/settings-view.js"
 import type { ConnectorCenterProps } from "../composites/connector-center.js"
+import type { InjectionTargetsProps } from "../composites/injection-targets.js"
 import type { OpenConnectorSectionProps } from "../composites/open-connector-section.js"
 import type { ThemesSettingsProps } from "../composites/themes-settings.js"
 import { type ConversationPaneCtx, SessionConversation } from "../screens/session-conversation.js"
@@ -151,6 +152,8 @@ export interface StarbaseAppProps {
   unifiedMcp?: OpenConnectorSectionProps
   /** MCP Connector Center data + actions (Settings → Connector Center). */
   connector?: ConnectorCenterProps
+  /** Per-harness injection readout (Settings → Connectors). */
+  injection?: InjectionTargetsProps
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */
@@ -287,6 +290,7 @@ export function StarbaseApp({
   onSetOpencodeAuth,
   unifiedMcp,
   connector,
+  injection,
   renderPullRequest,
   renderReview,
   renderCode,
@@ -615,6 +619,7 @@ export function StarbaseApp({
               onSetOpencodeAuth={onSetOpencodeAuth}
               unifiedMcp={unifiedMcp}
               connector={connector}
+              injection={injection}
               ghStatus={ghStatus ?? GH_UNAVAILABLE}
               github={githubConfig}
               git={gitConfig}

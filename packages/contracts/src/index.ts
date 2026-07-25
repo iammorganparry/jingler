@@ -32,6 +32,7 @@ import {
   ExecutionMode,
   PermissionMode,
   PrFileChange,
+  McpInjectionTarget,
   McpServerStatus,
   OpenConnectorConfig,
   OpenConnectorDefaults,
@@ -512,6 +513,21 @@ export class StarbaseRpcs extends RpcGroup.make(
    */
   Rpc.make("OpenConnector.test", {
     success: McpServerStatus,
+    error: ConfigError
+  }),
+
+  /**
+   * What each harness would ACTUALLY be launched with — resolved through the same
+   * `OpenConnectorService.injection(cli)` the runner calls, not re-derived from the
+   * config in the renderer.
+   *
+   * Without this, "the tools reach every agent" was a claim the UI made and nothing
+   * checked: the master switch, the per-harness opt-out, a missing token and a
+   * harness with no run path all produce the same green settings screen. Each row
+   * carries the reason it is off, so the answer is diagnosable rather than boolean.
+   */
+  Rpc.make("OpenConnector.injection", {
+    success: Schema.Array(McpInjectionTarget),
     error: ConfigError
   }),
 

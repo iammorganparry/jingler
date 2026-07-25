@@ -31,6 +31,7 @@ import type {
   Issue,
   IssueAutomations,
   IssueSummary,
+  McpInjectionTarget,
   McpServerStatus,
   OpenConnectorConfig,
   OpenConnectorDefaults,
@@ -237,6 +238,9 @@ export const rpc = {
   openConnectorTest: (): Promise<McpServerStatus> => run((c) => c.OpenConnector.test()),
   /** One-click onboarding: apply the environment default (dev = local, prod = hosted). */
   openConnectorAutoSetup: (): Promise<void> => run((c) => c.OpenConnector.autoSetup()),
+  /** Which harnesses actually receive the unified server, and why not when they don't. */
+  openConnectorInjection: (): Promise<ReadonlyArray<McpInjectionTarget>> =>
+    run((c) => c.OpenConnector.injection()),
   /** The OpenConnector provider catalog (Connector Center). */
   connectorProviders: (): Promise<ReadonlyArray<ConnectorProvider>> =>
     run((c) => c.Connector.providers()),

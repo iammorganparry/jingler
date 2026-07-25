@@ -29,6 +29,15 @@ empty "Search 0 providers" catalog that can't be told apart from a broken
 instance. A **Manage connection** toggle reveals the setup again to change
 instance.
 
+Below the connection, **Agents receiving these tools** lists every harness with
+the endpoint it will actually be launched with, resolved by
+`OpenConnector.injection` → `OpenConnectorService.injectionTargets` — the same
+`injection(cli)` the agent runner calls at spawn, so the readout cannot drift from
+the launch. Four distinct "no" states are named rather than collapsed: `disabled`
+(master switch/endpoint), `opted-out` (`perCli[cli] === false`, toggled per row),
+`no-token`, and `no-run-path` (cursor — Starbase never launches it). The bearer
+never crosses the RPC boundary; each row carries header *names* only.
+
 This replaced three sections (*MCP servers*, *Unified MCP*, *Connector Center*).
 The read-only **MCP servers** view — which displayed each harness's OWN MCP
 config — is **gone**, along with `McpService`, the `Mcp.list`/`Mcp.status` RPCs,
@@ -89,6 +98,17 @@ Defaults are resolved in the main process (`openConnectorDefaults` in
   secret — enforced by tests.
 - OAuth consent opens the system browser via `shell.openExternal`, guarded to
   `http(s)://` only; OpenConnector's own callback stores the grant.
+
+> **The instance itself does not authenticate.** Verified against
+> `ghcr.io/oomol-lab/open-connector:latest`: `GET /v1/providers` and `POST /mcp`
+> return **200 with a wrong bearer, or none at all** — `OPEN_CONNECTOR_API_TOKEN`
+> gates nothing on those routes. Anything that can reach the port can drive every
+> provider you have connected (your Slack, your GitHub). So compose publishes it as
+> `127.0.0.1:3000:3000`, **not** `3000:3000`: on the original binding a laptop on a
+> shared network was serving its credentials to that network. Any real deployment
+> must put the instance behind its own authenticating proxy — Starbase sending a
+> bearer is not a substitute, because the far end ignores it. `e2e/open-connector-live.spec.ts`
+> documents this in place of the wrong-token test one would expect to find there.
 
 ## Documentation TODO — the task
 

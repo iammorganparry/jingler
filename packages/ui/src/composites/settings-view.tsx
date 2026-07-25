@@ -72,6 +72,7 @@ import { Toggle } from "../components/toggle.js"
 import { ConnectorsSettings } from "./connectors-settings.js"
 import type { ConnectorCenterProps } from "./connector-center.js"
 import type { OpenConnectorSectionProps } from "./open-connector-section.js"
+import type { InjectionTargetsProps } from "./injection-targets.js"
 import { ProviderCard } from "./provider-card.js"
 
 // ── Section registry ─────────────────────────────────────────────────────────
@@ -481,6 +482,8 @@ export interface SettingsViewProps {
    * connection — see `ConnectorsSettings`.
    */
   connector?: ConnectorCenterProps
+  /** Per-harness injection readout, shown inside the Connectors section. */
+  injection?: InjectionTargetsProps
   /** Auto-compaction levers (master switch + working-set budget). */
   context?: ContextConfig | null
   onSaveContext?: (config: ContextConfig) => void
@@ -540,6 +543,7 @@ export function SettingsView({
   onSetOpencodeAuth,
   unifiedMcp,
   connector,
+  injection,
   context,
   onSaveContext,
   contextSessions,
@@ -671,7 +675,7 @@ export function SettingsView({
           />
         </div>
       ) : section === "connectors" ? (
-        <ConnectorsSettings unifiedMcp={unifiedMcp} connector={connector} />
+        <ConnectorsSettings unifiedMcp={unifiedMcp} connector={connector} injection={injection} />
       ) : section === "themes" ? (
         themes ? (
           <ThemesSettings {...themes} />

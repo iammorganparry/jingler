@@ -695,10 +695,19 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
         if (!existsSync(repoPath)) initRepo(repoPath)
       }
 
-      if (options.configured) {
+      /**
+       * Seed config.json — but NEVER over a reused home's existing one.
+       *
+       * A restart (`home` + `configured`) is supposed to read what the previous
+       * launch persisted. Re-seeding threw that away silently: settings the app
+       * wrote (a per-harness MCP opt-out, say) vanished, and the spec read the
+       * absence as "it didn't persist" rather than "the fixture deleted it".
+       */
+      const configPath = join(starbaseDir, "config.json")
+      if (options.configured && !(reused && existsSync(configPath))) {
         mkdirSync(starbaseDir, { recursive: true })
         writeFileSync(
-          join(starbaseDir, "config.json"),
+          configPath,
           JSON.stringify(
             {
               reposDir,
