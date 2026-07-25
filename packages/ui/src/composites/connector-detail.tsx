@@ -17,7 +17,6 @@ import {
   Dialog,
   DialogBody,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle
@@ -276,61 +275,55 @@ function DetailBody({
           laid the description out BESIDE the provider block and squeezed it
           until the auth chips wrapped into a column. This header is two stacked
           bands, so it overrides the axis. */}
-      <DialogHeader className="flex-col items-stretch gap-2">
-        {/* `pr-7` clears the dialog's own close button, which is absolutely
-            positioned at `right-3.5 top-[11px]` and would otherwise sit on top
-            of the Homepage link. */}
-        <div className="flex items-center gap-2.5 pr-7">
-          <ConnectorLogo
-            homepageUrl={provider.homepageUrl}
-            iconUrl={provider.icon}
-            name={provider.name}
-            size={32}
-          />
-          <div className="min-w-0 flex-1">
-            <DialogTitle className="flex items-center gap-2">
-              <span className="truncate">{provider.name}</span>
-              {/* Status-aware, matching the grid card's dot: a grant that has
-                  been started but not consented is listed, yet cannot run an
-                  action — calling that "connected" in the header while the row
-                  below shows an amber dot contradicts itself. */}
-              {connections.some((c) => c.status === "connected") ? (
-                <Badge tone="green" size="xs">
-                  connected
-                </Badge>
-              ) : connections.length > 0 ? (
-                <Badge tone="yellow" size="xs">
-                  pending
-                </Badge>
-              ) : null}
-            </DialogTitle>
-            <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-              <span className="font-mono text-[10px] text-dim">{provider.id}</span>
-              {authTypes.map((t) => (
-                <Badge key={t} tone="neutral" size="xs">
-                  {AUTH_LABEL[t]}
-                </Badge>
-              ))}
-              {detail?.actionCount ? (
-                <span className="text-[10px] text-dim">{detail.actionCount} actions</span>
-              ) : null}
-            </div>
-          </div>
-          {host ? (
-            <a
-              href={provider.homepageUrl ?? undefined}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="flex flex-none items-center gap-1 rounded-md border border-line bg-panel px-2 py-1 text-[11px] text-text hover:bg-surface"
-            >
-              Homepage
-              <ExternalLink size={11} />
-            </a>
+      {/*
+        One line: who this is, and whether it works. Everything else earns its
+        place lower down or not at all — the slug and the auth-type chips both
+        duplicated what the form immediately below already says (its tabs name
+        the auth modes; its field labels name the credential), and a header that
+        restates the body is just noise above the thing you came to do.
+      */}
+      <DialogHeader className="gap-2.5">
+        <ConnectorLogo
+          homepageUrl={provider.homepageUrl}
+          iconUrl={provider.icon}
+          name={provider.name}
+          size={26}
+        />
+        <DialogTitle className="flex min-w-0 items-center gap-2">
+          <span className="truncate">{provider.name}</span>
+          {/* Status-aware, matching the grid card's dot: a grant that has been
+              started but not consented is listed, yet cannot run an action —
+              calling that "connected" here while the row below shows an amber
+              dot contradicts itself. */}
+          {connections.some((c) => c.status === "connected") ? (
+            <Badge tone="green" size="xs">
+              connected
+            </Badge>
+          ) : connections.length > 0 ? (
+            <Badge tone="yellow" size="xs">
+              pending
+            </Badge>
           ) : null}
-        </div>
-        <DialogDescription>
-          Credentials are stored by OpenConnector, never in Starbase.
-        </DialogDescription>
+          {detail?.actionCount ? (
+            <span className="flex-none text-[10px] font-normal text-dim">
+              {detail.actionCount} actions
+            </span>
+          ) : null}
+        </DialogTitle>
+        {/* Icon only, and `mr-6` to clear the dialog's own close button, which
+            is absolutely positioned at `right-3.5 top-[11px]`. */}
+        {host ? (
+          <a
+            href={provider.homepageUrl ?? undefined}
+            target="_blank"
+            rel="noreferrer noopener"
+            aria-label={`${provider.name} homepage`}
+            title={host}
+            className="mr-6 flex size-6 flex-none items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface hover:text-text"
+          >
+            <ExternalLink size={13} />
+          </a>
+        ) : null}
       </DialogHeader>
 
       <DialogBody className="flex flex-col gap-4">
@@ -476,6 +469,14 @@ function DetailBody({
                 </AsyncButton>
               </div>
             ) : null}
+
+            {/* Sits with the form, not in the header: it is a reassurance about
+                the secret you are ABOUT TO TYPE, so it belongs where you type
+                it. In the header it rode along on every provider you opened,
+                including the `no_auth` ones that store nothing at all. */}
+            <p className="text-[10px] leading-relaxed text-dim">
+              Credentials are stored by OpenConnector, never in Starbase.
+            </p>
           </section>
         )}
 
