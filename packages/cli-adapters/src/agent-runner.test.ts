@@ -1584,6 +1584,8 @@ describe("AgentRunner stop", () => {
       const interrupted = yield* Deferred.make<boolean>()
       const base = Layer.mergeAll(
         AgentRunner.Default,
+        OpenConnectorService.Default,
+        InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
         TranscriptStore.Default,
