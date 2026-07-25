@@ -1,4 +1,4 @@
-import type { McpServerStatus, OpenConnectorConfig } from "@starbase/core"
+import type { McpServerStatus, OpenConnectorConfig, OpenConnectorDefaults } from "@starbase/core"
 import * as React from "react"
 import { AsyncButton } from "../components/async-button.js"
 import { Callout } from "../components/callout.js"
@@ -18,18 +18,30 @@ import { Toggle } from "../components/toggle.js"
 export interface OpenConnectorSectionProps {
   readonly config: OpenConnectorConfig | undefined
   readonly hasToken: boolean
+  /** Env-aware onboarding defaults (dev = local, prod = hosted). */
+  readonly defaults: OpenConnectorDefaults | undefined
   readonly loading: boolean
   readonly save: (config: OpenConnectorConfig, token?: string | null) => Promise<void>
+  /** One-click onboarding: apply the environment default. */
+  readonly autoSetup: () => Promise<void>
+  readonly settingUp: boolean
   readonly status: McpServerStatus | null
   readonly testing: boolean
   readonly test: () => void
 }
 
+/** Whether the operator has configured anything yet (drives the onboarding banner). */
+const isUnconfigured = (config: OpenConnectorConfig | undefined, hasToken: boolean): boolean =>
+  (config === undefined || config.endpoint.length === 0) && !hasToken
+
 export function OpenConnectorSection({
   config,
   hasToken,
+  defaults,
   loading,
   save,
+  autoSetup,
+  settingUp,
   status,
   testing,
   test
@@ -38,13 +50,18 @@ export function OpenConnectorSection({
   const [token, setToken] = React.useState("")
   const [enabled, setEnabled] = React.useState(false)
 
-  // Seed the local fields once the persisted config arrives.
+  // Seed the local fields once the persisted config arrives. When nothing is saved
+  // yet, prefill the endpoint from the environment default so onboarding is one edit.
   React.useEffect(() => {
-    if (config) {
+    if (config && config.endpoint.length > 0) {
       setEndpoint(config.endpoint)
       setEnabled(config.enabled)
+    } else if (defaults) {
+      setEndpoint(defaults.endpoint)
     }
-  }, [config])
+  }, [config, defaults])
+
+  const onboarding = isUnconfigured(config, hasToken)
 
   const onSave = () =>
     save(
@@ -57,10 +74,29 @@ export function OpenConnectorSection({
       <div>
         <h3 className="text-[13px] font-semibold text-text-bright">Unified MCP (OpenConnector)</h3>
         <p className="mt-0.5 text-[11px] text-dim">
-          Point every agent at one self-hosted OpenConnector <code className="font-mono">/mcp</code>{" "}
-          endpoint. Providers you connect in the Connector Center then reach all agents.
+          Point every agent at one OpenConnector <code className="font-mono">/mcp</code> endpoint.
+          Providers you connect in the Connector Center then reach all agents.
         </p>
       </div>
+
+      {onboarding && defaults ? (
+        <Callout tone="blue">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] text-text-body">
+              {defaults.kind === "local"
+                ? `Detected a local OpenConnector at ${defaults.endpoint} — set it up in one click.`
+                : `Use the Starbase-hosted OpenConnector (${defaults.endpoint}).`}
+            </span>
+            <AsyncButton
+              pendingLabel="Setting up…"
+              onClick={autoSetup}
+              disabled={settingUp}
+            >
+              Set up automatically
+            </AsyncButton>
+          </div>
+        </Callout>
+      ) : null}
 
       <label className="flex flex-col gap-1">
         <span className="text-[11px] text-muted-foreground">Endpoint</span>

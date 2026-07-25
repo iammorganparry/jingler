@@ -42,6 +42,25 @@ passes it on `SessionSpec.openConnector`; each adapter registers it in its own w
 - **Cursor** — read-only in Settings; Starbase has no cursor run path, so nothing
   to inject.
 
+## Onboarding (auto-setup)
+
+Settings › Unified MCP prefills an **environment-aware default** and offers a
+one-click **Set up automatically** (`OpenConnector.autoSetup`):
+
+- **Dev builds** (`!app.isPackaged`) → the local docker-compose instance
+  (`http://localhost:3000`) with its shipped dev token (`local-dev-token`); auto-setup
+  fills the endpoint + token and enables the feature.
+- **Prod builds** (packaged) → the Starbase-**hosted** instance; auto-setup fills the
+  endpoint but leaves it disabled until a token is provisioned.
+
+Defaults are resolved in the main process (`openConnectorDefaults` in
+`apps/desktop/src/main/rpc.ts`), overridable via `STARBASE_OPEN_CONNECTOR_URL` /
+`OPEN_CONNECTOR_BASE_URL` / `OPEN_CONNECTOR_API_TOKEN`.
+
+> **Gap:** `HOSTED_OPEN_CONNECTOR_URL` is a PLACEHOLDER (`https://connect.starbase.app`)
+> and prod token provisioning is not built. The mechanism points prod at the hosted
+> URL automatically the moment that URL + a token flow are real (see TODO below).
+
 ## Security model
 
 - The bearer lives only in `SecretStore` (a sibling of `auth.enc`, survives sign-out).
@@ -64,5 +83,8 @@ passes it on `SessionSpec.openConnector`; each adapter registers it in its own w
 - [ ] **Threat model / secret handling** section, expanded from the summary above.
 - [ ] **Troubleshooting**: "not configured", unreachable instance, timeout, OAuth
       redirect-URI mismatch.
+- [ ] **Hosted instance**: stand up the real hosted OpenConnector, replace the
+      `HOSTED_OPEN_CONNECTOR_URL` placeholder, and build prod token provisioning
+      (likely via the auth backend) so prod auto-setup can enable end-to-end.
 - [ ] **Follow-ups**: whether to gate the Unified MCP toggle per-harness; named
       connections in the Connector Center.

@@ -34,6 +34,7 @@ import type {
   McpServer,
   McpServerStatus,
   OpenConnectorConfig,
+  OpenConnectorDefaults,
   ConnectorProvider,
   ConnectorConnection,
   OAuthClientInfo,
@@ -237,14 +238,19 @@ export const rpc = {
     cli?: CliKind,
     refresh?: boolean
   ): Promise<ReadonlyArray<McpServerStatus>> => run((c) => c.Mcp.status({ sessionId, cli, refresh })),
-  /** The unified OpenConnector settings + whether a bearer token is stored (never the token). */
-  openConnectorGet: (): Promise<{ config: OpenConnectorConfig; hasToken: boolean }> =>
-    run((c) => c.OpenConnector.get()),
+  /** The unified OpenConnector settings + hasToken + env-aware onboarding defaults. */
+  openConnectorGet: (): Promise<{
+    config: OpenConnectorConfig
+    hasToken: boolean
+    defaults: OpenConnectorDefaults
+  }> => run((c) => c.OpenConnector.get()),
   /** Save settings, and optionally the token (omit to keep, null/"" to clear). */
   openConnectorSet: (config: OpenConnectorConfig, token?: string | null): Promise<void> =>
     run((c) => c.OpenConnector.set({ config, token })),
   /** Live probe of the configured endpoint (for the panel's Test button). */
   openConnectorTest: (): Promise<McpServerStatus> => run((c) => c.OpenConnector.test()),
+  /** One-click onboarding: apply the environment default (dev = local, prod = hosted). */
+  openConnectorAutoSetup: (): Promise<void> => run((c) => c.OpenConnector.autoSetup()),
   /** The OpenConnector provider catalog (Connector Center). */
   connectorProviders: (): Promise<ReadonlyArray<ConnectorProvider>> =>
     run((c) => c.Connector.providers()),

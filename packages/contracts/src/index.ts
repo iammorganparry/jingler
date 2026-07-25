@@ -35,6 +35,7 @@ import {
   McpServer,
   McpServerStatus,
   OpenConnectorConfig,
+  OpenConnectorDefaults,
   ConnectorProvider,
   ConnectorConnection,
   ConnectorActionResult,
@@ -495,7 +496,22 @@ export class StarbaseRpcs extends RpcGroup.make(
    * process, so the panel can show "configured" without the value crossing over.
    */
   Rpc.make("OpenConnector.get", {
-    success: Schema.Struct({ config: OpenConnectorConfig, hasToken: Schema.Boolean }),
+    success: Schema.Struct({
+      config: OpenConnectorConfig,
+      hasToken: Schema.Boolean,
+      /** Environment-aware onboarding defaults (dev = local, prod = hosted). */
+      defaults: OpenConnectorDefaults
+    }),
+    error: ConfigError
+  }),
+
+  /**
+   * One-click onboarding: apply the environment default. In a dev build this fills
+   * the local endpoint + the shipped dev token and enables the feature; in a
+   * packaged build it points at the hosted instance (token provisioned separately).
+   */
+  Rpc.make("OpenConnector.autoSetup", {
+    success: Schema.Void,
     error: ConfigError
   }),
 
