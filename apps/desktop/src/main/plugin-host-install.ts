@@ -13,8 +13,12 @@
  */
 import { Effect } from "effect"
 import {
+  makeGithubAuthProvider,
+  PluginAuth,
+  PluginRegistry,
   PluginHost,
   PluginHostRuntime,
+  type ConsentPrompt,
   type HostProcess,
   type HostRequestHandler
 } from "@starbase/cli-adapters"
@@ -30,12 +34,17 @@ import { runtime as appRuntime } from "./runtime.js"
  */
 export const installPluginHost = (
   spawn: () => HostProcess,
+  consentPrompt: ConsentPrompt,
   makeHandler: (deps: {
     storageGet: (pluginId: string, key: string) => Promise<unknown>
     storageSet: (pluginId: string, key: string, value: unknown) => Promise<void>
     storageDelete: (pluginId: string, key: string) => Promise<void>
     storageKeys: (pluginId: string) => Promise<ReadonlyArray<string>>
     defaultCwd: () => string | undefined
+    getSession: (
+      pluginId: string,
+      request: { providerId: string; scopes: readonly string[]; createIfNone?: boolean }
+    ) => Promise<{ accessToken: string; account?: string; scopes: readonly string[] } | null>
   }) => HostRequestHandler
 ) =>
   Effect.gen(function* () {
@@ -53,7 +62,23 @@ export const installPluginHost = (
       // no session is active, which spawns in the host's own cwd — deliberately
       // NOT the repos root, since a plugin running a command against a repo it
       // was not told about is a surprise.
-      defaultCwd: () => undefined
+      defaultCwd: () => undefined,
+      getSession: (pluginId, request) =>
+        appRuntime.runPromise(
+          Effect.gen(function* () {
+            const catalog = yield* PluginRegistry.list()
+            const plugin = catalog.plugins.find((p) => p.manifest.id === pluginId)
+            return yield* PluginAuth.getSession({
+              pluginId,
+              // The prompt shows the plugin's display name, not its id — the
+              // operator picked it by name in Settings.
+              pluginName: plugin?.manifest.name ?? pluginId,
+              providerId: request.providerId,
+              scopes: request.scopes,
+              createIfNone: request.createIfNone
+            })
+          })
+        )
     })
 
     const hostRuntime = new PluginHostRuntime(spawn, handler, {
@@ -69,4 +94,16 @@ export const installPluginHost = (
     })
 
     yield* PluginHost.install(hostRuntime)
+
+    // The consent prompt is main's to supply: it owns the window, and the prompt
+    // is deliberately a NATIVE modal so plugin code in the renderer cannot
+    // obscure or mimic the one decision that is purely about trust.
+    yield* PluginAuth.setPrompt(consentPrompt)
+
+    // GitHub is registered as an ORDINARY provider, not a shortcut. That is what
+    // makes the claim in the docs true: the official GitHub plugin holds no
+    // privilege a third-party one could not also request.
+    yield* PluginAuth.registerProvider(
+      makeGithubAuthProvider((effect) => appRuntime.runPromise(effect))
+    )
   })

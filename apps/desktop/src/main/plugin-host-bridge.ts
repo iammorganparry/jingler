@@ -14,7 +14,7 @@
 import { join } from "node:path"
 import { utilityProcess } from "electron"
 import type { HostProcess } from "@starbase/cli-adapters"
-import type { ExecRequest } from "@starbase/cli-adapters"
+import type { AuthSessionRequestPayload, ExecRequest } from "@starbase/cli-adapters"
 import { runShell } from "./plugin-exec.js"
 
 /**
@@ -64,6 +64,11 @@ export const makeHostRequestHandler = (deps: {
   storageKeys: (pluginId: string) => Promise<ReadonlyArray<string>>
   /** The worktree an `exec` with no `cwd` should run in. */
   defaultCwd: () => string | undefined
+  /** Resolve a credential grant, prompting the operator if there is none yet. */
+  getSession: (
+    pluginId: string,
+    request: AuthSessionRequestPayload
+  ) => Promise<{ accessToken: string; account?: string; scopes: readonly string[] } | null>
 }) => {
   return async (
     pluginId: string,
@@ -98,14 +103,17 @@ export const makeHostRequestHandler = (deps: {
         }
       }
 
-      case "auth.getSession":
-        // Deliberately refused rather than faked. A plugin that received a
-        // plausible-looking empty session would send unauthenticated requests
-        // and report confusing 401s; being told the door is not built yet is
-        // the more useful failure.
-        return refuse(
-          "Credential grants are not available in this build. `authentication.getSession` is not yet wired to a consent prompt."
-        )
+      case "auth.getSession": {
+        const request = payload as AuthSessionRequestPayload
+        try {
+          // `null` — declined, or no credentials — is a VALUE, not a failure.
+          // The SDK's prompting overload turns it into a rejection host-side;
+          // `createIfNone: false` hands it straight back as undefined.
+          return { ok: true, value: await deps.getSession(pluginId, request) }
+        } catch (cause) {
+          return refuse(cause instanceof Error ? cause.message : String(cause))
+        }
+      }
 
       default:
         return refuse(`unknown host operation "${op}"`)

@@ -31,6 +31,7 @@ import { starbaseRoot } from "./app-paths.js"
 import { registerPluginProtocolHandler, registerPluginScheme } from "./plugin-protocol.js"
 import { makeHostRequestHandler, spawnHostProcess } from "./plugin-host-bridge.js"
 import { installPluginHost } from "./plugin-host-install.js"
+import { nativeConsentPrompt } from "./plugin-consent.js"
 import { bootBackgroundColor, registerBootThemeChannel, resolveBootTheme } from "./boot-theme.js"
 import { runtime } from "./runtime.js"
 import { initAutoUpdater } from "./updater.js"
@@ -227,7 +228,7 @@ if (!gotPrimaryLock) {
     // here — the first activation event does that, which is the whole point of
     // lazy activation.
     await runtime.runPromise(
-      installPluginHost(spawnHostProcess, makeHostRequestHandler)
+      installPluginHost(spawnHostProcess, nativeConsentPrompt, makeHostRequestHandler)
     )
     // Force the layer to build so the RPC server + `ipcMain` listener are live
     // before the renderer can send its first frame.

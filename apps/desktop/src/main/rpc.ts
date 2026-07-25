@@ -38,6 +38,7 @@ import {
   PlanStore,
   PluginRegistry,
   PluginHost,
+  PluginAuth,
   PlanRoundStore,
   planReviewPost,
   retitleSession,
@@ -2251,7 +2252,18 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "Plugins.setEnabled": ({ pluginId, enabled }) =>
     PluginRegistry.setEnabled(pluginId, enabled),
 
-  "Plugins.uninstall": ({ pluginId }) => PluginRegistry.uninstall(pluginId),
+  /**
+   * Uninstall, and drop the plugin's credentials with it.
+   *
+   * Leaving grants behind would mean reinstalling a plugin silently restores
+   * access the operator revoked by deleting it — the strongest revocation
+   * gesture there is, and the one they would most expect to stick.
+   */
+  "Plugins.uninstall": ({ pluginId }) =>
+    Effect.gen(function* () {
+      yield* PluginRegistry.uninstall(pluginId)
+      yield* PluginAuth.revokeAll(pluginId)
+    }),
 
   "Plugins.installFromFolder": ({ sourcePath }) =>
     PluginRegistry.installFromFolder(sourcePath),
@@ -2275,9 +2287,7 @@ const HandlersLayer = StarbaseRpcs.toLayer({
 
   "Plugins.storageKeys": ({ pluginId }) => pluginStorageKeys(pluginId),
 
-  // No grants can exist until the host can request them, so the honest answer
-  // is an empty list rather than a failure — Settings renders "nothing granted".
-  "Plugins.authSessions": () => Effect.succeed([]),
+  "Plugins.authSessions": () => PluginAuth.list(),
 
   // An empty stream, not a failure: the renderer subscribes at startup and must
   // not spend its life retrying a channel that is merely quiet.
@@ -2308,10 +2318,28 @@ const HandlersLayer = StarbaseRpcs.toLayer({
             : new PluginError({ pluginId, reason: String(cause) })
       })
     }),
-  "Plugins.authGrant": ({ pluginId }) =>
-    notYetHosted(pluginId, "request credentials for"),
-  "Plugins.authRevoke": ({ pluginId }) =>
-    notYetHosted(pluginId, "revoke credentials for")
+  /**
+   * Grant from the renderer — used by Settings to pre-authorise, and by the
+   * e2e suite. The plugin-driven path goes through the extension host instead.
+   */
+  "Plugins.authGrant": ({ pluginId, providerId, scopes }) =>
+    Effect.gen(function* () {
+      const plugin = yield* pluginById(pluginId)
+      const session = yield* PluginAuth.getSession({
+        pluginId,
+        pluginName: plugin.manifest.name,
+        providerId,
+        scopes
+      })
+      if (!session) return null
+      // Metadata only. The token stays in main — `AuthSessionInfo` has no field
+      // for it, which is the boundary rather than an omission.
+      const granted = yield* PluginAuth.list()
+      return granted.find((g) => g.pluginId === pluginId && g.providerId === providerId) ?? null
+    }),
+
+  "Plugins.authRevoke": ({ pluginId, providerId }) =>
+    PluginAuth.revoke(pluginId, providerId)
 })
 
 /**

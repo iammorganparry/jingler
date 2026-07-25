@@ -20,6 +20,7 @@ import {
   PlanStore,
   PluginRegistry,
   PluginHost,
+  PluginAuth,
   PlanExecutor,
   PlanRoundStore,
   ReviewService,
@@ -124,14 +125,22 @@ const AppLayer = RpcServerLive.pipe(
   // stage would have exceeded; all three are peers with no dependencies, so
   // merging changes nothing but the argument count.
   Layer.provideMerge(
-    Layer.mergeAll(ModelsService.Default, RankingService.Default, PluginHost.Default)
+    Layer.mergeAll(
+      ModelsService.Default,
+      RankingService.Default,
+      PluginHost.Default,
+      // provideMerge for the same reason as PluginHost: main installs the
+      // native consent prompt and the built-in github provider into it at
+      // startup, so the RPC handlers must reach that same instance.
+      PluginAuth.Default,
+      // And PluginRegistry, because the host's consent flow looks a plugin's
+      // display name up from the catalog before prompting — the operator picked
+      // it by name in Settings, so the prompt has to say the name.
+      PluginRegistry.Default
+    )
   ),
   Layer.provide(UsageService.Default),
-  // Peers, merged for the same argument-count reason. Both sit above
-  // ConfigService/AppPaths/NodeContext because those are what they consume —
-  // the plugin catalog is a read of `pluginsDir` filtered by the disabled list
-  // in `config.json`.
-  Layer.provide(Layer.mergeAll(GhService.Default, PluginRegistry.Default)),
+  Layer.provide(GhService.Default),
   // provideMerge: the `Config.*` handlers consume ConfigService AND the boot
   // theme resolution reads the active theme id from it before any window
   // exists.
