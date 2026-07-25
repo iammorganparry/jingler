@@ -23,29 +23,31 @@ export const PlaintextSecretStoreLive = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const paths = yield* AppPaths
-    return {
+    // One factory, two files: the auth token and the OpenConnector token stay in
+    // SEPARATE files (`authFile` vs `openConnectorFile`) but share identical logic,
+    // so a fix lands once and can't drift between them.
+    const slot = (path: string) => ({
       get: fs
-        .readFileString(paths.authFile)
+        .readFileString(path)
         .pipe(
           Effect.map((raw) => (raw.trim().length > 0 ? raw.trim() : null)),
           Effect.orElseSucceed(() => null)
         ),
       set: (token: string) =>
         fs
-          .writeFileString(paths.authFile, token)
+          .writeFileString(path, token)
           .pipe(Effect.mapError(() => new SecretStoreUnavailable({ message: "e2e write failed" }))),
-      clear: fs.remove(paths.authFile).pipe(Effect.ignore),
-      getOpenConnectorToken: fs
-        .readFileString(paths.openConnectorFile)
-        .pipe(
-          Effect.map((raw) => (raw.trim().length > 0 ? raw.trim() : null)),
-          Effect.orElseSucceed(() => null)
-        ),
-      setOpenConnectorToken: (token: string) =>
-        fs
-          .writeFileString(paths.openConnectorFile, token)
-          .pipe(Effect.mapError(() => new SecretStoreUnavailable({ message: "e2e write failed" }))),
-      clearOpenConnectorToken: fs.remove(paths.openConnectorFile).pipe(Effect.ignore)
+      clear: fs.remove(path).pipe(Effect.ignore)
+    })
+    const auth = slot(paths.authFile)
+    const openConnector = slot(paths.openConnectorFile)
+    return {
+      get: auth.get,
+      set: auth.set,
+      clear: auth.clear,
+      getOpenConnectorToken: openConnector.get,
+      setOpenConnectorToken: openConnector.set,
+      clearOpenConnectorToken: openConnector.clear
     }
   })
 )
@@ -55,44 +57,23 @@ export const SecretStoreLive = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const paths = yield* AppPaths
-    return {
+    // One factory, two files: `authFile` and `openConnectorFile` are independent
+    // ciphertext blobs but share identical encrypt/decrypt handling, so a change to
+    // (say) the decrypt error path lands once instead of drifting between them.
+    const slot = (path: string) => ({
       get: Effect.gen(function* () {
-        const exists = yield* fs.exists(paths.authFile).pipe(Effect.orElseSucceed(() => false))
+        const exists = yield* fs.exists(path).pipe(Effect.orElseSucceed(() => false))
         if (!exists || !safeStorage.isEncryptionAvailable()) return null
-        const bytes = yield* fs.readFile(paths.authFile).pipe(Effect.orElseSucceed(() => null))
-        if (!bytes) return null
-        return yield* Effect.try(() =>
-          safeStorage.decryptString(Buffer.from(bytes))
-        ).pipe(Effect.orElseSucceed(() => null))
-      }),
-      set: (token: string) =>
-        safeStorage.isEncryptionAvailable()
-          ? fs
-              .writeFile(paths.authFile, safeStorage.encryptString(token))
-              .pipe(
-                Effect.mapError(
-                  () => new SecretStoreUnavailable({ message: "failed to write encrypted token" })
-                )
-              )
-          : Effect.fail(
-              new SecretStoreUnavailable({ message: "OS encryption is unavailable on this host" })
-            ),
-      clear: fs.remove(paths.authFile).pipe(Effect.ignore),
-      getOpenConnectorToken: Effect.gen(function* () {
-        const exists = yield* fs
-          .exists(paths.openConnectorFile)
-          .pipe(Effect.orElseSucceed(() => false))
-        if (!exists || !safeStorage.isEncryptionAvailable()) return null
-        const bytes = yield* fs.readFile(paths.openConnectorFile).pipe(Effect.orElseSucceed(() => null))
+        const bytes = yield* fs.readFile(path).pipe(Effect.orElseSucceed(() => null))
         if (!bytes) return null
         return yield* Effect.try(() => safeStorage.decryptString(Buffer.from(bytes))).pipe(
           Effect.orElseSucceed(() => null)
         )
       }),
-      setOpenConnectorToken: (token: string) =>
+      set: (token: string) =>
         safeStorage.isEncryptionAvailable()
           ? fs
-              .writeFile(paths.openConnectorFile, safeStorage.encryptString(token))
+              .writeFile(path, safeStorage.encryptString(token))
               .pipe(
                 Effect.mapError(
                   () => new SecretStoreUnavailable({ message: "failed to write encrypted token" })
@@ -101,7 +82,17 @@ export const SecretStoreLive = Layer.effect(
           : Effect.fail(
               new SecretStoreUnavailable({ message: "OS encryption is unavailable on this host" })
             ),
-      clearOpenConnectorToken: fs.remove(paths.openConnectorFile).pipe(Effect.ignore)
+      clear: fs.remove(path).pipe(Effect.ignore)
+    })
+    const auth = slot(paths.authFile)
+    const openConnector = slot(paths.openConnectorFile)
+    return {
+      get: auth.get,
+      set: auth.set,
+      clear: auth.clear,
+      getOpenConnectorToken: openConnector.get,
+      setOpenConnectorToken: openConnector.set,
+      clearOpenConnectorToken: openConnector.clear
     }
   })
 )
