@@ -118,6 +118,7 @@ export * from "./diff/review-thread-hunk.js"
 // App compositions
 export * from "./app/title-bar.js"
 export * from "./app/tab-bar.js"
+export * from "./app/tab-contributions.js"
 export * from "./app/agent-tab-bar.js"
 export * from "./app/subagent-view.js"
 export * from "./app/session-filters.js"

@@ -36,6 +36,7 @@ import {
   METERED_ENV_KEYS,
   PlanExecutor,
   PlanStore,
+  PluginRegistry,
   PlanRoundStore,
   planReviewPost,
   retitleSession,
@@ -73,6 +74,7 @@ import {
   resolveOrchestrator,
   ReviewError,
   reviewModelFor,
+  PluginError,
   TASK_KINDS,
   userMessage
 } from "@starbase/core"
@@ -1740,6 +1742,82 @@ export const setReasoning = (
   )
 
 /**
+ * The uniform refusal for anything that needs a running extension host.
+ *
+ * Phrased as a capability the app does not have YET rather than as a fault of
+ * the plugin, because that is what the operator will read in a toast. It also
+ * keeps every unimplemented plugin path failing identically, so the renderer's
+ * error handling is written against one shape instead of four.
+ */
+const notYetHosted = (pluginId: string, verb: string) =>
+  Effect.fail(
+    new PluginError({
+      pluginId,
+      reason: `Cannot ${verb} "${pluginId}" — the plugin extension host is not running in this build.`
+    })
+  )
+
+/** Where one plugin's private key/value blob lives. Confined by construction. */
+const pluginStorageFile = (pluginId: string) =>
+  Effect.gen(function* () {
+    const paths = yield* AppPaths
+    const path = yield* Path.Path
+    const root = path.resolve(paths.pluginStorageDir)
+    const file = path.resolve(root, `${pluginId}.json`)
+    // The id is schema-constrained to kebab-case at the contract boundary, so
+    // this can only fail if that guarantee is ever relaxed. Cheap to keep, and
+    // the failure mode it prevents is writing anywhere on disk.
+    if (path.dirname(file) !== root) {
+      return yield* Effect.fail(
+        new PluginError({ pluginId, reason: "plugin id escapes the storage directory" })
+      )
+    }
+    return { root, file }
+  })
+
+const pluginStorageRead = (pluginId: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const { file } = yield* pluginStorageFile(pluginId)
+    const raw = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => null))
+    if (!raw) return {} as Record<string, unknown>
+    return yield* Effect.try(() => JSON.parse(raw) as Record<string, unknown>).pipe(
+      // A corrupt blob reads as empty rather than failing every subsequent get.
+      // Plugin storage is a cache of the plugin's own state, not a record of
+      // record — losing it costs a re-fetch, whereas a hard failure here would
+      // wedge the plugin with no way for the operator to clear it.
+      Effect.orElseSucceed(() => ({}) as Record<string, unknown>)
+    )
+  })
+
+/**
+ * Read one key. Declared never-failing in the contract, so every fault folds to
+ * `null` — an unreadable store is indistinguishable from an unset key, which is
+ * exactly what a caller asking "do you have this?" wants.
+ */
+const pluginStorageGet = (pluginId: string, key: string) =>
+  pluginStorageRead(pluginId).pipe(
+    Effect.map((all) => all[key] ?? null),
+    Effect.orElseSucceed(() => null)
+  )
+
+const pluginStorageSet = (pluginId: string, key: string, value: unknown) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const { root, file } = yield* pluginStorageFile(pluginId)
+    const all = yield* pluginStorageRead(pluginId)
+    yield* fs.makeDirectory(root, { recursive: true }).pipe(Effect.ignore)
+    yield* fs
+      .writeFileString(file, JSON.stringify({ ...all, [key]: value }, null, 2))
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new PluginError({ pluginId, reason: `could not write plugin storage`, cause })
+        )
+      )
+  })
+
+/**
  * Handlers for every procedure in the group. Each one delegates straight to an
  * Effect service, so the group remains the sole contract. `Discovery.list`
  * pulls in a `CommandExecutor` requirement (via `DiscoveryService.list()`) that
@@ -2102,7 +2180,61 @@ const HandlersLayer = StarbaseRpcs.toLayer({
         const file = resolve(path)
         if (dirname(file) === themesDir) shell.showItemInFolder(file)
       })
-    )
+    ),
+
+  // ── Plugins ────────────────────────────────────────────────────────────────
+  // The registry half is live; the extension-host half is not. Everything that
+  // needs a running plugin process — command dispatch, the event stream, auth
+  // grants — is stubbed HERE rather than left out of the layer, because
+  // `toLayer` demands a total handler map: an omission is a compile error, not
+  // a missing feature. Each stub fails with the same `PluginError` the real
+  // implementation will, so the renderer's error path is exercised from day one
+  // instead of being written blind against a handler that never failed.
+
+  "Plugins.list": () => PluginRegistry.list(),
+
+  // `Stream.unwrap(Effect.map(...))`, not the accessor — the accessor form
+  // yields a stream OF a stream and the renderer receives nothing. Same shape
+  // as `Theme.watch` above, and for the same reason.
+  "Plugins.watch": () => Stream.unwrap(Effect.map(PluginRegistry, (p) => p.watch())),
+
+  "Plugins.setEnabled": ({ pluginId, enabled }) =>
+    PluginRegistry.setEnabled(pluginId, enabled),
+
+  "Plugins.uninstall": ({ pluginId }) => PluginRegistry.uninstall(pluginId),
+
+  "Plugins.installFromFolder": ({ sourcePath }) =>
+    PluginRegistry.installFromFolder(sourcePath),
+
+  // Confinement is the service's job (`dirFor` fails for anything that resolves
+  // outside `pluginsDir`), so this handler cannot be tricked into revealing an
+  // arbitrary path by a renderer that sends a crafted id.
+  "Plugins.reveal": ({ pluginId }) =>
+    Effect.flatMap(PluginRegistry.dirFor(pluginId), (dir) =>
+      Effect.sync(() => {
+        shell.showItemInFolder(dir)
+      })
+    ),
+
+  "Plugins.storageGet": ({ pluginId, key }) => pluginStorageGet(pluginId, key),
+
+  "Plugins.storageSet": ({ pluginId, key, value }) =>
+    pluginStorageSet(pluginId, key, value),
+
+  // No grants can exist until the host can request them, so the honest answer
+  // is an empty list rather than a failure — Settings renders "nothing granted".
+  "Plugins.authSessions": () => Effect.succeed([]),
+
+  // An empty stream, not a failure: the renderer subscribes at startup and must
+  // not spend its life retrying a channel that is merely quiet.
+  "Plugins.events": () => Stream.empty,
+
+  "Plugins.reload": ({ pluginId }) => notYetHosted(pluginId, "reload"),
+  "Plugins.invoke": ({ pluginId }) => notYetHosted(pluginId, "invoke a command in"),
+  "Plugins.authGrant": ({ pluginId }) =>
+    notYetHosted(pluginId, "request credentials for"),
+  "Plugins.authRevoke": ({ pluginId }) =>
+    notYetHosted(pluginId, "revoke credentials for")
 })
 
 /**

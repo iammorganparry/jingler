@@ -18,6 +18,7 @@ import {
   HarnessCliAdapterLive,
   ModelsService,
   PlanStore,
+  PluginRegistry,
   PlanExecutor,
   PlanRoundStore,
   ReviewService,
@@ -117,7 +118,12 @@ const AppLayer = RpcServerLive.pipe(
   // rankings peer is also process-cached and has no dependencies.
   Layer.provideMerge(Layer.mergeAll(ModelsService.Default, RankingService.Default)),
   Layer.provide(UsageService.Default),
-  Layer.provide(GhService.Default),
+  // Merged rather than piped separately because `.pipe` tops out at 20
+  // arguments and this was the 21st. They are peers — neither depends on the
+  // other — and both sit above ConfigService/AppPaths/NodeContext here because
+  // those are what they consume: the plugin catalog is a read of `pluginsDir`
+  // filtered by the disabled list in `config.json`.
+  Layer.provide(Layer.mergeAll(GhService.Default, PluginRegistry.Default)),
   // provideMerge: the `Config.*` handlers consume ConfigService AND the boot
   // theme resolution reads the active theme id from it before any window
   // exists.

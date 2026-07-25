@@ -2,20 +2,18 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import {
   ChevronLeft,
   ChevronRight,
-  CircleDot,
-  FileDiff,
-  GitCompareArrows,
-  GitPullRequest,
   Globe,
   type LucideIcon,
-  MessagesSquare,
   MoreHorizontal,
   PanelRight,
-  Waypoints,
-  Workflow,
   X
 } from "lucide-react"
+import type { TabDescriptor, TabKey } from "./tab-contributions.js"
 import { cn } from "../lib/cn.js"
+
+// Re-exported because they ARE this component's props vocabulary — a caller
+// building a tab bar should not have to know which module the shapes live in.
+export type { TabDescriptor, TabKey }
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Pill } from "../components/pill.js"
 import { Badge } from "../components/badge.js"
@@ -103,28 +101,6 @@ function PaneActionsMenu({
   )
 }
 
-export type TabKey = "conversation" | "issue" | "changes" | "pr" | "review" | "plan" | "workflow"
-
-const LABEL: Record<TabKey, string> = {
-  conversation: "Conversation",
-  issue: "Issue",
-  changes: "Changes",
-  pr: "Pull Request",
-  review: "Code Review",
-  plan: "Plan Review",
-  workflow: "Workflow"
-}
-
-const ICON: Record<TabKey, LucideIcon> = {
-  conversation: MessagesSquare,
-  issue: CircleDot,
-  changes: FileDiff,
-  pr: GitPullRequest,
-  review: GitCompareArrows,
-  plan: Waypoints,
-  workflow: Workflow
-}
-
 /**
  * The main-pane tab bar — IDE/editor-style tabs. Each tab is a flat cell on a
  * darker strip; the active one matches the editor background (so it reads as the
@@ -136,8 +112,6 @@ export function TabBar({
   tabs,
   active,
   onChange,
-  prNumber = null,
-  changes = null,
   status,
   pane,
   onToggleBrowser,
@@ -148,13 +122,18 @@ export function TabBar({
   onMovePaneLeft,
   onMovePaneRight
 }: {
-  tabs: ReadonlyArray<TabKey>
+  /**
+   * The tabs to draw, already filtered and ordered, each carrying its own
+   * label, icon and badge.
+   *
+   * Descriptors rather than keys because the bar must be able to draw a tab it
+   * has never heard of. It previously looked every key up in local `LABEL` and
+   * `ICON` maps, which quietly made "a tab this file knows about" a precondition
+   * for rendering one — the exact thing a plugin cannot satisfy.
+   */
+  tabs: ReadonlyArray<TabDescriptor>
   active: TabKey
   onChange: (key: TabKey) => void
-  /** Linked PR number for the active session (badges the Pull Request tab). */
-  prNumber?: number | null
-  /** Live worktree diff totals, shown as `+N −N` on the Changes tab. */
-  changes?: { added: number; removed: number } | null
   /**
    * The session's state as ONE of the five reported words ("Thinking",
    * "Running", …) — never the tool or target, which is what the sidebar row
@@ -256,21 +235,21 @@ export function TabBar({
         is hidden (`sb-no-scrollbar`) because it would eat a third of a 36px row.
       */}
       <div className="sb-no-scrollbar flex min-w-0 flex-1 items-stretch overflow-x-auto">
-        {tabs.map((key) => {
-          const Icon = ICON[key]
-          const isActive = key === active
+        {tabs.map((tab) => {
+          const Icon = tab.icon
+          const isActive = tab.id === active
           const showLabel = !iconOnly || isActive
           return (
             <button
-              key={key}
+              key={tab.id}
               type="button"
-              onClick={() => onChange(key)}
+              onClick={() => onChange(tab.id)}
               aria-current={isActive ? "page" : undefined}
               // The name has to survive the label being hidden — this is what a
               // screen reader and `getByRole("tab", { name })` read once the
               // text is gone, and it doubles as the hover tooltip.
-              aria-label={LABEL[key]}
-              title={LABEL[key]}
+              aria-label={tab.label}
+              title={tab.label}
               className={cn(
                 "group relative flex flex-none items-center gap-2 border-r border-hairline text-[12.5px] outline-none transition-colors",
                 // Icon-only cells lose the label's optical weight, so the
@@ -290,16 +269,22 @@ export function TabBar({
                   isActive ? "text-blue" : "text-dim group-hover:text-muted-foreground"
                 )}
               />
-              {showLabel && <span className="whitespace-nowrap">{LABEL[key]}</span>}
-              {key === "pr" && prNumber !== null && (
+              {showLabel && <span className="whitespace-nowrap">{tab.label}</span>}
+              {/*
+                Two badge shapes, drawn from whatever the contribution computed.
+                This used to be `key === "pr"` and `key === "changes"`, which
+                meant the tab bar knew what a pull request was — and that a
+                plugin could never badge its own tab.
+              */}
+              {tab.badge?.kind === "count" && (
                 <Badge tone="count" size="xs">
-                  #{prNumber}
+                  {tab.badge.text}
                 </Badge>
               )}
-              {key === "changes" && changes && changes.added + changes.removed > 0 && (
+              {tab.badge?.kind === "diff" && (
                 <span className="flex items-center gap-1 font-mono text-[10.5px] tabular-nums">
-                  <span className="text-green">+{changes.added}</span>
-                  <span className="text-red">−{changes.removed}</span>
+                  <span className="text-green">+{tab.badge.added}</span>
+                  <span className="text-red">−{tab.badge.removed}</span>
                 </span>
               )}
             </button>

@@ -1,11 +1,17 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
-import { TabBar, type TabKey } from "./tab-bar.js"
+import { TabBar } from "./tab-bar.js"
+import { builtinDescriptor } from "./tab-contributions.js"
 
 afterEach(cleanup)
 
-const TABS: ReadonlyArray<TabKey> = ["conversation", "plan", "pr", "review"]
+const TABS = [
+  builtinDescriptor("conversation"),
+  builtinDescriptor("plan"),
+  builtinDescriptor("pr"),
+  builtinDescriptor("review")
+]
 
 const noop = () => {}
 
