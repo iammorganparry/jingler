@@ -56,9 +56,6 @@ const failureTag = <A, E>(exit: Exit.Exit<A, E>): string | null => {
 const readAsset = (path: string) =>
   run(Effect.flatMap(AssetService, (s) => s.read(worktree.dir, path)))
 
-const statAsset = (path: string) =>
-  run(Effect.flatMap(AssetService, (s) => s.stat(worktree.dir, path)))
-
 describe("AssetService.read — containment", () => {
   it("refuses a `..` traversal out of the worktree", async () => {
     const exit = await readAsset(`../${outside.dir.split("/").pop()}/secret.txt`)
@@ -176,25 +173,36 @@ describe("AssetService.read — refusals that are not traversals", () => {
   })
 })
 
-describe("AssetService.stat", () => {
-  it("answers kind and size without reading contents", async () => {
-    writeFileSync(join(worktree.dir, "notes.md"), "# Hello")
-    const exit = await statAsset("notes.md")
-    expect(exit).toMatchObject({
-      _tag: "Success",
-      value: { kind: "markdown", size: 7, viewable: true, path: "notes.md" }
-    })
+describe("AssetService.pdfPath — the SECOND door into the filesystem", () => {
+  const pdfPath = (path: string) =>
+    run(Effect.flatMap(AssetService, (s) => s.pdfPath(worktree.dir, path)))
+
+  it("returns the absolute path for a real PDF", async () => {
+    writeFileSync(join(worktree.dir, "report.pdf"), "%PDF-1.4 fake")
+    const exit = await pdfPath("report.pdf")
+    expect(Exit.isSuccess(exit)).toBe(true)
+    if (Exit.isSuccess(exit)) expect(exit.value).toContain("report.pdf")
   })
 
-  it("returns null — not an error — for a miss, so scanning a transcript is cheap", async () => {
-    expect(await statAsset("does-not-exist.md")).toMatchObject({ _tag: "Success", value: null })
-    expect(await statAsset("v1.2.3")).toMatchObject({ _tag: "Success", value: null })
-    expect(await statAsset("../escape.md")).toMatchObject({ _tag: "Success", value: null })
+  it("refuses a non-PDF, even one inside the worktree", async () => {
+    // The finding this pins: containment alone is the wrong bar here. The native
+    // view renders a `file://` DOCUMENT, so pointing it at agent-authored HTML
+    // would give that page a file origin and the local subresources that come
+    // with it. A compromised renderer asking for `.html` must be refused in MAIN,
+    // not merely discouraged by the renderer gating on `kind === "pdf"`.
+    writeFileSync(join(worktree.dir, "evil.html"), "<script>fetch('//x')</script>")
+    expect(failureTag(await pdfPath("evil.html"))).toBe("AssetUnsupportedError")
+    writeFileSync(join(worktree.dir, "notes.md"), "# hi")
+    expect(failureTag(await pdfPath("notes.md"))).toBe("AssetUnsupportedError")
   })
 
-  it("marks an over-cap file as not viewable rather than hiding it", async () => {
-    writeFileSync(join(worktree.dir, "huge.md"), "x".repeat(6 * 1024 * 1024))
-    const exit = await statAsset("huge.md")
-    expect(exit).toMatchObject({ _tag: "Success", value: { kind: "markdown", viewable: false } })
+  it("refuses a traversal exactly as a read does", async () => {
+    symlinkSync(join(outside.dir, "secret.txt"), join(worktree.dir, "escape.pdf"))
+    expect(failureTag(await pdfPath("escape.pdf"))).toBe("AssetOutsideWorktreeError")
+  })
+
+  it("refuses a DIRECTORY named like a PDF", async () => {
+    mkdirSync(join(worktree.dir, "dir.pdf"), { recursive: true })
+    expect(failureTag(await pdfPath("dir.pdf"))).toBe("AssetOutsideWorktreeError")
   })
 })

@@ -48,6 +48,22 @@ describe("resolveOpenablePath — accepts", () => {
     expect(resolveOpenablePath("/docs/spec.md", FILES)).toBe("docs/spec.md")
   })
 
+  it("a ROOT-relative href even when a worktreeRoot is set", () => {
+    // The regression this pins: `[the spec](./docs/spec.md)` reaches us as
+    // `/docs/spec.md`, which LOOKS absolute but is worktree-relative. Gating it
+    // on `isUnderRoot` refused it outright and silently killed the whole
+    // markdown-link route — caught only by the e2e.
+    expect(resolveOpenablePath("/docs/spec.md", FILES, "/Users/x/wt")).toBe("docs/spec.md")
+  })
+
+  it("still refuses a foreign absolute path that a root-relative read would rescue", () => {
+    // The root-relative fallback matches the WHOLE remaining path, so a foreign
+    // path cannot sneak through it: `/usr/lib/x/package.json` becomes
+    // `usr/lib/x/package.json`, which is not tracked.
+    expect(resolveOpenablePath("/usr/lib/x/package.json", FILES, "/Users/x/wt")).toBeNull()
+    expect(resolveOpenablePath("/other/proj/src/index.ts", FILES, "/Users/x/wt")).toBeNull()
+  })
+
   it("a file at the worktree root", () => {
     expect(resolveOpenablePath("README.md", FILES)).toBe("README.md")
   })
@@ -100,6 +116,57 @@ describe("resolveOpenablePath — refuses", () => {
     expect(resolveOpenablePath("   ", FILES)).toBeNull()
     expect(resolveOpenablePath("/", FILES)).toBeNull()
     expect(resolveOpenablePath("...", FILES)).toBeNull()
+  })
+})
+
+describe("resolveOpenablePath — extensionless known files", () => {
+  // `extensionToKind` recognises a handful of dotless basenames (Dockerfile,
+  // Makefile). The shape gate used to demand a dot, so these were never clickable
+  // even when tracked — the two allow-lists disagreed. They should open now.
+  const WITH_DOCKERFILE = new Set(["Dockerfile", "Makefile", "docs/spec.md"])
+
+  it("opens an extensionless file that has a viewer and is tracked", () => {
+    expect(resolveOpenablePath("Dockerfile", WITH_DOCKERFILE)).toBe("Dockerfile")
+    expect(resolveOpenablePath("Makefile", WITH_DOCKERFILE)).toBe("Makefile")
+  })
+
+  it("refuses those same names when the worktree does not track them", () => {
+    expect(resolveOpenablePath("Dockerfile", FILES)).toBeNull()
+    expect(resolveOpenablePath("Makefile", FILES)).toBeNull()
+  })
+
+  it("still refuses a bare word we have no viewer for, even when tracked", () => {
+    // The regression the relaxed shape must not introduce: an ordinary word is
+    // path-shaped, so only gate two (no viewer) keeps it inert.
+    expect(resolveOpenablePath("randomword", new Set(["randomword"]))).toBeNull()
+  })
+})
+
+describe("resolveOpenablePath — worktree root", () => {
+  const ROOT = "/Users/x/wt"
+
+  it("opens an absolute path inside the root, returned worktree-relative", () => {
+    expect(resolveOpenablePath("/Users/x/wt/docs/spec.md", FILES, ROOT)).toBe("docs/spec.md")
+  })
+
+  it("refuses an absolute path OUTSIDE the root whose tail matches a tracked file", () => {
+    // The foreign-repo bug: each ends in one of our relative paths but belongs to
+    // a different checkout, so opening this worktree's copy is confidently wrong.
+    expect(resolveOpenablePath("/other/proj/docs/spec.md", FILES, ROOT)).toBeNull()
+    expect(resolveOpenablePath("/usr/lib/node_modules/x/package.json", FILES, ROOT)).toBeNull()
+  })
+
+  it("does not count a sibling dir that merely shares the root's prefix", () => {
+    expect(resolveOpenablePath("/Users/x/wt-other/docs/spec.md", FILES, ROOT)).toBeNull()
+  })
+
+  it("keeps the permissive suffix match when no root is supplied", () => {
+    // Storybook and the component tests mount no root; behaviour is unchanged.
+    expect(resolveOpenablePath("/anywhere/at/all/docs/spec.md", FILES)).toBe("docs/spec.md")
+  })
+
+  it("tolerates a trailing slash on the root", () => {
+    expect(resolveOpenablePath("/Users/x/wt/docs/spec.md", FILES, "/Users/x/wt/")).toBe("docs/spec.md")
   })
 })
 

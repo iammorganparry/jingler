@@ -125,6 +125,16 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   const planSessions = usePlanSessions()
   const termDock = useTerminalDock()
   const browserDock = usePreviewDock()
+  // Preview tabs outlive the app, so a deleted session would otherwise reopen as
+  // a "couldn't open" pane on every launch, for ever, until each is closed by
+  // hand. Reconciling here rather than in the machine keeps the machine free of
+  // any opinion about where the session list comes from. `pruneTabs` no-ops on
+  // an empty set, so the first render — before sessions have loaded — cannot
+  // wipe the tabs it is meant to be preserving.
+  const pruneTabs = browserDock.pruneTabs
+  useEffect(() => {
+    pruneTabs(new Set(sessions.map((s) => s.id)))
+  }, [sessions, pruneTabs])
   const qc = useQueryClient()
   const { activeId: activeThemeId, catalog: themeCatalog } = useThemeCatalog()
   const connector = useConnectorCenter()

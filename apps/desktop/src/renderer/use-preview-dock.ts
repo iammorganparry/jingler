@@ -30,6 +30,12 @@ export interface PreviewDockPrefs {
   openAsset: (sessionId: string, path: string) => void
   /** Close an asset tab. A no-op for the pinned browser tab. */
   close: (id: string) => void
+  /**
+   * Drop tabs whose session is no longer live, reconciling against the given
+   * set of live session ids. A no-op when the set is empty (sessions not loaded
+   * yet), so a slow first load never wipes restored tabs.
+   */
+  pruneTabs: (liveSessionIds: ReadonlySet<string>) => void
 }
 
 export function usePreviewDock(): PreviewDockPrefs {
@@ -40,6 +46,10 @@ export function usePreviewDock(): PreviewDockPrefs {
   const setSide = useCallback((next: DockSide) => send({ type: "SET_SIDE", side: next }), [send])
   const select = useCallback((id: string) => send({ type: "SELECT", id }), [send])
   const close = useCallback((id: string) => send({ type: "CLOSE", id }), [send])
+  const pruneTabs = useCallback(
+    (liveSessionIds: ReadonlySet<string>) => send({ type: "PRUNE", liveSessionIds }),
+    [send]
+  )
   const openAsset = useCallback(
     (sessionId: string, path: string) => send({ type: "OPEN_ASSET", sessionId, path }),
     [send]
@@ -82,6 +92,7 @@ export function usePreviewDock(): PreviewDockPrefs {
     activeId,
     select,
     openAsset,
-    close
+    close,
+    pruneTabs
   }
 }

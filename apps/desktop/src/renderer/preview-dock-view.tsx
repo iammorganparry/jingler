@@ -36,10 +36,10 @@ import {
   PreviewDock,
   type PreviewTab
 } from "@starbase/ui"
-import { isPaintableRect } from "./browser-preview-bounds.js"
 import { rpc } from "./rpc-client.js"
 import type { PreviewDockPrefs } from "./use-preview-dock.js"
 import { assetTabId } from "./preview-dock-machine.js"
+import { useNativeViewBounds } from "./use-native-view-bounds.js"
 
 // Default target until run-scripts (#1) can seed the session's real dev-server
 // port. TODO(#1): derive from the session's $STARBASE_PORT when available.
@@ -100,36 +100,31 @@ function BrowserBody({
   session: Session | null
   nativeWanted: boolean
 }) {
-  const boundsRef = useRef<HTMLDivElement>(null)
-
-  const rect = useCallback((): { x: number; y: number; width: number; height: number } | null => {
-    const el = boundsRef.current
-    if (!el) return null
-    const r = el.getBoundingClientRect()
-    return { x: r.x, y: r.y, width: r.width, height: r.height }
-  }, [])
-
   // The URL last loaded into the native view (via open OR navigate), so a URL
   // change navigates IN PLACE instead of tearing the view down. Held in a ref so
-  // it doesn't drive the lifecycle effect below.
+  // it doesn't drive the lifecycle effects below.
   const loadedUrl = useRef<string | null>(null)
   const urlRef = useRef(url)
   useEffect(() => {
     urlRef.current = url
   }, [url])
 
-  // Lifecycle: create the native view the first time the browser tab is shown,
-  // and destroy it only on unmount. Deliberately NOT keyed on `url` — navigating
-  // must not recreate the view (that would flash a blank overlay).
-  useEffect(() => {
-    if (!nativeWanted) return
-    const r = rect()
-    if (!r) return
-    if (loadedUrl.current === null) {
-      void rpc.browserPreviewOpen(urlRef.current, r).catch(() => {})
-      loadedUrl.current = urlRef.current
+  // Create the native view the first time a paintable rect exists (not on mount:
+  // a 0×0 placeholder mid dock-transition would leave the overlay unopened), and
+  // keep it aligned after. Idempotent on re-show — the `loadedUrl` guard means a
+  // second first-paintable-rect fire doesn't re-open the already-open view.
+  const boundsRef = useNativeViewBounds({
+    active: nativeWanted,
+    onFirstPaintableRect: (r) => {
+      if (loadedUrl.current === null) {
+        void rpc.browserPreviewOpen(urlRef.current, r).catch(() => {})
+        loadedUrl.current = urlRef.current
+      }
+    },
+    onBoundsChanged: (r) => {
+      void rpc.browserPreviewSetBounds(r)
     }
-  }, [nativeWanted, rect])
+  })
 
   useEffect(
     () => () => {
@@ -146,44 +141,15 @@ function BrowserBody({
     void rpc.browserPreviewSetVisible(nativeWanted)
   }, [nativeWanted])
 
-  // Navigation: load a new URL on the already-open view (no teardown). Skips the
-  // value `open` just loaded, so opening the dock doesn't double-load.
+  // Navigation: load a new URL on the already-open view (no teardown). Guarded on
+  // `loadedUrl` being set — before the view opens, the open above loads the
+  // current URL, so navigating here would fire against a view that isn't up and
+  // block that open (its `loadedUrl === null` guard).
   useEffect(() => {
-    if (!nativeWanted || loadedUrl.current === url) return
+    if (!nativeWanted || loadedUrl.current === null || loadedUrl.current === url) return
     loadedUrl.current = url
     void rpc.browserPreviewNavigate(url).catch(() => {})
   }, [nativeWanted, url])
-
-  // Keep the native view aligned with the placeholder: a rAF loop that pushes new
-  // bounds only when they change (handles dock resize AND layout shifts that move
-  // the pane without resizing it, which a ResizeObserver would miss).
-  useEffect(() => {
-    if (!nativeWanted) return
-    let raf = 0
-    let last = ""
-    const tick = () => {
-      const r = rect()
-      // A degenerate rect is NOT a small view — it's a placeholder that is
-      // hidden, unmounted, or mid-transition through a dock switch. Pushing one
-      // parks a zero-size (or negative) overlay over the placeholder, and
-      // Chromium reflows the page to that size on the way through. Skipping
-      // holds the last good bounds until the layout settles, one frame later.
-      //
-      // A SMALL rect is a different thing entirely and must still be pushed —
-      // see `isPaintableRect` for what happened when this guard couldn't tell
-      // the two apart.
-      if (r && isPaintableRect(r)) {
-        const key = `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)}`
-        if (key !== last) {
-          last = key
-          void rpc.browserPreviewSetBounds(r)
-        }
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [nativeWanted, rect])
 
   const empty = useMemo(
     () => (
@@ -228,7 +194,11 @@ function AssetTab({
   const query = useQuery({
     queryKey: ["asset", asset?.sessionId, asset?.path],
     queryFn: () => rpc.assetRead(asset?.sessionId ?? "", asset?.path ?? ""),
-    enabled: active && asset !== undefined,
+    // Dock visibility is part of `enabled`, not just tab focus: an active tab in
+    // a HIDDEN dock renders into a `display:none` div, so with only `active` here
+    // every app focus (`refetchOnWindowFocus`) re-reads the file over RPC — a
+    // 25 MB CSV included — to paint nothing.
+    enabled: active && dockVisible && asset !== undefined,
     // Agents rewrite files mid-session, so a cached read goes stale the moment
     // the next turn touches it. Refetching on focus is the cheap approximation
     // of a worktree watcher, which is deliberately out of scope for v1.
@@ -274,49 +244,32 @@ function PdfBody({
   shown: boolean
   children: React.ReactNode
 }) {
-  const boundsRef = useRef<HTMLDivElement>(null)
-
-  const rect = useCallback((): { x: number; y: number; width: number; height: number } | null => {
-    const el = boundsRef.current
-    if (!el) return null
-    const r = el.getBoundingClientRect()
-    return { x: r.x, y: r.y, width: r.width, height: r.height }
-  }, [])
-
-  useEffect(() => {
-    if (!shown) {
-      void rpc.assetHidePdf()
-      return
-    }
-    const r = rect()
-    if (r && isPaintableRect(r)) {
+  // Open Chromium's viewer over the placeholder the first frame a paintable rect
+  // exists (opening on mount stranded the PDF on "Loading PDF…" forever when that
+  // first measure was 0×0), and keep it aligned after.
+  const boundsRef = useNativeViewBounds({
+    active: shown,
+    onFirstPaintableRect: (r) => {
       void rpc.assetOpenPdf(asset.sessionId, asset.path, r).catch(() => {})
+    },
+    onBoundsChanged: (r) => {
+      void rpc.browserPreviewSetBounds(r)
     }
-    return () => {
-      void rpc.assetHidePdf()
-    }
-  }, [shown, asset.sessionId, asset.path, rect])
+  })
 
-  // Same rAF discipline as the browser: push bounds only when they change, and
-  // never push a degenerate rect (see `isPaintableRect`).
+  // A native overlay is not hidden by hiding a div, so leaving the tab (or the
+  // dock closing) has to say so out loud. The unmount case matters most: closing
+  // the tab must not strand a PDF painted over the app.
   useEffect(() => {
-    if (!shown) return
-    let raf = 0
-    let last = ""
-    const tick = () => {
-      const r = rect()
-      if (r && isPaintableRect(r)) {
-        const key = `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)}`
-        if (key !== last) {
-          last = key
-          void rpc.browserPreviewSetBounds(r)
-        }
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [shown, rect])
+    if (shown) return
+    void rpc.assetHidePdf()
+  }, [shown])
+  useEffect(
+    () => () => {
+      void rpc.assetHidePdf()
+    },
+    []
+  )
 
   return (
     <div ref={boundsRef} className="absolute inset-0">

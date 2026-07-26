@@ -14,6 +14,34 @@ import { CsvTable } from "./csv-table.js"
 const LINE_HEIGHT = 20
 
 /**
+ * Above this size we refuse to build the table rather than freeze the window.
+ *
+ * `parseCsv` is a single-threaded, char-by-char loop that also allocates a string
+ * per cell and an array per row; on the render path a ~2 MB file already costs
+ * roughly 100–200 ms, and the csv cap is 25 MB — an order of magnitude past that,
+ * seconds of a blocked main thread before the first row paints. The virtualizer
+ * only bounds DOM cost, not parse cost, so the fix is to not start. Well under the
+ * read cap, so large-but-valid exports get an honest refusal (with Reveal in
+ * Finder) instead of a hang, and we never truncate — a half-shown CSV that looks
+ * whole is worse.
+ */
+const CSV_PARSE_CAP = 2 * 1024 * 1024
+
+/**
+ * Above this many lines a `code`/`text` asset renders as plain monospace instead
+ * of going through Shiki.
+ *
+ * `tokenizeLines` is borrowed from the diff engine, which only ever feeds it
+ * hunks of a few hundred lines. A file at the 5 MB code cap is ~100k lines;
+ * tokenizing all of them stalls the first paint for seconds AND retains a token
+ * array for every line while the virtualizer paints ~50. A few thousand lines
+ * stays a fraction of a second with a bounded token footprint, so that is where
+ * we stop and fall back to the plain-text path that already exists for a null
+ * language.
+ */
+const CODE_HIGHLIGHT_MAX_LINES = 5_000
+
+/**
  * The Preview dock's file viewer. Switches on the discriminated
  * `AssetPayload.kind` so TypeScript narrows each branch's extra fields — no `!`
  * and no unreachable default.
@@ -38,7 +66,18 @@ export function AssetView({
     case "text":
       return <CodeView text={payload.text} language={payload.language} className={className} />
     case "csv":
-      return <CsvTable text={payload.text} className={className} />
+      // Guard the synchronous parse: over the cap we offer Finder rather than
+      // freezing the renderer for seconds building a table nobody can scroll yet.
+      return payload.size > CSV_PARSE_CAP ? (
+        <AssetNotice
+          icon={<FileWarning className="size-6 text-yellow" aria-hidden />}
+          title="Too large to show as a table"
+          detail={`${payload.path} is ${formatBytes(payload.size)} — parsing it inline would freeze the window. Open it in another tool instead.`}
+          onReveal={onReveal}
+        />
+      ) : (
+        <CsvTable text={payload.text} className={className} />
+      )
     case "image":
       return (
         <div className={cn("flex h-full items-center justify-center overflow-auto bg-canvas p-4", className)}>
@@ -99,26 +138,31 @@ const useCodeHighlight = (
   language: string | null
 ): ReadonlyArray<ReadonlyArray<Token>> | null => {
   const [tokens, setTokens] = useState<ReadonlyArray<ReadonlyArray<Token>> | null>(null)
-  // Key off the CONTENT, not the array identity: `lines` is derived and gets a
-  // fresh identity every render, which would otherwise re-tokenize forever.
-  const key = useMemo(() => lines.join("\n"), [lines])
   const theme = useShikiTheme()
+  // Past the cap we don't tokenize at all: a 100k-line file would stall the first
+  // paint and hold a token array per line for ~50 painted rows. Null tokens are
+  // the same plain-monospace path a null language already takes.
+  const tooManyLines = lines.length > CODE_HIGHLIGHT_MAX_LINES
 
   useEffect(() => {
-    if (language === null) {
+    if (language === null || tooManyLines) {
       setTokens(null)
       return
     }
-    // The grammar loads async; the user can switch files before it resolves.
-    // Without this guard a late resolve paints one file's tokens onto another's.
+    // `lines` is memoized on the file text by the caller, so its identity is
+    // stable per file — key the effect on it directly instead of joining to a
+    // string and splitting it straight back apart to rebuild the array we already
+    // hold. The grammar loads async and the user can switch files before it
+    // resolves; without the `live` guard a late resolve paints one file's tokens
+    // onto another's.
     let live = true
-    void tokenizeLines(key.split("\n"), language, theme).then((result) => {
+    void tokenizeLines(lines, language, theme).then((result) => {
       if (live) setTokens(result)
     })
     return () => {
       live = false
     }
-  }, [key, language, theme])
+  }, [lines, language, theme, tooManyLines])
 
   return tokens
 }
@@ -149,12 +193,22 @@ function CodeView({
   })
 
   const gutterWidth = `${String(lines.length).length + 1}ch`
+  // Mirrors the hook's own cutoff so the file reads as an intentional plain-text
+  // fallback, not a highlighter that silently gave up.
+  const highlightingOff = language !== null && lines.length > CODE_HIGHLIGHT_MAX_LINES
 
   return (
     <div
       ref={scrollRef}
       className={cn("h-full overflow-auto bg-canvas font-mono text-[12px] leading-[20px]", className)}
     >
+      {highlightingOff && (
+        <div className="pointer-events-none sticky top-0 z-10 flex justify-end px-3 py-1">
+          <span className="rounded bg-sunken px-1.5 py-0.5 text-[10px] text-dim">
+            Syntax highlighting off — file too large
+          </span>
+        </div>
+      )}
       <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((item) => (
           <div

@@ -25,6 +25,14 @@ export interface OpenAssetContextValue {
    * reason to fall back to matching on shape alone.
    */
   knownFiles: ReadonlySet<string>
+  /**
+   * The session's worktree root, absolute. Optional: Storybook and the tests
+   * mount none, and there an absolute path is still matched by suffix. When it
+   * IS present, an absolute path OUTSIDE the root is refused — so an agent citing
+   * `/usr/lib/node_modules/x/package.json` can't open this worktree's own
+   * `package.json` by accident.
+   */
+  worktreeRoot?: string
 }
 
 const OpenAssetContext = createContext<OpenAssetContextValue | null>(null)
@@ -32,9 +40,13 @@ const OpenAssetContext = createContext<OpenAssetContextValue | null>(null)
 export function OpenAssetProvider({
   open,
   knownFiles,
+  worktreeRoot,
   children
 }: OpenAssetContextValue & { children: ReactNode }) {
-  const value = useMemo(() => ({ open, knownFiles }), [open, knownFiles])
+  const value = useMemo(
+    () => ({ open, knownFiles, worktreeRoot }),
+    [open, knownFiles, worktreeRoot]
+  )
   return <OpenAssetContext.Provider value={value}>{children}</OpenAssetContext.Provider>
 }
 
@@ -52,7 +64,7 @@ export const useOpenPath = (raw: string | null | undefined): (() => void) | null
   const ctx = useOpenAsset()
   return useMemo(() => {
     if (!ctx || !raw) return null
-    const path = resolveOpenablePath(raw, ctx.knownFiles)
+    const path = resolveOpenablePath(raw, ctx.knownFiles, ctx.worktreeRoot)
     return path === null ? null : () => ctx.open(path)
   }, [ctx, raw])
 }

@@ -79,24 +79,6 @@ export const AssetPayload = Schema.Union(
 export type AssetPayload = Schema.Schema.Type<typeof AssetPayload>
 
 /**
- * The answer to "is this path worth making clickable?" — kind and size, no
- * contents.
- *
- * `Asset.stat` returns `null` rather than an error when the file simply isn't
- * there, because the caller is a transcript scanning candidate paths: a miss is
- * the common case and not a failure.
- */
-export const AssetStat = Schema.Struct({
-  path: Schema.String,
-  absolutePath: Schema.String,
-  kind: AssetKind,
-  size: Schema.Number,
-  /** False when `size` exceeds this kind's cap — the viewer shows the escape hatch. */
-  viewable: Schema.Boolean
-})
-export type AssetStat = Schema.Schema.Type<typeof AssetStat>
-
-/**
  * Extension → kind. The single source of truth for "can we show this?".
  *
  * Deliberately a closed allow-list: an unknown extension returns null and the

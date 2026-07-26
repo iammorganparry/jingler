@@ -22,6 +22,23 @@
  * anything over it fails with `AssetTooLargeError` so the viewer can offer
  * Reveal in Finder instead of trying.
  *
+ * ## The residual TOCTOU race, stated rather than hidden
+ *
+ * `resolveInside` realpaths and compares; `stat` and the read then run on the
+ * resolved STRING a moment later. An agent process running continuously in the
+ * worktree could, in principle, swap a directory component for a symlink in
+ * that window and land the read outside the sandbox. The size cap has the same
+ * shape — a file can grow between `stat` and `readFile`.
+ *
+ * This is knowingly not closed, and the reason is that closing it properly
+ * needs an fd-based read (open with `O_NOFOLLOW` per component, `fstat` the
+ * descriptor, then read *through* it), which `@effect/platform`'s `FileSystem`
+ * does not expose — so a real fix means dropping to `node:fs` and hand-rolling
+ * the path walk. Against that: the attacker must win a millisecond-wide race
+ * AND have the operator click that exact path at that exact moment, to reach a
+ * file the same agent can already read directly with its own tools. The trade
+ * is documented here so the next reader knows it was weighed, not missed.
+ *
  * ## PDFs deliberately ship no bytes
  *
  * `read` returns metadata only for `kind: "pdf"`. Chromium's own PDF viewer
@@ -30,7 +47,7 @@
  * for none of its benefit.
  */
 import { FileSystem, Path } from "@effect/platform"
-import type { AssetKind, AssetPayload, AssetStat } from "@starbase/core"
+import type { AssetKind, AssetPayload } from "@starbase/core"
 import {
   ASSET_SIZE_CAP,
   AssetOutsideWorktreeError,
@@ -107,32 +124,35 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
       path_.relative(root, absolutePath).split(path_.sep).join("/")
 
     /**
-     * Kind + size without contents. Returns `null` for "nothing viewable here"
-     * — a miss is the common case when a transcript scans candidate paths, and
-     * an error channel would make every non-path inline code span look like a
-     * failure.
+     * The absolute path to load into Chromium's native PDF viewer, or a refusal.
+     *
+     * NOT `revealPath`. Containment alone is the wrong bar for this door: the
+     * native view renders a `file://` document with the whole worktree as its
+     * origin's neighbourhood, so pointing it at an agent-authored `.html` gives
+     * that page the ability to pull in local subresources. The renderer gating
+     * on `kind === "pdf"` is exactly the trust this module exists not to extend,
+     * so the kind and regular-file checks are repeated HERE, where they bind.
      */
-    const stat = (
+    const pdfPath = (
       worktree: string,
       requested: string
-    ): Effect.Effect<AssetStat | null, never, AssetEnv> =>
+    ): Effect.Effect<
+      string,
+      AssetOutsideWorktreeError | AssetUnsupportedError,
+      AssetEnv
+    > =>
       Effect.gen(function* () {
-        const kind = extensionToKind(requested)
-        if (kind === null) return null
-        const resolved = yield* resolveInside(worktree, requested).pipe(
-          Effect.catchAll(() => Effect.succeed(null))
-        )
-        if (resolved === null) return null
-        const info = yield* fs.stat(resolved.absolutePath).pipe(Effect.orElseSucceed(() => null))
-        if (info === null || info.type !== "File") return null
-        const size = Number(info.size)
-        return {
-          path: relativeTo(resolved.root, resolved.absolutePath),
-          absolutePath: resolved.absolutePath,
-          kind,
-          size,
-          viewable: size <= ASSET_SIZE_CAP[kind]
+        if (extensionToKind(requested) !== "pdf") {
+          return yield* new AssetUnsupportedError({ path: requested })
         }
+        const { absolutePath } = yield* resolveInside(worktree, requested)
+        const info = yield* fs.stat(absolutePath).pipe(
+          Effect.mapError(() => new AssetOutsideWorktreeError({ path: requested, reason: "unreadable" }))
+        )
+        if (info.type !== "File") {
+          return yield* new AssetOutsideWorktreeError({ path: requested, reason: "not-a-file" })
+        }
+        return absolutePath
       })
 
     const read = (
@@ -198,6 +218,6 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
     const revealPath = (worktree: string, requested: string) =>
       Effect.map(resolveInside(worktree, requested), (r) => r.absolutePath)
 
-    return { read, stat, revealPath } as const
+    return { read, pdfPath, revealPath } as const
   })
 }) {}

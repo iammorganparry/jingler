@@ -43,8 +43,16 @@ export interface OpenAsset {
   path: string
 }
 
-/** Tab ids are `${sessionId}:${path}` so reopening the same file focuses it. */
-export const assetTabId = (sessionId: string, path: string): string => `${sessionId}:${path}`
+/**
+ * Tab ids join session and path so reopening the same file focuses it. The
+ * separator is a SPACE, not `:`: a path legally contains `:`, so `a:b:c` could be
+ * (`a`, `b:c`) or (`a:b`, `c`) and two distinct pairs could collide. A session id
+ * is a slug (`s_<slug>_<stamp>`) and never contains a space, so splitting at the
+ * first space is unambiguous — the join is injective. Ids are only ever compared,
+ * never parsed back, and persisted tabs store (sessionId, path) OBJECTS not ids,
+ * so this separator never touches the restore path.
+ */
+export const assetTabId = (sessionId: string, path: string): string => `${sessionId} ${path}`
 
 // Hidden by default — the preview dock is opt-in (unlike the terminal dock).
 const readVisible = (): boolean => {
@@ -113,6 +121,7 @@ export type PreviewDockEvent =
   | { type: "SELECT"; id: string }
   | { type: "OPEN_ASSET"; sessionId: string; path: string }
   | { type: "CLOSE"; id: string }
+  | { type: "PRUNE"; liveSessionIds: ReadonlySet<string> }
 
 export const previewDockMachine = setup({
   types: {
@@ -150,6 +159,25 @@ export const previewDockMachine = setup({
         assets,
         activeId: context.activeId === event.id ? BROWSER_TAB_ID : context.activeId
       }
+    }),
+    // Drop tabs whose session no longer exists — a deleted session's tabs would
+    // otherwise restore forever as error panes. Persistence validates shape, not
+    // liveness, so this reconciles against the live list the app hands in.
+    pruneTabs: assign(({ context, event }) => {
+      if (event.type !== "PRUNE") return {}
+      // No-op on an EMPTY live set: the app hasn't loaded its sessions yet, and
+      // pruning now would wipe every restored tab before the list arrives.
+      if (event.liveSessionIds.size === 0) return {}
+      const assets = context.assets.filter((a) => event.liveSessionIds.has(a.sessionId))
+      if (assets.length === context.assets.length) return {}
+      write(TABS_KEY, JSON.stringify(assets))
+      // If the focused tab belonged to a now-dead session, fall back to the
+      // pinned browser tab — the one tab guaranteed to still be there.
+      const activeSurvives = assets.some((a) => assetTabId(a.sessionId, a.path) === context.activeId)
+      return {
+        assets,
+        activeId: activeSurvives ? context.activeId : BROWSER_TAB_ID
+      }
     })
   },
   guards: {
@@ -177,7 +205,10 @@ export const previewDockMachine = setup({
     },
     // Opening an asset is an explicit request to LOOK at it, so it shows the
     // dock. Focusing a tab in a hidden panel would look like nothing happened.
-    OPEN_ASSET: { target: ".shown", actions: "openAsset" }
+    OPEN_ASSET: { target: ".shown", actions: "openAsset" },
+    // Reconcile open tabs against the live session list. Orthogonal to
+    // visibility — pruning a dead tab must not open or close the dock.
+    PRUNE: { actions: "pruneTabs" }
   },
   states: {
     restoring: {

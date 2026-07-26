@@ -6,7 +6,6 @@
  */
 import type {
   AssetPayload,
-  AssetStat,
   BackgroundTask,
   AdversarialReview,
   PlanningReadiness,
@@ -228,9 +227,6 @@ export const rpc = {
    */
   assetRead: (sessionId: string, path: string): Promise<AssetPayload> =>
     run((c) => c.Asset.read({ sessionId, path })),
-  /** Kind + size for a candidate path, or null when there is nothing to show. */
-  assetStat: (sessionId: string, path: string): Promise<AssetStat | null> =>
-    run((c) => c.Asset.stat({ sessionId, path })),
   assetReveal: (sessionId: string, path: string): Promise<void> =>
     run((c) => c.Asset.reveal({ sessionId, path })),
   /** Park Chromium's PDF viewer over `bounds`. Main resolves the path itself. */

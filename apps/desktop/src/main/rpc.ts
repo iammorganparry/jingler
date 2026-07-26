@@ -485,12 +485,6 @@ export const assetRead = (input: { sessionId: string; path: string }) =>
     AssetService.read(worktree, input.path)
   )
 
-/** `Asset.stat` handler — kind + size, or null. Never throws for a miss. */
-export const assetStat = (input: { sessionId: string; path: string }) =>
-  Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
-    AssetService.stat(worktree, input.path)
-  )
-
 /**
  * `Asset.reveal` handler — show the file in the OS file manager.
  *
@@ -521,7 +515,7 @@ export const assetOpenPdf = (input: {
 }) =>
   Effect.gen(function* () {
     const worktree = yield* assetWorktree(input.sessionId)
-    const absolutePath = yield* AssetService.revealPath(worktree, input.path)
+    const absolutePath = yield* AssetService.pdfPath(worktree, input.path)
     yield* Effect.flatMap(PreviewViewService, (v) => v.openFile(absolutePath, input.bounds))
   })
 
@@ -2340,7 +2334,6 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "BrowserPreview.close": () => Effect.flatMap(PreviewViewService, (b) => b.close()),
 
   "Asset.read": (input) => assetRead(input),
-  "Asset.stat": (input) => assetStat(input),
   "Asset.reveal": (input) => assetReveal(input),
   "Asset.openPdf": (input) => assetOpenPdf(input),
   "Asset.hidePdf": () => Effect.flatMap(PreviewViewService, (b) => b.hideFile()),

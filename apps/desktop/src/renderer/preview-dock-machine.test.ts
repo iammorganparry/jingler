@@ -126,6 +126,70 @@ describe("previewDockMachine", () => {
     expect(snapshot.context.activeId).toBe(BROWSER_TAB_ID)
   })
 
+  it("assetTabId joins on a space, so paths containing ':' don't collide", () => {
+    // Under the old ':' join these two distinct pairs both became "s1:a:b".
+    expect(assetTabId("s1", "a:b")).not.toBe(assetTabId("s1:a", "b"))
+    // A ':' in the path survives as part of a single, stable id.
+    expect(assetTabId("s1", "src/a:b.ts")).toBe("s1 src/a:b.ts")
+  })
+
+  it("reopening a path that contains ':' focuses its tab instead of duplicating", () => {
+    const actor = start()
+    actor.send({ type: "OPEN_ASSET", sessionId: "s1", path: "weird:name.md" })
+    actor.send({ type: "OPEN_ASSET", sessionId: "s1", path: "weird:name.md" })
+    const snapshot = actor.getSnapshot()
+    expect(snapshot.context.assets).toHaveLength(1)
+    expect(snapshot.context.activeId).toBe(assetTabId("s1", "weird:name.md"))
+  })
+
+  it("PRUNE drops tabs whose session isn't live and rewrites storage", () => {
+    const actor = start()
+    actor.send({ type: "OPEN_ASSET", sessionId: "s1", path: "a.md" })
+    actor.send({ type: "OPEN_ASSET", sessionId: "s2", path: "b.md" })
+
+    actor.send({ type: "PRUNE", liveSessionIds: new Set(["s1"]) })
+
+    const snapshot = actor.getSnapshot()
+    expect(snapshot.context.assets).toEqual([{ sessionId: "s1", path: "a.md" }])
+    expect(store.get("starbase.preview.tabs")).toBe(
+      JSON.stringify([{ sessionId: "s1", path: "a.md" }])
+    )
+  })
+
+  it("PRUNE is a no-op when the live set is empty (sessions not loaded yet)", () => {
+    store.set("starbase.preview.tabs", JSON.stringify([{ sessionId: "s1", path: "a.md" }]))
+    const actor = start()
+
+    actor.send({ type: "PRUNE", liveSessionIds: new Set() })
+
+    expect(actor.getSnapshot().context.assets).toEqual([{ sessionId: "s1", path: "a.md" }])
+    // Storage untouched — the restored tab survives a first load with no sessions.
+    expect(store.get("starbase.preview.tabs")).toBe(
+      JSON.stringify([{ sessionId: "s1", path: "a.md" }])
+    )
+  })
+
+  it("PRUNE falls back to the browser when the focused tab's session died", () => {
+    const actor = start()
+    actor.send({ type: "OPEN_ASSET", sessionId: "s1", path: "a.md" })
+    actor.send({ type: "OPEN_ASSET", sessionId: "s2", path: "b.md" })
+    // s2's tab is focused; prune leaves only s1.
+    actor.send({ type: "PRUNE", liveSessionIds: new Set(["s1"]) })
+
+    const snapshot = actor.getSnapshot()
+    expect(snapshot.context.activeId).toBe(BROWSER_TAB_ID)
+    expect(snapshot.matches("shown")).toBe(true)
+  })
+
+  it("PRUNE leaves the selection alone when the focused tab survives", () => {
+    const actor = start()
+    actor.send({ type: "OPEN_ASSET", sessionId: "s1", path: "a.md" })
+    actor.send({ type: "OPEN_ASSET", sessionId: "s2", path: "b.md" })
+    // s2 focused and still live — only the dead s3 (none here) would go.
+    actor.send({ type: "PRUNE", liveSessionIds: new Set(["s1", "s2"]) })
+    expect(actor.getSnapshot().context.activeId).toBe(assetTabId("s2", "b.md"))
+  })
+
   it("SET_SIDE persists the docked side", () => {
     const actor = start()
     actor.send({ type: "SET_SIDE", side: "bottom" })

@@ -6,7 +6,6 @@ import {
   PlanRound,
   ArchiveReason,
   AssetPayload,
-  AssetStat,
   Attachment,
   AuthProvider,
   AuthSession,
@@ -1377,17 +1376,6 @@ export class StarbaseRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, path: Schema.String }
   }),
 
-  /**
-   * Cheap probe: does this path exist in the worktree and what would we render
-   * it as? Used to decide whether a candidate path in the transcript is worth
-   * making clickable without paying for its contents.
-   */
-  Rpc.make("Asset.stat", {
-    success: Schema.NullOr(AssetStat),
-    error: SessionNotFoundError,
-    payload: { sessionId: Schema.String, path: Schema.String }
-  }),
-
   /** Reveal the asset in the OS file manager. */
   Rpc.make("Asset.reveal", {
     error: Schema.Union(AssetOutsideWorktreeError, SessionNotFoundError),
@@ -1404,7 +1392,15 @@ export class StarbaseRpcs extends RpcGroup.make(
    * point the viewer at an arbitrary file on disk.
    */
   Rpc.make("Asset.openPdf", {
-    error: Schema.Union(AssetOutsideWorktreeError, SessionNotFoundError, BrowserPreviewError),
+    error: Schema.Union(
+      AssetOutsideWorktreeError,
+      // Not just containment: main re-checks that the path is a PDF and a
+      // regular file, because the native view renders a `file://` DOCUMENT and
+      // an agent-authored `.html` there would get a file origin.
+      AssetUnsupportedError,
+      SessionNotFoundError,
+      BrowserPreviewError
+    ),
     payload: { sessionId: Schema.String, path: Schema.String, bounds: BrowserBounds }
   }),
 

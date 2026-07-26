@@ -228,32 +228,39 @@ function PreviewTabButton({
   /** Omitted for a pinned tab, which then renders no ✕ at all. */
   onClose?: () => void
 }) {
+  // A real <button> for the tab, not a div+onClick: a div is invisible to the
+  // a11y tree and unreachable by keyboard, which is how this shipped. The close
+  // ✕ is a SIBLING button, not nested — a button inside a button is invalid HTML
+  // the browser reparents. The active/inactive treatment and hover-reveal live on
+  // the wrapper so both look identical to the old single element.
   return (
     <div
-      onClick={onSelect}
-      title={tab.path ?? tab.title}
       className={cn(
-        "group flex flex-none cursor-pointer items-center gap-2 border-r border-hairline px-3 font-mono text-[11.5px]",
+        "group flex flex-none items-stretch border-r border-hairline font-mono text-[11.5px]",
         active
           ? "border-t-2 border-t-blue bg-sunken text-text-bright"
           : "text-muted-foreground opacity-70 hover:opacity-100"
       )}
     >
-      {tab.kind === "browser" ? (
-        <Globe className="size-3 flex-none text-dim" aria-hidden />
-      ) : (
-        <FileIcon path={tab.path ?? tab.title} size={12} />
-      )}
-      <span className="max-w-[140px] truncate">{tab.title}</span>
+      <button
+        type="button"
+        onClick={onSelect}
+        title={tab.path ?? tab.title}
+        className={cn("flex min-w-0 cursor-pointer items-center gap-2 pl-3", onClose ? "pr-1.5" : "pr-3")}
+      >
+        {tab.kind === "browser" ? (
+          <Globe className="size-3 flex-none text-dim" aria-hidden />
+        ) : (
+          <FileIcon path={tab.path ?? tab.title} size={12} />
+        )}
+        <span className="max-w-[140px] truncate">{tab.title}</span>
+      </button>
       {onClose && (
         <button
           type="button"
           aria-label={`Close ${tab.title}`}
-          onClick={(e) => {
-            e.stopPropagation()
-            onClose()
-          }}
-          className="ml-0.5 flex size-4 flex-none items-center justify-center rounded text-dim opacity-0 transition hover:bg-hairline hover:text-text-bright group-hover:opacity-100"
+          onClick={onClose}
+          className="mr-1.5 flex size-4 flex-none items-center justify-center self-center rounded text-dim opacity-0 transition hover:bg-hairline hover:text-text-bright group-hover:opacity-100"
         >
           <X className="size-3" />
         </button>
