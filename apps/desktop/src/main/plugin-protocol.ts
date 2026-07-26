@@ -44,7 +44,7 @@ import * as Sdk from "@starbase/plugin-sdk"
 // come from a data module that imports nothing; a test in the SDK asserts the
 // two agree.
 import { UI_EXPORT_NAMES } from "@starbase/plugin-sdk/ui-exports"
-import { pluginsRoot } from "./app-paths.js"
+import { builtinPluginsRoot, pluginsRoot } from "./app-paths.js"
 
 /** The scheme, in one place — it appears in CSP, in the importmap and here. */
 export const PLUGIN_SCHEME = "starbase-plugin"
@@ -126,6 +126,59 @@ const RUNTIME_MODULES: Record<string, string> = {
   "sdk-ui.js": runtimeShim("sdkUi", [...UI_EXPORT_NAMES])
 }
 
+/**
+ * Bare specifiers a plugin may import, and the shim each resolves to.
+ *
+ * ## Why these are rewritten rather than left to the importmap
+ *
+ * `index.html` declares an import map covering exactly these, and in a browser
+ * that is the whole mechanism. It is not sufficient here. The packaged renderer
+ * is loaded with `loadFile`, so the document's origin is `file:` while a plugin
+ * module's origin is `starbase-plugin:` — and in that arrangement Chromium does
+ * not apply the document's import map to the plugin module's own imports. The
+ * plugin fails with "Failed to resolve module specifier", having never reached
+ * a line of its own code.
+ *
+ * Found by the e2e spec, which is the only test that runs a real renderer
+ * against a real custom-scheme module. Nothing smaller would have caught it.
+ *
+ * So the handler rewrites them on the way out. The import map stays as well —
+ * it costs nothing, and it keeps `import` maps working for anything loaded from
+ * the document's own origin — but correctness no longer depends on it.
+ */
+const BARE_SPECIFIERS: Record<string, string> = {
+  react: `${PLUGIN_SCHEME}://${RUNTIME_HOST}/react.js`,
+  "react-dom": `${PLUGIN_SCHEME}://${RUNTIME_HOST}/react.js`,
+  "react/jsx-runtime": `${PLUGIN_SCHEME}://${RUNTIME_HOST}/jsx-runtime.js`,
+  "react/jsx-dev-runtime": `${PLUGIN_SCHEME}://${RUNTIME_HOST}/jsx-dev-runtime.js`,
+  "@starbase/plugin-sdk": `${PLUGIN_SCHEME}://${RUNTIME_HOST}/sdk.js`,
+  "@starbase/plugin-sdk/ui": `${PLUGIN_SCHEME}://${RUNTIME_HOST}/sdk-ui.js`
+}
+
+/**
+ * Point a module's bare specifiers at their shims.
+ *
+ * Deliberately narrow. It only rewrites a quoted specifier that follows `from`
+ * or a bare `import`/`export`, and only when the specifier is EXACTLY one of the
+ * six above — so an unrelated string that merely contains the word `react` is
+ * untouched, and a specifier the app does not provide is left alone to fail
+ * loudly rather than being silently redirected somewhere plausible.
+ *
+ * A full parse would be more correct and is not worth it: these are ES modules
+ * emitted by a bundler, where every import is a top-level static statement.
+ */
+const rewriteSpecifiers = (source: string): string =>
+  source.replace(
+    /(\bfrom\s*|\bimport\s*|\bexport\s*\*\s*from\s*)(["'])([^"']+)\2/g,
+    (match, prefix: string, quote: string, specifier: string) => {
+      const target = BARE_SPECIFIERS[specifier]
+      return target ? `${prefix}${quote}${target}${quote}` : match
+    }
+  )
+
+/** Rewriting only makes sense for JavaScript. */
+const isModule = (file: string): boolean => /\.m?js$/i.test(file)
+
 const MIME: Record<string, string> = {
   ".js": "text/javascript",
   ".mjs": "text/javascript",
@@ -193,31 +246,39 @@ export const resolvePluginAsset = async (
   // possible caller of a URL and this is the cheaper of the two checks.
   if (!/^[a-z0-9][a-z0-9-]*$/.test(pluginId)) return null
 
-  const root = resolve(pluginsRoot())
-  const pluginDir = resolve(root, pluginId)
-  if (pluginDir !== join(root, pluginId)) return null
-
   const relative = decodeURIComponent(requestPath).replace(/^\/+/, "")
   if (!relative) return null
 
-  const target = resolve(pluginDir, relative)
-  // The lexical check catches `../..`; it does NOT catch a symlink, which is
-  // why the realpath check below is not redundant.
-  if (target !== pluginDir && !target.startsWith(pluginDir + sep)) return null
+  // BOTH roots. Official plugins are read from the app bundle rather than
+  // copied into `~/starbase/plugins`, so a handler that knew only the installed
+  // root served every bundled plugin a 404 — which presents as an official
+  // plugin that appears in Settings and then fails to load, with the module
+  // plainly present on disk.
+  for (const rootPath of [pluginsRoot(), builtinPluginsRoot()]) {
+    const root = resolve(rootPath)
+    const pluginDir = resolve(root, pluginId)
+    if (pluginDir !== join(root, pluginId)) continue
 
-  try {
-    const real = await realpath(target)
-    // A plugin directory is third-party content. A symlink inside it pointing at
-    // `~/.ssh/id_rsa` would otherwise be served happily by the lexical check
-    // above, because the *link path* is innocent.
-    const realRoot = await realpath(pluginDir)
-    if (real !== realRoot && !real.startsWith(realRoot + sep)) return null
-    const info = await stat(real)
-    if (!info.isFile()) return null
-    return real
-  } catch {
-    return null
+    const target = resolve(pluginDir, relative)
+    // The lexical check catches `../..`; it does NOT catch a symlink, which is
+    // why the realpath check below is not redundant.
+    if (target !== pluginDir && !target.startsWith(pluginDir + sep)) continue
+
+    try {
+      const real = await realpath(target)
+      // A plugin directory is third-party content. A symlink inside it pointing
+      // at `~/.ssh/id_rsa` would otherwise be served happily by the lexical
+      // check above, because the *link path* is innocent.
+      const realRoot = await realpath(pluginDir)
+      if (real !== realRoot && !real.startsWith(realRoot + sep)) continue
+      const info = await stat(real)
+      if (!info.isFile()) continue
+      return real
+    } catch {
+      // Not under this root, or not readable. Try the next.
+    }
   }
+  return null
 }
 
 /**
@@ -251,7 +312,10 @@ export const handlePluginRequest = async (url: string): Promise<Response> => {
 
   try {
     const body = await readFile(file)
-    return new Response(new Uint8Array(body), {
+    const payload = isModule(file)
+      ? new TextEncoder().encode(rewriteSpecifiers(body.toString("utf8")))
+      : new Uint8Array(body)
+    return new Response(payload, {
       status: 200,
       headers: {
         "content-type": mimeFor(file),
