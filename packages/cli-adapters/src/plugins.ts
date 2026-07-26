@@ -102,20 +102,37 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
      * path reaches `remove`, `copy` or the shell. Every mutating operation goes
      * through here first.
      */
-    const dirFor = (pluginId: string): Effect.Effect<string, PluginError, Path.Path | AppPaths> =>
+    const dirFor = (
+      pluginId: string
+    ): Effect.Effect<string, PluginError, Path.Path | AppPaths | FileSystem.FileSystem> =>
       Effect.gen(function* () {
         const path = yield* Path.Path
-        const root = path.resolve(yield* pluginsDir)
-        const dir = path.resolve(root, pluginId)
-        if (path.dirname(dir) !== root) {
-          return yield* Effect.fail(
-            new PluginError({
-              pluginId,
-              reason: "A plugin id must name a directory directly inside ~/starbase/plugins."
-            })
-          )
+        const fs = yield* FileSystem.FileSystem
+        const bundled = yield* builtinDir
+
+        // Both roots, installed first — the same precedence `list` applies, so
+        // an installed override resolves to the copy actually being used.
+        //
+        // Checking only the installed root meant Reveal on a BUILT-IN plugin
+        // resolved to `~/starbase/plugins/<id>`, a path it does not live at, and
+        // opened a Finder window on nothing.
+        for (const rootPath of [yield* pluginsDir, bundled]) {
+          if (!rootPath) continue
+          const root = path.resolve(rootPath)
+          const dir = path.resolve(root, pluginId)
+          // Confinement is unchanged and still applies per root: the id must
+          // name a DIRECT child, so `../..` and absolute paths are refused
+          // before this reaches `remove`, `copy` or the shell.
+          if (path.dirname(dir) !== root) continue
+          if (yield* fs.exists(dir).pipe(Effect.orElseSucceed(() => false))) return dir
         }
-        return dir
+
+        return yield* Effect.fail(
+          new PluginError({
+            pluginId,
+            reason: "A plugin id must name a directory directly inside ~/starbase/plugins."
+          })
+        )
       })
 
     /**
@@ -188,7 +205,21 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
           const manifestFile = path.join(pluginDir, MANIFEST_FILE)
           const raw = yield* fs.readFileString(manifestFile).pipe(Effect.orElseSucceed(() => null))
           if (raw === null) {
-            failed.push({ dir: entry, kind: "manifest-missing", message: `No ${MANIFEST_FILE} in this directory.` })
+            // In the INSTALLED root the operator put this directory there, so a
+            // missing manifest is worth reporting. In the BUNDLED root we put it
+            // there — `plugins/examples/` is a container, not a plugin — and
+            // reporting it made every dev launch show a permanent "broken
+            // plugin" in Settings that the operator can do nothing about.
+            //
+            // A manifest that EXISTS and fails to decode is still reported from
+            // either root: that is a real broken plugin whoever shipped it.
+            if (!builtin) {
+              failed.push({
+                dir: entry,
+                kind: "manifest-missing",
+                message: `No ${MANIFEST_FILE} in this directory.`
+              })
+            }
             continue
           }
 
@@ -284,7 +315,23 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
     const uninstall = (pluginId: string): Effect.Effect<void, PluginError, PluginEnv> =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
         const dir = yield* dirFor(pluginId)
+
+        // `dirFor` resolves BUNDLED plugins too, so Reveal can open one. Delete
+        // must not follow it there: in a packaged build that is inside the app,
+        // and in development it is the repo's own `plugins/` — one click in
+        // Settings would `rm -rf` checked-in source. Settings already hides the
+        // control for built-ins; this is the half that cannot be bypassed.
+        const installedRoot = path.resolve(yield* pluginsDir)
+        if (path.dirname(path.resolve(dir)) !== installedRoot) {
+          return yield* Effect.fail(
+            new PluginError({
+              pluginId,
+              reason: "That plugin ships with Starbase and cannot be uninstalled. Disable it instead."
+            })
+          )
+        }
         const exists = yield* fs.exists(dir).pipe(Effect.orElseSucceed(() => false))
         if (!exists) {
           return yield* Effect.fail(new PluginError({ pluginId, reason: "That plugin is not installed." }))
@@ -360,13 +407,31 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
       Stream.unwrap(
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
-          const dir = yield* pluginsDir
+          const installed = yield* pluginsDir
+          const bundled = yield* builtinDir
 
           // Watch a directory that exists — creating it first also means the very
           // first install shows up live rather than needing a relaunch.
-          yield* fs.makeDirectory(dir, { recursive: true }).pipe(Effect.orElseSucceed(() => undefined))
+          yield* fs
+            .makeDirectory(installed, { recursive: true })
+            .pipe(Effect.orElseSucceed(() => undefined))
 
-          return fs.watch(dir).pipe(
+          // BOTH roots. `app-paths.ts` sells the dev bundled root as "the same
+          // live-reload story a third-party author gets", and watching only the
+          // installed root made that untrue: an official plugin under active
+          // edit needed a relaunch. Not created if absent — a packaged build
+          // with no bundled plugins should not have a directory conjured for it.
+          const bundledExists =
+            bundled !== undefined &&
+            bundled !== installed &&
+            (yield* fs.exists(bundled).pipe(Effect.orElseSucceed(() => false)))
+
+          const sources = [
+            fs.watch(installed),
+            ...(bundledExists && bundled ? [fs.watch(bundled)] : [])
+          ]
+
+          return Stream.mergeAll(sources, { concurrency: sources.length }).pipe(
             Stream.debounce(WATCH_DEBOUNCE_MS),
             Stream.mapEffect(() => list()),
             // A dead watcher takes live reload with it; ending the stream leaves

@@ -232,8 +232,22 @@ export const loadPluginUi = async (
     }
   }
 
-  // A plugin with no UI entry is legal — it may be host-only, or contribute
-  // nothing yet. It simply has no tabs or panes, which is not an error.
+  // A manifest that declares UI but names no entry to render it from is a
+  // mistake, not a host-only plugin. It used to return ok-with-nothing, so
+  // Settings counted the contributions and the tab never appeared — the same
+  // silent absence every other branch here exists to prevent.
+  if (!manifest.ui && (declaredTabs.length > 0 || declaredPanes.length > 0)) {
+    return {
+      ok: false,
+      error: {
+        id: manifest.id,
+        message: `declares ${declaredTabs.length + declaredPanes.length} UI contribution(s) but no \`ui\` entry. Add \`ui: "dist/ui.js"\` to the manifest.`
+      }
+    }
+  }
+
+  // A plugin with no UI entry AND no UI contributions is legal — host-only, or
+  // contributing nothing yet.
   if (!manifest.ui || (declaredTabs.length === 0 && declaredPanes.length === 0)) {
     return {
       ok: true,

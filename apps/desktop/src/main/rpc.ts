@@ -97,6 +97,7 @@ import type {
   CreateSessionInput,
   IssueAutomations,
   IssueSummary,
+  PluginCatalog,
   PrMergeMethod,
   ProviderConfig,
   ReviewComment,
@@ -1750,9 +1751,42 @@ export const setReasoning = (
  * the renderer can ask to invoke a command in a plugin that was uninstalled a
  * moment ago, and "no such plugin" is a better answer than a process being
  * asked to activate a directory that is gone.
+ *
+ * ## Why the catalog is cached
+ *
+ * `PluginRegistry.list()` stats, reads and Schema-decodes every manifest on
+ * disk. Doing that on EVERY `Plugins.invoke` put a full directory scan in front
+ * of every command a plugin's UI fires — including ones in a render loop.
+ *
+ * The cache is invalidated by the watcher, which already re-emits the whole
+ * catalog whenever `~/starbase/plugins` changes, so the only way to read a stale
+ * entry is to race a filesystem change by less than the debounce — and the
+ * activation that follows re-reads the directory anyway.
  */
+let catalogCache: { at: number; catalog: PluginCatalog } | null = null
+
+/** How long a resolved catalog is trusted between filesystem events. */
+const CATALOG_CACHE_MS = 2_000
+
+/** Dropped by the watcher, so an install or uninstall is visible immediately. */
+export const invalidatePluginCatalog = (): void => {
+  catalogCache = null
+}
+
+const cachedCatalog = Effect.suspend(() => {
+  const now = Date.now()
+  if (catalogCache && now - catalogCache.at < CATALOG_CACHE_MS) {
+    return Effect.succeed(catalogCache.catalog)
+  }
+  return Effect.tap(PluginRegistry.list(), (catalog) =>
+    Effect.sync(() => {
+      catalogCache = { at: now, catalog }
+    })
+  )
+})
+
 const pluginById = (pluginId: string) =>
-  Effect.flatMap(PluginRegistry.list(), (catalog) => {
+  Effect.flatMap(cachedCatalog, (catalog) => {
     const found = catalog.plugins.find((p) => p.manifest.id === pluginId)
     if (!found) {
       return Effect.fail(
@@ -1829,6 +1863,34 @@ export const pluginStorageGet = (pluginId: string, key: string) =>
     Effect.orElseSucceed(() => null)
   )
 
+/**
+ * One writer at a time, per plugin.
+ *
+ * `set` and `delete` are each read-modify-write over a whole JSON blob. Two
+ * concurrent writers — a plugin's UI half and its host half both persisting, or
+ * two `set`s inside one `Promise.all` — each read the same before-state, and the
+ * second write silently dropped the first's key.
+ *
+ * A permit per plugin id rather than one global: two plugins writing at once are
+ * touching different files and have no reason to queue behind each other.
+ */
+const storageLocks = new Map<string, Effect.Semaphore>()
+
+const withStorageLock = <A, E, R>(
+  pluginId: string,
+  work: Effect.Effect<A, E, R>
+): Effect.Effect<A, E, R> =>
+  Effect.flatMap(
+    Effect.sync(() => {
+      const existing = storageLocks.get(pluginId)
+      if (existing) return existing
+      const created = Effect.unsafeMakeSemaphore(1)
+      storageLocks.set(pluginId, created)
+      return created
+    }),
+    (lock) => lock.withPermits(1)(work)
+  )
+
 /** Write the whole blob back. Shared by set and delete. */
 const pluginStorageWrite = (pluginId: string, all: Record<string, unknown>) =>
   Effect.gen(function* () {
@@ -1843,8 +1905,11 @@ const pluginStorageWrite = (pluginId: string, all: Record<string, unknown>) =>
   })
 
 export const pluginStorageSet = (pluginId: string, key: string, value: unknown) =>
-  Effect.flatMap(pluginStorageRead(pluginId), (all) =>
-    pluginStorageWrite(pluginId, { ...all, [key]: value })
+  withStorageLock(
+    pluginId,
+    Effect.flatMap(pluginStorageRead(pluginId), (all) =>
+      pluginStorageWrite(pluginId, { ...all, [key]: value })
+    )
   )
 
 /**
@@ -1854,12 +1919,15 @@ export const pluginStorageSet = (pluginId: string, key: string, value: unknown) 
  * `storageKeys`, so folding the two together would make a deleted key show up
  * in a listing forever.
  */
-export const pluginStorageDelete = (pluginId: string, key: string) =>
+const pluginStorageDeleteUnlocked = (pluginId: string, key: string) =>
   Effect.flatMap(pluginStorageRead(pluginId), (all) => {
     if (!(key in all)) return Effect.void
     const { [key]: _removed, ...rest } = all
     return pluginStorageWrite(pluginId, rest)
   })
+
+export const pluginStorageDelete = (pluginId: string, key: string) =>
+  withStorageLock(pluginId, pluginStorageDeleteUnlocked(pluginId, key))
 
 /** Declared never-failing: an unreadable store lists nothing, same as an empty one. */
 export const pluginStorageKeys = (pluginId: string) =>
@@ -2247,7 +2315,14 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   // `Stream.unwrap(Effect.map(...))`, not the accessor — the accessor form
   // yields a stream OF a stream and the renderer receives nothing. Same shape
   // as `Theme.watch` above, and for the same reason.
-  "Plugins.watch": () => Stream.unwrap(Effect.map(PluginRegistry, (p) => p.watch())),
+  "Plugins.watch": () =>
+    Stream.unwrap(
+      Effect.map(PluginRegistry, (p) =>
+        // Every emission means the directory changed, so the resolution cache
+        // `pluginById` keeps is stale by definition.
+        p.watch().pipe(Stream.tap(() => Effect.sync(invalidatePluginCatalog)))
+      )
+    ),
 
   "Plugins.setEnabled": ({ pluginId, enabled }) =>
     PluginRegistry.setEnabled(pluginId, enabled),

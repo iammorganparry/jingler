@@ -20,8 +20,11 @@
 import { spawn } from "node:child_process"
 import type { ExecReply, ExecRequest } from "@starbase/cli-adapters"
 
-/** Hard ceiling on captured output, so a runaway process cannot exhaust memory. */
-const MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+/**
+ * Hard ceiling on captured output PER STREAM, so a runaway process cannot
+ * exhaust memory and a chatty stdout cannot starve stderr.
+ */
+const MAX_STREAM_BYTES = 8 * 1024 * 1024
 
 /** Default kill time. A plugin can shorten it; it cannot remove it. */
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -44,18 +47,39 @@ export const runShell = (
       shell: false
     })
 
-    let stdout = ""
-    let stderr = ""
+    // Buffers, not strings, and a budget PER STREAM.
+    //
+    // The previous version summed `String.length` — UTF-16 code units, not
+    // bytes, so a multibyte-heavy stream got well past the nominal cap — and
+    // shared one budget across both, so a chatty stdout could starve stderr of
+    // its entire allowance and swallow the error message explaining the failure.
+    const out: Buffer[] = []
+    const err: Buffer[] = []
+    let outBytes = 0
+    let errBytes = 0
     let truncated = false
     let settled = false
 
     const capture = (chunk: Buffer, into: "out" | "err") => {
-      if (stdout.length + stderr.length >= MAX_OUTPUT_BYTES) {
+      const used = into === "out" ? outBytes : errBytes
+      if (used >= MAX_STREAM_BYTES) {
         truncated = true
         return
       }
-      if (into === "out") stdout += chunk.toString("utf8")
-      else stderr += chunk.toString("utf8")
+      // Trim the chunk rather than dropping it whole: the cap is a ceiling on
+      // what is kept, and checking only before the append let one oversized
+      // chunk through in full.
+      const room = MAX_STREAM_BYTES - used
+      const kept = chunk.byteLength > room ? chunk.subarray(0, room) : chunk
+      if (kept.byteLength < chunk.byteLength) truncated = true
+
+      if (into === "out") {
+        out.push(kept)
+        outBytes += kept.byteLength
+      } else {
+        err.push(kept)
+        errBytes += kept.byteLength
+      }
     }
 
     child.stdout?.on("data", (chunk: Buffer) => capture(chunk, "out"))
@@ -82,6 +106,8 @@ export const runShell = (
       if (settled) return
       settled = true
       clearTimeout(timer)
+      const stdout = Buffer.concat(out).toString("utf8")
+      const stderr = Buffer.concat(err).toString("utf8")
       resolve({
         stdout: truncated ? `${stdout}\n… output truncated` : stdout,
         stderr,

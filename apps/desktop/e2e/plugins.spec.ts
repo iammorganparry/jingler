@@ -321,12 +321,29 @@ export default definePlugin(
   await expect(window.getByTestId("e2e-host-answer")).toHaveText("42", { timeout: 20_000 })
 })
 
-test("the plugins directory never leaks outside the throwaway home", async ({ launchApp }) => {
-  // Guards the guard: STARBASE_HOME must be what the protocol handler resolves
-  // against, or a test would serve — and a failing test could delete — the
-  // developer's real plugins.
-  const { home } = await launchApp({ configured: true, withRepo: true, sessions: [SESSION] })
-  const dir = await seedPlugin(home)
-  expect(dir.startsWith(home)).toBe(true)
-  await rm(dir, { recursive: true, force: true })
+test("a plugin is served from the throwaway home, not the developer's own", async ({
+  launchApp
+}) => {
+  // Not a tautology about `join(home, …)` — that only asserted the test's own
+  // arithmetic. This proves the RUNNING APP resolved `STARBASE_HOME`: the plugin
+  // exists only under the temp home, so a tab appearing at all means the
+  // protocol handler read from there rather than the developer's ~/starbase.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+  await seedPlugin(home, { id: "scoped-to-home" , manifest: manifest({ id: "scoped-to-home",
+    contributes: { tabs: [{ id: "scoped-to-home.main", label: "Scoped", when: "always" }] } }),
+    ui: UI_MODULE.replace(/e2e-tab/g, "scoped-to-home").replace(/"E2E"/g, '"Scoped"') })
+
+  await openSession(window)
+  await expect(window.getByRole("button", { name: "Scoped" })).toBeVisible({ timeout: 15_000 })
+
+  // And it goes away with the home, rather than lingering in a real one.
+  await rm(join(home, "starbase", "plugins", "scoped-to-home"), {
+    recursive: true,
+    force: true
+  })
+  await expect(window.getByRole("button", { name: "Scoped" })).toHaveCount(0, { timeout: 15_000 })
 })

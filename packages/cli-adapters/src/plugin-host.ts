@@ -83,12 +83,23 @@ interface Waiter {
 /** How many times a crashed host is respawned before it is left down. */
 const MAX_RESTARTS = 1
 
+/**
+ * How long a host must stay up before its crash budget is forgiven.
+ *
+ * Long enough that a crash-loop cannot launder itself clean between attempts,
+ * short enough that an operator who hit a bad path an hour ago is not still
+ * paying for it.
+ */
+const HEALTHY_UPTIME_MS = 60_000
+
 export class PluginHostRuntime {
   private process: HostProcess | null = null
   private ready = false
   private restarts = 0
   private downReason: string | null = null
   private nextId = 0
+  /** Pending "this host has been up long enough" timer. See HEALTHY_UPTIME_MS. */
+  private healthyTimer: ReturnType<typeof setTimeout> | undefined
   private readonly waiters = new Map<string, Waiter>()
   /** Plugins currently activated, so a restart can restore them. */
   private readonly activated = new Map<string, LoadedPlugin>()
@@ -142,6 +153,9 @@ export class PluginHostRuntime {
   private handleExit(): void {
     this.process = null
     this.ready = false
+    // The uptime it was accruing did not happen.
+    clearTimeout(this.healthyTimer)
+    this.healthyTimer = undefined
 
     // Every in-flight call dies with the process. Rejecting them explicitly is
     // the difference between a plugin command that reports a crash and one that
@@ -203,6 +217,14 @@ export class PluginHostRuntime {
     switch (message.kind) {
       case "ready": {
         this.ready = true
+        // A host that booted successfully has spent its debt. Without this
+        // `restarts` only ever went up — two crashes an hour apart killed the
+        // host permanently, when the policy comment describes a LOOP (crashing
+        // again immediately) as the thing worth giving up on.
+        clearTimeout(this.healthyTimer)
+        this.healthyTimer = setTimeout(() => {
+          this.restarts = 0
+        }, HEALTHY_UPTIME_MS)
         const waiting = this.readyWaiters
         this.readyWaiters = []
         for (const waiter of waiting) waiter.resolve()
@@ -438,6 +460,8 @@ export class PluginHostRuntime {
 
   /** Terminate the host. Called on quit; leaves no orphan Node process. */
   shutdown(): void {
+    clearTimeout(this.healthyTimer)
+    this.healthyTimer = undefined
     this.process?.kill()
     this.process = null
     this.ready = false

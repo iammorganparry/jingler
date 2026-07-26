@@ -1521,7 +1521,7 @@ export class StarbaseRpcs extends RpcGroup.make(
    * side of the command palette / keybinding path. `arg` is the command's opaque
    * argument; the result is whatever the plugin returned, unvalidated JSON.
    *
-   * Owned by the extension host (task #5) — stubbed to fail until it lands.
+   * Served by the extension host.
    */
   Rpc.make("Plugins.invoke", {
     success: Schema.Unknown,
@@ -1538,8 +1538,7 @@ export class StarbaseRpcs extends RpcGroup.make(
    * `Activated` / `ActivationFailed` lifecycle. One multiplexed stream for the
    * window, tagged by `pluginId` so the renderer fans it back out.
    *
-   * Owned by the extension host (task #5) — stubbed to an empty stream until it
-   * lands (the renderer can subscribe safely; nothing arrives yet).
+   * Served by the extension host.
    */
   Rpc.make("Plugins.events", {
     success: PluginEvent,
@@ -1593,7 +1592,7 @@ export class StarbaseRpcs extends RpcGroup.make(
    * operator; returns the granted session's METADATA, or null if declined. The
    * token itself never crosses this boundary — it stays in the host.
    *
-   * Owned by the extension host (task #5) — stubbed to fail until it lands.
+   * Served by the extension host.
    */
   Rpc.make("Plugins.authGrant", {
     success: Schema.NullOr(AuthSessionInfo),
@@ -1602,8 +1601,7 @@ export class StarbaseRpcs extends RpcGroup.make(
   }),
 
   /**
-   * Revoke a plugin's session with one provider. Owned by the extension host
-   * (task #5) — stubbed to fail until it lands.
+   * Revoke a plugin's session with one provider.
    */
   Rpc.make("Plugins.authRevoke", {
     error: PluginError,

@@ -74,8 +74,13 @@ export function useSession(): SessionSnapshot {
  * This plugin's persistent key/value store.
  *
  * Namespaced to the plugin and shared with its host half, so a value written
- * during `activate` is readable here. Survives restarts; the plugin never learns
- * where it lands on disk, which is what stops one plugin reaching another's keys.
+ * during `activate` is readable here. Survives restarts, and the plugin never
+ * learns where it lands on disk.
+ *
+ * That namespacing is bookkeeping, NOT a security boundary. Every plugin's host
+ * half shares one Node process, so a plugin determined to read another's keys
+ * can — see `docs/plugins/permissions-and-trust.md`. It keeps honest plugins
+ * from colliding; it does not contain a dishonest one.
  *
  * @example
  * ```ts

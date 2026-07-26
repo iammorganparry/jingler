@@ -44,14 +44,21 @@ export class PluginTabHost extends Component<Props, State> {
   }
 
   /**
-   * Clear the error when the operator switches back to the tab.
+   * Clear the error when the subtree beneath us is genuinely new.
    *
-   * Without this the card is sticky for the life of the mount: a plugin that
-   * failed once because a request timed out would stay broken until the app
-   * restarted, even after the plugin itself was fixed and hot-reloaded.
+   * Keyed on `children` identity, not `pluginId`. A hot reload gives the plugin
+   * a fresh module and a fresh element while the id stays the same — so the
+   * previous `prev.pluginId !== this.props.pluginId` test never fired for the
+   * one case the comment promised it covered, and a plugin that failed once
+   * showed its card until the app restarted however many times its author fixed
+   * and rebuilt it.
+   *
+   * Switching sessions or plugins re-renders with new children too, which is the
+   * other moment a stale error should go.
    */
   override componentDidUpdate(prev: Props): void {
-    if (prev.pluginId !== this.props.pluginId && this.state.message) {
+    if (this.state.message === null) return
+    if (prev.children !== this.props.children || prev.pluginId !== this.props.pluginId) {
       this.setState({ message: null })
     }
   }

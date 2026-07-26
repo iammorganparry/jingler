@@ -64,8 +64,12 @@ export interface SessionSnapshot {
  * ## Why the host owns the bytes
  *
  * The store is namespaced to the plugin and survives restarts, but the plugin
- * never sees where it lands on disk — that is the host's call, so a plugin
- * cannot reach another plugin's keys or scribble outside `~/starbase`. The same
+ * never sees where it lands on disk — that is the host's call, so honest plugins
+ * cannot collide and none needs to know the layout.
+ *
+ * Namespacing is not isolation: all host halves share one process, so this stops
+ * accidents rather than adversaries. `docs/plugins/permissions-and-trust.md` is
+ * explicit about which boundaries are real. The same
  * interface is handed to both halves ({@link HostContext.storage} and
  * {@link usePluginStorage}); a value written by the host half is readable by the
  * UI half and vice versa, because both resolve to the one store the host keeps.

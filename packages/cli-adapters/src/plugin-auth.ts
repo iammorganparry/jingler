@@ -285,9 +285,21 @@ export class PluginAuth extends Effect.Service<PluginAuth>()("@starbase/PluginAu
 
           const token = yield* provider.getToken(request.scopes)
           if (!token) return null
+
+          // Every field the SDK's `AuthSession` declares non-optional. Returning
+          // only accessToken/scopes handed plugins an object missing `id`,
+          // `providerId` and `grantedAt` while its type promised them — so
+          // `session.grantedAt` was `undefined` against a `string`.
+          const afterConsent = yield* readGrants
+          const granted = afterConsent.find((g) =>
+            sameGrant(g, request.pluginId, request.providerId)
+          )
           return {
+            id: `${request.pluginId}:${request.providerId}`,
+            providerId: request.providerId,
             accessToken: token.accessToken,
             scopes: request.scopes,
+            grantedAt: granted?.grantedAt ?? new Date().toISOString(),
             ...(token.account ? { account: token.account } : {})
           }
         })

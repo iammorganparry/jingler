@@ -305,8 +305,10 @@ export const handlePluginRequest = async (url: string): Promise<Response> => {
       status: 200,
       headers: {
         "content-type": "text/javascript",
-        // Shims are generated per launch and never change within one; letting
-        // the renderer cache them keeps a ten-plugin window to one fetch each.
+        // `no-cache` means revalidate, and this handler sends no validator, so
+        // every import re-fetches. That is fine — a shim is a few hundred bytes
+        // of generated text — but the previous comment claimed it collapsed ten
+        // plugins to one fetch each, which it did not.
         "cache-control": "no-cache"
       }
     })
