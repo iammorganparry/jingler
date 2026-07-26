@@ -143,16 +143,12 @@ export interface SessionConversationProps {
   /** Which edge the terminal dock attaches to — drives the content column's flow. */
   terminalDockSide?: DockSide
   /**
-   * Render the embedded browser-preview dock (desktop app's BrowserPreviewView).
+   * Render the preview dock (the desktop app's PreviewDockView).
    * Docked beside/below the tab body like the terminal dock; absent in stories.
    */
   renderBrowserDock?: (session: Session | null) => ReactNode
   /** Which edge the browser dock attaches to. */
   browserDockSide?: DockSide
-  /** Toggle the browser-preview pane (shows a control in the tab bar). */
-  onToggleBrowser?: () => void
-  /** Whether the browser-preview pane is currently open. */
-  browserActive?: boolean
   /** App version, shown in the sidebar footer. */
   version?: string
 }
@@ -245,8 +241,6 @@ export function SessionConversation(props: SessionConversationProps) {
             terminalDockSide={props.terminalDockSide}
             renderBrowserDock={props.renderBrowserDock}
             browserDockSide={props.browserDockSide}
-            onToggleBrowser={props.onToggleBrowser}
-            browserActive={props.browserActive}
           />
         )}
       </div>

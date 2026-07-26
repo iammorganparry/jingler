@@ -6,7 +6,6 @@ import {
   FileDiff,
   GitCompareArrows,
   GitPullRequest,
-  Globe,
   type LucideIcon,
   MessagesSquare,
   MoreHorizontal,
@@ -37,28 +36,22 @@ const ACTION_CLASS = "flex size-6 flex-none items-center justify-center rounded 
 function PaneActionsMenu({
   onToggleSplit,
   splitActive,
-  onToggleBrowser,
-  browserActive,
   onMovePaneLeft,
   onMovePaneRight
 }: {
   onToggleSplit?: () => void
   splitActive: boolean
-  onToggleBrowser?: () => void
-  browserActive: boolean
   onMovePaneLeft?: () => void
   onMovePaneRight?: () => void
 }) {
   const items: Array<{ label: string; icon: LucideIcon; active?: boolean; onSelect: () => void }> = []
   if (onToggleSplit)
     items.push({ label: "Split plan beside conversation", icon: PanelRight, active: splitActive, onSelect: onToggleSplit })
-  if (onToggleBrowser)
-    items.push({ label: "Browser preview", icon: Globe, active: browserActive, onSelect: onToggleBrowser })
   if (onMovePaneLeft) items.push({ label: "Move pane left", icon: ChevronLeft, onSelect: onMovePaneLeft })
   if (onMovePaneRight) items.push({ label: "Move pane right", icon: ChevronRight, onSelect: onMovePaneRight })
 
   // Nothing to collapse — render nothing rather than a button that opens onto an
-  // empty menu. A single-pane group with no plan and no browser hits this.
+  // empty menu. A single-pane group with no plan hits this.
   if (items.length === 0) return null
 
   return (
@@ -177,8 +170,6 @@ export function TabBar({
   pane,
   sessionTitle,
   chatSlot,
-  onToggleBrowser,
-  browserActive = false,
   onToggleSplit,
   splitActive = false,
   onClosePane,
@@ -225,10 +216,6 @@ export function TabBar({
    * pills would drag the RPC client into the component library.
    */
   chatSlot?: ReactNode
-  /** Toggle the embedded browser preview pane (desktop only; absent in stories). */
-  onToggleBrowser?: () => void
-  /** Whether the browser preview pane is currently open (highlights the toggle). */
-  browserActive?: boolean
   /**
    * Open Plan Review beside the transcript. Omitted — and so hidden — unless the
    * split is actually available: the session has a plan AND the conversation tab
@@ -431,8 +418,6 @@ export function TabBar({
           <PaneActionsMenu
             onToggleSplit={onToggleSplit}
             splitActive={splitActive}
-            onToggleBrowser={onToggleBrowser}
-            browserActive={browserActive}
             onMovePaneLeft={onMovePaneLeft}
             onMovePaneRight={onMovePaneRight}
           />
@@ -450,22 +435,6 @@ export function TabBar({
             )}
           >
             <PanelRight className="size-4" />
-          </button>
-        )}
-        {!collapseActions && onToggleBrowser && (
-          <button
-            type="button"
-            onClick={onToggleBrowser}
-            aria-label="Browser preview"
-            aria-pressed={browserActive}
-            data-testid="toggle-browser"
-            title="Toggle browser preview (⌃⇧B)"
-            className={cn(
-              "flex size-6 items-center justify-center rounded transition-colors hover:bg-hairline",
-              browserActive ? "text-blue" : "text-dim hover:text-text-bright"
-            )}
-          >
-            <Globe className="size-4" />
           </button>
         )}
         {!collapseActions && (onMovePaneLeft || onMovePaneRight) && (

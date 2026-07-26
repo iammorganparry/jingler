@@ -5,6 +5,8 @@
  * `StarbaseRpcs` group. Callers get plain, typed Promises back.
  */
 import type {
+  AssetPayload,
+  AssetStat,
   BackgroundTask,
   AdversarialReview,
   PlanningReadiness,
@@ -216,6 +218,25 @@ export const rpc = {
   sessionsDiff: (id: string): Promise<string> => run((c) => c.Sessions.diff({ id })),
   workspaceFiles: (repoPath: string): Promise<ReadonlyArray<string>> =>
     run((c) => c.Workspace.files({ repoPath })),
+  /**
+   * Read one asset out of a session's worktree. `path` is worktree-relative and
+   * is re-validated in main — the renderer never gets to say where on disk a
+   * read lands.
+   */
+  assetRead: (sessionId: string, path: string): Promise<AssetPayload> =>
+    run((c) => c.Asset.read({ sessionId, path })),
+  /** Kind + size for a candidate path, or null when there is nothing to show. */
+  assetStat: (sessionId: string, path: string): Promise<AssetStat | null> =>
+    run((c) => c.Asset.stat({ sessionId, path })),
+  assetReveal: (sessionId: string, path: string): Promise<void> =>
+    run((c) => c.Asset.reveal({ sessionId, path })),
+  /** Park Chromium's PDF viewer over `bounds`. Main resolves the path itself. */
+  assetOpenPdf: (
+    sessionId: string,
+    path: string,
+    bounds: { x: number; y: number; width: number; height: number }
+  ): Promise<void> => run((c) => c.Asset.openPdf({ sessionId, path, bounds })),
+  assetHidePdf: (): Promise<void> => run((c) => c.Asset.hidePdf()),
   workspaceRevertFile: (sessionId: string, path: string): Promise<void> =>
     run((c) => c.Workspace.revertFile({ sessionId, path })),
   workspaceRevertLines: (
@@ -588,6 +609,9 @@ export const rpc = {
     run((c) => c.BrowserPreview.navigate({ url })),
   /** Reload the current preview page. */
   browserPreviewReload: (): Promise<void> => run((c) => c.BrowserPreview.reload()),
+  /** Hide the native view for a tab switch, keeping its page and history alive. */
+  browserPreviewSetVisible: (visible: boolean): Promise<void> =>
+    run((c) => c.BrowserPreview.setVisible({ visible })),
   /** Hide + destroy the preview view (pane closed / session switched). */
   browserPreviewClose: (): Promise<void> => run((c) => c.BrowserPreview.close()),
 

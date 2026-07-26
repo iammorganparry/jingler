@@ -17,3 +17,25 @@ for the full architecture guide; this file is the short list of standing rules.
 
 - **Never hardcode a colour in a component** — use the `--sb-*` theme tokens
   (see the Theming section of `CLAUDE.md`).
+
+- **When renderer state starts adding up, model it as an XState machine.** A
+  couple of independent `useState`s is fine. Reach for a machine in
+  `apps/desktop/src/renderer/*-machine.ts` as soon as any of these is true:
+
+  - three or more pieces of state that have to change **together** (one intent
+    updating several setters — `openAsset` showing the dock *and* appending a
+    tab *and* focusing it);
+  - a value that is really a **mode** rather than data (`visible`, `loading`,
+    `editing`) — that is a state, not a boolean;
+  - state that must be **mirrored somewhere else** on every change (localStorage,
+    RPC, the main process) — persistence belongs in a transition action, not
+    duplicated next to each setter;
+  - any async transition — model it as an invoked `fromPromise`/`fromCallback`
+    actor rather than a data-fetching `useEffect`.
+
+  The pattern is a `*-machine.ts` holding every rule plus a thin `use-*.ts` hook
+  that calls `useMachine` and maps the snapshot to props (see
+  `preview-dock-machine.ts` / `use-preview-dock.ts`, and `app-machine.ts`,
+  `auth-machine.ts`, `conversation-machine.ts`). Machines get a `*.test.ts`
+  driving them with `createActor` under the node environment — no rendering
+  needed, which is most of the point.

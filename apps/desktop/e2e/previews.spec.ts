@@ -80,9 +80,10 @@ test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", asyn
 
   // Browser pane: open it from the tab-bar control, then navigate. The
   // WebContentsView is out-of-DOM, so we assert on the address bar (in DOM).
-  // `exact` avoids matching the pane's "Hide browser preview" button, and we open
+  // The toggle lives in the WINDOW TITLE BAR now, not a pane's tab bar; `exact`
+  // avoids matching the dock's own "Hide preview" button, and we open
   // only if it isn't already (its visibility persists in localStorage across runs).
-  const toggle = window.getByRole("button", { name: "Browser preview", exact: true })
+  const toggle = window.getByRole("button", { name: "Preview", exact: true })
   if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click()
   const url = window.getByLabel("Preview URL")
   await expect(url).toBeVisible()

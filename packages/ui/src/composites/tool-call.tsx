@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { StatusDot } from "../components/status-dot.js"
 import { FileIcon } from "../components/file-icon.js"
+import { useOpenPath } from "../asset/open-asset-context.js"
 
 export type ToolCallStatus = "success" | "running" | "error"
 
@@ -43,16 +44,59 @@ const splitPath = (path: string): { dir: string; base: string } => {
     : { dir: path.slice(0, cut), base: path.slice(cut + 1) }
 }
 
-/** The target as a path: a directory that gives way, and a filename that never does. */
+/**
+ * The target as a path: a directory that gives way, and a filename that never does.
+ *
+ * When the file is one we can show, the filename becomes a button that opens it
+ * in the Preview dock. This is the highest-signal of the three click targets —
+ * `filePath` is structured data straight off the tool call, so there is no
+ * guessing involved, and a `Write` card is literally the moment the agent
+ * created the thing you want to look at.
+ *
+ * The DIRECTORY stays inert on purpose. It is the part that truncates, so it is
+ * routinely half a path, and making a fragment clickable would be a lie.
+ */
 function PathTarget({ path }: { path: string }) {
   const { dir, base } = splitPath(path)
+  const open = useOpenPath(path)
+  // `flex-none` so the directory is what shrinks; the filename is the point of
+  // the card. It still truncates if it alone can't fit — better a cut filename
+  // than one pushed out of the row entirely.
+  const nameClass = "max-w-full flex-none truncate text-text-bright"
   return (
     <span className="flex min-w-0 flex-1 items-baseline">
       {dir && <span className="truncate text-dim">{dir}/</span>}
-      {/* `flex-none` so the directory is what shrinks; the filename is the point
-          of the card. It still truncates if it alone can't fit — better a cut
-          filename than one pushed out of the row entirely. */}
-      <span className="max-w-full flex-none truncate text-text-bright">{base}</span>
+      {open ? (
+        // A span with `role="button"`, NOT a real <button>. On an expandable
+        // card the whole header already IS a <button>, and a nested one is
+        // invalid HTML that browsers fix by hoisting it out of its parent —
+        // the filename would jump out of the row it belongs to.
+        <span
+          role="button"
+          tabIndex={0}
+          title={`Open ${base}`}
+          onClick={(e) => {
+            // The header is a toggle; without this, opening the file would also
+            // collapse the card underneath it.
+            e.stopPropagation()
+            open()
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" && e.key !== " ") return
+            e.preventDefault()
+            e.stopPropagation()
+            open()
+          }}
+          className={cn(
+            nameClass,
+            "cursor-pointer rounded-[3px] underline-offset-2 outline-none hover:text-blue hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          )}
+        >
+          {base}
+        </span>
+      ) : (
+        <span className={nameClass}>{base}</span>
+      )}
     </span>
   )
 }

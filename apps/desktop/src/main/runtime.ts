@@ -9,6 +9,7 @@
 import {
   AdversarialPlanService,
   AgentRunner,
+  AssetService,
   AuthService,
   ConfigService,
   ContextManager,
@@ -37,7 +38,7 @@ import {
 import { NodeContext } from "@effect/platform-node"
 import { Layer, ManagedRuntime } from "effect"
 import { AppPathsLive } from "./app-paths.js"
-import { BrowserPreviewServiceLive } from "./browser-preview.js"
+import { PreviewViewServiceLive } from "./preview-view.js"
 import { DialogServiceLive } from "./dialog.js"
 import { RpcServerLive } from "./rpc.js"
 import { PlaintextSecretStoreLive, SecretStoreLive } from "./secret-store.js"
@@ -84,7 +85,10 @@ const AppLayer = RpcServerLive.pipe(
   Layer.provideMerge(DiscoveryService.Default),
   // AuthService requires SecretStore, satisfied by SecretStoreLive (merged below).
   Layer.provide(AuthService.Default),
-  Layer.provide(WorkspaceService.Default),
+  // Merged into one stage to stay inside `pipe`'s 20-argument limit. Neither
+  // depends on the other — both are leaf FS/git consumers — so the composition
+  // is unchanged by pairing them.
+  Layer.provide(Layer.mergeAll(WorkspaceService.Default, AssetService.Default)),
   // Before SessionStore so the stores below satisfy the daemon's requirements —
   // a stage is provided-to by everything that follows it.
   Layer.provide(SessionStore.Default),
@@ -125,7 +129,7 @@ const AppLayer = RpcServerLive.pipe(
   Layer.provide(GitService.Default),
   Layer.provide(HarnessCliAdapterLive),
   Layer.provide(DialogServiceLive),
-  Layer.provide(BrowserPreviewServiceLive),
+  Layer.provide(PreviewViewServiceLive),
   // provideMerge so ThemeService/ConfigService stay callable from the runtime
   // directly (boot theme), not only from inside an RPC handler.
   Layer.provideMerge(AppPathsLive),

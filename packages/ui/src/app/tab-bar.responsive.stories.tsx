@@ -38,8 +38,6 @@ const loaded = {
   status: { label: "Running", tone: "yellow" as const, detail: "Running pnpm test -- auth" },
   onToggleSplit: noop,
   splitActive: false,
-  onToggleBrowser: noop,
-  browserActive: false,
   onClosePane: noop,
   onMovePaneLeft: noop,
   onMovePaneRight: noop

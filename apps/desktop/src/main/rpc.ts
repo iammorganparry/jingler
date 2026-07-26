@@ -15,6 +15,7 @@
 import {
   AdversarialPlanService,
   AgentRunner,
+  AssetService,
   AuthService,
   ConfigService,
   claudeTitleGenerator,
@@ -73,10 +74,12 @@ import {
   resolveOrchestrator,
   ReviewError,
   reviewModelFor,
+  SessionNotFoundError,
   TASK_KINDS,
   userMessage
 } from "@starbase/core"
 import type {
+  BrowserBounds,
   AdversarialReview,
   Attachment,
   CliKind,
@@ -114,7 +117,7 @@ import { Effect, Layer, Mailbox, Option, Runtime, Stream } from "effect"
 import type { WebContents } from "electron"
 import { app, BrowserWindow, ipcMain, shell } from "electron"
 import { showNotification, shouldNotify } from "./notifications.js"
-import { BrowserPreviewService } from "./browser-preview.js"
+import { PreviewViewService } from "./preview-view.js"
 import { DialogService } from "./dialog.js"
 
 /** The single IPC channel both directions of the RPC transport ride on. */
@@ -453,6 +456,68 @@ export const githubIssue = (sessionId: string) =>
     const session = yield* resolveSession(sessionId)
     if (!session?.worktreePath || session.issueNumber == null) return null
     return yield* GhService.issueView(session.worktreePath, session.issueNumber)
+  })
+
+/**
+ * Resolve a session's worktree for the `Asset.*` handlers, or fail.
+ *
+ * Deliberately NOT best-effort like `resolveSession`: an asset read that can't
+ * find a worktree must not silently fall back to anything — the worktree root
+ * IS the sandbox, so "no worktree" has to stop the read rather than widen it.
+ */
+const assetWorktree = (sessionId: string) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(sessionId).pipe(
+      Effect.catchAll(() => new SessionNotFoundError({ sessionId }))
+    )
+    if (!session.worktreePath) return yield* new SessionNotFoundError({ sessionId })
+    return session.worktreePath
+  })
+
+/** `Asset.read` handler — one asset's contents, sandboxed to the session worktree. */
+export const assetRead = (input: { sessionId: string; path: string }) =>
+  Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
+    AssetService.read(worktree, input.path)
+  )
+
+/** `Asset.stat` handler — kind + size, or null. Never throws for a miss. */
+export const assetStat = (input: { sessionId: string; path: string }) =>
+  Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
+    AssetService.stat(worktree, input.path)
+  )
+
+/**
+ * `Asset.reveal` handler — show the file in the OS file manager.
+ *
+ * The path is re-resolved through `AssetService` rather than taken from the
+ * renderer's `absolutePath`, so revealing is held to the same containment rule
+ * as reading. A renderer holding a stale or doctored payload can't use this to
+ * point Finder at an arbitrary file.
+ */
+export const assetReveal = (input: { sessionId: string; path: string }) =>
+  Effect.gen(function* () {
+    const worktree = yield* assetWorktree(input.sessionId)
+    const absolutePath = yield* AssetService.revealPath(worktree, input.path)
+    yield* Effect.sync(() => shell.showItemInFolder(absolutePath))
+  })
+
+/**
+ * `Asset.openPdf` handler — park Chromium's PDF viewer over the dock's rect.
+ *
+ * The absolute path is derived HERE, from the session's own worktree, rather
+ * than accepted from the renderer. That keeps one containment check for both
+ * doors into the filesystem: a renderer that could pass its own path would make
+ * the native viewer a way around the check that guards `Asset.read`.
+ */
+export const assetOpenPdf = (input: {
+  sessionId: string
+  path: string
+  bounds: BrowserBounds
+}) =>
+  Effect.gen(function* () {
+    const worktree = yield* assetWorktree(input.sessionId)
+    const absolutePath = yield* AssetService.revealPath(worktree, input.path)
+    yield* Effect.flatMap(PreviewViewService, (v) => v.openFile(absolutePath, input.bounds))
   })
 
 /**
@@ -2050,13 +2115,21 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   // Browser preview — a native WebContentsView over a localhost dev server,
   // driven from the renderer's preview pane (bounds streamed to stay aligned).
   "BrowserPreview.open": ({ url, bounds }) =>
-    Effect.flatMap(BrowserPreviewService, (b) => b.open(url, bounds)),
+    Effect.flatMap(PreviewViewService, (b) => b.openBrowser(url, bounds)),
   "BrowserPreview.setBounds": ({ bounds }) =>
-    Effect.flatMap(BrowserPreviewService, (b) => b.setBounds(bounds)),
+    Effect.flatMap(PreviewViewService, (b) => b.setBounds(bounds)),
   "BrowserPreview.navigate": ({ url }) =>
-    Effect.flatMap(BrowserPreviewService, (b) => b.navigate(url)),
-  "BrowserPreview.reload": () => Effect.flatMap(BrowserPreviewService, (b) => b.reload()),
-  "BrowserPreview.close": () => Effect.flatMap(BrowserPreviewService, (b) => b.close()),
+    Effect.flatMap(PreviewViewService, (b) => b.navigate(url)),
+  "BrowserPreview.reload": () => Effect.flatMap(PreviewViewService, (b) => b.reload()),
+  "BrowserPreview.setVisible": ({ visible }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.setVisible(visible)),
+  "BrowserPreview.close": () => Effect.flatMap(PreviewViewService, (b) => b.close()),
+
+  "Asset.read": (input) => assetRead(input),
+  "Asset.stat": (input) => assetStat(input),
+  "Asset.reveal": (input) => assetReveal(input),
+  "Asset.openPdf": (input) => assetOpenPdf(input),
+  "Asset.hidePdf": () => Effect.flatMap(PreviewViewService, (b) => b.hideFile()),
 
   // Auth — the sign-in wall. Delegates to AuthService, which bridges the OS
   // keychain (SecretStore) and the BetterAuth backend.

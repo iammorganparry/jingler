@@ -37,8 +37,8 @@ import { PullRequestPane } from "./pull-request-pane.js"
 import { ReviewPane } from "./review-pane.js"
 import { TerminalDockView } from "./terminal-dock-view.js"
 import { useTerminalDock } from "./use-terminal-dock.js"
-import { BrowserPreviewView } from "./browser-preview-view.js"
-import { useBrowserPreview } from "./use-browser-preview.js"
+import { PreviewDockView } from "./preview-dock-view.js"
+import { usePreviewDock } from "./use-preview-dock.js"
 import { useSessionActivities } from "./session-activity.js"
 import { useSessionDiffs } from "./diff-presence.js"
 import { usePlanSessions } from "./plan-presence.js"
@@ -118,7 +118,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   const liveDiff = useSessionDiffs()
   const planSessions = usePlanSessions()
   const termDock = useTerminalDock()
-  const browserDock = useBrowserPreview()
+  const browserDock = usePreviewDock()
   const qc = useQueryClient()
   const { activeId: activeThemeId, catalog: themeCatalog } = useThemeCatalog()
   const connector = useConnectorCenter()
@@ -699,6 +699,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
           onRestore={restoreSession}
           onDelete={deleteSession}
           onInitialPromptConsumed={consumeInitialPrompt}
+          onOpenAsset={browserDock.openAsset}
           paneFocused={ctx.paneFocused ?? true}
         />
       )}
@@ -743,15 +744,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       browserDockSide={browserDock.side}
       browserActive={browserDock.visible}
       onToggleBrowser={browserDock.toggle}
-      renderBrowserDock={(session) => (
-        <BrowserPreviewView
-          session={session}
-          visible={browserDock.visible}
-          onToggle={browserDock.toggle}
-          side={browserDock.side}
-          onSideChange={browserDock.setSide}
-        />
-      )}
+      renderBrowserDock={(session) => <PreviewDockView session={session} dock={browserDock} />}
       version={__APP_VERSION__}
     />
     <ConfirmDialog

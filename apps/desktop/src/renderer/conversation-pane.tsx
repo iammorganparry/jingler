@@ -5,11 +5,12 @@
  * lives here — above the Conversation ↔ Plan Review view switch — so switching to
  * the Plan tab does NOT unmount the agent stream (which would abort a parked plan).
  */
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import type { Session } from "@starbase/core"
 import { agentChildren, agentPath } from "@starbase/core"
 import {
+  OpenAssetProvider,
   SubagentTabBar,
   BackgroundTaskDock,
   BackgroundTaskOutput,
@@ -40,6 +41,7 @@ export function ConversationPane({
   onRestore,
   onDelete,
   onInitialPromptConsumed,
+  onOpenAsset,
   paneFocused = true
 }: {
   session: Session
@@ -66,6 +68,12 @@ export function ConversationPane({
   /** Notify once the composer has consumed the one-shot initial prompt. */
   onInitialPromptConsumed?: (sessionId: string) => void
   /**
+   * Open a worktree file in the Preview dock. Supplied by the app; when it is
+   * absent every path in the transcript stays inert text, which is exactly what
+   * Storybook and the component tests want.
+   */
+  onOpenAsset?: (sessionId: string, path: string) => void
+  /**
    * Whether this is the pane the operator is looking at. Only that pane's
    * composer takes the caret when the conversation opens.
    */
@@ -75,6 +83,15 @@ export function ConversationPane({
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
   const convo = useConversation(session, activeChat.id)
+
+  // Everything the transcript needs to turn a path into a link. `convo.files` is
+  // the worktree's tracked-file list, already fetched for the composer's `@`
+  // menu — reusing it is what keeps the false-positive gate free.
+  const knownFiles = useMemo(() => new Set(convo.files), [convo.files])
+  const openAsset = useCallback(
+    (path: string) => onOpenAsset?.(session.id, path),
+    [onOpenAsset, session.id]
+  )
 
   // Declared unconditionally (hook order) — the plan column only reads it in the
   // `split` view, but the `plan` view returns early above.
@@ -347,9 +364,11 @@ export function ConversationPane({
 
   if (view === "plan") {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        {planReview}
-      </div>
+      <OpenAssetProvider open={openAsset} knownFiles={knownFiles}>
+        <div className="flex min-h-0 flex-1 flex-col">
+          {planReview}
+        </div>
+      </OpenAssetProvider>
     )
   }
 
@@ -359,12 +378,13 @@ export function ConversationPane({
   // either way — the actor lives in the registry, not this pane, so swapping the
   // view never aborts the run.
   return (
-    // `min-w-0` is load-bearing on BOTH rows, not decoration. A flex item
-    // defaults to `min-width: auto`, which refuses to shrink below its content —
-    // so a wide child (the sub-agent tab strip, whose cells are `flex-none` and
-    // `whitespace-nowrap`) pushes this row past the viewport instead of letting
-    // the strip's own `overflow-x-auto` take over. The inner column already had
-    // it; this outer row did not, so the constraint stopped one level short.
+    <OpenAssetProvider open={openAsset} knownFiles={knownFiles}>
+    {/* `min-w-0` is load-bearing on BOTH rows, not decoration. A flex item
+        defaults to `min-width: auto`, which refuses to shrink below its content —
+        so a wide child (the sub-agent tab strip, whose cells are `flex-none` and
+        `whitespace-nowrap`) pushes this row past the viewport instead of letting
+        the strip's own `overflow-x-auto` take over. The inner column already had
+        it; this outer row did not, so the constraint stopped one level short. */}
     <div className="flex min-h-0 min-w-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {barAgents.length > 0 && (
@@ -511,5 +531,6 @@ export function ConversationPane({
         </>
       )}
     </div>
+    </OpenAssetProvider>
   )
 }

@@ -1021,11 +1021,12 @@ test("a running adversarial review reports its phase and appears in the agent ta
   })
   await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
 
-  // The browser preview docks over the right rail, covering the review button.
+  // The preview dock covers the right rail, hiding the review button.
   // Collapse it only IF it's open: its visibility persists in localStorage across
   // runs, so an unconditional toggle opens it whenever the last run left it shut.
-  // `exact` also matters — otherwise this matches "Hide browser preview" too.
-  const preview = window.getByRole("button", { name: "Browser preview", exact: true })
+  // `exact` also matters — otherwise this matches "Hide preview" too.
+  // The control is in the window title bar now, not this pane's tab bar.
+  const preview = window.getByRole("button", { name: "Preview", exact: true })
   if ((await preview.getAttribute("aria-pressed")) === "true") await preview.click()
 
   await window.getByRole("button", { name: "Pull Request" }).click()

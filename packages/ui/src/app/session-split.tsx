@@ -51,8 +51,6 @@ export interface SessionSplitProps {
   terminalDockSide?: DockSide
   renderBrowserDock?: (session: Session | null) => ReactNode
   browserDockSide?: DockSide
-  onToggleBrowser?: () => void
-  browserActive?: boolean
 }
 
 /**
@@ -98,8 +96,6 @@ export function SessionSplit(props: SessionSplitProps) {
         renderIssue={props.renderIssue}
         // The docks are mounted ONCE below, outside the pane loop, so the toggle
         // is app-level and every pane's copy drives the same dock.
-        onToggleBrowser={props.onToggleBrowser}
-        browserActive={props.browserActive}
         // No close control in a group of one: there is nothing to close back to,
         // so it would only be a way to blank the app.
         onClosePane={single || !props.onClosePane ? undefined : () => props.onClosePane?.(index)}

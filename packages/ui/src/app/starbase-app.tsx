@@ -30,6 +30,7 @@ import type {
 } from "@starbase/core"
 import type { DockSide } from "./terminal-panel.js"
 import { AppShell } from "./app-shell.js"
+import { PreviewToggleButton } from "./preview-dock.js"
 import { NewSessionDialog } from "../composites/new-session-dialog.js"
 import { UsageModal } from "../composites/usage-modal.js"
 import { SettingsView } from "../composites/settings-view.js"
@@ -166,13 +167,17 @@ export interface StarbaseAppProps {
   renderTerminalDock?: (session: Session) => ReactNode
   /** Which edge the terminal dock attaches to (drives the content column's flow). */
   terminalDockSide?: DockSide
-  /** Render the embedded browser-preview dock (desktop app's BrowserPreviewView). */
+  /** Render the preview dock (the desktop app's PreviewDockView). */
   renderBrowserDock?: (session: Session | null) => ReactNode
-  /** Which edge the browser dock attaches to. */
+  /** Which edge the preview dock attaches to. */
   browserDockSide?: DockSide
-  /** Toggle the browser-preview pane (adds a control to the tab bar). */
+  /**
+   * Toggle the preview dock. Rendered in the WINDOW TITLE BAR rather than in a
+   * pane's tab bar: there is one dock and one native browser view for the whole
+   * app, and a copy of the control in each pane implied one per pane.
+   */
   onToggleBrowser?: () => void
-  /** Whether the browser-preview pane is currently open. */
+  /** Whether the preview dock is currently open (highlights the toggle). */
   browserActive?: boolean
   activeSessionId?: string | null
   /**
@@ -560,7 +565,14 @@ export function StarbaseApp({
   return (
     // No layout picker in the title bar any more: the shape of the split is a
     // consequence of what you dragged where, not a mode you pick up front.
-    <AppShell title="Starbase">
+    <AppShell
+      title="Starbase"
+      actions={
+        onToggleBrowser ? (
+          <PreviewToggleButton active={browserActive ?? false} onClick={onToggleBrowser} />
+        ) : undefined
+      }
+    >
       <SessionConversation
         sessions={sessions}
         clis={clis}
@@ -664,8 +676,6 @@ export function StarbaseApp({
         terminalDockSide={terminalDockSide}
         renderBrowserDock={renderBrowserDock}
         browserDockSide={browserDockSide}
-        onToggleBrowser={onToggleBrowser}
-        browserActive={browserActive}
         version={version}
       />
       {onCreateSession && (

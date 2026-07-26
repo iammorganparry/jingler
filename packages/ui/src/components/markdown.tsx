@@ -1,10 +1,12 @@
-import { isValidElement, useMemo, type ReactNode } from "react"
-import { Streamdown, type AllowedTags, type MathPlugin } from "streamdown"
+import { createContext, isValidElement, useContext, useMemo, type ReactNode } from "react"
+import { Streamdown, defaultUrlTransform, type AllowedTags, type MathPlugin, type UrlTransform } from "streamdown"
 import rehypeKatex from "rehype-katex"
 import remarkMath from "remark-math"
 import { cn } from "../lib/cn.js"
 import { DiffPeek } from "./diff-peek.js"
 import { HtmlPreview } from "./html-preview.js"
+import { useOpenAsset, useOpenPath } from "../asset/open-asset-context.js"
+import { resolveOpenablePath } from "../asset/path-detect.js"
 
 /**
  * Math support: `remark-math` parses `$…$` / `$$…$$` and `rehype-katex` renders
@@ -65,6 +67,16 @@ const ALLOWED_TAGS: AllowedTags = {
  * — resetting `HtmlPreview`'s Code/Preview toggle whenever the transcript
  * re-renders (e.g. the virtualizer re-measuring on a height change).
  */
+/**
+ * True inside a fenced block.
+ *
+ * `MarkdownCode` needs to know, and cannot tell from its own props: a fence with
+ * NO language carries no `language-…` class, so it is indistinguishable from an
+ * inline span. Without this, a fence whose entire body is a path (agents write
+ * those constantly) turned into one giant link.
+ */
+const InsideFence = createContext(false)
+
 function MarkdownPre({ children }: { children?: ReactNode }) {
   const code = isValidElement<{ className?: string; children?: unknown }>(children) ? children : null
   const lang = /language-(\w+)/.exec(code?.props.className ?? "")?.[1]
@@ -83,10 +95,101 @@ function MarkdownPre({ children }: { children?: ReactNode }) {
     return <HtmlPreview code={text} />
   }
   // Non-diff code blocks: plain, styled by `.sb-md pre` (no chrome).
-  return <pre>{children}</pre>
+  return (
+    <InsideFence.Provider value={true}>
+      <pre>{children}</pre>
+    </InsideFence.Provider>
+  )
 }
 
-const COMPONENTS = { pre: MarkdownPre }
+/**
+ * An inline `code` span that names a real file becomes a link into the Preview
+ * dock; everything else renders exactly as it always did.
+ *
+ * The gate is `useOpenPath`, which requires the token to be in the session's
+ * worktree — see `path-detect.ts` for why shape alone is not enough. With no
+ * `OpenAssetProvider` above it (Storybook, component tests) this is a plain
+ * `<code>`, unchanged.
+ *
+ * Module-scope for the same reason `MarkdownPre` is: Streamdown re-runs its
+ * pipeline on every render, so an inline closure would be a new component TYPE
+ * each time and React would unmount and remount every code span in the message.
+ */
+function MarkdownCode({ children, ...rest }: { children?: ReactNode; className?: string }) {
+  // Only bare inline spans are candidates: a fenced block's body is not a path,
+  // however much of it happens to look like one.
+  const fenced = useContext(InsideFence)
+  const text = typeof children === "string" ? children : null
+  const open = useOpenPath(fenced || rest.className ? null : text)
+  if (!open || text === null) return <code {...rest}>{children}</code>
+  return (
+    <button type="button" onClick={open} title={`Open ${text}`} className="sb-md-path">
+      <code {...rest}>{children}</code>
+    </button>
+  )
+}
+
+
+/**
+ * A markdown link whose target is a file in this worktree opens in the Preview
+ * dock; every other link renders as Streamdown's own anchor.
+ *
+ * ## Why this has to be a component override
+ *
+ * Streamdown's link component renders a `<button>`, not an `<a>`, whenever
+ * link-safety is on — the href lives in props and never reaches the DOM. So
+ * intercepting clicks on the rendered output cannot work: by then the path is
+ * gone. The component layer is the only place the href still exists.
+ *
+ * ## What this costs, deliberately
+ *
+ * Streamdown's built-in "are you sure?" modal for external links is not
+ * reproduced here; an external link is rendered as a plain
+ * `target="_blank" rel="noreferrer"` anchor. Reproducing the modal would mean
+ * duplicating the library's internals — including its context shape — and that
+ * duplication silently rotting on the next upgrade is a worse failure than the
+ * one it prevents. Hardening is UNAFFECTED either way: `rehype-harden` runs in
+ * the rehype pipeline, long before any component sees an href, which is why the
+ * `javascript:` test still passes.
+ *
+ * `data-streamdown="link"` is kept because a test asserts it — dropping it once
+ * already made a real external link stop reading as one.
+ */
+function MarkdownAnchor({
+  href,
+  children,
+  className,
+  node: _node,
+  ...rest
+}: {
+  href?: string
+  children?: ReactNode
+  className?: string
+  node?: unknown
+}) {
+  const open = useOpenPath(href)
+  if (open) {
+    return (
+      <button type="button" onClick={open} title={`Open ${href}`} className="sb-md-path">
+        {children}
+      </button>
+    )
+  }
+  return (
+    <a
+      className={cn("wrap-anywhere font-medium underline", className)}
+      data-streamdown="link"
+      href={href}
+      rel="noreferrer"
+      target="_blank"
+      {...rest}
+    >
+      {children}
+    </a>
+  )
+}
+
+const COMPONENTS = { pre: MarkdownPre, code: MarkdownCode, a: MarkdownAnchor }
 
 /**
  * Unwrap no-op `<a href="#">…</a>` anchors.
@@ -107,6 +210,31 @@ const NO_OP_ANCHOR = /<a\s(?:[^>]*\s)?href=(["'])#\1(?:\s[^>]*)?>([\s\S]*?)<\/a>
 const unwrapNoOpAnchors = (md: string): string => md.replace(NO_OP_ANCHOR, "$2")
 
 /**
+ * Keep the href on a markdown link that points at a worktree file.
+ *
+ * Streamdown's hardening drops a RELATIVE href outright and renders the link as
+ * an inert `<button>` — so by the time any component sees it, the path is gone
+ * and there is nothing left to intercept. `urlTransform` is the one seam that
+ * runs before that, so this is where a link like `./docs/spec.md` has to be
+ * rescued.
+ *
+ * Everything else is handed straight to `defaultUrlTransform`. That is the point:
+ * the ONLY urls this waves through are ones already proven to name a file in
+ * this session's worktree, so `javascript:` and friends are still hardened
+ * exactly as before.
+ */
+const useAssetUrlTransform = (): UrlTransform => {
+  const ctx = useOpenAsset()
+  return useMemo<UrlTransform>(() => {
+    if (!ctx) return defaultUrlTransform
+    return (url, key, node) =>
+      key === "href" && resolveOpenablePath(url, ctx.knownFiles) !== null
+        ? url
+        : defaultUrlTransform(url, key, node)
+  }, [ctx])
+}
+
+/**
  * Renders agent markdown as prose via `streamdown` — headings, bold, lists,
  * inline/blocked code, tables, etc. `parseIncompleteMarkdown` makes it safe to
  * render a half-streamed message (unclosed fences/bold don't flash broken).
@@ -117,6 +245,7 @@ const unwrapNoOpAnchors = (md: string): string => md.replace(NO_OP_ANCHOR, "$2")
  */
 export function Markdown({ children, className }: { children: string; className?: string }) {
   const source = useMemo(() => unwrapNoOpAnchors(children), [children])
+  const urlTransform = useAssetUrlTransform()
   return (
     <div className={cn("sb-md text-[14.5px] leading-[1.65] text-text-body", className)}>
       <Streamdown
@@ -124,6 +253,7 @@ export function Markdown({ children, className }: { children: string; className?
         plugins={PLUGINS}
         allowedTags={ALLOWED_TAGS}
         shikiTheme={["one-dark-pro", "one-dark-pro"]}
+        urlTransform={urlTransform}
         components={COMPONENTS}
       >
         {source}

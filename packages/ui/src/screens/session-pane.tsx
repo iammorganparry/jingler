@@ -86,14 +86,6 @@ export interface SessionPaneProps {
   /** Render the Issue tab — the rich linked-issue view (shown when one is linked). */
   renderIssue?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /**
-   * Toggle the browser-preview pane. App-level, not pane-level: the dock itself is
-   * mounted once outside the grid, so every pane's copy of this control drives the
-   * same one.
-   */
-  onToggleBrowser?: () => void
-  /** Whether the browser-preview pane is currently open. */
-  browserActive?: boolean
-  /**
    * This pane's place in the split, for the tab bar's identity chip. Absent in a
    * group of one — there, the pane IS the session and the chip would only label
    * the single thing on screen.
@@ -243,8 +235,6 @@ function SessionPaneBody(props: SessionPaneProps) {
         pane={
           props.pane ? { ...props.pane, title: active.title || UNTITLED_SESSION } : undefined
         }
-        onToggleBrowser={props.onToggleBrowser}
-        browserActive={props.browserActive}
         onToggleSplit={splitAvailable ? () => setSplit((v) => !v) : undefined}
         splitActive={splitOpen}
         onClosePane={props.onClosePane}

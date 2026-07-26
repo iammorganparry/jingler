@@ -115,6 +115,13 @@ export * from "./diff/diff-hunk.js"
 export * from "./diff/parse-diff-hunk.js"
 export * from "./diff/review-thread-hunk.js"
 
+// Asset viewer (Preview dock)
+export * from "./asset/csv-parse.js"
+export * from "./asset/csv-table.js"
+export * from "./asset/asset-view.js"
+export * from "./asset/path-detect.js"
+export * from "./asset/open-asset-context.js"
+
 // App compositions
 export * from "./app/title-bar.js"
 export * from "./app/tab-bar.js"
@@ -125,7 +132,7 @@ export * from "./app/session-sidebar.js"
 export * from "./app/conversation-view.js"
 export * from "./app/diff-panel.js"
 export * from "./app/terminal-panel.js"
-export * from "./app/browser-preview.js"
+export * from "./app/preview-dock.js"
 export * from "./app/app-shell.js"
 export * from "./app/starbase-app.js"
 
