@@ -404,10 +404,20 @@ Add the existing limiter to the refund route and verify its rejection path.`
       if (spec.prompt.includes("[[held-subagents]]")) {
         const first = `toolu_a_${sessionId}`
         const second = `toolu_b_${sessionId}`
+        // The steered text, handed to the event loop below rather than emitted here.
+        //
+        // A steer handler MUST NOT call `emit`: the runner serializes both behind one
+        // semaphore (`agent-runner.ts`, `turnMutation`), so emitting while the steer
+        // holds the permit deadlocks — the message hangs on "Sending" and the reply
+        // never renders. The real adapters don't either; they hand the harness the
+        // text and its answer comes back through the stream a beat later. This models
+        // that: the handle only accepts, and the window emits the acknowledgement.
+        let pendingSteer: string | null = null
+        let steered = false
         if (registerTurnSteer !== undefined) {
-          yield* registerTurnSteer(async (text) => {
-            await Effect.runPromise(emit({ _tag: "Assistant", text: `Noted: ${text}` }))
-            return "accepted"
+          yield* registerTurnSteer((text) => {
+            pendingSteer = text
+            return Promise.resolve("accepted" as const)
           })
         }
         for (const [id, description] of [[first, "Survey the tab bar"], [second, "Audit the theme tokens"]] as const) {
@@ -425,7 +435,24 @@ Add the existing limiter to the refund route and verify its rejection path.`
         // just AFTER the only boundary, replays as a fresh turn after `Done`, and the
         // steer never renders. A boundary every 300ms across the window means a steer
         // sent at any point in it is flushed by the next one.
-        for (let tick = 0; tick < 8; tick++) {
+        //
+        // The window's LENGTH is the other half of that race. Eight ticks is 2.4s, and
+        // the spec has to see four elements and type before it runs out — which it does
+        // not reliably do on a loaded machine, so the turn settles first and the message
+        // replays as a fresh turn. So the window runs until the steer has been seen AND
+        // two more boundaries have flushed it, with a hard cap so a run that never
+        // steers (the `stop` spec below) still terminates.
+        const MIN_TICKS = 8
+        const MAX_TICKS = 60 // 18s — past any Playwright assertion in the window
+        let ticksAfterSteer = 0
+        for (let tick = 0; tick < MAX_TICKS; tick++) {
+          if (pendingSteer !== null) {
+            yield* emit({ _tag: "Assistant", text: `Noted: ${pendingSteer}` })
+            pendingSteer = null
+            steered = true
+          }
+          if (steered) ticksAfterSteer++
+          if (tick >= MIN_TICKS && ticksAfterSteer >= 2) break
           yield* Effect.sleep("300 millis")
           yield* emit({ _tag: "Assistant", text: "reading the tab bar", agentId: first })
           yield* emit({
