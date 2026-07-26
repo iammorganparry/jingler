@@ -181,3 +181,12 @@ pnpm test
 
 Add a Changeset with `pnpm changeset` for user-facing changes. CI runs the same lint, typecheck,
 and unit-test gates on every pull request.
+
+## Plugins
+
+Starbase is extensible — plugins add tabs, dock panes, commands and
+keybindings, dropped into `~/starbase/plugins`.
+
+- **Writing one:** [`packages/plugin-sdk/AGENTS.md`](packages/plugin-sdk/AGENTS.md)
+- **Installing one:** [`docs/plugins/permissions-and-trust.md`](docs/plugins/permissions-and-trust.md) — read this first
+- **Start from scratch:** `node scripts/create-starbase-plugin.mjs my-plugin`
