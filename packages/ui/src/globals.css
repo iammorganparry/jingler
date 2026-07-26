@@ -528,6 +528,40 @@
   padding: 1px 5px;
   color: var(--sb-cyan);
 }
+/*
+  A path in agent output that opens in the Preview dock. Rendered as a <button>
+  so it is keyboard-reachable and announced as an action rather than a link —
+  it navigates nothing, it opens a panel.
+
+  The button is deliberately shape-less: it inherits the surrounding line's
+  metrics so a path inside a sentence does not change that sentence's height or
+  baseline. The only visual difference from an inert path is the underline on
+  hover, which is the same affordance `.sb-md a` uses.
+*/
+.sb-md-path {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+.sb-md-path:hover code {
+  border-color: var(--sb-blue);
+  color: var(--sb-blue);
+}
+.sb-md-path:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--sb-blue);
+}
+.sb-md-path:focus-visible {
+  outline: 2px solid var(--sb-ring);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
 .sb-md pre {
   margin: 0 0 12px;
   padding: 11px 13px;

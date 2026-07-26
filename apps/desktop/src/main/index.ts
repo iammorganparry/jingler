@@ -28,6 +28,7 @@ import {
   registerProtocolClient
 } from "./deep-link.js"
 import { starbaseRoot } from "./app-paths.js"
+import { isExternallyOpenable, sameOrigin } from "./window-guards.js"
 import { registerPluginProtocolHandler, registerPluginScheme } from "./plugin-protocol.js"
 import { makeHostRequestHandler, spawnHostProcess } from "./plugin-host-bridge.js"
 import { installPluginHost } from "./plugin-host-install.js"
@@ -177,6 +178,47 @@ if (!gotPrimaryLock) {
       }
     })
     mainWindow = window
+
+    /**
+     * The renderer window is a one-way door: nothing gets to navigate it, and
+     * nothing gets to open a second window from it.
+     *
+     * Both matter because of what this window's `webPreferences` carry. The
+     * preload exposes `window.starbase.send/on` — the whole RPC bridge, and with
+     * it Terminal, Workspace and Auth. Electron hands a `window.open`ed child
+     * the OPENER'S web preferences, so a new window would inherit that preload,
+     * and whatever remote page loaded in it would have a live channel to it.
+     *
+     * The content this guards is not hypothetical or user-authored: agent
+     * markdown is rendered as real links, and a prompt-injected agent emitting
+     * `[docs](https://attacker.com)` is a realistic way to get one click.
+     *
+     * So: deny every window-open request outright, and hand http(s) to the
+     * user's real browser instead — which is what every deliberate external link
+     * in the app already does via `starbase/open-external`. Non-http(s) schemes
+     * are dropped rather than passed to `shell.openExternal`, which would happily
+     * launch an arbitrary protocol handler.
+     */
+    window.webContents.setWindowOpenHandler(({ url }) => {
+      if (isExternallyOpenable(url)) void shell.openExternal(url)
+      return { action: "deny" }
+    })
+
+    /**
+     * In-place navigation away from the app is likewise never legitimate — the
+     * renderer only ever loads its own bundle. Letting a link replace the
+     * document would put a remote origin on the same `webContents`, preload and
+     * all, which is the same hole without needing a second window.
+     */
+    window.webContents.on("will-navigate", (event, url) => {
+      // Same-origin is allowed, not same-URL: Vite's dev server reloads the page
+      // on an HMR failure, and blocking that would make the dev loop look broken
+      // in a way nothing reports. `file://` URLs have an opaque "null" origin, so
+      // the packaged build compares hrefs instead.
+      if (sameOrigin(url, window.webContents.getURL())) return
+      event.preventDefault()
+      if (isExternallyOpenable(url)) void shell.openExternal(url)
+    })
 
     // Headless e2e: never show the window and never take the dock/focus.
     //

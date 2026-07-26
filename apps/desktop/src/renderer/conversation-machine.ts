@@ -220,6 +220,7 @@ type ConversationEvent =
   | { type: "STEER_RESULT"; queued: QueuedMessage; result: SteerResult; auto?: boolean }
   | { type: "STREAM_EVENT"; event: StreamEvent }
   | { type: "PATCH_UPDATED"; patch: string }
+  | { type: "FILES_UPDATED"; files: ReadonlyArray<string> }
   | { type: "DECIDE_GATE"; gateId: string; decision: GateDecision }
   | { type: "ANSWER_QUESTION"; requestId: string; answers: ReadonlyArray<QuestionAnswer> }
   | { type: "SET_MODE"; mode: PermissionMode }
@@ -875,9 +876,25 @@ export const conversationMachine = setup({
         .sessionsDiff(context.session.id)
         .then((patch) => self.send({ type: "PATCH_UPDATED", patch }))
         .catch(() => {})
+      // The same signal re-reads the worktree's file list. Without this, a file
+      // the agent creates mid-turn is missing from `files` until the whole
+      // conversation reloads — which means the `@` menu can't reference it and,
+      // worse, the Preview dock's clickability gate rejects the very path the
+      // agent just announced. The list is small (one `git ls-files` pair) and
+      // this only fires on a tool that actually touched files.
+      const worktreePath = context.session.worktreePath
+      if (worktreePath) {
+        void rpc
+          .workspaceFiles(worktreePath)
+          .then((files) => self.send({ type: "FILES_UPDATED", files }))
+          .catch(() => {})
+      }
     },
     applyLivePatch: assign(({ event }) =>
       event.type === "PATCH_UPDATED" ? { patch: event.patch } : {}
+    ),
+    applyLiveFiles: assign(({ event }) =>
+      event.type === "FILES_UPDATED" ? { files: event.files } : {}
     ),
     optimisticGate: assign(({ context, event }) => {
       if (event.type !== "DECIDE_GATE") return {}
@@ -1503,6 +1520,7 @@ export const conversationMachine = setup({
         ],
         // A live diff read resolved — reflect it in the Changes rail.
         PATCH_UPDATED: { actions: "applyLivePatch" },
+        FILES_UPDATED: { actions: "applyLiveFiles" },
         // Sent mid-run: queued, then flushed into this turn at the next tool
         // boundary where the harness can take it (see `canAutoFlush`).
         SEND: { actions: "enqueue" },
@@ -1584,6 +1602,7 @@ export const conversationMachine = setup({
         // The run is already being halted; a second STOP only clears the queue.
         STOP: { actions: ["clearQueue", "clearSubagents"] },
         PATCH_UPDATED: { actions: "applyLivePatch" },
+        FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
         SET_HARNESS: { actions: "persistHarness" }
       }
@@ -1623,6 +1642,7 @@ export const conversationMachine = setup({
         // A late live diff read may still resolve here — apply it (the authoritative
         // refresh's onDone runs last, so it wins).
         PATCH_UPDATED: { actions: "applyLivePatch" },
+        FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
         SET_HARNESS: { actions: "persistHarness" }
       }

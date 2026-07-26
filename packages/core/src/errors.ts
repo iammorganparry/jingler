@@ -183,3 +183,60 @@ export class ThemeError extends Schema.TaggedError<ThemeError>()(
     cause: Schema.optional(Schema.String)
   }
 ) {}
+
+/**
+ * Raised when a requested asset path resolves OUTSIDE the session's worktree.
+ *
+ * This is the feature's security boundary, not a user-error message. The paths
+ * that reach `Asset.read` come from agent output — a transcript is untrusted
+ * input that happens to name files — so `../../../.ssh/id_rsa`, an absolute
+ * path, and a symlink pointing at `/etc/passwd` all land here. Main resolves
+ * the realpath and compares against the worktree root; the renderer is never
+ * trusted to have done that.
+ *
+ * Deliberately carries only the requested path, never the resolved one:
+ * echoing where a traversal *landed* is a filesystem oracle.
+ */
+export class AssetOutsideWorktreeError extends Schema.TaggedError<AssetOutsideWorktreeError>()(
+  "AssetOutsideWorktreeError",
+  {
+    /** The path as requested — worktree-relative, or whatever was asked for. */
+    path: Schema.String,
+    /** Why it was refused: no worktree, escaped the root, or not a regular file. */
+    reason: Schema.Literal("no-worktree", "escapes-root", "not-a-file", "unreadable")
+  }
+) {}
+
+/**
+ * Raised when an asset is over its per-kind size cap (`ASSET_SIZE_CAP`).
+ *
+ * A distinct error rather than a truncated read, because silently showing the
+ * first 5 MB of a 400 MB CSV is the kind of thing an operator acts on without
+ * noticing. Carries both numbers so the viewer can say "42 MB, cap is 5 MB"
+ * and offer Reveal in Finder instead.
+ */
+export class AssetTooLargeError extends Schema.TaggedError<AssetTooLargeError>()(
+  "AssetTooLargeError",
+  {
+    path: Schema.String,
+    /** Actual size in bytes. */
+    size: Schema.Number,
+    /** The cap that was exceeded, in bytes. */
+    cap: Schema.Number
+  }
+) {}
+
+/**
+ * Raised when a path has no viewer — an extension outside `extensionToKind`'s
+ * allow-list.
+ *
+ * In normal use the renderer never asks (it gates clickability on the same
+ * pure function), so this fires only when the two get out of step — a stale
+ * persisted dock tab, mainly. Worth a typed error rather than a crash.
+ */
+export class AssetUnsupportedError extends Schema.TaggedError<AssetUnsupportedError>()(
+  "AssetUnsupportedError",
+  {
+    path: Schema.String
+  }
+) {}

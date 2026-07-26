@@ -36,8 +36,8 @@ import { PullRequestPane } from "./pull-request-pane.js"
 import { ReviewPane } from "./review-pane.js"
 import { TerminalDockView } from "./terminal-dock-view.js"
 import { useTerminalDock } from "./use-terminal-dock.js"
-import { BrowserPreviewView } from "./browser-preview-view.js"
-import { useBrowserPreview } from "./use-browser-preview.js"
+import { PreviewDockView } from "./preview-dock-view.js"
+import { usePreviewDock } from "./use-preview-dock.js"
 import { useSessionActivities } from "./session-activity.js"
 import { useSessionDiffs } from "./diff-presence.js"
 import { usePlanSessions } from "./plan-presence.js"
@@ -124,7 +124,17 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   const liveDiff = useSessionDiffs()
   const planSessions = usePlanSessions()
   const termDock = useTerminalDock()
-  const browserDock = useBrowserPreview()
+  const browserDock = usePreviewDock()
+  // Preview tabs outlive the app, so a deleted session would otherwise reopen as
+  // a "couldn't open" pane on every launch, for ever, until each is closed by
+  // hand. Reconciling here rather than in the machine keeps the machine free of
+  // any opinion about where the session list comes from. `pruneTabs` no-ops on
+  // an empty set, so the first render — before sessions have loaded — cannot
+  // wipe the tabs it is meant to be preserving.
+  const pruneTabs = browserDock.pruneTabs
+  useEffect(() => {
+    pruneTabs(new Set(sessions.map((s) => s.id)))
+  }, [sessions, pruneTabs])
   const qc = useQueryClient()
   const { activeId: activeThemeId, catalog: themeCatalog } = useThemeCatalog()
   const connector = useConnectorCenter()
@@ -712,6 +722,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
           onRestore={restoreSession}
           onDelete={deleteSession}
           onInitialPromptConsumed={consumeInitialPrompt}
+          onOpenAsset={browserDock.openAsset}
           paneFocused={ctx.paneFocused ?? true}
         />
       )}
@@ -755,15 +766,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       browserDockSide={browserDock.side}
       browserActive={browserDock.visible}
       onToggleBrowser={browserDock.toggle}
-      renderBrowserDock={(session) => (
-        <BrowserPreviewView
-          session={session}
-          visible={browserDock.visible}
-          onToggle={browserDock.toggle}
-          side={browserDock.side}
-          onSideChange={browserDock.setSide}
-        />
-      )}
+      renderBrowserDock={(session) => <PreviewDockView session={session} dock={browserDock} />}
       version={__APP_VERSION__}
     />
     <ConfirmDialog

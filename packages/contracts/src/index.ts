@@ -5,6 +5,7 @@ import {
   PlanningReadiness,
   PlanRound,
   ArchiveReason,
+  AssetPayload,
   Attachment,
   AuthProvider,
   AuthSession,
@@ -77,6 +78,9 @@ import {
   WorkspaceConfig
 } from "@starbase/core"
 import {
+  AssetOutsideWorktreeError,
+  AssetTooLargeError,
+  AssetUnsupportedError,
   AuthError,
   BrowserPreviewError,
   ConfigError,
@@ -1337,8 +1341,71 @@ export class StarbaseRpcs extends RpcGroup.make(
   /** Reload the current page. No-op if closed. */
   Rpc.make("BrowserPreview.reload", {}),
 
+  /**
+   * Show/hide the native view without destroying it — the Preview dock switching
+   * away from the Browser tab. `close` would also hide it, but it discards the
+   * page, its history and its scroll position with it.
+   */
+  Rpc.make("BrowserPreview.setVisible", {
+    payload: { visible: Schema.Boolean }
+  }),
+
   /** Hide + destroy the view (pane closed or session switched). Idempotent. */
   Rpc.make("BrowserPreview.close", {}),
+
+  // ── Assets ───────────────────────────────────────────────────────────────────
+  // Files an agent left in a session's worktree, opened as tabs in the Preview
+  // dock. `path` is always WORKTREE-RELATIVE and always untrusted — it comes out
+  // of agent output. Main resolves it against the session's own worktree and
+  // refuses anything that escapes; the renderer's copy of `absolutePath` is for
+  // display and Finder only, never an authority for a read.
+
+  /**
+   * Read one asset's contents. Returns a payload discriminated on `kind`: text
+   * for markdown/code/text/csv, base64 for images, and metadata only for PDFs
+   * (whose bytes never cross this boundary — Chromium loads them off disk).
+   */
+  Rpc.make("Asset.read", {
+    success: AssetPayload,
+    error: Schema.Union(
+      AssetOutsideWorktreeError,
+      AssetTooLargeError,
+      AssetUnsupportedError,
+      SessionNotFoundError
+    ),
+    payload: { sessionId: Schema.String, path: Schema.String }
+  }),
+
+  /** Reveal the asset in the OS file manager. */
+  Rpc.make("Asset.reveal", {
+    error: Schema.Union(AssetOutsideWorktreeError, SessionNotFoundError),
+    payload: { sessionId: Schema.String, path: Schema.String }
+  }),
+
+  /**
+   * Show a PDF at `bounds`, in Chromium's own viewer, in a native view over the
+   * renderer. That is why the app ships no pdf.js.
+   *
+   * Takes `sessionId` + a worktree-relative `path` rather than a URL on purpose:
+   * main resolves the absolute path itself, through the same containment check
+   * that guards a read. A renderer holding a doctored payload therefore cannot
+   * point the viewer at an arbitrary file on disk.
+   */
+  Rpc.make("Asset.openPdf", {
+    error: Schema.Union(
+      AssetOutsideWorktreeError,
+      // Not just containment: main re-checks that the path is a PDF and a
+      // regular file, because the native view renders a `file://` DOCUMENT and
+      // an agent-authored `.html` there would get a file origin.
+      AssetUnsupportedError,
+      SessionNotFoundError,
+      BrowserPreviewError
+    ),
+    payload: { sessionId: Schema.String, path: Schema.String, bounds: BrowserBounds }
+  }),
+
+  /** Hide the PDF view without destroying it (the dock switched tabs). */
+  Rpc.make("Asset.hidePdf", {}),
 
   // ── Themes ─────────────────────────────────────────────────────────────────
 

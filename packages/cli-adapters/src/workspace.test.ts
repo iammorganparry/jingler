@@ -109,6 +109,40 @@ describe("WorkspaceService", () => {
     }
   })
 
+  it("files() includes an UNTRACKED file — the one the agent just wrote", async () => {
+    // The case the whole thing exists for. A file created this turn is untracked
+    // until something commits it, so a tracked-only list is blind to precisely
+    // the file the operator wants to open. `.gitignore`d paths still stay out.
+    const repoPath = initGitRepo(join(repos.dir, "untracked"))
+    writeFileSync(join(repoPath, ".gitignore"), "node_modules/\nbuild.log\n")
+    execFileSync("git", ["add", "-A"], { cwd: repoPath })
+    execFileSync("git", ["commit", "-m", "ignore", "--no-gpg-sign"], { cwd: repoPath })
+    writeFileSync(join(repoPath, "spec.md"), "# just written\n")
+    writeFileSync(join(repoPath, "build.log"), "noise\n")
+    const exit = await runExit(
+      WorkspaceService.files(repoPath).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") {
+      expect([...exit.value].sort()).toStrictEqual([".gitignore", "README.md", "spec.md"])
+    }
+  })
+
+  it("files() lists each path once — tracked and untracked are disjoint", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "disjoint"))
+    writeFileSync(join(repoPath, "README.md"), "# edited but still tracked\n")
+    const exit = await runExit(
+      WorkspaceService.files(repoPath).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") {
+      // A MODIFIED tracked file must not also show up as "other".
+      expect([...exit.value]).toStrictEqual(["README.md"])
+    }
+  })
+
   it("files() lists the repo's tracked files (for the @ menu)", async () => {
     const repoPath = initGitRepo(join(repos.dir, "tracked"))
     writeFileSync(join(repoPath, "src.ts"), "export const x = 1\n")
