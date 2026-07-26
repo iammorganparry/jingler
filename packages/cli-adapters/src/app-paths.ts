@@ -55,6 +55,33 @@ export interface AppPathsShape {
    */
   readonly themesDir: string
   /**
+   * `~/starbase/plugins` — installed plugins, one directory per plugin, each
+   * holding a `starbase.plugin.json`. A directory of folders rather than a
+   * section of `config.json` for the same reason themes are files: a plugin is a
+   * bundle (manifest plus UI/host entry files), people already exchange them, and
+   * `config.json` is read-modify-written on every settings save — inlining plugin
+   * code there would rewrite it on every unrelated toggle.
+   */
+  readonly pluginsDir: string
+  /**
+   * Plugins that ship inside the app, read-only.
+   *
+   * Undefined when nothing is bundled — a dev run before the plugins are built,
+   * or a test with a synthetic AppPaths. Absent means "no built-ins", never an
+   * error, so the registry works identically either way.
+   */
+  readonly builtinPluginsDir?: string
+  /**
+   * `~/starbase/plugin-storage` — each plugin's private key/value store, one JSON
+   * file per plugin at `<pluginStorageDir>/<pluginId>.json`.
+   *
+   * A sibling of `pluginsDir`, never inside it, so a plugin's persisted state
+   * outlives a reinstall of its code (uninstall removes the plugin directory; the
+   * store is only cleared on an explicit request) and so scanning `pluginsDir`
+   * for manifests never trips over a plugin's data files.
+   */
+  readonly pluginStorageDir: string
+  /**
    * `~/starbase/auth.enc` — the signed-in session token, encrypted with the OS
    * credential vault (Electron `safeStorage`). Only ever ciphertext is written
    * here; see `SecretStore`.

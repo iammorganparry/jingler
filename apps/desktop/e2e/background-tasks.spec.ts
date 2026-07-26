@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js"
+import { expect, sessionRow, test } from "./fixtures.js"
 import type { LaunchedApp, LaunchOptions, SeedSession } from "./fixtures.js"
 
 /**
@@ -51,7 +51,7 @@ const expandDock = async (window: LaunchedApp["window"]) => {
 
 test("a background task appears in the dock and survives the turn ending", async ({ launchApp }) => {
   const { window } = await launch(launchApp)
-  await window.getByText("Background session").click()
+  await sessionRow(window, "Background session").click()
   await startBackgroundTask(window)
 
   // The turn finishes — the agent's reply lands — and the task is STILL listed.
@@ -73,7 +73,7 @@ test("a backgrounded sub-agent gets a dock row, not an agent tab", async ({ laun
   // tab bar and the dock. The dock owns it — it outlives the turn; the tab
   // would be wiped by the next prompt while the work carried on.
   const { window } = await launch(launchApp)
-  await window.getByText("Background session").click()
+  await sessionRow(window, "Background session").click()
   await window.getByPlaceholder(/message claude/i).fill("survey it [[background-agent]]")
   await window.getByRole("button", { name: /send/i }).click()
 
@@ -86,7 +86,7 @@ test("a backgrounded sub-agent gets a dock row, not an agent tab", async ({ laun
 
 test("the dock reports a running task's live progress", async ({ launchApp }) => {
   const { window } = await launch(launchApp)
-  await window.getByText("Background session").click()
+  await sessionRow(window, "Background session").click()
   await startBackgroundTask(window)
   await expandDock(window)
 
@@ -99,7 +99,7 @@ test("the dock reports a running task's live progress", async ({ launchApp }) =>
 
 test("stopping a task settles it, and the row says so", async ({ launchApp }) => {
   const { window } = await launch(launchApp)
-  await window.getByText("Background session").click()
+  await sessionRow(window, "Background session").click()
   await startBackgroundTask(window)
   await expandDock(window)
 
@@ -119,7 +119,7 @@ test("the dock is hidden for a harness with no background-task support", async (
   // Codex can only abort a whole turn, so a dock with a Stop button would be a
   // lie about what the operator can actually do.
   const { window } = await launch(launchApp, "codex")
-  await window.getByText("Background session").click()
+  await sessionRow(window, "Background session").click()
   await window.getByPlaceholder(/message codex/i).fill("watch the tests [[background]]")
   await window.getByRole("button", { name: /send/i }).click()
 
@@ -130,7 +130,7 @@ test("the dock is hidden for a harness with no background-task support", async (
 test("there is no dock until something actually runs in the background", async ({ launchApp }) => {
   // An empty dock is chrome that costs attention and reports nothing.
   const { window } = await launch(launchApp)
-  await window.getByText("Background session").click()
+  await sessionRow(window, "Background session").click()
   await expect(window.getByPlaceholder(/message claude/i)).toBeVisible()
   await expect(window.getByTestId("background-task-dock")).toHaveCount(0)
 })
@@ -148,7 +148,7 @@ test("the chat still accepts a prompt while a background task runs on", async ({
   // already running" — while the composer, which follows the machine and went
   // idle on `Done`, shows a send button and no way to stop anything.
   const { window } = await launch(launchApp)
-  await window.getByText("Background session").click()
+  await sessionRow(window, "Background session").click()
   await window
     .getByPlaceholder(/message claude/i)
     .fill("watch the tests [[background-live-harness]]")
@@ -187,7 +187,7 @@ test("a reloaded window can still talk to a chat whose background task runs on",
   // task runs — while the reloaded renderer shows an idle composer and a send
   // button, with nothing to stop.
   const { window } = await launch(launchApp)
-  await window.getByText("Background session").click()
+  await sessionRow(window, "Background session").click()
   await window
     .getByPlaceholder(/message claude/i)
     .fill("watch the tests [[background-live-harness]]")
@@ -198,7 +198,7 @@ test("a reloaded window can still talk to a chat whose background task runs on",
 
   // The renderer goes away without interrupting the stream.
   await window.reload()
-  await window.getByText("Background session").click()
+  await sessionRow(window, "Background session").click()
   await expect(window.getByPlaceholder(/message claude/i)).toBeVisible()
 
   await window.getByPlaceholder(/message claude/i).fill("summarise the repo")
@@ -219,7 +219,7 @@ test("a task that finishes after its turn reports its outcome, unprompted", asyn
   // still consuming — and the run used to be killed the moment the renderer left
   // `running` on `Done`. The row stayed "running" forever over a dead process.
   const { window } = await launch(launchApp)
-  await window.getByText("Background session").click()
+  await sessionRow(window, "Background session").click()
   await window
     .getByPlaceholder(/message claude/i)
     .fill("watch the tests [[background-completes]]")
@@ -245,7 +245,7 @@ test("the chat is usable while a task runs, and reports the task's outcome after
   // The two halves together, which is what the operator actually experiences:
   // talk to the agent while the work runs, and still be told how the work ended.
   const { window } = await launch(launchApp)
-  await window.getByText("Background session").click()
+  await sessionRow(window, "Background session").click()
   await window
     .getByPlaceholder(/message claude/i)
     .fill("watch the tests [[background-completes]]")

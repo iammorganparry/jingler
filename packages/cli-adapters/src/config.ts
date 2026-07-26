@@ -113,6 +113,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.adhdMode !== undefined ? { adhdMode: existing.adhdMode } : {}),
             ...(existing?.theme ? { theme: existing.theme } : {}),
             ...(existing?.openConnector ? { openConnector: existing.openConnector } : {}),
+            ...(existing?.disabledPlugins ? { disabledPlugins: existing.disabledPlugins } : {}),
             // MANDATORY: omit a section here and every unrelated save silently
             // drops it, because `patch` is a whole-object read-modify-write.
             ...patch
@@ -184,6 +185,10 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       /** Persist the unified OpenConnector settings (endpoint, toggles). Token is NOT here. */
       const setOpenConnector = (openConnector: OpenConnectorConfig) => patch({ openConnector })
 
+      /** Replace the set of disabled plugin ids wholesale (PluginRegistry owns the merge). */
+      const setDisabledPlugins = (disabledPlugins: ReadonlyArray<string>) =>
+        patch({ disabledPlugins })
+
       /** Replace the override layer wholesale, keeping the active theme id. */
       const setThemeCustomizations = (colorCustomizations: Record<string, string>) =>
         Effect.gen(function* () {
@@ -239,7 +244,8 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setGigaplanRouting,
         setActiveTheme,
         setThemeCustomizations,
-        setOpenConnector
+        setOpenConnector,
+        setDisabledPlugins
       }
     }
   }

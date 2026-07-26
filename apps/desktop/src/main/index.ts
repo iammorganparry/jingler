@@ -15,6 +15,7 @@ import {
   killAllChildren,
   killAllPtysSync,
   ModelsService,
+  PluginHost,
   SecretStore
 } from "@starbase/cli-adapters"
 import { app, BrowserWindow, ipcMain, shell } from "electron"
@@ -27,6 +28,10 @@ import {
   registerProtocolClient
 } from "./deep-link.js"
 import { starbaseRoot } from "./app-paths.js"
+import { registerPluginProtocolHandler, registerPluginScheme } from "./plugin-protocol.js"
+import { makeHostRequestHandler, spawnHostProcess } from "./plugin-host-bridge.js"
+import { installPluginHost } from "./plugin-host-install.js"
+import { nativeConsentPrompt } from "./plugin-consent.js"
 import { bootBackgroundColor, registerBootThemeChannel, resolveBootTheme } from "./boot-theme.js"
 import { runtime } from "./runtime.js"
 import { initAutoUpdater } from "./updater.js"
@@ -207,8 +212,24 @@ if (!gotPrimaryLock) {
     }
   }
 
+  // Before `whenReady`, and that ordering is load-bearing: Electron reads the
+  // privileged-scheme table when the protocol subsystem starts, so a call made
+  // after ready is silently ignored and every plugin module 404s with nothing
+  // in the log to say why.
+  registerPluginScheme()
+
   app.whenReady().then(async () => {
     enableCodexDiagnostics()
+    // Now that the subsystem is up, attach the handler that actually serves
+    // plugin files (and the runtime shims) out of `~/starbase/plugins`.
+    registerPluginProtocolHandler()
+
+    // Hand the host service its Electron-shaped pieces. No process is spawned
+    // here — the first activation event does that, which is the whole point of
+    // lazy activation.
+    await runtime.runPromise(
+      installPluginHost(spawnHostProcess, nativeConsentPrompt, makeHostRequestHandler)
+    )
     // Force the layer to build so the RPC server + `ipcMain` listener are live
     // before the renderer can send its first frame.
     await runtime.runPromise(Effect.void)
@@ -244,24 +265,28 @@ if (!gotPrimaryLock) {
   })
 
   app.on("before-quit", () => {
+    // The extension host is a utilityProcess; Electron reaps it with the app,
+    // but killing it explicitly means a plugin mid-`exec` gets torn down in the
+    // same pass as the PTYs below rather than racing the app's own exit.
+    void runtime.runPromise(PluginHost.shutdown()).catch(() => {})
     // Nothing we spawned is reaped when the main process exits — POSIX reparents
     // orphans to init and they live forever. Two families of child, killed the
     // same way for the same reason:
     //
-    //  - PTYs, which live in their own session (TerminalService.killAll);
     //  - harness subprocesses — `opencode serve`, `codex app-server` — which each
     //    spawn site cleans up on its own happy path, but NOT when the app quits
     //    mid-flight. That gap leaked one `opencode serve` per e2e test, since the
     //    suite tears down Electron once per test while the model catalogue is
     //    still being fetched.
+    //  - PTYs, which live in their own session.
     //
-    // Synchronous and first: `runtime.dispose()` below may never get the chance to
-    // run to completion, and an orphaned server outlives the app either way.
-    // BOTH are synchronous, and the PTYs especially so. Reclaiming them through
-    // the runtime (`runPromise(TerminalService.killAll)`) is a promise, so this
-    // handler returned and Electron tore the Node environment down with shells
-    // still open — node-pty's reader thread then fired a ThreadSafeFunction into
-    // an environment already in `CleanupHandles()`, which napi refuses, which
+    // BOTH synchronous, and the PTYs especially so. `runtime.dispose()` below may
+    // never get the chance to run to completion, and an orphaned server outlives
+    // the app either way — but the PTYs are worse than a leak. Reclaiming them
+    // through the runtime (`runPromise(TerminalService.killAll)`) is a PROMISE, so
+    // this handler returned and Electron tore the Node environment down with
+    // shells still open; node-pty's reader thread then fired a ThreadSafeFunction
+    // into an environment already in `CleanupHandles()`, which napi refuses, which
     // node-addon-api throws, which nothing catches: SIGABRT out of `pty.node`
     // instead of a clean quit. See `killAllPtysSync` for the long version.
     killAllChildren()

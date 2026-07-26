@@ -121,6 +121,18 @@ jobs:
           echo "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/asc/AuthKey.p8"
           echo "path=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_OUTPUT"
 
+      # The plugins that ship inside the app. Separate from the electron-vite
+      # build because `--filter @starbase/desktop` cannot reach them: the desktop
+      # app does not depend on any plugin, and `plugins/*/dist` is git-ignored, so
+      # a fresh checkout has nothing to stage. Without this the `extraResources`
+      # block in electron-builder.yml copies a manifest with no entry files and
+      # the release ships with its official plugins silently missing.
+      #
+      # The script verifies the built entries exist and exits non-zero if not, so
+      # this step failing is the intended outcome rather than a quiet bad build.
+      - name: Build bundled plugins
+        run: pnpm --filter @starbase/desktop run build:bundled-plugins
+
       - name: Build (electron-vite)
         run: pnpm --filter @starbase/desktop run build
 

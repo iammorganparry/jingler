@@ -1,0 +1,320 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Starbase plugin manifest",
+  "description": "The contents of a plugin's starbase.plugin.json. Generated from @starbase/core — do not edit by hand.",
+  "$defs": {
+    "PluginId": {
+      "type": "string",
+      "description": "lowercase kebab-case, e.g. github-pull-requests",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "PluginApiVersion": {
+      "type": "integer",
+      "description": "The Starbase plugin API generation this plugin targets. Omit to mean 'the current one'.",
+      "title": "greaterThanOrEqualTo(1)",
+      "minimum": 1
+    },
+    "ActivationEvent": {
+      "type": "string",
+      "description": "onStartupFinished, onCommand:<id>, onTab:<id>, or repoContains:<glob>",
+      "pattern": "^(?:onStartupFinished|onCommand:[a-z0-9][a-z0-9-]*\\.[a-z0-9][a-z0-9-]*|onTab:[a-z0-9][a-z0-9-]*\\.[a-z0-9][a-z0-9-]*|repoContains:.+)$"
+    },
+    "ContributionId": {
+      "type": "string",
+      "description": "namespaced as <pluginId>.<local>, e.g. linear.issues",
+      "pattern": "^[a-z0-9][a-z0-9-]*\\.[a-z0-9][a-z0-9-]*$"
+    },
+    "AuthProviderId": {
+      "type": "string",
+      "description": "a string matching the pattern ^[a-z0-9][a-z0-9-]*$",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    }
+  },
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "version"
+  ],
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/PluginId"
+    },
+    "name": {
+      "type": "string",
+      "description": "a string at least 1 character(s) long",
+      "title": "minLength(1)",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "description": "a string at least 1 character(s) long",
+      "title": "minLength(1)",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "publisher": {
+      "type": "string"
+    },
+    "apiVersion": {
+      "$ref": "#/$defs/PluginApiVersion"
+    },
+    "ui": {
+      "type": "string"
+    },
+    "main": {
+      "type": "string"
+    },
+    "extensionKind": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "ui",
+          "host"
+        ]
+      }
+    },
+    "activationEvents": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ActivationEvent"
+      }
+    },
+    "extensionDependencies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PluginId"
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "untrustedRepos": {
+          "type": "object",
+          "required": [
+            "supported"
+          ],
+          "properties": {
+            "supported": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "limited"
+                  ]
+                }
+              ]
+            },
+            "description": {
+              "type": "string"
+            },
+            "restrictedContributions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContributionId"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "contributes": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "tabs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/ContributionId"
+              },
+              "label": {
+                "type": "string"
+              },
+              "icon": {
+                "type": "string"
+              },
+              "order": {
+                "type": "number"
+              },
+              "when": {
+                "type": "string",
+                "enum": [
+                  "always",
+                  "hasPr",
+                  "hasWorktree",
+                  "hasIssue"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "panes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label",
+              "slot"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/ContributionId"
+              },
+              "label": {
+                "type": "string"
+              },
+              "icon": {
+                "type": "string"
+              },
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "right",
+                  "bottom"
+                ]
+              },
+              "defaultSize": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "title"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/ContributionId"
+              },
+              "title": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "icon": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "keybindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "command",
+              "key"
+            ],
+            "properties": {
+              "command": {
+                "$ref": "#/$defs/ContributionId"
+              },
+              "key": {
+                "type": "string"
+              },
+              "mac": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "settings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/ContributionId"
+              },
+              "label": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "enum"
+                ]
+              },
+              "description": {
+                "type": "string"
+              },
+              "default": {
+                "$id": "/schemas/unknown",
+                "title": "unknown"
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "authenticationProviders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/AuthProviderId"
+              },
+              "label": {
+                "type": "string"
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

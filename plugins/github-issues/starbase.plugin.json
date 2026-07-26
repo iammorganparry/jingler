@@ -1,0 +1,30 @@
+{
+  "$schema": "../../../packages/plugin-sdk/starbase.plugin.schema.json",
+  "id": "github-issues",
+  "name": "GitHub Issues",
+  "version": "1.0.0",
+  "description": "Read the issue linked to a session, without leaving Starbase.",
+  "ui": "dist/ui.js",
+  "main": "dist/main.js",
+  "activationEvents": [
+    "onTab:github-issues.issue"
+  ],
+  "contributes": {
+    "tabs": [
+      {
+        "id": "github-issues.issue",
+        "label": "Issue",
+        "icon": "CircleDot",
+        "order": 10,
+        "when": "hasIssue"
+      }
+    ],
+    "commands": [
+      {
+        "id": "github-issues.fetch",
+        "title": "Fetch linked issue",
+        "category": "GitHub"
+      }
+    ]
+  }
+}

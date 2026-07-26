@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { expect, test } from "./fixtures.js"
+import { expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -41,10 +41,7 @@ test("Deslop button sends the file to the session's agent", async ({ launchApp }
     }
   })
 
-  // By row id, not by text: the pane's tab pill now carries the session title too
-  // (`3dccb5c`), so a bare `getByText` matches two elements and throws on strict
-  // mode. The suite isn't in CI, so this sat red without anything being broken.
-  await window.getByTestId("session-row-s_deslop_1").click()
+  await sessionRow(window, "Deslop source session").click()
   // No PR yet, so the local worktree diff lives on the "Changes" tab.
   await window.getByRole("button", { name: "Changes" }).first().click()
 
