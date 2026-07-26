@@ -13,8 +13,41 @@ import { app } from "electron"
 import { AppPaths } from "@starbase/cli-adapters"
 import { Layer } from "effect"
 
-/** The shared root for every Starbase-owned file in the desktop app. */
+/**
+ * The shared root for every Starbase-owned file in the desktop app.
+ *
+ * Read once, at module load. That is fine for a running app — `STARBASE_HOME`
+ * does not change under it — and the e2e suite launches a fresh process per
+ * home, so nothing is pinned across the boundary that matters.
+ */
 export const starbaseRoot = join(process.env.STARBASE_HOME ?? app.getPath("home"), "starbase")
+
+/**
+ * Where installed plugins live.
+ *
+ * A function purely for call-site convenience — it derives from `starbaseRoot`,
+ * which is itself resolved once at module load, so this is NOT lazier than a
+ * const would be. An earlier version of this comment claimed it prevented
+ * `STARBASE_HOME` being pinned; it does not, and nothing needs it to: each e2e
+ * launch is its own process with its own environment.
+ */
+export const pluginsRoot = (): string => join(starbaseRoot, "plugins")
+
+/**
+ * Where the plugins that ship with Starbase live.
+ *
+ * Packaged: `resources/plugins`, alongside the app's own asar. In development:
+ * the repo's `plugins/` directory, so an official plugin under active edit is
+ * the one the running app loads — the same live-reload story a third-party
+ * author gets, rather than a build-and-copy step only we have to remember.
+ *
+ * A function for the same reason as `pluginsRoot` — call-site convenience, not
+ * laziness. `app.isPackaged` is stable for the process's lifetime.
+ */
+export const builtinPluginsRoot = (): string =>
+  app.isPackaged
+    ? join(process.resourcesPath, "plugins")
+    : join(import.meta.dirname, "../../../../plugins")
 
 export const AppPathsLive = Layer.succeed(AppPaths, {
   root: starbaseRoot,
@@ -26,6 +59,9 @@ export const AppPathsLive = Layer.succeed(AppPaths, {
   planRoundsDir: join(starbaseRoot, "plan-rounds"),
   plansDir: join(starbaseRoot, ".starbase"),
   themesDir: join(starbaseRoot, "themes"),
+  pluginsDir: join(starbaseRoot, "plugins"),
+  builtinPluginsDir: builtinPluginsRoot(),
+  pluginStorageDir: join(starbaseRoot, "plugin-storage"),
   authFile: join(starbaseRoot, "auth.enc"),
   openConnectorFile: join(starbaseRoot, "open-connector.enc")
 })

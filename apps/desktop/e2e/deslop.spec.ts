@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { expect, test } from "./fixtures.js"
+import { expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -41,7 +41,7 @@ test("Deslop button sends the file to the session's agent", async ({ launchApp }
     }
   })
 
-  await window.getByText("Deslop source session").click()
+  await sessionRow(window, "Deslop source session").click()
   // No PR yet, so the local worktree diff lives on the "Changes" tab.
   await window.getByRole("button", { name: "Changes" }).first().click()
 

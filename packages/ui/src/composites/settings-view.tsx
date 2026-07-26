@@ -35,6 +35,7 @@ import {
 } from "@starbase/core"
 import { ContextMeter } from "./context-meter.js"
 import {
+  Boxes,
   ChevronRight,
   Cpu,
   Keyboard,
@@ -59,6 +60,7 @@ import { ProviderIcon, PROVIDER_LABEL } from "../components/provider-icon.js"
 import { ORCHESTRATOR_DEFAULT } from "@starbase/core"
 import { GigaplanSettings } from "./gigaplan-settings.js"
 import { ThemesSettings, type ThemesSettingsProps } from "./themes-settings.js"
+import { PluginsSettings, type PluginsSettingsProps } from "./plugins-settings.js"
 import {
   Select,
   SelectContent,
@@ -87,6 +89,7 @@ type SectionKey =
   | "connectors"
   | "github"
   | "themes"
+  | "plugins"
   | "keybindings"
 
 interface NavItem {
@@ -107,6 +110,7 @@ const NAV: ReadonlyArray<NavItem> = [
   { key: "connectors", label: "Connectors", icon: <Plug size={14} />, ready: true },
   { key: "github", label: "GitHub", icon: <GithubMark size={14} />, ready: true },
   { key: "themes", label: "Themes", icon: <Palette size={14} />, ready: true },
+  { key: "plugins", label: "Plugins", icon: <Boxes size={14} />, ready: true },
   { key: "keybindings", label: "Keybindings", icon: <Keyboard size={14} />, ready: false }
 ]
 
@@ -445,6 +449,12 @@ export interface SettingsViewProps {
    * renders the stub, exactly as an unbuilt section does.
    */
   themes?: ThemesSettingsProps
+  /**
+   * Everything the Plugins pane needs. Optional for the same reason `themes`
+   * is — Storybook mounts Settings without a plugin catalog, and absent renders
+   * the stub rather than an empty screen pretending nothing is installed.
+   */
+  plugins?: PluginsSettingsProps
   /** Persisted per-CLI provider defaults. */
   providers?: ProvidersConfig | null
   /** Persist one CLI's provider config. */
@@ -527,6 +537,7 @@ export interface SettingsViewProps {
 export function SettingsView({
   clis,
   themes,
+  plugins,
   providers,
   onSaveProvider,
   defaultCli,
@@ -683,6 +694,12 @@ export function SettingsView({
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-editor p-6">
           <ConnectorsSettings unifiedMcp={unifiedMcp} connector={connector} injection={injection} />
         </div>
+      ) : section === "plugins" ? (
+        plugins ? (
+          <PluginsSettings {...plugins} />
+        ) : (
+          <StubSection label="Plugins" />
+        )
       ) : section === "themes" ? (
         themes ? (
           <ThemesSettings {...themes} />

@@ -14,6 +14,7 @@ import {
   DiscoveryService,
   killAllChildren,
   ModelsService,
+  PluginHost,
   SecretStore,
   TerminalService
 } from "@starbase/cli-adapters"
@@ -27,6 +28,10 @@ import {
   registerProtocolClient
 } from "./deep-link.js"
 import { starbaseRoot } from "./app-paths.js"
+import { registerPluginProtocolHandler, registerPluginScheme } from "./plugin-protocol.js"
+import { makeHostRequestHandler, spawnHostProcess } from "./plugin-host-bridge.js"
+import { installPluginHost } from "./plugin-host-install.js"
+import { nativeConsentPrompt } from "./plugin-consent.js"
 import { bootBackgroundColor, registerBootThemeChannel, resolveBootTheme } from "./boot-theme.js"
 import { runtime } from "./runtime.js"
 import { initAutoUpdater } from "./updater.js"
@@ -207,8 +212,24 @@ if (!gotPrimaryLock) {
     }
   }
 
+  // Before `whenReady`, and that ordering is load-bearing: Electron reads the
+  // privileged-scheme table when the protocol subsystem starts, so a call made
+  // after ready is silently ignored and every plugin module 404s with nothing
+  // in the log to say why.
+  registerPluginScheme()
+
   app.whenReady().then(async () => {
     enableCodexDiagnostics()
+    // Now that the subsystem is up, attach the handler that actually serves
+    // plugin files (and the runtime shims) out of `~/starbase/plugins`.
+    registerPluginProtocolHandler()
+
+    // Hand the host service its Electron-shaped pieces. No process is spawned
+    // here — the first activation event does that, which is the whole point of
+    // lazy activation.
+    await runtime.runPromise(
+      installPluginHost(spawnHostProcess, nativeConsentPrompt, makeHostRequestHandler)
+    )
     // Force the layer to build so the RPC server + `ipcMain` listener are live
     // before the renderer can send its first frame.
     await runtime.runPromise(Effect.void)
@@ -244,6 +265,10 @@ if (!gotPrimaryLock) {
   })
 
   app.on("before-quit", () => {
+    // The extension host is a utilityProcess; Electron reaps it with the app,
+    // but killing it explicitly means a plugin mid-`exec` gets torn down in the
+    // same pass as the PTYs below rather than racing the app's own exit.
+    void runtime.runPromise(PluginHost.shutdown()).catch(() => {})
     // Nothing we spawned is reaped when the main process exits — POSIX reparents
     // orphans to init and they live forever. Two families of child, killed the
     // same way for the same reason:

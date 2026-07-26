@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test"
-import { expect, test } from "./fixtures.js"
+import { expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -72,7 +72,7 @@ const setWindowSize = async (page: Page, width: number, height: number) => {
 
 test("the tab bar does not spill at half-screen width", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await window.getByText("Alpha session").click()
+  await sessionRow(window, "Alpha session").click()
   await setWindowSize(window, 940, 700)
 
   const bar = window.getByTestId("session-tab-bar").first()
@@ -84,7 +84,7 @@ test("the tab bar does not spill at half-screen width", async ({ launchApp }) =>
 
 test("close-pane survives all the way down to the window's minimum", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await window.getByText("Alpha session").click()
+  await sessionRow(window, "Alpha session").click()
   await setWindowSize(window, 900, 600)
 
   // Everything else in the cluster may fold into the overflow menu. This may not:
@@ -105,7 +105,7 @@ test("the sidebar collapses to a rail and every session stays reachable", async 
 
 test("nothing non-scrollable overflows its box at the window minimum", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await window.getByText("Alpha session").click()
+  await sessionRow(window, "Alpha session").click()
   await setWindowSize(window, 900, 600)
 
   // Deliberately broad: the point is to catch the control nobody thought about,

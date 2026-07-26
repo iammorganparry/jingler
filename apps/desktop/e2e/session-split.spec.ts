@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test"
-import { expect, test } from "./fixtures.js"
+import { expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -154,7 +154,7 @@ const paneSessions = (page: Page) =>
 
 test("dropping a session on a pane's edge splits it in beside", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   // One session, one pane — in this model that is a group of one, and there is
   // no empty slot anywhere to drop into. The split is CREATED by the drop.
@@ -170,7 +170,7 @@ test("dropping on a pane's MIDDLE replaces its session rather than splitting", a
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
   await expect.poll(() => paneSessions(window)).toEqual(["s_alpha", "s_beta"])
@@ -183,7 +183,7 @@ test("dropping on a pane's MIDDLE replaces its session rather than splitting", a
 
 test("a split renders as ONE sidebar row with a segment per pane", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
 
@@ -199,7 +199,7 @@ test("a split renders as ONE sidebar row with a segment per pane", async ({ laun
 
 test("a session that is not on screen carries no pane badge", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
 
@@ -208,7 +208,7 @@ test("a session that is not on screen carries no pane badge", async ({ launchApp
 
 test("dropping a session onto the split it is ALREADY in changes nothing", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
   await expect.poll(() => paneSessions(window)).toEqual(["s_alpha", "s_beta"])
@@ -229,7 +229,7 @@ test("a session in ANOTHER group moves into this split rather than duplicating",
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
   // Gamma gets its own group by being clicked, then is dragged into the split.
@@ -245,7 +245,7 @@ test("a session in ANOTHER group moves into this split rather than duplicating",
 
 test("a segment can be dragged out of its split into another group", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
   // Gamma alone becomes the active group; Alpha+Beta stay behind as a pill.
@@ -265,7 +265,7 @@ test("a segment can be dragged out of its split into another group", async ({ la
 
 test("closing a pane leaves the other one running and the app on screen", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
 
@@ -285,7 +285,7 @@ test("closing a pane leaves the other one running and the app on screen", async 
 
 test("a segment's × in the sidebar closes that pane", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
   await settle(window)
@@ -302,7 +302,7 @@ test("clicking a session already on screen focuses its pane instead of rearrangi
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
   await expect.poll(() => paneSessions(window)).toEqual(["s_alpha", "s_beta"])
@@ -328,7 +328,7 @@ test("clicking a session already on screen focuses its pane instead of rearrangi
  */
 test("the Arc keyboard map drives focus in a real browser", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await window.keyboard.press("Control+Shift+Equal")
   await window.keyboard.press("Control+Shift+Equal")
@@ -372,7 +372,7 @@ test("the Arc keyboard map drives focus in a real browser", async ({ launchApp }
  */
 test("⌃⇧= adds a pane, and stops when nothing is left to add", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   // Two presses, two more panes — each takes the first session not already shown.
   await window.keyboard.press("Control+Shift+Equal")
@@ -388,7 +388,7 @@ test("⌃⇧= adds a pane, and stops when nothing is left to add", async ({ laun
 /** The panel is gone from every pane count, not merely hidden at the cap. */
 test("no add-split panel is on screen", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
   await expect(window.getByTestId("add-right-split")).toHaveCount(0)
 
   await window.keyboard.press("Control+Shift+Equal")
@@ -398,7 +398,7 @@ test("no add-split panel is on screen", async ({ launchApp }) => {
 
 test("Separate all tabs flies every pane out to its own row", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
   await expect(window.getByTestId("split-segment-s_beta")).toBeVisible()
@@ -415,7 +415,7 @@ test("Separate all tabs flies every pane out to its own row", async ({ launchApp
 
 test("the split and its sessions survive a real app restart", async ({ launchApp }) => {
   const first = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(first.window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(first.window, "Alpha session")).toBeVisible()
 
   await dragTo(first.window, "session-row-s_beta", "split-pane-0", "after")
   await dragTo(first.window, "session-row-s_gamma", "split-pane-1", "after")
@@ -451,7 +451,7 @@ test("the split and its sessions survive a real app restart", async ({ launchApp
  */
 test("a dragged divider's position survives a real app restart", async ({ launchApp }) => {
   const first = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(first.window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(first.window, "Alpha session")).toBeVisible()
 
   await dragTo(first.window, "session-row-s_beta", "split-pane-0", "after")
   await settle(first.window)
@@ -489,7 +489,7 @@ test("a dragged divider's position survives a real app restart", async ({ launch
 
 test("a foreign drag (a file) is ignored by the split", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
 
   // The composer accepts file drops; a pane must not swallow one.
@@ -543,7 +543,7 @@ test("a single pane fills its container, pinning the composer to the bottom", as
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await settle(window)
   const view = await boxOf(window, '[data-testid="split-view"]')
@@ -562,7 +562,7 @@ test("both panes of a two-way split fill their height and share the width", asyn
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
   await expect.poll(() => paneSessions(window)).toEqual(["s_alpha", "s_beta"])
@@ -588,7 +588,7 @@ test("both panes of a two-way split fill their height and share the width", asyn
 
 test("the divider tracks the pointer during the drag, not after it", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
   await settle(window)
@@ -619,7 +619,7 @@ test("the divider tracks the pointer during the drag, not after it", async ({ la
 
 test("dragging the divider trades width between the two panes", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
   await settle(window)
@@ -663,7 +663,7 @@ test("dragging the divider trades width between the two panes", async ({ launchA
  */
 test("a freshly mounted composer is one line tall, not its max height", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
   await expect.poll(() => paneSessions(window)).toEqual(["s_alpha", "s_beta"])
@@ -700,7 +700,7 @@ test("a freshly mounted composer is one line tall, not its max height", async ({
  */
 test("switching sessions puts the new pane at full width immediately", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
   await settle(window)
   const view = await boxOf(window, '[data-testid="split-view"]')
 
@@ -720,7 +720,7 @@ test("switching sessions puts the new pane at full width immediately", async ({ 
  */
 test("each pane of a split names its session in the top bar", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
-  await expect(window.getByText("Alpha session")).toBeVisible()
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   // A lone pane needs no chip — the sidebar selection already says which it is.
   await expect(window.getByTestId("pane-chip-0")).toHaveCount(0)

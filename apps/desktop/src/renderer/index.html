@@ -17,11 +17,44 @@
 
       Images only — no script, style or connect origin is widened.
     -->
+    <!--
+      `script-src` allows exactly one source beyond 'self': the
+      `starbase-plugin:` scheme, which the main process registers and serves
+      ONLY out of `~/starbase/plugins` (see main/plugin-protocol.ts). That is
+      what lets a plugin's UI module be imported at all.
+
+      What did NOT widen: `connect-src` (still 'self' via default-src), so a
+      plugin's renderer half cannot reach the network however much code it
+      runs — anything outbound goes through the extension host, where the
+      operator's consent is recorded. No remote script origin is allowed, ever.
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https://github.com https://*.githubusercontent.com https://www.google.com https://*.gstatic.com"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' starbase-plugin:; img-src 'self' data: starbase-plugin: https://github.com https://*.githubusercontent.com https://www.google.com https://*.gstatic.com"
     />
     <title>Starbase</title>
+    <!--
+      Bare specifiers a plugin may import. Each resolves to a generated shim
+      that re-exports the app's ALREADY-INSTANTIATED singleton rather than a
+      second copy of the library.
+
+      This is not an optimisation. Two Reacts in one tree makes every hook throw
+      "invalid hook call", and the failure only appears once a SECOND plugin is
+      installed — so without this a plugin author would ship something that
+      worked perfectly on their machine and broke on everyone else's.
+    -->
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "starbase-plugin://runtime/react.js",
+          "react-dom": "starbase-plugin://runtime/react-dom.js",
+          "react/jsx-runtime": "starbase-plugin://runtime/jsx-runtime.js",
+          "react/jsx-dev-runtime": "starbase-plugin://runtime/jsx-dev-runtime.js",
+          "@starbase/plugin-sdk": "starbase-plugin://runtime/sdk.js",
+          "@starbase/plugin-sdk/ui": "starbase-plugin://runtime/sdk-ui.js"
+        }
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

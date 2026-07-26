@@ -3,10 +3,20 @@ import type { DiffStat, Session, SessionActivity, SessionDisplayStatus } from "@
 import { activityLabel, displayStatusOf, UNTITLED_SESSION } from "@starbase/core"
 import { displayStatusLabel } from "../tokens.js"
 import { atLeast, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js"
-import { TabBar, type TabKey } from "../app/tab-bar.js"
+import { TabBar } from "../app/tab-bar.js"
+import {
+  BUILTIN_TAB,
+  builtinTabContributions,
+  describeTab,
+  type TabContext,
+  type TabContribution,
+  type TabKey,
+  type TabRenderContext,
+  visibleTabs
+} from "../app/tab-contributions.js"
 import { ConversationView } from "../app/conversation-view.js"
 import { SEED_CONVERSATION } from "../seed.js"
-import { StubScreen } from "./stub-screen.js"
+import { BuiltinStubScreen } from "./stub-screen.js"
 
 /**
  * The tab-bar pill's accent per reported state. Blue means "you're needed" and is
@@ -83,8 +93,16 @@ export interface SessionPaneProps {
   renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Changes tab — the Code Review view over the local worktree diff. */
   renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
-  /** Render the Issue tab — the rich linked-issue view (shown when one is linked). */
-  renderIssue?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  /**
+   * Tabs contributed by plugins, merged with the built-ins into one list.
+   *
+   * One list, not two, and not a separate "plugin tabs" region of the bar: a
+   * contributed tab sorts, renders, badges and unmounts by exactly the same
+   * rules as Conversation does. Anything less and plugin tabs would drift into
+   * being second-class the first time a built-in gained a behaviour the plugin
+   * path forgot.
+   */
+  tabContributions?: ReadonlyArray<TabContribution>
   /**
    * Toggle the browser-preview pane. App-level, not pane-level: the dock itself is
    * mounted once outside the grid, so every pane's copy of this control drives the
@@ -105,26 +123,6 @@ export interface SessionPaneProps {
   onMovePaneLeft?: () => void
   /** Swap this pane with its right-hand neighbour. Absent at the right-hand end. */
   onMovePaneRight?: () => void
-}
-
-/**
- * The tabs relevant to a session — extra tabs only appear once they have data.
- * The Pull Request tab also shows for a branch with changes but no PR yet, so the
- * "Create pull request" empty state is reachable; Code Review needs a linked PR.
- */
-export const visibleTabs = (
-  active: Session | null,
-  planSessions?: ReadonlySet<string>
-): ReadonlyArray<TabKey> => {
-  const tabs: TabKey[] = ["conversation"]
-  // A linked GitHub issue gets its own rich Issue tab, right after Conversation.
-  if (active?.issueNumber != null) tabs.push("issue")
-  if (active && planSessions?.has(active.id)) tabs.push("plan")
-  if (active?.prNumber != null) tabs.push("pr", "review")
-  // No PR yet: the local worktree diff gets its own Changes tab (Code Review
-  // covers local diffs only once a PR exists).
-  else if (active?.worktreePath) tabs.push("pr", "changes")
-  return tabs
 }
 
 /**
@@ -179,9 +177,79 @@ function SessionPaneBody(props: SessionPaneProps) {
   const active = props.session
   const planStepTarget = target?.sessionId === active.id ? target.stepId : null
 
-  const tabs = visibleTabs(active, props.planSessions)
-  // Never leave a hidden tab selected (e.g. after a session's PR is merged away).
-  const activeTab = tabs.includes(tab) ? tab : "conversation"
+  // What every contribution's `when` and `badge` gets to reason about. Assembled
+  // once rather than per tab: `hasPlan` and `diff` are lookups the old if/push
+  // chain did inline, and doing them per contribution would repeat them per tab
+  // per render.
+  const tabCtx: TabContext = {
+    session: active,
+    hasPlan: props.planSessions?.has(active.id) ?? false,
+    diff: props.liveDiff?.[active.id] ?? null
+  }
+  const connectGithub = props.onOpenSettings ?? (() => {})
+
+  /**
+   * The built-in tabs, then whatever plugins added.
+   *
+   * Rebuilt every render rather than memoised: the list is six closures over
+   * props that change on every render anyway, so a memo would need every one of
+   * them in its dependency array and would buy nothing but a stale-closure bug
+   * the first time someone forgot one. What must stay stable across renders is
+   * the MOUNTED SUBTREE, and that is keyed by mount group below — not by the
+   * identity of this array.
+   */
+  const contributions: ReadonlyArray<TabContribution> = [
+    ...builtinTabContributions({
+      conversation: (session, ctx) => {
+        const paneCtx: ConversationPaneCtx = {
+          onOpenPlanReview: (stepId) => {
+            setTarget(stepId ? { sessionId: session.id, stepId } : null)
+            // Already split? Plan Review is on screen — switching tabs would
+            // close the transcript the operator just clicked from. Just move
+            // its selection.
+            if (!ctx.splitOpen) ctx.onSelectTab(BUILTIN_TAB.plan)
+          },
+          planStepId: planStepTarget,
+          onPlanStepSelected: () => setTarget(null),
+          // "Is this the pane the operator is looking at?" — a group of one has
+          // no `pane` prop at all, and is always the one being looked at.
+          paneFocused: props.pane === undefined || props.pane.focused
+        }
+        if (!props.renderConversation) {
+          return (
+            props.conversationPane ?? (
+              <ConversationView messages={SEED_CONVERSATION} mode="accept-edits" />
+            )
+          )
+        }
+        return props.renderConversation(
+          session,
+          ctx.activeTabId === BUILTIN_TAB.plan
+            ? "plan"
+            : ctx.splitOpen
+              ? "split"
+              : "conversation",
+          paneCtx
+        )
+      },
+      pullRequest: (session, ctx) =>
+        props.renderPullRequest?.(session, { onConnectGithub: ctx.onConnectGithub }),
+      review: (session, ctx) =>
+        props.renderReview?.(session, { onConnectGithub: ctx.onConnectGithub }),
+      code: (session, ctx) =>
+        props.renderCode?.(session, { onConnectGithub: ctx.onConnectGithub }),
+      stub: (id) => <BuiltinStubScreen tab={id} />
+    }),
+    ...(props.tabContributions ?? [])
+  ]
+
+  const tabs = visibleTabs(tabCtx, contributions)
+  // Never leave a hidden tab selected (e.g. after a session's PR is merged away,
+  // or after the plugin that owned the selected tab was disabled). Falling back
+  // to the first visible tab rather than the literal "conversation" keeps this
+  // honest if the built-in set ever changes.
+  const activeContribution = tabs.find((c) => c.id === tab) ?? tabs[0]
+  const activeTab = activeContribution?.id ?? BUILTIN_TAB.conversation
   // Plan Review beside the transcript. Derived, never merely stored: a session
   // with no plan has nothing to split, so the same reasoning that hides the Plan
   // tab collapses the split — otherwise a plan-less session would leave an empty
@@ -202,20 +270,28 @@ function SessionPaneBody(props: SessionPaneProps) {
   // same rule is spelled out in `issue-view.tsx` and `pull-request-view.tsx`;
   // it applies here too — and `useHookAtTopLevel` now enforces it.
   const roomy = atLeast(useWidthTier(), "wide")
-  const splitAvailable = activeTab === "conversation" && tabs.includes("plan") && roomy
+  const splitAvailable =
+    activeTab === BUILTIN_TAB.conversation &&
+    tabs.some((c) => c.id === BUILTIN_TAB.plan) &&
+    roomy
   const splitOpen = split && splitAvailable
-  const connectGithub = props.onOpenSettings ?? (() => {})
   // What this session's agent is doing — drives the tab bar's pill.
   const activeActivity = props.liveActivity?.[active.id] ?? null
+
+  /** What the tab actually on screen is handed. */
+  const renderCtx: TabRenderContext = {
+    activeTabId: activeTab,
+    splitOpen,
+    onConnectGithub: connectGithub,
+    onSelectTab: setTab
+  }
 
   return (
     <>
       <TabBar
-        tabs={tabs}
+        tabs={tabs.map((c) => describeTab(c, tabCtx))}
         active={activeTab}
         onChange={setTab}
-        prNumber={active.prNumber ?? null}
-        changes={props.liveDiff?.[active.id] ?? null}
         status={
           activeActivity
             ? {
@@ -253,66 +329,27 @@ function SessionPaneBody(props: SessionPaneProps) {
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/*
-        The Conversation + Plan tabs share ONE persistent pane (same
-        conversation machine), so switching to Plan Review never unmounts —
-        and thus never aborts — a parked plan run. The pane swaps its own
-        inner view; only the OTHER tabs (pr/review/stub) fully unmount on
-        switch (keyed by activeTab), since the virtualized transcript's
-        measurement cache corrupts if kept mounted-but-hidden.
-      */}
-      {activeTab === "conversation" || activeTab === "plan" ? (
-        props.renderConversation ? (
-          <div key={active.id} className="flex min-h-0 min-w-0 flex-1">
-            {props.renderConversation(
-              active,
-              activeTab === "plan" ? "plan" : splitOpen ? "split" : "conversation",
-              {
-                onOpenPlanReview: (stepId) => {
-                  setTarget(stepId ? { sessionId: active.id, stepId } : null)
-                  // Already split? Plan Review is on screen — switching tabs
-                  // would close the transcript the operator just clicked from.
-                  // Just move its selection.
-                  if (!splitOpen) setTab("plan")
-                },
-                planStepId: planStepTarget,
-                onPlanStepSelected: () => setTarget(null),
-                // "Is this the pane the operator is looking at?" — a group of one
-                // has no `pane` prop at all, and is always the one being looked at.
-                paneFocused: props.pane === undefined || props.pane.focused
-              }
-            )}
-          </div>
-        ) : (
-          <div key="conversation" className="flex min-h-0 min-w-0 flex-1">
-            {props.conversationPane ?? (
-              <ConversationView messages={SEED_CONVERSATION} mode="accept-edits" />
-            )}
-          </div>
-        )
-      ) : (
-        <div key={activeTab} className="flex min-h-0 min-w-0 flex-1">
-          {activeTab === "issue" ? (
-            (props.renderIssue?.(active, { onConnectGithub: connectGithub }) ?? (
-              <StubScreen tab="issue" />
-            ))
-          ) : activeTab === "pr" ? (
-            (props.renderPullRequest?.(active, { onConnectGithub: connectGithub }) ?? (
-              <StubScreen tab="pr" />
-            ))
-          ) : activeTab === "review" ? (
-            (props.renderReview?.(active, { onConnectGithub: connectGithub }) ?? (
-              <StubScreen tab="review" />
-            ))
-          ) : activeTab === "changes" ? (
-            (props.renderCode?.(active, { onConnectGithub: connectGithub }) ?? (
-              <StubScreen tab="changes" />
-            ))
-          ) : (
-            <StubScreen tab={activeTab} />
-          )}
+        {/*
+          One dispatch, where there used to be a five-branch ternary chain.
+
+          The mount key is what preserves the behaviour that chain encoded:
+          tabs in the same MOUNT GROUP share one subtree and swap faces
+          internally, everything else remounts on switch. Conversation and Plan
+          Review declare the same group, so switching to Plan never unmounts —
+          and thus never aborts — a parked plan run; every other tab keeps the
+          old remount-on-switch semantics, which the virtualized transcript
+          REQUIRES of its neighbours (its measurement cache corrupts if it is
+          kept mounted-but-hidden).
+
+          The session id is in the key too, so a pane reused for a different
+          session never hands the new session's data to the old subtree.
+        */}
+        <div
+          key={`${activeContribution?.mountGroup ?? activeTab}:${active.id}`}
+          className="flex min-h-0 min-w-0 flex-1"
+        >
+          {activeContribution?.render(active, renderCtx)}
         </div>
-      )}
       </div>
     </>
   )

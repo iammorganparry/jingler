@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js"
+import { expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -65,13 +65,13 @@ test("a session's transcript survives being evicted from the actor cache", async
   // Visit every session in turn. Well past the residency cap, so the earliest
   // ones have certainly been stopped and forgotten by the time we reach the end.
   for (let i = 0; i < SESSION_COUNT; i++) {
-    await window.getByText(`Residency ${i}`).click()
+    await sessionRow(window, `Residency ${i}`).click()
     await expect(window.getByText(`answer belonging to session ${i}`)).toBeAttached()
   }
 
   // Back to the first, whose actor is long gone: the pane must rebuild it from the
   // transcript on disk, with its own history and nobody else's.
-  await window.getByText("Residency 0").click()
+  await sessionRow(window, "Residency 0").click()
   await expect(window.getByText("answer belonging to session 0")).toBeAttached()
   await expect(window.getByText("question for session 0")).toBeAttached()
   await expect(window.getByText("answer belonging to session 8")).not.toBeAttached()

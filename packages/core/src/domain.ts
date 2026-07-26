@@ -818,7 +818,18 @@ export const WorkspaceConfig = Schema.Struct({
    * on older configs, which means the feature is off (`OPEN_CONNECTOR_DEFAULT`);
    * the bearer token is NEVER stored here — it lives in `SecretStore`.
    */
-  openConnector: Schema.optional(OpenConnectorConfig)
+  openConnector: Schema.optional(OpenConnectorConfig),
+  /**
+   * Ids of plugins the operator has turned OFF. Absent (or a missing id) means
+   * enabled — the safe default, since a freshly-dropped-in plugin should work
+   * without a settings visit.
+   *
+   * A disabled LIST rather than an enabled one so the set stays small and the
+   * default needs no entry: the catalog is the source of truth for which plugins
+   * exist, and this only records the exceptions. A plugin whose directory is
+   * gone but whose id lingers here is harmless — nothing matches it.
+   */
+  disabledPlugins: Schema.optional(Schema.Array(Schema.String))
 })
 export type WorkspaceConfig = Schema.Schema.Type<typeof WorkspaceConfig>
 

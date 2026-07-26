@@ -29,6 +29,12 @@ import {
   Message,
   ModelOption,
   OpencodeProviderInfo,
+  AuthSessionInfo,
+  AuthSessionRequest,
+  LoadedPlugin,
+  PluginCatalog,
+  PluginEvent,
+  PluginId,
   ExecutionMode,
   PermissionMode,
   PrFileChange,
@@ -78,6 +84,7 @@ import {
   DiscoveryError,
   GhError,
   GitError,
+  PluginError,
   ReviewError,
   SessionNotFoundError,
   TerminalError,
@@ -1438,5 +1445,221 @@ export class StarbaseRpcs extends RpcGroup.make(
    */
   Rpc.make("Theme.reveal", {
     payload: { path: Schema.String }
+  }),
+
+  // ── Plugins ──────────────────────────────────────────────────────────────────
+  // The installed-plugin surface. The registry (list/watch/enable/install) mirrors
+  // the theme surface exactly — a directory of manifests, re-emitted whole on every
+  // change. The rest (invoke/events/storage/auth) is the extension-host boundary:
+  // command dispatch, the host→renderer push stream, per-plugin storage, and the
+  // consent-gated credential grants. No `Plugins.*` success schema carries a token;
+  // credentials live in the host and only `AuthSessionInfo` metadata ever crosses.
+
+  /**
+   * Every plugin directory under `~/starbase/plugins`, decoded.
+   *
+   * Never errors, for the reason `Theme.list` doesn't: one malformed manifest
+   * arrives in `catalog.failed` beside the plugins that loaded, so a single bad
+   * `starbase.plugin.json` can inform the operator without emptying the list.
+   */
+  Rpc.make("Plugins.list", {
+    success: PluginCatalog
+  }),
+
+  /**
+   * Re-emit the whole catalog whenever `~/starbase/plugins` changes on disk, so
+   * dropping in (or editing) a plugin folder updates Settings live.
+   *
+   * The whole catalog rather than a per-file delta — the same reasoning as
+   * `Theme.watch`, and served with the same `Stream.unwrap(Effect.map(…))` shape
+   * in the handler (the accessor form silently yields a stream-of-one-stream).
+   */
+  Rpc.make("Plugins.watch", {
+    success: PluginCatalog,
+    stream: true
+  }),
+
+  /**
+   * Enable or disable a plugin. Disabled plugins stay in the catalog (the
+   * operator can turn them back on) but contribute nothing and never activate.
+   * Persisted in `WorkspaceConfig`, so the choice survives a restart.
+   */
+  Rpc.make("Plugins.setEnabled", {
+    error: PluginError,
+    payload: { pluginId: PluginId, enabled: Schema.Boolean }
+  }),
+
+  /** Remove a plugin's directory. Fails `PluginError` for a built-in or unknown id. */
+  Rpc.make("Plugins.uninstall", {
+    error: PluginError,
+    payload: { pluginId: PluginId }
+  }),
+
+  /** Reveal a plugin's directory in the OS file manager (confined to `pluginsDir`). */
+  Rpc.make("Plugins.reveal", {
+    error: PluginError,
+    payload: { pluginId: PluginId }
+  }),
+
+  /**
+   * Deactivate then re-activate a plugin's host half — the development loop for a
+   * plugin author editing `main`. Served by the extension host.
+   */
+  Rpc.make("Plugins.reload", {
+    error: PluginError,
+    payload: { pluginId: PluginId }
+  }),
+
+  /**
+   * Start a plugin's host half because one of its `activationEvents` fired.
+   *
+   * ## Why this exists at all
+   *
+   * `activate()` used to be reachable only from `invoke()`. That made
+   * `activationEvents` decorative: `onTab:<id>` appeared to work because a plugin
+   * tab's first render usually calls `host.invoke(...)`, which activates lazily
+   * on the way past — and `onStartupFinished` never fired at any point, so a
+   * plugin whose whole job was to subscribe to session events in `activate` never
+   * ran a line of code. The docs said otherwise.
+   *
+   * Idempotent, and cheap when it is a no-op: the runtime tracks what it has
+   * activated and joins an in-flight activation rather than starting a second.
+   * That matters because the renderer calls this on every plugin-tab switch.
+   *
+   * A plugin with no `main` resolves without spawning anything.
+   */
+  Rpc.make("Plugins.activate", {
+    error: PluginError,
+    payload: { pluginId: PluginId }
+  }),
+
+  /**
+   * Copy a folder into `~/starbase/plugins` and load it, returning the installed
+   * plugin. The source is validated as a real plugin (a decodable manifest)
+   * before anything is copied, so a bad folder fails without leaving a partial
+   * directory behind.
+   *
+   * Takes a path the CALLER already has. Settings uses
+   * {@link Plugins.installFromPicker} instead, which chooses the path natively.
+   */
+  Rpc.make("Plugins.installFromFolder", {
+    success: LoadedPlugin,
+    error: PluginError,
+    payload: { sourcePath: Schema.String }
+  }),
+
+  /**
+   * Show a native folder picker and install whatever the operator chooses.
+   *
+   * Succeeds with `null` when the picker is cancelled — cancelling is a normal
+   * outcome, not an error, and modelling it as one would make Settings show a
+   * failure toast for closing a dialog.
+   *
+   * ## Why the picker lives behind the RPC rather than in the renderer
+   *
+   * `showOpenDialog` is main-only, so *something* has to cross the boundary. The
+   * choice is whether the renderer gets a general "open a folder picker" call and
+   * then passes the result to `installFromFolder`, or whether pick-and-install is
+   * one atomic operation. It is one operation here because the renderer is a
+   * realm plugin UI also runs in: a general picker exposed to it is a picker
+   * anything in that realm could open and read a path from, and the path it
+   * returns is a filesystem location the operator selected. Fusing the two means
+   * the only thing the renderer can do with the picker is install a plugin.
+   */
+  Rpc.make("Plugins.installFromPicker", {
+    success: Schema.NullOr(LoadedPlugin),
+    error: PluginError
+  }),
+
+  /**
+   * Dispatch a command to a plugin's host half and return its result. The renderer
+   * side of the command palette / keybinding path. `arg` is the command's opaque
+   * argument; the result is whatever the plugin returned, unvalidated JSON.
+   *
+   * Served by the extension host.
+   */
+  Rpc.make("Plugins.invoke", {
+    success: Schema.Unknown,
+    error: PluginError,
+    payload: {
+      pluginId: PluginId,
+      commandId: Schema.String,
+      arg: Schema.optional(Schema.Unknown)
+    }
+  }),
+
+  /**
+   * The host→renderer push stream: `Emitted` topic messages, and the lazy
+   * `Activated` / `ActivationFailed` lifecycle. One multiplexed stream for the
+   * window, tagged by `pluginId` so the renderer fans it back out.
+   *
+   * Served by the extension host.
+   */
+  Rpc.make("Plugins.events", {
+    success: PluginEvent,
+    stream: true
+  }),
+
+  /**
+   * Read a value from a plugin's private key/value store. Null when unset. The
+   * value is opaque JSON — Starbase persists it without interpreting it.
+   */
+  Rpc.make("Plugins.storageGet", {
+    success: Schema.NullOr(Schema.Unknown),
+    payload: { pluginId: PluginId, key: Schema.String }
+  }),
+
+  /** Write a value into a plugin's private key/value store. */
+  Rpc.make("Plugins.storageSet", {
+    error: PluginError,
+    payload: { pluginId: PluginId, key: Schema.String, value: Schema.Unknown }
+  }),
+
+  /**
+   * Remove a key from a plugin's store.
+   *
+   * Distinct from writing `null`: a key present with a null value still shows up
+   * in `storageKeys`, so folding delete into set would make the two disagree.
+   */
+  Rpc.make("Plugins.storageDelete", {
+    error: PluginError,
+    payload: { pluginId: PluginId, key: Schema.String }
+  }),
+
+  /** Every key currently set for a plugin. Empty when the store has never been written. */
+  Rpc.make("Plugins.storageKeys", {
+    success: Schema.Array(Schema.String),
+    payload: { pluginId: PluginId }
+  }),
+
+  /**
+   * The granted auth sessions, for the Settings list that lets the operator see
+   * and revoke what each plugin holds. Returns metadata only — `AuthSessionInfo`
+   * has no token field, and that absence is the security boundary, not an
+   * omission (see `packages/core/src/plugin.ts`).
+   */
+  Rpc.make("Plugins.authSessions", {
+    success: Schema.Array(AuthSessionInfo)
+  }),
+
+  /**
+   * A plugin asking for credentials (plugin, provider, scopes). Prompts the
+   * operator; returns the granted session's METADATA, or null if declined. The
+   * token itself never crosses this boundary — it stays in the host.
+   *
+   * Served by the extension host.
+   */
+  Rpc.make("Plugins.authGrant", {
+    success: Schema.NullOr(AuthSessionInfo),
+    error: PluginError,
+    payload: AuthSessionRequest
+  }),
+
+  /**
+   * Revoke a plugin's session with one provider.
+   */
+  Rpc.make("Plugins.authRevoke", {
+    error: PluginError,
+    payload: { pluginId: PluginId, providerId: Schema.String }
   })
 ) {}

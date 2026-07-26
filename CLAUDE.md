@@ -121,6 +121,32 @@ Other things worth knowing before touching this:
   script flattens VS Code's `include` chains; without that, `dark_modern.json`
   resolves to zero syntax rules and renders as grey mush with no error.
 
+### Plugins
+
+Starbase is extensible: plugins add **tabs, dock panes and commands**, loaded
+from `~/starbase/plugins`. Keybinding and settings contributions are in the
+schema but not yet dispatched; a manifest declaring one fails to load loudly. The shape is VS Code's on
+purpose — `activationEvents`, `contributes`, `capabilities` mean what they mean
+there.
+
+- **The authoring contract is `packages/plugin-sdk/AGENTS.md`.** It is written
+  for a coding agent, which makes it the densest thing to hand a human too.
+- **There is no `permissions` array in a manifest.** A plugin asks for
+  credentials when it needs them via `getSession(providerId, scopes)`, and the
+  operator consents once, revocably. See `docs/plugins/permissions-and-trust.md`
+  — including what the boundaries do and do not protect.
+- **Plugin UI shares the app's React**, reached through an importmap over the
+  `starbase-plugin://` scheme. A plugin that bundles its own React makes every
+  hook throw, but only once a SECOND plugin is installed.
+- **A tab is a `TabContribution`, and the built-ins are contributions too**
+  (`packages/ui/src/app/tab-contributions.ts`). There is no second code path for
+  plugin tabs — that is the only way they stay first-class.
+- `plugins/github-issues` is the reference official plugin. It takes no shortcut
+  for being official: it asks for GitHub through the same consent-gated call a
+  third-party plugin would.
+
+New plugin: `node scripts/create-starbase-plugin.mjs my-plugin`.
+
 ### Persistence
 
 Desktop state is **JSON files under `~/starbase`** (no ORM) — see `apps/desktop/src/main/app-paths.ts`: `config.json`, `sessions.json`, `worktrees/`, `transcripts/`, `themes/` (user colour themes, watched for live reload), `.starbase/` (plans), `auth.enc` (the bearer token via `SecretStore`). **`STARBASE_HOME` overrides the root** — the e2e suite points it at a throwaway dir so tests never touch the developer's real `~/starbase`. The auth server's own state lives in **Postgres** (Drizzle schema in `apps/server/src/db/schema.ts`), separate from the desktop's JSON store.

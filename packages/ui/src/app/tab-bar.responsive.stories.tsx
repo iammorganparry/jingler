@@ -2,12 +2,25 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import { BOUNDARY_WIDTHS, LookFor, WidthLadder } from "../story-support.js"
 import { TabBar, type TabKey } from "./tab-bar.js"
 import { ChatTabBar } from "./agent-tab-bar.js"
+import { builtinDescriptor } from "./tab-contributions.js"
 
 const meta: Meta = { title: "Responsive/Tab Bar", parameters: { layout: "fullscreen" } }
 export default meta
 type Story = StoryObj
 
-const ALL_TABS: ReadonlyArray<TabKey> = ["conversation", "issue", "plan", "pr", "review"]
+// Badges now ride on the descriptor rather than on separate `prNumber` /
+// `changes` props, so the bar can draw a decoration it has never heard of.
+const ALL_TABS = [
+  builtinDescriptor("conversation"),
+  builtinDescriptor("issue"),
+  builtinDescriptor("plan"),
+  builtinDescriptor("pr", { kind: "count", text: "#482" }),
+  // The diff badge is the widest decoration the row can hold, so the ladder has
+  // to include it — this is what main's story carried as a `changes` prop before
+  // badges moved onto the descriptors.
+  builtinDescriptor("changes", { kind: "diff", added: 313, removed: 23 }),
+  builtinDescriptor("review")
+]
 
 const noop = () => {}
 
@@ -33,8 +46,6 @@ const loaded = {
       onCloseChat={noop}
     />
   ),
-  prNumber: 482,
-  changes: { added: 313, removed: 23 },
   status: { label: "Running", tone: "yellow" as const, detail: "Running pnpm test -- auth" },
   onToggleSplit: noop,
   splitActive: false,
@@ -135,7 +146,13 @@ export const NothingToCollapse: Story = {
       </LookFor>
       <WidthLadder
         height={80}
-        render={() => <TabBar tabs={["conversation", "pr"]} active="conversation" onChange={noop} />}
+        render={() => (
+          <TabBar
+            tabs={[builtinDescriptor("conversation"), builtinDescriptor("pr")]}
+            active="conversation"
+            onChange={noop}
+          />
+        )}
       />
     </div>
   )
