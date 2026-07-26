@@ -15,8 +15,13 @@ import {
   X
 } from "lucide-react"
 import type { ReactNode } from "react"
+import type { TabDescriptor, TabKey } from "./tab-contributions.js"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier, type WidthTier } from "../hooks/width-tier.js"
+
+// Re-exported because they ARE this component's props vocabulary — a caller
+// building a tab bar should not have to know which module the shapes live in.
+export type { TabDescriptor, TabKey }
 import { Pill } from "../components/pill.js"
 import { Badge } from "../components/badge.js"
 import { StatusDot } from "../components/status-dot.js"
@@ -98,8 +103,6 @@ function PaneActionsMenu({
   )
 }
 
-export type TabKey = "conversation" | "issue" | "changes" | "pr" | "review" | "plan" | "workflow"
-
 /**
  * How wide the session chip's title may grow, per tier. At `tiny` the title is
  * dropped entirely — the chip keeps its slot badge and its tooltip, which is
@@ -115,25 +118,18 @@ const TITLE_WIDTH: Record<WidthTier, string | null> = {
 /** Status tone → dot class. Literal on purpose — see the use site. */
 const DOT_TONE = { yellow: "bg-yellow", blue: "bg-blue", green: "bg-green" } as const
 
-const LABEL: Record<TabKey, string> = {
-  conversation: "Conversation",
-  issue: "Issue",
-  changes: "Changes",
-  pr: "Pull Request",
-  review: "Code Review",
-  plan: "Plan Review",
-  workflow: "Workflow"
-}
-
-const ICON: Record<TabKey, LucideIcon> = {
-  conversation: MessagesSquare,
-  issue: CircleDot,
-  changes: FileDiff,
-  pr: GitPullRequest,
-  review: GitCompareArrows,
-  plan: Waypoints,
-  workflow: Workflow
-}
+/*
+ * There is deliberately no `LABEL`/`ICON` lookup here.
+ *
+ * The redesign this file came from keyed both off a closed `TabKey` union, which
+ * cannot describe a tab a plugin contributed — the whole point of
+ * `TabContribution` is that a plugin's tab is not a second code path. A
+ * `TabDescriptor` carries its own label, icon and badge, so the built-ins and the
+ * plugin tabs render through the same branch and the union can stay open.
+ *
+ * `BUILTIN_TAB_META` in `tab-contributions.ts` is where the built-ins' labels and
+ * icons now live.
+ */
 
 /**
  * The main-pane tab bar — ONE row of pills carrying everything the pane can
@@ -164,8 +160,6 @@ export function TabBar({
   tabs,
   active,
   onChange,
-  prNumber = null,
-  changes = null,
   status,
   pane,
   sessionTitle,
@@ -176,13 +170,17 @@ export function TabBar({
   onMovePaneLeft,
   onMovePaneRight
 }: {
-  tabs: ReadonlyArray<TabKey>
+  /**
+   * Every tab this pane can switch to, in display order, built-ins and plugin
+   * contributions alike.
+   *
+   * A `TabDescriptor` list rather than a `TabKey` list: each descriptor carries
+   * its own label, icon and badge, which is what lets a plugin's tab render
+   * through this same branch instead of needing a second one.
+   */
+  tabs: ReadonlyArray<TabDescriptor>
   active: TabKey
   onChange: (key: TabKey) => void
-  /** Linked PR number for the active session (badges the Pull Request tab). */
-  prNumber?: number | null
-  /** Live worktree diff totals, shown as `+N −N` on the Changes tab. */
-  changes?: { added: number; removed: number } | null
   /**
    * The session's state as ONE of the five reported words ("Thinking",
    * "Running", …) — never the tool or target, which is what the sidebar row
@@ -254,8 +252,15 @@ export function TabBar({
   const titleWidth = TITLE_WIDTH[tier]
   const title = sessionTitle ?? pane?.title ?? "Conversation"
   const conversationActive = active === "conversation"
-  const hasConversation = tabs.includes("conversation")
-  const viewTabs = tabs.filter((key) => key !== "conversation")
+  // `"conversation"` is still special — the redesign folded it into the session
+  // chip rather than giving it a pill — but it is matched by id on a descriptor
+  // now, not by a member of a closed union.
+  const conversationTab = tabs.find((tab) => tab.id === "conversation")
+  const hasConversation = conversationTab !== undefined
+  // Its accessible name comes from the descriptor rather than a local constant,
+  // so it cannot drift from `BUILTIN_TAB_META`.
+  const conversationLabel = conversationTab?.label ?? "Conversation"
+  const viewTabs = tabs.filter((tab) => tab.id !== "conversation")
 
   return (
     <div
@@ -284,12 +289,12 @@ export function TabBar({
             type="button"
             onClick={() => onChange("conversation")}
             aria-current={conversationActive ? "page" : undefined}
-            aria-label={LABEL.conversation}
+            aria-label={conversationLabel}
             data-testid={pane ? `pane-chip-${pane.index}` : "conversation-tab"}
             title={
               pane
                 ? `Pane ${pane.index + 1} — ${title} (⌃⇧${pane.index + 1})`
-                : `${LABEL.conversation} — ${title}`
+                : `${conversationLabel} — ${title}`
             }
             className={cn(
               "flex flex-none items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] outline-none transition-colors",
@@ -328,8 +333,9 @@ export function TabBar({
           </button>
         )}
 
-        {viewTabs.map((key) => {
-          const Icon = ICON[key]
+        {viewTabs.map((tab) => {
+          const key = tab.id
+          const Icon = tab.icon
           const isActive = key === active
           const showLabel = isActive && showActiveLabel
           return (
@@ -341,8 +347,8 @@ export function TabBar({
               // The name has to survive the label being hidden — this is what a
               // screen reader and `getByRole("tab", { name })` read once the
               // text is gone, and it doubles as the hover tooltip.
-              aria-label={LABEL[key]}
-              title={LABEL[key]}
+              aria-label={tab.label}
+              title={tab.label}
               className={cn(
                 "group flex flex-none items-center gap-1.5 rounded-md py-1 text-[12.5px] outline-none transition-colors",
                 // Glyph-only pills lose the label's optical weight, so the
@@ -360,26 +366,36 @@ export function TabBar({
                   isActive ? "text-blue" : "text-dim group-hover:text-muted-foreground"
                 )}
               />
-              {showLabel && <span className="whitespace-nowrap">{LABEL[key]}</span>}
-              {key === "pr" && prNumber !== null && (
+              {showLabel && <span className="whitespace-nowrap">{tab.label}</span>}
+              {/*
+                Badges come off the DESCRIPTOR, not from `key === "pr"` /
+                `key === "changes"` against dedicated props.
+
+                Both spellings drew the same two pixels; the difference is that
+                keying off the id made "a tab this file knows about" a
+                precondition for decorating one, which is exactly what a plugin
+                cannot satisfy. A contribution supplies its own badge, so a
+                plugin can show an unread count without anyone editing this file.
+              */}
+              {tab.badge?.kind === "count" && (
                 <Badge tone="count" size="xs">
-                  #{prNumber}
+                  {tab.badge.text}
                 </Badge>
               )}
-              {key === "changes" && changes && changes.added + changes.removed > 0 && (
+              {tab.badge?.kind === "diff" &&
+                tab.badge.added + tab.badge.removed > 0 &&
                 // Below `mid` the counts collapse to one dot: "+681 −0" is four
                 // to seven characters of tabular numerals per tab, and at that
                 // width they cost a whole chat pill to say something the Changes
                 // view says better.
-                atLeast(tier, "mid") ? (
+                (atLeast(tier, "mid") ? (
                   <span className="flex items-center gap-1 font-mono text-[10.5px] tabular-nums">
-                    <span className="text-green">+{changes.added}</span>
-                    <span className="text-red">−{changes.removed}</span>
+                    <span className="text-green">+{tab.badge.added}</span>
+                    <span className="text-red">−{tab.badge.removed}</span>
                   </span>
                 ) : (
                   <StatusDot tone="bg-green" size={5} />
-                )
-              )}
+                ))}
             </button>
           )
         })}

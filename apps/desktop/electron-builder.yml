@@ -17,6 +17,31 @@ files:
   - out/**
   - package.json
 
+# Official plugins. `builtinPluginsRoot()` (src/main/app-paths.ts) resolves to
+# `resources/plugins` in a packaged build, so without this the packaged app looks
+# for its bundled plugins in a directory that does not exist and ships NONE of
+# them — the GitHub Issues tab simply is not there, with no error to explain it.
+#
+# Listed one by one rather than globbed from `plugins/*`:
+#   - `plugins/examples/*` are teaching material and must not ship;
+#   - a glob would also drag in `node_modules`, `src` and `vite.config.ts`.
+# Adding an official plugin is therefore one deliberate edit here, which is the
+# right amount of friction for "this now ships to every user".
+#
+# The `to` path's last segment MUST equal the manifest's `id` — discovery reads
+# directory names and `PluginRegistry.dirFor` resolves `<root>/<id>`, so a
+# mismatch makes the plugin load but Reveal open nothing.
+#
+# `dist/**` assumes the plugin has been BUILT. `pnpm build` (turbo) covers it:
+# `plugins/*` is in pnpm-workspace.yaml and each plugin has a `build` script.
+extraResources:
+  - from: ../../plugins/github-issues
+    to: plugins/github-issues
+    filter:
+      - starbase.plugin.json
+      - dist/**
+      - "!dist/**/*.map"
+
 # The one native module — @homebridge/node-pty-prebuilt-multiarch — must live
 # OUTSIDE the asar so its `.node` binary can be dlopen'd at runtime (asar-packed
 # native addons can't be loaded). Unpack the whole package (it also spawns a

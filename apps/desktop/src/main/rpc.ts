@@ -37,6 +37,9 @@ import {
   METERED_ENV_KEYS,
   PlanExecutor,
   PlanStore,
+  PluginRegistry,
+  PluginHost,
+  PluginAuth,
   PlanRoundStore,
   planReviewPost,
   retitleSession,
@@ -74,6 +77,7 @@ import {
   resolveOrchestrator,
   ReviewError,
   reviewModelFor,
+  PluginError,
   SessionNotFoundError,
   TASK_KINDS,
   userMessage
@@ -96,6 +100,7 @@ import type {
   CreateSessionInput,
   IssueAutomations,
   IssueSummary,
+  PluginCatalog,
   PrMergeMethod,
   ProviderConfig,
   ReviewComment,
@@ -1805,6 +1810,215 @@ export const setReasoning = (
   )
 
 /**
+ * Resolve a plugin id against the live catalog.
+ *
+ * Every host operation starts here rather than trusting the id it was handed:
+ * the renderer can ask to invoke a command in a plugin that was uninstalled a
+ * moment ago, and "no such plugin" is a better answer than a process being
+ * asked to activate a directory that is gone.
+ *
+ * ## Why the catalog is cached
+ *
+ * `PluginRegistry.list()` stats, reads and Schema-decodes every manifest on
+ * disk. Doing that on EVERY `Plugins.invoke` put a full directory scan in front
+ * of every command a plugin's UI fires — including ones in a render loop.
+ *
+ * The cache is invalidated by the watcher, which already re-emits the whole
+ * catalog whenever `~/starbase/plugins` changes, so the only way to read a stale
+ * entry is to race a filesystem change by less than the debounce — and the
+ * activation that follows re-reads the directory anyway.
+ */
+let catalogCache: { at: number; catalog: PluginCatalog } | null = null
+
+/** How long a resolved catalog is trusted between filesystem events. */
+const CATALOG_CACHE_MS = 2_000
+
+/** Dropped by the watcher, so an install or uninstall is visible immediately. */
+export const invalidatePluginCatalog = (): void => {
+  catalogCache = null
+}
+
+const cachedCatalog = Effect.suspend(() => {
+  const now = Date.now()
+  if (catalogCache && now - catalogCache.at < CATALOG_CACHE_MS) {
+    return Effect.succeed(catalogCache.catalog)
+  }
+  return Effect.tap(PluginRegistry.list(), (catalog) =>
+    Effect.sync(() => {
+      catalogCache = { at: now, catalog }
+    })
+  )
+})
+
+/**
+ * Tear down a plugin's host half, tolerating every reason there might not be one.
+ *
+ * Disable and uninstall both need this and neither should fail because of it: a
+ * UI-only plugin has no host half, a never-activated plugin has nothing running,
+ * and a build without an extension host has no runtime at all. All three are
+ * normal, and none of them is a reason to refuse to disable something.
+ *
+ * `deactivate` on the runtime is already a no-op for a plugin it is not running,
+ * so this only has to absorb the "no host here" failure from `get()`.
+ */
+const deactivateQuietly = (pluginId: string) =>
+  PluginHost.get().pipe(
+    Effect.flatMap((host) => Effect.promise(() => host.deactivate(pluginId))),
+    Effect.catchAll(() => Effect.void)
+  )
+
+const pluginById = (pluginId: string) =>
+  Effect.flatMap(cachedCatalog, (catalog) => {
+    const found = catalog.plugins.find((p) => p.manifest.id === pluginId)
+    if (!found) {
+      return Effect.fail(
+        new PluginError({ pluginId, reason: `no plugin with id "${pluginId}" is installed` })
+      )
+    }
+    if (!found.enabled) {
+      // A disabled plugin runs no code, and that has to include commands the
+      // renderer still remembers — otherwise the Settings switch is advisory.
+      return Effect.fail(
+        new PluginError({ pluginId, reason: `"${pluginId}" is disabled` })
+      )
+    }
+    return Effect.succeed(found)
+  })
+
+/**
+ * The uniform refusal for anything that needs a running extension host.
+ *
+ * Phrased as a capability the app does not have YET rather than as a fault of
+ * the plugin, because that is what the operator will read in a toast. It also
+ * keeps every unimplemented plugin path failing identically, so the renderer's
+ * error handling is written against one shape instead of four.
+ */
+const notYetHosted = (pluginId: string, verb: string) =>
+  Effect.fail(
+    new PluginError({
+      pluginId,
+      reason: `Cannot ${verb} "${pluginId}" — the plugin extension host is not running in this build.`
+    })
+  )
+
+/** Where one plugin's private key/value blob lives. Confined by construction. */
+const pluginStorageFile = (pluginId: string) =>
+  Effect.gen(function* () {
+    const paths = yield* AppPaths
+    const path = yield* Path.Path
+    const root = path.resolve(paths.pluginStorageDir)
+    const file = path.resolve(root, `${pluginId}.json`)
+    // The id is schema-constrained to kebab-case at the contract boundary, so
+    // this can only fail if that guarantee is ever relaxed. Cheap to keep, and
+    // the failure mode it prevents is writing anywhere on disk.
+    if (path.dirname(file) !== root) {
+      return yield* Effect.fail(
+        new PluginError({ pluginId, reason: "plugin id escapes the storage directory" })
+      )
+    }
+    return { root, file }
+  })
+
+const pluginStorageRead = (pluginId: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const { file } = yield* pluginStorageFile(pluginId)
+    const raw = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => null))
+    if (!raw) return {} as Record<string, unknown>
+    return yield* Effect.try(() => JSON.parse(raw) as Record<string, unknown>).pipe(
+      // A corrupt blob reads as empty rather than failing every subsequent get.
+      // Plugin storage is a cache of the plugin's own state, not a record of
+      // record — losing it costs a re-fetch, whereas a hard failure here would
+      // wedge the plugin with no way for the operator to clear it.
+      Effect.orElseSucceed(() => ({}) as Record<string, unknown>)
+    )
+  })
+
+/**
+ * Read one key. Declared never-failing in the contract, so every fault folds to
+ * `null` — an unreadable store is indistinguishable from an unset key, which is
+ * exactly what a caller asking "do you have this?" wants.
+ */
+export const pluginStorageGet = (pluginId: string, key: string) =>
+  pluginStorageRead(pluginId).pipe(
+    Effect.map((all) => all[key] ?? null),
+    Effect.orElseSucceed(() => null)
+  )
+
+/**
+ * One writer at a time, per plugin.
+ *
+ * `set` and `delete` are each read-modify-write over a whole JSON blob. Two
+ * concurrent writers — a plugin's UI half and its host half both persisting, or
+ * two `set`s inside one `Promise.all` — each read the same before-state, and the
+ * second write silently dropped the first's key.
+ *
+ * A permit per plugin id rather than one global: two plugins writing at once are
+ * touching different files and have no reason to queue behind each other.
+ */
+const storageLocks = new Map<string, Effect.Semaphore>()
+
+const withStorageLock = <A, E, R>(
+  pluginId: string,
+  work: Effect.Effect<A, E, R>
+): Effect.Effect<A, E, R> =>
+  Effect.flatMap(
+    Effect.sync(() => {
+      const existing = storageLocks.get(pluginId)
+      if (existing) return existing
+      const created = Effect.unsafeMakeSemaphore(1)
+      storageLocks.set(pluginId, created)
+      return created
+    }),
+    (lock) => lock.withPermits(1)(work)
+  )
+
+/** Write the whole blob back. Shared by set and delete. */
+const pluginStorageWrite = (pluginId: string, all: Record<string, unknown>) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const { root, file } = yield* pluginStorageFile(pluginId)
+    yield* fs.makeDirectory(root, { recursive: true }).pipe(Effect.ignore)
+    yield* fs.writeFileString(file, JSON.stringify(all, null, 2)).pipe(
+      Effect.mapError(
+        (cause) => new PluginError({ pluginId, reason: "could not write plugin storage", cause })
+      )
+    )
+  })
+
+export const pluginStorageSet = (pluginId: string, key: string, value: unknown) =>
+  withStorageLock(
+    pluginId,
+    Effect.flatMap(pluginStorageRead(pluginId), (all) =>
+      pluginStorageWrite(pluginId, { ...all, [key]: value })
+    )
+  )
+
+/**
+ * Remove a key.
+ *
+ * Not `set(key, null)`: a key present with a null value still appears in
+ * `storageKeys`, so folding the two together would make a deleted key show up
+ * in a listing forever.
+ */
+const pluginStorageDeleteUnlocked = (pluginId: string, key: string) =>
+  Effect.flatMap(pluginStorageRead(pluginId), (all) => {
+    if (!(key in all)) return Effect.void
+    const { [key]: _removed, ...rest } = all
+    return pluginStorageWrite(pluginId, rest)
+  })
+
+export const pluginStorageDelete = (pluginId: string, key: string) =>
+  withStorageLock(pluginId, pluginStorageDeleteUnlocked(pluginId, key))
+
+/** Declared never-failing: an unreadable store lists nothing, same as an empty one. */
+export const pluginStorageKeys = (pluginId: string) =>
+  pluginStorageRead(pluginId).pipe(
+    Effect.map((all) => Object.keys(all)),
+    Effect.orElseSucceed(() => [] as Array<string>)
+  )
+
+/**
  * Handlers for every procedure in the group. Each one delegates straight to an
  * Effect service, so the group remains the sole contract. `Discovery.list`
  * pulls in a `CommandExecutor` requirement (via `DiscoveryService.list()`) that
@@ -2175,7 +2389,176 @@ const HandlersLayer = StarbaseRpcs.toLayer({
         const file = resolve(path)
         if (dirname(file) === themesDir) shell.showItemInFolder(file)
       })
-    )
+    ),
+
+  // ── Plugins ────────────────────────────────────────────────────────────────
+  // The registry half is live; the extension-host half is not. Everything that
+  // needs a running plugin process — command dispatch, the event stream, auth
+  // grants — is stubbed HERE rather than left out of the layer, because
+  // `toLayer` demands a total handler map: an omission is a compile error, not
+  // a missing feature. Each stub fails with the same `PluginError` the real
+  // implementation will, so the renderer's error path is exercised from day one
+  // instead of being written blind against a handler that never failed.
+
+  "Plugins.list": () => PluginRegistry.list(),
+
+  // `Stream.unwrap(Effect.map(...))`, not the accessor — the accessor form
+  // yields a stream OF a stream and the renderer receives nothing. Same shape
+  // as `Theme.watch` above, and for the same reason.
+  "Plugins.watch": () =>
+    Stream.unwrap(
+      Effect.map(PluginRegistry, (p) =>
+        // Every emission means the directory changed, so the resolution cache
+        // `pluginById` keeps is stale by definition.
+        p.watch().pipe(Stream.tap(() => Effect.sync(invalidatePluginCatalog)))
+      )
+    ),
+
+  /**
+   * Flip the switch, and STOP the plugin if it is being turned off.
+   *
+   * Writing `disabledPlugins` alone made "disabled" mean "contributes no UI and
+   * accepts no new invokes". The renderer stops rendering its tabs, so it looks
+   * off — while an already-activated host half keeps its subscriptions, its
+   * timers and any in-flight work running until the app restarts.
+   *
+   * Disabling is almost always damage control: the plugin is doing something the
+   * operator wants stopped, and it was the one thing the switch did not do.
+   */
+  "Plugins.setEnabled": ({ pluginId, enabled }) =>
+    Effect.gen(function* () {
+      yield* PluginRegistry.setEnabled(pluginId, enabled)
+      if (!enabled) yield* deactivateQuietly(pluginId)
+    }),
+
+  /**
+   * Uninstall, and drop the plugin's credentials with it.
+   *
+   * Leaving grants behind would mean reinstalling a plugin silently restores
+   * access the operator revoked by deleting it — the strongest revocation
+   * gesture there is, and the one they would most expect to stick.
+   */
+  "Plugins.uninstall": ({ pluginId }) =>
+    Effect.gen(function* () {
+      // Stop it BEFORE deleting its directory. A host half whose `deactivate`
+      // touches its own files should find them there, and an uninstall that
+      // leaves code running against a directory that no longer exists is a
+      // stranger failure than one that stops it first.
+      yield* deactivateQuietly(pluginId)
+      yield* PluginRegistry.uninstall(pluginId)
+      yield* PluginAuth.revokeAll(pluginId)
+    }),
+
+  "Plugins.installFromFolder": ({ sourcePath }) =>
+    PluginRegistry.installFromFolder(sourcePath),
+
+  "Plugins.installFromPicker": () =>
+    Effect.gen(function* () {
+      const dialog = yield* DialogService
+      const chosen = yield* dialog.chooseDirectory({
+        title: "Install a plugin",
+        message: "Choose a plugin folder — the one containing starbase.plugin.json.",
+        // No "New Folder": a folder made in the picker is empty, and an empty
+        // folder fails the manifest check a moment later. Offering the button
+        // only invites that.
+        allowCreate: false
+      })
+      // Cancelled. Not an error — see the contract for why this is a `null`
+      // success rather than a `PluginError`.
+      if (chosen === null) return null
+      return yield* PluginRegistry.installFromFolder(chosen)
+    }),
+
+  // Confinement is the service's job (`dirFor` fails for anything that resolves
+  // outside `pluginsDir`), so this handler cannot be tricked into revealing an
+  // arbitrary path by a renderer that sends a crafted id.
+  "Plugins.reveal": ({ pluginId }) =>
+    Effect.flatMap(PluginRegistry.dirFor(pluginId), (dir) =>
+      Effect.sync(() => {
+        shell.showItemInFolder(dir)
+      })
+    ),
+
+  "Plugins.storageGet": ({ pluginId, key }) => pluginStorageGet(pluginId, key),
+
+  "Plugins.storageSet": ({ pluginId, key, value }) =>
+    pluginStorageSet(pluginId, key, value),
+
+  "Plugins.storageDelete": ({ pluginId, key }) => pluginStorageDelete(pluginId, key),
+
+  "Plugins.storageKeys": ({ pluginId }) => pluginStorageKeys(pluginId),
+
+  "Plugins.authSessions": () => PluginAuth.list(),
+
+  // An empty stream, not a failure: the renderer subscribes at startup and must
+  // not spend its life retrying a channel that is merely quiet.
+  "Plugins.events": () => Stream.empty,
+
+  "Plugins.invoke": ({ pluginId, commandId, arg }) =>
+    Effect.gen(function* () {
+      const host = yield* PluginHost.get()
+      const plugin = yield* pluginById(pluginId)
+      return yield* Effect.tryPromise({
+        try: () => host.invoke(plugin, commandId, arg),
+        catch: (cause) =>
+          cause instanceof PluginError
+            ? cause
+            : new PluginError({ pluginId, reason: String(cause) })
+      })
+    }),
+
+  "Plugins.activate": ({ pluginId }) =>
+    Effect.gen(function* () {
+      const host = yield* PluginHost.get()
+      const plugin = yield* pluginById(pluginId)
+      // A disabled plugin must not be woken by an event. The renderer stops
+      // rendering its tabs when it is disabled, so it should not reach here — but
+      // `onStartupFinished` dispatch iterates the catalog, and "disabled" has to
+      // mean "runs no code" at every entry point rather than most of them.
+      if (!plugin.enabled) return
+      yield* Effect.tryPromise({
+        try: () => host.activate(plugin),
+        catch: (cause) =>
+          cause instanceof PluginError
+            ? cause
+            : new PluginError({ pluginId, reason: String(cause) })
+      })
+    }),
+
+  "Plugins.reload": ({ pluginId }) =>
+    Effect.gen(function* () {
+      const host = yield* PluginHost.get()
+      const plugin = yield* pluginById(pluginId)
+      yield* Effect.tryPromise({
+        try: () => host.reload(plugin),
+        catch: (cause) =>
+          cause instanceof PluginError
+            ? cause
+            : new PluginError({ pluginId, reason: String(cause) })
+      })
+    }),
+  /**
+   * Grant from the renderer — used by Settings to pre-authorise, and by the
+   * e2e suite. The plugin-driven path goes through the extension host instead.
+   */
+  "Plugins.authGrant": ({ pluginId, providerId, scopes }) =>
+    Effect.gen(function* () {
+      const plugin = yield* pluginById(pluginId)
+      const session = yield* PluginAuth.getSession({
+        pluginId,
+        pluginName: plugin.manifest.name,
+        providerId,
+        scopes
+      })
+      if (!session) return null
+      // Metadata only. The token stays in main — `AuthSessionInfo` has no field
+      // for it, which is the boundary rather than an omission.
+      const granted = yield* PluginAuth.list()
+      return granted.find((g) => g.pluginId === pluginId && g.providerId === providerId) ?? null
+    }),
+
+  "Plugins.authRevoke": ({ pluginId, providerId }) =>
+    PluginAuth.revoke(pluginId, providerId)
 })
 
 /**

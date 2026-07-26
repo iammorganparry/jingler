@@ -1,0 +1,51 @@
+{
+  "name": "@starbase/plugin-sdk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Types and helpers for writing a Starbase plugin \u2014 the renderer half (`.`) and the extension-host half (`./host`).",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ui": "./src/ui.ts",
+    "./ui-exports": "./src/ui-exports.ts",
+    "./host": "./src/host.ts",
+    "./vite": {
+      "types": "./vite.d.ts",
+      "default": "./vite.mjs"
+    }
+  },
+  "files": [
+    "src",
+    "vite.mjs",
+    "vite.d.ts",
+    "starbase.plugin.schema.json",
+    "AGENTS.md",
+    "api-digest.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "gen:schema": "tsx ../../scripts/gen-plugin-schema.mjs",
+    "clean": "rimraf dist .turbo *.tsbuildinfo"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "@starbase/ui": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "@starbase/ui": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@starbase/core": "workspace:*",
+    "@starbase/tsconfig": "workspace:*",
+    "@starbase/ui": "workspace:*",
+    "@types/react": "^19.2.0",
+    "expect-type": "^1.4.0",
+    "react": "^19.2.0",
+    "tsx": "^4.23.1"
+  }
+}

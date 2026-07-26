@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { expect, showSessions, test } from "./fixtures.js"
+import { expect, sessionRow, showSessions, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -76,7 +76,7 @@ test("opening a long existing chat starts at the bottom", async ({ launchApp }) 
     transcripts: { s_long: longConversation }
   })
 
-  await window.getByText("Long history").click()
+  await sessionRow(window, "Long history").click()
   await expect(window.getByText("Turn 40", { exact: true })).toBeAttached()
 
   const transcript = window.getByTestId("conversation-scroll")
@@ -110,7 +110,7 @@ test("a session's history survives a real app restart", async ({ launchApp }) =>
     transcripts: { s_hist: conversation }
   })
 
-  await first.window.getByText("History session").click()
+  await sessionRow(first.window, "History session").click()
   await expect(first.window.getByText("It issues and verifies bearer tokens.")).toBeVisible()
   await first.app.close()
 
@@ -123,7 +123,7 @@ test("a session's history survives a real app restart", async ({ launchApp }) =>
     withRepo: true
   })
 
-  await second.window.getByText("History session").click()
+  await sessionRow(second.window, "History session").click()
   await expect(second.window.getByText("what does the auth module do")).toBeVisible()
   await expect(second.window.getByText("It issues and verifies bearer tokens.")).toBeVisible()
 })
@@ -152,8 +152,8 @@ test("a transcript zeroed by a killed write opens empty rather than breaking the
     withRepo: true
   })
 
-  await expect(second.window.getByText("Zeroed session")).toBeVisible()
-  await second.window.getByText("Zeroed session").click()
+  await expect(sessionRow(second.window, "Zeroed session")).toBeVisible()
+  await sessionRow(second.window, "Zeroed session").click()
   // The composer is the proof the pane mounted rather than erroring out.
   await expect(second.window.getByPlaceholder(/message claude/i)).toBeVisible()
 })
@@ -171,7 +171,7 @@ test("history written during a run is still there after a restart", async ({ lau
     transcripts: { s_run: [] }
   })
 
-  await first.window.getByText("Run session").click()
+  await sessionRow(first.window, "Run session").click()
   await first.window.getByPlaceholder(/message claude/i).fill("summarise the repo")
   await first.window.getByRole("button", { name: /send/i }).click()
   // Scoped to the transcript throughout: multi-chat titles a chat from its first
@@ -215,7 +215,7 @@ test("history written during a run is still there after a restart", async ({ lau
     configured: true,
     withRepo: true
   })
-  await second.window.getByText("Run session").click()
+  await sessionRow(second.window, "Run session").click()
   await expect(
     second.window.getByTestId("conversation-scroll").getByText("summarise the repo")
   ).toBeVisible()
@@ -247,7 +247,7 @@ test("a session whose PR merged stays in the sidebar instead of auto-archiving",
     }
   })
 
-  await expect(window.getByText("Multi PR session")).toBeVisible()
+  await expect(sessionRow(window, "Multi PR session")).toBeVisible()
 
   // Wait for the MERGED badge first. This is load-bearing: it proves the PR-state
   // poll actually completed. Asserting "not archived" without it passes trivially
@@ -259,7 +259,7 @@ test("a session whose PR merged stays in the sidebar instead of auto-archiving",
 
   // Now the interesting part: merged, and STILL an active session. With archived
   // hidden by default, "still listed" IS "still active".
-  await expect(window.getByText("Multi PR session")).toBeVisible()
+  await expect(sessionRow(window, "Multi PR session")).toBeVisible()
   const persisted = JSON.parse(readFileSync(join(home, "starbase", "sessions.json"), "utf8"))
   expect(persisted[0]?.archived ?? false).toBe(false)
 })

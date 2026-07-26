@@ -85,6 +85,30 @@ export function ReviewDiff({
     setOpen(false)
   }
 
+  // Read through a ref, so the two row handlers below can be STABLE.
+  //
+  // They are the whole reason `DiffLine` can be memoized. Built inline per row
+  // they were a fresh function identity on every render, which defeats `memo`
+  // completely — and this list is every line of every file in the changeset, so
+  // "re-render them all" was the cost of one selection step or one drag frame of
+  // the review pane's resize handle.
+  const selectionRef = React.useRef(selection)
+  selectionRef.current = selection
+
+  const onLinePointerDown = React.useCallback((i: number, e: React.PointerEvent) => {
+    // Suppress native text selection so the drag selects lines cleanly.
+    e.preventDefault()
+    setOpen(false)
+    const sel = selectionRef.current
+    setSelection(e.shiftKey && sel !== null ? { anchor: sel.anchor, head: i } : { anchor: i, head: i })
+    dragging.current = true
+  }, [])
+
+  const onLinePointerEnter = React.useCallback((i: number) => {
+    if (!dragging.current) return
+    setSelection((sel) => (sel === null ? sel : { ...sel, head: i }))
+  }, [])
+
   const rangeOf = (s: Selection) => {
     const a = rows[lo(s)] as LineRow
     const b = rows[hi(s)] as LineRow
@@ -138,25 +162,12 @@ export function ReviewDiff({
         return (
           <React.Fragment key={row.key}>
             <DiffLine
+              index={i}
               row={row}
               tokens={highlighted?.[i]}
               selected={inRange(selection, i)}
-              onPointerDown={(e) => {
-                // Suppress native text selection so the drag selects lines cleanly.
-                e.preventDefault()
-                setOpen(false)
-                if (e.shiftKey && selection !== null) {
-                  setSelection({ anchor: selection.anchor, head: i })
-                  dragging.current = true
-                } else {
-                  setSelection({ anchor: i, head: i })
-                  dragging.current = true
-                }
-              }}
-              onPointerEnter={() => {
-                if (!dragging.current) return
-                setSelection((sel) => (sel === null ? sel : { ...sel, head: i }))
-              }}
+              onPointerDown={onLinePointerDown}
+              onPointerEnter={onLinePointerEnter}
             />
             {open && composerAnchor === i && selection !== null && (
               <div className="py-3 pl-[100px] pr-4">
@@ -184,19 +195,35 @@ export function ReviewDiff({
   return scroll ? <div className="min-h-0 flex-1 overflow-auto">{body}</div> : body
 }
 
-function DiffLine({
+/**
+ * MEMOIZED, and it has to be.
+ *
+ * This component is instantiated once per line of every file in the changeset —
+ * tens of thousands of times on a real branch. Without `memo`, any state change
+ * in the pane re-rendered all of them: a selection step, and worse, every frame
+ * of a review-pane resize drag. React allocates a work-in-progress fiber per
+ * component per pass, so that measured at ~35MB of garbage *per render pass* on
+ * a 12k-line diff — which is how dragging the pane divider ate gigabytes.
+ *
+ * `memo` only holds while the props are stable, which is why the two pointer
+ * handlers are `useCallback`s taking `index` rather than closures built per row.
+ */
+const DiffLine = React.memo(function DiffLine({
+  index,
   row,
   tokens,
   selected,
   onPointerDown,
   onPointerEnter
 }: {
+  /** This row's position in the file, passed back to the shared handlers. */
+  index: number
   row: LineRow
   /** This line's themed runs, or undefined while the grammar loads. */
   tokens: ReadonlyArray<Token> | undefined
   selected: boolean
-  onPointerDown: (e: React.PointerEvent) => void
-  onPointerEnter: () => void
+  onPointerDown: (index: number, e: React.PointerEvent) => void
+  onPointerEnter: (index: number) => void
 }) {
   const add = row.type === "add"
   const del = row.type === "del"
@@ -220,8 +247,11 @@ function DiffLine({
 
   return (
     <div
-      onPointerDown={onPointerDown}
-      onPointerEnter={onPointerEnter}
+      // Counted by the e2e memory guard to prove the whole changeset is NOT
+      // mounted at once — a heap ceiling alone would pass a smaller row.
+      data-review-line=""
+      onPointerDown={(e) => onPointerDown(index, e)}
+      onPointerEnter={() => onPointerEnter(index)}
       className={cn(
         "flex w-full cursor-pointer select-none border-l-2 font-mono text-[12px] leading-[1.85]",
         selected ? "border-blue" : "border-transparent",
@@ -240,4 +270,4 @@ function DiffLine({
       </span>
     </div>
   )
-}
+})

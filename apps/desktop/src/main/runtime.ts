@@ -19,6 +19,9 @@ import {
   HarnessCliAdapterLive,
   ModelsService,
   PlanStore,
+  PluginRegistry,
+  PluginHost,
+  PluginAuth,
   PlanExecutor,
   PlanRoundStore,
   ReviewService,
@@ -119,7 +122,27 @@ const AppLayer = RpcServerLive.pipe(
   // prefetch reaches the very same instance — a different one would warm a cache
   // nobody reads, so the merge is what makes the prefetch actually count. The
   // rankings peer is also process-cached and has no dependencies.
-  Layer.provideMerge(Layer.mergeAll(ModelsService.Default, RankingService.Default)),
+  // PluginHost joins this group for two reasons. It needs provideMerge — main
+  // installs the Electron-backed process factory into it at startup, so the RPC
+  // handlers must later reach the SAME instance rather than a second one with
+  // no way to spawn. And `.pipe` tops out at 20 arguments, which a separate
+  // stage would have exceeded; all three are peers with no dependencies, so
+  // merging changes nothing but the argument count.
+  Layer.provideMerge(
+    Layer.mergeAll(
+      ModelsService.Default,
+      RankingService.Default,
+      PluginHost.Default,
+      // provideMerge for the same reason as PluginHost: main installs the
+      // native consent prompt and the built-in github provider into it at
+      // startup, so the RPC handlers must reach that same instance.
+      PluginAuth.Default,
+      // And PluginRegistry, because the host's consent flow looks a plugin's
+      // display name up from the catalog before prompting — the operator picked
+      // it by name in Settings, so the prompt has to say the name.
+      PluginRegistry.Default
+    )
+  ),
   Layer.provide(UsageService.Default),
   Layer.provide(GhService.Default),
   // provideMerge: the `Config.*` handlers consume ConfigService AND the boot

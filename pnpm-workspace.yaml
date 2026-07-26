@@ -1,3 +1,14 @@
 packages:
   - "apps/*"
   - "packages/*"
+  # Example plugins are real, independent plugin projects. In the workspace so
+  # they resolve @starbase/plugin-sdk and so CI compiles them — an example that
+  # no longer builds is worse than no example.
+  - "plugins/examples/*"
+  # Official plugins, and anything scaffolded by
+  # `scripts/create-starbase-plugin.mjs`. A glob rather than a list so a new
+  # plugin resolves @starbase/plugin-sdk without editing this file first — the
+  # scaffold's output has to build with zero edits or it teaches the wrong
+  # lesson. CI compiles whatever is here, which is the point: an official plugin
+  # that no longer builds is the worst possible example.
+  - "plugins/*"

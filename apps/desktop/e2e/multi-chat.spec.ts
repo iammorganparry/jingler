@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js"
+import { expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 const session: SeedSession = {
@@ -22,7 +22,7 @@ test("chat selection and titles survive a real app restart", async ({ launchApp 
     sessions: (context) => [{ ...session, worktreePath: context.repoPath }]
   })
 
-  await first.window.getByText("Multi-chat lifecycle").click()
+  await sessionRow(first.window, "Multi-chat lifecycle").click()
   await expect(first.window.getByTitle("1. Chat 1")).toBeVisible()
   await first.window.getByRole("button", { name: "New chat" }).click()
   const secondChat = first.window.getByTitle("2. Chat 2")
@@ -41,7 +41,7 @@ test("chat selection and titles survive a real app restart", async ({ launchApp 
     withRepo: true
   })
 
-  await second.window.getByText("Multi-chat lifecycle").click()
+  await sessionRow(second.window, "Multi-chat lifecycle").click()
   await expect(second.window.getByTitle("1. Chat 1")).toBeVisible()
   await expect(second.window.getByTitle("2. Review migrations")).toHaveAttribute(
     "aria-current",
@@ -60,6 +60,6 @@ test("chat selection and titles survive a real app restart", async ({ launchApp 
     withRepo: true
   })
 
-  await third.window.getByText("Multi-chat lifecycle").click()
+  await sessionRow(third.window, "Multi-chat lifecycle").click()
   await expect(third.window.getByTitle("1. Chat 1")).toHaveAttribute("aria-current", "page")
 })

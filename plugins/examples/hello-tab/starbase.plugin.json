@@ -1,0 +1,18 @@
+{
+  "$schema": "../../../packages/plugin-sdk/starbase.plugin.schema.json",
+  "id": "hello-tab",
+  "name": "Hello Tab",
+  "version": "1.0.0",
+  "description": "The smallest complete Starbase plugin.",
+  "ui": "dist/ui.js",
+  "contributes": {
+    "tabs": [
+      {
+        "id": "hello-tab.greeting",
+        "label": "Hello",
+        "icon": "Sparkles",
+        "when": "always"
+      }
+    ]
+  }
+}

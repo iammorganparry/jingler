@@ -1,11 +1,17 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
-import { TabBar, type TabKey } from "./tab-bar.js"
+import { TabBar } from "./tab-bar.js"
+import { builtinDescriptor } from "./tab-contributions.js"
 
 afterEach(cleanup)
 
-const TABS: ReadonlyArray<TabKey> = ["conversation", "plan", "pr", "review"]
+const TABS = [
+  builtinDescriptor("conversation"),
+  builtinDescriptor("plan"),
+  builtinDescriptor("pr"),
+  builtinDescriptor("review")
+]
 
 const noop = () => {}
 
@@ -79,13 +85,19 @@ describe("TabBar at width", () => {
   })
 
   it("collapses the diff counts to a dot below the mid tier", () => {
-    const changes = { added: 681, removed: 0 }
-    renderAt(1200, { tabs: ["conversation", "changes"], changes })
+    // The diff totals arrive on the DESCRIPTOR now, not as a `changes` prop —
+    // keying decoration off `id === "changes"` made "a tab this file knows
+    // about" a precondition for badging one, which a plugin cannot satisfy.
+    const withDiff = [
+      builtinDescriptor("conversation"),
+      builtinDescriptor("changes", { kind: "diff", added: 681, removed: 0 })
+    ]
+    renderAt(1200, { tabs: withDiff })
     expect(screen.getByText("+681")).toBeTruthy()
     cleanup()
     // "+681 −0" is up to seven tabular glyphs per tab — a whole chat pill's worth
     // of width, spent on something the Changes view itself says better.
-    renderAt(420, { tabs: ["conversation", "changes"], changes })
+    renderAt(420, { tabs: withDiff })
     expect(screen.queryByText("+681")).toBeNull()
   })
 

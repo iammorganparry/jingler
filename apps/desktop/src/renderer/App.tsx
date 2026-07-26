@@ -32,7 +32,6 @@ import { appMachine } from "./app-machine.js"
 import { authMachine } from "./auth-machine.js"
 import { ConversationPane } from "./conversation-pane.js"
 import { SessionChatTabs } from "./session-chat-tabs.js"
-import { IssuePane } from "./issue-pane.js"
 import { PullRequestPane } from "./pull-request-pane.js"
 import { ReviewPane } from "./review-pane.js"
 import { TerminalDockView } from "./terminal-dock-view.js"
@@ -58,6 +57,8 @@ import { themeCatalogKey, useTheme } from "./use-theme.js"
 import { useConnectorCenter } from "./use-connector-center.js"
 import { useOpenConnector } from "./use-open-connector.js"
 import { useInjectionTargets } from "./use-injection-targets.js"
+import { PluginProvider, usePluginPanes, usePluginTabs } from "./plugin-registry.js"
+import { usePlugins } from "./use-plugins.js"
 
 const GH_UNKNOWN: GhStatus = {
   available: false,
@@ -86,6 +87,11 @@ const PR_STATE_STALE_MS = 5 * 60_000
 function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void }) {
   const [state, send] = useMachine(appMachine)
   const { clis, repos, reposDir, sessions } = state.context
+  // Merged with the built-ins inside `SessionPane`, through the same registry —
+  // a plugin tab is not a separate region of the tab bar.
+  const pluginTabs = usePluginTabs()
+  const pluginPanes = usePluginPanes()
+  const plugins = usePlugins()
 
   // The conversation machine persists a session's settled status by itself, with
   // no route back here. Fold those records into the list, or the sidebar keeps
@@ -626,6 +632,8 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     <>
     <StarbaseApp
       clis={clis}
+      tabContributions={pluginTabs}
+      paneContributions={pluginPanes}
       selectSessionRequest={selectRequest}
       onVisibleSessionsChange={onVisibleSessionsChange}
       sessions={sessions}
@@ -654,6 +662,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       adhdMode={adhdMode}
       onSaveAdhdMode={saveAdhdMode}
       themes={themeSettings}
+      plugins={plugins}
       providersConfig={providersConfig}
       onSaveProvider={saveProvider}
       defaultCli={defaultCli}
@@ -714,7 +723,6 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
           onPrLinked={onPrLinked}
         />
       )}
-      renderIssue={(session) => <IssuePane session={session} onUnlink={unlinkIssue} />}
       renderReview={(session, ctx) => (
         <ReviewPane
           key={`${session.id}:${session.prNumber ?? "none"}`}
@@ -813,7 +821,16 @@ export function App() {
       catalog={theme.catalog}
       theme={theme.theme}
     >
-      <AppContent authState={authState} authSend={authSend} />
+      {/*
+        Inside ThemeProvider so a plugin's tab renders against the operator's
+        theme tokens from its first frame, and OUTSIDE the sign-in wall for the
+        same reason the theme is: the plugin catalog is read from disk and has
+        nothing to do with who is signed in, so loading it here means the tabs
+        are ready the instant auth resolves rather than a beat afterwards.
+      */}
+      <PluginProvider>
+        <AppContent authState={authState} authSend={authSend} />
+      </PluginProvider>
     </ThemeProvider>
   )
 }

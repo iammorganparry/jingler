@@ -38,11 +38,14 @@ import type { ConnectorCenterProps } from "../composites/connector-center.js"
 import type { InjectionTargetsProps } from "../composites/injection-targets.js"
 import type { OpenConnectorSectionProps } from "../composites/open-connector-section.js"
 import type { ThemesSettingsProps } from "../composites/themes-settings.js"
+import type { PluginsSettingsProps } from "../composites/plugins-settings.js"
+import type { PaneContribution } from "./pane-contributions.js"
 import { type ConversationPaneCtx, SessionConversation } from "../screens/session-conversation.js"
 import { useSplitLayout } from "./use-split-layout.js"
 import { MAX_PANES } from "./split-layout.js"
 import { matchSplitShortcut } from "./split-shortcuts.js"
 import { SEED_PATCH } from "../seed.js"
+import type { TabContribution } from "./tab-contributions.js"
 
 const GH_UNAVAILABLE: GhStatus = {
   available: false,
@@ -126,6 +129,8 @@ export interface StarbaseAppProps {
    * the section's stub.
    */
   themes?: ThemesSettingsProps
+  /** Everything Settings › Plugins needs. Absent renders the stub. */
+  plugins?: PluginsSettingsProps
   /** Re-run `gh auth status` (the settings "Recheck" button); may be async. */
   onRecheckGh?: () => Promise<void> | void
   /** Persisted per-CLI provider defaults (Settings · Providers view). */
@@ -157,12 +162,27 @@ export interface StarbaseAppProps {
   injection?: InjectionTargetsProps
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  /**
+   * Tabs contributed by plugins.
+   *
+   * Threaded rather than read from a context here because `packages/ui` has no
+   * access to the plugin registry — and should not: the library stays a pure
+   * consumer of contributions, whoever built them.
+   */
+  tabContributions?: ReadonlyArray<TabContribution>
+  /**
+   * Dock panes contributed by plugins.
+   *
+   * Threaded beside `tabContributions` rather than inferred: a dock belongs to
+   * the window, so it is mounted once by `SessionSplit` outside the pane loop —
+   * putting one inside would render four copies in a four-way split.
+   */
+  paneContributions?: ReadonlyArray<PaneContribution>
   /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */
   renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Changes tab — the Code Review view over the local worktree diff. */
   renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Issue tab — the rich linked-issue view. */
-  renderIssue?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the per-session terminal dock (desktop app's live TerminalDock). */
   renderTerminalDock?: (session: Session) => ReactNode
   /** Which edge the terminal dock attaches to (drives the content column's flow). */
@@ -287,6 +307,7 @@ export function StarbaseApp({
   onSavePlanAutoRun,
   adhdMode,
   themes,
+  plugins,
   onSaveAdhdMode,
   onRecheckGh,
   providersConfig,
@@ -305,9 +326,10 @@ export function StarbaseApp({
   connector,
   injection,
   renderPullRequest,
+  tabContributions,
+  paneContributions,
   renderReview,
   renderCode,
-  renderIssue,
   renderTerminalDock,
   terminalDockSide,
   renderBrowserDock,
@@ -659,6 +681,7 @@ export function StarbaseApp({
               adhdMode={adhdMode}
               onSaveAdhdMode={onSaveAdhdMode}
               themes={themes}
+              plugins={plugins}
               onClose={() => setSettingsOpen(false)}
             />
           ) : undefined
@@ -669,9 +692,10 @@ export function StarbaseApp({
         collapsedRepoNames={collapsedRepoNames}
         onToggleCollapsed={onToggleCollapsed ? toggleCollapsedByName : undefined}
         renderPullRequest={renderPullRequest}
+        tabContributions={tabContributions}
+        paneContributions={paneContributions}
         renderReview={renderReview}
         renderCode={renderCode}
-        renderIssue={renderIssue}
         renderTerminalDock={renderTerminalDock}
         terminalDockSide={terminalDockSide}
         renderBrowserDock={renderBrowserDock}

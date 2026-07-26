@@ -6,6 +6,8 @@ import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
 import { EmptyConversation } from "./empty-conversation.js"
 import type { ConversationPaneCtx } from "./session-pane.js"
+import type { TabContribution } from "../app/tab-contributions.js"
+import type { PaneContribution } from "../app/pane-contributions.js"
 
 // The pane ctx is part of this screen's public surface (StarbaseApp types its
 // `renderConversation` callback with it), so keep it importable from here even
@@ -128,12 +130,15 @@ export interface SessionConversationProps {
   onToggleCollapsed?: (repoName: string) => void | Promise<void>
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  /** Tabs contributed by plugins, merged with the built-ins in `SessionPane`. */
+  tabContributions?: ReadonlyArray<TabContribution>
+  /** Dock panes contributed by plugins, mounted once beside the built-in docks. */
+  paneContributions?: ReadonlyArray<PaneContribution>
   /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */
   renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Changes tab — the Code Review view over the local worktree diff. */
   renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Issue tab — the rich linked-issue view (shown when one is linked). */
-  renderIssue?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /**
    * Render the per-session terminal dock (the desktop app's live TerminalDock).
    * Docked to the main content column beside/below the tab body — never shown in
@@ -234,9 +239,10 @@ export function SessionConversation(props: SessionConversationProps) {
             liveDiff={props.liveDiff}
             onOpenSettings={props.onOpenSettings}
             renderPullRequest={props.renderPullRequest}
+            tabContributions={props.tabContributions}
+            paneContributions={props.paneContributions}
             renderReview={props.renderReview}
             renderCode={props.renderCode}
-            renderIssue={props.renderIssue}
             renderTerminalDock={props.renderTerminalDock}
             terminalDockSide={props.terminalDockSide}
             renderBrowserDock={props.renderBrowserDock}

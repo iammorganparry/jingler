@@ -1,9 +1,8 @@
 import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { Issue, PrFileChange, PullRequest as PullRequestData } from "@starbase/core"
+import type { PrFileChange, PullRequest as PullRequestData } from "@starbase/core"
 import { LookFor, WidthLadder } from "../story-support.js"
 import { CodeReviewView, type ReviewSource } from "./code-review-view.js"
-import { IssueView } from "./issue-view.js"
 import { PullRequestView } from "./pull-request-view.js"
 
 const meta: Meta = { title: "Responsive/Panes", parameters: { layout: "fullscreen" } }
@@ -77,19 +76,6 @@ const PR: PullRequestData = {
   mergeStateStatus: "CLEAN"
 } as unknown as PullRequestData
 
-const ISSUE: Issue = {
-  number: 204,
-  title: "Token refresh loops forever on a permanently invalid token",
-  state: "open",
-  body: "Repro: revoke the refresh token server-side, then make any authenticated call.",
-  url: "https://github.com/acme/x/issues/204",
-  author: { login: "morgan", avatarUrl: null },
-  createdAt: "2026-07-20T08:00:00.000Z",
-  labels: [{ name: "bug", color: "e06c75" }],
-  assignees: [{ login: "morgan", avatarUrl: null }],
-  comments: []
-} as unknown as Issue
-
 /**
  * Code Review: a file list, a diff, and a review tray.
  *
@@ -161,20 +147,3 @@ export const PullRequestPane: Story = {
   )
 }
 
-/**
- * The Issue tab — the healthiest pane, with no side rails at all. Included as
- * the control case: if this one crowds, the problem is in a shared primitive
- * rather than in a pane's own layout.
- */
-export const IssuePane: Story = {
-  render: () => (
-    <div className="min-h-screen bg-canvas">
-      <LookFor>
-        <strong className="text-text-bright">Look for:</strong> the title row wrapping so its two
-        action buttons drop below the heading rather than crushing it to one word, and the 32px
-        gutters tightening to 16px below 560.
-      </LookFor>
-      <WidthLadder height={420} render={() => <IssueView issue={ISSUE} onOpen={() => {}} onUnlink={() => {}} />} />
-    </div>
-  )
-}

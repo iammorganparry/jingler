@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { expect, test } from "./fixtures.js"
+import { expect, sessionRow, test } from "./fixtures.js"
 
 const FRIENDLY_WORKTREE_RE = /[\\/][a-z]+-[a-z]+$/
 
@@ -31,7 +31,7 @@ test("creating a session forks a real worktree and persists it", async ({ launch
   await expect(create).toBeEnabled()
   await create.click()
 
-  await expect(window.getByText("Fix token refresh")).toBeVisible()
+  await expect(sessionRow(window, "Fix token refresh")).toBeVisible()
 
   // Real outcome: the trimmed operator title is pinned and its branch is
   // readable immediately.
@@ -78,7 +78,7 @@ test("creating a blank session stages a detached worktree for agent naming", asy
   await expect(create).toBeEnabled()
   await create.click()
 
-  await expect(window.getByText("Untitled session")).toBeVisible()
+  await expect(sessionRow(window, "Untitled session")).toBeVisible()
 
   const persisted = JSON.parse(
     readFileSync(join(home, "starbase", "sessions.json"), "utf-8")
@@ -251,13 +251,34 @@ test("creating a session from an issue forks a linked branch and seeds the task"
   // The composer is prefilled (HITL) with the task derived from the issue.
   await expect(window.getByPlaceholder("Message Claude…")).toHaveValue(/Fix the refund route/)
 
-  // The session gains an "Issue" tab → the rich issue view (title, body, state).
+  // The session gains an "Issue" tab, gated on `hasIssue`.
+  //
+  // It is contributed by the OFFICIAL `github-issues` PLUGIN now, not by a
+  // built-in pane — `8ca3351` retired the built-in one, which is the point of
+  // shipping that plugin as the reference example. So the assertions that used to
+  // read the rich issue view (heading, body, state) are gone: rendering it means
+  // fetching from GitHub through a consent-gated `getSession("github", …)`, and an
+  // offline e2e has no account to grant and no prompt to answer.
+  //
+  // What is still this test's business — that linking an issue makes the tab
+  // appear at all — is asserted here. The plugin's own body is covered in
+  // `plugins.spec.ts`, against a plugin whose host half the test controls.
+  await expect(window.getByRole("button", { name: "Issue" })).toBeVisible({ timeout: 15_000 })
   await window.getByRole("button", { name: "Issue" }).click()
-  await expect(
-    window.getByRole("heading", { name: /Refund route 500s on a stale token/ })
-  ).toBeVisible()
-  await expect(window.getByText(/triggers a refresh \+ retry/)).toBeVisible()
-  await expect(window.getByText("Open", { exact: true })).toBeVisible()
+
+  // The plugin's view MOUNTED. Not "the issue rendered": fetching it needs a
+  // consent-gated GitHub session, so offline the plugin correctly shows its own
+  // "couldn't be loaded" state instead. Either way the assertion that matters is
+  // that no plugin ERROR BOUNDARY fired — the tab is the plugin's, drawn by the
+  // plugin, through the same path a third-party tab would take.
+  // No plugin error boundary. That is the whole claim, and it is a real one: the
+  // official plugin's tab used to die here with `jsxDEV is not a function`,
+  // because the `react/jsx-dev-runtime` shim exported a name the runtime did not
+  // supply. Which of the plugin's own states it then shows depends on whether a
+  // GitHub session exists, so that is asserted where the fetch can be controlled
+  // rather than guessed at here.
+  await expect(window.getByTestId("plugin-error-github-issues")).toHaveCount(0)
+  await expect(window.getByRole("button", { name: "Issue" })).toBeVisible()
 
   // Real outcome: a fresh `starbase/128-<slug>` worktree exists on that branch.
   const worktreePath = join(
