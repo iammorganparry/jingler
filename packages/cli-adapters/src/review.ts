@@ -7,6 +7,7 @@ import { CliAdapter, PlanDecision } from "./adapter.js"
 import { DiscoveryService } from "./discovery.js"
 import type { AppPaths } from "./app-paths.js"
 import { ReviewStore } from "./review-store.js"
+import { SessionStore } from "./sessions.js"
 import { adversarialPrompt } from "./review-prompt.js"
 
 /**
@@ -128,6 +129,9 @@ export type ReviewEnv =
   | DiscoveryService
   | CommandExecutor.CommandExecutor
   | ReviewStore
+  // A review is owned by ONE chat — the session's `activeChatId` at the moment it
+  // starts — so `ReviewService` needs the store to read that owner. See `watch`.
+  | SessionStore
   | FileSystem.FileSystem
   | Path.Path
   | AppPaths
@@ -175,10 +179,27 @@ export class ReviewService extends Effect.Service<ReviewService>()("@starbase/Re
       Effect.gen(function* () {
         const hub = yield* PubSub.unbounded<StreamEvent>()
         const buffer = yield* Ref.make<ReadonlyArray<StreamEvent>>([])
+        // The chat that owns the CURRENT in-process run — the session's
+        // `activeChatId` when it started (see `resetLive`). `watch` emits a run's
+        // events only to this chat; `null` means no run has started this process,
+        // in which case `watch` falls back to the owner stored on disk.
+        const owner = yield* Ref.make<string | null>(null)
         const gate = yield* Effect.makeSemaphore(1)
-        return { hub, buffer, gate }
+        return { hub, buffer, owner, gate }
       })
     )
+
+    /**
+     * The chat that owns a review started right now: the session's `activeChatId`.
+     * A session that has gone missing (deleted mid-run, or a test that never
+     * created one) yields `null` — the unowned fallback, which `watch` treats as
+     * visible to every chat.
+     */
+    const ownerFor = (sessionId: string): Effect.Effect<string | null, never, ReviewEnv> =>
+      SessionStore.get(sessionId).pipe(
+        Effect.map((session): string | null => session.activeChatId),
+        Effect.orElseSucceed(() => null)
+      )
 
     const publish = (sessionId: string, event: StreamEvent): Effect.Effect<void> =>
       Effect.gen(function* () {
@@ -194,7 +215,11 @@ export class ReviewService extends Effect.Service<ReviewService>()("@starbase/Re
       })
 
     /**
-     * Drop the previous run's events — a watcher must never see two runs merged.
+     * Drop the previous run's events — a watcher must never see two runs merged —
+     * and stamp the run now starting with its OWNING chat. This is the one place a
+     * run's owner is decided: the session's `activeChatId` at this instant. A
+     * later chat switch does not move the review; ownership is fixed at birth.
+     *
      * The stored transcript goes too: `watch` falls back to it when the buffer is
      * cold, so leaving it would let the last run's transcript replay underneath
      * the one now starting.
@@ -202,12 +227,19 @@ export class ReviewService extends Effect.Service<ReviewService>()("@starbase/Re
     const resetLive = (sessionId: string): Effect.Effect<void, never, ReviewEnv> =>
       Effect.gen(function* () {
         const live = yield* liveFor(sessionId)
-        // BOTH clears under one permit. `watch` reads the buffer and the stored
-        // transcript under this same permit, so clearing them separately leaves a
-        // window where it sees an empty buffer but a not-yet-deleted file — and
-        // replays the previous run ahead of the one just starting.
+        // Read the owner OUTSIDE the permit — it reads sessions.json, and `watch`
+        // waits on this permit, so it must never be held across file IO.
+        const owner = yield* ownerFor(sessionId)
+        // Buffer, owner and stored transcript reset under one permit. `watch`
+        // reads all three under this same permit, so clearing them separately
+        // leaves a window where it sees an empty buffer but a not-yet-deleted file
+        // (or a stale owner) — and replays the previous run ahead of the one just
+        // starting, or hands it to the wrong chat.
         yield* live.gate.withPermits(1)(
-          Effect.zipRight(Ref.set(live.buffer, []), ReviewStore.clearTranscript(sessionId))
+          Ref.set(live.buffer, []).pipe(
+            Effect.zipRight(Ref.set(live.owner, owner)),
+            Effect.zipRight(ReviewStore.clearTranscript(sessionId))
+          )
         )
       })
 
@@ -222,17 +254,35 @@ export class ReviewService extends Effect.Service<ReviewService>()("@starbase/Re
     const persistLive = (sessionId: string): Effect.Effect<void, never, ReviewEnv> =>
       Effect.gen(function* () {
         const live = yield* liveFor(sessionId)
-        const events = yield* live.gate.withPermits(1)(Ref.get(live.buffer))
+        // Snapshot events and owner together under the permit — the owner is part
+        // of this run's identity, and it rides to disk so a restart restores the
+        // tab to the chat that started the review rather than to all of them.
+        const { events, owner } = yield* live.gate.withPermits(1)(
+          Effect.all({ events: Ref.get(live.buffer), owner: Ref.get(live.owner) })
+        )
         if (events.length === 0) return
-        yield* ReviewStore.setTranscript(sessionId, events)
+        yield* ReviewStore.setTranscript(sessionId, owner, events)
       })
 
     /**
-     * The running reviewer's events for a session: what it has emitted so far,
-     * then everything after, live. Empty (but open) when nothing is running, so a
-     * watcher can subscribe before a review starts and still catch the whole run.
+     * The running reviewer's events for a session — as seen by `chatId`, the chat
+     * doing the watching. What that chat's review has emitted so far, then
+     * everything after, live. Empty (but open) when nothing it owns is running, so
+     * a watcher can subscribe before a review starts and still catch the whole run.
+     *
+     * The ownership gate is the fix for the leak: a review belongs to the ONE chat
+     * that was active when it started (recorded in `resetLive`, persisted by
+     * `persistLive`). Its transcript renders in that chat's sub-agent rail, so any
+     * OTHER chat's watcher must see nothing — otherwise every new chat in the
+     * session inherits the last review's Reviewer tab and replays a run it had no
+     * part in. A `null` owner (no run yet, or a transcript stored before ownership
+     * existed) belongs to whoever looks: the old, leaky behaviour, kept only so a
+     * pre-upgrade transcript still shows once, and it self-heals on the next run.
      */
-    const watch = (sessionId: string): Stream.Stream<StreamEvent, never, ReviewEnv> =>
+    const watch = (
+      sessionId: string,
+      chatId: string
+    ): Stream.Stream<StreamEvent, never, ReviewEnv> =>
       Stream.unwrapScoped(
         Effect.gen(function* () {
           const live = yield* liveFor(sessionId)
@@ -243,13 +293,28 @@ export class ReviewService extends Effect.Service<ReviewService>()("@starbase/Re
               const buffered = yield* Ref.get(live.buffer)
               // A cold buffer means no run has happened in THIS process — so fall
               // back to the last completed run on disk, which is what makes the
-              // Reviewer tab survive a restart. Read inside the permit: a run
-              // starting between the read and the subscribe would otherwise splice
-              // the old transcript onto the new run's events.
-              const replay =
-                buffered.length > 0 ? buffered : yield* ReviewStore.getTranscript(sessionId)
+              // Reviewer tab survive a restart, and read its owner from the same
+              // file. A warm buffer's owner is the in-memory ref. Both read inside
+              // the permit: a run starting between the read and the subscribe would
+              // otherwise splice the old transcript onto the new run's events.
+              const { replay, replayOwner } =
+                buffered.length > 0
+                  ? { replay: buffered, replayOwner: yield* Ref.get(live.owner) }
+                  : yield* ReviewStore.getTranscript(sessionId).pipe(
+                      Effect.map((stored) => ({ replay: stored.events, replayOwner: stored.owner }))
+                    )
+              const belongs = (owner: string | null): boolean =>
+                owner === null || owner === chatId
               const subscription = yield* PubSub.subscribe(live.hub)
-              return Stream.concat(Stream.fromIterable(replay), Stream.fromQueue(subscription))
+              // Replay only what this chat owns. The live tail is filtered per
+              // event against the CURRENT owner (a Ref, not the snapshot): a
+              // watcher that attached before any run must start seeing events the
+              // moment a run it owns begins, and stay silent for one it doesn't.
+              const tail = Stream.fromQueue(subscription).pipe(
+                Stream.filterEffect(() => Ref.get(live.owner).pipe(Effect.map(belongs)))
+              )
+              const head = belongs(replayOwner) ? Stream.fromIterable(replay) : Stream.empty
+              return Stream.concat(head, tail)
             })
           )
         })

@@ -6,7 +6,37 @@ import { AppPaths } from "./app-paths.js"
 
 type ReviewEnv = FileSystem.FileSystem | Path.Path | AppPaths
 
-const Transcript = Schema.Array(StreamEventSchema)
+const Events = Schema.Array(StreamEventSchema)
+
+/**
+ * The stored transcript, now wrapped so it can carry its OWNING chat id — the
+ * chat that was the session's `activeChatId` when the review started. Persisting
+ * the owner is what lets the Reviewer tab come back in the RIGHT chat after a
+ * restart, rather than in every chat of the session (see `ReviewService.watch`).
+ */
+const StoredTranscriptSchema = Schema.Struct({
+  owner: Schema.NullOr(Schema.String),
+  events: Events
+})
+
+/**
+ * What a stored transcript decodes to. `owner` is nullable because a transcript
+ * written before ownership existed is a BARE array on disk with no owner to
+ * read — the union below folds that legacy shape to `{ owner: null, … }`, and
+ * `watch` treats a null owner as "belongs to whoever is looking" (old behaviour,
+ * self-heals on the next review).
+ */
+export interface StoredTranscript {
+  readonly owner: string | null
+  readonly events: ReadonlyArray<StreamEvent>
+}
+
+// New wrapped shape, or a legacy bare array. Decoding keeps them apart (a struct
+// is not an array); `getTranscript` lifts the legacy array to an unowned
+// transcript. A plain union rather than a `transform` on purpose — the event
+// schema's decoded/encoded shapes differ enough that a strict transform can't
+// prove the round-trip, and this file only ever DECODES the legacy form.
+const StoredTranscriptCompat = Schema.Union(StoredTranscriptSchema, Events)
 
 /**
  * The last adversarial review per session, persisted to
@@ -121,25 +151,35 @@ export class ReviewStore extends Effect.Service<ReviewStore>()("@starbase/Review
      */
     const getTranscript = (
       sessionId: string
-    ): Effect.Effect<ReadonlyArray<StreamEvent>, never, ReviewEnv> =>
+    ): Effect.Effect<StoredTranscript, never, ReviewEnv> =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const file = yield* transcriptFileFor(sessionId)
+        const empty: StoredTranscript = { owner: null, events: [] }
         const exists = yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false))
-        if (!exists) return []
+        if (!exists) return empty
         const raw = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => ""))
-        if (raw.trim().length === 0) return []
-        return yield* Schema.decodeUnknown(Schema.parseJson(Transcript))(raw).pipe(
-          Effect.map((events): ReadonlyArray<StreamEvent> => events),
+        if (raw.trim().length === 0) return empty
+        return yield* Schema.decodeUnknown(Schema.parseJson(StoredTranscriptCompat))(raw).pipe(
+          // A legacy bare array has no owner recorded; lift it to an unowned
+          // transcript so `watch` shows it to whoever looks (self-heals next run).
+          Effect.map((stored): StoredTranscript =>
+            "owner" in stored ? stored : { owner: null, events: stored }
+          ),
           // A malformed transcript is a cosmetic loss — fall back to no tab
           // rather than failing the watch that every session opens.
-          Effect.orElseSucceed(() => [] as ReadonlyArray<StreamEvent>)
+          Effect.orElseSucceed(() => empty)
         )
       })
 
-    /** Persist a finished reviewer's events. Best-effort, like `set`. */
+    /**
+     * Persist a finished reviewer's events, stamped with the chat that OWNS the
+     * run. Best-effort, like `set`. The owner rides in the same file so a restart
+     * restores the tab to the chat that started the review, not to all of them.
+     */
     const setTranscript = (
       sessionId: string,
+      owner: string | null,
       events: ReadonlyArray<StreamEvent>
     ): Effect.Effect<void, never, ReviewEnv> =>
       Effect.gen(function* () {
@@ -147,7 +187,9 @@ export class ReviewStore extends Effect.Service<ReviewStore>()("@starbase/Review
         const paths = yield* AppPaths
         const file = yield* transcriptFileFor(sessionId)
         yield* fs.makeDirectory(paths.reviewsDir, { recursive: true }).pipe(Effect.ignore)
-        const encoded = yield* Schema.encode(Transcript)(events).pipe(Effect.orElseSucceed(() => null))
+        const encoded = yield* Schema.encode(StoredTranscriptSchema)({ owner, events }).pipe(
+          Effect.orElseSucceed(() => null)
+        )
         if (encoded === null) return
         yield* fs.writeFileString(file, JSON.stringify(encoded)).pipe(Effect.ignore)
       })

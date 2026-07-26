@@ -6,11 +6,14 @@ import type { AgentContext, CliAdapterShape, SessionSpec } from "./adapter.js"
 import { CommandExecutor } from "@effect/platform"
 import { Effect, Fiber, Layer, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { DiscoveryService } from "./discovery.js"
 import { ReviewService, extractJsonBlock, parseFindings } from "./review.js"
 import { adversarialPrompt, fenceFor } from "./review-prompt.js"
 import type { ReviewEnv, ReviewInput } from "./review.js"
 import { ReviewStore } from "./review-store.js"
+import { SessionStore } from "./sessions.js"
 import { fakeCommandExecutor, withTempRoot } from "./test-support.js"
 
 /**
@@ -85,12 +88,49 @@ const env = (
     adapter,
     DiscoveryService.Default,
     store,
+    // A review is owned by the session's active chat, so the service reads it
+    // from the real store over the temp `~/starbase`. Sessions that were never
+    // seeded simply aren't found, and an unowned review is visible to any chat —
+    // which is why every test that doesn't care about ownership still passes.
+    SessionStore.Default,
     // Real FS + AppPaths for the transcript store…
     temp.layer,
     // …but CLI detection must stay canned, so the fake executor is merged LAST
     // and wins over the Node one `temp.layer` brings in.
     executor
   ) as Layer.Layer<ReviewService | ReviewEnv>
+
+/**
+ * Seed a session on disk so `SessionStore.get` finds it — its `activeChatId` is
+ * the chat a review started now will belong to. Rewritable between runs: the
+ * store re-reads the file each time, so flipping the active chat mid-test models
+ * the user switching chats before kicking off a second review.
+ */
+const seedSession = (activeChatId: string, chatIds: ReadonlyArray<string> = [activeChatId]) => {
+  const now = "2026-07-26T00:00:00.000Z"
+  mkdirSync(temp.root, { recursive: true })
+  writeFileSync(
+    join(temp.root, "sessions.json"),
+    JSON.stringify([
+      {
+        id: INPUT.sessionId,
+        repo: "acme/widget",
+        branch: "feature",
+        title: "Test",
+        status: "idle",
+        cli: "claude",
+        diff: { added: 0, removed: 0 },
+        prNumber: 42,
+        costUsd: 0,
+        tokens: 0,
+        updatedAt: now,
+        worktreePath: temp.root,
+        chats: chatIds.map((id) => ({ id, title: null, createdAt: now, updatedAt: now })),
+        activeChatId
+      }
+    ])
+  )
+}
 
 const runReview = (adapter: Layer.Layer<CliAdapter>, input: ReviewInput = INPUT) =>
   Effect.runPromise(ReviewService.run(input).pipe(Effect.provide(env(adapter))))
@@ -563,15 +603,19 @@ describe("ReviewService.watch", () => {
   // Reached through the service instance, not the generated accessor — the
   // accessors are Effect-shaped and mangle a Stream-returning method. This is the
   // same way the RPC handler consumes it (`Stream.unwrap(Effect.map(...))`).
-  const watchStream = (sessionId: string) =>
-    Stream.unwrap(Effect.map(ReviewService, (r) => r.watch(sessionId)))
+  const watchStream = (sessionId: string, chatId = "watcher") =>
+    Stream.unwrap(Effect.map(ReviewService, (r) => r.watch(sessionId, chatId)))
 
   /** Run a review while collecting everything a watcher attached first would see. */
-  const runWatched = (adapter: Layer.Layer<CliAdapter>, input: ReviewInput = INPUT) =>
+  const runWatched = (
+    adapter: Layer.Layer<CliAdapter>,
+    input: ReviewInput = INPUT,
+    chatId = "watcher"
+  ) =>
     Effect.runPromise(
       Effect.gen(function* () {
         const seen: Array<StreamEvent> = []
-        const watcher = yield* watchStream(input.sessionId).pipe(
+        const watcher = yield* watchStream(input.sessionId, chatId).pipe(
           Stream.runForEach((e) => Effect.sync(() => seen.push(e))),
           Effect.fork
         )
@@ -680,6 +724,120 @@ describe("ReviewService.watch", () => {
 })
 
 /**
+ * A review belongs to ONE chat — the session's `activeChatId` when it started —
+ * and only that chat's watcher may see it. Every chat runs its own conversation
+ * machine and renders the reviewer in its own sub-agent rail, so a session-wide
+ * watch replays one chat's review into all of them: open a new chat in a session
+ * that has reviewed and it inherits the last run's Reviewer tab. These pin the
+ * fix — the first test is the reported leak, and fails before the ownership gate.
+ */
+describe("ReviewService.watch — chat ownership", () => {
+  const watchStream = (sessionId: string, chatId: string) =>
+    Stream.unwrap(Effect.map(ReviewService, (r) => r.watch(sessionId, chatId)))
+
+  const workingStub = () =>
+    stubAdapter((_id, _s, ctx) =>
+      Effect.gen(function* () {
+        yield* ctx.emit({ _tag: "Started", sessionId: "review_s1" })
+        yield* ctx.emit({ _tag: "ToolStart", id: "t1", name: "Read", target: "a.ts" })
+        yield* emitJson(ctx, '{"findings":[]}')
+      })
+    )
+
+  // The reported bug: a chat that did NOT start the review must see nothing, even
+  // though the buffer is full of the owner's events. Before the gate, the cold
+  // buffer fell back to (here, the warm buffer of) another chat's run and the new
+  // chat opened replaying it.
+  it("shows nothing to a chat that does not own the review", async () => {
+    seedSession("chatA", ["chatA", "chatB"])
+    const seen: Array<StreamEvent> = []
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        // chatA's review runs to completion and fills the buffer.
+        yield* ReviewService.run(INPUT)
+        // chatB attaches — a brand-new chat in the same session.
+        const watcher = yield* watchStream(INPUT.sessionId, "chatB").pipe(
+          Stream.runForEach((e) => Effect.sync(() => seen.push(e))),
+          Effect.fork
+        )
+        yield* Effect.yieldNow()
+        yield* Fiber.interrupt(watcher)
+      }).pipe(Effect.provide(env(workingStub())))
+    )
+    expect(seen).toEqual([])
+  })
+
+  it("replays the whole run to the chat that owns it, and tails it live", async () => {
+    seedSession("chatA", ["chatA", "chatB"])
+    // Live tail: chatA attaches BEFORE the run and sees it unfold.
+    const live: Array<StreamEvent> = []
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const watcher = yield* watchStream(INPUT.sessionId, "chatA").pipe(
+          Stream.runForEach((e) => Effect.sync(() => live.push(e))),
+          Effect.fork
+        )
+        yield* Effect.yieldNow()
+        yield* ReviewService.run(INPUT)
+        yield* Fiber.interrupt(watcher)
+      }).pipe(Effect.provide(env(workingStub())))
+    )
+    expect(live.map((e) => e._tag)).toContain("ToolStart")
+    expect(live[live.length - 1]!._tag).toBe("Done")
+
+    // Replay: chatA attaches AFTER, to the warm buffer, and still gets the run.
+    const replay: Array<StreamEvent> = []
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* ReviewService.run(INPUT)
+        const watcher = yield* watchStream(INPUT.sessionId, "chatA").pipe(
+          Stream.runForEach((e) => Effect.sync(() => replay.push(e))),
+          Effect.fork
+        )
+        yield* Effect.yieldNow()
+        yield* Fiber.interrupt(watcher)
+      }).pipe(Effect.provide(env(workingStub())))
+    )
+    expect(replay.map((e) => e._tag)).toContain("ToolStart")
+    expect(replay[replay.length - 1]!._tag).toBe("Done")
+  })
+
+  // A second review started while a DIFFERENT chat is active takes ownership from
+  // the first — the tab moves with the run that produced it, not the chat that
+  // once owned an earlier one.
+  it("re-assigns ownership to the active chat of the newer run", async () => {
+    const seenA: Array<StreamEvent> = []
+    const seenB: Array<StreamEvent> = []
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        // Run 1 while chatA is active.
+        yield* Effect.sync(() => seedSession("chatA", ["chatA", "chatB"]))
+        yield* ReviewService.run(INPUT)
+        // The user switches to chatB, then runs a second review.
+        yield* Effect.sync(() => seedSession("chatB", ["chatA", "chatB"]))
+        yield* ReviewService.run(INPUT)
+        // chatB now owns the live buffer; chatA owns nothing.
+        const watcherB = yield* watchStream(INPUT.sessionId, "chatB").pipe(
+          Stream.runForEach((e) => Effect.sync(() => seenB.push(e))),
+          Effect.fork
+        )
+        const watcherA = yield* watchStream(INPUT.sessionId, "chatA").pipe(
+          Stream.runForEach((e) => Effect.sync(() => seenA.push(e))),
+          Effect.fork
+        )
+        yield* Effect.yieldNow()
+        yield* Fiber.interrupt(watcherB)
+        yield* Fiber.interrupt(watcherA)
+      }).pipe(Effect.provide(env(workingStub())))
+    )
+    // The newer run's owner sees exactly one run's worth…
+    expect(seenB.filter((e) => e._tag === "Done")).toHaveLength(1)
+    // …and the chat that owned the earlier run sees nothing now.
+    expect(seenA).toEqual([])
+  })
+})
+
+/**
  * The Reviewer tab must survive a restart — the findings already do, so a tab
  * that vanishes while its verdict remains reads as a bug. Persistence rides on
  * `watch`'s replay: a fresh process has a cold buffer and falls back to disk, so
@@ -690,8 +848,8 @@ describe("ReviewService.watch", () => {
  * what actually reached the disk.
  */
 describe("ReviewService — transcript persistence", () => {
-  const watchStream = (sessionId: string) =>
-    Stream.unwrap(Effect.map(ReviewService, (r) => r.watch(sessionId)))
+  const watchStream = (sessionId: string, chatId = "watcher") =>
+    Stream.unwrap(Effect.map(ReviewService, (r) => r.watch(sessionId, chatId)))
 
   const workingStub = () =>
     stubAdapter((_id, _s, ctx) =>
@@ -842,8 +1000,8 @@ describe("ReviewService — transcript persistence", () => {
  * the ordinary splice test attaches once the whole reset is done and sails past.
  */
 describe("ReviewService — reset is atomic", () => {
-  const watchStream = (sessionId: string) =>
-    Stream.unwrap(Effect.map(ReviewService, (r) => r.watch(sessionId)))
+  const watchStream = (sessionId: string, chatId = "watcher") =>
+    Stream.unwrap(Effect.map(ReviewService, (r) => r.watch(sessionId, chatId)))
 
   it("never replays the previous transcript in front of a starting run", async () => {
     let releaseClear: () => void = () => {}
@@ -863,8 +1021,8 @@ describe("ReviewService — reset is atomic", () => {
         get: () => Effect.succeed(null),
         set: () => Effect.void,
         clear: () => Effect.void,
-        getTranscript: () => Effect.sync(() => stored),
-        setTranscript: (_id, events) =>
+        getTranscript: () => Effect.sync(() => ({ owner: null, events: stored })),
+        setTranscript: (_id, _owner, events) =>
           Effect.sync(() => {
             stored = events
           }),
