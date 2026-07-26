@@ -20,10 +20,11 @@ import type { SeedSession } from "./fixtures.js"
  * — so the spec checks that the placeholder mounts, never what the PDF looks
  * like.
  *
- * The seeded files must be COMMITTED, not merely written: clickability is gated
- * on `git ls-files` (the same list the composer's `@` menu uses), so an untracked
- * file is correctly not a link and every assertion below would fail for a reason
- * that has nothing to do with the viewer.
+ * One asset is deliberately left UNCOMMITTED. Clickability is gated on the
+ * worktree's file list, and a file the agent wrote this turn is untracked until
+ * something commits it — so a tracked-only list would be blind to precisely the
+ * file the operator most wants to open. `notes.md` is that case, in the shape it
+ * actually occurs.
  */
 
 const git = (cwd: string, args: ReadonlyArray<string>): void => {
@@ -57,6 +58,11 @@ const seedAssets = ({ repoPath }: { repoPath: string }): void => {
   writeFileSync(join(repoPath, "report.pdf"), MINIMAL_PDF)
   git(repoPath, ["add", "-A"])
   git(repoPath, ["commit", "-m", "assets", "--no-gpg-sign"])
+  // Written but NOT committed — this is what a file the agent just made looks
+  // like. It must still be openable.
+  writeFileSync(join(repoPath, "notes.md"), "# Fresh Notes\n\nWritten this turn.\n")
+  writeFileSync(join(repoPath, ".gitignore"), "ignored.md\n")
+  writeFileSync(join(repoPath, "ignored.md"), "# Ignored\n")
 }
 
 const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [
@@ -85,6 +91,8 @@ const PROSE = [
   "Upgraded the toolchain to `v1.2.3` while I was there.",
   "",
   "The generated deck is at `report.pdf`.",
+  "",
+  "Fresh, uncommitted output lives in `notes.md`; build spew is in `ignored.md`.",
   ""
 ].join("\n")
 
@@ -173,12 +181,34 @@ test("opens worktree assets from the transcript in the Preview dock", async ({ l
   await window.getByTitle("docs/spec.md", { exact: true }).click()
   await expect(window.getByRole("heading", { name: "The Spec" })).toBeVisible()
 
+  // ── An UNCOMMITTED file is still openable ───────────────────────────────
+  // The headline case: a file the agent wrote this turn is untracked, so a
+  // tracked-only file list would leave it inert — exactly the file the operator
+  // came to read.
+  await window.getByTitle("Open notes.md").click()
+  await expect(window.getByRole("heading", { name: "Fresh Notes" })).toBeVisible({
+    timeout: 15_000
+  })
+
+  // …but .gitignore is still honoured, so build spew never becomes a link.
+  await expect(window.getByTitle("Open ignored.md")).toHaveCount(0)
+
   // ── PDF: chrome only, never pixels ──────────────────────────────────────
   // Chromium's own viewer paints a native WebContentsView over this hole, so
   // the renderer's job is to claim the space and get out of the way. Asserting
   // on the rendered PDF would be asserting on Electron.
   await window.getByTitle("Open report.pdf").click()
   await expect(window.getByTestId("asset-pdf-placeholder")).toBeVisible({ timeout: 15_000 })
+
+  // Hiding the DOCK while a PDF is focused must take the overlay with it. The
+  // native view is not hidden by hiding a div, and the bounds loop deliberately
+  // holds its last good rect rather than pushing a 0x0 one — so a missed hide
+  // leaves the PDF painted over the conversation until the app restarts.
+  // Asserted through the dock's own chrome, which is the in-DOM proxy for it.
+  await window.getByRole("button", { name: "Hide preview" }).click()
+  await expect(window.getByTestId("asset-pdf-placeholder")).toBeHidden()
+  await window.getByRole("button", { name: "Preview", exact: true }).click()
+  await expect(window.getByTestId("asset-pdf-placeholder")).toBeVisible()
 
   // Closing an asset tab falls back to the Browser tab — the only one that is
   // guaranteed to still be there.

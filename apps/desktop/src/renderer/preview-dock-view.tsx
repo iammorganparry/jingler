@@ -14,7 +14,14 @@
  *
  * That is why the browser body stays mounted for every tab (the dock renders all
  * bodies and CSS-hides the inactive ones) while `setVisible` and the bounds loop
- * are gated on it actually being the active tab.
+ * are gated on it actually being on screen.
+ *
+ * "On screen" is TWO conditions, and both native bodies check both: the tab is
+ * focused AND the dock is open. Checking only tab focus leaves the overlay
+ * painting over the conversation the moment ⌃⇧B hides the dock — and because the
+ * rAF loop deliberately ignores a degenerate rect (`isPaintableRect`) rather than
+ * pushing a 0×0 one, it holds its last good bounds and simply stays there until
+ * the app restarts.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
@@ -57,9 +64,9 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
       tab.kind === "browser" ? (
         <BrowserBody url={url} session={session} nativeWanted={nativeWanted} />
       ) : (
-        <AssetTab tabId={tab.id} assets={dock.assets} active={active} />
+        <AssetTab tabId={tab.id} assets={dock.assets} active={active} dockVisible={dock.visible} />
       ),
-    [url, session, nativeWanted, dock.assets]
+    [url, session, nativeWanted, dock.assets, dock.visible]
   )
 
   return (
@@ -208,11 +215,14 @@ function BrowserBody({
 function AssetTab({
   tabId,
   assets,
-  active
+  active,
+  dockVisible
 }: {
   tabId: string
   assets: PreviewDockPrefs["assets"]
   active: boolean
+  /** Whether the DOCK itself is showing. A PDF needs both — see `PdfBody`. */
+  dockVisible: boolean
 }) {
   const asset = assets.find((a) => assetTabId(a.sessionId, a.path) === tabId)
   const query = useQuery({
@@ -235,7 +245,10 @@ function AssetTab({
   // Chromium's own viewer is parked over it, which is why the app ships no
   // pdf.js. The wrapper exists solely to measure that hole.
   return query.data.kind === "pdf" ? (
-    <PdfBody asset={asset} active={active}>
+    // BOTH conditions, for the same reason `BrowserBody` takes `nativeWanted`:
+    // a native overlay is not hidden by hiding a div, so the dock closing has to
+    // be said out loud exactly as a tab switch does.
+    <PdfBody asset={asset} shown={active && dockVisible}>
       {body}
     </PdfBody>
   ) : (
@@ -253,11 +266,12 @@ function AssetTab({
  */
 function PdfBody({
   asset,
-  active,
+  shown,
   children
 }: {
   asset: { sessionId: string; path: string }
-  active: boolean
+  /** The tab is focused AND the dock is open. Either being false hides the view. */
+  shown: boolean
   children: React.ReactNode
 }) {
   const boundsRef = useRef<HTMLDivElement>(null)
@@ -270,7 +284,7 @@ function PdfBody({
   }, [])
 
   useEffect(() => {
-    if (!active) {
+    if (!shown) {
       void rpc.assetHidePdf()
       return
     }
@@ -281,12 +295,12 @@ function PdfBody({
     return () => {
       void rpc.assetHidePdf()
     }
-  }, [active, asset.sessionId, asset.path, rect])
+  }, [shown, asset.sessionId, asset.path, rect])
 
   // Same rAF discipline as the browser: push bounds only when they change, and
   // never push a degenerate rect (see `isPaintableRect`).
   useEffect(() => {
-    if (!active) return
+    if (!shown) return
     let raf = 0
     let last = ""
     const tick = () => {
@@ -302,7 +316,7 @@ function PdfBody({
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [active, rect])
+  }, [shown, rect])
 
   return (
     <div ref={boundsRef} className="absolute inset-0">

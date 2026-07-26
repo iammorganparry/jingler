@@ -154,6 +154,17 @@ function MarkdownCode({ children, ...rest }: { children?: ReactNode; className?:
  *
  * `data-streamdown="link"` is kept because a test asserts it — dropping it once
  * already made a real external link stop reading as one.
+ *
+ * ## `target="_blank"` here is only safe because main refuses it
+ *
+ * An href in agent markdown is attacker-influenceable, and Electron hands a
+ * `window.open`ed child the OPENER'S `webPreferences` — including the preload
+ * that exposes the RPC bridge. The reason this renders a plain anchor rather
+ * than routing through an injected opener is that `setWindowOpenHandler` in
+ * `apps/desktop/src/main/index.ts` denies every window-open request outright and
+ * hands http(s) to `shell.openExternal`, so the click lands in the user's real
+ * browser and no Electron window is ever created. Deleting that handler
+ * re-opens the hole for every `Markdown` in the app, not just this one.
  */
 function MarkdownAnchor({
   href,

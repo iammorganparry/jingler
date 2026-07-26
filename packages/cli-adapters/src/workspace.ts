@@ -183,18 +183,41 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()(
           )
         ),
 
-      /** Tracked files in a repo (git ls-files), for the `@` code-reference menu. */
+      /**
+       * Every file in a repo worth referencing — for the `@` code-reference menu
+       * and for deciding whether a path in agent output is worth linking.
+       *
+       * Tracked files AND untracked-but-not-ignored ones. `git ls-files` alone
+       * lists only what git already knows about, which excludes precisely the
+       * files the agent just wrote: a file created this turn is untracked until
+       * something commits it, so the two features this feeds would both go blind
+       * on their most important case. `--exclude-standard` keeps `.gitignore`
+       * honoured, so `node_modules` and build output stay out.
+       *
+       * The two lists are concatenated rather than merged with a Set: `ls-files`
+       * and `ls-files --others` are disjoint by definition (a path is tracked or
+       * it is not), so deduplicating would only cost a pass over every path in
+       * the repo.
+       */
       files: (
         repoPath: string
       ): Effect.Effect<ReadonlyArray<string>, GitError, CommandExecutor.CommandExecutor> =>
-        runGit(repoPath, ["ls-files"]).pipe(
-          Effect.map((out) =>
+        Effect.gen(function* () {
+          const lines = (out: string): ReadonlyArray<string> =>
             out
               .split("\n")
               .map((line) => line.trim())
               .filter((line) => line.length > 0)
-          )
-        ),
+          const tracked = yield* runGit(repoPath, ["ls-files"])
+          // Untracked is best-effort: a repo where this fails should still offer
+          // its tracked files rather than none at all.
+          const untracked = yield* runGit(repoPath, [
+            "ls-files",
+            "--others",
+            "--exclude-standard"
+          ]).pipe(Effect.orElseSucceed(() => ""))
+          return [...lines(tracked), ...lines(untracked)]
+        }),
 
       /**
        * The unified working diff for a worktree, for the Changes view. `git diff
