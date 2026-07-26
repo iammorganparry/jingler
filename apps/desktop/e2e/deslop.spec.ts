@@ -43,7 +43,7 @@ test("Deslop button sends the file to the session's agent", async ({ launchApp }
 
   await window.getByText("Deslop source session").click()
   // No PR yet, so the local worktree diff lives on the "Changes" tab.
-  await window.getByText("Changes").first().click()
+  await window.getByRole("button", { name: "Changes" }).first().click()
 
   // The Deslop button sits in each file's sticky header, beside Revert file.
   const deslop = window.getByRole("button", { name: "Deslop" }).first()

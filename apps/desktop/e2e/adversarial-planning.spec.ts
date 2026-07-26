@@ -65,8 +65,8 @@ const runGigaplanRound = async (window: Page) => {
   const createPlan = window.getByRole("button", { name: "Create plan" })
   await expect(createPlan).toBeEnabled({ timeout: 30_000 })
   await createPlan.click()
-  await expect(window.getByText("Plan Review").first()).toBeVisible({ timeout: 30_000 })
-  await window.getByText("Plan Review").first().click()
+  await expect(window.getByRole("button", { name: "Plan Review" }).first()).toBeVisible({ timeout: 30_000 })
+  await window.getByRole("button", { name: "Plan Review" }).first().click()
   await expect(window.getByRole("button", { name: /^01 Add request limiter/ })).toBeVisible({
     timeout: 30_000
   })
@@ -285,7 +285,7 @@ test("approving a Gigaplan runs its steps, each on the harness the plan assigned
   await window.getByRole("menuitem", { name: "Gigaplan" }).click()
   await expect(window.getByRole("button", { name: "Gigaplan" })).toBeVisible()
 
-  await window.getByText("Plan Review").first().click()
+  await window.getByRole("button", { name: "Plan Review" }).first().click()
   await expect(window.getByLabel("Assigned to codex gpt-5.6-sol")).toBeVisible()
   await window.getByRole("button", { name: /^02 Backfill it/ }).click()
   await expect(window.getByText("Assigned model", { exact: true })).toBeVisible()
@@ -296,7 +296,7 @@ test("approving a Gigaplan runs its steps, each on the harness the plan assigned
 
   // The executor turn — text only `beginPlanExecution` writes — proves approval
   // took the Gigaplan path rather than re-driving on the session's own harness.
-  await window.getByText("Conversation").first().click()
+  await window.getByRole("button", { name: "Conversation" }).first().click()
   await expect(window.getByText("Approved — run the plan.")).toBeVisible({ timeout: 30_000 })
 
   // The closing tally: only the executor emits this, and only after walking

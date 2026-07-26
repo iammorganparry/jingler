@@ -76,6 +76,13 @@ export interface SessionConversationProps {
     view: "conversation" | "plan" | "split",
     ctx: ConversationPaneCtx
   ) => ReactNode
+  /**
+   * Render a session's chat pills into the tab row's `chatSlot`. A render prop
+   * for the same reason `renderConversation` is: the chat state it drives (RPCs
+   * + live per-chat activity) lives in the desktop renderer, so building the bar
+   * here would drag the RPC client into the component library. Absent in stories.
+   */
+  renderChatTabs?: (session: Session) => ReactNode
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>
   /**
@@ -225,6 +232,7 @@ export function SessionConversation(props: SessionConversationProps) {
             }
             renderConversation={props.renderConversation}
             conversationPane={props.conversationPane}
+            renderChatTabs={props.renderChatTabs}
             planSessions={props.planSessions}
             liveActivity={props.liveActivity}
             liveDiff={props.liveDiff}
