@@ -5,3 +5,6 @@ packages:
   # they resolve @starbase/plugin-sdk and so CI compiles them — an example that
   # no longer builds is worse than no example.
   - "plugins/examples/*"
+  # Official plugins. In the workspace for the same reason: CI compiles them,
+  # and an official plugin that no longer builds is the worst possible example.
+  - "plugins/github-issues"

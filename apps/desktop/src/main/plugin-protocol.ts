@@ -38,6 +38,12 @@ import * as React from "react"
 import * as JsxRuntime from "react/jsx-runtime"
 import * as JsxDevRuntime from "react/jsx-dev-runtime"
 import * as Sdk from "@starbase/plugin-sdk"
+// NOT `import * as SdkUi from "@starbase/plugin-sdk/ui"`. That would make the
+// MAIN process load the whole component library — shiki, katex, a graph layout
+// engine — at startup, to serve a few hundred bytes of re-exports. The names
+// come from a data module that imports nothing; a test in the SDK asserts the
+// two agree.
+import { UI_EXPORT_NAMES } from "@starbase/plugin-sdk/ui-exports"
 import { pluginsRoot } from "./app-paths.js"
 
 /** The scheme, in one place — it appears in CSP, in the importmap and here. */
@@ -116,7 +122,8 @@ const RUNTIME_MODULES: Record<string, string> = {
     "jsxRuntime",
     exportNames({ ...JsxRuntime, ...JsxDevRuntime })
   ),
-  "sdk.js": runtimeShim("sdk", exportNames(Sdk))
+  "sdk.js": runtimeShim("sdk", exportNames(Sdk)),
+  "sdk-ui.js": runtimeShim("sdkUi", [...UI_EXPORT_NAMES])
 }
 
 const MIME: Record<string, string> = {

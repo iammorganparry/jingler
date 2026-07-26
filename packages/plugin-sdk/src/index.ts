@@ -78,3 +78,10 @@ export type { HostBridge, PluginViewValue } from "./context.js"
  * a second copy would make `useContext` silently return null in every plugin.
  */
 export { PluginViewContext, PluginViewProvider } from "./context.js"
+
+// The themed UI kit is NOT re-exported here. It lives at
+// `@starbase/plugin-sdk/ui`, for the same reason `/host` is separate: this entry
+// has to stay importable from a plain Node script. A plugin generates its
+// `starbase.plugin.json` by importing its own manifest module, which imports
+// `defineManifest` from here — and re-exporting the UI kit made that script drag
+// in the entire component library and die on a stylesheet import.

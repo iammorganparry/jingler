@@ -33,27 +33,55 @@ export const STARBASE_EXTERNALS = [
   "react-dom",
   "react/jsx-runtime",
   "react/jsx-dev-runtime",
-  "@starbase/plugin-sdk"
+  "@starbase/plugin-sdk",
+  "@starbase/plugin-sdk/ui"
 ]
 
 /**
- * A Vite `build` config for a plugin's UI entry.
+ * A Vite `build` config for a plugin.
+ *
+ * Builds BOTH halves when a plugin has both. Getting this wrong is silent and
+ * late: the manifest declares `main: "dist/main.js"`, the UI-only build never
+ * writes it, and the plugin loads perfectly until the first activation event
+ * fires and the host cannot find the file. Passing `main` here is what stops
+ * that being something an author discovers from a user.
+ *
+ * Output names are fixed (`ui.js`, `main.js`) and match what the manifests in
+ * `plugins/` declare — one fewer thing to keep in agreement by hand.
  *
  * ES format with no code splitting: Starbase imports one module per plugin over
  * `starbase-plugin://`, and a split chunk would make the manifest's `ui` path
  * stop describing what actually loads.
  */
-export const starbasePluginBuild = (options) => ({
-  outDir: options.outDir ?? "dist",
-  lib: {
-    entry: options.entry,
-    formats: ["es"],
-    fileName: () => "ui.js"
-  },
-  rollupOptions: { external: [...STARBASE_EXTERNALS] },
-  cssCodeSplit: false,
-  // Plugins are read and debugged in place from `~/starbase/plugins`; a stack
-  // trace pointing into minified soup helps nobody diagnose their own tab.
-  minify: false,
-  sourcemap: true
-})
+export const starbasePluginBuild = (options) => {
+  const input = {}
+  // `entry` is the UI half; `ui` is accepted as a clearer alias for a plugin
+  // that has both, since "entry" stops meaning anything once there are two.
+  const ui = options.ui ?? options.entry
+  if (ui) input.ui = ui
+  if (options.main) input.main = options.main
+
+  return {
+    outDir: options.outDir ?? "dist",
+    rollupOptions: {
+      input,
+      external: [...STARBASE_EXTERNALS],
+      output: {
+        format: "es",
+        entryFileNames: "[name].js",
+        // No shared chunk. Two entries that both touch a helper would otherwise
+        // emit a third file neither manifest mentions, and the host half loads
+        // in Node while the UI half loads over a custom scheme — a chunk they
+        // both import has to resolve in both, which it would not.
+        manualChunks: undefined,
+        inlineDynamicImports: false
+      },
+      preserveEntrySignatures: "exports-only"
+    },
+    cssCodeSplit: false,
+    // Plugins are read and debugged in place from `~/starbase/plugins`; a stack
+    // trace pointing into minified soup helps nobody diagnose their own tab.
+    minify: false,
+    sourcemap: true
+  }
+}

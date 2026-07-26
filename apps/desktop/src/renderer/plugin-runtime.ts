@@ -27,6 +27,7 @@
 import * as React from "react"
 import * as jsxRuntime from "react/jsx-runtime"
 import * as sdkModule from "@starbase/plugin-sdk"
+import * as sdkUiModule from "@starbase/plugin-sdk/ui"
 
 /** What the generated shims destructure. Keys match `RUNTIME_MODULES`. */
 export interface StarbaseRuntime {
@@ -43,6 +44,8 @@ export interface StarbaseRuntime {
    * through the shim, is what makes the hooks work at all.
    */
   readonly sdk: Record<string, unknown>
+  /** The themed UI kit, at `@starbase/plugin-sdk/ui`. */
+  readonly sdkUi: Record<string, unknown>
 }
 
 declare global {
@@ -65,7 +68,8 @@ export const publishPluginRuntime = (): void => {
   globalThis.__STARBASE_RUNTIME__ ??= {
     react: React,
     jsxRuntime,
-    sdk: sdkModule as unknown as Record<string, unknown>
+    sdk: sdkModule as unknown as Record<string, unknown>,
+    sdkUi: sdkUiModule as unknown as Record<string, unknown>
   }
 }
 

@@ -1,0 +1,23 @@
+{
+  "name": "@starbase/plugin-github-issues",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The GitHub Issues tab, as an official Starbase plugin.",
+  "scripts": {
+    "build": "vite build && tsx ./scripts/emit-manifest.mjs",
+    "typecheck": "tsc --noEmit",
+    "install:local": "node ./scripts/install-local.mjs",
+    "clean": "rimraf dist .turbo *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@starbase/plugin-sdk": "workspace:*",
+    "@starbase/tsconfig": "workspace:*",
+    "@types/react": "^19.2.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "react": "^19.2.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6"
+  }
+}
