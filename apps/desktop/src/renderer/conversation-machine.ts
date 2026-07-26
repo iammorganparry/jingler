@@ -402,10 +402,20 @@ const agentStream = fromCallback<
  * session nobody is looking at. Subscribing costs nothing while idle (the stream
  * stays quiet until a review starts) and means the Reviewer tab is live the
  * moment one does.
+ *
+ * Scoped to THIS chat, not just the session. A review is a session-level
+ * artifact, but every chat runs its own conversation machine and renders the
+ * reviewer in its own sub-agent rail — so a session-wide watch would replay one
+ * chat's review into all of them, and a brand-new chat would open showing a
+ * Reviewer tab for a run it had no part in. Passing `chatId` lets the watch
+ * receive only the review THIS chat owns (the chat that was active when the
+ * review started); the others stay silent.
  */
-const reviewStream = fromCallback<ConversationEvent, { sessionId: string }>(
+const reviewStream = fromCallback<ConversationEvent, { sessionId: string; chatId: string }>(
   ({ sendBack, input }) =>
-    rpc.reviewWatch(input.sessionId, (event) => sendBack({ type: "REVIEW_EVENT", event }))
+    rpc.reviewWatch(input.sessionId, input.chatId, (event) =>
+      sendBack({ type: "REVIEW_EVENT", event })
+    )
 )
 
 const patchLast = (
@@ -1257,7 +1267,10 @@ export const conversationMachine = setup({
   entry: ["loadCatalog", "loadSkills", "loadReadiness"],
   // Watch the reviewer for the machine's whole life — a review is not part of a
   // turn, so it can start, run and finish in any state.
-  invoke: { src: "reviewStream", input: ({ context }) => ({ sessionId: context.session.id }) },
+  invoke: {
+    src: "reviewStream",
+    input: ({ context }) => ({ sessionId: context.session.id, chatId: context.chatId })
+  },
   // All three can land in any state — they race nothing. SKILLS_LOADED belongs
   // here for the same reason CATALOG_LOADED does: now that the `/` menu is
   // fetched out of band, its reply can arrive while the transcript is still

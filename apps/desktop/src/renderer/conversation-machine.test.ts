@@ -143,7 +143,7 @@ vi.mock("./rpc-client.js", () => ({
         h.streamCb = null
       }
     },
-    reviewWatch: (_sessionId: string, onEvent: (event: unknown) => void) => {
+    reviewWatch: (_sessionId: string, _chatId: string, onEvent: (event: unknown) => void) => {
       h.reviewCb = onEvent
       return () => {
         h.reviewCb = null
