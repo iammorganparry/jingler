@@ -943,11 +943,18 @@ export class StarbaseRpcs extends RpcGroup.make(
    * auto-review is a poll across every session, so a reviewer may already be
    * mid-flight when you open one. Subscribing is safe at any time — the stream is
    * simply empty until a review starts.
+   *
+   * `chatId` is the subscriber, and it is load-bearing, not cosmetic. A review
+   * is a session-level artifact, but its transcript is rendered inside ONE chat's
+   * sub-agent rail — so it must belong to exactly one chat, or every new chat in
+   * the session inherits the last review's Reviewer tab and replays someone
+   * else's run. Ownership is the chat that was the session's `activeChatId` when
+   * the review STARTED; only that chat's watcher receives the run's events.
    */
   Rpc.make("Review.watch", {
     success: StreamEvent,
     stream: true,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
   /** The last stored adversarial review for a session, or null. Never errors. */

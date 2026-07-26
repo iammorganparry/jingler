@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
 import { TabBar } from "./tab-bar.js"
@@ -33,19 +33,18 @@ const renderAt = (width: number, extra: Partial<React.ComponentProps<typeof TabB
   )
 
 describe("TabBar at width", () => {
-  it("shows every tab label when the pane is wide", () => {
+  it("labels the SELECTED view tab and leaves the rest as glyphs", () => {
     renderAt(1200)
-    expect(screen.getByText("Conversation")).toBeTruthy()
-    expect(screen.getByText("Pull Request")).toBeTruthy()
-    expect(screen.getByText("Code Review")).toBeTruthy()
-  })
-
-  it("keeps the ACTIVE tab's label when the rest go icon-only", () => {
-    renderAt(600)
-    // Losing every label leaves a row of near-identical glyphs with no answer to
-    // "what am I looking at" — the one question a tab bar exists to answer.
+    // The row now carries the chat pills too, and a chat title is the thing you
+    // actually read to tell two conversations apart — so the view tabs spend
+    // their width only on the one you're looking at.
     expect(screen.getByText("Code Review")).toBeTruthy()
     expect(screen.queryByText("Pull Request")).toBeNull()
+  })
+
+  it("drops even the active label below the mid tier", () => {
+    renderAt(420)
+    expect(screen.queryByText("Code Review")).toBeNull()
   })
 
   it("keeps every tab reachable by name once the labels are hidden", () => {
@@ -53,6 +52,54 @@ describe("TabBar at width", () => {
     // The aria-label survives the text being dropped, so a screen reader and a
     // by-name lookup both still find the tab.
     expect(screen.getByRole("button", { name: "Pull Request" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Conversation" })).toBeTruthy()
+  })
+
+  it("wears the session's name on the conversation tab, not the word 'Conversation'", () => {
+    // The chip and the Conversation tab used to be two controls for one idea,
+    // one of which you couldn't click. This is the merge.
+    renderAt(1200, { sessionTitle: "feat(signals): account-first resolution" })
+    expect(screen.getByText("feat(signals): account-first resolution")).toBeTruthy()
+  })
+
+  it("gives the session title less room as the pane narrows, and drops it at tiny", () => {
+    const title = "feat(signals): account-first resolution"
+    const widthAt = (width: number) => {
+      cleanup()
+      renderAt(width, { sessionTitle: title })
+      return screen.queryByText(title)?.className ?? null
+    }
+    expect(widthAt(1200)).toContain("max-w-[210px]")
+    expect(widthAt(600)).toContain("max-w-[150px]")
+    expect(widthAt(420)).toContain("max-w-[92px]")
+    // At `tiny` there is no room for a name — the tab keeps its tooltip and,
+    // when the session is doing something, a status dot.
+    expect(widthAt(320)).toBeNull()
+  })
+
+  it("renders the chat pills inside the row, behind a divider", () => {
+    // The whole point of the redesign: what used to be a second ruled strip is
+    // now a slot in this one.
+    renderAt(1200, { chatSlot: <button type="button">Lets review the PR</button> })
+    const row = screen.getByTestId("session-tab-bar")
+    expect(within(row).getByText("Lets review the PR")).toBeTruthy()
+  })
+
+  it("collapses the diff counts to a dot below the mid tier", () => {
+    // The diff totals arrive on the DESCRIPTOR now, not as a `changes` prop —
+    // keying decoration off `id === "changes"` made "a tab this file knows
+    // about" a precondition for badging one, which a plugin cannot satisfy.
+    const withDiff = [
+      builtinDescriptor("conversation"),
+      builtinDescriptor("changes", { kind: "diff", added: 681, removed: 0 })
+    ]
+    renderAt(1200, { tabs: withDiff })
+    expect(screen.getByText("+681")).toBeTruthy()
+    cleanup()
+    // "+681 −0" is up to seven tabular glyphs per tab — a whole chat pill's worth
+    // of width, spent on something the Changes view itself says better.
+    renderAt(420, { tabs: withDiff })
+    expect(screen.queryByText("+681")).toBeNull()
   })
 
   it("folds the pane actions into a menu below the mid tier", () => {

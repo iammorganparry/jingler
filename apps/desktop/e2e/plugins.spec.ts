@@ -168,8 +168,16 @@ const secondManifest = {
   }
 }
 
+/**
+ * Click the seeded session in the SIDEBAR.
+ *
+ * By test id, not by text. The tab-chrome redesign put the session's title on the
+ * conversation chip, so "Plugin session" now appears twice on screen — once in the
+ * sidebar row and once in the pane's own header — and a bare `getByText` is a
+ * strict-mode violation rather than a click.
+ */
 const openSession = async (window: import("@playwright/test").Page) => {
-  await window.getByText("Plugin session").click()
+  await window.getByTestId(`session-row-${SESSION.id}`).click()
 }
 
 /** Open Settings and land on the Plugins section. Mirrors the other specs. */
@@ -1109,7 +1117,9 @@ test("onStartupFinished activates at boot, with no tab ever opened", async ({ la
     configured: true,
     withRepo: true
   })
-  await expect(second.window.getByText("Plugin session")).toBeVisible({ timeout: 15_000 })
+  await expect(second.window.getByTestId(`session-row-${SESSION.id}`)).toBeVisible({
+    timeout: 15_000
+  })
 
   await expect.poll(() => existsSync(marker), { timeout: 25_000 }).toBe(true)
 })
@@ -1144,7 +1154,9 @@ test("a disabled plugin is not woken by onStartupFinished", async ({ launchApp }
     configured: true,
     withRepo: true
   })
-  await expect(second.window.getByText("Plugin session")).toBeVisible({ timeout: 15_000 })
+  await expect(second.window.getByTestId(`session-row-${SESSION.id}`)).toBeVisible({
+    timeout: 15_000
+  })
 
   // Give startup dispatch time to have got it wrong.
   await second.window.waitForTimeout(3_000)
@@ -1221,7 +1233,7 @@ export default definePlugin(
   // The app is intact — this is the assertion that failed before the boundary
   // existed, because the window was blank.
   await expect(window.getByRole("button", { name: "Conversation" })).toBeVisible()
-  await expect(window.getByText("Plugin session")).toBeVisible()
+  await expect(window.getByTestId(`session-row-${SESSION.id}`)).toBeVisible()
 })
 
 test("SDK hooks work inside a dock pane, as the SDK documents", async ({ launchApp }) => {

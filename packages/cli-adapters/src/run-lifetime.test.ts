@@ -65,3 +65,40 @@ describe("runLifetime", () => {
     })
   })
 })
+
+/**
+ * Why sub-agents are absent from this table, given they were being killed by it.
+ *
+ * `liveBackgroundTasks` counts the DOCK's tasks, and sub-agents are deliberately
+ * filtered out of the dock (`claude-adapter.ts`, `isSubagentTask` — "the dock is
+ * for work the operator has to mind"). So a settled turn with five live sub-agents
+ * read as `work-finished` here, and `Fiber.interrupt` aborted the one SDK query all
+ * five were running inside.
+ *
+ * The fix is upstream, in `turn-continuation.ts`: a turn with live sub-agents does
+ * not emit its terminal event, so `turnSettled` stays FALSE and rule 1/2 keeps the
+ * run alive without this policy knowing sub-agents exist. These cases pin the two
+ * rows that fix depends on, so a later edit here cannot quietly reopen the bug.
+ */
+describe("runLifetime — the rows sub-agents depend on", () => {
+  it("keeps an unsettled turn alive with no background tasks at all", () => {
+    // THE ROW. A held-open turn looks exactly like this: watched, no terminal event
+    // yet, nothing in the dock. If this ever returns `end`, every sub-agent dies
+    // again and no test in `claude-adapter-subagents.test.ts` would notice.
+    expect(runLifetime(state({ turnSettled: false, liveBackgroundTasks: 0 }))).toEqual({
+      verdict: "run",
+      because: "turn-in-flight"
+    })
+  })
+
+  it("still ends an unsettled turn whose consumer detached — the known gap", () => {
+    // Asserted so it is a decision, not an accident: closing the window (or an HMR
+    // reload) mid-sub-agent DOES lose them, because rule 1 outranks everything and
+    // a held `Done` widens the window in which that is true. Fixing it properly
+    // means letting sub-agents outlive the turn, which is a separate change.
+    expect(runLifetime(state({ turnSettled: false, consumerAttached: false }))).toEqual({
+      verdict: "end",
+      because: "abandoned-mid-turn"
+    })
+  })
+})

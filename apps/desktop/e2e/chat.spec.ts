@@ -373,7 +373,7 @@ test("Plan mode: propose a plan, review a step, and approve in auto", async ({
   await expect(window.getByText("Audit session middleware").first()).toBeVisible()
 
   // The Plan Review tab surfaces (live plan-presence); open it.
-  await window.getByText("Plan Review").first().click()
+  await window.getByRole("button", { name: "Plan Review" }).first().click()
 
   // The step list renders; drill into a branch step to open its spec.
   await expect(window.getByText("Handle token refresh").first()).toBeVisible()
@@ -394,7 +394,7 @@ test("Plan mode: propose a plan, review a step, and approve in auto", async ({
   // override becomes visible in the mode chip, and execution starts.
   await window.getByRole("button", { name: "Approve and auto", exact: true }).click()
   await expect(window.getByText(/execution started/i)).toBeVisible({ timeout: 15_000 })
-  await window.getByText("Conversation", { exact: true }).first().click()
+  await window.getByRole("button", { name: "Conversation" }).first().click()
   await expect(window.getByRole("button", { name: "auto", exact: true })).toBeVisible()
   await window.getByText("Plan Review", { exact: true }).first().click()
 
@@ -481,8 +481,8 @@ test("a linked PR shows the sidebar badge and the Pull Request / Code Review tab
   await expect(window.getByText(/#482/).first()).toBeVisible()
 
   // The PR + Code Review tabs appear once a session has a linked PR.
-  await expect(window.getByText("Pull Request").first()).toBeVisible()
-  const reviewTab = window.getByText("Code Review").first()
+  await expect(window.getByRole("button", { name: "Pull Request" }).first()).toBeVisible()
+  const reviewTab = window.getByRole("button", { name: "Code Review" }).first()
   await expect(reviewTab).toBeVisible()
 
   // The Code Review tab is reachable (its view mounts in place of the stub).
@@ -646,7 +646,7 @@ test("Code Review shows the Uncommitted source and reverts a whole file", async 
   })
   await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
 
-  await window.getByText("Code Review").first().click()
+  await window.getByRole("button", { name: "Code Review" }).first().click()
 
   // The pane mounts (gh calls for the empty PR source can be slow), the source
   // toggle shows "Uncommitted" selected (the view falls back to the local source),
@@ -787,7 +787,7 @@ test("a stale plan (reopened app) can be approved to re-drive execution", async 
 
   await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
   // The seeded session auto-selects; a plan present → the Plan Review tab shows.
-  await window.getByText("Plan Review").first().click()
+  await window.getByRole("button", { name: "Plan Review" }).first().click()
   await expect(window.getByText("Refactor the auth flow").first()).toBeVisible()
 
   // On load the orphaned plan is "stale" → not the normal Approve, but a distinct
@@ -798,7 +798,7 @@ test("a stale plan (reopened app) can be approved to re-drive execution", async 
   // Approving re-drives a fresh run: the plan flips out of stale (Execution
   // started) and the resume turn lands in the conversation.
   await expect(window.getByText(/Execution started/i)).toBeVisible({ timeout: 15_000 })
-  await window.getByText("Conversation").first().click()
+  await window.getByRole("button", { name: "Conversation" }).first().click()
   await expect(window.getByText("Approved — implement the plan.")).toBeVisible({ timeout: 15_000 })
 })
 
@@ -1042,7 +1042,7 @@ test("a running adversarial review reports its phase and appears in the agent ta
   ).toBeVisible({ timeout: 20_000 })
 
   // …and the reviewer is watchable in the agent tab bar, mid-run.
-  await window.getByText("Conversation").first().click()
+  await window.getByRole("button", { name: "Conversation" }).first().click()
   await expect(window.getByRole("button", { name: /Reviewer/ })).toBeVisible()
 })
 

@@ -684,13 +684,17 @@ export const rpc = {
   },
 
 
-  reviewWatch: (sessionId: string, onEvent: (event: StreamEvent) => void): (() => void) => {
+  reviewWatch: (
+    sessionId: string,
+    chatId: string,
+    onEvent: (event: StreamEvent) => void
+  ): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
     let cancelled = false
     void clientPromise.then((client) => {
       if (cancelled) return
       fiber = runtime.runFork(
-        client.Review.watch({ sessionId }).pipe(
+        client.Review.watch({ sessionId, chatId }).pipe(
           Stream.runForEach((event) => Effect.sync(() => onEvent(event)))
         )
       )

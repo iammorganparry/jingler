@@ -34,6 +34,13 @@ export interface SessionSplitProps {
     ctx: ConversationPaneCtx
   ) => ReactNode
   conversationPane?: ReactNode
+  /**
+   * Render a session's chat pills into the tab row's `chatSlot`. A render prop
+   * for the same reason `renderConversation` is: the chat state it drives (RPCs
+   * + live per-chat activity) lives in the desktop renderer, so building the bar
+   * here would drag the RPC client into the component library.
+   */
+  renderChatTabs?: (session: Session) => ReactNode
   planSessions?: ReadonlySet<string>
   liveActivity?: Record<string, SessionActivity>
   liveDiff?: Record<string, DiffStat>
@@ -88,6 +95,7 @@ export function SessionSplit(props: SessionSplitProps) {
         session={session}
         renderConversation={props.renderConversation}
         conversationPane={props.conversationPane}
+        renderChatTabs={props.renderChatTabs}
         planSessions={props.planSessions}
         liveActivity={props.liveActivity}
         liveDiff={props.liveDiff}

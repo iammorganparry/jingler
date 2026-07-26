@@ -220,6 +220,14 @@ export interface StarbaseAppProps {
     view: "conversation" | "plan" | "split",
     ctx: ConversationPaneCtx
   ) => ReactNode
+  /**
+   * Render a session's chat pills into the tab row's `chatSlot`. A render prop
+   * for the same reason `renderConversation` is: the chat state it drives — the
+   * create/select/rename/close RPCs and the live per-chat activity — lives in
+   * the desktop renderer, so building the bar here would drag the RPC client
+   * into the component library. Absent in stories.
+   */
+  renderChatTabs?: (session: Session) => ReactNode
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>
   /** Load branch names for a repo (New Session base picker). */
@@ -328,6 +336,7 @@ export function StarbaseApp({
   onVisibleSessionsChange,
   patch = SEED_PATCH,
   renderConversation,
+  renderChatTabs,
   planSessions,
   loadBranches = noBranches,
   onCreateSession,
@@ -610,6 +619,7 @@ export function StarbaseApp({
         onRestoreSession={onRestoreSession}
         onDeleteSession={onDeleteSession}
         renderConversation={renderConversation}
+        renderChatTabs={renderChatTabs}
         planSessions={planSessions}
         showEmpty={showEmpty}
         patch={patch}

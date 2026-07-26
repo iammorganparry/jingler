@@ -139,6 +139,18 @@ describe("visibleTabs", () => {
   })
 })
 
+/*
+ * A note on `getByRole("button", { name })` rather than `getByText` for tabs.
+ *
+ * The tab-chrome redesign made non-conversation tabs glyph-first: the text label
+ * is rendered only while that tab is selected, and only from the `mid` width tier
+ * up. So `getByText("Pull Request")` cannot find a tab you have not clicked yet —
+ * which is every tab, at the moment you want to click it.
+ *
+ * The accessible name survives on purpose (`aria-label` + `title` on every glyph),
+ * so querying by it is both what a screen-reader user does and the only spelling
+ * that is stable across tiers.
+ */
 describe("plugin tab contributions", () => {
   it("renders a plugin tab body through the same path as a built-in", () => {
     render(
@@ -148,7 +160,7 @@ describe("plugin tab contributions", () => {
         tabContributions={[pluginTab("linear.issues")]}
       />
     )
-    fireEvent.click(screen.getByText("linear.issues"))
+    fireEvent.click(screen.getByRole("button", { name: "linear.issues" }))
     expect(screen.getByText("linear.issues body")).toBeTruthy()
   })
 
@@ -182,7 +194,7 @@ describe("plugin tab contributions", () => {
       />
     )
     expect(screen.getByText("transcript")).toBeTruthy()
-    expect(screen.getByText("linear.issues")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "linear.issues" })).toBeTruthy()
   })
 
   it("falls back off a plugin tab when its plugin is disabled mid-session", () => {
@@ -193,7 +205,7 @@ describe("plugin tab contributions", () => {
         tabContributions={[pluginTab("linear.issues")]}
       />
     )
-    fireEvent.click(screen.getByText("linear.issues"))
+    fireEvent.click(screen.getByRole("button", { name: "linear.issues" }))
     expect(screen.getByText("linear.issues body")).toBeTruthy()
 
     rerender(
@@ -230,7 +242,7 @@ describe("mount groups", () => {
     )
     expect(onMount).toHaveBeenCalledTimes(1)
 
-    fireEvent.click(screen.getByText("Plan Review"))
+    fireEvent.click(screen.getByRole("button", { name: "Plan Review" }))
     expect(onMount).toHaveBeenCalledTimes(1)
   })
 
@@ -250,11 +262,11 @@ describe("mount groups", () => {
         renderPullRequest={() => <Body />}
       />
     )
-    fireEvent.click(screen.getByText("Pull Request"))
+    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
     expect(onMount).toHaveBeenCalledTimes(1)
 
-    fireEvent.click(screen.getByText("Code Review"))
-    fireEvent.click(screen.getByText("Pull Request"))
+    fireEvent.click(screen.getByRole("button", { name: "Code Review" }))
+    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
     expect(onMount).toHaveBeenCalledTimes(2)
   })
 })
@@ -294,7 +306,7 @@ describe("SessionPane", () => {
 
     // Move pane A to its Pull Request tab; pane B must stay on Conversation.
     const paneA = screen.getByTestId("pane-a")
-    fireEvent.click(within(paneA).getByText("Pull Request"))
+    fireEvent.click(within(paneA).getByRole("button", { name: "Pull Request" }))
 
     expect(within(paneA).getByText("pr view a")).toBeTruthy()
     expect(within(screen.getByTestId("pane-b")).getByText("transcript b")).toBeTruthy()
@@ -308,7 +320,7 @@ describe("SessionPane", () => {
         renderReview={() => <div>review view</div>}
       />
     )
-    fireEvent.click(screen.getByText("Code Review"))
+    fireEvent.click(screen.getByRole("button", { name: "Code Review" }))
     expect(screen.getByText("review view")).toBeTruthy()
 
     // The PR goes away (merged and unlinked) — Review is no longer a visible tab,
@@ -335,7 +347,7 @@ describe("SessionPane", () => {
         renderPullRequest={(s) => <div>pr view {s.id}</div>}
       />
     )
-    fireEvent.click(screen.getByText("Pull Request"))
+    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
     expect(screen.getByText("pr view a")).toBeTruthy()
 
     rerender(

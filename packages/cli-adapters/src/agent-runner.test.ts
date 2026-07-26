@@ -296,7 +296,43 @@ describe("AgentRunner sub-agents", () => {
     })
   )
 
-  const runSubagentPrompt = () => {
+  /**
+   * An adapter that models a HELD-OPEN turn: the main agent finishes talking, its
+   * `Done` is withheld while the sub-agent works on (see `turn-continuation.ts`),
+   * and only the sub-agent's bookend releases it.
+   *
+   * The gap is where the bug used to live. With the `Done` emitted early the
+   * renderer left `running`, the stream's scope closed, and `runLifetime` reaped the
+   * fiber — aborting the one SDK query every sub-agent ran inside. Here the terminal
+   * event comes LAST, so the runner must carry the whole sub-agent lifecycle to the
+   * consumer and settle exactly once at the end.
+   */
+  const heldTurnAdapter: Layer.Layer<CliAdapter> = Layer.succeed(
+    CliAdapter,
+    CliAdapter.of({
+      run: (_sessionId, _spec, ctx) =>
+        Effect.gen(function* () {
+          yield* ctx.emit({ _tag: "Assistant", text: "delegating" })
+          yield* ctx.emit({
+            _tag: "SubagentStarted",
+            id: "task_1",
+            name: "Explore",
+            description: "sub task",
+            parentId: null
+          })
+          // The main agent's own `result` would land about here. Nothing terminal
+          // is emitted, and the sub-agent goes on reporting across the gap.
+          yield* Effect.sleep("20 millis")
+          yield* ctx.emit({ _tag: "Assistant", text: "LATE", agentId: "task_1" })
+          yield* Effect.sleep("20 millis")
+          yield* ctx.emit({ _tag: "SubagentEnded", id: "task_1", status: "done" })
+          yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        }) as ReturnType<CliAdapterShape["run"]>,
+      stop: () => Effect.void
+    })
+  )
+
+  const runSubagentPrompt = (adapter: Layer.Layer<CliAdapter> = subagentAdapter) => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
@@ -307,7 +343,7 @@ describe("AgentRunner sub-agents", () => {
       BackgroundTaskStore.Default,
     BackgroundTaskStore.Default,
       PlanStore.Default,
-      subagentAdapter,
+      adapter,
       DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
@@ -340,6 +376,29 @@ describe("AgentRunner sub-agents", () => {
     expect(text).toContain("main output")
     expect(text).not.toContain("SUBTEXT")
     expect(assistant.parts.some((p) => p._tag === "Tool" && p.tool.id === "r1")).toBe(false)
+  })
+
+  it("carries a held-open turn's sub-agent events through to the consumer", async () => {
+    // The regression. A turn whose `Done` is withheld while a sub-agent works must
+    // not be truncated or reaped: the run is unsettled, so `runLifetime` keeps it on
+    // `turn-in-flight` and every event after the main agent's last word still lands.
+    const { events, transcript } = await runSubagentPrompt(heldTurnAdapter)
+
+    const tags = events.map((e) => e._tag)
+    expect(tags).toContain("SubagentEnded")
+    expect(events.some((e) => e._tag === "Assistant" && e.agentId === "task_1")).toBe(true)
+
+    // Ordering is the claim: the terminal event comes AFTER the sub-agent settled,
+    // never before it.
+    expect(tags.lastIndexOf("Done")).toBeGreaterThan(tags.indexOf("SubagentEnded"))
+    expect(tags.filter((tag) => tag === "Done")).toHaveLength(1)
+    expect(tags).not.toContain("Failed")
+
+    // And the turn settles exactly once, with only the main agent's own words.
+    const assistant = transcript[1]!
+    const text = assistant.parts.filter((p) => p._tag === "Text").map((p) => (p as { text: string }).text).join("")
+    expect(text).toContain("delegating")
+    expect(text).not.toContain("LATE")
   })
 })
 

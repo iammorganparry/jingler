@@ -143,7 +143,7 @@ vi.mock("./rpc-client.js", () => ({
         h.streamCb = null
       }
     },
-    reviewWatch: (_sessionId: string, onEvent: (event: unknown) => void) => {
+    reviewWatch: (_sessionId: string, _chatId: string, onEvent: (event: unknown) => void) => {
       h.reviewCb = onEvent
       return () => {
         h.reviewCb = null
@@ -625,6 +625,109 @@ describe("conversationMachine — queue while busy", () => {
     actor.send({ type: "STOP" })
     await waitFor(actor, (s) => s.matches(idle), { timeout: 3000 })
     expect(actor.getSnapshot().context.queued).toEqual([])
+    actor.stop()
+  })
+})
+
+/**
+ * What the renderer must do while sub-agents are still working.
+ *
+ * The adapter now withholds a turn's `Done` until its last sub-agent bookends
+ * (`turn-continuation.ts`), because every sub-agent runs inside the ONE SDK query
+ * that `Done` used to close — so settling early aborted all of them. That changes
+ * which events the machine sees while `running`, and these cases pin the three
+ * consequences rather than leaving them to be discovered by a user.
+ */
+describe("conversationMachine — talking to the main agent while sub-agents run", () => {
+  it("stays in running with its tabs live while no Done arrives", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "fan out" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    emit({ _tag: "SubagentStarted", id: "task_1", name: "Explore", description: "map it", parentId: null })
+    emit({ _tag: "Assistant", text: "reading", agentId: "task_1" })
+
+    // No terminal event: the machine must not go looking for one. Leaving `running`
+    // here is what closed the RPC stream's scope and got the run reaped.
+    expect(actor.getSnapshot().matches("running")).toBe(true)
+    expect(actor.getSnapshot().context.subagents).toHaveLength(1)
+
+    emit({ _tag: "SubagentEnded", id: "task_1", status: "done" })
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.stop()
+  })
+
+  it("flushes a queued message on a sub-agent's tool boundary — steering, not stopping", async () => {
+    // The reported scenario. `canAutoFlush` fires on any `ToolEnd`, and a sub-agent's
+    // carries an `agentId` — deliberately still eligible, because the push goes into
+    // the same live query and is what lets the operator talk mid-flight. The
+    // alternative path (`unsupported` → `stopping` → `agentStop`) is the one that
+    // aborts every sub-agent, so the assertion is that we never take it.
+    h.steerStatus = "accepted"
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "fan out" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    emit({ _tag: "SubagentStarted", id: "task_1", name: "Explore", description: "map it", parentId: null })
+    actor.send({ type: "SEND", text: "also check the tests" })
+    expect(h.steerCalls).toHaveLength(0)
+
+    emit({ _tag: "ToolEnd", id: "r1", status: "success", meta: null, diff: null, preview: null, agentId: "task_1" })
+
+    // Wait for the steer's REPLY, not just the call: the reply is what could still
+    // escalate to `stopping`, so asserting before it lands would prove nothing.
+    await waitFor(actor, (s) => h.steerCalls.length === 1 && s.context.steeringId === null, {
+      timeout: 3000
+    })
+    expect(h.steerCalls[0]).toMatchObject({ text: "also check the tests" })
+    // Never stopped, and never replayed as a fresh run — the sub-agents survive.
+    expect(actor.getSnapshot().matches("running")).toBe(true)
+    expect(h.stopCalls).toEqual([])
+    expect(h.agentRunCalls).toHaveLength(1)
+    actor.stop()
+  })
+
+  it("does not escalate an auto-flush the harness could not take", async () => {
+    // An `unsupported` reply to the queue's OWN flush must leave the message queued.
+    // Escalating it to `stopping` would abort the query — killing the sub-agents to
+    // deliver a message that could simply have waited for the next tool boundary.
+    h.steerStatus = "unsupported"
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "fan out" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    emit({ _tag: "SubagentStarted", id: "task_1", name: "Explore", description: "map it", parentId: null })
+    actor.send({ type: "SEND", text: "later" })
+    emit({ _tag: "ToolEnd", id: "r1", status: "success", meta: null, diff: null, preview: null, agentId: "task_1" })
+
+    await waitFor(actor, (s) => h.steerCalls.length === 1 && s.context.steeringId === null, {
+      timeout: 3000
+    })
+    expect(actor.getSnapshot().matches("running")).toBe(true)
+    expect(h.stopCalls).toEqual([])
+    expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["later"])
+    actor.stop()
+  })
+
+  it("STOP is still global — it clears every sub-agent tab", async () => {
+    // The operator's own halt is one button for one turn, and a held-open turn is
+    // still one turn. No completion events will arrive for the tabs, so they go too.
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "fan out" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    emit({ _tag: "SubagentStarted", id: "task_1", name: "Explore", description: "a", parentId: null })
+    emit({ _tag: "SubagentStarted", id: "task_2", name: "Explore", description: "b", parentId: null })
+    expect(actor.getSnapshot().context.subagents).toHaveLength(2)
+
+    actor.send({ type: "STOP" })
+    expect(actor.getSnapshot().context.subagents).toEqual([])
+    expect(h.stopCalls).toEqual(["s1"])
     actor.stop()
   })
 })

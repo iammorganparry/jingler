@@ -71,6 +71,14 @@ export interface SessionPaneProps {
    * `renderConversation` is wired. Falls back again to the seeded transcript.
    */
   conversationPane?: ReactNode
+  /**
+   * Render the session's chat pills into the tab row's `chatSlot` (behind the
+   * divider). A render prop for the same reason `renderConversation` is: the
+   * chat state it drives — the create/select/rename/close RPCs and the live
+   * per-chat activity — lives in the desktop renderer, so building the bar here
+   * would drag the RPC client into the component library. Absent in stories.
+   */
+  renderChatTabs?: (session: Session) => ReactNode
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>
   /** What each session's agent is doing right now, keyed by id (live). */
@@ -300,6 +308,12 @@ function SessionPaneBody(props: SessionPaneProps) {
               }
             : undefined
         }
+        // The title comes from the session rather than from the caller, so the
+        // conversation tab follows a rename the moment it lands.
+        sessionTitle={active.title || UNTITLED_SESSION}
+        // The chat pills share the tab row, behind a divider. Built by the
+        // renderer (RPCs + live activity), threaded in as an opaque node.
+        chatSlot={props.renderChatTabs?.(active)}
         // The title comes from the session rather than from the caller, so the
         // chip follows a rename the moment it lands.
         pane={

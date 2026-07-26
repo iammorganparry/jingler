@@ -2227,8 +2227,8 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "Review.run": ({ sessionId, force }) => reviewRun(sessionId, force),
   // Unwrapped from the service like `Terminal.attach` — the reviewer outlives any
   // one watcher, so the stream attaches to it rather than starting it.
-  "Review.watch": ({ sessionId }) =>
-    Stream.unwrap(Effect.map(ReviewService, (r) => r.watch(sessionId))),
+  "Review.watch": ({ sessionId, chatId }) =>
+    Stream.unwrap(Effect.map(ReviewService, (r) => r.watch(sessionId, chatId))),
   "Review.get": ({ sessionId }) => reviewGet(sessionId),
   "Review.markRouted": ({ sessionId }) => reviewMarkRouted(sessionId),
   "Review.reconcile": ({ sessionId }) => reviewReconcile(sessionId),
