@@ -10,7 +10,6 @@ import { useQuery } from "@tanstack/react-query"
 import type { Session } from "@starbase/core"
 import { agentChildren, agentPath } from "@starbase/core"
 import {
-  ChatTabBar,
   SubagentTabBar,
   BackgroundTaskDock,
   BackgroundTaskOutput,
@@ -26,8 +25,7 @@ import { publishSessionUpdate } from "./session-updates.js"
 import {
   disposeChatActor,
   getConversationActor,
-  rehomeSharedPlan,
-  useChatActivities
+  rehomeSharedPlan
 } from "./conversation-registry.js"
 import { clearDraft, getDraft, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
 import { useConversation } from "./use-conversation.js"
@@ -77,7 +75,6 @@ export function ConversationPane({
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
   const convo = useConversation(session, activeChat.id)
-  const chatActivities = useChatActivities(session.id)
 
   // Declared unconditionally (hook order) — the plan column only reads it in the
   // `split` view, but the `plan` view returns early above.
@@ -242,9 +239,6 @@ export function ConversationPane({
     if (chatId === activeChat.id) return
     void rpc.sessionsSelectChat(session.id, chatId).then(publishSessionUpdate)
   }
-  const renameChat = (chatId: string, title: string) => {
-    void rpc.sessionsRenameChat(session.id, chatId, title).then(publishSessionUpdate)
-  }
   const closeChat = (chatId: string) => {
     void rpc.sessionsCloseChat(session.id, chatId).then((updated) => {
       clearDraft(chatId)
@@ -351,25 +345,9 @@ export function ConversationPane({
     />
   )
 
-  const chatBar = (
-    <ChatTabBar
-      chats={session.chats.map((chat, index) => ({
-        id: chat.id,
-        title: chat.title ?? `Chat ${index + 1}`,
-        running: chatActivities[chat.id] !== undefined
-      }))}
-      activeChatId={activeChat.id}
-      onSelectChat={selectChat}
-      onCreateChat={createChat}
-      onRenameChat={renameChat}
-      onCloseChat={closeChat}
-    />
-  )
-
   if (view === "plan") {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        {chatBar}
         {planReview}
       </div>
     )
@@ -389,7 +367,6 @@ export function ConversationPane({
     // it; this outer row did not, so the constraint stopped one level short.
     <div className="flex min-h-0 min-w-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {chatBar}
       {barAgents.length > 0 && (
         <SubagentTabBar
           agents={barAgents.map((s) => ({

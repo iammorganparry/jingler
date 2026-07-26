@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import {
@@ -22,6 +23,20 @@ const CHATS: ReadonlyArray<ChatTabItem> = [
   { id: "c3", title: "Check accessibility" }
 ]
 
+/**
+ * `ChatTabBar` is a FRAGMENT — it renders straight into `TabBar`'s `chatSlot`,
+ * inheriting that row's gap, alignment and single horizontal scroll. So every
+ * story here supplies the row it would otherwise be missing; rendered bare, the
+ * pills would inherit whatever Storybook's canvas happens to be.
+ */
+function Row({ children }: { children: ReactNode }) {
+  return (
+    <div className="sb-no-scrollbar flex h-10 items-center gap-0.5 overflow-x-auto border-b border-hairline bg-sunken px-2">
+      {children}
+    </div>
+  )
+}
+
 /** Select, create, close, or double-click a title to rename it. */
 export const Interactive: Story = {
   args: {
@@ -36,6 +51,7 @@ export const Interactive: Story = {
     const [chats, setChats] = useState(CHATS)
     const [activeChatId, setActiveChatId] = useState("c1")
     return (
+      <Row>
       <ChatTabBar
         chats={chats}
         activeChatId={activeChatId}
@@ -54,6 +70,7 @@ export const Interactive: Story = {
           if (id === activeChatId && next[0]) setActiveChatId(next[0].id)
         }}
       />
+      </Row>
     )
   }
 }
@@ -70,7 +87,12 @@ export const Overflow: Story = {
     onCreateChat: () => {},
     onRenameChat: () => {},
     onCloseChat: () => {}
-  }
+  },
+  render: (args) => (
+    <Row>
+      <ChatTabBar {...args} />
+    </Row>
+  )
 }
 
 /** Running state stays attached to its chat when another chat is active. */
@@ -82,7 +104,12 @@ export const Running: Story = {
     onCreateChat: () => {},
     onRenameChat: () => {},
     onCloseChat: () => {}
-  }
+  },
+  render: (args) => (
+    <Row>
+      <ChatTabBar {...args} />
+    </Row>
+  )
 }
 
 const AGENTS: ReadonlyArray<AgentTabItem> = [

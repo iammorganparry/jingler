@@ -62,7 +62,7 @@ describe("SessionPane", () => {
 
     // Move pane A to its Pull Request tab; pane B must stay on Conversation.
     const paneA = screen.getByTestId("pane-a")
-    fireEvent.click(within(paneA).getByText("Pull Request"))
+    fireEvent.click(within(paneA).getByRole("button", { name: "Pull Request" }))
 
     expect(within(paneA).getByText("pr view a")).toBeTruthy()
     expect(within(screen.getByTestId("pane-b")).getByText("transcript b")).toBeTruthy()
@@ -76,7 +76,7 @@ describe("SessionPane", () => {
         renderReview={() => <div>review view</div>}
       />
     )
-    fireEvent.click(screen.getByText("Code Review"))
+    fireEvent.click(screen.getByRole("button", { name: "Code Review" }))
     expect(screen.getByText("review view")).toBeTruthy()
 
     // The PR goes away (merged and unlinked) — Review is no longer a visible tab,
@@ -103,7 +103,7 @@ describe("SessionPane", () => {
         renderPullRequest={(s) => <div>pr view {s.id}</div>}
       />
     )
-    fireEvent.click(screen.getByText("Pull Request"))
+    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
     expect(screen.getByText("pr view a")).toBeTruthy()
 
     rerender(

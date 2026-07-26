@@ -31,6 +31,7 @@ import {
 import { appMachine } from "./app-machine.js"
 import { authMachine } from "./auth-machine.js"
 import { ConversationPane } from "./conversation-pane.js"
+import { SessionChatTabs } from "./session-chat-tabs.js"
 import { IssuePane } from "./issue-pane.js"
 import { PullRequestPane } from "./pull-request-pane.js"
 import { ReviewPane } from "./review-pane.js"
@@ -701,6 +702,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
           paneFocused={ctx.paneFocused ?? true}
         />
       )}
+      renderChatTabs={(session: Session) => <SessionChatTabs session={session} />}
       renderPullRequest={(session, ctx) => (
         <PullRequestPane
           session={session}
