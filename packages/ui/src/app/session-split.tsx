@@ -51,7 +51,6 @@ export interface SessionSplitProps {
   paneContributions?: ReadonlyArray<PaneContribution>
   renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
-  renderIssue?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   renderTerminalDock?: (session: Session) => ReactNode
   terminalDockSide?: DockSide
   renderBrowserDock?: (session: Session | null) => ReactNode
@@ -100,7 +99,6 @@ export function SessionSplit(props: SessionSplitProps) {
         tabContributions={props.tabContributions}
         renderReview={props.renderReview}
         renderCode={props.renderCode}
-        renderIssue={props.renderIssue}
         // The docks are mounted ONCE below, outside the pane loop, so the toggle
         // is app-level and every pane's copy drives the same dock.
         onToggleBrowser={props.onToggleBrowser}

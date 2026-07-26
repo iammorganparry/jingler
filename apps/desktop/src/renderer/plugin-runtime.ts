@@ -42,10 +42,15 @@ export interface StarbaseRuntime {
    * `useHost()` would read a DIFFERENT context, find null, and throw "called
    * outside a plugin view" from inside a plugin view. One SDK instance, reached
    * through the shim, is what makes the hooks work at all.
+   *
+   * Typed as the module itself rather than `Record<string, unknown>`. Nothing
+   * reads these through TypeScript — the generated shims destructure them at
+   * runtime in plain JS — so the loose type bought nothing and cost the one
+   * place that documents what a plugin actually receives.
    */
-  readonly sdk: Record<string, unknown>
+  readonly sdk: typeof sdkModule
   /** The themed UI kit, at `@starbase/plugin-sdk/ui`. */
-  readonly sdkUi: Record<string, unknown>
+  readonly sdkUi: typeof sdkUiModule
 }
 
 declare global {
@@ -68,8 +73,8 @@ export const publishPluginRuntime = (): void => {
   globalThis.__STARBASE_RUNTIME__ ??= {
     react: React,
     jsxRuntime,
-    sdk: sdkModule as unknown as Record<string, unknown>,
-    sdkUi: sdkUiModule as unknown as Record<string, unknown>
+    sdk: sdkModule,
+    sdkUi: sdkUiModule
   }
 }
 

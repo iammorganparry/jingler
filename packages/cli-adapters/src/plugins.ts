@@ -58,6 +58,8 @@ const WATCH_DEBOUNCE_MS = 200
 interface DecodedPlugin {
   readonly dir: string
   readonly manifest: PluginManifest
+  /** True for a plugin shipped inside the app rather than installed by hand. */
+  readonly builtin: boolean
 }
 
 export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/PluginRegistry", {
@@ -66,6 +68,22 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
     const pluginsDir = Effect.gen(function* () {
       const paths = yield* AppPaths
       return paths.pluginsDir
+    })
+
+    /**
+     * Where plugins that SHIP WITH the app live.
+     *
+     * Official plugins are read from the app bundle rather than copied into
+     * `~/starbase/plugins` on first run. Copying would mean an upgrade silently
+     * leaves the old version in place — the operator's directory is theirs, and
+     * Starbase writing into it is a surprise that only shows up as a plugin
+     * that stopped matching its own release notes.
+     *
+     * Undefined outside a packaged build, where there is nothing bundled yet.
+     */
+    const builtinDir = Effect.gen(function* () {
+      const paths = yield* AppPaths
+      return paths.builtinPluginsDir
     })
 
     const pluginStorageDir = Effect.gen(function* () {
@@ -119,10 +137,39 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
       PluginEnv
     > =>
       Effect.gen(function* () {
+        const installed = yield* scanRoot(yield* pluginsDir, false)
+        const bundled = yield* scanRoot(yield* builtinDir, true)
+
+        // Bundled first, then installed. An installed plugin with the same id as
+        // a bundled one WINS — that is how an operator tries a fix or a fork of
+        // an official plugin without waiting for a release, and it is the same
+        // precedence a user theme has over a vendored one.
+        const byId = new Map<string, DecodedPlugin>()
+        for (const plugin of [...bundled.decoded, ...installed.decoded]) {
+          byId.set(plugin.manifest.id, plugin)
+        }
+
+        return {
+          decoded: [...byId.values()],
+          failed: [...bundled.failed, ...installed.failed]
+        }
+      })
+
+    /** Read every plugin directory under one root. */
+    const scanRoot = (
+      root: string | undefined,
+      builtin: boolean
+    ): Effect.Effect<
+      { decoded: ReadonlyArray<DecodedPlugin>; failed: ReadonlyArray<PluginLoadFailure> },
+      never,
+      PluginEnv
+    > =>
+      Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
-        const dir = yield* pluginsDir
+        const dir = root
 
+        if (!dir) return { decoded: [], failed: [] }
         const exists = yield* fs.exists(dir).pipe(Effect.orElseSucceed(() => false))
         if (!exists) return { decoded: [], failed: [] }
 
@@ -166,7 +213,7 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
             continue
           }
 
-          decoded.push({ dir: pluginDir, manifest })
+          decoded.push({ dir: pluginDir, manifest, builtin })
         }
 
         return { decoded, failed }
@@ -196,7 +243,7 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
           // The registry does not run host halves — that is the extension host's
           // job — so from here every plugin is un-activated by definition.
           activated: false,
-          builtin: false
+          builtin: entry.builtin
         }))
 
         return { plugins, failed: [...failed, ...depFailed] }

@@ -216,6 +216,10 @@ export const BUILTIN_TAB_META: Record<
   { label: string; icon: LucideIcon; order: number; blurb?: string }
 > = {
   conversation: { label: "Conversation", icon: MessagesSquare, order: 0 },
+  // Kept for the stub screen and for continuity of the id, but no longer a
+  // built-in contribution: the Issue tab ships as the `github-issues` plugin,
+  // which claims the same order so the migration is invisible to anyone who was
+  // already using it.
   issue: { label: "Issue", icon: CircleDot, order: 10 },
   plan: {
     label: "Plan Review",
@@ -268,7 +272,6 @@ export interface BuiltinTabRenderers {
     session: Session,
     ctx: TabRenderContext
   ) => ReactNode
-  readonly issue?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly pullRequest?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly review?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly code?: (session: Session, ctx: TabRenderContext) => ReactNode
@@ -304,13 +307,6 @@ export const builtinTabContributions = (
       when: () => true,
       mountGroup: CONVERSATION_GROUP,
       render: renderers.conversation
-    },
-    {
-      id: BUILTIN_TAB.issue,
-      ...meta.issue,
-      when: ({ session }) => session.issueNumber != null,
-      render: (session, ctx) =>
-        renderers.issue?.(session, ctx) ?? renderers.stub("issue")
     },
     {
       id: BUILTIN_TAB.plan,

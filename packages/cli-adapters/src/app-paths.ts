@@ -64,6 +64,14 @@ export interface AppPathsShape {
    */
   readonly pluginsDir: string
   /**
+   * Plugins that ship inside the app, read-only.
+   *
+   * Undefined when nothing is bundled — a dev run before the plugins are built,
+   * or a test with a synthetic AppPaths. Absent means "no built-ins", never an
+   * error, so the registry works identically either way.
+   */
+  readonly builtinPluginsDir?: string
+  /**
    * `~/starbase/plugin-storage` — each plugin's private key/value store, one JSON
    * file per plugin at `<pluginStorageDir>/<pluginId>.json`.
    *

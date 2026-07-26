@@ -26,6 +26,22 @@ export const starbaseRoot = join(process.env.STARBASE_HOME ?? app.getPath("home"
  */
 export const pluginsRoot = (): string => join(starbaseRoot, "plugins")
 
+/**
+ * Where the plugins that ship with Starbase live.
+ *
+ * Packaged: `resources/plugins`, alongside the app's own asar. In development:
+ * the repo's `plugins/` directory, so an official plugin under active edit is
+ * the one the running app loads — the same live-reload story a third-party
+ * author gets, rather than a build-and-copy step only we have to remember.
+ *
+ * A function, not a const, for the same reason as `pluginsRoot`: the e2e suite
+ * moves `STARBASE_HOME` between launches and reading either once would pin it.
+ */
+export const builtinPluginsRoot = (): string =>
+  app.isPackaged
+    ? join(process.resourcesPath, "plugins")
+    : join(import.meta.dirname, "../../../../plugins")
+
 export const AppPathsLive = Layer.succeed(AppPaths, {
   root: starbaseRoot,
   configFile: join(starbaseRoot, "config.json"),
@@ -37,6 +53,7 @@ export const AppPathsLive = Layer.succeed(AppPaths, {
   plansDir: join(starbaseRoot, ".starbase"),
   themesDir: join(starbaseRoot, "themes"),
   pluginsDir: join(starbaseRoot, "plugins"),
+  builtinPluginsDir: builtinPluginsRoot(),
   pluginStorageDir: join(starbaseRoot, "plugin-storage"),
   authFile: join(starbaseRoot, "auth.enc"),
   openConnectorFile: join(starbaseRoot, "open-connector.enc")

@@ -85,8 +85,6 @@ export interface SessionPaneProps {
   renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Changes tab — the Code Review view over the local worktree diff. */
   renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
-  /** Render the Issue tab — the rich linked-issue view (shown when one is linked). */
-  renderIssue?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /**
    * Tabs contributed by plugins, merged with the built-ins into one list.
    *
@@ -226,8 +224,6 @@ function SessionPaneBody(props: SessionPaneProps) {
           paneCtx
         )
       },
-      issue: (session, ctx) =>
-        props.renderIssue?.(session, { onConnectGithub: ctx.onConnectGithub }),
       pullRequest: (session, ctx) =>
         props.renderPullRequest?.(session, { onConnectGithub: ctx.onConnectGithub }),
       review: (session, ctx) =>

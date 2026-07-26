@@ -50,8 +50,24 @@ describe("visibleTabs", () => {
     ])
   })
 
-  it("adds Issue when an issue is linked", () => {
-    expect(idsFor(session({ id: "a", issueNumber: 7 }))).toContain("issue")
+  it("no longer has a built-in Issue tab — that shipped as a plugin", () => {
+    // The Issue tab is `github-issues`, an official plugin. Nothing built-in
+    // claims it, which is what makes the migration real rather than cosmetic.
+    expect(idsFor(session({ id: "a", issueNumber: 7 }))).not.toContain("issue")
+  })
+
+  it("lets a plugin claim the Issue slot at the order the built-in used", () => {
+    // `github-issues` declares order 10, so the migration is invisible to an
+    // operator who was already using the tab: same place, same label.
+    const ids = idsFor(session({ id: "a", issueNumber: 7 }), {
+      extra: [
+        pluginTab("github-issues.issue", {
+          order: 10,
+          when: ({ session: s }) => s.issueNumber != null
+        })
+      ]
+    })
+    expect(ids[1]).toBe("github-issues.issue")
   })
 
   it("adds Plan only for sessions with a plan", () => {
@@ -69,7 +85,6 @@ describe("visibleTabs", () => {
   it("keeps the built-in order the operator already knows", () => {
     expect(idsFor(session({ id: "a", issueNumber: 7 }), { hasPlan: true })).toEqual([
       "conversation",
-      "issue",
       "plan",
       "pr",
       "changes"

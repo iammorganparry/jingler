@@ -129,7 +129,6 @@ export interface SessionConversationProps {
   /** Render the Changes tab — the Code Review view over the local worktree diff. */
   renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Issue tab — the rich linked-issue view (shown when one is linked). */
-  renderIssue?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /**
    * Render the per-session terminal dock (the desktop app's live TerminalDock).
    * Docked to the main content column beside/below the tab body — never shown in
@@ -236,7 +235,6 @@ export function SessionConversation(props: SessionConversationProps) {
             tabContributions={props.tabContributions}
             renderReview={props.renderReview}
             renderCode={props.renderCode}
-            renderIssue={props.renderIssue}
             renderTerminalDock={props.renderTerminalDock}
             terminalDockSide={props.terminalDockSide}
             renderBrowserDock={props.renderBrowserDock}
