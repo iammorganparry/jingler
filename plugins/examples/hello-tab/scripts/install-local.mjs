@@ -2,6 +2,11 @@
  * Copy this plugin into `~/starbase/plugins/hello-tab` so the running app picks
  * it up. Honours `STARBASE_HOME`, so it can target a throwaway home in tests.
  *
+ * Duplicated on purpose — see the long note in
+ * `plugins/github-issues/scripts/install-local.mjs`. Change one, change all three
+ * (here, github-issues, and the scaffold template in
+ * `scripts/create-starbase-plugin.mjs`).
+ *
  * Copies rather than symlinks: the protocol handler resolves every request
  * through `realpath` and refuses anything landing outside the plugins root, so a
  * symlinked plugin directory would be served exactly zero files. That is the

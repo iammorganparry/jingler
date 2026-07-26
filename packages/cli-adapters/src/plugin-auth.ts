@@ -108,6 +108,41 @@ export class PluginAuth extends Effect.Service<PluginAuth>()("@starbase/PluginAu
       return path.join(paths.root, "plugin-grants.json")
     })
 
+    /**
+     * Serialises every read-modify-write of the grant file. Same shape as the
+     * session store's lock, and for the same reason.
+     *
+     * Every mutation here is read-the-whole-list, change one entry, write the
+     * whole list back — and BOTH halves are async filesystem effects, so there is
+     * an interleaving window inside each one. Two revokes fired from Settings
+     * (which dispatches them through `mutateAsync` with nothing ordering them),
+     * or a revoke racing the write after a consent prompt, both read the same
+     * list and the second write silently restores what the first removed. A lost
+     * grant only re-prompts; a lost REVOCATION hands back access the operator
+     * had just taken away, which is the failure worth paying a lock for.
+     *
+     * An earlier version of this comment claimed `revoke` had "no await between
+     * its read and its write". It does — `readGrants` and `writeGrants` are both
+     * `Effect`s over `FileSystem` — so that reasoning was wrong and the code was
+     * relying on a window being small rather than on it being closed.
+     *
+     * ## What is deliberately OUTSIDE the lock
+     *
+     * The consent prompt. It is a native dialog paced by a human and can sit open
+     * for minutes; holding a permit across it would freeze `list`, `revoke` and
+     * every other plugin's `getSession` behind one unanswered question. So
+     * `getSession` prompts first and only then takes the lock to re-read, merge
+     * and write — which is why the re-read inside the critical section is still
+     * load-bearing and not redundant with the lock.
+     *
+     * In-process only. It orders this app's writers, which is what exists today;
+     * it would not order a second Starbase process against this one.
+     */
+    const lock = Effect.unsafeMakeSemaphore(1)
+    const atomically = <A, E, R>(
+      effect: Effect.Effect<A, E, R>
+    ): Effect.Effect<A, E, R> => lock.withPermits(1)(effect)
+
     const readGrants = Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const file = yield* grantsFile
@@ -189,17 +224,21 @@ export class PluginAuth extends Effect.Service<PluginAuth>()("@starbase/PluginAu
 
       /** Drop a plugin's grant with one provider. The next ask prompts again. */
       revoke: (pluginId: string, providerId: string) =>
-        Effect.gen(function* () {
-          const grants = yield* readGrants
-          yield* writeGrants(grants.filter((g) => !sameGrant(g, pluginId, providerId)))
-        }),
+        atomically(
+          Effect.gen(function* () {
+            const grants = yield* readGrants
+            yield* writeGrants(grants.filter((g) => !sameGrant(g, pluginId, providerId)))
+          })
+        ),
 
       /** Drop every grant a plugin holds. Called when it is uninstalled. */
       revokeAll: (pluginId: string) =>
-        Effect.gen(function* () {
-          const grants = yield* readGrants
-          yield* writeGrants(grants.filter((g) => g.pluginId !== pluginId))
-        }),
+        atomically(
+          Effect.gen(function* () {
+            const grants = yield* readGrants
+            yield* writeGrants(grants.filter((g) => g.pluginId !== pluginId))
+          })
+        ),
 
       /**
        * The call behind `ctx.authentication.getSession`.
@@ -257,30 +296,52 @@ export class PluginAuth extends Effect.Service<PluginAuth>()("@starbase/PluginAu
             )
             if (!approved) return null
 
-            // Recorded BEFORE the token is fetched. If the provider then fails,
-            // the operator's decision still stands — they should not be asked
-            // the same question again because a network call went wrong.
-            const merged = [
-              ...grants.filter(
-                (g) => !sameGrant(g, request.pluginId, request.providerId)
-              ),
-              {
-                pluginId: request.pluginId,
-                providerId: request.providerId,
-                // Union with any previous scopes, so a narrower later ask does
-                // not silently shrink what was already agreed.
-                scopes: [
-                  ...new Set([
-                    ...request.scopes,
-                    ...grants
-                      .filter((g) => sameGrant(g, request.pluginId, request.providerId))
-                      .flatMap((g) => g.scopes)
-                  ])
-                ],
-                grantedAt: new Date().toISOString()
-              }
-            ]
-            yield* writeGrants(merged)
+            // The prompt is now behind us, and the world moved while it was open:
+            // a second plugin's consent may have landed, or the operator may have
+            // revoked something in Settings. So the list read BEFORE the prompt is
+            // stale and merging into it would clobber whatever arrived — a lost
+            // grant only re-prompts, but a lost REVOCATION silently restores
+            // access the operator had just taken away.
+            //
+            // Read and write inside one critical section, and re-read INSIDE it.
+            // The lock alone is not enough (the stale pre-prompt list would still
+            // be the thing merged) and the re-read alone is not enough (a revoke
+            // can land between this read and this write, both of which are async
+            // filesystem effects). It takes both.
+            //
+            // The lock is taken HERE rather than around the whole handler on
+            // purpose: holding a permit across an operator-paced native dialog
+            // would freeze `list`, `revoke` and every other plugin's `getSession`
+            // behind one unanswered question.
+            yield* atomically(
+              Effect.gen(function* () {
+                const current = yield* readGrants
+                const mine = current.filter((g) =>
+                  sameGrant(g, request.pluginId, request.providerId)
+                )
+
+                // Recorded BEFORE the token is fetched. If the provider then
+                // fails, the operator's decision still stands — they should not
+                // be asked the same question again because a network call went
+                // wrong.
+                const merged = [
+                  ...current.filter(
+                    (g) => !sameGrant(g, request.pluginId, request.providerId)
+                  ),
+                  {
+                    pluginId: request.pluginId,
+                    providerId: request.providerId,
+                    // Union with any previous scopes, so a narrower later ask
+                    // does not silently shrink what was already agreed.
+                    scopes: [
+                      ...new Set([...request.scopes, ...mine.flatMap((g) => g.scopes)])
+                    ],
+                    grantedAt: new Date().toISOString()
+                  }
+                ]
+                yield* writeGrants(merged)
+              })
+            )
           }
 
           const token = yield* provider.getToken(request.scopes)

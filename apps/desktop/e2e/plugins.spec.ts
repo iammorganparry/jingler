@@ -1359,6 +1359,102 @@ export default definePlugin(
   await expect(window.getByTestId("plugin-pane-error-pane-plugin")).toHaveCount(0)
 })
 
+test("a plugin can unlink the session's issue, and the app sees it", async ({ launchApp }) => {
+  // The built-in Issue tab offered "unlink"; the plugin that replaced it could
+  // not, because the SDK had no session-mutating surface at all. The RPC and its
+  // main-process handler survived the migration and `App.tsx` kept a callback
+  // nothing referenced, so the capability was gone with nothing failing.
+  //
+  // What this asserts is the whole round trip, because each half was already
+  // there and it was the JOIN that was missing: the hook reaches the RPC, main
+  // writes the session, and the updated record gets republished into the app's
+  // own state so the plugin's `useSession` sees it WITHOUT a reload. That last
+  // step is the one a unit test cannot reach.
+  const first = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [{ ...SESSION, issueNumber: 128 }]
+  })
+  const { window, home } = first
+
+  await seedPlugin(home, {
+    id: "unlink-plugin",
+    manifest: {
+      id: "unlink-plugin",
+      name: "Unlink Plugin",
+      version: "1.0.0",
+      ui: "dist/ui.js",
+      contributes: {
+        tabs: [{ id: "unlink-plugin.issue", label: "Linked", icon: "CircleDot" }]
+      }
+    },
+    ui: `
+import { jsx, jsxs } from "react/jsx-runtime"
+import { definePlugin, useSession, useSessionActions } from "@starbase/plugin-sdk"
+
+function IssueTab() {
+  const session = useSession()
+  const { unlinkIssue } = useSessionActions()
+  return jsxs("div", {
+    children: [
+      jsx("span", {
+        "data-testid": "unlink-issue-number",
+        children: session.issueNumber == null ? "none" : String(session.issueNumber)
+      }),
+      jsx("button", {
+        type: "button",
+        "data-testid": "unlink-go",
+        onClick: () => { void unlinkIssue(session.id) },
+        children: "Unlink"
+      })
+    ]
+  })
+}
+
+export default definePlugin(
+  {
+    id: "unlink-plugin", name: "Unlink Plugin", version: "1.0.0", ui: "dist/ui.js",
+    contributes: { tabs: [{ id: "unlink-plugin.issue", label: "Linked", icon: "CircleDot" }] }
+  },
+  { views: { "unlink-plugin.issue": IssueTab } }
+)
+`
+  })
+
+  await openSession(window)
+  await window.getByRole("button", { name: "Linked" }).click({ timeout: 15_000 })
+
+  // The snapshot carries the linked issue, so the tab has something to unlink.
+  await expect(window.getByTestId("unlink-issue-number")).toHaveText("128", {
+    timeout: 15_000
+  })
+
+  await window.getByTestId("unlink-go").click()
+
+  // Live, with no reload: `session-updates` republished the record the RPC
+  // returned, App.tsx forwarded it into `appMachine`, and the snapshot the hook
+  // resolves was rebuilt from it. Without that republish this stays at 128 until
+  // the app restarts, which looks exactly like the button doing nothing.
+  await expect(window.getByTestId("unlink-issue-number")).toHaveText("none", {
+    timeout: 15_000
+  })
+  await first.app.close()
+
+  // And it is a real write rather than renderer state: same ~/starbase, nothing
+  // re-seeded, so 128 coming back would mean the RPC never reached disk.
+  const second = await launchApp({
+    home: first.home,
+    reposDir: first.reposDir,
+    configured: true,
+    withRepo: true
+  })
+  await second.window.getByTestId(`session-row-${SESSION.id}`).click()
+  await second.window.getByRole("button", { name: "Linked" }).click({ timeout: 15_000 })
+  await expect(second.window.getByTestId("unlink-issue-number")).toHaveText("none", {
+    timeout: 15_000
+  })
+})
+
 test("a failed install says why, instead of the picker closing on nothing", async ({
   launchApp
 }) => {
@@ -1409,4 +1505,91 @@ test("a plugin declaring the CURRENT api version loads normally", async ({ launc
   await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
   await window.getByRole("button", { name: "E2E" }).click()
   await expect(window.getByTestId("e2e-tab-repo")).toHaveText("widget")
+})
+
+test("unlinking from a `when: hasIssue` tab removes that tab without breaking the pane", async ({
+  launchApp
+}) => {
+  // The shipped github-issues tab declares `when: "hasIssue"`, so unlinking makes
+  // the tab's OWN visibility condition false — the operator clicks a button and
+  // the thing they clicked it in disappears. The other unlink test uses an
+  // always-visible tab and would pass either way.
+  //
+  // The hazard is the pane being left pointing at a tab that no longer exists.
+  // The github-issues plugin cannot be driven here (its tab needs a live GitHub
+  // fetch before the button renders at all), so this reproduces the shape with a
+  // synthetic plugin declaring the same `when`.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [{ ...SESSION, issueNumber: 128 }]
+  })
+
+  await seedPlugin(home, {
+    id: "hasissue-plugin",
+    manifest: {
+      id: "hasissue-plugin",
+      name: "HasIssue Plugin",
+      version: "1.0.0",
+      ui: "dist/ui.js",
+      contributes: {
+        tabs: [
+          {
+            id: "hasissue-plugin.issue",
+            label: "Linked",
+            icon: "CircleDot",
+            when: "hasIssue"
+          }
+        ]
+      }
+    },
+    ui: `
+import { jsx, jsxs } from "react/jsx-runtime"
+import { definePlugin, useSession, useSessionActions } from "@starbase/plugin-sdk"
+
+function IssueTab() {
+  const session = useSession()
+  const { unlinkIssue } = useSessionActions()
+  return jsxs("div", {
+    children: [
+      jsx("span", { "data-testid": "hasissue-body", children: "linked" }),
+      jsx("button", {
+        type: "button",
+        "data-testid": "hasissue-unlink",
+        onClick: () => { void unlinkIssue(session.id) },
+        children: "Unlink"
+      })
+    ]
+  })
+}
+
+export default definePlugin(
+  {
+    id: "hasissue-plugin", name: "HasIssue Plugin", version: "1.0.0", ui: "dist/ui.js",
+    contributes: {
+      tabs: [{ id: "hasissue-plugin.issue", label: "Linked", icon: "CircleDot", when: "hasIssue" }]
+    }
+  },
+  { views: { "hasissue-plugin.issue": IssueTab } }
+)
+`
+  })
+
+  await openSession(window)
+
+  // The tab is there because the session has an issue — that is the `when`.
+  await window.getByRole("button", { name: "Linked" }).click({ timeout: 15_000 })
+  await expect(window.getByTestId("hasissue-body")).toBeVisible({ timeout: 15_000 })
+
+  await window.getByTestId("hasissue-unlink").click()
+
+  // The tab removes itself, because its own condition is now false.
+  await expect(window.getByRole("button", { name: "Linked" })).toHaveCount(0, {
+    timeout: 15_000
+  })
+
+  // And the pane falls back to a real tab rather than rendering nothing or a
+  // boundary card — the failure this test exists for.
+  await expect(window.getByRole("button", { name: "Conversation" })).toBeVisible()
+  await expect(window.getByTestId("plugin-error-hasissue-plugin")).toHaveCount(0)
 })

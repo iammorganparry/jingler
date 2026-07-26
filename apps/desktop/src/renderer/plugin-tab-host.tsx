@@ -20,6 +20,11 @@ import { toSessionSnapshot } from "./plugin-loader.js"
 
 interface Props {
   readonly pluginId: string
+  /**
+   * Changes exactly when the plugin's code does — `id@version` from the catalog.
+   * The one signal that means "this is a different plugin build, try again".
+   */
+  readonly reloadKey: string
   /** The internal session. Narrowed to a `SessionSnapshot` before it is exposed. */
   readonly session: Session
   readonly children: ReactNode
@@ -44,21 +49,29 @@ export class PluginTabHost extends Component<Props, State> {
   }
 
   /**
-   * Clear the error when the subtree beneath us is genuinely new.
+   * Clear the error when the plugin, its build, or the session actually changes.
    *
-   * Keyed on `children` identity, not `pluginId`. A hot reload gives the plugin
-   * a fresh module and a fresh element while the id stays the same — so the
-   * previous `prev.pluginId !== this.props.pluginId` test never fired for the
-   * one case the comment promised it covered, and a plugin that failed once
-   * showed its card until the app restarted however many times its author fixed
-   * and rebuilt it.
+   * NOT keyed on `children` identity, which was the previous test and is a trap:
+   * `render` builds a fresh element on every pass of the registry's memo, so
+   * `prev.children !== this.props.children` is true on every parent re-render.
+   * The session pane re-renders constantly (live activity, status ticks), so a
+   * plugin that throws deterministically got its error cleared, re-mounted,
+   * threw again and logged another `componentDidCatch` — several times a second,
+   * forever. The card the operator saw was being torn down and rebuilt under
+   * them, and the console filled with the same stack.
    *
-   * Switching sessions or plugins re-renders with new children too, which is the
-   * other moment a stale error should go.
+   * `reloadKey` is `id@version` from the catalog, which is what a hot reload
+   * changes — the case the old comment claimed `children` covered and `pluginId`
+   * did not. `session.id` is here because a stale failure should not follow the
+   * operator into a different session.
    */
   override componentDidUpdate(prev: Props): void {
     if (this.state.message === null) return
-    if (prev.children !== this.props.children || prev.pluginId !== this.props.pluginId) {
+    if (
+      prev.pluginId !== this.props.pluginId ||
+      prev.reloadKey !== this.props.reloadKey ||
+      prev.session.id !== this.props.session.id
+    ) {
       this.setState({ message: null })
     }
   }
@@ -95,6 +108,24 @@ export class PluginTabHost extends Component<Props, State> {
         <div className="max-w-[420px] text-center font-mono text-[11.5px] leading-[1.6] text-dim">
           {this.state.message}
         </div>
+        {/*
+          An explicit retry, because the reset rules above are deliberately
+          narrow and a plugin can throw on something transient — a field briefly
+          undefined during a status tick, a fetch that failed once. The previous
+          `children`-keyed reset retried on every render, which self-healed that
+          case by accident while making a DETERMINISTIC crash re-mount forever.
+          A button is the same recovery without the loop: the operator chooses,
+          and a plugin that is genuinely broken shows its card again immediately
+          instead of thrashing.
+        */}
+        <button
+          type="button"
+          data-testid={`plugin-error-retry-${this.props.pluginId}`}
+          onClick={() => this.setState({ message: null })}
+          className="rounded border border-line px-2.5 py-1 text-[12px] text-text-body transition-colors hover:border-blue hover:text-text-bright"
+        >
+          Try again
+        </button>
         <div className="max-w-[420px] text-center text-[12.5px] leading-[1.6]">
           Other tabs are unaffected. You can disable this plugin in Settings ›
           Plugins.

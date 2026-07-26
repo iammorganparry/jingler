@@ -349,6 +349,32 @@ interface SessionSnapshot {
 `SessionSnapshot` is deliberately small. Starbase's internal session type has
 ~25 fields; this is the stable subset a plugin may couple to.
 
+## Changing the session
+
+A snapshot is read-only. The one mutation a plugin may make is detaching the
+session's linked issue:
+
+```tsx
+const session = useSession()
+const { unlinkIssue } = useSessionActions()
+
+<button type="button" onClick={() => void unlinkIssue(session.id)}>Unlink</button>
+```
+
+It resolves once the app's own state has been updated, so the next render sees
+the change — you do not have to reload anything.
+
+**This list is short and stays short.** A plugin DECORATES a session; it does not
+drive one. There is no `setStatus`, no `rename`, no `archive`, and adding one
+means arguing that the operator can only reach it through the plugin that owns
+the concept. `unlinkIssue` clears that bar because the app knows a session *has*
+a linked issue while the plugin owns the UI where "actually, not that one"
+belongs.
+
+It is not a security boundary: any installed plugin can unlink any session's
+issue, and nothing prompts. That is an accepted risk because it is trivially
+reversible — see `docs/plugins/permissions-and-trust.md`.
+
 ## Storage
 
 Namespaced to your plugin, shared between both halves, persists across restarts:

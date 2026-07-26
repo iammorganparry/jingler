@@ -267,7 +267,21 @@ export interface ExecOptions {
   readonly env?: Readonly<Record<string, string>>
   /** Written to the child's stdin, then closed. */
   readonly input?: string
-  /** Kill the child after this many milliseconds and reject. */
+  /**
+   * Kill the child after this many milliseconds and reject.
+   *
+   * **Capped at 120000ms, which is also the default.** You can shorten the kill
+   * time; you cannot lengthen it or turn it off, because a child with no
+   * deadline outlives the tab that asked for it and shows up nowhere the
+   * operator would think to look. A larger number is silently reduced to the
+   * ceiling rather than rejected — so if you need a long-running process, own
+   * it: spawn it from your `main` half and manage its lifetime yourself.
+   *
+   * `0`, negatives and `NaN` are read as UNSET and get the default. They are not
+   * clamped to some tiny floor: no caller means "kill it before it starts", and
+   * a config value that parsed badly should not present as every command
+   * mysteriously timing out.
+   */
   readonly timeoutMs?: number
 }
 

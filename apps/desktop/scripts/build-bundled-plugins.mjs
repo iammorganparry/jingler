@@ -36,6 +36,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const desktopDir = resolve(here, "..")
 const repoRoot = resolve(desktopDir, "../..")
 const builderYml = join(desktopDir, "electron-builder.yml")
+const isWindows = process.platform === "win32"
 
 /**
  * The bundled plugin ids, read from the `to: plugins/<id>` lines of the
@@ -68,10 +69,31 @@ for (const id of ids) {
     process.exit(1)
   }
 
-  // `pnpm -C` rather than `--filter`: the package NAME and the directory name
-  // differ (`@starbase/plugin-github-issues` lives at `plugins/github-issues`),
-  // and the directory is what the YAML gives us.
-  execFileSync("pnpm", ["-C", dir, "run", "build"], { stdio: "inherit", cwd: repoRoot })
+  // The directory goes in `cwd`, NOT on the command line.
+  //
+  // `--filter` is not an option: the package NAME and the directory name differ
+  // (`@starbase/plugin-github-issues` lives at `plugins/github-issues`) and the
+  // directory is what the YAML gives us. The obvious alternative is `pnpm -C
+  // <dir>`, and it is a trap here, because of the shell:
+  //
+  // `shell: true` is required on Windows — `pnpm` there is `pnpm.cmd`, and since
+  // the fix for CVE-2024-27980 Node refuses to run a `.cmd`/`.bat` through
+  // `execFile` without one, so the unshelled call is a flat ENOENT. But with a
+  // shell, argv is joined into a `cmd.exe` command line unescaped, and no amount
+  // of hand-quoting makes an arbitrary path safe there: `%VAR%` still expands
+  // inside double quotes, and `&`, `^` or an embedded quote in a checkout path
+  // break out of them. Quoting for spaces alone (an earlier version of this)
+  // fixes the common case and leaves the sharp one.
+  //
+  // Passing it as `cwd` sidesteps the whole question — the path never becomes
+  // shell text, so there is nothing to escape. The release runner is macOS, but
+  // `electron-builder.yml` declares a `win` target and this script is wired into
+  // `dist`/`electron:pack`, which a developer on Windows runs directly.
+  execFileSync("pnpm", ["run", "build"], {
+    stdio: "inherit",
+    cwd: dir,
+    shell: isWindows
+  })
 }
 
 // ── Verify, don't assume ─────────────────────────────────────────────────────

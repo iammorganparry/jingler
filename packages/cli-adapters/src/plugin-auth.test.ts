@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { Effect, Layer } from "effect"
+import { Effect, Fiber, Layer } from "effect"
 import { NodeContext } from "@effect/platform-node"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -298,5 +298,119 @@ describe("failure modes", () => {
       }
     )
     expect(prompt).toHaveBeenCalledOnce()
+  })
+})
+
+describe("concurrent grant-file mutations", () => {
+  /**
+   * The grant file is read-whole, change-one, write-whole — and BOTH halves are
+   * async filesystem effects, so every mutation has an interleaving window. Two
+   * writers that each read the same list will each write a list missing the
+   * other's change, and the last write wins.
+   *
+   * A lost grant only re-prompts. A lost REVOCATION hands back access the
+   * operator had just taken away, which is the one that has to be impossible.
+   */
+
+  it("does not lose a revocation to a concurrent revocation of another grant", async () => {
+    // Settings dispatches these through `mutateAsync` with nothing ordering
+    // them. Unserialised, both read a two-grant list and each writes back the
+    // one-grant list it computed — so whichever lands second resurrects the
+    // grant the first removed, and the operator watches a row they just deleted
+    // reappear.
+    const remaining = await withAuth(
+      (auth) =>
+        Effect.gen(function* () {
+          yield* auth.getSession({
+            pluginId: "linear",
+            pluginName: "Linear",
+            providerId: "github",
+            scopes: ["repo"]
+          })
+          yield* auth.getSession({
+            pluginId: "jira",
+            pluginName: "Jira",
+            providerId: "github",
+            scopes: ["repo"]
+          })
+
+          yield* Effect.all(
+            [auth.revoke("linear", "github"), auth.revoke("jira", "github")],
+            { concurrency: "unbounded" }
+          )
+
+          return yield* auth.list()
+        }),
+      { prompt: async () => true }
+    )
+
+    expect(remaining).toEqual([])
+  })
+
+  it("does not resurrect a grant revoked while another plugin's prompt was open", async () => {
+    // The window this closes is the widest one in the module: `getSession`
+    // reads, awaits an operator-paced native dialog, then writes. A revoke
+    // performed during that dialog is inside the gap.
+    //
+    // The prompt below performs the revoke, which is exactly when a real
+    // operator would: the consent dialog is up, and they tidy Settings behind
+    // it. Before the fix, jira's post-consent write was computed from a list
+    // read before the dialog opened — one that still contained linear's grant —
+    // so approving jira silently restored linear.
+    // Two hand-rolled gates, so the race is deterministic rather than hopeful:
+    // the test blocks until jira's dialog is genuinely open, does the revoke,
+    // and only then lets the dialog return.
+    let opened!: () => void
+    const promptOpened = new Promise<void>((res) => {
+      opened = res
+    })
+    let release!: () => void
+    const promptReleased = new Promise<void>((res) => {
+      release = res
+    })
+
+    const remaining = await withAuth(
+      (auth) =>
+        Effect.gen(function* () {
+          yield* auth.getSession({
+            pluginId: "linear",
+            pluginName: "Linear",
+            providerId: "github",
+            scopes: ["repo"]
+          })
+
+          // jira asks, and its prompt parks open.
+          const asking = yield* Effect.fork(
+            auth.getSession({
+              pluginId: "jira",
+              pluginName: "Jira",
+              providerId: "github",
+              scopes: ["repo"]
+            })
+          )
+          yield* Effect.promise(() => promptOpened)
+
+          // The operator tidies Settings behind the open dialog.
+          yield* auth.revoke("linear", "github")
+
+          release()
+          yield* Fiber.join(asking)
+
+          return yield* auth.list()
+        }),
+      {
+        prompt: async (req) => {
+          if (req.pluginId !== "jira") return true
+          opened()
+          await promptReleased
+          return true
+        }
+      }
+    )
+
+    // linear stays revoked. Before the fix, jira's post-consent write merged
+    // into a list read before its dialog opened — one that still had linear in
+    // it — so approving jira silently restored it.
+    expect(remaining.map((g) => g.pluginId)).toEqual(["jira"])
   })
 })

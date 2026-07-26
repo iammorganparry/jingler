@@ -23,8 +23,13 @@
  * having been opened in any of them.
  */
 import { useEffect, useState } from "react"
-import { CheckCircle2, CircleDot, ExternalLink, MessageSquare } from "lucide-react"
-import { definePlugin, useHost, type TabProps } from "@starbase/plugin-sdk"
+import { CheckCircle2, CircleDot, ExternalLink, MessageSquare, Unlink } from "lucide-react"
+import {
+  definePlugin,
+  useHost,
+  useSessionActions,
+  type TabProps
+} from "@starbase/plugin-sdk"
 // The themed kit is its own entrypoint, so a plugin's Node-side build scripts
 // can import the root without dragging the component library in.
 import {
@@ -32,6 +37,9 @@ import {
   Avatar,
   cn,
   githubAvatarUrl,
+  // The app's own chip, not a copy. A local port drifted by a font size within
+  // one commit, which is the whole argument against porting it.
+  IssueLabelChip,
   Markdown,
   relativeTime,
   Spinner,
@@ -97,10 +105,16 @@ function Comment({
 
 function IssueTab({ session }: TabProps) {
   const host = useHost()
+  // The built-in Issue tab this replaced offered "unlink", and the first port
+  // dropped it — the RPC survived, the button did not, and the operator was left
+  // with a session permanently attached to the wrong issue. It comes back
+  // through the SDK, the same call any third-party plugin can make.
+  const { unlinkIssue } = useSessionActions()
   const tier = useWidthTier()
   const [issue, setIssue] = useState<Issue | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [unlinking, setUnlinking] = useState(false)
 
   const issueNumber = session.issueNumber
 
@@ -183,6 +197,39 @@ function IssueTab({ session }: TabProps) {
           >
             <ExternalLink size={12} /> Open on GitHub
           </button>
+          <button
+            type="button"
+            data-testid="github-issues-unlink"
+            disabled={unlinking}
+            onClick={() => {
+              // NOT optimistic. An earlier version cleared `issue` first and
+              // fired the call with `void`, which fails in two ways at once if
+              // the RPC rejects: the rejection is unhandled, and the tab sits
+              // there claiming no issue is linked while the session still has
+              // one — a lie the operator can only discover by restarting.
+              //
+              // The RPC is fast and local, so waiting costs a frame. The button
+              // disables meanwhile so it cannot be double-fired.
+              setUnlinking(true)
+              void unlinkIssue(session.id)
+                .then(() => {
+                  // Cleared only on success. The session record updates through
+                  // `session-updates`, but this component's `issue` is its own
+                  // state — without this the detached issue stays on screen
+                  // until something else re-renders the tab.
+                  setIssue(null)
+                })
+                .catch((cause: unknown) => {
+                  setError(cause instanceof Error ? cause.message : String(cause))
+                })
+                .finally(() => {
+                  setUnlinking(false)
+                })
+            }}
+            className="flex flex-none items-center gap-1.5 rounded border border-line px-2 py-1 text-[12px] text-text-body transition-colors hover:border-red hover:text-text-bright disabled:opacity-50"
+          >
+            <Unlink size={12} /> {unlinking ? "Unlinking…" : "Unlink"}
+          </button>
         </div>
 
         <div className="mb-5 flex flex-wrap items-center gap-2">
@@ -208,12 +255,7 @@ function IssueTab({ session }: TabProps) {
         {(issue.labels?.length ?? 0) > 0 && (
           <div className="mb-5 flex flex-wrap gap-1.5">
             {issue.labels?.map((label) => (
-              <span
-                key={label.name}
-                className="rounded-full border border-line px-2 py-0.5 text-[11.5px] text-text-body"
-              >
-                {label.name}
-              </span>
+              <IssueLabelChip key={label.name} name={label.name} color={label.color} />
             ))}
           </div>
         )}

@@ -13,7 +13,12 @@
  */
 import { useContext, useMemo } from "react"
 import type { PluginStorage, SessionSnapshot } from "./common.js"
-import { PluginViewContext, type HostBridge, type PluginViewValue } from "./context.js"
+import {
+  PluginViewContext,
+  type HostBridge,
+  type PluginViewValue,
+  type SessionActions
+} from "./context.js"
 
 const useView = (hook: string): PluginViewValue => {
   const value = useContext(PluginViewContext)
@@ -127,6 +132,32 @@ export function useSessionOrNull(): SessionSnapshot | null {
  */
 export function usePluginStorage(): PluginStorage {
   return useView("usePluginStorage").bridge.storage
+}
+
+/**
+ * The short list of session mutations a plugin may make.
+ *
+ * See {@link SessionActions} for why the list is short and why it stays short.
+ * The returned object is the bridge's own, so it is referentially stable and
+ * safe in a dependency array.
+ *
+ * @example
+ * ```tsx
+ * function IssueHeader() {
+ *   const session = useSession()
+ *   const { unlinkIssue } = useSessionActions()
+ *   return (
+ *     <button type="button" onClick={() => void unlinkIssue(session.id)}>
+ *       Unlink issue
+ *     </button>
+ *   )
+ * }
+ * ```
+ *
+ * @throws If called outside a plugin view.
+ */
+export function useSessionActions(): SessionActions {
+  return useView("useSessionActions").bridge.sessions
 }
 
 /**

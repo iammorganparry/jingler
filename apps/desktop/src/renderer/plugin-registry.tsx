@@ -138,6 +138,25 @@ export function PluginProvider({ children }: { children: ReactNode }) {
       ])
     )
 
+    /**
+     * `id@version`, the one string that changes when a plugin's CODE changes.
+     *
+     * The error boundaries use it to decide when a stale failure card should go.
+     * They used to key that on the identity of the element passed as `children`,
+     * which is rebuilt on every render — so a plugin that threw deterministically
+     * was cleared and re-mounted on every tick of the session pane. Bumping
+     * `version` is already the documented way to force a reload, so it is also
+     * the honest signal for "this is a different build, try again".
+     *
+     * Read off `ActivePlugin`, which carries `version` already. An earlier
+     * version built a Map from the catalog instead, which was both a needless
+     * indirection and a lookup that could MISS — the loader can hold an active
+     * plugin the catalog query has since stopped listing, and a miss fell back
+     * to a bare id, silently turning the reset key into a constant.
+     */
+    const reloadKeyOf = (plugin: { id: string; version: string }) =>
+      `${plugin.id}@${plugin.version}`
+
     const tabs = loaded.active.flatMap((plugin) =>
       plugin.tabs.map((tab) => ({
         ...tab,
@@ -153,7 +172,11 @@ export function PluginProvider({ children }: { children: ReactNode }) {
             pluginId={plugin.id}
             shouldActivate={(eventsFor.get(plugin.id) ?? []).includes(`onTab:${tab.id}`)}
           >
-            <PluginTabHost pluginId={plugin.id} session={session}>
+            <PluginTabHost
+              pluginId={plugin.id}
+              reloadKey={reloadKeyOf(plugin)}
+              session={session}
+            >
               {tab.render(session, ctx)}
             </PluginTabHost>
           </PluginActivateOnMount>
@@ -174,7 +197,11 @@ export function PluginProvider({ children }: { children: ReactNode }) {
       plugin.panes.map((pane) => ({
         ...pane,
         render: (session: Parameters<typeof pane.render>[0]) => (
-          <PluginPaneHost pluginId={plugin.id} session={session}>
+          <PluginPaneHost
+            pluginId={plugin.id}
+            reloadKey={reloadKeyOf(plugin)}
+            session={session}
+          >
             {pane.render(session)}
           </PluginPaneHost>
         )

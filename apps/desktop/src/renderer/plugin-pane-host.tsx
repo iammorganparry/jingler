@@ -32,6 +32,8 @@ import { toSessionSnapshot } from "./plugin-loader.js"
 
 interface Props {
   readonly pluginId: string
+  /** `id@version` from the catalog — see `PluginTabHost`'s `reloadKey`. */
+  readonly reloadKey: string
   /** The focused session, or `null` when none is open. */
   readonly session: Session | null
   readonly children: ReactNode
@@ -53,15 +55,18 @@ export class PluginPaneHost extends Component<Props, State> {
   }
 
   /**
-   * Clear on a genuinely new subtree — the same rule as `PluginTabHost`.
-   *
-   * Keyed on `children` identity so a hot reload, which hands us a fresh element
-   * under an unchanged plugin id, clears the card. Without it a pane that failed
-   * once stays failed however many times its author fixes it.
+   * Clear on a genuinely new plugin build — the same rule, and the same trap
+   * avoided, as `PluginTabHost`. See the long note there: keying on `children`
+   * identity looks like "the subtree changed" and actually means "anything
+   * re-rendered", which turns a deterministic crash into a re-mount loop.
    */
   override componentDidUpdate(prev: Props): void {
     if (this.state.message === null) return
-    if (prev.children !== this.props.children || prev.pluginId !== this.props.pluginId) {
+    if (
+      prev.pluginId !== this.props.pluginId ||
+      prev.reloadKey !== this.props.reloadKey ||
+      prev.session?.id !== this.props.session?.id
+    ) {
       this.setState({ message: null })
     }
   }
@@ -97,6 +102,15 @@ export class PluginPaneHost extends Component<Props, State> {
         <div className="max-w-[240px] text-center font-mono text-[10.5px] leading-[1.5] text-dim">
           {this.state.message}
         </div>
+        {/* Same explicit retry as the tab host — see the note there. */}
+        <button
+          type="button"
+          data-testid={`plugin-pane-error-retry-${this.props.pluginId}`}
+          onClick={() => this.setState({ message: null })}
+          className="rounded border border-line px-2 py-0.5 text-[11.5px] text-text-body transition-colors hover:border-blue hover:text-text-bright"
+        >
+          Try again
+        </button>
         <div className="max-w-[240px] text-center text-[11.5px] leading-[1.5]">
           The rest of the app is unaffected. Disable this plugin in Settings ›
           Plugins.

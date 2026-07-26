@@ -26,15 +26,44 @@ import type { ExecReply, ExecRequest } from "@starbase/cli-adapters"
  */
 const MAX_STREAM_BYTES = 8 * 1024 * 1024
 
-/** Default kill time. A plugin can shorten it; it cannot remove it. */
+/**
+ * Default kill time, and the CEILING. A plugin can shorten it; it cannot raise
+ * it or remove it — an unbounded child spawned by a plugin outlives the tab that
+ * asked for it and is invisible to the operator. The cap is documented on
+ * `ExecOptions.timeoutMs` in the SDK, because a plugin asking for 300_000 and
+ * silently getting 120_000 is the kind of surprise that reads as a hang.
+ */
 const DEFAULT_TIMEOUT_MS = 120_000
+
+/**
+ * Resolve the kill time a request actually gets.
+ *
+ * `0`, a negative, and `NaN` all fall back to the DEFAULT rather than being
+ * honoured. The old `Math.min(asked, DEFAULT)` passed them straight through, and
+ * `setTimeout(kill, 0)` — or `setTimeout(kill, NaN)`, which is the same thing —
+ * schedules the SIGKILL for the next tick: every command died instantly with a
+ * timeout error nobody asked for. A config value that parsed to `0` or `NaN` is
+ * the realistic way a plugin gets here.
+ *
+ * A floor of 1ms would satisfy the letter and change nothing — spawning a
+ * process takes longer than that. The useful reading of every value at or below
+ * zero is "unset", because no caller means "kill it before it starts".
+ *
+ * Exported so the ceiling can be asserted without a test that waits two minutes
+ * for a child to be killed. "Assert it by living through it" is not a test
+ * anyone keeps.
+ */
+export const clampTimeout = (asked: number | undefined): number =>
+  asked === undefined || !Number.isFinite(asked) || asked <= 0
+    ? DEFAULT_TIMEOUT_MS
+    : Math.min(asked, DEFAULT_TIMEOUT_MS)
 
 export const runShell = (
   request: ExecRequest,
   defaultCwd: string | undefined
 ): Promise<ExecReply> =>
   new Promise<ExecReply>((resolve, reject) => {
-    const timeoutMs = Math.min(request.timeoutMs ?? DEFAULT_TIMEOUT_MS, DEFAULT_TIMEOUT_MS)
+    const timeoutMs = clampTimeout(request.timeoutMs)
 
     const child = spawn(request.command, [...request.args], {
       cwd: request.cwd ?? defaultCwd,
@@ -53,17 +82,29 @@ export const runShell = (
     // bytes, so a multibyte-heavy stream got well past the nominal cap — and
     // shared one budget across both, so a chatty stdout could starve stderr of
     // its entire allowance and swallow the error message explaining the failure.
+    //
+    // `truncated` is PER STREAM, and so is the marker. A single shared flag put
+    // "… output truncated" on stdout when it was stderr that overflowed — so a
+    // command with a chatty stderr and a small, valid JSON stdout came back with
+    // the marker glued to the JSON, and `JSON.parse(result.stdout)` threw on a
+    // command that had succeeded. That is the pattern the bundled github-issues
+    // plugin uses, so the corruption was reachable from shipped code.
     const out: Buffer[] = []
     const err: Buffer[] = []
     let outBytes = 0
     let errBytes = 0
-    let truncated = false
+    let outTruncated = false
+    let errTruncated = false
     let settled = false
 
     const capture = (chunk: Buffer, into: "out" | "err") => {
       const used = into === "out" ? outBytes : errBytes
+      const markTruncated = () => {
+        if (into === "out") outTruncated = true
+        else errTruncated = true
+      }
       if (used >= MAX_STREAM_BYTES) {
-        truncated = true
+        markTruncated()
         return
       }
       // Trim the chunk rather than dropping it whole: the cap is a ceiling on
@@ -71,7 +112,7 @@ export const runShell = (
       // chunk through in full.
       const room = MAX_STREAM_BYTES - used
       const kept = chunk.byteLength > room ? chunk.subarray(0, room) : chunk
-      if (kept.byteLength < chunk.byteLength) truncated = true
+      if (kept.byteLength < chunk.byteLength) markTruncated()
 
       if (into === "out") {
         out.push(kept)
@@ -109,8 +150,8 @@ export const runShell = (
       const stdout = Buffer.concat(out).toString("utf8")
       const stderr = Buffer.concat(err).toString("utf8")
       resolve({
-        stdout: truncated ? `${stdout}\n… output truncated` : stdout,
-        stderr,
+        stdout: outTruncated ? `${stdout}\n… output truncated` : stdout,
+        stderr: errTruncated ? `${stderr}\n… output truncated` : stderr,
         code: code ?? 0
       })
     })

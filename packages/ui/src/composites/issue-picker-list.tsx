@@ -101,9 +101,24 @@ export function IssuePickerList({
 
 /**
  * A GitHub label chip tinted from the label's own hex colour. Reused by the
- * picker rows and the linked-issue banner.
+ * picker rows, the linked-issue banner, and — through `@starbase/plugin-sdk/ui`
+ * — the github-issues plugin's Issue tab.
+ *
+ * That last consumer is why `color` accepts `undefined` as well as `null`: the
+ * app's own `Issue` type has the field nullable, the GitHub API shape a plugin
+ * decodes has it optional, and the alternative is every plugin writing
+ * `color ?? null` at the call site. It briefly lived as a copy inside the
+ * plugin, which drifted by a font size within one commit — the usual argument
+ * for a copy ("a label is a GitHub concept, the SDK kit is generic primitives")
+ * does not survive the kit already exporting `githubAvatarUrl`.
  */
-export function IssueLabelChip({ name, color }: { name: string; color: string | null }) {
+export function IssueLabelChip({
+  name,
+  color
+}: {
+  name: string
+  color?: string | null
+}) {
   // GitHub label colors are 6-hex with no leading '#'. Fall back to a neutral
   // Badge when absent so the chip never renders with a broken colour.
   if (!color || !/^[0-9a-fA-F]{6}$/.test(color)) {

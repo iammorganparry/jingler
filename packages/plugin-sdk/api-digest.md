@@ -99,6 +99,15 @@ it must render an empty state; `useSession` throws in that moment rather than
 widening its return type for every tab that cannot hit the case. In a tab this
 never returns null and `useSession` is the better call.
 
+### `useSessionActions`
+
+```ts
+function useSessionActions(): SessionActions
+```
+
+The short list of session mutations a plugin may make. Currently only
+`unlinkIssue`. See `SessionActions` for why the list stays short.
+
 ### `usePluginStorage`
 
 ```ts
@@ -154,10 +163,30 @@ interface HostBridge {
   invoke<T = unknown>(commandId: string, arg?: unknown): Promise<T>
   readonly storage: PluginStorage
   openExternal(url: string): Promise<void>
+  readonly sessions: SessionActions
 }
 ```
 
 `invoke` is the only route from a plugin's UI to anything outside the renderer.
+
+### `SessionActions`
+
+```ts
+interface SessionActions {
+  unlinkIssue(sessionId: string): Promise<void>
+}
+```
+
+Mutations a plugin may make to the session it is decorating. Deliberately tiny,
+and it stays that way: a plugin DECORATES a session, it does not drive one. An
+entry earns its place by being something the operator can only reach through the
+plugin that owns the concept — `unlinkIssue` qualifies because the app knows a
+session has a linked issue but the plugin owns the UI where "not that one"
+belongs.
+
+Not a security boundary: any installed plugin can unlink any session's issue and
+nothing prompts. Reversible, and re-linking is also available, which is why it is
+allowed at all — see `docs/plugins/permissions-and-trust.md`.
 
 ### `PluginStorage`
 
@@ -489,6 +518,7 @@ they cost your bundle nothing.
 | `Card` | A panel container |
 | `CodeChip` | Inline monospace token |
 | `Input` / `SearchInput` | Themed text inputs |
+| `IssueLabelChip` | A GitHub label, tinted from its own hex colour |
 | `Kbd` | A keyboard-key glyph |
 | `Markdown` | The app's markdown renderer, with syntax highlighting |
 | `Pill` | A rounded label |

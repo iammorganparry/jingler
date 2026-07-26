@@ -16,8 +16,31 @@
  * every consumer a new callback each time and defeat every dependency array
  * downstream.
  */
-import type { HostBridge, PluginStorage } from "@starbase/plugin-sdk"
+import type { HostBridge, PluginStorage, SessionActions } from "@starbase/plugin-sdk"
 import { rpc } from "./rpc-client.js"
+import { publishSessionUpdate } from "./session-updates.js"
+
+/**
+ * Session mutations, published back into the app's own state.
+ *
+ * The RPC returns the updated record and `publishSessionUpdate` is how a write
+ * made outside the view tree reaches `appMachine` — App.tsx already subscribes.
+ * Without that call the write would land on disk and the sidebar would keep
+ * rendering the pre-write session until the app restarted, which is the exact
+ * failure `session-updates.ts` was written for.
+ *
+ * Not closed over a plugin id: unlike `invoke` and `storage`, this reaches the
+ * app's own state rather than the plugin's, so there is nothing to scope. The
+ * `sessionId` is the caller's, and any plugin can name any session — see the
+ * note on `SessionActions` in the SDK for why that is an accepted risk here and
+ * would not be for anything less reversible.
+ */
+const sessionActions: SessionActions = {
+  unlinkIssue: async (sessionId: string) => {
+    const session = await rpc.sessionsUnlinkIssue(sessionId)
+    publishSessionUpdate(session)
+  }
+}
 
 const bridges = new Map<string, HostBridge>()
 
@@ -52,7 +75,11 @@ export const pluginBridge = (pluginId: string): HostBridge => {
         throw new Error(`openExternal refused a non-http(s) URL: ${url}`)
       }
       await window.starbase.openExternal(url)
-    }
+    },
+    // Shared, not per-plugin: it carries no plugin-scoped state, and a fresh
+    // object per bridge would only give `useSessionActions` a new identity in
+    // every plugin for no gain.
+    sessions: sessionActions
   }
 
   bridges.set(pluginId, bridge)

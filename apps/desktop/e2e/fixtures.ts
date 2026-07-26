@@ -106,6 +106,7 @@ export interface SeedSession {
   readonly cli: "claude" | "codex" | "cursor" | "opencode"
   readonly diff: { added: number; removed: number }
   readonly prNumber: number | null
+  readonly issueNumber?: number | null
   readonly costUsd: number
   readonly tokens: number
   readonly contextTokens?: number
