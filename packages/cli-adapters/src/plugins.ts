@@ -102,6 +102,40 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
      * path reaches `remove`, `copy` or the shell. Every mutating operation goes
      * through here first.
      */
+    /**
+     * The path a plugin id WOULD occupy in the installed root, whether or not it
+     * exists yet.
+     *
+     * Split out from `dirFor` because the two questions are genuinely different
+     * and conflating them broke install. `dirFor` answers "where does this
+     * plugin live?" and therefore must only return a directory that exists;
+     * `installFromFolder` asks "where should this plugin GO?" about an id that by
+     * definition does not exist yet. Sharing one function meant every install of
+     * a new plugin failed with "a plugin id must name a directory directly inside
+     * ~/starbase/plugins" — about an id that was perfectly valid.
+     *
+     * The confinement check is the same one, and is the reason this is a function
+     * rather than a `join`: the id reaches `copy` and `remove`, so `../..` and
+     * absolute paths have to be refused before it gets there.
+     */
+    const destFor = (
+      pluginId: string
+    ): Effect.Effect<string, PluginError, Path.Path | AppPaths> =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path
+        const root = path.resolve(yield* pluginsDir)
+        const dir = path.resolve(root, pluginId)
+        if (path.dirname(dir) !== root) {
+          return yield* Effect.fail(
+            new PluginError({
+              pluginId,
+              reason: "A plugin id must name a directory directly inside ~/starbase/plugins."
+            })
+          )
+        }
+        return dir
+      })
+
     const dirFor = (
       pluginId: string
     ): Effect.Effect<string, PluginError, Path.Path | AppPaths | FileSystem.FileSystem> =>
@@ -369,7 +403,17 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
           )
         )
 
-        const dest = yield* dirFor(manifest.id)
+        // `destFor`, not `dirFor`. `dirFor` only returns a directory that EXISTS,
+        // which is right for Reveal and Uninstall and exactly wrong here: the id
+        // being installed does not exist yet by definition, so every install of a
+        // new plugin failed with "a plugin id must name a directory directly
+        // inside ~/starbase/plugins" about an id that was perfectly valid.
+        //
+        // It also has to be the INSTALLED root specifically. `dirFor` resolves
+        // bundled plugins too, so installing a fork of an official plugin would
+        // have found the bundled copy and refused as "already installed" —
+        // defeating the documented promise that an installed override wins.
+        const dest = yield* destFor(manifest.id)
         const exists = yield* fs.exists(dest).pipe(Effect.orElseSucceed(() => false))
         if (exists) {
           return yield* Effect.fail(
@@ -426,9 +470,33 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
             bundled !== installed &&
             (yield* fs.exists(bundled).pipe(Effect.orElseSucceed(() => false)))
 
+          // RECURSIVE, and that is the whole of live reload.
+          //
+          // `fs.watch` reports only DIRECT children by default. The direct
+          // children of `~/starbase/plugins` are the plugin directories
+          // themselves, so a non-recursive watch fires when a plugin is installed
+          // or removed and never when one is EDITED: the files an author actually
+          // rewrites — `starbase.plugin.json` and `dist/ui.js` — are one level
+          // down.
+          //
+          // The effect was that "Starbase watches ~/starbase/plugins and reloads
+          // without a restart" was true only for adding and deleting folders, and
+          // the advice to bump `version` to defeat the ES-module URL cache could
+          // not work, because nothing ever re-read the manifest to notice the new
+          // version. Every author's inner loop was silently a relaunch.
+          //
+          // Supported on every platform on Node 20+, and this repo requires 22.
+          //
+          // Recursive does mean the DEVELOPMENT bundled root — the repo's own
+          // `plugins/`, `node_modules` and all — produces events during a plugin
+          // build. That is noisy rather than harmful: an emission costs one
+          // catalog re-read, and the renderer keys its module cache on
+          // `id@version`, so nothing re-imports or remounts unless a version
+          // actually changed.
+          const options = { recursive: true } as const
           const sources = [
-            fs.watch(installed),
-            ...(bundledExists && bundled ? [fs.watch(bundled)] : [])
+            fs.watch(installed, options),
+            ...(bundledExists && bundled ? [fs.watch(bundled, options)] : [])
           ]
 
           return Stream.mergeAll(sources, { concurrency: sources.length }).pipe(

@@ -56,6 +56,8 @@ export type {
   IdOf,
   ManifestInput,
   PaneDeclaration,
+  PaneIdsOf,
+  PaneProps,
   Plugin,
   TabDeclaration,
   TabIdsOf,

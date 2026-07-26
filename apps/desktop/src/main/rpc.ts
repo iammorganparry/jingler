@@ -2343,6 +2343,23 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "Plugins.installFromFolder": ({ sourcePath }) =>
     PluginRegistry.installFromFolder(sourcePath),
 
+  "Plugins.installFromPicker": () =>
+    Effect.gen(function* () {
+      const dialog = yield* DialogService
+      const chosen = yield* dialog.chooseDirectory({
+        title: "Install a plugin",
+        message: "Choose a plugin folder — the one containing starbase.plugin.json.",
+        // No "New Folder": a folder made in the picker is empty, and an empty
+        // folder fails the manifest check a moment later. Offering the button
+        // only invites that.
+        allowCreate: false
+      })
+      // Cancelled. Not an error — see the contract for why this is a `null`
+      // success rather than a `PluginError`.
+      if (chosen === null) return null
+      return yield* PluginRegistry.installFromFolder(chosen)
+    }),
+
   // Confinement is the service's job (`dirFor` fails for anything that resolves
   // outside `pluginsDir`), so this handler cannot be tricked into revealing an
   // arbitrary path by a renderer that sends a crafted id.

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { mkdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { expect, test } from "./fixtures.js"
@@ -118,6 +119,53 @@ const seedPlugin = async (
   )
   await writeFile(join(dir, "dist", "ui.js"), opts.ui ?? UI_MODULE, "utf8")
   return dir
+}
+
+/**
+ * A second plugin, written independently of the first.
+ *
+ * Its whole job is to be a SECOND one. The runtime shims, the importmap and the
+ * `react-dom` singleton all exist because two plugins that each bundled React
+ * would give the tree two copies and make every hook throw — and the failure is
+ * invisible until the second plugin arrives, which is to say after the author
+ * shipped. Both tabs calling `useState` is the assertion.
+ */
+const SECOND_UI = `
+import { jsx, jsxs } from "react/jsx-runtime"
+import { definePlugin, useSession } from "@starbase/plugin-sdk"
+import { useState } from "react"
+
+function Tab() {
+  // A hook with STATE, not just context: a duplicate React fails here loudly
+  // ("Invalid hook call") rather than returning a plausible undefined.
+  const [n] = useState(7)
+  const session = useSession()
+  return jsxs("div", {
+    "data-testid": "second-tab-body",
+    children: [
+      jsx("span", { "data-testid": "second-tab-state", children: String(n) }),
+      jsx("span", { "data-testid": "second-tab-repo", children: session.repo })
+    ]
+  })
+}
+
+export default definePlugin(
+  {
+    id: "second-plugin", name: "Second Plugin", version: "1.0.0", ui: "dist/ui.js",
+    contributes: { tabs: [{ id: "second-plugin.main", label: "Second", when: "always" }] }
+  },
+  { views: { "second-plugin.main": Tab } }
+)
+`
+
+const secondManifest = {
+  id: "second-plugin",
+  name: "Second Plugin",
+  version: "1.0.0",
+  ui: "dist/ui.js",
+  contributes: {
+    tabs: [{ id: "second-plugin.main", label: "Second", when: "always" }]
+  }
 }
 
 const openSession = async (window: import("@playwright/test").Page) => {
@@ -346,4 +394,627 @@ test("a plugin is served from the throwaway home, not the developer's own", asyn
     force: true
   })
   await expect(window.getByRole("button", { name: "Scoped" })).toHaveCount(0, { timeout: 15_000 })
+})
+
+test("two plugins share one React — both render, neither throws", async ({ launchApp }) => {
+  // The single most valuable test in this file, because it is the one failure the
+  // whole runtime-shim/importmap apparatus exists to prevent and the one an
+  // author cannot hit while developing: with one plugin installed, a bundled
+  // React works fine. Every other test here installs exactly one plugin, so a
+  // regression in the shims passed the entire suite and broke in the field the
+  // first time a user installed a second plugin.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await seedPlugin(home)
+  await seedPlugin(home, {
+    id: "second-plugin",
+    manifest: secondManifest,
+    ui: SECOND_UI
+  })
+
+  await openSession(window)
+
+  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
+  await expect(window.getByRole("button", { name: "Second" })).toBeVisible({ timeout: 15_000 })
+
+  // The first plugin's hooks still resolve with a second one loaded.
+  await window.getByRole("button", { name: "E2E" }).click()
+  await expect(window.getByTestId("e2e-tab-repo")).toHaveText("widget")
+
+  // And the second's `useState` returns its value rather than throwing
+  // "Invalid hook call" — which is what a duplicate React produces.
+  await window.getByRole("button", { name: "Second" }).click()
+  await expect(window.getByTestId("second-tab-state")).toHaveText("7")
+  await expect(window.getByTestId("second-tab-repo")).toHaveText("widget")
+
+  // No error boundary fired for either.
+  await expect(window.getByTestId("plugin-error-e2e-tab")).toHaveCount(0)
+  await expect(window.getByTestId("plugin-error-second-plugin")).toHaveCount(0)
+})
+
+test("a disabled plugin stays disabled after a restart", async ({ launchApp }) => {
+  // Disabling is usually an act of damage control — the plugin is misbehaving and
+  // the operator wants it to stop. If the switch does not survive a relaunch, the
+  // plugin comes back on next launch and the control was theatre. The existing
+  // disable test only asserts within one session, so this is the half that
+  // matters.
+  const first = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+  await seedPlugin(first.home)
+
+  await openSession(first.window)
+  await expect(first.window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
+
+  await openPluginSettings(first.window)
+  await first.window.getByLabel("Enable E2E Tab").click()
+  await first.window.getByRole("button", { name: "Close settings" }).click()
+  await expect(first.window.getByRole("button", { name: "E2E" })).toHaveCount(0, {
+    timeout: 15_000
+  })
+  await first.app.close()
+
+  // Same ~/starbase, nothing re-seeded: the plugin folder is still on disk, so a
+  // tab appearing would mean `disabledPlugins` did not persist.
+  const second = await launchApp({
+    home: first.home,
+    reposDir: first.reposDir,
+    configured: true,
+    withRepo: true
+  })
+
+  await openSession(second.window)
+  // Wait for a tab that IS expected before asserting on absence, or this passes
+  // simply by racing the plugin load.
+  await expect(second.window.getByRole("button", { name: "Conversation" })).toBeVisible({
+    timeout: 15_000
+  })
+  await expect(second.window.getByRole("button", { name: "E2E" })).toHaveCount(0)
+
+  // And Settings agrees it is off, rather than the tab merely failing to load.
+  await openPluginSettings(second.window)
+  await expect(second.window.getByTestId("plugin-row-e2e-tab")).toBeVisible()
+  await expect(second.window.getByLabel("Enable E2E Tab")).not.toBeChecked()
+})
+
+test("Uninstall removes the plugin from disk and the tab from the session", async ({
+  launchApp
+}) => {
+  // The existing coverage deletes the folder with `fs.rm` from the test, which
+  // proves the watcher notices a removal and nothing about the UI that performs
+  // one. This drives the real path: the confirm step, the id→directory
+  // resolution, and the `remove` itself.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+  const dir = await seedPlugin(home)
+
+  await openSession(window)
+  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
+
+  await openPluginSettings(window)
+  await window.getByTestId("plugin-uninstall-e2e-tab").click()
+  // Two-step on purpose — deleting a folder is not undoable, so the first click
+  // must not do it.
+  await expect(window.getByText("Remove this plugin’s folder?")).toBeVisible()
+  await window.getByTestId("plugin-uninstall-confirm-e2e-tab").click()
+
+  await expect(window.getByTestId("plugin-row-e2e-tab")).toHaveCount(0, { timeout: 15_000 })
+
+  // Gone from disk, not just from the list.
+  expect(existsSync(dir)).toBe(false)
+
+  await window.getByRole("button", { name: "Close settings" }).click()
+  await expect(window.getByRole("button", { name: "E2E" })).toHaveCount(0, { timeout: 15_000 })
+})
+
+test("Install from folder copies a plugin in and it starts contributing", async ({
+  launchApp
+}) => {
+  // This button rendered for nobody until `use-plugins.ts` was given an
+  // `onInstallFromFolder`, and the service behind it refused every install
+  // because it resolved the destination with `dirFor`, which only returns
+  // directories that already exist. Both were invisible to a suite that installed
+  // plugins by writing files directly into the plugins folder.
+  const { window, app, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  // A plugin sitting OUTSIDE ~/starbase/plugins, the way a downloaded one would.
+  const source = join(home, "downloads", "e2e-tab")
+  await mkdir(join(source, "dist"), { recursive: true })
+  await writeFile(
+    join(source, "starbase.plugin.json"),
+    JSON.stringify(manifest(), null, 2),
+    "utf8"
+  )
+  await writeFile(join(source, "dist", "ui.js"), UI_MODULE, "utf8")
+
+  // The picker is a native modal, so it is stubbed the way `auth.spec.ts` stubs
+  // `shell.openExternal`: the test cannot click an OS dialog, but everything
+  // downstream of the chosen path is the real thing.
+  await app.evaluate(({ dialog }, chosen) => {
+    dialog.showOpenDialog = () =>
+      Promise.resolve({ canceled: false, filePaths: [chosen] }) as never
+  }, source)
+
+  await openPluginSettings(window)
+  // Not "the list is empty": in development `builtinPluginsRoot()` is the repo's
+  // own `plugins/`, so the official GitHub Issues plugin is always listed. The
+  // assertion is about THIS plugin's absence, before and then presence, after.
+  await expect(window.getByTestId("plugin-row-e2e-tab")).toHaveCount(0)
+  await window.getByTestId("plugin-install-folder").click()
+
+  await expect(window.getByTestId("plugin-row-e2e-tab")).toBeVisible({ timeout: 15_000 })
+  // Copied into the managed directory rather than referenced where it sat.
+  expect(existsSync(join(home, "starbase", "plugins", "e2e-tab", "dist", "ui.js"))).toBe(true)
+
+  await window.getByRole("button", { name: "Close settings" }).click()
+  await openSession(window)
+  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
+})
+
+test("cancelling the install picker changes nothing", async ({ launchApp }) => {
+  // Cancelling a dialog is the most common thing that happens to a dialog, and
+  // the contract models it as a `null` success precisely so it does not surface
+  // as a failure. If that regressed to an error the operator would get a red
+  // toast for closing a window.
+  const { window, app } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await app.evaluate(({ dialog }) => {
+    dialog.showOpenDialog = () => Promise.resolve({ canceled: true, filePaths: [] }) as never
+  })
+
+  await openPluginSettings(window)
+  // The built-in GitHub Issues plugin is the whole list before the click (see
+  // the note in the install test about the development bundled root).
+  await expect(window.getByTestId("plugin-row-github-issues")).toBeVisible({ timeout: 15_000 })
+  await window.getByTestId("plugin-install-folder").click()
+
+  // Nothing installed, and no failure reported for closing a dialog.
+  await expect(window.getByTestId("plugin-row-github-issues")).toBeVisible()
+  await expect(window.getByTestId("plugins-undecodable")).toHaveCount(0)
+})
+
+test("a plugin's dock pane mounts beside the session", async ({ launchApp }) => {
+  // Panes are a whole contribution type with no coverage — every other test
+  // plugin is tab-only. They mount differently (once per window, not once per
+  // session pane) and through a different branch of the loader, so "tabs work"
+  // says nothing about them.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await seedPlugin(home, {
+    id: "pane-plugin",
+    manifest: {
+      id: "pane-plugin",
+      name: "Pane Plugin",
+      version: "1.0.0",
+      ui: "dist/ui.js",
+      contributes: {
+        panes: [{ id: "pane-plugin.side", label: "Side", slot: "right", defaultSize: 220 }]
+      }
+    },
+    ui: `
+import { jsx } from "react/jsx-runtime"
+import { definePlugin } from "@starbase/plugin-sdk"
+
+// A pane is handed \`session\`, which may be null — rendering the repo proves the
+// pane got the FOCUSED session rather than an empty prop.
+function Side({ session }) {
+  return jsx("div", {
+    "data-testid": "pane-plugin-body",
+    children: session ? "docked:" + session.repo : "docked:none"
+  })
+}
+
+// \`panes\`, not \`views\`. They are separate keys because a pane's props differ
+// from a tab's, and mixing them would mean one map whose value type depends on
+// which contribution the key happens to name.
+export default definePlugin(
+  {
+    id: "pane-plugin", name: "Pane Plugin", version: "1.0.0", ui: "dist/ui.js",
+    contributes: {
+      panes: [{ id: "pane-plugin.side", label: "Side", slot: "right", defaultSize: 220 }]
+    }
+  },
+  { panes: { "pane-plugin.side": Side } }
+)
+`
+  })
+
+  await openSession(window)
+
+  await expect(window.getByTestId("plugin-dock-pane-plugin.side")).toBeVisible({
+    timeout: 15_000
+  })
+  await expect(window.getByTestId("pane-plugin-body")).toHaveText("docked:widget")
+
+  // A pane is a window-level dock, so it must not have been filed as a tab.
+  // `exact` matters: the default is a case-insensitive substring match, and
+  // "Side" is inside "Collapse sidebar".
+  await expect(window.getByRole("button", { name: "Side", exact: true })).toHaveCount(0)
+})
+
+test("storage written by the host half is read by the UI half, and survives a restart", async ({
+  launchApp
+}) => {
+  // The design's promise is that the two halves share one store. Nothing tested
+  // that they agree, and they are two separate implementations either side of an
+  // RPC — the UI half goes through `plugin-bridge`, the host half through
+  // `plugin-host-bridge`. A divergence here is silent data loss for every plugin
+  // that persists anything.
+  const STORAGE_UI = `
+import { jsx, jsxs } from "react/jsx-runtime"
+import { definePlugin, useHost, usePluginStorage } from "@starbase/plugin-sdk"
+import { useEffect, useState } from "react"
+
+function Tab() {
+  const host = useHost()
+  const storage = usePluginStorage()
+  const [seen, setSeen] = useState("…")
+  useEffect(() => {
+    // Waking the host half is what writes the key on a first run; on a relaunch
+    // the value is already on disk and this just re-confirms it.
+    host.invoke("store-plugin.touch", {})
+      .then(() => storage.get("greeting"))
+      .then((v) => setSeen(v === undefined ? "unset" : String(v)))
+      .catch((e) => setSeen("error: " + String(e && e.message ? e.message : e)))
+  }, [host, storage])
+  return jsxs("div", {
+    children: [jsx("span", { "data-testid": "store-seen", children: seen })]
+  })
+}
+
+export default definePlugin(
+  {
+    id: "store-plugin", name: "Store Plugin", version: "1.0.0",
+    ui: "dist/ui.js", main: "dist/main.js",
+    contributes: {
+      tabs: [{ id: "store-plugin.main", label: "Store", when: "always" }],
+      commands: [{ id: "store-plugin.touch", title: "Touch" }]
+    }
+  },
+  { views: { "store-plugin.main": Tab } }
+)
+`
+  const storageManifest = {
+    id: "store-plugin",
+    name: "Store Plugin",
+    version: "1.0.0",
+    ui: "dist/ui.js",
+    main: "dist/main.js",
+    activationEvents: ["onTab:store-plugin.main"],
+    contributes: {
+      tabs: [{ id: "store-plugin.main", label: "Store", when: "always" }],
+      commands: [{ id: "store-plugin.touch", title: "Touch" }]
+    }
+  }
+  // Writes only if unset, so the relaunch reads what the FIRST run stored rather
+  // than a value this run just rewrote.
+  const STORAGE_MAIN = `export const activate = (ctx) => {
+  ctx.subscriptions.push(
+    ctx.commands.register("store-plugin.touch", async () => {
+      const existing = await ctx.storage.get("greeting")
+      if (existing === undefined) await ctx.storage.set("greeting", "from-the-host")
+      return true
+    })
+  )
+}
+`
+
+  const first = await launchApp({ configured: true, withRepo: true, sessions: [SESSION] })
+  await seedPlugin(first.home, {
+    id: "store-plugin",
+    manifest: storageManifest,
+    ui: STORAGE_UI
+  })
+  await writeFile(
+    join(first.home, "starbase", "plugins", "store-plugin", "dist", "main.js"),
+    STORAGE_MAIN,
+    "utf8"
+  )
+
+  await openSession(first.window)
+  await expect(first.window.getByRole("button", { name: "Store" })).toBeVisible({
+    timeout: 15_000
+  })
+  await first.window.getByRole("button", { name: "Store" }).click()
+
+  // The UI half reading a value only the HOST half ever wrote.
+  await expect(first.window.getByTestId("store-seen")).toHaveText("from-the-host", {
+    timeout: 20_000
+  })
+  await first.app.close()
+
+  const second = await launchApp({
+    home: first.home,
+    reposDir: first.reposDir,
+    configured: true,
+    withRepo: true
+  })
+  await openSession(second.window)
+  await second.window.getByRole("button", { name: "Store" }).click()
+  await expect(second.window.getByTestId("store-seen")).toHaveText("from-the-host", {
+    timeout: 20_000
+  })
+})
+
+test("bumping the version re-imports the module, so an edit is visible", async ({
+  launchApp
+}) => {
+  // The author's inner loop, and the one the docs warn about hardest: ES module
+  // imports are cached by URL for the life of the window, so the loader keys the
+  // module by manifest version. Coverage existed for ADDING a plugin and for
+  // REMOVING one; editing — the thing an author does fifty times an hour — had
+  // none, and if the version key regressed, every author's edits would silently
+  // do nothing.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  const withLabel = (version: string, body: string) => ({
+    manifest: manifest({ version }),
+    ui: UI_MODULE.replace('version: "1.0.0"', `version: "${version}"`).replace(
+      '"Hello from a plugin"',
+      JSON.stringify(body)
+    )
+  })
+
+  await seedPlugin(home, withLabel("1.0.0", "first version"))
+  await openSession(window)
+  await window.getByRole("button", { name: "E2E" }).click({ timeout: 15_000 })
+  await expect(window.getByText("first version")).toBeVisible({ timeout: 15_000 })
+
+  // Rewrite the module AND bump the version, exactly as `pnpm build` would.
+  await seedPlugin(home, withLabel("1.0.1", "second version"))
+
+  await expect(window.getByText("second version")).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByText("first version")).toHaveCount(0)
+})
+
+test("a host half can run a subprocess through ctx.exec", async ({ launchApp }) => {
+  // `exec` had no e2e at all: the one host-half test returns a pure number. It is
+  // the most security-sensitive thing a plugin can do — no shell, argv only, byte
+  // caps, a timeout kill — and all of that was unit-tested in isolation while the
+  // real path from a plugin's `activate` to a spawned process was never walked.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await seedPlugin(home, {
+    manifest: manifest({
+      main: "dist/main.js",
+      activationEvents: ["onTab:e2e-tab.main"],
+      contributes: {
+        tabs: [{ id: "e2e-tab.main", label: "E2E", when: "always" }],
+        commands: [{ id: "e2e-tab.run", title: "Run" }]
+      }
+    }),
+    ui: `
+import { jsx, jsxs } from "react/jsx-runtime"
+import { definePlugin, useHost } from "@starbase/plugin-sdk"
+import { useEffect, useState } from "react"
+
+function Tab() {
+  const host = useHost()
+  const [out, setOut] = useState("…")
+  useEffect(() => {
+    host.invoke("e2e-tab.run", {})
+      .then((r) => setOut(String(r)))
+      .catch((e) => setOut("error: " + String(e && e.message ? e.message : e)))
+  }, [host])
+  return jsxs("div", { children: [jsx("div", { "data-testid": "exec-out", children: out })] })
+}
+
+export default definePlugin(
+  {
+    id: "e2e-tab", name: "E2E Tab", version: "1.0.0", ui: "dist/ui.js", main: "dist/main.js",
+    contributes: {
+      tabs: [{ id: "e2e-tab.main", label: "E2E", when: "always" }],
+      commands: [{ id: "e2e-tab.run", title: "Run" }]
+    }
+  },
+  { views: { "e2e-tab.main": Tab } }
+)
+`
+  })
+
+  // `process.execPath` is the Electron binary; ELECTRON_RUN_AS_NODE makes it
+  // behave as plain Node, so this needs no node on PATH and no shell.
+  await writeFile(
+    join(home, "starbase", "plugins", "e2e-tab", "dist", "main.js"),
+    `export const activate = (ctx) => {
+  ctx.subscriptions.push(
+    ctx.commands.register("e2e-tab.run", async () => {
+      const r = await ctx.exec(process.execPath, ["-e", "process.stdout.write('ran:' + (1+1))"], {
+        env: { ELECTRON_RUN_AS_NODE: "1" }
+      })
+      // \`code\`, not \`exitCode\` — the field name the API digest got wrong.
+      return r.stdout.trim() + "|code=" + r.code
+    })
+  )
+}
+`,
+    "utf8"
+  )
+
+  await openSession(window)
+  await window.getByRole("button", { name: "E2E" }).click({ timeout: 15_000 })
+  await expect(window.getByTestId("exec-out")).toHaveText("ran:2|code=0", { timeout: 25_000 })
+})
+
+test("a valid manifest with a broken module explains itself in Settings", async ({
+  launchApp
+}) => {
+  // The third failure category, between "manifest will not decode" and "the view
+  // threw while rendering": the manifest is fine, the module loads, and it does
+  // not export what it promised. The loader files this as a load error shown in
+  // the plugin's own Settings row under a different testid that nothing asserted
+  // — so the user got a missing tab and no explanation.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await seedPlugin(home, {
+    // Declares a tab, ships no default export to satisfy it.
+    ui: `export const notThePoint = 1\n`
+  })
+
+  await openPluginSettings(window)
+
+  await expect(window.getByTestId("plugin-error-detail-e2e-tab")).toBeVisible({
+    timeout: 15_000
+  })
+  // It is listed as an installed plugin, NOT as an undecodable folder — the
+  // distinction the two code paths exist to draw.
+  await expect(window.getByTestId("plugin-row-e2e-tab")).toBeVisible()
+  await expect(window.getByTestId("plugins-undecodable")).toHaveCount(0)
+})
+
+test("declaring a keybinding fails loudly rather than doing nothing", async ({ launchApp }) => {
+  // `contributes.keybindings` validates against the schema but is dispatched
+  // nowhere. Accepting it would give an author a shortcut that never fires and no
+  // reason why, so the loader refuses the plugin outright. That refusal is a
+  // deliberate product decision and therefore worth a test — the tempting "fix"
+  // for a confusing error is to make it silent again.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await seedPlugin(home, {
+    manifest: manifest({
+      contributes: {
+        tabs: [{ id: "e2e-tab.main", label: "E2E", when: "always" }],
+        keybindings: [{ command: "e2e-tab.main", key: "ctrl+alt+e" }]
+      }
+    })
+  })
+
+  await openPluginSettings(window)
+
+  const detail = window.getByTestId("plugin-error-detail-e2e-tab")
+  await expect(detail).toBeVisible({ timeout: 15_000 })
+  await expect(detail).toContainText(/keybinding/i)
+
+  // And it contributed nothing, rather than half-loading its tab.
+  await window.getByRole("button", { name: "Close settings" }).click()
+  await openSession(window)
+  await expect(window.getByRole("button", { name: "Conversation" })).toBeVisible({
+    timeout: 15_000
+  })
+  await expect(window.getByRole("button", { name: "E2E" })).toHaveCount(0)
+})
+
+test("declaring untrusted-repo capabilities fails loudly, because nothing honours them", async ({
+  launchApp
+}) => {
+  // The same rule as keybindings, applied to the one field where silence is
+  // actively dangerous. `capabilities.untrustedRepos` is not a feature a plugin
+  // wants — it is a promise a plugin MAKES about what it will not do in a repo
+  // the operator has not trusted. Starbase has no trust model yet and mounts
+  // those contributions anyway, so accepting the declaration would turn a safety
+  // claim into decoration and mislead the most careful author hardest.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await seedPlugin(home, {
+    manifest: manifest({
+      capabilities: {
+        untrustedRepos: {
+          supported: "limited",
+          restrictedContributions: ["e2e-tab.main"]
+        }
+      }
+    })
+  })
+
+  await openPluginSettings(window)
+
+  const detail = window.getByTestId("plugin-error-detail-e2e-tab")
+  await expect(detail).toBeVisible({ timeout: 15_000 })
+  await expect(detail).toContainText(/untrustedRepos/)
+
+  await window.getByRole("button", { name: "Close settings" }).click()
+  await openSession(window)
+  await expect(window.getByRole("button", { name: "Conversation" })).toBeVisible({
+    timeout: 15_000
+  })
+  // Crucially the restricted contribution is NOT mounted. Loading the plugin and
+  // ignoring the restriction is the failure this refusal exists to prevent.
+  await expect(window.getByRole("button", { name: "E2E" })).toHaveCount(0)
+})
+
+test("a plugin built for a newer API is refused with a version, not a stack trace", async ({
+  launchApp
+}) => {
+  // Checked BEFORE the module is imported, which is the whole point: evaluating a
+  // future plugin's top-level code against an SDK missing what it expects
+  // produces a stack trace from inside a bundle. The operator needs a sentence
+  // naming the cause and the fix.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await seedPlugin(home, {
+    manifest: manifest({ apiVersion: 99 }),
+    // Deliberately a module that would THROW on import. If it is ever evaluated
+    // the message would be this string rather than the version mismatch, so this
+    // asserts the ordering rather than trusting it.
+    ui: `throw new Error("this module must never be imported")\n`
+  })
+
+  await openPluginSettings(window)
+
+  const detail = window.getByTestId("plugin-error-detail-e2e-tab")
+  await expect(detail).toBeVisible({ timeout: 15_000 })
+  await expect(detail).toContainText("plugin API v99")
+  await expect(detail).not.toContainText("must never be imported")
+})
+
+test("a plugin declaring the CURRENT api version loads normally", async ({ launchApp }) => {
+  // The other half of the gate, and the one that would break every plugin if the
+  // comparison were `!==` rather than `>`: opting in must not cost anything.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await seedPlugin(home, { manifest: manifest({ apiVersion: 1 }) })
+
+  await openSession(window)
+  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
+  await window.getByRole("button", { name: "E2E" }).click()
+  await expect(window.getByTestId("e2e-tab-repo")).toHaveText("widget")
 })

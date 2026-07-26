@@ -343,6 +343,47 @@ export const AuthSessionInfo = Schema.Struct({
 })
 export type AuthSessionInfo = Schema.Schema.Type<typeof AuthSessionInfo>
 
+// ── SDK compatibility ────────────────────────────────────────────────────────
+
+/**
+ * The plugin API generation this app implements.
+ *
+ * A single integer, not a semver range, because the only question worth asking
+ * is "does this plugin speak the API I have?" and the only two useful answers
+ * are yes and no. A range invites authors to reason about which patch of the
+ * host they need, which they cannot test and Starbase cannot promise.
+ *
+ * ## When to bump this
+ *
+ * Only on a BREAKING change to what a plugin sees: removing or renaming an
+ * export, changing a `HostContext` method's signature, changing what
+ * `definePlugin` returns. Adding a new hook, a new contribution point or a new
+ * optional manifest field is not breaking and must not bump it — every existing
+ * plugin still works, and bumping would refuse them all for nothing.
+ *
+ * Adding `panes` to `definePlugin` is the worked example: purely additive, so
+ * this stayed at 1.
+ */
+export const PLUGIN_API_VERSION = 1
+
+/**
+ * Manifest field: the API generation a plugin was built against.
+ *
+ * Optional, and its absence means "assume the current generation". That is
+ * deliberately the lenient reading: every plugin written before this field
+ * existed omits it, and refusing those would break the plugins this field was
+ * added to protect. A plugin that opts IN gets a clear refusal instead of a
+ * runtime crash; one that does not is exactly as exposed as it was before.
+ */
+export const PluginApiVersion = Schema.Int.pipe(
+  Schema.greaterThanOrEqualTo(1),
+  Schema.annotations({
+    identifier: "PluginApiVersion",
+    description:
+      "The Starbase plugin API generation this plugin targets. Omit to mean 'the current one'."
+  })
+)
+
 // ── The manifest ─────────────────────────────────────────────────────────────
 
 const PluginManifestFields = Schema.Struct({
@@ -351,6 +392,11 @@ const PluginManifestFields = Schema.Struct({
   version: Schema.String.pipe(Schema.minLength(1)),
   description: Schema.optional(Schema.String),
   publisher: Schema.optional(Schema.String),
+  /**
+   * The plugin API generation this plugin targets. See
+   * {@link PLUGIN_API_VERSION}. Omit to mean "whatever this app implements".
+   */
+  apiVersion: Schema.optional(PluginApiVersion),
   /** ESM entry for the renderer half, relative to the plugin directory. */
   ui: Schema.optional(Schema.String),
   /** Entry for the extension-host half, relative to the plugin directory. */

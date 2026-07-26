@@ -184,9 +184,12 @@ and unit-test gates on every pull request.
 
 ## Plugins
 
-Starbase is extensible — plugins add tabs, dock panes and commands, dropped
-into `~/starbase/plugins`.
+Starbase is extensible — plugins add tabs, dock panes and commands, dropped into
+`~/starbase/plugins` or installed from **Settings › Plugins › Install from
+folder…**. They appear without a restart.
 
-- **Writing one:** [`packages/plugin-sdk/AGENTS.md`](packages/plugin-sdk/AGENTS.md)
-- **Installing one:** [`docs/plugins/permissions-and-trust.md`](docs/plugins/permissions-and-trust.md) — read this first
 - **Start from scratch:** `node scripts/create-starbase-plugin.mjs my-plugin`
+- **Writing one:** [`packages/plugin-sdk/AGENTS.md`](packages/plugin-sdk/AGENTS.md) — the complete authoring contract
+- **Overview, dev loop, distribution:** [`docs/plugins/README.md`](docs/plugins/README.md)
+- **Something broken:** [`docs/plugins/debugging.md`](docs/plugins/debugging.md) — where each failure surfaces
+- **Installing one:** [`docs/plugins/permissions-and-trust.md`](docs/plugins/permissions-and-trust.md) — read this first; a plugin runs with the app's full access

@@ -29,6 +29,7 @@
  * advisory, since a module could register whatever it liked at import time.
  */
 import { createElement, type ComponentType } from "react"
+import { PLUGIN_API_VERSION } from "@starbase/core"
 import type { LoadedPlugin, Session } from "@starbase/core"
 import { useSession, type SessionSnapshot } from "@starbase/plugin-sdk"
 import {
@@ -205,21 +206,60 @@ export const loadPluginUi = async (
     import(/* @vite-ignore */ url)
 ): Promise<PluginLoadResult> => {
   const { manifest } = plugin
+
+  // ── API generation, checked before anything is imported ────────────────────
+  //
+  // First, on purpose. A plugin built for a future API is refused without its
+  // module ever being evaluated: importing it would run its top-level code
+  // against an SDK missing whatever it expects, and the failure that produces is
+  // a stack trace inside a bundle rather than a sentence naming the cause.
+  //
+  // Only the FUTURE direction is refused. A plugin targeting an older generation
+  // keeps loading, because every change that bumped the generation was breaking
+  // in the other direction — the new host still honours the old surface, or the
+  // bump was wrong.
+  const targeted = manifest.apiVersion
+  if (targeted !== undefined && targeted > PLUGIN_API_VERSION) {
+    return {
+      ok: false,
+      error: {
+        id: manifest.id,
+        message: `needs plugin API v${targeted}, and this Starbase implements v${PLUGIN_API_VERSION}. Update Starbase, or install a build of this plugin made for v${PLUGIN_API_VERSION}.`
+      }
+    }
+  }
+
   const declaredTabs = manifest.contributes?.tabs ?? []
 
   const declaredPanes = manifest.contributes?.panes ?? []
 
-  // Keybindings and settings are accepted by the manifest schema and consumed by
-  // nothing. Rather than let a plugin declare one and watch it never happen —
-  // the exact "silently absent" failure this loader exists to prevent — say so
-  // at load time, in Settings, where the author will see it.
+  // Four manifest fields are accepted by the schema and consumed by no code.
+  // Rather than let a plugin declare one and watch it never happen — the exact
+  // "silently absent" failure this loader exists to prevent — say so at load
+  // time, in Settings, where the author will see it.
+  //
+  // ## Why `capabilities.untrustedRepos` is in this list and not merely warned about
+  //
+  // The other three are features a plugin WANTS. That one is a promise a plugin
+  // MAKES: `{ supported: "limited", restrictedContributions: [...] }` says "these
+  // contributions stay inert until the operator trusts this repo". Starbase has
+  // no repo-trust model yet and mounts them regardless — so accepting the
+  // declaration turns a safety claim into decoration, and the author who wrote it
+  // most carefully is the one most misled. A load error is the only honest
+  // answer available until the gating exists.
   //
   // `resolveKeybindings` and the settings form exist and are tested; what is
-  // missing is the app-level dispatch to hook them to. Until that lands this is
-  // the honest answer.
+  // missing is the app-level dispatch to hook them to. `registerProvider` throws
+  // for the same reason. Each entry here comes out the moment its half lands.
   const unsupported = [
-    (manifest.contributes?.keybindings?.length ?? 0) > 0 ? "keybindings" : null,
-    (manifest.contributes?.settings?.length ?? 0) > 0 ? "settings" : null
+    (manifest.contributes?.keybindings?.length ?? 0) > 0 ? "contributes.keybindings" : null,
+    (manifest.contributes?.settings?.length ?? 0) > 0 ? "contributes.settings" : null,
+    (manifest.contributes?.authenticationProviders?.length ?? 0) > 0
+      ? "contributes.authenticationProviders"
+      : null,
+    manifest.capabilities?.untrustedRepos !== undefined
+      ? "capabilities.untrustedRepos"
+      : null
   ].filter((x): x is string => x !== null)
 
   if (unsupported.length > 0) {
@@ -227,7 +267,7 @@ export const loadPluginUi = async (
       ok: false,
       error: {
         id: manifest.id,
-        message: `contributes.${unsupported.join(" and contributes.")} — not supported in this build. Remove ${unsupported.length > 1 ? "them" : "it"} from the manifest; tabs, panes and commands work.`
+        message: `${unsupported.join(" and ")} — declared but not honoured by this build, so it would silently do nothing. Remove ${unsupported.length > 1 ? "them" : "it"} from the manifest; tabs, panes, commands and getSession all work.`
       }
     }
   }

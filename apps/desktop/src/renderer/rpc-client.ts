@@ -786,6 +786,10 @@ export const rpc = {
   pluginsInstallFromFolder: (sourcePath: string): Promise<LoadedPlugin> =>
     run((c) => c.Plugins.installFromFolder({ sourcePath })),
 
+  /** Resolves `null` when the operator cancels the picker. */
+  pluginsInstallFromPicker: (): Promise<LoadedPlugin | null> =>
+    run((c) => c.Plugins.installFromPicker()),
+
   pluginsStorageGet: (pluginId: string, key: string): Promise<unknown> =>
     run((c) => c.Plugins.storageGet({ pluginId, key })),
 

@@ -212,10 +212,14 @@ describe("panes", () => {
   })
 })
 
-describe("contributions this build cannot honour", () => {
+describe("declarations this build cannot honour", () => {
   it.each([
     ["keybindings", { keybindings: [{ command: "hello.greeting", key: "ctrl+shift+h" }] }],
-    ["settings", { settings: [{ id: "hello.opt", label: "Opt", type: "boolean" }] }]
+    ["settings", { settings: [{ id: "hello.opt", label: "Opt", type: "boolean" }] }],
+    [
+      "authenticationProviders",
+      { authenticationProviders: [{ id: "hello.gh", label: "GitHub" }] }
+    ]
   ])("fails loudly on contributes.%s rather than dropping it", async (name, extra) => {
     // The schema accepts these and nothing consumes them. Silence here is the
     // precise failure mode the rest of this loader exists to prevent.
@@ -228,8 +232,60 @@ describe("contributions this build cannot honour", () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error.message).toContain(name)
-    expect(result.error.message).toContain("not supported in this build")
+    expect(result.error.message).toContain("declared but not honoured")
   })
+
+  it("fails loudly on capabilities.untrustedRepos, because it is a safety claim", async () => {
+    // The others are features a plugin wants. This one is a promise a plugin
+    // MAKES — that the named contributions stay inert until the repo is trusted.
+    // Starbase has no trust model and would mount them anyway, so accepting the
+    // declaration would void the claim silently.
+    const result = await loadPluginUi(
+      plugin({
+        capabilities: {
+          untrustedRepos: { supported: "limited", restrictedContributions: ["hello.greeting"] }
+        },
+        contributes: { tabs: [{ id: "hello.greeting", label: "Hello" }] }
+      } as Partial<LoadedPlugin["manifest"]>),
+      async () => ({ default: { views: { "hello.greeting": View } } })
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.message).toContain("capabilities.untrustedRepos")
+  })
+})
+
+describe("plugin API generation", () => {
+  it("refuses a plugin built for a newer API without importing its module", async () => {
+    // The ordering is the point. Evaluating a future plugin's top-level code
+    // against an SDK missing what it expects yields a stack trace inside a
+    // bundle; the operator needs a sentence naming the cause.
+    let imported = false
+    const result = await loadPluginUi(
+      plugin({ apiVersion: 99 } as Partial<LoadedPlugin["manifest"]>),
+      async () => {
+        imported = true
+        return { default: { views: { "hello.greeting": View } } }
+      }
+    )
+    expect(imported).toBe(false)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.message).toContain("plugin API v99")
+  })
+
+  it.each([[undefined], [1]])(
+    "loads a plugin targeting %s, so opting in costs nothing",
+    async (apiVersion) => {
+      // A `!==` comparison here instead of `>` would refuse every plugin that
+      // names the current version — the ones doing the right thing.
+      const result = await loadPluginUi(
+        plugin({ apiVersion } as Partial<LoadedPlugin["manifest"]>),
+        async () => ({ default: { views: { "hello.greeting": View } } })
+      )
+      expect(result.ok).toBe(true)
+    }
+  )
 })
 
 describe("loadPlugins", () => {

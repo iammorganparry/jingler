@@ -25,6 +25,38 @@ touching the network, a CLI, the filesystem or credentials goes here. It is
 **optional**: a plugin that only displays local session data needs no host half
 at all, and Starbase will never start a process for it.
 
+Your own npm dependencies are **bundled into your output** — there is no
+`node_modules` beside an installed plugin, so never mark them external. Only the
+six specifiers Starbase supplies at runtime are external, and
+`@starbase/plugin-sdk/vite` already lists them.
+
+### Four import paths
+
+| Import from | Runs in | Gives you |
+|---|---|---|
+| `@starbase/plugin-sdk` | renderer | `definePlugin`, `defineManifest`, hooks, types |
+| `@starbase/plugin-sdk/ui` | renderer | the themed component kit — use this before writing your own |
+| `@starbase/plugin-sdk/host` | extension host | `HostContext`, `Activate`, credentials, `exec` |
+| `@starbase/plugin-sdk/vite` | your build | `starbasePluginBuild`, `STARBASE_EXTERNALS` |
+
+`@starbase/plugin-sdk/ui` is what makes a plugin look like part of the app rather
+than a webpage inside it: `Markdown`, `Spinner`, `Card`, `Callout`, `Badge`,
+`Avatar`, `Input`, `Toggle`, `Kbd`, `cn`, `relativeTime`, `useWidthTier` and more.
+It is externalised, so importing it costs your bundle nothing. See `api-digest.md`
+for the full list.
+
+### Set `apiVersion`
+
+```ts
+apiVersion: 1,   // the plugin API generation you built against
+```
+
+Optional, and worth setting before you share a plugin with anyone. A Starbase too
+old to speak your generation refuses the plugin with a sentence naming both
+versions; without it, the same mismatch is a stack trace from inside your bundle
+on someone else's machine. Only breaking changes to what a plugin sees bump it, so
+a new hook or contribution point never will.
+
 ## A complete, working plugin
 
 Three files. Copy this and change the names.
@@ -162,10 +194,46 @@ did nothing" report.
 
 ### 5. Declare what you implement
 
-`definePlugin` requires a view for every tab in `contributes.tabs`, and rejects
-views for tabs you did not declare. Both are compile errors. A plugin cannot
-contribute something it did not declare — otherwise the enable switch in
-Settings would be advisory.
+`definePlugin` requires a component for every id in `contributes.tabs` **and**
+`contributes.panes`, and rejects components for ids you did not declare. Both are
+compile errors. A plugin cannot contribute something it did not declare —
+otherwise the enable switch in Settings would be advisory.
+
+### 6. Dock panes go in `panes`, not `views`
+
+```ts
+export default definePlugin(manifest, {
+  views: { "linear.issues": IssuesTab },       // session: SessionSnapshot
+  panes: { "linear.activity": ActivityPane }   // session: SessionSnapshot | null
+})
+```
+
+They are separate keys because the props differ, and the props differ because the
+mounting scope does:
+
+- a **tab** belongs to one session and cannot exist without it;
+- a **pane** is mounted once for the **window** and follows whichever session has
+  focus — including none, when the last session is closed.
+
+So a pane must handle `session === null` and render an empty state. Putting a pane
+in `views` is a load error naming the pane; you will see it in Settings › Plugins.
+
+## Fields Starbase refuses
+
+The manifest schema is VS Code's, so it validates several things Starbase does not
+yet honour. Declaring one is a **load failure**, not a silent no-op:
+
+- `contributes.keybindings`
+- `contributes.settings`
+- `contributes.authenticationProviders`
+- `capabilities.untrustedRepos`
+
+Do not put them in a manifest. A plugin declaring any of them contributes nothing
+at all and shows a message in Settings › Plugins saying which field and why. The
+refusal is deliberate: a keybinding that never fires or a trust promise that is
+never honoured is worse than an error, because there is nothing to search for.
+
+`extensionKind` is accepted and ignored — it is a hint, not a promise.
 
 ## Permissions: there aren't any
 
@@ -278,16 +346,71 @@ in the renderer's own realm; the host half is Node with full access. The
 consent-based auth flow and lazy activation are real boundaries, but this is not
 a sandbox. Tell users to install plugins they trust.
 
+## The dev loop
+
+```bash
+# once, from the repo root — links @starbase/plugin-sdk into your package
+pnpm install
+
+# after every change
+pnpm -C plugins/my-plugin build && pnpm -C plugins/my-plugin install:local
+```
+
+Starbase watches `~/starbase/plugins` **recursively**, so the rebuilt file is
+noticed in under a second with no restart. But `install:local` copies only
+`starbase.plugin.json` and `dist` into that directory — it does not watch your
+source tree — so the copy step is not optional, and neither is bumping `version`
+(rule 4).
+
+`install:local` writes to your **real** `~/starbase`. To keep development
+separate, set `STARBASE_HOME` for both the install and the app:
+
+```bash
+export STARBASE_HOME=/tmp/starbase-dev
+```
+
+## When something breaks
+
+`docs/plugins/debugging.md` in the Starbase repo is the map. The short version:
+
+- **UI half** → renderer devtools (`Cmd+Opt+I` / `Ctrl+Shift+I`)
+- **Host half** → the terminal running `pnpm dev` (`ctx.log` and `console.log` both)
+- **Anything that stopped the plugin loading** → Settings › Plugins, in its row
+
+Starbase never fails a plugin silently. If you get nothing anywhere, that is a bug
+in Starbase, not in your plugin.
+
+## Testing
+
+There is no plugin test harness, and `pnpm test` at the repo root does not glob
+`plugins/*` — a Vitest suite inside your plugin would not run in CI. What does
+cover you: `pnpm typecheck` and `pnpm build` include every plugin, and
+`defineManifest`/`definePlugin` turn a missing component, an undeclared id and an
+unnamespaced contribution into compile errors. Keep your own logic in plain
+functions and test those directly.
+
+## Sharing a plugin
+
+There is no registry and no publish command. `pnpm build`, then zip
+`starbase.plugin.json` and `dist` — nothing else, since your dependencies are
+already bundled. The recipient uses **Settings › Plugins › Install from folder…**
+or copies it to `~/starbase/plugins/<id>/`. No signing, no auto-update, no sandbox.
+
 ## Checklist before you ship
 
 1. `react` and `@starbase/plugin-sdk` are external in your build config
-2. No hex colours — only `--sb-*` Tailwind tokens
-3. Every contribution id starts with your plugin id
-4. `version` bumped since the last load
-5. A declined `getSession` is handled — it rejects unless you pass `createIfNone: false`
+2. `apiVersion` is set
+3. No hex colours — only `--sb-*` Tailwind tokens
+4. Every contribution id starts with your plugin id
+5. `version` bumped since the last load
+6. A declined `getSession` is handled — it rejects unless you pass `createIfNone: false`
+7. No `keybindings`, `settings`, `authenticationProviders` or `capabilities.untrustedRepos`
+8. If your manifest declares `main`, your build config passes `main` too
 
 ## Where to look next
 
 - `api-digest.md` in this package — every export with its signature, one page
 - `starbase.plugin.schema.json` — the manifest's full validated shape
+- `plugins/github-issues/README.md` — a real plugin with both halves, annotated
+- `docs/plugins/debugging.md` — where each kind of failure surfaces
 - Hover any SDK export in your editor — each carries a runnable `@example`

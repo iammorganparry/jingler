@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 /**
  * `starbase-plugin://` serves third-party code out of the operator's home
@@ -21,6 +21,25 @@ let home: string
 // The module reads `STARBASE_HOME` through `app-paths`, which resolves it at
 // import time — so the temp home has to exist before the dynamic import below.
 const load = async () => await import("./plugin-protocol.js")
+
+/**
+ * Pay the module graph's transform cost once, outside any test's clock.
+ *
+ * `vi.resetModules()` below means every test re-imports, but only the FIRST
+ * import in the file transforms — and that took ~1.4s locally, which under a
+ * fully loaded parallel run tipped the first test past the 5s default and made
+ * this file fail intermittently in CI while passing every time in isolation.
+ * Warming here moves the cost to a hook, where no timeout applies.
+ *
+ * The temp home is not set up yet, so this import is discarded; it exists purely
+ * for its side effect on the transform cache.
+ */
+beforeAll(async () => {
+  home = await mkdtemp(join(tmpdir(), "starbase-plugin-protocol-warm-"))
+  process.env.STARBASE_HOME = home
+  await load()
+  await rm(home, { recursive: true, force: true })
+})
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "starbase-plugin-protocol-"))

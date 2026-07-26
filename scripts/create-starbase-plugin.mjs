@@ -129,6 +129,11 @@ export const manifest = defineManifest({
   name: "${title}",
   version: "1.0.0",
   description: "A Starbase plugin.",
+  // The plugin API generation this targets. A Starbase too old to speak it
+  // refuses the plugin with a sentence naming both versions, instead of
+  // evaluating your bundle against an SDK missing what it expects and handing
+  // the operator a stack trace. Bump only if the SDK's own major does.
+  apiVersion: 1,
   ui: "dist/ui.js",
   // No \`main\`, so no host half and no Node process. Add one when you need the
   // network, a CLI or credentials — the renderer cannot reach any of those.

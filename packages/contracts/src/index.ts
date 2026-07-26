@@ -1496,8 +1496,7 @@ export class StarbaseRpcs extends RpcGroup.make(
 
   /**
    * Deactivate then re-activate a plugin's host half — the development loop for a
-   * plugin author editing `main`. Owned by the extension host (task #5); stubbed
-   * to fail until that lands.
+   * plugin author editing `main`. Served by the extension host.
    */
   Rpc.make("Plugins.reload", {
     error: PluginError,
@@ -1509,11 +1508,37 @@ export class StarbaseRpcs extends RpcGroup.make(
    * plugin. The source is validated as a real plugin (a decodable manifest)
    * before anything is copied, so a bad folder fails without leaving a partial
    * directory behind.
+   *
+   * Takes a path the CALLER already has. Settings uses
+   * {@link Plugins.installFromPicker} instead, which chooses the path natively.
    */
   Rpc.make("Plugins.installFromFolder", {
     success: LoadedPlugin,
     error: PluginError,
     payload: { sourcePath: Schema.String }
+  }),
+
+  /**
+   * Show a native folder picker and install whatever the operator chooses.
+   *
+   * Succeeds with `null` when the picker is cancelled — cancelling is a normal
+   * outcome, not an error, and modelling it as one would make Settings show a
+   * failure toast for closing a dialog.
+   *
+   * ## Why the picker lives behind the RPC rather than in the renderer
+   *
+   * `showOpenDialog` is main-only, so *something* has to cross the boundary. The
+   * choice is whether the renderer gets a general "open a folder picker" call and
+   * then passes the result to `installFromFolder`, or whether pick-and-install is
+   * one atomic operation. It is one operation here because the renderer is a
+   * realm plugin UI also runs in: a general picker exposed to it is a picker
+   * anything in that realm could open and read a path from, and the path it
+   * returns is a filesystem location the operator selected. Fusing the two means
+   * the only thing the renderer can do with the picker is install a plugin.
+   */
+  Rpc.make("Plugins.installFromPicker", {
+    success: Schema.NullOr(LoadedPlugin),
+    error: PluginError
   }),
 
   /**

@@ -8,6 +8,12 @@
       "description": "lowercase kebab-case, e.g. github-pull-requests",
       "pattern": "^[a-z0-9][a-z0-9-]*$"
     },
+    "PluginApiVersion": {
+      "type": "integer",
+      "description": "The Starbase plugin API generation this plugin targets. Omit to mean 'the current one'.",
+      "title": "greaterThanOrEqualTo(1)",
+      "minimum": 1
+    },
     "ActivationEvent": {
       "type": "string",
       "description": "onStartupFinished, onCommand:<id>, onTab:<id>, or repoContains:<glob>",
@@ -51,6 +57,9 @@
     },
     "publisher": {
       "type": "string"
+    },
+    "apiVersion": {
+      "$ref": "#/$defs/PluginApiVersion"
     },
     "ui": {
       "type": "string"

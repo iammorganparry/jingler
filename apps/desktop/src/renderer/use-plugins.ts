@@ -50,6 +50,16 @@ export function usePlugins(): PluginsSettingsProps {
     onSettled: refresh
   })
 
+  // Without this the "Install from folder…" button in `PluginsSettings` never
+  // rendered at all: the component only draws it when `onInstallFromFolder` is
+  // provided, and this hook — the only caller — did not provide it. The RPC, the
+  // service and the button all existed; the one line joining them did not, so the
+  // documented install path was reachable only from a devtools console.
+  const installFromPicker = useMutation({
+    mutationFn: () => rpc.pluginsInstallFromPicker(),
+    onSettled: refresh
+  })
+
   const revokeAuth = useMutation({
     mutationFn: ({ pluginId, providerId }: { pluginId: string; providerId: string }) =>
       rpc.pluginsAuthRevoke(pluginId, providerId),
@@ -64,6 +74,7 @@ export function usePlugins(): PluginsSettingsProps {
     authSessions,
     onSetEnabled: (pluginId, enabled) => setEnabled.mutateAsync({ pluginId, enabled }),
     onUninstall: (pluginId) => uninstall.mutateAsync(pluginId),
+    onInstallFromFolder: () => installFromPicker.mutateAsync().then(() => undefined),
     onReveal: (pluginId) => rpc.pluginsReveal(pluginId),
     onRevokeAuth: (pluginId, providerId) =>
       revokeAuth.mutateAsync({ pluginId, providerId })

@@ -95,6 +95,19 @@ export interface ManifestInput {
   readonly version: string
   readonly description?: string
   readonly publisher?: string
+  /**
+   * The Starbase plugin API generation you built against — see
+   * `PLUGIN_API_VERSION`, currently **1**.
+   *
+   * Optional, and worth setting. A Starbase older than your plugin refuses it at
+   * load with a sentence saying so; without this field the same mismatch is a
+   * stack trace from inside your bundle, on someone else's machine.
+   *
+   * A single integer rather than a semver range: the only useful answers are
+   * "this host speaks your API" and "it does not". Only breaking changes to what
+   * a plugin sees bump it, so a new hook or contribution point never will.
+   */
+  readonly apiVersion?: number
   /** ESM entry for the renderer half, relative to the plugin directory. */
   readonly ui?: string
   /** Entry for the extension-host half, relative to the plugin directory. */
@@ -115,6 +128,15 @@ export type TabIdsOf<M> = M extends {
   contributes?: { tabs?: infer T }
 }
   ? T extends readonly { readonly id: infer Id }[]
+    ? Id & string
+    : never
+  : never
+
+/** The dock-pane ids a manifest declares, as a union of string literals. */
+export type PaneIdsOf<M> = M extends {
+  contributes?: { panes?: infer P }
+}
+  ? P extends readonly { readonly id: infer Id }[]
     ? Id & string
     : never
   : never
@@ -150,9 +172,9 @@ export type ContributionId<M> = `${IdOf<M>}.${string}`
  * text contains the required prefix.
  */
 type NamespaceCheck<M> =
-  [TabIdsOf<M> | CommandIdsOf<M>] extends [never]
+  [TabIdsOf<M> | PaneIdsOf<M> | CommandIdsOf<M>] extends [never]
     ? unknown
-    : TabIdsOf<M> | CommandIdsOf<M> extends ContributionId<M>
+    : TabIdsOf<M> | PaneIdsOf<M> | CommandIdsOf<M> extends ContributionId<M>
       ? unknown
       : {
           readonly __starbase_error: `every contribution id must start with "${IdOf<M>}."`
@@ -208,17 +230,60 @@ export interface TabProps {
   readonly pluginId: string
 }
 
+/**
+ * What a plugin's dock-pane component is handed.
+ *
+ * `session` is nullable and a tab's is not, because the two are mounted at
+ * different scopes: a tab belongs to one session and cannot exist without it,
+ * while a dock pane is mounted once for the WINDOW and follows whichever session
+ * has focus — including none, when the last one is closed. A pane must therefore
+ * be able to render an empty state.
+ */
+export interface PaneProps {
+  /** The focused session, or `null` when no session is open. */
+  readonly session: SessionSnapshot | null
+  /** The id of the plugin this pane belongs to. */
+  readonly pluginId: string
+}
+
 /** What a plugin's UI module default-exports. */
 export interface Plugin<M extends ManifestInput = ManifestInput> {
   readonly manifest: M
   readonly views: Readonly<Record<string, ComponentType<TabProps>>>
+  readonly panes: Readonly<Record<string, ComponentType<PaneProps>>>
 }
 
 /**
- * Bind view components to the tabs a manifest declares.
+ * `views` is required when the manifest declares tabs and forbidden-ish (an
+ * optional empty object) when it does not.
  *
- * Every declared tab id must appear in `views`, and no key outside the manifest
- * is allowed. Both directions are enforced at compile time.
+ * Without the conditional, a pane-only plugin still had to write `views: {}` to
+ * satisfy the type — which reads as "this plugin has no tabs, and I had to say so
+ * twice". The same shape applies to `panes` below.
+ */
+type ViewsFor<M> = [TabIdsOf<M>] extends [never]
+  ? { readonly views?: Readonly<Record<never, never>> }
+  : { readonly views: { readonly [K in TabIdsOf<M>]: ComponentType<TabProps> } }
+
+type PanesFor<M> = [PaneIdsOf<M>] extends [never]
+  ? { readonly panes?: Readonly<Record<never, never>> }
+  : { readonly panes: { readonly [K in PaneIdsOf<M>]: ComponentType<PaneProps> } }
+
+/**
+ * Bind components to the tabs and dock panes a manifest declares.
+ *
+ * Every declared id must appear, and no key outside the manifest is allowed.
+ * Both directions are enforced at compile time, for tabs and panes alike.
+ *
+ * ## Panes were missing here, and that made them unbuildable
+ *
+ * The manifest schema accepted `contributes.panes`, the loader read a `panes`
+ * key off the default export, the registry collected them and `SessionSplit`
+ * mounted them. This function — the only supported way to produce that export —
+ * had no `panes` parameter and never set the key. So the documented "plugins add
+ * tabs, dock panes and commands" was two-thirds true: declaring a pane got you a
+ * load error saying its UI module exports no matching pane component, which was
+ * accurate and impossible to act on.
  *
  * @example
  * ```ts
@@ -238,6 +303,22 @@ export interface Plugin<M extends ManifestInput = ManifestInput> {
  * })
  * ```
  *
+ * @example A dock pane. Note `session` may be `null` — a pane outlives any one
+ * session, so it has to render an empty state.
+ * ```ts
+ * const manifest = defineManifest({
+ *   id: "linear", name: "Linear", version: "1.0.0", ui: "dist/ui.js",
+ *   contributes: { panes: [{ id: "linear.activity", label: "Activity", slot: "right" }] }
+ * })
+ *
+ * function Activity({ session }: PaneProps) {
+ *   if (!session) return <div>No session selected.</div>
+ *   return <div>Activity for {session.repo}</div>
+ * }
+ *
+ * export default definePlugin(manifest, { panes: { "linear.activity": Activity } })
+ * ```
+ *
  * @example Forgetting a declared tab fails to compile:
  * ```ts
  * // Error: Property '"linear.issues"' is missing in type '{}'
@@ -248,9 +329,15 @@ export interface Plugin<M extends ManifestInput = ManifestInput> {
  */
 export function definePlugin<const M extends ManifestInput>(
   manifest: M,
-  impl: {
-    readonly views: { readonly [K in TabIdsOf<M>]: ComponentType<TabProps> }
-  }
+  impl: ViewsFor<M> & PanesFor<M>
 ): Plugin<M> {
-  return { manifest, views: impl.views as Record<string, ComponentType<TabProps>> }
+  const { views, panes } = impl as {
+    views?: Record<string, ComponentType<TabProps>>
+    panes?: Record<string, ComponentType<PaneProps>>
+  }
+  // Both default to `{}` rather than being left undefined: the loader iterates
+  // the manifest's declarations and indexes into these, and an absent object
+  // would turn a "you declared a pane with no component" load error into a
+  // TypeError inside the renderer.
+  return { manifest, views: views ?? {}, panes: panes ?? {} }
 }
