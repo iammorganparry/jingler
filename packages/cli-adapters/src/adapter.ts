@@ -279,7 +279,7 @@ export const scriptedPlan = (sessionId: string, rev: number): Plan => ({
  */
 export const scriptedRun =
   (delayMs: number): CliAdapterShape["run"] =>
-  (sessionId, spec, { emit, canUseTool, askQuestion, proposePlan, registerBackgroundStop }) =>
+  (sessionId, spec, { emit, canUseTool, askQuestion, proposePlan, registerBackgroundStop, registerTurnSteer }) =>
     Effect.gen(function* () {
       const pause = delayMs > 0 ? Effect.sleep(`${delayMs} millis`) : Effect.void
 
@@ -384,6 +384,58 @@ Add the existing limiter to the refund route and verify its rejection path.`
         yield* emit({ _tag: "BackgroundTasksChanged", ids: [taskId] })
         yield* emit({ _tag: "Assistant", text: "Delegated the survey to a background agent." })
         yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        return
+      }
+
+      /**
+       * A turn HELD OPEN by sub-agents that are still working.
+       *
+       * The shape the real Claude adapter now has (see `turn-continuation.ts`): the
+       * main agent stops talking, but its `Done` is WITHHELD because the sub-agents
+       * it delegated to are still running inside the same query. The regression this
+       * drives is the one the operator reported — talking to the main agent killed
+       * every sub-agent, because settling the turn closed the query all of them ran
+       * in and the runner then reaped the process.
+       *
+       * The steer handle is registered for the whole held window, exactly as the
+       * real adapter's is, so a message sent mid-flight lands in THIS turn instead
+       * of stopping it and starting another.
+       */
+      if (spec.prompt.includes("[[held-subagents]]")) {
+        const first = `toolu_a_${sessionId}`
+        const second = `toolu_b_${sessionId}`
+        if (registerTurnSteer !== undefined) {
+          yield* registerTurnSteer(async (text) => {
+            await Effect.runPromise(emit({ _tag: "Assistant", text: `Noted: ${text}` }))
+            return "accepted"
+          })
+        }
+        for (const [id, description] of [[first, "Survey the tab bar"], [second, "Audit the theme tokens"]] as const) {
+          yield* emit({ _tag: "SubagentStarted", id, name: "Explore", description, parentId: null })
+        }
+        yield* emit({ _tag: "Assistant", text: "Delegated to two agents." })
+        // The main agent's `result` lands about here. Nothing terminal is emitted:
+        // the sub-agents are still working, so the turn is not over.
+        yield* Effect.sleep("300 millis")
+        yield* emit({ _tag: "Assistant", text: "reading the tab bar", agentId: first })
+        // A tool boundary inside a sub-agent — what the queue auto-flushes on.
+        yield* emit({ _tag: "ToolStart", id: `read_${sessionId}`, name: "Read", target: "tabs.tsx", agentId: first })
+        yield* emit({
+          _tag: "ToolEnd",
+          id: `read_${sessionId}`,
+          status: "success",
+          meta: null,
+          diff: null,
+          preview: null,
+          agentId: first
+        })
+        yield* Effect.sleep("1 seconds")
+        yield* emit({ _tag: "SubagentEnded", id: first, status: "done" })
+        yield* emit({ _tag: "SubagentEnded", id: second, status: "done" })
+        // Only now is the turn genuinely finished.
+        yield* emit({ _tag: "Assistant", text: "Both agents reported back." })
+        yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        if (registerTurnSteer !== undefined) yield* registerTurnSteer(null)
         return
       }
 

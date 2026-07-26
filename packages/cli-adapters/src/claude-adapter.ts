@@ -20,6 +20,7 @@ import { worktreeEnv } from "./worktree-env.js"
 import { capOutput } from "./output-cap.js"
 import { formatQuestionAnswers } from "./question-prompt.js"
 import { hasPlanBlock, parsePlan, planModeInstructions } from "./plan-parse.js"
+import { turnContinuation } from "./turn-continuation.js"
 
 /**
  * Real Claude harness, driven by `@anthropic-ai/claude-agent-sdk`'s `query()`.
@@ -923,6 +924,21 @@ const TEARDOWN_GRACE = "15 seconds"
  */
 const STEER_CONTINUE_GRACE = 2_500
 
+/**
+ * How long a turn may be held open by a sub-agent that has gone silent.
+ *
+ * Not a grace period — a leak guard, and deliberately three orders of magnitude
+ * above `STEER_CONTINUE_GRACE`. A steered turn's continuation follows within
+ * milliseconds, so waiting 2.5s for it is generous. A sub-agent is the opposite:
+ * it runs for minutes and reports `task_progress` only sporadically, so any cap
+ * short enough to feel like a grace period would close the input channel in the
+ * middle of healthy work — ending the query and killing every sub-agent in it,
+ * which is the exact bug this hold exists to fix. This fires only when a
+ * `task_notification` never arrives at all (a harness crash, a dropped bookend),
+ * and its expiry still emits the turn's real withheld `Done`.
+ */
+const SUBAGENT_LINGER_CAP = 10 * 60_000
+
 export const runClaude = (
   sessionId: string,
   spec: SessionSpec,
@@ -953,6 +969,21 @@ export const runClaude = (
         const { query } = await import("@anthropic-ai/claude-agent-sdk")
         const tools = new Map<string, ToolMemo>()
         const bgState = backgroundTaskState()
+        /**
+         * Sub-agents that have started and not yet bookended, keyed by the
+         * spawning `Task`/`Agent` tool_use id.
+         *
+         * The turn's `Done` is withheld while this is non-empty (see the seam at
+         * the `result` below). `SubagentEnded` is the authoritative removal — it
+         * comes off `task_notification`, not the ~150ms "Async agent launched
+         * successfully" ACK the tool_result carries — so this set is the only
+         * honest answer to "has the delegated work actually finished".
+         *
+         * A SYNCHRONOUS Task never keeps the set non-empty at a `result`: its
+         * notification fires just before its tool_result, both well inside the
+         * turn. So this changes nothing for undelegated work.
+         */
+        const liveSubagents = new Set<string>()
 
         // ── Live bash output via tee (see bash-tee.ts) ──────────────────────
         // claude has no partial-output event, so an allowed Bash command is
@@ -1173,21 +1204,50 @@ export const runClaude = (
          * continuation is mostly partial and system frames, so arming only at
          * results meant the first such frame disarmed the net permanently and the
          * wedge it exists to break went unguarded from there on.
+         *
+         * Its DURATION comes from why the turn is being held (see
+         * `turn-continuation.ts`): `STEER_CONTINUE_GRACE` for a continuation that
+         * should arrive in milliseconds, `SUBAGENT_LINGER_CAP` for delegated work
+         * that legitimately runs for minutes. One timer, two very different waits —
+         * a single grace period cannot serve both.
          */
-        let steerWatchdog: ReturnType<typeof setTimeout> | null = null
-        const disarmWatchdog = () => {
-          if (steerWatchdog === null) return
-          clearTimeout(steerWatchdog)
-          steerWatchdog = null
+        let holdTimer: ReturnType<typeof setTimeout> | null = null
+        const disarmHold = () => {
+          if (holdTimer === null) return
+          clearTimeout(holdTimer)
+          holdTimer = null
         }
         try {
           for await (const msg of iterator) {
-            disarmWatchdog()
+            disarmHold()
             const sid = (msg as { session_id?: unknown }).session_id
             // A `fresh` run must leave no trace in the map, or the NEXT run under
             // this key would resume it.
             if (!spec.fresh && typeof sid === "string" && sid.length > 0) {
               resume.set(sessionId, sid)
+            }
+            /**
+             * Mapped BEFORE the seam decision, because the events are what say
+             * whether this message ends the run: a `result` becomes `Done` or
+             * `Failed` depending on `subtype`/`is_error`, and re-deriving that here
+             * would be a second copy of the mapper's rule, free to drift from it.
+             *
+             * Safe to do early — mapping is pure with respect to the query. It only
+             * feeds `tools`/`bgState`, never the child or the input channel, so
+             * nothing below depends on it having run late.
+             */
+            const events = streamEventsFor(msg, tools, bgState)
+            // Keep the live sub-agent set current before anything reads it. Both
+            // edges come from the mapper: `SubagentStarted` off the `Task` tool_use,
+            // `SubagentEnded` off the `task_notification` bookend. The errored
+            // `ToolEnd` is the leak guard — a Task that dies without a notification
+            // would otherwise hold the turn open until `SUBAGENT_LINGER_CAP`.
+            for (const event of events) {
+              if (event._tag === "SubagentStarted") liveSubagents.add(event.id)
+              if (event._tag === "SubagentEnded") liveSubagents.delete(event.id)
+              if (event._tag === "ToolEnd" && event.status === "error") {
+                liveSubagents.delete(event.id)
+              }
             }
             /**
              * Whether this `result` is the end of the run, or a seam in it.
@@ -1197,11 +1257,12 @@ export const runClaude = (
              * one `result` for it (`scripts/probe-claude-steer.ts`). So the common
              * case is: this result ends the run, emit `Done`, close the channel.
              *
-             * The exception is a push that landed in the last few milliseconds and
-             * has not been read yet. Closing the channel would discard the
-             * operator's message outright, so instead the channel stays open for
-             * the turn it will open, and this result's `Done` is withheld — it
-             * would settle a conversation that is about to continue.
+             * Two exceptions, both in `turn-continuation.ts`: a push that landed in
+             * the last few milliseconds and has not been read yet, and sub-agents
+             * that are still working. In either case the channel stays open and this
+             * result's `Done` is withheld — it would settle a conversation that is
+             * about to continue, or (worse, for sub-agents) end the one query every
+             * sub-agent is running inside.
              */
             let extended = false
             if ((msg as { type?: unknown }).type === "result") {
@@ -1228,37 +1289,52 @@ export const runClaude = (
               // Read as LATE as possible: a push that arrives during the probe is
               // then still seen here rather than stranded by the close below.
               //
-              // `takeSteered` OR `hasUnread`, not just the latter: the SDK pulls a
+              // `takeSteered` AND `hasUnread`, not just the latter: the SDK pulls a
               // pushed message out of the channel within a microtask, so by now it
               // usually looks empty whether or not the CLI has acted on it. Probing
               // the real harness in exactly that state showed a SECOND turn follows,
               // so a result after any push is treated as a seam until the stream
-              // goes quiet. The wait is bounded by the watchdog armed at the foot of
-              // this loop, once per message, off `withheldDone`.
-              extended = live.takeSteered() || live.hasUnread()
+              // goes quiet. `takeSteered()` is a CONSUMING read, so it is called
+              // here exactly once and its value handed to the policy — never
+              // re-read, and never behind a `||` that could short-circuit past it.
+              // The wait is bounded by the timer armed at the foot of this loop,
+              // once per message, off `withheldDone`.
+              const verdict = turnContinuation({
+                steered: live.takeSteered(),
+                unread: live.hasUnread(),
+                liveSubagents: liveSubagents.size,
+                terminalKind: events.some((event) => event._tag === "Failed")
+                  ? "failed"
+                  : events.some((event) => event._tag === "Done")
+                    ? "done"
+                    : null
+              })
+              extended = verdict.kind === "continue"
               if (!extended) live.finish()
             }
-            for (const event of streamEventsFor(msg, tools, bgState)) {
+            for (const event of events) {
               // A command has finished: its ToolEnd carries the authoritative
               // output, so stop tailing and drop the temp file BEFORE emitting —
               // otherwise a late poll could re-open the settled card. A no-op for
               // any tool that wasn't teed.
               if (event._tag === "ToolEnd") stopTee(event.id)
               // The continuation's own result will carry the real `Done`; this one
-              // is withheld, not dropped (see `withheldDone`). A `Failed` is never
-              // withheld — the run IS over, and the channel must close or the query
-              // would never end.
+              // is withheld, not dropped (see `withheldDone`).
               if (extended && event._tag === "Done") {
                 withheldDone = event
                 continue
               }
-              if (extended && event._tag === "Failed") {
-                disarmWatchdog()
-                live.finish()
-              }
               if (event._tag === "Done" || event._tag === "Failed") {
                 terminal = true
                 withheldDone = null
+                // A terminal event we are NOT withholding ends the run, so the
+                // channel must close or the input generator parks forever with
+                // nothing left to wake it. Already done for a `result` (the policy
+                // said close); this covers a `Failed` mapped from anything else,
+                // which would otherwise fall between the two and wedge the query.
+                // `finish()` is idempotent.
+                disarmHold()
+                live.finish()
               }
               await runP(ctx.emit(event))
             }
@@ -1268,8 +1344,26 @@ export const runClaude = (
             // holding the door open forever: nothing would ever close the input
             // channel again, and a continuation that stalled would leave the turn
             // streaming until the operator stopped it by hand.
+            //
+            // Asked of the same policy as the seam, so the two cannot disagree: a
+            // sub-agent that bookended while the turn was held gets the channel
+            // closed HERE, which returns the input generator, exits this loop, and
+            // lets the post-loop branch emit the withheld `Done` for real.
             if (withheldDone !== null) {
-              steerWatchdog = setTimeout(() => live.finish(), STEER_CONTINUE_GRACE)
+              const held = turnContinuation({
+                // Consumed at the result; a fresh push shows up as `unread`.
+                steered: false,
+                unread: live.hasUnread(),
+                liveSubagents: liveSubagents.size,
+                terminalKind: null
+              })
+              if (held.kind === "close") live.finish()
+              else {
+                holdTimer = setTimeout(
+                  () => live.finish(),
+                  held.because === "subagent-work" ? SUBAGENT_LINGER_CAP : STEER_CONTINUE_GRACE
+                )
+              }
             }
           }
           // A withheld `Done` outlived the turn it belonged to: the continuation we
@@ -1296,7 +1390,7 @@ export const runClaude = (
           // End of run (or a throw / interrupt-driven iterator close): tear down
           // any watcher still open — a command whose ToolEnd never arrived, or the
           // operator stopping mid-command — so no timer or temp file outlives it.
-          disarmWatchdog()
+          disarmHold()
           // Close the input channel and retract the steer handle together: a live
           // handle after the turn would accept a message into a query that is gone,
           // reporting `accepted` for a message nothing will ever read.
