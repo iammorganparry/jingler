@@ -259,6 +259,14 @@ export const loadPluginUi = async (
       : null,
     manifest.capabilities?.untrustedRepos !== undefined
       ? "capabilities.untrustedRepos"
+      : null,
+    // `onStartupFinished`, `onCommand:` and `onTab:` are all dispatched now.
+    // `repoContains:` is not: matching a glob against the active session's repo
+    // needs a scanner nothing implements, so a plugin waiting on it would wait
+    // forever. Named specifically rather than refusing `activationEvents`
+    // wholesale, since the other three work.
+    (manifest.activationEvents ?? []).some((e) => e.startsWith("repoContains:"))
+      ? "activationEvents: repoContains"
       : null
   ].filter((x): x is string => x !== null)
 

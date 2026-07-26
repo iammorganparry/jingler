@@ -47,6 +47,21 @@ export interface PluginsSettingsProps {
    * is knowable by the process that reads the directory.
    */
   loadErrors?: ReadonlyArray<{ readonly id: string; readonly message: string }>
+  /**
+   * Why the operator's last action failed, if it did.
+   *
+   * Every callback below returns a promise, and this component invokes them as
+   * `void onX()` — a rejection with nowhere to go became an unhandled promise
+   * rejection visible only in devtools. The install flow made that plainly wrong:
+   * the two commonest outcomes of choosing a folder are "no
+   * `starbase.plugin.json` in the selected folder" and "already installed,
+   * uninstall it first", and both presented as the picker closing and nothing
+   * happening. Exactly the silently-absent failure the rest of this system
+   * refuses to ship.
+   */
+  actionError?: string | null
+  /** Dismiss {@link actionError}. */
+  onDismissActionError?: () => void
   onSetEnabled: (pluginId: string, enabled: boolean) => void | Promise<void>
   onUninstall: (pluginId: string) => void | Promise<void>
   onReveal: (pluginId: string) => void | Promise<void>
@@ -202,6 +217,8 @@ function Row({
 export function PluginsSettings({
   catalog,
   loadErrors = [],
+  actionError = null,
+  onDismissActionError,
   onSetEnabled,
   onUninstall,
   onReveal,
@@ -239,6 +256,32 @@ export function PluginsSettings({
           </button>
         )}
       </div>
+
+      {/* Directly under the Install button, because that is the control whose
+          failures the operator most needs explained and the one they were just
+          looking at. */}
+      {actionError !== null && (
+        <div
+          data-testid="plugin-action-error"
+          role="alert"
+          className="flex items-start gap-2 rounded border border-red/50 bg-panel px-3 py-2.5"
+        >
+          <AlertTriangle size={14} className="mt-0.5 flex-none text-red" />
+          <span className="flex-1 text-[12.5px] leading-[1.6] text-text-body">
+            {actionError}
+          </span>
+          {onDismissActionError && (
+            <button
+              type="button"
+              data-testid="plugin-action-error-dismiss"
+              onClick={onDismissActionError}
+              className="flex-none text-[11.5px] text-dim transition-colors hover:text-text-bright"
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
 
       {plugins.length === 0 && undecodable.length === 0 ? (
         <div

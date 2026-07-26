@@ -218,6 +218,24 @@ mounting scope does:
 So a pane must handle `session === null` and render an empty state. Putting a pane
 in `views` is a load error naming the pane; you will see it in Settings › Plugins.
 
+**All the hooks work in a pane**, with one substitution: use `useSessionOrNull()`
+instead of `useSession()`. `useSession` returns a non-nullable snapshot for tabs,
+which cannot be honest in a pane with nothing open, so it throws there with a
+message pointing at the alternative.
+
+```tsx
+function ActivityPane() {
+  const host = useHost()               // fine
+  const storage = usePluginStorage()   // fine
+  const session = useSessionOrNull()   // null when nothing is open
+  if (!session) return <div className="text-dim">No session selected.</div>
+  return <div className="text-text">{session.repo}</div>
+}
+```
+
+A pane that throws gets its own error card scoped to the dock, and the rest of the
+app keeps working — the same containment a tab gets.
+
 ## Fields Starbase refuses
 
 The manifest schema is VS Code's, so it validates several things Starbase does not
@@ -227,6 +245,7 @@ yet honour. Declaring one is a **load failure**, not a silent no-op:
 - `contributes.settings`
 - `contributes.authenticationProviders`
 - `capabilities.untrustedRepos`
+- `activationEvents: ["repoContains:…"]` — the other three events work; see [Activation](#activation)
 
 Do not put them in a manifest. A plugin declaring any of them contributes nothing
 at all and shows a message in Settings › Plugins saying which field and why. The
@@ -262,18 +281,39 @@ there is no route for it, by design.
 
 Your host half stays dormant until one of its `activationEvents` fires:
 
-| Event | Fires when |
-|---|---|
-| `onTab:<contributionId>` | the operator opens that tab |
-| `onCommand:<contributionId>` | the operator runs that command |
-| `onStartupFinished` | the window is interactive |
-| `repoContains:<glob>` | the active session's repo has a matching file |
+| Event | Fires when | Dispatched |
+|---|---|---|
+| `onTab:<contributionId>` | the operator opens that tab | yes |
+| `onCommand:<contributionId>` | the operator runs that command | yes |
+| `onStartupFinished` | the app has finished starting | yes |
+| `repoContains:<glob>` | the active session's repo has a matching file | **no — refused at load** |
 
 Prefer the narrowest one. `onStartupFinished` costs startup time for work the
 operator may never ask for.
 
+`repoContains:` is in the manifest schema and matching a glob against a session's
+repo is implemented by nothing, so a plugin waiting on it would wait forever.
+Declaring it is a load failure, like the fields in the previous section — the other
+three all work, so only this one is refused.
+
 **Omitting `activationEvents` entirely is valid** and correct for a UI-only
 plugin — its tabs still render, and no Node process is ever started.
+
+A plugin that is **disabled** is never activated by any event, including
+`onStartupFinished`. "Disabled" means it runs no code, and disabling one also tears
+down a host half that is already running.
+
+### Activation is not the same as an invoke
+
+Worth stating because it used to be untrue. `activate()` was once reachable only
+through `invoke()`, which made `onTab` *appear* to work — a tab's first render
+usually calls `host.invoke(...)`, and activation happened as a side effect on the
+way past. A tab that rendered from `session` alone got nothing, and
+`onStartupFinished` never fired at all.
+
+Both are dispatched properly now, so you can rely on `activate` having run before
+your first command, and on a host half that only subscribes to events actually
+starting.
 
 ## Tab visibility
 

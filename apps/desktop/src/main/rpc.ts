@@ -1785,6 +1785,23 @@ const cachedCatalog = Effect.suspend(() => {
   )
 })
 
+/**
+ * Tear down a plugin's host half, tolerating every reason there might not be one.
+ *
+ * Disable and uninstall both need this and neither should fail because of it: a
+ * UI-only plugin has no host half, a never-activated plugin has nothing running,
+ * and a build without an extension host has no runtime at all. All three are
+ * normal, and none of them is a reason to refuse to disable something.
+ *
+ * `deactivate` on the runtime is already a no-op for a plugin it is not running,
+ * so this only has to absorb the "no host here" failure from `get()`.
+ */
+const deactivateQuietly = (pluginId: string) =>
+  PluginHost.get().pipe(
+    Effect.flatMap((host) => Effect.promise(() => host.deactivate(pluginId))),
+    Effect.catchAll(() => Effect.void)
+  )
+
 const pluginById = (pluginId: string) =>
   Effect.flatMap(cachedCatalog, (catalog) => {
     const found = catalog.plugins.find((p) => p.manifest.id === pluginId)
@@ -2324,8 +2341,22 @@ const HandlersLayer = StarbaseRpcs.toLayer({
       )
     ),
 
+  /**
+   * Flip the switch, and STOP the plugin if it is being turned off.
+   *
+   * Writing `disabledPlugins` alone made "disabled" mean "contributes no UI and
+   * accepts no new invokes". The renderer stops rendering its tabs, so it looks
+   * off — while an already-activated host half keeps its subscriptions, its
+   * timers and any in-flight work running until the app restarts.
+   *
+   * Disabling is almost always damage control: the plugin is doing something the
+   * operator wants stopped, and it was the one thing the switch did not do.
+   */
   "Plugins.setEnabled": ({ pluginId, enabled }) =>
-    PluginRegistry.setEnabled(pluginId, enabled),
+    Effect.gen(function* () {
+      yield* PluginRegistry.setEnabled(pluginId, enabled)
+      if (!enabled) yield* deactivateQuietly(pluginId)
+    }),
 
   /**
    * Uninstall, and drop the plugin's credentials with it.
@@ -2336,6 +2367,11 @@ const HandlersLayer = StarbaseRpcs.toLayer({
    */
   "Plugins.uninstall": ({ pluginId }) =>
     Effect.gen(function* () {
+      // Stop it BEFORE deleting its directory. A host half whose `deactivate`
+      // touches its own files should find them there, and an uninstall that
+      // leaves code running against a directory that no longer exists is a
+      // stranger failure than one that stops it first.
+      yield* deactivateQuietly(pluginId)
       yield* PluginRegistry.uninstall(pluginId)
       yield* PluginAuth.revokeAll(pluginId)
     }),
@@ -2391,6 +2427,24 @@ const HandlersLayer = StarbaseRpcs.toLayer({
       const plugin = yield* pluginById(pluginId)
       return yield* Effect.tryPromise({
         try: () => host.invoke(plugin, commandId, arg),
+        catch: (cause) =>
+          cause instanceof PluginError
+            ? cause
+            : new PluginError({ pluginId, reason: String(cause) })
+      })
+    }),
+
+  "Plugins.activate": ({ pluginId }) =>
+    Effect.gen(function* () {
+      const host = yield* PluginHost.get()
+      const plugin = yield* pluginById(pluginId)
+      // A disabled plugin must not be woken by an event. The renderer stops
+      // rendering its tabs when it is disabled, so it should not reach here — but
+      // `onStartupFinished` dispatch iterates the catalog, and "disabled" has to
+      // mean "runs no code" at every entry point rather than most of them.
+      if (!plugin.enabled) return
+      yield* Effect.tryPromise({
+        try: () => host.activate(plugin),
         catch: (cause) =>
           cause instanceof PluginError
             ? cause

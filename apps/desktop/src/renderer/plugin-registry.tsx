@@ -34,6 +34,8 @@ import {
   type ActivePlugin,
   type PluginLoadError
 } from "./plugin-loader.js"
+import { PluginActivateOnMount } from "./plugin-activate-on-mount.js"
+import { PluginPaneHost } from "./plugin-pane-host.js"
 import { PluginTabHost } from "./plugin-tab-host.js"
 
 interface PluginRegistryValue {
@@ -123,22 +125,61 @@ export function PluginProvider({ children }: { children: ReactNode }) {
   })
 
   const value = useMemo<PluginRegistryValue>(() => {
+    /**
+     * The `activationEvents` each plugin declared, by id.
+     *
+     * Read from the catalog because `ActivePlugin` carries only what the loader
+     * built — ids, versions, contributions — and the events live on the manifest.
+     */
+    const eventsFor = new Map(
+      (catalog?.plugins ?? []).map((p) => [
+        p.manifest.id,
+        p.manifest.activationEvents ?? []
+      ])
+    )
+
     const tabs = loaded.active.flatMap((plugin) =>
       plugin.tabs.map((tab) => ({
         ...tab,
         // Every plugin body is wrapped HERE rather than in the loader, so the
         // boundary is guaranteed present no matter who built the contribution.
+        //
+        // The activator sits OUTSIDE the boundary: dispatching an activation
+        // event is the app's business, and a plugin whose render throws should
+        // still have had its host half told the tab was opened — that is often
+        // exactly the code that would fix the render.
         render: (session: Parameters<typeof tab.render>[0], ctx: Parameters<typeof tab.render>[1]) => (
-          <PluginTabHost pluginId={plugin.id} session={session}>
-            {tab.render(session, ctx)}
-          </PluginTabHost>
+          <PluginActivateOnMount
+            pluginId={plugin.id}
+            shouldActivate={(eventsFor.get(plugin.id) ?? []).includes(`onTab:${tab.id}`)}
+          >
+            <PluginTabHost pluginId={plugin.id} session={session}>
+              {tab.render(session, ctx)}
+            </PluginTabHost>
+          </PluginActivateOnMount>
         )
       }))
     )
-    // Panes are NOT wrapped in `PluginTabHost`: it provides the per-session view
-    // context a tab needs, and a dock has no single session to scope to. Its own
-    // boundary comes with the pane host in `session-split`.
-    const panes = loaded.active.flatMap((plugin) => plugin.panes)
+    // Panes get `PluginPaneHost`, not `PluginTabHost` — same job, nullable
+    // session, dock-shaped failure copy. Wrapped HERE for the same reason tabs
+    // are: the boundary is then guaranteed present no matter who built the
+    // contribution.
+    //
+    // A previous version of this comment said a pane's boundary "comes with the
+    // pane host in session-split". It did not: `renderDock` there is a bare
+    // `<div>`, so nothing on the pane path had a boundary or a view provider —
+    // one throwing pane blanked the window, and every SDK hook threw inside a
+    // pane despite the SDK documenting them as working there.
+    const panes = loaded.active.flatMap((plugin) =>
+      plugin.panes.map((pane) => ({
+        ...pane,
+        render: (session: Parameters<typeof pane.render>[0]) => (
+          <PluginPaneHost pluginId={plugin.id} session={session}>
+            {pane.render(session)}
+          </PluginPaneHost>
+        )
+      }))
+    )
 
     return {
       tabs,

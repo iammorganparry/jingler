@@ -116,4 +116,59 @@ export const installPluginHost = (
     yield* PluginAuth.registerProvider(
       makeGithubAuthProvider((effect) => appRuntime.runPromise(effect))
     )
+
+    yield* dispatchStartupActivations(hostRuntime)
+  })
+
+/**
+ * Fire `onStartupFinished` for every enabled plugin that declares it.
+ *
+ * Nothing fired it before, so this was the one activation event that could not
+ * happen at all: `activate()` was reachable only through `invoke()`, which needs a
+ * command call, which needs UI. A plugin whose entire purpose is to subscribe to
+ * session events in `activate` — a legitimate and documented shape — never ran a
+ * line of code.
+ *
+ * ## Why here rather than in the renderer
+ *
+ * "Startup finished" is a property of the app, not of a window, and main is the
+ * only place that knows the difference. Dispatching from the renderer would fire
+ * it again on every reload of the renderer, which is not what the name promises.
+ *
+ * ## Why failures are logged and swallowed
+ *
+ * This runs during boot. A plugin whose `activate` throws must not take the app
+ * down with it, and there is no operator watching a modal at this moment — the
+ * failure belongs in the log and in Settings, which is where
+ * `onActivationFailed` already puts it. Every activation is independent for the
+ * same reason: one bad plugin must not stop the next one starting.
+ */
+const dispatchStartupActivations = (host: PluginHostRuntime) =>
+  Effect.gen(function* () {
+    const catalog = yield* PluginRegistry.list().pipe(
+      Effect.catchAll(() => Effect.succeed(null))
+    )
+    if (catalog === null) return
+
+    const wanted = catalog.plugins.filter(
+      (p) =>
+        p.enabled &&
+        p.manifest.main !== undefined &&
+        (p.manifest.activationEvents ?? []).includes("onStartupFinished")
+    )
+    if (wanted.length === 0) return
+
+    yield* Effect.forEach(
+      wanted,
+      (plugin) =>
+        Effect.promise(() =>
+          host.activate(plugin).catch((cause: unknown) => {
+            console.error(
+              `[plugin:${plugin.manifest.id}] onStartupFinished activation failed:`,
+              cause
+            )
+          })
+        ),
+      { concurrency: "unbounded", discard: true }
+    )
   })

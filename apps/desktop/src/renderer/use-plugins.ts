@@ -10,6 +10,7 @@
  * the whole catalog, `setEnabled` and friends return nothing useful, and the
  * authoritative answer is the next catalog emission from disk.
  */
+import { useCallback, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PluginsSettingsProps } from "@starbase/ui"
 import { rpc } from "./rpc-client.js"
@@ -21,10 +22,57 @@ import {
 
 const authSessionsKey = ["plugin-auth-sessions"] as const
 
+/**
+ * The operator-facing sentence from a failed RPC.
+ *
+ * `PluginError` crosses the boundary as a tagged error carrying `reason`, which
+ * is already written to be read — "No starbase.plugin.json in the selected
+ * folder." The `message` fallback catches anything else, and the last resort
+ * exists because a rejection with neither is still a rejection the operator
+ * deserves to know happened.
+ */
+const reasonOf = (cause: unknown): string => {
+  if (typeof cause === "object" && cause !== null) {
+    const maybe = cause as { reason?: unknown; message?: unknown }
+    if (typeof maybe.reason === "string" && maybe.reason.length > 0) return maybe.reason
+    if (typeof maybe.message === "string" && maybe.message.length > 0) return maybe.message
+  }
+  return "That did not work, and the reason was not reported."
+}
+
 export function usePlugins(): PluginsSettingsProps {
   const catalog = usePluginCatalog()
   const loadErrors = usePluginErrors()
   const queryClient = useQueryClient()
+
+  /**
+   * Why the last action failed.
+   *
+   * One slot rather than per-mutation error state: the operator performs one of
+   * these at a time, and a newer failure supersedes an older one. Held here
+   * rather than read off `mutation.error` because four mutations would give four
+   * independent errors with no ordering between them, and the pane shows one
+   * message.
+   */
+  const [actionError, setActionError] = useState<string | null>(null)
+  const dismiss = useCallback(() => setActionError(null), [])
+
+  /**
+   * Run a mutation and route its rejection to the pane instead of the void.
+   *
+   * `PluginsSettings` invokes these as `void onX()`, so a rejection had nowhere
+   * to go and became an unhandled promise rejection in devtools. Resolving after
+   * catching is deliberate: the caller's `void` wants a settled promise, and the
+   * error is now on screen rather than thrown past it.
+   */
+  const reporting = <A>(run: () => Promise<A>) => async (): Promise<void> => {
+    setActionError(null)
+    try {
+      await run()
+    } catch (cause) {
+      setActionError(reasonOf(cause))
+    }
+  }
 
   const { data: authSessions = [] } = useQuery({
     queryKey: authSessionsKey,
@@ -72,11 +120,14 @@ export function usePlugins(): PluginsSettingsProps {
     catalog,
     loadErrors,
     authSessions,
-    onSetEnabled: (pluginId, enabled) => setEnabled.mutateAsync({ pluginId, enabled }),
-    onUninstall: (pluginId) => uninstall.mutateAsync(pluginId),
-    onInstallFromFolder: () => installFromPicker.mutateAsync().then(() => undefined),
-    onReveal: (pluginId) => rpc.pluginsReveal(pluginId),
+    actionError,
+    onDismissActionError: dismiss,
+    onSetEnabled: (pluginId, enabled) =>
+      reporting(() => setEnabled.mutateAsync({ pluginId, enabled }))(),
+    onUninstall: (pluginId) => reporting(() => uninstall.mutateAsync(pluginId))(),
+    onInstallFromFolder: reporting(() => installFromPicker.mutateAsync()),
+    onReveal: (pluginId) => reporting(() => rpc.pluginsReveal(pluginId))(),
     onRevokeAuth: (pluginId, providerId) =>
-      revokeAuth.mutateAsync({ pluginId, providerId })
+      reporting(() => revokeAuth.mutateAsync({ pluginId, providerId }))()
   }
 }

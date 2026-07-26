@@ -35,6 +35,11 @@ const fakeProcess = () => {
     },
     kill: () => {
       killed = true
+      // A real `utilityProcess` fires `exit` when it is killed — the SAME event
+      // a crash fires. The fake used to swallow it, which is why the suite could
+      // not see that `shutdown()` was respawning the host on quit: nothing in
+      // the tests ever reached `handleExit` by the kill path.
+      onExit?.(0)
     }
   }
 
@@ -84,7 +89,20 @@ const setup = (count = 4, handleRequest: HostRequestHandler = noRequests) => {
     handleRequest,
     events
   )
-  return { runtime, procs, events, current: () => procs[index - 1]! }
+  return {
+    runtime,
+    procs,
+    events,
+    current: () => procs[index - 1]!,
+    /**
+     * How many fakes the runtime has actually taken.
+     *
+     * `procs` is pre-filled to `count` whether or not they get used, so its
+     * length says nothing about spawning — asserting on it looks like a spawn
+     * count and is a constant.
+     */
+    spawned: () => index
+  }
 }
 
 /** Let queued microtasks run — the runtime awaits `ready` before sending. */
@@ -340,5 +358,36 @@ describe("shutdown", () => {
     runtime.shutdown()
     expect(procs[0]!.killed).toBe(true)
     expect(runtime.isActivated("linear")).toBe(false)
+  })
+
+  it("does not respawn the host it just killed", async () => {
+    // Killing a child fires the same `exit` event a crash does, and
+    // `handleExit` could not tell them apart: with the crash budget unspent it
+    // restarted, forking a fresh utilityProcess in the middle of `before-quit`.
+    // The healthy-uptime reset made that the normal case, since any host up for
+    // a minute has `restarts === 0`.
+    const { runtime, procs, spawned } = setup()
+    await activateFully(runtime, procs[0]!)
+    expect(spawned()).toBe(1)
+
+    runtime.shutdown()
+    await tick()
+
+    expect(spawned(), "a second process was spawned during shutdown").toBe(1)
+  })
+
+  it("rejects in-flight calls rather than parking them forever", async () => {
+    // `handleExit` normally does this and now returns early on an intentional
+    // kill, so `shutdown` has to. A quit that leaves promises unsettled is a
+    // quit that can hang on them.
+    const { runtime, procs } = setup()
+    await activateFully(runtime, procs[0]!)
+
+    const inFlight = runtime.invoke(plugin(), "linear.sync")
+    await tick()
+
+    runtime.shutdown()
+
+    await expect(inFlight).rejects.toThrow(/shut down/)
   })
 })

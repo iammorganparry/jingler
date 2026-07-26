@@ -67,7 +67,13 @@ export type {
 
 export type { Disposable, PluginStorage, SessionSnapshot } from "./common.js"
 
-export { useCommand, useHost, usePluginStorage, useSession } from "./hooks.js"
+export {
+  useCommand,
+  useHost,
+  usePluginStorage,
+  useSession,
+  useSessionOrNull
+} from "./hooks.js"
 export type { HostBridge, PluginViewValue } from "./context.js"
 
 /**

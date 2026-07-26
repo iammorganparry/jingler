@@ -69,7 +69,8 @@ export default definePlugin(manifest, {
 
 ## `@starbase/plugin-sdk` — hooks
 
-All throw if called outside a plugin view.
+All throw if called outside a plugin view. All work in a contributed **tab or dock
+pane** — in a pane, substitute `useSessionOrNull` for `useSession`.
 
 ### `useHost`
 
@@ -86,6 +87,17 @@ function useSession(): SessionSnapshot
 ```
 
 The session this tab is decorating — the same value as `props.session`.
+
+### `useSessionOrNull`
+
+```ts
+function useSessionOrNull(): SessionSnapshot | null
+```
+
+The pane-safe counterpart to `useSession`. A dock pane outlives any one session, so
+it must render an empty state; `useSession` throws in that moment rather than
+widening its return type for every tab that cannot hit the case. In a tab this
+never returns null and `useSession` is the better call.
 
 ### `usePluginStorage`
 
@@ -169,6 +181,7 @@ interface ManifestInput {
   readonly version: string             // bump to force a reload
   readonly description?: string
   readonly publisher?: string
+  readonly apiVersion?: number         // the API generation you built against; set it
   readonly ui?: string                 // renderer entry, relative to plugin dir
   readonly main?: string               // host entry, relative to plugin dir
   readonly activationEvents?: readonly ActivationEvent[]
@@ -226,7 +239,13 @@ type ActivationEvent =
   | `repoContains:${string}`
 ```
 
-Omit entirely for a UI-only plugin — no Node process is started.
+`onStartupFinished`, `onCommand:` and `onTab:` are all dispatched.
+**`repoContains:` is not** — matching a glob against a session's repo is
+implemented by nothing, so declaring it is a load failure rather than a wait that
+never ends.
+
+Omit `activationEvents` entirely for a UI-only plugin — no Node process is started.
+A disabled plugin is never activated by any event.
 
 ### `TabVisibility`
 
@@ -238,10 +257,11 @@ type TabVisibility = "always" | "hasPr" | "hasWorktree" | "hasIssue"
 
 ```ts
 type TabIdsOf<M>        // union of tab ids a manifest declares
+type PaneIdsOf<M>       // union of dock-pane ids a manifest declares
 type CommandIdsOf<M>    // union of command ids a manifest declares
 type IdOf<M>            // the plugin's own id, as a literal
 type ContributionId<M>  // `${IdOf<M>}.${string}`
-type Plugin<M>          // { manifest, views }
+type Plugin<M>          // { manifest, views, panes }
 type Disposable         // { dispose(): void }
 ```
 

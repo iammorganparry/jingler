@@ -52,8 +52,16 @@ export interface HostBridge {
 export interface PluginViewValue {
   /** The plugin that owns the view being rendered. */
   readonly pluginId: string
-  /** The session this view is decorating. */
-  readonly session: SessionSnapshot
+  /**
+   * The session this view is decorating, or `null` in a dock pane with no
+   * session open.
+   *
+   * Nullable because a pane is mounted once for the WINDOW and follows whichever
+   * session has focus — including none, when the last one is closed. A tab's
+   * session can never be null, which is why `useSession` still returns a
+   * non-nullable snapshot and `useSessionOrNull` exists for panes.
+   */
+  readonly session: SessionSnapshot | null
   /** This plugin's bridge to the app. */
   readonly bridge: HostBridge
 }

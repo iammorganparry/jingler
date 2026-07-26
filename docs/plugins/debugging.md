@@ -46,7 +46,8 @@ The messages you will actually hit:
 | `its UI module exports no default` | Your entry is missing `export default definePlugin(...)`. |
 | `declares the tab "x" but its UI module exports no matching view` | The manifest and the `views` map disagree. |
 | `declares the pane "x" but its UI module exports no matching pane component` | Panes go in the **`panes`** key of `definePlugin`, not `views`. |
-| `contributes.keybindings — not supported in this build` | Real. Keybinding and settings contributions validate but are dispatched by nothing yet, so the loader refuses rather than letting you ship a shortcut that never fires. Remove it. |
+| `… declared but not honoured by this build` | Real, and deliberate. Some manifest fields validate against the schema and are consumed by nothing, so the loader refuses the plugin rather than letting you ship a declaration that silently does nothing. The message names the field. It covers `contributes.keybindings`, `contributes.settings`, `contributes.authenticationProviders`, `capabilities.untrustedRepos` and `activationEvents: repoContains` — remove whichever it names. |
+| `needs plugin API v<n>` | Your manifest's `apiVersion` is newer than this Starbase implements. Update the app, or install a build of the plugin made for its generation. Checked before your module is imported, which is why you get this instead of a stack trace. |
 | `entry-missing` (in "Could not be read") | The manifest names a `ui`/`main` file that is not on disk. Almost always a forgotten `pnpm build`. |
 
 ## Manifest failures
@@ -66,7 +67,7 @@ Two things that are *not* failures and produce no entry:
 ## Render failures
 
 *Symptom: the tab appears, and clicking it shows a bordered error card naming
-your plugin.*
+your plugin. Or a dock pane shows a smaller card in its place.*
 
 Your component threw while rendering. The card shows the message; the stack is in
 **renderer devtools**:
@@ -75,10 +76,14 @@ Your component threw while rendering. The card shows the message; the stack is i
 View › Toggle Developer Tools      (or Cmd+Opt+I / Ctrl+Shift+I)
 ```
 
-The card is contained on purpose — the rest of Starbase keeps working, and the
-other tabs are unaffected. It clears by itself when the subtree beneath it is
-replaced, so **fixing your plugin and rebuilding makes the card go away** without
-a restart.
+Tabs and panes each get their own boundary, so a throw in one is contained and the
+rest of the app keeps working. It clears by itself when the subtree beneath it is
+replaced, so **fixing your plugin and rebuilding makes the card go away** without a
+restart.
+
+One cause specific to panes: **`useSession()` throws in a pane with no session
+open.** A dock outlives any one session, so call `useSessionOrNull()` there — the
+error message says as much.
 
 The single most common cause, and the one that will not reproduce on your
 machine: **you bundled React.** See [the React rule](#the-react-rule).
@@ -109,10 +114,13 @@ Failures Starbase prints for you:
 
 Things worth knowing when a host half misbehaves:
 
-- **`activate` runs on your declared `activationEvents`, not at startup.** A
-  plugin with no `activationEvents` never starts a process at all — Settings says
-  "no background process" in its row. If your `activate` is not running, check
-  that first.
+- **`activate` runs on your declared `activationEvents`.** `onTab:` fires when the
+  operator opens that tab, `onCommand:` when the command runs, and
+  `onStartupFinished` shortly after the app boots. A plugin with no
+  `activationEvents` never starts a process at all — Settings says "no background
+  process" in its row. If your `activate` is not running, check that first, then
+  check the plugin is enabled: a disabled plugin is activated by no event, and
+  disabling one tears down a host half that was already running.
 - **All plugins share one host process.** A crash takes every plugin's host half
   down with it. Starbase restarts it once and re-activates; a plugin that crashes
   again immediately is left down rather than looped. A minute of healthy uptime

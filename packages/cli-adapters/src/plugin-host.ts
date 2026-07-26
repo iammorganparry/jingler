@@ -97,6 +97,24 @@ export class PluginHostRuntime {
   private ready = false
   private restarts = 0
   private downReason: string | null = null
+  /**
+   * Set once `shutdown` has been called, and never cleared.
+   *
+   * `shutdown` kills the child, and killing a child fires the SAME `onExit`
+   * handler a crash does — `handleExit` had no way to tell the two apart. With
+   * the crash budget unspent it did what it does for a crash: incremented
+   * `restarts` and called `start()`, forking a fresh `utilityProcess` in the
+   * middle of `before-quit`. A new Node process racing app teardown, and if the
+   * fork throws that late it throws inside an exit handler.
+   *
+   * The healthy-uptime reset made this the NORMAL case rather than a rare one:
+   * any host that had been up a minute has `restarts === 0`, so every ordinary
+   * quit with a live plugin host hit it.
+   *
+   * Never cleared because a runtime that has been shut down is finished; the
+   * layer builds a new one on the next boot.
+   */
+  private shuttingDown = false
   private nextId = 0
   /** Pending "this host has been up long enough" timer. See HEALTHY_UPTIME_MS. */
   private healthyTimer: ReturnType<typeof setTimeout> | undefined
@@ -156,6 +174,12 @@ export class PluginHostRuntime {
     // The uptime it was accruing did not happen.
     clearTimeout(this.healthyTimer)
     this.healthyTimer = undefined
+
+    // An intentional kill is not a crash. Everything below this line — rejecting
+    // waiters, restarting, re-activating — is the response to a host that died
+    // on its own, and running it during `shutdown` respawns the process we just
+    // killed. `shutdown` has already cleared the state this would rebuild.
+    if (this.shuttingDown) return
 
     // Every in-flight call dies with the process. Rejecting them explicitly is
     // the difference between a plugin command that reports a crash and one that
@@ -460,12 +484,33 @@ export class PluginHostRuntime {
 
   /** Terminate the host. Called on quit; leaves no orphan Node process. */
   shutdown(): void {
+    // BEFORE the kill, because `kill()` may deliver `exit` synchronously and
+    // `handleExit` reads this flag to know the death was intentional.
+    this.shuttingDown = true
     clearTimeout(this.healthyTimer)
     this.healthyTimer = undefined
     this.process?.kill()
     this.process = null
     this.ready = false
     this.activated.clear()
+
+    // Anything still in flight dies with the process. `handleExit` normally does
+    // this and now returns early, so it is done here instead — a quit that
+    // leaves promises parked forever is a quit that can hang on them.
+    for (const [, waiter] of this.waiters) {
+      waiter.reject(
+        new PluginError({ pluginId: "<host>", reason: "the plugin host was shut down" })
+      )
+    }
+    this.waiters.clear()
+
+    const stranded = this.readyWaiters
+    this.readyWaiters = []
+    for (const waiter of stranded) {
+      waiter.reject(
+        new PluginError({ pluginId: "<host>", reason: "the plugin host was shut down" })
+      )
+    }
   }
 }
 

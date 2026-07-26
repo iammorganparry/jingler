@@ -16,12 +16,14 @@ plugin that declares one** and says so in Settings › Plugins.
 | `contributes.tabs` | Works |
 | `contributes.panes` | Works — dock panes, one per window |
 | `contributes.commands` | Works — dispatched to your host half |
-| `activationEvents`, `extensionDependencies` | Works |
+| `activationEvents` | Works — `onTab`, `onCommand`, `onStartupFinished` all dispatched |
+| `extensionDependencies` | Works |
 | `apiVersion` | Works — a too-old Starbase refuses you by name |
 | `contributes.keybindings` | **Refused** — validated, dispatched by nothing |
 | `contributes.settings` | **Refused** — same |
 | `contributes.authenticationProviders` | **Refused** — `registerProvider` is not implemented |
 | `capabilities.untrustedRepos` | **Refused** — see below |
+| `activationEvents: repoContains:…` | **Refused** — needs a repo scanner nothing implements |
 | `extensionKind` | Accepted and ignored; it is a hint, not a promise |
 
 `capabilities.untrustedRepos` is refused rather than warned about because it is

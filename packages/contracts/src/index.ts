@@ -1504,6 +1504,29 @@ export class StarbaseRpcs extends RpcGroup.make(
   }),
 
   /**
+   * Start a plugin's host half because one of its `activationEvents` fired.
+   *
+   * ## Why this exists at all
+   *
+   * `activate()` used to be reachable only from `invoke()`. That made
+   * `activationEvents` decorative: `onTab:<id>` appeared to work because a plugin
+   * tab's first render usually calls `host.invoke(...)`, which activates lazily
+   * on the way past — and `onStartupFinished` never fired at any point, so a
+   * plugin whose whole job was to subscribe to session events in `activate` never
+   * ran a line of code. The docs said otherwise.
+   *
+   * Idempotent, and cheap when it is a no-op: the runtime tracks what it has
+   * activated and joins an in-flight activation rather than starting a second.
+   * That matters because the renderer calls this on every plugin-tab switch.
+   *
+   * A plugin with no `main` resolves without spawning anything.
+   */
+  Rpc.make("Plugins.activate", {
+    error: PluginError,
+    payload: { pluginId: PluginId }
+  }),
+
+  /**
    * Copy a folder into `~/starbase/plugins` and load it, returning the installed
    * plugin. The source is validated as a real plugin (a decodable manifest)
    * before anything is copied, so a bad folder fails without leaving a partial

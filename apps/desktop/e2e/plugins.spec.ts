@@ -1002,6 +1002,331 @@ test("a plugin built for a newer API is refused with a version, not a stack trac
   await expect(detail).not.toContainText("must never be imported")
 })
 
+/**
+ * A host half that records the fact it ran, on disk.
+ *
+ * The point is to prove activation happened WITHOUT the UI invoking anything.
+ * Every previous host-half test asserted on an `invoke` round-trip — and `invoke`
+ * activates on the way past, so those tests passed whether or not
+ * `activationEvents` were ever dispatched. A file written by `activate` is
+ * observable from the test process with no plugin command involved.
+ */
+const RECORDING_MAIN = (marker: string) => `import { writeFileSync } from "node:fs"
+export const activate = (ctx) => {
+  writeFileSync(${JSON.stringify(marker)}, "activated", "utf8")
+  ctx.subscriptions.push({ dispose: () => {} })
+}
+`
+
+test("onTab activates the host half without the tab invoking anything", async ({
+  launchApp
+}) => {
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  const marker = join(home, "onTab-fired")
+
+  await seedPlugin(home, {
+    manifest: manifest({
+      main: "dist/main.js",
+      activationEvents: ["onTab:e2e-tab.main"],
+      contributes: { tabs: [{ id: "e2e-tab.main", label: "E2E", when: "always" }] }
+    }),
+    // Renders from `session` alone. No `useHost`, no invoke — so nothing here can
+    // activate the host half as a side effect.
+    ui: `
+import { jsx } from "react/jsx-runtime"
+import { definePlugin, useSession } from "@starbase/plugin-sdk"
+
+function Tab() {
+  const session = useSession()
+  return jsx("div", { "data-testid": "e2e-tab-repo", children: session.repo })
+}
+
+export default definePlugin(
+  {
+    id: "e2e-tab", name: "E2E Tab", version: "1.0.0", ui: "dist/ui.js", main: "dist/main.js",
+    contributes: { tabs: [{ id: "e2e-tab.main", label: "E2E", when: "always" }] }
+  },
+  { views: { "e2e-tab.main": Tab } }
+)
+`
+  })
+  await writeFile(
+    join(home, "starbase", "plugins", "e2e-tab", "dist", "main.js"),
+    RECORDING_MAIN(marker),
+    "utf8"
+  )
+
+  await openSession(window)
+  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
+
+  // Not activated yet: the tab exists but has never been opened, and lazy
+  // activation is the whole point of declaring an event.
+  expect(existsSync(marker)).toBe(false)
+
+  await window.getByRole("button", { name: "E2E" }).click()
+  await expect(window.getByTestId("e2e-tab-repo")).toHaveText("widget")
+
+  await expect
+    .poll(() => existsSync(marker), { timeout: 20_000 })
+    .toBe(true)
+})
+
+test("onStartupFinished activates at boot, with no tab ever opened", async ({ launchApp }) => {
+  // The event that could not fire at all: `activate()` was reachable only from
+  // `invoke()`, which needs a command call, which needs UI. A plugin whose whole
+  // job is to subscribe to session events in `activate` never ran a line.
+  //
+  // Dispatched by main after the host is installed, so it needs a relaunch
+  // against a home that ALREADY has the plugin — seeding after launch would test
+  // the watcher instead.
+  const first = await launchApp({ configured: true, withRepo: true, sessions: [SESSION] })
+  const marker = join(first.home, "onStartup-fired")
+
+  await seedPlugin(first.home, {
+    manifest: manifest({
+      main: "dist/main.js",
+      activationEvents: ["onStartupFinished"],
+      // No tabs at all. There is no UI to open, which is the case that proves it.
+      contributes: {}
+    }),
+    ui: `export default { manifest: { id: "e2e-tab" }, views: {}, panes: {} }\n`
+  })
+  await writeFile(
+    join(first.home, "starbase", "plugins", "e2e-tab", "dist", "main.js"),
+    RECORDING_MAIN(marker),
+    "utf8"
+  )
+  await first.app.close()
+
+  const second = await launchApp({
+    home: first.home,
+    reposDir: first.reposDir,
+    configured: true,
+    withRepo: true
+  })
+  await expect(second.window.getByText("Plugin session")).toBeVisible({ timeout: 15_000 })
+
+  await expect.poll(() => existsSync(marker), { timeout: 25_000 }).toBe(true)
+})
+
+test("a disabled plugin is not woken by onStartupFinished", async ({ launchApp }) => {
+  // "Disabled" has to mean "runs no code" at every entry point, not most of them.
+  // Startup dispatch iterates the catalog, so it is the one most likely to forget.
+  const first = await launchApp({ configured: true, withRepo: true, sessions: [SESSION] })
+  const marker = join(first.home, "disabled-fired")
+
+  await seedPlugin(first.home, {
+    manifest: manifest({
+      main: "dist/main.js",
+      activationEvents: ["onStartupFinished"],
+      contributes: { tabs: [{ id: "e2e-tab.main", label: "E2E", when: "always" }] }
+    })
+  })
+  await writeFile(
+    join(first.home, "starbase", "plugins", "e2e-tab", "dist", "main.js"),
+    RECORDING_MAIN(marker),
+    "utf8"
+  )
+
+  await openPluginSettings(first.window)
+  await expect(first.window.getByTestId("plugin-row-e2e-tab")).toBeVisible({ timeout: 15_000 })
+  await first.window.getByLabel("Enable E2E Tab").click()
+  await first.app.close()
+
+  const second = await launchApp({
+    home: first.home,
+    reposDir: first.reposDir,
+    configured: true,
+    withRepo: true
+  })
+  await expect(second.window.getByText("Plugin session")).toBeVisible({ timeout: 15_000 })
+
+  // Give startup dispatch time to have got it wrong.
+  await second.window.waitForTimeout(3_000)
+  expect(existsSync(marker)).toBe(false)
+})
+
+test("declaring repoContains fails loudly — nothing matches globs against a repo", async ({
+  launchApp
+}) => {
+  // The one activation event still unimplemented. `onStartupFinished`,
+  // `onCommand:` and `onTab:` are all dispatched now; matching a glob against the
+  // active session's repo needs a scanner nothing provides, so a plugin waiting
+  // on it would wait forever.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await seedPlugin(home, {
+    manifest: manifest({ activationEvents: ["repoContains:Cargo.toml"] })
+  })
+
+  await openPluginSettings(window)
+  const detail = window.getByTestId("plugin-error-detail-e2e-tab")
+  await expect(detail).toBeVisible({ timeout: 15_000 })
+  await expect(detail).toContainText("repoContains")
+})
+
+test("a throwing dock pane shows a card instead of blanking the window", async ({
+  launchApp
+}) => {
+  // There was no error boundary anywhere on the pane path — a comment claimed one
+  // came from `session-split`, where `renderDock` is a bare div. So a pane with a
+  // typo unwound to the root boundary and took the whole window, sessions and all.
+  // The other pane test only reads props, so it could not catch this.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await seedPlugin(home, {
+    id: "pane-plugin",
+    manifest: {
+      id: "pane-plugin",
+      name: "Pane Plugin",
+      version: "1.0.0",
+      ui: "dist/ui.js",
+      contributes: {
+        panes: [{ id: "pane-plugin.side", label: "Side", slot: "right" }]
+      }
+    },
+    ui: `
+import { definePlugin } from "@starbase/plugin-sdk"
+function Side() { throw new Error("pane exploded") }
+export default definePlugin(
+  {
+    id: "pane-plugin", name: "Pane Plugin", version: "1.0.0", ui: "dist/ui.js",
+    contributes: { panes: [{ id: "pane-plugin.side", label: "Side", slot: "right" }] }
+  },
+  { panes: { "pane-plugin.side": Side } }
+)
+`
+  })
+
+  await openSession(window)
+
+  await expect(window.getByTestId("plugin-pane-error-pane-plugin")).toBeVisible({
+    timeout: 15_000
+  })
+  await expect(window.getByText(/pane exploded/)).toBeVisible()
+
+  // The app is intact — this is the assertion that failed before the boundary
+  // existed, because the window was blank.
+  await expect(window.getByRole("button", { name: "Conversation" })).toBeVisible()
+  await expect(window.getByText("Plugin session")).toBeVisible()
+})
+
+test("SDK hooks work inside a dock pane, as the SDK documents", async ({ launchApp }) => {
+  // Panes were never wrapped in a `PluginViewProvider`, so every hook threw
+  // "called outside a Starbase plugin view" — in one of the two places the SDK
+  // says hooks work.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await seedPlugin(home, {
+    id: "pane-plugin",
+    manifest: {
+      id: "pane-plugin",
+      name: "Pane Plugin",
+      version: "1.0.0",
+      ui: "dist/ui.js",
+      contributes: {
+        panes: [{ id: "pane-plugin.side", label: "Side", slot: "right" }]
+      }
+    },
+    ui: `
+import { jsx, jsxs } from "react/jsx-runtime"
+import { definePlugin, useHost, usePluginStorage, useSessionOrNull } from "@starbase/plugin-sdk"
+import { useEffect, useState } from "react"
+
+function Side() {
+  const host = useHost()
+  const storage = usePluginStorage()
+  const session = useSessionOrNull()
+  const [stored, setStored] = useState("…")
+  useEffect(() => {
+    storage.set("pane", "wrote-from-pane")
+      .then(() => storage.get("pane"))
+      .then((v) => setStored(String(v)))
+      .catch((e) => setStored("error: " + String(e && e.message ? e.message : e)))
+  }, [storage])
+  return jsxs("div", {
+    children: [
+      jsx("span", { "data-testid": "pane-bridge", children: typeof host.invoke === "function" ? "bridge ready" : "bridge missing" }),
+      jsx("span", { "data-testid": "pane-session", children: session ? session.repo : "none" }),
+      jsx("span", { "data-testid": "pane-stored", children: stored })
+    ]
+  })
+}
+
+export default definePlugin(
+  {
+    id: "pane-plugin", name: "Pane Plugin", version: "1.0.0", ui: "dist/ui.js",
+    contributes: { panes: [{ id: "pane-plugin.side", label: "Side", slot: "right" }] }
+  },
+  { panes: { "pane-plugin.side": Side } }
+)
+`
+  })
+
+  await openSession(window)
+
+  // No error card: the hooks resolved rather than throwing.
+  await expect(window.getByTestId("pane-bridge")).toHaveText("bridge ready", { timeout: 15_000 })
+  await expect(window.getByTestId("pane-session")).toHaveText("widget")
+  // Storage round-trips from a pane, which needs the bridge the provider carries.
+  await expect(window.getByTestId("pane-stored")).toHaveText("wrote-from-pane", {
+    timeout: 20_000
+  })
+  await expect(window.getByTestId("plugin-pane-error-pane-plugin")).toHaveCount(0)
+})
+
+test("a failed install says why, instead of the picker closing on nothing", async ({
+  launchApp
+}) => {
+  // Every settings callback returned a promise that the component invoked as
+  // `void onX()`, so a rejection was an unhandled promise rejection in devtools.
+  // On the install flow, where invalid input is the expected case, the operator
+  // chose a folder and nothing whatsoever happened.
+  const { window, app, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  // A directory with no manifest — the commonest mistake, picking the repo root
+  // or a `src` folder rather than the built plugin.
+  const notAPlugin = join(home, "downloads", "not-a-plugin")
+  await mkdir(notAPlugin, { recursive: true })
+
+  await app.evaluate(({ dialog }, chosen) => {
+    dialog.showOpenDialog = () =>
+      Promise.resolve({ canceled: false, filePaths: [chosen] }) as never
+  }, notAPlugin)
+
+  await openPluginSettings(window)
+  await window.getByTestId("plugin-install-folder").click()
+
+  const error = window.getByTestId("plugin-action-error")
+  await expect(error).toBeVisible({ timeout: 15_000 })
+  await expect(error).toContainText("starbase.plugin.json")
+
+  // And it can be dismissed, rather than sitting there for the session.
+  await window.getByTestId("plugin-action-error-dismiss").click()
+  await expect(error).toHaveCount(0)
+})
+
 test("a plugin declaring the CURRENT api version loads normally", async ({ launchApp }) => {
   // The other half of the gate, and the one that would break every plugin if the
   // comparison were `!==` rather than `>`: opting in must not cost anything.

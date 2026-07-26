@@ -790,6 +790,10 @@ export const rpc = {
   pluginsInstallFromPicker: (): Promise<LoadedPlugin | null> =>
     run((c) => c.Plugins.installFromPicker()),
 
+  /** Fire an `activationEvents` trigger. Idempotent; a no-op if already running. */
+  pluginsActivate: (pluginId: string): Promise<void> =>
+    run((c) => c.Plugins.activate({ pluginId })),
+
   pluginsStorageGet: (pluginId: string, key: string): Promise<unknown> =>
     run((c) => c.Plugins.storageGet({ pluginId, key })),
 

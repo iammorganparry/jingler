@@ -67,7 +67,41 @@ export function useHost(): HostBridge {
  * @throws If called outside a plugin view.
  */
 export function useSession(): SessionSnapshot {
-  return useView("useSession").session
+  const session = useView("useSession").session
+  if (session === null) {
+    // Only reachable from a dock pane with no session open. Named rather than
+    // returned as null, because every tab calling this is guaranteed a session
+    // and widening the return type would push a null check into all of them for
+    // a case they cannot hit.
+    throw new Error(
+      "useSession() found no session. This is a dock pane with nothing open — use useSessionOrNull(), or the `session` prop, which is typed `SessionSnapshot | null` for exactly this."
+    )
+  }
+  return session
+}
+
+/**
+ * The focused session, or `null` when nothing is open.
+ *
+ * The pane-safe counterpart to {@link useSession}. A dock pane is mounted once
+ * for the window and outlives any one session, so it has to be able to render an
+ * empty state; `useSession` throws in that moment rather than returning null.
+ *
+ * In a tab this never returns null, and `useSession` is the better call.
+ *
+ * @example
+ * ```tsx
+ * function ActivityPane() {
+ *   const session = useSessionOrNull()
+ *   if (!session) return <div className="text-dim">No session selected.</div>
+ *   return <div className="text-text">{session.repo}</div>
+ * }
+ * ```
+ *
+ * @throws If called outside a plugin view.
+ */
+export function useSessionOrNull(): SessionSnapshot | null {
+  return useView("useSessionOrNull").session
 }
 
 /**
