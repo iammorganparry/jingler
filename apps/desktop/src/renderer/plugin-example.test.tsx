@@ -107,7 +107,7 @@ describe("the shipped hello-tab example", () => {
     const tab = result.plugin.tabs[0]!
 
     render(
-      <PluginTabHost pluginId="hello-tab" session={session()}>
+      <PluginTabHost pluginId="hello-tab" reloadKey="hello-tab@1.0.0" session={session()}>
         {tab.render(session(), {
           activeTabId: "hello-tab.greeting",
           splitOpen: false,
@@ -130,7 +130,7 @@ describe("the shipped hello-tab example", () => {
     const tab = result.plugin.tabs[0]!
 
     render(
-      <PluginTabHost pluginId="hello-tab" session={session()}>
+      <PluginTabHost pluginId="hello-tab" reloadKey="hello-tab@1.0.0" session={session()}>
         {tab.render(session(), {
           activeTabId: "hello-tab.greeting",
           splitOpen: false,

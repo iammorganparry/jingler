@@ -72,9 +72,10 @@ export {
   useHost,
   usePluginStorage,
   useSession,
+  useSessionActions,
   useSessionOrNull
 } from "./hooks.js"
-export type { HostBridge, PluginViewValue } from "./context.js"
+export type { HostBridge, PluginViewValue, SessionActions } from "./context.js"
 
 /**
  * Starbase's own wiring. A plugin never imports these — the host uses them to

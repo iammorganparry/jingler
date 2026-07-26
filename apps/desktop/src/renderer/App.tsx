@@ -309,8 +309,12 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   const onPrLinked = (sessionId: string, prNumber: number) =>
     send({ type: "SESSION_PR_LINKED", sessionId, prNumber })
 
-  const unlinkIssue = (sessionId: string) =>
-    void rpc.sessionsUnlinkIssue(sessionId).then((session) => send({ type: "SESSION_UPDATED", session }))
+  // Unlinking an issue used to live here, wired to the built-in Issue tab's
+  // `onUnlink`. That tab retired in favour of the github-issues plugin and this
+  // callback was left declared and unreferenced — the capability simply vanished
+  // from the UI. It now belongs to the plugin, through
+  // `useSessionActions().unlinkIssue`, which routes the same RPC and republishes
+  // the updated record via `session-updates.ts` so this machine still sees it.
 
   // The composer consumed the one-shot prompt: clear it (backend returns the
   // updated session) so re-opening the session never re-seeds the draft.

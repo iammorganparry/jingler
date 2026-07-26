@@ -257,11 +257,28 @@ export class PluginAuth extends Effect.Service<PluginAuth>()("@starbase/PluginAu
             )
             if (!approved) return null
 
+            // RE-READ the file rather than merging into the list read before the
+            // prompt. That prompt is operator-paced and can sit open for minutes,
+            // and the world moves underneath it: a second plugin's consent lands,
+            // or the operator revokes something in Settings. Writing a list
+            // computed from the stale read clobbers both — a lost grant only
+            // re-prompts, but a lost REVOCATION silently restores access the
+            // operator had just taken away, which is the failure that matters.
+            //
+            // A re-read rather than a lock because there is exactly one awaited
+            // gap and this is the far side of it. `revoke`/`revokeAll` have no
+            // await between their read and their write, so they cannot interleave
+            // with themselves; only the prompt opens a window this wide.
+            const current = yield* readGrants
+            const mine = current.filter((g) =>
+              sameGrant(g, request.pluginId, request.providerId)
+            )
+
             // Recorded BEFORE the token is fetched. If the provider then fails,
             // the operator's decision still stands — they should not be asked
             // the same question again because a network call went wrong.
             const merged = [
-              ...grants.filter(
+              ...current.filter(
                 (g) => !sameGrant(g, request.pluginId, request.providerId)
               ),
               {
@@ -270,12 +287,7 @@ export class PluginAuth extends Effect.Service<PluginAuth>()("@starbase/PluginAu
                 // Union with any previous scopes, so a narrower later ask does
                 // not silently shrink what was already agreed.
                 scopes: [
-                  ...new Set([
-                    ...request.scopes,
-                    ...grants
-                      .filter((g) => sameGrant(g, request.pluginId, request.providerId))
-                      .flatMap((g) => g.scopes)
-                  ])
+                  ...new Set([...request.scopes, ...mine.flatMap((g) => g.scopes)])
                 ],
                 grantedAt: new Date().toISOString()
               }

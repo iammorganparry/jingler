@@ -119,7 +119,18 @@ export * from "./diff/review-thread-hunk.js"
 export * from "./app/title-bar.js"
 export * from "./app/tab-bar.js"
 export * from "./app/tab-contributions.js"
-export * from "./app/keybinding-contributions.js"
+// `./app/keybinding-contributions.js` is deliberately NOT exported.
+//
+// The module and its tests are complete, but nothing dispatches
+// `matchKeybinding` and the loader refuses any manifest declaring
+// `contributes.keybindings` (see `plugin-loader.ts`). Publishing the resolver
+// from this index would commit the package to an API for a feature the app
+// currently declines to ship — a surface future readers must understand and
+// keep compiling, with no caller to justify either. `pane-contributions` earned
+// its export by being wired in; this one has not yet.
+//
+// Add the export back in the same change that removes `contributes.keybindings`
+// from the loader's `unsupported` list and hooks the dispatch up.
 export * from "./app/pane-contributions.js"
 export * from "./app/agent-tab-bar.js"
 export * from "./app/subagent-view.js"

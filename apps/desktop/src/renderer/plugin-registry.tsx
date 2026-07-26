@@ -138,6 +138,23 @@ export function PluginProvider({ children }: { children: ReactNode }) {
       ])
     )
 
+    /**
+     * `id@version`, the one string that changes when a plugin's CODE changes.
+     *
+     * The error boundaries use it to decide when a stale failure card should go.
+     * They used to key that on the identity of the element passed as `children`,
+     * which is rebuilt on every render — so a plugin that threw deterministically
+     * was cleared and re-mounted on every tick of the session pane. Bumping
+     * `version` is already the documented way to force a reload, so it is also
+     * the honest signal for "this is a different build, try again".
+     */
+    const reloadKeyFor = new Map(
+      (catalog?.plugins ?? []).map((p) => [
+        p.manifest.id,
+        `${p.manifest.id}@${p.manifest.version}`
+      ])
+    )
+
     const tabs = loaded.active.flatMap((plugin) =>
       plugin.tabs.map((tab) => ({
         ...tab,
@@ -153,7 +170,11 @@ export function PluginProvider({ children }: { children: ReactNode }) {
             pluginId={plugin.id}
             shouldActivate={(eventsFor.get(plugin.id) ?? []).includes(`onTab:${tab.id}`)}
           >
-            <PluginTabHost pluginId={plugin.id} session={session}>
+            <PluginTabHost
+              pluginId={plugin.id}
+              reloadKey={reloadKeyFor.get(plugin.id) ?? plugin.id}
+              session={session}
+            >
               {tab.render(session, ctx)}
             </PluginTabHost>
           </PluginActivateOnMount>
@@ -174,7 +195,11 @@ export function PluginProvider({ children }: { children: ReactNode }) {
       plugin.panes.map((pane) => ({
         ...pane,
         render: (session: Parameters<typeof pane.render>[0]) => (
-          <PluginPaneHost pluginId={plugin.id} session={session}>
+          <PluginPaneHost
+            pluginId={plugin.id}
+            reloadKey={reloadKeyFor.get(plugin.id) ?? plugin.id}
+            session={session}
+          >
             {pane.render(session)}
           </PluginPaneHost>
         )

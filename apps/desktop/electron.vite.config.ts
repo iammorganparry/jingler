@@ -36,8 +36,17 @@ export default defineConfig({
         input: {
           index: resolve(import.meta.dirname, "src/main/index.ts"),
           // The extension host runs in its OWN process, so it needs its own
-          // bundle — it cannot share main's. `.mjs` because utilityProcess
-          // forks it as an ES module.
+          // bundle — it cannot share main's.
+          //
+          // The output is `plugin-host-entry.js`, NOT `.mjs`: electron-vite
+          // emits main-process entries as `.js` (only the preload gets `.mjs`)
+          // and the `.js` is still ESM because this app's own `package.json`
+          // declares `"type": "module"`. `plugin-host-bridge.ts` joins that exact
+          // filename, and an earlier version of this comment claiming `.mjs`
+          // is how it came to fork a path that never existed — the host never
+          // booted and every plugin with a `main` half silently failed to
+          // activate. Change the name here and that fork breaks again.
+
           "plugin-host-entry": resolve(
             import.meta.dirname,
             "src/main/plugin-host-entry.ts"

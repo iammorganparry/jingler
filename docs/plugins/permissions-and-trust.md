@@ -108,6 +108,19 @@ This is deliberately testable rather than merely asserted: if an official plugin
 could skip consent, the API would be decorative, and the first third-party
 plugin author to look would find out.
 
+## Session mutations are not consent-gated
+
+A plugin can detach a session's linked issue — `useSessionActions().unlinkIssue`
+— and nothing prompts. That is a deliberate reading of the risk rather than an
+oversight: the action is trivially reversible, re-linking is available through
+the same plugin, and no credential or data leaves the machine. Putting a native
+dialog in front of it would train operators to click through dialogs, which is
+the one thing that would make the `getSession` prompt above worth less.
+
+It is still a mutation, and it is the only one. If this list ever grows past
+"reversible in one click", it needs the consent machinery, not a bigger
+paragraph here.
+
 ## For plugin authors
 
 - Handle a declined prompt. `getSession` **rejects** when the operator says no

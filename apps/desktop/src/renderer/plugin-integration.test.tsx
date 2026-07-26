@@ -67,7 +67,7 @@ const internalSession = (over: Partial<Session> = {}): Session =>
 /** Mounts a view the way `plugin-registry` does: inside the host, no props. */
 const mountPlugin = (View: () => ReactNode, over: Partial<Session> = {}) =>
   render(
-    <PluginTabHost pluginId="linear" session={internalSession(over)}>
+    <PluginTabHost pluginId="linear" reloadKey="linear@1.0.0" session={internalSession(over)}>
       <View />
     </PluginTabHost>
   )

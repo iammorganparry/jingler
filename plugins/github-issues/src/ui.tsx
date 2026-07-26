@@ -23,13 +23,19 @@
  * having been opened in any of them.
  */
 import { useEffect, useState } from "react"
-import { CheckCircle2, CircleDot, ExternalLink, MessageSquare } from "lucide-react"
-import { definePlugin, useHost, type TabProps } from "@starbase/plugin-sdk"
+import { CheckCircle2, CircleDot, ExternalLink, MessageSquare, Unlink } from "lucide-react"
+import {
+  definePlugin,
+  useHost,
+  useSessionActions,
+  type TabProps
+} from "@starbase/plugin-sdk"
 // The themed kit is its own entrypoint, so a plugin's Node-side build scripts
 // can import the root without dragging the component library in.
 import {
   atLeast,
   Avatar,
+  Badge,
   cn,
   githubAvatarUrl,
   Markdown,
@@ -58,6 +64,55 @@ interface Issue {
   readonly assignees?: ReadonlyArray<IssueUser>
   readonly comments?: ReadonlyArray<IssueComment>
   readonly createdAt: string
+}
+
+/**
+ * A GitHub label chip tinted from the label's own hex colour.
+ *
+ * Ported from `IssueLabelChip` in `@starbase/ui` rather than re-exported through
+ * the SDK kit: a label is a GitHub concept and the SDK's kit is deliberately
+ * curated to primitives every plugin could want. This plugin owns the concept,
+ * so it owns the chip. Losing it in the migration made every label render as the
+ * same neutral outline, which reads as "this issue has no colour coding" rather
+ * than "the port dropped a feature".
+ *
+ * ## Why the hex is parsed rather than interpolated
+ *
+ * `color` is a string from the GitHub API going into a `style` attribute. Same
+ * rule as the theme mapper: never pass an outside string through, re-emit it
+ * from parsed components. The regex is the gate and `parseInt` is the re-emit,
+ * so the worst a hostile value can do is fail the test and get the neutral
+ * Badge.
+ */
+function IssueLabelChip({ name, color }: { name: string; color?: string }) {
+  // GitHub label colours are 6 hex digits with no leading '#'. Anything else
+  // falls back to a neutral Badge, so the chip never renders half-styled.
+  if (!color || !/^[0-9a-fA-F]{6}$/.test(color)) {
+    return (
+      <Badge tone="neutral" size="xs">
+        {name}
+      </Badge>
+    )
+  }
+  const r = Number.parseInt(color.slice(0, 2), 16)
+  const g = Number.parseInt(color.slice(2, 4), 16)
+  const b = Number.parseInt(color.slice(4, 6), 16)
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-[4px] border px-2 py-px text-[11.5px] font-medium"
+      style={{
+        color: `rgb(${r} ${g} ${b})`,
+        backgroundColor: `rgb(${r} ${g} ${b} / 0.12)`,
+        borderColor: `rgb(${r} ${g} ${b} / 0.3)`
+      }}
+    >
+      <span
+        className="size-1.5 rounded-full"
+        style={{ backgroundColor: `rgb(${r} ${g} ${b})` }}
+      />
+      {name}
+    </span>
+  )
 }
 
 /** One comment, including the issue body rendered as the opening one. */
@@ -97,6 +152,11 @@ function Comment({
 
 function IssueTab({ session }: TabProps) {
   const host = useHost()
+  // The built-in Issue tab this replaced offered "unlink", and the first port
+  // dropped it — the RPC survived, the button did not, and the operator was left
+  // with a session permanently attached to the wrong issue. It comes back
+  // through the SDK, the same call any third-party plugin can make.
+  const { unlinkIssue } = useSessionActions()
   const tier = useWidthTier()
   const [issue, setIssue] = useState<Issue | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -183,6 +243,21 @@ function IssueTab({ session }: TabProps) {
           >
             <ExternalLink size={12} /> Open on GitHub
           </button>
+          <button
+            type="button"
+            data-testid="github-issues-unlink"
+            onClick={() => {
+              // Clear the local copy immediately as well as calling through.
+              // The session record updates via `session-updates`, but this
+              // component's `issue` state is its own — without this the detached
+              // issue stays on screen until something else re-renders the tab.
+              setIssue(null)
+              void unlinkIssue(session.id)
+            }}
+            className="flex flex-none items-center gap-1.5 rounded border border-line px-2 py-1 text-[12px] text-text-body transition-colors hover:border-red hover:text-text-bright"
+          >
+            <Unlink size={12} /> Unlink
+          </button>
         </div>
 
         <div className="mb-5 flex flex-wrap items-center gap-2">
@@ -208,12 +283,7 @@ function IssueTab({ session }: TabProps) {
         {(issue.labels?.length ?? 0) > 0 && (
           <div className="mb-5 flex flex-wrap gap-1.5">
             {issue.labels?.map((label) => (
-              <span
-                key={label.name}
-                className="rounded-full border border-line px-2 py-0.5 text-[11.5px] text-text-body"
-              >
-                {label.name}
-              </span>
+              <IssueLabelChip key={label.name} name={label.name} color={label.color} />
             ))}
           </div>
         )}
