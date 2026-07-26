@@ -80,10 +80,42 @@ declare global {
  * plugin's `import { useHost } from "@starbase/plugin-sdk"` resolved to
  * `undefined`.
  */
+/**
+ * `react/jsx-runtime` plus a `jsxDEV` that exists in every build.
+ *
+ * A plugin built by Vite in DEVELOPMENT mode emits `jsxDEV(...)` calls and imports
+ * `react/jsx-dev-runtime`. The shim for that specifier took its export NAMES from
+ * the union of both namespaces — so `jsxDEV` was exported — while taking its
+ * VALUES from `jsxRuntime`, which does not have it. The name resolved to
+ * `undefined`, and the plugin died on its first element with
+ * `jsxDEV is not a function`.
+ *
+ * That broke the official `github-issues` plugin's tab in development, and every
+ * dev-built third-party plugin with it. The comment beside `RUNTIME_MODULES`
+ * already claimed this fallback existed; it did not.
+ *
+ * `jsxDEV` takes the extra `(source, self)` arguments React's dev runtime uses for
+ * warnings and drops them here. Losing a dev-only warning is the right trade
+ * against a plugin that cannot render, and it is what makes a dev-built plugin
+ * loadable against a PACKAGED app, where React ships no dev runtime at all.
+ */
+const jsxRuntimeWithDev = {
+  ...jsxRuntime,
+  jsxDEV:
+    (jsxRuntime as { jsxDEV?: unknown }).jsxDEV ??
+    ((type: unknown, props: unknown, key: unknown) =>
+      // `jsxs` handles a children array; `jsx` does not. Dev builds route both
+      // through `jsxDEV`, so picking by shape is what keeps a fragment with two
+      // children from rendering as one.
+      Array.isArray((props as { children?: unknown } | null)?.children)
+        ? (jsxRuntime as unknown as { jsxs: Function }).jsxs(type, props, key)
+        : (jsxRuntime as unknown as { jsx: Function }).jsx(type, props, key))
+}
+
 export const publishPluginRuntime = (): void => {
   globalThis.__STARBASE_RUNTIME__ ??= {
     react: React,
-    jsxRuntime,
+    jsxRuntime: jsxRuntimeWithDev as typeof jsxRuntime,
     reactDom,
     sdk: sdkModule,
     sdkUi: sdkUiModule

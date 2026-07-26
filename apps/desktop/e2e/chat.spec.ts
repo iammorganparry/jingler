@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { ALT_CLAUDE_MODEL, DEFAULT_CLAUDE_MODEL, expect, showSessions, test } from "./fixtures.js"
+import { ALT_CLAUDE_MODEL, DEFAULT_CLAUDE_MODEL, expect, sessionRow, showSessions, test } from "./fixtures.js"
 import type { Page } from "@playwright/test"
 import { reasoningEffortsFor } from "../../../packages/ui/src/lib/reasoning-options.js"
 import type { SeedSession } from "./fixtures.js"
@@ -396,7 +396,7 @@ test("Plan mode: propose a plan, review a step, and approve in auto", async ({
   await expect(window.getByText(/execution started/i)).toBeVisible({ timeout: 15_000 })
   await window.getByRole("button", { name: "Conversation" }).first().click()
   await expect(window.getByRole("button", { name: "auto", exact: true })).toBeVisible()
-  await window.getByText("Plan Review", { exact: true }).first().click()
+  await window.getByRole("button", { name: "Plan Review" }).first().click()
 
   // Drilling into a step shows its proposed code sample AND a per-step Changes
   // rail (the actual worktree diff for that step's files) on the right.
@@ -460,7 +460,11 @@ test("a worktree session without a PR shows a Changes tab with the Code Review v
 
   // No PR yet → the local worktree diff gets its own top-level Changes tab, which
   // is the Code Review view scoped to the uncommitted (local) source.
-  const changesTab = window.getByText("Changes", { exact: true }).first()
+  // By accessible name, like the Pull Request / Code Review assertions below it.
+  // The tab-chrome redesign renders a non-conversation tab's text label only while
+  // that tab is selected, so `getByText("Changes")` cannot find the tab you have
+  // not clicked yet. `aria-label` survives at every width on purpose.
+  const changesTab = window.getByRole("button", { name: "Changes" }).first()
   await expect(changesTab).toBeVisible()
   await changesTab.click()
   await expectFileRail(window)
@@ -836,7 +840,10 @@ test("an archived session shows in the Archived group, read-only, and restores",
   // list until it is asked for, and that is the behaviour worth asserting.
   // Checking it is absent FIRST also proves the filter is doing the hiding, rather
   // than the seed having silently failed.
-  await expect(window.getByText("Refactor auth flow")).toHaveCount(0)
+  // The SIDEBAR row, specifically. A bare `getByText` would also count the title
+  // the pane's conversation chip wears, so "absent from the list" and "not open
+  // anywhere" would be the same assertion — and only the first is the claim here.
+  await expect(sessionRow(window, "Refactor auth flow")).toHaveCount(0)
   await showSessions(window, "Archived")
   await expect(window.getByText("Merged #482")).toBeVisible()
 
@@ -889,7 +896,7 @@ test("sidebar quick-actions: hover a row to archive an active session", async ({
   await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
 
   // Both sessions are active, so both are listed under the default filter.
-  await expect(window.getByText("Second session")).toBeVisible()
+  await expect(sessionRow(window, "Second session")).toBeVisible()
 
   // Hover the second row to reveal its quick-actions, then Archive it.
   const row = window.getByTestId("session-row-s_act")
@@ -898,10 +905,10 @@ test("sidebar quick-actions: hover a row to archive an active session", async ({
 
   // Archiving now removes it from the default (active) list — and it is still
   // there, one filter away, rather than deleted.
-  await expect(window.getByText("Second session")).toHaveCount(0)
-  await expect(window.getByText("First session")).toBeVisible()
+  await expect(sessionRow(window, "Second session")).toHaveCount(0)
+  await expect(sessionRow(window, "First session")).toBeVisible()
   await showSessions(window, "Archived")
-  await expect(window.getByText("Second session")).toBeVisible()
+  await expect(sessionRow(window, "Second session")).toBeVisible()
 })
 
 test("sidebar quick-actions: right-click → Delete removes a session after confirming", async ({
@@ -909,7 +916,7 @@ test("sidebar quick-actions: right-click → Delete removes a session after conf
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: twoSessions })
   await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
-  await expect(window.getByText("Second session")).toBeVisible()
+  await expect(sessionRow(window, "Second session")).toBeVisible()
 
   // Right-click the row opens the context menu; choose Delete.
   const row = window.getByTestId("session-row-s_act")
@@ -928,8 +935,8 @@ test("sidebar quick-actions: right-click → Delete removes a session after conf
   await window.getByRole("dialog").getByRole("button", { name: "Delete" }).click()
 
   await expect(window.getByTestId("session-row-s_act")).toHaveCount(0)
-  await expect(window.getByText("Second session")).toHaveCount(0)
-  await expect(window.getByText("First session")).toBeVisible()
+  await expect(sessionRow(window, "Second session")).toHaveCount(0)
+  await expect(sessionRow(window, "First session")).toBeVisible()
 })
 
 test("a merged PR badges its linked session but never archives it", async ({ launchApp }) => {
@@ -989,7 +996,7 @@ test("a merged PR badges its linked session but never archives it", async ({ lau
   // Still an ACTIVE session — which, now that archived is a hidden-by-default
   // filter, means simply: still listed. That is a stronger check than the old
   // "no Archived group" one, which would pass even if the session had vanished.
-  await expect(window.getByText("Old shipped work")).toBeVisible()
+  await expect(sessionRow(window, "Old shipped work")).toBeVisible()
 })
 
 /**
@@ -1075,8 +1082,14 @@ test("a finished reviewer's tab is restored after a restart", async ({ launchApp
   await reviewerTab.click()
   await expect(window.getByText(/stale token can be reused/)).toBeVisible()
 
-  // Restored as finished, not mid-flight: the stored stream ends in `Done`, which
-  // is why only completed runs are ever persisted — a half-written one would come
-  // back as a reviewer that appears to still be working with nothing behind it.
-  await expect(window.getByText("watch-only")).toBeVisible()
+  // There used to be a third assertion here, on the literal text "watch-only".
+  // `9365e0c` ("a review belongs to one chat") deleted the sub-agent view's whole
+  // header — agent name, task description and that label — so the assertion was
+  // reading text that no longer exists anywhere, and it had been failing since.
+  //
+  // Nothing replaced the affordance, so rather than invent an assertion about a
+  // pulse class, this leans on what the two above already prove: the tab came back
+  // AND its transcript is readable behind it. Only `Done`-terminated runs are ever
+  // persisted, so a readable restored transcript IS the "finished, not mid-flight"
+  // claim — a half-written run would have no assistant text to find.
 })

@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js"
+import { expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -90,7 +90,7 @@ test("a deep-link callback signs in and reaches the app shell", async ({ launchA
   // …then the OS hands back the starbase:// callback → signed in → app shell.
   await completeDeepLinkSignIn()
   await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
-  await expect(window.getByText("Seeded session")).toBeVisible()
+  await expect(sessionRow(window, "Seeded session")).toBeVisible()
   await expect(window.getByRole("heading", { name: "Sign in to Starbase" })).toHaveCount(0)
 })
 

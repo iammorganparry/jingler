@@ -2,7 +2,7 @@ import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import type { Page } from "@playwright/test"
 import { GIGAPLAN_ROUTING_POLICY_VERSION } from "@starbase/core"
-import { DEFAULT_CLAUDE_MODEL, expect, test } from "./fixtures.js"
+import { DEFAULT_CLAUDE_MODEL, expect, sessionRow, test } from "./fixtures.js"
 import type { LaunchOptions, SeedSession } from "./fixtures.js"
 
 const GIGAPLAN_SETTINGS = /^Gigaplan/
@@ -49,8 +49,8 @@ const openSession = async (
     withRepo: true,
     sessions: ({ repoPath }) => [seeded(repoPath)]
   })
-  await expect(launched.window.getByText("Planning session")).toBeVisible()
-  await launched.window.getByText("Planning session").click()
+  await expect(sessionRow(launched.window, "Planning session")).toBeVisible()
+  await sessionRow(launched.window, "Planning session").click()
   return launched
 }
 
@@ -189,7 +189,7 @@ test("learning is OFF on a real first boot, and leaves no trace", async ({ launc
   // all, and this is asserted against the real state directory rather than a
   // mocked config, because that is exactly the claim the settings pane makes.
   const { window, home } = await openSession(launchApp)
-  await expect(window.getByText("Planning session")).toBeVisible()
+  await expect(sessionRow(window, "Planning session")).toBeVisible()
 
   const starbase = join(home, "starbase")
   const entries = existsSync(starbase) ? readdirSync(starbase) : []
@@ -277,8 +277,8 @@ test("approving a Gigaplan runs its steps, each on the harness the plan assigned
     }
   })
 
-  await expect(window.getByText("Planning session")).toBeVisible()
-  await window.getByText("Planning session").click()
+  await expect(sessionRow(window, "Planning session")).toBeVisible()
+  await sessionRow(window, "Planning session").click()
 
   // Gigaplan must be ON, or approval re-drives on one harness instead.
   await window.getByRole("button", { name: "accept edits" }).click()
@@ -381,7 +381,7 @@ test("plan mode is offered on a Codex session and proposes a reviewable plan", a
     withRepo: true,
     sessions: ({ repoPath }) => [codexSeed(repoPath)]
   })
-  await window.getByText("Codex planning session").click()
+  await sessionRow(window, "Codex planning session").click()
 
   // 1. The chip offers it. Before this change `allowPlan` was false off-Claude,
   //    so the option was omitted from the menu entirely — not disabled, absent.
@@ -411,7 +411,7 @@ test("switching harness mid-plan keeps plan mode instead of dropping it", async 
     withRepo: true,
     sessions: ({ repoPath }) => [seeded(repoPath)]
   })
-  await window.getByText("Planning session").click()
+  await sessionRow(window, "Planning session").click()
 
   await window.getByRole("button", { name: "accept edits" }).click()
   await window.getByRole("menuitem", { name: "plan", exact: true }).click()

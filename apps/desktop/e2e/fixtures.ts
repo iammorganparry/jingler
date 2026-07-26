@@ -59,6 +59,43 @@ export const showSessions = async (
   await expect(window.getByTestId("session-filter-menu")).toBeVisible()
 }
 
+/**
+ * The SIDEBAR row for a session, found by its title.
+ *
+ * ## Why `getByText(title)` stopped working
+ *
+ * The tab-chrome redesign folded the Conversation tab into a chip that wears the
+ * session's name. So an OPEN session's title is now on screen twice — once in the
+ * sidebar row, once in its pane's header — and `getByText("Alpha session")`
+ * resolves to two elements, which Playwright's strict mode treats as an error
+ * rather than picking one.
+ *
+ * Every spec that clicked a session by its title broke at once, and the fix is not
+ * "pick the first": the two elements do different jobs, and a spec that means
+ * "switch to this session" wants the sidebar unambiguously.
+ *
+ * ## Why by title rather than by id
+ *
+ * `session-row-<id>` is the canonical handle and is what a spec should use when it
+ * has the id to hand. This exists for the many call sites that only ever knew the
+ * title — converting those to ids means threading a constant through each spec for
+ * no gain, while a prefix locator filtered by text is exact enough: the prefix
+ * confines it to the sidebar list, and the title picks the row.
+ */
+export const sessionRow = (window: Page, title: string) =>
+  window.locator("[data-testid^='session-row-']").filter({ hasText: title })
+
+/**
+ * Click a session in the sidebar. The common case of {@link sessionRow}.
+ *
+ * `.first()` is safe HERE and not a fudge: the locator is already confined to the
+ * sidebar, so more than one match means two sessions share a title — and clicking
+ * either satisfies what such a spec asked for.
+ */
+export const openSessionByTitle = async (window: Page, title: string): Promise<void> => {
+  await sessionRow(window, title).first().click()
+}
+
 /** A seeded session written to sessions.json (valid `Session` shape). */
 export interface SeedSession {
   readonly id: string

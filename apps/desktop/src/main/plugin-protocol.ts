@@ -120,12 +120,20 @@ const RUNTIME_MODULES: Record<string, string> = {
   // `createPortal`, `createRoot` or `flushSync`, so any plugin importing one
   // failed to instantiate.
   "react-dom.js": runtimeShim("reactDom", exportNames(ReactDom)),
-  // React only ships `jsx-dev-runtime` in development builds; falling back to
-  // the production namespace keeps a plugin built in dev mode loadable against
-  // a packaged app, where `jsxDEV` does not exist.
+  // React only ships `jsx-dev-runtime` in development builds, so the export list
+  // is the union of both namespaces and the values come from the renderer's
+  // `jsxRuntime` — which publishes a `jsxDEV` of its own precisely so this union
+  // is honest. See `jsxRuntimeWithDev` in `plugin-runtime.ts`.
+  //
+  // That was a bug for a while: the names came from the union while the values
+  // came from the production namespace alone, so `jsxDEV` was exported as
+  // `undefined` and any plugin Vite had built in dev mode — including the official
+  // `github-issues` one — died on its first element with `jsxDEV is not a
+  // function`. The two halves have to agree, and only the renderer can supply the
+  // fallback, because only it has a React to fall back to.
   "jsx-dev-runtime.js": runtimeShim(
     "jsxRuntime",
-    exportNames({ ...JsxRuntime, ...JsxDevRuntime })
+    exportNames({ ...JsxRuntime, ...JsxDevRuntime, jsxDEV: undefined })
   ),
   "sdk.js": runtimeShim("sdk", exportNames(Sdk)),
   "sdk-ui.js": runtimeShim("sdkUi", [...UI_EXPORT_NAMES])

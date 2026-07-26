@@ -404,6 +404,61 @@ test("a plugin is served from the throwaway home, not the developer's own", asyn
   await expect(window.getByRole("button", { name: "Scoped" })).toHaveCount(0, { timeout: 15_000 })
 })
 
+test("a plugin built in dev mode renders — jsxDEV resolves", async ({ launchApp }) => {
+  // Vite in DEVELOPMENT mode emits `jsxDEV(...)` and imports
+  // `react/jsx-dev-runtime`. The shim for that specifier listed `jsxDEV` among its
+  // exports (the name came from the union of both React namespaces) while taking
+  // its values from the production namespace, which has no `jsxDEV` — so the name
+  // resolved to `undefined` and the plugin died on its first element with
+  // `jsxDEV is not a function`.
+  //
+  // It broke the official `github-issues` tab and every dev-built third-party
+  // plugin, and no test saw it: every hand-written plugin in this spec imports
+  // `react/jsx-runtime` directly, which is what a PRODUCTION build emits. This is
+  // the only case that takes the dev path.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await seedPlugin(home, {
+    ui: `
+import { jsxDEV } from "react/jsx-dev-runtime"
+import { definePlugin, useSession } from "@starbase/plugin-sdk"
+
+function Tab() {
+  const session = useSession()
+  // The extra (source, self) arguments are exactly what a dev build passes.
+  return jsxDEV("div", {
+    "data-testid": "dev-built-body",
+    children: jsxDEV("span", { children: session.repo }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this)
+}
+
+export default definePlugin(
+  {
+    id: "e2e-tab", name: "E2E Tab", version: "1.0.0", ui: "dist/ui.js",
+    contributes: { tabs: [{ id: "e2e-tab.main", label: "E2E", when: "always" }] }
+  },
+  { views: { "e2e-tab.main": Tab } }
+)
+`
+  })
+
+  await openSession(window)
+  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
+  await window.getByRole("button", { name: "E2E" }).click()
+
+  const body = window.getByTestId("dev-built-body")
+  await expect(body).toBeVisible()
+  // Scoped to the plugin's own body: "widget" is the repo name, which the sidebar
+  // also shows, so an unscoped `getByText` is a strict-mode violation.
+  await expect(body.getByText("widget")).toBeVisible()
+  // Not the error card, which is what this produced before.
+  await expect(window.getByTestId("plugin-error-e2e-tab")).toHaveCount(0)
+})
+
 test("two plugins share one React — both render, neither throws", async ({ launchApp }) => {
   // The single most valuable test in this file, because it is the one failure the
   // whole runtime-shim/importmap apparatus exists to prevent and the one an
