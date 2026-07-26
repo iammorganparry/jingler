@@ -14,17 +14,29 @@
  *  1. **A failed turn always closes.** The run IS over. The input channel must be
  *     closed or the query would never end, and a withheld `Failed` would leave the
  *     turn streaming forever with nothing to settle it.
- *  2. **A pending steer outranks everything.** A message pushed in the last few
+ *  2. **Delegated work keeps the turn open, and outranks a steer.** The SDK
+ *     backgrounds every `Task` by default, so the main agent's `result` routinely
+ *     lands while its sub-agents are still working. Closing there ends the query,
+ *     and since every sub-agent runs inside that one query with one
+ *     `AbortController`, ending it kills all of them at once — which is exactly
+ *     what "talking to the main agent killed my sub-agents" was.
+ *
+ *     It is checked BEFORE the steer because the reason doubles as the caller's
+ *     timer, and when both are true the LONGER wait has to win. Reporting
+ *     `steer-pending` here would arm a 2.5-second grace over live sub-agents, so a
+ *     continuation that took three seconds to start would close the channel and
+ *     kill them — trading the bug this module exists to fix for a turn that reads
+ *     as settled a few seconds sooner.
+ *  3. **A pending steer keeps it open too.** A message pushed in the last few
  *     milliseconds has not been read yet; closing the channel discards the
  *     operator's message outright. This is why `steered` is passed in rather than
  *     read here — `takeSteered()` is a CONSUMING read, and a `||` chain that
  *     short-circuited past it would strand the message it exists to notice.
- *  3. **Delegated work keeps the turn open.** The SDK backgrounds every `Task` by
- *     default, so the main agent's `result` routinely lands while its sub-agents
- *     are still working. Closing there ends the query, and since every sub-agent
- *     runs inside that one query with one `AbortController`, ending it kills all of
- *     them at once — which is exactly what "talking to the main agent killed my
- *     sub-agents" was.
+ *
+ *     Callers must also REMEMBER this across messages. The SDK pulls a pushed
+ *     message out of the channel within a microtask, so a later `unread` check
+ *     reports false whether or not the CLI has acted on it: asking again from
+ *     scratch says "nothing pending" and closes the turn the push just opened.
  *  4. **Otherwise the turn is finished.** No steer, no sub-agents: nothing is left
  *     to wait for, and a query held past that never ends at all.
  */
@@ -34,8 +46,9 @@ export interface TurnContinuationState {
   /**
    * Did a steer land in this turn?
    *
-   * Pass the result of `live.takeSteered()`. It is a consuming read, so it must be
-   * called exactly once per `result` and its value handed here — never re-read.
+   * Pass the result of `live.takeSteered()`, OR'd with whatever the caller has
+   * remembered from an earlier message — the read is consuming AND the SDK empties
+   * the channel within a microtask, so this is not re-derivable later.
    */
   readonly steered: boolean
   /** Is a pushed message still sitting unread in the input channel? */
@@ -64,10 +77,11 @@ export const turnContinuation = (state: TurnContinuationState): TurnContinuation
   // Rule 1. Checked first: a failure closes even with sub-agents outstanding,
   // because the query carrying them has already gone wrong.
   if (state.terminalKind === "failed") return { kind: "close", because: "failed" }
-  // Rule 2.
-  if (state.steered || state.unread) return { kind: "continue", because: "steer-pending" }
-  // Rule 3.
+  // Rule 2. Before the steer — see the header: both are `continue`, so the order
+  // only picks the timer, and over live sub-agents the longer wait must win.
   if (state.liveSubagents > 0) return { kind: "continue", because: "subagent-work" }
+  // Rule 3.
+  if (state.steered || state.unread) return { kind: "continue", because: "steer-pending" }
   // Rule 4.
   return { kind: "close", because: "turn-finished" }
 }

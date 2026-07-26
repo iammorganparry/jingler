@@ -1217,6 +1217,25 @@ export const runClaude = (
           clearTimeout(holdTimer)
           holdTimer = null
         }
+        /**
+         * Whether a steer is still waiting to be answered — sticky across messages.
+         *
+         * Not derivable a second time, which is the whole reason it is a variable.
+         * `takeSteered()` is a consuming read and the SDK pulls a pushed message out
+         * of the channel within a microtask, so by the foot of the loop `hasUnread()`
+         * reports false whether or not the CLI has acted on it. Asking again from
+         * scratch therefore said "nothing pending" and closed the channel at 0ms —
+         * cutting the very continuation the push had just opened, and leaving the
+         * operator's message accepted but unanswered.
+         *
+         * Kept as its OWN fact rather than read back off the last verdict's reason:
+         * a steer noticed while sub-agents are live yields `subagent-work` (the
+         * longer timer wins), so remembering the reason instead would forget the
+         * steer and close as soon as the last bookend landed.
+         *
+         * Cleared by a `result`, which is what actually answers it.
+         */
+        let steerPending = false
         try {
           for await (const msg of iterator) {
             disarmHold()
@@ -1299,9 +1318,11 @@ export const runClaude = (
               // re-read, and never behind a `||` that could short-circuit past it.
               // The wait is bounded by the timer armed at the foot of this loop,
               // once per message, off `withheldDone`.
+              const steered = live.takeSteered()
+              const unread = live.hasUnread()
               const verdict = turnContinuation({
-                steered: live.takeSteered(),
-                unread: live.hasUnread(),
+                steered,
+                unread,
                 liveSubagents: liveSubagents.size,
                 terminalKind: events.some((event) => event._tag === "Failed")
                   ? "failed"
@@ -1310,6 +1331,10 @@ export const runClaude = (
                     : null
               })
               extended = verdict.kind === "continue"
+              // This result ANSWERS a steer, so it also resets the memory — re-seeded
+              // from the reads above so a push that arrived during the probe still
+              // counts, and set independently of which reason won the timer.
+              steerPending = extended && (steered || unread)
               if (!extended) live.finish()
             }
             for (const event of events) {
@@ -1327,6 +1352,7 @@ export const runClaude = (
               if (event._tag === "Done" || event._tag === "Failed") {
                 terminal = true
                 withheldDone = null
+                steerPending = false
                 // A terminal event we are NOT withholding ends the run, so the
                 // channel must close or the input generator parks forever with
                 // nothing left to wake it. Already done for a `result` (the policy
@@ -1350,10 +1376,15 @@ export const runClaude = (
             // closed HERE, which returns the input generator, exits this loop, and
             // lets the post-loop branch emit the withheld `Done` for real.
             if (withheldDone !== null) {
+              // A push that landed since the last read still counts, and a steer
+              // noticed at any point during the hold KEEPS counting until a result
+              // resolves it — see `steerPending`. Asking `hasUnread()` alone reports
+              // false the moment the SDK takes the message, which is precisely when
+              // the answer matters.
+              steerPending = steerPending || live.takeSteered() || live.hasUnread()
               const held = turnContinuation({
-                // Consumed at the result; a fresh push shows up as `unread`.
-                steered: false,
-                unread: live.hasUnread(),
+                steered: steerPending,
+                unread: false,
                 liveSubagents: liveSubagents.size,
                 terminalKind: null
               })

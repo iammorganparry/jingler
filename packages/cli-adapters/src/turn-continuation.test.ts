@@ -16,8 +16,10 @@ const TERMINAL = ["done", "failed", null] as const
 /** The expectation, stated independently of the implementation's branch order. */
 const expected = (s: TurnContinuationState): ReturnType<typeof turnContinuation> => {
   if (s.terminalKind === "failed") return { kind: "close", because: "failed" }
-  if (s.steered || s.unread) return { kind: "continue", because: "steer-pending" }
+  // Sub-agents before the steer: both continue, so the order only picks the caller's
+  // timer, and over live sub-agents the LONGER wait must win.
   if (s.liveSubagents > 0) return { kind: "continue", because: "subagent-work" }
+  if (s.steered || s.unread) return { kind: "continue", because: "steer-pending" }
   return { kind: "close", because: "turn-finished" }
 }
 
@@ -76,12 +78,24 @@ describe("turnContinuation — the rules that bit", () => {
     ).toStrictEqual({ kind: "continue", because: "steer-pending" })
   })
 
-  it("prefers the steer over sub-agent work when both are true", () => {
-    // Not arbitrary: the steer needs the SHORT timer. Reporting `subagent-work`
-    // here would arm SUBAGENT_LINGER_CAP for a continuation due in milliseconds,
-    // leaving the turn visibly running for ten minutes after it finished.
+  it("prefers sub-agent work over the steer when both are true", () => {
+    // Not arbitrary, and the reverse of the obvious choice. Both arms continue, so
+    // the order only picks the caller's TIMER — and over live sub-agents the longer
+    // wait has to win. Reporting `steer-pending` here would arm a 2.5s grace while
+    // sub-agents ran, so a continuation that took three seconds to start would close
+    // the channel and kill them: the exact bug this module exists to prevent, traded
+    // for a turn that reads as settled a few seconds sooner.
     expect(
       turnContinuation({ steered: true, unread: true, liveSubagents: 2, terminalKind: null })
+    ).toStrictEqual({ kind: "continue", because: "subagent-work" })
+  })
+
+  it("falls back to the steer's short grace once the sub-agents are gone", () => {
+    // The other half of that trade: with nothing left to kill, a pending steer gets
+    // the 2.5s wait it always had, so a continuation that never comes does not leave
+    // the turn visibly running for ten minutes.
+    expect(
+      turnContinuation({ steered: true, unread: false, liveSubagents: 0, terminalKind: null })
     ).toStrictEqual({ kind: "continue", because: "steer-pending" })
   })
 

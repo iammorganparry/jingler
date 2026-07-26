@@ -40,6 +40,20 @@ let released: Promise<void>
 let pushed: SDKUserMessage[] = []
 /** Set by the mock's `finally` — i.e. the iterator genuinely unwound. */
 let iteratorUnwound = false
+/** True once the adapter closed the input channel (`live.finish()`). */
+let inputClosed = false
+/** Scripted messages the mock never got to yield because the input closed first. */
+let truncatedAt: number | null = null
+
+/**
+ * Let a `finish()` from the previous message reach the drain loop.
+ *
+ * Microtasks, not a timer, so this behaves identically under `vi.useFakeTimers()`.
+ * A `for await` noticing its async generator has returned takes a few turns.
+ */
+const settleMicrotasks = async () => {
+  for (let i = 0; i < 8; i += 1) await Promise.resolve()
+}
 /** Resolved once the mocked query has yielded everything and is parked on input. */
 let parked: Promise<void>
 
@@ -50,13 +64,23 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
       // iterable here is what makes `live.finish()` observable.
       const drained = (async () => {
         for await (const message of prompt) pushed.push(message)
+        inputClosed = true
       })()
       try {
-        for (const message of scripted) {
+        for (const [index, message] of scripted.entries()) {
           if (message === PAUSE) {
             markParked()
             await released
             continue
+          }
+          // The real query ENDS when its streaming input closes. Yielding on past
+          // that point is the difference between a mock that models the harness and
+          // one that hides a premature `live.finish()`: the remaining script would
+          // arrive from a process that, in production, no longer exists.
+          await settleMicrotasks()
+          if (inputClosed) {
+            truncatedAt ??= index
+            break
           }
           yield message
         }
@@ -205,6 +229,8 @@ const run = async (
 beforeEach(() => {
   pushed = []
   iteratorUnwound = false
+  inputClosed = false
+  truncatedAt = null
   parked = new Promise<void>((resolve) => {
     markParked = resolve
   })
@@ -329,6 +355,60 @@ describe("a turn with live sub-agents", () => {
     expect(pushed.map((message) => message.message.content)).toContain("also check the tests")
     expect(state.tags.filter((tag) => tag === "Done")).toHaveLength(1)
     expect(state.tags.indexOf("Done")).toBeGreaterThan(state.tags.indexOf("SubagentEnded"))
+    // The continuation the hold exists for must actually be reached. The channel
+    // closing before the script ran out means the operator's message went into a
+    // query that was already shutting down — accepted, and never answered.
+    expect(truncatedAt).toBeNull()
+  })
+
+  it("holds the channel open for a steer taken during a sub-agent hold", async () => {
+    // The narrowest form of the bug, and the one a `hasUnread()` check cannot see:
+    // the SDK pulls a pushed message out within a microtask, so by the foot of the
+    // loop the channel looks EMPTY whether or not the CLI has acted on it. If the
+    // last `task_notification` then lands before the continuation's `result`, the
+    // policy sees no steer and no sub-agents and closes at 0ms — cutting the very
+    // turn the push was meant to open.
+    const state = await run(
+      [spawn("task_1"), launchAck("task_1"), result(), PAUSE, notify("task_1"), result()],
+      async (live) => {
+        expect(await live.steer!("and the theme tokens", [])).toBe("accepted")
+      }
+    )
+
+    // Nothing was cut, and the turn settled exactly once.
+    expect(truncatedAt).toBeNull()
+    expect(state.tags.filter((tag) => tag === "Done")).toHaveLength(1)
+  })
+
+  it("remembers the steer across the messages between it and the last bookend", async () => {
+    // The same bug one message further out, and the one a "remember the last
+    // verdict" fix still gets wrong: the steer is noticed while TWO sub-agents are
+    // live, so the verdict that message is `subagent-work`. If that overwrites the
+    // memory, the steer is forgotten — and when the second bookend lands the policy
+    // sees no steer and no sub-agents and closes at 0ms.
+    //
+    // The steer must be remembered as its own fact, not inferred from whichever
+    // reason happened to pick the timer.
+    const state = await run(
+      [
+        spawn("task_1"),
+        spawn("task_2"),
+        launchAck("task_1"),
+        result(),
+        PAUSE,
+        progress("task_1"), // a message between the steer and the bookends
+        notify("task_1"),
+        notify("task_2"), // sub-agents drain HERE, long after the steer was noticed
+        result()
+      ],
+      async (live) => {
+        expect(await live.steer!("and the theme tokens", [])).toBe("accepted")
+      }
+    )
+
+    expect(truncatedAt).toBeNull()
+    expect(pushed.map((message) => message.message.content)).toContain("and the theme tokens")
+    expect(state.tags.filter((tag) => tag === "Done")).toHaveLength(1)
   })
 })
 
