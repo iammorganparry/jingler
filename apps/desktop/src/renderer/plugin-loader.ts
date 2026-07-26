@@ -33,6 +33,7 @@ import type { LoadedPlugin, Session } from "@starbase/core"
 import { useSession, type SessionSnapshot } from "@starbase/plugin-sdk"
 import {
   PLUGIN_TAB_ORDER,
+  type PaneContribution,
   type TabContribution,
   type TabContext
 } from "@starbase/ui"
@@ -43,6 +44,21 @@ import { Boxes } from "lucide-react"
 /** What a plugin's UI module must default-export. */
 export interface PluginModule {
   readonly views?: Record<string, ComponentType<PluginViewProps>>
+  /**
+   * Dock pane components, keyed by contributed pane id.
+   *
+   * Separate from `views` because a pane's lifecycle is different: it is mounted
+   * once for the WINDOW and takes whichever session has focus, where a tab
+   * belongs to one session and there may be four on screen.
+   */
+  readonly panes?: Record<string, ComponentType<PluginPaneProps>>
+}
+
+/** What a plugin's dock pane component is handed. */
+export interface PluginPaneProps {
+  /** The focused session, or null when there is none. A dock outlives any one. */
+  readonly session: SessionSnapshot | null
+  readonly pluginId: string
 }
 
 /** What a plugin's view component is handed. */
@@ -80,6 +96,7 @@ export interface ActivePlugin {
   readonly id: string
   readonly version: string
   readonly tabs: ReadonlyArray<TabContribution>
+  readonly panes: ReadonlyArray<PaneContribution>
 }
 
 /** A plugin that did not load, and why — surfaced in Settings verbatim. */
@@ -161,6 +178,21 @@ const PluginViewMount = ({
   pluginId: string
 }) => createElement(View, { session: useSession(), pluginId })
 
+/** Renders a plugin's dock pane, narrowing the session it is handed. */
+const PluginPaneMount = ({
+  Pane,
+  pluginId,
+  session
+}: {
+  Pane: ComponentType<PluginPaneProps>
+  pluginId: string
+  session: Session | null
+}) =>
+  createElement(Pane, {
+    session: session ? toSessionSnapshot(session) : null,
+    pluginId
+  })
+
 /**
  * Import one plugin's UI module and build its contributions.
  *
@@ -175,10 +207,38 @@ export const loadPluginUi = async (
   const { manifest } = plugin
   const declaredTabs = manifest.contributes?.tabs ?? []
 
+  const declaredPanes = manifest.contributes?.panes ?? []
+
+  // Keybindings and settings are accepted by the manifest schema and consumed by
+  // nothing. Rather than let a plugin declare one and watch it never happen —
+  // the exact "silently absent" failure this loader exists to prevent — say so
+  // at load time, in Settings, where the author will see it.
+  //
+  // `resolveKeybindings` and the settings form exist and are tested; what is
+  // missing is the app-level dispatch to hook them to. Until that lands this is
+  // the honest answer.
+  const unsupported = [
+    (manifest.contributes?.keybindings?.length ?? 0) > 0 ? "keybindings" : null,
+    (manifest.contributes?.settings?.length ?? 0) > 0 ? "settings" : null
+  ].filter((x): x is string => x !== null)
+
+  if (unsupported.length > 0) {
+    return {
+      ok: false,
+      error: {
+        id: manifest.id,
+        message: `contributes.${unsupported.join(" and contributes.")} — not supported in this build. Remove ${unsupported.length > 1 ? "them" : "it"} from the manifest; tabs, panes and commands work.`
+      }
+    }
+  }
+
   // A plugin with no UI entry is legal — it may be host-only, or contribute
-  // nothing yet. It simply has no tabs, which is not an error.
-  if (!manifest.ui || declaredTabs.length === 0) {
-    return { ok: true, plugin: { id: manifest.id, version: manifest.version, tabs: [] } }
+  // nothing yet. It simply has no tabs or panes, which is not an error.
+  if (!manifest.ui || (declaredTabs.length === 0 && declaredPanes.length === 0)) {
+    return {
+      ok: true,
+      plugin: { id: manifest.id, version: manifest.version, tabs: [], panes: [] }
+    }
   }
 
   let module: unknown
@@ -241,7 +301,37 @@ export const loadPluginUi = async (
     })
   }
 
-  return { ok: true, plugin: { id: manifest.id, version: manifest.version, tabs } }
+  const panes: Array<PaneContribution> = []
+  const paneComponents = exported.panes ?? {}
+
+  for (const declared of declaredPanes) {
+    const view = paneComponents[declared.id]
+    if (typeof view !== "function") {
+      // Checked exactly as tabs are. A declared pane with no component used to
+      // be accepted and then silently dropped — the operator saw a contribution
+      // count in Settings and nothing in the dock.
+      return {
+        ok: false,
+        error: {
+          id: manifest.id,
+          message: `declares the pane "${declared.id}" but its UI module exports no matching pane component`
+        }
+      }
+    }
+
+    const Pane = view
+    panes.push({
+      id: declared.id,
+      label: declared.label,
+      icon: resolveIcon(declared.icon),
+      slot: declared.slot,
+      ...(declared.defaultSize === undefined ? {} : { defaultSize: declared.defaultSize }),
+      render: (session) =>
+        createElement(PluginPaneMount, { Pane, pluginId: manifest.id, session })
+    })
+  }
+
+  return { ok: true, plugin: { id: manifest.id, version: manifest.version, tabs, panes } }
 }
 
 /**

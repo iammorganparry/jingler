@@ -58,10 +58,20 @@ export const installPluginHost = (
       storageDelete: (pluginId, key) =>
         appRuntime.runPromise(pluginStorageDelete(pluginId, key)),
       storageKeys: (pluginId) => appRuntime.runPromise(pluginStorageKeys(pluginId)),
-      // `exec` with no `cwd` runs where the operator is looking. Undefined when
-      // no session is active, which spawns in the host's own cwd — deliberately
-      // NOT the repos root, since a plugin running a command against a repo it
-      // was not told about is a surprise.
+      // No default. `exec` with no `cwd` runs in the host process's own
+      // directory, and the SDK now says so.
+      //
+      // `ExecOptions` used to promise "the active session's worktree" while this
+      // returned undefined — so `ctx.exec("git", ["status"])` written straight
+      // from the docs ran wherever Electron happened to be. Read-only that is
+      // merely wrong; a mutating git command in the wrong directory is
+      // destructive.
+      //
+      // Fixed by correcting the contract rather than inventing a default. Main
+      // has no notion of a focused session — that is renderer state — and the
+      // plugin already holds the right answer: `session.worktreePath` is on the
+      // snapshot its tab was handed. Guessing on its behalf would pick the wrong
+      // repo the moment a split has two sessions open.
       defaultCwd: () => undefined,
       getSession: (pluginId, request) =>
         appRuntime.runPromise(

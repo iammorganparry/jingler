@@ -38,6 +38,7 @@ import type { InjectionTargetsProps } from "../composites/injection-targets.js"
 import type { OpenConnectorSectionProps } from "../composites/open-connector-section.js"
 import type { ThemesSettingsProps } from "../composites/themes-settings.js"
 import type { PluginsSettingsProps } from "../composites/plugins-settings.js"
+import type { PaneContribution } from "./pane-contributions.js"
 import { type ConversationPaneCtx, SessionConversation } from "../screens/session-conversation.js"
 import { useSplitLayout } from "./use-split-layout.js"
 import { MAX_PANES } from "./split-layout.js"
@@ -168,6 +169,14 @@ export interface StarbaseAppProps {
    * consumer of contributions, whoever built them.
    */
   tabContributions?: ReadonlyArray<TabContribution>
+  /**
+   * Dock panes contributed by plugins.
+   *
+   * Threaded beside `tabContributions` rather than inferred: a dock belongs to
+   * the window, so it is mounted once by `SessionSplit` outside the pane loop —
+   * putting one inside would render four copies in a four-way split.
+   */
+  paneContributions?: ReadonlyArray<PaneContribution>
   /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */
   renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Changes tab — the Code Review view over the local worktree diff. */
@@ -305,6 +314,7 @@ export function StarbaseApp({
   injection,
   renderPullRequest,
   tabContributions,
+  paneContributions,
   renderReview,
   renderCode,
   renderTerminalDock,
@@ -661,6 +671,7 @@ export function StarbaseApp({
         onToggleCollapsed={onToggleCollapsed ? toggleCollapsedByName : undefined}
         renderPullRequest={renderPullRequest}
         tabContributions={tabContributions}
+        paneContributions={paneContributions}
         renderReview={renderReview}
         renderCode={renderCode}
         renderTerminalDock={renderTerminalDock}

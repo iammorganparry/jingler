@@ -25,7 +25,13 @@ import { runShell } from "./plugin-exec.js"
  * and it gets a `parentPort` message channel without us wiring up stdio.
  */
 export const spawnHostProcess = (): HostProcess => {
-  const entry = join(import.meta.dirname, "plugin-host-entry.mjs")
+  // `.js`, not `.mjs`. electron-vite emits main-process entries as `.js` (only
+  // the preload gets `.mjs`), so the original path pointed at a file that never
+  // existed: the host never booted, never sent `ready`, and every plugin with a
+  // `main` half failed to activate in every build. Nothing caught it because the
+  // unit tests drive a fake `HostProcess` and the e2e plugin was UI-only — the
+  // real spawn path had zero coverage until the case added alongside this fix.
+  const entry = join(import.meta.dirname, "plugin-host-entry.js")
   const child = utilityProcess.fork(entry, [], {
     // Named so it is identifiable in Activity Monitor / `ps` — an operator
     // wondering what is using CPU deserves better than a second "Electron".

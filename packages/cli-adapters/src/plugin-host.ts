@@ -32,6 +32,7 @@ import { PluginError } from "@starbase/core"
 import type { LoadedPlugin } from "@starbase/core"
 import {
   ACTIVATE_TIMEOUT_MS,
+  HOST_READY_TIMEOUT_MS,
   type FromHostMessage,
   type ToHostMessage
 } from "./plugin-host-protocol.js"
@@ -91,6 +92,21 @@ export class PluginHostRuntime {
   private readonly waiters = new Map<string, Waiter>()
   /** Plugins currently activated, so a restart can restore them. */
   private readonly activated = new Map<string, LoadedPlugin>()
+  /**
+   * Activations in flight, keyed by plugin id.
+   *
+   * The `activated` check alone was a time-of-check/time-of-use hole: it happens
+   * before `await whenReady()` and the set happens after, so two concurrent
+   * callers — which this class's own comments call the normal case, a tab and a
+   * command firing together — both passed the check and both sent an `activate`.
+   * The host entry had the same shape, so `module.activate(ctx)` ran twice:
+   * duplicated subscriptions, doubled side effects, last-write-wins handlers.
+   *
+   * Storing the promise on first entry and returning it to everyone else makes
+   * concurrent activation one activation, which is what "idempotent" was always
+   * supposed to mean.
+   */
+  private readonly activating = new Map<string, Promise<void>>()
   /**
    * Callers parked in {@link whenReady}.
    *
@@ -260,9 +276,39 @@ export class PluginHostRuntime {
       )
   }
 
+  /**
+   * Wait for the host to report `ready`, but not forever.
+   *
+   * `HOST_READY_TIMEOUT_MS` was defined with a docstring explaining exactly this
+   * and then consumed by nothing. A host that spawns and hangs before sending
+   * `ready` — or a spawn that fails without producing an exit event — parked
+   * every activation in `readyWaiters` permanently: the tab that triggered it
+   * spun with no diagnosis, and `ACTIVATE_TIMEOUT_MS` never fired because that
+   * race only starts once this resolves.
+   */
   private whenReady(): Promise<void> {
     if (this.ready) return Promise.resolve()
-    return new Promise((resolve, reject) => this.readyWaiters.push({ resolve, reject }))
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        resolve: () => {
+          clearTimeout(timer)
+          resolve()
+        },
+        reject: (error: PluginError) => {
+          clearTimeout(timer)
+          reject(error)
+        }
+      }
+      const timer = setTimeout(() => {
+        this.readyWaiters = this.readyWaiters.filter((w) => w !== waiter)
+        // Marked down rather than merely failed: a host that never booted will
+        // not boot on the next attempt either, and retrying forever is how this
+        // presents as an app that is just slow.
+        this.downReason = `the plugin host did not start within ${HOST_READY_TIMEOUT_MS}ms`
+        reject(new PluginError({ pluginId: "<host>", reason: this.downReason }))
+      }, HOST_READY_TIMEOUT_MS)
+      this.readyWaiters.push(waiter)
+    })
   }
 
   private send<T>(message: ToHostMessage & { requestId: string }): Promise<T> {
@@ -295,6 +341,21 @@ export class PluginHostRuntime {
     if (!manifest.main) return
     if (this.activated.has(manifest.id)) return
 
+    // Join an activation already under way rather than starting a second.
+    const inFlight = this.activating.get(manifest.id)
+    if (inFlight) return await inFlight
+
+    const run = this.runActivation(plugin)
+    this.activating.set(manifest.id, run)
+    try {
+      await run
+    } finally {
+      this.activating.delete(manifest.id)
+    }
+  }
+
+  private async runActivation(plugin: LoadedPlugin): Promise<void> {
+    const { manifest } = plugin
     const down = this.ensureProcess()
     if (down) throw down
 

@@ -249,7 +249,19 @@ export interface HostEvents {
 
 /** Options for {@link HostContext.exec}. */
 export interface ExecOptions {
-  /** Working directory. Defaults to the active session's worktree. */
+  /**
+   * Working directory.
+   *
+   * Defaults to the HOST PROCESS's own directory — Starbase does not guess a
+   * repo for you. Pass it explicitly for anything repo-shaped: your tab already
+   * has the right answer in `session.worktreePath`, and in a split with two
+   * sessions open there is no single "active" worktree to infer.
+   *
+   * @example
+   * ```ts
+   * await ctx.exec("git", ["status"], { cwd: worktreePath })
+   * ```
+   */
   readonly cwd?: string
   /** Extra environment for the child, merged over the host's own. */
   readonly env?: Readonly<Record<string, string>>

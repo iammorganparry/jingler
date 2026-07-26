@@ -1,6 +1,8 @@
 # Starbase plugins
 
-Plugins add tabs, dock panes, commands and keybindings to Starbase. They are
+Plugins add tabs, dock panes and commands to Starbase. (Keybinding and settings
+contributions are declared in the schema but not yet wired — a manifest using
+one fails to load with a message saying so, rather than silently doing nothing.) They are
 VS Code-shaped on purpose: `activationEvents`, `contributes`, `extensionKind`,
 `capabilities` all mean what they mean there, so a plugin author who has written
 an extension is not learning a second vocabulary for the same ideas.

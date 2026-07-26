@@ -26,6 +26,7 @@
  */
 import * as React from "react"
 import * as jsxRuntime from "react/jsx-runtime"
+import * as reactDom from "react-dom"
 import * as sdkModule from "@starbase/plugin-sdk"
 import * as sdkUiModule from "@starbase/plugin-sdk/ui"
 
@@ -33,6 +34,16 @@ import * as sdkUiModule from "@starbase/plugin-sdk/ui"
 export interface StarbaseRuntime {
   readonly react: typeof React
   readonly jsxRuntime: typeof jsxRuntime
+  /**
+   * `react-dom`, as its own singleton.
+   *
+   * It used to be aliased to the React shim, which exports none of its
+   * bindings — so a plugin doing `import { createPortal } from "react-dom"`
+   * died at module instantiation with "does not provide an export named
+   * createPortal". `STARBASE_EXTERNALS` tells every plugin to externalise
+   * react-dom, so that was the supported path leading straight into a wall.
+   */
+  readonly reactDom: typeof reactDom
   /**
    * The plugin SDK's renderer half — this app's instance of it.
    *
@@ -73,6 +84,7 @@ export const publishPluginRuntime = (): void => {
   globalThis.__STARBASE_RUNTIME__ ??= {
     react: React,
     jsxRuntime,
+    reactDom,
     sdk: sdkModule,
     sdkUi: sdkUiModule
   }

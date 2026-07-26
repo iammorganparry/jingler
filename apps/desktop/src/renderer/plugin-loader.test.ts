@@ -181,6 +181,57 @@ describe("loadPluginUi", () => {
   })
 })
 
+describe("panes", () => {
+  const withPane = () =>
+    plugin({
+      contributes: {
+        tabs: [{ id: "hello.greeting", label: "Hello" }],
+        panes: [{ id: "hello.dock", label: "Dock", slot: "right" }]
+      }
+    } as Partial<LoadedPlugin["manifest"]>)
+
+  it("builds a pane contribution when the module exports one", async () => {
+    const result = await loadPluginUi(withPane(), async () => ({
+      default: { views: { "hello.greeting": View }, panes: { "hello.dock": View } }
+    }))
+    if (!result.ok) throw new Error(result.error.message)
+    expect(result.plugin.panes).toHaveLength(1)
+    expect(result.plugin.panes[0]?.slot).toBe("right")
+  })
+
+  it("refuses a declared pane with no component, exactly as it does a tab", async () => {
+    // Previously accepted and silently dropped: Settings counted the
+    // contribution and nothing ever appeared in the dock.
+    const result = await loadPluginUi(withPane(), async () => ({
+      default: { views: { "hello.greeting": View } }
+    }))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.message).toContain("hello.dock")
+    expect(result.error.message).toContain("no matching pane component")
+  })
+})
+
+describe("contributions this build cannot honour", () => {
+  it.each([
+    ["keybindings", { keybindings: [{ command: "hello.greeting", key: "ctrl+shift+h" }] }],
+    ["settings", { settings: [{ id: "hello.opt", label: "Opt", type: "boolean" }] }]
+  ])("fails loudly on contributes.%s rather than dropping it", async (name, extra) => {
+    // The schema accepts these and nothing consumes them. Silence here is the
+    // precise failure mode the rest of this loader exists to prevent.
+    const result = await loadPluginUi(
+      plugin({
+        contributes: { tabs: [{ id: "hello.greeting", label: "Hello" }], ...extra }
+      } as Partial<LoadedPlugin["manifest"]>),
+      async () => ({ default: { views: { "hello.greeting": View } } })
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.message).toContain(name)
+    expect(result.error.message).toContain("not supported in this build")
+  })
+})
+
 describe("loadPlugins", () => {
   it("keeps the good plugins when one fails, rather than aborting the batch", async () => {
     const good = plugin()

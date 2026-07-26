@@ -184,8 +184,8 @@ and unit-test gates on every pull request.
 
 ## Plugins
 
-Starbase is extensible — plugins add tabs, dock panes, commands and
-keybindings, dropped into `~/starbase/plugins`.
+Starbase is extensible — plugins add tabs, dock panes and commands, dropped
+into `~/starbase/plugins`.
 
 - **Writing one:** [`packages/plugin-sdk/AGENTS.md`](packages/plugin-sdk/AGENTS.md)
 - **Installing one:** [`docs/plugins/permissions-and-trust.md`](docs/plugins/permissions-and-trust.md) — read this first

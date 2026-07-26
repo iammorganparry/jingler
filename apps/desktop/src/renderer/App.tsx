@@ -56,7 +56,7 @@ import { themeCatalogKey, useTheme } from "./use-theme.js"
 import { useConnectorCenter } from "./use-connector-center.js"
 import { useOpenConnector } from "./use-open-connector.js"
 import { useInjectionTargets } from "./use-injection-targets.js"
-import { PluginProvider, usePluginTabs } from "./plugin-registry.js"
+import { PluginProvider, usePluginPanes, usePluginTabs } from "./plugin-registry.js"
 import { usePlugins } from "./use-plugins.js"
 
 const GH_UNKNOWN: GhStatus = {
@@ -89,6 +89,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   // Merged with the built-ins inside `SessionPane`, through the same registry —
   // a plugin tab is not a separate region of the tab bar.
   const pluginTabs = usePluginTabs()
+  const pluginPanes = usePluginPanes()
   const plugins = usePlugins()
 
   // The conversation machine persists a session's settled status by itself, with
@@ -631,6 +632,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     <StarbaseApp
       clis={clis}
       tabContributions={pluginTabs}
+      paneContributions={pluginPanes}
       selectSessionRequest={selectRequest}
       onVisibleSessionsChange={onVisibleSessionsChange}
       sessions={sessions}

@@ -85,6 +85,18 @@ interface LivePlugin {
 
 const live = new Map<string, LivePlugin>()
 
+/**
+ * Activations in flight, keyed by plugin id.
+ *
+ * `live.has(pluginId)` is checked before `await import(entry)` and `live.set`
+ * happens after, so two `activate` messages arriving together both passed the
+ * check and both imported and called `module.activate(ctx)` — duplicated
+ * subscriptions, doubled side effects, last-write-wins command handlers. Main
+ * now coalesces concurrent callers too, but this side must hold on its own: the
+ * two processes are not one lock.
+ */
+const activating = new Map<string, Promise<void>>()
+
 const storageFor = (pluginId: string): PluginStorage => ({
   get: <T,>(key: string) =>
     ask<T | undefined>(pluginId, "storage.get", { key }).then((v) => v ?? undefined),
@@ -128,14 +140,44 @@ const buildContext = (plugin: LivePlugin): HostContext => ({
   // Mirrors VS Code: prompting is the default and a declined prompt REJECTS,
   // so the common call site needs no null check. `createIfNone: false` is the
   // opt-in "tell me if there is already a grant" form, which resolves undefined.
+  //
+  // The translation happens HERE and nowhere else. `PluginAuth` answers a plain
+  // question with a plain answer — null means "no session" — and main forwards
+  // that verbatim. Without this wrapper the prompting overload handed a plugin
+  // `null` while its TYPE promised an `AuthSession`, so code written to the
+  // documented contract (including this repo's own github-issues plugin) hit
+  // "Cannot read properties of null" instead of the rejection the docs, the
+  // types and three separate comments all describe.
   authentication: {
-    getSession: ((providerId: string, scopes: readonly string[], opts?: { createIfNone?: boolean }) =>
-      ask<AuthSession | undefined>(plugin.pluginId, "auth.getSession", {
-        providerId,
-        scopes,
-        createIfNone: opts?.createIfNone
-      })) as HostContext["authentication"]["getSession"],
-    registerProvider: () => ({ dispose: () => {} })
+    getSession: (async (
+      providerId: string,
+      scopes: readonly string[],
+      opts?: { createIfNone?: boolean }
+    ) => {
+      const session = await ask<AuthSession | null | undefined>(
+        plugin.pluginId,
+        "auth.getSession",
+        { providerId, scopes, createIfNone: opts?.createIfNone }
+      )
+      if (session) return session
+      // The non-prompting form is allowed to answer "there is no grant".
+      if (opts?.createIfNone === false) return undefined
+      throw new Error(
+        `Access to "${providerId}" was declined, or no credentials are available. ` +
+          `Pass { createIfNone: false } to ask without prompting.`
+      )
+    }) as HostContext["authentication"]["getSession"],
+    registerProvider: () => {
+      // Loud, not silent. The manifest accepts `contributes.authenticationProviders`
+      // and the SDK documents a worked example, but nothing forwards a provider
+      // to `PluginAuth` — and the two `AuthProvider` shapes do not even match
+      // (the SDK's getSessions/createSession versus cli-adapters' getToken). A
+      // plugin that believed this worked would watch every consumer get "no
+      // authentication provider with id X" and have nothing to debug.
+      throw new Error(
+        "authentication.registerProvider is not implemented yet. Contributed auth providers are not supported in this build; remove `contributes.authenticationProviders` from your manifest."
+      )
+    }
   },
 
   exec: (command, args = [], options = {}) =>
@@ -164,13 +206,42 @@ const messageOf = (cause: unknown): string =>
 // ── Message handling ─────────────────────────────────────────────────────────
 
 const activate = async (message: Extract<ToHostMessage, { kind: "activate" }>) => {
-  const { requestId, pluginId, entry, declaredCommands } = message
+  const { requestId, pluginId } = message
+
+  const inFlight = activating.get(pluginId)
+  if (inFlight) {
+    // Join it rather than starting a second. Whichever way it settles, this
+    // caller gets the same answer the first one did.
+    await inFlight.then(
+      () => send({ kind: "activated", requestId, pluginId }),
+      (cause: unknown) =>
+        send({ kind: "activation-failed", requestId, pluginId, message: messageOf(cause) })
+    )
+    return
+  }
+
+  const run = runActivation(message)
+  activating.set(pluginId, run)
+  try {
+    await run
+    send({ kind: "activated", requestId, pluginId })
+  } catch (cause) {
+    send({ kind: "activation-failed", requestId, pluginId, message: messageOf(cause) })
+  } finally {
+    activating.delete(pluginId)
+  }
+}
+
+/** Import and activate once. Throws on failure; the caller reports it. */
+const runActivation = async (
+  message: Extract<ToHostMessage, { kind: "activate" }>
+): Promise<void> => {
+  const { pluginId, entry, declaredCommands } = message
 
   if (live.has(pluginId)) {
     // Already activated. Idempotent rather than an error: several activation
     // events can fire for one plugin (its tab AND its command), and racing them
     // is normal rather than exceptional.
-    send({ kind: "activated", requestId, pluginId })
     return
   }
 
@@ -197,13 +268,12 @@ const activate = async (message: Extract<ToHostMessage, { kind: "activate" }>) =
 
     live.set(pluginId, { ...plugin, deactivate: module.deactivate })
     await module.activate(buildContext(plugin))
-    send({ kind: "activated", requestId, pluginId })
   } catch (cause) {
     // Dropped from `live` so a later activation event can try again — a plugin
     // that failed because a file was mid-save should not stay dead until the
     // app restarts.
     live.delete(pluginId)
-    send({ kind: "activation-failed", requestId, pluginId, message: messageOf(cause) })
+    throw cause
   }
 }
 

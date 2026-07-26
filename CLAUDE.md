@@ -123,8 +123,9 @@ Other things worth knowing before touching this:
 
 ### Plugins
 
-Starbase is extensible: plugins add **tabs, dock panes, commands and
-keybindings**, loaded from `~/starbase/plugins`. The shape is VS Code's on
+Starbase is extensible: plugins add **tabs, dock panes and commands**, loaded
+from `~/starbase/plugins`. Keybinding and settings contributions are in the
+schema but not yet dispatched; a manifest declaring one fails to load loudly. The shape is VS Code's on
 purpose — `activationEvents`, `contributes`, `capabilities` mean what they mean
 there.
 

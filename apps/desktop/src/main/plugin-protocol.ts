@@ -36,6 +36,7 @@ import { protocol } from "electron"
 // own copy of React; that is fine precisely because nothing here is ever called.
 import * as React from "react"
 import * as JsxRuntime from "react/jsx-runtime"
+import * as ReactDom from "react-dom"
 import * as JsxDevRuntime from "react/jsx-dev-runtime"
 import * as Sdk from "@starbase/plugin-sdk"
 // NOT `import * as SdkUi from "@starbase/plugin-sdk/ui"`. That would make the
@@ -115,6 +116,10 @@ export default mod
 const RUNTIME_MODULES: Record<string, string> = {
   "react.js": runtimeShim("react", exportNames(React)),
   "jsx-runtime.js": runtimeShim("jsxRuntime", exportNames(JsxRuntime)),
+  // Its OWN shim. Aliasing this to react.js served a module exporting none of
+  // `createPortal`, `createRoot` or `flushSync`, so any plugin importing one
+  // failed to instantiate.
+  "react-dom.js": runtimeShim("reactDom", exportNames(ReactDom)),
   // React only ships `jsx-dev-runtime` in development builds; falling back to
   // the production namespace keeps a plugin built in dev mode loadable against
   // a packaged app, where `jsxDEV` does not exist.
@@ -148,7 +153,7 @@ const RUNTIME_MODULES: Record<string, string> = {
  */
 const BARE_SPECIFIERS: Record<string, string> = {
   react: `${PLUGIN_SCHEME}://${RUNTIME_HOST}/react.js`,
-  "react-dom": `${PLUGIN_SCHEME}://${RUNTIME_HOST}/react.js`,
+  "react-dom": `${PLUGIN_SCHEME}://${RUNTIME_HOST}/react-dom.js`,
   "react/jsx-runtime": `${PLUGIN_SCHEME}://${RUNTIME_HOST}/jsx-runtime.js`,
   "react/jsx-dev-runtime": `${PLUGIN_SCHEME}://${RUNTIME_HOST}/jsx-dev-runtime.js`,
   "@starbase/plugin-sdk": `${PLUGIN_SCHEME}://${RUNTIME_HOST}/sdk.js`,

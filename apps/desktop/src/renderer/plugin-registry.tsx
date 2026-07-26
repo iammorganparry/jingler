@@ -27,7 +27,7 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PluginCatalog } from "@starbase/core"
-import type { TabContribution } from "@starbase/ui"
+import type { PaneContribution, TabContribution } from "@starbase/ui"
 import { rpc } from "./rpc-client.js"
 import {
   loadPlugins,
@@ -39,13 +39,15 @@ import { PluginTabHost } from "./plugin-tab-host.js"
 interface PluginRegistryValue {
   /** Tabs contributed by every enabled plugin that loaded, ready to merge. */
   readonly tabs: ReadonlyArray<TabContribution>
+  /** Dock panes, mounted once for the window rather than per session pane. */
+  readonly panes: ReadonlyArray<PaneContribution>
   /** Plugins that failed to load, for Settings to show verbatim. */
   readonly errors: ReadonlyArray<PluginLoadError>
   /** The last catalog from disk, including manifests that failed to decode. */
   readonly catalog: PluginCatalog | null
 }
 
-const EMPTY: PluginRegistryValue = { tabs: [], errors: [], catalog: null }
+const EMPTY: PluginRegistryValue = { tabs: [], panes: [], errors: [], catalog: null }
 const EMPTY_MODULES: {
   active: ReadonlyArray<ActivePlugin>
   errors: ReadonlyArray<PluginLoadError>
@@ -133,8 +135,14 @@ export function PluginProvider({ children }: { children: ReactNode }) {
         )
       }))
     )
+    // Panes are NOT wrapped in `PluginTabHost`: it provides the per-session view
+    // context a tab needs, and a dock has no single session to scope to. Its own
+    // boundary comes with the pane host in `session-split`.
+    const panes = loaded.active.flatMap((plugin) => plugin.panes)
+
     return {
       tabs,
+      panes,
       // Manifests that never decoded are failures too, and the operator should
       // see them in the same list as modules that failed to import.
       errors: [
@@ -160,6 +168,10 @@ export function PluginProvider({ children }: { children: ReactNode }) {
 /** Every plugin-contributed tab, ready to hand to `SessionPane`. */
 export const usePluginTabs = (): ReadonlyArray<TabContribution> =>
   useContext(PluginRegistryContext).tabs
+
+/** Every plugin-contributed dock pane, for `SessionSplit`. */
+export const usePluginPanes = (): ReadonlyArray<PaneContribution> =>
+  useContext(PluginRegistryContext).panes
 
 /** Plugins that failed to load — manifest or module — for Settings. */
 export const usePluginErrors = (): ReadonlyArray<PluginLoadError> =>

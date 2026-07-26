@@ -309,7 +309,14 @@ The id must be one your manifest declares in `contributes.commands`.
 ### `ExecOptions` / `ExecResult`
 
 ```ts
-interface ExecOptions { cwd?: string; env?: Record<string, string> }
+// `cwd` defaults to the HOST PROCESS's directory, not a repo. Pass it
+// explicitly for anything repo-shaped — your tab has `session.worktreePath`.
+interface ExecOptions {
+  cwd?: string
+  env?: Record<string, string>
+  input?: string
+  timeoutMs?: number
+}
 interface ExecResult { stdout: string; stderr: string; exitCode: number }
 ```
 

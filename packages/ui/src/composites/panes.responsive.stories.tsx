@@ -1,6 +1,6 @@
 import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { Issue, PrFileChange, PullRequest as PullRequestData } from "@starbase/core"
+import type { PrFileChange, PullRequest as PullRequestData } from "@starbase/core"
 import { LookFor, WidthLadder } from "../story-support.js"
 import { CodeReviewView, type ReviewSource } from "./code-review-view.js"
 import { PullRequestView } from "./pull-request-view.js"
@@ -75,6 +75,29 @@ const PR: PullRequestData = {
   mergeBlockers: [],
   mergeStateStatus: "CLEAN"
 } as unknown as PullRequestData
+
+/**
+ * Code Review: a file list, a diff, and a review tray.
+ *
+ * The two rails were 160px and 260px of `flex-none`, and `review-diff.tsx` spends
+ * another 84px on fixed line-number gutters inside whatever is left. In a 500px
+ * pane that came to roughly 70px of actual code — not a narrower view of the
+ * diff so much as no view of it.
+ */
+export const CodeReview: Story = {
+  render: () => (
+    <div className="min-h-screen bg-canvas">
+      <LookFor>
+        <strong className="text-text-bright">Look for:</strong> both rails docked only while their
+        saved widths leave at least 560px for the diff. Otherwise two toggle buttons appear in the
+        header — clicking either floats it as a sheet OVER the diff. The diff column should never
+        fall below a readable width, and the header should wrap rather than clip its &quot;Finish
+        review&quot; button.
+      </LookFor>
+      <WidthLadder height={420} render={() => <CodeReviewPane />} />
+    </div>
+  )
+}
 
 function CodeReviewPane() {
   const [source, setSource] = useState<ReviewSource>("pr")

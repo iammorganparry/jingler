@@ -245,6 +245,82 @@ export default definePlugin(
   await expect(window.getByTestId("plugin-error-e2e-tab")).toHaveCount(0)
 })
 
+test("a plugin with a host half activates and answers an invoke", async ({ launchApp }) => {
+  // The gap that let the extension host fork a filename the build never emits:
+  // the unit tests drive a fake `HostProcess` and every other e2e plugin is
+  // UI-only, so the REAL spawn path had zero coverage. This is the only test
+  // that starts an actual utilityProcess.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await seedPlugin(home, {
+    manifest: manifest({
+      main: "dist/main.js",
+      activationEvents: ["onTab:e2e-tab.main"],
+      contributes: {
+        tabs: [{ id: "e2e-tab.main", label: "E2E", icon: "Boxes", when: "always" }],
+        commands: [{ id: "e2e-tab.ping", title: "Ping" }]
+      }
+    }),
+    ui: `
+import { jsx, jsxs } from "react/jsx-runtime"
+import { definePlugin, useHost } from "@starbase/plugin-sdk"
+import { useEffect, useState } from "react"
+
+function Tab() {
+  const host = useHost()
+  const [answer, setAnswer] = useState("…")
+  useEffect(() => {
+    host.invoke("e2e-tab.ping", { n: 41 })
+      .then((r) => setAnswer(String(r)))
+      .catch((e) => setAnswer("error: " + String(e && e.message ? e.message : e)))
+  }, [host])
+  return jsxs("div", {
+    "data-testid": "e2e-tab-body",
+    children: [
+      jsx("span", { children: "host half" }),
+      jsx("div", { "data-testid": "e2e-host-answer", children: answer })
+    ]
+  })
+}
+
+export default definePlugin(
+  {
+    id: "e2e-tab", name: "E2E Tab", version: "1.0.0", ui: "dist/ui.js", main: "dist/main.js",
+    contributes: {
+      tabs: [{ id: "e2e-tab.main", label: "E2E", when: "always" }],
+      commands: [{ id: "e2e-tab.ping", title: "Ping" }]
+    }
+  },
+  { views: { "e2e-tab.main": Tab } }
+)
+`
+  })
+
+  // The host half. Plain Node — no imports, so no bundling required.
+  await writeFile(
+    join(home, "starbase", "plugins", "e2e-tab", "dist", "main.js"),
+    `export const activate = (ctx) => {
+  ctx.subscriptions.push(
+    ctx.commands.register("e2e-tab.ping", async (arg) => (arg?.n ?? 0) + 1)
+  )
+}
+`,
+    "utf8"
+  )
+
+  await openSession(window)
+  await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
+  await window.getByRole("button", { name: "E2E" }).click()
+
+  // 42 means: the process spawned, reported ready, imported main.js, ran
+  // activate(), registered the command, and round-tripped an invoke.
+  await expect(window.getByTestId("e2e-host-answer")).toHaveText("42", { timeout: 20_000 })
+})
+
 test("the plugins directory never leaks outside the throwaway home", async ({ launchApp }) => {
   // Guards the guard: STARBASE_HOME must be what the protocol handler resolves
   // against, or a test would serve — and a failing test could delete — the
