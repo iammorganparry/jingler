@@ -13,10 +13,10 @@ import { join } from "node:path"
 import {
   DiscoveryService,
   killAllChildren,
+  killAllPtysSync,
   ModelsService,
   PluginHost,
-  SecretStore,
-  TerminalService
+  SecretStore
 } from "@starbase/cli-adapters"
 import { app, BrowserWindow, ipcMain, shell } from "electron"
 import { Effect } from "effect"
@@ -273,19 +273,24 @@ if (!gotPrimaryLock) {
     // orphans to init and they live forever. Two families of child, killed the
     // same way for the same reason:
     //
-    //  - PTYs, which live in their own session (TerminalService.killAll);
     //  - harness subprocesses — `opencode serve`, `codex app-server` — which each
     //    spawn site cleans up on its own happy path, but NOT when the app quits
     //    mid-flight. That gap leaked one `opencode serve` per e2e test, since the
     //    suite tears down Electron once per test while the model catalogue is
     //    still being fetched.
+    //  - PTYs, which live in their own session.
     //
-    // Synchronous and first: `runtime.dispose()` below may never get the chance to
-    // run to completion, and an orphaned server outlives the app either way.
+    // BOTH synchronous, and the PTYs especially so. `runtime.dispose()` below may
+    // never get the chance to run to completion, and an orphaned server outlives
+    // the app either way — but the PTYs are worse than a leak. Reclaiming them
+    // through the runtime (`runPromise(TerminalService.killAll)`) is a PROMISE, so
+    // this handler returned and Electron tore the Node environment down with
+    // shells still open; node-pty's reader thread then fired a ThreadSafeFunction
+    // into an environment already in `CleanupHandles()`, which napi refuses, which
+    // node-addon-api throws, which nothing catches: SIGABRT out of `pty.node`
+    // instead of a clean quit. See `killAllPtysSync` for the long version.
     killAllChildren()
-    void runtime
-      .runPromise(Effect.flatMap(TerminalService, (t) => t.killAll))
-      .catch(() => {})
-      .finally(() => void runtime.dispose())
+    killAllPtysSync()
+    void runtime.dispose()
   })
 }
