@@ -69,22 +69,31 @@ for (const id of ids) {
     process.exit(1)
   }
 
-  // `pnpm -C` rather than `--filter`: the package NAME and the directory name
-  // differ (`@starbase/plugin-github-issues` lives at `plugins/github-issues`),
-  // and the directory is what the YAML gives us.
+  // The directory goes in `cwd`, NOT on the command line.
   //
-  // `shell: true` on Windows only. `pnpm` there is `pnpm.cmd`, and since the
-  // fix for CVE-2024-27980 Node refuses to run a `.cmd`/`.bat` through
-  // `execFile` without a shell — so the unshelled call is a flat ENOENT. The
-  // release runner is macOS, but `electron-builder.yml` declares a `win`
-  // target and this script is wired into `dist`/`electron:pack`, which a
-  // developer on Windows runs directly. `dir` is quoted because a shell splits
-  // on the spaces in a path like `C:\Users\Some One\starbase`.
-  execFileSync(
-    "pnpm",
-    isWindows ? ["-C", `"${dir}"`, "run", "build"] : ["-C", dir, "run", "build"],
-    { stdio: "inherit", cwd: repoRoot, shell: isWindows }
-  )
+  // `--filter` is not an option: the package NAME and the directory name differ
+  // (`@starbase/plugin-github-issues` lives at `plugins/github-issues`) and the
+  // directory is what the YAML gives us. The obvious alternative is `pnpm -C
+  // <dir>`, and it is a trap here, because of the shell:
+  //
+  // `shell: true` is required on Windows — `pnpm` there is `pnpm.cmd`, and since
+  // the fix for CVE-2024-27980 Node refuses to run a `.cmd`/`.bat` through
+  // `execFile` without one, so the unshelled call is a flat ENOENT. But with a
+  // shell, argv is joined into a `cmd.exe` command line unescaped, and no amount
+  // of hand-quoting makes an arbitrary path safe there: `%VAR%` still expands
+  // inside double quotes, and `&`, `^` or an embedded quote in a checkout path
+  // break out of them. Quoting for spaces alone (an earlier version of this)
+  // fixes the common case and leaves the sharp one.
+  //
+  // Passing it as `cwd` sidesteps the whole question — the path never becomes
+  // shell text, so there is nothing to escape. The release runner is macOS, but
+  // `electron-builder.yml` declares a `win` target and this script is wired into
+  // `dist`/`electron:pack`, which a developer on Windows runs directly.
+  execFileSync("pnpm", ["run", "build"], {
+    stdio: "inherit",
+    cwd: dir,
+    shell: isWindows
+  })
 }
 
 // ── Verify, don't assume ─────────────────────────────────────────────────────

@@ -518,6 +518,7 @@ they cost your bundle nothing.
 | `Card` | A panel container |
 | `CodeChip` | Inline monospace token |
 | `Input` / `SearchInput` | Themed text inputs |
+| `IssueLabelChip` | A GitHub label, tinted from its own hex colour |
 | `Kbd` | A keyboard-key glyph |
 | `Markdown` | The app's markdown renderer, with syntax highlighting |
 | `Pill` | A rounded label |

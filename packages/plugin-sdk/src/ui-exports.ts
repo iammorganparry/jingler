@@ -22,6 +22,7 @@ export const UI_EXPORT_NAMES = [
   "Card",
   "CodeChip",
   "Input",
+  "IssueLabelChip",
   "Kbd",
   "Markdown",
   "Pill",

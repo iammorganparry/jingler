@@ -108,6 +108,24 @@ export class PluginTabHost extends Component<Props, State> {
         <div className="max-w-[420px] text-center font-mono text-[11.5px] leading-[1.6] text-dim">
           {this.state.message}
         </div>
+        {/*
+          An explicit retry, because the reset rules above are deliberately
+          narrow and a plugin can throw on something transient — a field briefly
+          undefined during a status tick, a fetch that failed once. The previous
+          `children`-keyed reset retried on every render, which self-healed that
+          case by accident while making a DETERMINISTIC crash re-mount forever.
+          A button is the same recovery without the loop: the operator chooses,
+          and a plugin that is genuinely broken shows its card again immediately
+          instead of thrashing.
+        */}
+        <button
+          type="button"
+          data-testid={`plugin-error-retry-${this.props.pluginId}`}
+          onClick={() => this.setState({ message: null })}
+          className="rounded border border-line px-2.5 py-1 text-[12px] text-text-body transition-colors hover:border-blue hover:text-text-bright"
+        >
+          Try again
+        </button>
         <div className="max-w-[420px] text-center text-[12.5px] leading-[1.6]">
           Other tabs are unaffected. You can disable this plugin in Settings ›
           Plugins.

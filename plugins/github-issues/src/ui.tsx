@@ -35,9 +35,11 @@ import {
 import {
   atLeast,
   Avatar,
-  Badge,
   cn,
   githubAvatarUrl,
+  // The app's own chip, not a copy. A local port drifted by a font size within
+  // one commit, which is the whole argument against porting it.
+  IssueLabelChip,
   Markdown,
   relativeTime,
   Spinner,
@@ -64,55 +66,6 @@ interface Issue {
   readonly assignees?: ReadonlyArray<IssueUser>
   readonly comments?: ReadonlyArray<IssueComment>
   readonly createdAt: string
-}
-
-/**
- * A GitHub label chip tinted from the label's own hex colour.
- *
- * Ported from `IssueLabelChip` in `@starbase/ui` rather than re-exported through
- * the SDK kit: a label is a GitHub concept and the SDK's kit is deliberately
- * curated to primitives every plugin could want. This plugin owns the concept,
- * so it owns the chip. Losing it in the migration made every label render as the
- * same neutral outline, which reads as "this issue has no colour coding" rather
- * than "the port dropped a feature".
- *
- * ## Why the hex is parsed rather than interpolated
- *
- * `color` is a string from the GitHub API going into a `style` attribute. Same
- * rule as the theme mapper: never pass an outside string through, re-emit it
- * from parsed components. The regex is the gate and `parseInt` is the re-emit,
- * so the worst a hostile value can do is fail the test and get the neutral
- * Badge.
- */
-function IssueLabelChip({ name, color }: { name: string; color?: string }) {
-  // GitHub label colours are 6 hex digits with no leading '#'. Anything else
-  // falls back to a neutral Badge, so the chip never renders half-styled.
-  if (!color || !/^[0-9a-fA-F]{6}$/.test(color)) {
-    return (
-      <Badge tone="neutral" size="xs">
-        {name}
-      </Badge>
-    )
-  }
-  const r = Number.parseInt(color.slice(0, 2), 16)
-  const g = Number.parseInt(color.slice(2, 4), 16)
-  const b = Number.parseInt(color.slice(4, 6), 16)
-  return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-[4px] border px-2 py-px text-[11.5px] font-medium"
-      style={{
-        color: `rgb(${r} ${g} ${b})`,
-        backgroundColor: `rgb(${r} ${g} ${b} / 0.12)`,
-        borderColor: `rgb(${r} ${g} ${b} / 0.3)`
-      }}
-    >
-      <span
-        className="size-1.5 rounded-full"
-        style={{ backgroundColor: `rgb(${r} ${g} ${b})` }}
-      />
-      {name}
-    </span>
-  )
 }
 
 /** One comment, including the issue body rendered as the opening one. */
@@ -161,6 +114,7 @@ function IssueTab({ session }: TabProps) {
   const [issue, setIssue] = useState<Issue | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [unlinking, setUnlinking] = useState(false)
 
   const issueNumber = session.issueNumber
 
@@ -246,17 +200,35 @@ function IssueTab({ session }: TabProps) {
           <button
             type="button"
             data-testid="github-issues-unlink"
+            disabled={unlinking}
             onClick={() => {
-              // Clear the local copy immediately as well as calling through.
-              // The session record updates via `session-updates`, but this
-              // component's `issue` state is its own — without this the detached
-              // issue stays on screen until something else re-renders the tab.
-              setIssue(null)
+              // NOT optimistic. An earlier version cleared `issue` first and
+              // fired the call with `void`, which fails in two ways at once if
+              // the RPC rejects: the rejection is unhandled, and the tab sits
+              // there claiming no issue is linked while the session still has
+              // one — a lie the operator can only discover by restarting.
+              //
+              // The RPC is fast and local, so waiting costs a frame. The button
+              // disables meanwhile so it cannot be double-fired.
+              setUnlinking(true)
               void unlinkIssue(session.id)
+                .then(() => {
+                  // Cleared only on success. The session record updates through
+                  // `session-updates`, but this component's `issue` is its own
+                  // state — without this the detached issue stays on screen
+                  // until something else re-renders the tab.
+                  setIssue(null)
+                })
+                .catch((cause: unknown) => {
+                  setError(cause instanceof Error ? cause.message : String(cause))
+                })
+                .finally(() => {
+                  setUnlinking(false)
+                })
             }}
-            className="flex flex-none items-center gap-1.5 rounded border border-line px-2 py-1 text-[12px] text-text-body transition-colors hover:border-red hover:text-text-bright"
+            className="flex flex-none items-center gap-1.5 rounded border border-line px-2 py-1 text-[12px] text-text-body transition-colors hover:border-red hover:text-text-bright disabled:opacity-50"
           >
-            <Unlink size={12} /> Unlink
+            <Unlink size={12} /> {unlinking ? "Unlinking…" : "Unlink"}
           </button>
         </div>
 

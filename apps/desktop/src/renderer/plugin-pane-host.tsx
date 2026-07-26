@@ -102,6 +102,15 @@ export class PluginPaneHost extends Component<Props, State> {
         <div className="max-w-[240px] text-center font-mono text-[10.5px] leading-[1.5] text-dim">
           {this.state.message}
         </div>
+        {/* Same explicit retry as the tab host — see the note there. */}
+        <button
+          type="button"
+          data-testid={`plugin-pane-error-retry-${this.props.pluginId}`}
+          onClick={() => this.setState({ message: null })}
+          className="rounded border border-line px-2 py-0.5 text-[11.5px] text-text-body transition-colors hover:border-blue hover:text-text-bright"
+        >
+          Try again
+        </button>
         <div className="max-w-[240px] text-center text-[11.5px] leading-[1.5]">
           The rest of the app is unaffected. Disable this plugin in Settings ›
           Plugins.

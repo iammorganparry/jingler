@@ -55,6 +55,10 @@ export { Badge } from "@starbase/ui"
 export { Pill } from "@starbase/ui"
 export { Spinner } from "@starbase/ui"
 export { Avatar, githubAvatarUrl } from "@starbase/ui"
+// GitHub-shaped, like `githubAvatarUrl` above. The kit is curated, not generic:
+// a plugin rendering issues should not have to reimplement the chip the app
+// already draws — the one copy that existed drifted by a font size immediately.
+export { IssueLabelChip } from "@starbase/ui"
 export { Callout } from "@starbase/ui"
 export { Card } from "@starbase/ui"
 export { Input } from "@starbase/ui"

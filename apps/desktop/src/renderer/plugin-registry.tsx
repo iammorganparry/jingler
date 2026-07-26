@@ -147,13 +147,15 @@ export function PluginProvider({ children }: { children: ReactNode }) {
      * was cleared and re-mounted on every tick of the session pane. Bumping
      * `version` is already the documented way to force a reload, so it is also
      * the honest signal for "this is a different build, try again".
+     *
+     * Read off `ActivePlugin`, which carries `version` already. An earlier
+     * version built a Map from the catalog instead, which was both a needless
+     * indirection and a lookup that could MISS — the loader can hold an active
+     * plugin the catalog query has since stopped listing, and a miss fell back
+     * to a bare id, silently turning the reset key into a constant.
      */
-    const reloadKeyFor = new Map(
-      (catalog?.plugins ?? []).map((p) => [
-        p.manifest.id,
-        `${p.manifest.id}@${p.manifest.version}`
-      ])
-    )
+    const reloadKeyOf = (plugin: { id: string; version: string }) =>
+      `${plugin.id}@${plugin.version}`
 
     const tabs = loaded.active.flatMap((plugin) =>
       plugin.tabs.map((tab) => ({
@@ -172,7 +174,7 @@ export function PluginProvider({ children }: { children: ReactNode }) {
           >
             <PluginTabHost
               pluginId={plugin.id}
-              reloadKey={reloadKeyFor.get(plugin.id) ?? plugin.id}
+              reloadKey={reloadKeyOf(plugin)}
               session={session}
             >
               {tab.render(session, ctx)}
@@ -197,7 +199,7 @@ export function PluginProvider({ children }: { children: ReactNode }) {
         render: (session: Parameters<typeof pane.render>[0]) => (
           <PluginPaneHost
             pluginId={plugin.id}
-            reloadKey={reloadKeyFor.get(plugin.id) ?? plugin.id}
+            reloadKey={reloadKeyOf(plugin)}
             session={session}
           >
             {pane.render(session)}
