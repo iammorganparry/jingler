@@ -96,6 +96,35 @@ interface Handle {
   ring: RingBuffer
   /** The single attached consumer, if any (null while detached). */
   live: LiveConsumer | null
+  /** Synchronous, idempotent reclaim: drop listeners, drop consumer, kill. */
+  teardown: () => void
+}
+
+/**
+ * Every live PTY's `teardown`, module-level and callable with no Effect runtime.
+ *
+ * This exists for ONE caller — `before-quit` — and the reason is a crash, not
+ * tidiness. Reclaiming PTYs through the runtime (`runPromise(killAll)`) is a
+ * PROMISE: `before-quit` returns before it runs, so Electron tears the Node
+ * environment down with the PTYs still open. node-pty's reader thread then posts
+ * one last chunk into a `ThreadSafeFunction` whose environment is already inside
+ * `node::Environment::CleanupHandles()`; napi refuses the call, node-addon-api
+ * turns that into a C++ exception nobody is left to catch, and the app dies with
+ * SIGABRT. In a crash report it reads `pty.node` → `__cxa_throw` → `abort()`,
+ * which looks like anything but "we quit with a shell open".
+ *
+ * So quit kills PTYs synchronously, and `teardown` disposes each one's JS
+ * listeners BEFORE killing it — the callback the reader thread is racing toward
+ * no longer exists by the time it gets there.
+ */
+const teardowns = new Set<() => void>()
+
+/** Reclaim every live PTY, synchronously. Returns how many were still open. */
+export const killAllPtysSync = (): number => {
+  const open = teardowns.size
+  for (const teardown of [...teardowns]) teardown()
+  teardowns.clear()
+  return open
 }
 
 const snapshot = (info: MutableInfo): TerminalInfo => ({ ...info })
@@ -189,19 +218,52 @@ export class TerminalService extends Effect.Service<TerminalService>()("@starbas
             status: "running",
             exitCode: null
           }
-          const handle: Handle = { pty, info, ring: new RingBuffer(RING_CAP), live: null }
+          const handle: Handle = {
+            pty,
+            info,
+            ring: new RingBuffer(RING_CAP),
+            live: null,
+            teardown: () => {}
+          }
 
-          // Always feed the ring (bounded); fan out to the live consumer if attached.
-          pty.onData((data) => {
-            handle.ring.push(data)
-            handle.live?.push(data)
-          })
-          pty.onExit(({ exitCode }) => {
-            info.status = "exited"
-            info.exitCode = exitCode
-            handle.live?.exit(exitCode)
-          })
+          // Kept so `teardown` can DISPOSE them. node-pty hands every listener
+          // back as a disposable and we used to drop those on the floor, which is
+          // fine right up until the process exits — see `teardowns` above.
+          const listeners = [
+            // Always feed the ring (bounded); fan out to the live consumer if attached.
+            pty.onData((data) => {
+              handle.ring.push(data)
+              handle.live?.push(data)
+            }),
+            pty.onExit(({ exitCode }) => {
+              info.status = "exited"
+              info.exitCode = exitCode
+              handle.live?.exit(exitCode)
+            })
+          ]
 
+          handle.teardown = () => {
+            // Idempotent via the set: `kill` then quit (or two quits racing) must
+            // not dispose one PTY's listeners twice.
+            if (!teardowns.delete(handle.teardown)) return
+            for (const listener of listeners) {
+              try {
+                listener.dispose()
+              } catch {
+                /* already disposed */
+              }
+            }
+            handle.live?.dispose()
+            handle.live = null
+            handles.delete(id)
+            try {
+              handle.pty.kill()
+            } catch {
+              /* already dead */
+            }
+          }
+
+          teardowns.add(handle.teardown)
           handles.set(id, handle)
           return snapshot(info)
         },
@@ -318,18 +380,7 @@ export class TerminalService extends Effect.Service<TerminalService>()("@starbas
       })
 
     const kill = (terminalId: string): Effect.Effect<void> =>
-      Effect.sync(() => {
-        const handle = handles.get(terminalId)
-        if (!handle) return
-        handle.live?.dispose()
-        handle.live = null
-        handles.delete(terminalId)
-        try {
-          handle.pty.kill()
-        } catch {
-          /* already dead */
-        }
-      })
+      Effect.sync(() => handles.get(terminalId)?.teardown())
 
     const list = (sessionId: string): Effect.Effect<ReadonlyArray<TerminalInfo>> =>
       Effect.sync(() =>
@@ -338,15 +389,11 @@ export class TerminalService extends Effect.Service<TerminalService>()("@starbas
           .map((h) => snapshot(h.info))
       )
 
+    // Delegates to the module-level reclaim so there is exactly ONE teardown path
+    // — quit takes it synchronously, this takes it through the runtime, and both
+    // dispose listeners before killing.
     const killAll: Effect.Effect<void> = Effect.sync(() => {
-      for (const handle of handles.values()) {
-        handle.live?.dispose()
-        try {
-          handle.pty.kill()
-        } catch {
-          /* already dead */
-        }
-      }
+      killAllPtysSync()
       handles.clear()
     })
 

@@ -460,7 +460,11 @@ test("a worktree session without a PR shows a Changes tab with the Code Review v
 
   // No PR yet → the local worktree diff gets its own top-level Changes tab, which
   // is the Code Review view scoped to the uncommitted (local) source.
-  const changesTab = window.getByText("Changes", { exact: true }).first()
+  //
+  // Matched by ROLE, not by text: the tab chrome collapsed into a row of pills
+  // (`3dccb5c`), and a bare `getByText("Changes")` has found nothing since. The
+  // suite isn't in CI, so it sat red and unread — the tab it guards was fine.
+  const changesTab = window.getByRole("button", { name: "Changes" }).first()
   await expect(changesTab).toBeVisible()
   await changesTab.click()
   await expectFileRail(window)

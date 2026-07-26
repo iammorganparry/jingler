@@ -41,7 +41,10 @@ test("Deslop button sends the file to the session's agent", async ({ launchApp }
     }
   })
 
-  await window.getByText("Deslop source session").click()
+  // By row id, not by text: the pane's tab pill now carries the session title too
+  // (`3dccb5c`), so a bare `getByText` matches two elements and throws on strict
+  // mode. The suite isn't in CI, so this sat red without anything being broken.
+  await window.getByTestId("session-row-s_deslop_1").click()
   // No PR yet, so the local worktree diff lives on the "Changes" tab.
   await window.getByRole("button", { name: "Changes" }).first().click()
 

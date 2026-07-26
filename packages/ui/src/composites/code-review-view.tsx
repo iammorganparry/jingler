@@ -11,6 +11,7 @@ import { cn } from "../lib/cn.js"
 import { usePaneWidth } from "../hooks/width-tier.js"
 import { feedbackCounts } from "../lib/review-feedback.js"
 import { ReviewDiff } from "./review-diff.js"
+import { DeferredSection } from "./deferred-section.js"
 import { ReviewFileRow } from "./review-file-row.js"
 import { ReviewFindingRow, rankFindings } from "./review-findings.js"
 import { ReviewTray, type ReviewDraft } from "./review-tray.js"
@@ -163,6 +164,27 @@ export function CodeReviewView({
     () => new Map(fileDiffs.map((d) => [d.path, d.diff])),
     [fileDiffs]
   )
+
+  /**
+   * Roughly how tall each file's rendered diff will be, for the spacer a
+   * not-yet-mounted section leaves behind (see `DeferredSection`).
+   *
+   * Newlines rather than a real parse: this is a placeholder height that is
+   * replaced by a measurement the first time the section mounts, so precision
+   * buys nothing — and parsing every file's diff up front to compute it would
+   * reintroduce a chunk of the work the deferral exists to avoid. `ROW_HEIGHT`
+   * tracks `DiffLine`'s `text-[12px] leading-[1.85]`.
+   */
+  const heightByPath = useMemo(() => {
+    const ROW_HEIGHT = 22.2
+    const out = new Map<string, number>()
+    for (const { path, diff } of fileDiffs) {
+      let rows = 0
+      for (let i = 0; i < diff.length; i++) if (diff.charCodeAt(i) === 10) rows++
+      out.set(path, Math.max(ROW_HEIGHT, rows * ROW_HEIGHT))
+    }
+    return out
+  }, [fileDiffs])
 
   /**
    * Findings grouped by file, plus the ones that belong nowhere in particular.
@@ -542,23 +564,33 @@ export function CodeReviewView({
                     ))}
                   </div>
                 )}
-                <ReviewDiff
-                  path={file.path}
-                  diff={diffByPath.get(file.path) ?? ""}
-                  scroll={false}
-                  connected={connected}
-                  routeTargetSession={routeTargetSession}
-                  onAddDraft={(d) =>
-                    onAddDraft({
-                      path: d.path,
-                      line: d.startLine,
-                      endLine: d.endLine > d.startLine ? d.endLine : null,
-                      body: d.body,
-                      routeToAgent: d.routeToAgent
-                    })
-                  }
-                  onRevert={isLocal ? onRevertLines : undefined}
-                />
+                {/* Mounted only near the viewport. Every line of every file
+                    used to be live at once — half a million React fibers on a
+                    real branch — which is what made this pane cost gigabytes
+                    and made resizing it re-render the lot. The active file is
+                    pinned so a half-written inline comment survives scrolling. */}
+                <DeferredSection
+                  estimatedHeight={heightByPath.get(file.path) ?? 0}
+                  pinned={file.path === activePath}
+                >
+                  <ReviewDiff
+                    path={file.path}
+                    diff={diffByPath.get(file.path) ?? ""}
+                    scroll={false}
+                    connected={connected}
+                    routeTargetSession={routeTargetSession}
+                    onAddDraft={(d) =>
+                      onAddDraft({
+                        path: d.path,
+                        line: d.startLine,
+                        endLine: d.endLine > d.startLine ? d.endLine : null,
+                        body: d.body,
+                        routeToAgent: d.routeToAgent
+                      })
+                    }
+                    onRevert={isLocal ? onRevertLines : undefined}
+                  />
+                </DeferredSection>
               </div>
             ))
           )}
