@@ -13,16 +13,6 @@ const UNREAD = [false, true] as const
 const SUBAGENTS = [0, 1, 2] as const
 const TERMINAL = ["done", "failed", null] as const
 
-/** The expectation, stated independently of the implementation's branch order. */
-const expected = (s: TurnContinuationState): ReturnType<typeof turnContinuation> => {
-  if (s.terminalKind === "failed") return { kind: "close", because: "failed" }
-  // Sub-agents before the steer: both continue, so the order only picks the caller's
-  // timer, and over live sub-agents the LONGER wait must win.
-  if (s.liveSubagents > 0) return { kind: "continue", because: "subagent-work" }
-  if (s.steered || s.unread) return { kind: "continue", because: "steer-pending" }
-  return { kind: "close", because: "turn-finished" }
-}
-
 const rows: ReadonlyArray<TurnContinuationState> = STEERED.flatMap((steered) =>
   UNREAD.flatMap((unread) =>
     SUBAGENTS.flatMap((liveSubagents) =>
@@ -34,23 +24,89 @@ const rows: ReadonlyArray<TurnContinuationState> = STEERED.flatMap((steered) =>
 const label = (s: TurnContinuationState) =>
   `steered=${s.steered} unread=${s.unread} subagents=${s.liveSubagents} terminal=${s.terminalKind}`
 
+/**
+ * Every row's verdict, WRITTEN OUT.
+ *
+ * Deliberately literal rather than a second copy of the rules. An oracle that
+ * re-states the implementation's four branches in the implementation's order can
+ * only catch a textual divergence between two copies — a shared misreading of what
+ * the policy should DO passes both. These 36 answers were each decided by hand from
+ * the header's rules, so a branch reordering, an off-by-one on `liveSubagents`, or
+ * a `failed` that stopped winning shows up as a specific row rather than as nothing
+ * at all.
+ */
+const VERDICTS: Readonly<Record<string, string>> = {
+  "steered=false unread=false subagents=0 terminal=done": "close/turn-finished",
+  "steered=false unread=false subagents=0 terminal=failed": "close/failed",
+  "steered=false unread=false subagents=0 terminal=null": "close/turn-finished",
+  "steered=false unread=false subagents=1 terminal=done": "continue/subagent-work",
+  "steered=false unread=false subagents=1 terminal=failed": "close/failed",
+  "steered=false unread=false subagents=1 terminal=null": "continue/subagent-work",
+  "steered=false unread=false subagents=2 terminal=done": "continue/subagent-work",
+  "steered=false unread=false subagents=2 terminal=failed": "close/failed",
+  "steered=false unread=false subagents=2 terminal=null": "continue/subagent-work",
+  "steered=false unread=true subagents=0 terminal=done": "continue/steer-pending",
+  "steered=false unread=true subagents=0 terminal=failed": "close/failed",
+  "steered=false unread=true subagents=0 terminal=null": "continue/steer-pending",
+  "steered=false unread=true subagents=1 terminal=done": "continue/subagent-work",
+  "steered=false unread=true subagents=1 terminal=failed": "close/failed",
+  "steered=false unread=true subagents=1 terminal=null": "continue/subagent-work",
+  "steered=false unread=true subagents=2 terminal=done": "continue/subagent-work",
+  "steered=false unread=true subagents=2 terminal=failed": "close/failed",
+  "steered=false unread=true subagents=2 terminal=null": "continue/subagent-work",
+  "steered=true unread=false subagents=0 terminal=done": "continue/steer-pending",
+  "steered=true unread=false subagents=0 terminal=failed": "close/failed",
+  "steered=true unread=false subagents=0 terminal=null": "continue/steer-pending",
+  "steered=true unread=false subagents=1 terminal=done": "continue/subagent-work",
+  "steered=true unread=false subagents=1 terminal=failed": "close/failed",
+  "steered=true unread=false subagents=1 terminal=null": "continue/subagent-work",
+  "steered=true unread=false subagents=2 terminal=done": "continue/subagent-work",
+  "steered=true unread=false subagents=2 terminal=failed": "close/failed",
+  "steered=true unread=false subagents=2 terminal=null": "continue/subagent-work",
+  "steered=true unread=true subagents=0 terminal=done": "continue/steer-pending",
+  "steered=true unread=true subagents=0 terminal=failed": "close/failed",
+  "steered=true unread=true subagents=0 terminal=null": "continue/steer-pending",
+  "steered=true unread=true subagents=1 terminal=done": "continue/subagent-work",
+  "steered=true unread=true subagents=1 terminal=failed": "close/failed",
+  "steered=true unread=true subagents=1 terminal=null": "continue/subagent-work",
+  "steered=true unread=true subagents=2 terminal=done": "continue/subagent-work",
+  "steered=true unread=true subagents=2 terminal=failed": "close/failed",
+  "steered=true unread=true subagents=2 terminal=null": "continue/subagent-work"
+}
+
+const verdictOf = (s: TurnContinuationState) => {
+  const v = turnContinuation(s)
+  return `${v.kind}/${v.because}`
+}
+
 describe("turnContinuation — the whole table", () => {
   it("enumerates every combination of the four inputs", () => {
     expect(rows).toHaveLength(2 * 2 * 3 * 3)
+    // The literal table is not allowed to drift out of sync with the sweep, in
+    // either direction — a row silently missing from `VERDICTS` would assert
+    // nothing while still counting as coverage.
+    expect(Object.keys(VERDICTS).sort()).toStrictEqual(rows.map(label).sort())
   })
 
-  it.each(rows.map((s) => [label(s), s] as const))("%s", (_name, state) => {
-    expect(turnContinuation(state)).toStrictEqual(expected(state))
+  it.each(rows.map((s) => [label(s), s] as const))("%s", (name, state) => {
+    expect(verdictOf(state)).toBe(VERDICTS[name])
   })
 
   it("reaches all four verdicts across the table", () => {
-    const seen = new Set(rows.map((s) => `${turnContinuation(s).kind}/${turnContinuation(s).because}`))
-    expect([...seen].sort()).toStrictEqual([
+    expect([...new Set(rows.map(verdictOf))].sort()).toStrictEqual([
       "close/failed",
       "close/turn-finished",
       "continue/steer-pending",
       "continue/subagent-work"
     ])
+  })
+
+  it("treats a `done` and no terminal event identically — there is no done/null branch", () => {
+    // Pinned because the field's docstring PROMISES it, and the promise is what
+    // stops the next reader hunting for a distinction the decision never makes.
+    for (const s of rows.filter((r) => r.terminalKind === "done")) {
+      expect(verdictOf({ ...s, terminalKind: null })).toBe(verdictOf(s))
+    }
   })
 })
 

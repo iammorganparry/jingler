@@ -416,20 +416,38 @@ Add the existing limiter to the refund route and verify its rejection path.`
         yield* emit({ _tag: "Assistant", text: "Delegated to two agents." })
         // The main agent's `result` lands about here. Nothing terminal is emitted:
         // the sub-agents are still working, so the turn is not over.
+        //
+        // The held window is then paced by REPEATED tool boundaries rather than one.
+        // The renderer's steer queue flushes only on a `ToolEnd`
+        // (`conversation-machine.ts`, `canAutoFlush`), so a single boundary makes the
+        // e2e a race: the spec has to see four elements, fill the composer and land
+        // its Enter inside one 300ms gap, and on a slow machine the message queues
+        // just AFTER the only boundary, replays as a fresh turn after `Done`, and the
+        // steer never renders. A boundary every 300ms across the window means a steer
+        // sent at any point in it is flushed by the next one.
+        for (let tick = 0; tick < 8; tick++) {
+          yield* Effect.sleep("300 millis")
+          yield* emit({ _tag: "Assistant", text: "reading the tab bar", agentId: first })
+          yield* emit({
+            _tag: "ToolStart",
+            id: `read_${sessionId}_${tick}`,
+            name: "Read",
+            target: "tabs.tsx",
+            agentId: first
+          })
+          yield* emit({
+            _tag: "ToolEnd",
+            id: `read_${sessionId}_${tick}`,
+            status: "success",
+            meta: null,
+            diff: null,
+            preview: null,
+            agentId: first
+          })
+        }
+        // One last boundary-free tail, so the steer is demonstrably flushed by a
+        // sub-agent's own work rather than by the turn settling.
         yield* Effect.sleep("300 millis")
-        yield* emit({ _tag: "Assistant", text: "reading the tab bar", agentId: first })
-        // A tool boundary inside a sub-agent — what the queue auto-flushes on.
-        yield* emit({ _tag: "ToolStart", id: `read_${sessionId}`, name: "Read", target: "tabs.tsx", agentId: first })
-        yield* emit({
-          _tag: "ToolEnd",
-          id: `read_${sessionId}`,
-          status: "success",
-          meta: null,
-          diff: null,
-          preview: null,
-          agentId: first
-        })
-        yield* Effect.sleep("1 seconds")
         yield* emit({ _tag: "SubagentEnded", id: first, status: "done" })
         yield* emit({ _tag: "SubagentEnded", id: second, status: "done" })
         // Only now is the turn genuinely finished.

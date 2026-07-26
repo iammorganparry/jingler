@@ -609,12 +609,27 @@ export interface BackgroundTaskState {
   readonly meta: Map<string, TaskMemo>
   readonly live: Set<string>
   readonly ever: Set<string>
+  /**
+   * `tool_use_id`s this harness has bookended with a `task_started`.
+   *
+   * The version gate for "will a `task_notification` ever arrive for this Task?".
+   * `task_started` fires for FOREGROUND tasks too, so it does not tell us whether
+   * a Task was backgrounded — but it does tell us the harness speaks the bookend
+   * protocol at all, and a harness that emits one emits the other. `spec.binPath`
+   * lets the operator point at any `claude` install, and on a build that predates
+   * the protocol a Task's `SubagentStarted` would never be retracted: the turn
+   * would sit visibly running for the full `SUBAGENT_LINGER_CAP` after the work
+   * finished. So a Task whose `tool_result` lands with no `task_started` on
+   * record is settled by that `tool_result` instead (see the "user" case).
+   */
+  readonly bookended: Set<string>
 }
 
 export const backgroundTaskState = (): BackgroundTaskState => ({
   meta: new Map(),
   live: new Set(),
-  ever: new Set()
+  ever: new Set(),
+  bookended: new Set()
 })
 
 /**
@@ -694,6 +709,10 @@ export const streamEventsFor = (
       // one that IS gets promoted above with the details remembered here.
       if (msg.subtype === "task_started" && bg) {
         const id = strOf(msg.task_id)
+        // Recorded before the `task_id` guard: the version gate is keyed on the
+        // tool_use, and an ambient task with no id still proves the protocol.
+        const startedToolUse = strOf(msg.tool_use_id)
+        if (startedToolUse) bg.bookended.add(startedToolUse)
         if (!id) return []
         bg.meta.set(id, {
           description: strOf(msg.description) ?? "Background task",
@@ -751,6 +770,10 @@ export const streamEventsFor = (
         // membership, but it is the one place a background task is still spoken
         // about as a sub-agent — so don't say it.)
         const id = strOf(msg.tool_use_id)
+        // A notification proves the protocol just as a `task_started` does, so a
+        // harness that dropped the start edge still suppresses the tool_result
+        // fallback below rather than settling the tab twice.
+        if (id && bg) bg.bookended.add(id)
         if (id && !(taskId && bg?.ever.has(taskId))) {
           out.push({ _tag: "SubagentEnded", id, status: msg.status === "completed" ? "done" : "error" })
         }
@@ -852,6 +875,16 @@ export const streamEventsFor = (
           ...(output !== undefined ? { output } : {}),
           ...forAgent
         })
+        // The version-gated fallback for the NOTE above. A Task the harness never
+        // bookended with a `task_started` will never get a `task_notification`
+        // either, so its `SubagentStarted` would never be retracted: the tab would
+        // read "running" forever and — worse — the turn would be held open for the
+        // full `SUBAGENT_LINGER_CAP` after the delegated work was already done.
+        // On any harness that speaks the protocol this is dead code, because the
+        // start edge always precedes the tool_result.
+        if (bg && memo && SUBAGENT_TOOLS.has(memo.name) && !bg.bookended.has(id)) {
+          out.push({ _tag: "SubagentEnded", id, status: block.is_error === true ? "error" : "done" })
+        }
       }
       return out
     }
@@ -1401,7 +1434,14 @@ export const runClaude = (
           // held the channel open for never came. The turn DID complete, so emit the
           // real terminal event rather than letting the failure fallback below
           // report "ended without responding" for a run that answered fine.
-          if (!terminal && withheldDone !== null) {
+          //
+          // Guarded on the abort exactly as the fallback below is, and for the same
+          // reason: an operator Stop closes the SDK iterator, and it does not always
+          // close it by throwing. A clean close during the hold would otherwise
+          // report the stopped run as `Done`, racing the stop path's own `Failed` —
+          // and the hold is now a sub-agent window measured in minutes, not a 2.5s
+          // steer grace, so the odds of a Stop landing inside it are no longer small.
+          if (!terminal && withheldDone !== null && !abort.signal.aborted) {
             terminal = true
             await runP(ctx.emit(withheldDone))
           }

@@ -184,6 +184,27 @@ const launchAck = (id: string, isError = false): SDKMessage =>
     }
   }) as unknown as SDKMessage
 
+/**
+ * The harness's START bookend, emitted for EVERY Task — foreground or backgrounded.
+ *
+ * Present in these scripts because its ABSENCE is now meaningful: a Task the
+ * harness never started is one whose `task_notification` will never arrive
+ * either, and the adapter settles that Task on its own `tool_result` rather than
+ * holding the turn for the full linger cap (see "settles a Task the harness never
+ * bookended"). Leaving it out of a script that means to exercise the normal path
+ * would silently take the fallback instead.
+ */
+const started = (id: string): SDKMessage =>
+  ({
+    ...base,
+    type: "system",
+    subtype: "task_started",
+    task_id: `bg_${id}`,
+    tool_use_id: id,
+    description: `work ${id}`,
+    subagent_type: "Explore"
+  }) as unknown as SDKMessage
+
 /** The authoritative sub-agent completion bookend. */
 const notify = (id: string, status = "completed"): SDKMessage =>
   ({ ...base, type: "system", subtype: "task_notification", task_id: `bg_${id}`, tool_use_id: id, status }) as unknown as SDKMessage
@@ -247,6 +268,7 @@ describe("a turn with live sub-agents", () => {
   it("withholds Done until the sub-agent's task_notification arrives", async () => {
     const state = await run([
       spawn("task_1"),
+      started("task_1"),
       launchAck("task_1"),
       result(), // the main agent stops talking — the old bug closed the query HERE
       progress("task_1"),
@@ -262,7 +284,7 @@ describe("a turn with live sub-agents", () => {
     // The whole point of holding the turn open: the operator's next message goes
     // into the SAME query, so the sub-agents keep running. A retracted handle sends
     // the renderer down the stop-and-replay path, which aborts everything.
-    const state = await run([spawn("task_1"), launchAck("task_1"), result(), notify("task_1")])
+    const state = await run([spawn("task_1"), started("task_1"), launchAck("task_1"), result(), notify("task_1")])
     // Registered once at the start, retracted once in the run's `finally` — never
     // in between, or the message would have had nowhere to go.
     expect(state.registrations).toStrictEqual(["handle", "null"])
@@ -272,6 +294,8 @@ describe("a turn with live sub-agents", () => {
     const state = await run([
       spawn("task_1"),
       spawn("task_2"),
+      started("task_1"),
+      started("task_2"),
       launchAck("task_1"),
       launchAck("task_2"),
       result(),
@@ -290,6 +314,8 @@ describe("a turn with live sub-agents", () => {
     const state = await run([
       spawn("task_1"),
       spawn("task_2", "task_1"), // spawned BY task_1
+      started("task_1"),
+      started("task_2"),
       launchAck("task_1"),
       result(),
       notify("task_1"), // the parent finishes first
@@ -303,7 +329,7 @@ describe("a turn with live sub-agents", () => {
 
   it("still emits the real Done when a notification never arrives (linger cap)", async () => {
     vi.useFakeTimers()
-    scripted = [spawn("task_1"), launchAck("task_1"), result()]
+    scripted = [spawn("task_1"), started("task_1"), launchAck("task_1"), result()]
     const { ctx, state } = harness()
     const { runClaude } = await import("./claude-adapter.js")
     const finished = Effect.runPromise(runClaude("s1", spec, ctx, new Map()))
@@ -322,17 +348,42 @@ describe("a turn with live sub-agents", () => {
     expect(state.tags).not.toContain("Failed")
   })
 
+  it("settles a Task the harness never bookended, instead of hanging for the cap", async () => {
+    // `spec.binPath` lets the operator point at any `claude` install, and a build
+    // that predates the task bookends emits no `task_started` and no
+    // `task_notification` — its Tasks are plain synchronous tool calls whose
+    // `tool_result` carries the real output, not a launch ACK. Without this
+    // fallback the `SubagentStarted` is never retracted, so EVERY delegating turn
+    // reads as running for the full ten-minute linger cap after the work is done.
+    //
+    // Note the missing `started("task_1")`: its absence is the whole test.
+    vi.useFakeTimers()
+    scripted = [spawn("task_1"), launchAck("task_1"), result()]
+    const { ctx, state } = harness()
+    const { runClaude } = await import("./claude-adapter.js")
+    const finished = Effect.runPromise(runClaude("s1", spec, ctx, new Map()))
+
+    // No timers advanced: the turn settles on the tool_result itself.
+    await vi.advanceTimersByTimeAsync(0)
+    await finished
+
+    expect(state.tags.filter((tag) => tag === "Done")).toHaveLength(1)
+    expect(state.tags).toContain("SubagentEnded")
+    expect(state.events.find((e) => e._tag === "SubagentEnded")).toMatchObject({ id: "task_1", status: "done" })
+    expect(state.tags).not.toContain("Failed")
+  })
+
   it("does not wait for a Task that failed to launch", async () => {
     // An errored tool_result is the leak guard: no `task_notification` is coming,
     // so holding for ten minutes would be ten minutes of a chat that looks stuck.
-    const state = await run([spawn("task_1"), launchAck("task_1", true), result()])
+    const state = await run([spawn("task_1"), started("task_1"), launchAck("task_1", true), result()])
 
     expect(state.tags.filter((tag) => tag === "Done")).toHaveLength(1)
     expect(state.tags).not.toContain("SubagentEnded")
   })
 
   it("closes immediately on a Failed, whatever is outstanding", async () => {
-    const state = await run([spawn("task_1"), launchAck("task_1"), result(false)])
+    const state = await run([spawn("task_1"), started("task_1"), launchAck("task_1"), result(false)])
 
     expect(state.tags.filter((tag) => tag === "Failed")).toHaveLength(1)
     expect(state.tags).not.toContain("Done")
@@ -343,7 +394,7 @@ describe("a turn with live sub-agents", () => {
     const state = await run(
       // Paused AFTER the main agent's result, while task_1 is still working — the
       // exact moment the operator was losing their sub-agents.
-      [spawn("task_1"), launchAck("task_1"), result(), PAUSE, notify("task_1"), result()],
+      [spawn("task_1"), started("task_1"), launchAck("task_1"), result(), PAUSE, notify("task_1"), result()],
       async (live) => {
         // The assertion is that talking here does NOT kill anything: the handle is
         // still live, so the message goes into the SAME query as the sub-agents.
@@ -369,7 +420,7 @@ describe("a turn with live sub-agents", () => {
     // policy sees no steer and no sub-agents and closes at 0ms — cutting the very
     // turn the push was meant to open.
     const state = await run(
-      [spawn("task_1"), launchAck("task_1"), result(), PAUSE, notify("task_1"), result()],
+      [spawn("task_1"), started("task_1"), launchAck("task_1"), result(), PAUSE, notify("task_1"), result()],
       async (live) => {
         expect(await live.steer!("and the theme tokens", [])).toBe("accepted")
       }
@@ -393,6 +444,8 @@ describe("a turn with live sub-agents", () => {
       [
         spawn("task_1"),
         spawn("task_2"),
+        started("task_1"),
+        started("task_2"),
         launchAck("task_1"),
         result(),
         PAUSE,

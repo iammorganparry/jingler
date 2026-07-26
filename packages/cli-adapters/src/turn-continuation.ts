@@ -55,7 +55,18 @@ export interface TurnContinuationState {
   readonly unread: boolean
   /** Sub-agents that have started and not yet emitted `SubagentEnded`. */
   readonly liveSubagents: number
-  /** The terminal event this message carried, if any. */
+  /**
+   * The terminal event this message carried, if any.
+   *
+   * Only `"failed"` changes the verdict. `"done"` and `null` are DELIBERATELY
+   * indistinguishable here — a `Done` is exactly what rules 2 and 3 exist to
+   * withhold, so "the turn said it was finished" carries no weight the other
+   * inputs don't already carry. It stays three-valued rather than collapsing to
+   * a `failed` boolean because the caller reads the kind off the mapped events
+   * either way, and a boolean at this seam would invite re-deriving "was this a
+   * result?" from something else. Don't go hunting for a done/null branch: there
+   * isn't one, and the exhaustive table asserts there never will be.
+   */
   readonly terminalKind: "done" | "failed" | null
 }
 
