@@ -119,14 +119,36 @@ export const peekVariants: Variants = {
  * of the window, so it should look like it came from the chord rather than from
  * the top edge of the screen.
  *
- * **There is no `exit`, and that is the design.** Dismissal should be immediate
- * — you press Escape because you want the thing gone, and a palette that lingers
- * on its way out delays the view you went back to. Radix unmounts the content on
- * close, so nothing here has to arrange that.
+ * **`exit` is `FAST`, not a spring, and that asymmetry is the design.** Arriving
+ * is a thing you watch; leaving is a thing you have already stopped caring about
+ * — you pressed Escape because you want the view behind it back. A spring out
+ * would take the same ~260ms as the spring in and make dismissal feel like it
+ * needed permission. 140ms of fade is enough to say "that closed" without
+ * standing between you and what you went back to.
+ *
+ * It also barely moves on the way out: `y: -2` rather than the -6 it entered
+ * from. Retracing the entry in reverse reads as an undo; a slight lift reads as
+ * dismissal.
  */
 export const paletteVariants: Variants = {
   hidden: { opacity: 0, scale: 0.98, y: -6 },
-  visible: { opacity: 1, scale: 1, y: 0, transition: SPRING }
+  visible: { opacity: 1, scale: 1, y: 0, transition: SPRING },
+  exit: { opacity: 0, scale: 0.99, y: -2, transition: FAST }
+}
+
+/**
+ * The dim behind the palette.
+ *
+ * Separate from `paletteVariants` because it must NOT scale or move — a dim that
+ * slides is a grey rectangle sliding, which is the one thing an overlay can do
+ * that draws attention to itself. Only opacity, on `FAST` both ways: the card
+ * springing in over a hard-cut dim was the visible mismatch that made this its
+ * own variant rather than an inline prop.
+ */
+export const paletteOverlayVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: FAST },
+  exit: { opacity: 0, transition: FAST }
 }
 
 /**

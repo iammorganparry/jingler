@@ -1,10 +1,17 @@
 import * as React from "react"
+import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { Command as CommandPrimitive } from "cmdk"
 import { Search } from "lucide-react"
-import { motion } from "motion/react"
+import { AnimatePresence, motion } from "motion/react"
 import { cn } from "../lib/cn.js"
-import { paletteVariants } from "../lib/motion.js"
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./dialog.js"
+import { paletteOverlayVariants, paletteVariants } from "../lib/motion.js"
+import {
+  Dialog,
+  DialogDescription,
+  DialogOverlay,
+  DialogPortal,
+  DialogTitle
+} from "./dialog.js"
 
 /**
  * shadcn's Command (cmdk), restyled to Starbase's tokens.
@@ -54,14 +61,23 @@ Command.displayName = CommandPrimitive.displayName
  * it. Anchored near the top, the input stays put and only the list below it
  * changes length.
  *
- * ## Why the card, and not `DialogContent`, is the thing that animates
+ * ## Why the card, and not the content element, is the thing that animates
  *
- * `DialogContent` positions itself with `-translate-x-1/2`, and Motion writes
- * the element's whole `transform`. Animating scale on that element would drop
- * the centring on the first frame and the palette would fly in from the left.
- * So the positioned box is left transparent and the chrome — border, shadow,
- * radius — moves onto the `motion.div` inside it, which owns a transform nobody
- * else is writing.
+ * `DialogPrimitive.Content` positions itself with `-translate-x-1/2`, and Motion
+ * writes the element's whole `transform`. Animating scale on that element would
+ * drop the centring on the first frame and the palette would fly in from the
+ * left. So the positioned box stays a plain frame and the chrome — border,
+ * shadow, radius — lives on the `motion.div` inside it, which owns a transform
+ * nobody else is writing.
+ *
+ * ## Why it survives its own close
+ *
+ * Radix unmounts content when `open` goes false, which would cut an exit
+ * animation off before its first frame. `forceMount` on the portal, the overlay
+ * and the content hands that decision to `AnimatePresence` instead, which keeps
+ * the subtree alive until the exit finishes. Radix still owns focus trapping,
+ * Escape and click-outside — `forceMount` changes when the DOM goes away, not
+ * who is in charge of it.
  *
  * Reduced motion is not checked here: `MotionConfig reducedMotion="user"` in
  * `app-shell` (and the Storybook preview) makes the transform instant, which is
@@ -86,25 +102,54 @@ export function CommandDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        hideClose
-        // Stripped to a positioned, transparent frame. `overflow-visible` so the
-        // card's shadow is not clipped by a box that no longer draws anything.
-        className="top-[12vh] w-[600px] max-w-[92vw] translate-y-0 overflow-visible border-0 bg-transparent p-0 shadow-none"
-      >
-        <DialogTitle className="sr-only">{title}</DialogTitle>
-        <DialogDescription className="sr-only">{description}</DialogDescription>
-        <motion.div
-          initial="hidden"
-          animate="visible"
-          variants={paletteVariants}
-          className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-line shadow-[0_16px_48px_var(--sb-shadow-strong)]"
-        >
-          <Command className={className} {...props}>
-            {children}
-          </Command>
-        </motion.div>
-      </DialogContent>
+      {/*
+        `mode="wait"` is not a style choice — it is what keeps two palettes off
+        the screen at once. Close and immediately reopen (Escape, then ⌘K a
+        beat later) and the default `sync` mode would run the leaving card's
+        exit alongside the arriving one's enter: two mounted `Command` roots,
+        two inputs, two of every row. `wait` holds the new one until the old is
+        gone, at the cost of 140ms on a gesture almost nobody makes.
+      */}
+      <AnimatePresence mode="wait">
+        {open && (
+          <DialogPortal forceMount>
+            <DialogOverlay asChild forceMount>
+              <motion.div
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                variants={paletteOverlayVariants}
+              />
+            </DialogOverlay>
+            {/*
+              The positioned frame, built from the primitive rather than the
+              app's `DialogContent`: this is the one dialog in the app that has
+              to survive its own close long enough to animate, and `forceMount`
+              has to reach both the portal and the content for that. Wiring it
+              through the shared wrapper would have put an escape hatch on every
+              other dialog to serve this one.
+            */}
+            <DialogPrimitive.Content
+              forceMount
+              className="fixed left-1/2 top-[12vh] z-50 w-[600px] max-w-[92vw] -translate-x-1/2 outline-none"
+            >
+              <DialogTitle className="sr-only">{title}</DialogTitle>
+              <DialogDescription className="sr-only">{description}</DialogDescription>
+              <motion.div
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                variants={paletteVariants}
+                className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-line shadow-[0_16px_48px_var(--sb-shadow-strong)]"
+              >
+                <Command className={className} {...props}>
+                  {children}
+                </Command>
+              </motion.div>
+            </DialogPrimitive.Content>
+          </DialogPortal>
+        )}
+      </AnimatePresence>
     </Dialog>
   )
 }

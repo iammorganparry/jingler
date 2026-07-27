@@ -85,13 +85,46 @@ test("⌘P opens the same palette, and Escape closes it", async ({ launchApp }) 
   await expect(window.getByPlaceholder(PLACEHOLDER)).toHaveValue("")
 })
 
+/**
+ * Close and reopen faster than the exit animation, twice.
+ *
+ * The palette now survives its own close so it can fade out, which introduces a
+ * failure mode it did not have before: the leaving card and the arriving one can
+ * both be mounted, giving two inputs and two of every row. `AnimatePresence
+ * mode="wait"` is what prevents it, and this is the test that would notice if it
+ * were ever dropped for the default `sync`.
+ *
+ * Deliberately no `toBeHidden()` between the two presses — waiting for the exit
+ * is exactly what would stop this reproducing.
+ */
+test("reopening mid-exit leaves exactly one palette", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, sessions: seededSessions })
+  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+
+  for (let i = 0; i < 2; i++) {
+    await window.keyboard.press("Meta+k")
+    await expect(window.getByTestId("command-palette")).toBeVisible()
+    await window.keyboard.press("Escape")
+    await window.keyboard.press("Meta+k")
+    await expect(window.locator("[data-testid='command-palette']")).toHaveCount(1)
+  }
+
+  // One input, and it is usable — a strict-mode violation here would mean two.
+  await window.getByPlaceholder(PLACEHOLDER).fill("Beta")
+  await expect(window.getByTestId("palette-item-session:sess-beta")).toBeVisible()
+})
+
 test("⌘F still focuses the sidebar filter after the rebind", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, sessions: seededSessions })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  // Wait on the input itself, not just the "Sessions" heading. The heading
+  // paints before the sidebar is interactive, and a chord pressed into that gap
+  // is simply lost — which is what made this the one flaky test in the file.
+  const filter = window.getByPlaceholder("Filter sessions…")
+  await expect(filter).toBeVisible()
 
   await window.keyboard.press("Meta+f")
-  await expect(window.getByPlaceholder("Filter sessions…")).toBeFocused()
+  await expect(filter).toBeFocused()
   // And it must NOT have opened the palette on the way.
   await expect(window.getByTestId("command-palette")).toBeHidden()
 
