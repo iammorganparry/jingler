@@ -161,6 +161,8 @@ export interface SessionConversationProps {
    * split, which hands it to the focused pane only.
    */
   selectTabRequest?: { readonly tabId: TabKey; readonly nonce: number } | null
+  /** Told when the focused pane has applied the request, so it can be dropped. */
+  onTabRequestHandled?: () => void
 }
 
 /**
@@ -253,6 +255,7 @@ export function SessionConversation(props: SessionConversationProps) {
             renderBrowserDock={props.renderBrowserDock}
             browserDockSide={props.browserDockSide}
             selectTabRequest={props.selectTabRequest}
+            onTabRequestHandled={props.onTabRequestHandled}
           />
         )}
       </div>

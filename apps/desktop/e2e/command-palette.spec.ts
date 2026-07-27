@@ -131,6 +131,71 @@ test("toggles the terminal dock — an action the shell cannot reach on its own"
   await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
 })
 
+/**
+ * The chord is ⌘ on macOS and Ctrl elsewhere, NOT either-or.
+ *
+ * Ctrl+K and Ctrl+P are Cocoa caret bindings Chromium implements in every macOS
+ * text field — kill-line and previous-line — so accepting bare Ctrl here would
+ * take both away from the composer and pop a modal instead, on the one platform
+ * where ⌘K already works.
+ */
+test("does not hijack Ctrl+K from macOS text fields", async ({ launchApp }) => {
+  test.skip(process.platform !== "darwin", "the Ctrl/⌘ split only bites on macOS")
+
+  const { window } = await launchApp({ configured: true, sessions: seededSessions })
+  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+
+  await window.keyboard.press("Control+k")
+  await expect(window.getByTestId("command-palette")).toBeHidden()
+  await window.keyboard.press("Control+p")
+  await expect(window.getByTestId("command-palette")).toBeHidden()
+
+  // …and the real chord still works, so this is a narrowing rather than a break.
+  await window.keyboard.press("Meta+k")
+  await expect(window.getByTestId("command-palette")).toBeVisible()
+})
+
+/**
+ * Switching sessions after a "Go to <Tab>" must not carry the tab with it.
+ *
+ * A pane is keyed by session id and remounts on every switch, so an uncleared
+ * request is replayed onto the next session's first render — one "Go to
+ * Changes" would open everything you visited afterwards on Changes, which reads
+ * as the palette having changed a setting rather than performed an action.
+ */
+test("a 'Go to <Tab>' does not follow you to the next session", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [
+      { ...seededSessions[0]!, worktreePath: repoPath },
+      { ...seededSessions[1]!, worktreePath: repoPath }
+    ]
+  })
+
+  await expect(window.getByTestId("conversation-tab")).toContainText("Alpha session")
+
+  // A worktree with no PR surfaces the Changes tab — see `builtinTabContributions`.
+  await window.keyboard.press("Meta+k")
+  await window.getByTestId("palette-item-tab:changes").click()
+  await expect(window.getByRole("button", { name: "Changes" })).toHaveAttribute(
+    "aria-current",
+    "page"
+  )
+
+  // Jump to the other session. It must arrive on Conversation.
+  await window.keyboard.press("Meta+k")
+  await window.getByPlaceholder(PLACEHOLDER).fill("Beta")
+  await window.keyboard.press("Enter")
+
+  await expect(window.getByTestId("conversation-tab")).toContainText("Beta session")
+  // `aria-current` is absent, not "false", when a tab is not the active one.
+  await expect(window.getByRole("button", { name: "Changes" })).not.toHaveAttribute(
+    "aria-current",
+    "page"
+  )
+})
+
 test("archives the active session from the palette", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, sessions: seededSessions })
 

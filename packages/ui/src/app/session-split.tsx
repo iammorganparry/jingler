@@ -69,6 +69,8 @@ export interface SessionSplitProps {
    * what "go to Changes" means — the operator is looking at one pane.
    */
   selectTabRequest?: { readonly tabId: TabKey; readonly nonce: number } | null
+  /** Told when the focused pane has applied the request, so it can be dropped. */
+  onTabRequestHandled?: () => void
 }
 
 /**
@@ -111,6 +113,7 @@ export function SessionSplit(props: SessionSplitProps) {
         selectTabRequest={
           index === (group?.focused ?? 0) ? props.selectTabRequest : undefined
         }
+        onTabRequestHandled={props.onTabRequestHandled}
         renderPullRequest={props.renderPullRequest}
         tabContributions={props.tabContributions}
         renderReview={props.renderReview}

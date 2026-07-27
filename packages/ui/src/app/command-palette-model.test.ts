@@ -163,41 +163,92 @@ describe("groupPaletteItems", () => {
 })
 
 describe("matchPaletteChord", () => {
+  // The platform is INJECTED in every case below. A matcher whose result depends
+  // on the machine running the suite is a matcher only half of which is ever
+  // tested, and the two branches are the whole point of this function.
+  const MAC = true
+  const PC = false
+
   it.each([
     ["KeyK", "k"],
     ["KeyP", "p"]
-  ])("matches ⌘ and ⌃ with %s", (code, key) => {
-    expect(matchPaletteChord(chord({ code, key, metaKey: true }))).toBe(true)
-    expect(matchPaletteChord(chord({ code, key, ctrlKey: true }))).toBe(true)
+  ])("matches ⌘%s on macOS and Ctrl+%s elsewhere", (code, key) => {
+    expect(matchPaletteChord(chord({ code, key, metaKey: true }), MAC)).toBe(true)
+    expect(matchPaletteChord(chord({ code, key, ctrlKey: true }), PC)).toBe(true)
+  })
+
+  /**
+   * The regression this signature exists for.
+   *
+   * Ctrl+K and Ctrl+P are Cocoa caret bindings Chromium implements in every
+   * macOS text field (kill-line, previous-line) and readline's equivalents in
+   * the terminal dock. Accepting bare Ctrl on macOS — which the app's usual
+   * `meta || ctrl` posture would — takes both away and pops a modal instead, on
+   * the one platform where ⌘K already works.
+   */
+  it.each([
+    ["KeyK", "k"],
+    ["KeyP", "p"]
+  ])("does NOT take Ctrl+%s on macOS, where it is an editing key", (code, key) => {
+    expect(matchPaletteChord(chord({ code, key, ctrlKey: true }), MAC)).toBe(false)
+  })
+
+  it("does not take ⌘K on a non-Mac, where ⌘ is not the app modifier", () => {
+    expect(matchPaletteChord(chord({ code: "KeyK", key: "k", metaKey: true }), PC)).toBe(false)
+  })
+
+  it("does not fire when both modifiers are held, on either platform", () => {
+    const both = chord({ code: "KeyK", key: "k", metaKey: true, ctrlKey: true })
+    expect(matchPaletteChord(both, MAC)).toBe(false)
+    expect(matchPaletteChord(both, PC)).toBe(false)
+  })
+
+  /**
+   * The listener sits on `window` in the bubble phase, so anything nearer the
+   * target that has already claimed the key — a terminal, an editor, a plugin's
+   * input — keeps it simply by doing its job.
+   */
+  it("bails on an event some nearer handler already claimed", () => {
+    const e = chord({ code: "KeyK", key: "k", metaKey: true, cancelable: true })
+    expect(matchPaletteChord(e, MAC)).toBe(true)
+    e.preventDefault()
+    expect(e.defaultPrevented).toBe(true)
+    expect(matchPaletteChord(e, MAC)).toBe(false)
   })
 
   it("matches on `key` alone, for a layout that moves the physical key", () => {
-    expect(matchPaletteChord(chord({ code: "Unidentified", key: "k", metaKey: true }))).toBe(
-      true
-    )
+    expect(
+      matchPaletteChord(chord({ code: "Unidentified", key: "k", metaKey: true }), MAC)
+    ).toBe(true)
   })
 
   it("does not fire without a modifier, so plain typing is untouched", () => {
-    expect(matchPaletteChord(chord({ code: "KeyK", key: "k" }))).toBe(false)
-    expect(matchPaletteChord(chord({ code: "KeyP", key: "p" }))).toBe(false)
+    expect(matchPaletteChord(chord({ code: "KeyK", key: "k" }), MAC)).toBe(false)
+    expect(matchPaletteChord(chord({ code: "KeyP", key: "p" }), PC)).toBe(false)
   })
 
   it("does not fire with Shift or Alt held", () => {
     // ⌘⇧P is VS Code's palette; here it stays free, and a chord that fires on
     // any modifier combination fires when you meant the one next to it.
-    expect(matchPaletteChord(chord({ code: "KeyP", key: "P", metaKey: true, shiftKey: true }))).toBe(
-      false
-    )
-    expect(matchPaletteChord(chord({ code: "KeyK", key: "k", metaKey: true, altKey: true }))).toBe(
-      false
-    )
+    expect(
+      matchPaletteChord(chord({ code: "KeyP", key: "P", metaKey: true, shiftKey: true }), MAC)
+    ).toBe(false)
+    expect(
+      matchPaletteChord(chord({ code: "KeyK", key: "k", metaKey: true, altKey: true }), MAC)
+    ).toBe(false)
   })
 
   it("leaves the chords the app already owns alone", () => {
     // ⌘N (new session) and ⌘B (sidebar) must not open the palette.
-    expect(matchPaletteChord(chord({ code: "KeyN", key: "n", metaKey: true }))).toBe(false)
-    expect(matchPaletteChord(chord({ code: "KeyB", key: "b", metaKey: true }))).toBe(false)
+    expect(matchPaletteChord(chord({ code: "KeyN", key: "n", metaKey: true }), MAC)).toBe(false)
+    expect(matchPaletteChord(chord({ code: "KeyB", key: "b", metaKey: true }), MAC)).toBe(false)
     // ⌘F, which this feature hands to the sidebar filter.
-    expect(matchPaletteChord(chord({ code: "KeyF", key: "f", metaKey: true }))).toBe(false)
+    expect(matchPaletteChord(chord({ code: "KeyF", key: "f", metaKey: true }), MAC)).toBe(false)
+  })
+
+  it("defaults to the running platform when none is injected", () => {
+    // jsdom's navigator reports a non-Mac UA, so the Ctrl branch is the live one
+    // here. The assertion is that the default is READ at all, not what it says.
+    expect(matchPaletteChord(chord({ code: "KeyK", key: "k", ctrlKey: true }))).toBe(true)
   })
 })

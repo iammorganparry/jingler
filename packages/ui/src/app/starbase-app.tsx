@@ -434,10 +434,17 @@ export function StarbaseApp({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ghRechecking, setGhRechecking] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  // The palette's half of tab switching. A nonce, not a tab id, so asking for
-  // the tab you are already on still counts as an ask — same shape as
-  // `selectSessionRequest`, for the same reason.
+  /**
+   * The palette's half of tab switching. Nonced, and CLEARED once applied.
+   *
+   * The nonce is so that asking for the tab you are already on still counts as
+   * an ask — same shape as `selectSessionRequest`. The clearing is because a
+   * pane is not `StarbaseApp`: it is keyed by session id and remounts on every
+   * session switch, so a request left standing would be replayed onto the next
+   * session you opened, and onto whichever pane you focused next in a split.
+   */
   const [tabRequest, setTabRequest] = useState<{ tabId: TabKey; nonce: number } | null>(null)
+  const clearTabRequest = useCallback(() => setTabRequest(null), [])
 
   // An outside request to jump to a session (notification click). Keyed on the
   // NONCE, not the id: clicking two notifications for the same session must
@@ -975,6 +982,7 @@ export function StarbaseApp({
         renderBrowserDock={renderBrowserDock}
         browserDockSide={browserDockSide}
         selectTabRequest={tabRequest}
+        onTabRequestHandled={clearTabRequest}
         version={version}
       />
       {onCreateSession && (

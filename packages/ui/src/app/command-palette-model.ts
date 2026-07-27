@@ -194,7 +194,54 @@ export const groupPaletteItems = (
 // ---------------------------------------------------------------------------
 
 /**
- * Does this keypress ask for the palette? ⌘K or ⌘P, Ctrl on non-Mac.
+ * `Chord` plus the one field the palette needs that a split shortcut does not.
+ *
+ * Widened here rather than on the shared `Chord`, which is deliberately the
+ * minimum a pure matcher can be tested against — a real `KeyboardEvent`
+ * satisfies both, and `matchSplitShortcut` has no business reading this.
+ */
+export type PaletteChord = Chord & { readonly defaultPrevented?: boolean }
+
+/**
+ * Is this a Mac? Read once, from the renderer's own globals.
+ *
+ * `navigator.platform` is deprecated and `userAgentData` is not in every engine
+ * this package is compiled against (Storybook, jsdom), so both are tried and a
+ * miss answers "not a Mac" — the branch that keeps Ctrl working, which is the
+ * safe way round for a chord nobody can otherwise reach.
+ */
+const isMacPlatform = (): boolean => {
+  const nav: unknown = globalThis.navigator
+  if (typeof nav !== "object" || nav === null) return false
+  const { platform, userAgent } = nav as { platform?: string; userAgent?: string }
+  return /mac/i.test(platform ?? userAgent ?? "")
+}
+
+/**
+ * Does this keypress ask for the palette? **⌘K/⌘P on macOS, Ctrl+K/Ctrl+P
+ * elsewhere** — not either-or.
+ *
+ * ## Why this one chord breaks the app's `meta || ctrl` rule
+ *
+ * `matchSplitShortcut` accepts either modifier on every platform, and says so:
+ * the same physical gesture should work on macOS and elsewhere. That holds for
+ * ITS chords because they are all ⌃⇧-something, and nothing else wants those.
+ *
+ * K and P are different. On macOS, Ctrl+K and Ctrl+P are Cocoa caret bindings
+ * that Chromium implements in every text field — kill-line and previous-line —
+ * so accepting bare Ctrl here would take both away from the composer and pop a
+ * modal instead, on the platform where ⌘ is already the palette chord and the
+ * Ctrl variant buys nothing. They are also readline's kill-line and
+ * previous-history, which matters in an app with a terminal dock in it.
+ *
+ * VS Code draws the line in the same place, and for the same reason.
+ *
+ * ## `defaultPrevented`
+ *
+ * Bailing on an already-handled event is what keeps this from stealing a key
+ * some nearer handler has claimed. The listener sits on `window` in the bubble
+ * phase, so anything closer to the target — a dock, an editor, a plugin's own
+ * input — gets first refusal simply by doing its job.
  *
  * Both `code` and `key` are checked for the same reason `matchSplitShortcut`
  * does it: `code` names the physical key and survives layouts, `key` covers a
@@ -203,9 +250,19 @@ export const groupPaletteItems = (
  * Shift and Alt must be ABSENT. ⌘⇧P is VS Code's palette, but here it is free
  * for something else, and a chord that fires on any modifier combination is a
  * chord that fires when you meant something adjacent to it.
+ *
+ * @param isMac - defaults to the running platform; injected by the tests, which
+ * must be able to assert BOTH branches on one machine.
  */
-export const matchPaletteChord = (e: Chord): boolean => {
-  if (!(e.metaKey || e.ctrlKey)) return false
+export const matchPaletteChord = (
+  e: PaletteChord,
+  isMac: boolean = isMacPlatform()
+): boolean => {
+  if (e.defaultPrevented) return false
+  // The one modifier that counts, per platform. Accepting the other as well is
+  // what would collide; requiring the absence of it is what makes ⌘K on a Mac
+  // unambiguous.
+  if (isMac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return false
   if (e.shiftKey || e.altKey) return false
   const key = e.key.toLowerCase()
   return e.code === "KeyK" || key === "k" || e.code === "KeyP" || key === "p"
