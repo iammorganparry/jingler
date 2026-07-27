@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { GitService, mainTreeHoldsBranch } from "./git.js"
+import { GitService, ensureWorktreeLinked, mainTreeHoldsBranch, resetWorktreeLinkCache } from "./git.js"
 import { advanceOrigin, failureOf, initGitRepo, initGitRepoWithOrigin, mkTemp, runExit, withTempRoot } from "./test-support.js"
 
 /**
@@ -519,5 +519,121 @@ describe("GitService.checkoutBranch", () => {
     const exit = await checkout(wt, "feature/x")
     expect(exit._tag).toBe("Success")
     expect(git(wt, ["rev-parse", "--abbrev-ref", "HEAD"]).trim()).toBe("feature/x")
+  })
+})
+
+/**
+ * Renaming a repo directory breaks every worktree forked from it, because the
+ * link between the two is stored as an ABSOLUTE path at both ends. These run
+ * real `git worktree add` and a real directory rename — the failure being
+ * repaired is git's own, so a fake executor would only prove the mock agrees
+ * with itself.
+ */
+describe("ensureWorktreeLinked", () => {
+  let temp: ReturnType<typeof withTempRoot>
+  let repos: ReturnType<typeof mkTemp>
+  beforeEach(() => {
+    temp = withTempRoot()
+    repos = mkTemp("jingler-repos-")
+    // The checked-set is module-level and survives between cases, so a second
+    // test would otherwise short-circuit on the first one's path.
+    resetWorktreeLinkCache()
+  })
+  afterEach(() => {
+    temp.cleanup()
+    repos.cleanup()
+  })
+
+  const git = (cwd: string, args: Array<string>) =>
+    execFileSync("git", args, { cwd, encoding: "utf-8" })
+
+  /** Does git still recognise `dir` as a working tree? */
+  const isLinked = (dir: string): boolean => {
+    try {
+      git(dir, ["rev-parse", "--git-dir"])
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** A repo with one worktree forked from it. Returns both paths. */
+  const forkWorktree = async (name: string) => {
+    const repoPath = initGitRepo(join(repos.dir, name))
+    const exit = await runExit(
+      GitService.createWorktree({
+        repoPath,
+        repoName: name,
+        slug: "fix-auth",
+        baseBranch: "main"
+      }).pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") throw new Error("worktree fork failed")
+    return { repoPath, worktreePath: exit.value.path }
+  }
+
+  const repair = (repoPath: string, worktreePath: string) =>
+    runExit(ensureWorktreeLinked(repoPath, worktreePath), temp.layer)
+
+  it("re-points a worktree after its repo directory is renamed", async () => {
+    const { repoPath, worktreePath } = await forkWorktree("starbase")
+    expect(isLinked(worktreePath)).toBe(true)
+
+    // The rename the whole fix exists for. The worktree itself does not move —
+    // it lives under ~/jingler/worktrees — so it is left holding an absolute
+    // path to a repo that is no longer there.
+    const renamed = join(repos.dir, "jingler")
+    renameSync(repoPath, renamed)
+    expect(isLinked(worktreePath)).toBe(false)
+
+    const exit = await repair(renamed, worktreePath)
+    expect(exit._tag).toBe("Success")
+    expect(isLinked(worktreePath)).toBe(true)
+  })
+
+  it("leaves a healthy worktree alone", async () => {
+    const { repoPath, worktreePath } = await forkWorktree("widget")
+    const before = git(worktreePath, ["rev-parse", "HEAD"]).trim()
+
+    const exit = await repair(repoPath, worktreePath)
+    expect(exit._tag).toBe("Success")
+    expect(isLinked(worktreePath)).toBe(true)
+    expect(git(worktreePath, ["rev-parse", "HEAD"]).trim()).toBe(before)
+  })
+
+  it("does not re-create a worktree that was deleted", async () => {
+    const { repoPath, worktreePath } = await forkWorktree("widget")
+    rmSync(worktreePath, { recursive: true, force: true })
+
+    const exit = await repair(repoPath, worktreePath)
+    // Succeeds because it is best-effort, but must not resurrect the directory:
+    // handing an agent an empty tree wearing the right name is worse than the
+    // honest failure the caller is about to raise.
+    expect(exit._tag).toBe("Success")
+    expect(existsSync(worktreePath)).toBe(false)
+  })
+
+  it("checks a given worktree only once per run", async () => {
+    const { repoPath, worktreePath } = await forkWorktree("starbase")
+    const renamed = join(repos.dir, "jingler")
+    renameSync(repoPath, renamed)
+
+    expect((await repair(renamed, worktreePath))._tag).toBe("Success")
+    expect(isLinked(worktreePath)).toBe(true)
+
+    // Break it a second time. The memo means this is NOT repaired again — which
+    // is the intended trade: one subprocess per worktree per run, not two per
+    // message forever.
+    renameSync(renamed, join(repos.dir, "moved-again"))
+    expect(isLinked(worktreePath)).toBe(false)
+    expect((await repair(join(repos.dir, "moved-again"), worktreePath))._tag).toBe("Success")
+    expect(isLinked(worktreePath)).toBe(false)
+  })
+
+  it("is a no-op when either path is empty", async () => {
+    expect((await repair("", "/tmp/whatever"))._tag).toBe("Success")
+    expect((await repair("/tmp/whatever", ""))._tag).toBe("Success")
   })
 })

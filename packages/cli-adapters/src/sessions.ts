@@ -144,6 +144,38 @@ export const migrateSessionChats = (value: unknown): unknown => {
 }
 
 /**
+ * Re-derive `repo` from `repoPath` so renaming a repo directory does not strand
+ * every existing session in a phantom sidebar group.
+ *
+ * `repo` is a DENORMALISED copy of the repo's folder name, snapshotted when the
+ * session is created and never revisited — while the sidebar groups on exactly
+ * that string (`session-filters.ts`, `groupSessions`). Rename
+ * `~/repos/starbase` to `~/repos/jingler` and every session created before the
+ * rename keeps grouping under "starbase": a heading naming a directory that no
+ * longer exists, sitting next to a "jingler" group holding only the sessions
+ * created since. The two are the same repo.
+ *
+ * `repoPath` is the identity and stays correct across a rename, so the display
+ * name is recomputed on every read rather than trusted. Like
+ * `migrateSessionChats` this is deterministic, so a stale file can be read
+ * repeatedly and the corrected name is persisted by the next mutation.
+ *
+ * Sessions predating `repoPath` (it is `Schema.optional`) keep their stored
+ * name — there is nothing better to derive one from, and a wrong group beats no
+ * group.
+ */
+export const migrateRepoName = (value: unknown): unknown => {
+  if (!isRecord(value)) return value
+  const repoPath = typeof value.repoPath === "string" ? value.repoPath.trim() : ""
+  if (repoPath.length === 0) return value
+  const derived = basename(repoPath)
+  // `basename` yields "" for "/" and for a path that is only separators. An
+  // empty group heading is worse than a stale one, so keep what was stored.
+  if (derived.length === 0 || derived === value.repo) return value
+  return { ...value, repo: derived }
+}
+
+/**
  * The longest slug we will put on disk.
  *
  * A slug becomes a DIRECTORY NAME (`~/jingler/worktrees/<repo>/<slug>`) and a
@@ -231,7 +263,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           if (!Array.isArray(parsed)) return []
           const sessions: Array<Session> = []
           for (const value of parsed) {
-            const decoded = Schema.decodeUnknownEither(SessionSchema)(migrateSessionChats(value))
+            const decoded = Schema.decodeUnknownEither(SessionSchema)(
+              migrateRepoName(migrateSessionChats(value))
+            )
             if (Either.isRight(decoded)) sessions.push(decoded.right)
           }
           return sessions
@@ -1026,6 +1060,17 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const setPrNumber = (id: string, prNumber: number | null) =>
         update(id, (s) => ({ ...s, prNumber }))
 
+      /**
+       * Record a worktree that has MOVED — not one that was re-forked.
+       *
+       * `worktreePath` is stored absolute and nothing else rewrites it, so it
+       * goes stale when `~/jingler` or the repo directory is renamed. The caller
+       * (`healedWorktreePath`) only produces a new value after confirming the
+       * directory is really there, so this never invents a path.
+       */
+      const setWorktreePath = (id: string, worktreePath: string) =>
+        update(id, (s) => ({ ...s, worktreePath }))
+
       /** Link (or, with `null`, unlink) a GitHub issue on a live session. */
       const setIssue = (
         id: string,
@@ -1155,6 +1200,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setStatus,
         addAllowlist,
         setPrNumber,
+        setWorktreePath,
         setIssue,
         clearInitialPrompt,
         archive,

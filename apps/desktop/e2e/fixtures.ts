@@ -112,6 +112,12 @@ export interface SeedSession {
   readonly contextTokens?: number
   readonly updatedAt: string
   readonly worktreePath?: string
+  /**
+   * The repo's absolute path. Distinct from `repo`, which is only the display
+   * name — the two disagree exactly when the directory has been renamed since
+   * the session was created, which is what `migrateRepoName` exists to fix.
+   */
+  readonly repoPath?: string
   readonly baseBranch?: string
   readonly model?: string
   readonly resumeId?: string
