@@ -48,7 +48,12 @@ services:
       # SQLite lives here — connected providers survive a restart.
       - jingler-open-connector-data:/data
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/openapi.json"]
+      # 127.0.0.1, NOT localhost. Inside this image /etc/hosts maps localhost to
+      # ::1 only, while the server binds IPv4 — so `wget http://localhost:3000`
+      # is refused on every probe and the container sits permanently unhealthy
+      # while serving fine on the published port. Cosmetic until something waits
+      # on `condition: service_healthy`, which would then hang forever.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/openapi.json"]
       interval: 30s
       timeout: 5s
       retries: 5
