@@ -15,7 +15,7 @@
  *
  * ## Why parsing is here and not in the manifest schema
  *
- * `"ctrl+shift+l"` is a string in `starbase.plugin.json` because that is the
+ * `"ctrl+shift+l"` is a string in `jingler.plugin.json` because that is the
  * notation VS Code authors already know. Turning it into a predicate over a
  * keyboard event needs to know about `code` vs `key`, which is a renderer
  * concern — the schema's job is to accept a plausible string, and this module's
@@ -125,7 +125,7 @@ export const resolveKeybindings = (
   const taken = new Map<string, string>()
   for (const spec of reserved) {
     const parsed = parseChord(spec)
-    if (parsed) taken.set(chordKey(parsed), "Starbase")
+    if (parsed) taken.set(chordKey(parsed), "Jingler")
   }
 
   // Sorted so the winner between two plugins is stable across launches rather
@@ -139,7 +139,7 @@ export const resolveKeybindings = (
     if (!parsed) {
       rejected.push({
         ...binding,
-        reason: `"${binding.key}" is not a chord Starbase understands. Use a form like "ctrl+shift+l".`
+        reason: `"${binding.key}" is not a chord Jingler understands. Use a form like "ctrl+shift+l".`
       })
       continue
     }

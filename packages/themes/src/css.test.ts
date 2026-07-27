@@ -1,4 +1,4 @@
-import { CSS_VAR_BY_TOKEN } from "@starbase/core"
+import { CSS_VAR_BY_TOKEN } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import { THEME_STYLE_ID, toCssText } from "./css.js"
 import { toTokens } from "./map.js"
@@ -68,6 +68,6 @@ describe("toCssText", () => {
 
 describe("THEME_STYLE_ID", () => {
   it("names the element shared by the pre-paint injector and ThemeProvider", () => {
-    expect(THEME_STYLE_ID).toBe("starbase-theme")
+    expect(THEME_STYLE_ID).toBe("jingler-theme")
   })
 })

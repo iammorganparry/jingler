@@ -4,7 +4,7 @@
  * listener) and then opens the window. The renderer talks to the backend purely
  * through the RPC transport in `./rpc.ts`.
  *
- * It also owns the `starbase://` deep-link sign-in bridge: a single-instance lock
+ * It also owns the `jingler://` deep-link sign-in bridge: a single-instance lock
  * keeps auth callbacks landing in the running app, and an inbound callback stores
  * the session token (OS keychain, via `SecretStore`) before telling the renderer
  * to re-check auth.
@@ -17,7 +17,7 @@ import {
   ModelsService,
   PluginHost,
   SecretStore
-} from "@starbase/cli-adapters"
+} from "@jingler/cli-adapters"
 import { app, BrowserWindow, ipcMain, shell } from "electron"
 import { Effect } from "effect"
 import type { AuthCallback } from "./deep-link.js"
@@ -27,7 +27,7 @@ import {
   parseAuthCallback,
   registerProtocolClient
 } from "./deep-link.js"
-import { starbaseRoot } from "./app-paths.js"
+import { jinglerRoot } from "./app-paths.js"
 import { isExternallyOpenable, sameOrigin } from "./window-guards.js"
 import { registerPluginProtocolHandler, registerPluginScheme } from "./plugin-protocol.js"
 import { makeHostRequestHandler, spawnHostProcess } from "./plugin-host-bridge.js"
@@ -44,23 +44,23 @@ let mainWindow: BrowserWindow | null = null
  * Development builds keep a redacted Codex lifecycle trace so an intermittent
  * silent turn leaves evidence after its ten-minute watchdog fires. Packaged
  * builds and headless e2e remain unchanged; developers can explicitly disable
- * it with `STARBASE_CODEX_DIAGNOSTICS=0`.
+ * it with `JINGLER_CODEX_DIAGNOSTICS=0`.
  */
 const enableCodexDiagnostics = (): void => {
   if (
     app.isPackaged ||
-    process.env.STARBASE_E2E_HEADLESS === "1" ||
-    process.env.STARBASE_CODEX_DIAGNOSTICS === "0"
+    process.env.JINGLER_E2E_HEADLESS === "1" ||
+    process.env.JINGLER_CODEX_DIAGNOSTICS === "0"
   ) {
     return
   }
-  process.env.STARBASE_CODEX_DIAGNOSTICS_DIR ??= join(
-    starbaseRoot,
+  process.env.JINGLER_CODEX_DIAGNOSTICS_DIR ??= join(
+    jinglerRoot,
     "diagnostics",
     "codex"
   )
   console.info(
-    `[codex-diagnostics] redacted traces: ${process.env.STARBASE_CODEX_DIAGNOSTICS_DIR}`
+    `[codex-diagnostics] redacted traces: ${process.env.JINGLER_CODEX_DIAGNOSTICS_DIR}`
   )
 }
 
@@ -83,7 +83,7 @@ const prefetchModels = Effect.gen(function* () {
 }).pipe(Effect.ignore)
 
 // Only one instance may run: a second launch (e.g. the OS handing us a
-// `starbase://` deep link) must forward its argv into the primary instance
+// `jingler://` deep link) must forward its argv into the primary instance
 // rather than spawn a rival window. If we didn't get the lock, we're that second
 // launch — quit immediately and let `second-instance` do the delivery.
 const gotPrimaryLock = app.requestSingleInstanceLock()
@@ -93,7 +93,7 @@ if (!gotPrimaryLock) {
   registerProtocolClient()
 
   /** Open an http(s) URL (e.g. a PR link) in the user's default browser. */
-  ipcMain.handle("starbase/open-external", (_event, url: unknown) => {
+  ipcMain.handle("jingler/open-external", (_event, url: unknown) => {
     if (typeof url === "string" && /^https?:\/\//i.test(url)) return shell.openExternal(url)
     return undefined
   })
@@ -121,7 +121,7 @@ if (!gotPrimaryLock) {
     if (!mainWindow) return
     // Deep-link handling focuses the window; under headless e2e that would undo
     // the whole point (the auth specs drive deep links repeatedly).
-    if (process.env.STARBASE_E2E_HEADLESS === "1") return
+    if (process.env.JINGLER_E2E_HEADLESS === "1") return
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.focus()
   }
@@ -184,7 +184,7 @@ if (!gotPrimaryLock) {
      * nothing gets to open a second window from it.
      *
      * Both matter because of what this window's `webPreferences` carry. The
-     * preload exposes `window.starbase.send/on` — the whole RPC bridge, and with
+     * preload exposes `window.jingler.send/on` — the whole RPC bridge, and with
      * it Terminal, Workspace and Auth. Electron hands a `window.open`ed child
      * the OPENER'S web preferences, so a new window would inherit that preload,
      * and whatever remote page loaded in it would have a live channel to it.
@@ -195,7 +195,7 @@ if (!gotPrimaryLock) {
      *
      * So: deny every window-open request outright, and hand http(s) to the
      * user's real browser instead — which is what every deliberate external link
-     * in the app already does via `starbase/open-external`. Non-http(s) schemes
+     * in the app already does via `jingler/open-external`. Non-http(s) schemes
      * are dropped rather than passed to `shell.openExternal`, which would happily
      * launch an arbitrary protocol handler.
      */
@@ -228,7 +228,7 @@ if (!gotPrimaryLock) {
     // incompatible with using the machine. The renderer still loads and is fully
     // drivable while hidden, and `toBeVisible()` asserts DOM visibility, not
     // window visibility, so specs behave identically.
-    if (process.env.STARBASE_E2E_HEADLESS === "1") {
+    if (process.env.JINGLER_E2E_HEADLESS === "1") {
       app.dock?.hide()
     } else {
       window.on("ready-to-show", () => window.show())
@@ -263,7 +263,7 @@ if (!gotPrimaryLock) {
   app.whenReady().then(async () => {
     enableCodexDiagnostics()
     // Now that the subsystem is up, attach the handler that actually serves
-    // plugin files (and the runtime shims) out of `~/starbase/plugins`.
+    // plugin files (and the runtime shims) out of `~/jingler/plugins`.
     registerPluginProtocolHandler()
 
     // Hand the host service its Electron-shaped pieces. No process is spawned

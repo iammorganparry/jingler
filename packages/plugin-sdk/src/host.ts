@@ -1,8 +1,8 @@
 /**
- * `@starbase/plugin-sdk/host` — the extension-host half of a plugin.
+ * `@jingler/plugin-sdk/host` — the extension-host half of a plugin.
  *
  * Import from here in the module your manifest names as `main`. It runs in
- * Node, inside Starbase's extension host, and it is where anything touching the
+ * Node, inside Jingler's extension host, and it is where anything touching the
  * network, a CLI or credentials belongs — the renderer's CSP means a plugin's UI
  * half cannot reach the outside world however much code it runs.
  *
@@ -11,7 +11,7 @@
  *
  * @example
  * ```ts
- * import type { Activate } from "@starbase/plugin-sdk/host"
+ * import type { Activate } from "@jingler/plugin-sdk/host"
  *
  * export const activate: Activate = async (ctx) => {
  *   // No manifest flag grants GitHub access — the plugin asks, and the

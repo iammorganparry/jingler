@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { ChevronRight, MessagesSquare, Plus, X } from "lucide-react"
-import type { SubagentStatus } from "@starbase/core"
+import type { SubagentStatus } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier, type WidthTier } from "../hooks/width-tier.js"
 import { StatusDot } from "../components/status-dot.js"

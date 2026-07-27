@@ -1,6 +1,6 @@
 import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { PrFileChange, PullRequest as PullRequestData } from "@starbase/core"
+import type { PrFileChange, PullRequest as PullRequestData } from "@jingler/core"
 import { LookFor, WidthLadder } from "../story-support.js"
 import { CodeReviewView, type ReviewSource } from "./code-review-view.js"
 import { PullRequestView } from "./pull-request-view.js"

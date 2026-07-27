@@ -69,8 +69,8 @@ export interface PreviewDockProps {
 // The keys are the browser preview's originals on purpose: this dock replaced
 // it in place, and renaming them would silently reset every existing install's
 // carefully-dragged height to the default.
-const HEIGHT = { key: "starbase.browser.height", initial: 360, min: 180, max: 820 }
-const WIDTH = { key: "starbase.browser.width", initial: 520, min: 320, max: 1000 }
+const HEIGHT = { key: "jingler.browser.height", initial: 360, min: 180, max: 820 }
+const WIDTH = { key: "jingler.browser.width", initial: 520, min: 320, max: 1000 }
 
 /** The id of the pinned browser tab. Stable, so the app can address it directly. */
 export const BROWSER_TAB_ID = "browser"
@@ -202,7 +202,7 @@ export function PreviewDock(props: PreviewDockProps) {
                 active ? "block" : "hidden",
                 // The browser renders somebody ELSE'S page over these bounds, so
                 // it gets the CSS default a bare document would have. Tinting it
-                // with a Starbase surface would restyle a stranger's site — and
+                // with a Jingler surface would restyle a stranger's site — and
                 // on a light theme, hide it entirely.
                 t.kind === "browser" ? "bg-white" : "bg-canvas"
               )}

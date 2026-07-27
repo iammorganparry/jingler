@@ -15,7 +15,7 @@ export const env = {
   isDev: nodeEnv !== "production",
   port: Number(optional("PORT", "9100")),
   /** Postgres connection string. Defaults to the local Docker instance (port 5433). */
-  databaseUrl: optional("DATABASE_URL", "postgres://postgres:postgres@localhost:5433/starbase"),
+  databaseUrl: optional("DATABASE_URL", "postgres://postgres:postgres@localhost:5433/jingler"),
   /** BetterAuth signing secret. MUST be overridden in production. */
   authSecret: optional("BETTER_AUTH_SECRET", "dev-insecure-secret-change-me"),
   /** Public base URL the auth server is reachable at (used for OAuth callbacks). */
@@ -25,9 +25,9 @@ export const env = {
   googleClientId: optional("GOOGLE_CLIENT_ID"),
   googleClientSecret: optional("GOOGLE_CLIENT_SECRET"),
   resendApiKey: optional("RESEND_API_KEY"),
-  emailFrom: optional("EMAIL_FROM", "Starbase <login@starbase.local>"),
+  emailFrom: optional("EMAIL_FROM", "Jingler <login@jingler.local>"),
   /** Deep-link the desktop app registers; magic links + OAuth bounce back here. */
-  desktopRedirect: optional("DESKTOP_REDIRECT", "starbase://auth/callback")
+  desktopRedirect: optional("DESKTOP_REDIRECT", "jingler://auth/callback")
 } as const
 
 /** True when a social provider has both id + secret configured (else we skip it). */

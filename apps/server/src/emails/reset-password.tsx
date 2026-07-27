@@ -12,7 +12,7 @@ export interface ResetPasswordProps {
   secureUrl: string
 }
 
-export const resetPasswordSubject = "Reset your Starbase password"
+export const resetPasswordSubject = "Reset your Jingler password"
 
 export function ResetPassword({ email, resetUrl, secureUrl }: ResetPasswordProps) {
   return (
@@ -39,8 +39,8 @@ export function ResetPassword({ email, resetUrl, secureUrl }: ResetPasswordProps
 
 ResetPassword.PreviewProps = {
   email: "you@acme.dev",
-  resetUrl: "https://app.starbase.dev/reset?t=7c1a9f",
-  secureUrl: "https://app.starbase.dev/security"
+  resetUrl: "https://app.jingler.dev/reset?t=7c1a9f",
+  secureUrl: "https://app.jingler.dev/security"
 } satisfies ResetPasswordProps
 
 export default ResetPassword

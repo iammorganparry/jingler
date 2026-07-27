@@ -7,7 +7,7 @@ import type { ElectronApplication, Page } from "@playwright/test"
 import { _electron as electron } from "playwright"
 import { startFakeAuthServer, type FakeAuthServer } from "./fake-auth.js"
 import { MAIN_ENTRY } from "./global-setup.js"
-import { FALLBACK_MODELS } from "@starbase/core"
+import { FALLBACK_MODELS } from "@jingler/core"
 
 /**
  * Model labels read from the catalogue rather than written out in each spec.
@@ -128,7 +128,7 @@ export interface LaunchOptions {
    */
   readonly scriptedAgent?: boolean
   /**
-   * Relaunch against an EXISTING `~/starbase` (a previous launch's `home`) —
+   * Relaunch against an EXISTING `~/jingler` (a previous launch's `home`) —
    * i.e. a real app restart, reading whatever the last run persisted rather than
    * what the test seeded. Pass `reposDir` alongside it to keep the same repos.
    * The original launch still owns teardown for both.
@@ -160,13 +160,13 @@ export interface LaunchOptions {
     | ((ctx: { reposDir: string; repoPath: string }) => ReadonlyArray<SeedSession>)
   /**
    * Seed persisted transcripts, keyed by session id → the message array written to
-   * `~/starbase/transcripts/<id>.json`. Lets a test load a conversation with, e.g.,
+   * `~/jingler/transcripts/<id>.json`. Lets a test load a conversation with, e.g.,
    * an orphaned pending gate (to assert it settles on load).
    */
   readonly transcripts?: Record<string, ReadonlyArray<unknown>>
   /**
    * Seed a finished reviewer's event stream, keyed by session id → the events
-   * written to `~/starbase/reviews/<id>.transcript.json`. A fresh launch with one
+   * written to `~/jingler/reviews/<id>.transcript.json`. A fresh launch with one
    * of these IS the "restored after a restart" case: the app has no live reviewer,
    * so a Reviewer tab can only come from the disk.
    */
@@ -251,10 +251,10 @@ export interface LaunchOptions {
 /**
  * Install a fake harness in the pinned discovery dir that only answers `--version`.
  *
- * Discovery is pinned to that dir (`STARBASE_DISCOVERY_BIN_DIR`), so without this
+ * Discovery is pinned to that dir (`JINGLER_DISCOVERY_BIN_DIR`), so without this
  * the suite would find NO harness and every flow gated on one — creating a
  * session, the harness picker, the model chip — would skip. A shim is enough
- * because `STARBASE_SCRIPTED_AGENT` routes actual turns to the scripted harness:
+ * because `JINGLER_SCRIPTED_AGENT` routes actual turns to the scripted harness:
  * the binary is only ever asked for its version.
  *
  * This is what makes those specs both hermetic AND still run. Previously they
@@ -321,8 +321,8 @@ const notifyUsage = (tokens, turnId) =>
     }
   })
 const record = (method) => {
-  if (process.env.STARBASE_E2E_CODEX_LOG) {
-    fs.appendFileSync(process.env.STARBASE_E2E_CODEX_LOG, method + "\\n")
+  if (process.env.JINGLER_E2E_CODEX_LOG) {
+    fs.appendFileSync(process.env.JINGLER_E2E_CODEX_LOG, method + "\\n")
   }
 }
 let buffer = ""
@@ -451,8 +451,8 @@ const installFakeOpencode = (
   }))
 
   const script = `#!/usr/bin/env node
-const version = process.env.STARBASE_E2E_OPENCODE_VERSION || "1.18.0"
-const providers = JSON.parse(process.env.STARBASE_E2E_OPENCODE_PROVIDERS || "[]")
+const version = process.env.JINGLER_E2E_OPENCODE_VERSION || "1.18.0"
+const providers = JSON.parse(process.env.JINGLER_E2E_OPENCODE_PROVIDERS || "[]")
 const argv = process.argv.slice(2)
 
 if (argv.includes("--version") || argv.includes("-v")) {
@@ -495,19 +495,19 @@ if (argv[0] === "serve") {
     }
     if (req.method === "PUT" && req.url.startsWith("/auth/")) {
       // Record the write so a test can assert the key went to opencode's own
-      // store rather than anywhere of Starbase's.
+      // store rather than anywhere of Jingler's.
       const id = decodeURIComponent(req.url.slice("/auth/".length))
       let body = ""
       req.on("data", (c) => (body += c))
       req.on("end", () => {
         require("node:fs").appendFileSync(
-          process.env.STARBASE_E2E_OPENCODE_AUTH_LOG,
+          process.env.JINGLER_E2E_OPENCODE_AUTH_LOG,
           JSON.stringify({ id, body: JSON.parse(body || "{}") }) + "\\n"
         )
         // Refusing the write is a state a real server reaches (its credential
         // store unwritable) and the one the row itself can't show — the UI has
         // to say so rather than close as though the key landed.
-        if (process.env.STARBASE_E2E_OPENCODE_AUTH_FAILS === "1") {
+        if (process.env.JINGLER_E2E_OPENCODE_AUTH_FAILS === "1") {
           res.statusCode = 500
           res.end(JSON.stringify({ error: "cannot write auth.json" }))
           return
@@ -534,17 +534,17 @@ process.exit(0)
   writeFileSync(path, script)
   chmodSync(path, 0o755)
   return {
-    STARBASE_E2E_OPENCODE_VERSION: opencode.version ?? "1.18.0",
-    STARBASE_E2E_OPENCODE_PROVIDERS: JSON.stringify(providers),
-    STARBASE_E2E_OPENCODE_AUTH_LOG: join(binDir, "auth-writes.jsonl"),
-    STARBASE_E2E_OPENCODE_AUTH_FAILS: opencode.authFails === true ? "1" : "0"
+    JINGLER_E2E_OPENCODE_VERSION: opencode.version ?? "1.18.0",
+    JINGLER_E2E_OPENCODE_PROVIDERS: JSON.stringify(providers),
+    JINGLER_E2E_OPENCODE_AUTH_LOG: join(binDir, "auth-writes.jsonl"),
+    JINGLER_E2E_OPENCODE_AUTH_FAILS: opencode.authFails === true ? "1" : "0"
   }
 }
 
 export interface LaunchedApp {
   readonly app: ElectronApplication
   readonly window: Page
-  /** The throwaway home; `~/starbase` lives at `<home>/starbase`. */
+  /** The throwaway home; `~/jingler` lives at `<home>/jingler`. */
   readonly home: string
   /** The seeded repos directory (when `configured`). */
   readonly reposDir: string
@@ -560,13 +560,13 @@ export interface LaunchedApp {
   /**
    * Keys the fake opencode was asked to store, in the order it was asked. The
    * point of the assertion is WHERE a key lands: opencode's own credential
-   * store, never Starbase's SecretStore.
+   * store, never Jingler's SecretStore.
    */
   readonly opencodeAuthWrites: () => ReadonlyArray<{ id: string; body: { type: string; key: string } }>
   /** Ordered JSON-RPC methods received by the fake Codex app-server. */
   readonly codexCalls: () => ReadonlyArray<string>
   /**
-   * Drive a `starbase://` sign-in callback into the running app (the OS would
+   * Drive a `jingler://` sign-in callback into the running app (the OS would
    * normally do this after the browser flow). Emits the main-process `open-url`.
    */
   readonly completeDeepLinkSignIn: () => Promise<void>
@@ -584,8 +584,8 @@ const git = (cwd: string, args: ReadonlyArray<string>) =>
 const initRepo = (dir: string): void => {
   mkdirSync(dir, { recursive: true })
   git(dir, ["init", "-b", "main"])
-  git(dir, ["config", "user.email", "e2e@starbase.dev"])
-  git(dir, ["config", "user.name", "Starbase E2E"])
+  git(dir, ["config", "user.email", "e2e@jingler.dev"])
+  git(dir, ["config", "user.name", "Jingler E2E"])
   git(dir, ["config", "commit.gpgsign", "false"])
   writeFileSync(join(dir, "README.md"), "# e2e repo\n")
   git(dir, ["add", "-A"])
@@ -698,7 +698,7 @@ if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
-  printf '%s' "$STARBASE_E2E_GH_PRS"; exit 0
+  printf '%s' "$JINGLER_E2E_GH_PRS"; exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
   # The adversarial-review de-dupe reads the head SHA on its own cadence, as a
@@ -707,29 +707,29 @@ if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
     *headRefOid*) printf '{"headRefOid":"e2ehead%s"}' "$3"; exit 0;;
     # statusCheckRollup appears only in the Pull Request tab's full field list,
     # never in the cheap state poll — so it's the marker for "serve the whole PR".
-    *statusCheckRollup*) cat "$STARBASE_E2E_GH_DIR/pr-$3.json" 2>/dev/null || echo '{}'; exit 0;;
+    *statusCheckRollup*) cat "$JINGLER_E2E_GH_DIR/pr-$3.json" 2>/dev/null || echo '{}'; exit 0;;
   esac
-  st=$(printf '%s' "$STARBASE_E2E_GH_STATES" | tr ',' '\\n' | awk -F: -v n="$3" '$1==n{print $2}')
+  st=$(printf '%s' "$JINGLER_E2E_GH_STATES" | tr ',' '\\n' | awk -F: -v n="$3" '$1==n{print $2}')
   [ -z "$st" ] && st="OPEN"
   printf '{"state":"%s"}' "$st"; exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "diff" ]; then
-  printf '%s' "$STARBASE_E2E_GH_DIFF"; exit 0
+  printf '%s' "$JINGLER_E2E_GH_DIFF"; exit 0
 fi
 # Record write commands so a test can assert WHICH one ran (e.g. the merge
-# strategy). Appended, one invocation per line, to $STARBASE_E2E_GH_LOG.
+# strategy). Appended, one invocation per line, to $JINGLER_E2E_GH_LOG.
 if [ "$1" = "pr" ] && { [ "$2" = "merge" ] || [ "$2" = "update-branch" ] || [ "$2" = "ready" ]; }; then
-  printf '%s\\n' "$*" >> "$STARBASE_E2E_GH_LOG"; exit 0
+  printf '%s\\n' "$*" >> "$JINGLER_E2E_GH_LOG"; exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "checkout" ]; then
-  ref=$(printf '%s' "$STARBASE_E2E_GH_HEADS" | tr ',' '\\n' | awk -F: -v n="$3" '$1==n{print $2}')
+  ref=$(printf '%s' "$JINGLER_E2E_GH_HEADS" | tr ',' '\\n' | awk -F: -v n="$3" '$1==n{print $2}')
   git checkout "$ref" >/dev/null 2>&1; exit $?
 fi
 if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
-  printf '%s' "$STARBASE_E2E_GH_ISSUES"; exit 0
+  printf '%s' "$JINGLER_E2E_GH_ISSUES"; exit 0
 fi
 if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
-  cat "$STARBASE_E2E_GH_DIR/issue-$3.json" 2>/dev/null || echo '{}'; exit 0
+  cat "$JINGLER_E2E_GH_DIR/issue-$3.json" 2>/dev/null || echo '{}'; exit 0
 fi
 if [ "$1" = "issue" ]; then
   exit 0
@@ -742,15 +742,15 @@ exit 0
   return {
     // A reviewer refuses to run on an empty diff (that would cache a false
     // all-clear), so `gh pr diff` has to return something real.
-    STARBASE_E2E_GH_DIFF:
+    JINGLER_E2E_GH_DIFF:
       gh.diff ??
       "diff --git a/src/auth.ts b/src/auth.ts\n--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -1,3 +1,4 @@\n const a = 1\n+const token = refresh()\n",
-    STARBASE_E2E_GH_PRS: JSON.stringify(prs),
-    STARBASE_E2E_GH_ISSUES: JSON.stringify(issues),
-    STARBASE_E2E_GH_DIR: binDir,
-    STARBASE_E2E_GH_HEADS: heads,
-    STARBASE_E2E_GH_STATES: states,
-    STARBASE_E2E_GH_LOG: join(binDir, "gh-calls.log")
+    JINGLER_E2E_GH_PRS: JSON.stringify(prs),
+    JINGLER_E2E_GH_ISSUES: JSON.stringify(issues),
+    JINGLER_E2E_GH_DIR: binDir,
+    JINGLER_E2E_GH_HEADS: heads,
+    JINGLER_E2E_GH_STATES: states,
+    JINGLER_E2E_GH_LOG: join(binDir, "gh-calls.log")
   }
 }
 
@@ -769,9 +769,9 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
       // only ever assert that seeded fixtures render. Skip re-registering
       // cleanups so the first launch's teardown isn't run twice.
       const reused = options.home !== undefined
-      const home = options.home ?? mkdtempSync(join(tmpdir(), "starbase-e2e-home-"))
-      const starbaseDir = join(home, "starbase")
-      const reposDir = options.reposDir ?? mkdtempSync(join(tmpdir(), "starbase-e2e-repos-"))
+      const home = options.home ?? mkdtempSync(join(tmpdir(), "jingler-e2e-home-"))
+      const jinglerDir = join(home, "jingler")
+      const reposDir = options.reposDir ?? mkdtempSync(join(tmpdir(), "jingler-e2e-repos-"))
       if (!reused) {
         cleanups.push(() => rmSync(home, { recursive: true, force: true }))
         cleanups.push(() => rmSync(reposDir, { recursive: true, force: true }))
@@ -792,9 +792,9 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
        * wrote (a per-harness MCP opt-out, say) vanished, and the spec read the
        * absence as "it didn't persist" rather than "the fixture deleted it".
        */
-      const configPath = join(starbaseDir, "config.json")
+      const configPath = join(jinglerDir, "config.json")
       if (options.configured && !(reused && existsSync(configPath))) {
-        mkdirSync(starbaseDir, { recursive: true })
+        mkdirSync(jinglerDir, { recursive: true })
         writeFileSync(
           configPath,
           JSON.stringify(
@@ -813,18 +813,18 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
           typeof options.sessions === "function"
             ? options.sessions({ reposDir, repoPath })
             : options.sessions
-        mkdirSync(starbaseDir, { recursive: true })
-        writeFileSync(join(starbaseDir, "sessions.json"), JSON.stringify(sessions, null, 2))
+        mkdirSync(jinglerDir, { recursive: true })
+        writeFileSync(join(jinglerDir, "sessions.json"), JSON.stringify(sessions, null, 2))
       }
       if (options.transcripts) {
-        const dir = join(starbaseDir, "transcripts")
+        const dir = join(jinglerDir, "transcripts")
         mkdirSync(dir, { recursive: true })
         for (const [sessionId, messages] of Object.entries(options.transcripts)) {
           writeFileSync(join(dir, `${sessionId}.json`), JSON.stringify(messages, null, 2))
         }
       }
       if (options.reviewTranscripts) {
-        const dir = join(starbaseDir, "reviews")
+        const dir = join(jinglerDir, "reviews")
         mkdirSync(dir, { recursive: true })
         for (const [sessionId, events] of Object.entries(options.reviewTranscripts)) {
           writeFileSync(join(dir, `${sessionId}.transcript.json`), JSON.stringify(events))
@@ -840,7 +840,7 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
       // otherwise reads the developer's real `~` and reports whatever they happen to
       // be signed into, so the same test says different things on different machines.
       const mcpEnv: Record<string, string> = {
-        STARBASE_HARNESS_HOME: join(home, "harness-home")
+        JINGLER_HARNESS_HOME: join(home, "harness-home")
       }
 
       // Optional fake `gh` / `opencode` on PATH (offline + deterministic). Both
@@ -881,11 +881,11 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
       cleanups.push(() => void authServer.close())
       const signedIn = options.signedIn ?? true
       if (signedIn) {
-        mkdirSync(starbaseDir, { recursive: true })
-        writeFileSync(join(starbaseDir, "auth.enc"), authServer.token)
+        mkdirSync(jinglerDir, { recursive: true })
+        writeFileSync(join(jinglerDir, "auth.enc"), authServer.token)
       }
 
-      // A throwaway Chromium profile per launch. `STARBASE_HOME` isolates the
+      // A throwaway Chromium profile per launch. `JINGLER_HOME` isolates the
       // app's own JSON state, but NOT `localStorage` — which lives in Electron's
       // userData dir and backs the renderer's UI chrome prefs (browser-preview
       // visibility + dock side, panel widths). Without this the default profile is
@@ -893,7 +893,7 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
       // preview leaked into later tests forever: at the 1320px default window the
       // extra rail squeezed the Plan Review step spec to zero width, and its
       // assertions failed on an element that was rendered but had no box.
-      const userDataDir = options.userDataDir ?? mkdtempSync(join(tmpdir(), "starbase-e2e-userdata-"))
+      const userDataDir = options.userDataDir ?? mkdtempSync(join(tmpdir(), "jingler-e2e-userdata-"))
       // Only the launch that CREATED the profile tears it down, or a restart
       // would delete the directory its predecessor is still cleaning up.
       if (!options.userDataDir) {
@@ -908,11 +908,11 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
           ...opencodeEnv,
           ...mcpEnv,
           PATH: `${pathPrefix}${process.env.PATH ?? ""}`,
-          STARBASE_HOME: home,
+          JINGLER_HOME: home,
           // Pin harness discovery to the fixture's own bin dir. PATH alone can't
           // do this: `CLI_SPECS.candidates` hardcodes absolute install paths
           // (/opt/homebrew/bin/opencode), so a real install would still be found.
-          STARBASE_DISCOVERY_BIN_DIR: binDir,
+          JINGLER_DISCOVERY_BIN_DIR: binDir,
           // The Anthropic model catalogue is a live HTTP call whenever this is
           // set. Blank it so the suite falls back to the static list instead of
           // hitting the network with the developer's key.
@@ -920,18 +920,18 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
           ELECTRON_RENDERER_URL: "",
           // Auth: talk to the offline fake backend, and store the token as a plain
           // file (no OS keychain prompts under headless Playwright).
-          STARBASE_AUTH_URL: authServer.url,
-          STARBASE_SECRET_STORE: "memory",
+          JINGLER_AUTH_URL: authServer.url,
+          JINGLER_SECRET_STORE: "memory",
           // Force the deterministic scripted agent so chat e2e never spawns a
           // real harness (no auth, no network, reproducible).
-          STARBASE_SCRIPTED_AGENT: options.scriptedAgent === false ? "0" : "1",
-          STARBASE_E2E_CODEX_LOG: join(binDir, "codex-calls.log"),
+          JINGLER_SCRIPTED_AGENT: options.scriptedAgent === false ? "0" : "1",
+          JINGLER_E2E_CODEX_LOG: join(binDir, "codex-calls.log"),
           // Keep the window hidden and off the dock. The suite launches a real
           // Electron app dozens of times, and a visible window steals focus on
           // every launch — which makes running the suite locally (its only home;
           // it's not in CI) incompatible with using the machine at the same time.
-          // Set STARBASE_E2E_HEADED=1 to watch a run instead.
-          STARBASE_E2E_HEADLESS: process.env.STARBASE_E2E_HEADED === "1" ? "0" : "1"
+          // Set JINGLER_E2E_HEADED=1 to watch a run instead.
+          JINGLER_E2E_HEADLESS: process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1"
         }
       })
       apps.push(app)
@@ -943,7 +943,7 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
           ({ app: electronApp }, url) => {
             electronApp.emit("open-url", { preventDefault() {} }, url)
           },
-          `starbase://auth/callback?token=${authServer.token}`
+          `jingler://auth/callback?token=${authServer.token}`
         )
       }
 

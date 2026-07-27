@@ -18,11 +18,11 @@ import {
 
 const resend = env.resendApiKey ? new Resend(env.resendApiKey) : null
 
-/** Where the "Open Starbase" CTA points (the app registers the deep link). */
-const APP_OPEN_URL = "starbase://open"
-const QUICKSTART_URL = "https://starbase.dev/quickstart"
+/** Where the "Open Jingler" CTA points (the app registers the deep link). */
+const APP_OPEN_URL = "jingler://open"
+const QUICKSTART_URL = "https://jingler.dev/quickstart"
 /** Account-security landing page (used by the "secure your account" links). */
-const SECURITY_URL = "https://starbase.dev/account/security"
+const SECURITY_URL = "https://jingler.dev/account/security"
 
 /** Best-effort security context for the "password changed" notification. */
 export interface SecurityContext {
@@ -36,7 +36,7 @@ async function deliver(to: string, email: RenderedEmail): Promise<void> {
   if (!resend) {
     // eslint-disable-next-line no-console
     console.log(
-      `\n[@starbase/server] email "${email.subject}" → ${to} (no RESEND_API_KEY; not sent)\n${email.text}\n`
+      `\n[@jingler/server] email "${email.subject}" → ${to} (no RESEND_API_KEY; not sent)\n${email.text}\n`
     )
     return
   }

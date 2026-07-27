@@ -1,4 +1,4 @@
-import type { SessionStatus } from "@starbase/core"
+import type { SessionStatus } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { statusDotClass, statusPulses } from "../tokens.js"
 

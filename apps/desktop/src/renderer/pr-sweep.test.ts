@@ -1,4 +1,4 @@
-import type { PrState, Session } from "@starbase/core"
+import type { PrState, Session } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import { issuesToCloseOnMerge, prsToNotify } from "./pr-sweep.js"
 
@@ -14,7 +14,7 @@ import { issuesToCloseOnMerge, prsToNotify } from "./pr-sweep.js"
 const session = (over: Partial<Session> & { id: string }): Session =>
   ({
     repo: "r",
-    branch: `starbase/${over.id}`,
+    branch: `jingler/${over.id}`,
     title: over.id,
     status: "idle",
     cli: "claude",

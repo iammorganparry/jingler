@@ -1,4 +1,4 @@
-import type { PrState, PrSummary } from "@starbase/core"
+import type { PrState, PrSummary } from "@jingler/core"
 import { GitPullRequest } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"

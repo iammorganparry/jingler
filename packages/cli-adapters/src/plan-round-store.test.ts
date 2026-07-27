@@ -1,4 +1,4 @@
-import type { Plan, PlanRound } from "@starbase/core"
+import type { Plan, PlanRound } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { writeFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"

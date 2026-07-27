@@ -7,7 +7,7 @@ declare const __APP_VERSION__: string
 // The narrow, safe surface the preload bridge exposes on `window`. It only
 // shuttles opaque RPC frames — no business logic lives here. See
 // `src/preload/index.ts` and `src/renderer/rpc-client.ts`.
-interface StarbaseBridge {
+interface JinglerBridge {
   /**
    * The active theme's `:root` block, fetched synchronously by the preload so
    * `main.tsx` can inject it before the document's first paint. Empty string
@@ -21,7 +21,7 @@ interface StarbaseBridge {
   /** Open an http(s) URL in the user's default browser. */
   readonly openExternal: (url: string) => Promise<void>
   /**
-   * Subscribe to `starbase://` sign-in completions from the main process.
+   * Subscribe to `jingler://` sign-in completions from the main process.
    * Returns an unsubscribe fn.
    */
   readonly onAuthComplete: (
@@ -37,9 +37,9 @@ interface StarbaseBridge {
 }
 
 interface Window {
-  readonly starbase: StarbaseBridge
+  readonly jingler: JinglerBridge
 }
 
-// `import "@starbase/ui/globals.css"` resolves to a real stylesheet that Vite
+// `import "@jingler/ui/globals.css"` resolves to a real stylesheet that Vite
 // loads; tsc just needs to know the side-effect import is a module.
 declare module "*.css"

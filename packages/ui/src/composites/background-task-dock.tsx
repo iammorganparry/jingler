@@ -1,5 +1,5 @@
 import * as React from "react"
-import type { BackgroundTask } from "@starbase/core"
+import type { BackgroundTask } from "@jingler/core"
 import { ChevronRight, FileText, Loader2, Octagon, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Badge } from "../components/badge.js"

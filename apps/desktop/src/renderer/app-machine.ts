@@ -4,7 +4,7 @@
  * pick + scan, session load) inside declarative `fromPromise` actors — no
  * data-fetching `useEffect`s, minimal `useState`.
  */
-import type { CliInfo, Repo, Session } from "@starbase/core"
+import type { CliInfo, Repo, Session } from "@jingler/core"
 import { assign, fromPromise, setup } from "xstate"
 import { rpc } from "./rpc-client.js"
 

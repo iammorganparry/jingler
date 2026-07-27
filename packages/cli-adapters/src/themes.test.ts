@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { FileSystem, Path } from "@effect/platform"
-import { DEFAULT_THEME_ID } from "@starbase/core"
-import { BUILTIN_THEME_IDS } from "@starbase/themes"
+import { DEFAULT_THEME_ID } from "@jingler/core"
+import { BUILTIN_THEME_IDS } from "@jingler/themes"
 import { Chunk, Effect, Fiber, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AppPaths } from "./app-paths.js"
@@ -10,7 +10,7 @@ import { ThemeService } from "./themes.js"
 import { failureOf, runExit, withTempRoot } from "./test-support.js"
 
 /**
- * ThemeService is run against a real temp `~/starbase` with real files, so a
+ * ThemeService is run against a real temp `~/jingler` with real files, so a
  * theme actually round-trips through disk. Assertions are on observable
  * outcomes — what `list()` returns, what ends up in the directory, how a
  * malformed file surfaces — never on how the JSON is parsed.
@@ -372,7 +372,7 @@ describe("ThemeService", () => {
       expect(exit.value.source).toBe("user")
     })
 
-    it("keeps keys Starbase does not model, so the file stays usable in VS Code", async () => {
+    it("keeps keys Jingler does not model, so the file stays usable in VS Code", async () => {
       const exit = await provided(
         Effect.gen(function* () {
           yield* ThemeService.importJson(

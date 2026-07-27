@@ -1,6 +1,6 @@
 import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { Session, SessionActivity } from "@starbase/core"
+import type { Session, SessionActivity } from "@jingler/core"
 import { LookFor } from "../story-support.js"
 import { WidthTierProvider } from "../hooks/width-tier.js"
 import { SessionSidebar } from "../app/session-sidebar.js"
@@ -14,8 +14,8 @@ export default meta
 type Story = StoryObj
 
 const session = (over: Partial<Session> & Pick<Session, "id" | "title">): Session => ({
-  repo: "starbase",
-  branch: `starbase/${over.id}`,
+  repo: "jingler",
+  branch: `jingler/${over.id}`,
   status: "idle",
   cli: "claude",
   diff: { added: 0, removed: 0 },
@@ -111,7 +111,7 @@ function Shell({
                       onSelect={() => {}}
                       onNew={() => {}}
                       onClose={() => {}}
-                      cwdLabel="~/starbase/worktrees/s1"
+                      cwdLabel="~/jingler/worktrees/s1"
                       renderTerminal={() => (
                         <div className="flex flex-1 items-center justify-center font-mono text-[11px] text-dim">
                           terminal

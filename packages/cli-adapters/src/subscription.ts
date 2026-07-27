@@ -2,12 +2,12 @@ import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import type { CliKind } from "@starbase/core"
+import type { CliKind } from "@jingler/core"
 
 /**
  * Running on the operator's PLAN, not on a metered key they forgot was exported.
  *
- * Starbase's premise is that it drives the harnesses you already pay for. A
+ * Jingler's premise is that it drives the harnesses you already pay for. A
  * stray `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in the shell environment quietly
  * defeats that: the CLI inherits it, prefers it over its own stored
  * subscription auth, and bills per token — with nothing on screen to say so.
@@ -98,7 +98,7 @@ export const billingPath = (
  *
  * Memoised because it is consulted on every run and a Keychain probe spawns a
  * process. The memo is NOT permanent: signing in with `claude login` or `codex
- * login` happens in a terminal and does not restart Starbase, so a cache held
+ * login` happens in a terminal and does not restart Jingler, so a cache held
  * for the app's lifetime would keep reporting "not signed in" — and, worse, keep
  * passing a metered key through to a harness that had since gained a plan.
  * `Billing.paths` clears it, so opening the settings pane re-probes.
@@ -108,13 +108,13 @@ const cache = new Map<CliKind, boolean>()
 /**
  * Where a harness keeps its own credentials.
  *
- * Honours `STARBASE_HARNESS_HOME`, the override the e2e suite already uses to
+ * Honours `JINGLER_HARNESS_HOME`, the override the e2e suite already uses to
  * seed a fake `~`. Reading the real home unconditionally made this probe report
  * whatever the DEVELOPER happened to be signed into, so the same test said
  * different things on different machines — the exact non-determinism the
  * fixtures work hard to remove everywhere else.
  */
-const harnessHome = (): string => process.env.STARBASE_HARNESS_HOME ?? homedir()
+const harnessHome = (): string => process.env.JINGLER_HARNESS_HOME ?? homedir()
 
 /**
  * Whether the probe itself could not run, as opposed to finding no plan.
@@ -122,7 +122,7 @@ const harnessHome = (): string => process.env.STARBASE_HARNESS_HOME ?? homedir()
  * Recorded because the two are different claims and only one is actionable. A
  * harness with genuinely no subscription should be told to sign in; a harness
  * whose credential store we failed to READ (permissions, an unreadable
- * Keychain, a platform with neither) is a Starbase problem the operator can do
+ * Keychain, a platform with neither) is a Jingler problem the operator can do
  * nothing about, and reporting it as "not signed in" sends them to fix
  * something that is not broken.
  *
@@ -150,7 +150,7 @@ const detect = (cli: CliKind): boolean => {
       // presence without ever reading the secret.
       // A seeded harness home means a TEST: the Keychain belongs to the real
       // machine and would leak the developer's own sign-in into the result.
-      if (process.env.STARBASE_HARNESS_HOME !== undefined) return false
+      if (process.env.JINGLER_HARNESS_HOME !== undefined) return false
       // Not macOS and no credentials file: Claude Code may still be signed in
       // somewhere we cannot see, so this is "could not tell" rather than "no".
       if (process.platform !== "darwin") {

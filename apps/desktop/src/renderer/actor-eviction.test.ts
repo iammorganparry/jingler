@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { ActivityPhase } from "@starbase/core"
+import type { ActivityPhase } from "@jingler/core"
 import { MAX_LIVE_ACTORS, isEvictable, keysToEvict } from "./actor-eviction.js"
 import type { ActorCandidate } from "./actor-eviction.js"
 

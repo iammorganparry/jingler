@@ -1,5 +1,5 @@
-import type { Plan, SessionPlanArtifact } from "@starbase/core"
-import { SessionPlanArtifact as SessionPlanArtifactSchema } from "@starbase/core"
+import type { Plan, SessionPlanArtifact } from "@jingler/core"
+import { SessionPlanArtifact as SessionPlanArtifactSchema } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
@@ -16,7 +16,7 @@ export const planFileName = (input: string): string =>
 
 /**
  * The plan library: each session's plans persisted as markdown under
- * `~/starbase/.starbase/<worktree-slug>/<plan-name>.md`. Starbase already captures
+ * `~/jingler/.jingler/<worktree-slug>/<plan-name>.md`. Jingler already captures
  * a plan in the transcript when the agent calls ExitPlanMode; writing it to disk
  * too — in a stable location keyed by the session's worktree — lets a LATER turn
  * or session "pick the plan back up" by reading the file, which the runner points
@@ -26,7 +26,7 @@ export const planFileName = (input: string): string =>
  * per-session folder, so plans from different sessions never collide.
  */
 export class PlanStore extends Effect.Service<PlanStore>()(
-  "@starbase/PlanStore",
+  "@jingler/PlanStore",
   {
     accessors: true,
     sync: () => {

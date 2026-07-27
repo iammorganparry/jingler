@@ -1,4 +1,4 @@
-import type { CliInfo, GhStatus, Repo } from "@starbase/core"
+import type { CliInfo, GhStatus, Repo } from "@jingler/core"
 import { ArrowRight, FolderSearch, GitBranch, RefreshCw } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Button } from "../components/button.js"
@@ -28,7 +28,7 @@ export interface SetupScreenProps {
   recheckingGh?: boolean
 }
 
-/** First-run welcome. Points Starbase at the folder that holds your git repos. */
+/** First-run welcome. Points Jingler at the folder that holds your git repos. */
 export function SetupScreen({
   clis,
   ghStatus,
@@ -59,7 +59,7 @@ export function SetupScreen({
             Set up your workspace
           </h1>
           <p className="text-[13px] leading-[1.6] text-muted-foreground">
-            Starbase needs the folder that holds your git repos — the one with{" "}
+            Jingler needs the folder that holds your git repos — the one with{" "}
             <span className="font-mono text-text">~/repos</span> and friends inside it. Sessions run
             in isolated worktrees forked from those repos.
           </p>

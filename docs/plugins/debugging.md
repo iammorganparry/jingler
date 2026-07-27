@@ -23,8 +23,8 @@ Read the first table, find your symptom, go to that section.
   forwards its output there.
 - **Anything that stopped the plugin loading** → **Settings › Plugins**, in the row.
 
-Starbase never fails a plugin silently. If you are getting nothing at all with no
-message anywhere, that is a bug in Starbase — please report it, because the whole
+Jingler never fails a plugin silently. If you are getting nothing at all with no
+message anywhere, that is a bug in Jingler — please report it, because the whole
 loader is built so that cannot happen.
 
 ---
@@ -47,7 +47,7 @@ The messages you will actually hit:
 | `declares the tab "x" but its UI module exports no matching view` | The manifest and the `views` map disagree. |
 | `declares the pane "x" but its UI module exports no matching pane component` | Panes go in the **`panes`** key of `definePlugin`, not `views`. |
 | `… declared but not honoured by this build` | Real, and deliberate. Some manifest fields validate against the schema and are consumed by nothing, so the loader refuses the plugin rather than letting you ship a declaration that silently does nothing. The message names the field. It covers `contributes.keybindings`, `contributes.settings`, `contributes.authenticationProviders`, `capabilities.untrustedRepos` and `activationEvents: repoContains` — remove whichever it names. |
-| `needs plugin API v<n>` | Your manifest's `apiVersion` is newer than this Starbase implements. Update the app, or install a build of the plugin made for its generation. Checked before your module is imported, which is why you get this instead of a stack trace. |
+| `needs plugin API v<n>` | Your manifest's `apiVersion` is newer than this Jingler implements. Update the app, or install a build of the plugin made for its generation. Checked before your module is imported, which is why you get this instead of a stack trace. |
 | `entry-missing` (in "Could not be read") | The manifest names a `ui`/`main` file that is not on disk. Almost always a forgotten `pnpm build`. |
 
 ## Manifest failures
@@ -55,12 +55,12 @@ The messages you will actually hit:
 *Symptom: your plugin is not in the Settings list at all.*
 
 Scroll to **"Could not be read"** in Settings › Plugins. A folder whose
-`starbase.plugin.json` cannot be decoded is listed there with the decoder's
+`jingler.plugin.json` cannot be decoded is listed there with the decoder's
 verbatim complaint, including the path into the JSON that was wrong.
 
 Two things that are *not* failures and produce no entry:
 
-- a directory with **no** `starbase.plugin.json` in the app's own bundled plugin
+- a directory with **no** `jingler.plugin.json` in the app's own bundled plugin
   root — that is a container, not a broken plugin;
 - a plugin you have **disabled** — it stays in the main list with its switch off.
 
@@ -106,7 +106,7 @@ console.log("raw")                // plain, via inherited stdio
 Prefer `ctx.log` — it is tagged with your plugin id, so it is findable when three
 plugins are talking at once.
 
-Failures Starbase prints for you:
+Failures Jingler prints for you:
 
 ```
 [plugin:my-plugin] activation failed: <the error your activate threw>
@@ -122,7 +122,7 @@ Things worth knowing when a host half misbehaves:
   check the plugin is enabled: a disabled plugin is activated by no event, and
   disabling one tears down a host half that was already running.
 - **All plugins share one host process.** A crash takes every plugin's host half
-  down with it. Starbase restarts it once and re-activates; a plugin that crashes
+  down with it. Jingler restarts it once and re-activates; a plugin that crashes
   again immediately is left down rather than looped. A minute of healthy uptime
   forgives the budget.
 - **`ctx.exec` gives you `code`, not `exitCode`.** Reading the wrong field yields
@@ -136,16 +136,16 @@ Things worth knowing when a host half misbehaves:
 Almost always one of these three, in order of likelihood:
 
 1. **You did not bump `version`.** ES module imports are cached by URL for the
-   life of the window. Starbase keys your module by the manifest version, so the
+   life of the window. Jingler keys your module by the manifest version, so the
    version is what busts that cache. Same version, same module, no matter how
    many times you rebuild.
 
-2. **You did not re-run `install:local`.** Starbase watches
-   `~/starbase/plugins`, not your source tree. Building into `plugins/my-plugin/dist`
+2. **You did not re-run `install:local`.** Jingler watches
+   `~/jingler/plugins`, not your source tree. Building into `plugins/my-plugin/dist`
    changes nothing until it is copied across. The full loop is
    `pnpm build && pnpm install:local`.
 
-3. **You edited the manifest but not the built one.** `starbase.plugin.json` is
+3. **You edited the manifest but not the built one.** `jingler.plugin.json` is
    *generated* from `src/manifest.ts` by `pnpm build`. Editing the JSON directly
    works until the next build overwrites it.
 
@@ -153,9 +153,9 @@ With all three right, the reload is live — no restart, no reopening the sessio
 
 ## The React rule
 
-`@starbase/plugin-sdk/vite` externalises `react`, `react-dom`,
-`react/jsx-runtime`, `react/jsx-dev-runtime`, `@starbase/plugin-sdk` and
-`@starbase/plugin-sdk/ui`. Starbase supplies all six at runtime.
+`@jingler/plugin-sdk/vite` externalises `react`, `react-dom`,
+`react/jsx-runtime`, `react/jsx-dev-runtime`, `@jingler/plugin-sdk` and
+`@jingler/plugin-sdk/ui`. Jingler supplies all six at runtime.
 
 If you bundle React anyway, **your plugin works perfectly until a second plugin
 is installed**, and then every hook in both throws `Invalid hook call`. You will
@@ -170,14 +170,14 @@ grep -c "useState" dist/ui.js     # your calls only — a bundled React is thous
 ## Getting a clean slate
 
 ```bash
-# Which plugins does Starbase actually see?
-ls ~/starbase/plugins
+# Which plugins does Jingler actually see?
+ls ~/jingler/plugins
 
-# Start over without touching your real setup: point STARBASE_HOME somewhere else.
-STARBASE_HOME=/tmp/starbase-scratch pnpm --filter @starbase/desktop dev
+# Start over without touching your real setup: point JINGLER_HOME somewhere else.
+JINGLER_HOME=/tmp/jingler-scratch pnpm --filter @jingler/desktop dev
 ```
 
-`STARBASE_HOME` moves the whole `~/starbase` tree — config, sessions, plugins,
+`JINGLER_HOME` moves the whole `~/jingler` tree — config, sessions, plugins,
 plugin storage. It is what the e2e suite uses, and it is the fastest way to prove
 a problem is your plugin rather than your existing state.
 

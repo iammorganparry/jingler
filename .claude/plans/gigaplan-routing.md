@@ -50,7 +50,7 @@ The reference repository demonstrates four useful architectural ideas:
 | Reference pattern                                 | Gigaplan adaptation                                                                       | Deliberate difference                                                               |
 | ------------------------------------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | Semantic categories carry model and prompt policy | `TaskKind`, effort, and risk feed a pure resolver                                         | Keep domain, depth, and risk orthogonal instead of creating mixed categories        |
-| Ordered precedence and curated fallbacks          | User override → planner preference → evaluated affinity → policy profile → system default | Do not copy its exact model matrix; derive and test a Starbase-specific matrix      |
+| Ordered precedence and curated fallbacks          | User override → planner preference → evaluated affinity → policy profile → system default | Do not copy its exact model matrix; derive and test a Jingler-specific matrix      |
 | Proactive model availability resolution           | Resolve only against the complete live `ModelsService.catalog`                            | Revalidate again immediately before execution                                       |
 | Reactive provider-error fallback                  | Classify failures and advance through bounded alternatives                                | Never reroute after likely worktree mutation; preserve at-most-three total attempts |
 
@@ -88,7 +88,7 @@ flowchart LR
     E --> O[Attempt outcome and divergence]
 ```
 
-The resolver belongs in `@starbase/core`. Prompt parsing and CLI failure classification remain in `@starbase/cli-adapters`. Desktop RPC supplies live catalogue and persisted configuration. UI displays and edits policy without owning routing logic.
+The resolver belongs in `@jingler/core`. Prompt parsing and CLI failure classification remain in `@jingler/cli-adapters`. Desktop RPC supplies live catalogue and persisted configuration. UI displays and edits policy without owning routing logic.
 
 ## Domain contract
 
@@ -275,10 +275,10 @@ Roll out the correctness fixes—full catalogue use, stale-model rejection, and 
 Recommended commands during implementation:
 
 ```bash
-pnpm --filter @starbase/core test
-pnpm --filter @starbase/cli-adapters test
-pnpm --filter @starbase/ui test
-pnpm --filter @starbase/desktop test
+pnpm --filter @jingler/core test
+pnpm --filter @jingler/cli-adapters test
+pnpm --filter @jingler/ui test
+pnpm --filter @jingler/desktop test
 pnpm typecheck
 ```
 

@@ -10,9 +10,9 @@ describe("planNote", () => {
   })
 
   it("is null for harnesses that cannot plan at all", () => {
-    // cursor falls through to the scripted stub; starbase orchestrates.
+    // cursor falls through to the scripted stub; jingler orchestrates.
     expect(planNote("cursor")).toBe(null)
-    expect(planNote("starbase")).toBe(null)
+    expect(planNote("jingler")).toBe(null)
   })
 
   it("hands codex and opencode the identical protocol", () => {

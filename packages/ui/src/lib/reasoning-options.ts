@@ -1,4 +1,4 @@
-import type { CliKind, ReasoningEffort } from "@starbase/core"
+import type { CliKind, ReasoningEffort } from "@jingler/core"
 
 const CLAUDE_REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 const CODEX_REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const

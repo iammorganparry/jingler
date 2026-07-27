@@ -1,5 +1,5 @@
 ---
-"@starbase/desktop": minor
+"@jingler/desktop": minor
 ---
 
 VS Code-compatible colour themes.
@@ -10,8 +10,8 @@ High Contrast Dark. Pick one in Settings › Themes, where every entry previews
 itself in its own colours rather than just naming itself.
 
 Bring your own: any VS Code theme JSON works. Paste one from a marketplace
-extension into the import box, or drop a file into `~/starbase/themes/`. Edit
-that file in your own editor and the app repaints as you save. Keys Starbase does
+extension into the import box, or drop a file into `~/jingler/themes/`. Edit
+that file in your own editor and the app repaints as you save. Keys Jingler does
 not use are preserved, so the file stays usable in VS Code.
 
 Duplicate any theme to get an editable copy with a colour picker for the values

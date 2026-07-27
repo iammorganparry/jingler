@@ -1,9 +1,9 @@
 {
-  "$schema": "../../../packages/plugin-sdk/starbase.plugin.schema.json",
+  "$schema": "../../../packages/plugin-sdk/jingler.plugin.schema.json",
   "id": "hello-tab",
   "name": "Hello Tab",
   "version": "1.0.0",
-  "description": "The smallest complete Starbase plugin.",
+  "description": "The smallest complete Jingler plugin.",
   "ui": "dist/ui.js",
   "contributes": {
     "tabs": [

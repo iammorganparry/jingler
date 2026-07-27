@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { StreamEvent } from "@starbase/core"
+import type { StreamEvent } from "@jingler/core"
 import { Effect, Layer, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliAdapter } from "./adapter.js"
@@ -41,7 +41,7 @@ beforeEach(() => {
     JSON.stringify([{
       id: SESSION,
       repo: "widget",
-      branch: "starbase/unsettled",
+      branch: "jingler/unsettled",
       title: "Unsettled",
       status: "idle",
       cli: "claude",

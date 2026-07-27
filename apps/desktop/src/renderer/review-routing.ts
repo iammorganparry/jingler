@@ -1,5 +1,5 @@
-import type { AdversarialReview, ReviewFinding } from "@starbase/core"
-import { findingLocation } from "@starbase/core"
+import type { AdversarialReview, ReviewFinding } from "@jingler/core"
+import { findingLocation } from "@jingler/core"
 
 /**
  * Which adversarial-review findings have been handed to the working agent, and

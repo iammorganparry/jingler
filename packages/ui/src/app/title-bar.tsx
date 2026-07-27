@@ -5,7 +5,7 @@ const noDrag = { WebkitAppRegion: "no-drag" } as CSSProperties
 
 /** macOS-style window title bar with traffic lights and a centered title. */
 export function TitleBar({
-  title = "Starbase",
+  title = "Jingler",
   actions
 }: {
   title?: string

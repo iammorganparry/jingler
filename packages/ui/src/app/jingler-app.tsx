@@ -27,8 +27,8 @@ import type {
   SessionActivity,
   Usage,
   User
-} from "@starbase/core"
-import { UNTITLED_SESSION } from "@starbase/core"
+} from "@jingler/core"
+import { UNTITLED_SESSION } from "@jingler/core"
 import type { DockSide } from "./terminal-panel.js"
 import { AppShell } from "./app-shell.js"
 import { PreviewToggleButton } from "./preview-dock.js"
@@ -96,7 +96,7 @@ const GH_UNAVAILABLE: GhStatus = {
   version: null
 }
 
-export interface StarbaseAppProps {
+export interface JinglerAppProps {
   clis: ReadonlyArray<CliInfo>
   /**
    * The harness new sessions start on (Settings · Providers). The New Session
@@ -333,11 +333,11 @@ export interface StarbaseAppProps {
 const noBranches = async (): Promise<ReadonlyArray<string>> => []
 
 /**
- * The product shell — the whole Starbase window, data-driven. The desktop
+ * The product shell — the whole Jingler window, data-driven. The desktop
  * renderer feeds it discovered `clis`/`repos`/`ghStatus` and the session list
  * over Effect RPC, plus the callbacks that create real worktrees.
  */
-export function StarbaseApp({
+export function JinglerApp({
   clis,
   defaultCli,
   onSaveDefaultCli,
@@ -420,7 +420,7 @@ export function StarbaseApp({
   loadIssues,
   onCreateSessionFromIssue,
   version
-}: StarbaseAppProps) {
+}: JinglerAppProps) {
   // The split replaces what used to be a single `selected` useState. The focused
   // pane's session IS the old "selected" — every existing call site below still
   // reads `selected` / calls `setSelected` and behaves as it always did when the
@@ -440,7 +440,7 @@ export function StarbaseApp({
    *
    * The nonce is so that asking for the tab you are already on still counts as
    * an ask — same shape as `selectSessionRequest`. The clearing is because a
-   * pane is not `StarbaseApp`: it is keyed by session id and remounts on every
+   * pane is not `JinglerApp`: it is keyed by session id and remounts on every
    * session switch, so a request left standing would be replayed onto the next
    * session you opened, and onto whichever pane you focused next in a split.
    */
@@ -652,7 +652,7 @@ export function StarbaseApp({
    *
    * ## An unavailable capability produces NO row
    *
-   * Every action here is gated on the prop that performs it. A Starbase built
+   * Every action here is gated on the prop that performs it. A Jingler built
    * without `onSignOut` should not offer "Sign out" greyed out — a row you can
    * arrow onto and select that then does nothing is indistinguishable from a
    * bug, and the palette is the one surface where you cannot see why a thing is
@@ -874,7 +874,7 @@ export function StarbaseApp({
     // No layout picker in the title bar any more: the shape of the split is a
     // consequence of what you dragged where, not a mode you pick up front.
     <AppShell
-      title="Starbase"
+      title="Jingler"
       actions={
         onToggleBrowser ? (
           <PreviewToggleButton active={browserActive ?? false} onClick={onToggleBrowser} />

@@ -1,37 +1,37 @@
 import { Context } from "effect"
 
 /**
- * Resolved filesystem locations Starbase owns, all under `~/starbase`. The Live
+ * Resolved filesystem locations Jingler owns, all under `~/jingler`. The Live
  * layer is provided by the Electron main process (which resolves the real home
  * directory); keeping this a `Context.Tag` lets `cli-adapters` stay
  * environment-agnostic and unit-testable with a fake path root.
  */
 export interface AppPathsShape {
-  /** The managed root directory, `~/starbase`. */
+  /** The managed root directory, `~/jingler`. */
   readonly root: string
-  /** `~/starbase/config.json` — persisted `WorkspaceConfig`. */
+  /** `~/jingler/config.json` — persisted `WorkspaceConfig`. */
   readonly configFile: string
-  /** `~/starbase/sessions.json` — persisted session list. */
+  /** `~/jingler/sessions.json` — persisted session list. */
   readonly sessionsFile: string
-  /** `~/starbase/worktrees` — parent of every session's isolated worktree. */
+  /** `~/jingler/worktrees` — parent of every session's isolated worktree. */
   readonly worktreesDir: string
-  /** `~/starbase/transcripts` — parent of every session's persisted transcript. */
+  /** `~/jingler/transcripts` — parent of every session's persisted transcript. */
   readonly transcriptsDir: string
   /**
-   * `~/starbase/reviews` — the last adversarial review per session, at
+   * `~/jingler/reviews` — the last adversarial review per session, at
    * `<reviewsDir>/<sessionId>.json`. Kept out of `sessions.json` on purpose: a
    * review carries an unbounded findings array, and bloating the session list
    * would slow every sidebar read.
    */
   readonly reviewsDir: string
   /**
-   * `~/starbase/.starbase` — the plan library. Each session's plans live under
+   * `~/jingler/.jingler` — the plan library. Each session's plans live under
    * `<plansDir>/<worktree-slug>/<plan-name>.md`, so a plan can be picked back up
    * (read from disk) in a later turn or session on the same worktree.
    */
   readonly plansDir: string
   /**
-   * `~/starbase/plan-rounds` — the last adversarial planning round per session,
+   * `~/jingler/plan-rounds` — the last adversarial planning round per session,
    * at `<planRoundsDir>/<sessionId>.json`.
    *
    * Separate from `plansDir` (which holds plan markdown keyed by worktree)
@@ -43,7 +43,7 @@ export interface AppPathsShape {
    */
   readonly planRoundsDir: string
   /**
-   * `~/starbase/themes` — user-authored colour themes, one VS Code theme JSON
+   * `~/jingler/themes` — user-authored colour themes, one VS Code theme JSON
    * per file at `<themesDir>/<id>.json`.
    *
    * A directory of plain files rather than a section of `config.json` for two
@@ -55,8 +55,8 @@ export interface AppPathsShape {
    */
   readonly themesDir: string
   /**
-   * `~/starbase/plugins` — installed plugins, one directory per plugin, each
-   * holding a `starbase.plugin.json`. A directory of folders rather than a
+   * `~/jingler/plugins` — installed plugins, one directory per plugin, each
+   * holding a `jingler.plugin.json`. A directory of folders rather than a
    * section of `config.json` for the same reason themes are files: a plugin is a
    * bundle (manifest plus UI/host entry files), people already exchange them, and
    * `config.json` is read-modify-written on every settings save — inlining plugin
@@ -72,7 +72,7 @@ export interface AppPathsShape {
    */
   readonly builtinPluginsDir?: string
   /**
-   * `~/starbase/plugin-storage` — each plugin's private key/value store, one JSON
+   * `~/jingler/plugin-storage` — each plugin's private key/value store, one JSON
    * file per plugin at `<pluginStorageDir>/<pluginId>.json`.
    *
    * A sibling of `pluginsDir`, never inside it, so a plugin's persisted state
@@ -82,13 +82,13 @@ export interface AppPathsShape {
    */
   readonly pluginStorageDir: string
   /**
-   * `~/starbase/auth.enc` — the signed-in session token, encrypted with the OS
+   * `~/jingler/auth.enc` — the signed-in session token, encrypted with the OS
    * credential vault (Electron `safeStorage`). Only ever ciphertext is written
    * here; see `SecretStore`.
    */
   readonly authFile: string
   /**
-   * `~/starbase/open-connector.enc` — the self-hosted OpenConnector instance's
+   * `~/jingler/open-connector.enc` — the self-hosted OpenConnector instance's
    * bearer token, encrypted with the OS credential vault. A sibling of `authFile`
    * (never the same file) so the MCP token and the sign-in token are independent:
    * signing out must not drop the instance credential. Only ciphertext is written.
@@ -96,4 +96,4 @@ export interface AppPathsShape {
   readonly openConnectorFile: string
 }
 
-export class AppPaths extends Context.Tag("@starbase/AppPaths")<AppPaths, AppPathsShape>() {}
+export class AppPaths extends Context.Tag("@jingler/AppPaths")<AppPaths, AppPathsShape>() {}

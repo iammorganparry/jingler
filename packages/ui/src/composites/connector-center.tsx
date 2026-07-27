@@ -3,7 +3,7 @@ import type {
   ConnectorProvider,
   ConnectorProviderDetail,
   OAuthClientInfo
-} from "@starbase/core"
+} from "@jingler/core"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as React from "react"
 import { Badge } from "../components/badge.js"
@@ -22,7 +22,7 @@ import { ConnectorDetail } from "./connector-detail.js"
  * of logo cards and connect providers (OAuth or API key) in-app.
  *
  * PRESENTATIONAL: it renders from props and calls back on actions, so it lives
- * in `@starbase/ui` (storybookable, no rpc). The desktop renderer wires
+ * in `@jingler/ui` (storybookable, no rpc). The desktop renderer wires
  * `useConnectorCenter()` into `ConnectorCenterProps`.
  *
  * The catalog is ~1,100 providers, so the grid is virtualized BY ROW rather than

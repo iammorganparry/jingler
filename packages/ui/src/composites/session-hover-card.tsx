@@ -1,5 +1,5 @@
-import type { Session, SessionActivity, SessionPrStatus } from "@starbase/core"
-import { activityLabel, displayStatusOf, UNTITLED_SESSION } from "@starbase/core"
+import type { Session, SessionActivity, SessionPrStatus } from "@jingler/core"
+import { activityLabel, displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
 import { GitBranch } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"

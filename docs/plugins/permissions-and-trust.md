@@ -4,7 +4,7 @@ Read this before installing a plugin, and before writing one.
 
 ## Plugins are trusted code
 
-Starbase plugins are **not sandboxed**. This is the same position VS Code takes
+Jingler plugins are **not sandboxed**. This is the same position VS Code takes
 with extensions, and it is a deliberate choice rather than an unfinished one.
 
 Concretely:
@@ -12,7 +12,7 @@ Concretely:
 - A plugin's **UI half** is an ES module loaded into the renderer's own realm. It
   shares the app's React and can draw anything the app can draw.
 - A plugin's **host half** is Node, running in a `utilityProcess` with the same
-  filesystem and network access Starbase itself has.
+  filesystem and network access Jingler itself has.
 
 Install plugins you trust, from sources you trust. Settings › Plugins says this
 too, because that is the screen where the decision is actually made.
@@ -24,20 +24,20 @@ about what each one buys is more useful than a reassuring summary.
 
 | Boundary | What it actually protects |
 |---|---|
-| Extension host is a separate process | Starbase from a plugin that hangs or crashes — not you from the plugin |
-| `script-src 'self' starbase-plugin:` | The app from remote code. Plugin code is served only from `~/starbase/plugins` |
+| Extension host is a separate process | Jingler from a plugin that hangs or crashes — not you from the plugin |
+| `script-src 'self' jingler-plugin:` | The app from remote code. Plugin code is served only from `~/jingler/plugins` |
 | `connect-src` unwidened | Nothing a determined plugin cannot route around via its host half — it stops *accidental* renderer network access |
 | Path confinement + `realpath` | The protocol handler from serving files outside the plugins root, including via symlink |
 | Lazy activation | Your startup time, and your CPU. Not your data |
 | Consent-gated credentials | **This one is real.** See below |
 
-The honest summary: the process boundary protects *Starbase* from plugins, and
+The honest summary: the process boundary protects *Jingler* from plugins, and
 the credential boundary protects *your accounts* from plugins. Neither protects
 your machine from a plugin you chose to install.
 
 ## There is no `permissions` array
 
-A Starbase manifest has no `permissions: ["github", "network"]` field. Do not
+A Jingler manifest has no `permissions: ["github", "network"]` field. Do not
 look for one; it was considered and rejected.
 
 A coarse flag answers "may this plugin run `gh`?" — but the question an operator
@@ -71,7 +71,7 @@ covered by a test:
 
 ### Why the prompt is a native dialog
 
-It is the only modal in Starbase that is not React. Plugin UI runs in the
+It is the only modal in Jingler that is not React. Plugin UI runs in the
 renderer's own realm and can draw anything the app can draw — so a consent
 prompt rendered *there* is one a plugin could obscure, mimic or race. A native
 modal is drawn by the OS and cannot be touched from the renderer.
@@ -96,11 +96,11 @@ whatever scopes it has. The consent prompt tells you what is being asked for and
 the grant records it; it does not mint a narrower token.
 
 The upside is that the account a plugin acts as is visibly the account the rest
-of Starbase acts as, which is what you would assume anyway.
+of Jingler acts as, which is what you would assume anyway.
 
 ## No privileged plugins
 
-The GitHub Issues plugin ships with Starbase and still calls
+The GitHub Issues plugin ships with Jingler and still calls
 `getSession("github", ["repo"])` like anything else. There is no back door for
 official plugins, and there is no allowlist.
 

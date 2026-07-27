@@ -21,7 +21,7 @@ import {
   type ConsentPrompt,
   type HostProcess,
   type HostRequestHandler
-} from "@starbase/cli-adapters"
+} from "@jingler/cli-adapters"
 import { pluginStorageDelete, pluginStorageGet, pluginStorageKeys, pluginStorageSet } from "./rpc.js"
 import { runtime as appRuntime } from "./runtime.js"
 

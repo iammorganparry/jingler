@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { VsCodeTheme } from "@starbase/core"
+import type { VsCodeTheme } from "@jingler/core"
 import { contrast, luminance, parseHex } from "./color.js"
 import { toTokens } from "./map.js"
 import { BUILTIN_THEMES } from "./presets/index.js"
@@ -49,7 +49,7 @@ describe("toTokens — every built-in theme", () => {
   )
 
   /**
-   * The five text tones are the type hierarchy, and Starbase renders all of
+   * The five text tones are the type hierarchy, and Jingler renders all of
    * them inside a single sidebar row.
    *
    * Non-increasing rather than strictly decreasing, because the top of the ramp
@@ -162,7 +162,7 @@ describe("toTokens — One Dark Pro is a visual no-op", () => {
   /**
    * The diff viewer is the loudest place the no-op rule could break. One Dark
    * Pro genuinely ships `diffEditor.insertedTextBackground: "#00809b33"` — a
-   * TEAL insert wash — while Starbase's diff has always painted
+   * TEAL insert wash — while Jingler's diff has always painted
    * `bg-green/[0.13]`. Taking the theme's own value would have recoloured every
    * diff on upgrade, so the default preset pins these four the way it pins its
    * surfaces. Other themes still get their own.

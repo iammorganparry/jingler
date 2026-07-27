@@ -1,4 +1,4 @@
-import type { ArchiveReason } from "@starbase/core"
+import type { ArchiveReason } from "@jingler/core"
 import { GitMerge, RotateCcw, Trash2, XCircle } from "lucide-react"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"

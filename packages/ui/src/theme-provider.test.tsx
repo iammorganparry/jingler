@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react"
-import { CSS_VAR_BY_TOKEN } from "@starbase/core"
-import type { ThemeTokens } from "@starbase/core"
-import { BUILTIN_THEMES, toTokens } from "@starbase/themes"
+import { CSS_VAR_BY_TOKEN } from "@jingler/core"
+import type { ThemeTokens } from "@jingler/core"
+import { BUILTIN_THEMES, toTokens } from "@jingler/themes"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   ThemeProvider,
@@ -12,7 +12,7 @@ import {
 
 afterEach(() => {
   cleanup()
-  document.getElementById("starbase-theme")?.remove()
+  document.getElementById("jingler-theme")?.remove()
   document.documentElement.removeAttribute("data-theme-kind")
 })
 
@@ -22,7 +22,7 @@ const themeFor = (id: string): ThemeTokens =>
 const oneDark = themeFor("one-dark-pro")
 const lightModern = themeFor("light-modern")
 
-const styleText = () => document.getElementById("starbase-theme")?.textContent ?? ""
+const styleText = () => document.getElementById("jingler-theme")?.textContent ?? ""
 
 describe("themeCssText", () => {
   it("emits every colour token as its CSS var", () => {
@@ -55,7 +55,7 @@ describe("ThemeProvider", () => {
         <div>hi</div>
       </ThemeProvider>
     )
-    expect(document.querySelectorAll("#starbase-theme")).toHaveLength(1)
+    expect(document.querySelectorAll("#jingler-theme")).toHaveLength(1)
     expect(styleText()).toContain("--sb-editor: #282c34;")
   })
 
@@ -81,7 +81,7 @@ describe("ThemeProvider", () => {
     )
     expect(styleText()).not.toContain("#282c34")
     expect(styleText()).toContain(`--sb-editor: ${lightModern.editor};`)
-    expect(document.querySelectorAll("#starbase-theme")).toHaveLength(1)
+    expect(document.querySelectorAll("#jingler-theme")).toHaveLength(1)
   })
 
   /**
@@ -111,7 +111,7 @@ describe("ThemeProvider", () => {
    */
   it("adopts the pre-paint style element instead of adding another", () => {
     const boot = document.createElement("style")
-    boot.id = "starbase-theme"
+    boot.id = "jingler-theme"
     boot.textContent = ":root { --sb-editor: #000000; }"
     document.head.appendChild(boot)
 
@@ -121,14 +121,14 @@ describe("ThemeProvider", () => {
       </ThemeProvider>
     )
 
-    expect(document.querySelectorAll("#starbase-theme")).toHaveLength(1)
+    expect(document.querySelectorAll("#jingler-theme")).toHaveLength(1)
     expect(styleText()).toContain("--sb-editor: #282c34;")
   })
 
   it("preserves the pre-paint theme until the async theme state is ready", () => {
     const bootCss = themeCssText(lightModern)
     const boot = document.createElement("style")
-    boot.id = "starbase-theme"
+    boot.id = "jingler-theme"
     boot.textContent = bootCss
     document.head.appendChild(boot)
 
@@ -153,7 +153,7 @@ describe("ThemeProvider", () => {
         <div>hi</div>
       </ThemeProvider>
     )
-    expect(document.head.lastElementChild?.id).toBe("starbase-theme")
+    expect(document.head.lastElementChild?.id).toBe("jingler-theme")
   })
 })
 

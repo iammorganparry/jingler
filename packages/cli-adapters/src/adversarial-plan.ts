@@ -14,13 +14,13 @@ import type {
   RoutingContext,
   StreamEvent,
   VendorReach
-} from "@starbase/core"
+} from "@jingler/core"
 import {
   DEFAULT_REVIEW_MODEL,
   PlanError,
   resolvePlanRoutes,
   scopeToAgent
-} from "@starbase/core"
+} from "@jingler/core"
 import { Effect, Mailbox, Ref, Schema, Stream } from "effect"
 import type { AgentContext, SessionSpec } from "./adapter.js"
 import { CliAdapter, isChildLifecycle, PlanDecision } from "./adapter.js"
@@ -485,7 +485,7 @@ const runRole = (
       const timedOut = outcome.left._tag === "RoleTimedOut"
       if (timedOut && who.cli === "codex") {
         const diagnostics = createCodexAppServerDiagnostics(
-          process.env.STARBASE_CODEX_DIAGNOSTICS_DIR,
+          process.env.JINGLER_CODEX_DIAGNOSTICS_DIR,
           {
             sessionId: childSessionId,
             model: who.model,
@@ -524,7 +524,7 @@ const ROLE_NAMES = {
 const scopeToRole = scopeToAgent
 
 export class AdversarialPlanService extends Effect.Service<AdversarialPlanService>()(
-  "@starbase/AdversarialPlanService",
+  "@jingler/AdversarialPlanService",
   {
     accessors: true,
     effect: Effect.gen(function* () {

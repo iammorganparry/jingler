@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query"
-import type { AdversarialReview, Session } from "@starbase/core"
-import { partitionFindings } from "@starbase/core"
+import type { AdversarialReview, Session } from "@jingler/core"
+import { partitionFindings } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { markRouted } from "./routed-store.js"

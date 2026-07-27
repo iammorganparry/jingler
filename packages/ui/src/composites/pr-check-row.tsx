@@ -1,4 +1,4 @@
-import type { PrCheck } from "@starbase/core"
+import type { PrCheck } from "@jingler/core"
 import { Check, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Spinner } from "../components/loading.js"

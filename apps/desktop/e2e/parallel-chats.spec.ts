@@ -20,7 +20,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   {
     id: "s_parallel",
     repo: "widget",
-    branch: "starbase/parallel",
+    branch: "jingler/parallel",
     title: "Parallel chats",
     status: "idle",
     cli: "claude",

@@ -3,7 +3,7 @@
  *
  * ## Why this is a NATIVE dialog and not an in-app one
  *
- * Every other modal in Starbase is React, and this one deliberately is not.
+ * Every other modal in Jingler is React, and this one deliberately is not.
  * Plugin UI runs in the renderer's own realm — it can draw anything the app can
  * draw. A consent prompt rendered in that realm is a prompt a plugin could
  * obscure, mimic, or race, and the whole value of the prompt is that the
@@ -21,7 +21,7 @@
  * decision and can only do that if they are told the specific thing.
  */
 import { dialog, BrowserWindow } from "electron"
-import type { ConsentPrompt } from "@starbase/cli-adapters"
+import type { ConsentPrompt } from "@jingler/cli-adapters"
 
 export const nativeConsentPrompt: ConsentPrompt = async (request) => {
   const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]

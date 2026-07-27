@@ -1,15 +1,15 @@
 /**
- * Plugins — the manifest on disk, and what Starbase folds it down to.
+ * Plugins — the manifest on disk, and what Jingler folds it down to.
  *
  * ## Why the shape mirrors VS Code
  *
- * The people who will write Starbase plugins have written VS Code extensions.
+ * The people who will write Jingler plugins have written VS Code extensions.
  * Every concept below — `activationEvents`, `contributes`, `extensionKind`,
  * `capabilities`, `extensionDependencies` — is named the way VS Code names it,
  * because a plugin author who already knows that vocabulary should not have to
- * learn a second one to say the same thing. Where Starbase has no equivalent
+ * learn a second one to say the same thing. Where Jingler has no equivalent
  * noun the name is translated rather than invented (`untrustedWorkspaces`
- * becomes `untrustedRepos`), and where Starbase has a surface VS Code lacks
+ * becomes `untrustedRepos`), and where Jingler has a surface VS Code lacks
  * (session tabs, split panes) the contribution point is new.
  *
  * ## Why there is no `permissions: ["git", "gh"]`
@@ -51,7 +51,7 @@ import { Schema } from "effect"
  * contributions must sit under.
  *
  * Constrained rather than left free-form because the id is also a directory
- * name under `~/starbase/plugins` and a path segment in `starbase-plugin://`
+ * name under `~/jingler/plugins` and a path segment in `jingler-plugin://`
  * URLs. Allowing dots, slashes or uppercase would make `../../etc` and
  * case-insensitive-filesystem collisions expressible at the schema level, and
  * the loader would be left to catch at runtime what the type could have refused
@@ -226,7 +226,7 @@ export type SettingType = Schema.Schema.Type<typeof SettingType>
  * A setting rendered into Settings as a generated form row.
  *
  * Generated rather than plugin-drawn so that every plugin's settings look like
- * every other plugin's and like Starbase's own — a plugin cannot ship a
+ * every other plugin's and like Jingler's own — a plugin cannot ship a
  * settings pane that ignores the theme, because it does not ship one at all.
  */
 export const SettingContribution = Schema.Struct({
@@ -244,7 +244,7 @@ export type SettingContribution = Schema.Schema.Type<typeof SettingContribution>
  * An authentication provider the plugin itself implements.
  *
  * This is what makes "extend the app with your favourite apps" reach past the
- * services Starbase happens to know about: a self-hosted GitLab, an internal
+ * services Jingler happens to know about: a self-hosted GitLab, an internal
  * issue tracker or a corporate SSO is a plugin contributing a provider, and
  * every other plugin can then ask it for sessions through exactly the same
  * `getSession` call it would use for the built-in `github` provider.
@@ -284,9 +284,9 @@ export type PluginContributes = Schema.Schema.Type<typeof PluginContributes>
 /**
  * What a plugin does in a repo the operator has not marked trusted.
  *
- * VS Code's `capabilities.untrustedWorkspaces`, renamed to Starbase's noun. The
+ * VS Code's `capabilities.untrustedWorkspaces`, renamed to Jingler's noun. The
  * threat is concrete: a session is a checkout of someone else's code, and a
- * plugin that reads `.starbase/config` or runs a repo-local binary is executing
+ * plugin that reads `.jingler/config` or runs a repo-local binary is executing
  * a stranger's intent. Declaring `limited` and naming the contributions that go
  * quiet is how a plugin says "I am still useful here, but I will not do that
  * part."
@@ -351,7 +351,7 @@ export type AuthSessionInfo = Schema.Schema.Type<typeof AuthSessionInfo>
  * A single integer, not a semver range, because the only question worth asking
  * is "does this plugin speak the API I have?" and the only two useful answers
  * are yes and no. A range invites authors to reason about which patch of the
- * host they need, which they cannot test and Starbase cannot promise.
+ * host they need, which they cannot test and Jingler cannot promise.
  *
  * ## When to bump this
  *
@@ -380,7 +380,7 @@ export const PluginApiVersion = Schema.Int.pipe(
   Schema.annotations({
     identifier: "PluginApiVersion",
     description:
-      "The Starbase plugin API generation this plugin targets. Omit to mean 'the current one'."
+      "The Jingler plugin API generation this plugin targets. Omit to mean 'the current one'."
   })
 )
 
@@ -424,7 +424,7 @@ const contributionIds = (
 }
 
 /**
- * A plugin's `starbase.plugin.json`, verbatim.
+ * A plugin's `jingler.plugin.json`, verbatim.
  *
  * The two cross-field rules live here rather than in the loader because both
  * describe the manifest being wrong, not the environment being wrong, and a
@@ -545,7 +545,7 @@ export class PluginError extends Schema.TaggedError<PluginError>()(
  *
  * - `Emitted` — the plugin published on one of its own topics (its UI half
  *   subscribed to that topic). `payload` is opaque: it is the plugin's own data,
- *   and Starbase neither reads nor validates it beyond "it is JSON".
+ *   and Jingler neither reads nor validates it beyond "it is JSON".
  * - `Activated` — the host half finished `activate()`, so any UI waiting on
  *   "is my backend live yet?" can proceed.
  * - `ActivationFailed` — `activate()` threw. Carried as an event rather than
@@ -560,7 +560,7 @@ export const PluginEvent = Schema.Union(
     pluginId: PluginId,
     /** The plugin-defined channel this was published on, e.g. `issues.changed`. */
     topic: Schema.String,
-    /** The plugin's own data. Opaque to Starbase — never read, only forwarded. */
+    /** The plugin's own data. Opaque to Jingler — never read, only forwarded. */
     payload: Schema.Unknown
   }),
   Schema.TaggedStruct("Activated", {

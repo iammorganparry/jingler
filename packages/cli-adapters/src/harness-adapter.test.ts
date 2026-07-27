@@ -1,4 +1,4 @@
-import type { CliKind } from "@starbase/core"
+import type { CliKind } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import { forgetForeignResume, selectHarness } from "./harness-adapter.js"
 

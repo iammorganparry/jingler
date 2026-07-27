@@ -4,8 +4,8 @@
  * `useReview` (both the PR diff and the worktree's uncommitted diff + reverts).
  */
 import { useCallback } from "react"
-import type { Session } from "@starbase/core"
-import { CodeReviewView } from "@starbase/ui"
+import type { Session } from "@jingler/core"
+import { CodeReviewView } from "@jingler/ui"
 import { useReview } from "./use-review.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
 import { getConversationActor } from "./conversation-registry.js"

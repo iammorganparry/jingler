@@ -28,8 +28,8 @@ import type {
   SessionStatus,
   Skill,
   Subagent
-} from "@starbase/core"
-import { latestPlan, pendingPlan, pendingQuestion } from "@starbase/core"
+} from "@jingler/core"
+import { latestPlan, pendingPlan, pendingQuestion } from "@jingler/core"
 import type { QueuedMessage } from "./conversation-machine.js"
 import { getConversationActor } from "./conversation-registry.js"
 

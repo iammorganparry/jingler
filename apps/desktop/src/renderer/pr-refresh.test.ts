@@ -1,4 +1,4 @@
-import type { ActivityKind, Session, SessionActivity } from "@starbase/core"
+import type { ActivityKind, Session, SessionActivity } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import { completedSessionIds } from "./pr-refresh.js"
 

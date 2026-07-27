@@ -1,6 +1,6 @@
 /**
- * `starbase://` deep-link plumbing. The browser sign-in flow ends by redirecting
- * to `starbase://auth/callback?token=…` (or `?error=…`); the OS routes that to
+ * `jingler://` deep-link plumbing. The browser sign-in flow ends by redirecting
+ * to `jingler://auth/callback?token=…` (or `?error=…`); the OS routes that to
  * this app. Delivery differs per platform:
  *   - macOS: the `open-url` event (even while running).
  *   - Windows/Linux: the URL arrives as a `process.argv` entry, via the
@@ -12,9 +12,9 @@
 import path from "node:path"
 import { app } from "electron"
 
-export const AUTH_PROTOCOL = "starbase"
+export const AUTH_PROTOCOL = "jingler"
 /** IPC channel the main process uses to tell the renderer a sign-in resolved. */
-export const AUTH_COMPLETE_CHANNEL = "starbase/auth-complete"
+export const AUTH_COMPLETE_CHANNEL = "jingler/auth-complete"
 
 export interface AuthCallback {
   readonly token: string | null
@@ -22,7 +22,7 @@ export interface AuthCallback {
 }
 
 /**
- * Parse a `starbase://auth/callback?token=…|error=…` URL. Returns null when the
+ * Parse a `jingler://auth/callback?token=…|error=…` URL. Returns null when the
  * URL isn't our auth callback (wrong scheme/host or unparseable).
  */
 export const parseAuthCallback = (raw: string): AuthCallback | null => {
@@ -37,11 +37,11 @@ export const parseAuthCallback = (raw: string): AuthCallback | null => {
   return { token: url.searchParams.get("token"), error: url.searchParams.get("error") }
 }
 
-/** Find the first `starbase://…` deep link in a process argv array. */
+/** Find the first `jingler://…` deep link in a process argv array. */
 export const findDeepLinkInArgv = (argv: ReadonlyArray<string>): string | null =>
   argv.find((arg) => arg.startsWith(`${AUTH_PROTOCOL}://`)) ?? null
 
-/** Register this app as the OS handler for the `starbase://` scheme. */
+/** Register this app as the OS handler for the `jingler://` scheme. */
 export const registerProtocolClient = (): void => {
   // In dev, Electron runs via `electron .`, so the launcher + script path must be
   // passed explicitly for the OS to re-invoke us with the right arguments.

@@ -17,7 +17,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   {
     id: "s_seeded",
     repo: "widget",
-    branch: "starbase/refactor",
+    branch: "jingler/refactor",
     title: "Refactor auth flow",
     status: "idle",
     cli: "claude",

@@ -19,8 +19,8 @@
     -->
     <!--
       `script-src` allows exactly one source beyond 'self': the
-      `starbase-plugin:` scheme, which the main process registers and serves
-      ONLY out of `~/starbase/plugins` (see main/plugin-protocol.ts). That is
+      `jingler-plugin:` scheme, which the main process registers and serves
+      ONLY out of `~/jingler/plugins` (see main/plugin-protocol.ts). That is
       what lets a plugin's UI module be imported at all.
 
       What did NOT widen: `connect-src` (still 'self' via default-src), so a
@@ -30,9 +30,9 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' starbase-plugin:; img-src 'self' data: starbase-plugin: https://github.com https://*.githubusercontent.com https://www.google.com https://*.gstatic.com"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' jingler-plugin:; img-src 'self' data: jingler-plugin: https://github.com https://*.githubusercontent.com https://www.google.com https://*.gstatic.com"
     />
-    <title>Starbase</title>
+    <title>Jingler</title>
     <!--
       Bare specifiers a plugin may import. Each resolves to a generated shim
       that re-exports the app's ALREADY-INSTANTIATED singleton rather than a
@@ -46,12 +46,12 @@
     <script type="importmap">
       {
         "imports": {
-          "react": "starbase-plugin://runtime/react.js",
-          "react-dom": "starbase-plugin://runtime/react-dom.js",
-          "react/jsx-runtime": "starbase-plugin://runtime/jsx-runtime.js",
-          "react/jsx-dev-runtime": "starbase-plugin://runtime/jsx-dev-runtime.js",
-          "@starbase/plugin-sdk": "starbase-plugin://runtime/sdk.js",
-          "@starbase/plugin-sdk/ui": "starbase-plugin://runtime/sdk-ui.js"
+          "react": "jingler-plugin://runtime/react.js",
+          "react-dom": "jingler-plugin://runtime/react-dom.js",
+          "react/jsx-runtime": "jingler-plugin://runtime/jsx-runtime.js",
+          "react/jsx-dev-runtime": "jingler-plugin://runtime/jsx-dev-runtime.js",
+          "@jingler/plugin-sdk": "jingler-plugin://runtime/sdk.js",
+          "@jingler/plugin-sdk/ui": "jingler-plugin://runtime/sdk-ui.js"
         }
       }
     </script>

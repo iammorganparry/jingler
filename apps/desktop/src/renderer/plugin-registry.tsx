@@ -1,7 +1,7 @@
 /**
  * The live plugin set, as React context.
  *
- * Owns one job: keep `~/starbase/plugins` on disk and the app's contributions in
+ * Owns one job: keep `~/jingler/plugins` on disk and the app's contributions in
  * sync, in both directions of change — a plugin added, edited, enabled, disabled
  * or removed. It subscribes to `Plugins.watch`, which re-emits the WHOLE catalog
  * on every change rather than a delta, so this file never accumulates state that
@@ -26,8 +26,8 @@
  */
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import type { PluginCatalog } from "@starbase/core"
-import type { PaneContribution, PluginPaletteCommand, TabContribution } from "@starbase/ui"
+import type { PluginCatalog } from "@jingler/core"
+import type { PaneContribution, PluginPaletteCommand, TabContribution } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
 import {
   loadPlugins,

@@ -15,7 +15,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   {
     id: "s_queue",
     repo: "widget",
-    branch: "starbase/queue-actions",
+    branch: "jingler/queue-actions",
     title: "Queue actions",
     status: "idle",
     cli: "claude",

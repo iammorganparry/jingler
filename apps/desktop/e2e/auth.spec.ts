@@ -4,14 +4,14 @@ import type { SeedSession } from "./fixtures.js"
 /**
  * The sign-in wall. The whole app is gated behind BetterAuth, so these assert the
  * wall shows when signed out, the magic-link flow reaches its "sent" state, and a
- * `starbase://` deep-link callback signs the user in and drops them into the app.
+ * `jingler://` deep-link callback signs the user in and drops them into the app.
  * All offline: the fixture runs a fake auth backend and a plaintext token store.
  */
 
 const seeded: SeedSession = {
   id: "s_auth_1",
   repo: "widget",
-  branch: "starbase/seed",
+  branch: "jingler/seed",
   title: "Seeded session",
   status: "idle",
   cli: "claude",
@@ -24,7 +24,7 @@ const seeded: SeedSession = {
 
 test("signed out shows the sign-in wall", async ({ launchApp }) => {
   const { window } = await launchApp({ signedIn: false })
-  await expect(window.getByRole("heading", { name: "Sign in to Starbase" })).toBeVisible()
+  await expect(window.getByRole("heading", { name: "Sign in to Jingler" })).toBeVisible()
   await expect(window.getByRole("button", { name: /continue with github/i })).toBeVisible()
   await expect(window.getByRole("button", { name: /continue with google/i })).toBeVisible()
   // The app shell must NOT be reachable behind the wall.
@@ -47,7 +47,7 @@ test("a rejected magic-link request shows the error state", async ({ launchApp }
   await window.getByRole("button", { name: /send magic link/i }).click()
   await expect(window.getByText(/couldn't send the sign-in link/i)).toBeVisible()
   // Still on the wall, and can retry.
-  await expect(window.getByRole("heading", { name: "Sign in to Starbase" })).toBeVisible()
+  await expect(window.getByRole("heading", { name: "Sign in to Jingler" })).toBeVisible()
 })
 
 test("OAuth opens the provider URL and the callback signs in", async ({ launchApp }) => {
@@ -86,18 +86,18 @@ test("a deep-link callback signs in and reaches the app shell", async ({ launchA
     sessions: [seeded]
   })
   // Wall first…
-  await expect(window.getByRole("heading", { name: "Sign in to Starbase" })).toBeVisible()
-  // …then the OS hands back the starbase:// callback → signed in → app shell.
+  await expect(window.getByRole("heading", { name: "Sign in to Jingler" })).toBeVisible()
+  // …then the OS hands back the jingler:// callback → signed in → app shell.
   await completeDeepLinkSignIn()
   await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
   await expect(sessionRow(window, "Seeded session")).toBeVisible()
-  await expect(window.getByRole("heading", { name: "Sign in to Starbase" })).toHaveCount(0)
+  await expect(window.getByRole("heading", { name: "Sign in to Jingler" })).toHaveCount(0)
 })
 
 test("a stored token boots straight past the wall", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: [seeded] })
   await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
-  await expect(window.getByRole("heading", { name: "Sign in to Starbase" })).toHaveCount(0)
+  await expect(window.getByRole("heading", { name: "Sign in to Jingler" })).toHaveCount(0)
 })
 
 test("the account menu shows the user and signs out", async ({ launchApp }) => {
@@ -107,10 +107,10 @@ test("the account menu shows the user and signs out", async ({ launchApp }) => {
   // The footer account menu shows the signed-in user (from the fake backend).
   const account = window.getByRole("button", { name: "Account menu" })
   await expect(account.getByText("E2E User")).toBeVisible()
-  await expect(account.getByText("e2e@starbase.dev")).toBeVisible()
+  await expect(account.getByText("e2e@jingler.dev")).toBeVisible()
 
   // Open it and sign out → back to the wall.
   await account.click()
   await window.getByRole("menuitem", { name: /sign out/i }).click()
-  await expect(window.getByRole("heading", { name: "Sign in to Starbase" })).toBeVisible()
+  await expect(window.getByRole("heading", { name: "Sign in to Jingler" })).toBeVisible()
 })

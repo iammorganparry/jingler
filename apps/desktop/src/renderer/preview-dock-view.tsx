@@ -1,7 +1,7 @@
 /**
  * PreviewDockView — binds the Preview dock's prefs (`usePreviewDock`), the
  * main-process `WebContentsView` (the `BrowserPreview.*` RPCs) and the asset
- * read path (`Asset.*`) to the presentational `PreviewDock` in @starbase/ui.
+ * read path (`Asset.*`) to the presentational `PreviewDock` in @jingler/ui.
  *
  * ## The native view is not in the DOM, and that shapes everything here
  *
@@ -25,7 +25,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import type { Session } from "@starbase/core"
+import type { Session } from "@jingler/core"
 import {
   AssetError,
   AssetLoading,
@@ -35,14 +35,14 @@ import {
   BROWSER_TAB_ID,
   PreviewDock,
   type PreviewTab
-} from "@starbase/ui"
+} from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
 import type { PreviewDockPrefs } from "./use-preview-dock.js"
 import { assetTabId } from "./preview-dock-machine.js"
 import { useNativeViewBounds } from "./use-native-view-bounds.js"
 
 // Default target until run-scripts (#1) can seed the session's real dev-server
-// port. TODO(#1): derive from the session's $STARBASE_PORT when available.
+// port. TODO(#1): derive from the session's $JINGLER_PORT when available.
 const DEFAULT_URL = "http://localhost:3000"
 
 export interface PreviewDockViewProps {

@@ -1,4 +1,4 @@
-import type { StreamEvent } from "@starbase/core"
+import type { StreamEvent } from "@jingler/core"
 import { Effect, TestClock, TestContext } from "effect"
 import { describe, expect, it } from "vitest"
 import { BackgroundTaskStore } from "./background-tasks.js"

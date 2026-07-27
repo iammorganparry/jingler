@@ -9,8 +9,8 @@
  */
 import { useCallback, useEffect, useMemo } from "react"
 import { useMachine } from "@xstate/react"
-import type { DockSide, PreviewTab } from "@starbase/ui"
-import { BROWSER_TAB_ID } from "@starbase/ui"
+import type { DockSide, PreviewTab } from "@jingler/ui"
+import { BROWSER_TAB_ID } from "@jingler/ui"
 import { assetTabId, type OpenAsset, previewDockMachine } from "./preview-dock-machine.js"
 
 const basename = (path: string): string => path.split("/").pop() ?? path

@@ -15,7 +15,7 @@ import { CommandPalette } from "./command-palette.js"
 import type { PaletteItem } from "./command-palette-model.js"
 
 /**
- * The palette with the item set `StarbaseApp` actually builds, so grouping,
+ * The palette with the item set `JinglerApp` actually builds, so grouping,
  * hints and the empty state can be iterated without launching Electron.
  *
  * `run` is a no-op here on purpose: the whole value of the split is that this
@@ -42,10 +42,10 @@ const session = (id: string, label: string, repo: string, branch: string): Palet
 })
 
 const ITEMS: ReadonlyArray<PaletteItem> = [
-  session("s1", "refactor auth", "starbase", "feat/auth"),
-  session("s2", "theme tokens", "starbase", "feat/theme"),
-  session("s3", "session sidebar filters", "starbase", "feat/sidebar"),
-  session("s4", "fix flaky terminal spec", "starbase", "fix/terminal"),
+  session("s1", "refactor auth", "jingler", "feat/auth"),
+  session("s2", "theme tokens", "jingler", "feat/theme"),
+  session("s3", "session sidebar filters", "jingler", "feat/sidebar"),
+  session("s4", "fix flaky terminal spec", "jingler", "fix/terminal"),
   {
     id: "a-new",
     kind: "action",

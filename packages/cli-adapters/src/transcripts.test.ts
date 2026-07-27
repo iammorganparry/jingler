@@ -1,5 +1,5 @@
-import type { Message } from "@starbase/core"
-import { assistantMessage, userMessage } from "@starbase/core"
+import type { Message } from "@jingler/core"
+import { assistantMessage, userMessage } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"

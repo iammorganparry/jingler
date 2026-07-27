@@ -102,7 +102,7 @@ describe("enforceSurfaceRamp", () => {
 
   /**
    * Dark Modern paints title bar, sidebar and panel all `#181818` — faithful to
-   * VS Code, where 1px borders carry the structure. Starbase renders code
+   * VS Code, where 1px borders carry the structure. Jingler renders code
    * blocks INSIDE cards, so a collapsed `sunken` makes them invisible.
    */
   it("pulls collapsed surfaces apart on a dark theme", () => {
@@ -157,7 +157,7 @@ describe("enforceTextRamp", () => {
   /**
    * Light Modern sets `foreground` and `descriptionForeground` to the same
    * `#3b3b3b`. VS Code renders those far enough apart that nobody notices;
-   * Starbase renders both inside one sidebar row.
+   * Jingler renders both inside one sidebar row.
    */
   it("separates a secondary tone that collapsed into body text", () => {
     const r = enforceTextRamp(panel, {

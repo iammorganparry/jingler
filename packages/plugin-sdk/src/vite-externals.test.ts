@@ -4,13 +4,13 @@ import { describe, expect, it } from "vitest"
 // @ts-expect-error — vite.mjs is plain JS whose only types are the hand-written
 // vite.d.ts this test exists to check. Importing it *through* those types would
 // make the test assert the declaration against itself.
-import { STARBASE_EXTERNALS } from "../vite.mjs"
+import { JINGLER_EXTERNALS } from "../vite.mjs"
 
 /**
- * `STARBASE_EXTERNALS` exists three times, by hand, and this is what makes that
+ * `JINGLER_EXTERNALS` exists three times, by hand, and this is what makes that
  * safe.
  *
- * The list of specifiers Starbase provides at runtime is written out in:
+ * The list of specifiers Jingler provides at runtime is written out in:
  *
  *   1. `vite.mjs`      — the runtime array a plugin's build actually consumes
  *   2. `vite.d.ts`     — a hand-written tuple, because `vite.mjs` is plain JS
@@ -27,10 +27,10 @@ import { STARBASE_EXTERNALS } from "../vite.mjs"
  * ## Why a tuple rather than `readonly string[]`
  *
  * The literal tuple is the point: it lets an author write
- * `STARBASE_EXTERNALS[5]` or spread it into a config and have the compiler know
+ * `JINGLER_EXTERNALS[5]` or spread it into a config and have the compiler know
  * the members. That value is exactly what makes drift expensive — a tuple that
  * disagrees with runtime gives a compile-time picture of a runtime that is not
- * there, and the mistake shows up as a plugin that bundles something Starbase
+ * there, and the mistake shows up as a plugin that bundles something Jingler
  * also provides.
  *
  * That is the same trade `ui-exports.ts` makes, and it is acceptable for the same
@@ -43,7 +43,7 @@ const read = (relative: string): string =>
   readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8")
 
 /**
- * Pull the quoted strings out of a `STARBASE_EXTERNALS` declaration.
+ * Pull the quoted strings out of a `JINGLER_EXTERNALS` declaration.
  *
  * Text, not `import`: `vite.d.ts` is a type declaration with no runtime value,
  * and the whole question is whether the text a human maintains matches the array
@@ -52,20 +52,20 @@ const read = (relative: string): string =>
 const listedIn = (source: string, after: RegExp): ReadonlyArray<string> => {
   const start = source.match(after)
   if (start?.index === undefined) {
-    throw new Error(`Could not find a STARBASE_EXTERNALS declaration matching ${after}`)
+    throw new Error(`Could not find a JINGLER_EXTERNALS declaration matching ${after}`)
   }
   const from = source.slice(start.index + start[0].length)
   const block = from.slice(0, from.indexOf("]"))
   return [...block.matchAll(/"([^"]+)"/g)].map((m) => m[1] as string)
 }
 
-const runtime: ReadonlyArray<string> = STARBASE_EXTERNALS
+const runtime: ReadonlyArray<string> = JINGLER_EXTERNALS
 
-const declared = listedIn(read("../vite.d.ts"), /export declare const STARBASE_EXTERNALS[^[]*\[/)
+const declared = listedIn(read("../vite.d.ts"), /export declare const JINGLER_EXTERNALS[^[]*\[/)
 
-const documented = listedIn(read("../api-digest.md"), /const STARBASE_EXTERNALS[^[]*\[/)
+const documented = listedIn(read("../api-digest.md"), /const JINGLER_EXTERNALS[^[]*\[/)
 
-describe("STARBASE_EXTERNALS", () => {
+describe("JINGLER_EXTERNALS", () => {
   it("declares in vite.d.ts exactly what vite.mjs provides at runtime", () => {
     // Order-sensitive, unlike the ui-exports test: this is a TUPLE, so index 5
     // is part of its type. Two lists with the same members in a different order
@@ -85,8 +85,8 @@ describe("STARBASE_EXTERNALS", () => {
     // `/ui` subpath was added to the kit and to `vite.mjs` and initially missed
     // in `vite.d.ts` and the digest — a plugin importing the themed components
     // then bundled a second copy of every one of them.
-    expect(runtime).toContain("@starbase/plugin-sdk")
-    expect(runtime).toContain("@starbase/plugin-sdk/ui")
+    expect(runtime).toContain("@jingler/plugin-sdk")
+    expect(runtime).toContain("@jingler/plugin-sdk/ui")
   })
 
   it("has no duplicates, which would silently pass the comparisons above", () => {

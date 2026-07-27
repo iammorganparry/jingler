@@ -1,14 +1,14 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { Repo } from "@starbase/core"
+import type { Repo } from "@jingler/core"
 import { RepoPicker } from "./repo-picker.js"
 
 const repo = (name: string, path = `/code/${name}`): Repo => ({ name, path }) as Repo
 
 const REPOS = [
   repo("gtm-grid"),
-  repo("starbase"),
+  repo("jingler"),
   repo("trigify-app"),
   repo("athena"),
   repo("avatarz"),
@@ -16,7 +16,7 @@ const REPOS = [
   repo("claude-code")
 ]
 
-const STARRED = ["/code/gtm-grid", "/code/starbase", "/code/trigify-app"]
+const STARRED = ["/code/gtm-grid", "/code/jingler", "/code/trigify-app"]
 
 afterEach(cleanup)
 
@@ -44,7 +44,7 @@ describe("RepoPicker", () => {
     await userEvent.type(input, "av")
     expect(screen.queryByText("avatarz")).toBeTruthy()
     expect(screen.queryByText("athena")).toBeNull()
-    expect(screen.queryByText("starbase")).toBeNull()
+    expect(screen.queryByText("jingler")).toBeNull()
   })
 
   it("hides a section that filters down to nothing", async () => {
@@ -57,11 +57,11 @@ describe("RepoPicker", () => {
   })
 
   it("matches on the path too, so two checkouts of one repo are separable", async () => {
-    const repos = [repo("starbase", "/code/starbase"), repo("starbase", "/work/starbase")]
+    const repos = [repo("jingler", "/code/jingler"), repo("jingler", "/work/jingler")]
     render(<RepoPicker repos={repos} value="" onChange={() => {}} />)
     const input = await open()
     await userEvent.type(input, "/work")
-    expect(screen.getAllByText("starbase")).toHaveLength(1)
+    expect(screen.getAllByText("jingler")).toHaveLength(1)
   })
 
   it("says so when nothing matches, rather than showing a blank menu", async () => {

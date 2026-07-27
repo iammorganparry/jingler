@@ -9,7 +9,7 @@ import { FAKE_TOKEN, FAKE_TOOL_COUNT, startFakeOpenConnector } from "./fake-open
  * other half of the promise — that a session on each harness really starts with
  * the unified server attached — because those are independent failures and the
  * settings screen looked identical for all of them: the master switch, a
- * per-harness opt-out, a missing token and a harness Starbase can't launch each
+ * per-harness opt-out, a missing token and a harness Jingler can't launch each
  * produce "connected" with no tools anywhere.
  *
  * The per-harness rows are resolved in main by `OpenConnector.injection`, which
@@ -17,7 +17,7 @@ import { FAKE_TOKEN, FAKE_TOOL_COUNT, startFakeOpenConnector } from "./fake-open
  * spawn. So asserting the row asserts the launch, not a second implementation of
  * the rule that happens to agree.
  *
- * Run locally: `pnpm --filter @starbase/desktop e2e open-connector-injection`.
+ * Run locally: `pnpm --filter @jingler/desktop e2e open-connector-injection`.
  */
 
 const RUNNABLE = ["Claude Code", "Codex", "opencode"] as const
@@ -62,7 +62,7 @@ test("every runnable harness reports the live endpoint it will be launched with"
     // The probe reached the instance and counted its tools.
     await expect(app.window.getByText(`Connected — ${FAKE_TOOL_COUNT} tools`)).toBeVisible()
 
-    // …and every harness Starbase launches now carries the shared server.
+    // …and every harness Jingler launches now carries the shared server.
     for (const harness of RUNNABLE) {
       await expect(row(app.window, harness).getByText("injected", { exact: true })).toBeVisible()
       await expect(
@@ -70,7 +70,7 @@ test("every runnable harness reports the live endpoint it will be launched with"
       ).toBeVisible()
     }
 
-    // Cursor is listed and explicitly NOT injected: Starbase has no run path for
+    // Cursor is listed and explicitly NOT injected: Jingler has no run path for
     // it, and a green row there would promise tools to an agent that never starts.
     await expect(row(app.window, "Cursor").getByText("not injected")).toBeVisible()
     await expect(row(app.window, "Cursor").getByText(/does not launch/)).toBeVisible()
@@ -123,7 +123,7 @@ test("opting one harness out leaves the others injected, and survives a restart"
     await expect(row(app.window, "opencode").getByText("injected", { exact: true })).toBeVisible()
 
     // A per-harness opt-out is a persisted decision, not a UI mood: relaunch
-    // against the same `~/starbase` and the app must resolve it the same way.
+    // against the same `~/jingler` and the app must resolve it the same way.
     const restarted = await launchApp({
       configured: true,
       home: app.home,

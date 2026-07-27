@@ -7,13 +7,13 @@ import { capOutput } from "./output-cap.js"
 
 describe("teeLogPath", () => {
   it("names a deterministic file under the given dir, keyed by the tool-use id", () => {
-    expect(teeLogPath("toolu_abc123", "/tmp/x")).toBe("/tmp/x/starbase-tee-toolu_abc123.log")
+    expect(teeLogPath("toolu_abc123", "/tmp/x")).toBe("/tmp/x/jingler-tee-toolu_abc123.log")
   })
 
   it("strips characters that could escape the temp dir or break the shell", () => {
     // A `/` or `..` in the id must not walk out of the temp dir.
-    expect(teeLogPath("../../etc/passwd", "/tmp/x")).toBe("/tmp/x/starbase-tee-______etc_passwd.log")
-    expect(teeLogPath("a b;c", "/tmp/x")).toBe("/tmp/x/starbase-tee-a_b_c.log")
+    expect(teeLogPath("../../etc/passwd", "/tmp/x")).toBe("/tmp/x/jingler-tee-______etc_passwd.log")
+    expect(teeLogPath("a b;c", "/tmp/x")).toBe("/tmp/x/jingler-tee-a_b_c.log")
   })
 
   it("is stable across calls, so the watcher and the cleanup name the same file", () => {

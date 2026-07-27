@@ -1,4 +1,4 @@
-import type { Plan, QuestionRequest, StreamEvent } from "@starbase/core"
+import type { Plan, QuestionRequest, StreamEvent } from "@jingler/core"
 import { Effect, Fiber } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentContext, PlanDecision as PlanDecisionType, SessionSpec } from "./adapter.js"
@@ -196,7 +196,7 @@ afterEach(() => {
 
 describe("runCodexAppServer", () => {
   it("replaces a persisted thread whose local rollout no longer exists", async () => {
-    vi.stubEnv("STARBASE_CODEX_DIAGNOSTICS_DIR", "/tmp")
+    vi.stubEnv("JINGLER_CODEX_DIAGNOSTICS_DIR", "/tmp")
     server.state.threadId = "replacement-thread"
     server.state.resumeError = new Error(
       "thread/resume failed: no rollout found for thread id stale-thread (code -32600)"
@@ -600,7 +600,7 @@ describe("runCodexAppServer", () => {
   })
 
   it("bounds the interrupt request before closing a wedged server", async () => {
-    vi.stubEnv("STARBASE_CODEX_DIAGNOSTICS_DIR", "/tmp")
+    vi.stubEnv("JINGLER_CODEX_DIAGNOSTICS_DIR", "/tmp")
     server.state.hangMessages = true
     const { ctx } = harness()
     const fiber = Effect.runFork(runCodexAppServer("s1", spec(), ctx, new Map()))
@@ -628,7 +628,7 @@ describe("runCodexAppServer", () => {
   })
 
   it("fails instead of waiting forever when an active turn stops emitting events", async () => {
-    vi.stubEnv("STARBASE_CODEX_DIAGNOSTICS_DIR", "/tmp")
+    vi.stubEnv("JINGLER_CODEX_DIAGNOSTICS_DIR", "/tmp")
     vi.useFakeTimers()
     try {
       server.state.hangMessages = true

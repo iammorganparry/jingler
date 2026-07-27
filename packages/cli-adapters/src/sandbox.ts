@@ -23,7 +23,7 @@ import { join } from "node:path"
  *
  * What IS expressible is a denylist of the places credentials live. That is a
  * meaningful reduction — an unattended agent cannot exfiltrate SSH keys, cloud
- * credentials, or the tokens for the very harnesses Starbase drives — but it is
+ * credentials, or the tokens for the very harnesses Jingler drives — but it is
  * a denylist, not a boundary, and anything not on the list is still readable.
  */
 
@@ -35,7 +35,7 @@ import { join } from "node:path"
  * have read is a privacy problem; an SSH key is a lateral-movement problem.
  *
  * `~/.claude` and `~/.codex` are on the list because they hold the auth for the
- * harnesses Starbase itself drives — an agent that could read those could keep
+ * harnesses Jingler itself drives — an agent that could read those could keep
  * running as the operator long after the session ended.
  */
 export const CREDENTIAL_DIRS: ReadonlyArray<string> = [
@@ -56,7 +56,7 @@ export const CREDENTIAL_DIRS: ReadonlyArray<string> = [
   // Holds `oauthAccount` and MCP server definitions whose `env` blocks
   // routinely carry third-party API keys.
   ".claude.json",
-  // opencode is a harness Starbase drives — same argument as .claude/.codex.
+  // opencode is a harness Jingler drives — same argument as .claude/.codex.
   ".local/share/opencode/auth.json",
   ".pgpass",
   ".claude/.credentials.json",

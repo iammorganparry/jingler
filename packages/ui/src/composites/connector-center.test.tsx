@@ -3,7 +3,7 @@ import type {
   ConnectorProvider,
   ConnectorProviderDetail,
   OAuthClientInfo
-} from "@starbase/core"
+} from "@jingler/core"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 

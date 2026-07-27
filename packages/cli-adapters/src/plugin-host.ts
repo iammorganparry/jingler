@@ -28,8 +28,8 @@
  * spawning anything.
  */
 import { Effect, Deferred, Ref } from "effect"
-import { PluginError } from "@starbase/core"
-import type { LoadedPlugin } from "@starbase/core"
+import { PluginError } from "@jingler/core"
+import type { LoadedPlugin } from "@jingler/core"
 import {
   ACTIVATE_TIMEOUT_MS,
   HOST_READY_TIMEOUT_MS,
@@ -522,7 +522,7 @@ export class PluginHostRuntime {
  * clearly than a `Map` does. The service exists so main can reach it through the
  * same layer mechanism as everything else, and so `before-quit` can shut it down.
  */
-export class PluginHost extends Effect.Service<PluginHost>()("@starbase/PluginHost", {
+export class PluginHost extends Effect.Service<PluginHost>()("@jingler/PluginHost", {
   accessors: true,
   effect: Effect.gen(function* () {
     const runtimeRef = yield* Ref.make<PluginHostRuntime | null>(null)

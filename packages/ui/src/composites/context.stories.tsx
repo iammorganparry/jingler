@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { ContextDigest } from "@starbase/core"
+import type { ContextDigest } from "@jingler/core"
 import { ContextDivider } from "./context-divider.js"
 import { ContextMeter } from "./context-meter.js"
 

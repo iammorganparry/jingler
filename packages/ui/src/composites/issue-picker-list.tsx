@@ -1,4 +1,4 @@
-import type { IssueSummary } from "@starbase/core"
+import type { IssueSummary } from "@jingler/core"
 import { CircleDot } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
@@ -101,7 +101,7 @@ export function IssuePickerList({
 
 /**
  * A GitHub label chip tinted from the label's own hex colour. Reused by the
- * picker rows, the linked-issue banner, and — through `@starbase/plugin-sdk/ui`
+ * picker rows, the linked-issue banner, and — through `@jingler/plugin-sdk/ui`
  * — the github-issues plugin's Issue tab.
  *
  * That last consumer is why `color` accepts `undefined` as well as `null`: the

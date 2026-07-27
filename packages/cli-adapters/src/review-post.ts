@@ -1,5 +1,5 @@
-import type { AdversarialReview, ReviewFinding } from "@starbase/core"
-import { findingLocation, partitionFindings } from "@starbase/core"
+import type { AdversarialReview, ReviewFinding } from "@jingler/core"
+import { findingLocation, partitionFindings } from "@jingler/core"
 import { postableLines } from "./gh.js"
 
 /**

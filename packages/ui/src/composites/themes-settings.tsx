@@ -15,12 +15,12 @@
  * Built-ins are immutable (`ThemeService.save` refuses their ids), so "edit
  * Monokai" is really "make my own copy of Monokai and edit that". Rather than
  * hide that behind an Edit button that silently forks, the button says
- * Duplicate & Edit. The fork is the operator's, sits in `~/starbase/themes` as
+ * Duplicate & Edit. The fork is the operator's, sits in `~/jingler/themes` as
  * a file they can read, and leaves the original there to fall back to.
  *
  * ## Why the editor is a short list and not 900 fields
  *
- * VS Code names around 900 colours. Starbase acts on about forty of them, and
+ * VS Code names around 900 colours. Jingler acts on about forty of them, and
  * folds those down to the ~30 `--sb-*` tokens the app actually paints with.
  * Exposing 900 inputs would be exhaustive and useless; exposing the ~14 that
  * carry the theme's character — surfaces, text ramp, accents — is what someone
@@ -28,8 +28,8 @@
  * and that file hot-reloads.
  */
 import * as React from "react"
-import type { ThemeSummary, VsCodeTheme } from "@starbase/core"
-import { parseHex, toHex } from "@starbase/themes"
+import type { ThemeSummary, VsCodeTheme } from "@jingler/core"
+import { parseHex, toHex } from "@jingler/themes"
 import { Check, Copy, Download, FolderOpen, Pencil, Trash2, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Button } from "../components/button.js"
@@ -227,7 +227,7 @@ export function ThemesSettings({
         ))}
 
         <p className="mt-2 font-mono text-[10px] leading-relaxed text-dim">
-          themes · <span className="text-muted-foreground">~/starbase/themes/*.json</span>
+          themes · <span className="text-muted-foreground">~/jingler/themes/*.json</span>
           <br />
           VS Code theme JSON. Edit a file in your own editor and the app repaints as you save.
         </p>
@@ -376,7 +376,7 @@ function ImportPanel({
     <div className="mb-5 rounded-md border border-line bg-sunken p-3">
       <div className="mb-2 text-[12px] text-text-body">
         Paste a VS Code colour theme. Any <span className="font-mono text-[11px]">.json</span> from a
-        marketplace extension works — keys Starbase does not use are kept, so the file stays usable
+        marketplace extension works — keys Jingler does not use are kept, so the file stays usable
         in VS Code.
       </div>
       <textarea
@@ -500,7 +500,7 @@ function ThemeEditor({
             <p className="font-mono text-[10px] leading-relaxed text-dim">
               Saved to{" "}
               <span className="text-muted-foreground">
-                ~/starbase/themes/{summary.id}.json
+                ~/jingler/themes/{summary.id}.json
               </span>
               <br />
               Every other VS Code colour key can be set by editing that file directly.

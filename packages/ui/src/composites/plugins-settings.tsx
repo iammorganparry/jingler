@@ -3,7 +3,7 @@
  *
  * ## What this screen is for
  *
- * Plugins arrive by being copied into `~/starbase/plugins`, which means the
+ * Plugins arrive by being copied into `~/jingler/plugins`, which means the
  * operator's mental model is "a folder either works or it doesn't". This screen
  * exists to answer, for each folder, WHICH — and when it doesn't, why, in the
  * decoder's own words rather than a shrug.
@@ -29,13 +29,13 @@ import {
   Plus,
   Trash2
 } from "lucide-react"
-import type { AuthSessionInfo, LoadedPlugin, PluginCatalog } from "@starbase/core"
+import type { AuthSessionInfo, LoadedPlugin, PluginCatalog } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { Badge } from "../components/badge.js"
 import { Toggle } from "../components/toggle.js"
 
 export interface PluginsSettingsProps {
-  /** Everything under `~/starbase/plugins`, including what failed to decode. */
+  /** Everything under `~/jingler/plugins`, including what failed to decode. */
   catalog: PluginCatalog | null
   /**
    * Plugins whose MODULE failed to load, keyed by id.
@@ -54,7 +54,7 @@ export interface PluginsSettingsProps {
    * `void onX()` — a rejection with nowhere to go became an unhandled promise
    * rejection visible only in devtools. The install flow made that plainly wrong:
    * the two commonest outcomes of choosing a folder are "no
-   * `starbase.plugin.json` in the selected folder" and "already installed,
+   * `jingler.plugin.json` in the selected folder" and "already installed,
    * uninstall it first", and both presented as the picker closing and nothing
    * happening. Exactly the silently-absent failure the rest of this system
    * refuses to ship.
@@ -237,10 +237,10 @@ export function PluginsSettings({
           <h2 className="text-[15px] font-semibold text-text">Plugins</h2>
           <p className="mt-1 max-w-[520px] text-[12.5px] leading-[1.6] text-dim">
             Plugins add tabs, panes and commands. Drop a folder into{" "}
-            <code className="font-mono text-text-body">~/starbase/plugins</code> and it
+            <code className="font-mono text-text-body">~/jingler/plugins</code> and it
             appears here — no restart.{" "}
             <span className="text-text-body">
-              Plugins run with the same access as Starbase itself; install ones you
+              Plugins run with the same access as Jingler itself; install ones you
               trust.
             </span>
           </p>
@@ -292,7 +292,7 @@ export function PluginsSettings({
           <div className="mt-2 text-[13px] text-text">No plugins installed</div>
           <div className="mt-1 text-[12px] text-dim">
             Copy a plugin folder into{" "}
-            <code className="font-mono">~/starbase/plugins</code> to get started.
+            <code className="font-mono">~/jingler/plugins</code> to get started.
           </div>
         </div>
       ) : (
@@ -315,7 +315,7 @@ export function PluginsSettings({
           <h3 className="text-[13px] font-medium text-text">Could not be read</h3>
           <p className="text-[12px] text-dim">
             These folders are in your plugins directory but their{" "}
-            <code className="font-mono">starbase.plugin.json</code> could not be
+            <code className="font-mono">jingler.plugin.json</code> could not be
             decoded, so they contribute nothing.
           </p>
           <ul

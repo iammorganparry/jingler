@@ -1,18 +1,18 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { LoadedPlugin } from "@starbase/core"
-import type { Session } from "@starbase/core"
+import type { LoadedPlugin } from "@jingler/core"
+import type { Session } from "@jingler/core"
 import { PluginTabHost } from "./plugin-tab-host.js"
 import { loadPluginUi } from "./plugin-loader.js"
-import manifestJson from "../../../../plugins/examples/hello-tab/starbase.plugin.json"
+import manifestJson from "../../../../plugins/examples/hello-tab/jingler.plugin.json"
 
 /**
  * The shipped example plugin, run through the real loader.
  *
  * Every other test in this area substitutes something: a fake importer, a fake
  * manifest, a fake view. This one uses `plugins/examples/hello-tab` exactly as
- * it is published — its generated `starbase.plugin.json` and its actual UI
+ * it is published — its generated `jingler.plugin.json` and its actual UI
  * module — so if the example ever stops being a valid plugin, or the loader
  * stops accepting one, this fails.
  *
@@ -37,7 +37,7 @@ const session = (over: Partial<Session> = {}): Session =>
   ({
     id: "s1",
     repo: "trigify/api",
-    branch: "starbase/s1",
+    branch: "jingler/s1",
     title: "Fix auth",
     status: "idle",
     cli: "claude",
@@ -57,7 +57,7 @@ const session = (over: Partial<Session> = {}): Session =>
 const asLoadedPlugin = (): LoadedPlugin =>
   ({
     manifest: manifestJson,
-    dir: "/home/dev/starbase/plugins/hello-tab",
+    dir: "/home/dev/jingler/plugins/hello-tab",
     enabled: true,
     activated: false,
     builtin: false
@@ -69,8 +69,8 @@ const importExample = async () =>
 
 describe("the shipped hello-tab example", () => {
   it("has a committed manifest matching the TypeScript it is generated from", async () => {
-    // `starbase.plugin.json` is written by the build from `src/manifest.ts`. If
-    // someone edits the TypeScript and forgets to rebuild, Starbase reads the
+    // `jingler.plugin.json` is written by the build from `src/manifest.ts`. If
+    // someone edits the TypeScript and forgets to rebuild, Jingler reads the
     // stale JSON — so the tab it loads is not the tab the code declares, and
     // `definePlugin`'s compile-time guarantee silently stops describing reality.
     const { manifest } = await import(

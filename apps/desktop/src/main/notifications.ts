@@ -18,12 +18,12 @@
  * `shouldNotify` is pure so the suppression rules can be tested without
  * Electron, which is most of the behaviour worth defending.
  */
-import type { NotificationKind, NotificationsConfig } from "@starbase/core"
-import { NOTIFICATIONS_DEFAULT } from "@starbase/core"
+import type { NotificationKind, NotificationsConfig } from "@jingler/core"
+import { NOTIFICATIONS_DEFAULT } from "@jingler/core"
 import { BrowserWindow, Notification } from "electron"
 
 /** IPC channel main uses to tell the renderer which session to open. */
-export const NOTIFICATION_ACTIVATED_CHANNEL = "starbase/notification-activated"
+export const NOTIFICATION_ACTIVATED_CHANNEL = "jingler/notification-activated"
 
 /** Map a kind onto the per-kind toggle that governs it. */
 const TOGGLE: Record<NotificationKind, keyof NotificationsConfig> = {
@@ -35,7 +35,7 @@ const TOGGLE: Record<NotificationKind, keyof NotificationsConfig> = {
 
 export interface NotifyDecision {
   readonly kind: NotificationKind
-  /** Is the Starbase window focused right now? */
+  /** Is the Jingler window focused right now? */
   readonly windowFocused: boolean
   /**
    * Is this the session the operator currently has open? Only meaningful while

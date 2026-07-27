@@ -5,8 +5,8 @@ import type {
   ProviderModels,
   RouteCandidate,
   TaskKind
-} from "@starbase/core"
-import { GIGAPLAN_ROUTING_DEFAULT, TASK_KINDS } from "@starbase/core"
+} from "@jingler/core"
+import { GIGAPLAN_ROUTING_DEFAULT, TASK_KINDS } from "@jingler/core"
 import { Plus, Trash2 } from "lucide-react"
 import { Button } from "../components/button.js"
 import { SegmentedControl } from "../components/segmented-control.js"
@@ -68,9 +68,9 @@ export function GigaplanSettings({
 }: GigaplanSettingsProps) {
   const active = orchestrator ?? defaultOrchestrator
   const routeConfig = routing ?? GIGAPLAN_ROUTING_DEFAULT
-  // `starbase` is filtered for the same reason it is filtered from the composer's
+  // `jingler` is filtered for the same reason it is filtered from the composer's
   // picker: the orchestrator cannot be its own backend.
-  const groups = catalog.filter((p) => p.cli !== "starbase" && p.models.length > 0)
+  const groups = catalog.filter((p) => p.cli !== "jingler" && p.models.length > 0)
   const liveRoutes: ReadonlyArray<RouteCandidate> = groups.flatMap((provider) =>
     provider.models.map((model) => ({ cli: provider.cli, model: model.id }))
   )
@@ -260,7 +260,7 @@ export function GigaplanSettings({
         <div className="flex flex-col gap-2">
           <span className="text-[12px] font-semibold text-text">What this is charged to</span>
           <span className="text-[11.5px] leading-relaxed text-muted-foreground">
-            Starbase drives the harnesses you already pay for. Where a plan is available its
+            Jingler drives the harnesses you already pay for. Where a plan is available its
             metered key is withheld, so an API key left in your shell can&rsquo;t silently take
             over the billing.
           </span>
@@ -293,7 +293,7 @@ export function GigaplanSettings({
                     without anyone noticing. */}
                 {b.path === "undetermined" ? (
                   <span className="text-[11px] text-muted-foreground">
-                    Starbase couldn&rsquo;t read this harness&rsquo;s credentials, so it left your
+                    Jingler couldn&rsquo;t read this harness&rsquo;s credentials, so it left your
                     environment alone
                   </span>
                 ) : null}

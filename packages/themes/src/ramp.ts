@@ -1,5 +1,5 @@
 /**
- * Enforces the two orderings Starbase's layout depends on, after the mapper has
+ * Enforces the two orderings Jingler's layout depends on, after the mapper has
  * read whatever the theme happened to say.
  *
  * ## Why a second pass exists at all
@@ -12,7 +12,7 @@
  * chains:
  *
  * - **Monokai** puts `#414339` — its SELECTION colour — in `panel.background`.
- *   Read literally, the recessed well Starbase renders terminals and code
+ *   Read literally, the recessed well Jingler renders terminals and code
  *   blocks into came out *lighter* than the panel containing it. A well that
  *   bulges outward.
  * - **Dark Modern** paints title bar, sidebar and panel all `#181818`. Faithful
@@ -23,7 +23,7 @@
  *   `foreground`, collapsing `muted` into `text` and flattening the five-step
  *   type hierarchy into two.
  *
- * Each is a theme being internally consistent for a layout Starbase does not
+ * Each is a theme being internally consistent for a layout Jingler does not
  * have. So the fix belongs here, applied uniformly, rather than as special
  * cases smuggled into the chains.
  *
@@ -125,7 +125,7 @@ export const separate = (
  * outrank a timestamp. Themes routinely give two of these the same value —
  * `foreground` and `descriptionForeground` are identical in Light Modern —
  * because VS Code renders them in places far enough apart that nobody notices.
- * Starbase renders all five within one sidebar row.
+ * Jingler renders all five within one sidebar row.
  *
  * Collapsed entries are rebuilt by pulling the weaker tone toward the
  * background, which is the direction "less important" already means, so the

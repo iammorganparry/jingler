@@ -85,11 +85,11 @@ export const FALLBACK_MODELS: Record<CliKind, ReadonlyArray<ModelOption>> = {
     { id: "opencode/north-mini-code-free", label: "north-mini-code-free" },
     { id: "opencode/hy3-free", label: "hy3-free" }
   ],
-  // Starbase picks the model per step from the plan and the repo's knowledge
+  // Jingler picks the model per step from the plan and the repo's knowledge
   // base, so there is exactly one choice to offer: let it choose. This is not a
   // placeholder for a real catalogue — offering a fixed model here would
   // contradict the whole point of selecting the orchestrator.
-  starbase: [{ id: "auto", label: "orchestrate" }]
+  jingler: [{ id: "auto", label: "orchestrate" }]
 }
 
 /** The default model id for a harness (the first fallback option). */
@@ -122,7 +122,7 @@ export const DEFAULT_REVIEW_MODEL: Record<CliKind, string> = {
   // Never read: a review runs on the harness that wrote the diff, and the
   // orchestrator writes none of it — its steps run on real harnesses, which is
   // what a review attributes to. Present only to keep the record total.
-  starbase: "auto"
+  jingler: "auto"
 }
 
 /** The reviewer's model for `cli`, honouring the user's override when set. */

@@ -225,7 +225,7 @@ describe("Session", () => {
   const base: Session = {
     id: "s_fix-login_abc",
     repo: "trigify-app",
-    branch: "starbase/fix-login",
+    branch: "jingler/fix-login",
     title: "Fix login",
     status: "idle",
     cli: "claude",
@@ -252,7 +252,7 @@ describe("Session", () => {
   it("round-trips the optional worktreePath / baseBranch / mode / model when present", () => {
     const withWorktree: Session = {
       ...base,
-      worktreePath: "/Users/me/starbase/worktrees/trigify-app/fix-login",
+      worktreePath: "/Users/me/jingler/worktrees/trigify-app/fix-login",
       baseBranch: "main",
       chats: [{ ...base.chats[0]!, mode: "auto", model: "opus" }]
     }
@@ -349,10 +349,10 @@ describe("supportsPlanMode", () => {
 
   it("excludes the harnesses that would fabricate a plan", () => {
     // cursor falls through to the scripted stub in `harness-adapter.ts`, so its
-    // "plan" would be invented; starbase picks a harness per step rather than
+    // "plan" would be invented; jingler picks a harness per step rather than
     // running turns itself.
     expect(supportsPlanMode("cursor")).toBe(false)
-    expect(supportsPlanMode("starbase")).toBe(false)
+    expect(supportsPlanMode("jingler")).toBe(false)
   })
 
   it("classifies every CliKind, so a new harness cannot be forgotten", () => {
@@ -375,7 +375,7 @@ describe("supportsSteer", () => {
   it("excludes the harnesses whose turn cannot be added to", () => {
     expect(supportsSteer("cursor")).toBe(false)
     expect(supportsSteer("opencode")).toBe(false)
-    expect(supportsSteer("starbase")).toBe(false)
+    expect(supportsSteer("jingler")).toBe(false)
   })
 
   it("classifies every CliKind, so a new harness cannot be forgotten", () => {
@@ -415,14 +415,14 @@ describe("newSessionCli", () => {
   })
 
   it("never starts a session on the orchestrator", () => {
-    // `starbase` drives other harnesses; a session running "on" it would have
+    // `jingler` drives other harnesses; a session running "on" it would have
     // nothing to dispatch to. Gigaplan is a per-turn mode instead.
-    const clis = [cli("starbase", true), cli("claude", true)]
-    expect(newSessionCli(clis, "starbase")).toBe("claude")
+    const clis = [cli("jingler", true), cli("claude", true)]
+    expect(newSessionCli(clis, "jingler")).toBe("claude")
     expect(startableClis(clis).map((c) => c.kind)).toEqual(["claude"])
   })
 
   it("reports null when no harness can run a session", () => {
-    expect(newSessionCli([cli("starbase", true), cli("claude", false)], null)).toBe(null)
+    expect(newSessionCli([cli("jingler", true), cli("claude", false)], null)).toBe(null)
   })
 })

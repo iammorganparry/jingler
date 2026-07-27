@@ -1,7 +1,7 @@
 /**
  * Docker-style friendly names for untitled sessions — `<adjective>-<name>`, e.g.
  * "hopeful-einstein". Replaces the old "untitled-session-<stamp>" slug so a
- * session's worktree/branch reads nicely (`starbase/hopeful-einstein`) before the
+ * session's worktree/branch reads nicely (`jingler/hopeful-einstein`) before the
  * agent auto-titles it. All tokens are lowercase single words, so the result is a
  * valid kebab slug / branch / filesystem name with no extra sanitising.
  */
@@ -43,7 +43,7 @@ export const creativeName = (seed: number): string => {
 /**
  * The first friendly name (starting from `seed`) not already taken by `used`,
  * falling back to a stamped name only if every attempt in a generous window
- * collides — so the common case is a clean, unstamped `starbase/hopeful-einstein`.
+ * collides — so the common case is a clean, unstamped `jingler/hopeful-einstein`.
  */
 export const freeCreativeName = (
   used: ReadonlySet<string>,

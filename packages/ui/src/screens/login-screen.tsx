@@ -29,7 +29,7 @@ export interface LoginScreenProps {
 }
 
 const COPY: Record<AuthMode, { title: string; subtitle: string }> = {
-  signin: { title: "Sign in to Starbase", subtitle: "Run and manage your agent sessions." },
+  signin: { title: "Sign in to Jingler", subtitle: "Run and manage your agent sessions." },
   signup: { title: "Create your account", subtitle: "Start running agent sessions in minutes." }
 }
 
@@ -130,7 +130,7 @@ export function LoginScreen({
 
         {/* Footer toggles between sign-in and sign-up. */}
         <div className="absolute inset-x-0 bottom-0 z-10 flex h-[42px] items-center justify-center gap-1.5 border-t border-hairline bg-panel text-[12px] text-muted-foreground">
-          <span>{signup ? "Already have an account?" : "New to Starbase?"}</span>
+          <span>{signup ? "Already have an account?" : "New to Jingler?"}</span>
           <button
             type="button"
             onClick={toggleMode}

@@ -1,5 +1,5 @@
-import type { PermissionMode, ReasoningEffort, StreamEvent } from "@starbase/core"
-import { CliExecError, resumePlanPrompt, splitModelId } from "@starbase/core"
+import type { PermissionMode, ReasoningEffort, StreamEvent } from "@jingler/core"
+import { CliExecError, resumePlanPrompt, splitModelId } from "@jingler/core"
 import type { Event, Part, SessionPromptData as LegacySessionPromptData } from "@opencode-ai/sdk"
 import type { SessionPromptData } from "@opencode-ai/sdk/v2/client"
 import { Effect, Runtime } from "effect"
@@ -18,7 +18,7 @@ import { opencodeMcpConfig } from "./mcp-config.js"
  * We deliberately do NOT use the SDK's `createOpencodeServer`. It does
  * `spawn("opencode", …)` — a bare name resolved off `PATH`, with no executable
  * override in `ServerOptions` (contrast Claude's `pathToClaudeCodeExecutable`
- * and Codex's `codexPathOverride`). Two problems: Starbase's whole discovery
+ * and Codex's `codexPathOverride`). Two problems: Jingler's whole discovery
  * model hands the adapter a resolved `binPath`, and an Electron GUI app on macOS
  * doesn't inherit the shell `PATH`, so a user whose opencode lives in
  * `~/.opencode/bin` would silently get "not found". It also *overwrites*
@@ -39,7 +39,7 @@ import { opencodeMcpConfig } from "./mcp-config.js"
 // ── Pure helpers (the testable seam) ─────────────────────────────────────────
 
 /**
- * Re-exported from `@starbase/core`, where it moved so `vendor.ts` can resolve a
+ * Re-exported from `@jingler/core`, where it moved so `vendor.ts` can resolve a
  * model id to the lab behind it without `core` depending on this package. Kept
  * exported here because it reads as an opencode concern at every call site.
  */
@@ -58,7 +58,7 @@ export const mapOpencodeReasoning = (
  * opencode's permission config for a run. Values are `"ask" | "allow" | "deny"`.
  *
  * `ask` routes the action to opencode's permission bus, which we bridge onto
- * `ctx.canUseTool` — so Starbase's own HITL mode/allowlist decides. `auto` skips
+ * `ctx.canUseTool` — so Jingler's own HITL mode/allowlist decides. `auto` skips
  * the bus entirely.
  *
  * "Ask about everything the operator might want to gate" is NOT the rule: the
@@ -208,7 +208,7 @@ export const assistantText = (parts: ReadonlyArray<Part> | undefined): string =>
     .trim()
 
 /**
- * opencode tool names are lowercase (`bash`, `edit`); Starbase's transcript UI
+ * opencode tool names are lowercase (`bash`, `edit`); Jingler's transcript UI
  * speaks the Claude-flavoured title-case vocabulary that the other adapters emit
  * (`Bash`, `Edit`). Unknown tools pass through unchanged rather than being
  * dropped — an unrecognised tool should still be visible in the transcript.
@@ -312,7 +312,7 @@ export const asPermissionAsked = (event: unknown): PermissionAsked | null => {
 }
 
 /**
- * Map a `permission.asked` onto the request Starbase gates on.
+ * Map a `permission.asked` onto the request Jingler gates on.
  *
  * The kind is an ALLOWLIST, and that is the whole point: only opencode's own
  * `edit` maps to our `"edit"`.
@@ -383,7 +383,7 @@ export const totalTokens = (tokens: {
 }
 
 /**
- * Folds opencode's event bus into Starbase's normalized `StreamEvent`s.
+ * Folds opencode's event bus into Jingler's normalized `StreamEvent`s.
  *
  * Stateful by necessity, hence a factory rather than the pure function the other
  * adapters use, for two reasons found by driving the real binary:
@@ -953,7 +953,7 @@ const waitForServer = (
   })
 
 /**
- * Bridges opencode's ASYNCHRONOUS permission bus onto Starbase's synchronous
+ * Bridges opencode's ASYNCHRONOUS permission bus onto Jingler's synchronous
  * `canUseTool` gate.
  *
  * opencode raises `permission.updated` and then waits for a reply on a separate
@@ -982,7 +982,7 @@ class PermissionBridge {
   async handle(asked: PermissionAsked): Promise<void> {
     try {
       const decision = await this.runP(this.ctx.canUseTool(permissionToRequest(asked)))
-      // `once` rather than `always`: Starbase's own allowlist decides what is
+      // `once` rather than `always`: Jingler's own allowlist decides what is
       // remembered, so letting opencode cache an approval would silently widen
       // a grant the operator scoped to a single action.
       await this.reply(asked, decision === "allow" ? "once" : "reject")

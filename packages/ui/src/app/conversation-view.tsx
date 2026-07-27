@@ -14,12 +14,12 @@ import type {
   ReasoningEffort,
   ReasoningSetting,
   Skill
-} from "@starbase/core"
+} from "@jingler/core"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useHotkeys } from "react-hotkeys-hook"
 import { Lock, RotateCcw } from "lucide-react"
-import type { ArchiveReason, ContextPhase } from "@starbase/core"
-import { supportsPlanMode } from "@starbase/core"
+import type { ArchiveReason, ContextPhase } from "@jingler/core"
+import { supportsPlanMode } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"

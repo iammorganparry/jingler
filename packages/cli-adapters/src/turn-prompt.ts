@@ -1,4 +1,4 @@
-import type { CliKind } from "@starbase/core"
+import type { CliKind } from "@jingler/core"
 
 /**
  * How a turn's prompt is assembled from the operator's message and the notes that
@@ -85,7 +85,7 @@ export const composeTurnPrompt = (
  * the plan file path(s).
  *
  * (1) matters because the plan library lives OUTSIDE the worktree
- * (`~/starbase/.starbase/…`): without being told its working directory, an agent
+ * (`~/jingler/.jingler/…`): without being told its working directory, an agent
  * that reads the plan file can mistake the plan's parent for the project root and
  * `cd` out of its worktree (even into the origin checkout) — corrupting the wrong
  * tree. So we state the worktree path explicitly and forbid treating the plan's

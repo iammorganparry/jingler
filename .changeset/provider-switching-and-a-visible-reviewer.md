@@ -1,9 +1,9 @@
 ---
-"@starbase/cli-adapters": minor
-"@starbase/contracts": minor
-"@starbase/core": minor
-"@starbase/desktop": minor
-"@starbase/ui": minor
+"@jingler/cli-adapters": minor
+"@jingler/contracts": minor
+"@jingler/core": minor
+"@jingler/desktop": minor
+"@jingler/ui": minor
 ---
 
 Switch provider from the model chip, real Codex models, and a reviewer you can actually watch.

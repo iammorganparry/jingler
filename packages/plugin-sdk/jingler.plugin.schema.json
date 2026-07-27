@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Starbase plugin manifest",
-  "description": "The contents of a plugin's starbase.plugin.json. Generated from @starbase/core — do not edit by hand.",
+  "title": "Jingler plugin manifest",
+  "description": "The contents of a plugin's jingler.plugin.json. Generated from @jingler/core — do not edit by hand.",
   "$defs": {
     "PluginId": {
       "type": "string",
@@ -10,7 +10,7 @@
     },
     "PluginApiVersion": {
       "type": "integer",
-      "description": "The Starbase plugin API generation this plugin targets. Omit to mean 'the current one'.",
+      "description": "The Jingler plugin API generation this plugin targets. Omit to mean 'the current one'.",
       "title": "greaterThanOrEqualTo(1)",
       "minimum": 1
     },

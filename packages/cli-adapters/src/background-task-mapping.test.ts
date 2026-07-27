@@ -1,4 +1,4 @@
-import type { StreamEvent } from "@starbase/core"
+import type { StreamEvent } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import { backgroundTaskState, streamEventsFor } from "./claude-adapter.js"
 

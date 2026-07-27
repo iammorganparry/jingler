@@ -22,4 +22,4 @@
  * Kept as a re-export for the theme package's public API. The implementation
  * lives in core so Electron main and the React provider cannot drift.
  */
-export { THEME_STYLE_ID, toCssText } from "@starbase/core"
+export { THEME_STYLE_ID, toCssText } from "@jingler/core"

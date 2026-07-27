@@ -1,5 +1,5 @@
-import type { StreamEvent } from "@starbase/core"
-import { CliExecError } from "@starbase/core"
+import type { StreamEvent } from "@jingler/core"
+import { CliExecError } from "@jingler/core"
 import type { PermissionDecision } from "./adapter.js"
 import { CliAdapter } from "./adapter.js"
 import type { AgentContext, CliAdapterShape, SessionSpec } from "./adapter.js"
@@ -67,7 +67,7 @@ const installedHarnesses = fakeCommandExecutor((command, args) => {
 /** A host with no coding CLI installed at all. */
 const noHarnesses = fakeCommandExecutor(() => ({ exitCode: 1, stdout: "" }))
 
-// A real temp `~/starbase` per test: the reviewer's transcript is persisted so
+// A real temp `~/jingler` per test: the reviewer's transcript is persisted so
 // its tab survives a restart, and asserting that against a real file is the only
 // way to know the round-trip actually works.
 let temp: ReturnType<typeof withTempRoot>
@@ -89,7 +89,7 @@ const env = (
     DiscoveryService.Default,
     store,
     // A review is owned by the session's active chat, so the service reads it
-    // from the real store over the temp `~/starbase`. Sessions that were never
+    // from the real store over the temp `~/jingler`. Sessions that were never
     // seeded simply aren't found, and an unowned review is visible to any chat —
     // which is why every test that doesn't care about ownership still passes.
     SessionStore.Default,
@@ -844,7 +844,7 @@ describe("ReviewService.watch — chat ownership", () => {
  * the renderer needs no idea any of this happened.
  *
  * "A fresh process" is modelled by building a SECOND ReviewService over the same
- * temp `~/starbase` — a new instance has new in-memory state and can only know
+ * temp `~/jingler` — a new instance has new in-memory state and can only know
  * what actually reached the disk.
  */
 describe("ReviewService — transcript persistence", () => {
@@ -887,7 +887,7 @@ describe("ReviewService — transcript persistence", () => {
     const adapter = workingStub()
     // Process 1: run a review.
     await Effect.runPromise(ReviewService.run(INPUT).pipe(Effect.provide(env(adapter))))
-    // Process 2: a cold instance over the same ~/starbase.
+    // Process 2: a cold instance over the same ~/jingler.
     const seen = await Effect.runPromise(attach(INPUT.sessionId).pipe(Effect.provide(env(adapter))))
 
     expect(seen.map((e) => e._tag)).toContain("ToolStart")
@@ -1017,7 +1017,7 @@ describe("ReviewService — reset is atomic", () => {
     const parkedStore = Layer.succeed(
       ReviewStore,
       ReviewStore.of({
-        _tag: "@starbase/ReviewStore",
+        _tag: "@jingler/ReviewStore",
         get: () => Effect.succeed(null),
         set: () => Effect.void,
         clear: () => Effect.void,

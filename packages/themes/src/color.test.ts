@@ -92,7 +92,7 @@ describe("toHex / toCss", () => {
 
 describe("over", () => {
   /**
-   * VS Code themes hand Starbase translucent values for slots that paint
+   * VS Code themes hand Jingler translucent values for slots that paint
    * SURFACES — `list.hoverBackground: "#2c313a80"` becoming `--sb-panel`. On a
    * frameless Electron window a translucent surface shows the user's desktop
    * through the app, so compositing must always yield an opaque result.
@@ -183,7 +183,7 @@ describe("ensureContrast", () => {
   })
 
   /**
-   * Starbase paints theme accents as TEXT (a `text-yellow` warning label) where
+   * Jingler paints theme accents as TEXT (a `text-yellow` warning label) where
    * the theme painted them as terminal output. Without this lift, Solarized
    * Light's `#b58900` on a light panel and several worse offenders ship as
    * barely-readable UI text.

@@ -6,8 +6,8 @@ import type {
   QuestionAnswer,
   ReasoningEffort,
   StreamEvent
-} from "@starbase/core"
-import { CliExecError } from "@starbase/core"
+} from "@jingler/core"
+import { CliExecError } from "@jingler/core"
 import type { PermissionMode as SdkPermissionMode, PermissionResult, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import { Effect, Runtime } from "effect"
 import type { AgentContext, PermissionRequest, SessionSpec } from "./adapter.js"
@@ -117,12 +117,12 @@ export const mapClaudeReasoning = (
 }
 
 /**
- * Handed back when a plan arrives without its ` ```plan ` fence. Starbase renders
+ * Handed back when a plan arrives without its ` ```plan ` fence. Jingler renders
  * plans from that block, so a fence-less plan has no steps to review — we ask for
  * one reformat before falling back to showing the raw markdown.
  */
 export const PLAN_REFORMAT = [
-  "Your plan is missing the required ```plan block, so Starbase cannot render it as a reviewable plan.",
+  "Your plan is missing the required ```plan block, so Jingler cannot render it as a reviewable plan.",
   "Re-call ExitPlanMode with the SAME plan, but put a fenced ```plan block at the top of it:",
   "a `summary:` line, then each step as `01 Step title` with two-space-indented",
   "`intent:` / `approach:` / `files:` / `guards:` fields. Keep your human-readable markdown below the block.",
@@ -381,7 +381,7 @@ export interface LiveInput {
  *
  * The SDK's streaming-input form keeps the query open until the input iterable
  * ends, which is the only way to put a message into a turn that is already
- * running — the whole point of Starbase's queue: a correction typed 10 seconds in
+ * running — the whole point of Jingler's queue: a correction typed 10 seconds in
  * should reach the agent at the next tool boundary, not two minutes later against
  * work it was meant to redirect. So the adapter opens the channel, yields the
  * prompt, and holds it open until the turn is genuinely over.
@@ -1170,7 +1170,7 @@ export const runClaude = (
 
         // The unified OpenConnector server, passed INLINE (not via `.mcp.json`) so
         // it bypasses Claude's project-approval prompt — the operator already
-        // opted in through Starbase's Settings. `launch.url` is always set for a
+        // opted in through Jingler's Settings. `launch.url` is always set for a
         // remote (http) entry; the `??` is just to satisfy the optional type.
         const oc = spec.openConnector
         const mcpServers =
@@ -1194,7 +1194,7 @@ export const runClaude = (
           options: {
             ...(mcpServers ? { mcpServers } : {}),
             // Never `|| undefined`: an empty cwd makes the SDK inherit the app's
-            // working directory, pointing the agent at whatever repo Starbase itself
+            // working directory, pointing the agent at whatever repo Jingler itself
             // was launched from instead of the session's worktree.
             cwd: requireWorktree(spec.cwd, `session ${sessionId}`),
             pathToClaudeCodeExecutable: spec.binPath ?? undefined,
@@ -1202,7 +1202,7 @@ export const runClaude = (
             // REPLACES the child environment with this rather than merging, so
             // `harnessEnv` returns a complete copy. See `subscription.ts`.
             // Layered over `worktreeEnv` so the agent also stops inheriting the
-            // toolchain config of whatever repo Starbase was launched from —
+            // toolchain config of whatever repo Jingler was launched from —
             // the env-var counterpart of the `cwd` hazard noted above.
             env: harnessEnv(
               "claude",

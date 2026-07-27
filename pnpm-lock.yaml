@@ -50,12 +50,12 @@ importers:
       '@homebridge/node-pty-prebuilt-multiarch':
         specifier: ^0.13.1
         version: 0.13.1
+      '@jingler/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
       '@openai/codex-sdk':
         specifier: ^0.144.1
         version: 0.144.1
-      '@starbase/plugin-sdk':
-        specifier: workspace:*
-        version: link:../../packages/plugin-sdk
       '@tanstack/react-query':
         specifier: ^5.101.2
         version: 5.101.2(react@19.2.7)
@@ -84,27 +84,27 @@ importers:
         specifier: ^5.32.4
         version: 5.32.4
     devDependencies:
+      '@jingler/cli-adapters':
+        specifier: workspace:*
+        version: link:../../packages/cli-adapters
+      '@jingler/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@jingler/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@jingler/themes':
+        specifier: workspace:*
+        version: link:../../packages/themes
+      '@jingler/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
+      '@jingler/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@playwright/test':
         specifier: ^1.61.1
         version: 1.61.1
-      '@starbase/cli-adapters':
-        specifier: workspace:*
-        version: link:../../packages/cli-adapters
-      '@starbase/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
-      '@starbase/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@starbase/themes':
-        specifier: workspace:*
-        version: link:../../packages/themes
-      '@starbase/tsconfig':
-        specifier: workspace:*
-        version: link:../../packages/tsconfig
-      '@starbase/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
       '@tailwindcss/vite':
         specifier: ^4.3.2
         version: 4.3.2(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.1))
@@ -193,7 +193,7 @@ importers:
         specifier: ^6.17.2
         version: 6.17.2(@react-email/render@2.1.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7))
     devDependencies:
-      '@starbase/tsconfig':
+      '@jingler/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig
       '@types/node':
@@ -229,6 +229,12 @@ importers:
       '@effect/platform':
         specifier: ^0.96.2
         version: 0.96.2(effect@3.21.4)
+      '@jingler/core':
+        specifier: workspace:*
+        version: link:../core
+      '@jingler/themes':
+        specifier: workspace:*
+        version: link:../themes
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
@@ -238,12 +244,6 @@ importers:
       '@opencode-ai/sdk':
         specifier: 1.18.3
         version: 1.18.3
-      '@starbase/core':
-        specifier: workspace:*
-        version: link:../core
-      '@starbase/themes':
-        specifier: workspace:*
-        version: link:../themes
       effect:
         specifier: ^3.21.4
         version: 3.21.4
@@ -257,7 +257,7 @@ importers:
       '@effect/platform-node':
         specifier: ^0.107.0
         version: 0.107.0(@effect/cluster@0.59.0(@effect/platform@0.96.2(effect@3.21.4))(@effect/rpc@0.75.1(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(@effect/sql@0.51.1(@effect/experimental@0.60.0(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(@effect/workflow@0.18.2(@effect/experimental@0.60.0(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(@effect/platform@0.96.2(effect@3.21.4))(@effect/rpc@0.75.1(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(effect@3.21.4))(effect@3.21.4))(@effect/platform@0.96.2(effect@3.21.4))(@effect/rpc@0.75.1(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(@effect/sql@0.51.1(@effect/experimental@0.60.0(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4))(effect@3.21.4)
-      '@starbase/tsconfig':
+      '@jingler/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       '@types/node':
@@ -272,17 +272,17 @@ importers:
       '@effect/rpc':
         specifier: ^0.75.1
         version: 0.75.1(@effect/platform@0.96.2(effect@3.21.4))(effect@3.21.4)
-      '@starbase/core':
+      '@jingler/core':
         specifier: workspace:*
         version: link:../core
       effect:
         specifier: ^3.21.4
         version: 3.21.4
     devDependencies:
-      '@starbase/themes':
+      '@jingler/themes':
         specifier: workspace:*
         version: link:../themes
-      '@starbase/tsconfig':
+      '@jingler/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
 
@@ -295,7 +295,7 @@ importers:
         specifier: ^5.32.4
         version: 5.32.4
     devDependencies:
-      '@starbase/tsconfig':
+      '@jingler/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       fast-check:
@@ -304,13 +304,13 @@ importers:
 
   packages/plugin-sdk:
     devDependencies:
-      '@starbase/core':
+      '@jingler/core':
         specifier: workspace:*
         version: link:../core
-      '@starbase/tsconfig':
+      '@jingler/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
-      '@starbase/ui':
+      '@jingler/ui':
         specifier: workspace:*
         version: link:../ui
       '@types/react':
@@ -328,19 +328,19 @@ importers:
 
   packages/themes:
     dependencies:
-      '@starbase/core':
+      '@jingler/core':
         specifier: workspace:*
         version: link:../core
       effect:
         specifier: ^3.21.4
         version: 3.21.4
     devDependencies:
+      '@jingler/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
       '@shikijs/themes':
         specifier: ^4.3.1
         version: 4.3.1
-      '@starbase/tsconfig':
-        specifier: workspace:*
-        version: link:../tsconfig
 
   packages/tsconfig: {}
 
@@ -349,6 +349,12 @@ importers:
       '@dagrejs/dagre':
         specifier: ^3.0.0
         version: 3.0.0
+      '@jingler/core':
+        specifier: workspace:*
+        version: link:../core
+      '@jingler/themes':
+        specifier: workspace:*
+        version: link:../themes
       '@radix-ui/react-avatar':
         specifier: ^1.2.2
         version: 1.2.2(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -382,12 +388,6 @@ importers:
       '@radix-ui/react-tooltip':
         specifier: ^1.2.12
         version: 1.2.12(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@starbase/core':
-        specifier: workspace:*
-        version: link:../core
-      '@starbase/themes':
-        specifier: workspace:*
-        version: link:../themes
       '@tanstack/react-virtual':
         specifier: ^3.14.5
         version: 3.14.5(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -440,10 +440,10 @@ importers:
         specifier: ^5.32.4
         version: 5.32.4
     devDependencies:
-      '@starbase/cli-adapters':
+      '@jingler/cli-adapters':
         specifier: workspace:*
         version: link:../cli-adapters
-      '@starbase/tsconfig':
+      '@jingler/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       '@storybook/addon-a11y':
@@ -497,10 +497,10 @@ importers:
 
   plugins/examples/hello-tab:
     devDependencies:
-      '@starbase/plugin-sdk':
+      '@jingler/plugin-sdk':
         specifier: workspace:*
         version: link:../../../packages/plugin-sdk
-      '@starbase/tsconfig':
+      '@jingler/tsconfig':
         specifier: workspace:*
         version: link:../../../packages/tsconfig
       '@types/react':
@@ -524,10 +524,10 @@ importers:
 
   plugins/github-issues:
     devDependencies:
-      '@starbase/plugin-sdk':
+      '@jingler/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
-      '@starbase/tsconfig':
+      '@jingler/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig
       '@types/react':

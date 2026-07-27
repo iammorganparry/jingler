@@ -40,8 +40,8 @@
  * There is exactly one window (see rpc.ts), so views attach to
  * `BrowserWindow.getAllWindows()[0]`.
  */
-import type { BrowserBounds } from "@starbase/core"
-import { BrowserPreviewError } from "@starbase/core"
+import type { BrowserBounds } from "@jingler/core"
+import { BrowserPreviewError } from "@jingler/core"
 import { pathToFileURL } from "node:url"
 import { BrowserWindow, WebContentsView } from "electron"
 import { Context, Effect, Layer } from "effect"
@@ -76,7 +76,7 @@ export interface PreviewViewServiceShape {
   readonly visibleOwner: () => Effect.Effect<PreviewOwner | null>
 }
 
-export class PreviewViewService extends Context.Tag("@starbase/PreviewViewService")<
+export class PreviewViewService extends Context.Tag("@jingler/PreviewViewService")<
   PreviewViewService,
   PreviewViewServiceShape
 >() {}

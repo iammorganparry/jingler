@@ -1,4 +1,4 @@
-import type { Message, ToolCall as ToolCallModel } from "@starbase/core"
+import type { Message, ToolCall as ToolCallModel } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { MessageTurn } from "./message-turn.js"
@@ -32,7 +32,7 @@ const tool = (t: Partial<ToolCallModel>): Message => ({
   ]
 })
 
-const LONG = "/Users/morganparry/starbase/worktrees/starbase/vivid-dijkstra/.changeset/stop-a-run-search-models-and-honest-plan-steps.md"
+const LONG = "/Users/morganparry/jingler/worktrees/jingler/vivid-dijkstra/.changeset/stop-a-run-search-models-and-honest-plan-steps.md"
 
 describe("tool card — the file being written", () => {
   it("shows the filename in full, however long the path", () => {
@@ -46,14 +46,14 @@ describe("tool card — the file being written", () => {
   it("keeps the directory as context, dimmed", () => {
     render(<MessageTurn message={tool({ name: "Write", target: LONG })} />)
     expect(
-      screen.getByText("/Users/morganparry/starbase/worktrees/starbase/vivid-dijkstra/.changeset/")
+      screen.getByText("/Users/morganparry/jingler/worktrees/jingler/vivid-dijkstra/.changeset/")
     ).toBeDefined()
   })
 
   it("does not split a command into directory and filename", () => {
     // A Bash target is a command; slicing it at the last "/" would be nonsense.
-    render(<MessageTurn message={tool({ name: "Bash", target: "pnpm --filter @starbase/ui test" })} />)
-    expect(screen.getByText("pnpm --filter @starbase/ui test")).toBeDefined()
+    render(<MessageTurn message={tool({ name: "Bash", target: "pnpm --filter @jingler/ui test" })} />)
+    expect(screen.getByText("pnpm --filter @jingler/ui test")).toBeDefined()
   })
 })
 

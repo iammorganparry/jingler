@@ -1,4 +1,4 @@
-import type { AdversarialReview, ReviewFinding } from "@starbase/core"
+import type { AdversarialReview, ReviewFinding } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import { agentBatchPrompt, resolveSentIds, reviewQueryKey } from "./review-routing.js"
 

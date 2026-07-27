@@ -7,7 +7,7 @@ describe("unattendedSandbox", () => {
     const deny = unattendedSandbox("/home/x").filesystem.denyRead
     expect(deny).toContain("/home/x/.ssh")
     expect(deny).toContain("/home/x/.aws")
-    // The harnesses Starbase itself drives: an agent that read these could keep
+    // The harnesses Jingler itself drives: an agent that read these could keep
     // running as the operator long after the session ended.
     expect(deny).toContain("/home/x/.claude/.credentials.json")
     expect(deny).toContain("/home/x/.codex/auth.json")

@@ -24,7 +24,7 @@ describe("resolveOrchestrator", () => {
     // Reachable by a hand-edited config or an older build; left alone it would
     // recurse — the orchestrator resolving to itself, forever.
     expect(
-      resolveOrchestrator(config({ orchestrator: { cli: "starbase", model: "auto" } }))
+      resolveOrchestrator(config({ orchestrator: { cli: "jingler", model: "auto" } }))
     ).toStrictEqual(ORCHESTRATOR_DEFAULT)
   })
 })

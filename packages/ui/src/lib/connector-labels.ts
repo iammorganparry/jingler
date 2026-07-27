@@ -1,4 +1,4 @@
-import type { ConnectorAuthType } from "@starbase/core"
+import type { ConnectorAuthType } from "@jingler/core"
 
 /**
  * How each way of connecting is named to the operator.
@@ -11,7 +11,7 @@ import type { ConnectorAuthType } from "@starbase/core"
  *
  * These are display strings, not the wire values: OpenConnector's own names
  * (`api_key`, `custom_credential`) are what cross the RPC boundary and appear in
- * `@starbase/core`.
+ * `@jingler/core`.
  */
 export const AUTH_LABEL: Record<ConnectorAuthType, string> = {
   oauth2: "OAuth",

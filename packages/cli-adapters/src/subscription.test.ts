@@ -5,7 +5,7 @@ const ENV = { PATH: "/usr/bin", HOME: "/home/x", OPENAI_API_KEY: "sk-x", ANTHROP
 
 describe("harnessEnv", () => {
   it("withholds the metered key when the harness has a plan", () => {
-    // The whole point: Starbase drives what you already pay for, and an
+    // The whole point: Jingler drives what you already pay for, and an
     // exported key silently overrides that with per-token billing.
     const out = harnessEnv("codex", ENV, true)
     expect(out.OPENAI_API_KEY).toBeUndefined()

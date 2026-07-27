@@ -1,5 +1,5 @@
-import type { PermissionMode, Question, QuestionAnswer, ReasoningEffort } from "@starbase/core"
-import { CliExecError, resumePlanPrompt } from "@starbase/core"
+import type { PermissionMode, Question, QuestionAnswer, ReasoningEffort } from "@jingler/core"
+import { CliExecError, resumePlanPrompt } from "@jingler/core"
 import { Effect, Runtime } from "effect"
 import type { AgentContext, SessionSpec } from "./adapter.js"
 import {
@@ -39,7 +39,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
 /**
- * Codex persists thread history as a local rollout. Starbase can outlive that
+ * Codex persists thread history as a local rollout. Jingler can outlive that
  * file, leaving a valid persisted resume id that Codex can no longer open.
  *
  * Match the provider's specific diagnosis rather than JSON-RPC's generic
@@ -116,7 +116,7 @@ const startedTurnId = (message: JsonRpcMessage, expectedThreadId: string): strin
 /**
  * A started turn must eventually emit another protocol message. Codex can
  * otherwise leave the transport open forever after replacement or compaction,
- * which keeps Starbase's run and renderer permanently busy.
+ * which keeps Jingler's run and renderer permanently busy.
  *
  * This is an inactivity deadline, not a total turn limit: every usage, tool,
  * assistant, or terminal event starts a fresh window.
@@ -390,7 +390,7 @@ export const runCodexAppServer = (
       try: async () => {
         const cwd = requireWorktree(spec.cwd, `session ${sessionId}`)
         const env = harnessEnv("codex", worktreeEnv(process.env, cwd), hasSubscriptionAuth("codex"))
-        diagnostics = createCodexAppServerDiagnostics(process.env.STARBASE_CODEX_DIAGNOSTICS_DIR, {
+        diagnostics = createCodexAppServerDiagnostics(process.env.JINGLER_CODEX_DIAGNOSTICS_DIR, {
           sessionId,
           model: spec.model ?? null,
           reasoningEffort: mapCodexAppServerReasoning(spec.reasoningEffort) ?? null

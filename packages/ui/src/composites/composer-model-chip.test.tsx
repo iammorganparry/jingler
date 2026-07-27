@@ -1,4 +1,4 @@
-import type { ProviderModels } from "@starbase/core"
+import type { ProviderModels } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { Composer } from "./composer.js"

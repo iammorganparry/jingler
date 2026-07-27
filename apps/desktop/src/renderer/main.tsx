@@ -1,7 +1,7 @@
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { QueryClientProvider } from "@tanstack/react-query"
-import { THEME_STYLE_ID } from "@starbase/core"
+import { THEME_STYLE_ID } from "@jingler/core"
 import "./index.css"
 // Imported for its side effect, and BEFORE `createRoot`: it publishes the React
 // singleton that every plugin's generated `react` shim re-exports. A plugin
@@ -14,7 +14,7 @@ import { queryClient } from "./query-client.js"
 /**
  * Paint the operator's theme before React exists.
  *
- * `window.starbase.initialThemeCss` was fetched synchronously by the preload,
+ * `window.jingler.initialThemeCss` was fetched synchronously by the preload,
  * so it is already here — no await, no round trip, nothing for the browser to
  * paint around. Injected before `createRoot` because everything after that
  * point is at least one frame too late: React would mount, `ThemeProvider`
@@ -26,7 +26,7 @@ import { queryClient } from "./query-client.js"
  * both sides generate the text from `CSS_VAR_BY_TOKEN`, the handover produces
  * byte-identical CSS and is invisible.
  */
-const bootThemeCss = window.starbase?.initialThemeCss
+const bootThemeCss = window.jingler?.initialThemeCss
 if (bootThemeCss) {
   const style = document.createElement("style")
   style.id = THEME_STYLE_ID

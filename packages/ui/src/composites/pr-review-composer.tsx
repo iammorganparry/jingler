@@ -1,5 +1,5 @@
 import * as React from "react"
-import type { ReviewSubmitKind } from "@starbase/core"
+import type { ReviewSubmitKind } from "@jingler/core"
 import { AsyncButton } from "../components/async-button.js"
 import { Callout } from "../components/callout.js"
 import { Toggle } from "../components/toggle.js"

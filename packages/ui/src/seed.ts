@@ -1,4 +1,4 @@
-import type { Message } from "@starbase/core"
+import type { Message } from "@jingler/core"
 
 /**
  * Sample conversation + diff for the active session, mirroring the design.

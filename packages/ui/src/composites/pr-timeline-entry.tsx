@@ -1,4 +1,4 @@
-import type { PrTimelineItem } from "@starbase/core"
+import type { PrTimelineItem } from "@jingler/core"
 import { Check, MessageSquare, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"

@@ -1,7 +1,7 @@
 ---
-"@starbase/ui": patch
-"@starbase/contracts": minor
-"@starbase/cli-adapters": minor
+"@jingler/ui": patch
+"@jingler/contracts": minor
+"@jingler/cli-adapters": minor
 ---
 
 A review belongs to one chat, and the sub-agent view drops its duplicate header.

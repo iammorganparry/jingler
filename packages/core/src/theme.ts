@@ -1,23 +1,23 @@
 /**
- * Theming — the VS Code theme format, and what Starbase folds it down to.
+ * Theming — the VS Code theme format, and what Jingler folds it down to.
  *
  * ## Why the VS Code format is the stored format
  *
  * Themes are a thing people already own. An operator arriving with a favourite
  * has it as a VS Code theme JSON — from a marketplace extension, a gist, or the
- * `.vscode/` directory of a repo. Inventing a Starbase-shaped theme file would
+ * `.vscode/` directory of a repo. Inventing a Jingler-shaped theme file would
  * mean every one of those needs hand-translating before it can be used, which
  * in practice means nobody brings one.
  *
  * So `VsCodeTheme` below IS the file on disk, verbatim, unknown keys and all.
- * The lossy step happens later and in one place: `@starbase/themes`'s mapper
- * folds the ~40 keys Starbase can act on down to `ThemeTokens`. VS Code names
- * around 900 colours, most of them for surfaces Starbase does not have (no
+ * The lossy step happens later and in one place: `@jingler/themes`'s mapper
+ * folds the ~40 keys Jingler can act on down to `ThemeTokens`. VS Code names
+ * around 900 colours, most of them for surfaces Jingler does not have (no
  * minimap, no breadcrumbs, no editor gutter), and pretending to model them
  * would be a lie told in 900 lines of schema.
  *
  * Unknown keys survive decoding (see the index signature on `VsCodeTheme`)
- * rather than being stripped, so a theme that round-trips through Starbase's
+ * rather than being stripped, so a theme that round-trips through Jingler's
  * editor comes back out still usable in VS Code. Lossy in the renderer is fine;
  * lossy on disk destroys the user's file.
  *
@@ -32,7 +32,7 @@
  *
  * Adding a token means touching three places, in this order: this struct, the
  * `:root` fallback + `@theme inline` block in `globals.css`, and the mapper's
- * fallback chain in `@starbase/themes`. Miss the third and the token is
+ * fallback chain in `@jingler/themes`. Miss the third and the token is
  * `undefined` for every imported theme.
  */
 import { Schema } from "effect"
@@ -58,7 +58,7 @@ export type HexColor = Schema.Schema.Type<typeof HexColor>
 /**
  * A CSS colour expression — hex, or `rgb(…)` / `rgba(…)` in either notation.
  *
- * Used for the tokens Starbase DERIVES rather than reads: scrims, shadows and
+ * Used for the tokens Jingler DERIVES rather than reads: scrims, shadows and
  * selection washes are `rgb(… / …)` because they must sit translucently over
  * whatever surface they land on, and baking them to an opaque hex would make
  * them wrong the moment a panel changed colour.
@@ -92,7 +92,7 @@ export const VsCodeThemeType = Schema.Literal("dark", "light", "hc", "hcDark", "
 export type VsCodeThemeType = Schema.Schema.Type<typeof VsCodeThemeType>
 
 /**
- * The three grounds Starbase actually branches on, after `VsCodeThemeType` is
+ * The three grounds Jingler actually branches on, after `VsCodeThemeType` is
  * normalised. Collapsing five spellings to three here means the mapper's
  * defaults table and the light-mode CSS both have one thing to switch on.
  */
@@ -112,7 +112,7 @@ export const isDarkType = (type: VsCodeThemeType): boolean => type !== "light" &
 
 /**
  * One TextMate rule from a theme's `tokenColors`. This is what syntax
- * highlighting is made of, and it passes through Starbase untouched — shiki
+ * highlighting is made of, and it passes through Jingler untouched — shiki
  * consumes the same shape, so the diff viewer can be handed the theme's own
  * rules instead of an approximation built from the accent ramp.
  */
@@ -134,7 +134,7 @@ export type TokenColorRule = Schema.Schema.Type<typeof TokenColorRule>
  * The trailing index signature is load-bearing: without it Effect's `Struct`
  * strips every key it does not name, so saving an edited theme would quietly
  * delete `semanticTokenColors`, `$schema` and anything else the author wrote.
- * Starbase reads a handful of keys and preserves all of them.
+ * Jingler reads a handful of keys and preserves all of them.
  *
  * Note what is NOT here: `include`. VS Code's own built-ins are chains
  * (`dark_modern` → `dark_plus` → `dark_vs`), and a theme that still carries an
@@ -320,7 +320,7 @@ export const CSS_VAR_BY_TOKEN: Readonly<Record<Exclude<keyof ThemeTokens, "kind"
 }
 
 /** The id of the single managed theme style element. */
-export const THEME_STYLE_ID = "starbase-theme"
+export const THEME_STYLE_ID = "jingler-theme"
 
 /**
  * Emit the complete `:root` stylesheet for a resolved theme.
@@ -378,7 +378,7 @@ export type ThemeLoadFailure = Schema.Schema.Type<typeof ThemeLoadFailure>
  * Everything installed, plus what could not be read.
  *
  * `skipped` travels WITH the list rather than being thrown, because one
- * malformed file in `~/starbase/themes` must not take out the picker. The user
+ * malformed file in `~/jingler/themes` must not take out the picker. The user
  * needs to keep switching themes AND to be told which file is broken; an error
  * channel can only do the second.
  */
@@ -425,7 +425,7 @@ export const DEFAULT_THEME_ID = "one-dark-pro"
  * Filesystem-safe id from a display name: "Solarized Dark" → "solarized-dark".
  *
  * Used when duplicating, so the copy's id matches the filename it lands at and
- * `~/starbase/themes/solarized-dark-copy.json` is guessable from the picker.
+ * `~/jingler/themes/solarized-dark-copy.json` is guessable from the picker.
  */
 export const themeIdFromName = (name: string): string =>
   name

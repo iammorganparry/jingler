@@ -1,22 +1,22 @@
-# `@starbase/plugin-sdk` — API digest
+# `@jingler/plugin-sdk` — API digest
 
 Every export, with its signature and one line of purpose. For the narrative
 version see `AGENTS.md`; for the manifest's validated shape see
-`starbase.plugin.schema.json`.
+`jingler.plugin.schema.json`.
 
 Four entrypoints, deliberately separate so a host-only plugin never pulls React
 into Node and a UI-only plugin never pulls Node types into the browser:
 
 | Import from | Runs in | Use for |
 |---|---|---|
-| `@starbase/plugin-sdk` | Starbase's renderer | tabs, panes, React components |
-| `@starbase/plugin-sdk/ui` | Starbase's renderer | the themed component kit |
-| `@starbase/plugin-sdk/host` | Node, in the extension host | network, CLIs, credentials |
-| `@starbase/plugin-sdk/vite` | your build | externals config |
+| `@jingler/plugin-sdk` | Jingler's renderer | tabs, panes, React components |
+| `@jingler/plugin-sdk/ui` | Jingler's renderer | the themed component kit |
+| `@jingler/plugin-sdk/host` | Node, in the extension host | network, CLIs, credentials |
+| `@jingler/plugin-sdk/vite` | your build | externals config |
 
 ---
 
-## `@starbase/plugin-sdk` — authoring
+## `@jingler/plugin-sdk` — authoring
 
 ### `defineManifest`
 
@@ -67,7 +67,7 @@ export default definePlugin(manifest, {
 
 ---
 
-## `@starbase/plugin-sdk` — hooks
+## `@jingler/plugin-sdk` — hooks
 
 All throw if called outside a plugin view. All work in a contributed **tab or dock
 pane** — in a pane, substitute `useSessionOrNull` for `useSession`.
@@ -126,7 +126,7 @@ A bound callable for one of your host commands.
 
 ---
 
-## `@starbase/plugin-sdk` — types
+## `@jingler/plugin-sdk` — types
 
 ### `TabProps`
 
@@ -147,7 +147,7 @@ interface SessionSnapshot {
   readonly repo: string          // "owner/repo"
   readonly branch: string
   readonly title: string
-  readonly cli: "claude" | "codex" | "cursor" | "opencode" | "starbase"
+  readonly cli: "claude" | "codex" | "cursor" | "opencode" | "jingler"
   readonly prNumber: number | null
   readonly issueNumber?: number
   readonly worktreePath?: string
@@ -296,7 +296,7 @@ type Disposable         // { dispose(): void }
 
 ---
 
-## `@starbase/plugin-sdk/host`
+## `@jingler/plugin-sdk/host`
 
 ### `Activate` / `Deactivate`
 
@@ -422,7 +422,7 @@ interface Logger {
 }
 ```
 
-Lines are tagged with your plugin id and land in Starbase's plugin log. See
+Lines are tagged with your plugin id and land in Jingler's plugin log. See
 [`docs/plugins/debugging.md`](../../docs/plugins/debugging.md) for where to read
 them — a logger whose output you cannot find is not a logger.
 
@@ -456,12 +456,12 @@ runaway process cannot exhaust memory and a chatty `stdout` cannot starve the
 
 ---
 
-## `@starbase/plugin-sdk/vite`
+## `@jingler/plugin-sdk/vite`
 
-### `starbasePluginBuild`
+### `jinglerPluginBuild`
 
 ```ts
-function starbasePluginBuild(options: {
+function jinglerPluginBuild(options: {
   /** Your UI entry, e.g. `src/ui.tsx`. Emitted as `ui.js`. */
   entry?: string
   /** Clearer alias for `entry`. Use this one when the plugin has both halves. */
@@ -480,21 +480,21 @@ your plugin for anyone who installs a second one.
 builds a plugin that loads fine and then fails at its first activation event,
 because the file the manifest promises was never emitted.
 
-### `STARBASE_EXTERNALS`
+### `JINGLER_EXTERNALS`
 
 ```ts
-const STARBASE_EXTERNALS: readonly [
+const JINGLER_EXTERNALS: readonly [
   "react", "react-dom", "react/jsx-runtime",
-  "react/jsx-dev-runtime", "@starbase/plugin-sdk", "@starbase/plugin-sdk/ui"
+  "react/jsx-dev-runtime", "@jingler/plugin-sdk", "@jingler/plugin-sdk/ui"
 ]
 ```
 
-Specifiers Starbase provides at runtime. Never bundle these.
+Specifiers Jingler provides at runtime. Never bundle these.
 
 ### Your own dependencies
 
 Everything *not* in that list is **bundled into your output**, and that is the
-only way it can work: `install:local` copies `starbase.plugin.json` and `dist`
+only way it can work: `install:local` copies `jingler.plugin.json` and `dist`
 and nothing else, so there is no `node_modules` beside your plugin at runtime.
 
 Import `octokit` in your host half and Vite inlines it — fine. Mark it external
@@ -503,9 +503,9 @@ its first activation, on a machine that is not yours.
 
 ---
 
-## `@starbase/plugin-sdk/ui` — the themed kit
+## `@jingler/plugin-sdk/ui` — the themed kit
 
-Starbase's own components, themed by the active colour theme, re-exported for
+Jingler's own components, themed by the active colour theme, re-exported for
 plugins. Use these before writing your own: they are how a plugin looks like part
 of the app rather than a webpage inside it, and they are already externalised so
 they cost your bundle nothing.
@@ -532,5 +532,5 @@ they cost your bundle nothing.
 | `githubAvatarUrl` | Build a GitHub avatar URL from a login |
 
 ```ts
-import { Card, Markdown, Spinner, cn } from "@starbase/plugin-sdk/ui"
+import { Card, Markdown, Spinner, cn } from "@jingler/plugin-sdk/ui"
 ```

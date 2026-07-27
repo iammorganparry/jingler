@@ -1,6 +1,6 @@
 ---
-"@starbase/cli-adapters": patch
-"@starbase/desktop": patch
+"@jingler/cli-adapters": patch
+"@jingler/desktop": patch
 ---
 
 Fix a dead composer on session open — a prompt typed while a session loaded did nothing at all.
@@ -13,4 +13,4 @@ Three follow-ons, because a window that swallows input is only really closed whe
 
 - **A prompt sent before the transcript lands is now held and run**, exactly as a send during a run is. Dropping one was invisible — the box clears and you believe you sent it — and it survives a *failed* load too: losing the transcript is no reason to also lose what you typed.
 - **A mode or harness picked mid-load is honoured** rather than dropped.
-- **The skills probe honours `STARBASE_SCRIPTED_AGENT`.** That switch means "spawn no real harness", and the probe ignored it — so the e2e suite was starting the operator's real `claude`, with their real login, on every launch. It now answers for the fake harness instead, which is what made the suite depend on which CLIs the host happened to have installed.
+- **The skills probe honours `JINGLER_SCRIPTED_AGENT`.** That switch means "spawn no real harness", and the probe ignored it — so the e2e suite was starting the operator's real `claude`, with their real login, on every launch. It now answers for the fake harness instead, which is what made the suite depend on which CLIs the host happened to have installed.

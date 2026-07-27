@@ -1,4 +1,4 @@
-import type { CliKind, McpInjectionTarget, OpenConnectorConfig } from "@starbase/core"
+import type { CliKind, McpInjectionTarget, OpenConnectorConfig } from "@jingler/core"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback } from "react"
 import { rpc } from "./rpc-client.js"

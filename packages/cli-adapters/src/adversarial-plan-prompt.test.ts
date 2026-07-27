@@ -1,4 +1,4 @@
-import type { PlanChallenge } from "@starbase/core"
+import type { PlanChallenge } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import {
   critiquePrompt,

@@ -14,10 +14,10 @@ import { startTeeStream, teeLogPath } from "./bash-tee.js"
  * (not one lump at the end), that the temp file is cleaned up, and — the part a
  * bare `| tee` gets wrong — that the command's real exit code survives the pipe.
  *
- * Gated behind STARBASE_PROBE=1 so a machine without bash never fails CI. Run it:
- *   STARBASE_PROBE=1 pnpm vitest run packages/cli-adapters/src/bash-tee.probe.test.ts
+ * Gated behind JINGLER_PROBE=1 so a machine without bash never fails CI. Run it:
+ *   JINGLER_PROBE=1 pnpm vitest run packages/cli-adapters/src/bash-tee.probe.test.ts
  */
-const RUN = process.env.STARBASE_PROBE === "1"
+const RUN = process.env.JINGLER_PROBE === "1"
 
 /** Run a rewritten command in a real bash, resolving with its exit code. */
 const runInBash = (command: string): Promise<number> =>

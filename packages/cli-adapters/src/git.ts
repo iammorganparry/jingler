@@ -1,5 +1,5 @@
-import type { ResolvingCommit, Worktree } from "@starbase/core"
-import { GitError } from "@starbase/core"
+import type { ResolvingCommit, Worktree } from "@jingler/core"
+import { GitError } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Effect } from "effect"
@@ -12,7 +12,7 @@ export interface CreateWorktreeInput {
   readonly repoPath: string
   /** The repo's folder name (namespaces the worktree directory). */
   readonly repoName: string
-  /** Kebab slug for the branch/worktree (branch becomes `starbase/<slug>`). */
+  /** Kebab slug for the branch/worktree (branch becomes `jingler/<slug>`). */
   readonly slug: string
   /** The branch to fork from. */
   readonly baseBranch: string
@@ -53,7 +53,7 @@ const claimTaskBranch = (
   slug: string,
   suffix: number
 ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> => {
-  const branch = `starbase/${slug}${suffix === 1 ? "" : `-${suffix}`}`
+  const branch = `jingler/${slug}${suffix === 1 ? "" : `-${suffix}`}`
   return gitLine(cwd, "show-ref", "--verify", `refs/heads/${branch}`).pipe(
     Effect.flatMap((existing) => {
       if (existing !== null) return claimTaskBranch(cwd, slug, suffix + 1)
@@ -107,7 +107,7 @@ export const mainTreeHoldsBranch = (porcelain: string, branch: string): boolean 
 
 /**
  * Creates isolated git worktrees for sessions. A worktree is added under
- * `~/starbase/worktrees/<repo>/<slug>` on a fresh `starbase/<slug>` branch forked
+ * `~/jingler/worktrees/<repo>/<slug>` on a fresh `jingler/<slug>` branch forked
  * from `baseBranch`.
  *
  * Dependencies are NOT mirrored here. This service used to build the worktree a
@@ -129,11 +129,11 @@ export const mainTreeHoldsBranch = (porcelain: string, branch: string): boolean 
  * worktree of a repo costs a fraction of the first in real blocks.
  */
 export class GitService extends Effect.Service<GitService>()(
-  "@starbase/GitService",
+  "@jingler/GitService",
   {
     accessors: true,
     sync: () => {
-      /** The `~/starbase/worktrees/<repo>/<slug>` path (pure — no side effects). */
+      /** The `~/jingler/worktrees/<repo>/<slug>` path (pure — no side effects). */
       const worktreePathFor = (
         repoName: string,
         slug: string
@@ -212,12 +212,12 @@ export class GitService extends Effect.Service<GitService>()(
           Effect.map((sha) => (sha ? `origin/${baseBranch}` : baseBranch))
         )
 
-      /** Fork an isolated worktree on a fresh `starbase/<slug>` branch. */
+      /** Fork an isolated worktree on a fresh `jingler/<slug>` branch. */
       const createWorktree = (
         input: CreateWorktreeInput
       ): Effect.Effect<Worktree, GitError, GitEnv> =>
         Effect.gen(function* () {
-          const branch = `starbase/${input.slug}`
+          const branch = `jingler/${input.slug}`
           const worktreePath = yield* resolveWorktreePath(input)
           yield* reclaimStaleWorktree(input.repoPath, worktreePath)
           // Freshen the base from origin, then fork off the remote tip when we have
@@ -269,7 +269,7 @@ export class GitService extends Effect.Service<GitService>()(
       /**
        * Keep commits made on a detached session reachable before its worktree is
        * removed. A detached HEAD already contained by any local or remote ref is
-       * safe; otherwise create a collision-safe `starbase/<slug>` branch at HEAD.
+       * safe; otherwise create a collision-safe `jingler/<slug>` branch at HEAD.
        */
       const preserveDetachedHead = (
         cwd: string,

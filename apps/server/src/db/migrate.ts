@@ -1,6 +1,6 @@
 /**
  * Apply generated SQL migrations (from ./drizzle) to the configured database.
- * Run with `pnpm --filter @starbase/server db:migrate` after `db:generate`.
+ * Run with `pnpm --filter @jingler/server db:migrate` after `db:generate`.
  * Uses a dedicated single connection that is closed when done.
  */
 import { drizzle } from "drizzle-orm/postgres-js"
@@ -13,7 +13,7 @@ const run = async (): Promise<void> => {
   try {
     await migrate(drizzle(migrationClient), { migrationsFolder: "./drizzle" })
     // eslint-disable-next-line no-console
-    console.log("[@starbase/server] migrations applied")
+    console.log("[@jingler/server] migrations applied")
   } finally {
     await migrationClient.end()
   }
@@ -21,6 +21,6 @@ const run = async (): Promise<void> => {
 
 run().catch((err) => {
   // eslint-disable-next-line no-console
-  console.error("[@starbase/server] migration failed:", err)
+  console.error("[@jingler/server] migration failed:", err)
   process.exit(1)
 })

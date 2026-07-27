@@ -7,9 +7,9 @@ import type {
   NotificationsConfig,
   OpenConnectorConfig,
   ProviderConfig
-} from "@starbase/core"
-import { DEFAULT_THEME_ID, WorkspaceConfig } from "@starbase/core"
-import { ConfigError } from "@starbase/core"
+} from "@jingler/core"
+import { DEFAULT_THEME_ID, WorkspaceConfig } from "@jingler/core"
+import { ConfigError } from "@jingler/core"
 import { FileSystem } from "@effect/platform"
 import { Effect, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
@@ -49,12 +49,12 @@ export const migrateConfigReasoning = (value: unknown): unknown => {
 }
 
 /**
- * Reads and writes the persisted `WorkspaceConfig` at `~/starbase/config.json`.
+ * Reads and writes the persisted `WorkspaceConfig` at `~/jingler/config.json`.
  * `get()` returns null until first-run setup writes a repos directory. Backed by
  * `@effect/platform` `FileSystem` (from `NodeContext.layer`) + `AppPaths`.
  */
 export class ConfigService extends Effect.Service<ConfigService>()(
-  "@starbase/ConfigService",
+  "@jingler/ConfigService",
   {
     accessors: true,
     sync: () => {
@@ -216,7 +216,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
           const paths = yield* AppPaths
           yield* fs
             .makeDirectory(paths.root, { recursive: true })
-            .pipe(Effect.mapError((cause) => new ConfigError({ message: "Failed to create ~/starbase", cause })))
+            .pipe(Effect.mapError((cause) => new ConfigError({ message: "Failed to create ~/jingler", cause })))
           const encoded = yield* Schema.encode(WorkspaceConfig)(config).pipe(
             Effect.mapError((cause) => new ConfigError({ message: "Failed to encode config", cause }))
           )

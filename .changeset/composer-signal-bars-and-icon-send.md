@@ -1,5 +1,5 @@
 ---
-"@starbase/ui": patch
+"@jingler/ui": patch
 ---
 
 Retune the composer toolbar's trailing end: the branch now rides beside send, and send/stop are icon buttons.

@@ -2,7 +2,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import type * as React from "react"
 import { cn } from "../lib/cn.js"
 
-/** shadcn ButtonGroup, adapted to Starbase's owned Button primitive and tokens. */
+/** shadcn ButtonGroup, adapted to Jingler's owned Button primitive and tokens. */
 const buttonGroupVariants = cva(
   "flex w-fit items-stretch [&>*]:focus-visible:relative [&>*]:focus-visible:z-10 has-[>[data-slot=button-group]]:gap-2",
   {

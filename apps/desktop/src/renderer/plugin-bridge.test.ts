@@ -10,7 +10,7 @@
  * missing when the capability was lost in the plugin migration.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { Session } from "@starbase/core"
+import type { Session } from "@jingler/core"
 
 const sessionsUnlinkIssue = vi.fn()
 

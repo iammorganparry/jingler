@@ -13,7 +13,7 @@
  * not a snapshot — App.tsx forwards each one into the machine rather than
  * rendering from it.
  */
-import type { Session } from "@starbase/core"
+import type { Session } from "@jingler/core"
 
 type Listener = (session: Session) => void
 

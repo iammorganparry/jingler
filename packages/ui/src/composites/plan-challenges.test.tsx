@@ -1,4 +1,4 @@
-import type { PlanChallenge, PlanStep } from "@starbase/core"
+import type { PlanChallenge, PlanStep } from "@jingler/core"
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { ChallengeBadge, PlanChallenges, PlanProvenance } from "./plan-challenges.js"

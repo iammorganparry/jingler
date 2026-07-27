@@ -23,7 +23,7 @@ import type { SeedSession } from "./fixtures.js"
 
 const baseSession = (over: Partial<SeedSession> & { id: string }): SeedSession => ({
   repo: "widget",
-  branch: `starbase/${over.id}`,
+  branch: `jingler/${over.id}`,
   title: over.id,
   status: "idle",
   cli: "claude",
@@ -427,7 +427,7 @@ test("the split and its sessions survive a real app restart", async ({ launchApp
     home: first.home,
     reposDir: first.reposDir,
     // The split lives in localStorage (`sb.split.v2`), which is in the Chromium
-    // profile, not STARBASE_HOME — reuse it or this restarts with a blank slate
+    // profile, not JINGLER_HOME — reuse it or this restarts with a blank slate
     // and proves nothing.
     userDataDir: first.userDataDir
   })

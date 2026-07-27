@@ -19,7 +19,7 @@ export interface ClaudeCapabilities {
 export const NO_CAPABILITIES: ClaudeCapabilities = { commands: [], skills: [] }
 
 /**
- * What the SCRIPTED harness says it can do (`STARBASE_SCRIPTED_AGENT`).
+ * What the SCRIPTED harness says it can do (`JINGLER_SCRIPTED_AGENT`).
  *
  * Probing means spawning the real CLI — with the operator's real login — which
  * the scripted switch exists precisely to prevent. So under it we answer for the

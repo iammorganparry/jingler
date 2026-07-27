@@ -1,7 +1,7 @@
 import { join } from "node:path"
 import { execFileSync } from "node:child_process"
-import type { CreateSessionInput } from "@starbase/core"
-import { fallbackTitle, userMessage } from "@starbase/core"
+import type { CreateSessionInput } from "@jingler/core"
+import { fallbackTitle, userMessage } from "@jingler/core"
 import { Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { GitService } from "./git.js"
@@ -22,7 +22,7 @@ describe("retitleSession", () => {
   let repoPath: string
   beforeEach(() => {
     temp = withTempRoot()
-    repos = mkTemp("starbase-repos-")
+    repos = mkTemp("jingler-repos-")
     repoPath = initGitRepo(join(repos.dir, "app"))
   })
   afterEach(() => {
@@ -58,15 +58,15 @@ describe("retitleSession", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     expect(exit.value.updated.title).toBe("Add response caching")
-    expect(exit.value.updated.branch).toBe("starbase/add-response-caching")
+    expect(exit.value.updated.branch).toBe("jingler/add-response-caching")
     expect(exit.value.persisted.title).toBe("Add response caching")
-    expect(exit.value.persisted.branch).toBe("starbase/add-response-caching")
+    expect(exit.value.persisted.branch).toBe("jingler/add-response-caching")
     expect(
       execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
         cwd: exit.value.persisted.worktreePath,
         encoding: "utf-8"
       }).trim()
-    ).toBe("starbase/add-response-caching")
+    ).toBe("jingler/add-response-caching")
   })
 
   it("falls back to the first user message when the generator yields the heuristic", async () => {
@@ -117,9 +117,9 @@ describe("retitleSession", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value.first.branch).toBe("starbase/first-task")
+    expect(exit.value.first.branch).toBe("jingler/first-task")
     expect(exit.value.second.title).toBe("Different task")
-    expect(exit.value.second.branch).toBe("starbase/first-task")
+    expect(exit.value.second.branch).toBe("jingler/first-task")
   })
 
   it("fails with GitError for an unknown session id", async () => {

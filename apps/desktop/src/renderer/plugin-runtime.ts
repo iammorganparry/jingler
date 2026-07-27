@@ -5,9 +5,9 @@
  *
  * A plugin ships `import { useState } from "react"`. The importmap in
  * `index.html` points that bare specifier at
- * `starbase-plugin://runtime/react.js`, and the main process serves a generated
+ * `jingler-plugin://runtime/react.js`, and the main process serves a generated
  * shim for it (`main/plugin-protocol.ts`). That shim does not contain React — it
- * reads `globalThis.__STARBASE_RUNTIME__` and re-exports off it.
+ * reads `globalThis.__JINGLER_RUNTIME__` and re-exports off it.
  *
  * This module is what puts the object there.
  *
@@ -27,11 +27,11 @@
 import * as React from "react"
 import * as jsxRuntime from "react/jsx-runtime"
 import * as reactDom from "react-dom"
-import * as sdkModule from "@starbase/plugin-sdk"
-import * as sdkUiModule from "@starbase/plugin-sdk/ui"
+import * as sdkModule from "@jingler/plugin-sdk"
+import * as sdkUiModule from "@jingler/plugin-sdk/ui"
 
 /** What the generated shims destructure. Keys match `RUNTIME_MODULES`. */
-export interface StarbaseRuntime {
+export interface JinglerRuntime {
   readonly react: typeof React
   readonly jsxRuntime: typeof jsxRuntime
   /**
@@ -40,7 +40,7 @@ export interface StarbaseRuntime {
    * It used to be aliased to the React shim, which exports none of its
    * bindings — so a plugin doing `import { createPortal } from "react-dom"`
    * died at module instantiation with "does not provide an export named
-   * createPortal". `STARBASE_EXTERNALS` tells every plugin to externalise
+   * createPortal". `JINGLER_EXTERNALS` tells every plugin to externalise
    * react-dom, so that was the supported path leading straight into a wall.
    */
   readonly reactDom: typeof reactDom
@@ -60,13 +60,13 @@ export interface StarbaseRuntime {
    * place that documents what a plugin actually receives.
    */
   readonly sdk: typeof sdkModule
-  /** The themed UI kit, at `@starbase/plugin-sdk/ui`. */
+  /** The themed UI kit, at `@jingler/plugin-sdk/ui`. */
   readonly sdkUi: typeof sdkUiModule
 }
 
 declare global {
   // eslint-disable-next-line no-var
-  var __STARBASE_RUNTIME__: StarbaseRuntime | undefined
+  var __JINGLER_RUNTIME__: JinglerRuntime | undefined
 }
 
 /**
@@ -77,7 +77,7 @@ declare global {
  * in which a plugin could observe a half-built surface. An earlier draft had a
  * `publishPluginSdk` that populated the `sdk` object after the fact, which was
  * both unnecessary and a bug waiting to happen: nothing ever called it, so every
- * plugin's `import { useHost } from "@starbase/plugin-sdk"` resolved to
+ * plugin's `import { useHost } from "@jingler/plugin-sdk"` resolved to
  * `undefined`.
  */
 /**
@@ -113,7 +113,7 @@ const jsxRuntimeWithDev = {
 }
 
 export const publishPluginRuntime = (): void => {
-  globalThis.__STARBASE_RUNTIME__ ??= {
+  globalThis.__JINGLER_RUNTIME__ ??= {
     react: React,
     jsxRuntime: jsxRuntimeWithDev as typeof jsxRuntime,
     reactDom,

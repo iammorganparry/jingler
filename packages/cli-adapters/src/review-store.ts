@@ -1,5 +1,5 @@
-import type { AdversarialReview, StreamEvent } from "@starbase/core"
-import { AdversarialReview as AdversarialReviewSchema, StreamEvent as StreamEventSchema } from "@starbase/core"
+import type { AdversarialReview, StreamEvent } from "@jingler/core"
+import { AdversarialReview as AdversarialReviewSchema, StreamEvent as StreamEventSchema } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Ref, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
@@ -40,7 +40,7 @@ const StoredTranscriptCompat = Schema.Union(StoredTranscriptSchema, Events)
 
 /**
  * The last adversarial review per session, persisted to
- * `~/starbase/reviews/<sessionId>.json`. Mirrors `TranscriptStore`: reads are
+ * `~/jingler/reviews/<sessionId>.json`. Mirrors `TranscriptStore`: reads are
  * best-effort, so a missing or malformed file yields `null` rather than failing
  * the Pull Request tab.
  *
@@ -51,13 +51,13 @@ const StoredTranscriptCompat = Schema.Union(StoredTranscriptSchema, Events)
  *
  * **The de-dupe deliberately does not depend on the disk.** Writes are
  * best-effort (a failed persist must not fail a review the user can already
- * see), but if `get` could only read the file, an unwritable `~/starbase/reviews`
+ * see), but if `get` could only read the file, an unwritable `~/jingler/reviews`
  * would make every lookup miss — and the auto-trigger, which polls on a timer,
  * would then spawn a fresh reviewer on the priciest model every 60 seconds,
  * forever, with no user-visible error. So an in-memory mirror backs the file and
  * is authoritative when the file is absent or unreadable.
  */
-export class ReviewStore extends Effect.Service<ReviewStore>()("@starbase/ReviewStore", {
+export class ReviewStore extends Effect.Service<ReviewStore>()("@jingler/ReviewStore", {
   accessors: true,
   effect: Effect.gen(function* () {
     // Survives a failed/unreadable write; lost on restart (when a re-review is

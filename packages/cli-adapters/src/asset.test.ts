@@ -21,8 +21,8 @@ let worktree: ReturnType<typeof mkTemp>
 let outside: ReturnType<typeof mkTemp>
 
 beforeEach(() => {
-  worktree = mkTemp("starbase-worktree-")
-  outside = mkTemp("starbase-outside-")
+  worktree = mkTemp("jingler-worktree-")
+  outside = mkTemp("jingler-outside-")
   writeFileSync(join(outside.dir, "secret.txt"), "SUPER SECRET")
 })
 afterEach(() => {

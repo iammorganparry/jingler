@@ -16,7 +16,7 @@
  * visit, but a live run, a queued turn or half-typed prompt text exists ONLY in the
  * actor. Hence the guards below rather than a plain LRU.
  */
-import type { ActivityPhase } from "@starbase/core"
+import type { ActivityPhase } from "@jingler/core"
 
 /**
  * How many actors stay resident.

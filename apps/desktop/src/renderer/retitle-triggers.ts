@@ -1,4 +1,4 @@
-import type { Session } from "@starbase/core"
+import type { Session } from "@jingler/core"
 
 /**
  * Auto-named session ids whose plan JUST appeared — present in `next` (a plan was

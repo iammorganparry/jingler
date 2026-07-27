@@ -1,5 +1,5 @@
-import type { StreamEvent } from "@starbase/core"
-import { isBackgroundTaskEvent, isSubagentEvent } from "@starbase/core"
+import type { StreamEvent } from "@jingler/core"
+import { isBackgroundTaskEvent, isSubagentEvent } from "@jingler/core"
 
 /**
  * Where a stream event goes.

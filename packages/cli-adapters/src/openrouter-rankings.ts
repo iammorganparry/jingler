@@ -1,5 +1,5 @@
-import type { RoutingRankingModel, RoutingRankingSnapshot, TaskKind } from "@starbase/core"
-import { TASK_KINDS } from "@starbase/core"
+import type { RoutingRankingModel, RoutingRankingSnapshot, TaskKind } from "@jingler/core"
+import { TASK_KINDS } from "@jingler/core"
 import { Effect, Ref, Schema } from "effect"
 import { isScriptedEnv } from "./scripted.js"
 
@@ -118,7 +118,7 @@ interface RankingCache {
 }
 
 /** Best-effort runtime evidence: network or schema drift never blocks a plan. */
-export class RankingService extends Effect.Service<RankingService>()("@starbase/RankingService", {
+export class RankingService extends Effect.Service<RankingService>()("@jingler/RankingService", {
   accessors: true,
   effect: Effect.gen(function* () {
     const cache = yield* Ref.make<RankingCache>({ value: null, expiresAt: 0 })

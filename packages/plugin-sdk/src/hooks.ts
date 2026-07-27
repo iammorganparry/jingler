@@ -1,7 +1,7 @@
 /**
  * The hooks a plugin's UI half calls.
  *
- * All four resolve through {@link PluginViewContext}, which Starbase provides
+ * All four resolve through {@link PluginViewContext}, which Jingler provides
  * around every plugin view. See `context.ts` for why that is a context rather
  * than the module-level "current plugin" this originally used — the short
  * version is that a split window renders several plugins at once, and a global
@@ -24,7 +24,7 @@ const useView = (hook: string): PluginViewValue => {
   const value = useContext(PluginViewContext)
   if (!value) {
     throw new Error(
-      `${hook}() was called outside a Starbase plugin view. Plugin hooks only work inside a component rendered by a contributed tab or pane.`
+      `${hook}() was called outside a Jingler plugin view. Plugin hooks only work inside a component rendered by a contributed tab or pane.`
     )
   }
   return value

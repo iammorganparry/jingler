@@ -1,5 +1,5 @@
 /**
- * CLI wrapper around `rebuildTranscript` — restore a session's Starbase
+ * CLI wrapper around `rebuildTranscript` — restore a session's Jingler
  * transcript from the Claude harness's own JSONL log.
  *
  * All conversion logic lives in `src/main/transcript-backfill.ts` (and is unit
@@ -16,10 +16,10 @@ import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from "n
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { Effect, Schema } from "effect"
-import { Message as MessageSchema } from "@starbase/core"
+import { Message as MessageSchema } from "@jingler/core"
 import { harnessLogPath, rebuildTranscript } from "../src/main/transcript-backfill.js"
 
-const STARBASE_HOME = process.env.STARBASE_HOME ?? join(homedir(), "starbase")
+const JINGLER_HOME = process.env.JINGLER_HOME ?? join(homedir(), "jingler")
 
 const main = async () => {
   const [sessionId, ...flags] = process.argv.slice(2)
@@ -27,7 +27,7 @@ const main = async () => {
   const write = flags.includes("--write")
   const force = flags.includes("--force")
 
-  const sessions = JSON.parse(readFileSync(join(STARBASE_HOME, "sessions.json"), "utf8")) as Array<{
+  const sessions = JSON.parse(readFileSync(join(JINGLER_HOME, "sessions.json"), "utf8")) as Array<{
     id: string
     cli?: string
     resumeId?: string
@@ -44,7 +44,7 @@ const main = async () => {
   const jsonl = harnessLogPath(session.worktreePath, session.resumeId)
   if (!existsSync(jsonl)) throw new Error(`no harness log at ${jsonl}`)
 
-  const target = join(STARBASE_HOME, "transcripts", `${sessionId}.json`)
+  const target = join(JINGLER_HOME, "transcripts", `${sessionId}.json`)
   const existingBytes = existsSync(target) ? statSync(target).size : 0
   if (existingBytes > 0 && !force) {
     throw new Error(`${target} already has ${existingBytes} bytes — pass --force to replace it`)

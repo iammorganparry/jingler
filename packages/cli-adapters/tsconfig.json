@@ -1,4 +1,4 @@
 {
-  "extends": "@starbase/tsconfig/node.json",
+  "extends": "@jingler/tsconfig/node.json",
   "include": ["src"]
 }

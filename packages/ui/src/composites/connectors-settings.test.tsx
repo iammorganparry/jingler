@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { ConnectorsSettings } from "./connectors-settings.js"
 import type { OpenConnectorSectionProps } from "./open-connector-section.js"
 import type { ConnectorCenterProps } from "./connector-center.js"
-import type { McpServerStatus } from "@starbase/core"
+import type { McpServerStatus } from "@jingler/core"
 
 afterEach(cleanup)
 

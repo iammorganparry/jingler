@@ -1,5 +1,5 @@
 /**
- * The wire between Starbase's main process and the plugin extension host.
+ * The wire between Jingler's main process and the plugin extension host.
  *
  * ## Why plugin backends run in a separate process at all
  *
@@ -32,7 +32,7 @@
  * `RpcGroup`s multiplexed over one channel rather than the server/client pair
  * `main/rpc.ts` gets away with. And the payloads are genuinely `unknown`: a
  * plugin command's argument and return value are arbitrary JSON by definition,
- * so schema validation buys far less than it does for `StarbaseRpcs`, where
+ * so schema validation buys far less than it does for `JinglerRpcs`, where
  * every field has a known shape.
  *
  * What the hand-rolled version costs is correlation code, which is exactly the
@@ -157,7 +157,7 @@ export interface AuthSessionRequestPayload {
 }
 
 /** The channel name the utilityProcess uses. One channel, tagged messages. */
-export const PLUGIN_HOST_CHANNEL = "starbase/plugin-host"
+export const PLUGIN_HOST_CHANNEL = "jingler/plugin-host"
 
 /**
  * How long main waits for the host to report `ready` before giving up.

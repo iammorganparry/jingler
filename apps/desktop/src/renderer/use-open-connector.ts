@@ -1,4 +1,4 @@
-import type { McpServerStatus, OpenConnectorConfig, OpenConnectorDefaults } from "@starbase/core"
+import type { McpServerStatus, OpenConnectorConfig, OpenConnectorDefaults } from "@jingler/core"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useState } from "react"
 import { rpc } from "./rpc-client.js"

@@ -1,7 +1,7 @@
 import type { ChildProcess } from "node:child_process"
 
 /**
- * Every harness subprocess Starbase spawns, so all of them can be killed when the
+ * Every harness subprocess Jingler spawns, so all of them can be killed when the
  * app quits.
  *
  * POSIX does not reap a child when its parent dies — an orphan is reparented to

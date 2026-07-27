@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { ChevronRight, Layers } from "lucide-react"
-import type { ContextDigest } from "@starbase/core"
+import type { ContextDigest } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 
 const fmtTokens = (n: number): string =>

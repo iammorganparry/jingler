@@ -88,10 +88,10 @@ export interface RouteQuotaState {
   readonly resetsAt: string | null
 }
 
-const CLI_ORDER: ReadonlyArray<CliKind> = ["claude", "codex", "opencode", "cursor", "starbase"]
+const CLI_ORDER: ReadonlyArray<CliKind> = ["claude", "codex", "opencode", "cursor", "jingler"]
 
 /**
- * Starbase-owned, deliberately small domain profile. It names harness families,
+ * Jingler-owned, deliberately small domain profile. It names harness families,
  * not upstream model ids, so live discovery remains authoritative.
  */
 const TASK_CLI_ORDER: Readonly<Record<TaskKind, ReadonlyArray<CliKind>>> = {
@@ -219,8 +219,8 @@ export const canonicalRouteCandidates = (
         model: model.id
       }))
     )
-    // `starbase` re-enters the orchestrator; cursor has no real headless adapter.
-    .filter((candidate) => candidate.cli !== "starbase" && candidate.cli !== "cursor")
+    // `jingler` re-enters the orchestrator; cursor has no real headless adapter.
+    .filter((candidate) => candidate.cli !== "jingler" && candidate.cli !== "cursor")
     .sort((left, right) => {
       const cli = CLI_ORDER.indexOf(left.cli) - CLI_ORDER.indexOf(right.cli)
       return cli === 0 ? left.model.localeCompare(right.model) : cli

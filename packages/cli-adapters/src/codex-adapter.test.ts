@@ -1,4 +1,4 @@
-import { applyStreamEvent, assistantMessage } from "@starbase/core"
+import { applyStreamEvent, assistantMessage } from "@jingler/core"
 import type { ThreadEvent } from "@openai/codex-sdk"
 import { describe, expect, it } from "vitest"
 import {
@@ -130,7 +130,7 @@ describe("codexEventToStreamEvents", () => {
     ])
   })
 
-  it("falls back to the Starbase session key when thread.started has no thread id", () => {
+  it("falls back to the Jingler session key when thread.started has no thread id", () => {
     expect(codexEventToStreamEvents(ev({ type: "thread.started" }), "s1")).toStrictEqual([
       { _tag: "Started", sessionId: "s1" }
     ])

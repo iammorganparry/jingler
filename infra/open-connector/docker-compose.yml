@@ -1,4 +1,4 @@
-# Self-hosted OpenConnector — the ONE central MCP store every Starbase agent
+# Self-hosted OpenConnector — the ONE central MCP store every Jingler agent
 # (claude / codex / cursor / opencode) draws its tools from. A provider connected
 # once here (via the web console at :3000) is available to all of them.
 #

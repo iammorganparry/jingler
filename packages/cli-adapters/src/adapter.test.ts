@@ -1,4 +1,4 @@
-import type { StreamEvent } from "@starbase/core"
+import type { StreamEvent } from "@jingler/core"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import {
@@ -14,9 +14,9 @@ const runScripted = async (prompt: string): Promise<ReadonlyArray<StreamEvent>> 
     "session-1",
     {
       cli: "claude",
-      repo: "starbase",
-      branch: "starbase/test",
-      cwd: "/tmp/starbase-test",
+      repo: "jingler",
+      branch: "jingler/test",
+      cwd: "/tmp/jingler-test",
       prompt,
       images: [],
       binPath: null,

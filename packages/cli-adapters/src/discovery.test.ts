@@ -5,12 +5,12 @@ import { fakeCommandExecutor, runExit } from "./test-support.js"
 import type { FakeCommandHandler } from "./test-support.js"
 
 /**
- * Just the harnesses this module actually probes the host for. `starbase` is
+ * Just the harnesses this module actually probes the host for. `jingler` is
  * the app itself and is always present, so including it would make every
  * "nothing is installed" assertion permanently false.
  */
 const external = (cs: ReadonlyArray<{ kind: string; available: boolean }>) =>
-  cs.filter((c) => c.kind !== "starbase")
+  cs.filter((c) => c.kind !== "jingler")
 
 /**
  * DiscoveryService probes the host for coding CLIs. Those binaries aren't present
@@ -25,7 +25,7 @@ const basename = (command: string) => command.split("/").pop() ?? command
 /**
  * The e2e hermeticity guard.
  *
- * `STARBASE_DISCOVERY_BIN_DIR` pins discovery to one directory so a test run can
+ * `JINGLER_DISCOVERY_BIN_DIR` pins discovery to one directory so a test run can
  * never find the developer's real harnesses — booting them is slow, varies per
  * machine, and (since `withOpencodeServer` inherits the environment untouched)
  * runs them against the developer's own credentials.
@@ -35,10 +35,10 @@ const basename = (command: string) => command.split("/").pop() ?? command
  * proves the pin overrides them rather than merely coinciding with an empty host.
  */
 describe("DiscoveryService.list — pinned bin dir", () => {
-  const PIN = "/tmp/starbase-pinned-bin"
+  const PIN = "/tmp/jingler-pinned-bin"
 
   afterEach(() => {
-    delete process.env.STARBASE_DISCOVERY_BIN_DIR
+    delete process.env.JINGLER_DISCOVERY_BIN_DIR
   })
 
   /** A host where every harness is genuinely installed, by both discovery routes. */
@@ -54,7 +54,7 @@ describe("DiscoveryService.list — pinned bin dir", () => {
   ): ReturnType<FakeCommandHandler> => fullyInstalled(...params)
 
   it("finds nothing when the pinned dir is empty, despite a real install on PATH", async () => {
-    process.env.STARBASE_DISCOVERY_BIN_DIR = PIN
+    process.env.JINGLER_DISCOVERY_BIN_DIR = PIN
     const exit = await run((...params) => {
       const [command] = params
       // The pinned probe runs `<pin>/<bin> --version`; that binary doesn't exist.
@@ -64,7 +64,7 @@ describe("DiscoveryService.list — pinned bin dir", () => {
 
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    // Starbase ships with the app, so it is always available and has no binary
+    // Jingler ships with the app, so it is always available and has no binary
     // — it is not part of what "probing the host" means. Excluded by kind rather
     // than by relaxing the assertion, so a REAL harness leaking through still
     // fails this.
@@ -73,7 +73,7 @@ describe("DiscoveryService.list — pinned bin dir", () => {
   })
 
   it("finds only what the pinned dir contains", async () => {
-    process.env.STARBASE_DISCOVERY_BIN_DIR = PIN
+    process.env.JINGLER_DISCOVERY_BIN_DIR = PIN
     const exit = await run((...params) => {
       const [command, args] = params
       if (command === `${PIN}/claude` && args.includes("--version")) return { stdout: "2.0.0 (Claude Code)" }
@@ -93,7 +93,7 @@ describe("DiscoveryService.list — pinned bin dir", () => {
 
   /** PATH scrubbing alone could never do this — the candidates are absolute. */
   it("ignores the hardcoded absolute candidates while pinned", async () => {
-    process.env.STARBASE_DISCOVERY_BIN_DIR = PIN
+    process.env.JINGLER_DISCOVERY_BIN_DIR = PIN
     const exit = await run((command) => {
       if (command.startsWith(PIN)) return { stdout: "" }
       // Every absolute candidate answers, as it would on a real dev machine.
@@ -109,7 +109,7 @@ describe("DiscoveryService.list — pinned bin dir", () => {
   })
 
   it("still probes the real host when the pin is unset or blank", async () => {
-    process.env.STARBASE_DISCOVERY_BIN_DIR = ""
+    process.env.JINGLER_DISCOVERY_BIN_DIR = ""
     const exit = await run(fullyInstalled)
 
     expect(exit._tag).toBe("Success")
@@ -133,7 +133,7 @@ describe("DiscoveryService.list", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     const byKind = Object.fromEntries(exit.value.map((c) => [c.kind, c]))
-    expect(exit.value).toHaveLength(5) // one entry per CLI spec, incl. starbase
+    expect(exit.value).toHaveLength(5) // one entry per CLI spec, incl. jingler
 
     expect(byKind.claude).toMatchObject({ available: true, version: "claude 2.1.0" })
     expect(byKind.claude?.binPath).toBe("/usr/local/bin/claude")
@@ -150,7 +150,7 @@ describe("DiscoveryService.list", () => {
     }
   })
 
-  it("still offers Starbase itself on a host with no CLI at all", async () => {
+  it("still offers Jingler itself on a host with no CLI at all", async () => {
     // The orchestrator is the app, not something installed beside it. Reporting
     // it unavailable here would be both false and unactionable — there is
     // nothing the operator could install to fix it. Whether a round can RUN is a
@@ -159,8 +159,8 @@ describe("DiscoveryService.list", () => {
     const exit = await run(() => ({ stdout: "" }))
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    const starbase = exit.value.find((c) => c.kind === "starbase")
-    expect(starbase).toMatchObject({ available: true, binPath: null })
+    const jingler = exit.value.find((c) => c.kind === "jingler")
+    expect(jingler).toMatchObject({ available: true, binPath: null })
   })
 
   /**

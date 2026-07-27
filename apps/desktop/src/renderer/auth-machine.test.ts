@@ -4,7 +4,7 @@ import { authMachine } from "./auth-machine.js"
 
 /**
  * The auth machine's side-effects go through `rpc-client` (mocked) and
- * `window.starbase.openExternal` (stubbed), so it runs under node. We drive it
+ * `window.jingler.openExternal` (stubbed), so it runs under node. We drive it
  * through the same events the LoginScreen sends and assert the states the gate
  * keys off: signed-in vs the wall, the magic-link sent/error substates, the
  * OAuth → deep-link → signed-in path, and sign-out.
@@ -44,7 +44,7 @@ beforeEach(() => {
   h.openedUrls = []
   h.signOutCalls = 0
   vi.stubGlobal("window", {
-    starbase: { openExternal: async (url: string) => void h.openedUrls.push(url) }
+    jingler: { openExternal: async (url: string) => void h.openedUrls.push(url) }
   })
 })
 

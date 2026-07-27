@@ -1,5 +1,5 @@
 ---
-"@starbase/cli-adapters": patch
+"@jingler/cli-adapters": patch
 ---
 
 Fixed: a session could share a branch ref with your own checkout, so the agent's commits moved the branch you were standing on.

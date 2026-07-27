@@ -1,4 +1,4 @@
-import type { PrFileChange, PrReviewThread, ReviewFinding } from "@starbase/core"
+import type { PrFileChange, PrReviewThread, ReviewFinding } from "@jingler/core"
 
 /**
  * How much feedback each changed file carries — the number behind the comment

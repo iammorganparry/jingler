@@ -7,8 +7,8 @@ import type {
   ConnectorProvider,
   ConnectorProviderDetail,
   OAuthClientInfo
-} from "@starbase/core"
-import { ConnectorError } from "@starbase/core"
+} from "@jingler/core"
+import { ConnectorError } from "@jingler/core"
 import { Effect } from "effect"
 import { ConfigService } from "./config.js"
 import { SecretStore } from "./secret-store.js"
@@ -23,7 +23,7 @@ import { isRecord, normalizeEndpoint, str, strArray } from "./mcp-config.js"
  *
  * SECURITY: credentials flow ONE way — api keys, client secrets and OAuth grants
  * go IN on request payloads and are handed to OpenConnector, which owns the vault.
- * Nothing here returns a secret to the renderer; the domain types (`@starbase/core`
+ * Nothing here returns a secret to the renderer; the domain types (`@jingler/core`
  * `connector.ts`) have no field for one.
  *
  * Responses are mapped defensively (never `Schema.decode`, which would throw on an
@@ -269,7 +269,7 @@ const mapOAuthConfig = (raw: unknown): OAuthClientInfo | undefined => {
 const OK: ConnectorActionResult = { ok: true, message: null }
 
 export class OpenConnectorApi extends Effect.Service<OpenConnectorApi>()(
-  "@starbase/OpenConnectorApi",
+  "@jingler/OpenConnectorApi",
   {
     accessors: true,
     effect: Effect.gen(function* () {

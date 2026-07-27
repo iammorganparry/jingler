@@ -91,7 +91,7 @@ export const SignupSent: Story = { render: () => <MagicLink state="sent" mode="s
 
 export const Card: Story = {
   render: () => (
-    <AuthCard title="Sign in to Starbase" subtitle="Run and manage your agent sessions.">
+    <AuthCard title="Sign in to Jingler" subtitle="Run and manage your agent sessions.">
       <OAuthButton provider="github" onClick={() => {}} />
       <AuthDivider />
       <MagicLinkForm

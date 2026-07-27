@@ -32,7 +32,7 @@ const toRecord = (row: UserRow): UserRecord => ({
 })
 
 export class UserRepository extends Effect.Service<UserRepository>()(
-  "@starbase/server/UserRepository",
+  "@jingler/server/UserRepository",
   {
     accessors: true,
     effect: Effect.gen(function* () {

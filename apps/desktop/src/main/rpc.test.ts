@@ -23,8 +23,8 @@ import {
   TerminalService,
   UsageService,
   WorkspaceService
-} from "@starbase/cli-adapters"
-import type { AgentContext, CliAdapterShape, SessionSpec } from "@starbase/cli-adapters"
+} from "@jingler/cli-adapters"
+import type { AgentContext, CliAdapterShape, SessionSpec } from "@jingler/cli-adapters"
 import type {
   Attachment,
   CliKind,
@@ -34,9 +34,9 @@ import type {
   RoutingRankingSnapshot,
   StreamEvent,
   Usage
-} from "@starbase/core"
-import { GitError } from "@starbase/core"
-import { appPathsFor, fakeCommandExecutor } from "@starbase/cli-adapters/test-support"
+} from "@jingler/core"
+import { GitError } from "@jingler/core"
+import { appPathsFor, fakeCommandExecutor } from "@jingler/cli-adapters/test-support"
 import { NodeContext } from "@effect/platform-node"
 import type { CommandExecutor } from "@effect/platform"
 import { Effect, Layer, Logger, Stream } from "effect"
@@ -242,8 +242,8 @@ describe("RPC handlers", () => {
   let root: string
   let base: Layer.Layer<ConfigService | AppPaths | NodeContext.NodeContext>
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "starbase-rpc-"))
-    root = join(dir, "starbase")
+    dir = mkdtempSync(join(tmpdir(), "jingler-rpc-"))
+    root = join(dir, "jingler")
     base = Layer.mergeAll(
       ConfigService.Default,
       Layer.succeed(AppPaths, appPathsFor(root)),
@@ -290,7 +290,7 @@ describe("RPC handlers", () => {
     const enabled = undefined
 
     it("observes a terminal sign-in after a cached unauthenticated result", () => {
-      const previousHarnessHome = process.env.STARBASE_HARNESS_HOME
+      const previousHarnessHome = process.env.JINGLER_HARNESS_HOME
       const previousOpenAiKey = process.env.OPENAI_API_KEY
       const harnessHome = join(dir, "harness-home")
       const catalog = [
@@ -301,7 +301,7 @@ describe("RPC handlers", () => {
         }
       ]
 
-      process.env.STARBASE_HARNESS_HOME = harnessHome
+      process.env.JINGLER_HARNESS_HOME = harnessHome
       delete process.env.OPENAI_API_KEY
       resetSubscriptionCache()
 
@@ -316,8 +316,8 @@ describe("RPC handlers", () => {
 
         expect(eligibleRoutingCatalog(catalog, enabled)).toStrictEqual(catalog)
       } finally {
-        if (previousHarnessHome === undefined) delete process.env.STARBASE_HARNESS_HOME
-        else process.env.STARBASE_HARNESS_HOME = previousHarnessHome
+        if (previousHarnessHome === undefined) delete process.env.JINGLER_HARNESS_HOME
+        else process.env.JINGLER_HARNESS_HOME = previousHarnessHome
         if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY
         else process.env.OPENAI_API_KEY = previousOpenAiKey
         resetSubscriptionCache()
@@ -1300,8 +1300,8 @@ describe("Gigaplan round persistence", () => {
     rankingReads = 0
     previousAnthropicKey = process.env.ANTHROPIC_API_KEY
     process.env.ANTHROPIC_API_KEY = "e2e-test-key"
-    dir = mkdtempSync(join(tmpdir(), "starbase-round-"))
-    root = join(dir, "starbase")
+    dir = mkdtempSync(join(tmpdir(), "jingler-round-"))
+    root = join(dir, "jingler")
     mkdirSync(root, { recursive: true })
     writeFileSync(
       join(root, "sessions.json"),
@@ -1312,7 +1312,7 @@ describe("Gigaplan round persistence", () => {
           branch: "b",
           title: "t",
           status: "idle",
-          cli: "starbase",
+          cli: "jingler",
           diff: { added: 0, removed: 0 },
           prNumber: null,
           costUsd: 0,

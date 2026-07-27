@@ -2,7 +2,7 @@ import { Schema } from "effect"
 
 /**
  * Auth domain schemas, shared across the RPC boundary. The desktop app holds a
- * bearer token (in the OS keychain) issued by the `@starbase/server` BetterAuth
+ * bearer token (in the OS keychain) issued by the `@jingler/server` BetterAuth
  * backend; these types describe what the renderer sees.
  */
 

@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 /**
- * `starbase-plugin://` serves third-party code out of the operator's home
+ * `jingler-plugin://` serves third-party code out of the operator's home
  * directory, so the interesting tests are all about what it REFUSES.
  *
  * Electron is stubbed rather than launched: `protocol.registerSchemesAsPrivileged`
@@ -18,7 +18,7 @@ vi.mock("electron", () => ({
 
 let home: string
 
-// The module reads `STARBASE_HOME` through `app-paths`, which resolves it at
+// The module reads `JINGLER_HOME` through `app-paths`, which resolves it at
 // import time — so the temp home has to exist before the dynamic import below.
 const load = async () => await import("./plugin-protocol.js")
 
@@ -35,24 +35,24 @@ const load = async () => await import("./plugin-protocol.js")
  * for its side effect on the transform cache.
  */
 beforeAll(async () => {
-  home = await mkdtemp(join(tmpdir(), "starbase-plugin-protocol-warm-"))
-  process.env.STARBASE_HOME = home
+  home = await mkdtemp(join(tmpdir(), "jingler-plugin-protocol-warm-"))
+  process.env.JINGLER_HOME = home
   await load()
   await rm(home, { recursive: true, force: true })
 })
 
 beforeEach(async () => {
-  home = await mkdtemp(join(tmpdir(), "starbase-plugin-protocol-"))
-  process.env.STARBASE_HOME = home
+  home = await mkdtemp(join(tmpdir(), "jingler-plugin-protocol-"))
+  process.env.JINGLER_HOME = home
   vi.resetModules()
 })
 
 afterEach(async () => {
-  delete process.env.STARBASE_HOME
+  delete process.env.JINGLER_HOME
   await rm(home, { recursive: true, force: true })
 })
 
-const pluginDir = (id: string) => join(home, "starbase", "plugins", id)
+const pluginDir = (id: string) => join(home, "jingler", "plugins", id)
 
 const writePlugin = async (id: string, files: Record<string, string>) => {
   const dir = pluginDir(id)
@@ -129,7 +129,7 @@ describe("handlePluginRequest", () => {
     const { handlePluginRequest } = await load()
     await writePlugin("hello-tab", { "ui.js": "export default 42" })
 
-    const response = await handlePluginRequest("starbase-plugin://hello-tab/ui.js")
+    const response = await handlePluginRequest("jingler-plugin://hello-tab/ui.js")
     expect(response.status).toBe(200)
     expect(response.headers.get("content-type")).toBe("text/javascript")
     expect(await response.text()).toContain("42")
@@ -138,7 +138,7 @@ describe("handlePluginRequest", () => {
   it("never caches a plugin file, so an author's edit shows up on reload", async () => {
     const { handlePluginRequest } = await load()
     await writePlugin("hello-tab", { "ui.js": "export default 1" })
-    const response = await handlePluginRequest("starbase-plugin://hello-tab/ui.js")
+    const response = await handlePluginRequest("jingler-plugin://hello-tab/ui.js")
     expect(response.headers.get("cache-control")).toBe("no-store")
   })
 
@@ -147,20 +147,20 @@ describe("handlePluginRequest", () => {
     // probe at a time.
     const { handlePluginRequest } = await load()
     const refused = await handlePluginRequest(
-      "starbase-plugin://hello-tab/../../../etc/passwd"
+      "jingler-plugin://hello-tab/../../../etc/passwd"
     )
-    const missing = await handlePluginRequest("starbase-plugin://hello-tab/nope.js")
+    const missing = await handlePluginRequest("jingler-plugin://hello-tab/nope.js")
     expect(refused.status).toBe(404)
     expect(missing.status).toBe(404)
   })
 
   it("serves the React shim off the reserved runtime host", async () => {
     const { handlePluginRequest } = await load()
-    const response = await handlePluginRequest("starbase-plugin://runtime/react.js")
+    const response = await handlePluginRequest("jingler-plugin://runtime/react.js")
     expect(response.status).toBe(200)
     const source = await response.text()
     // The whole point: it re-exports the app's instance, it does not bundle one.
-    expect(source).toContain("__STARBASE_RUNTIME__")
+    expect(source).toContain("__JINGLER_RUNTIME__")
     expect(source).toContain("export const useState")
     expect(source).not.toContain("import ")
   })
@@ -170,9 +170,9 @@ describe("handlePluginRequest", () => {
     // so adding an export to the SDK would compile, ship, and hand plugins
     // `undefined` for a function that plainly exists.
     const { handlePluginRequest } = await load()
-    const Sdk = await import("@starbase/plugin-sdk")
+    const Sdk = await import("@jingler/plugin-sdk")
     const source = await (
-      await handlePluginRequest("starbase-plugin://runtime/sdk.js")
+      await handlePluginRequest("jingler-plugin://runtime/sdk.js")
     ).text()
 
     for (const name of Object.keys(Sdk).filter((n) => n !== "default")) {
@@ -190,7 +190,7 @@ describe("handlePluginRequest", () => {
     // filled and report being outside a plugin view from inside one.
     const { handlePluginRequest } = await load()
     const source = await (
-      await handlePluginRequest("starbase-plugin://runtime/sdk.js")
+      await handlePluginRequest("jingler-plugin://runtime/sdk.js")
     ).text()
     expect(source).toContain("export const PluginViewContext =")
     expect(source).toContain("export const PluginViewProvider =")
@@ -200,7 +200,7 @@ describe("handlePluginRequest", () => {
     const { handlePluginRequest } = await load()
     for (const mod of ["react.js", "jsx-runtime.js", "sdk.js"]) {
       const source = await (
-        await handlePluginRequest(`starbase-plugin://runtime/${mod}`)
+        await handlePluginRequest(`jingler-plugin://runtime/${mod}`)
       ).text()
       // A namespace carries `default` and may carry `__esModule`; neither is
       // legal after `export const`, and one slipping through is a syntax error
@@ -214,7 +214,7 @@ describe("handlePluginRequest", () => {
 
   it("serves the jsx-runtime shim, which every compiled plugin component needs", async () => {
     const { handlePluginRequest } = await load()
-    const response = await handlePluginRequest("starbase-plugin://runtime/jsx-runtime.js")
+    const response = await handlePluginRequest("jingler-plugin://runtime/jsx-runtime.js")
     expect(response.status).toBe(200)
     expect(await response.text()).toContain("export const jsx")
   })
@@ -222,15 +222,15 @@ describe("handlePluginRequest", () => {
   it("throws a named error if a plugin module is imported before the runtime is published", async () => {
     const { handlePluginRequest } = await load()
     const source = await (
-      await handlePluginRequest("starbase-plugin://runtime/react.js")
+      await handlePluginRequest("jingler-plugin://runtime/react.js")
     ).text()
     // Better than `undefined is not an object` three frames into a plugin.
-    expect(source).toContain("Starbase plugin runtime is not published yet")
+    expect(source).toContain("Jingler plugin runtime is not published yet")
   })
 
   it("404s an unknown runtime module instead of falling through to the filesystem", async () => {
     const { handlePluginRequest } = await load()
-    const response = await handlePluginRequest("starbase-plugin://runtime/../ui.js")
+    const response = await handlePluginRequest("jingler-plugin://runtime/../ui.js")
     expect(response.status).toBe(404)
   })
 

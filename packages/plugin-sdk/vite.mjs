@@ -4,7 +4,7 @@
  * ## Why this file is plain JavaScript, alone in a TypeScript package
  *
  * Every other module here ships as raw `.ts`, because every other consumer is a
- * bundler or the Starbase renderer, both of which transpile. This one is
+ * bundler or the Jingler renderer, both of which transpile. This one is
  * imported by `vite.config.ts` — which Vite hands to **Node**, and Node cannot
  * load `.ts`. Shipping it as TypeScript produced
  * `ERR_UNKNOWN_FILE_EXTENSION: Unknown file extension ".ts"` on the very first
@@ -14,7 +14,7 @@
  *
  * ## What this exists to prevent
  *
- * Bundling React. A plugin runs inside Starbase's renderer and shares the app's
+ * Bundling React. A plugin runs inside Jingler's renderer and shares the app's
  * React, which reaches it through an importmap at runtime. A plugin that bundles
  * its own copy puts two Reacts in one tree and every hook throws "invalid hook
  * call" — but only once a SECOND plugin is installed, because alone the plugin's
@@ -27,14 +27,14 @@
  * inside a plugin view and be told it was outside one.
  */
 
-/** Specifiers Starbase provides at runtime. A plugin must never bundle these. */
-export const STARBASE_EXTERNALS = [
+/** Specifiers Jingler provides at runtime. A plugin must never bundle these. */
+export const JINGLER_EXTERNALS = [
   "react",
   "react-dom",
   "react/jsx-runtime",
   "react/jsx-dev-runtime",
-  "@starbase/plugin-sdk",
-  "@starbase/plugin-sdk/ui"
+  "@jingler/plugin-sdk",
+  "@jingler/plugin-sdk/ui"
 ]
 
 /**
@@ -49,11 +49,11 @@ export const STARBASE_EXTERNALS = [
  * Output names are fixed (`ui.js`, `main.js`) and match what the manifests in
  * `plugins/` declare — one fewer thing to keep in agreement by hand.
  *
- * ES format with no code splitting: Starbase imports one module per plugin over
- * `starbase-plugin://`, and a split chunk would make the manifest's `ui` path
+ * ES format with no code splitting: Jingler imports one module per plugin over
+ * `jingler-plugin://`, and a split chunk would make the manifest's `ui` path
  * stop describing what actually loads.
  */
-export const starbasePluginBuild = (options) => {
+export const jinglerPluginBuild = (options) => {
   const input = {}
   // `entry` is the UI half; `ui` is accepted as a clearer alias for a plugin
   // that has both, since "entry" stops meaning anything once there are two.
@@ -65,7 +65,7 @@ export const starbasePluginBuild = (options) => {
     outDir: options.outDir ?? "dist",
     rollupOptions: {
       input,
-      external: [...STARBASE_EXTERNALS],
+      external: [...JINGLER_EXTERNALS],
       output: {
         format: "es",
         entryFileNames: "[name].js",
@@ -79,7 +79,7 @@ export const starbasePluginBuild = (options) => {
       preserveEntrySignatures: "exports-only"
     },
     cssCodeSplit: false,
-    // Plugins are read and debugged in place from `~/starbase/plugins`; a stack
+    // Plugins are read and debugged in place from `~/jingler/plugins`; a stack
     // trace pointing into minified soup helps nobody diagnose their own tab.
     minify: false,
     sourcemap: true

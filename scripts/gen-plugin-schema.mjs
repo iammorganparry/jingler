@@ -1,6 +1,6 @@
 /**
- * Generate `starbase.plugin.schema.json` from the Effect Schema in
- * `@starbase/core`.
+ * Generate `jingler.plugin.schema.json` from the Effect Schema in
+ * `@jingler/core`.
  *
  * ## Why generated rather than hand-written
  *
@@ -13,9 +13,9 @@
  *
  * Deriving it means a manifest with `"$schema": "..."` gets validation and
  * autocomplete in VS Code, Zed, or anything else that speaks JSON Schema, with
- * no Starbase-specific tooling installed.
+ * no Jingler-specific tooling installed.
  *
- * Run with `pnpm --filter @starbase/plugin-sdk gen:schema` (tsx resolves the
+ * Run with `pnpm --filter @jingler/plugin-sdk gen:schema` (tsx resolves the
  * TypeScript import).
  */
 import { writeFileSync } from "node:fs"
@@ -24,14 +24,14 @@ import { JSONSchema } from "effect"
 import { PluginManifest } from "../packages/core/src/plugin.ts"
 
 const OUT = fileURLToPath(
-  new URL("../packages/plugin-sdk/starbase.plugin.schema.json", import.meta.url)
+  new URL("../packages/plugin-sdk/jingler.plugin.schema.json", import.meta.url)
 )
 
 const schema = {
   $schema: "http://json-schema.org/draft-07/schema#",
-  title: "Starbase plugin manifest",
+  title: "Jingler plugin manifest",
   description:
-    "The contents of a plugin's starbase.plugin.json. Generated from @starbase/core — do not edit by hand.",
+    "The contents of a plugin's jingler.plugin.json. Generated from @jingler/core — do not edit by hand.",
   ...JSONSchema.make(PluginManifest)
 }
 

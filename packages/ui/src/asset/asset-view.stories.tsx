@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { ASSET_SIZE_CAP, type AssetPayload } from "@starbase/core"
+import { ASSET_SIZE_CAP, type AssetPayload } from "@jingler/core"
 import { AssetError, AssetLoading, AssetTooLarge, AssetUnsupported, AssetView } from "./asset-view.js"
 
 const meta: Meta<typeof AssetView> = {

@@ -1,8 +1,8 @@
 ---
-"@starbase/cli-adapters": minor
-"@starbase/core": minor
-"@starbase/desktop": minor
-"@starbase/ui": minor
+"@jingler/cli-adapters": minor
+"@jingler/core": minor
+"@jingler/desktop": minor
+"@jingler/ui": minor
 ---
 
 Plan-mode cycling, per-mode composer theming, per-step plan flows, and sidebar archive/delete quick actions.

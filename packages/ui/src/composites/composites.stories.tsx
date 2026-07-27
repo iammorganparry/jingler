@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { CliInfo, GhStatus, ModelOption, ProvidersConfig } from "@starbase/core"
+import type { CliInfo, GhStatus, ModelOption, ProvidersConfig } from "@jingler/core"
 import { SettingsView } from "./settings-view.js"
 import { ToolCall } from "./tool-call.js"
 import { ThoughtBlock } from "./thought-block.js"
@@ -154,7 +154,7 @@ function TerminalDockDemo() {
         onSelect={setActiveId}
         onNew={() => {}}
         onClose={() => {}}
-        cwdLabel="~/repos/starbase"
+        cwdLabel="~/repos/jingler"
         lastExit={0}
         renderTerminal={(id) => (
           <div className="h-full w-full p-3 font-mono text-xs text-ink">

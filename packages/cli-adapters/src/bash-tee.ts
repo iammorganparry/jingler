@@ -35,7 +35,7 @@ const safeId = (toolUseId: string): string => toolUseId.replace(/[^A-Za-z0-9_-]/
  * dir; tests pass their own throwaway dir.
  */
 export const teeLogPath = (toolUseId: string, dir: string = tmpdir()): string =>
-  join(dir, `starbase-tee-${safeId(toolUseId)}.log`)
+  join(dir, `jingler-tee-${safeId(toolUseId)}.log`)
 
 /**
  * Wrap `command` so its combined stdout+stderr is teed to `logFile` while still

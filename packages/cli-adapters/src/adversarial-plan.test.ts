@@ -1,5 +1,5 @@
-import type { Plan, RoutingContext, StreamEvent, VendorReach } from "@starbase/core"
-import { CliExecError, GIGAPLAN_ROUTING_POLICY_VERSION } from "@starbase/core"
+import type { Plan, RoutingContext, StreamEvent, VendorReach } from "@jingler/core"
+import { CliExecError, GIGAPLAN_ROUTING_POLICY_VERSION } from "@jingler/core"
 import { Effect, Fiber, Layer, Stream, TestClock, TestContext } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { ParsedCritique } from "./adversarial-plan.js"
@@ -131,7 +131,7 @@ const runRound = (
       .run({
         sessionId: "s1",
         repo: "acme/api",
-        branch: "starbase/x",
+        branch: "jingler/x",
         cwd: "/tmp/wt",
         brief: "Add a tier column",
         vendors,
@@ -580,7 +580,7 @@ describe("unattendedAnswers", () => {
 
 describe("a role that never finishes", () => {
   it("fails the round with a timeout, rather than hanging forever", async () => {
-    vi.stubEnv("STARBASE_CODEX_DIAGNOSTICS_DIR", "/tmp")
+    vi.stubEnv("JINGLER_CODEX_DIAGNOSTICS_DIR", "/tmp")
     // What shipped: the proposer looped on AskUserQuestion, the round never
     // ended, and the session sat at "Idle" with nothing on screen to say it had
     // died. A bound turns that into a visible failure.
@@ -591,7 +591,7 @@ describe("a role that never finishes", () => {
           .run({
             sessionId: "s1",
             repo: "acme/api",
-            branch: "starbase/x",
+            branch: "jingler/x",
             cwd: "/tmp/wt",
             brief: "Add a tier column",
             vendors: [OPENAI, MOONSHOT],

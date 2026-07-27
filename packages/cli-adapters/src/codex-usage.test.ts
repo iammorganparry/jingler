@@ -84,7 +84,7 @@ describe("fetchCodexUsage", () => {
     await expect(fetchCodexUsage("/nonexistent/codex-does-not-exist")).resolves.toBeNull()
   })
 
-  it.skipIf(!process.env.STARBASE_LIVE_CODEX)(
+  it.skipIf(!process.env.JINGLER_LIVE_CODEX)(
     "reads real rate limits from the logged-in Codex app server",
     async () => {
       const response = await fetchCodexUsage(null)

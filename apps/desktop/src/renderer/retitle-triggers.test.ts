@@ -1,4 +1,4 @@
-import type { Session } from "@starbase/core"
+import type { Session } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import { newlyPlannedSessionIds } from "./retitle-triggers.js"
 

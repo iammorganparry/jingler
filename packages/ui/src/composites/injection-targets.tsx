@@ -1,4 +1,4 @@
-import type { CliKind, McpInjectionSkip, McpInjectionTarget } from "@starbase/core"
+import type { CliKind, McpInjectionSkip, McpInjectionTarget } from "@jingler/core"
 import * as React from "react"
 import { Badge } from "../components/badge.js"
 import { Toggle } from "../components/toggle.js"
@@ -9,7 +9,7 @@ import { Toggle } from "../components/toggle.js"
  * Connecting a provider in the Connector Center is only half the promise; the other
  * half is that a `claude` / `codex` / `opencode` session really starts with the
  * unified server attached. Four independent things can silently break that (the
- * master switch, a per-harness opt-out, a missing token, a harness Starbase can't
+ * master switch, a per-harness opt-out, a missing token, a harness Jingler can't
  * launch) and from the settings screen alone they all look identical. Each row
  * therefore states the outcome AND the reason, sourced from
  * `OpenConnector.injection` — the same call path the agent runner takes.
@@ -26,7 +26,7 @@ const LABEL: Record<CliKind, string> = {
   codex: "Codex",
   cursor: "Cursor",
   opencode: "opencode",
-  starbase: "Starbase"
+  jingler: "Jingler"
 }
 
 /** Operator-facing wording for each way injection can be off. */
@@ -34,7 +34,7 @@ const REASON: Record<McpInjectionSkip, string> = {
   disabled: "Turn on Enable above to inject the shared server.",
   "opted-out": "Switched off for this agent.",
   "no-token": "No API token stored — add one above.",
-  "no-run-path": "Starbase does not launch this agent, so there is nothing to inject."
+  "no-run-path": "Jingler does not launch this agent, so there is nothing to inject."
 }
 
 export function InjectionTargets({ targets, loading = false, onToggle }: InjectionTargetsProps) {

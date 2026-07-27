@@ -11,7 +11,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   {
     id: "s_codex_context",
     repo: "widget",
-    branch: "starbase/codex-context",
+    branch: "jingler/codex-context",
     title: "Long Codex session",
     status: "idle",
     cli: "codex",

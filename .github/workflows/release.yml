@@ -27,7 +27,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
-  # Apply pending changesets, bump every @starbase/* package in lockstep, sync the
+  # Apply pending changesets, bump every @jingler/* package in lockstep, sync the
   # root version, commit `release: vX.Y.Z`, tag, and push both back to main.
   version:
     name: Version & tag
@@ -122,7 +122,7 @@ jobs:
           echo "path=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_OUTPUT"
 
       # The plugins that ship inside the app. Separate from the electron-vite
-      # build because `--filter @starbase/desktop` cannot reach them: the desktop
+      # build because `--filter @jingler/desktop` cannot reach them: the desktop
       # app does not depend on any plugin, and `plugins/*/dist` is git-ignored, so
       # a fresh checkout has nothing to stage. Without this the `extraResources`
       # block in electron-builder.yml copies a manifest with no entry files and
@@ -131,13 +131,13 @@ jobs:
       # The script verifies the built entries exist and exits non-zero if not, so
       # this step failing is the intended outcome rather than a quiet bad build.
       - name: Build bundled plugins
-        run: pnpm --filter @starbase/desktop run build:bundled-plugins
+        run: pnpm --filter @jingler/desktop run build:bundled-plugins
 
       - name: Build (electron-vite)
-        run: pnpm --filter @starbase/desktop run build
+        run: pnpm --filter @jingler/desktop run build
 
       - name: Package & publish
-        run: pnpm --filter @starbase/desktop exec electron-builder ${{ matrix.args }} --publish always
+        run: pnpm --filter @jingler/desktop exec electron-builder ${{ matrix.args }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Apple signing/notarization — gated to macOS so the Apple cert is never

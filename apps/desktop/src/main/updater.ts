@@ -24,7 +24,7 @@ export function initAutoUpdater(): void {
       defaultId: 0,
       cancelId: 1,
       title: "Update available",
-      message: `Starbase ${info.version} is available.`,
+      message: `Jingler ${info.version} is available.`,
       detail: "Download it now? You can keep working while it downloads."
     })
     if (response === 0) void autoUpdater.downloadUpdate()
@@ -37,7 +37,7 @@ export function initAutoUpdater(): void {
       defaultId: 0,
       cancelId: 1,
       title: "Update ready",
-      message: `Starbase ${info.version} has been downloaded.`,
+      message: `Jingler ${info.version} has been downloaded.`,
       detail: "Restart to install the update."
     })
     if (response === 0) autoUpdater.quitAndInstall()

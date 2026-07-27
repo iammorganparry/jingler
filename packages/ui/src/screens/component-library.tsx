@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import type { Session } from "@starbase/core"
+import type { Session } from "@jingler/core"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { Kbd } from "../components/kbd.js"
@@ -64,7 +64,7 @@ export function ComponentLibrary() {
             ✦
           </span>
           <span className="text-[22px] font-bold tracking-[-.2px] text-text-bright">
-            Starbase component library
+            Jingler component library
           </span>
           <Badge tone="count">One Dark Pro</Badge>
         </div>

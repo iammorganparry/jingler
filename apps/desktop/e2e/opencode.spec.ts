@@ -18,7 +18,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   {
     id: "s_seeded",
     repo: "widget",
-    branch: "starbase/refactor",
+    branch: "jingler/refactor",
     title: "Refactor auth flow",
     status: "idle",
     cli: "claude",
@@ -118,7 +118,7 @@ test("opencode's providers show where each credential came from", async ({ launc
   const providers = window.getByText("opencode brings its own providers.").locator("..")
 
   // OpenRouter is live because of the user's OWN env var — and we say so rather
-  // than implying Starbase configured it.
+  // than implying Jingler configured it.
   await expect(providers.getByText("OpenRouter", { exact: true })).toBeVisible()
   await expect(providers.getByText("environment")).toBeVisible()
   await expect(providers.getByText("OpenCode Zen", { exact: true })).toBeVisible()
@@ -140,9 +140,9 @@ test("opencode's providers show where each credential came from", async ({ launc
 })
 
 /**
- * The BYOK contract, asserted where it counts: a key typed into Starbase is
+ * The BYOK contract, asserted where it counts: a key typed into Jingler is
  * written to OPENCODE's own credential store — so it works in a bare `opencode`
- * shell too — and never into Starbase's SecretStore.
+ * shell too — and never into Jingler's SecretStore.
  *
  * Crucially this drives an UNCONNECTED provider. `/config/providers` lists only
  * what already resolves, so before the registry was merged in there was no way

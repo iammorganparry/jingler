@@ -1,5 +1,5 @@
 {
-  "name": "@starbase/core",
+  "name": "@jingler/core",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -15,7 +15,7 @@
     "xstate": "^5.32.4"
   },
   "devDependencies": {
-    "@starbase/tsconfig": "workspace:*",
+    "@jingler/tsconfig": "workspace:*",
     "fast-check": "^4.9.0"
   }
 }

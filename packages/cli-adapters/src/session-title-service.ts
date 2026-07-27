@@ -1,5 +1,5 @@
-import type { Message } from "@starbase/core"
-import { GitError, buildTitlePrompt, cleanTitle, fallbackTitle } from "@starbase/core"
+import type { Message } from "@jingler/core"
+import { GitError, buildTitlePrompt, cleanTitle, fallbackTitle } from "@jingler/core"
 import { Effect } from "effect"
 import { SessionStore, taskSlug } from "./sessions.js"
 import { GitService } from "./git.js"

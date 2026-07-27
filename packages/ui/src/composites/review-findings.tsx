@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
-import type { AdversarialReview, ReviewFinding, ReviewPhase, ReviewSeverity } from "@starbase/core"
-import { destinationOf, findingLocation, partitionFindings, resolvedCount } from "@starbase/core"
+import type { AdversarialReview, ReviewFinding, ReviewPhase, ReviewSeverity } from "@jingler/core"
+import { destinationOf, findingLocation, partitionFindings, resolvedCount } from "@jingler/core"
 import {
   AlertTriangle,
   ChevronRight,

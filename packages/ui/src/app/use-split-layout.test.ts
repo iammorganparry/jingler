@@ -319,7 +319,7 @@ describe("useSplitLayout", () => {
     })
   })
 
-  // `StarbaseApp` puts this object in the deps of its window `keydown` effect. A
+  // `JinglerApp` puts this object in the deps of its window `keydown` effect. A
   // bare object literal is a new reference every render, which tore the listener
   // down and re-attached it on every keystroke in the composer and every activity
   // tick — so the identity is part of the contract, not an implementation detail.

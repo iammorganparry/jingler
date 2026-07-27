@@ -1,6 +1,6 @@
 import * as React from "react"
-import type { SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@starbase/core"
-import { displayStatusOf, UNTITLED_SESSION } from "@starbase/core"
+import type { SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@jingler/core"
+import { displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
 import {
   ChevronRight,
   Columns2,
@@ -579,7 +579,7 @@ function SidebarBody({
             className="flex h-9 items-center px-2 font-mono text-[11px] text-dim"
             title={version ? "App version" : undefined}
           >
-            {version ? `Starbase v${version}` : "Starbase"}
+            {version ? `Jingler v${version}` : "Jingler"}
           </span>
         )}
       </div>

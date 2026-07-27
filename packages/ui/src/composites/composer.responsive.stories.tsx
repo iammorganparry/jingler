@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { ProviderModels } from "@starbase/core"
+import type { ProviderModels } from "@jingler/core"
 import { BOUNDARY_WIDTHS, LookFor, WidthLadder } from "../story-support.js"
 import { Composer } from "./composer.js"
 
@@ -32,7 +32,7 @@ const loaded = {
   mode: "accept-edits" as const,
   onSetMode: () => {},
   allowPlan: true,
-  branch: "starbase/wandering-watt",
+  branch: "jingler/wandering-watt",
   skills: [{ name: "/review", description: "Review current changes", source: "skill" as const }],
   onSend: () => {}
 }

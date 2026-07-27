@@ -4,11 +4,11 @@
  * Anything handed to the agent — "Create pull request", routed review feedback —
  * goes through the session's persistent conversation actor (a normal turn), so
  * the work + any approval gates/questions surface in the Conversation tab.
- * Keeps `@starbase/ui`'s `PullRequestView` presentational.
+ * Keeps `@jingler/ui`'s `PullRequestView` presentational.
  */
 import { useCallback, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import type { PrMergeMethod, PullRequest, ReviewSubmitKind, Session } from "@starbase/core"
+import type { PrMergeMethod, PullRequest, ReviewSubmitKind, Session } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { markRouted, useRoutedEntries } from "./routed-store.js"
@@ -211,7 +211,7 @@ export function usePullRequest(
   )
 
   const openOnGithub = useCallback(() => {
-    if (pr?.url) void window.starbase.openExternal(pr.url)
+    if (pr?.url) void window.jingler.openExternal(pr.url)
   }, [pr])
 
   return {

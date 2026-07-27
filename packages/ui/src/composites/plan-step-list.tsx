@@ -1,4 +1,4 @@
-import type { Plan, PlanStep, PlanStepStatus } from "@starbase/core"
+import type { Plan, PlanStep, PlanStepStatus } from "@jingler/core"
 import { Check, GitBranch, MessageSquareText } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { ChallengeBadge } from "./plan-challenges.js"

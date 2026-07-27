@@ -5,7 +5,7 @@
  * script instead. Source: extensions/theme-defaults/themes/hc_black.json
  * Include chain resolved and flattened at vendor time.
  */
-import type { VsCodeTheme } from "@starbase/core"
+import type { VsCodeTheme } from "@jingler/core"
 
 export const highContrastDark: VsCodeTheme = {
   "name": "High Contrast Dark",

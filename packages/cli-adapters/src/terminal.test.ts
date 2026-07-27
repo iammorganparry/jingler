@@ -1,4 +1,4 @@
-import type { TerminalChunk, TerminalError } from "@starbase/core"
+import type { TerminalChunk, TerminalError } from "@jingler/core"
 import { Effect, Fiber, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import { RingBuffer, TerminalService } from "./terminal.js"
@@ -108,10 +108,10 @@ describe("TerminalService", () => {
         const info = yield* t.create({ sessionId: "s1", cols: 80, rows: 24 })
         const sink = collect(t, info.id)
         yield* Effect.sleep("150 millis") // let the shell + attach settle
-        yield* t.write(info.id, "echo HELLO_STARBASE\r")
-        yield* waitFor(() => sink.text().includes("HELLO_STARBASE"))
+        yield* t.write(info.id, "echo HELLO_JINGLER\r")
+        yield* waitFor(() => sink.text().includes("HELLO_JINGLER"))
         yield* Fiber.interrupt(sink.fiber)
-        expect(sink.text()).toContain("HELLO_STARBASE")
+        expect(sink.text()).toContain("HELLO_JINGLER")
       })
     ))
 

@@ -1,7 +1,7 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 import { describe, expect, it } from "vitest"
-import type { PermissionMode, Question, QuestionAnswer } from "@starbase/core"
-import type { Attachment } from "@starbase/core"
+import type { PermissionMode, Question, QuestionAnswer } from "@jingler/core"
+import type { Attachment } from "@jingler/core"
 import {
   makeLiveInput,
   editStats,

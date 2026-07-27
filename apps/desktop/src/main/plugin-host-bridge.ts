@@ -13,8 +13,8 @@
  */
 import { join } from "node:path"
 import { utilityProcess } from "electron"
-import type { HostProcess } from "@starbase/cli-adapters"
-import type { AuthSessionRequestPayload, ExecRequest } from "@starbase/cli-adapters"
+import type { HostProcess } from "@jingler/cli-adapters"
+import type { AuthSessionRequestPayload, ExecRequest } from "@jingler/cli-adapters"
 import { runShell } from "./plugin-exec.js"
 
 /**
@@ -35,7 +35,7 @@ export const spawnHostProcess = (): HostProcess => {
   const child = utilityProcess.fork(entry, [], {
     // Named so it is identifiable in Activity Monitor / `ps` — an operator
     // wondering what is using CPU deserves better than a second "Electron".
-    serviceName: "starbase-plugin-host",
+    serviceName: "jingler-plugin-host",
     stdio: "inherit"
   })
 

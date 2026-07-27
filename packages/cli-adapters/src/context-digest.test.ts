@@ -1,4 +1,4 @@
-import type { ContentPart, Message } from "@starbase/core"
+import type { ContentPart, Message } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import {
   digestPrompt,

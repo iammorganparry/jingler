@@ -1,5 +1,5 @@
-import { ThemeCatalog, ThemeError, ThemeSummary, VsCodeTheme } from "@starbase/core"
-import { BUILTIN_THEMES, toTokens } from "@starbase/themes"
+import { ThemeCatalog, ThemeError, ThemeSummary, VsCodeTheme } from "@jingler/core"
+import { BUILTIN_THEMES, toTokens } from "@jingler/themes"
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 
@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest"
  *
  * That is worth its own suite because two of these schemas are shapes the rest
  * of the contract does not use: `VsCodeTheme` carries an index signature of
- * `Schema.Unknown` (to preserve keys Starbase does not model), and `ThemeTokens`
+ * `Schema.Unknown` (to preserve keys Jingler does not model), and `ThemeTokens`
  * nests a 21-field struct for the terminal palette. Both encode fine in
  * isolation and would be caught only at runtime, in the renderer, if they did
  * not — as a settings screen that silently renders nothing.
@@ -29,7 +29,7 @@ describe("VsCodeTheme over the wire", () => {
   })
 
   /**
-   * The index signature is what stops Starbase's editor deleting the parts of a
+   * The index signature is what stops Jingler's editor deleting the parts of a
    * user's theme it does not model. If those keys were dropped in transit
    * rather than at decode, the loss would happen on the way BACK from the
    * renderer — i.e. only when someone saves an edit, which is the worst
@@ -61,7 +61,7 @@ describe("ThemeCatalog over the wire", () => {
         tokens: toTokens(b.theme)
       })
     ),
-    skipped: [{ path: "/home/me/starbase/themes/broken.json", message: "type: is missing" }]
+    skipped: [{ path: "/home/me/jingler/themes/broken.json", message: "type: is missing" }]
   }
 
   it("survives an encode/decode round trip with every built-in", () => {

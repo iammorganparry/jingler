@@ -1,14 +1,14 @@
 /**
- * Preload bridge. Exposes a minimal, safe surface on `window.starbase` that only
+ * Preload bridge. Exposes a minimal, safe surface on `window.jingler` that only
  * shuttles opaque RPC frames between the renderer's `RpcClient` and the main
  * process's `RpcServer`. No business logic lives here — see `src/main/rpc.ts`.
  */
 import { contextBridge, ipcRenderer } from "electron"
 
-const RPC_CHANNEL = "starbase/rpc"
-const AUTH_COMPLETE_CHANNEL = "starbase/auth-complete"
-const NOTIFICATION_ACTIVATED_CHANNEL = "starbase/notification-activated"
-const BOOT_THEME_CHANNEL = "starbase/boot-theme"
+const RPC_CHANNEL = "jingler/rpc"
+const AUTH_COMPLETE_CHANNEL = "jingler/auth-complete"
+const NOTIFICATION_ACTIVATED_CHANNEL = "jingler/notification-activated"
+const BOOT_THEME_CHANNEL = "jingler/boot-theme"
 
 /**
  * The active theme's `:root` block, fetched SYNCHRONOUSLY at preload time.
@@ -39,7 +39,7 @@ interface AuthCompletePayload {
   readonly error: string | null
 }
 
-contextBridge.exposeInMainWorld("starbase", {
+contextBridge.exposeInMainWorld("jingler", {
   /** The active theme's `:root` block, for `main.tsx` to inject pre-paint. */
   initialThemeCss,
   /** Ship one client→server RPC frame to main. */
@@ -51,9 +51,9 @@ contextBridge.exposeInMainWorld("starbase", {
     return () => ipcRenderer.removeListener(RPC_CHANNEL, listener)
   },
   /** Open an http(s) URL in the user's default browser (not an Electron window). */
-  openExternal: (url: string) => ipcRenderer.invoke("starbase/open-external", url),
+  openExternal: (url: string) => ipcRenderer.invoke("jingler/open-external", url),
   /**
-   * Subscribe to `starbase://` sign-in completions (the deep-link callback landed
+   * Subscribe to `jingler://` sign-in completions (the deep-link callback landed
    * and the token was stored). Returns an unsubscribe fn. The renderer re-checks
    * the session on `ok`.
    */

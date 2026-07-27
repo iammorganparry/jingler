@@ -4,9 +4,9 @@ import type {
   GateDecision,
   PermissionMode,
   QuestionAnswer
-} from "@starbase/core"
+} from "@jingler/core"
 import type { PermissionRequest, PlanDecision } from "./adapter.js"
-import { PLAN_AUTO_RUN_DEFAULT } from "@starbase/core"
+import { PLAN_AUTO_RUN_DEFAULT } from "@jingler/core"
 
 /**
  * Human-in-the-loop: what the agent must ask before doing, and what happens while

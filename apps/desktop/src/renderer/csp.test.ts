@@ -46,11 +46,11 @@ describe("renderer CSP", () => {
 
   it("keeps script-src to 'self' plus the local plugin scheme, and nothing else", () => {
     // Plugin UI is ES modules the renderer imports, so `script-src` had to give
-    // exactly one inch: the `starbase-plugin:` scheme, which the main process
-    // serves ONLY from `~/starbase/plugins`. Pinned as an exact string so that
+    // exactly one inch: the `jingler-plugin:` scheme, which the main process
+    // serves ONLY from `~/jingler/plugins`. Pinned as an exact string so that
     // widening it to a remote origin — the one thing an agent harness must
     // never do — cannot happen without deleting this assertion first.
-    expect(directive("script-src")).toBe("script-src 'self' starbase-plugin:")
+    expect(directive("script-src")).toBe("script-src 'self' jingler-plugin:")
     expect(directive("default-src")).toBe("default-src 'self'")
   })
 
@@ -77,10 +77,10 @@ describe("renderer CSP", () => {
       "react",
       "react/jsx-runtime",
       "react/jsx-dev-runtime",
-      "@starbase/plugin-sdk"
+      "@jingler/plugin-sdk"
     ]) {
       expect(imports[specifier], `${specifier} is mapped`).toMatch(
-        /^starbase-plugin:\/\/runtime\//
+        /^jingler-plugin:\/\/runtime\//
       )
     }
   })

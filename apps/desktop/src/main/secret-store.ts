@@ -2,18 +2,18 @@
  * `SecretStore` backed by Electron `safeStorage` — the OS credential vault
  * (macOS Keychain / Windows DPAPI / Linux libsecret). This is the most trusted
  * store available to an Electron app and is preferred over the unmaintained
- * `keytar`. Only ciphertext is ever written to `~/starbase/auth.enc`; if the OS
+ * `keytar`. Only ciphertext is ever written to `~/jingler/auth.enc`; if the OS
  * vault is unavailable we refuse to persist (forcing re-login) rather than fall
  * back to plaintext.
  */
 import { FileSystem } from "@effect/platform"
-import { AppPaths, SecretStore, SecretStoreUnavailable } from "@starbase/cli-adapters"
+import { AppPaths, SecretStore, SecretStoreUnavailable } from "@jingler/cli-adapters"
 import { Effect, Layer } from "effect"
 import { safeStorage } from "electron"
 
 /**
  * A plaintext, file-backed `SecretStore` used ONLY by the e2e harness (selected
- * in `runtime.ts` via `STARBASE_SECRET_STORE=memory`). It sidesteps the OS
+ * in `runtime.ts` via `JINGLER_SECRET_STORE=memory`). It sidesteps the OS
  * keychain — which would prompt / be unavailable under headless Playwright — so
  * the sign-in flow can be driven deterministically. NEVER used in a real build;
  * the production path is always `SecretStoreLive` below.

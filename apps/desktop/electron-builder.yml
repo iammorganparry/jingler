@@ -2,9 +2,9 @@
 # and publishes them (+ the electron-updater `latest*.yml` channel files) to
 # GitHub Releases. Run via `pnpm electron:pack` (local) / `pnpm electron:publish`
 # (CI). See .github/workflows/release.yml for the release flow.
-appId: app.starbase.desktop
-productName: Starbase
-copyright: Copyright © Starbase
+appId: app.jingler.desktop
+productName: Jingler
+copyright: Copyright © Jingler
 
 directories:
   output: release
@@ -38,7 +38,7 @@ extraResources:
   - from: ../../plugins/github-issues
     to: plugins/github-issues
     filter:
-      - starbase.plugin.json
+      - jingler.plugin.json
       - dist/**
       - "!dist/**/*.map"
 
@@ -60,7 +60,7 @@ buildDependenciesFromSource: false
 publish:
   provider: github
   owner: iammorganparry
-  repo: starbase
+  repo: jingler
 
 mac:
   category: public.app-category.developer-tools

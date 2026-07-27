@@ -1,6 +1,6 @@
 /**
- * `@starbase/themes` — the built-in themes and the fold that makes any VS Code
- * theme usable by Starbase.
+ * `@jingler/themes` — the built-in themes and the fold that makes any VS Code
+ * theme usable by Jingler.
  *
  * Deliberately free of Effect, filesystem access and React. It is imported by
  * the Electron MAIN process (to resolve the boot theme before a window exists),
@@ -8,8 +8,8 @@
  * preview a theme the operator is editing but has not saved). A dependency on
  * any one of those three worlds would put it out of reach of the other two.
  *
- * The stateful half — reading and writing `~/starbase/themes` — lives in
- * `ThemeService` in `@starbase/cli-adapters`.
+ * The stateful half — reading and writing `~/jingler/themes` — lives in
+ * `ThemeService` in `@jingler/cli-adapters`.
  */
 export * from "./color.js"
 export * from "./ramp.js"

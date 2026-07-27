@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { Attachment } from "@starbase/core"
+import type { Attachment } from "@jingler/core"
 import {
   __flushDrafts,
   __resetDrafts,

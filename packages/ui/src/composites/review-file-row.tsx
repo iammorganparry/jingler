@@ -1,4 +1,4 @@
-import type { PrFileChange } from "@starbase/core"
+import type { PrFileChange } from "@jingler/core"
 import { Check, MessageSquare } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { DiffStat } from "../components/diff-stat.js"

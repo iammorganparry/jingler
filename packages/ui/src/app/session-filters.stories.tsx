@@ -1,6 +1,6 @@
 import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { Session, SessionActivity, SessionPrStatus } from "@starbase/core"
+import type { Session, SessionActivity, SessionPrStatus } from "@jingler/core"
 import { WidthTierProvider } from "../hooks/width-tier.js"
 import { LookFor } from "../story-support.js"
 import { SessionSidebar } from "./session-sidebar.js"
@@ -12,8 +12,8 @@ export default meta
 type Story = StoryObj
 
 const session = (over: Partial<Session> & Pick<Session, "id" | "title">): Session => ({
-  repo: "starbase",
-  branch: `starbase/${over.id}`,
+  repo: "jingler",
+  branch: `jingler/${over.id}`,
   status: "idle",
   cli: "claude",
   diff: { added: 0, removed: 0 },

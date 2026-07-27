@@ -1,4 +1,4 @@
-# Starbase Architecture Map
+# Jingler Architecture Map
 
 > Last updated: 2026-07-22
 > Cartographer skill revision focused on Gigaplan routing

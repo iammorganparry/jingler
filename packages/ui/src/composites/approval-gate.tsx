@@ -1,5 +1,5 @@
 import { KeyRound } from "lucide-react"
-import type { GateDecision, GateKind, GateStatus } from "@starbase/core"
+import type { GateDecision, GateKind, GateStatus } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { StatusDot } from "../components/status-dot.js"
 import { Button } from "../components/button.js"

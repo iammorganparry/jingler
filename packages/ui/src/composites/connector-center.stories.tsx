@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { ConnectorConnection, ConnectorProvider, OAuthClientInfo } from "@starbase/core"
+import type { ConnectorConnection, ConnectorProvider, OAuthClientInfo } from "@jingler/core"
 import { ConnectorCenter } from "./connector-center.js"
 
 /**

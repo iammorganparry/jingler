@@ -1,4 +1,4 @@
-import type { Plan, QuestionRequest, StreamEvent } from "@starbase/core"
+import type { Plan, QuestionRequest, StreamEvent } from "@jingler/core"
 import { Effect } from "effect"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentContext, PlanDecision as PlanDecisionType, SessionSpec } from "./adapter.js"

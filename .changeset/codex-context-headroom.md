@@ -1,7 +1,7 @@
 ---
-"@starbase/cli-adapters": patch
-"@starbase/desktop": patch
-"@starbase/core": patch
+"@jingler/cli-adapters": patch
+"@jingler/desktop": patch
+"@jingler/core": patch
 ---
 
 Compact Codex conversations before an agentic turn can exhaust the model window.

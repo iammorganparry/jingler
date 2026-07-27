@@ -183,7 +183,7 @@ export function useSplitLayout(
    * un-retiring.
    */
   useEffect(() => {
-    // Unconditional, including for an EMPTY list. `StarbaseApp` only mounts once
+    // Unconditional, including for an EMPTY list. `JinglerApp` only mounts once
     // the app machine has left `loading`/`starting` (App.tsx renders LoadingScreen
     // until then), so no sessions here means every session really was deleted —
     // not that they haven't arrived yet. Skipping the prune in that case left the
@@ -292,7 +292,7 @@ export function useSplitLayout(
    * Every operation above is already a stable `useCallback` and every derived
    * value a `useMemo` — but returning them in a bare object literal handed the
    * caller a NEW reference on every render regardless, which defeats all of it.
-   * `StarbaseApp` lists this object in the deps of the window `keydown` effect,
+   * `JinglerApp` lists this object in the deps of the window `keydown` effect,
    * so the listener was torn down and re-attached on every render of the shell:
    * every keystroke in the composer, every activity tick. Nothing broke — but
    * the effect only has any reason to re-run when the workspace actually

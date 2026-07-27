@@ -8,8 +8,8 @@
  * them); the duplication is intended — both places drive the same session store
  * and there is nothing shared to hoist that would be simpler than the calls.
  */
-import type { Session } from "@starbase/core"
-import { ChatTabBar } from "@starbase/ui"
+import type { Session } from "@jingler/core"
+import { ChatTabBar } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
 import { publishSessionUpdate } from "./session-updates.js"
 import { disposeChatActor, rehomeSharedPlan, useChatActivities } from "./conversation-registry.js"

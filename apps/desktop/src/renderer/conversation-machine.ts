@@ -28,7 +28,7 @@ import type {
   Skill,
   StreamEvent,
   Subagent
-} from "@starbase/core"
+} from "@jingler/core"
 import {
   activityOf,
   addPlanComment,
@@ -49,7 +49,7 @@ import {
   supportsPlanMode,
   supportsSteer,
   userMessage
-} from "@starbase/core"
+} from "@jingler/core"
 import { assign, fromCallback, fromPromise, setup } from "xstate"
 import { rpc } from "./rpc-client.js"
 import { publishSessionUpdate } from "./session-updates.js"
@@ -1110,7 +1110,7 @@ export const conversationMachine = setup({
      *    harness starts a fresh thread, so the transcript stays on screen but the
      *    agent won't recall earlier turns;
      *  - `plan` mode degrades to `ask` on a harness that can't hold it
-     *    (`supportsPlanMode`) — cursor and starbase;
+     *    (`supportsPlanMode`) — cursor and jingler;
      *  - skills are per-harness, so the `/` menu is refetched.
      */
     persistHarness: assign(({ context, event, self }) => {

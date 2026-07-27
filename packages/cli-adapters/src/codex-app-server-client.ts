@@ -301,7 +301,7 @@ export interface StartCodexAppServerOptions {
   readonly configOverrides?: ReadonlyArray<string>
 }
 
-/** Spawn and initialize one app-server connection for one Starbase run. */
+/** Spawn and initialize one app-server connection for one Jingler run. */
 export const startCodexAppServer = async (
   options: StartCodexAppServerOptions
 ): Promise<CodexAppServerConnection> => {
@@ -348,7 +348,7 @@ export const startCodexAppServer = async (
 
   try {
     await connection.request("initialize", {
-      clientInfo: { name: "starbase", version: "1" },
+      clientInfo: { name: "jingler", version: "1" },
       capabilities: { experimentalApi: true }
     })
     connection.notify("initialized", {})

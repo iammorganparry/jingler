@@ -99,7 +99,7 @@ describe("Codex diagnostic persistence", () => {
   })
 
   it("writes protocol metadata into the configured directory", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "starbase-codex-diagnostics-"))
+    const directory = mkdtempSync(join(tmpdir(), "jingler-codex-diagnostics-"))
     directories.push(directory)
     const diagnostics = createCodexAppServerDiagnostics(
       directory,

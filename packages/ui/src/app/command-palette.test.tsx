@@ -36,7 +36,7 @@ const ITEMS: ReadonlyArray<PaletteItem> = [
     id: "session-1",
     kind: "session",
     label: "refactor auth",
-    detail: "starbase · feat/auth",
+    detail: "jingler · feat/auth",
     group: "Sessions",
     run: () => {}
   },
@@ -44,7 +44,7 @@ const ITEMS: ReadonlyArray<PaletteItem> = [
     id: "session-2",
     kind: "session",
     label: "theme tokens",
-    detail: "starbase · feat/theme",
+    detail: "jingler · feat/theme",
     group: "Sessions",
     run: () => {}
   },

@@ -138,7 +138,7 @@ const DEFAULT_WINDOW: Record<CliKind, number | null> = {
   // reports no `Usage` of its own, so `contextReporting` already keeps
   // compaction away from it; `null` states the same thing in the one place that
   // computes a budget.
-  starbase: null
+  jingler: null
 }
 
 /**
@@ -336,7 +336,7 @@ export const DEFAULT_DIGEST_MODEL: Record<CliKind, string> = {
   // is never requested for it. Present because the record must be total, and
   // matching its sole catalogue entry so the "names a model the harness offers"
   // guard keeps holding.
-  starbase: "auto"
+  jingler: "auto"
 }
 
 /** The digest model for `cli`, honouring the user's `backgroundModel` override. */

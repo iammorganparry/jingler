@@ -261,7 +261,7 @@ export function LoadingScreen() {
         <span className="flex size-[22px] items-center justify-center rounded-md bg-blue text-[13px] text-editor">
           ✦
         </span>
-        <span className="text-[14px] font-semibold text-text-bright">Starbase</span>
+        <span className="text-[14px] font-semibold text-text-bright">Jingler</span>
       </div>
 
       {/* Copy + progress */}

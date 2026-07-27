@@ -76,7 +76,7 @@ import {
   Usage,
   VsCodeTheme,
   WorkspaceConfig
-} from "@starbase/core"
+} from "@jingler/core"
 import {
   AssetOutsideWorktreeError,
   AssetTooLargeError,
@@ -94,17 +94,17 @@ import {
   TerminalError,
   ThemeError,
   WorkspaceNotConfiguredError
-} from "@starbase/core"
+} from "@jingler/core"
 import { Rpc, RpcGroup } from "@effect/rpc"
 import { Schema } from "effect"
 
 /**
- * The Starbase RPC surface — a single source of truth shared by the Electron
+ * The Jingler RPC surface — a single source of truth shared by the Electron
  * main process (which implements the handlers as Effect services) and the
  * renderer (which calls them through a typed `RpcClient`). Transport is Electron
  * IPC; serialization is JSON. See `apps/desktop/src/main/rpc` for the wiring.
  */
-export class StarbaseRpcs extends RpcGroup.make(
+export class JinglerRpcs extends RpcGroup.make(
   /** List every known coding CLI and whether it is installed on this host. */
   /**
    * What each installed harness will actually be billed to.
@@ -662,7 +662,7 @@ export class StarbaseRpcs extends RpcGroup.make(
    * The providers opencode resolves for the user, and where each credential came
    * from — Settings · Providers. Live from the binary, because the answer is a
    * property of the USER's setup (env vars, `opencode auth login`,
-   * `opencode.json`), not of Starbase.
+   * `opencode.json`), not of Jingler.
    */
   Rpc.make("Opencode.listProviders", {
     success: Schema.Array(OpencodeProviderInfo),
@@ -673,8 +673,8 @@ export class StarbaseRpcs extends RpcGroup.make(
    * Store an API key for one opencode provider (e.g. `openrouter`).
    *
    * Writes to opencode's OWN credential file, exactly as `opencode auth login`
-   * would — NOT to Starbase's `SecretStore`, which stays reserved for the
-   * Starbase bearer token. A key added here therefore works in a bare `opencode`
+   * would — NOT to Jingler's `SecretStore`, which stays reserved for the
+   * Jingler bearer token. A key added here therefore works in a bare `opencode`
    * shell too. Succeeds silently into `false` rather than erroring on a bad key:
    * opencode doesn't validate on write.
    */
@@ -1129,7 +1129,7 @@ export class StarbaseRpcs extends RpcGroup.make(
    *
    * Distinct from `Github.comment` (one top-level blob) and `Github.review` (a
    * body and nothing else): this is the only path that produces inline threads,
-   * so a comment written in Starbase comes back from GitHub on the same line.
+   * so a comment written in Jingler comes back from GitHub on the same line.
    *
    * Returns how many drafts couldn't be anchored to a line in the PR's current
    * diff — those are folded into the review body rather than dropped, so a
@@ -1306,7 +1306,7 @@ export class StarbaseRpcs extends RpcGroup.make(
 
   /**
    * Begin an OAuth sign-in: returns the provider URL the renderer opens in the
-   * system browser. The flow completes via the `starbase://` deep link.
+   * system browser. The flow completes via the `jingler://` deep link.
    */
   Rpc.make("Auth.startSignIn", {
     success: Schema.String,
@@ -1426,7 +1426,7 @@ export class StarbaseRpcs extends RpcGroup.make(
   // ── Themes ─────────────────────────────────────────────────────────────────
 
   /**
-   * Everything installed: bundled presets plus `~/starbase/themes/*.json`.
+   * Everything installed: bundled presets plus `~/jingler/themes/*.json`.
    *
    * Never errors. A malformed user file arrives in `skipped` alongside the
    * themes that did load — one bad file must not empty the picker, and the
@@ -1494,7 +1494,7 @@ export class StarbaseRpcs extends RpcGroup.make(
   }),
 
   /**
-   * Replace the override layer — Starbase's `workbench.colorCustomizations`.
+   * Replace the override layer — Jingler's `workbench.colorCustomizations`.
    * Keyed by VS Code colour name, so an override survives switching themes and
    * stays portable back to VS Code.
    */
@@ -1505,7 +1505,7 @@ export class StarbaseRpcs extends RpcGroup.make(
   }),
 
   /**
-   * Re-emits the whole catalog whenever `~/starbase/themes` changes on disk, so
+   * Re-emits the whole catalog whenever `~/jingler/themes` changes on disk, so
    * editing a theme in your own editor repaints the app live.
    *
    * The whole catalog rather than a per-file delta: the consumers are a grid
@@ -1539,18 +1539,18 @@ export class StarbaseRpcs extends RpcGroup.make(
   // credentials live in the host and only `AuthSessionInfo` metadata ever crosses.
 
   /**
-   * Every plugin directory under `~/starbase/plugins`, decoded.
+   * Every plugin directory under `~/jingler/plugins`, decoded.
    *
    * Never errors, for the reason `Theme.list` doesn't: one malformed manifest
    * arrives in `catalog.failed` beside the plugins that loaded, so a single bad
-   * `starbase.plugin.json` can inform the operator without emptying the list.
+   * `jingler.plugin.json` can inform the operator without emptying the list.
    */
   Rpc.make("Plugins.list", {
     success: PluginCatalog
   }),
 
   /**
-   * Re-emit the whole catalog whenever `~/starbase/plugins` changes on disk, so
+   * Re-emit the whole catalog whenever `~/jingler/plugins` changes on disk, so
    * dropping in (or editing) a plugin folder updates Settings live.
    *
    * The whole catalog rather than a per-file delta — the same reasoning as
@@ -1617,7 +1617,7 @@ export class StarbaseRpcs extends RpcGroup.make(
   }),
 
   /**
-   * Copy a folder into `~/starbase/plugins` and load it, returning the installed
+   * Copy a folder into `~/jingler/plugins` and load it, returning the installed
    * plugin. The source is validated as a real plugin (a decodable manifest)
    * before anything is copied, so a bad folder fails without leaving a partial
    * directory behind.
@@ -1685,7 +1685,7 @@ export class StarbaseRpcs extends RpcGroup.make(
 
   /**
    * Read a value from a plugin's private key/value store. Null when unset. The
-   * value is opaque JSON — Starbase persists it without interpreting it.
+   * value is opaque JSON — Jingler persists it without interpreting it.
    */
   Rpc.make("Plugins.storageGet", {
     success: Schema.NullOr(Schema.Unknown),

@@ -1,5 +1,5 @@
-import type { AdversarialReview, CliKind, ReviewFinding, ReviewSeverity, StreamEvent } from "@starbase/core"
-import { ReviewError } from "@starbase/core"
+import type { AdversarialReview, CliKind, ReviewFinding, ReviewSeverity, StreamEvent } from "@jingler/core"
+import { ReviewError } from "@jingler/core"
 import type { CommandExecutor, FileSystem, Path } from "@effect/platform"
 import { Effect, PubSub, Ref, Schema, Stream } from "effect"
 import type { AgentContext, SessionSpec } from "./adapter.js"
@@ -160,7 +160,7 @@ export interface ReviewInput {
  */
 const REPLAY_CAP = 2000
 
-export class ReviewService extends Effect.Service<ReviewService>()("@starbase/ReviewService", {
+export class ReviewService extends Effect.Service<ReviewService>()("@jingler/ReviewService", {
   accessors: true,
   effect: Effect.gen(function* () {
     /**

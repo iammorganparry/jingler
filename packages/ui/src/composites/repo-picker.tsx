@@ -1,5 +1,5 @@
 import * as React from "react"
-import type { Repo } from "@starbase/core"
+import type { Repo } from "@jingler/core"
 import { ChevronDown, Star } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Button } from "../components/button.js"
@@ -45,7 +45,7 @@ export function RepoPicker({
       value: r.path,
       label: r.name,
       // Match on the PATH as well as the name: two checkouts of the same repo
-      // differ only by directory, and "starbase" alone can't tell them apart.
+      // differ only by directory, and "jingler" alone can't tell them apart.
       searchText: `${r.name} ${r.path}`
     })
     const starred = repos.filter((r) => starredSet.has(r.path))

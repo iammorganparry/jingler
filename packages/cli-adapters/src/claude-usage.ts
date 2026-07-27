@@ -1,4 +1,4 @@
-import type { ProviderUsage, UsageStatus, UsageWindow } from "@starbase/core"
+import type { ProviderUsage, UsageStatus, UsageWindow } from "@jingler/core"
 
 /**
  * Claude plan usage, read on demand from the SDK's structured `/usage` control

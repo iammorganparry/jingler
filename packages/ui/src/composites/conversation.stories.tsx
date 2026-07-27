@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { Attachment, Message } from "@starbase/core"
+import type { Attachment, Message } from "@jingler/core"
 import { SEED_CONVERSATION } from "../seed.js"
 import { CodeChip } from "../components/code-chip.js"
 import { DiffPeek } from "../components/diff-peek.js"

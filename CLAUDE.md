@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Starbase is a desktop **agent harness**: an Electron app that runs local coding agents (`claude`, `codex`, `cursor`) as parallel **sessions**, each wired to a repo, a git **worktree**, a branch, and a PR. A separate Hono/Postgres **auth backend** (`apps/server`) gates the app behind sign-in. It's a Turborepo monorepo managed with pnpm.
+Jingler is a desktop **agent harness**: an Electron app that runs local coding agents (`claude`, `codex`, `cursor`) as parallel **sessions**, each wired to a repo, a git **worktree**, a branch, and a PR. A separate Hono/Postgres **auth backend** (`apps/server`) gates the app behind sign-in. It's a Turborepo monorepo managed with pnpm.
 
 ## Commands
 
@@ -21,9 +21,9 @@ pnpm lint           # biome lint . — errors gate CI; a11y/style report as warn
 Per-app / per-package (use `--filter`, or `pnpm -C <dir>`):
 
 ```bash
-pnpm --filter @starbase/desktop dev        # just the Electron app (opens a window)
-pnpm --filter @starbase/server dev         # just the auth backend (http://localhost:9100)
-pnpm --filter @starbase/ui storybook       # component library preview on :6006
+pnpm --filter @jingler/desktop dev        # just the Electron app (opens a window)
+pnpm --filter @jingler/server dev         # just the auth backend (http://localhost:9100)
+pnpm --filter @jingler/ui storybook       # component library preview on :6006
 ```
 
 Tests (Vitest, configured at the root via the `projects` feature):
@@ -31,18 +31,18 @@ Tests (Vitest, configured at the root via the `projects` feature):
 ```bash
 pnpm vitest run path/to/file.test.ts       # a single test file
 pnpm vitest run -t "substring of test name" # tests matching a name
-pnpm --filter @starbase/server test        # one package's suite
-pnpm --filter @starbase/server test:integration  # DB tests (sets STARBASE_DB_TESTS=1)
-pnpm --filter @starbase/desktop e2e        # Playwright `_electron` e2e (local only; not in CI)
+pnpm --filter @jingler/server test        # one package's suite
+pnpm --filter @jingler/server test:integration  # DB tests (sets JINGLER_DB_TESTS=1)
+pnpm --filter @jingler/desktop e2e        # Playwright `_electron` e2e (local only; not in CI)
 ```
 
 Auth backend needs a local Postgres (Docker, port **5433** to avoid clashing with a host 5432):
 
 ```bash
 docker compose up -d db                     # start Postgres
-pnpm --filter @starbase/server db:generate  # drizzle-kit generate (after schema.ts changes)
-pnpm --filter @starbase/server db:migrate   # apply migrations
-pnpm --filter @starbase/server db:studio    # drizzle studio
+pnpm --filter @jingler/server db:generate  # drizzle-kit generate (after schema.ts changes)
+pnpm --filter @jingler/server db:migrate   # apply migrations
+pnpm --filter @jingler/server db:studio    # drizzle studio
 ```
 
 Copy `apps/server/.env.example` → `apps/server/.env` for local dev; the server boots with zero real secrets (Docker Postgres + magic links logged to the console when `RESEND_API_KEY` is unset).
@@ -51,18 +51,18 @@ Copy `apps/server/.env.example` → `apps/server/.env` for local dev; the server
 
 ### Monorepo layout
 
-- `apps/desktop` — the Electron app (`@starbase/desktop`), built with **electron-vite**.
-- `apps/server` — the **BetterAuth** backend (`@starbase/server`) on Hono + Postgres/Drizzle; runs locally via `tsx` and deploys to Vercel (`api/[[...route]].ts`).
+- `apps/desktop` — the Electron app (`@jingler/desktop`), built with **electron-vite**.
+- `apps/server` — the **BetterAuth** backend (`@jingler/server`) on Hono + Postgres/Drizzle; runs locally via `tsx` and deploys to Vercel (`api/[[...route]].ts`).
 - `packages/core` — domain types and errors, expressed as **Effect `Schema`** (`CliKind`, `Session`, `AuthSession`, tagged errors). No runtime logic.
-- `packages/contracts` — the **RPC contract** (`StarbaseRpcs`, an `@effect/rpc` `RpcGroup`). The single source of truth for every desktop main↔renderer call.
+- `packages/contracts` — the **RPC contract** (`JinglerRpcs`, an `@effect/rpc` `RpcGroup`). The single source of truth for every desktop main↔renderer call.
 - `packages/cli-adapters` — the desktop **backend logic** as **Effect services** (`Effect.Service`): `SessionStore`, `AgentRunner`, `WorkspaceService` (git/worktrees), `TerminalService`, `GhService`, `AuthService`, `DiscoveryService`, etc. These run in the Electron **main** process.
-- `packages/themes` — the **theme engine**: nine vendored VS Code themes, the fold from a VS Code theme JSON to Starbase's `ThemeTokens`, and the colour maths. Pure — no Effect, no filesystem, no React — because main, `cli-adapters` and the renderer all import it.
+- `packages/themes` — the **theme engine**: nine vendored VS Code themes, the fold from a VS Code theme JSON to Jingler's `ThemeTokens`, and the colour maths. Pure — no Effect, no filesystem, no React — because main, `cli-adapters` and the renderer all import it.
 - `packages/ui` — React component library (Tailwind, **themeable** — One Dark Pro is the default and the fallback, Storybook). Consumed by the renderer.
 - `packages/tsconfig` — shared tsconfig presets: `base.json`, `node.json`, `react.json` (the last adds `jsx` + DOM/React types).
 
 ### Workspace packages ship raw TypeScript (important)
 
-`@starbase/*` packages set `exports` → `./src/index.ts` — **no build step**. Consumers transpile them:
+`@jingler/*` packages set `exports` → `./src/index.ts` — **no build step**. Consumers transpile them:
 - the desktop **bundles** them via Vite (they're listed in `electron.vite.config.ts` and *excluded* from `externalizeDepsPlugin`, so main/preload/renderer get them transpiled in);
 - the server runs them through `tsx`.
 
@@ -73,16 +73,16 @@ Consequence: editing a package is picked up immediately in dev (no rebuild), and
 The Electron app is **main / preload / renderer**. Instead of ad-hoc IPC, it runs the real `@effect/rpc` machinery over one IPC channel:
 - `main` hosts an `RpcServer` (`src/main/rpc.ts`) backed by the cli-adapters Effect services, assembled in `src/main/runtime.ts` as a `ManagedRuntime` (`AppLayer` wires every service + `AppPathsLive` + `SecretStore`).
 - `renderer` hosts an `RpcClient` (`src/renderer/rpc-client.ts`) exposing plain typed Promises (`rpc.authSendMagicLink(...)`, etc.).
-- Both are driven by the shared `StarbaseRpcs` group in `packages/contracts`, which owns every payload/success/error schema. **To add or change a main↔renderer call, edit `packages/contracts` first**, then the main handler and the renderer client.
+- Both are driven by the shared `JinglerRpcs` group in `packages/contracts`, which owns every payload/success/error schema. **To add or change a main↔renderer call, edit `packages/contracts` first**, then the main handler and the renderer client.
 
 Renderer UI state is driven by **XState** machines (e.g. `authMachine`, `appMachine`); the app is gated on `authMachine` reaching `signedIn`.
 
 ### Theming
 
 The app ships **VS Code-compatible themes**: nine built in, and any VS Code theme
-JSON can be dropped into `~/starbase/themes/*.json` or pasted into Settings ›
+JSON can be dropped into `~/jingler/themes/*.json` or pasted into Settings ›
 Themes. That format is the *stored* format on purpose — themes are a thing people
-already own, and a Starbase-shaped file would mean every one needs translating.
+already own, and a Jingler-shaped file would mean every one needs translating.
 
 **Never hardcode a colour in a component.** Every colour is a `--sb-*` custom
 property re-exported to Tailwind (`bg-panel`, `text-blue`, `border-line`), and a
@@ -111,20 +111,20 @@ Other things worth knowing before touching this:
   into a `<style>` before React mounts. The mapper never passes a theme's string through —
   every value is re-emitted from parsed components.
 - **`map.ts` has a second pass (`ramp.ts`) and it is not optional.** Real themes
-  invert or collapse the planes Starbase needs separated: Monokai puts its
+  invert or collapse the planes Jingler needs separated: Monokai puts its
   selection colour in `panel.background`, Light Modern gives `foreground` and
   `descriptionForeground` the same value.
 - **The first paint is main's job**, not the renderer's — `main/boot-theme.ts`
   plus a synchronous preload fetch. By the time React could ask, the browser has
   already painted.
-- Re-vendor the built-ins with `pnpm --filter @starbase/themes vendor`. The
+- Re-vendor the built-ins with `pnpm --filter @jingler/themes vendor`. The
   script flattens VS Code's `include` chains; without that, `dark_modern.json`
   resolves to zero syntax rules and renders as grey mush with no error.
 
 ### Plugins
 
-Starbase is extensible: plugins add **tabs, dock panes and commands**, loaded
-from `~/starbase/plugins`. Keybinding and settings contributions are in the
+Jingler is extensible: plugins add **tabs, dock panes and commands**, loaded
+from `~/jingler/plugins`. Keybinding and settings contributions are in the
 schema but not yet dispatched; a manifest declaring one fails to load loudly. The shape is VS Code's on
 purpose — `activationEvents`, `contributes`, `capabilities` mean what they mean
 there.
@@ -136,7 +136,7 @@ there.
   operator consents once, revocably. See `docs/plugins/permissions-and-trust.md`
   — including what the boundaries do and do not protect.
 - **Plugin UI shares the app's React**, reached through an importmap over the
-  `starbase-plugin://` scheme. A plugin that bundles its own React makes every
+  `jingler-plugin://` scheme. A plugin that bundles its own React makes every
   hook throw, but only once a SECOND plugin is installed.
 - **A tab is a `TabContribution`, and the built-ins are contributions too**
   (`packages/ui/src/app/tab-contributions.ts`). There is no second code path for
@@ -145,15 +145,15 @@ there.
   for being official: it asks for GitHub through the same consent-gated call a
   third-party plugin would.
 
-New plugin: `node scripts/create-starbase-plugin.mjs my-plugin`.
+New plugin: `node scripts/create-jingler-plugin.mjs my-plugin`.
 
 ### Persistence
 
-Desktop state is **JSON files under `~/starbase`** (no ORM) — see `apps/desktop/src/main/app-paths.ts`: `config.json`, `sessions.json`, `worktrees/`, `transcripts/`, `themes/` (user colour themes, watched for live reload), `.starbase/` (plans), `auth.enc` (the bearer token via `SecretStore`). **`STARBASE_HOME` overrides the root** — the e2e suite points it at a throwaway dir so tests never touch the developer's real `~/starbase`. The auth server's own state lives in **Postgres** (Drizzle schema in `apps/server/src/db/schema.ts`), separate from the desktop's JSON store.
+Desktop state is **JSON files under `~/jingler`** (no ORM) — see `apps/desktop/src/main/app-paths.ts`: `config.json`, `sessions.json`, `worktrees/`, `transcripts/`, `themes/` (user colour themes, watched for live reload), `.jingler/` (plans), `auth.enc` (the bearer token via `SecretStore`). **`JINGLER_HOME` overrides the root** — the e2e suite points it at a throwaway dir so tests never touch the developer's real `~/jingler`. The auth server's own state lives in **Postgres** (Drizzle schema in `apps/server/src/db/schema.ts`), separate from the desktop's JSON store.
 
 ### Auth flow
 
-`apps/server` (BetterAuth: GitHub/Google OAuth + email magic link, `bearer` plugin) issues a token the desktop stores via `SecretStore`. The renderer drives sign-in through the `Auth.*` RPCs → `AuthService` (`packages/cli-adapters/src/auth.ts`), which talks to the backend. OAuth/magic-link bounce back through the `starbase://` custom-protocol deep link, handled in `apps/desktop/src/main/deep-link.ts`. The desktop targets `http://localhost:9100` by default (override with `STARBASE_AUTH_URL`).
+`apps/server` (BetterAuth: GitHub/Google OAuth + email magic link, `bearer` plugin) issues a token the desktop stores via `SecretStore`. The renderer drives sign-in through the `Auth.*` RPCs → `AuthService` (`packages/cli-adapters/src/auth.ts`), which talks to the backend. OAuth/magic-link bounce back through the `jingler://` custom-protocol deep link, handled in `apps/desktop/src/main/deep-link.ts`. The desktop targets `http://localhost:9100` by default (override with `JINGLER_AUTH_URL`).
 
 ## Conventions & gotchas
 

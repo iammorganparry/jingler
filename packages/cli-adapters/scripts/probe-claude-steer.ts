@@ -10,7 +10,7 @@
  *
  * It spawns the operator's real `claude`, so it is a manual tool, never CI:
  *
- *   pnpm --filter @starbase/cli-adapters probe:claude-steer
+ *   pnpm --filter @jingler/cli-adapters probe:claude-steer
  *
  * WHAT IT FOUND (and what the adapter now assumes): the CLI absorbs the pushed
  * message into the running turn and emits exactly ONE `result`. The first version

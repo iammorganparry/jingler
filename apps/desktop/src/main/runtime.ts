@@ -2,7 +2,7 @@
  * The main-process Effect runtime. `AppLayer` wires every backend dependency the
  * RPC handlers need — the Node platform (`CommandExecutor` + `FileSystem` +
  * `Path`), the workspace/config/git/gh/discovery/session services, the native
- * dialog + `~/starbase` path layers — and launches the RPC server.
+ * dialog + `~/jingler` path layers — and launches the RPC server.
  * `ManagedRuntime` keeps the layer's scope (forked server daemon + IPC listener)
  * alive for the lifetime of the app.
  */
@@ -37,7 +37,7 @@ import {
   RankingService,
   UsageService,
   WorkspaceService
-} from "@starbase/cli-adapters"
+} from "@jingler/cli-adapters"
 import { NodeContext } from "@effect/platform-node"
 import { Layer, ManagedRuntime } from "effect"
 import { AppPathsLive } from "./app-paths.js"
@@ -49,10 +49,10 @@ import { PlaintextSecretStoreLive, SecretStoreLive } from "./secret-store.js"
 // e2e selects a plaintext file store (no OS keychain prompts under Playwright);
 // every real build uses the keychain-backed store.
 const SecretStoreLayer =
-  process.env.STARBASE_SECRET_STORE === "memory" ? PlaintextSecretStoreLive : SecretStoreLive
+  process.env.JINGLER_SECRET_STORE === "memory" ? PlaintextSecretStoreLive : SecretStoreLive
 
 /**
- * The per-session JSON stores under `~/starbase`. Independent peers — each needs
+ * The per-session JSON stores under `~/jingler`. Independent peers — each needs
  * only FileSystem/Path/AppPaths — so they're merged into one `provide` rather
  * than chained. (`pipe` tops out at 20 arguments; grouping peers keeps headroom.)
  */

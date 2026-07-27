@@ -1,9 +1,9 @@
 ---
-"@starbase/cli-adapters": minor
-"@starbase/contracts": minor
-"@starbase/core": minor
-"@starbase/desktop": minor
-"@starbase/ui": minor
+"@jingler/cli-adapters": minor
+"@jingler/contracts": minor
+"@jingler/core": minor
+"@jingler/desktop": minor
+"@jingler/ui": minor
 ---
 
 Agentic adversarial code review — a reviewer agent that argues *against* a pull request, manually or automatically, with findings routed back to the working agent.

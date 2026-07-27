@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Scaffold a Starbase plugin.
+ * Scaffold a Jingler plugin.
  *
- *   node scripts/create-starbase-plugin.mjs my-plugin
+ *   node scripts/create-jingler-plugin.mjs my-plugin
  *
  * ## Why the output is a WORKING plugin, not a skeleton
  *
@@ -15,7 +15,7 @@
  *
  * ## Why it emits TypeScript manifests rather than JSON
  *
- * Starbase reads `starbase.plugin.json`, but the scaffold writes
+ * Jingler reads `jingler.plugin.json`, but the scaffold writes
  * `src/manifest.ts` and generates the JSON at build time. That is what lets
  * `definePlugin` check the views against the declared tab ids — rename a tab and
  * get a compile error, rather than a tab that opens onto nothing.
@@ -29,12 +29,12 @@ const REPO = resolve(fileURLToPath(new URL("..", import.meta.url)))
 const id = process.argv[2]
 
 if (!id) {
-  console.error("Usage: node scripts/create-starbase-plugin.mjs <plugin-id>")
+  console.error("Usage: node scripts/create-jingler-plugin.mjs <plugin-id>")
   console.error("  <plugin-id> is lowercase kebab-case, e.g. my-plugin")
   process.exit(1)
 }
 
-// The same constraint `PluginId` enforces in `@starbase/core`. Checked here so
+// The same constraint `PluginId` enforces in `@jingler/core`. Checked here so
 // the failure arrives before any files exist, rather than at first load.
 if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
   console.error(`"${id}" is not a valid plugin id.`)
@@ -62,19 +62,19 @@ const component = `${title.replace(/ /g, "")}Tab`
 const files = {
   "package.json": `${JSON.stringify(
     {
-      name: `@starbase-plugin/${id}`,
+      name: `@jingler-plugin/${id}`,
       version: "1.0.0",
       private: true,
       type: "module",
-      description: `A Starbase plugin.`,
+      description: `A Jingler plugin.`,
       scripts: {
         build: "vite build && tsx ./scripts/emit-manifest.mjs",
         typecheck: "tsc --noEmit",
         "install:local": "node ./scripts/install-local.mjs"
       },
       devDependencies: {
-        "@starbase/plugin-sdk": "workspace:*",
-        "@starbase/tsconfig": "workspace:*",
+        "@jingler/plugin-sdk": "workspace:*",
+        "@jingler/tsconfig": "workspace:*",
         "@types/react": "^19.2.0",
         "@vitejs/plugin-react": "^5.2.0",
         react: "^19.2.0",
@@ -88,7 +88,7 @@ const files = {
   )}\n`,
 
   "tsconfig.json": `{
-  "extends": "@starbase/tsconfig/react.json",
+  "extends": "@jingler/tsconfig/react.json",
   "include": ["src", "vite.config.ts"]
 }
 `,
@@ -97,11 +97,11 @@ const files = {
 
   "vite.config.ts": `import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
-import { starbasePluginBuild } from "@starbase/plugin-sdk/vite"
+import { jinglerPluginBuild } from "@jingler/plugin-sdk/vite"
 
 /**
- * \`starbasePluginBuild\` sets the externals that matter: react, react-dom, the
- * JSX runtimes and the SDK all come from Starbase at runtime. Bundling any of
+ * \`jinglerPluginBuild\` sets the externals that matter: react, react-dom, the
+ * JSX runtimes and the SDK all come from Jingler at runtime. Bundling any of
  * them — React especially — puts two copies in one tree and makes every hook
  * throw, but only once a SECOND plugin is installed.
  *
@@ -110,26 +110,26 @@ import { starbasePluginBuild } from "@starbase/plugin-sdk/vite"
  */
 export default defineConfig({
   plugins: [react()],
-  build: starbasePluginBuild({ ui: "src/ui.tsx" })
+  build: jinglerPluginBuild({ ui: "src/ui.tsx" })
 })
 `,
 
-  "src/manifest.ts": `import { defineManifest } from "@starbase/plugin-sdk"
+  "src/manifest.ts": `import { defineManifest } from "@jingler/plugin-sdk"
 
 /**
  * Written in TypeScript so the contribution ids below are captured as literal
  * types: \`definePlugin\` in \`ui.tsx\` then requires a matching view for each one,
  * and a typo is a compile error rather than a tab that opens onto nothing.
  *
- * \`pnpm build\` generates \`starbase.plugin.json\` from this. Do not hand-edit the
+ * \`pnpm build\` generates \`jingler.plugin.json\` from this. Do not hand-edit the
  * JSON — it is overwritten.
  */
 export const manifest = defineManifest({
   id: "${id}",
   name: "${title}",
   version: "1.0.0",
-  description: "A Starbase plugin.",
-  // The plugin API generation this targets. A Starbase too old to speak it
+  description: "A Jingler plugin.",
+  // The plugin API generation this targets. A Jingler too old to speak it
   // refuses the plugin with a sentence naming both versions, instead of
   // evaluating your bundle against an SDK missing what it expects and handing
   // the operator a stack trace. Bump only if the SDK's own major does.
@@ -151,10 +151,10 @@ export const manifest = defineManifest({
 })
 `,
 
-  "src/ui.tsx": `import { definePlugin, useSession, type TabProps } from "@starbase/plugin-sdk"
+  "src/ui.tsx": `import { definePlugin, useSession, type TabProps } from "@jingler/plugin-sdk"
 // The themed kit is a separate entrypoint so Node-side build scripts can import
 // the root without pulling the component library in.
-import { cn } from "@starbase/plugin-sdk/ui"
+import { cn } from "@jingler/plugin-sdk/ui"
 import { manifest } from "./manifest.js"
 
 /**
@@ -200,7 +200,7 @@ export default definePlugin(manifest, {
 `,
 
   "scripts/emit-manifest.mjs": `/**
- * Write \`starbase.plugin.json\` from the TypeScript manifest.
+ * Write \`jingler.plugin.json\` from the TypeScript manifest.
  *
  * One source of truth: a hand-maintained JSON copy drifts the first time
  * someone renames a tab.
@@ -209,14 +209,14 @@ import { writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { manifest } from "../src/manifest.ts"
 
-const out = fileURLToPath(new URL("../starbase.plugin.json", import.meta.url))
+const out = fileURLToPath(new URL("../jingler.plugin.json", import.meta.url))
 writeFileSync(out, \`\${JSON.stringify(manifest, null, 2)}\\n\`, "utf8")
 console.log(\`Wrote \${out}\`)
 `,
 
   "scripts/install-local.mjs": `/**
- * Copy this plugin into \`~/starbase/plugins/${id}\` so the running app picks it
- * up. Honours \`STARBASE_HOME\`.
+ * Copy this plugin into \`~/jingler/plugins/${id}\` so the running app picks it
+ * up. Honours \`JINGLER_HOME\`.
  *
  * Copies rather than symlinks: the protocol handler resolves every request
  * through \`realpath\` and refuses anything landing outside the plugins root, so
@@ -229,14 +229,14 @@ import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const src = fileURLToPath(new URL("..", import.meta.url))
-const root = join(process.env.STARBASE_HOME ?? homedir(), "starbase", "plugins")
+const root = join(process.env.JINGLER_HOME ?? homedir(), "jingler", "plugins")
 const dest = join(root, "${id}")
 
 await mkdir(root, { recursive: true })
 await rm(dest, { recursive: true, force: true })
 await mkdir(dest, { recursive: true })
 
-for (const entry of ["starbase.plugin.json", "dist"]) {
+for (const entry of ["jingler.plugin.json", "dist"]) {
   await cp(join(src, entry), join(dest, entry), { recursive: true })
 }
 
@@ -244,7 +244,7 @@ console.log(\`Installed ${id} to \${dest}\`)
 console.log("The app picks it up live — no restart needed.")
 `,
 
-  "AGENTS.md": `# ${title} — a Starbase plugin
+  "AGENTS.md": `# ${title} — a Jingler plugin
 
 The complete authoring contract is in
 \`packages/plugin-sdk/AGENTS.md\`, and every export is listed in
@@ -262,15 +262,15 @@ anything here.
 ## Commands
 
 \`\`\`bash
-pnpm build          # bundle + regenerate starbase.plugin.json
-pnpm install:local  # copy into ~/starbase/plugins
+pnpm build          # bundle + regenerate jingler.plugin.json
+pnpm install:local  # copy into ~/jingler/plugins
 pnpm typecheck
 \`\`\`
 `,
 
   "README.md": `# ${title}
 
-A Starbase plugin.
+A Jingler plugin.
 
 \`\`\`bash
 pnpm install
@@ -278,8 +278,8 @@ pnpm build
 pnpm install:local
 \`\`\`
 
-The tab appears in every session immediately — Starbase watches
-\`~/starbase/plugins\` and reloads without a restart.
+The tab appears in every session immediately — Jingler watches
+\`~/jingler/plugins\` and reloads without a restart.
 
 Editing and seeing nothing? Bump \`version\` in \`src/manifest.ts\`. Module imports
 are cached by URL for the life of the window.
@@ -297,7 +297,7 @@ for (const [path, contents] of Object.entries(files)) {
 console.log(`Created plugins/${id}`)
 console.log("")
 console.log("  pnpm install")
-console.log(`  pnpm --filter @starbase-plugin/${id} build`)
-console.log(`  pnpm --filter @starbase-plugin/${id} install:local`)
+console.log(`  pnpm --filter @jingler-plugin/${id} build`)
+console.log(`  pnpm --filter @jingler-plugin/${id} install:local`)
 console.log("")
 console.log("Then open any session — the tab is there.")

@@ -1,4 +1,4 @@
-import { CliExecError } from "@starbase/core"
+import { CliExecError } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import { classifyProviderFailure, toolMayMutate } from "./provider-failure.js"
 

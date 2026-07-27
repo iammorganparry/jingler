@@ -1,5 +1,5 @@
 {
-  "name": "@starbase/contracts",
+  "name": "@jingler/contracts",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -11,12 +11,12 @@
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@starbase/core": "workspace:*",
+    "@jingler/core": "workspace:*",
     "@effect/rpc": "^0.75.1",
     "effect": "^3.21.4"
   },
   "devDependencies": {
-    "@starbase/themes": "workspace:*",
-    "@starbase/tsconfig": "workspace:*"
+    "@jingler/themes": "workspace:*",
+    "@jingler/tsconfig": "workspace:*"
   }
 }

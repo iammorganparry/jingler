@@ -1,4 +1,4 @@
-import type { HarnessBilling } from "@starbase/core"
+import type { HarnessBilling } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { GigaplanSettings } from "./gigaplan-settings.js"

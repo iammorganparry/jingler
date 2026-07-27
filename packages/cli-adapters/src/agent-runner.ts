@@ -14,7 +14,7 @@ import type {
   ReasoningSetting,
   Session,
   StreamEvent
-} from "@starbase/core"
+} from "@jingler/core"
 import {
   ADHD_MODE_DEFAULT,
   applyStreamEvent,
@@ -32,7 +32,7 @@ import {
   STOPPED_NOTE,
   userMessage,
   resolveOrchestrator
-} from "@starbase/core"
+} from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Schedule, Stream } from "effect"
@@ -102,7 +102,7 @@ export const resolveIntakeHarness = (
   const installed = (cli: CliKind): boolean =>
     discovered.some((candidate) => candidate.kind === cli && candidate.binPath !== null)
   if (installed(configured.cli)) return configured
-  if (session.cli !== "starbase" && installed(session.cli)) return session
+  if (session.cli !== "jingler" && installed(session.cli)) return session
   return configured
 }
 
@@ -128,7 +128,7 @@ const INTERRUPT_GRACE = "5 seconds"
  * that hangs before its `system/init` line is invisible everywhere, and the
  * turn's placeholder message stays empty with `streaming: true` forever. That
  * is the spinning-eyebrow-with-no-reply bug; 32 of 946 assistant turns in
- * ~/starbase/transcripts are stuck in exactly that state.
+ * ~/jingler/transcripts are stuck in exactly that state.
  *
  * Generous on purpose. This is the wait for the FIRST event, not for the
  * answer: harness startup, MCP server boot and a cold resume all land well
@@ -246,7 +246,7 @@ export type AgentRunTarget = "session" | "orchestrator"
  * this singleton service so `decideGate`/`setMode` (separate RPCs) can reach the
  * paused run.
  */
-export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentRunner", {
+export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRunner", {
   effect: Effect.gen(function* () {
     // gateId → the pending gate (shared across prompt/decideGate/stop calls).
     /** Human-in-the-loop state, and the rule that decides what needs approval. */
@@ -279,7 +279,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     // forks and registers run B over run A's entry, and only THEN does the
     // stop's `Ref.get` schedule — handing it run B's fiber to kill. The operator
     // sees their fresh message answered with a bare "Stopped." and re-sends.
-    // (64 of 946 assistant turns in ~/starbase/transcripts are exactly that.)
+    // (64 of 946 assistant turns in ~/jingler/transcripts are exactly that.)
     //
     // A token check alone cannot fix it: by the time the stop reads the map, the
     // only entry that ever existed for that read IS run B's. The read and the
@@ -447,7 +447,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
     /**
      * The user's configured default execution mode for a session (`auto` /
      * `accept-edits` / `ask`), read from their CLI config. `AppPaths.root` is
-     * `~/starbase`, so its parent is $HOME. Never fails.
+     * `~/jingler`, so its parent is $HOME. Never fails.
      */
     const resolveExecMode = (sessionId: string): Effect.Effect<PermissionMode, never, PromptEnv> =>
       Effect.gen(function* () {
@@ -629,7 +629,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             ...(yield* approvals.allowlistFor(chatId)),
             ...(chat.allowlist ?? [])
           ])
-          // `starbase` is not a harness that can run anything — it is us. A
+          // `jingler` is not a harness that can run anything — it is us. A
           // session on the orchestrator runs on the ONE model the operator
           // configured for it (default Claude Opus), so general asks have a
           // predictable identity. Resolving it here, before the binary lookup
@@ -661,7 +661,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           // effect on the very next message of an already-running session.
           const adhdMode = workspaceConfig?.adhdMode ?? ADHD_MODE_DEFAULT
           const cli =
-            orchestrating || sessionCli === "starbase" ? orchestrator.cli : sessionCli
+            orchestrating || sessionCli === "jingler" ? orchestrator.cli : sessionCli
           // Cache the user's configured default exec mode so approving a plan can
           // restore it.
           const execDefault = yield* resolveExecMode(sessionId)
@@ -676,7 +676,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
           // `"" || undefined` to *no* cwd, so the harness inherited the Electron
           // main process's working directory — in development, whichever worktree
           // `pnpm dev` was launched from. An agent for repo A would then read and
-          // edit repo B, most likely Starbase's own source. The adapters now call
+          // edit repo B, most likely Jingler's own source. The adapters now call
           // `requireWorktree`, which throws rather than inheriting.
           const worktreePath = session?.worktreePath ?? ""
           // Saved plans for this worktree, so a "implement/continue the plan" turn
@@ -793,7 +793,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
             binPath,
             mode,
             model:
-              orchestrating || sessionCli === "starbase"
+              orchestrating || sessionCli === "jingler"
                 ? orchestrator.model
                 : (chat.model ?? defaultModel(cli)),
             ...(resolvedReasoning === null
@@ -1065,7 +1065,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@starbase/AgentR
               // Persist the harness session id (carried on Started) so the NEXT
               // prompt resumes this conversation — even after an app restart wiped
               // the adapter's in-memory resume map. `event.sessionId` is the
-              // harness's own id, not our `sessionId` (the Starbase session key).
+              // harness's own id, not our `sessionId` (the Jingler session key).
               if (event._tag === "Started" && event.sessionId.length > 0) {
                 yield* (
                   orchestrating

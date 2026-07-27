@@ -1,4 +1,4 @@
-import type { Session } from "@starbase/core"
+import type { Session } from "@jingler/core"
 
 /**
  * A Session with sensible defaults, for tests and stories.
@@ -14,7 +14,7 @@ import type { Session } from "@starbase/core"
 export const testSession = (over: Partial<Session> & { id: string }): Session =>
   ({
     repo: "gtm-grid",
-    branch: `starbase/${over.id}`,
+    branch: `jingler/${over.id}`,
     title: over.id,
     status: "idle",
     cli: "claude",

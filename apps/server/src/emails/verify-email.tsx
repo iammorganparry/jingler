@@ -17,7 +17,7 @@ export function VerifyEmail({ email, verifyUrl }: VerifyEmailProps) {
     <EmailShell preview="One click and your first session is ready." footer={<SecurityFooter />}>
       <H1>Confirm your email</H1>
       <P>
-        Thanks for signing up for Starbase. Confirm <Mono>{email}</Mono> and we&apos;ll drop you
+        Thanks for signing up for Jingler. Confirm <Mono>{email}</Mono> and we&apos;ll drop you
         straight into your workspace.
       </P>
       <PrimaryButton href={verifyUrl}>Verify email address</PrimaryButton>
@@ -48,7 +48,7 @@ export function VerifyEmail({ email, verifyUrl }: VerifyEmailProps) {
 
 VerifyEmail.PreviewProps = {
   email: "you@acme.dev",
-  verifyUrl: "https://app.starbase.dev/verify?t=9f2c8b1e-4a7d-4c2e-9b1a-3f8e2c1d5a1b"
+  verifyUrl: "https://app.jingler.dev/verify?t=9f2c8b1e-4a7d-4c2e-9b1a-3f8e2c1d5a1b"
 } satisfies VerifyEmailProps
 
 export default VerifyEmail

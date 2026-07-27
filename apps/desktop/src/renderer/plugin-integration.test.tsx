@@ -2,13 +2,13 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { useEffect, useState, type ReactNode } from "react"
-import type { Session } from "@starbase/core"
+import type { Session } from "@jingler/core"
 import {
   useCommand,
   useHost,
   usePluginStorage,
   useSession
-} from "@starbase/plugin-sdk"
+} from "@jingler/plugin-sdk"
 import { PluginTabHost } from "./plugin-tab-host.js"
 
 /**
@@ -46,7 +46,7 @@ const internalSession = (over: Partial<Session> = {}): Session =>
   ({
     id: "s1",
     repo: "trigify/api",
-    branch: "starbase/s1",
+    branch: "jingler/s1",
     title: "Fix auth",
     status: "idle",
     cli: "claude",
@@ -82,7 +82,7 @@ describe("a plugin view rendered the way the app renders it", () => {
     expect(screen.getByText("repo: trigify/api")).toBeTruthy()
   })
 
-  it("sees the narrowed snapshot, not Starbase's internal session", () => {
+  it("sees the narrowed snapshot, not Jingler's internal session", () => {
     // The contract the SDK documents. If the full `Session` leaked through,
     // every one of its ~25 fields would become a de-facto public API.
     const View = () => {
@@ -163,7 +163,7 @@ describe("a plugin hook called outside a plugin view", () => {
       return null
     }
     const spy = vi.spyOn(console, "error").mockImplementation(() => {})
-    expect(() => render(<Stray />)).toThrow(/outside a Starbase plugin view/)
+    expect(() => render(<Stray />)).toThrow(/outside a Jingler plugin view/)
     spy.mockRestore()
   })
 })

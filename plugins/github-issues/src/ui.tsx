@@ -5,9 +5,9 @@
  *
  * It is a port of `IssueView` from `packages/ui/src/composites`, and the port is
  * the point: it uses only what a third-party plugin can reach. No app internals,
- * no `@starbase/ui` deep imports, no privileged data — the session comes from
+ * no `@jingler/ui` deep imports, no privileged data — the session comes from
  * `useSession`, GitHub comes from a host command, and every primitive comes from
- * `@starbase/plugin-sdk`.
+ * `@jingler/plugin-sdk`.
  *
  * Writing it is what showed the SDK had no UI kit at all. A rich tab wants
  * markdown, avatars, a spinner and relative timestamps; without those a plugin
@@ -29,7 +29,7 @@ import {
   useHost,
   useSessionActions,
   type TabProps
-} from "@starbase/plugin-sdk"
+} from "@jingler/plugin-sdk"
 // The themed kit is its own entrypoint, so a plugin's Node-side build scripts
 // can import the root without dragging the component library in.
 import {
@@ -44,7 +44,7 @@ import {
   relativeTime,
   Spinner,
   useWidthTier
-} from "@starbase/plugin-sdk/ui"
+} from "@jingler/plugin-sdk/ui"
 import { manifest } from "./manifest.js"
 
 interface IssueUser {

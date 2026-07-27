@@ -11,7 +11,7 @@ import {
 } from "./theme.js"
 
 /**
- * A realistic slice of a marketplace theme: the keys Starbase reads, plus keys
+ * A realistic slice of a marketplace theme: the keys Jingler reads, plus keys
  * it does not model (`$schema`, `semanticTokenColors`, `editorGutter.*`). The
  * unmodelled ones are the point of most of these tests.
  */
@@ -46,10 +46,10 @@ describe("VsCodeTheme", () => {
   /**
    * The one that protects the user's file. Effect's `Struct` strips unnamed
    * keys by default, so without the index signature, opening a theme in
-   * Starbase's editor and saving it would silently delete everything Starbase
+   * Jingler's editor and saving it would silently delete everything Jingler
    * does not model — and the user would find out in VS Code, later.
    */
-  it("preserves keys Starbase does not model, through a full round trip", () => {
+  it("preserves keys Jingler does not model, through a full round trip", () => {
     const decoded = Schema.decodeUnknownSync(VsCodeTheme)(MARKETPLACE_THEME)
     const reencoded = Schema.encodeSync(VsCodeTheme)(decoded)
 

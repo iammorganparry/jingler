@@ -1,4 +1,4 @@
-import type { CliInfo, CliKind, ProviderUsage, Usage } from "@starbase/core"
+import type { CliInfo, CliKind, ProviderUsage, Usage } from "@jingler/core"
 import { Effect } from "effect"
 import { fetchClaudeUsage, toClaudeProviderUsage } from "./claude-usage.js"
 import { fetchCodexUsage, toCodexProviderUsage } from "./codex-usage.js"
@@ -12,9 +12,9 @@ const NAME: Record<CliKind, string> = {
   // Lowercase is the product's own styling, not a typo.
   opencode: "opencode",
   // Never surfaced: the orchestrator holds no subscription of its own. What a
-  // Starbase session spends is spent by the harnesses it drives, and those
+  // Jingler session spends is spent by the harnesses it drives, and those
   // report their own usage under their own names.
-  starbase: "Starbase"
+  jingler: "Jingler"
 }
 
 const unavailable = (cli: CliKind, name?: string): ProviderUsage => ({
@@ -31,7 +31,7 @@ const unavailable = (cli: CliKind, name?: string): ProviderUsage => ({
  * Failed reads and scripted mode degrade to "not available" without making the
  * modal itself fail.
  */
-export class UsageService extends Effect.Service<UsageService>()("@starbase/UsageService", {
+export class UsageService extends Effect.Service<UsageService>()("@jingler/UsageService", {
   accessors: true,
   sync: () => ({
     get: (clis: ReadonlyArray<CliInfo>): Effect.Effect<Usage> =>

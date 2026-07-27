@@ -1,4 +1,4 @@
-import type { ProviderUsage, UsageStatus, UsageWindow } from "@starbase/core"
+import type { ProviderUsage, UsageStatus, UsageWindow } from "@jingler/core"
 import { requestCodexAppServer } from "./codex-app-server.js"
 
 export interface CodexRateLimitWindow {

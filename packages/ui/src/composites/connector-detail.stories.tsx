@@ -3,7 +3,7 @@ import type {
   ConnectorConnection,
   ConnectorProvider,
   ConnectorProviderDetail
-} from "@starbase/core"
+} from "@jingler/core"
 import { ConnectorDetail } from "./connector-detail.js"
 
 /**

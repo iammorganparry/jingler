@@ -151,7 +151,7 @@ export * from "./app/diff-panel.js"
 export * from "./app/terminal-panel.js"
 export * from "./app/preview-dock.js"
 export * from "./app/app-shell.js"
-export * from "./app/starbase-app.js"
+export * from "./app/jingler-app.js"
 
 // Screens
 export * from "./screens/session-conversation.js"

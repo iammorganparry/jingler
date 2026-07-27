@@ -65,7 +65,7 @@ export const auth = betterAuth({
   secret: env.authSecret,
   baseURL: env.authBaseUrl,
   // The desktop app lives behind a custom protocol; allow it as a redirect target.
-  trustedOrigins: ["starbase://"],
+  trustedOrigins: ["jingler://"],
   database: drizzleAdapter(db, { provider: "pg", schema }),
   socialProviders,
   // Email + password. Sign-up requires verifying the address first; the reset
@@ -83,7 +83,7 @@ export const auth = betterAuth({
         await sendPasswordChangedEmail(user.email, { device: deviceFrom(request) })
       } catch (error) {
         // eslint-disable-next-line no-console
-        console.error(`[@starbase/server] password-changed email failed for ${user.email}:`, error)
+        console.error(`[@jingler/server] password-changed email failed for ${user.email}:`, error)
       }
     }
   },
@@ -105,7 +105,7 @@ export const auth = betterAuth({
             await sendWelcomeEmail(user.email)
           } catch (error) {
             // eslint-disable-next-line no-console
-            console.error(`[@starbase/server] welcome email failed for ${user.email}:`, error)
+            console.error(`[@jingler/server] welcome email failed for ${user.email}:`, error)
           }
         }
       }

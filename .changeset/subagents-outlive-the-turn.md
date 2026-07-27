@@ -1,6 +1,6 @@
 ---
-"@starbase/cli-adapters": patch
-"@starbase/desktop": patch
+"@jingler/cli-adapters": patch
+"@jingler/desktop": patch
 ---
 
 Fix: talking to the main agent no longer kills its sub-agents.

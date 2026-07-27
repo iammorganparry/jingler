@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import type { PrFileChange } from "@starbase/core"
+import type { PrFileChange } from "@jingler/core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
 import { CodeReviewView } from "./code-review-view.js"

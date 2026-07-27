@@ -1,5 +1,5 @@
-import type { BackgroundTask, BackgroundTaskState, StreamEvent } from "@starbase/core"
-import { backgroundTaskMachine, newTaskContext, toBackgroundTask } from "@starbase/core"
+import type { BackgroundTask, BackgroundTaskState, StreamEvent } from "@jingler/core"
+import { backgroundTaskMachine, newTaskContext, toBackgroundTask } from "@jingler/core"
 import { Clock, Effect, Ref } from "effect"
 import type { Actor } from "xstate"
 import { createActor } from "xstate"
@@ -60,7 +60,7 @@ const expired = (task: BackgroundTask, nowMs: number): boolean =>
  * restart could never settle and its id would resolve to nothing stoppable.
  */
 export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
-  "@starbase/BackgroundTaskStore",
+  "@jingler/BackgroundTaskStore",
   {
     accessors: true,
     effect: Effect.gen(function* () {

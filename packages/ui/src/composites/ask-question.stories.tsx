@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { Message, QuestionAnswer, QuestionRequest } from "@starbase/core"
-import { pendingQuestion, setQuestionAnswers } from "@starbase/core"
+import type { Message, QuestionAnswer, QuestionRequest } from "@jingler/core"
+import { pendingQuestion, setQuestionAnswers } from "@jingler/core"
 import { ConversationView } from "../app/conversation-view.js"
 
 /**

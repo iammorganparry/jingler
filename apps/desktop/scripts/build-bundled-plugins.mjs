@@ -8,11 +8,11 @@
  * Three facts conspire to make that silently ship nothing:
  *
  *   1. every plugin's `dist` is git-ignored, so a fresh CI checkout has none;
- *   2. the release job builds with `--filter @starbase/desktop`, and the desktop
+ *   2. the release job builds with `--filter @jingler/desktop`, and the desktop
  *      app does not depend on any plugin, so no plugin build is pulled in;
  *   3. electron-builder treats a `filter` that matches nothing as success.
  *
- * The result was a `.dmg` containing `starbase.plugin.json` and no `dist/`. At
+ * The result was a `.dmg` containing `jingler.plugin.json` and no `dist/`. At
  * runtime `firstMissingEntry` files that under `entry-missing`, so the GitHub
  * Issues tab is simply absent — no crash, no error, nothing to search for.
  *
@@ -72,7 +72,7 @@ for (const id of ids) {
   // The directory goes in `cwd`, NOT on the command line.
   //
   // `--filter` is not an option: the package NAME and the directory name differ
-  // (`@starbase/plugin-github-issues` lives at `plugins/github-issues`) and the
+  // (`@jingler/plugin-github-issues` lives at `plugins/github-issues`) and the
   // directory is what the YAML gives us. The obvious alternative is `pnpm -C
   // <dir>`, and it is a trap here, because of the shell:
   //
@@ -106,10 +106,10 @@ const problems = []
 
 for (const id of ids) {
   const dir = join(repoRoot, "plugins", id)
-  const manifestPath = join(dir, "starbase.plugin.json")
+  const manifestPath = join(dir, "jingler.plugin.json")
 
   if (!existsSync(manifestPath)) {
-    problems.push(`plugins/${id}: no starbase.plugin.json (does \`build\` run emit-manifest?)`)
+    problems.push(`plugins/${id}: no jingler.plugin.json (does \`build\` run emit-manifest?)`)
     continue
   }
 
@@ -117,7 +117,7 @@ for (const id of ids) {
   try {
     manifest = JSON.parse(readFileSync(manifestPath, "utf8"))
   } catch (cause) {
-    problems.push(`plugins/${id}: starbase.plugin.json is not valid JSON — ${cause.message}`)
+    problems.push(`plugins/${id}: jingler.plugin.json is not valid JSON — ${cause.message}`)
     continue
   }
 

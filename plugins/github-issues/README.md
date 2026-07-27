@@ -1,4 +1,4 @@
-# GitHub Issues — the reference Starbase plugin
+# GitHub Issues — the reference Jingler plugin
 
 Shows the GitHub issue linked to a session, in a tab beside the conversation.
 
@@ -16,12 +16,12 @@ does it do when there is no issue.
 | A host half doing the network work | `src/main.ts` |
 | Consent-gated credentials | `getSession("github", ["repo"])` in `src/main.ts` |
 | UI → host over a command | `contributes.commands` + `host.invoke` |
-| Themed components, no hardcoded colour | `@starbase/plugin-sdk/ui` in `src/ui.tsx` |
+| Themed components, no hardcoded colour | `@jingler/plugin-sdk/ui` in `src/ui.tsx` |
 | Activating lazily | `activationEvents: ["onTab:github-issues.issue"]` |
 
 ## It takes no shortcut for being official
 
-Starbase already holds GitHub credentials, and this plugin ships inside the app,
+Jingler already holds GitHub credentials, and this plugin ships inside the app,
 so handing it a token directly would be easy and invisible. It asks for one
 instead — through the same `getSession("github", ["repo"])` a plugin written this
 afternoon would call, producing the same native consent prompt, recorded in the
@@ -60,7 +60,7 @@ if any entry file the manifest names is missing.
 ## Installed copies win
 
 An installed plugin with the same id shadows this one. So you can run a fork or a
-fix out of `~/starbase/plugins/github-issues` without waiting for a release, and
+fix out of `~/jingler/plugins/github-issues` without waiting for a release, and
 Settings shows which copy is in use. Uninstall is refused for the bundled copy —
 in development that directory is checked-in source, and one click would delete it.
 
@@ -70,11 +70,11 @@ in development that directory is checked-in source, and one click would delete i
 src/manifest.ts     the manifest, in TypeScript so ids are literal types
 src/ui.tsx          the tab — React, themed, no network
 src/main.ts         the host half — gh, credentials, the fetch
-scripts/emit-manifest.mjs   writes starbase.plugin.json from src/manifest.ts
-scripts/install-local.mjs   copies manifest + dist into ~/starbase/plugins
+scripts/emit-manifest.mjs   writes jingler.plugin.json from src/manifest.ts
+scripts/install-local.mjs   copies manifest + dist into ~/jingler/plugins
 ```
 
-`starbase.plugin.json` is **generated**. Editing it works until the next build
+`jingler.plugin.json` is **generated**. Editing it works until the next build
 overwrites it; change `src/manifest.ts` instead.
 
 ## Further reading

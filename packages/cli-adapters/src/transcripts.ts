@@ -1,5 +1,5 @@
-import type { Message } from "@starbase/core"
-import { Message as MessageSchema } from "@starbase/core"
+import type { Message } from "@jingler/core"
+import { Message as MessageSchema } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
@@ -10,14 +10,14 @@ type TranscriptEnv = FileSystem.FileSystem | Path.Path | AppPaths
 
 /**
  * Per-chat conversation transcript, persisted to
- * `~/starbase/transcripts/<chatId>.json`. Reads are best-effort (a missing or
+ * `~/jingler/transcripts/<chatId>.json`. Reads are best-effort (a missing or
  * malformed file yields an empty transcript so the session still opens), matching
  * `SessionStore`. `AgentRunner` writes here as it folds stream events, so
  * reopening a session shows its full history — the same `Message[]` the renderer
  * rendered live.
  */
 export class TranscriptStore extends Effect.Service<TranscriptStore>()(
-  "@starbase/TranscriptStore",
+  "@jingler/TranscriptStore",
   {
     accessors: true,
     sync: () => {

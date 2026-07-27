@@ -6,7 +6,7 @@ import type {
   ConnectorProvider,
   ConnectorProviderDetail,
   OAuthClientInfo
-} from "@starbase/core"
+} from "@jingler/core"
 import { ExternalLink } from "lucide-react"
 import * as React from "react"
 import { AsyncButton } from "../components/async-button.js"
@@ -475,7 +475,7 @@ function DetailBody({
                 it. In the header it rode along on every provider you opened,
                 including the `no_auth` ones that store nothing at all. */}
             <p className="text-[10px] leading-relaxed text-dim">
-              Credentials are stored by OpenConnector, never in Starbase.
+              Credentials are stored by OpenConnector, never in Jingler.
             </p>
           </section>
         )}

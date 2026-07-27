@@ -23,7 +23,7 @@
  * `visibleTabs` is trivially testable and so the ordering rules can be checked
  * without mounting anything.
  */
-import type { DiffStat, Session } from "@starbase/core"
+import type { DiffStat, Session } from "@jingler/core"
 import type { ReactNode } from "react"
 import type { LucideIcon } from "lucide-react"
 import {
@@ -43,7 +43,7 @@ import {
  * `linear.issues` has to be as valid here as `conversation`. Built-in ids stay
  * bare words for continuity with persisted state and e2e selectors; plugin ids
  * are namespaced `<pluginId>.<local>` and validated at the manifest boundary in
- * `@starbase/core`, so the two can never collide.
+ * `@jingler/core`, so the two can never collide.
  */
 export type TabKey = string
 

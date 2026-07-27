@@ -1,6 +1,6 @@
-# @starbase/server
+# @jingler/server
 
-The Starbase auth backend — [BetterAuth](https://www.better-auth.com/) over
+The Jingler auth backend — [BetterAuth](https://www.better-auth.com/) over
 Postgres/Drizzle, served by [Hono](https://hono.dev/). Runs locally under
 `@hono/node-server` and deploys to Vercel unchanged (`api/[[...route]].ts`).
 
@@ -21,10 +21,10 @@ docker compose up -d db            # postgres:16 on localhost:5433
 cp apps/server/.env.example apps/server/.env
 
 # 3. Create the auth tables
-pnpm --filter @starbase/server db:migrate
+pnpm --filter @jingler/server db:migrate
 
 # 4. Run the server
-pnpm --filter @starbase/server dev # http://localhost:9100
+pnpm --filter @jingler/server dev # http://localhost:9100
 ```
 
 Health check: `curl http://localhost:9100/health` → `{"status":"ok",…}`.
@@ -42,7 +42,7 @@ curl -X POST http://localhost:9100/api/auth/sign-in/magic-link \
 OAuth and magic-link flows finish in the user's browser, where the session is a
 cookie the desktop app can't read. The client sets `GET /desktop/callback` as its
 `callbackURL`; that route reads the fresh session server-side and 302-redirects to
-`starbase://auth/callback?token=<bearer>`, which the desktop stores in the OS
+`jingler://auth/callback?token=<bearer>`, which the desktop stores in the OS
 keychain. From then on it calls the API with `Authorization: Bearer <token>`.
 
 ## Database access — Repositories via an Effect service
@@ -77,9 +77,9 @@ Drizzle schema (`src/db/schema.ts`) is BetterAuth's core tables: `user`,
 subscriptions) reference `user.id`.
 
 ```bash
-pnpm --filter @starbase/server db:generate   # generate a migration from schema.ts
-pnpm --filter @starbase/server db:migrate     # apply migrations
-pnpm --filter @starbase/server db:studio      # drizzle-kit studio
+pnpm --filter @jingler/server db:generate   # generate a migration from schema.ts
+pnpm --filter @jingler/server db:migrate     # apply migrations
+pnpm --filter @jingler/server db:studio      # drizzle-kit studio
 ```
 
 The client uses `postgres.js` with `prepare:false` and a module-scoped instance,
@@ -105,8 +105,8 @@ with magic links alone.
 ## Testing
 
 ```bash
-pnpm --filter @starbase/server test              # unit — repositories vs a fake Database (CI-safe)
-pnpm --filter @starbase/server test:integration  # HTTP e2e vs real Postgres (needs docker compose up -d db + db:migrate)
+pnpm --filter @jingler/server test              # unit — repositories vs a fake Database (CI-safe)
+pnpm --filter @jingler/server test:integration  # HTTP e2e vs real Postgres (needs docker compose up -d db + db:migrate)
 ```
 
 `test:integration` drives the full auth flow through Hono's `app.request` against
@@ -114,7 +114,7 @@ a real database: magic-link → session → bearer → `/api/me` → sign out. I
 excluded from `pnpm test` (and CI), which has no Postgres.
 
 The desktop sign-in flow is covered by Playwright e2e in
-`apps/desktop/e2e/auth.spec.ts` (`pnpm --filter @starbase/desktop e2e`), against an
+`apps/desktop/e2e/auth.spec.ts` (`pnpm --filter @jingler/desktop e2e`), against an
 offline fake auth backend.
 
 ## Deploying to Vercel

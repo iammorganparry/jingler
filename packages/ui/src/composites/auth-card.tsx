@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 import { cn } from "../lib/cn.js"
 
 export interface AuthCardProps {
-  /** Card heading, e.g. "Sign in to Starbase". */
+  /** Card heading, e.g. "Sign in to Jingler". */
   title: string
   /** Supporting line under the heading. */
   subtitle?: string

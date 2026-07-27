@@ -3,7 +3,7 @@
  *
  * ## The design this file exists to make real
  *
- * A Starbase manifest has no `permissions: ["github"]` array, and that absence
+ * A Jingler manifest has no `permissions: ["github"]` array, and that absence
  * is load-bearing. A coarse flag answers "may this plugin run gh?" when the
  * question an operator actually has is "which account, with which scopes, and
  * can I take it back?" — and a flag can express none of that.
@@ -31,8 +31,8 @@
  * in the renderer can leak one.
  */
 import { Effect, Schema } from "effect"
-import type { AuthSessionInfo } from "@starbase/core"
-import { PluginError } from "@starbase/core"
+import type { AuthSessionInfo } from "@jingler/core"
+import { PluginError } from "@jingler/core"
 import { AppPaths } from "./app-paths.js"
 import { FileSystem, Path } from "@effect/platform"
 
@@ -90,13 +90,13 @@ const sameGrant = (grant: StoredGrant, pluginId: string, providerId: string): bo
   grant.pluginId === pluginId && grant.providerId === providerId
 
 /**
- * Grants persisted under `~/starbase`, and the consent flow around them.
+ * Grants persisted under `~/jingler`, and the consent flow around them.
  *
  * Deliberately not a `Schema.TaggedError`-heavy service: the only failure a
  * caller can act on is "no such provider" or "declined", and both are modelled
  * as values rather than defects.
  */
-export class PluginAuth extends Effect.Service<PluginAuth>()("@starbase/PluginAuth", {
+export class PluginAuth extends Effect.Service<PluginAuth>()("@jingler/PluginAuth", {
   accessors: true,
   effect: Effect.gen(function* () {
     const providers = new Map<string, AuthProvider>()
@@ -136,7 +136,7 @@ export class PluginAuth extends Effect.Service<PluginAuth>()("@starbase/PluginAu
      * load-bearing and not redundant with the lock.
      *
      * In-process only. It orders this app's writers, which is what exists today;
-     * it would not order a second Starbase process against this one.
+     * it would not order a second Jingler process against this one.
      */
     const lock = Effect.unsafeMakeSemaphore(1)
     const atomically = <A, E, R>(

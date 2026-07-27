@@ -11,7 +11,7 @@ const STDERR_LIMIT = 16_384
 const REPLAY_QUIET_MS = 1_000
 
 const usage = `Usage:
-  pnpm --filter @starbase/cli-adapters probe:codex-silent -- [options]
+  pnpm --filter @jingler/cli-adapters probe:codex-silent -- [options]
 
 Options:
   --attempts <1-${MAX_ATTEMPTS}>          Number of probe turns (default: 6)
@@ -376,7 +376,7 @@ const openConnection = async (options) => {
     connection,
     "initialize",
     {
-      clientInfo: { name: "starbase-silent-turn-probe", version: "1" },
+      clientInfo: { name: "jingler-silent-turn-probe", version: "1" },
       capabilities: { experimentalApi: true }
     },
     options.timeoutMs

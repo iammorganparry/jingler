@@ -5,7 +5,7 @@ import { neutralCwd, requireWorktree } from "./cwd.js"
 /**
  * Cross-repo containment.
  *
- * Starbase runs many repos side by side, each session in its own worktree. The
+ * Jingler runs many repos side by side, each session in its own worktree. The
  * failure this guards against is real and already happened: a user-scope MCP
  * server probed from Settings had no worktree, was spawned with no cwd, inherited
  * the Electron main process's working directory — which in development is
@@ -19,8 +19,8 @@ import { neutralCwd, requireWorktree } from "./cwd.js"
 
 describe("requireWorktree", () => {
   it("returns a real worktree path unchanged", () => {
-    expect(requireWorktree("/Users/me/starbase/worktrees/app/feat", "session s1")).toBe(
-      "/Users/me/starbase/worktrees/app/feat"
+    expect(requireWorktree("/Users/me/jingler/worktrees/app/feat", "session s1")).toBe(
+      "/Users/me/jingler/worktrees/app/feat"
     )
   })
 

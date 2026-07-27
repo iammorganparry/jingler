@@ -6,7 +6,7 @@ import { worktreeEnv } from "./worktree-env.js"
 /**
  * Boot a throwaway opencode server, hand its URL to `fn`, and shut it down.
  *
- * Everything Starbase asks opencode *about* — the resolved model catalogue, the
+ * Everything Jingler asks opencode *about* — the resolved model catalogue, the
  * provider list, writing a key — goes through its HTTP API, which means a
  * server. Booting one costs ~0.7s, about the same as any of opencode's own
  * one-shot commands, and it answers far more richly than they do.
@@ -50,7 +50,7 @@ export const withOpencodeServer = async <A>(
     spawn(binPath, ["serve", "--hostname=127.0.0.1", "--port=0"], {
       stdio: ["ignore", "pipe", "ignore"],
       // A probe with no worktree of its own: every `node_modules/.bin` on PATH
-      // belongs to the repo Starbase was launched from. See `worktree-env.ts`.
+      // belongs to the repo Jingler was launched from. See `worktree-env.ts`.
       env: worktreeEnv(process.env, undefined)
     })
   )

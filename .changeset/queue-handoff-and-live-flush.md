@@ -1,8 +1,8 @@
 ---
-"@starbase/desktop": minor
-"@starbase/cli-adapters": minor
-"@starbase/core": minor
-"@starbase/ui": minor
+"@jingler/desktop": minor
+"@jingler/cli-adapters": minor
+"@jingler/core": minor
+"@jingler/ui": minor
 ---
 
 Queued messages now behave like Claude Code's: the head of the queue is handed to

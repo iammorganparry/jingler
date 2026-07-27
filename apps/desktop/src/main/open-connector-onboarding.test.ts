@@ -7,8 +7,8 @@ import {
   ConfigService,
   InMemorySecretStoreLive,
   OpenConnectorService
-} from "@starbase/cli-adapters"
-import { appPathsFor } from "@starbase/cli-adapters/test-support"
+} from "@jingler/cli-adapters"
+import { appPathsFor } from "@jingler/cli-adapters/test-support"
 import { Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { openConnectorAutoSetup, openConnectorDefaults, openConnectorGet } from "./rpc.js"

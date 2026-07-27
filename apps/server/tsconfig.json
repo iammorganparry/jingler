@@ -1,5 +1,5 @@
 {
-  "extends": "@starbase/tsconfig/node.json",
+  "extends": "@jingler/tsconfig/node.json",
   "compilerOptions": {
     "jsx": "react-jsx",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],

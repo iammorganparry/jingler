@@ -8,7 +8,7 @@ import type {
   ReviewSeverity,
   SessionDisplayStatus,
   SessionStatus
-} from "@starbase/core"
+} from "@jingler/core"
 
 /** Semantic accent per session/agent status → Tailwind text color utility. */
 export const statusTextClass: Record<SessionStatus, string> = {

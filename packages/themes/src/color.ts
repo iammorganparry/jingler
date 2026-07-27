@@ -69,7 +69,7 @@ export const toCss = (c: Rgba): string =>
  * Composite `fg` over `bg`, producing an opaque colour.
  *
  * The reason this exists: VS Code themes routinely give translucent values for
- * things Starbase needs opaque. `descriptionForeground` is often `#ccccccb3`
+ * things Jingler needs opaque. `descriptionForeground` is often `#ccccccb3`
  * and `list.hoverBackground` `#2c313a80`. Assigning those straight to a
  * `--sb-*` var that paints a SURFACE means whatever is behind the app shows
  * through — on a frameless Electron window, that is the desktop.
@@ -130,7 +130,7 @@ export const contrast = (a: Rgba, b: Rgba): number => {
  * Push `color` away from `bg` until it clears `min` contrast.
  *
  * This is what makes an imported theme *usable* rather than merely *applied*.
- * Starbase paints accents as TEXT — `text-blue` on a status row, `text-yellow`
+ * Jingler paints accents as TEXT — `text-blue` on a status row, `text-yellow`
  * on a warning — where the theme that supplied them painted them as terminal
  * output on a terminal background. Solarized Light's ANSI yellow is `#b58900`
  * on `#fdf6e3`, which is fine in a terminal and marginal as UI text on a

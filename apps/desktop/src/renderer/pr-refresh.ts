@@ -1,4 +1,4 @@
-import type { Session, SessionActivity } from "@starbase/core"
+import type { Session, SessionActivity } from "@jingler/core"
 
 /**
  * Session ids whose live agent run just COMPLETED between two `liveActivity`

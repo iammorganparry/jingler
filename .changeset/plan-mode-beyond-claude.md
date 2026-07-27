@@ -1,7 +1,7 @@
 ---
-"@starbase/cli-adapters": minor
-"@starbase/core": minor
-"@starbase/ui": minor
+"@jingler/cli-adapters": minor
+"@jingler/core": minor
+"@jingler/ui": minor
 ---
 
 Plan mode now runs on Codex and opencode, not just Claude.
