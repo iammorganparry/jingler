@@ -105,6 +105,31 @@ export const peekVariants: Variants = {
 }
 
 /**
+ * The command palette arriving.
+ *
+ * Same doctrine as `peekVariants` — settles the last few percent rather than
+ * growing from nothing — but tighter, and for a reason peculiar to this surface:
+ * the palette is summoned by a chord and answered by typing, and the first
+ * keystroke often lands before the animation has finished. A card still visibly
+ * scaling while characters appear in it reads as lag, not polish. `SPRING`
+ * rather than `SPRING_SOFT`, and 0.98 rather than 0.96, so the movement is over
+ * about as fast as you can register that it happened.
+ *
+ * The downward `y` is the small one on purpose: the box is anchored near the top
+ * of the window, so it should look like it came from the chord rather than from
+ * the top edge of the screen.
+ *
+ * **There is no `exit`, and that is the design.** Dismissal should be immediate
+ * — you press Escape because you want the thing gone, and a palette that lingers
+ * on its way out delays the view you went back to. Radix unmounts the content on
+ * close, so nothing here has to arrange that.
+ */
+export const paletteVariants: Variants = {
+  hidden: { opacity: 0, scale: 0.98, y: -6 },
+  visible: { opacity: 1, scale: 1, y: 0, transition: SPRING }
+}
+
+/**
  * How long to hover a split row before its peek card appears, in ms.
  *
  * Long enough that dragging the pointer across the sidebar doesn't strobe cards

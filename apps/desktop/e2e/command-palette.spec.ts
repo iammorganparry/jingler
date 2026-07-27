@@ -114,6 +114,8 @@ test("toggles the terminal dock — an action the shell cannot reach on its own"
   // HIDE it — the label states the effect, not the current state.
   await window.keyboard.press("Meta+k")
   const hide = window.getByTestId("palette-item-action:toggle-terminal")
+  // `toContainText` also settles the open spring before the click — see the note
+  // in the "Go to <Tab>" test below.
   await expect(hide).toContainText("Hide Terminal")
   await hide.click()
 
@@ -177,7 +179,12 @@ test("a 'Go to <Tab>' does not follow you to the next session", async ({ launchA
 
   // A worktree with no PR surfaces the Changes tab — see `builtinTabContributions`.
   await window.keyboard.press("Meta+k")
-  await window.getByTestId("palette-item-tab:changes").click()
+  // Waiting on the row explicitly rather than letting `click()`'s actionability
+  // check do it: the card springs in on open, and a click that lands mid-spring
+  // reports as a stability timeout on a line that says nothing about animation.
+  const changes = window.getByTestId("palette-item-tab:changes")
+  await expect(changes).toBeVisible()
+  await changes.click()
   await expect(window.getByRole("button", { name: "Changes" })).toHaveAttribute(
     "aria-current",
     "page"
