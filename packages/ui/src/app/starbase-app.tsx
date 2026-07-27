@@ -57,7 +57,9 @@ import {
 import { CommandPalette } from "./command-palette.js"
 import {
   matchPaletteChord,
+  PALETTE_GROUP,
   type PaletteItem,
+  pluginGroupName,
   type PluginPaletteCommand
 } from "./command-palette-model.js"
 import { SEED_PATCH } from "../seed.js"
@@ -645,11 +647,6 @@ export function StarbaseApp({
     return () => window.removeEventListener("keydown", onKey)
   }, [onCreateSession, group, split, addNextSessionAsPane])
 
-  const activeSession = useMemo(
-    () => sessions.find((s) => s.id === selected) ?? null,
-    [sessions, selected]
-  )
-
   /**
    * Everything the palette can do, as data.
    *
@@ -677,7 +674,7 @@ export function StarbaseApp({
       kind: "session",
       label: s.title || UNTITLED_SESSION,
       detail: `${s.repo} · ${s.branch}`,
-      group: s.archived ? "Archived sessions" : "Sessions",
+      group: s.archived ? PALETTE_GROUP.archived : PALETTE_GROUP.sessions,
       run: () => setSelected(s.id)
     })
 
@@ -688,19 +685,28 @@ export function StarbaseApp({
         id: "action:new-session",
         kind: "action",
         label: "New Session",
-        group: "Actions",
+        group: PALETTE_GROUP.actions,
         hint: "⌘N",
         icon: SquareTerminal,
         run: () => setNewOpen(true)
       })
     }
 
-    if (onToggleTerminal) {
+    // Gated on a session as well as the prop. The terminal dock is per-SESSION —
+    // `SessionSplit` renders it only when there is one to attach to — so in an
+    // empty workspace this row would flip a localStorage preference and change
+    // nothing on screen, with no error to read. That is the failure this whole
+    // block's gating exists to prevent, arrived at from the other direction.
+    //
+    // Show Browser is deliberately NOT gated the same way: the preview dock
+    // points at localhost and `renderBrowserDock` takes a nullable session, so
+    // it opens perfectly well with nothing selected.
+    if (onToggleTerminal && active) {
       items.push({
         id: "action:toggle-terminal",
         kind: "action",
         label: terminalActive ? "Hide Terminal" : "Show Terminal",
-        group: "Actions",
+        group: PALETTE_GROUP.actions,
         hint: "⌃`",
         icon: TerminalSquare,
         run: onToggleTerminal
@@ -714,7 +720,7 @@ export function StarbaseApp({
         // The label names what the chord will DO, not what is currently true —
         // "Browser: on" would leave you working out which way to read it.
         label: browserActive ? "Hide Browser" : "Show Browser",
-        group: "Actions",
+        group: PALETTE_GROUP.actions,
         hint: "⌃⇧B",
         icon: MonitorPlay,
         run: onToggleBrowser
@@ -723,26 +729,26 @@ export function StarbaseApp({
 
     // Archive and Restore are the SAME row in two states, and only ever one of
     // them, because a session is either archived or it is not.
-    if (activeSession && !activeSession.archived && onArchiveSession) {
+    if (active && !active.archived && onArchiveSession) {
       items.push({
         id: "action:archive-session",
         kind: "action",
         label: "Archive Session",
-        detail: activeSession.title || UNTITLED_SESSION,
-        group: "Actions",
+        detail: active.title || UNTITLED_SESSION,
+        group: PALETTE_GROUP.actions,
         icon: Archive,
-        run: () => onArchiveSession(activeSession.id)
+        run: () => onArchiveSession(active.id)
       })
     }
-    if (activeSession?.archived && onRestoreSession) {
+    if (active?.archived && onRestoreSession) {
       items.push({
         id: "action:restore-session",
         kind: "action",
         label: "Restore Session",
-        detail: activeSession.title || UNTITLED_SESSION,
-        group: "Actions",
+        detail: active.title || UNTITLED_SESSION,
+        group: PALETTE_GROUP.actions,
         icon: ArchiveRestore,
-        run: () => onRestoreSession(activeSession.id)
+        run: () => onRestoreSession(active.id)
       })
     }
 
@@ -753,7 +759,7 @@ export function StarbaseApp({
         id: "action:open-settings",
         kind: "action",
         label: "Open Settings",
-        group: "Actions",
+        group: PALETTE_GROUP.actions,
         icon: SettingsIcon,
         run: () => setSettingsOpen(true)
       })
@@ -764,7 +770,7 @@ export function StarbaseApp({
         id: "action:sign-out",
         kind: "action",
         label: "Sign out",
-        group: "Actions",
+        group: PALETTE_GROUP.actions,
         icon: LogOut,
         run: onSignOut
       })
@@ -779,18 +785,18 @@ export function StarbaseApp({
      * a tab that cannot open would be worse than offering none: the palette
      * would close, nothing would change, and there is no error to read.
      */
-    if (activeSession) {
+    if (active) {
       const tabCtx: TabContext = {
-        session: activeSession,
-        hasPlan: planSessions?.has(activeSession.id) ?? false,
-        diff: liveDiff?.[activeSession.id] ?? null
+        session: active,
+        hasPlan: planSessions?.has(active.id) ?? false,
+        diff: liveDiff?.[active.id] ?? null
       }
       for (const tab of visibleTabs(tabCtx, [...TAB_SHAPES, ...(tabContributions ?? [])])) {
         items.push({
           id: `tab:${tab.id}`,
           kind: "tab",
           label: `Go to ${tab.label}`,
-          group: "Go to tab",
+          group: PALETTE_GROUP.tabs,
           icon: tab.icon,
           run: () => setTabRequest((prev) => ({ tabId: tab.id, nonce: (prev?.nonce ?? 0) + 1 }))
         })
@@ -808,7 +814,7 @@ export function StarbaseApp({
           kind: "plugin",
           label: command.title,
           detail: command.pluginName,
-          group: command.category ?? command.pluginName,
+          group: pluginGroupName(command.category, command.pluginName),
           run: () => onRunPluginCommand(command.pluginId, command.commandId)
         })
       }
@@ -819,7 +825,7 @@ export function StarbaseApp({
     return items
   }, [
     sessions,
-    activeSession,
+    active,
     setSelected,
     onCreateSession,
     onToggleTerminal,

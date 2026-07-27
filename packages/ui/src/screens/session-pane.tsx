@@ -204,7 +204,14 @@ function SessionPaneBody(props: SessionPaneProps) {
     if (tabRequestId === undefined) return
     setTab(tabRequestId)
     onTabRequestHandled?.()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- nonce is the trigger
+    // Depends on the NONCE alone, deliberately: adding `tabRequestId` would
+    // re-fire on a request for a different tab that carried the same nonce, and
+    // adding the callback would re-fire whenever the owner re-rendered.
+    //
+    // No suppression comment here. The repo lints with Biome, whose rule is
+    // `lint/correctness/useExhaustiveDependencies` and is configured `warn`, so
+    // the `// eslint-disable-next-line` form used elsewhere in this codebase
+    // suppresses nothing at all — it only claims to.
   }, [tabRequestNonce])
 
   const active = props.session

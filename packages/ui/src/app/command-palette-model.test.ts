@@ -4,7 +4,9 @@ import {
   groupPaletteItems,
   itemKeywords,
   matchPaletteChord,
+  PALETTE_GROUP,
   type PaletteItem,
+  pluginGroupName,
   scoreItem
 } from "./command-palette-model.js"
 
@@ -91,6 +93,33 @@ describe("fuzzyScore", () => {
       )
     })
 
+    /**
+     * The bug the second alignment pass exists for.
+     *
+     * Taking the leftmost occurrence of each character is greedy, and greedy
+     * throws the word-boundary bonus away: the first `s` in "case session" is
+     * inside "case", so the docblock's promise that a post-separator character
+     * counts as initials held only when greed happened to land on one.
+     */
+    it("aligns to a word boundary rather than the leftmost occurrence", () => {
+      // The two haystacks are the SAME LENGTH, so the length tie-breaker cannot
+      // account for the gap — the only difference is that "case session" offers
+      // an "se" that starts a word and "casexsession" does not. Greedy takes the
+      // "se" inside "case" in both and scores them alike; this must not.
+      expect("case session".length).toBe("casexsession".length)
+      expect(fuzzyScore("case session", "se")).toBeGreaterThan(
+        fuzzyScore("casexsession", "se")
+      )
+    })
+
+    it("still matches when the boundary alignment would fail", () => {
+      // "xsa sx": greedy takes the `s` at 1 and finds the `a` at 2. The boundary
+      // pass jumps to the `s` at 4 (after the space) and then finds no `a` after
+      // it at all — so that pass scores 0 and the greedy one has to carry the
+      // match. Taking the max of the two is what makes the preference safe.
+      expect(fuzzyScore("xsa sx", "sa")).toBeGreaterThan(0)
+    })
+
     it("treats a separator as a word start", () => {
       // The 's' after the slash is a boundary hit; the one inside "grass" is not.
       expect(fuzzyScore("repo/session", "s")).toBeGreaterThan(fuzzyScore("grasses", "s"))
@@ -137,6 +166,35 @@ describe("itemKeywords", () => {
     expect(
       itemKeywords(item({ label: "auth", detail: "starbase · feat/auth", group: "Sessions" }))
     ).toEqual(["auth", "starbase · feat/auth", "Sessions"])
+  })
+})
+
+describe("pluginGroupName", () => {
+  /**
+   * A plugin command is the one row in this palette that runs third-party code,
+   * and `groupPaletteItems` merges groups by name — so a manifest declaring
+   * `category: "Actions"` with the title "Sign out" used to sit under the real
+   * Actions heading, told apart only by small print.
+   */
+  it("never lets a category impersonate a built-in heading", () => {
+    for (const builtin of Object.values(PALETTE_GROUP)) {
+      const group = pluginGroupName(builtin, "Evil Plugin")
+      expect(group).not.toBe(builtin)
+      expect(group).toContain("Evil Plugin")
+    }
+  })
+
+  it("catches a plugin merely NAMED after a built-in, with no category", () => {
+    expect(pluginGroupName(undefined, PALETTE_GROUP.actions)).not.toBe(PALETTE_GROUP.actions)
+  })
+
+  it("keeps the author's category, with the plugin named alongside it", () => {
+    expect(pluginGroupName("Issues", "GitHub Issues")).toBe("Issues · GitHub Issues")
+  })
+
+  it("falls back to the plugin's name when no category was declared", () => {
+    expect(pluginGroupName(undefined, "GitHub Issues")).toBe("GitHub Issues")
+    expect(pluginGroupName("   ", "GitHub Issues")).toBe("GitHub Issues")
   })
 })
 

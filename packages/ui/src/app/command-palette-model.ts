@@ -90,13 +90,54 @@ export const fuzzyScore = (haystack: string, query: string): number => {
   const h = haystack.toLowerCase()
   if (h.length === 0) return 0
 
+  // Two alignments, best wins. See `rawScore`.
+  const raw = Math.max(rawScore(h, q, false), rawScore(h, q, true))
+  if (raw === 0) return 0
+
+  const best = q.length * 5 // 1 base + 4, the largest bonus, per character
+  return 0.9 * (raw / best) + 0.1 * (q.length / h.length)
+}
+
+/**
+ * Score ONE alignment of `q` through `h`. 0 means the subsequence isn't there.
+ *
+ * ## Why this runs twice
+ *
+ * Taking the leftmost occurrence of each character is greedy, and greedy throws
+ * away the word-boundary bonus the ranking is built on. Search "se" against
+ * "case session" and the leftmost `s` is the one inside "case" — no bonus, and
+ * the score comes out 4 where the aligning-to-"session" reading scores 7. The
+ * docblock above promises that a character after a separator is treated as
+ * evidence of initials; under pure greed that promise held only when the two
+ * happened to coincide, which is exactly the "the palette ignored what I typed"
+ * failure the bonuses exist to prevent.
+ *
+ * `preferBoundary` runs the same walk but skips each character forward to the
+ * next occurrence that starts a word, when there is one. That pass can FAIL
+ * where greedy succeeds — "sa" against "case sx" jumps the `s` to the word start
+ * and then finds no `a` after it — which is why the caller takes the max of the
+ * two rather than trusting either alone. Two linear passes over strings the
+ * length of a session title is not a cost worth optimising away.
+ */
+const rawScore = (h: string, q: string, preferBoundary: boolean): number => {
+  const startsWord = (at: number) => at === 0 || SEPARATORS.has(h[at - 1] ?? "")
+
   let cursor = 0
   let raw = 0
   let previous = -2 // -2 so the first match is never "consecutive"
 
   for (const needle of q) {
-    const at = h.indexOf(needle, cursor)
+    let at = h.indexOf(needle, cursor)
     if (at === -1) return 0
+
+    if (preferBoundary && !startsWord(at)) {
+      for (let probe = at; probe !== -1; probe = h.indexOf(needle, probe + 1)) {
+        if (startsWord(probe)) {
+          at = probe
+          break
+        }
+      }
+    }
 
     // Ranked, not summed: a character cannot be both at index 0 and adjacent to
     // its predecessor, and stacking the bonuses would let a long weak match beat
@@ -109,8 +150,7 @@ export const fuzzyScore = (haystack: string, query: string): number => {
     cursor = at + 1
   }
 
-  const best = q.length * 5 // 1 base + 4, the largest bonus, per character
-  return 0.9 * (raw / best) + 0.1 * (q.length / h.length)
+  return raw
 }
 
 /**
@@ -161,6 +201,44 @@ export interface PluginPaletteCommand {
   readonly category?: string
   /** The plugin's display name — the group when no category was declared. */
   readonly pluginName: string
+}
+
+/**
+ * The headings the app itself uses.
+ *
+ * Exported so `starbase-app.tsx` builds its groups from the same constants this
+ * module defends — two lists spelled the same way in two files is how a reserved
+ * name stops being reserved.
+ */
+export const PALETTE_GROUP = {
+  sessions: "Sessions",
+  actions: "Actions",
+  tabs: "Go to tab",
+  archived: "Archived sessions"
+} as const
+
+const BUILTIN_GROUP_NAMES: ReadonlySet<string> = new Set(Object.values(PALETTE_GROUP))
+
+/**
+ * The heading a plugin's command sits under, and it always names the plugin.
+ *
+ * `category` comes from a manifest, and `groupPaletteItems` merges groups by
+ * name — so a plugin declaring `category: "Actions"` with the title "Sign out"
+ * used to land a row of THIRD-PARTY CODE under the built-in Actions heading,
+ * separated from the genuine row only by small print. That is the one row in
+ * this palette where provenance matters most.
+ *
+ * So the plugin's name is always part of the heading, and the bare fallback is
+ * checked against the built-ins too — otherwise a plugin merely called "Actions"
+ * would walk through the front door instead of the side one.
+ */
+export const pluginGroupName = (
+  category: string | undefined,
+  pluginName: string
+): string => {
+  const trimmed = category?.trim()
+  const label = trimmed ? `${trimmed} · ${pluginName}` : pluginName
+  return BUILTIN_GROUP_NAMES.has(label) ? `${label} (plugin)` : label
 }
 
 /** One heading and its rows, in the order the caller supplied them. */
