@@ -57,7 +57,12 @@ import { themeCatalogKey, useTheme } from "./use-theme.js"
 import { useConnectorCenter } from "./use-connector-center.js"
 import { useOpenConnector } from "./use-open-connector.js"
 import { useInjectionTargets } from "./use-injection-targets.js"
-import { PluginProvider, usePluginPanes, usePluginTabs } from "./plugin-registry.js"
+import {
+  PluginProvider,
+  usePluginCommands,
+  usePluginPanes,
+  usePluginTabs
+} from "./plugin-registry.js"
 import { usePlugins } from "./use-plugins.js"
 
 const GH_UNKNOWN: GhStatus = {
@@ -91,6 +96,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   // a plugin tab is not a separate region of the tab bar.
   const pluginTabs = usePluginTabs()
   const pluginPanes = usePluginPanes()
+  const pluginCommands = usePluginCommands()
   const plugins = usePlugins()
 
   // The conversation machine persists a session's settled status by itself, with
@@ -119,6 +125,23 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     (ids: ReadonlySet<string>) => setVisibleSessionIds(ids),
     []
   )
+
+  /**
+   * Dispatch a palette row to the plugin's host half.
+   *
+   * Fire-and-forget by design: `Plugins.invoke` returns whatever the handler
+   * returned, and the palette has already closed by the time this runs, so there
+   * is nowhere on screen left to put a result. A REJECTION is still logged with
+   * the plugin's id in the same shape `plugin-activate-on-mount.tsx` uses —
+   * a command that silently does nothing is the exact failure the plugin loader
+   * refuses manifests to prevent, and it would be perverse to reintroduce it at
+   * the dispatch end.
+   */
+  const runPluginCommand = useCallback((pluginId: string, commandId: string) => {
+    void rpc.pluginsInvoke(pluginId, commandId).catch((cause: unknown) => {
+      console.error(`[plugin:${pluginId}] command "${commandId}" failed:`, cause)
+    })
+  }, [])
 
   const liveActivity = useSessionActivities()
   const liveDiff = useSessionDiffs()
@@ -648,6 +671,8 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       clis={clis}
       tabContributions={pluginTabs}
       paneContributions={pluginPanes}
+      pluginCommands={pluginCommands}
+      onRunPluginCommand={runPluginCommand}
       selectSessionRequest={selectRequest}
       onVisibleSessionsChange={onVisibleSessionsChange}
       sessions={sessions}
@@ -754,6 +779,11 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
         />
       )}
       terminalDockSide={termDock.side}
+      // The palette's route to the same toggle ⌃` drives. The dock's visibility
+      // is this file's state, so without these two props the shell can lay the
+      // dock out but cannot ask for it.
+      onToggleTerminal={termDock.toggle}
+      terminalActive={termDock.visible}
       renderTerminalDock={(session) => (
         <TerminalDockView
           session={session}

@@ -28,6 +28,7 @@ import type {
   Usage,
   User
 } from "@starbase/core"
+import { UNTITLED_SESSION } from "@starbase/core"
 import type { DockSide } from "./terminal-panel.js"
 import { AppShell } from "./app-shell.js"
 import { PreviewToggleButton } from "./preview-dock.js"
@@ -44,8 +45,47 @@ import { type ConversationPaneCtx, SessionConversation } from "../screens/sessio
 import { useSplitLayout } from "./use-split-layout.js"
 import { MAX_PANES } from "./split-layout.js"
 import { matchSplitShortcut } from "./split-shortcuts.js"
+import {
+  Archive,
+  ArchiveRestore,
+  LogOut,
+  MonitorPlay,
+  Settings as SettingsIcon,
+  SquareTerminal,
+  TerminalSquare
+} from "lucide-react"
+import { CommandPalette } from "./command-palette.js"
+import {
+  matchPaletteChord,
+  type PaletteItem,
+  type PluginPaletteCommand
+} from "./command-palette-model.js"
 import { SEED_PATCH } from "../seed.js"
-import type { TabContribution } from "./tab-contributions.js"
+import {
+  BUILTIN_TAB_META,
+  builtinTabContributions,
+  type TabContext,
+  type TabContribution,
+  type TabKey,
+  visibleTabs
+} from "./tab-contributions.js"
+
+/**
+ * The built-in tabs, with every body stubbed out.
+ *
+ * The palette needs to know which tabs a session CAN show, and that is decided
+ * entirely by each contribution's `when(ctx)` — a predicate over the session,
+ * whether it has a plan, and its diff. None of it touches a render callback, so
+ * supplying real ones here would mean duplicating `SessionPane`'s six closures
+ * in a second place purely to throw them away.
+ *
+ * Hoisted to module scope because it is constant: rebuilding it per render would
+ * allocate the whole array on every keystroke in the palette.
+ */
+const TAB_SHAPES = builtinTabContributions({
+  conversation: () => null,
+  stub: () => null
+})
 
 const GH_UNAVAILABLE: GhStatus = {
   available: false,
@@ -187,6 +227,17 @@ export interface StarbaseAppProps {
   renderTerminalDock?: (session: Session) => ReactNode
   /** Which edge the terminal dock attaches to (drives the content column's flow). */
   terminalDockSide?: DockSide
+  /**
+   * Show/hide the terminal dock — the same toggle ⌃` drives.
+   *
+   * The dock's visibility is the renderer's (`use-terminal-dock.ts`), not this
+   * shell's, so until the palette existed only `renderTerminalDock` needed to
+   * cross the boundary: the shell laid the dock out but never asked for it. A
+   * palette entry has to be able to ask.
+   */
+  onToggleTerminal?: () => void
+  /** Whether the terminal dock is currently open (drives the palette's label). */
+  terminalActive?: boolean
   /** Render the preview dock (the desktop app's PreviewDockView). */
   renderBrowserDock?: (session: Session | null) => ReactNode
   /** Which edge the preview dock attaches to. */
@@ -264,6 +315,16 @@ export interface StarbaseAppProps {
   ) => Promise<ReadonlyArray<IssueSummary>>
   /** Create a session from a GitHub issue (forks a fresh branch, links it) and return it. */
   onCreateSessionFromIssue?: (input: CreateSessionFromIssueInput) => Promise<Session>
+  /**
+   * Commands contributed by loaded plugins, for the palette.
+   *
+   * Passed in rather than read here: this package has no RPC client and no
+   * plugin registry, and dragging either into the component library to populate
+   * one list would be the wrong trade. The renderer already holds both.
+   */
+  pluginCommands?: ReadonlyArray<PluginPaletteCommand>
+  /** Dispatch one to its plugin's host half (`Plugins.invoke`). */
+  onRunPluginCommand?: (pluginId: string, commandId: string) => void
   /** App version (from `__APP_VERSION__`), shown in the sidebar footer. */
   version?: string
 }
@@ -332,6 +393,10 @@ export function StarbaseApp({
   renderCode,
   renderTerminalDock,
   terminalDockSide,
+  onToggleTerminal,
+  terminalActive,
+  pluginCommands,
+  onRunPluginCommand,
   renderBrowserDock,
   browserDockSide,
   onToggleBrowser,
@@ -368,6 +433,11 @@ export function StarbaseApp({
   const [usageLoading, setUsageLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ghRechecking, setGhRechecking] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  // The palette's half of tab switching. A nonce, not a tab id, so asking for
+  // the tab you are already on still counts as an ask — same shape as
+  // `selectSessionRequest`, for the same reason.
+  const [tabRequest, setTabRequest] = useState<{ tabId: TabKey; nonce: number } | null>(null)
 
   // An outside request to jump to a session (notification click). Keyed on the
   // NONCE, not the id: clicking two notifications for the same session must
@@ -505,6 +575,18 @@ export function StarbaseApp({
   // the thing the chord asked for is possible right now.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // The palette goes FIRST, and in this listener rather than one of its own.
+      // Three window-level keydown handlers racing for the same event is how a
+      // chord ends up meaning two things depending on mount order; the sidebar's
+      // ⌘F is separate only because it lives in a component this one does not
+      // own. `setPaletteOpen(true)` is idempotent, so holding ⌘K cannot stack
+      // dialogs.
+      if (matchPaletteChord(e)) {
+        e.preventDefault()
+        setPaletteOpen(true)
+        return
+      }
+
       const shortcut = matchSplitShortcut(e)
       if (shortcut === null) return
 
@@ -556,6 +638,198 @@ export function StarbaseApp({
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [onCreateSession, group, split, addNextSessionAsPane])
+
+  const activeSession = useMemo(
+    () => sessions.find((s) => s.id === selected) ?? null,
+    [sessions, selected]
+  )
+
+  /**
+   * Everything the palette can do, as data.
+   *
+   * ## An unavailable capability produces NO row
+   *
+   * Every action here is gated on the prop that performs it. A Starbase built
+   * without `onSignOut` should not offer "Sign out" greyed out — a row you can
+   * arrow onto and select that then does nothing is indistinguishable from a
+   * bug, and the palette is the one surface where you cannot see why a thing is
+   * disabled. Absent is honest; inert is not.
+   *
+   * ## Archived sessions are last, not hidden
+   *
+   * The sidebar's default filter hides them, and copying that here would make
+   * the palette answer "no results" for a session that plainly exists — the
+   * exact failure the fuzzy matcher was added to avoid. They sit in their own
+   * group at the bottom instead, because `groupPaletteItems` keeps the order
+   * this array is built in.
+   */
+  const paletteItems = useMemo<ReadonlyArray<PaletteItem>>(() => {
+    const items: PaletteItem[] = []
+
+    const sessionItem = (s: Session): PaletteItem => ({
+      id: `session:${s.id}`,
+      kind: "session",
+      label: s.title || UNTITLED_SESSION,
+      detail: `${s.repo} · ${s.branch}`,
+      group: s.archived ? "Archived sessions" : "Sessions",
+      run: () => setSelected(s.id)
+    })
+
+    for (const s of sessions) if (!s.archived) items.push(sessionItem(s))
+
+    if (onCreateSession) {
+      items.push({
+        id: "action:new-session",
+        kind: "action",
+        label: "New Session",
+        group: "Actions",
+        hint: "⌘N",
+        icon: SquareTerminal,
+        run: () => setNewOpen(true)
+      })
+    }
+
+    if (onToggleTerminal) {
+      items.push({
+        id: "action:toggle-terminal",
+        kind: "action",
+        label: terminalActive ? "Hide Terminal" : "Show Terminal",
+        group: "Actions",
+        hint: "⌃`",
+        icon: TerminalSquare,
+        run: onToggleTerminal
+      })
+    }
+
+    if (onToggleBrowser) {
+      items.push({
+        id: "action:toggle-browser",
+        kind: "action",
+        // The label names what the chord will DO, not what is currently true —
+        // "Browser: on" would leave you working out which way to read it.
+        label: browserActive ? "Hide Browser" : "Show Browser",
+        group: "Actions",
+        hint: "⌃⇧B",
+        icon: MonitorPlay,
+        run: onToggleBrowser
+      })
+    }
+
+    // Archive and Restore are the SAME row in two states, and only ever one of
+    // them, because a session is either archived or it is not.
+    if (activeSession && !activeSession.archived && onArchiveSession) {
+      items.push({
+        id: "action:archive-session",
+        kind: "action",
+        label: "Archive Session",
+        detail: activeSession.title || UNTITLED_SESSION,
+        group: "Actions",
+        icon: Archive,
+        run: () => onArchiveSession(activeSession.id)
+      })
+    }
+    if (activeSession?.archived && onRestoreSession) {
+      items.push({
+        id: "action:restore-session",
+        kind: "action",
+        label: "Restore Session",
+        detail: activeSession.title || UNTITLED_SESSION,
+        group: "Actions",
+        icon: ArchiveRestore,
+        run: () => onRestoreSession(activeSession.id)
+      })
+    }
+
+    // Gated on `onSaveProvider` for the same reason the sidebar's menu item is:
+    // that prop is what makes the Settings view renderable at all.
+    if (onSaveProvider) {
+      items.push({
+        id: "action:open-settings",
+        kind: "action",
+        label: "Open Settings",
+        group: "Actions",
+        icon: SettingsIcon,
+        run: () => setSettingsOpen(true)
+      })
+    }
+
+    if (onSignOut) {
+      items.push({
+        id: "action:sign-out",
+        kind: "action",
+        label: "Sign out",
+        group: "Actions",
+        icon: LogOut,
+        run: onSignOut
+      })
+    }
+
+    /**
+     * "Go to <Tab>" for the tabs the ACTIVE session can actually show.
+     *
+     * Built from the same `when` predicates the pane uses rather than from a
+     * hardcoded list, so a session with no plan is not offered "Go to Plan" and
+     * a plugin's tab appears here the moment it appears in the tab bar. Offering
+     * a tab that cannot open would be worse than offering none: the palette
+     * would close, nothing would change, and there is no error to read.
+     */
+    if (activeSession) {
+      const tabCtx: TabContext = {
+        session: activeSession,
+        hasPlan: planSessions?.has(activeSession.id) ?? false,
+        diff: liveDiff?.[activeSession.id] ?? null
+      }
+      for (const tab of visibleTabs(tabCtx, [...TAB_SHAPES, ...(tabContributions ?? [])])) {
+        items.push({
+          id: `tab:${tab.id}`,
+          kind: "tab",
+          label: `Go to ${tab.label}`,
+          group: "Go to tab",
+          icon: tab.icon,
+          run: () => setTabRequest((prev) => ({ tabId: tab.id, nonce: (prev?.nonce ?? 0) + 1 }))
+        })
+      }
+    }
+
+    // Grouped by the manifest's `category`, falling back to the plugin's name —
+    // a heading of "Commands" over two plugins' rows would hide which one is
+    // about to run, and a plugin command is the one row here that executes
+    // third-party code.
+    if (onRunPluginCommand) {
+      for (const command of pluginCommands ?? []) {
+        items.push({
+          id: `plugin:${command.commandId}`,
+          kind: "plugin",
+          label: command.title,
+          detail: command.pluginName,
+          group: command.category ?? command.pluginName,
+          run: () => onRunPluginCommand(command.pluginId, command.commandId)
+        })
+      }
+    }
+
+    for (const s of sessions) if (s.archived) items.push(sessionItem(s))
+
+    return items
+  }, [
+    sessions,
+    activeSession,
+    setSelected,
+    onCreateSession,
+    onToggleTerminal,
+    terminalActive,
+    onToggleBrowser,
+    browserActive,
+    onArchiveSession,
+    onRestoreSession,
+    onSaveProvider,
+    onSignOut,
+    planSessions,
+    liveDiff,
+    tabContributions,
+    pluginCommands,
+    onRunPluginCommand
+  ])
 
   const handleCreate = useCallback(
     async (input: CreateSessionInput) => {
@@ -700,6 +974,7 @@ export function StarbaseApp({
         terminalDockSide={terminalDockSide}
         renderBrowserDock={renderBrowserDock}
         browserDockSide={browserDockSide}
+        selectTabRequest={tabRequest}
         version={version}
       />
       {onCreateSession && (
@@ -728,6 +1003,7 @@ export function StarbaseApp({
           onClose={() => setUsageOpen(false)}
         />
       )}
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} items={paletteItems} />
     </AppShell>
   )
 }

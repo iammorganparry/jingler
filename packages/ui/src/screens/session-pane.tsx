@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react"
+import { type ReactNode, useEffect, useState } from "react"
 import type { DiffStat, Session, SessionActivity, SessionDisplayStatus } from "@starbase/core"
 import { activityLabel, displayStatusOf, UNTITLED_SESSION } from "@starbase/core"
 import { displayStatusLabel } from "../tokens.js"
@@ -56,6 +56,18 @@ export interface ConversationPaneCtx {
 export interface SessionPaneProps {
   /** The session this pane shows. A pane only exists for a filled grid slot. */
   session: Session
+  /**
+   * Switch tabs from OUTSIDE the pane — today, the command palette.
+   *
+   * Keyed on the nonce rather than the id, for the same reason
+   * `selectSessionRequest` is: asking for the tab you are already on has to
+   * work, and depending on `tabId` alone would make the second request a no-op.
+   * The pane still owns its tab the rest of the time, so a plain controlled prop
+   * would fight every click on the tab bar.
+   *
+   * Only the FOCUSED pane is given one — see `SessionSplit`.
+   */
+  selectTabRequest?: { readonly tabId: TabKey; readonly nonce: number } | null
   /**
    * The real app's session-keyed pane, rendered for BOTH the Conversation and
    * Plan tabs from the same machine (so switching to Plan never aborts a parked
@@ -165,6 +177,19 @@ function SessionPaneBody(props: SessionPaneProps) {
   // survived a re-key would snap to an unrelated same-numbered step.
   const [target, setTarget] = useState<{ sessionId: string; stepId: string } | null>(null)
   const [split, setSplit] = useState(false)
+
+  // An outside request to switch tabs (the command palette). The nonce is the
+  // trigger, not the id — see `selectTabRequest`'s docblock. No validation here:
+  // a tab that isn't visible is already handled downstream, where
+  // `activeContribution` falls back to the first visible tab rather than
+  // rendering nothing.
+  const tabRequestNonce = props.selectTabRequest?.nonce
+  const tabRequestId = props.selectTabRequest?.tabId
+  useEffect(() => {
+    if (tabRequestId === undefined) return
+    setTab(tabRequestId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- nonce is the trigger
+  }, [tabRequestNonce])
 
   const active = props.session
   const planStepTarget = target?.sessionId === active.id ? target.stepId : null

@@ -6,7 +6,7 @@ import { usePaneWidth } from "../hooks/width-tier.js"
 import { effectiveDock } from "./dock-fit.js"
 import { SplitView } from "./split-view.js"
 import { SessionPane, type ConversationPaneCtx } from "../screens/session-pane.js"
-import type { TabContribution } from "./tab-contributions.js"
+import type { TabContribution, TabKey } from "./tab-contributions.js"
 import { dockedPanes, type PaneContribution } from "./pane-contributions.js"
 
 export interface SessionSplitProps {
@@ -62,6 +62,13 @@ export interface SessionSplitProps {
   terminalDockSide?: DockSide
   renderBrowserDock?: (session: Session | null) => ReactNode
   browserDockSide?: DockSide
+  /**
+   * A palette request to switch tabs, handed to the FOCUSED pane only.
+   *
+   * Broadcasting it would switch all four tabs in a four-way split, which is not
+   * what "go to Changes" means — the operator is looking at one pane.
+   */
+  selectTabRequest?: { readonly tabId: TabKey; readonly nonce: number } | null
 }
 
 /**
@@ -101,6 +108,9 @@ export function SessionSplit(props: SessionSplitProps) {
         // Identity only where it disambiguates: a group of one needs no chip,
         // and `group` is non-null wherever a pane is being rendered at all.
         pane={single ? undefined : { index, focused: index === (group?.focused ?? 0) }}
+        selectTabRequest={
+          index === (group?.focused ?? 0) ? props.selectTabRequest : undefined
+        }
         renderPullRequest={props.renderPullRequest}
         tabContributions={props.tabContributions}
         renderReview={props.renderReview}
