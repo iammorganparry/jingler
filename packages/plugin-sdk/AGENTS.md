@@ -254,6 +254,18 @@ never honoured is worse than an error, because there is nothing to search for.
 
 `extensionKind` is accepted and ignored — it is a hint, not a promise.
 
+### Entry points must cover what you contribute
+
+Two more load failures, for the same reason: a contribution nothing can serve is
+worse than an error.
+
+- `contributes.tabs` or `contributes.panes` with **no `ui`** — the views live in
+  the UI half.
+- `contributes.commands` with **no `main`** — the handlers live in the host half
+  (`ctx.commands.register`), and Starbase will not start a host process for a
+  plugin that has no `main`. Without this check the command appears in the
+  command palette, runs nothing, and looks like your handler is broken.
+
 ## Permissions: there aren't any
 
 There is no `permissions: ["github"]` field. Do not look for one.

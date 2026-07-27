@@ -294,6 +294,23 @@ export const loadPluginUi = async (
     }
   }
 
+  // The same check one plane over: a command's handler is registered by the HOST
+  // half (`ctx.commands.register`), and `PluginHost.activate` returns early
+  // without a `main` entry — so a manifest promising commands and no `main` gets
+  // a row in the command palette that dispatches into a process that was never
+  // started. The author sees their command listed and would reasonably conclude
+  // the handler is at fault.
+  const declaredCommands = manifest.contributes?.commands ?? []
+  if (!manifest.main && declaredCommands.length > 0) {
+    return {
+      ok: false,
+      error: {
+        id: manifest.id,
+        message: `declares ${declaredCommands.length} command(s) but no \`main\` entry, so nothing could handle them. Add \`main: "dist/main.js"\` to the manifest.`
+      }
+    }
+  }
+
   // A plugin with no UI entry AND no UI contributions is legal — host-only, or
   // contributing nothing yet.
   if (!manifest.ui || (declaredTabs.length === 0 && declaredPanes.length === 0)) {

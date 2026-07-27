@@ -43,6 +43,23 @@ export const SPRING_SOFT: Transition = {
 export const FAST: Transition = { duration: 0.14, ease: [0.2, 0, 0, 1] }
 
 /**
+ * A thing LEAVING the screen.
+ *
+ * The second easing in this file, and it earns its place by pointing the other
+ * way. `FAST` decelerates — it is shaped for something arriving and settling.
+ * Run in reverse on an exit it reads as hesitation: the element creeps for most
+ * of its duration and then vanishes. This accelerates instead, so the movement
+ * commits and the element is gone.
+ *
+ * 190ms rather than `FAST`'s 140. The first exit shipped here was `FAST` with a
+ * 1% scale change and read to everyone who tried it as "it just closes" — the
+ * animation was running (measurably: opacity fell 1 → 0 over ~150ms) and was
+ * simply below the threshold at which anyone perceives it as motion rather than
+ * a cut. An exit nobody can see is the same as no exit, only harder to explain.
+ */
+export const EXIT: Transition = { duration: 0.19, ease: [0.4, 0, 1, 1] }
+
+/**
  * No animation at all — the value is written on the frame it changes.
  *
  * For the case where the POINTER is the animation: while a divider is being
@@ -102,6 +119,60 @@ export const peekVariants: Variants = {
   hidden: { opacity: 0, scale: 0.96, y: -4 },
   visible: { opacity: 1, scale: 1, y: 0, transition: SPRING_SOFT },
   exit: { opacity: 0, scale: 0.98, y: -2, transition: FAST }
+}
+
+/**
+ * The command palette arriving.
+ *
+ * Same doctrine as `peekVariants` — settles the last few percent rather than
+ * growing from nothing — but tighter, and for a reason peculiar to this surface:
+ * the palette is summoned by a chord and answered by typing, and the first
+ * keystroke often lands before the animation has finished. A card still visibly
+ * scaling while characters appear in it reads as lag, not polish. `SPRING`
+ * rather than `SPRING_SOFT`, and 0.98 rather than 0.96, so the movement is over
+ * about as fast as you can register that it happened.
+ *
+ * The downward `y` is the small one on purpose: the box is anchored near the top
+ * of the window, so it should look like it came from the chord rather than from
+ * the top edge of the screen.
+ *
+ * **`exit` is a curve, not a spring, and that asymmetry is the design.** Arriving
+ * is a thing you watch; leaving is a thing you have already stopped caring about
+ * — you pressed Escape because you want the view behind it back. A spring out
+ * would take the same ~260ms as the spring in and make dismissal feel like it
+ * needed permission.
+ *
+ * But it must still be SEEN. The first version exited on `FAST` with a 1% scale
+ * change, on the theory that a dismissal should get out of the way; measured, it
+ * did animate, and everyone who tried it reported that the palette "just
+ * closes". Below roughly 150ms, and below a few percent of scale, motion stops
+ * reading as motion and becomes a cut. So the exit travels FURTHER than the
+ * entry (0.96 and -8px, against 0.98 and -6px) over a slightly longer window —
+ * the larger movement is what makes the shorter-than-a-spring duration legible.
+ */
+export const paletteVariants: Variants = {
+  hidden: { opacity: 0, scale: 0.98, y: -6 },
+  visible: { opacity: 1, scale: 1, y: 0, transition: SPRING },
+  exit: { opacity: 0, scale: 0.96, y: -8, transition: EXIT }
+}
+
+/**
+ * The dim behind the palette.
+ *
+ * Separate from `paletteVariants` because it must NOT scale or move — a dim that
+ * slides is a grey rectangle sliding, which is the one thing an overlay can do
+ * that draws attention to itself. Only opacity: the card springing in over a
+ * hard-cut dim was the visible mismatch that made this its own variant rather
+ * than an inline prop.
+ *
+ * The dim leaves on the same `EXIT` as the card so the two finish together. A
+ * dim outlasting the card by even 50ms reads as a flash of grey after the thing
+ * it belonged to has gone.
+ */
+export const paletteOverlayVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: FAST },
+  exit: { opacity: 0, transition: EXIT }
 }
 
 /**

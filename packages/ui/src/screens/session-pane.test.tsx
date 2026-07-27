@@ -312,6 +312,79 @@ describe("SessionPane", () => {
     expect(within(screen.getByTestId("pane-b")).getByText("transcript b")).toBeTruthy()
   })
 
+  describe("selectTabRequest — the command palette's 'Go to <Tab>'", () => {
+    const pane = (props: Record<string, unknown>) => (
+      <SessionPane
+        session={session({ id: "a", prNumber: 5 })}
+        renderConversation={(s) => <div>transcript {s.id}</div>}
+        renderReview={() => <div>review view</div>}
+        {...props}
+      />
+    )
+
+    it("switches to the requested tab and reports it handled", () => {
+      const onTabRequestHandled = vi.fn()
+      render(
+        pane({ selectTabRequest: { tabId: "review", nonce: 1 }, onTabRequestHandled })
+      )
+      expect(screen.getByText("review view")).toBeTruthy()
+      expect(onTabRequestHandled).toHaveBeenCalledTimes(1)
+    })
+
+    /**
+     * The regression.
+     *
+     * A pane is keyed by `pane.sessionId` (`split-view.tsx`), so switching
+     * sessions REMOUNTS it — and a mount runs the request effect with whatever
+     * is still in the prop. One "Go to Code Review" used to mean every session
+     * you opened afterwards landed on Code Review, which reads as the palette
+     * having changed a setting rather than performed an action.
+     *
+     * Reported-handled is what prevents it: the owner drops the request, so the
+     * next mount sees null. This test asserts the pane's half — that a mount
+     * with NO live request does not resurrect one.
+     */
+    it("does not replay a request the owner has already cleared", () => {
+      const onTabRequestHandled = vi.fn()
+      const { unmount } = render(
+        pane({ selectTabRequest: { tabId: "review", nonce: 1 }, onTabRequestHandled })
+      )
+      expect(screen.getByText("review view")).toBeTruthy()
+      expect(onTabRequestHandled).toHaveBeenCalledTimes(1)
+
+      // What the owner does on being told: drop it. The pane then remounts, as
+      // it does on every session switch.
+      unmount()
+      render(pane({ selectTabRequest: null, onTabRequestHandled }))
+
+      expect(screen.queryByText("review view")).toBeNull()
+      expect(screen.getByText("transcript a")).toBeTruthy()
+    })
+
+    it("fires again for the same tab when the nonce moves", () => {
+      const onTabRequestHandled = vi.fn()
+      const { rerender } = render(
+        pane({ selectTabRequest: { tabId: "review", nonce: 1 }, onTabRequestHandled })
+      )
+      rerender(pane({ selectTabRequest: null, onTabRequestHandled }))
+      fireEvent.click(screen.getByRole("button", { name: "Conversation" }))
+      expect(screen.getByText("transcript a")).toBeTruthy()
+
+      // Asking for the SAME tab a second time has to work — that is what the
+      // nonce is for, over and above the clearing.
+      rerender(pane({ selectTabRequest: { tabId: "review", nonce: 2 }, onTabRequestHandled }))
+      expect(screen.getByText("review view")).toBeTruthy()
+      expect(onTabRequestHandled).toHaveBeenCalledTimes(2)
+    })
+
+    it("does nothing at all when no request was ever made", () => {
+      const onTabRequestHandled = vi.fn()
+      render(pane({ onTabRequestHandled }))
+      expect(screen.getByText("transcript a")).toBeTruthy()
+      expect(onTabRequestHandled).not.toHaveBeenCalled()
+    })
+  })
+
   it("falls back to Conversation when the selected tab stops being available", () => {
     const { rerender } = render(
       <SessionPane

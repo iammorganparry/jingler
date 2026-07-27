@@ -27,7 +27,7 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PluginCatalog } from "@starbase/core"
-import type { PaneContribution, TabContribution } from "@starbase/ui"
+import type { PaneContribution, PluginPaletteCommand, TabContribution } from "@starbase/ui"
 import { rpc } from "./rpc-client.js"
 import {
   loadPlugins,
@@ -43,13 +43,28 @@ interface PluginRegistryValue {
   readonly tabs: ReadonlyArray<TabContribution>
   /** Dock panes, mounted once for the window rather than per session pane. */
   readonly panes: ReadonlyArray<PaneContribution>
+  /**
+   * Commands contributed by plugins that LOADED, for the command palette.
+   *
+   * Derived from `loaded.active` rather than the catalog, which is the whole
+   * point: a plugin whose module failed to import has no `commands.register`
+   * handler behind its manifest entry, so listing its commands would offer rows
+   * that dispatch into nothing.
+   */
+  readonly commands: ReadonlyArray<PluginPaletteCommand>
   /** Plugins that failed to load, for Settings to show verbatim. */
   readonly errors: ReadonlyArray<PluginLoadError>
   /** The last catalog from disk, including manifests that failed to decode. */
   readonly catalog: PluginCatalog | null
 }
 
-const EMPTY: PluginRegistryValue = { tabs: [], panes: [], errors: [], catalog: null }
+const EMPTY: PluginRegistryValue = {
+  tabs: [],
+  panes: [],
+  commands: [],
+  errors: [],
+  catalog: null
+}
 const EMPTY_MODULES: {
   active: ReadonlyArray<ActivePlugin>
   errors: ReadonlyArray<PluginLoadError>
@@ -208,9 +223,44 @@ export function PluginProvider({ children }: { children: ReactNode }) {
       }))
     )
 
+    /**
+     * The palette entries a plugin's manifest promised.
+     *
+     * ## Three gates, and each is a different question
+     *
+     * `enabled` is the operator's answer, `activeIds` is "did this plugin load",
+     * and **`manifest.main` is the one that decides whether a command can
+     * actually run**. That last one is not redundant with the other two, and
+     * getting it wrong was a real bug: a command handler lives in the HOST half
+     * (`ctx.commands.register`), which `PluginHost.activate` refuses to start
+     * without a `main` entry — while `ActivePlugin` reports only on the
+     * RENDERER's `ui` import, and a plugin with no `ui` at all enters the active
+     * set without importing anything. So a manifest declaring
+     * `contributes.commands` and no `main` sailed through both other gates and
+     * produced rows whose invoke could never be handled.
+     *
+     * `plugin-loader.ts` now refuses such a manifest outright, which is the
+     * honest place to catch it — the author is told rather than the row quietly
+     * vanishing. This check stays as the second line: the catalog lists every
+     * plugin on disk, including ones the loader rejected.
+     */
+    const activeIds = new Set(loaded.active.map((p) => p.id))
+    const commands: ReadonlyArray<PluginPaletteCommand> = (catalog?.plugins ?? [])
+      .filter((p) => p.enabled && activeIds.has(p.manifest.id) && p.manifest.main)
+      .flatMap((p) =>
+        (p.manifest.contributes?.commands ?? []).map((command) => ({
+          pluginId: p.manifest.id,
+          commandId: command.id,
+          title: command.title,
+          category: command.category,
+          pluginName: p.manifest.name
+        }))
+      )
+
     return {
       tabs,
       panes,
+      commands,
       // Manifests that never decoded are failures too, and the operator should
       // see them in the same list as modules that failed to import.
       errors: [
@@ -240,6 +290,10 @@ export const usePluginTabs = (): ReadonlyArray<TabContribution> =>
 /** Every plugin-contributed dock pane, for `SessionSplit`. */
 export const usePluginPanes = (): ReadonlyArray<PaneContribution> =>
   useContext(PluginRegistryContext).panes
+
+/** Every command a loaded plugin contributed, for the command palette. */
+export const usePluginCommands = (): ReadonlyArray<PluginPaletteCommand> =>
+  useContext(PluginRegistryContext).commands
 
 /** Plugins that failed to load — manifest or module — for Settings. */
 export const usePluginErrors = (): ReadonlyArray<PluginLoadError> =>

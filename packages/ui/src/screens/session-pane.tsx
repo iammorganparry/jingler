@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react"
+import { type ReactNode, useEffect, useState } from "react"
 import type { DiffStat, Session, SessionActivity, SessionDisplayStatus } from "@starbase/core"
 import { activityLabel, displayStatusOf, UNTITLED_SESSION } from "@starbase/core"
 import { displayStatusLabel } from "../tokens.js"
@@ -56,6 +56,28 @@ export interface ConversationPaneCtx {
 export interface SessionPaneProps {
   /** The session this pane shows. A pane only exists for a filled grid slot. */
   session: Session
+  /**
+   * Switch tabs from OUTSIDE the pane — today, the command palette.
+   *
+   * **One-shot, and it has to be**, which is the same reasoning as `target`
+   * below. A pane is keyed by `pane.sessionId` (see `split-view.tsx`), so it
+   * REMOUNTS on every session switch — and a mount runs this effect with
+   * whatever request is still hanging around. Left uncleared, one "Go to
+   * Changes" would open every session you visited afterwards on Changes, and in
+   * a split, focusing another pane would yank its tab to the same stale
+   * request. `onTabRequestHandled` is what stops that: the pane reports the
+   * request consumed and the owner drops it.
+   *
+   * The nonce does the OTHER half: asking for the tab you are already on has to
+   * work, and a plain `tabId` would make the second ask a no-op. The pane still
+   * owns its tab the rest of the time, so a controlled prop would fight every
+   * click on the tab bar.
+   *
+   * Only the FOCUSED pane is given one — see `SessionSplit`.
+   */
+  selectTabRequest?: { readonly tabId: TabKey; readonly nonce: number } | null
+  /** Told when {@link selectTabRequest} has been applied, so it can be dropped. */
+  onTabRequestHandled?: () => void
   /**
    * The real app's session-keyed pane, rendered for BOTH the Conversation and
    * Plan tabs from the same machine (so switching to Plan never aborts a parked
@@ -165,6 +187,32 @@ function SessionPaneBody(props: SessionPaneProps) {
   // survived a re-key would snap to an unrelated same-numbered step.
   const [target, setTarget] = useState<{ sessionId: string; stepId: string } | null>(null)
   const [split, setSplit] = useState(false)
+
+  // An outside request to switch tabs (the command palette). The nonce is the
+  // trigger, not the id — see `selectTabRequest`'s docblock. No validation here:
+  // a tab that isn't visible is already handled downstream, where
+  // `activeContribution` falls back to the first visible tab rather than
+  // rendering nothing.
+  //
+  // Reporting it handled is NOT optional bookkeeping — a pane remounts on every
+  // session switch, so an unconsumed request is replayed on the next session's
+  // first render. Same shape as `onPlanStepSelected` a few lines down.
+  const tabRequestNonce = props.selectTabRequest?.nonce
+  const tabRequestId = props.selectTabRequest?.tabId
+  const onTabRequestHandled = props.onTabRequestHandled
+  useEffect(() => {
+    if (tabRequestId === undefined) return
+    setTab(tabRequestId)
+    onTabRequestHandled?.()
+    // Depends on the NONCE alone, deliberately: adding `tabRequestId` would
+    // re-fire on a request for a different tab that carried the same nonce, and
+    // adding the callback would re-fire whenever the owner re-rendered.
+    //
+    // No suppression comment here. The repo lints with Biome, whose rule is
+    // `lint/correctness/useExhaustiveDependencies` and is configured `warn`, so
+    // the `// eslint-disable-next-line` form used elsewhere in this codebase
+    // suppresses nothing at all — it only claims to.
+  }, [tabRequestNonce])
 
   const active = props.session
   const planStepTarget = target?.sessionId === active.id ? target.stepId : null

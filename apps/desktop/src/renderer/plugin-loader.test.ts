@@ -132,6 +132,44 @@ describe("loadPluginUi", () => {
     expect(result.plugin.tabs).toEqual([])
   })
 
+  /**
+   * The same refusal one plane over from the `ui`/tabs check.
+   *
+   * A command's handler is registered by the HOST half, and `PluginHost.activate`
+   * returns early without a `main` entry — so commands with no `main` would sit
+   * in the palette dispatching into a process that was never started. The author
+   * sees the row appear and would reasonably blame their handler.
+   */
+  it("refuses commands with no `main`, since nothing could ever handle them", async () => {
+    const result = await loadPluginUi(
+      plugin({
+        main: undefined,
+        ui: undefined,
+        contributes: { commands: [{ id: "hello.refresh", title: "Refresh" }] }
+      }),
+      async () => {
+        throw new Error("should not be imported")
+      }
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.message).toContain("no `main` entry")
+  })
+
+  it("accepts commands when `main` is there to handle them", async () => {
+    const result = await loadPluginUi(
+      plugin({
+        main: "dist/main.js",
+        ui: undefined,
+        contributes: { commands: [{ id: "hello.refresh", title: "Refresh" }] }
+      }),
+      async () => {
+        throw new Error("should not be imported")
+      }
+    )
+    expect(result.ok).toBe(true)
+  })
+
   it("never imports a module for a plugin that contributes no tabs", async () => {
     let imported = false
     await loadPluginUi(plugin({ contributes: { tabs: [] } }), async () => {

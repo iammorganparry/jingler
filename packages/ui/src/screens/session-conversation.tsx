@@ -6,7 +6,7 @@ import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
 import { EmptyConversation } from "./empty-conversation.js"
 import type { ConversationPaneCtx } from "./session-pane.js"
-import type { TabContribution } from "../app/tab-contributions.js"
+import type { TabContribution, TabKey } from "../app/tab-contributions.js"
 import type { PaneContribution } from "../app/pane-contributions.js"
 
 // The pane ctx is part of this screen's public surface (StarbaseApp types its
@@ -156,6 +156,13 @@ export interface SessionConversationProps {
   browserDockSide?: DockSide
   /** App version, shown in the sidebar footer. */
   version?: string
+  /**
+   * A command-palette request to switch tabs. Passed straight through to the
+   * split, which hands it to the focused pane only.
+   */
+  selectTabRequest?: { readonly tabId: TabKey; readonly nonce: number } | null
+  /** Told when the focused pane has applied the request, so it can be dropped. */
+  onTabRequestHandled?: () => void
 }
 
 /**
@@ -247,6 +254,8 @@ export function SessionConversation(props: SessionConversationProps) {
             terminalDockSide={props.terminalDockSide}
             renderBrowserDock={props.renderBrowserDock}
             browserDockSide={props.browserDockSide}
+            selectTabRequest={props.selectTabRequest}
+            onTabRequestHandled={props.onTabRequestHandled}
           />
         )}
       </div>

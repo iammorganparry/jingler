@@ -182,10 +182,23 @@ function SidebarBody({
     if (reconciled !== filters) setFilters(reconciled)
   }, [filters, sessions, setFilters])
 
-  // ⌘K / Ctrl-K focuses the filter.
+  /**
+   * ⌘F / Ctrl-F focuses the filter.
+   *
+   * This was ⌘K until the global command palette landed. ⌘K is the chord people
+   * arrive already knowing means "palette", and a ⌘K that instead put the caret
+   * in a list filter was the app quietly answering a different question — the
+   * `⌘K Command palette` hint in `screens/empty-conversation.tsx` had been
+   * advertising the palette for some time before one existed.
+   *
+   * ⌘F rather than nothing: "find within this list" is what the chord means
+   * everywhere else, and dropping the binding entirely would have been a
+   * regression paid for by whoever had already learnt it.
+   */
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if (e.shiftKey || e.altKey) return
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
         e.preventDefault()
         filterRef.current?.focus()
       }
@@ -387,7 +400,7 @@ function SidebarBody({
             value={filter}
             onChange={setFilter}
             placeholder="Filter sessions…"
-            kbd={<Kbd>⌘K</Kbd>}
+            kbd={<Kbd>⌘F</Kbd>}
           />
         </div>
         <FilterMenu axes={axes}>
