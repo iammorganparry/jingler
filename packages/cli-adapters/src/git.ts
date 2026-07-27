@@ -32,6 +32,68 @@ export const branchAt = (
     Effect.map((branch) => (branch === null || branch === "HEAD" ? null : branch))
   )
 
+/**
+ * Worktree paths whose link to their repo has already been checked this run.
+ *
+ * The check costs a `git rev-parse` subprocess and the answer cannot change
+ * while the app runs, so it is worth paying once per worktree rather than once
+ * per turn. A FAILED repair is recorded too: re-attempting a repair that cannot
+ * succeed would spawn two subprocesses on every message, forever.
+ *
+ * Module-level rather than per-service so this stays a plain function — it needs
+ * nothing from `GitService`, and threading that service into `AgentRunner` just
+ * to reach it would add a dependency to eighteen unrelated test layer sets.
+ */
+const linkChecked = new Set<string>()
+
+/** Test seam: forget what has been checked, so a case can observe the first call. */
+export const resetWorktreeLinkCache = (): void => linkChecked.clear()
+
+/**
+ * Re-point a worktree at its repo after the repo directory moved.
+ *
+ * A linked worktree does not contain a repository. It contains a `.git` FILE
+ * holding an ABSOLUTE path to `<repo>/.git/worktrees/<name>`, and the repo holds
+ * an absolute path back to the worktree in that directory's `gitdir` file.
+ * Renaming the repo directory breaks the pair in both directions, and every git
+ * command run inside the worktree then fails with "not a git repository".
+ *
+ * For a session that means no diff, no commit, and an agent that edits files
+ * happily right up until the moment anything touches git — with nothing
+ * anywhere naming the rename as the cause.
+ *
+ * `git worktree repair` is git's own remedy and rewrites both ends. It is run
+ * FROM the repo, which knows where it is, and pointed at the worktree.
+ *
+ * Best-effort throughout: a healthy worktree costs one `rev-parse` and changes
+ * nothing, so this is safe to call before any use of a worktree. A worktree
+ * that is broken for some OTHER reason — deleted, or never registered — is left
+ * exactly as it was for the caller to fail on, rather than being quietly
+ * re-created here, which would hand an agent an empty tree wearing the right
+ * name.
+ */
+export const ensureWorktreeLinked = (
+  repoPath: string,
+  worktreePath: string
+): Effect.Effect<void, never, FileSystem.FileSystem | CommandExecutor.CommandExecutor> =>
+  Effect.gen(function* () {
+    if (worktreePath.length === 0 || repoPath.length === 0) return
+    if (linkChecked.has(worktreePath)) return
+    const fs = yield* FileSystem.FileSystem
+    // A worktree that is not on disk is a different failure with a different
+    // fix. `repair` would do nothing for it, and recording an attempt invites
+    // the caller to read "checked" as "recoverable".
+    const exists = yield* fs.exists(worktreePath).pipe(Effect.orElseSucceed(() => false))
+    if (!exists) return
+    linkChecked.add(worktreePath)
+    const linked = yield* runGit(worktreePath, ["rev-parse", "--git-dir"]).pipe(
+      Effect.as(true),
+      Effect.orElseSucceed(() => false)
+    )
+    if (linked) return
+    yield* runGit(repoPath, ["worktree", "repair", worktreePath]).pipe(Effect.ignore)
+  })
+
 /** Switch a detached worktree, or return the branch a concurrent switch activated. */
 const switchTaskBranch = (
   cwd: string,

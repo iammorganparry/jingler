@@ -63,6 +63,7 @@ import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
 import { readDefaultMode } from "./default-mode.js"
 import { DiscoveryService } from "./discovery.js"
+import { ensureWorktreeLinked } from "./git.js"
 import { OpenConnectorService } from "./open-connector.js"
 import { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
@@ -679,6 +680,16 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // edit repo B, most likely Jingler's own source. The adapters now call
           // `requireWorktree`, which throws rather than inheriting.
           const worktreePath = session?.worktreePath ?? ""
+          // Re-point the worktree at its repo if the repo directory has moved
+          // since the worktree was forked. A worktree's link to its repo is an
+          // ABSOLUTE path, so renaming the repo leaves the directory intact but
+          // every git command inside it failing — the agent would run, edit
+          // files, and only fail at diff/commit time with "not a git
+          // repository". Memoised per worktree, so this is one `rev-parse` on
+          // the first turn and nothing after.
+          if (worktreePath.length > 0 && session?.repoPath) {
+            yield* ensureWorktreeLinked(session.repoPath, worktreePath)
+          }
           // Saved plans for this worktree, so a "implement/continue the plan" turn
           // can be pointed at the plan file on disk (best-effort — never blocks).
           const savedPlans =

@@ -11,7 +11,7 @@ import type {
 } from "@jingler/core"
 import { GhService } from "./gh.js"
 import { GitService } from "./git.js"
-import { SessionStore } from "./sessions.js"
+import { SessionStore, migrateRepoName } from "./sessions.js"
 import {
   failureOf,
   fakeCommandExecutor,
@@ -277,6 +277,36 @@ describe("SessionStore", () => {
     expect(reread._tag).toBe("Success")
     if (reread._tag !== "Success") return
     expect(activeChat(reread.value).contextTokens).toBe(190_000)
+  })
+
+  /**
+   * The pure-function cases live in `migrateRepoName`'s own describe. This one
+   * exists to pin the WIRING: drop the call from `readAll` and every one of
+   * those still passes while the sidebar silently regains its phantom group.
+   */
+  it("re-derives a stale repo name when reading sessions.json", async () => {
+    const created = await runExit(
+      SessionStore.create(input({ title: "Renamed repo" })).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(created._tag).toBe("Success")
+    if (created._tag !== "Success") return
+
+    // Rewrite the file the way a rename leaves it: `repoPath` still correct,
+    // `repo` still holding the directory's old name.
+    writeFileSync(
+      join(temp.root, "sessions.json"),
+      JSON.stringify([{ ...created.value, repo: "old-name" }])
+    )
+
+    const reread = await runExit(
+      SessionStore.get(created.value.id).pipe(Effect.provide(SessionStore.Default)),
+      temp.layer
+    )
+    expect(reread._tag).toBe("Success")
+    if (reread._tag !== "Success") return
+    expect(reread.value.repo).toBe(basename(repoPath))
+    expect(reread.value.repo).not.toBe("old-name")
   })
 
   it("keeps normal and Gigaplan resume ids independent", async () => {
@@ -1020,5 +1050,69 @@ describe("SessionStore", () => {
     expect(cleared.initialPrompt).toBeUndefined()
     expect(unlinked.issueNumber).toBeUndefined()
     expect(unlinked.automations).toBeUndefined()
+  })
+})
+
+/**
+ * `repo` is a denormalised copy of the repo's folder name, and the sidebar
+ * groups on it. Renaming a repo directory used to split one repo across two
+ * headings — the old name holding every session that predated the rename, the
+ * new name holding only what came after.
+ */
+describe("migrateRepoName", () => {
+  const at = (repoPath: string | undefined, repo: string) => {
+    const migrated = migrateRepoName({ id: "s1", repo, ...(repoPath === undefined ? {} : { repoPath }) })
+    return (migrated as { repo: string }).repo
+  }
+
+  it("re-derives the name from repoPath after a rename", () => {
+    expect(at("/Users/x/repos/jingler", "starbase")).toBe("jingler")
+  })
+
+  it("leaves an already-correct name untouched", () => {
+    expect(at("/Users/x/repos/jingler", "jingler")).toBe("jingler")
+  })
+
+  it("keeps the stored name when there is no repoPath to derive from", () => {
+    // Sessions predating `repoPath` — a stale group heading beats no heading.
+    expect(at(undefined, "starbase")).toBe("starbase")
+    expect(at("", "starbase")).toBe("starbase")
+    expect(at("   ", "starbase")).toBe("starbase")
+  })
+
+  it("keeps the stored name rather than deriving an empty one", () => {
+    // `basename("/")` is "", which would render as a blank group heading.
+    expect(at("/", "starbase")).toBe("starbase")
+  })
+
+  it("preserves a directory name that contains dots", () => {
+    // A real repo in this workspace: the whole basename is the name, and
+    // splitting on "." would silently rename it.
+    expect(at("/Users/x/repos/trigify-app.feat-signal", "old")).toBe("trigify-app.feat-signal")
+  })
+
+  it("is idempotent — re-reading an already-migrated file changes nothing", () => {
+    const once = migrateRepoName({ id: "s1", repo: "starbase", repoPath: "/Users/x/repos/jingler" })
+    expect(migrateRepoName(once)).toEqual(once)
+  })
+
+  it("passes non-records straight through", () => {
+    expect(migrateRepoName(null)).toBe(null)
+    expect(migrateRepoName("nope")).toBe("nope")
+  })
+
+  it("leaves every other field alone", () => {
+    const migrated = migrateRepoName({
+      id: "s1",
+      repo: "starbase",
+      repoPath: "/Users/x/repos/jingler",
+      branch: "starbase/fix-auth",
+      worktreePath: "/Users/x/jingler/worktrees/jingler/fix-auth"
+    }) as Record<string, unknown>
+    // The BRANCH keeps its old prefix on purpose: it is a real git ref with an
+    // open PR attached, and renaming it here would orphan both.
+    expect(migrated.branch).toBe("starbase/fix-auth")
+    expect(migrated.worktreePath).toBe("/Users/x/jingler/worktrees/jingler/fix-auth")
+    expect(migrated.id).toBe("s1")
   })
 })
