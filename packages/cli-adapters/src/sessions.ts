@@ -1060,6 +1060,17 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const setPrNumber = (id: string, prNumber: number | null) =>
         update(id, (s) => ({ ...s, prNumber }))
 
+      /**
+       * Record a worktree that has MOVED — not one that was re-forked.
+       *
+       * `worktreePath` is stored absolute and nothing else rewrites it, so it
+       * goes stale when `~/jingler` or the repo directory is renamed. The caller
+       * (`healedWorktreePath`) only produces a new value after confirming the
+       * directory is really there, so this never invents a path.
+       */
+      const setWorktreePath = (id: string, worktreePath: string) =>
+        update(id, (s) => ({ ...s, worktreePath }))
+
       /** Link (or, with `null`, unlink) a GitHub issue on a live session. */
       const setIssue = (
         id: string,
@@ -1189,6 +1200,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setStatus,
         addAllowlist,
         setPrNumber,
+        setWorktreePath,
         setIssue,
         clearInitialPrompt,
         archive,

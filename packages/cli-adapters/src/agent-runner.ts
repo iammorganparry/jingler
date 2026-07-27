@@ -63,6 +63,7 @@ import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
 import { readDefaultMode } from "./default-mode.js"
 import { DiscoveryService } from "./discovery.js"
+import { healedWorktreePath } from "./cli-project-dir.js"
 import { ensureWorktreeLinked } from "./git.js"
 import { OpenConnectorService } from "./open-connector.js"
 import { SecretStore } from "./secret-store.js"
@@ -679,7 +680,27 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // `pnpm dev` was launched from. An agent for repo A would then read and
           // edit repo B, most likely Jingler's own source. The adapters now call
           // `requireWorktree`, which throws rather than inheriting.
-          const worktreePath = session?.worktreePath ?? ""
+          // Recover the worktree path if `~/jingler` or the repo directory has
+          // been renamed since this session was created.
+          //
+          // `worktreePath` is stored ABSOLUTE and nothing rewrites it — this
+          // app's own rename moved the home directory and shipped no migration
+          // — so the stored value can name a directory that is not there while
+          // the worktree sits perfectly intact one name over. Healing it also
+          // moves the agent CLI's transcripts, which are filed under a slug of
+          // the working directory and are otherwise lost to `--resume`.
+          //
+          // Costs one `stat` on the overwhelmingly common healthy path.
+          const storedWorktree = session?.worktreePath ?? ""
+          const healPaths = yield* AppPaths
+          const worktreePath = session
+            ? yield* healedWorktreePath(storedWorktree, session.repo, healPaths.worktreesDir)
+            : storedWorktree
+          if (worktreePath !== storedWorktree) {
+            yield* SessionStore.setWorktreePath(sessionId, worktreePath).pipe(
+              Effect.ignore
+            )
+          }
           // Re-point the worktree at its repo if the repo directory has moved
           // since the worktree was forked. A worktree's link to its repo is an
           // ABSOLUTE path, so renaming the repo leaves the directory intact but
