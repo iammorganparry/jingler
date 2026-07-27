@@ -108,6 +108,10 @@ export interface Conversation {
   readonly reviewPhase: ReviewPhase
   readonly reviewStartedAt: number | null
   readonly stop: () => void
+  /** Kill one live sub-agent — its tab's ×. The turn and its siblings run on. */
+  readonly stopSubagent: (agentId: string) => void
+  /** Drop a settled sub-agent's tab (and its children's). Local only. */
+  readonly closeSubagent: (agentId: string) => void
   /** Re-read the worktree diff (e.g. after reverting from the Changes rail). */
   readonly refreshDiff: () => void
 }
@@ -192,6 +196,8 @@ export function useConversation(
     handoffPlan: () => send({ type: "HANDOFF_PLAN" }),
     setHarness: (c, m) => send({ type: "SET_HARNESS", cli: c, model: m }),
     stop: () => send({ type: "STOP" }),
+    stopSubagent: (agentId) => send({ type: "STOP_SUBAGENT", agentId }),
+    closeSubagent: (agentId) => send({ type: "CLOSE_SUBAGENT", agentId }),
     refreshDiff: () => send({ type: "REFRESH_DIFF" })
   }
 }

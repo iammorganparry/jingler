@@ -633,17 +633,34 @@ export const backgroundTaskState = (): BackgroundTaskState => ({
 })
 
 /**
+ * Harness `task_type`s that mean "a delegated agent", not operator work.
+ *
+ * `subagent` is the synchronous `Task`; `local_agent` is the async `Agent` tool.
+ * Both already own a watch-only tab, so neither belongs in the dock.
+ */
+const SUBAGENT_TASK_TYPES = new Set(["subagent", "local_agent"])
+
+/**
  * Is this live background task a delegated sub-agent rather than operator work?
  *
  * Checked against the memo `task_started` left us FIRST — that edge carries the
  * authoritative `subagent_type` — and falls back to the level's own fields for a
- * task whose start we never saw. Either signal is sufficient: the SDK sets
- * `task_type: "subagent"` and `subagent_type` together.
+ * task whose start we never saw.
+ *
+ * The fallback is NOT the rare path it reads as. The SDK documents the level as
+ * preceding the bookends, and it does: `background_tasks_changed` lands before
+ * the `task_started` that would fill `meta`, so EVERY task is classified by the
+ * level's own fields the first time we see it — and that payload carries only
+ * `task_id`, `task_type` and `description`. No `subagent_type`. So `task_type`
+ * is the whole test in practice, and it must name every delegated kind: an async
+ * `Agent` says `local_agent`, and matching only `subagent` put it in the dock,
+ * which then suppressed its `SubagentEnded` (see the `task_notification` case)
+ * and left the tab reading "running" for the rest of the session.
  */
 const isSubagentTask = (task: { task_type?: unknown; subagent_type?: unknown }, bg: BackgroundTaskState): boolean => {
   const meta = bg.meta.get(String((task as { task_id?: unknown }).task_id))
-  if (meta) return meta.taskType === "subagent" || meta.subagentType !== null
-  return task.task_type === "subagent" || strOf(task.subagent_type) !== null
+  if (meta) return SUBAGENT_TASK_TYPES.has(meta.taskType) || meta.subagentType !== null
+  return SUBAGENT_TASK_TYPES.has(String(task.task_type)) || strOf(task.subagent_type) !== null
 }
 
 export const streamEventsFor = (
@@ -775,7 +792,14 @@ export const streamEventsFor = (
         // fallback below rather than settling the tab twice.
         if (id && bg) bg.bookended.add(id)
         if (id && !(taskId && bg?.ever.has(taskId))) {
-          out.push({ _tag: "SubagentEnded", id, status: msg.status === "completed" ? "done" : "error" })
+          // `stopped` is carried through rather than flattened to `error`: it is
+          // the operator's own kill (the tab's ×), and a red dot would send them
+          // back to read a transcript they already decided to abandon.
+          out.push({
+            _tag: "SubagentEnded",
+            id,
+            status: msg.status === "completed" ? "done" : msg.status === "stopped" ? "stopped" : "error"
+          })
         }
         return out
       }
@@ -1219,6 +1243,24 @@ export const runClaude = (
             )
           )
         }
+        // Publish the per-task kill handle for this run.
+        //
+        // It takes EITHER id, because its two callers hold different ones: the
+        // dock knows a task by the harness's `task_id`, while a sub-agent tab
+        // has only ever known the spawning tool_use id. `bgState.meta` is the
+        // one place the two are correlated (it is filled from `task_started`,
+        // which carries both), and it lives here — inside the run that owns the
+        // query — so the translation belongs here rather than on the wire.
+        //
+        // A tool_use id that resolves to nothing is passed through unchanged
+        // rather than dropped: the harness is the authority on what its ids
+        // mean, and `stopTask` rejecting is already handled by the caller.
+        await runP(
+          ctx.registerBackgroundStop(async (id) => {
+            const byToolUse = [...bgState.meta].find(([, memo]) => memo.toolUseId === id)
+            await iterator.stopTask(byToolUse ? byToolUse[0] : id)
+          })
+        )
         /**
          * The `Done` withheld from a turn a late steer extended, if any.
          *

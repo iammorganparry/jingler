@@ -2160,6 +2160,11 @@ const HandlersLayer = StarbaseRpcs.toLayer({
     SessionStore.setHarness(sessionId, chatId, cli, model).pipe(Effect.ignore),
   "Agent.stop": ({ sessionId, chatId }) =>
     Effect.flatMap(AgentRunner, (runner) => runner.stop(sessionId, chatId)),
+  // Not `AgentRunner.stop` scoped smaller: that halts the whole turn. A
+  // sub-agent is killed through the run's own per-task handle, which is what
+  // `BackgroundTaskStore` holds.
+  "Agent.stopSubagent": ({ sessionId, chatId, agentId }) =>
+    BackgroundTaskStore.stopHandled(sessionId, chatId, agentId),
   "Agent.steer": ({ sessionId, chatId, text, images }) =>
     Effect.flatMap(AgentRunner, (runner) =>
       runner.steer(sessionId, chatId, text, images)

@@ -660,8 +660,18 @@ export type Skill = Schema.Schema.Type<typeof Skill>
 
 // ── Sub-agents (harness `Task` spawns, surfaced as live watch-only tabs) ──────
 
-/** Lifecycle of a spawned sub-agent, mirrored by its tab's status dot. */
-export const SubagentStatus = Schema.Literal("working", "done", "error")
+/**
+ * Lifecycle of a spawned sub-agent, mirrored by its tab's status dot.
+ *
+ * `stopped` is the operator's own kill (the tab's ×), and is deliberately NOT
+ * folded into `error`. The two look identical in a rail of dots but mean
+ * opposite things — one is a thing to go and read, the other is a thing you
+ * already decided about — and the same conflation on the DOCK side is why
+ * `BackgroundTaskSettled` has carried a distinct `stopped` since it shipped.
+ * It is not folded into `done` either: a killed agent's transcript ends
+ * mid-thought, and a green dot claims work that was never finished.
+ */
+export const SubagentStatus = Schema.Literal("working", "done", "error", "stopped")
 export type SubagentStatus = Schema.Schema.Type<typeof SubagentStatus>
 
 /**

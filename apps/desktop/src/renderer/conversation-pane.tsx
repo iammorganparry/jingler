@@ -402,13 +402,24 @@ export function ConversationPane({
             name: s.name,
             description: s.description,
             status: s.status,
-            hasChildren: convo.subagents.some((c) => c.parentId === s.id)
+            hasChildren: convo.subagents.some((c) => c.parentId === s.id),
+            // The reviewer is not a harness sub-agent — see `closable`.
+            closable: s.id !== convo.reviewer?.id
           }))}
           trail={trail}
           active={activeAgent}
           onChange={setSelectedAgent}
           onDrill={goToAgent}
           onNavigate={(id) => (id === MAIN_AGENT ? goToMain() : goToAgent(id))}
+          onStop={convo.stopSubagent}
+          onClose={(id) => {
+            // Back to Main FIRST. Both the transcript being read and the level
+            // being browsed can point at the tab about to vanish (or at one of
+            // its children, which go with it), and a pane left pointing at a
+            // retracted id renders an empty transcript with no way back.
+            if (activeAgent === id || effectiveLevel === id) goToMain()
+            convo.closeSubagent(id)
+          }}
         />
       )}
       {activeSubagent ? (
