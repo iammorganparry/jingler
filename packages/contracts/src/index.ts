@@ -451,6 +451,22 @@ export class StarbaseRpcs extends RpcGroup.make(
   }),
 
   /**
+   * Kill ONE live sub-agent, leaving the turn (and its siblings) running.
+   *
+   * `agentId` is the tab's id — the spawning tool_use id — not the harness's
+   * task id. The tab has only ever known the former; the run that owns the
+   * sub-agent is the only place the two are correlated, so the translation
+   * happens there rather than being pushed onto the renderer.
+   *
+   * Fire-and-forget by design. The kill is confirmed the same way an ordinary
+   * completion is — a `SubagentEnded` on the stream, with status `stopped` —
+   * so there is no reply here that the tab isn't already about to receive.
+   */
+  Rpc.make("Agent.stopSubagent", {
+    payload: { sessionId: Schema.String, chatId: Schema.String, agentId: Schema.String }
+  }),
+
+  /**
    * Add input to a live Codex turn. Compaction temporarily defers it; harnesses
    * without native steering report unsupported so the renderer can stop/replay.
    */

@@ -623,14 +623,24 @@ describe("streamEventsFor — sub-agents", () => {
     expect(events).toStrictEqual([{ _tag: "SubagentEnded", id: "task_1", status: "done" }])
   })
 
-  it("maps a failed/stopped task_notification onto an error status", () => {
-    for (const status of ["failed", "stopped"] as const) {
-      const events = streamEventsFor(
-        msg({ type: "system", subtype: "task_notification", task_id: "a1", tool_use_id: "task_1", status }),
-        new Map()
-      )
-      expect(events).toStrictEqual([{ _tag: "SubagentEnded", id: "task_1", status: "error" }])
-    }
+  it("maps a failed task_notification onto an error status", () => {
+    const events = streamEventsFor(
+      msg({ type: "system", subtype: "task_notification", task_id: "a1", tool_use_id: "task_1", status: "failed" }),
+      new Map()
+    )
+    expect(events).toStrictEqual([{ _tag: "SubagentEnded", id: "task_1", status: "error" }])
+  })
+
+  it("keeps a STOPPED task_notification distinct from a failed one", () => {
+    // `stopped` is the operator's own × on the tab. Flattening it into `error`
+    // (as this did before the tab had a ×, when nothing could produce it) puts
+    // a red dot on work they deliberately abandoned, which is the one tone in
+    // the rail that means "come back and read this".
+    const events = streamEventsFor(
+      msg({ type: "system", subtype: "task_notification", task_id: "a1", tool_use_id: "task_1", status: "stopped" }),
+      new Map()
+    )
+    expect(events).toStrictEqual([{ _tag: "SubagentEnded", id: "task_1", status: "stopped" }])
   })
 
   it("ignores a task_notification with no tool_use_id (ambient/workflow tasks have no tab)", () => {

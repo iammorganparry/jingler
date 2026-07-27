@@ -239,6 +239,10 @@ type ConversationEvent =
   | { type: "RESUME_PLAN"; planId: string }
   | { type: "REFRESH_DIFF" }
   | { type: "STOP" }
+  /** Kill ONE live sub-agent (its tab's ×), leaving the turn running. */
+  | { type: "STOP_SUBAGENT"; agentId: string }
+  /** Drop a SETTLED sub-agent's tab. Local only — nothing to tell the harness. */
+  | { type: "CLOSE_SUBAGENT"; agentId: string }
 
 interface LoadedData {
   readonly transcript: ReadonlyArray<Message>
@@ -864,6 +868,33 @@ export const conversationMachine = setup({
       return e._tag === "Started" && e.model ? { messages, model: e.model } : { messages }
     }),
     clearSubagents: assign(() => ({ subagents: [] as ReadonlyArray<Subagent> })),
+    /**
+     * Ask the harness to kill ONE sub-agent. Fire-and-forget, and with NO
+     * optimistic status change: the pill stays `working` until the harness's own
+     * `task_notification` settles it to `stopped`, which is the only moment the
+     * agent has actually stopped. Flipping it early would show a settled dot over
+     * an agent still writing to the file system.
+     */
+    requestStopSubagent: ({ context, event }) => {
+      if (event.type !== "STOP_SUBAGENT") return
+      void rpc.agentStopSubagent(context.session.id, context.chatId, event.agentId).catch(() => {})
+    },
+    /**
+     * Drop a settled sub-agent's tab, and with it any tabs it spawned — a child
+     * has no rail to live on once its parent's crumb is gone (`retractSubagent`
+     * takes the descendants for exactly this reason).
+     *
+     * Guarded on `working` rather than trusted from the UI: the rail routes a ×
+     * on a live agent to `STOP_SUBAGENT`, but a tab that retracted here while
+     * still running would drop the only surface its `SubagentEnded` could land
+     * on, and the agent would go on working with nothing on screen.
+     */
+    closeSubagent: assign(({ context, event }) => {
+      if (event.type !== "CLOSE_SUBAGENT") return {}
+      const agent = context.subagents.find((s) => s.id === event.agentId)
+      if (!agent || agent.status === "working") return {}
+      return { subagents: retractSubagent(context.subagents, event.agentId) }
+    }),
     // Realtime Changes rail: when a tool that touched files lands mid-run, re-read
     // the worktree diff right away (fire-and-forget) so the rail reflects edits as
     // they happen, not only after the whole turn settles. `ToolEnd.diff` is the
@@ -1299,7 +1330,12 @@ export const conversationMachine = setup({
     REVIEW_EVENT: { actions: "applyReview" },
     SET_REASONING: { actions: "persistReasoning" },
     SESSION_UPDATED: { actions: "reconcileSession" },
-    SHARED_PLAN_UPDATED: { actions: "applySharedPlan" }
+    SHARED_PLAN_UPDATED: { actions: "applySharedPlan" },
+    // Root-level for the same reason: a sub-agent's tab outlives the turn that
+    // spawned it, so closing one has to work in `idle` — and a stop request
+    // races nothing, since the harness answers it on the ordinary stream.
+    STOP_SUBAGENT: { actions: "requestStopSubagent" },
+    CLOSE_SUBAGENT: { actions: "closeSubagent" }
   },
   context: ({ input }) => {
     const persistedChats = input.session.chats ?? []

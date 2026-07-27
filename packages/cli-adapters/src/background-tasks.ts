@@ -255,6 +255,30 @@ export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
         })
 
       /**
+       * Ask the harness to kill something that has NO dock row — a sub-agent.
+       *
+       * Sub-agents are deliberately kept out of the dock (they own a tab
+       * instead), so `stop` below finds no actor for them and returns null
+       * without ever reaching the harness. They still need killing: the tab's ×
+       * has to stop the agent burning tokens, not just hide a pill.
+       *
+       * So this is `stop` minus the dock bookkeeping — resolve the run's handle
+       * and call it. The reply comes back through the ordinary stream as a
+       * `task_notification` with status `stopped`, which settles the tab; there
+       * is nothing to report here, and nothing optimistic to show, because the
+       * pill is already on screen and will change status when the harness says
+       * so. Silent on an unknown chat: a run that has ended has nothing live.
+       */
+      const stopHandled = (sessionId: string, chatId: string, id: string): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          const handle = (yield* Ref.get(stops)).get(sessionId)?.get(chatId)
+          if (!handle) return
+          // FORKED for the same reason as `stop`: the harness confirms a kill by
+          // another route entirely, and awaiting it would hang the click.
+          yield* Effect.forkDaemon(Effect.tryPromise(() => handle(id)).pipe(Effect.ignore))
+        })
+
+      /**
        * Ask the harness to stop one task.
        *
        * The machine moves to `stopping` FIRST, so the dock reflects the operator's
@@ -353,7 +377,7 @@ export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
           return live
         })
 
-      return { list, ingest, registerStop, stop, dismiss, clear, clearChat, liveFor }
+      return { list, ingest, registerStop, stop, stopHandled, dismiss, clear, clearChat, liveFor }
     })
   }
 ) {}

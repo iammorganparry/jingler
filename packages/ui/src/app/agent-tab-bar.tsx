@@ -18,6 +18,15 @@ export interface AgentTabItem {
   status: SubagentStatus
   /** This agent spawned sub-agents of its own — offer a drill-in affordance. */
   hasChildren: boolean
+  /**
+   * May the operator stop/close this one? Default `true`.
+   *
+   * False for the adversarial reviewer, which borrows this rail's shape but is
+   * not a harness sub-agent: no `Task` spawned it, so there is no task to kill
+   * and no entry in the list `retractSubagent` operates on. A × there would be
+   * a control that visibly does nothing.
+   */
+  closable?: boolean
 }
 
 /** One crumb in the drill path — `MAIN_AGENT`, then each drilled-into agent. */
@@ -48,13 +57,24 @@ export interface SubagentTabBarProps {
   onChange: (key: string) => void
   onDrill: (id: string) => void
   onNavigate: (id: string) => void
+  /** Kill a still-working sub-agent. Only ever called for `status === "working"`. */
+  onStop: (id: string) => void
+  /** Drop a settled sub-agent's pill. Never called while it is working. */
+  onClose: (id: string) => void
 }
 
-/** Status → dot tone + pulse (working pulses like a live run). */
+/**
+ * Status → dot tone + pulse (working pulses like a live run).
+ *
+ * `stopped` is dim rather than red on purpose: the operator killed it, so it is
+ * settled business, not something to go and read. Red is reserved for the agent
+ * that failed on its own and wants attention.
+ */
 const DOT: Record<SubagentStatus, { tone: string; pulse: boolean }> = {
   working: { tone: "bg-yellow", pulse: true },
   done: { tone: "bg-green", pulse: false },
-  error: { tone: "bg-red", pulse: false }
+  error: { tone: "bg-red", pulse: false },
+  stopped: { tone: "bg-dim", pulse: false }
 }
 
 /**
@@ -85,7 +105,9 @@ export function SubagentTabBar({
   active,
   onChange,
   onDrill,
-  onNavigate
+  onNavigate,
+  onStop,
+  onClose
 }: SubagentTabBarProps) {
   const tier = useWidthTier()
   // The task description is the first thing to go. It's the longest string in the
@@ -132,6 +154,13 @@ export function SubagentTabBar({
       {agents.map((agent) => {
         const isActive = agent.id === active
         const dot = DOT[agent.status]
+        // ONE × with two meanings, chosen by the agent's own state — the same
+        // affordance a chat pill has, and the same thing the operator means by
+        // it: "I am done with this". While it is working that has to reach the
+        // harness (the agent keeps burning tokens otherwise); once it has
+        // settled there is nothing to kill and the click is just tidying.
+        const working = agent.status === "working"
+        const closeLabel = `${working ? "Stop" : "Close"} ${agent.name}`
         return (
           <div
             key={agent.id}
@@ -149,7 +178,9 @@ export function SubagentTabBar({
               aria-current={isActive ? "page" : undefined}
               className={cn(
                 "flex items-center gap-1.5 py-0.5 pl-2 text-[11.5px] outline-none",
-                agent.hasChildren ? "pr-1" : "pr-2"
+                // `pr-2` only when nothing follows. A pill with a `>` or a ×
+                // after it would otherwise carry the gap twice.
+                agent.hasChildren || agent.closable !== false ? "pr-1" : "pr-2"
               )}
             >
               <StatusDot tone={dot.tone} pulse={dot.pulse} size={7} />
@@ -169,6 +200,17 @@ export function SubagentTabBar({
                 className="flex items-center pr-1.5 text-dim outline-none transition-colors hover:text-text"
               >
                 <ChevronRight className="size-3 flex-none" />
+              </button>
+            )}
+            {agent.closable !== false && (
+              <button
+                type="button"
+                aria-label={closeLabel}
+                title={closeLabel}
+                onClick={() => (working ? onStop(agent.id) : onClose(agent.id))}
+                className="mr-1 rounded p-0.5 text-dim opacity-0 outline-none hover:bg-editor hover:text-text focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <X className="size-3" />
               </button>
             )}
           </div>

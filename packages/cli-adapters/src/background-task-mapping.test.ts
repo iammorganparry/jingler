@@ -91,6 +91,26 @@ describe("background-task mapping", () => {
     expect(tags(events)).toStrictEqual(["BackgroundTasksChanged"])
   })
 
+  it("excludes an async `Agent`, which the level labels `local_agent` and nothing else", () => {
+    // The regression that made every async sub-agent tab read "running" forever.
+    //
+    // Two things the earlier code assumed, both false against claude 2.1.220:
+    // the level arrives AFTER `task_started` (it does not — it lands first, so
+    // the memo is always empty here), and a delegated task always says
+    // `subagent` (an async `Agent` says `local_agent`). The level payload
+    // carries task_id/task_type/description and NOTHING else — no
+    // `subagent_type` to fall back on — so `local_agent` is the only signal
+    // there is, and missing it put the sub-agent in the dock. From there its
+    // `task_notification` was read as a dock settle instead of a tab settle,
+    // and the tab it already owned was never retracted.
+    const events = run([
+      level([{ task_id: "task_1", task_type: "local_agent", description: "probe" }]),
+      taskStarted({ subagent_type: "general-purpose", task_type: "local_agent", tool_use_id: "toolu_9" })
+    ])
+    expect(tags(events)).toStrictEqual(["BackgroundTasksChanged"])
+    expect(events[0]).toMatchObject({ ids: [] })
+  })
+
   it("promotes a task from the level alone when its start edge never arrived", () => {
     const events = run([level([{ task_id: "ghost", task_type: "bash", description: "npm run watch" }])])
     expect(events[0]).toMatchObject({
@@ -212,6 +232,34 @@ describe("background-task mapping", () => {
     ])
     expect(tags(events).at(-1)).toBe("SubagentEnded")
     expect(tags(events)).not.toContain("BackgroundTaskSettled")
+  })
+
+  it("settles an async `Agent`'s tab in the order the harness really sends", () => {
+    // The test above scripts `task_started` before the level. The harness does
+    // the opposite, so the memo is empty when the level is classified — which is
+    // the whole reason `local_agent` has to be recognised on the level itself.
+    // Script it the real way round, or the regression passes.
+    const events = run([
+      level([{ task_id: "task_1", task_type: "local_agent", description: "probe" }]),
+      taskStarted({ tool_use_id: "toolu_1", subagent_type: "general-purpose", task_type: "local_agent" }),
+      notification({ tool_use_id: "toolu_1" })
+    ])
+    expect(tags(events).at(-1)).toBe("SubagentEnded")
+    expect(events.at(-1)).toMatchObject({ id: "toolu_1", status: "done" })
+    expect(tags(events)).not.toContain("BackgroundTaskStarted")
+    expect(tags(events)).not.toContain("BackgroundTaskSettled")
+  })
+
+  it("settles a sub-agent the operator killed as `stopped`, not `error`", () => {
+    // Same distinction the dock already draws. A × the operator clicked is not a
+    // failure to go and read, and red is the only thing in the rail that says
+    // "come back to this".
+    const events = run([
+      level([{ task_id: "task_1", task_type: "local_agent", description: "probe" }]),
+      taskStarted({ tool_use_id: "toolu_1", subagent_type: "general-purpose", task_type: "local_agent" }),
+      notification({ tool_use_id: "toolu_1", status: "stopped" })
+    ])
+    expect(events.at(-1)).toMatchObject({ _tag: "SubagentEnded", id: "toolu_1", status: "stopped" })
   })
 
   it("carries the spawning tool_use id on a real dock row", () => {

@@ -147,6 +147,8 @@ export const SubagentDrillIn: Story = {
       onChange={() => {}}
       onDrill={() => {}}
       onNavigate={() => {}}
+      onStop={() => {}}
+      onClose={() => {}}
     />
   )
 }

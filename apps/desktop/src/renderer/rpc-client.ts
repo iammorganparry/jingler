@@ -387,6 +387,8 @@ export const rpc = {
     run((c) => c.Agent.setHarness({ sessionId, chatId, cli, model })),
   agentStop: (sessionId: string, chatId: string): Promise<void> =>
     run((c) => c.Agent.stop({ sessionId, chatId })),
+  agentStopSubagent: (sessionId: string, chatId: string, agentId: string): Promise<void> =>
+    run((c) => c.Agent.stopSubagent({ sessionId, chatId, agentId })),
   agentSteer: (
     sessionId: string,
     chatId: string,
