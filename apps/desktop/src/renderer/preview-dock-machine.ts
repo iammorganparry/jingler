@@ -28,13 +28,13 @@
  * scroll live in the main process (its `WebContentsView`); this only says
  * whether and where the dock shows.
  */
-import type { DockSide } from "@starbase/ui"
-import { BROWSER_TAB_ID } from "@starbase/ui"
+import type { DockSide } from "@jingler/ui"
+import { BROWSER_TAB_ID } from "@jingler/ui"
 import { assign, setup } from "xstate"
 
-const VISIBLE_KEY = "starbase.browser.visible"
-const SIDE_KEY = "starbase.browser.side"
-const TABS_KEY = "starbase.preview.tabs"
+const VISIBLE_KEY = "jingler.browser.visible"
+const SIDE_KEY = "jingler.browser.side"
+const TABS_KEY = "jingler.preview.tabs"
 
 /** An open asset tab, as persisted. Keyed by session so a path is unambiguous. */
 export interface OpenAsset {

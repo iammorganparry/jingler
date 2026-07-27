@@ -1,4 +1,4 @@
-import type { CliKind, PermissionMode } from "@starbase/core"
+import type { CliKind, PermissionMode } from "@jingler/core"
 import { FileSystem } from "@effect/platform"
 import { Effect } from "effect"
 
@@ -69,7 +69,7 @@ export const codexDefaultMode = (configToml: string): PermissionMode => {
  * `"allow"` earns `auto`.
  *
  * `deny` maps to `ask` rather than anything stricter: we're picking the mode to
- * *execute* under, and Starbase has no "refuse everything" execution mode — the
+ * *execute* under, and Jingler has no "refuse everything" execution mode — the
  * gate will still ask, and the user can decline.
  */
 export const opencodeDefaultMode = (configJson: string): PermissionMode => {

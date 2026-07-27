@@ -1,6 +1,6 @@
 ---
-"@starbase/cli-adapters": patch
-"@starbase/core": patch
+"@jingler/cli-adapters": patch
+"@jingler/core": patch
 ---
 
 Compaction now decides from context OCCUPANCY, not cumulative token spend.

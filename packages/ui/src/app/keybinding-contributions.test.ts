@@ -96,7 +96,7 @@ describe("resolveKeybindings", () => {
     // plugin, and the author will have tested it where nothing else wanted it.
     const { active, rejected } = resolveKeybindings([binding()], ["ctrl+shift+l"])
     expect(active).toHaveLength(0)
-    expect(rejected[0]?.reason).toContain("already used by Starbase")
+    expect(rejected[0]?.reason).toContain("already used by Jingler")
   })
 
   it("matches a reserved chord written in different notation", () => {
@@ -107,7 +107,7 @@ describe("resolveKeybindings", () => {
 
   it("reports an unparseable chord rather than dropping it", () => {
     const { rejected } = resolveKeybindings([binding({ key: "wat" })], [])
-    expect(rejected[0]?.reason).toContain("not a chord Starbase understands")
+    expect(rejected[0]?.reason).toContain("not a chord Jingler understands")
     expect(rejected[0]?.reason).toContain("ctrl+shift+l")
   })
 

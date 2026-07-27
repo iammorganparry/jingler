@@ -1,11 +1,11 @@
 ---
-"@starbase/cli-adapters": patch
-"@starbase/core": patch
+"@jingler/cli-adapters": patch
+"@jingler/core": patch
 ---
 
 Fixed: sessions inherited the launching repo's package-manager config, and the session store could lose records.
 
-**Sessions ran under the wrong repo's tooling.** Starbase is itself started through a pnpm script, and pnpm publishes its resolved configuration into the environment before running one — an `npm_config_*` variable for every setting in the launching repo's `.npmrc`, plus `PNPM_SCRIPT_SRC_DIR` and a `PATH` prefixed with that repo's `node_modules/.bin`. Every agent session inherited all of it, so a session working in a worktree installed under the *origin* repo's `.npmrc` and resolved binaries from the *origin* repo's `.bin`. Because environment variables outrank `.npmrc`, the worktree could not override them: writing the setting into its own `.npmrc` changed nothing. This is the environment counterpart of the cwd inheritance fixed previously, and it is now stripped at all five spawn sites. Credentials are untouched — registry auth lives in `~/.npmrc`, which every package manager reads directly, and the uppercase `NPM_CONFIG_*` form (npm's documented way to configure from the environment) is deliberately preserved.
+**Sessions ran under the wrong repo's tooling.** Jingler is itself started through a pnpm script, and pnpm publishes its resolved configuration into the environment before running one — an `npm_config_*` variable for every setting in the launching repo's `.npmrc`, plus `PNPM_SCRIPT_SRC_DIR` and a `PATH` prefixed with that repo's `node_modules/.bin`. Every agent session inherited all of it, so a session working in a worktree installed under the *origin* repo's `.npmrc` and resolved binaries from the *origin* repo's `.bin`. Because environment variables outrank `.npmrc`, the worktree could not override them: writing the setting into its own `.npmrc` changed nothing. This is the environment counterpart of the cwd inheritance fixed previously, and it is now stripped at all five spawn sites. Credentials are untouched — registry auth lives in `~/.npmrc`, which every package manager reads directly, and the uppercase `NPM_CONFIG_*` form (npm's documented way to configure from the environment) is deliberately preserved.
 
 **The session store could silently lose every record.** `sessions.json` was rewritten in place, and a parse failure folds to an empty list so a corrupt file cannot stop the app booting — together, any partial write meant total silent loss of the only record of which worktrees exist. Writes now go to a unique temp file and are renamed into place, which is atomic. Separately, every read-modify-write is serialised: two sessions created at once each read the list, forked a worktree (seconds), then appended to the list they had read, so the second silently discarded the first.
 

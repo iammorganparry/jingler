@@ -1,6 +1,6 @@
 ---
-"@starbase/ui": patch
-"@starbase/desktop": patch
+"@jingler/ui": patch
+"@jingler/desktop": patch
 ---
 
 Fix provider logos never loading in the app, and the grid rendering as a single column.

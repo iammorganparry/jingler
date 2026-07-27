@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { StreamEvent } from "@starbase/core"
+import type { StreamEvent } from "@jingler/core"
 import { isTerminal, routeOf } from "./turn-events.js"
 
 /**

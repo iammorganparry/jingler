@@ -20,7 +20,7 @@ describe("WorkspaceService", () => {
   let repos: ReturnType<typeof mkTemp>
   beforeEach(() => {
     temp = withTempRoot()
-    repos = mkTemp("starbase-repos-")
+    repos = mkTemp("jingler-repos-")
   })
   afterEach(() => {
     temp.cleanup()

@@ -14,13 +14,13 @@ import { runtime } from "./runtime.js"
 
 export const app = new Hono()
 
-// The desktop app calls the auth API from a `starbase://` origin (and the Vite
+// The desktop app calls the auth API from a `jingler://` origin (and the Vite
 // dev renderer from localhost). Allow credentials so BetterAuth cookies/bearer
 // round-trip.
 app.use(
   "/api/*",
   cors({
-    origin: ["starbase://", "http://localhost:5173", "http://localhost:9100"],
+    origin: ["jingler://", "http://localhost:5173", "http://localhost:9100"],
     allowHeaders: ["Content-Type", "Authorization"],
     allowMethods: ["GET", "POST", "OPTIONS"],
     credentials: true
@@ -28,7 +28,7 @@ app.use(
 )
 
 /** Liveness probe (Vercel + local + e2e all hit this). */
-app.get("/health", (c) => c.json({ status: "ok", service: "@starbase/server" }))
+app.get("/health", (c) => c.json({ status: "ok", service: "@jingler/server" }))
 
 /** BetterAuth owns everything under /api/auth/* (OAuth, magic link, session). */
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
@@ -54,7 +54,7 @@ app.get("/api/me", async (c) => {
  * Desktop bridge. OAuth and magic-link flows complete in the user's browser,
  * where the session is a cookie the desktop app can't read. The client sets THIS
  * route as its `callbackURL`; here we read the freshly-created session server-
- * side and 302 to the `starbase://` deep link carrying the bearer token, which
+ * side and 302 to the `jingler://` deep link carrying the bearer token, which
  * the desktop then stores in the OS keychain. On failure we bounce back with an
  * `error` param so the LoginScreen can show its error state.
  */

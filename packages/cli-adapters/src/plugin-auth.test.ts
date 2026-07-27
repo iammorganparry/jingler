@@ -10,7 +10,7 @@ import { PluginAuth, type AuthProvider, type ConsentPrompt } from "./plugin-auth
 /**
  * Consent is the whole design.
  *
- * A Starbase manifest has no `permissions` array, so everything an operator can
+ * A Jingler manifest has no `permissions` array, so everything an operator can
  * say about what a plugin may reach is said here — once, at the moment of
  * asking, and revocably. These tests pin the properties that make that a real
  * bargain rather than a rhetorical one: a second ask does not re-prompt, a WIDER
@@ -18,8 +18,8 @@ import { PluginAuth, type AuthProvider, type ConsentPrompt } from "./plugin-auth
  */
 
 const tempPaths = async () => {
-  const home = await mkdtemp(join(tmpdir(), "starbase-plugin-auth-"))
-  const root = join(home, "starbase")
+  const home = await mkdtemp(join(tmpdir(), "jingler-plugin-auth-"))
+  const root = join(home, "jingler")
   return {
     home,
     layer: Layer.succeed(AppPaths, {
@@ -30,7 +30,7 @@ const tempPaths = async () => {
       transcriptsDir: join(root, "transcripts"),
       reviewsDir: join(root, "reviews"),
       planRoundsDir: join(root, "plan-rounds"),
-      plansDir: join(root, ".starbase"),
+      plansDir: join(root, ".jingler"),
       themesDir: join(root, "themes"),
       pluginsDir: join(root, "plugins"),
       pluginStorageDir: join(root, "plugin-storage"),

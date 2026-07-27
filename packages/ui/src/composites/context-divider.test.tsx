@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
-import type { ContextDigest } from "@starbase/core"
+import type { ContextDigest } from "@jingler/core"
 import { ContextDivider } from "./context-divider.js"
 
 afterEach(cleanup)

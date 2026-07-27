@@ -1,5 +1,5 @@
 ---
-"@starbase/ui": patch
+"@jingler/ui": patch
 ---
 
 Move splits above the repo groups in the sidebar

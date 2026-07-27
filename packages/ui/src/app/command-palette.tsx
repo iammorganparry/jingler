@@ -24,7 +24,7 @@ import {
  * and hands down a flat list of items, and this renders them. Every decision
  * about WHAT is in the list — which capabilities exist, which tabs the active
  * session can show, whether a plugin contributed anything — belongs to
- * `StarbaseApp`, and every decision about ranking belongs to
+ * `JinglerApp`, and every decision about ranking belongs to
  * `command-palette-model.ts`. What is left here is composition.
  */
 

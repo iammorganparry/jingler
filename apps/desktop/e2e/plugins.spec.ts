@@ -10,7 +10,7 @@ import type { SeedSession } from "./fixtures.js"
  * Everything else in this area is a unit test over one link: the protocol serves
  * a file, the loader refuses a bad module, the registry caches by version. This
  * spec is the only place all of them run together with a real Electron main
- * process, a real `starbase-plugin://` handler, a real importmap and a real
+ * process, a real `jingler-plugin://` handler, a real importmap and a real
  * renderer — which is the only way to know the importmap actually resolves, that
  * the scheme is registered early enough, and that the shims parse as modules.
  *
@@ -18,20 +18,20 @@ import type { SeedSession } from "./fixtures.js"
  *
  * A build step here would test Vite. Writing `dist/ui.js` by hand, importing the
  * exact bare specifiers a real plugin imports, tests what this spec is for: that
- * Starbase resolves them. If the importmap or a shim breaks, this fails; if the
+ * Jingler resolves them. If the importmap or a shim breaks, this fails; if the
  * bundler changes, it does not.
  *
  * ## Why the plugin is seeded AFTER launch
  *
  * It could be seeded before. Doing it after also proves the watcher: a folder
- * appearing in `~/starbase/plugins` shows up without a restart, which is the
+ * appearing in `~/jingler/plugins` shows up without a restart, which is the
  * whole install story and the thing an author relies on every time they rebuild.
  */
 
 const SESSION: SeedSession = {
   id: "s_plugin_1",
   repo: "widget",
-  branch: "starbase/plugin-session",
+  branch: "jingler/plugin-session",
   title: "Plugin session",
   status: "idle",
   cli: "claude",
@@ -58,13 +58,13 @@ const manifest = (over: Record<string, unknown> = {}) => ({
  * A plugin's UI module, hand-written.
  *
  * The three bare specifiers are exactly what a real plugin's bundle contains —
- * `@starbase/plugin-sdk/vite` externalises precisely these — so this exercises
+ * `@jingler/plugin-sdk/vite` externalises precisely these — so this exercises
  * the importmap and all three runtime shims.
  */
 const UI_MODULE = `
 import { jsx, jsxs } from "react/jsx-runtime"
-import { definePlugin, useSession, useHost } from "@starbase/plugin-sdk"
-import { cn } from "@starbase/plugin-sdk/ui"
+import { definePlugin, useSession, useHost } from "@jingler/plugin-sdk"
+import { cn } from "@jingler/plugin-sdk/ui"
 
 function Tab() {
   // Calling the hooks is the point: they resolve through the SDK's React
@@ -110,10 +110,10 @@ const seedPlugin = async (
   opts: { id?: string; ui?: string; manifest?: Record<string, unknown> } = {}
 ) => {
   const id = opts.id ?? "e2e-tab"
-  const dir = join(home, "starbase", "plugins", id)
+  const dir = join(home, "jingler", "plugins", id)
   await mkdir(join(dir, "dist"), { recursive: true })
   await writeFile(
-    join(dir, "starbase.plugin.json"),
+    join(dir, "jingler.plugin.json"),
     JSON.stringify(opts.manifest ?? manifest(), null, 2),
     "utf8"
   )
@@ -132,7 +132,7 @@ const seedPlugin = async (
  */
 const SECOND_UI = `
 import { jsx, jsxs } from "react/jsx-runtime"
-import { definePlugin, useSession } from "@starbase/plugin-sdk"
+import { definePlugin, useSession } from "@jingler/plugin-sdk"
 import { useState } from "react"
 
 function Tab() {
@@ -189,7 +189,7 @@ const openPluginSettings = async (window: import("@playwright/test").Page) => {
   await window.getByRole("button", { name: "Plugins" }).click()
 }
 
-test("a plugin dropped into ~/starbase/plugins contributes a working tab", async ({
+test("a plugin dropped into ~/jingler/plugins contributes a working tab", async ({
   launchApp
 }) => {
   const { window, home } = await launchApp({
@@ -205,7 +205,7 @@ test("a plugin dropped into ~/starbase/plugins contributes a working tab", async
   await seedPlugin(home)
 
   // No restart. The watcher notices, the catalog re-emits, the loader imports
-  // the module over `starbase-plugin://`, and the tab appears.
+  // the module over `jingler-plugin://`, and the tab appears.
   await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
 
   await window.getByRole("button", { name: "E2E" }).click()
@@ -250,10 +250,10 @@ test("a plugin whose manifest will not decode is reported, not silently absent",
 
   // A missing plugin and a broken one look identical from the session pane, so
   // Settings has to be able to tell them apart.
-  const dir = join(home, "starbase", "plugins", "broken")
+  const dir = join(home, "jingler", "plugins", "broken")
   await mkdir(dir, { recursive: true })
   await writeFile(
-    join(dir, "starbase.plugin.json"),
+    join(dir, "jingler.plugin.json"),
     JSON.stringify({ id: "broken", name: "Broken", activationEvents: ["onStartup"] }),
     "utf8"
   )
@@ -276,7 +276,7 @@ test("a plugin whose module throws shows a failure card, and other tabs keep wor
 
   await seedPlugin(home, {
     ui: `
-import { definePlugin } from "@starbase/plugin-sdk"
+import { definePlugin } from "@jingler/plugin-sdk"
 function Tab() { throw new Error("plugin exploded") }
 export default definePlugin(
   {
@@ -323,7 +323,7 @@ test("a plugin with a host half activates and answers an invoke", async ({ launc
     }),
     ui: `
 import { jsx, jsxs } from "react/jsx-runtime"
-import { definePlugin, useHost } from "@starbase/plugin-sdk"
+import { definePlugin, useHost } from "@jingler/plugin-sdk"
 import { useEffect, useState } from "react"
 
 function Tab() {
@@ -358,7 +358,7 @@ export default definePlugin(
 
   // The host half. Plain Node — no imports, so no bundling required.
   await writeFile(
-    join(home, "starbase", "plugins", "e2e-tab", "dist", "main.js"),
+    join(home, "jingler", "plugins", "e2e-tab", "dist", "main.js"),
     `export const activate = (ctx) => {
   ctx.subscriptions.push(
     ctx.commands.register("e2e-tab.ping", async (arg) => (arg?.n ?? 0) + 1)
@@ -381,9 +381,9 @@ test("a plugin is served from the throwaway home, not the developer's own", asyn
   launchApp
 }) => {
   // Not a tautology about `join(home, …)` — that only asserted the test's own
-  // arithmetic. This proves the RUNNING APP resolved `STARBASE_HOME`: the plugin
+  // arithmetic. This proves the RUNNING APP resolved `JINGLER_HOME`: the plugin
   // exists only under the temp home, so a tab appearing at all means the
-  // protocol handler read from there rather than the developer's ~/starbase.
+  // protocol handler read from there rather than the developer's ~/jingler.
   const { window, home } = await launchApp({
     configured: true,
     withRepo: true,
@@ -397,7 +397,7 @@ test("a plugin is served from the throwaway home, not the developer's own", asyn
   await expect(window.getByRole("button", { name: "Scoped" })).toBeVisible({ timeout: 15_000 })
 
   // And it goes away with the home, rather than lingering in a real one.
-  await rm(join(home, "starbase", "plugins", "scoped-to-home"), {
+  await rm(join(home, "jingler", "plugins", "scoped-to-home"), {
     recursive: true,
     force: true
   })
@@ -425,7 +425,7 @@ test("a plugin built in dev mode renders — jsxDEV resolves", async ({ launchAp
   await seedPlugin(home, {
     ui: `
 import { jsxDEV } from "react/jsx-dev-runtime"
-import { definePlugin, useSession } from "@starbase/plugin-sdk"
+import { definePlugin, useSession } from "@jingler/plugin-sdk"
 
 function Tab() {
   const session = useSession()
@@ -523,7 +523,7 @@ test("a disabled plugin stays disabled after a restart", async ({ launchApp }) =
   })
   await first.app.close()
 
-  // Same ~/starbase, nothing re-seeded: the plugin folder is still on disk, so a
+  // Same ~/jingler, nothing re-seeded: the plugin folder is still on disk, so a
   // tab appearing would mean `disabledPlugins` did not persist.
   const second = await launchApp({
     home: first.home,
@@ -593,11 +593,11 @@ test("Install from folder copies a plugin in and it starts contributing", async 
     sessions: [SESSION]
   })
 
-  // A plugin sitting OUTSIDE ~/starbase/plugins, the way a downloaded one would.
+  // A plugin sitting OUTSIDE ~/jingler/plugins, the way a downloaded one would.
   const source = join(home, "downloads", "e2e-tab")
   await mkdir(join(source, "dist"), { recursive: true })
   await writeFile(
-    join(source, "starbase.plugin.json"),
+    join(source, "jingler.plugin.json"),
     JSON.stringify(manifest(), null, 2),
     "utf8"
   )
@@ -620,7 +620,7 @@ test("Install from folder copies a plugin in and it starts contributing", async 
 
   await expect(window.getByTestId("plugin-row-e2e-tab")).toBeVisible({ timeout: 15_000 })
   // Copied into the managed directory rather than referenced where it sat.
-  expect(existsSync(join(home, "starbase", "plugins", "e2e-tab", "dist", "ui.js"))).toBe(true)
+  expect(existsSync(join(home, "jingler", "plugins", "e2e-tab", "dist", "ui.js"))).toBe(true)
 
   await window.getByRole("button", { name: "Close settings" }).click()
   await openSession(window)
@@ -677,7 +677,7 @@ test("a plugin's dock pane mounts beside the session", async ({ launchApp }) => 
     },
     ui: `
 import { jsx } from "react/jsx-runtime"
-import { definePlugin } from "@starbase/plugin-sdk"
+import { definePlugin } from "@jingler/plugin-sdk"
 
 // A pane is handed \`session\`, which may be null — rendering the repo proves the
 // pane got the FOCUSED session rather than an empty prop.
@@ -726,7 +726,7 @@ test("storage written by the host half is read by the UI half, and survives a re
   // that persists anything.
   const STORAGE_UI = `
 import { jsx, jsxs } from "react/jsx-runtime"
-import { definePlugin, useHost, usePluginStorage } from "@starbase/plugin-sdk"
+import { definePlugin, useHost, usePluginStorage } from "@jingler/plugin-sdk"
 import { useEffect, useState } from "react"
 
 function Tab() {
@@ -790,7 +790,7 @@ export default definePlugin(
     ui: STORAGE_UI
   })
   await writeFile(
-    join(first.home, "starbase", "plugins", "store-plugin", "dist", "main.js"),
+    join(first.home, "jingler", "plugins", "store-plugin", "dist", "main.js"),
     STORAGE_MAIN,
     "utf8"
   )
@@ -877,7 +877,7 @@ test("a host half can run a subprocess through ctx.exec", async ({ launchApp }) 
     }),
     ui: `
 import { jsx, jsxs } from "react/jsx-runtime"
-import { definePlugin, useHost } from "@starbase/plugin-sdk"
+import { definePlugin, useHost } from "@jingler/plugin-sdk"
 import { useEffect, useState } from "react"
 
 function Tab() {
@@ -907,7 +907,7 @@ export default definePlugin(
   // `process.execPath` is the Electron binary; ELECTRON_RUN_AS_NODE makes it
   // behave as plain Node, so this needs no node on PATH and no shell.
   await writeFile(
-    join(home, "starbase", "plugins", "e2e-tab", "dist", "main.js"),
+    join(home, "jingler", "plugins", "e2e-tab", "dist", "main.js"),
     `export const activate = (ctx) => {
   ctx.subscriptions.push(
     ctx.commands.register("e2e-tab.run", async () => {
@@ -1000,7 +1000,7 @@ test("declaring untrusted-repo capabilities fails loudly, because nothing honour
   // The same rule as keybindings, applied to the one field where silence is
   // actively dangerous. `capabilities.untrustedRepos` is not a feature a plugin
   // wants — it is a promise a plugin MAKES about what it will not do in a repo
-  // the operator has not trusted. Starbase has no trust model yet and mounts
+  // the operator has not trusted. Jingler has no trust model yet and mounts
   // those contributions anyway, so accepting the declaration would turn a safety
   // claim into decoration and mislead the most careful author hardest.
   const { window, home } = await launchApp({
@@ -1102,7 +1102,7 @@ test("onTab activates the host half without the tab invoking anything", async ({
     // activate the host half as a side effect.
     ui: `
 import { jsx } from "react/jsx-runtime"
-import { definePlugin, useSession } from "@starbase/plugin-sdk"
+import { definePlugin, useSession } from "@jingler/plugin-sdk"
 
 function Tab() {
   const session = useSession()
@@ -1119,7 +1119,7 @@ export default definePlugin(
 `
   })
   await writeFile(
-    join(home, "starbase", "plugins", "e2e-tab", "dist", "main.js"),
+    join(home, "jingler", "plugins", "e2e-tab", "dist", "main.js"),
     RECORDING_MAIN(marker),
     "utf8"
   )
@@ -1160,7 +1160,7 @@ test("onStartupFinished activates at boot, with no tab ever opened", async ({ la
     ui: `export default { manifest: { id: "e2e-tab" }, views: {}, panes: {} }\n`
   })
   await writeFile(
-    join(first.home, "starbase", "plugins", "e2e-tab", "dist", "main.js"),
+    join(first.home, "jingler", "plugins", "e2e-tab", "dist", "main.js"),
     RECORDING_MAIN(marker),
     "utf8"
   )
@@ -1193,7 +1193,7 @@ test("a disabled plugin is not woken by onStartupFinished", async ({ launchApp }
     })
   })
   await writeFile(
-    join(first.home, "starbase", "plugins", "e2e-tab", "dist", "main.js"),
+    join(first.home, "jingler", "plugins", "e2e-tab", "dist", "main.js"),
     RECORDING_MAIN(marker),
     "utf8"
   )
@@ -1266,7 +1266,7 @@ test("a throwing dock pane shows a card instead of blanking the window", async (
       }
     },
     ui: `
-import { definePlugin } from "@starbase/plugin-sdk"
+import { definePlugin } from "@jingler/plugin-sdk"
 function Side() { throw new Error("pane exploded") }
 export default definePlugin(
   {
@@ -1293,7 +1293,7 @@ export default definePlugin(
 
 test("SDK hooks work inside a dock pane, as the SDK documents", async ({ launchApp }) => {
   // Panes were never wrapped in a `PluginViewProvider`, so every hook threw
-  // "called outside a Starbase plugin view" — in one of the two places the SDK
+  // "called outside a Jingler plugin view" — in one of the two places the SDK
   // says hooks work.
   const { window, home } = await launchApp({
     configured: true,
@@ -1314,7 +1314,7 @@ test("SDK hooks work inside a dock pane, as the SDK documents", async ({ launchA
     },
     ui: `
 import { jsx, jsxs } from "react/jsx-runtime"
-import { definePlugin, useHost, usePluginStorage, useSessionOrNull } from "@starbase/plugin-sdk"
+import { definePlugin, useHost, usePluginStorage, useSessionOrNull } from "@jingler/plugin-sdk"
 import { useEffect, useState } from "react"
 
 function Side() {
@@ -1390,7 +1390,7 @@ test("a plugin can unlink the session's issue, and the app sees it", async ({ la
     },
     ui: `
 import { jsx, jsxs } from "react/jsx-runtime"
-import { definePlugin, useSession, useSessionActions } from "@starbase/plugin-sdk"
+import { definePlugin, useSession, useSessionActions } from "@jingler/plugin-sdk"
 
 function IssueTab() {
   const session = useSession()
@@ -1440,7 +1440,7 @@ export default definePlugin(
   })
   await first.app.close()
 
-  // And it is a real write rather than renderer state: same ~/starbase, nothing
+  // And it is a real write rather than renderer state: same ~/jingler, nothing
   // re-seeded, so 128 coming back would mean the RPC never reached disk.
   const second = await launchApp({
     home: first.home,
@@ -1483,7 +1483,7 @@ test("a failed install says why, instead of the picker closing on nothing", asyn
 
   const error = window.getByTestId("plugin-action-error")
   await expect(error).toBeVisible({ timeout: 15_000 })
-  await expect(error).toContainText("starbase.plugin.json")
+  await expect(error).toContainText("jingler.plugin.json")
 
   // And it can be dismissed, rather than sitting there for the session.
   await window.getByTestId("plugin-action-error-dismiss").click()
@@ -1545,7 +1545,7 @@ test("unlinking from a `when: hasIssue` tab removes that tab without breaking th
     },
     ui: `
 import { jsx, jsxs } from "react/jsx-runtime"
-import { definePlugin, useSession, useSessionActions } from "@starbase/plugin-sdk"
+import { definePlugin, useSession, useSessionActions } from "@jingler/plugin-sdk"
 
 function IssueTab() {
   const session = useSession()

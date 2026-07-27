@@ -1,4 +1,4 @@
-import type { Plan, PlanStep } from "@starbase/core"
+import type { Plan, PlanStep } from "@jingler/core"
 import { fenceFor } from "./review-prompt.js"
 
 /**

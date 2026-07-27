@@ -1,4 +1,4 @@
-import type { CliKind, Skill } from "@starbase/core"
+import type { CliKind, Skill } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Ref } from "effect"
 import { NO_CAPABILITIES, probeClaudeCapabilities, SCRIPTED_COMMANDS } from "./claude-commands.js"
@@ -152,7 +152,7 @@ const byName = (a: Skill, b: Skill): number => a.name.localeCompare(b.name)
  * `codex plugin list --json`. Its displayed `/name` becomes `$name` when selected.
  * Other harnesses report nothing until their own reporters land.
  */
-export class SkillsService extends Effect.Service<SkillsService>()("@starbase/SkillsService", {
+export class SkillsService extends Effect.Service<SkillsService>()("@jingler/SkillsService", {
   accessors: true,
   effect: Effect.gen(function* () {
     const cache = yield* Ref.make(new Map<string, ClaudeCapabilities>())

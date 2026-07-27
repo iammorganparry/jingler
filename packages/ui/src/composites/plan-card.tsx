@@ -1,4 +1,4 @@
-import type { ExecutionMode, Plan } from "@starbase/core"
+import type { ExecutionMode, Plan } from "@jingler/core"
 import { ClipboardList, GitBranch } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Badge } from "../components/badge.js"

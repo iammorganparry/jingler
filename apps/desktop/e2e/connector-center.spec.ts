@@ -11,7 +11,7 @@ import { FAKE_TOKEN, startFakeOpenConnector } from "./fake-open-connector.js"
  * `/api/connections/:service` shows up on the next `GET /api/connections`, so the
  * connect flow is observable the way the operator sees it.
  *
- * Run locally: `pnpm --filter @starbase/desktop e2e` (the `_electron` suite is not
+ * Run locally: `pnpm --filter @jingler/desktop e2e` (the `_electron` suite is not
  * in CI). Asserts on what the operator sees, never on internals.
  */
 

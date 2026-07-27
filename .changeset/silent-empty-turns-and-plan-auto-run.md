@@ -1,9 +1,9 @@
 ---
-"@starbase/cli-adapters": patch
-"@starbase/desktop": patch
-"@starbase/contracts": patch
-"@starbase/core": patch
-"@starbase/ui": patch
+"@jingler/cli-adapters": patch
+"@jingler/desktop": patch
+"@jingler/contracts": patch
+"@jingler/core": patch
+"@jingler/ui": patch
 ---
 
 Sessions no longer come back with nothing to say. A turn that opened with a slash command — `/babysit-pr the PR we need it to main asap` — was rewritten before it reached the harness: the compaction primer and the saved-plan pointer were prepended, so the command was no longer the first thing in the message and the harness read it as prose rather than expanding it. The agent had nothing to do, the turn settled with zero parts, and the transcript showed a bare "CLAUDE" header with no reply. A turn that leads with a command now keeps it in front, and the context rides along after it.

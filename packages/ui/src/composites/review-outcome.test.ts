@@ -1,4 +1,4 @@
-import type { AdversarialReview, ReviewFinding, ReviewSeverity } from "@starbase/core"
+import type { AdversarialReview, ReviewFinding, ReviewSeverity } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import { outcomeOf } from "./review-findings.js"
 

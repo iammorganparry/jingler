@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import type { ThemeSummary, VsCodeTheme } from "@starbase/core"
-import { BUILTIN_THEMES, toTokens } from "@starbase/themes"
+import type { ThemeSummary, VsCodeTheme } from "@jingler/core"
+import { BUILTIN_THEMES, toTokens } from "@jingler/themes"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ThemesSettings } from "./themes-settings.js"
 
@@ -14,7 +14,7 @@ const summaryOf = (id: string, source: "builtin" | "user" = "builtin"): ThemeSum
     name: builtin.theme.name,
     kind: tokens.kind,
     source,
-    ...(source === "user" ? { path: `/home/me/starbase/themes/${id}.json` } : {}),
+    ...(source === "user" ? { path: `/home/me/jingler/themes/${id}.json` } : {}),
     tokens
   }
 }
@@ -100,7 +100,7 @@ describe("ThemesSettings — the grid", () => {
     const onReveal = vi.fn()
     renderThemes({ onReveal })
     fireEvent.click(screen.getByRole("button", { name: "Reveal Monokai in file manager" }))
-    expect(onReveal).toHaveBeenCalledWith("/home/me/starbase/themes/monokai.json")
+    expect(onReveal).toHaveBeenCalledWith("/home/me/jingler/themes/monokai.json")
   })
 })
 
@@ -113,7 +113,7 @@ describe("ThemesSettings — broken theme files", () => {
    */
   it("names the files that could not be read, and why", () => {
     renderThemes({
-      skipped: [{ path: "/home/me/starbase/themes/broken.json", message: "type: is missing" }]
+      skipped: [{ path: "/home/me/jingler/themes/broken.json", message: "type: is missing" }]
     })
     expect(screen.getByText(/1 theme file could not be read/)).toBeTruthy()
     expect(screen.getByText(/broken\.json — type: is missing/)).toBeTruthy()

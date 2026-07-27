@@ -4,7 +4,7 @@ import type { SeedSession } from "./fixtures.js"
 const session: SeedSession = {
   id: "s_multi",
   repo: "widget",
-  branch: "starbase/multi-chat",
+  branch: "jingler/multi-chat",
   title: "Multi-chat lifecycle",
   status: "idle",
   cli: "claude",

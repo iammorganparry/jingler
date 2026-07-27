@@ -1,5 +1,5 @@
 import { useState } from "react"
-import type { PrMergeMethod, PrReviewer, PrReviewKind, PullRequest } from "@starbase/core"
+import type { PrMergeMethod, PrReviewer, PrReviewKind, PullRequest } from "@jingler/core"
 import type { BadgeProps } from "../components/badge.js"
 import { cn } from "../lib/cn.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"

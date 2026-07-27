@@ -19,7 +19,7 @@ import type {
   ReasoningEffort,
   ContextConfig,
   ContextSnapshot
-} from "@starbase/core"
+} from "@jingler/core"
 import {
   BUDGET_RANGE,
   DEFAULT_CONTEXT_CONFIG,
@@ -32,7 +32,7 @@ import {
   reviewModelFor,
   startableClis,
   triggerAt
-} from "@starbase/core"
+} from "@jingler/core"
 import { ContextMeter } from "./context-meter.js"
 import {
   Boxes,
@@ -57,7 +57,7 @@ import { Callout } from "../components/callout.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { GithubMark } from "../components/github-mark.js"
 import { ProviderIcon, PROVIDER_LABEL } from "../components/provider-icon.js"
-import { ORCHESTRATOR_DEFAULT } from "@starbase/core"
+import { ORCHESTRATOR_DEFAULT } from "@jingler/core"
 import { GigaplanSettings } from "./gigaplan-settings.js"
 import { ThemesSettings, type ThemesSettingsProps } from "./themes-settings.js"
 import { PluginsSettings, type PluginsSettingsProps } from "./plugins-settings.js"
@@ -177,7 +177,7 @@ function summarize(cli: CliKind, cfg: ProviderConfig, installed: boolean): strin
  * How each opencode provider got its credential, phrased for a human.
  *
  * The point of showing this is restraint: opencode resolves providers from the
- * user's OWN setup, and Starbase writing over that silently would be a
+ * user's OWN setup, and Jingler writing over that silently would be a
  * betrayal of it. So we say where each key came from, and only offer to add one
  * where there isn't one already.
  */
@@ -190,7 +190,7 @@ const SOURCE_LABEL: Record<OpencodeProviderSource, string> = {
 
 const SOURCE_HINT: Record<OpencodeProviderSource, string> = {
   env: "Resolved from an environment variable you set.",
-  api: "A key stored in opencode's own credential file — usable outside Starbase too.",
+  api: "A key stored in opencode's own credential file — usable outside Jingler too.",
   config: "Declared in your opencode.json.",
   custom: "Built into opencode."
 }
@@ -202,7 +202,7 @@ const BROWSE_LIMIT = 8
  * opencode's providers, and the key entry for them — the BYOK surface.
  *
  * Keys go to OPENCODE's credential store (`opencode auth login`'s file), never
- * to Starbase's `SecretStore`, which holds only the Starbase bearer token. So a
+ * to Jingler's `SecretStore`, which holds only the Jingler bearer token. So a
  * key added here works in a bare `opencode` shell, and one added there works
  * here. There is exactly one credential store and it is opencode's.
  */
@@ -636,7 +636,7 @@ export function SettingsView({
             the Settings body. */}
         {!compact && (
           <div className="mt-auto rounded-md border border-line px-2.5 py-2 font-mono text-[10px] leading-relaxed text-dim">
-            config · <span className="text-muted-foreground">~/starbase/config.json</span>
+            config · <span className="text-muted-foreground">~/jingler/config.json</span>
             <br />
             user scope
           </div>
@@ -833,7 +833,7 @@ function ProvidersSection({
             {/*
               The New Session dialog has no harness picker — it asked the same
               question every time. This is where that answer lives now. Only
-              startable harnesses qualify: `starbase` is the orchestrator, chosen
+              startable harnesses qualify: `jingler` is the orchestrator, chosen
               per turn via the Gigaplan mode chip, never as a session's harness.
             */}
             {onSaveDefaultCli && startable.some((c) => c.kind === selected) && (
@@ -952,7 +952,7 @@ function ProvidersSection({
         {/* footer */}
         <div className="flex flex-none items-center gap-2 border-t border-hairline px-6 py-3">
           <span className="font-mono text-[10.5px] text-dim">
-            Saved to <span className="text-muted-foreground">~/starbase/config.json</span>
+            Saved to <span className="text-muted-foreground">~/jingler/config.json</span>
           </span>
           <div className="flex-1" />
           <Button
@@ -1143,7 +1143,7 @@ function ContextSection({
 
         <Callout tone="blue">
           Long conversations lose accuracy well before they hit a model&apos;s limit.
-          Starbase summarises a session in the background once it outgrows the
+          Jingler summarises a session in the background once it outgrows the
           budget below, then quietly continues from that summary — your transcript
           is never truncated.
         </Callout>
@@ -1151,7 +1151,7 @@ function ContextSection({
         <div className="divide-y divide-hairline">
           <ToggleRow
             label="Compact sessions automatically"
-            description="Summarise and reseed in the background when a session outgrows its budget. Off returns Starbase to relying on each harness's own limit."
+            description="Summarise and reseed in the background when a session outgrows its budget. Off returns Jingler to relying on each harness's own limit."
             checked={draft.auto}
             onChange={(auto) => save({ ...draft, auto })}
           />
@@ -1276,7 +1276,7 @@ function ContextSection({
           <div>
             <div className="text-[12.5px] font-medium text-text-body">Context window override</div>
             <p className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-              Starbase infers each model&apos;s window, but opencode resolves models
+              Jingler infers each model&apos;s window, but opencode resolves models
               from your own credentials across many providers, so there is no
               reliable default. Set one here to enable auto-compaction for it.
             </p>
@@ -1452,7 +1452,7 @@ function GeneralSection({
         <div className="divide-y divide-hairline">
           <ToggleRow
             label="Desktop notifications"
-            description="Tell me when a session needs me or stops, while Starbase is in the background."
+            description="Tell me when a session needs me or stops, while Jingler is in the background."
             checked={draft.enabled}
             onChange={(enabled) => set({ enabled })}
           />

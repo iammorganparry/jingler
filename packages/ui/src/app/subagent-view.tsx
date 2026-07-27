@@ -1,4 +1,4 @@
-import type { CliKind, Subagent } from "@starbase/core"
+import type { CliKind, Subagent } from "@jingler/core"
 import { MessageTurn } from "../composites/message-turn.js"
 
 /**

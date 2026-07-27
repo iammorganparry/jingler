@@ -1,4 +1,4 @@
-import type { CliInfo } from "@starbase/core"
+import type { CliInfo } from "@jingler/core"
 import { FolderOpen, Plus } from "lucide-react"
 import { StatusDot } from "../components/status-dot.js"
 
@@ -88,7 +88,7 @@ export function EmptyConversation({
         <Shortcut keys="⌘K" label="Command palette" />
         <Shortcut keys="⌘," label="Settings" />
         <div className="flex-1" />
-        <span className="font-mono">{version ? `Starbase v${version}` : "Starbase"}</span>
+        <span className="font-mono">{version ? `Jingler v${version}` : "Jingler"}</span>
       </div>
     </div>
   )

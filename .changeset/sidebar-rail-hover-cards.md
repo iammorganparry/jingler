@@ -1,5 +1,5 @@
 ---
-"@starbase/ui": minor
+"@jingler/ui": minor
 ---
 
 Collapse the sidebar to an icon rail — on ⌘B, on a button, and with the session details one hover away.

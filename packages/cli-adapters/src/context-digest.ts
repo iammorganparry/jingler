@@ -1,4 +1,4 @@
-import type { ContextDigest, ContentPart, Message } from "@starbase/core"
+import type { ContextDigest, ContentPart, Message } from "@jingler/core"
 import { Schema } from "effect"
 
 /**

@@ -16,11 +16,11 @@ import { expect, test } from "./fixtures.js"
  * SKIPPED, not failed, when the container isn't up: this is not a test of whether
  * the developer happens to be running Docker. Bring it up with
  * `docker compose up -d open-connector`, then
- * `pnpm --filter @starbase/desktop e2e open-connector-live`.
+ * `pnpm --filter @jingler/desktop e2e open-connector-live`.
  */
 
-const ENDPOINT = process.env.STARBASE_E2E_OPEN_CONNECTOR_URL ?? "http://localhost:3000"
-const TOKEN = process.env.STARBASE_E2E_OPEN_CONNECTOR_TOKEN ?? "local-dev-token"
+const ENDPOINT = process.env.JINGLER_E2E_OPEN_CONNECTOR_URL ?? "http://localhost:3000"
+const TOKEN = process.env.JINGLER_E2E_OPEN_CONNECTOR_TOKEN ?? "local-dev-token"
 
 /** Is the instance up AND accepting our token? Both, or the spec is meaningless. */
 const instanceReachable = async (): Promise<boolean> => {
@@ -82,7 +82,7 @@ test("connects to the local OpenConnector and serves its real catalog to every a
  * FAILS here: `ghcr.io/oomol-lab/open-connector` does not enforce
  * `OPEN_CONNECTOR_API_TOKEN` on `/v1/*` or `/mcp` (a wrong bearer, or none, still
  * returns 200), so the app cheerfully reports "connected" with a garbage token.
- * That is the instance's behaviour, not Starbase's bug, and it is why compose binds
+ * That is the instance's behaviour, not Jingler's bug, and it is why compose binds
  * the port to loopback. Asserting a 401 here would encode a guarantee the image
  * does not make. An unreachable endpoint is the failure that IS real.
  */

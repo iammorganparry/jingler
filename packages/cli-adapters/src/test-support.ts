@@ -1,11 +1,11 @@
 /**
  * Test-only helpers for the cli-adapters suites. Deliberately kept OUT of the
  * package barrel (`index.ts`) so it never reaches app code; reachable from other
- * packages' tests via the explicit `@starbase/cli-adapters/test-support`
+ * packages' tests via the explicit `@jingler/cli-adapters/test-support`
  * subpath. Two testing strategies live here:
  *
  *  1. **Real outcomes** — `withTempRoot` + `initGitRepo` run the FS/git services
- *     against a real temp `~/starbase` and real `git`, so a config actually
+ *     against a real temp `~/jingler` and real `git`, so a config actually
  *     round-trips and a worktree/branch actually gets created. This is the default
  *     because it verifies behaviour, not mocked internals.
  *  2. **Fake command output** — `fakeCommandExecutor` swaps the platform
@@ -26,7 +26,7 @@ import type { AppPathsShape } from "./app-paths.js"
 // ── Temp filesystem ──────────────────────────────────────────────────────────
 
 export interface TempRoot {
-  /** The `~/starbase` equivalent, under a unique OS temp dir. */
+  /** The `~/jingler` equivalent, under a unique OS temp dir. */
   readonly root: string
   /** AppPaths + real Node FileSystem/Path/CommandExecutor, ready to `Effect.provide`. */
   readonly layer: Layer.Layer<AppPaths | NodeContext.NodeContext, never, never>
@@ -35,7 +35,7 @@ export interface TempRoot {
 }
 
 /**
- * The `~/starbase` layout for a test root. Exported so suites that need their own
+ * The `~/jingler` layout for a test root. Exported so suites that need their own
  * root don't hand-roll the literal — adding a path to `AppPathsShape` should be
  * one edit here, not one per test file (adding `reviewsDir` was three).
  */
@@ -47,7 +47,7 @@ export const appPathsFor = (root: string): AppPathsShape => ({
   transcriptsDir: join(root, "transcripts"),
   reviewsDir: join(root, "reviews"),
   planRoundsDir: join(root, "plan-rounds"),
-  plansDir: join(root, ".starbase"),
+  plansDir: join(root, ".jingler"),
   themesDir: join(root, "themes"),
   pluginsDir: join(root, "plugins"),
   pluginStorageDir: join(root, "plugin-storage"),
@@ -56,18 +56,18 @@ export const appPathsFor = (root: string): AppPathsShape => ({
 })
 
 /** Make a fresh OS temp dir; returns its path + a recursive cleanup. */
-export const mkTemp = (prefix = "starbase-test-"): { dir: string; cleanup: () => void } => {
+export const mkTemp = (prefix = "jingler-test-"): { dir: string; cleanup: () => void } => {
   const dir = mkdtempSync(join(tmpdir(), prefix))
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) }
 }
 
 /**
- * A temp `~/starbase` root wired with the real Node platform layer. Compose it
+ * A temp `~/jingler` root wired with the real Node platform layer. Compose it
  * under a service's `.Default` layer to exercise real FS/git outcomes.
  */
 export const withTempRoot = (): TempRoot => {
   const { dir, cleanup } = mkTemp()
-  const root = join(dir, "starbase")
+  const root = join(dir, "jingler")
   const layer = Layer.mergeAll(
     Layer.succeed(AppPaths, appPathsFor(root)),
     NodeContext.layer
@@ -102,8 +102,8 @@ export const initGitRepo = (dir: string, options: InitGitRepoOptions = {}): stri
   const branch = options.initialBranch ?? "main"
   mkdirSync(dir, { recursive: true })
   git(dir, ["init", "-b", branch])
-  git(dir, ["config", "user.email", "test@starbase.dev"])
-  git(dir, ["config", "user.name", "Starbase Test"])
+  git(dir, ["config", "user.email", "test@jingler.dev"])
+  git(dir, ["config", "user.name", "Jingler Test"])
   git(dir, ["config", "commit.gpgsign", "false"])
   writeFileSync(join(dir, "README.md"), `# ${dir}\n`)
   git(dir, ["add", "-A"])
@@ -139,12 +139,12 @@ export const initGitRepoWithOrigin = (
  * has a stale local `origin/<branch>` until it fetches. Returns the commit subject.
  */
 export const advanceOrigin = (origin: string, message: string, branch = "main"): string => {
-  const { dir, cleanup } = mkTemp("starbase-origin-push-")
+  const { dir, cleanup } = mkTemp("jingler-origin-push-")
   try {
     const work = join(dir, "clone")
     git(dir, ["clone", origin, work])
-    git(work, ["config", "user.email", "test@starbase.dev"])
-    git(work, ["config", "user.name", "Starbase Test"])
+    git(work, ["config", "user.email", "test@jingler.dev"])
+    git(work, ["config", "user.name", "Jingler Test"])
     git(work, ["config", "commit.gpgsign", "false"])
     git(work, ["commit", "--allow-empty", "-m", message, "--no-gpg-sign"])
     git(work, ["push", "origin", `HEAD:${branch}`])

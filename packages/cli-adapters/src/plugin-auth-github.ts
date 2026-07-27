@@ -3,7 +3,7 @@
  *
  * ## Why this is a provider and not a shortcut
  *
- * Starbase already has GitHub credentials — the `gh` CLI is authenticated, and
+ * Jingler already has GitHub credentials — the `gh` CLI is authenticated, and
  * `GhService` shells out to it constantly. The tempting thing is to let plugins
  * reach that directly, or to special-case the official PR plugin.
  *
@@ -16,7 +16,7 @@
  *
  * ## Why the token comes from `gh auth token`
  *
- * Starbase does not run its own GitHub OAuth app, and adding one would mean
+ * Jingler does not run its own GitHub OAuth app, and adding one would mean
  * asking every operator to authorise a second thing when they have already
  * authorised `gh`. Borrowing `gh`'s token means the account a plugin acts as is
  * visibly the same account the rest of the app acts as — which is what the

@@ -9,7 +9,7 @@
  *     idle          — nothing in flight
  *     sending       — magic-link request in flight
  *     magicLinkSent — "check your email" confirmation
- *     oauthPending  — browser opened, awaiting the `starbase://` callback
+ *     oauthPending  — browser opened, awaiting the `jingler://` callback
  *     error         — a send/OAuth attempt failed
  *   signedIn      — authenticated; `SIGN_OUT` revokes and returns to the wall
  *   signingOut    — sign-out request in flight
@@ -19,7 +19,7 @@
  * process's deep-link handler) re-runs `checking`, so both OAuth and magic-link
  * returns converge on the same validation path.
  */
-import type { AuthProvider, AuthSession } from "@starbase/core"
+import type { AuthProvider, AuthSession } from "@jingler/core"
 import { assign, fromPromise, setup } from "xstate"
 import { rpc } from "./rpc-client.js"
 
@@ -51,7 +51,7 @@ const sendMagicLink = fromPromise<void, { email: string; name: string | null }>(
 
 const startOAuth = fromPromise<void, { provider: AuthProvider }>(async ({ input }) => {
   const url = await rpc.authStartSignIn(input.provider)
-  await window.starbase.openExternal(url)
+  await window.jingler.openExternal(url)
 })
 
 const signOut = fromPromise<void>(() => rpc.authSignOut())

@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { Session, StreamEvent } from "@starbase/core"
+import type { Session, StreamEvent } from "@jingler/core"
 import { Effect, Layer, Ref } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliAdapter } from "./adapter.js"
@@ -137,7 +137,7 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
     const session: Session = {
       id: SESSION,
       repo: "trigify-app",
-      branch: "starbase/ctx",
+      branch: "jingler/ctx",
       title: "Context",
       status: "idle",
       cli: "claude",

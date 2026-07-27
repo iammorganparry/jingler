@@ -3,7 +3,7 @@ import { defineConfig } from "@playwright/test"
 /**
  * E2E against the real, built Electron app (Playwright's `_electron`). There is
  * no web server: `global-setup` builds the app once, and each test launches the
- * built `out/main/index.js` pointed at a throwaway `STARBASE_HOME`. Serial +
+ * built `out/main/index.js` pointed at a throwaway `JINGLER_HOME`. Serial +
  * single worker because each launch is a full Electron process.
  */
 export default defineConfig({

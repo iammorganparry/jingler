@@ -1,4 +1,4 @@
-import type { PlanStepAssignee } from "@starbase/core"
+import type { PlanStepAssignee } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { PROVIDER_LABEL, ProviderIcon } from "../components/provider-icon.js"
 

@@ -14,7 +14,7 @@ const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/
 /**
  * GitHub renders only the tail of a thread's hunk — the lines immediately around
  * the comment's anchor, not the whole hunk. Real hunks run long (a thread on
- * starbase#36 carries a 137-line `diffHunk`), so without this a single thread
+ * jingler#36 carries a 137-line `diffHunk`), so without this a single thread
  * would dwarf the conversation it belongs to.
  */
 const DEFAULT_TAIL = 8

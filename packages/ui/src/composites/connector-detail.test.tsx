@@ -2,7 +2,7 @@ import type {
   ConnectorConnection,
   ConnectorProvider,
   ConnectorProviderDetail
-} from "@starbase/core"
+} from "@jingler/core"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 

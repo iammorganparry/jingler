@@ -3,8 +3,8 @@
  * `changeset version`) into the root package.json so the repo version always
  * matches the shipped app version. Run as the second half of `version-packages`.
  *
- * The `@starbase/*` workspace packages move in lockstep (Changesets `fixed`), but
- * the root `starbase` package isn't part of the workspace globs, so Changesets
+ * The `@jingler/*` workspace packages move in lockstep (Changesets `fixed`), but
+ * the root `jingler` package isn't part of the workspace globs, so Changesets
  * never touches it — this script keeps it aligned.
  */
 import { readFileSync, writeFileSync } from "node:fs"

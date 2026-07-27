@@ -1,6 +1,6 @@
 ---
-"@starbase/core": minor
-"@starbase/ui": minor
+"@jingler/core": minor
+"@jingler/ui": minor
 ---
 
 The sidebar reports one of five states, and only those five: **Thinking**, **Running**, **Needs Input**, **Monitoring**, **Idle**.

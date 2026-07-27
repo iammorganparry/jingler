@@ -135,7 +135,7 @@ export const executionOrder = (plan: Plan): ExecutionPlan => {
  *
  * Two exclusions are absolute:
  *
- *  - **`starbase`.** A step routed back to the orchestrator would re-enter
+ *  - **`jingler`.** A step routed back to the orchestrator would re-enter
  *    planning to execute one step of the plan it just produced.
  *  - **A harness that isn't available here.** A plan can be reviewed on one
  *    machine and run on another, and the assignee is only a recommendation —
@@ -146,9 +146,9 @@ export const resolveRunner = (
   available: ReadonlyArray<{ readonly cli: CliKind; readonly model: string }>,
   fallback: { readonly cli: CliKind; readonly model: string } | null
 ): { readonly cli: CliKind; readonly model: string } | null => {
-  const usable = available.filter((a) => a.cli !== "starbase")
+  const usable = available.filter((a) => a.cli !== "jingler")
   const assignee: PlanStepAssignee | undefined = step.assignee
-  if (assignee !== undefined && assignee.cli !== "starbase") {
+  if (assignee !== undefined && assignee.cli !== "jingler") {
     const exact = usable.find(
       (candidate) => candidate.cli === assignee.cli && candidate.model === assignee.model
     )
@@ -159,14 +159,14 @@ export const resolveRunner = (
     if (exact !== undefined) return exact
   }
   // The fallback must clear the SAME bar as an assignee: installed here. It
-  // used to be returned on the `starbase` check alone, so on a Codex-only host
+  // used to be returned on the `jingler` check alone, so on a Codex-only host
   // the default orchestrator (claude/opus) was handed to steps that had no
   // assignee — the harness isn't there, the step burns all three attempts, and
   // the run dies with "stuck after 3 attempts" instead of the accurate "no
   // installed harness can run this step" that this function exists to produce.
   if (
     fallback !== null &&
-    fallback.cli !== "starbase" &&
+    fallback.cli !== "jingler" &&
     usable.some((a) => a.cli === fallback.cli)
   ) {
     return fallback

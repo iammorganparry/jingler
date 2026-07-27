@@ -1,5 +1,5 @@
-import type { PlanRound } from "@starbase/core"
-import { PlanRound as PlanRoundSchema } from "@starbase/core"
+import type { PlanRound } from "@jingler/core"
+import { PlanRound as PlanRoundSchema } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
@@ -8,7 +8,7 @@ type PlanRoundEnv = FileSystem.FileSystem | Path.Path | AppPaths
 
 /**
  * The last adversarial planning round per session, at
- * `~/starbase/plan-rounds/<sessionId>.json`.
+ * `~/jingler/plan-rounds/<sessionId>.json`.
  *
  * This is an audit trail, not the artefact. The settled plan already lives in
  * the transcript; what's kept here is the material needed to answer the question
@@ -25,7 +25,7 @@ type PlanRoundEnv = FileSystem.FileSystem | Path.Path | AppPaths
  * audit trail rather than an unbounded spend.
  */
 export class PlanRoundStore extends Effect.Service<PlanRoundStore>()(
-  "@starbase/PlanRoundStore",
+  "@jingler/PlanRoundStore",
   {
     accessors: true,
     sync: () => {

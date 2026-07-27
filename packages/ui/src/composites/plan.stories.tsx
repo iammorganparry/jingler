@@ -1,6 +1,6 @@
 import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { Plan, PlanComment } from "@starbase/core"
+import type { Plan, PlanComment } from "@jingler/core"
 import { ConversationView } from "../app/conversation-view.js"
 import { SEED_CONVERSATION } from "../seed.js"
 import { PlanReview } from "../screens/plan-review.js"

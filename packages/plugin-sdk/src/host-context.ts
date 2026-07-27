@@ -3,7 +3,7 @@
  *
  * ## Where this code runs, and why the surface looks like this
  *
- * The host half is Node, in Starbase's extension host, with the same reach any
+ * The host half is Node, in Jingler's extension host, with the same reach any
  * Node process has: it can spawn `gh`, read the worktree, open sockets. It is
  * NOT a sandbox (see `packages/core/src/plugin.ts` — "What this file is NOT").
  * What IS enforced lives at the two boundaries this file draws:
@@ -44,7 +44,7 @@ export type { Disposable, PluginStorage, SessionSnapshot } from "./common.js"
  *
  * @example
  * ```ts
- * import type { Activate } from "@starbase/plugin-sdk/host"
+ * import type { Activate } from "@jingler/plugin-sdk/host"
  *
  * export const activate: Activate = (ctx) => {
  *   const sub = ctx.commands.register("linear.refresh", () => refresh(ctx))
@@ -132,7 +132,7 @@ export interface HostContext {
     args?: readonly string[],
     options?: ExecOptions
   ) => Promise<ExecResult>
-  /** A logger whose output lands in Starbase's plugin log, tagged with `pluginId`. */
+  /** A logger whose output lands in Jingler's plugin log, tagged with `pluginId`. */
   readonly log: Logger
   /**
    * Push {@link Disposable}s here and the host disposes them, in reverse order,
@@ -151,7 +151,7 @@ export interface HostContext {
  * leaving a contributed command unregistered, is the plugin's bug to catch —
  * the manifest schema guarantees the id is namespaced, not that a handler exists.
  *
- * @see CommandContribution (in `@starbase/core`) — the manifest side of a command.
+ * @see CommandContribution (in `@jingler/core`) — the manifest side of a command.
  */
 export interface HostCommands {
   /**
@@ -252,7 +252,7 @@ export interface ExecOptions {
   /**
    * Working directory.
    *
-   * Defaults to the HOST PROCESS's own directory — Starbase does not guess a
+   * Defaults to the HOST PROCESS's own directory — Jingler does not guess a
    * repo for you. Pass it explicitly for anything repo-shaped: your tab already
    * has the right answer in `session.worktreePath`, and in a split with two
    * sessions open there is no single "active" worktree to infer.
@@ -316,14 +316,14 @@ export interface ExecResult {
  *
  * ## Why this differs from core's `AuthSessionInfo`
  *
- * `@starbase/core`'s `AuthSessionInfo` deliberately has no token field: it is
+ * `@jingler/core`'s `AuthSessionInfo` deliberately has no token field: it is
  * what the *renderer* may know, so a log line or crash report there cannot leak
  * a secret. This type is the host-side counterpart, and it *does* carry the
  * token, because the host is where credentialed calls are actually made. Keep
  * `accessToken` inside the host half — never return it across the RPC boundary
  * to the UI, or you have reopened the hole core closed.
  *
- * @see AuthSessionInfo (in `@starbase/core`) — the tokenless, renderer-visible twin.
+ * @see AuthSessionInfo (in `@jingler/core`) — the tokenless, renderer-visible twin.
  * @see Authentication.getSession — how one is obtained.
  */
 export interface AuthSession {
@@ -409,7 +409,7 @@ export interface Authentication {
 
 /**
  * An authentication provider a plugin *implements* — how "extend the app with
- * your own apps" reaches past the services Starbase ships knowing about.
+ * your own apps" reaches past the services Jingler ships knowing about.
  *
  * A self-hosted GitLab, an internal tracker, a corporate SSO: each is a plugin
  * that contributes a provider id in its manifest and implements this interface
@@ -429,7 +429,7 @@ export interface Authentication {
  * ctx.subscriptions.push(ctx.authentication.registerProvider(gitlab))
  * ```
  *
- * @see AuthProviderContribution (in `@starbase/core`) — the manifest declaration
+ * @see AuthProviderContribution (in `@jingler/core`) — the manifest declaration
  * this backs.
  */
 export interface AuthProvider {
@@ -451,7 +451,7 @@ export interface AuthProvider {
 
 // ── Logging ──────────────────────────────────────────────────────────────────
 
-/** A leveled logger whose lines land in Starbase's plugin log, tagged with the plugin id. */
+/** A leveled logger whose lines land in Jingler's plugin log, tagged with the plugin id. */
 export interface Logger {
   /** Routine progress. */
   info(message: string, ...args: readonly unknown[]): void

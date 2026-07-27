@@ -4,8 +4,8 @@ import type {
   McpInjectionTarget,
   McpServer,
   OpenConnectorConfig
-} from "@starbase/core"
-import { OPEN_CONNECTOR_DEFAULT } from "@starbase/core"
+} from "@jingler/core"
+import { OPEN_CONNECTOR_DEFAULT } from "@jingler/core"
 import { Effect } from "effect"
 import { ConfigService } from "./config.js"
 import { SecretStore } from "./secret-store.js"
@@ -19,7 +19,7 @@ import { probeServer } from "./mcp-probe.js"
  * connected once is available to all of them.
  *
  * This is the INVERSE of `McpService`, which only READS each harness's own MCP
- * config for display. Here Starbase OWNS a server and injects it at spawn. The
+ * config for display. Here Jingler OWNS a server and injects it at spawn. The
  * two share the `ParsedMcpServer` split so injection reuses the same redaction
  * contract: the `.server` half (header NAMES only) is all that may cross the RPC
  * boundary; the `.launch` half carries the bearer and never leaves main.
@@ -42,7 +42,7 @@ const mcpUrl = (endpoint: string): string => `${normalizeEndpoint(endpoint)}/mcp
 const INJECTION_TARGETS: ReadonlyArray<CliKind> = ["claude", "codex", "cursor", "opencode"]
 
 /**
- * The harnesses Starbase actually launches. `cursor` has no run path, so config
+ * The harnesses Jingler actually launches. `cursor` has no run path, so config
  * alone would say "injected" for a harness that never starts — a green row for
  * tools no agent will ever load.
  */
@@ -84,7 +84,7 @@ const remoteEntry = (
 }
 
 export class OpenConnectorService extends Effect.Service<OpenConnectorService>()(
-  "@starbase/OpenConnectorService",
+  "@jingler/OpenConnectorService",
   {
     accessors: true,
     // ConfigService + SecretStore are used via ACCESSORS inside the methods, not

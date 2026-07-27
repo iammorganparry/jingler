@@ -1,5 +1,5 @@
-import type { NotificationsConfig } from "@starbase/core"
-import { NOTIFICATIONS_DEFAULT } from "@starbase/core"
+import type { NotificationsConfig } from "@jingler/core"
+import { NOTIFICATIONS_DEFAULT } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import { shouldNotify } from "./notifications.js"
 

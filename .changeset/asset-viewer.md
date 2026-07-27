@@ -1,9 +1,9 @@
 ---
-"@starbase/cli-adapters": minor
-"@starbase/contracts": minor
-"@starbase/core": minor
-"@starbase/desktop": minor
-"@starbase/ui": minor
+"@jingler/cli-adapters": minor
+"@jingler/contracts": minor
+"@jingler/core": minor
+"@jingler/desktop": minor
+"@jingler/ui": minor
 ---
 
 Asset viewing — click a file path in agent output and read the thing the agent just made, without leaving the app.

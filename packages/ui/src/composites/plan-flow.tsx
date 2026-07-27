@@ -1,6 +1,6 @@
 import "@xyflow/react/dist/style.css"
 import { useMemo, useState } from "react"
-import type { PlanGraph, PlanNode, PlanNodeKind } from "@starbase/core"
+import type { PlanGraph, PlanNode, PlanNodeKind } from "@jingler/core"
 import Dagre from "@dagrejs/dagre"
 import {
   Background,

@@ -1,4 +1,4 @@
-import { defineManifest } from "@starbase/plugin-sdk"
+import { defineManifest } from "@jingler/plugin-sdk"
 
 /**
  * The GitHub Issues tab, as an official plugin.
@@ -27,7 +27,7 @@ export const manifest = defineManifest({
   id: "github-issues",
   name: "GitHub Issues",
   version: "1.0.0",
-  description: "Read the issue linked to a session, without leaving Starbase.",
+  description: "Read the issue linked to a session, without leaving Jingler.",
   ui: "dist/ui.js",
   main: "dist/main.js",
   // Dormant until the operator actually opens the tab. A session with no linked

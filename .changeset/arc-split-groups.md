@@ -1,5 +1,5 @@
 ---
-"@starbase/ui": minor
+"@jingler/ui": minor
 ---
 
 Rebuilt side-by-side sessions on Arc's group model: splits you build by dragging, not layouts you pick from a menu.
@@ -13,7 +13,7 @@ What that buys, concretely:
 - **Drag anywhere.** A session dropped on a pane's outer eighth inserts a pane on that side; dropped on the middle it replaces what's there. The edge zones are deliberately narrow — replacing is the commoner intent, and a wide edge means every casual drop splits when you meant to swap.
 - **One sidebar row per split**, rendered as Arc's pill: each pane a segment with its own status dot, title and close ×. At three panes and up the titles give way to dots (a 264px rail split four ways leaves ~50px a segment, which truncates "Refactor auth flow" to "R…"), and a hover peek card spells them out.
 - **Right-click a pill** for "Split with ▸" and "Separate all tabs" — Arc's own wording, reached the same way.
-- **Keyboard**, in one listener in `starbase-app.tsx`: `⌃⇧=` adds a pane, `⌃⇧1..4` focuses pane N, `⌃⇧[` / `⌃⇧]` move to the adjacent pane, `⌃⇧⌥←/→` move the focused *pane*, `⌃⇧W` closes it. Focus stops at the ends rather than wrapping — wrapping reads as a jump, and in a two-pane split it makes `[` and `]` indistinguishable.
+- **Keyboard**, in one listener in `jingler-app.tsx`: `⌃⇧=` adds a pane, `⌃⇧1..4` focuses pane N, `⌃⇧[` / `⌃⇧]` move to the adjacent pane, `⌃⇧⌥←/→` move the focused *pane*, `⌃⇧W` closes it. Focus stops at the ends rather than wrapping — wrapping reads as a jump, and in a two-pane split it makes `[` and `]` indistinguishable.
 - **Dividers you drag**, with the ratios persisted. Panes trade width continuously; both neighbours clamp at 15% so a hard drag parks the divider instead of collapsing a pane to nothing.
 
 Motion (framer-motion v12) carries the transitions, with `MotionConfig reducedMotion="user"` at the app root so the whole thing honours the OS setting for free. Two things were learned the hard way and are commented where they bite: `layout` animation must be *off* while a divider is being dragged (a spring chasing the pointer feels like elastic), and a `motion` element must wrap a draggable child rather than be one, or `motion` claims `onDragStart` for its own pan gesture.

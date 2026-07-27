@@ -1,4 +1,4 @@
-import type { Session, SessionDisplayStatus } from "@starbase/core"
+import type { Session, SessionDisplayStatus } from "@jingler/core"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { testSession } from "../test-support.js"
 import {
@@ -24,8 +24,8 @@ const idle = (): SessionDisplayStatus => "idle"
 const s = (over: Parameters<typeof testSession>[0]) => testSession(over)
 
 const SESSIONS: ReadonlyArray<Session> = [
-  s({ id: "a", title: "Charlie", repo: "starbase", updatedAt: "2026-07-21T10:00:00.000Z" }),
-  s({ id: "b", title: "Alpha", repo: "starbase", updatedAt: "2026-07-21T12:00:00.000Z" }),
+  s({ id: "a", title: "Charlie", repo: "jingler", updatedAt: "2026-07-21T10:00:00.000Z" }),
+  s({ id: "b", title: "Alpha", repo: "jingler", updatedAt: "2026-07-21T12:00:00.000Z" }),
   s({ id: "c", title: "Bravo", repo: "gtm-grid", updatedAt: "2026-07-21T11:00:00.000Z" }),
   s({
     id: "d",
@@ -66,7 +66,7 @@ describe("filterSessions", () => {
 
   it("matches title, branch and repo", () => {
     expect(filterSessions(SESSIONS, "gtm", DEFAULT_FILTERS).map((x) => x.id)).toStrictEqual(["c"])
-    expect(filterSessions(SESSIONS, "starbase/a", DEFAULT_FILTERS).map((x) => x.id)).toStrictEqual(["a"])
+    expect(filterSessions(SESSIONS, "jingler/a", DEFAULT_FILTERS).map((x) => x.id)).toStrictEqual(["a"])
   })
 })
 
@@ -127,12 +127,12 @@ describe("groupSessions", () => {
 
   it("groups by repo in first-seen order", () => {
     const out = groupSessions(active, DEFAULT_FILTERS, idle)
-    expect(out.map((g) => g.key)).toStrictEqual(["starbase", "gtm-grid"])
+    expect(out.map((g) => g.key)).toStrictEqual(["jingler", "gtm-grid"])
   })
 
   it("floats starred repos to the top without reordering the rest", () => {
     const out = groupSessions(active, DEFAULT_FILTERS, idle, new Set(["gtm-grid"]))
-    expect(out.map((g) => g.key)).toStrictEqual(["gtm-grid", "starbase"])
+    expect(out.map((g) => g.key)).toStrictEqual(["gtm-grid", "jingler"])
   })
 
   it("omits status groups with nothing in them", () => {
@@ -143,14 +143,14 @@ describe("groupSessions", () => {
 
   it("sorts within each group, not just across the whole list", () => {
     const out = groupSessions(active, { ...DEFAULT_FILTERS, sortBy: "name" }, idle)
-    const starbase = out.find((g) => g.key === "starbase")!
-    expect(starbase.sessions.map((x) => x.title)).toStrictEqual(["Alpha", "Charlie"])
+    const jingler = out.find((g) => g.key === "jingler")!
+    expect(jingler.sessions.map((x) => x.title)).toStrictEqual(["Alpha", "Charlie"])
   })
 })
 
 describe("persistence", () => {
   it("round-trips", () => {
-    const filters: SessionFilters = { status: "all", repo: "starbase", groupBy: "none", sortBy: "name" }
+    const filters: SessionFilters = { status: "all", repo: "jingler", groupBy: "none", sortBy: "name" }
     saveFilters(filters)
     expect(loadFilters()).toStrictEqual(filters)
   })
@@ -160,11 +160,11 @@ describe("persistence", () => {
     // store) must not silently reset the other three.
     localStorage.setItem(
       FILTERS_STORAGE_KEY,
-      JSON.stringify({ status: "nonsense", repo: "starbase", groupBy: "none", sortBy: "name" })
+      JSON.stringify({ status: "nonsense", repo: "jingler", groupBy: "none", sortBy: "name" })
     )
     expect(loadFilters()).toStrictEqual({
       status: DEFAULT_FILTERS.status,
-      repo: "starbase",
+      repo: "jingler",
       groupBy: "none",
       sortBy: "name"
     })
@@ -193,14 +193,14 @@ describe("reconcileRepo", () => {
   })
 
   it("keeps a repo filter that still matches", () => {
-    const filters = { ...DEFAULT_FILTERS, repo: "starbase" }
+    const filters = { ...DEFAULT_FILTERS, repo: "jingler" }
     expect(reconcileRepo(filters, SESSIONS)).toBe(filters)
   })
 
   it("leaves the filter alone while the list is empty", () => {
     // An empty list on first paint is loading, not an absent repo. Clearing on
     // it would discard the filter on every launch.
-    const filters = { ...DEFAULT_FILTERS, repo: "starbase" }
+    const filters = { ...DEFAULT_FILTERS, repo: "jingler" }
     expect(reconcileRepo(filters, [])).toBe(filters)
   })
 })
@@ -209,7 +209,7 @@ describe("isNarrowed", () => {
   it("is true only when something is HIDDEN", () => {
     expect(isNarrowed(DEFAULT_FILTERS)).toBe(false)
     expect(isNarrowed({ ...DEFAULT_FILTERS, status: "all" })).toBe(true)
-    expect(isNarrowed({ ...DEFAULT_FILTERS, repo: "starbase" })).toBe(true)
+    expect(isNarrowed({ ...DEFAULT_FILTERS, repo: "jingler" })).toBe(true)
     // Grouping and sorting rearrange what's there; they hide nothing.
     expect(isNarrowed({ ...DEFAULT_FILTERS, groupBy: "none", sortBy: "name" })).toBe(false)
   })
@@ -224,7 +224,7 @@ describe("sessionFilterAxes", () => {
 
   it("builds the repository list from the sessions that exist", () => {
     const repoAxis = sessionFilterAxes(DEFAULT_FILTERS, () => {}, SESSIONS).find((a) => a.id === "repo")!
-    expect(repoAxis.options.map((o) => o.value)).toStrictEqual([ALL_REPOS, "gtm-grid", "starbase"])
+    expect(repoAxis.options.map((o) => o.value)).toStrictEqual([ALL_REPOS, "gtm-grid", "jingler"])
   })
 
   it("counts archived and active separately", () => {
@@ -234,7 +234,7 @@ describe("sessionFilterAxes", () => {
 
   it("maps the All sentinel back to null", () => {
     let got: SessionFilters | null = null
-    const axes = sessionFilterAxes({ ...DEFAULT_FILTERS, repo: "starbase" }, (f) => (got = f), SESSIONS)
+    const axes = sessionFilterAxes({ ...DEFAULT_FILTERS, repo: "jingler" }, (f) => (got = f), SESSIONS)
     axes.find((a) => a.id === "repo")!.onSelect(ALL_REPOS)
     expect(got!.repo).toBeNull()
   })
@@ -242,6 +242,6 @@ describe("sessionFilterAxes", () => {
 
 describe("repoOptions", () => {
   it("de-duplicates and sorts alphabetically", () => {
-    expect(repoOptions(SESSIONS)).toStrictEqual(["gtm-grid", "starbase"])
+    expect(repoOptions(SESSIONS)).toStrictEqual(["gtm-grid", "jingler"])
   })
 })

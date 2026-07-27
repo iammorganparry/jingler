@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { Session, SessionPrStatus } from "@starbase/core"
+import type { Session, SessionPrStatus } from "@jingler/core"
 import { SessionSidebar } from "../app/session-sidebar.js"
 import { WidthTierProvider } from "../hooks/width-tier.js"
 import { prGlyphOf, PrStatusGlyph } from "./pr-glyph.js"
@@ -63,8 +63,8 @@ export const InTheSidebar: Story = {
     const session = (id: string, title: string, over: Partial<Session> = {}): Session => ({
       id,
       title,
-      repo: "starbase",
-      branch: `starbase/${id}`,
+      repo: "jingler",
+      branch: `jingler/${id}`,
       status: "idle",
       cli: "claude",
       diff: { added: 42, removed: 8 },

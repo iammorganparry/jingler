@@ -4,7 +4,7 @@
  * ## The one rule
  *
  * A plugin is third-party code, loaded from a folder the operator dropped into
- * `~/starbase/plugins`, and it is imported into the renderer's own realm. Every
+ * `~/jingler/plugins`, and it is imported into the renderer's own realm. Every
  * boundary in this file exists so that a plugin which is broken, half-written,
  * or actively hostile costs itself its tab and nothing else.
  *
@@ -29,15 +29,15 @@
  * advisory, since a module could register whatever it liked at import time.
  */
 import { createElement, type ComponentType } from "react"
-import { PLUGIN_API_VERSION } from "@starbase/core"
-import type { LoadedPlugin, Session } from "@starbase/core"
-import { useSession, type SessionSnapshot } from "@starbase/plugin-sdk"
+import { PLUGIN_API_VERSION } from "@jingler/core"
+import type { LoadedPlugin, Session } from "@jingler/core"
+import { useSession, type SessionSnapshot } from "@jingler/plugin-sdk"
 import {
   PLUGIN_TAB_ORDER,
   type PaneContribution,
   type TabContribution,
   type TabContext
-} from "@starbase/ui"
+} from "@jingler/ui"
 import type { LucideIcon } from "lucide-react"
 import * as Icons from "lucide-react"
 import { Boxes } from "lucide-react"
@@ -71,7 +71,7 @@ export interface PluginViewProps {
 /**
  * Narrow an internal `Session` to the subset a plugin may see.
  *
- * Starbase's `Session` carries ~25 fields — cost meters, token accounting, chat
+ * Jingler's `Session` carries ~25 fields — cost meters, token accounting, chat
  * arrays, worktree bookkeeping — and handing the whole thing to third-party code
  * would make every one of them a de-facto public API that cannot be reshaped
  * without breaking plugins. `SessionSnapshot` is the deliberately small, stable
@@ -163,7 +163,7 @@ const visibilityPredicate = (
  * and forces a fresh evaluation.
  */
 export const pluginModuleUrl = (plugin: LoadedPlugin): string =>
-  `starbase-plugin://${plugin.manifest.id}/${(plugin.manifest.ui ?? "").replace(/^\.?\//, "")}?v=${encodeURIComponent(plugin.manifest.version)}`
+  `jingler-plugin://${plugin.manifest.id}/${(plugin.manifest.ui ?? "").replace(/^\.?\//, "")}?v=${encodeURIComponent(plugin.manifest.version)}`
 
 /**
  * Renders a plugin's view with the props the SDK documents.
@@ -224,7 +224,7 @@ export const loadPluginUi = async (
       ok: false,
       error: {
         id: manifest.id,
-        message: `needs plugin API v${targeted}, and this Starbase implements v${PLUGIN_API_VERSION}. Update Starbase, or install a build of this plugin made for v${PLUGIN_API_VERSION}.`
+        message: `needs plugin API v${targeted}, and this Jingler implements v${PLUGIN_API_VERSION}. Update Jingler, or install a build of this plugin made for v${PLUGIN_API_VERSION}.`
       }
     }
   }
@@ -242,7 +242,7 @@ export const loadPluginUi = async (
   //
   // The other three are features a plugin WANTS. That one is a promise a plugin
   // MAKES: `{ supported: "limited", restrictedContributions: [...] }` says "these
-  // contributions stay inert until the operator trusts this repo". Starbase has
+  // contributions stay inert until the operator trusts this repo". Jingler has
   // no repo-trust model yet and mounts them regardless — so accepting the
   // declaration turns a safety claim into decoration, and the author who wrote it
   // most carefully is the one most misled. A load error is the only honest

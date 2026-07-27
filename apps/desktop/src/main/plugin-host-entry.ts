@@ -13,7 +13,7 @@
  *
  * Isolation between plugins is not the goal here and could not be achieved
  * anyway: plugins are trusted code, the same position VS Code takes. What IS
- * achieved is isolating plugins from *Starbase* — a plugin that hangs or throws
+ * achieved is isolating plugins from *Jingler* — a plugin that hangs or throws
  * takes down this process, not the RPC server every session depends on. Main
  * restarts it and re-activates what was live.
  *
@@ -31,13 +31,13 @@ import type {
   FromHostMessage,
   HostOp,
   ToHostMessage
-} from "@starbase/cli-adapters"
+} from "@jingler/cli-adapters"
 import type {
   AuthSession,
   Disposable,
   HostContext,
   PluginStorage
-} from "@starbase/plugin-sdk/host"
+} from "@jingler/plugin-sdk/host"
 
 /** The parent port, present because this only ever runs as a utilityProcess. */
 declare const process: NodeJS.Process & {

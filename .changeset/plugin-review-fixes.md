@@ -1,8 +1,8 @@
 ---
-"@starbase/plugin-sdk": minor
-"@starbase/cli-adapters": patch
-"@starbase/desktop": patch
-"@starbase/ui": patch
+"@jingler/plugin-sdk": minor
+"@jingler/cli-adapters": patch
+"@jingler/desktop": patch
+"@jingler/ui": patch
 ---
 
 Plugin system: a session-mutating SDK surface, and nine adversarial-review fixes.
@@ -13,4 +13,4 @@ Plugin system: a session-mutating SDK surface, and nine adversarial-review fixes
 - **`ctx.exec` no longer kills children instantly or corrupts stdout.** `timeoutMs: 0` (or a negative, or a `NaN` out of a parsed config) scheduled the SIGKILL for the next tick, so every command died with a timeout nobody asked for; those values are now read as unset. Separately, one truncation flag was shared across both streams and its marker only ever appended to stdout — so a command with a chatty stderr and a small valid JSON stdout came back with `… output truncated` glued to the JSON. The 120s ceiling is now documented on `ExecOptions` rather than silently clamping.
 - **A consent prompt no longer clobbers a concurrent revocation.** `getSession` read the grants file, awaited an operator-paced native dialog, then wrote a list computed from that stale read. A revoke performed while the prompt was open was silently undone — restoring access the operator had just taken away.
 
-Also: the extension-host bundle's filename is documented correctly in `electron.vite.config.ts` (`.js`, not `.mjs` — the stale comment described the exact bug it was meant to record), `build-bundled-plugins.mjs` can run on Windows, and `@starbase/ui` stops publishing the keybinding resolver until the dispatch half that would use it lands.
+Also: the extension-host bundle's filename is documented correctly in `electron.vite.config.ts` (`.js`, not `.mjs` — the stale comment described the exact bug it was meant to record), `build-bundled-plugins.mjs` can run on Windows, and `@jingler/ui` stops publishing the keybinding resolver until the dispatch half that would use it lands.

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import type { DiffStat, Session, SessionActivity } from "@starbase/core"
+import type { DiffStat, Session, SessionActivity } from "@jingler/core"
 import type { DockSide } from "./terminal-panel.js"
 import type { Pane, SplitGroup } from "./split-layout.js"
 import { usePaneWidth } from "../hooks/width-tier.js"

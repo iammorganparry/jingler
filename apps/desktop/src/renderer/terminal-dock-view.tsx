@@ -1,13 +1,13 @@
 /**
  * TerminalDockView — binds the app's per-session terminal state (`useTerminals`)
  * and live xterm cells (`XtermView`) to the presentational `TerminalDock` chrome
- * in @starbase/ui. Mounted ONCE (kept alive across session switches) so switching
+ * in @jingler/ui. Mounted ONCE (kept alive across session switches) so switching
  * away and back preserves each session's tab strip; dock visibility/side come in
  * as props from `useTerminalDock`.
  */
 import { useEffect, useRef, useState } from "react"
-import type { Session } from "@starbase/core"
-import { TerminalDock, type DockSide, type TerminalTab } from "@starbase/ui"
+import type { Session } from "@jingler/core"
+import { TerminalDock, type DockSide, type TerminalTab } from "@jingler/ui"
 import { useTerminals } from "./use-terminals.js"
 import { XtermView } from "./xterm-view.js"
 

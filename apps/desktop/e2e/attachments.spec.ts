@@ -19,7 +19,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   {
     id: "s_seeded",
     repo: "widget",
-    branch: "starbase/refactor",
+    branch: "jingler/refactor",
     title: "Refactor auth flow",
     status: "idle",
     cli: "claude",
@@ -35,7 +35,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
 
 /** A tiny on-disk PNG the file picker can attach. */
 const writeTinyPng = (): string => {
-  const dir = mkdtempSync(join(tmpdir(), "starbase-e2e-img-"))
+  const dir = mkdtempSync(join(tmpdir(), "jingler-e2e-img-"))
   const path = join(dir, "login.png")
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",

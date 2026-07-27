@@ -1,4 +1,4 @@
-import type { AdversarialReview, ReviewFinding, ReviewSeverity, Session } from "@starbase/core"
+import type { AdversarialReview, ReviewFinding, ReviewSeverity, Session } from "@jingler/core"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 /**

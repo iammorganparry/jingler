@@ -1,7 +1,7 @@
 ---
-"@starbase/cli-adapters": patch
-"@starbase/desktop": patch
-"@starbase/core": patch
+"@jingler/cli-adapters": patch
+"@jingler/desktop": patch
+"@jingler/core": patch
 ---
 
 Stop losing turns, and make a compaction seamless to pick back up

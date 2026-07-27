@@ -1,5 +1,5 @@
-import type { CliInfo, CliKind, ModelOption, ProviderModels } from "@starbase/core"
-import { FALLBACK_MODELS } from "@starbase/core"
+import type { CliInfo, CliKind, ModelOption, ProviderModels } from "@jingler/core"
+import { FALLBACK_MODELS } from "@jingler/core"
 import { Effect, Ref } from "effect"
 import { fetchCodexModels } from "./codex-models.js"
 import { fetchOpencodeModels } from "./opencode-models.js"
@@ -78,7 +78,7 @@ export const filterVisible = (
   return filtered.length > 0 ? filtered : models
 }
 
-export class ModelsService extends Effect.Service<ModelsService>()("@starbase/ModelsService", {
+export class ModelsService extends Effect.Service<ModelsService>()("@jingler/ModelsService", {
   accessors: true,
   effect: Effect.gen(function* () {
     const cache = yield* Ref.make(new Map<CliKind, ReadonlyArray<ModelOption>>())
@@ -113,10 +113,10 @@ export class ModelsService extends Effect.Service<ModelsService>()("@starbase/Mo
        */
       catalog: (clis: ReadonlyArray<CliInfo>): Effect.Effect<ReadonlyArray<ProviderModels>> =>
         Effect.forEach(
-          // `starbase` is excluded: it is not a model provider, and Gigaplan —
+          // `jingler` is excluded: it is not a model provider, and Gigaplan —
           // the mode that uses it — hides this picker entirely while it runs, so
           // an entry here could only ever be selected in order to be ignored.
-          clis.filter((c) => c.available && c.kind !== "starbase"),
+          clis.filter((c) => c.available && c.kind !== "jingler"),
           (c) =>
             list(c.kind, c.binPath).pipe(
               Effect.map((models) => ({ cli: c.kind, label: c.label, models }))

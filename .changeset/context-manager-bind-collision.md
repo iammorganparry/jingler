@@ -1,6 +1,6 @@
 ---
-"@starbase/desktop": patch
-"@starbase/cli-adapters": patch
+"@jingler/desktop": patch
+"@jingler/cli-adapters": patch
 ---
 
 Fixed: the context meter, the Compact now button and automatic compaction had all silently stopped working.

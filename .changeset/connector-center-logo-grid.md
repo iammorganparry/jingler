@@ -1,8 +1,8 @@
 ---
-"@starbase/ui": patch
-"@starbase/core": patch
-"@starbase/cli-adapters": patch
-"@starbase/contracts": patch
+"@jingler/ui": patch
+"@jingler/core": patch
+"@jingler/cli-adapters": patch
+"@jingler/contracts": patch
 ---
 
 Rebuild Settings › Connectors as a logo grid with a per-provider detail sheet, and fix the three catalog-mapping bugs the redesign exposed.

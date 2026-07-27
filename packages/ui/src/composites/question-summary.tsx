@@ -1,4 +1,4 @@
-import type { QuestionAnswer, QuestionRequest } from "@starbase/core"
+import type { QuestionAnswer, QuestionRequest } from "@jingler/core"
 import { CircleCheck } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Badge } from "../components/badge.js"

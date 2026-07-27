@@ -13,18 +13,18 @@ const { version } = JSON.parse(
 )
 const define = { __APP_VERSION__: JSON.stringify(version) }
 
-// The `@starbase/*` workspace packages ship raw TypeScript source (their
+// The `@jingler/*` workspace packages ship raw TypeScript source (their
 // `exports` point at `src/*.ts`). Node can't run those directly in the main
 // process, so we must NOT externalize them — Vite bundles + transpiles them into
 // the main/preload output. Third-party deps (effect, @effect/*, electron) stay
 // external and load from node_modules as usual.
 const workspacePackages = [
-  "@starbase/core",
-  "@starbase/contracts",
-  "@starbase/cli-adapters",
-  "@starbase/themes",
-  "@starbase/ui",
-  "@starbase/plugin-sdk"
+  "@jingler/core",
+  "@jingler/contracts",
+  "@jingler/cli-adapters",
+  "@jingler/themes",
+  "@jingler/ui",
+  "@jingler/plugin-sdk"
 ]
 
 export default defineConfig({

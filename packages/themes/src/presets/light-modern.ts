@@ -5,7 +5,7 @@
  * script instead. Source: extensions/theme-defaults/themes/light_modern.json
  * Include chain resolved and flattened at vendor time.
  */
-import type { VsCodeTheme } from "@starbase/core"
+import type { VsCodeTheme } from "@jingler/core"
 
 export const lightModern: VsCodeTheme = {
   "name": "Light Modern",

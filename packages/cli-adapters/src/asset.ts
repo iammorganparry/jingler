@@ -47,7 +47,7 @@
  * for none of its benefit.
  */
 import { FileSystem, Path } from "@effect/platform"
-import type { AssetKind, AssetPayload } from "@starbase/core"
+import type { AssetKind, AssetPayload } from "@jingler/core"
 import {
   ASSET_SIZE_CAP,
   AssetOutsideWorktreeError,
@@ -55,7 +55,7 @@ import {
   AssetUnsupportedError,
   extensionToKind,
   extensionToLanguage
-} from "@starbase/core"
+} from "@jingler/core"
 import { Effect } from "effect"
 
 type AssetEnv = FileSystem.FileSystem | Path.Path

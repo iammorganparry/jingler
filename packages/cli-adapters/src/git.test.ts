@@ -16,7 +16,7 @@ describe("GitService.createWorktree", () => {
   let repos: ReturnType<typeof mkTemp>
   beforeEach(() => {
     temp = withTempRoot()
-    repos = mkTemp("starbase-repos-")
+    repos = mkTemp("jingler-repos-")
   })
   afterEach(() => {
     temp.cleanup()
@@ -31,14 +31,14 @@ describe("GitService.createWorktree", () => {
       temp.layer
     )
 
-  it("creates the worktree on a fresh starbase/<slug> branch", async () => {
+  it("creates the worktree on a fresh jingler/<slug> branch", async () => {
     const repoPath = initGitRepo(join(repos.dir, "widget"))
     const exit = await create(repoPath, "widget")
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
 
     const worktree = exit.value
-    expect(worktree.branch).toBe("starbase/fix-auth")
+    expect(worktree.branch).toBe("jingler/fix-auth")
     expect(worktree.path).toBe(join(temp.root, "worktrees", "widget", "fix-auth"))
     expect(existsSync(worktree.path)).toBe(true)
 
@@ -46,7 +46,7 @@ describe("GitService.createWorktree", () => {
       cwd: repoPath,
       encoding: "utf-8"
     })
-    expect(branches).toContain("starbase/fix-auth")
+    expect(branches).toContain("jingler/fix-auth")
 
     const worktrees = execFileSync("git", ["worktree", "list"], { cwd: repoPath, encoding: "utf-8" })
     expect(worktrees).toContain(worktree.path)
@@ -135,7 +135,7 @@ describe("GitService.createWorktree", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     expect(existsSync(exit.value.path)).toBe(true)
-    expect(exit.value.branch).toBe("starbase/fix-auth")
+    expect(exit.value.branch).toBe("jingler/fix-auth")
   })
 
   it("forks off a local-only base branch when there is no matching remote ref", async () => {
@@ -220,7 +220,7 @@ describe("GitService.createWorktree", () => {
     )
     expect(named._tag).toBe("Success")
     if (named._tag !== "Success") return
-    expect(named.value).toBe("starbase/fix-token-refresh")
+    expect(named.value).toBe("jingler/fix-token-refresh")
     expect(
       execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
         cwd,
@@ -235,7 +235,7 @@ describe("GitService.createWorktree", () => {
 
   it("uses a deterministic suffix when the task branch already exists", async () => {
     const repoPath = initGitRepo(join(repos.dir, "collision"))
-    execFileSync("git", ["branch", "starbase/fix-token-refresh"], { cwd: repoPath })
+    execFileSync("git", ["branch", "jingler/fix-token-refresh"], { cwd: repoPath })
     const detached = await runExit(
       GitService.createDetachedWorktree({
         repoPath,
@@ -253,7 +253,7 @@ describe("GitService.createWorktree", () => {
       ),
       temp.layer
     )
-    expect(named._tag === "Success" && named.value).toBe("starbase/fix-token-refresh-2")
+    expect(named._tag === "Success" && named.value).toBe("jingler/fix-token-refresh-2")
   })
 
   it("reuses the live branch when task activation is triggered twice", async () => {
@@ -282,21 +282,21 @@ describe("GitService.createWorktree", () => {
       temp.layer
     )
 
-    expect(first._tag === "Success" && first.value).toBe("starbase/fix-token-refresh")
-    expect(second._tag === "Success" && second.value).toBe("starbase/fix-token-refresh")
+    expect(first._tag === "Success" && first.value).toBe("jingler/fix-token-refresh")
+    expect(second._tag === "Success" && second.value).toBe("jingler/fix-token-refresh")
     expect(
       execFileSync(
         "git",
         [
           "for-each-ref",
           "--format=%(refname:short)",
-          "refs/heads/starbase/fix-token-refresh"
+          "refs/heads/jingler/fix-token-refresh"
         ],
         { cwd: repoPath, encoding: "utf-8" }
       )
         .trim()
         .split("\n")
-    ).toStrictEqual(["starbase/fix-token-refresh"])
+    ).toStrictEqual(["jingler/fix-token-refresh"])
   })
 
   it("pins otherwise unreachable detached commits before worktree removal", async () => {
@@ -328,9 +328,9 @@ describe("GitService.createWorktree", () => {
       ),
       temp.layer
     )
-    expect(preserved._tag === "Success" && preserved.value).toBe("starbase/quiet-curie")
+    expect(preserved._tag === "Success" && preserved.value).toBe("jingler/quiet-curie")
     expect(
-      execFileSync("git", ["rev-parse", "starbase/quiet-curie"], {
+      execFileSync("git", ["rev-parse", "jingler/quiet-curie"], {
         cwd: repoPath,
         encoding: "utf-8"
       }).trim()
@@ -349,7 +349,7 @@ describe("GitService.commitsSince", () => {
   let repos: ReturnType<typeof mkTemp>
   beforeEach(() => {
     temp = withTempRoot()
-    repos = mkTemp("starbase-repos-")
+    repos = mkTemp("jingler-repos-")
   })
   afterEach(() => {
     temp.cleanup()
@@ -436,8 +436,8 @@ describe("mainTreeHoldsBranch", () => {
   // `git worktree list --porcelain`: blank-line separated records, main first.
   const porcelain = [
     "worktree /repos/widget\nHEAD abc123\nbranch refs/heads/main",
-    "worktree /starbase/worktrees/widget/fix-auth\nHEAD def456\nbranch refs/heads/starbase/fix-auth",
-    "worktree /starbase/worktrees/widget/detached\nHEAD 789abc\ndetached"
+    "worktree /jingler/worktrees/widget/fix-auth\nHEAD def456\nbranch refs/heads/jingler/fix-auth",
+    "worktree /jingler/worktrees/widget/detached\nHEAD 789abc\ndetached"
   ].join("\n\n")
 
   it("reports a branch held by the main working tree", () => {
@@ -446,7 +446,7 @@ describe("mainTreeHoldsBranch", () => {
 
   it("does NOT report a branch held only by another session worktree", () => {
     // Sharing between two sessions is the case the lever legitimately opts into.
-    expect(mainTreeHoldsBranch(porcelain, "starbase/fix-auth")).toBe(false)
+    expect(mainTreeHoldsBranch(porcelain, "jingler/fix-auth")).toBe(false)
   })
 
   it("does not match a branch nobody has checked out", () => {
@@ -481,7 +481,7 @@ describe("GitService.checkoutBranch", () => {
   let repos: ReturnType<typeof mkTemp>
   beforeEach(() => {
     temp = withTempRoot()
-    repos = mkTemp("starbase-repos-")
+    repos = mkTemp("jingler-repos-")
   })
   afterEach(() => {
     temp.cleanup()

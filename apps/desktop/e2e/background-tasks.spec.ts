@@ -13,7 +13,7 @@ import type { LaunchedApp, LaunchOptions, SeedSession } from "./fixtures.js"
 
 const session = (over: Partial<SeedSession> & { id: string }): SeedSession => ({
   repo: "widget",
-  branch: `starbase/${over.id}`,
+  branch: `jingler/${over.id}`,
   title: over.id,
   status: "idle",
   cli: "claude",

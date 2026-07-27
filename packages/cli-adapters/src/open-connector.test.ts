@@ -1,5 +1,5 @@
 import { FileSystem } from "@effect/platform"
-import type { McpInjectionTarget, OpenConnectorConfig } from "@starbase/core"
+import type { McpInjectionTarget, OpenConnectorConfig } from "@jingler/core"
 import { Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AppPaths } from "./app-paths.js"
@@ -12,7 +12,7 @@ import { runExit, withTempRoot } from "./test-support.js"
  * OpenConnectorService owns the unified-MCP injection. These tests pin the
  * SECURITY contract (the bearer never appears in the redacted `.server` half) and
  * the null-cases that decide whether an agent gets the server at all. Run against
- * a real temp `~/starbase` + an in-memory SecretStore.
+ * a real temp `~/jingler` + an in-memory SecretStore.
  */
 describe("OpenConnectorService", () => {
   let temp: ReturnType<typeof withTempRoot>
@@ -166,7 +166,7 @@ describe("OpenConnectorService", () => {
         expect(target?.url).toBe("https://mcp.internal/mcp")
         expect(target?.serverName).toBe("open-connector")
       }
-      // Cursor resolves a server but Starbase never launches it — reporting that as
+      // Cursor resolves a server but Jingler never launches it — reporting that as
       // "injected" would promise tools to an agent that never starts.
       expect(byCli(exit.value, "cursor")?.injected).toBe(false)
       expect(byCli(exit.value, "cursor")?.skipped).toBe("no-run-path")

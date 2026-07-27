@@ -1,9 +1,9 @@
 {
-  "name": "@starbase/plugin-github-issues",
+  "name": "@jingler/plugin-github-issues",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "The GitHub Issues tab, as an official Starbase plugin.",
+  "description": "The GitHub Issues tab, as an official Jingler plugin.",
   "scripts": {
     "build": "vite build && tsx ./scripts/emit-manifest.mjs",
     "typecheck": "tsc --noEmit",
@@ -11,8 +11,8 @@
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "devDependencies": {
-    "@starbase/plugin-sdk": "workspace:*",
-    "@starbase/tsconfig": "workspace:*",
+    "@jingler/plugin-sdk": "workspace:*",
+    "@jingler/tsconfig": "workspace:*",
     "@types/react": "^19.2.0",
     "@vitejs/plugin-react": "^5.2.0",
     "react": "^19.2.0",

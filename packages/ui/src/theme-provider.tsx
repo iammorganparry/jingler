@@ -27,8 +27,8 @@
  * colour that should be a utility class.
  */
 import * as React from "react"
-import type { ThemeCatalog, ThemeTokens, VsCodeTheme } from "@starbase/core"
-import { DEFAULT_THEME_ID, THEME_STYLE_ID, toCssText } from "@starbase/core"
+import type { ThemeCatalog, ThemeTokens, VsCodeTheme } from "@jingler/core"
+import { DEFAULT_THEME_ID, THEME_STYLE_ID, toCssText } from "@jingler/core"
 
 /** Backward-compatible name for callers that render theme CSS directly. */
 export const themeCssText = toCssText

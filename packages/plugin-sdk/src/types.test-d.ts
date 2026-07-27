@@ -152,7 +152,7 @@ expectTypeOf<TabProps["session"]>().not.toBeAny()
 expectTypeOf<TabProps["pluginId"]>().toEqualTypeOf<string>()
 
 // `SessionSnapshot` is the deliberately small subset a plugin may couple to. If
-// Starbase's internal `Session` ever leaks in here, this catches it.
+// Jingler's internal `Session` ever leaks in here, this catches it.
 expectTypeOf<SessionSnapshot["prNumber"]>().toEqualTypeOf<number | null>()
 expectTypeOf<SessionSnapshot>().not.toBeAny()
 

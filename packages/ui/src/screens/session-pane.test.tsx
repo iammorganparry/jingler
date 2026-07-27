@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { useEffect } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { Boxes } from "lucide-react"
-import type { Session } from "@starbase/core"
+import type { Session } from "@jingler/core"
 import { SessionPane } from "./session-pane.js"
 import {
   builtinTabContributions,

@@ -7,8 +7,8 @@ import type {
   IssueSummary,
   PrSummary,
   Repo
-} from "@starbase/core"
-import { newSessionCli } from "@starbase/core"
+} from "@jingler/core"
+import { newSessionCli } from "@jingler/core"
 import { assign, fromPromise, raise, setup } from "xstate"
 
 /** Which flavour of session the dialog is composing. */

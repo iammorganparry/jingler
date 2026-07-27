@@ -6,8 +6,8 @@ import type {
   RouteAttempt,
   RouteCandidate,
   StreamEvent
-} from "@starbase/core"
-import { executionOrder, PlanError, resolveRunner, scopeToAgent } from "@starbase/core"
+} from "@jingler/core"
+import { executionOrder, PlanError, resolveRunner, scopeToAgent } from "@jingler/core"
 import { Effect, Mailbox, Ref, Schema, Stream } from "effect"
 import type { AgentContext, SessionSpec } from "./adapter.js"
 import { CliAdapter, isChildLifecycle, PlanDecision } from "./adapter.js"
@@ -323,7 +323,7 @@ const routeCandidates = (
   }
   return [selected, ...routing.decision.alternatives].filter(
     (candidate, index, all) =>
-      all.findIndex((other) => sameRoute(candidate, other)) === index && candidate.cli !== "starbase"
+      all.findIndex((other) => sameRoute(candidate, other)) === index && candidate.cli !== "jingler"
   )
 }
 
@@ -333,7 +333,7 @@ const appendAttempt = (step: PlanStep, attempt: RouteAttempt): PlanStep => {
   return { ...step, routing: { ...step.routing, attempts } }
 }
 
-export class PlanExecutor extends Effect.Service<PlanExecutor>()("@starbase/PlanExecutor", {
+export class PlanExecutor extends Effect.Service<PlanExecutor>()("@jingler/PlanExecutor", {
   accessors: true,
   effect: Effect.gen(function* () {
     /**
@@ -395,7 +395,7 @@ export class PlanExecutor extends Effect.Service<PlanExecutor>()("@starbase/Plan
               Effect.all([publish(updated), persistStep(updated)], { discard: true })
             const liveRoutes = new Set(
               input.available
-                .filter((candidate) => candidate.cli !== "starbase")
+                .filter((candidate) => candidate.cli !== "jingler")
                 .map((candidate) => `${candidate.cli}\u0000${candidate.model}`)
             )
             const unavailableRoutes = new Map(

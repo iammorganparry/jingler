@@ -1,15 +1,15 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { Session } from "@starbase/core"
+import type { Session } from "@jingler/core"
 import { SplitRow } from "./split-row.js"
 import { SESSION_DND_MIME, show, splitWith, type SplitGroup } from "../app/split-layout.js"
 
 const session = (id: string, title: string): Session => ({
   id,
   title,
-  repo: "starbase",
-  branch: `starbase/${id}`,
+  repo: "jingler",
+  branch: `jingler/${id}`,
   status: "idle",
   cli: "claude",
   diff: { added: 0, removed: 0 },

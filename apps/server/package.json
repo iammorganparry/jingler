@@ -1,9 +1,9 @@
 {
-  "name": "@starbase/server",
+  "name": "@jingler/server",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Starbase auth backend — BetterAuth over Postgres/Drizzle, hosted on Hono (local + Vercel).",
+  "description": "Jingler auth backend — BetterAuth over Postgres/Drizzle, hosted on Hono (local + Vercel).",
   "exports": {
     ".": "./src/app.ts"
   },
@@ -18,7 +18,7 @@
     "db:studio": "drizzle-kit studio",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "STARBASE_DB_TESTS=1 vitest run --config vitest.integration.config.ts",
+    "test:integration": "JINGLER_DB_TESTS=1 vitest run --config vitest.integration.config.ts",
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
@@ -35,7 +35,7 @@
     "resend": "^6.17.2"
   },
   "devDependencies": {
-    "@starbase/tsconfig": "workspace:*",
+    "@jingler/tsconfig": "workspace:*",
     "@types/node": "^22.10.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",

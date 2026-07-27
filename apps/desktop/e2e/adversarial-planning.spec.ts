@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import type { Page } from "@playwright/test"
-import { GIGAPLAN_ROUTING_POLICY_VERSION } from "@starbase/core"
+import { GIGAPLAN_ROUTING_POLICY_VERSION } from "@jingler/core"
 import { DEFAULT_CLAUDE_MODEL, expect, sessionRow, test } from "./fixtures.js"
 import type { LaunchOptions, SeedSession } from "./fixtures.js"
 
@@ -20,14 +20,14 @@ const GIGAPLAN_SETTINGS = /^Gigaplan/
  * test hook to production code to verify production code is a weaker check than
  * exercising the path a user actually takes.
  *
- * The suite runs with `STARBASE_SCRIPTED_AGENT=1`, so no real harness is ever
+ * The suite runs with `JINGLER_SCRIPTED_AGENT=1`, so no real harness is ever
  * spawned and no model is ever called.
  */
 
 const seeded = (worktreePath: string): SeedSession => ({
   id: "s_plan_1",
   repo: "widget",
-  branch: "starbase/plan-session",
+  branch: "jingler/plan-session",
   title: "Planning session",
   status: "idle",
   cli: "claude",
@@ -170,18 +170,18 @@ test("a disabled provider cannot make Gigaplan look runnable", async ({ launchAp
   await expect(window.getByRole("menuitem", { name: "Gigaplan" })).toHaveCount(0)
 })
 
-test("Starbase is no longer a harness you can pick a model from", async ({ launchApp }) => {
+test("Jingler is no longer a harness you can pick a model from", async ({ launchApp }) => {
   // Gigaplan hides this picker while it runs, so an entry here could only ever
   // be selected in order to be ignored. One way to ask, not two.
   const { window } = await openSession(launchApp)
 
   await window.getByRole("button", { name: DEFAULT_CLAUDE_MODEL, exact: true }).click()
-  // Scoped to the open menu: "Starbase" is the app's own name and appears in
+  // Scoped to the open menu: "Jingler" is the app's own name and appears in
   // the window chrome, so a page-wide text assertion would fail for the wrong
   // reason.
   const menu = window.getByRole("menu")
   await expect(menu.getByRole("menuitem", { name: "orchestrate" })).toHaveCount(0)
-  await expect(menu.getByText("Starbase", { exact: true })).toHaveCount(0)
+  await expect(menu.getByText("Jingler", { exact: true })).toHaveCount(0)
 })
 
 test("learning is OFF on a real first boot, and leaves no trace", async ({ launchApp }) => {
@@ -191,8 +191,8 @@ test("learning is OFF on a real first boot, and leaves no trace", async ({ launc
   const { window, home } = await openSession(launchApp)
   await expect(sessionRow(window, "Planning session")).toBeVisible()
 
-  const starbase = join(home, "starbase")
-  const entries = existsSync(starbase) ? readdirSync(starbase) : []
+  const jingler = join(home, "jingler")
+  const entries = existsSync(jingler) ? readdirSync(jingler) : []
   expect(entries).not.toContain("outcomes")
   expect(entries).not.toContain("plan-rounds")
 })
@@ -361,7 +361,7 @@ test("the Gigaplan settings pane is reachable and states its default", async ({ 
  * proves the four now agree.
  *
  * What this deliberately does NOT cover: the Codex adapter's own plan loop. The
- * suite runs with `STARBASE_SCRIPTED_AGENT=1`, so the scripted adapter answers
+ * suite runs with `JINGLER_SCRIPTED_AGENT=1`, so the scripted adapter answers
  * here — see `codex-plan-loop.test.ts` for the real fenced-block round trip
  * against a mocked SDK.
  */

@@ -12,7 +12,7 @@
  * below, both of which exist because shiki is stricter than VS Code about
  * things real themes get away with.
  */
-import type { ThemeTokens, VsCodeTheme } from "@starbase/core"
+import type { ThemeTokens, VsCodeTheme } from "@jingler/core"
 
 /** The subset of shiki's theme shape we produce. Structural, so no dependency. */
 export interface ShikiThemeLike {

@@ -1,4 +1,4 @@
-import type { PrFileChange, PrReviewThread, ReviewFinding } from "@starbase/core"
+import type { PrFileChange, PrReviewThread, ReviewFinding } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import { feedbackCounts } from "./review-feedback.js"
 

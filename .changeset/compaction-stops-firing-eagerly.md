@@ -1,7 +1,7 @@
 ---
-"@starbase/cli-adapters": patch
-"@starbase/core": patch
-"@starbase/ui": patch
+"@jingler/cli-adapters": patch
+"@jingler/core": patch
+"@jingler/ui": patch
 ---
 
 Compaction stops firing eagerly, waits for a boundary, and reports honest numbers.

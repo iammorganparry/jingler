@@ -1,5 +1,5 @@
 /**
- * Shared building blocks for the Starbase email suite — the brand-marked card
+ * Shared building blocks for the Jingler email suite — the brand-marked card
  * shell, primary button, footers, and the mono metadata box. Every template is
  * assembled from these so the One Dark Pro chrome stays identical across the
  * suite (see Email Suite.dc.html). All styling is inline for email-client safety.
@@ -72,7 +72,7 @@ function BrandHeader() {
               letterSpacing: "-0.2px"
             }}
           >
-            Starbase
+            Jingler
           </span>
         </Column>
       </Row>
@@ -137,7 +137,7 @@ export function MetaBox({
   )
 }
 
-const FOOTER_TAGLINE = "Starbase — the agent harness for your terminal."
+const FOOTER_TAGLINE = "Jingler — the agent harness for your terminal."
 
 /** Security footer — no marketing links (verify, magic link, reset, changed). */
 export function SecurityFooter() {
@@ -153,7 +153,7 @@ export function SecurityFooter() {
         {FOOTER_TAGLINE}
       </Text>
       <Text style={{ margin: 0, fontSize: "11px", color: color.faint }}>
-        This is a security email tied to your account. © 2026 Starbase Labs · 2261 Market St, San
+        This is a security email tied to your account. © 2026 Jingler Labs · 2261 Market St, San
         Francisco, CA
       </Text>
     </Section>
@@ -193,7 +193,7 @@ export function MarketingFooter({
             </Link>
           </>
         ) : null}{" "}
-        · © 2026 Starbase Labs
+        · © 2026 Jingler Labs
       </Text>
     </Section>
   )

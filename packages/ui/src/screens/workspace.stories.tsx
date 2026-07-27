@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { CliInfo, GhStatus, PrSummary, Repo } from "@starbase/core"
+import type { CliInfo, GhStatus, PrSummary, Repo } from "@jingler/core"
 import { SetupScreen } from "./setup-screen.js"
 import { NewSessionDialog } from "../composites/new-session-dialog.js"
 import { PrPickerList } from "../composites/pr-picker-list.js"

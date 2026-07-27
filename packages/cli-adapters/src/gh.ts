@@ -17,8 +17,8 @@ import type {
   PrTimelineItem,
   PullRequest,
   ReviewSubmitKind
-} from "@starbase/core"
-import { GhError, PrAuthorAssociation } from "@starbase/core"
+} from "@jingler/core"
+import { GhError, PrAuthorAssociation } from "@jingler/core"
 import { Command } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Effect, Option, Schema, Stream } from "effect"
@@ -740,7 +740,7 @@ const capture = (
  * when a token is present, so we key authentication off the exit code.
  */
 export class GhService extends Effect.Service<GhService>()(
-  "@starbase/GhService",
+  "@jingler/GhService",
   {
     accessors: true,
     sync: () => ({

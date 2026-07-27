@@ -1,16 +1,16 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
-import type { Message, StreamEvent } from "@starbase/core"
-import { applyStreamEvent, assistantMessage, userMessage } from "@starbase/core"
-import { streamEventsFor } from "@starbase/cli-adapters"
+import type { Message, StreamEvent } from "@jingler/core"
+import { applyStreamEvent, assistantMessage, userMessage } from "@jingler/core"
+import { streamEventsFor } from "@jingler/cli-adapters"
 
 /**
- * Rebuild a Starbase transcript from the Claude harness's own JSONL log.
+ * Rebuild a Jingler transcript from the Claude harness's own JSONL log.
  *
- * Starbase's `~/starbase/transcripts/<sessionId>.json` was once written with a
+ * Jingler's `~/jingler/transcripts/<sessionId>.json` was once written with a
  * truncating overwrite, so killing the app mid-write (a dev restart) could leave
  * it 0 bytes — the session still resumed, because `resumeId` points at the
- * harness's own log, but Starbase's rendered history was gone. That log is a
+ * harness's own log, but Jingler's rendered history was gone. That log is a
  * complete second copy, so the history is recoverable.
  *
  * Fidelity comes from reusing the live code path rather than re-deriving it:

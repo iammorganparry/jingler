@@ -165,7 +165,7 @@ const writeLine = ({
  * excluded; bounded process stderr is credential-redacted before persistence.
  *
  * The Electron entry point enables it by setting
- * `STARBASE_CODEX_DIAGNOSTICS_DIR`; packaged builds leave that unset. Failure to
+ * `JINGLER_CODEX_DIAGNOSTICS_DIR`; packaged builds leave that unset. Failure to
  * create or write the trace never changes an agent turn's behavior.
  */
 export const createCodexAppServerDiagnostics = (

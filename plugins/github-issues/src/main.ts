@@ -11,7 +11,7 @@
  *
  * ## No shortcut for being official
  *
- * Starbase already has GitHub credentials and this plugin ships with the app,
+ * Jingler already has GitHub credentials and this plugin ships with the app,
  * so it would be easy to hand it a token directly. It asks for one instead,
  * through the same `getSession("github", …)` a plugin someone wrote this
  * afternoon would use, and the operator sees the same prompt. That is the whole
@@ -19,7 +19,7 @@
  * third-party one could not also request — and it is only true because this file
  * does the boring thing.
  */
-import type { Activate } from "@starbase/plugin-sdk/host"
+import type { Activate } from "@jingler/plugin-sdk/host"
 
 /** What the UI half asks for. */
 interface FetchArgs {

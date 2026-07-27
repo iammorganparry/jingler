@@ -1,4 +1,4 @@
-import type { CliKind } from "@starbase/core"
+import type { CliKind } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 
 /**
@@ -31,9 +31,9 @@ const ICONS: Record<CliKind, { viewBox: string; d: string; fillRule?: "evenodd" 
     d: "M384 416H128V96H384V416ZM320 160H192V352H320V160ZM320 224V352H192V224H320Z"
   },
   // Ours. A four-point star rather than a borrowed brand mark, matching the
-  // sparkle already used for Starbase itself on the sign-in and empty states —
+  // sparkle already used for Jingler itself on the sign-in and empty states —
   // so the orchestrator reads as *this app* in a list of other people's logos.
-  starbase: {
+  jingler: {
     viewBox: "0 0 24 24",
     d: "M12 1.5 14.3 9.7 22.5 12 14.3 14.3 12 22.5 9.7 14.3 1.5 12 9.7 9.7Z"
   }
@@ -46,7 +46,7 @@ export const PROVIDER_LABEL: Record<CliKind, string> = {
   cursor: "Cursor",
   // Lowercase is opencode's own styling, not a typo.
   opencode: "opencode",
-  starbase: "Starbase"
+  jingler: "Jingler"
 }
 
 /**
@@ -64,7 +64,7 @@ export const PROVIDER_COLOR: Record<CliKind, string> = {
   opencode: "var(--sb-text-bright)",
   // The app's own accent — the one colour in this map that is ours rather than
   // a vendor's, so it follows the theme.
-  starbase: "var(--sb-blue)"
+  jingler: "var(--sb-blue)"
 }
 
 export function ProviderIcon({

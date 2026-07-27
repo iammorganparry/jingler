@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import type { CliInfo, DiffStat, SessionPrStatus, Session, SessionActivity, User } from "@starbase/core"
+import type { CliInfo, DiffStat, SessionPrStatus, Session, SessionActivity, User } from "@jingler/core"
 import type { DockSide } from "../app/terminal-panel.js"
 import { SessionSidebar } from "../app/session-sidebar.js"
 import { SessionSplit } from "../app/session-split.js"
@@ -9,7 +9,7 @@ import type { ConversationPaneCtx } from "./session-pane.js"
 import type { TabContribution, TabKey } from "../app/tab-contributions.js"
 import type { PaneContribution } from "../app/pane-contributions.js"
 
-// The pane ctx is part of this screen's public surface (StarbaseApp types its
+// The pane ctx is part of this screen's public surface (JinglerApp types its
 // `renderConversation` callback with it), so keep it importable from here even
 // though it's now defined alongside the pane that consumes it.
 export type { ConversationPaneCtx } from "./session-pane.js"
@@ -89,7 +89,7 @@ export interface SessionConversationProps {
   planSessions?: ReadonlySet<string>
   /**
    * Show the empty state instead of the grid. The HOST owns this rule — it is
-   * not re-derived here. `StarbaseApp` sets it when the grid is entirely empty
+   * not re-derived here. `JinglerApp` sets it when the grid is entirely empty
    * AND a live `renderConversation` is wired, so the Storybook/standalone path
    * (no live renderer) still shows its seeded transcript rather than the
    * first-launch screen.

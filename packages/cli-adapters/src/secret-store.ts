@@ -34,7 +34,7 @@ export interface SecretStoreShape {
   readonly clearOpenConnectorToken: Effect.Effect<void>
 }
 
-export class SecretStore extends Context.Tag("@starbase/SecretStore")<
+export class SecretStore extends Context.Tag("@jingler/SecretStore")<
   SecretStore,
   SecretStoreShape
 >() {}

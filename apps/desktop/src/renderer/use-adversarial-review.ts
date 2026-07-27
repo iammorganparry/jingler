@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo } from "react"
 import { useSelector } from "@xstate/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import type { AdversarialReview, ReviewFinding, ReviewPhase, Session } from "@starbase/core"
+import type { AdversarialReview, ReviewFinding, ReviewPhase, Session } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { markRouted, useRoutedEntries } from "./routed-store.js"

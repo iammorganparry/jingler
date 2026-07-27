@@ -10,7 +10,7 @@
  * same feature.
  *
  * Panes were also never wrapped in a `PluginViewProvider`, so every SDK hook
- * threw "called outside a Starbase plugin view" inside a pane — in a component
+ * threw "called outside a Jingler plugin view" inside a pane — in a component
  * the SDK documents as one of the two places hooks work. The pane e2e test could
  * not catch either, because it only read the `session` prop.
  *
@@ -25,8 +25,8 @@
  */
 import { Component, type ErrorInfo, type ReactNode } from "react"
 import { TriangleAlert } from "lucide-react"
-import type { Session } from "@starbase/core"
-import { PluginViewProvider } from "@starbase/plugin-sdk"
+import type { Session } from "@jingler/core"
+import { PluginViewProvider } from "@jingler/plugin-sdk"
 import { pluginBridge } from "./plugin-bridge.js"
 import { toSessionSnapshot } from "./plugin-loader.js"
 

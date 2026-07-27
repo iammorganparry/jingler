@@ -58,7 +58,7 @@ export const codexContextUsageFromMessage = (
  *
  * Every request starts a short-lived process, performs `initialize`, sends the
  * requested method, and tears the process down. Failures resolve to null because
- * model/usage discovery is optional UI data and must never take down Starbase.
+ * model/usage discovery is optional UI data and must never take down Jingler.
  */
 export const requestCodexAppServer = (
   binPath: string | null | undefined,
@@ -132,7 +132,7 @@ export const requestCodexAppServer = (
       }
     })
 
-    send(1, "initialize", { clientInfo: { name: "starbase", version: "1" } })
+    send(1, "initialize", { clientInfo: { name: "jingler", version: "1" } })
   })
 
 /**
@@ -251,7 +251,7 @@ export const readCodexContextUsage = (
       jsonrpc: "2.0",
       id: 1,
       method: "initialize",
-      params: { clientInfo: { name: "starbase", version: "1" } }
+      params: { clientInfo: { name: "jingler", version: "1" } }
     })
   })
 }

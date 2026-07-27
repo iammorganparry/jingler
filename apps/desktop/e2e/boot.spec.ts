@@ -3,7 +3,7 @@ import type { SeedSession } from "./fixtures.js"
 
 /**
  * Boot behaviour: which screen the built app lands on, driven entirely by what's
- * in the throwaway `~/starbase`. No config → first-run setup. Seeded config +
+ * in the throwaway `~/jingler`. No config → first-run setup. Seeded config +
  * sessions → the app shell with those sessions.
  */
 
@@ -17,7 +17,7 @@ test("a configured workspace boots into the app shell with its sessions", async 
   const seeded: SeedSession = {
     id: "s_seed_1",
     repo: "widget",
-    branch: "starbase/seed-session",
+    branch: "jingler/seed-session",
     title: "Seeded session",
     status: "idle",
     cli: "claude",

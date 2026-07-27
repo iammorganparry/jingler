@@ -1,4 +1,4 @@
-import type { Session, SessionDisplayStatus } from "@starbase/core"
+import type { Session, SessionDisplayStatus } from "@jingler/core"
 
 /**
  * How the sidebar's session list is narrowed and arranged.

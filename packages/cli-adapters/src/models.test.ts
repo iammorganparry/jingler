@@ -1,5 +1,5 @@
-import type { CliInfo } from "@starbase/core"
-import { FALLBACK_MODELS, defaultModel } from "@starbase/core"
+import type { CliInfo } from "@jingler/core"
+import { FALLBACK_MODELS, defaultModel } from "@jingler/core"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import { ModelsService } from "./models.js"

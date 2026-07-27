@@ -1,5 +1,5 @@
 /**
- * The names `@starbase/plugin-sdk/ui` exports — as DATA, importing nothing.
+ * The names `@jingler/plugin-sdk/ui` exports — as DATA, importing nothing.
  *
  * ## Why this exists
  *

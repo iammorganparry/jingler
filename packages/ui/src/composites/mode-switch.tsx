@@ -1,4 +1,4 @@
-import type { PermissionMode } from "@starbase/core"
+import type { PermissionMode } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { Pill } from "../components/pill.js"
 import { SegmentedControl } from "../components/segmented-control.js"

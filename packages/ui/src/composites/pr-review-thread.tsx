@@ -1,4 +1,4 @@
-import type { PrReviewThread, PrThreadComment } from "@starbase/core"
+import type { PrReviewThread, PrThreadComment } from "@jingler/core"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { useState } from "react"
 import { cn } from "../lib/cn.js"

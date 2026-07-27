@@ -2,7 +2,7 @@
  * Per-chat composer drafts, hoisted out of the component tree.
  *
  * The conversation pane is mounted keyed by the active session (see
- * `StarbaseApp`), so switching sessions UNMOUNTS the composer and its local
+ * `JinglerApp`), so switching sessions UNMOUNTS the composer and its local
  * state — which is why a half-typed message used to vanish. That unmount is
  * load-bearing (keeping the pane mounted-but-hidden corrupts the virtualized
  * transcript's measurement cache), so the draft has to live out here instead,
@@ -12,7 +12,7 @@
  * session like `use-review`'s viewed-paths — so a draft survives a reload too.
  */
 import { useSyncExternalStore } from "react"
-import type { Attachment } from "@starbase/core"
+import type { Attachment } from "@jingler/core"
 
 export interface Draft {
   readonly text: string

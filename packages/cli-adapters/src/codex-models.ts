@@ -1,4 +1,4 @@
-import type { ModelOption } from "@starbase/core"
+import type { ModelOption } from "@jingler/core"
 import { requestCodexAppServer } from "./codex-app-server.js"
 
 /**

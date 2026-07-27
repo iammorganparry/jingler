@@ -13,8 +13,8 @@
  */
 import { Component, type ErrorInfo, type ReactNode } from "react"
 import { TriangleAlert } from "lucide-react"
-import type { Session } from "@starbase/core"
-import { PluginViewProvider } from "@starbase/plugin-sdk"
+import type { Session } from "@jingler/core"
+import { PluginViewProvider } from "@jingler/plugin-sdk"
 import { pluginBridge } from "./plugin-bridge.js"
 import { toSessionSnapshot } from "./plugin-loader.js"
 

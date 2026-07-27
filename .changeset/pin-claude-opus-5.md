@@ -1,5 +1,5 @@
 ---
-"@starbase/core": patch
+"@jingler/core": patch
 ---
 
 Offer a pinned `claude-opus-5` alongside the `opus` alias

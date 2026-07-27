@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { parseDiffHunk } from "./parse-diff-hunk.js"
 
-/** The real `diffHunk` GitHub returned for the Greptile thread on starbase#36. */
+/** The real `diffHunk` GitHub returned for the Greptile thread on jingler#36. */
 const REAL_HUNK = `@@ -27,9 +28,19 @@ export function ConversationPane({
    onRestore?: (sessionId: string) => void
    /** Permanently delete this session (the banner). */

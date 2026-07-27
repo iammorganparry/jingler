@@ -9,7 +9,7 @@
  * to that persisted status.
  */
 import { useSyncExternalStore } from "react"
-import type { SessionActivity } from "@starbase/core"
+import type { SessionActivity } from "@jingler/core"
 
 let activities: Record<string, SessionActivity> = {}
 const listeners = new Set<() => void>()

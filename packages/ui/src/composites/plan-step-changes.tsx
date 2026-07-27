@@ -1,5 +1,5 @@
 import { useMemo } from "react"
-import type { PlanStep } from "@starbase/core"
+import type { PlanStep } from "@jingler/core"
 import { FileDiff } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { DiffView } from "../diff/diff-view.js"

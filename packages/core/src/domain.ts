@@ -4,18 +4,18 @@ import { TaskKind } from "./task-kind.js"
 import { ThemeConfig } from "./theme.js"
 
 /**
- * Domain schemas for Starbase. These are Effect `Schema`s so they can be reused
+ * Domain schemas for Jingler. These are Effect `Schema`s so they can be reused
  * for RPC payload encode/decode, persistence, and runtime validation. The plain
  * TypeScript types are derived from the schemas via `Schema.Schema.Type`.
  */
 
 // ── CLI discovery ────────────────────────────────────────────────────────────
 
-/** The coding CLIs Starbase knows how to wrap. */
+/** The coding CLIs Jingler knows how to wrap. */
 /**
  * Every harness a session can run on.
  *
- * `starbase` is us: not a CLI on the host but our own orchestrator, which drives
+ * `jingler` is us: not a CLI on the host but our own orchestrator, which drives
  * the other harnesses rather than being one. It lives in this union because a
  * session genuinely runs *on* it — it is what the model picker selects, what
  * `Session.cli` persists, and what `harness-adapter` dispatches on — so keeping
@@ -27,7 +27,7 @@ import { ThemeConfig } from "./theme.js"
  * the orchestrator would recurse), and discovery's binary probing (there is no
  * binary to find).
  */
-export const CliKind = Schema.Literal("claude", "codex", "cursor", "opencode", "starbase")
+export const CliKind = Schema.Literal("claude", "codex", "cursor", "opencode", "jingler")
 export type CliKind = Schema.Schema.Type<typeof CliKind>
 
 /** Every harness kind, for exhaustive iteration and for validating parsed input. */
@@ -70,7 +70,7 @@ export const CliInfo = Schema.Struct({
   contextReporting: Schema.optional(Schema.Boolean),
   /**
    * Why an *installed* CLI is nonetheless unavailable — e.g. "opencode 1.0.220
-   * found; Starbase needs ≥1.18". Absent when the CLI is usable, or simply not
+   * found; Jingler needs ≥1.18". Absent when the CLI is usable, or simply not
    * installed (nothing to explain). Without this a too-old binary is
    * indistinguishable from a missing one, which is a miserable thing to debug.
    */
@@ -79,15 +79,15 @@ export const CliInfo = Schema.Struct({
 export type CliInfo = Schema.Schema.Type<typeof CliInfo>
 
 /**
- * Harnesses a session can be STARTED on — every available CLI except `starbase`.
+ * Harnesses a session can be STARTED on — every available CLI except `jingler`.
  *
  * The orchestrator is excluded on purpose: it drives the other harnesses rather
- * than being one, so "start a session on Starbase" answers a question nobody
+ * than being one, so "start a session on Jingler" answers a question nobody
  * asked. Gigaplan is reached the other way round — a per-turn mode chip on a
  * session that already runs on a real CLI.
  */
 export const startableClis = (clis: ReadonlyArray<CliInfo>): ReadonlyArray<CliInfo> =>
-  clis.filter((c) => c.available && c.kind !== "starbase")
+  clis.filter((c) => c.available && c.kind !== "jingler")
 
 /**
  * Which harness a NEW session runs on: the configured default when it is still
@@ -223,9 +223,9 @@ export type ExecutionMode = Schema.Schema.Type<typeof ExecutionMode>
  * the same `parsePlan` — the trick adversarial planning already relies on to run
  * any role on any harness.
  *
- * `cursor` and `starbase` are out for the same reason `vendorOf` excludes them:
+ * `cursor` and `jingler` are out for the same reason `vendorOf` excludes them:
  * cursor falls through to the scripted stub (its "plan" would be fabricated),
- * and starbase is an orchestrator that picks a harness per step rather than
+ * and jingler is an orchestrator that picks a harness per step rather than
  * running turns itself.
  *
  * A predicate rather than a scatter of `cli === "claude"` checks because the
@@ -515,7 +515,7 @@ export const ProviderConfig = Schema.Struct({
    */
   backgroundModel: Schema.optional(Schema.String),
   /**
-   * The model's context-window size in tokens, when Starbase can't infer it.
+   * The model's context-window size in tokens, when Jingler can't infer it.
    *
    * Only route to auto-compaction for opencode, whose catalogue is resolved from
    * the user's own credentials across ~167 providers — there is no honest window
@@ -559,7 +559,7 @@ export type ProviderConfig = Schema.Schema.Type<typeof ProviderConfig>
  *  - `config` — declared in their `opencode.json`
  *  - `custom` — opencode's built-in (e.g. the Zen gateway's free tier)
  *
- * Surfaced in Settings so it's obvious what is Starbase's doing and what is the
+ * Surfaced in Settings so it's obvious what is Jingler's doing and what is the
  * user's own — we never overwrite a credential we didn't put there.
  */
 export const OpencodeProviderSource = Schema.Literal("env", "config", "custom", "api")
@@ -637,7 +637,7 @@ export const DEFAULT_CONTEXT_CONFIG: ContextConfig = {
 /**
  * The self-hosted OpenConnector instance every agent draws its MCP tools from.
  *
- * Starbase runs `claude` / `codex` / `cursor` / `opencode` as separate sessions,
+ * Jingler runs `claude` / `codex` / `cursor` / `opencode` as separate sessions,
  * each of which would otherwise have to configure MCP servers independently. This
  * points all of them at ONE central OpenConnector `/mcp` endpoint, so a provider
  * connected once (in OpenConnector's own console) is available to every agent.
@@ -662,7 +662,7 @@ export const OpenConnectorConfig = Schema.Struct({
   /**
    * Per-harness opt-out. A CLI absent from the map defaults to ENABLED (when the
    * master switch is on); only an explicit `false` withholds the server from that
-   * harness. `starbase` is never a real launch target, so its entry is ignored.
+   * harness. `jingler` is never a real launch target, so its entry is ignored.
    *
    * Keyed by a bare string, not `CliKind`, on purpose: a `Record` over a literal
    * union is exhaustive under `Schema.encode` (every harness key would be
@@ -687,7 +687,7 @@ export const OPEN_CONNECTOR_DEFAULT: OpenConnectorConfig = {
  *
  * - `local` (dev builds) → the docker-compose instance on localhost, whose known
  *   dev token (`hasDevToken`) the app can fill in for the operator.
- * - `hosted` (packaged builds) → the Starbase-managed instance; the endpoint is
+ * - `hosted` (packaged builds) → the Jingler-managed instance; the endpoint is
  *   filled but the token is provisioned separately (no shipped dev token).
  */
 export const OpenConnectorDefaults = Schema.Struct({
@@ -701,7 +701,7 @@ export const OpenConnectorDefaults = Schema.Struct({
 export type OpenConnectorDefaults = Schema.Schema.Type<typeof OpenConnectorDefaults>
 
 /**
- * Persisted app configuration, stored at `~/starbase/config.json`. `reposDir` is
+ * Persisted app configuration, stored at `~/jingler/config.json`. `reposDir` is
  * null until the user completes first-run setup by choosing a repos directory.
  */
 export const WorkspaceConfig = Schema.Struct({
@@ -756,20 +756,20 @@ export const WorkspaceConfig = Schema.Struct({
    *
    * Absent, or naming a harness that is not installed, means "the first
    * available one", so a fresh install can still create sessions. Never
-   * `starbase`: the orchestrator is a per-turn MODE, not a harness you start a
+   * `jingler`: the orchestrator is a per-turn MODE, not a harness you start a
    * session on (see `newSessionCli`).
    */
   defaultCli: Schema.optional(CliKind),
   /** Semantic step routing; absent on legacy config means safe shadow mode. */
   gigaplanRouting: Schema.optional(GigaplanRoutingConfig),
   /**
-   * Whether Starbase may learn from finished work. Absent on older configs, and
+   * Whether Jingler may learn from finished work. Absent on older configs, and
    * absent means OFF — the safe direction for anything that reads your history.
    */
   /**
    * Which harness+model the ORCHESTRATOR itself runs on.
    *
-   * One fixed model, not a per-message choice. Everything Starbase does in its
+   * One fixed model, not a per-message choice. Everything Jingler does in its
    * own voice — general asks, and the planning it drives — runs here, so the
    * operator has a single, predictable answer to "what am I talking to". The
    * intelligence this feature is actually for is spent elsewhere: choosing a
@@ -809,7 +809,7 @@ export const WorkspaceConfig = Schema.Struct({
    * Absent means `DEFAULT_THEME_ID` (One Dark Pro) — which is also what every
    * config written before theming existed means, so upgrading users see exactly
    * the app they had. Only the CHOICE lives here; the themes themselves are
-   * bundled presets or files under `~/starbase/themes`, because a theme is
+   * bundled presets or files under `~/jingler/themes`, because a theme is
    * kilobytes of colour table and `config.json` is read on every settings save.
    */
   theme: Schema.optional(ThemeConfig),
@@ -858,9 +858,9 @@ export type Repo = Schema.Schema.Type<typeof Repo>
 
 /** An isolated git worktree created for a session. */
 export const Worktree = Schema.Struct({
-  /** Absolute path to the worktree, under `~/starbase/worktrees/…`. */
+  /** Absolute path to the worktree, under `~/jingler/worktrees/…`. */
   path: Schema.String,
-  /** The new branch checked out in the worktree (e.g. "starbase/refactor-auth"). */
+  /** The new branch checked out in the worktree (e.g. "jingler/refactor-auth"). */
   branch: Schema.String,
   /** The branch the worktree was forked from. */
   baseBranch: Schema.String,
@@ -1187,7 +1187,7 @@ export type Issue = Schema.Schema.Type<typeof Issue>
  * GitHub anchors a multi-line comment (and the inverse of how `ReviewFinding`
  * names them). Null `startLine` means a single-line comment.
  *
- * There is no `side`: everything Starbase posts is a comment on the NEW side of
+ * There is no `side`: everything Jingler posts is a comment on the NEW side of
  * the diff, and `prReviewComments` hardcodes `RIGHT` accordingly. A LEFT-side
  * anchor would need `postableLines` to track old-side lines too, which it
  * deliberately does not.
@@ -1268,7 +1268,7 @@ export type ReviewFinding = Schema.Schema.Type<typeof ReviewFinding>
 
 /**
  * The result of one adversarial review run against a PR head, persisted per
- * session under `~/starbase/reviews/<sessionId>.json` so it survives reloads.
+ * session under `~/jingler/reviews/<sessionId>.json` so it survives reloads.
  */
 export const AdversarialReview = Schema.Struct({
   sessionId: Schema.String,
@@ -1346,7 +1346,7 @@ export type CreateSessionInput = Schema.Schema.Type<typeof CreateSessionInput>
 
 /**
  * Parameters for creating a session from an *existing* pull request. Unlike
- * `CreateSessionInput` (which forks a fresh `starbase/<slug>` branch), this
+ * `CreateSessionInput` (which forks a fresh `jingler/<slug>` branch), this
  * checks out the PR's head branch into the worktree so the agent's commits
  * update the PR directly. Title + base come from the PR itself.
  */

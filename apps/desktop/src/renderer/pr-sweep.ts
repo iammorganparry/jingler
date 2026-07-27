@@ -1,4 +1,4 @@
-import type { PrState, Session } from "@starbase/core"
+import type { PrState, Session } from "@jingler/core"
 
 /**
  * Session ids whose linked PR has MERGED and whose linked issue should now be

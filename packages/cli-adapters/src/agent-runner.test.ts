@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join } from "node:path"
-import type { GateDecision, Message, PermissionMode, Plan, Session, StreamEvent } from "@starbase/core"
-import { CliExecError, findApprovedPlan, STOPPED_NOTE } from "@starbase/core"
+import type { GateDecision, Message, PermissionMode, Plan, Session, StreamEvent } from "@jingler/core"
+import { CliExecError, findApprovedPlan, STOPPED_NOTE } from "@jingler/core"
 import { Deferred, Effect, Fiber, Layer, Ref, Stream, TestClock, TestContext } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliAdapter, makeScriptedCliAdapter, scriptedPlan } from "./adapter.js"
@@ -41,7 +41,7 @@ beforeEach(() => {
     JSON.stringify([{
       id: SESSION,
       repo: "widget",
-      branch: "starbase/test",
+      branch: "jingler/test",
       title: "Test",
       status: "idle",
       cli: "claude",
@@ -925,14 +925,14 @@ describe("AgentRunner model", () => {
 })
 
 describe("AgentRunner plan library", () => {
-  const WT = "/tmp/starbase/worktrees/starbase/mysession"
+  const WT = "/tmp/jingler/worktrees/jingler/mysession"
 
   /** Seed a session that owns a worktree (so the runner writes/points at plans). */
   const seedSessionWithWorktree = (mode: PermissionMode) => {
     const session: Session = {
       id: SESSION,
       repo: "acme/widget",
-      branch: "starbase/mysession",
+      branch: "jingler/mysession",
       title: "My session",
       status: "idle",
       cli: "claude",
@@ -964,7 +964,7 @@ describe("AgentRunner plan library", () => {
       })
     )
 
-  it("writes a proposed plan into the session's plan library (~/starbase/.starbase/<worktree>/)", async () => {
+  it("writes a proposed plan into the session's plan library (~/jingler/.jingler/<worktree>/)", async () => {
     seedSessionWithWorktree("plan")
     const base = Layer.mergeAll(
       AgentRunner.Default,
@@ -995,8 +995,8 @@ describe("AgentRunner plan library", () => {
       }).pipe(Effect.provide(base))
     )
     // scriptedPlan's summary "Refactor auth flow" → file "refactor-auth-flow.md",
-    // namespaced by the worktree basename, under the app's .starbase library.
-    const file = join(temp.root, ".starbase", basename(WT), "refactor-auth-flow.md")
+    // namespaced by the worktree basename, under the app's .jingler library.
+    const file = join(temp.root, ".jingler", basename(WT), "refactor-auth-flow.md")
     expect(existsSync(file)).toBe(true)
     expect(readFileSync(file, "utf8")).toContain("Refactor auth flow")
   })
@@ -1308,13 +1308,13 @@ describe("AgentRunner resume across restarts", () => {
 })
 
 describe("AgentRunner plan progress across turns", () => {
-  const WT_X = "/tmp/starbase/worktrees/starbase/crossturn"
+  const WT_X = "/tmp/jingler/worktrees/jingler/crossturn"
 
   const seedCrossTurnSession = () => {
     const session: Session = {
       id: SESSION,
       repo: "acme/widget",
-      branch: "starbase/crossturn",
+      branch: "jingler/crossturn",
       title: "Cross-turn session",
       status: "idle",
       cli: "claude",
@@ -1473,7 +1473,7 @@ describe("AgentRunner failures", () => {
         {
           id: SESSION,
           repo: "acme/widget",
-          branch: "starbase/auth",
+          branch: "jingler/auth",
           title: "Auth failure",
           status: "idle",
           cli: "claude",
@@ -1945,7 +1945,7 @@ describe("AgentRunner stop", () => {
    * `stop` used to read a session's run by id alone, so an interrupt that landed
    * after the NEXT turn had been forked killed that turn instead — the
    * operator's fresh message came back as a bare "Stopped." and they re-sent it
-   * (64 of 946 assistant turns in ~/starbase/transcripts are exactly this).
+   * (64 of 946 assistant turns in ~/jingler/transcripts are exactly this).
    *
    * Asserting the SYMPTOM cannot be done honestly: reproducing it needs the
    * stop's map read to be scheduled after the next run registers, which is a
@@ -2035,7 +2035,7 @@ describe("AgentRunner stop", () => {
  * synthesises a terminal event when the stream ENDS, `Effect.ensuring(out.end)`
  * only runs when `adapter.run` RETURNS, and the unsettled-turn instrumentation
  * is a finalizer — none of them can fire on a run that neither emits nor exits.
- * 32 of 946 assistant turns in ~/starbase/transcripts are frozen exactly there:
+ * 32 of 946 assistant turns in ~/jingler/transcripts are frozen exactly there:
  * empty parts, `streaming: true`, and an eyebrow pulsing over nothing.
  */
 describe("AgentRunner first-event watchdog", () => {
@@ -2200,16 +2200,16 @@ describe("AgentRunner live tool output", () => {
   })
 })
 
-describe("AgentRunner on the Starbase harness", () => {
+describe("AgentRunner on the Jingler harness", () => {
   /**
    * A session whose harness is the orchestrator must run on a REAL one.
    *
-   * `starbase` is us, not something that can execute a turn, so without a
+   * `jingler` is us, not something that can execute a turn, so without a
    * substitution the dispatcher falls through to the scripted stub and the
    * session silently does nothing — looking, from the outside, exactly like a
    * broken app. This asserts the spec the adapter actually receives.
    */
-  const captureSpec = (sessionCli: "starbase" | "claude") =>
+  const captureSpec = (sessionCli: "jingler" | "claude") =>
     Effect.gen(function* () {
       let seen: { cli: string; model: string | null } | null = null
       const capturing: Layer.Layer<CliAdapter> = Layer.succeed(CliAdapter, {
@@ -2243,7 +2243,7 @@ describe("AgentRunner on the Starbase harness", () => {
           {
             id: SESSION,
             repo: "widget",
-            branch: "starbase/x",
+            branch: "jingler/x",
             title: "t",
             status: "idle",
             cli: sessionCli,
@@ -2264,11 +2264,11 @@ describe("AgentRunner on the Starbase harness", () => {
       return seen as { cli: string; model: string | null } | null
     }).pipe(Effect.runPromise)
 
-  it("runs a Starbase session on the orchestrator's model, not on 'starbase'", async () => {
+  it("runs a Jingler session on the orchestrator's model, not on 'jingler'", async () => {
     // Defaults to Claude Opus, and deliberately IGNORES the session's own stored
     // model: the orchestrator has one identity, chosen in settings, so a stale
     // per-session model must not quietly change who you are talking to.
-    expect(await captureSpec("starbase")).toStrictEqual({ cli: "claude", model: "opus" })
+    expect(await captureSpec("jingler")).toStrictEqual({ cli: "claude", model: "opus" })
   })
 
   it("leaves an ordinary session's harness and model exactly alone", async () => {

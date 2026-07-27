@@ -1,8 +1,8 @@
 ---
-"@starbase/cli-adapters": minor
-"@starbase/core": minor
-"@starbase/desktop": minor
-"@starbase/ui": minor
+"@jingler/cli-adapters": minor
+"@jingler/core": minor
+"@jingler/desktop": minor
+"@jingler/ui": minor
 ---
 
 Stop a running agent for real, search the model list, and plan steps that survive the parser.

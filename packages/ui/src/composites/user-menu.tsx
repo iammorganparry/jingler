@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import type { User } from "@starbase/core"
+import type { User } from "@jingler/core"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { ChevronsUpDown, Gauge, LogOut, Settings } from "lucide-react"
 import { cn } from "../lib/cn.js"
@@ -132,7 +132,7 @@ export function UserMenu({
           {version && (
             <>
               <DropdownMenu.Separator className="my-1 h-px bg-hairline" />
-              <span className="px-2.5 py-1 font-mono text-[10.5px] text-dim">Starbase v{version}</span>
+              <span className="px-2.5 py-1 font-mono text-[10.5px] text-dim">Jingler v{version}</span>
             </>
           )}
         </DropdownMenu.Content>

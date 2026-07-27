@@ -5,7 +5,7 @@
  * script instead. Source: extensions/theme-solarized-light/themes/solarized-light-color-theme.json
  * Include chain resolved and flattened at vendor time.
  */
-import type { VsCodeTheme } from "@starbase/core"
+import type { VsCodeTheme } from "@jingler/core"
 
 export const solarizedLight: VsCodeTheme = {
   "name": "Solarized Light",

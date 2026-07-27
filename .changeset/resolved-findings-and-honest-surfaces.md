@@ -1,9 +1,9 @@
 ---
-"@starbase/cli-adapters": minor
-"@starbase/contracts": minor
-"@starbase/core": minor
-"@starbase/desktop": minor
-"@starbase/ui": minor
+"@jingler/cli-adapters": minor
+"@jingler/contracts": minor
+"@jingler/core": minor
+"@jingler/desktop": minor
+"@jingler/ui": minor
 ---
 
 Background work, plan review and the pull request page each stop claiming something they can't back up.

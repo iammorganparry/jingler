@@ -1,7 +1,7 @@
 import { Command } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import type { PlatformError } from "@effect/platform/Error"
-import { GhError, GitError } from "@starbase/core"
+import { GhError, GitError } from "@jingler/core"
 import { Effect, Stream } from "effect"
 
 /** The user's home directory, from the environment (empty string if unset). */

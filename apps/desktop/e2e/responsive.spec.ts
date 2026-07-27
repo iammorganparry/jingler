@@ -19,12 +19,12 @@ import type { SeedSession } from "./fixtures.js"
  * will, however, see this fail.
  *
  * Not in CI — the Playwright `_electron` suite is local-only, per the repo's
- * convention. Run with `pnpm --filter @starbase/desktop e2e`.
+ * convention. Run with `pnpm --filter @jingler/desktop e2e`.
  */
 
 const baseSession = (over: Partial<SeedSession> & { id: string }): SeedSession => ({
   repo: "widget",
-  branch: `starbase/${over.id}`,
+  branch: `jingler/${over.id}`,
   title: over.id,
   status: "idle",
   cli: "claude",

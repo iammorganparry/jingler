@@ -1,4 +1,4 @@
-import type { PrReviewThread } from "@starbase/core"
+import type { PrReviewThread } from "@jingler/core"
 import { MessageSquare } from "lucide-react"
 import { relativeTime } from "../lib/relative-time.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"

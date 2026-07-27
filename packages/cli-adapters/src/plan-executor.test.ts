@@ -1,5 +1,5 @@
-import type { Plan, PlanStep, StreamEvent } from "@starbase/core"
-import { CliExecError } from "@starbase/core"
+import type { Plan, PlanStep, StreamEvent } from "@jingler/core"
+import { CliExecError } from "@jingler/core"
 import { Effect, Fiber, Layer, Stream, TestClock, TestContext } from "effect"
 import { describe, expect, it } from "vitest"
 import { CliAdapter, makeScriptedCliAdapter } from "./adapter.js"
@@ -71,7 +71,7 @@ const execute = (
       .run({
         sessionId: "s1",
         repo: "widget",
-        branch: "starbase/x",
+        branch: "jingler/x",
         cwd: "/tmp/wt",
         plan,
         available,

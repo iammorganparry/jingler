@@ -1,4 +1,4 @@
-import type { AdversarialReview } from "@starbase/core"
+import type { AdversarialReview } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"

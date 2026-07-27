@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { LoadedPlugin, PluginCatalog } from "@starbase/core"
+import type { LoadedPlugin, PluginCatalog } from "@jingler/core"
 import { PluginsSettings } from "./plugins-settings.js"
 
 afterEach(cleanup)
@@ -15,7 +15,7 @@ const plugin = (over: Partial<LoadedPlugin> = {}): LoadedPlugin =>
       ui: "dist/ui.js",
       contributes: { tabs: [{ id: "hello-tab.greeting", label: "Hello" }] }
     },
-    dir: "/home/dev/starbase/plugins/hello-tab",
+    dir: "/home/dev/jingler/plugins/hello-tab",
     enabled: true,
     activated: false,
     builtin: false,
@@ -130,7 +130,7 @@ describe("PluginsSettings", () => {
   it("states the trust model on the screen where plugins are installed", () => {
     // The one place an operator is deciding whether to trust a folder.
     render(<PluginsSettings catalog={catalog()} {...base} />)
-    expect(screen.getByText(/same access as Starbase itself/)).toBeTruthy()
+    expect(screen.getByText(/same access as Jingler itself/)).toBeTruthy()
   })
 })
 

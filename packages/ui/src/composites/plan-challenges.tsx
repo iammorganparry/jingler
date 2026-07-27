@@ -1,5 +1,5 @@
-import type { PlanChallenge, PlanStep } from "@starbase/core"
-import { unresolvedChallenges, wasChallenged } from "@starbase/core"
+import type { PlanChallenge, PlanStep } from "@jingler/core"
+import { unresolvedChallenges, wasChallenged } from "@jingler/core"
 import { ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { PlanAssignee } from "./plan-assignee.js"

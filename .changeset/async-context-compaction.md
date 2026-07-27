@@ -1,15 +1,15 @@
 ---
-"@starbase/cli-adapters": minor
-"@starbase/contracts": minor
-"@starbase/core": minor
-"@starbase/desktop": minor
-"@starbase/ui": minor
+"@jingler/cli-adapters": minor
+"@jingler/contracts": minor
+"@jingler/core": minor
+"@jingler/desktop": minor
+"@jingler/ui": minor
 ---
 
 Sessions now compact their own context in the background, so a long conversation stops losing accuracy without anyone having to intervene.
 
 - **Compaction fires on a quality budget, not a percentage of the window.** Attention degrades well before a model's hard ceiling — the usable band is roughly 256k–400k tokens — so a percentage rule would let a 1M-window model run to 650k before acting, which is precisely the rot worth avoiding. The trigger is an absolute budget (300k by default, adjustable within the band). The window survives only as a backstop: `min(budget, window × 0.85)`, so a 200k model compacts at 170k because it *must*, and a 1M model at 300k because it *should*.
-- **It never calls `/compact`, and is harness-agnostic as a result.** `TranscriptStore` already holds a normalized `Message[]` for every session regardless of which CLI produced it, so Starbase summarises *its own* transcript and reseeds a fresh harness conversation with the result — through the two seams every adapter already honours (`SessionSpec.resumeId` and the prompt). Claude, Codex and opencode get identical behaviour with no cooperation from any vendor.
+- **It never calls `/compact`, and is harness-agnostic as a result.** `TranscriptStore` already holds a normalized `Message[]` for every session regardless of which CLI produced it, so Jingler summarises *its own* transcript and reseeds a fresh harness conversation with the result — through the two seams every adapter already honours (`SessionSpec.resumeId` and the prompt). Claude, Codex and opencode get identical behaviour with no cooperation from any vendor.
 - **Your transcript is never truncated.** Only the model's working set shrinks; scroll back and the whole conversation is still there. That is the property `/compact` cannot offer, and a collapsible "Context compacted" divider in the transcript shows exactly what was carried forward — because a context meter that simply drops between turns with no explanation is why compaction reads as data loss.
 - **Summaries cost nothing extra.** The digest runs through the CLI you have already signed in to, on its cheapest tier — the first consumer of `ProviderConfig.backgroundModel`, documented since it landed as "small/fast model for summaries & side tasks". No API client is constructed anywhere in that path, so switching this on cannot produce a bill you did not expect.
 - **Everything degrades toward doing nothing.** A failed digest, an unknown window, or a harness that reports no usage all leave a session behaving exactly as it does today, with the harness's own limit still the backstop. Not compacting costs a slower session; compacting wrongly costs a session that has forgotten what it was doing, so the asymmetry is deliberate. Two consecutive failures stop a session retrying rather than forking a doomed fiber every turn.

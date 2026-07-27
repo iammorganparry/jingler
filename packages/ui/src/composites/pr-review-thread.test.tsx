@@ -1,4 +1,4 @@
-import type { PrReviewThread } from "@starbase/core"
+import type { PrReviewThread } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { PrReviewThreadView } from "./pr-review-thread.js"

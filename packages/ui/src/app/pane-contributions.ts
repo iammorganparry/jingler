@@ -23,11 +23,11 @@
  * appearance cannot disagree.
  */
 import type { ReactNode } from "react"
-import type { Session } from "@starbase/core"
+import type { Session } from "@jingler/core"
 import type { LucideIcon } from "lucide-react"
 import type { DockSide } from "./terminal-panel.js"
 
-/** Where a contributed pane docks. Mirrors `PaneSlot` in `@starbase/core`. */
+/** Where a contributed pane docks. Mirrors `PaneSlot` in `@jingler/core`. */
 export type PaneSlot = DockSide
 
 /**

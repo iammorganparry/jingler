@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import * as Icons from "lucide-react"
-import type { LoadedPlugin } from "@starbase/core"
+import type { LoadedPlugin } from "@jingler/core"
 import { loadPluginUi, loadPlugins, pluginModuleUrl, resolveIcon } from "./plugin-loader.js"
 
 /**
@@ -20,7 +20,7 @@ const plugin = (over: Partial<LoadedPlugin["manifest"]> = {}): LoadedPlugin => (
     contributes: { tabs: [{ id: "hello.greeting", label: "Hello" }] },
     ...over
   } as LoadedPlugin["manifest"],
-  dir: "/home/dev/starbase/plugins/hello",
+  dir: "/home/dev/jingler/plugins/hello",
   enabled: true,
   activated: false,
   builtin: false
@@ -30,7 +30,7 @@ const View = () => null
 
 describe("pluginModuleUrl", () => {
   it("addresses the plugin's own host on the custom scheme", () => {
-    expect(pluginModuleUrl(plugin())).toContain("starbase-plugin://hello/dist/ui.js")
+    expect(pluginModuleUrl(plugin())).toContain("jingler-plugin://hello/dist/ui.js")
   })
 
   it("carries the version, which is what makes hot reload possible at all", () => {
@@ -276,7 +276,7 @@ describe("declarations this build cannot honour", () => {
   it("fails loudly on capabilities.untrustedRepos, because it is a safety claim", async () => {
     // The others are features a plugin wants. This one is a promise a plugin
     // MAKES — that the named contributions stay inert until the repo is trusted.
-    // Starbase has no trust model and would mount them anyway, so accepting the
+    // Jingler has no trust model and would mount them anyway, so accepting the
     // declaration would void the claim silently.
     const result = await loadPluginUi(
       plugin({

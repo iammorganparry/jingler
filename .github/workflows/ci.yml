@@ -37,7 +37,7 @@ jobs:
         run: pnpm typecheck
 
       # Unit + integration tests (Vitest). The Playwright `_electron` e2e suite is
-      # run locally (`pnpm --filter @starbase/desktop e2e`), not in CI — it needs a
+      # run locally (`pnpm --filter @jingler/desktop e2e`), not in CI — it needs a
       # headless/xvfb Electron and a real `git`, which is deferred.
       - name: Test
         run: pnpm test

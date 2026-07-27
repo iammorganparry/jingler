@@ -1,11 +1,11 @@
-import type { Message, Plan, Session, SessionPlanArtifact, StreamEvent } from "@starbase/core"
+import type { Message, Plan, Session, SessionPlanArtifact, StreamEvent } from "@jingler/core"
 import {
   applyStreamEvent,
   assistantMessage,
   latestPlan,
   STOPPED_NOTE,
   userMessage
-} from "@starbase/core"
+} from "@jingler/core"
 import { createActor, waitFor } from "xstate"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { conversationMachine } from "./conversation-machine.js"

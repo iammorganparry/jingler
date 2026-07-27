@@ -7,7 +7,7 @@ import type {
   PrReviewThread,
   ReviewFinding,
   ReviewSeverity
-} from "@starbase/core"
+} from "@jingler/core"
 import { PullRequestView } from "./pull-request-view.js"
 import { CodeReviewView, type ReviewSource } from "./code-review-view.js"
 import { ReviewFindingRow } from "./review-findings.js"

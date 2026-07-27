@@ -1,7 +1,7 @@
 /**
- * Owns `~/starbase/plugins` — the stateful half of the plugin system.
+ * Owns `~/jingler/plugins` — the stateful half of the plugin system.
  *
- * `@starbase/core`'s `plugin.ts` is pure: it says what a `starbase.plugin.json`
+ * `@jingler/core`'s `plugin.ts` is pure: it says what a `jingler.plugin.json`
  * is and what a loaded plugin folds down to. This service is everything that
  * touches disk — enumerating what is installed, deciding a load order, toggling
  * a plugin off, copying one in, and noticing when the directory changes on disk.
@@ -31,15 +31,15 @@
  * does not know whether its Node half is running.
  */
 import { FileSystem, Path } from "@effect/platform"
-import type { LoadedPlugin, PluginCatalog, PluginFailureKind, PluginLoadFailure, PluginManifest } from "@starbase/core"
-import { PluginError, PluginManifest as PluginManifestSchema } from "@starbase/core"
+import type { LoadedPlugin, PluginCatalog, PluginFailureKind, PluginLoadFailure, PluginManifest } from "@jingler/core"
+import { PluginError, PluginManifest as PluginManifestSchema } from "@jingler/core"
 import { Effect, ParseResult, Schema, Stream } from "effect"
 import { ArrayFormatter } from "effect/ParseResult"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
 
 /** The one file that makes a directory a plugin. */
-const MANIFEST_FILE = "starbase.plugin.json"
+const MANIFEST_FILE = "jingler.plugin.json"
 
 type PluginEnv = FileSystem.FileSystem | Path.Path | AppPaths | ConfigService
 
@@ -62,7 +62,7 @@ interface DecodedPlugin {
   readonly builtin: boolean
 }
 
-export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/PluginRegistry", {
+export class PluginRegistry extends Effect.Service<PluginRegistry>()("@jingler/PluginRegistry", {
   accessors: true,
   sync: () => {
     const pluginsDir = Effect.gen(function* () {
@@ -74,9 +74,9 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
      * Where plugins that SHIP WITH the app live.
      *
      * Official plugins are read from the app bundle rather than copied into
-     * `~/starbase/plugins` on first run. Copying would mean an upgrade silently
+     * `~/jingler/plugins` on first run. Copying would mean an upgrade silently
      * leaves the old version in place — the operator's directory is theirs, and
-     * Starbase writing into it is a surprise that only shows up as a plugin
+     * Jingler writing into it is a surprise that only shows up as a plugin
      * that stopped matching its own release notes.
      *
      * Undefined outside a packaged build, where there is nothing bundled yet.
@@ -112,7 +112,7 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
      * `installFromFolder` asks "where should this plugin GO?" about an id that by
      * definition does not exist yet. Sharing one function meant every install of
      * a new plugin failed with "a plugin id must name a directory directly inside
-     * ~/starbase/plugins" — about an id that was perfectly valid.
+     * ~/jingler/plugins" — about an id that was perfectly valid.
      *
      * The confinement check is the same one, and is the reason this is a function
      * rather than a `join`: the id reaches `copy` and `remove`, so `../..` and
@@ -129,7 +129,7 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
           return yield* Effect.fail(
             new PluginError({
               pluginId,
-              reason: "A plugin id must name a directory directly inside ~/starbase/plugins."
+              reason: "A plugin id must name a directory directly inside ~/jingler/plugins."
             })
           )
         }
@@ -148,7 +148,7 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
         // an installed override resolves to the copy actually being used.
         //
         // Checking only the installed root meant Reveal on a BUILT-IN plugin
-        // resolved to `~/starbase/plugins/<id>`, a path it does not live at, and
+        // resolved to `~/jingler/plugins/<id>`, a path it does not live at, and
         // opened a Finder window on nothing.
         for (const rootPath of [yield* pluginsDir, bundled]) {
           if (!rootPath) continue
@@ -164,7 +164,7 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
         return yield* Effect.fail(
           new PluginError({
             pluginId,
-            reason: "A plugin id must name a directory directly inside ~/starbase/plugins."
+            reason: "A plugin id must name a directory directly inside ~/jingler/plugins."
           })
         )
       })
@@ -362,7 +362,7 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
           return yield* Effect.fail(
             new PluginError({
               pluginId,
-              reason: "That plugin ships with Starbase and cannot be uninstalled. Disable it instead."
+              reason: "That plugin ships with Jingler and cannot be uninstalled. Disable it instead."
             })
           )
         }
@@ -376,7 +376,7 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
       })
 
     /**
-     * Copy a folder into `~/starbase/plugins` and load it.
+     * Copy a folder into `~/jingler/plugins` and load it.
      *
      * The source is decoded to a valid `PluginManifest` FIRST, so the plugin's
      * own declared id names the destination directory (`pluginsDir/<id>`) and a
@@ -407,7 +407,7 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
         // which is right for Reveal and Uninstall and exactly wrong here: the id
         // being installed does not exist yet by definition, so every install of a
         // new plugin failed with "a plugin id must name a directory directly
-        // inside ~/starbase/plugins" about an id that was perfectly valid.
+        // inside ~/jingler/plugins" about an id that was perfectly valid.
         //
         // It also has to be the INSTALLED root specifically. `dirFor` resolves
         // bundled plugins too, so installing a fork of an official plugin would
@@ -424,7 +424,7 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
         const root = yield* pluginsDir
         yield* fs
           .makeDirectory(root, { recursive: true })
-          .pipe(Effect.mapError((cause) => new PluginError({ pluginId: manifest.id, reason: "Could not create ~/starbase/plugins.", cause })))
+          .pipe(Effect.mapError((cause) => new PluginError({ pluginId: manifest.id, reason: "Could not create ~/jingler/plugins.", cause })))
         yield* fs
           .copy(sourcePath, dest)
           .pipe(Effect.mapError((cause) => new PluginError({ pluginId: manifest.id, reason: "Could not copy the plugin into place.", cause })))
@@ -433,7 +433,7 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
       })
 
     /**
-     * Re-emit the whole catalog whenever `~/starbase/plugins` changes on disk.
+     * Re-emit the whole catalog whenever `~/jingler/plugins` changes on disk.
      *
      * The whole catalog rather than a per-directory delta, for the same reason
      * `ThemeService.watch` does: the consumer is a settings list that renders the
@@ -473,13 +473,13 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@starbase/
           // RECURSIVE, and that is the whole of live reload.
           //
           // `fs.watch` reports only DIRECT children by default. The direct
-          // children of `~/starbase/plugins` are the plugin directories
+          // children of `~/jingler/plugins` are the plugin directories
           // themselves, so a non-recursive watch fires when a plugin is installed
           // or removed and never when one is EDITED: the files an author actually
-          // rewrites — `starbase.plugin.json` and `dist/ui.js` — are one level
+          // rewrites — `jingler.plugin.json` and `dist/ui.js` — are one level
           // down.
           //
-          // The effect was that "Starbase watches ~/starbase/plugins and reloads
+          // The effect was that "Jingler watches ~/jingler/plugins and reloads
           // without a restart" was true only for adding and deleting folders, and
           // the advice to bump `version` to defeat the ES-module URL cache could
           // not work, because nothing ever re-read the manifest to notice the new

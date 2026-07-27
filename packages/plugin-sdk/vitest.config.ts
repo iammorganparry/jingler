@@ -6,7 +6,7 @@ import { defineConfig } from "vitest/config"
  * compiler cannot see, and only a runtime test can compare them:
  *
  *   - `ui-exports.ts` against the UI kit module it names;
- *   - `STARBASE_EXTERNALS` across `vite.mjs`, `vite.d.ts` and `api-digest.md`.
+ *   - `JINGLER_EXTERNALS` across `vite.mjs`, `vite.d.ts` and `api-digest.md`.
  *
  * Both lists are hand-written for a reason the tests explain, and both trades
  * are only acceptable because the test makes the drift loud.

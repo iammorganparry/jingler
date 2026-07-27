@@ -1,5 +1,5 @@
 import { useState } from "react"
-import type { Plan, PlanFileChange, PlanGuard, PlanStep } from "@starbase/core"
+import type { Plan, PlanFileChange, PlanGuard, PlanStep } from "@jingler/core"
 import {
   ArrowLeft,
   ArrowRight,

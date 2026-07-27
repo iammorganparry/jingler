@@ -1,14 +1,14 @@
-/** Specifiers Starbase provides at runtime. A plugin must never bundle these. */
-export declare const STARBASE_EXTERNALS: readonly [
+/** Specifiers Jingler provides at runtime. A plugin must never bundle these. */
+export declare const JINGLER_EXTERNALS: readonly [
   "react",
   "react-dom",
   "react/jsx-runtime",
   "react/jsx-dev-runtime",
-  "@starbase/plugin-sdk",
-  "@starbase/plugin-sdk/ui"
+  "@jingler/plugin-sdk",
+  "@jingler/plugin-sdk/ui"
 ]
 
-export interface StarbasePluginBuildOptions {
+export interface JinglerPluginBuildOptions {
   /** Your UI entry, e.g. `src/ui.tsx`. Emitted as `ui.js`. */
   entry?: string
   /** Clearer alias for `entry` when a plugin has both halves. */
@@ -33,14 +33,14 @@ export interface StarbasePluginBuildOptions {
  * // vite.config.ts
  * import { defineConfig } from "vite"
  * import react from "@vitejs/plugin-react"
- * import { starbasePluginBuild } from "@starbase/plugin-sdk/vite"
+ * import { jinglerPluginBuild } from "@jingler/plugin-sdk/vite"
  *
  * export default defineConfig({
  *   plugins: [react()],
- *   build: starbasePluginBuild({ entry: "src/ui.tsx" })
+ *   build: jinglerPluginBuild({ entry: "src/ui.tsx" })
  * })
  * ```
  */
-export declare const starbasePluginBuild: (
-  options: StarbasePluginBuildOptions
+export declare const jinglerPluginBuild: (
+  options: JinglerPluginBuildOptions
 ) => Record<string, unknown>

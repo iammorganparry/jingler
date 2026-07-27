@@ -20,8 +20,8 @@ const filledBars = (chip: HTMLElement) =>
 
 describe("Composer send row", () => {
   it("puts the branch immediately before the send button", () => {
-    render(<Composer branch="starbase/wandering-watt" />)
-    const branch = screen.getByTitle("Working branch: starbase/wandering-watt")
+    render(<Composer branch="jingler/wandering-watt" />)
+    const branch = screen.getByTitle("Working branch: jingler/wandering-watt")
     const send = screen.getByRole("button", { name: /Send/ })
     // FOLLOWING, not merely "somewhere later": the branch used to lead the row,
     // and any assertion loose enough to pass in both places tests nothing.

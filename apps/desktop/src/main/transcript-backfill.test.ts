@@ -1,5 +1,5 @@
-import type { Message, ToolPart } from "@starbase/core"
-import { Message as MessageSchema } from "@starbase/core"
+import type { Message, ToolPart } from "@jingler/core"
+import { Message as MessageSchema } from "@jingler/core"
 import { Effect, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { harnessLogPath, rebuildTranscript } from "./transcript-backfill.js"
@@ -232,8 +232,8 @@ describe("rebuildTranscript", () => {
 
 describe("harnessLogPath", () => {
   it("maps a worktree path to Claude's project dir by replacing separators", () => {
-    expect(harnessLogPath("/Users/me/starbase/worktrees/app/feat", "abc-123")).toMatch(
-      /\.claude\/projects\/-Users-me-starbase-worktrees-app-feat\/abc-123\.jsonl$/
+    expect(harnessLogPath("/Users/me/jingler/worktrees/app/feat", "abc-123")).toMatch(
+      /\.claude\/projects\/-Users-me-jingler-worktrees-app-feat\/abc-123\.jsonl$/
     )
   })
 })

@@ -1,5 +1,5 @@
-import type { PermissionMode, ReasoningEffort, StreamEvent } from "@starbase/core"
-import { CliExecError, resumePlanPrompt } from "@starbase/core"
+import type { PermissionMode, ReasoningEffort, StreamEvent } from "@jingler/core"
+import { CliExecError, resumePlanPrompt } from "@jingler/core"
 import type {
   ApprovalMode,
   Input,
@@ -273,9 +273,9 @@ export const codexEventToStreamEvents = (
 ): ReadonlyArray<StreamEvent> => {
   switch (event.type) {
     case "thread.started":
-      // Carry Codex's OWN thread id (not the Starbase session key) so the runner
+      // Carry Codex's OWN thread id (not the Jingler session key) so the runner
       // persists it as the resume id and "continue" reloads the thread after a
-      // restart. Falls back to the Starbase key if the thread id is absent.
+      // restart. Falls back to the Jingler key if the thread id is absent.
       return [{ _tag: "Started", sessionId: event.thread_id || sessionId }]
 
     case "item.started": {
@@ -431,7 +431,7 @@ export const runCodexSdk = (
           // not inherit `process.env` when this is given, so it is a complete
           // copy minus the metered key. See `subscription.ts`.
           // Layered over `worktreeEnv` so the agent also stops inheriting the
-          // toolchain config of whatever repo Starbase was launched from —
+          // toolchain config of whatever repo Jingler was launched from —
           // the env-var counterpart of the `cwd` hazard noted below.
           env: harnessEnv(
             "codex",

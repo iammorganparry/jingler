@@ -1,13 +1,13 @@
-import type { Plan, PlanChallenge, TaskKind } from "@starbase/core"
-import { TASK_KINDS } from "@starbase/core"
+import type { Plan, PlanChallenge, TaskKind } from "@jingler/core"
+import { TASK_KINDS } from "@jingler/core"
 import { fenceFor } from "./review-prompt.js"
 
 /**
  * Stable machine-readable roles shared with the scripted E2E adapter. Keep
  * these as the first prompt line; the human-facing prose below may change.
  */
-export const GIGAPLAN_PROPOSAL_PROMPT_MARKER = "<starbase:gigaplan-proposal>"
-export const GIGAPLAN_CRITIQUE_PROMPT_MARKER = "<starbase:gigaplan-critique>"
+export const GIGAPLAN_PROPOSAL_PROMPT_MARKER = "<jingler:gigaplan-proposal>"
+export const GIGAPLAN_CRITIQUE_PROMPT_MARKER = "<jingler:gigaplan-critique>"
 
 /**
  * The three prompts of an adversarial planning round: one flagship proposes, a

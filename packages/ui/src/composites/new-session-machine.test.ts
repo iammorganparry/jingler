@@ -1,4 +1,4 @@
-import type { CreateSessionInput } from "@starbase/core"
+import type { CreateSessionInput } from "@jingler/core"
 import { createActor, waitFor } from "xstate"
 import { describe, expect, it } from "vitest"
 import { newSessionMachine, type NewSessionDeps } from "./new-session-machine.js"

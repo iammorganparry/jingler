@@ -5,7 +5,7 @@ import { isExternallyOpenable, sameOrigin } from "./window-guards.js"
  * What may replace the renderer's document, and what may reach the OS.
  *
  * The stakes are not "a link went to the wrong place". The renderer's
- * `webPreferences` carry the preload that exposes `window.starbase.send/on` —
+ * `webPreferences` carry the preload that exposes `window.jingler.send/on` —
  * the whole RPC bridge — and Electron hands a `window.open`ed child the
  * OPENER'S preferences. A remote origin that lands on this `webContents`, in a
  * child window or in place, has a live channel to Terminal, Workspace and Auth.
@@ -34,7 +34,7 @@ describe("sameOrigin", () => {
     // The trap this exists for: `new URL("file:///etc/passwd").origin` is the
     // string "null", and so is the app bundle's. Comparing origins would make
     // every file on the disk same-origin with the renderer.
-    const packaged = "file:///Applications/Starbase.app/Contents/renderer/index.html"
+    const packaged = "file:///Applications/Jingler.app/Contents/renderer/index.html"
     expect(sameOrigin(packaged, packaged)).toBe(true)
     expect(sameOrigin("file:///etc/passwd", packaged)).toBe(false)
     expect(sameOrigin("file:///Users/me/.ssh/id_rsa", packaged)).toBe(false)
@@ -65,7 +65,7 @@ describe("isExternallyOpenable", () => {
     // here came out of agent output.
     expect(isExternallyOpenable("file:///etc/passwd")).toBe(false)
     expect(isExternallyOpenable("javascript:alert(1)")).toBe(false)
-    expect(isExternallyOpenable("starbase://auth?token=x")).toBe(false)
+    expect(isExternallyOpenable("jingler://auth?token=x")).toBe(false)
     expect(isExternallyOpenable("ms-msdt:/id")).toBe(false)
     expect(isExternallyOpenable("")).toBe(false)
   })

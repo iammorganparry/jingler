@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import type { GhStatus, GitConfig, GithubConfig } from "@starbase/core"
+import type { GhStatus, GitConfig, GithubConfig } from "@jingler/core"
 import { Check, Copy, GitBranch, RefreshCw, Settings } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { GithubMark } from "../components/github-mark.js"

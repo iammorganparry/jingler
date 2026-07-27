@@ -1,4 +1,4 @@
-import { CliExecError } from "@starbase/core"
+import { CliExecError } from "@jingler/core"
 
 export type RouteFailureClassification =
   | "transient-provider"

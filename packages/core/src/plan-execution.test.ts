@@ -189,11 +189,11 @@ describe("resolveRunner", () => {
     const s = step({
       id: "a",
       number: "01",
-      assignee: { cli: "starbase", model: "auto", reason: "r" }
+      assignee: { cli: "jingler", model: "auto", reason: "r" }
     })
-    expect(resolveRunner(s, available, null)?.cli).not.toBe("starbase")
-    expect(resolveRunner(s, [{ cli: "starbase", model: "auto" }], null)).toBeNull()
-    expect(resolveRunner(s, available, { cli: "starbase", model: "auto" })?.cli).toBe("claude")
+    expect(resolveRunner(s, available, null)?.cli).not.toBe("jingler")
+    expect(resolveRunner(s, [{ cli: "jingler", model: "auto" }], null)).toBeNull()
+    expect(resolveRunner(s, available, { cli: "jingler", model: "auto" })?.cli).toBe("claude")
   })
 
   it("reports that nothing can run it rather than guessing", () => {

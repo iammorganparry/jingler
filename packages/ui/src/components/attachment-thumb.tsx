@@ -1,4 +1,4 @@
-import type { Attachment } from "@starbase/core"
+import type { Attachment } from "@jingler/core"
 import { X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 

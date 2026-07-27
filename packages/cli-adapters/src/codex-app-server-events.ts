@@ -1,4 +1,4 @@
-import type { StreamEvent } from "@starbase/core"
+import type { StreamEvent } from "@jingler/core"
 import { capOutput } from "./output-cap.js"
 import type { JsonRpcMessage } from "./codex-app-server-client.js"
 import { codexContextUsageFromMessage } from "./codex-app-server.js"
@@ -193,7 +193,7 @@ const completedItemEvents = (
 }
 
 /**
- * Fold one app-server notification into Starbase's normalized stream.
+ * Fold one app-server notification into Jingler's normalized stream.
  * Server requests are handled by the live adapter because they need AgentContext.
  */
 export const codexAppServerMessageToStreamEvents = (
@@ -234,7 +234,7 @@ export const codexAppServerMessageToStreamEvents = (
   }
   if (method === "error") {
     // Recoverable transport/model retries are informational. Emitting Failed
-    // here would settle the Starbase turn even though Codex keeps working and
+    // here would settle the Jingler turn even though Codex keeps working and
     // later emits a successful turn/completed notification.
     if (params.willRetry === true) return []
     const error = recordAt(params, "error")

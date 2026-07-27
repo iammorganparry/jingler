@@ -1,5 +1,5 @@
 ---
-"@starbase/cli-adapters": patch
+"@jingler/cli-adapters": patch
 ---
 
 Code Review: show every file on a large PR, and its diff.

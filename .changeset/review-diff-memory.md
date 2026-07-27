@@ -1,7 +1,7 @@
 ---
-"@starbase/cli-adapters": patch
-"@starbase/desktop": patch
-"@starbase/ui": patch
+"@jingler/cli-adapters": patch
+"@jingler/desktop": patch
+"@jingler/ui": patch
 ---
 
 Fix a multi-gigabyte renderer on the Code Review tab, and a crash on quit.

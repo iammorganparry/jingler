@@ -14,7 +14,7 @@ import {
 } from "./dialog.js"
 
 /**
- * shadcn's Command (cmdk), restyled to Starbase's tokens.
+ * shadcn's Command (cmdk), restyled to Jingler's tokens.
  *
  * ## Why cmdk rather than a listbox of our own
  *

@@ -1,5 +1,5 @@
 import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
-import type { StreamEvent } from "@starbase/core"
+import type { StreamEvent } from "@jingler/core"
 import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentContext, SessionSpec, SteerTurn } from "./adapter.js"

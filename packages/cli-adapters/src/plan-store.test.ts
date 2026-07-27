@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { basename, dirname } from "node:path"
-import type { Plan } from "@starbase/core"
+import type { Plan } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -30,7 +30,7 @@ const run = <A>(
 /** A plan with an overridable summary/raw/id, built off the shared fixture. */
 const planWith = (over: Partial<Plan>): Plan => ({ ...scriptedPlan("s1", 1), ...over })
 
-const WT = "/tmp/starbase/worktrees/starbase/terminal"
+const WT = "/tmp/jingler/worktrees/jingler/terminal"
 
 describe("planFileName", () => {
   it("kebab-cases and strips unsafe characters", () => {
@@ -53,7 +53,7 @@ describe("PlanStore", () => {
     expect(basename(file)).toBe("refactor-auth-flow.md")
     // Namespaced by the worktree's basename, not its full path.
     expect(basename(dirname(file))).toBe("terminal")
-    expect(dirname(dirname(file)).endsWith("/.starbase")).toBe(true)
+    expect(dirname(dirname(file)).endsWith("/.jingler")).toBe(true)
     expect(existsSync(file)).toBe(true)
     expect(readFileSync(file, "utf8")).toBe("# Refactor auth flow\n\nDo the thing.")
   })
@@ -87,7 +87,7 @@ describe("PlanStore", () => {
   })
 
   it("namespaces plans by worktree so different sessions never collide", async () => {
-    const other = "/tmp/starbase/worktrees/starbase/other"
+    const other = "/tmp/jingler/worktrees/jingler/other"
     const { here, there } = await run(
       Effect.gen(function* () {
         yield* PlanStore.write(WT, planWith({ summary: "Mine", raw: "mine" }))
@@ -102,7 +102,7 @@ describe("PlanStore", () => {
   })
 
   it("lists nothing for a worktree that has no saved plans", async () => {
-    const files = await run(PlanStore.list("/tmp/starbase/worktrees/starbase/never-planned"))
+    const files = await run(PlanStore.list("/tmp/jingler/worktrees/jingler/never-planned"))
     expect(files).toStrictEqual([])
   })
 

@@ -12,7 +12,7 @@
  */
 import { useCallback, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import type { PluginsSettingsProps } from "@starbase/ui"
+import type { PluginsSettingsProps } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
 import {
   pluginCatalogKey,
@@ -26,7 +26,7 @@ const authSessionsKey = ["plugin-auth-sessions"] as const
  * The operator-facing sentence from a failed RPC.
  *
  * `PluginError` crosses the boundary as a tagged error carrying `reason`, which
- * is already written to be read — "No starbase.plugin.json in the selected
+ * is already written to be read — "No jingler.plugin.json in the selected
  * folder." The `message` fallback catches anything else, and the last resort
  * exists because a rejection with neither is still a rejection the operator
  * deserves to know happened.

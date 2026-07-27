@@ -39,17 +39,17 @@ describe("previewDockMachine", () => {
 
     actor.send({ type: "TOGGLE" })
     expect(actor.getSnapshot().matches("shown")).toBe(true)
-    expect(store.get("starbase.browser.visible")).toBe("true")
+    expect(store.get("jingler.browser.visible")).toBe("true")
 
     actor.send({ type: "TOGGLE" })
     expect(actor.getSnapshot().matches("hidden")).toBe(true)
-    expect(store.get("starbase.browser.visible")).toBe("false")
+    expect(store.get("jingler.browser.visible")).toBe("false")
   })
 
   it("restores visibility, side and open paths from storage", () => {
-    store.set("starbase.browser.visible", "true")
-    store.set("starbase.browser.side", "bottom")
-    store.set("starbase.preview.tabs", JSON.stringify([{ sessionId: "s1", path: "docs/a.md" }]))
+    store.set("jingler.browser.visible", "true")
+    store.set("jingler.browser.side", "bottom")
+    store.set("jingler.preview.tabs", JSON.stringify([{ sessionId: "s1", path: "docs/a.md" }]))
 
     const snapshot = start().getSnapshot()
     expect(snapshot.matches("shown")).toBe(true)
@@ -59,7 +59,7 @@ describe("previewDockMachine", () => {
 
   it("drops malformed restored tabs rather than throwing", () => {
     store.set(
-      "starbase.preview.tabs",
+      "jingler.preview.tabs",
       JSON.stringify([{ sessionId: "s1" }, "nope", null, { sessionId: "s2", path: "b.png" }])
     )
     expect(start().getSnapshot().context.assets).toEqual([{ sessionId: "s2", path: "b.png" }])
@@ -72,7 +72,7 @@ describe("previewDockMachine", () => {
     const snapshot = actor.getSnapshot()
     expect(snapshot.matches("shown")).toBe(true)
     expect(snapshot.context.activeId).toBe(assetTabId("s1", "docs/a.md"))
-    expect(store.get("starbase.preview.tabs")).toBe(
+    expect(store.get("jingler.preview.tabs")).toBe(
       JSON.stringify([{ sessionId: "s1", path: "docs/a.md" }])
     )
   })
@@ -151,20 +151,20 @@ describe("previewDockMachine", () => {
 
     const snapshot = actor.getSnapshot()
     expect(snapshot.context.assets).toEqual([{ sessionId: "s1", path: "a.md" }])
-    expect(store.get("starbase.preview.tabs")).toBe(
+    expect(store.get("jingler.preview.tabs")).toBe(
       JSON.stringify([{ sessionId: "s1", path: "a.md" }])
     )
   })
 
   it("PRUNE is a no-op when the live set is empty (sessions not loaded yet)", () => {
-    store.set("starbase.preview.tabs", JSON.stringify([{ sessionId: "s1", path: "a.md" }]))
+    store.set("jingler.preview.tabs", JSON.stringify([{ sessionId: "s1", path: "a.md" }]))
     const actor = start()
 
     actor.send({ type: "PRUNE", liveSessionIds: new Set() })
 
     expect(actor.getSnapshot().context.assets).toEqual([{ sessionId: "s1", path: "a.md" }])
     // Storage untouched — the restored tab survives a first load with no sessions.
-    expect(store.get("starbase.preview.tabs")).toBe(
+    expect(store.get("jingler.preview.tabs")).toBe(
       JSON.stringify([{ sessionId: "s1", path: "a.md" }])
     )
   })
@@ -194,7 +194,7 @@ describe("previewDockMachine", () => {
     const actor = start()
     actor.send({ type: "SET_SIDE", side: "bottom" })
     expect(actor.getSnapshot().context.side).toBe("bottom")
-    expect(store.get("starbase.browser.side")).toBe("bottom")
+    expect(store.get("jingler.browser.side")).toBe("bottom")
   })
 
   it("survives a localStorage that throws on read and write", () => {

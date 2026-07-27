@@ -1,4 +1,4 @@
-import type { CliKind, McpServerStatus } from "@starbase/core"
+import type { CliKind, McpServerStatus } from "@jingler/core"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
@@ -38,7 +38,7 @@ export const PROBE_CONCURRENCY = 4
 /** Error text is shown in the UI; cap it so a server dumping a stack can't flood the dialog. */
 const MAX_ERROR = 200
 
-const clientInfo = { name: "starbase", version: "0.0.0" } as const
+const clientInfo = { name: "jingler", version: "0.0.0" } as const
 
 const makeTransport = (launch: McpLaunch, cwd: string | null) => {
   if (launch.transport === "stdio") {
@@ -61,7 +61,7 @@ const makeTransport = (launch: McpLaunch, cwd: string | null) => {
        * process's cwd, which in development is whichever worktree `pnpm dev` was
        * launched from. A server that writes a relative path then creates files
        * inside an unrelated repo's checkout — which is exactly how a wowlogs-mcp
-       * SQLite database ended up as an untracked file in the starbase repo.
+       * SQLite database ended up as an untracked file in the jingler repo.
        */
       cwd: cwd ?? neutralCwd(),
       // The server's stderr is noise here; we report the handshake result, not its logs.
@@ -105,7 +105,7 @@ const message = (cause: unknown): string => {
 
 /**
  * Which harnesses gate project-scope servers behind their own approval, and so have
- * already asked the operator before Starbase probes anything.
+ * already asked the operator before Jingler probes anything.
  *
  * Claude records `.mcp.json` approvals in config we read, so an approved project
  * server is one the operator has consented to. Cursor and opencode prompt at
@@ -121,7 +121,7 @@ const GATES_PROJECT_SERVERS: Record<CliKind, boolean> = {
   // The orchestrator runs no MCP server itself — each step inherits the gate of
   // whichever harness actually runs it, which is the harness the operator
   // consented to. Answering `true` here would claim a consent nobody gave.
-  starbase: false
+  jingler: false
 }
 
 /**

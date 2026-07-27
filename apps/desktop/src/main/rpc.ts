@@ -4,7 +4,7 @@
  * APPROACH: the real `@effect/rpc` machinery, wired over Electron IPC with a
  * pair of *custom Protocols* (NOT the hand-rolled dispatch fallback). The main
  * process runs `RpcServer` and the renderer runs `RpcClient`; both are driven
- * by the shared `StarbaseRpcs` group, which stays the single source of truth for
+ * by the shared `JinglerRpcs` group, which stays the single source of truth for
  * every payload/success/error schema. The only thing crossing the IPC boundary
  * is already-encoded, JSON-safe `FromClientEncoded` / `FromServerEncoded` frames
  * on one channel (`RPC_CHANNEL`); RpcServer/RpcClient own all schema
@@ -58,7 +58,7 @@ import {
   TranscriptStore,
   UsageService,
   WorkspaceService
-} from "@starbase/cli-adapters"
+} from "@jingler/cli-adapters"
 import { homedir } from "node:os"
 import { dirname, resolve } from "node:path"
 import {
@@ -81,7 +81,7 @@ import {
   SessionNotFoundError,
   TASK_KINDS,
   userMessage
-} from "@starbase/core"
+} from "@jingler/core"
 import type {
   BrowserBounds,
   AdversarialReview,
@@ -111,9 +111,9 @@ import type {
   ProviderModels,
   ProvidersConfig,
   Usage
-} from "@starbase/core"
-import { StarbaseRpcs } from "@starbase/contracts"
-import { AppPaths, CliAdapter } from "@starbase/cli-adapters"
+} from "@jingler/core"
+import { JinglerRpcs } from "@jingler/contracts"
+import { AppPaths, CliAdapter } from "@jingler/cli-adapters"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { RpcServer } from "@effect/rpc"
@@ -126,7 +126,7 @@ import { PreviewViewService } from "./preview-view.js"
 import { DialogService } from "./dialog.js"
 
 /** The single IPC channel both directions of the RPC transport ride on. */
-export const RPC_CHANNEL = "starbase/rpc"
+export const RPC_CHANNEL = "jingler/rpc"
 
 /**
  * `Config.get` handler. A malformed or absent config folds to `null` so the
@@ -164,7 +164,7 @@ export const skillsList = (sessionId: string) =>
     return yield* SkillsService.list({
       cli,
       // The operator's global skills live under the real home (~/.claude/skills),
-      // never STARBASE_HOME.
+      // never JINGLER_HOME.
       homeDir: homedir(),
       worktreePath: session?.worktreePath ?? null,
       binPath: clis.find((c) => c.kind === cli)?.binPath ?? null
@@ -173,11 +173,11 @@ export const skillsList = (sessionId: string) =>
 
 
 /**
- * The Starbase-hosted OpenConnector URL used by packaged (prod) builds, overridable
+ * The Jingler-hosted OpenConnector URL used by packaged (prod) builds, overridable
  * via env for staging. PLACEHOLDER until the hosted instance ships — the mechanism
  * is here so prod points at it automatically the moment the URL is real.
  */
-const HOSTED_OPEN_CONNECTOR_URL = process.env.STARBASE_OPEN_CONNECTOR_URL ?? "https://connect.starbase.app"
+const HOSTED_OPEN_CONNECTOR_URL = process.env.JINGLER_OPEN_CONNECTOR_URL ?? "https://connect.jingler.app"
 
 /** The dev instance the repo-root docker-compose serves, with its zero-setup token. */
 const DEV_OPEN_CONNECTOR_URL = process.env.OPEN_CONNECTOR_BASE_URL ?? "http://localhost:3000"
@@ -393,7 +393,7 @@ export const opencodeListProviders = () =>
 
 /**
  * Store an API key in OPENCODE's own credential file — not `SecretStore`, which
- * stays reserved for the Starbase bearer token. The key therefore also works in
+ * stays reserved for the Jingler bearer token. The key therefore also works in
  * a bare `opencode` shell, which is the whole point of respecting their BYOK.
  * Exported for tests.
  */
@@ -798,7 +798,7 @@ export const billingPaths = Effect.gen(function* () {
   resetSubscriptionCache()
   const clis = yield* DiscoveryService.list()
   return clis
-    .filter((c) => c.available && c.kind !== "starbase")
+    .filter((c) => c.available && c.kind !== "jingler")
     .map((c) => {
       const subscription = hasSubscriptionAuth(c.kind)
       const keys = METERED_ENV_KEYS[c.kind] ?? []
@@ -1818,7 +1818,7 @@ export const setReasoning = (
  * of every command a plugin's UI fires — including ones in a render loop.
  *
  * The cache is invalidated by the watcher, which already re-emits the whole
- * catalog whenever `~/starbase/plugins` changes, so the only way to read a stale
+ * catalog whenever `~/jingler/plugins` changes, so the only way to read a stale
  * entry is to race a filesystem change by less than the debounce — and the
  * activation that follows re-reads the directory anyway.
  */
@@ -2018,7 +2018,7 @@ export const pluginStorageKeys = (pluginId: string) =>
  * pulls in a `CommandExecutor` requirement (via `DiscoveryService.list()`) that
  * `AppLayer` satisfies with the Node platform layer.
  */
-const HandlersLayer = StarbaseRpcs.toLayer({
+const HandlersLayer = JinglerRpcs.toLayer({
   "Billing.paths": () => billingPaths,
   "Discovery.list": () => DiscoveryService.list(),
   "Config.get": configGet,
@@ -2350,7 +2350,7 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "Auth.sendMagicLink": ({ email, name }) => AuthService.sendMagicLink(email, name),
   "Auth.signOut": () => AuthService.signOut(),
 
-  // Themes — the picker, the editor, and live reload of `~/starbase/themes`.
+  // Themes — the picker, the editor, and live reload of `~/jingler/themes`.
   "Theme.list": () => ThemeService.list(),
   "Theme.get": ({ id }) => ThemeService.get(id),
   "Theme.save": ({ id, theme }) => ThemeService.save(id, theme),
@@ -2372,7 +2372,7 @@ const HandlersLayer = StarbaseRpcs.toLayer({
   "Theme.watch": () => Stream.unwrap(Effect.map(ThemeService, (t) => t.watch())),
 
   /**
-   * Confined to `~/starbase/themes` on purpose.
+   * Confined to `~/jingler/themes` on purpose.
    *
    * The renderer supplies the path, and the renderer renders untrusted content
    * (agent markdown, PR bodies). An unconstrained reveal would be a way to make
@@ -2455,7 +2455,7 @@ const HandlersLayer = StarbaseRpcs.toLayer({
       const dialog = yield* DialogService
       const chosen = yield* dialog.chooseDirectory({
         title: "Install a plugin",
-        message: "Choose a plugin folder — the one containing starbase.plugin.json.",
+        message: "Choose a plugin folder — the one containing jingler.plugin.json.",
         // No "New Folder": a folder made in the picker is empty, and an empty
         // folder fails the manifest check a moment later. Offering the button
         // only invites that.
@@ -2646,7 +2646,7 @@ const ServerProtocolLive = Layer.effect(
  * TypeScript cannot NAME an inferred type that reaches into a workspace
  * package's internals without a reference to it in scope.
  */
-export const RpcServerLive = RpcServer.layer(StarbaseRpcs).pipe(
+export const RpcServerLive = RpcServer.layer(JinglerRpcs).pipe(
   Layer.provide(HandlersLayer),
   Layer.provide(ServerProtocolLive)
 )

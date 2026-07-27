@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { CliInfo, Session } from "@starbase/core"
+import type { CliInfo, Session } from "@jingler/core"
 import { ComponentLibrary } from "./component-library.js"
 import { LoginScreen } from "./login-screen.js"
-import { StarbaseApp } from "../app/starbase-app.js"
+import { JinglerApp } from "../app/jingler-app.js"
 
 const noop = () => {}
 
@@ -42,7 +42,7 @@ export const Library: Story = {
 export const App: Story = {
   render: () => (
     <div className="h-screen w-full">
-      <StarbaseApp
+      <JinglerApp
         clis={clis}
         sessions={sessions}
         user={{ id: "u1", name: "Morgan Parry", email: "morgan@trigify.io", image: null }}
@@ -60,7 +60,7 @@ export const App: Story = {
 export const LiveActivity: Story = {
   render: () => (
     <div className="h-screen w-full">
-      <StarbaseApp
+      <JinglerApp
         clis={clis}
         sessions={sessions}
         activeSessionId="s1"

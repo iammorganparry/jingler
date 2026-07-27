@@ -164,7 +164,7 @@ export class BrowserPreviewError extends Schema.TaggedError<BrowserPreviewError>
 
 /**
  * Raised when a theme cannot be read, written or deleted — a malformed JSON
- * file in `~/starbase/themes`, a write to a built-in id, or an import whose
+ * file in `~/jingler/themes`, a write to a built-in id, or an import whose
  * shape isn't a VS Code theme.
  *
  * Carries `themeId` alongside the message because the operator is almost always

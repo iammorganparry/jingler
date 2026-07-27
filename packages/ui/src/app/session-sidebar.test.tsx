@@ -162,7 +162,7 @@ describe("SessionSidebar split pill presence", () => {
     // A split is a top-level thing now, resolved against the whole active list
     // — drawing it per group would put the same pill in both repos.
     renderSidebar([
-      session({ id: "first", title: "Refactor auth flow", repo: "starbase" }),
+      session({ id: "first", title: "Refactor auth flow", repo: "jingler" }),
       session({ id: "second", title: "Bump the toolchain", repo: "gtm-grid" })
     ])
 

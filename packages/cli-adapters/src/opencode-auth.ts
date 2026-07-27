@@ -1,4 +1,4 @@
-import type { OpencodeProviderInfo } from "@starbase/core"
+import type { OpencodeProviderInfo } from "@jingler/core"
 import type { OpencodeProvider } from "./opencode-models.js"
 import { readAllProviders, readProviders } from "./opencode-models.js"
 import { withOpencodeServer } from "./opencode-server.js"
@@ -6,15 +6,15 @@ import { withOpencodeServer } from "./opencode-server.js"
 /**
  * opencode's provider/credential surface, for Settings · Providers.
  *
- * The design rule: **Starbase never owns an opencode credential.** Keys are
+ * The design rule: **Jingler never owns an opencode credential.** Keys are
  * written through opencode's OWN auth API (`PUT /auth/{providerID}` →
  * `~/.local/share/opencode/auth.json`), which means:
- *  - a key added in Starbase works in a bare `opencode` shell too, and
+ *  - a key added in Jingler works in a bare `opencode` shell too, and
  *  - a key the user already added with `opencode auth login` just works here,
- *  - and `SecretStore` keeps holding exactly one thing: the Starbase bearer
+ *  - and `SecretStore` keeps holding exactly one thing: the Jingler bearer
  *    token.
  *
- * That is what "respect their BYOK" has to mean — a second, Starbase-shaped
+ * That is what "respect their BYOK" has to mean — a second, Jingler-shaped
  * credential store would be a worse copy of the one opencode already has.
  *
  * `source` is the honest part of this: it says where each provider's credential

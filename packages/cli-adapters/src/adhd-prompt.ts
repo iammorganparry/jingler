@@ -1,4 +1,4 @@
-import type { CliKind } from "@starbase/core"
+import type { CliKind } from "@jingler/core"
 
 /**
  * The rules, spelled out. Used verbatim for every harness that cannot see the

@@ -1,4 +1,4 @@
-import type { PermissionMode } from "@starbase/core"
+import type { PermissionMode } from "@jingler/core"
 
 /**
  * Which permission mode a chat runs in around a plan.

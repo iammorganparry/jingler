@@ -1,45 +1,45 @@
-# Writing a Starbase plugin
+# Writing a Jingler plugin
 
-You are building a plugin for **Starbase**, a desktop agent harness. This file is
-the complete contract. You should not need to read Starbase's source or search
+You are building a plugin for **Jingler**, a desktop agent harness. This file is
+the complete contract. You should not need to read Jingler's source or search
 the web to write a working plugin.
 
 ## The 60-second version
 
-A plugin is a folder in `~/starbase/plugins/<id>/` containing a manifest and one
+A plugin is a folder in `~/jingler/plugins/<id>/` containing a manifest and one
 or two JavaScript entry points:
 
 ```
-~/starbase/plugins/linear/
-  starbase.plugin.json   ← the manifest (generated from src/manifest.ts)
+~/jingler/plugins/linear/
+  jingler.plugin.json   ← the manifest (generated from src/manifest.ts)
   dist/ui.js             ← the renderer half: React components
   dist/main.js           ← the host half: Node, optional
 ```
 
-The **UI half** renders tabs and panes. It runs in Starbase's renderer, shares
+The **UI half** renders tabs and panes. It runs in Jingler's renderer, shares
 the app's React, and **cannot reach the network** — the renderer's CSP forbids
 it.
 
-The **host half** runs in Node inside Starbase's extension host. Anything
+The **host half** runs in Node inside Jingler's extension host. Anything
 touching the network, a CLI, the filesystem or credentials goes here. It is
 **optional**: a plugin that only displays local session data needs no host half
-at all, and Starbase will never start a process for it.
+at all, and Jingler will never start a process for it.
 
 Your own npm dependencies are **bundled into your output** — there is no
 `node_modules` beside an installed plugin, so never mark them external. Only the
-six specifiers Starbase supplies at runtime are external, and
-`@starbase/plugin-sdk/vite` already lists them.
+six specifiers Jingler supplies at runtime are external, and
+`@jingler/plugin-sdk/vite` already lists them.
 
 ### Four import paths
 
 | Import from | Runs in | Gives you |
 |---|---|---|
-| `@starbase/plugin-sdk` | renderer | `definePlugin`, `defineManifest`, hooks, types |
-| `@starbase/plugin-sdk/ui` | renderer | the themed component kit — use this before writing your own |
-| `@starbase/plugin-sdk/host` | extension host | `HostContext`, `Activate`, credentials, `exec` |
-| `@starbase/plugin-sdk/vite` | your build | `starbasePluginBuild`, `STARBASE_EXTERNALS` |
+| `@jingler/plugin-sdk` | renderer | `definePlugin`, `defineManifest`, hooks, types |
+| `@jingler/plugin-sdk/ui` | renderer | the themed component kit — use this before writing your own |
+| `@jingler/plugin-sdk/host` | extension host | `HostContext`, `Activate`, credentials, `exec` |
+| `@jingler/plugin-sdk/vite` | your build | `jinglerPluginBuild`, `JINGLER_EXTERNALS` |
 
-`@starbase/plugin-sdk/ui` is what makes a plugin look like part of the app rather
+`@jingler/plugin-sdk/ui` is what makes a plugin look like part of the app rather
 than a webpage inside it: `Markdown`, `Spinner`, `Card`, `Callout`, `Badge`,
 `Avatar`, `Input`, `Toggle`, `Kbd`, `cn`, `relativeTime`, `useWidthTier` and more.
 It is externalised, so importing it costs your bundle nothing. See `api-digest.md`
@@ -51,7 +51,7 @@ for the full list.
 apiVersion: 1,   // the plugin API generation you built against
 ```
 
-Optional, and worth setting before you share a plugin with anyone. A Starbase too
+Optional, and worth setting before you share a plugin with anyone. A Jingler too
 old to speak your generation refuses the plugin with a sentence naming both
 versions; without it, the same mismatch is a stack trace from inside your bundle
 on someone else's machine. Only breaking changes to what a plugin sees bump it, so
@@ -64,7 +64,7 @@ Three files. Copy this and change the names.
 ### `src/manifest.ts`
 
 ```ts
-import { defineManifest } from "@starbase/plugin-sdk"
+import { defineManifest } from "@jingler/plugin-sdk"
 
 export const manifest = defineManifest({
   id: "linear",                       // lowercase kebab-case; also the folder name
@@ -83,7 +83,7 @@ export const manifest = defineManifest({
 ### `src/ui.tsx`
 
 ```tsx
-import { definePlugin, useHost, type TabProps } from "@starbase/plugin-sdk"
+import { definePlugin, useHost, type TabProps } from "@jingler/plugin-sdk"
 import { useEffect, useState } from "react"
 import { manifest } from "./manifest.js"
 
@@ -119,7 +119,7 @@ export default definePlugin(manifest, {
 ### `src/main.ts`
 
 ```ts
-import type { Activate } from "@starbase/plugin-sdk/host"
+import type { Activate } from "@jingler/plugin-sdk/host"
 
 export const activate: Activate = async (ctx) => {
   ctx.subscriptions.push(
@@ -148,19 +148,19 @@ export const activate: Activate = async (ctx) => {
 
 ### 1. Never bundle React
 
-Starbase provides `react`, `react-dom`, `react/jsx-runtime` and
-`@starbase/plugin-sdk` at runtime. Mark them external — `@starbase/plugin-sdk/vite`
+Jingler provides `react`, `react-dom`, `react/jsx-runtime` and
+`@jingler/plugin-sdk` at runtime. Mark them external — `@jingler/plugin-sdk/vite`
 does this for you:
 
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
-import { starbasePluginBuild } from "@starbase/plugin-sdk/vite"
+import { jinglerPluginBuild } from "@jingler/plugin-sdk/vite"
 
 export default defineConfig({
   plugins: [react()],
-  build: starbasePluginBuild({ entry: "src/ui.tsx" })
+  build: jinglerPluginBuild({ entry: "src/ui.tsx" })
 })
 ```
 
@@ -170,7 +170,7 @@ your machine and break on everyone else's.
 
 ### 2. Never hardcode a colour
 
-Every colour in Starbase is a `--sb-*` custom property exposed to Tailwind:
+Every colour in Jingler is a `--sb-*` custom property exposed to Tailwind:
 `bg-editor`, `bg-panel`, `text-text`, `text-dim`, `text-blue`, `border-line`,
 `text-green`, `text-red`, `text-yellow`.
 
@@ -187,7 +187,7 @@ silently shadowing the first.
 
 ### 4. Bump `version` to reload
 
-ES module imports are cached by URL for the life of the window. Starbase keys
+ES module imports are cached by URL for the life of the window. Jingler keys
 your module's URL by the manifest version, so **editing a file without bumping
 `version` shows you the old module**. This is the single most common "my change
 did nothing" report.
@@ -236,9 +236,9 @@ function ActivityPane() {
 A pane that throws gets its own error card scoped to the dock, and the rest of the
 app keeps working — the same containment a tab gets.
 
-## Fields Starbase refuses
+## Fields Jingler refuses
 
-The manifest schema is VS Code's, so it validates several things Starbase does not
+The manifest schema is VS Code's, so it validates several things Jingler does not
 yet honour. Declaring one is a **load failure**, not a silent no-op:
 
 - `contributes.keybindings`
@@ -262,7 +262,7 @@ worse than an error.
 - `contributes.tabs` or `contributes.panes` with **no `ui`** — the views live in
   the UI half.
 - `contributes.commands` with **no `main`** — the handlers live in the host half
-  (`ctx.commands.register`), and Starbase will not start a host process for a
+  (`ctx.commands.register`), and Jingler will not start a host process for a
   plugin that has no `main`. Without this check the command appears in the
   command palette, runs nothing, and looks like your handler is broken.
 
@@ -351,14 +351,14 @@ interface SessionSnapshot {
   repo: string            // "owner/repo"
   branch: string
   title: string
-  cli: "claude" | "codex" | "cursor" | "opencode" | "starbase"
+  cli: "claude" | "codex" | "cursor" | "opencode" | "jingler"
   prNumber: number | null
   issueNumber?: number
   worktreePath?: string
 }
 ```
 
-`SessionSnapshot` is deliberately small. Starbase's internal session type has
+`SessionSnapshot` is deliberately small. Jingler's internal session type has
 ~25 fields; this is the stable subset a plugin may couple to.
 
 ## Changing the session
@@ -405,12 +405,12 @@ All methods are async on both sides. The UI half's calls cross an IPC boundary.
 
 ## Editor support
 
-Add `$schema` to your `starbase.plugin.json` for validation and completion in
+Add `$schema` to your `jingler.plugin.json` for validation and completion in
 any editor:
 
 ```json
 {
-  "$schema": "./node_modules/@starbase/plugin-sdk/starbase.plugin.schema.json",
+  "$schema": "./node_modules/@jingler/plugin-sdk/jingler.plugin.schema.json",
   "id": "linear",
   "name": "Linear",
   "version": "1.0.0"
@@ -427,36 +427,36 @@ a sandbox. Tell users to install plugins they trust.
 ## The dev loop
 
 ```bash
-# once, from the repo root — links @starbase/plugin-sdk into your package
+# once, from the repo root — links @jingler/plugin-sdk into your package
 pnpm install
 
 # after every change
 pnpm -C plugins/my-plugin build && pnpm -C plugins/my-plugin install:local
 ```
 
-Starbase watches `~/starbase/plugins` **recursively**, so the rebuilt file is
+Jingler watches `~/jingler/plugins` **recursively**, so the rebuilt file is
 noticed in under a second with no restart. But `install:local` copies only
-`starbase.plugin.json` and `dist` into that directory — it does not watch your
+`jingler.plugin.json` and `dist` into that directory — it does not watch your
 source tree — so the copy step is not optional, and neither is bumping `version`
 (rule 4).
 
-`install:local` writes to your **real** `~/starbase`. To keep development
-separate, set `STARBASE_HOME` for both the install and the app:
+`install:local` writes to your **real** `~/jingler`. To keep development
+separate, set `JINGLER_HOME` for both the install and the app:
 
 ```bash
-export STARBASE_HOME=/tmp/starbase-dev
+export JINGLER_HOME=/tmp/jingler-dev
 ```
 
 ## When something breaks
 
-`docs/plugins/debugging.md` in the Starbase repo is the map. The short version:
+`docs/plugins/debugging.md` in the Jingler repo is the map. The short version:
 
 - **UI half** → renderer devtools (`Cmd+Opt+I` / `Ctrl+Shift+I`)
 - **Host half** → the terminal running `pnpm dev` (`ctx.log` and `console.log` both)
 - **Anything that stopped the plugin loading** → Settings › Plugins, in its row
 
-Starbase never fails a plugin silently. If you get nothing anywhere, that is a bug
-in Starbase, not in your plugin.
+Jingler never fails a plugin silently. If you get nothing anywhere, that is a bug
+in Jingler, not in your plugin.
 
 ## Testing
 
@@ -470,13 +470,13 @@ functions and test those directly.
 ## Sharing a plugin
 
 There is no registry and no publish command. `pnpm build`, then zip
-`starbase.plugin.json` and `dist` — nothing else, since your dependencies are
+`jingler.plugin.json` and `dist` — nothing else, since your dependencies are
 already bundled. The recipient uses **Settings › Plugins › Install from folder…**
-or copies it to `~/starbase/plugins/<id>/`. No signing, no auto-update, no sandbox.
+or copies it to `~/jingler/plugins/<id>/`. No signing, no auto-update, no sandbox.
 
 ## Checklist before you ship
 
-1. `react` and `@starbase/plugin-sdk` are external in your build config
+1. `react` and `@jingler/plugin-sdk` are external in your build config
 2. `apiVersion` is set
 3. No hex colours — only `--sb-*` Tailwind tokens
 4. Every contribution id starts with your plugin id
@@ -488,7 +488,7 @@ or copies it to `~/starbase/plugins/<id>/`. No signing, no auto-update, no sandb
 ## Where to look next
 
 - `api-digest.md` in this package — every export with its signature, one page
-- `starbase.plugin.schema.json` — the manifest's full validated shape
+- `jingler.plugin.schema.json` — the manifest's full validated shape
 - `plugins/github-issues/README.md` — a real plugin with both halves, annotated
 - `docs/plugins/debugging.md` — where each kind of failure surfaces
 - Hover any SDK export in your editor — each carries a runnable `@example`

@@ -1,7 +1,7 @@
 /**
- * Owns `~/starbase/themes` — the stateful half of theming.
+ * Owns `~/jingler/themes` — the stateful half of theming.
  *
- * `@starbase/themes` is pure: presets, the fold to `ThemeTokens`, colour maths.
+ * `@jingler/themes` is pure: presets, the fold to `ThemeTokens`, colour maths.
  * This service is everything that touches disk: enumerating what is installed,
  * writing an edit, deleting a copy, and noticing when someone edits a file
  * outside the app.
@@ -17,7 +17,7 @@
  *
  * ## User themes shadow built-ins
  *
- * A file at `~/starbase/themes/monokai.json` wins over the bundled Monokai.
+ * A file at `~/jingler/themes/monokai.json` wins over the bundled Monokai.
  * That is the escape hatch for "I like this theme but its sidebar is wrong" for
  * people who would rather edit a file than use the colour picker, and it means
  * a built-in can be corrected locally without waiting for a release. Built-ins
@@ -25,15 +25,15 @@
  * bundled copy is always there to fall back to.
  */
 import { FileSystem, Path } from "@effect/platform"
-import type { ThemeCatalog, ThemeLoadFailure, ThemeSummary, VsCodeTheme } from "@starbase/core"
+import type { ThemeCatalog, ThemeLoadFailure, ThemeSummary, VsCodeTheme } from "@jingler/core"
 import {
   DEFAULT_THEME_ID,
   ThemeError,
   VsCodeTheme as VsCodeThemeSchema,
   normalizeThemeKind,
   themeIdFromName
-} from "@starbase/core"
-import { BUILTIN_THEMES, BUILTIN_THEME_IDS, findBuiltinTheme, toTokens } from "@starbase/themes"
+} from "@jingler/core"
+import { BUILTIN_THEMES, BUILTIN_THEME_IDS, findBuiltinTheme, toTokens } from "@jingler/themes"
 import { Effect, ParseResult, Schema, Stream } from "effect"
 import { ArrayFormatter } from "effect/ParseResult"
 import { AppPaths } from "./app-paths.js"
@@ -66,7 +66,7 @@ const summaryOf = (
   tokens: toTokens(theme)
 })
 
-export class ThemeService extends Effect.Service<ThemeService>()("@starbase/ThemeService", {
+export class ThemeService extends Effect.Service<ThemeService>()("@jingler/ThemeService", {
   accessors: true,
   sync: () => {
     const themesDir = Effect.gen(function* () {
@@ -89,7 +89,7 @@ export class ThemeService extends Effect.Service<ThemeService>()("@starbase/Them
         const file = path.resolve(dir, `${id}.json`)
         if (path.dirname(file) !== dir) {
           return yield* Effect.fail(
-            new ThemeError({ message: "Theme id must name a file in ~/starbase/themes.", themeId: id })
+            new ThemeError({ message: "Theme id must name a file in ~/jingler/themes.", themeId: id })
           )
         }
         return file
@@ -266,7 +266,7 @@ export class ThemeService extends Effect.Service<ThemeService>()("@starbase/Them
             Effect.mapError(
               (cause) =>
                 new ThemeError({
-                  message: "Could not create ~/starbase/themes",
+                  message: "Could not create ~/jingler/themes",
                   themeId: id,
                   cause: describeDecodeFailure(cause)
                 })
@@ -307,7 +307,7 @@ export class ThemeService extends Effect.Service<ThemeService>()("@starbase/Them
      *
      * This is the ONLY path from "I like this but…" to an editable file, since
      * built-ins refuse writes. The id is derived from the new name and then
-     * uniquified, so the file at `~/starbase/themes/<id>.json` is guessable
+     * uniquified, so the file at `~/jingler/themes/<id>.json` is guessable
      * from the picker rather than being a random string.
      */
     const duplicate = (

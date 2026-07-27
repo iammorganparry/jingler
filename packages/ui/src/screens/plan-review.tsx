@@ -1,5 +1,5 @@
 import { useState } from "react"
-import type { ExecutionMode, Plan, PlanStatus } from "@starbase/core"
+import type { ExecutionMode, Plan, PlanStatus } from "@jingler/core"
 import { ClipboardList, GitBranch, MousePointerClick, Play, Send } from "lucide-react"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"

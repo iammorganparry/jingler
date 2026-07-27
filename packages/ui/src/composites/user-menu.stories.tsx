@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { User } from "@starbase/core"
+import type { User } from "@jingler/core"
 import { UserMenu } from "./user-menu.js"
 
 const meta = {

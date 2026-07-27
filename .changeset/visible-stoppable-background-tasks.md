@@ -1,9 +1,9 @@
 ---
-"@starbase/cli-adapters": minor
-"@starbase/contracts": minor
-"@starbase/core": minor
-"@starbase/desktop": minor
-"@starbase/ui": minor
+"@jingler/cli-adapters": minor
+"@jingler/contracts": minor
+"@jingler/core": minor
+"@jingler/desktop": minor
+"@jingler/ui": minor
 ---
 
 Background tasks are visible and stoppable, session transcripts survive a mid-write kill, and a merged PR no longer retires a live session.
@@ -34,4 +34,4 @@ A recovery script (`apps/desktop/scripts/backfill-transcript.ts`) rebuilds a los
 
 ## Local DX
 
-The Playwright e2e suite no longer steals focus. It launches a real Electron app dozens of times, and every `show()` pulled focus from whatever you were doing, making the suite (which runs only locally — it is not in CI) incompatible with using the machine. Windows are now hidden and off the dock by default; `STARBASE_E2E_HEADED=1` to watch a run.
+The Playwright e2e suite no longer steals focus. It launches a real Electron app dozens of times, and every `show()` pulled focus from whatever you were doing, making the suite (which runs only locally — it is not in CI) incompatible with using the machine. Windows are now hidden and off the dock by default; `JINGLER_E2E_HEADED=1` to watch a run.

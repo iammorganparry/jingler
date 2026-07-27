@@ -3,8 +3,8 @@
  * (keyed by session id) when the PR tab is active; owns its data via
  * `usePullRequest`.
  */
-import type { Session } from "@starbase/core"
-import { PullRequestView } from "@starbase/ui"
+import type { Session } from "@jingler/core"
+import { PullRequestView } from "@jingler/ui"
 import { usePullRequest } from "./use-pull-request.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
 

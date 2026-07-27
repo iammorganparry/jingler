@@ -21,8 +21,8 @@ import { NodeContext } from "@effect/platform-node"
 let home: ReturnType<typeof mkTemp>
 let repo: ReturnType<typeof mkTemp>
 beforeEach(() => {
-  home = mkTemp("starbase-home-")
-  repo = mkTemp("starbase-repo-")
+  home = mkTemp("jingler-home-")
+  repo = mkTemp("jingler-repo-")
 })
 afterEach(() => {
   home.cleanup()
@@ -123,7 +123,7 @@ describe("SkillsService", () => {
 })
 
 /**
- * `STARBASE_SCRIPTED_AGENT` means "no real harness" — it is what makes the e2e
+ * `JINGLER_SCRIPTED_AGENT` means "no real harness" — it is what makes the e2e
  * suite hermetic. The command probe missed that memo: it spawned the operator's
  * real `claude`, with their real login, on every launch. Slow, non-reproducible,
  * and dependent on which CLIs the host happens to have.
@@ -136,10 +136,10 @@ describe("SkillsService — under the scripted harness", () => {
   const NOWHERE = "/nonexistent/claude"
 
   beforeEach(() => {
-    process.env.STARBASE_SCRIPTED_AGENT = "1"
+    process.env.JINGLER_SCRIPTED_AGENT = "1"
   })
   afterEach(() => {
-    delete process.env.STARBASE_SCRIPTED_AGENT
+    delete process.env.JINGLER_SCRIPTED_AGENT
   })
 
   it("answers for the fake harness instead of spawning the real one", async () => {

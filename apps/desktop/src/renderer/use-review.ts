@@ -6,7 +6,7 @@
  */
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import type { PrFileChange, PrReviewThread, Session } from "@starbase/core"
+import type { PrFileChange, PrReviewThread, Session } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { prKey } from "./use-pull-request.js"
@@ -221,7 +221,7 @@ export function useReview(session: Session): ReviewState {
       } else {
         // Post as a review carrying INLINE comments, not one flattened top-level
         // blob: a draft written on a line has to come back from GitHub on that
-        // same line, or Starbase and the PR disagree after any refresh.
+        // same line, or Jingler and the PR disagree after any refresh.
         //
         // `line` is the range END (GitHub's orientation, see `ReviewComment`),
         // which is why `endLine` maps to it and `line` becomes `startLine`.

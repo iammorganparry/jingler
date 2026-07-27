@@ -1,5 +1,5 @@
 ---
-"@starbase/cli-adapters": patch
+"@jingler/cli-adapters": patch
 ---
 
 Auto-compaction now works against real harnesses. The background digest is collected as the harness streams it — token by token — and those fragments were being reassembled with a newline between each instead of joined directly. A boundary that fell inside a JSON string value (near-certain with token-level streaming) turned the reply into invalid JSON, so `parseDigest` rejected every real digest: the session showed "compacting soon", then "compaction failed" after the second attempt, and never actually compacted. The scripted adapter emitted its whole reply as a single event, where the separator was a no-op, so the unit and e2e suites stayed green while every real session failed.

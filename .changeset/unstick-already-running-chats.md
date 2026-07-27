@@ -1,6 +1,6 @@
 ---
-"@starbase/cli-adapters": patch
-"@starbase/desktop": patch
+"@jingler/cli-adapters": patch
+"@jingler/desktop": patch
 ---
 
 Stop a reloaded window from wedging a chat on "already running"

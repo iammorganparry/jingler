@@ -13,17 +13,17 @@ export interface MagicLinkProps {
   }
 }
 
-export const magicLinkSubject = "Your Starbase sign-in link"
+export const magicLinkSubject = "Your Jingler sign-in link"
 
 export function MagicLink({ signInUrl, requestMeta }: MagicLinkProps) {
   return (
     <EmailShell preview="Tap to sign in — no password needed." footer={<SecurityFooter />}>
-      <H1>Sign in to Starbase</H1>
+      <H1>Sign in to Jingler</H1>
       <P>
         Here&apos;s the magic link you asked for. It signs you in on this device — no password
         required.
       </P>
-      <PrimaryButton href={signInUrl}>Sign in to Starbase</PrimaryButton>
+      <PrimaryButton href={signInUrl}>Sign in to Jingler</PrimaryButton>
       <P
         style={{
           margin: "18px 0 20px",
@@ -51,7 +51,7 @@ export function MagicLink({ signInUrl, requestMeta }: MagicLinkProps) {
 }
 
 MagicLink.PreviewProps = {
-  signInUrl: "https://app.starbase.dev/auth/magic?t=af93k2",
+  signInUrl: "https://app.jingler.dev/auth/magic?t=af93k2",
   requestMeta: { device: "macOS · Chrome 126", ip: "84.23.·.· · Amsterdam, NL" }
 } satisfies MagicLinkProps
 

@@ -7,7 +7,7 @@
  * `session-status.ts`.
  */
 import { useSyncExternalStore } from "react"
-import type { DiffStat } from "@starbase/core"
+import type { DiffStat } from "@jingler/core"
 
 let diffs: Record<string, DiffStat> = {}
 const listeners = new Set<() => void>()

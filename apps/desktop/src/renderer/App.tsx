@@ -17,17 +17,17 @@ import type {
   Session,
   SessionActivity,
   User
-} from "@starbase/core"
-import { DEFAULT_THEME_ID } from "@starbase/core"
+} from "@jingler/core"
+import { DEFAULT_THEME_ID } from "@jingler/core"
 import {
   ConfirmDialog,
   LoadingScreen,
   LoginScreen,
   SetupScreen,
-  StarbaseApp,
+  JinglerApp,
   ThemeProvider,
   useThemeCatalog
-} from "@starbase/ui"
+} from "@jingler/ui"
 import { appMachine } from "./app-machine.js"
 import { authMachine } from "./auth-machine.js"
 import { ConversationPane } from "./conversation-pane.js"
@@ -114,7 +114,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   } | null>(null)
   useEffect(
     () =>
-      window.starbase.onNotificationActivated(({ sessionId }) =>
+      window.jingler.onNotificationActivated(({ sessionId }) =>
         setSelectRequest((prev) => ({ sessionId, nonce: (prev?.nonce ?? 0) + 1 }))
       ),
     []
@@ -667,7 +667,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
 
   return (
     <>
-    <StarbaseApp
+    <JinglerApp
       clis={clis}
       tabContributions={pluginTabs}
       paneContributions={pluginPanes}
@@ -829,7 +829,7 @@ function loginStateOf(matches: (value: object) => boolean): "default" | "loading
 /**
  * The auth gate. Drives the dedicated `authMachine` and renders the sign-in wall
  * until it reaches `signedIn`, at which point the real app (`AuthedApp`) mounts.
- * The `starbase://` deep-link callback arrives from the main process via the
+ * The `jingler://` deep-link callback arrives from the main process via the
  * preload bridge and re-validates the freshly-stored token.
  */
 export function App() {
@@ -851,7 +851,7 @@ export function App() {
   const theme = useTheme(configQuery.data)
 
   useEffect(() => {
-    const unsubscribe = window.starbase.onAuthComplete((payload) => {
+    const unsubscribe = window.jingler.onAuthComplete((payload) => {
       if (payload.ok) authSend({ type: "CALLBACK" })
     })
     return unsubscribe

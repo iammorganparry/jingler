@@ -141,7 +141,7 @@ describe("codex app-server event mapping", () => {
     })
   })
 
-  it("does not fail the Starbase turn for an error Codex will retry", () => {
+  it("does not fail the Jingler turn for an error Codex will retry", () => {
     expect(
       codexAppServerMessageToStreamEvents(
         {

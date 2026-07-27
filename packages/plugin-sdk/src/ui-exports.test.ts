@@ -5,7 +5,7 @@ import { UI_EXPORT_NAMES } from "./ui-exports.js"
 /**
  * `ui-exports.ts` is hand-written, and this is what makes that safe.
  *
- * Main generates the `@starbase/plugin-sdk/ui` runtime shim from that list
+ * Main generates the `@jingler/plugin-sdk/ui` runtime shim from that list
  * rather than from the module itself, because importing the module in the main
  * process would load the entire component library — a syntax highlighter, a
  * maths renderer, a graph layout engine — at startup, to serve a few hundred

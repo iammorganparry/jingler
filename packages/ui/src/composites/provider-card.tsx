@@ -1,4 +1,4 @@
-import type { CliKind } from "@starbase/core"
+import type { CliKind } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { ProviderIcon } from "../components/provider-icon.js"
 

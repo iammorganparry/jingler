@@ -1,5 +1,5 @@
-import type { Repo } from "@starbase/core"
-import { GitError, WorkspaceNotConfiguredError } from "@starbase/core"
+import type { Repo } from "@jingler/core"
+import { GitError, WorkspaceNotConfiguredError } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Effect, Option } from "effect"
@@ -151,7 +151,7 @@ type WorkspaceEnv =
  * the renderer treats as "run first-run setup".
  */
 export class WorkspaceService extends Effect.Service<WorkspaceService>()(
-  "@starbase/WorkspaceService",
+  "@jingler/WorkspaceService",
   {
     accessors: true,
     sync: () => ({

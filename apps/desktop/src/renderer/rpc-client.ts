@@ -1,8 +1,8 @@
 /**
  * Renderer-side RPC client. Mirror image of `src/main/rpc.ts`: a custom
  * `RpcClient.Protocol` that shuttles encoded frames over the preload bridge
- * (`window.starbase`), driving a real `RpcClient` built from the shared
- * `StarbaseRpcs` group. Callers get plain, typed Promises back.
+ * (`window.jingler`), driving a real `RpcClient` built from the shared
+ * `JinglerRpcs` group. Callers get plain, typed Promises back.
  */
 import type {
   AssetPayload,
@@ -75,8 +75,8 @@ import type {
   ContextSnapshot,
   Usage,
   WorkspaceConfig
-} from "@starbase/core"
-import { StarbaseRpcs } from "@starbase/contracts"
+} from "@jingler/core"
+import { JinglerRpcs } from "@jingler/contracts"
 import { RpcClient } from "@effect/rpc"
 import type { FromClientEncoded, FromServerEncoded } from "@effect/rpc/RpcMessage"
 import { Cause, Effect, Exit, Fiber, Layer, ManagedRuntime, Runtime, Scope, Stream } from "effect"
@@ -92,13 +92,13 @@ const ClientProtocolLive = Layer.effect(
     Effect.gen(function* () {
       const runFork = Runtime.runFork(yield* Effect.runtime<never>())
 
-      window.starbase.on((data) => {
+      window.jingler.on((data) => {
         runFork(writeResponse(data as FromServerEncoded))
       })
 
       return {
         send: (request: FromClientEncoded) =>
-          Effect.sync(() => window.starbase.send(request)),
+          Effect.sync(() => window.jingler.send(request)),
         supportsAck: true,
         supportsTransferables: false
       }
@@ -116,7 +116,7 @@ const runtime = ManagedRuntime.make(ClientProtocolLive)
 const clientScope = Effect.runSync(Scope.make())
 
 const clientPromise = runtime.runPromise(
-  RpcClient.make(StarbaseRpcs).pipe(Scope.extend(clientScope))
+  RpcClient.make(JinglerRpcs).pipe(Scope.extend(clientScope))
 )
 
 const run = <A>(
@@ -749,7 +749,7 @@ export const rpc = {
 
   // ── Themes ─────────────────────────────────────────────────────────────────
 
-  /** Bundled presets plus `~/starbase/themes`, each with resolved tokens. */
+  /** Bundled presets plus `~/jingler/themes`, each with resolved tokens. */
   themeList: (): Promise<ThemeCatalog> => run((c) => c.Theme.list()),
 
   /** The raw VS Code JSON for a theme — what the editor loads. */
@@ -776,7 +776,7 @@ export const rpc = {
     run((c) => c.Theme.setCustomizations({ colors })),
 
   /**
-   * Subscribe to `~/starbase/themes` changing on disk, so a theme edited in the
+   * Subscribe to `~/jingler/themes` changing on disk, so a theme edited in the
    * operator's own editor repaints the app live. Returns an unsubscribe.
    */
   themeWatch: (onCatalog: (catalog: ThemeCatalog) => void): (() => void) => {
@@ -842,7 +842,7 @@ export const rpc = {
     run((c) => c.Plugins.authRevoke({ pluginId, providerId })),
 
   /**
-   * Subscribe to `~/starbase/plugins` changing on disk — the same live-reload
+   * Subscribe to `~/jingler/plugins` changing on disk — the same live-reload
    * contract themes have, and the reason a plugin author can edit a file and see
    * the tab update without restarting the app.
    */

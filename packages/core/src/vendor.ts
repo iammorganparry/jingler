@@ -66,10 +66,10 @@ export const vendorOf = (cli: CliKind, modelId: string | null): string | null =>
   if (cli === "claude") return "anthropic"
   if (cli === "codex") return "openai"
   if (cli === "cursor") return null
-  // Starbase is an orchestrator, not a lab. Counting it as a vendor would let a
+  // Jingler is an orchestrator, not a lab. Counting it as a vendor would let a
   // host with ONLY our own harness look like it had the two independent
   // providers adversarial planning needs — a panel of us against ourselves.
-  if (cli === "starbase") return null
+  if (cli === "jingler") return null
   const { providerID, modelID } = splitModelId(modelId ?? "")
   if (providerID === "") return null
   if (!GATEWAYS.has(providerID)) return providerID

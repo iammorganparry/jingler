@@ -17,7 +17,7 @@ export interface PasswordChangedProps {
   secureUrl: string
 }
 
-export const passwordChangedSubject = "Your Starbase password was changed"
+export const passwordChangedSubject = "Your Jingler password was changed"
 
 export function PasswordChanged({
   email,
@@ -135,7 +135,7 @@ PasswordChanged.PreviewProps = {
   when: "Jul 15, 2026 · 14:32 UTC",
   device: "macOS · Chrome 126",
   location: "Amsterdam, NL",
-  secureUrl: "https://app.starbase.dev/security"
+  secureUrl: "https://app.jingler.dev/security"
 } satisfies PasswordChangedProps
 
 export default PasswordChanged

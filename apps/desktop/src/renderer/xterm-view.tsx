@@ -13,7 +13,7 @@
  * does NOT kill the PTY; it keeps running in main and is re-attachable.
  */
 import { useEffect, useRef } from "react"
-import { useThemeTokens } from "@starbase/ui"
+import { useThemeTokens } from "@jingler/ui"
 import { Terminal } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
 import { WebglAddon } from "@xterm/addon-webgl"
@@ -26,7 +26,7 @@ import { rpc } from "./rpc-client.js"
  * xterm paints to a canvas and takes a JS object, so it reads `ThemeTokens`
  * directly instead of CSS custom properties. `tokens.terminal` is the theme's
  * own `terminal.ansi*` palette where it declares one, and a derivation from the
- * accent ramp where it does not — see `@starbase/themes`'s mapper.
+ * accent ramp where it does not — see `@jingler/themes`'s mapper.
  */
 
 export interface XtermViewProps {
@@ -73,7 +73,7 @@ export function XtermView({ terminalId, onExit }: XtermViewProps) {
 
     const fit = new FitAddon()
     term.loadAddon(fit)
-    term.loadAddon(new WebLinksAddon((_event, uri) => void window.starbase.openExternal(uri)))
+    term.loadAddon(new WebLinksAddon((_event, uri) => void window.jingler.openExternal(uri)))
     term.open(el)
 
     // GPU rendering when the context is available; silently fall back to DOM.

@@ -3,7 +3,7 @@ import { homedir } from "node:os"
 /**
  * Working directories for spawned processes.
  *
- * Starbase runs many repos side by side, each session in its own git worktree.
+ * Jingler runs many repos side by side, each session in its own git worktree.
  * The one thing every spawn must never do is INHERIT the Electron main process's
  * cwd: in development that is whichever worktree `pnpm dev` was launched from,
  * so a process belonging to repo A silently reads and writes inside repo B.
@@ -34,7 +34,7 @@ export const neutralCwd = (): string => homedir()
  * Deliberately throws rather than falling back. A session with no worktree has
  * nothing legitimate to run — every code path that reaches here is about editing
  * a specific repo — and the only available fallback is the app's own cwd, which
- * would point the agent at Starbase's source instead. Failing loudly turns a
+ * would point the agent at Jingler's source instead. Failing loudly turns a
  * silent cross-repo write into a visible error.
  */
 export const requireWorktree = (cwd: string | null | undefined, what: string): string => {

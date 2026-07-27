@@ -30,7 +30,7 @@ export interface DialogServiceShape {
   readonly chooseDirectory: (prompt?: ChooseDirectoryPrompt) => Effect.Effect<string | null>
 }
 
-export class DialogService extends Context.Tag("@starbase/DialogService")<
+export class DialogService extends Context.Tag("@jingler/DialogService")<
   DialogService,
   DialogServiceShape
 >() {}

@@ -1,4 +1,4 @@
-import type { ExecutionMode } from "@starbase/core"
+import type { ExecutionMode } from "@jingler/core"
 import { Check, Zap } from "lucide-react"
 import { Button } from "../components/button.js"
 import { ButtonGroup } from "../components/button-group.js"

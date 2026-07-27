@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { CliInfo, ContextConfig, ProvidersConfig } from "@starbase/core"
+import type { CliInfo, ContextConfig, ProvidersConfig } from "@jingler/core"
 import { SettingsView } from "./settings-view.js"
 
 afterEach(cleanup)

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import type { LoadedPlugin } from "@starbase/core"
+import type { LoadedPlugin } from "@jingler/core"
 import {
   PluginHostRuntime,
   type HostProcess,
@@ -66,7 +66,7 @@ const plugin = (over: Partial<LoadedPlugin["manifest"]> = {}): LoadedPlugin =>
       contributes: { commands: [{ id: "linear.sync", title: "Sync" }] },
       ...over
     },
-    dir: "/home/dev/starbase/plugins/linear",
+    dir: "/home/dev/jingler/plugins/linear",
     enabled: true,
     activated: false,
     builtin: false
@@ -151,7 +151,7 @@ describe("activation", () => {
     expect(message).toBeTruthy()
     if (message?.kind !== "activate") throw new Error("expected activate")
     expect(message.pluginId).toBe("linear")
-    expect(message.entry).toBe("/home/dev/starbase/plugins/linear/dist/main.js")
+    expect(message.entry).toBe("/home/dev/jingler/plugins/linear/dist/main.js")
     // The host refuses registrations outside this list, which is what keeps the
     // manifest — the thing shown in Settings — the actual contract.
     expect(message.declaredCommands).toEqual(["linear.sync"])

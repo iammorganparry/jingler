@@ -1,40 +1,40 @@
 /**
- * Provides the concrete `~/starbase` paths for the backend services. The home
+ * Provides the concrete `~/jingler` paths for the backend services. The home
  * directory is resolved from Electron (`app.getPath("home")`), keeping the
  * environment-specific bit in the main process while `cli-adapters` stays
  * platform-agnostic behind the `AppPaths` tag.
  *
- * `STARBASE_HOME` overrides the home directory when set. It lets the Playwright
+ * `JINGLER_HOME` overrides the home directory when set. It lets the Playwright
  * e2e suite point the whole app at a throwaway home dir (and is handy for dev),
- * without which every launch would read/write the developer's real `~/starbase`.
+ * without which every launch would read/write the developer's real `~/jingler`.
  */
 import { join } from "node:path"
 import { app } from "electron"
-import { AppPaths } from "@starbase/cli-adapters"
+import { AppPaths } from "@jingler/cli-adapters"
 import { Layer } from "effect"
 
 /**
- * The shared root for every Starbase-owned file in the desktop app.
+ * The shared root for every Jingler-owned file in the desktop app.
  *
- * Read once, at module load. That is fine for a running app — `STARBASE_HOME`
+ * Read once, at module load. That is fine for a running app — `JINGLER_HOME`
  * does not change under it — and the e2e suite launches a fresh process per
  * home, so nothing is pinned across the boundary that matters.
  */
-export const starbaseRoot = join(process.env.STARBASE_HOME ?? app.getPath("home"), "starbase")
+export const jinglerRoot = join(process.env.JINGLER_HOME ?? app.getPath("home"), "jingler")
 
 /**
  * Where installed plugins live.
  *
- * A function purely for call-site convenience — it derives from `starbaseRoot`,
+ * A function purely for call-site convenience — it derives from `jinglerRoot`,
  * which is itself resolved once at module load, so this is NOT lazier than a
  * const would be. An earlier version of this comment claimed it prevented
- * `STARBASE_HOME` being pinned; it does not, and nothing needs it to: each e2e
+ * `JINGLER_HOME` being pinned; it does not, and nothing needs it to: each e2e
  * launch is its own process with its own environment.
  */
-export const pluginsRoot = (): string => join(starbaseRoot, "plugins")
+export const pluginsRoot = (): string => join(jinglerRoot, "plugins")
 
 /**
- * Where the plugins that ship with Starbase live.
+ * Where the plugins that ship with Jingler live.
  *
  * Packaged: `resources/plugins`, alongside the app's own asar. In development:
  * the repo's `plugins/` directory, so an official plugin under active edit is
@@ -50,18 +50,18 @@ export const builtinPluginsRoot = (): string =>
     : join(import.meta.dirname, "../../../../plugins")
 
 export const AppPathsLive = Layer.succeed(AppPaths, {
-  root: starbaseRoot,
-  configFile: join(starbaseRoot, "config.json"),
-  sessionsFile: join(starbaseRoot, "sessions.json"),
-  worktreesDir: join(starbaseRoot, "worktrees"),
-  transcriptsDir: join(starbaseRoot, "transcripts"),
-  reviewsDir: join(starbaseRoot, "reviews"),
-  planRoundsDir: join(starbaseRoot, "plan-rounds"),
-  plansDir: join(starbaseRoot, ".starbase"),
-  themesDir: join(starbaseRoot, "themes"),
-  pluginsDir: join(starbaseRoot, "plugins"),
+  root: jinglerRoot,
+  configFile: join(jinglerRoot, "config.json"),
+  sessionsFile: join(jinglerRoot, "sessions.json"),
+  worktreesDir: join(jinglerRoot, "worktrees"),
+  transcriptsDir: join(jinglerRoot, "transcripts"),
+  reviewsDir: join(jinglerRoot, "reviews"),
+  planRoundsDir: join(jinglerRoot, "plan-rounds"),
+  plansDir: join(jinglerRoot, ".jingler"),
+  themesDir: join(jinglerRoot, "themes"),
+  pluginsDir: join(jinglerRoot, "plugins"),
   builtinPluginsDir: builtinPluginsRoot(),
-  pluginStorageDir: join(starbaseRoot, "plugin-storage"),
-  authFile: join(starbaseRoot, "auth.enc"),
-  openConnectorFile: join(starbaseRoot, "open-connector.enc")
+  pluginStorageDir: join(jinglerRoot, "plugin-storage"),
+  authFile: join(jinglerRoot, "auth.enc"),
+  openConnectorFile: join(jinglerRoot, "open-connector.enc")
 })

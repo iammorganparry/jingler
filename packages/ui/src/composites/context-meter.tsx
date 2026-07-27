@@ -1,4 +1,4 @@
-import type { ContextPhase } from "@starbase/core"
+import type { ContextPhase } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 
 /** "42.6k" / "980" — compact token count. */
@@ -51,7 +51,7 @@ export interface ContextMeterProps {
 
 /**
  * How full the model's working set is, measured against the point at which
- * Starbase will compact it — NOT against the model's hard ceiling.
+ * Jingler will compact it — NOT against the model's hard ceiling.
  *
  * That distinction is the entire feature made visible. A 1M-window model shows
  * this meter near full at the budget, because that is where quality starts to go, and
@@ -120,7 +120,7 @@ export function ContextMeter({
             ? "compacting soon"
             : "context"
 
-  const title = `${tokens.toLocaleString()} of ~${triggerAt.toLocaleString()} tokens before Starbase compacts this session${
+  const title = `${tokens.toLocaleString()} of ~${triggerAt.toLocaleString()} tokens before Jingler compacts this session${
     preparing
       ? " · summarising in the background"
       : held

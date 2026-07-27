@@ -210,7 +210,7 @@ export function TabBar({
   /**
    * The chat pills, rendered inside this row behind a divider. A `ReactNode`
    * rather than data because chat state lives in the desktop renderer (rpc calls
-   * + live per-chat activity) and hoisting it into `@starbase/ui` to draw three
+   * + live per-chat activity) and hoisting it into `@jingler/ui` to draw three
    * pills would drag the RPC client into the component library.
    */
   chatSlot?: ReactNode

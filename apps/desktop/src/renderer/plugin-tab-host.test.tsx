@@ -15,11 +15,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
-import type { Session } from "@starbase/core"
+import type { Session } from "@jingler/core"
 import { PluginTabHost } from "./plugin-tab-host.js"
 
 // The host builds a real `pluginBridge`, which reaches `rpc-client`, which
-// reaches a `window.starbase` preload bridge that does not exist under jsdom.
+// reaches a `window.jingler` preload bridge that does not exist under jsdom.
 // Left unmocked it does not fail the tests — it just leaks an unhandled
 // rejection into the run, which is the kind of noise that trains people to
 // ignore unhandled rejections.

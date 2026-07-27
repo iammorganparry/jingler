@@ -2,7 +2,7 @@
 /**
  * Vendors VS Code's built-in colour themes into `src/presets/*.ts`.
  *
- * Run with `pnpm --filter @starbase/themes vendor` when refreshing against a
+ * Run with `pnpm --filter @jingler/themes vendor` when refreshing against a
  * newer VS Code. The output is committed, so a normal build and a normal CI run
  * never touch the network.
  *
@@ -201,7 +201,7 @@ const ONE_DARK_PIN = {
   "scrollbarSlider.background": "#3e4451",
   "scrollbarSlider.hoverBackground": "#4b5263",
   // One Dark Pro ships `diffEditor.insertedTextBackground: "#00809b33"` — a
-  // TEAL insert wash. Faithful to the theme, and not what Starbase's diff
+  // TEAL insert wash. Faithful to the theme, and not what Jingler's diff
   // viewer currently paints, which is `bg-green/[0.13]` / `bg-red/[0.12]`.
   // Since this preset is the default, taking the theme's own value here would
   // change the diff viewer's appearance on upgrade for every existing user.
@@ -242,7 +242,7 @@ const emit = (preset, theme) => {
  * script instead. Source: extensions/${preset.path}
  * Include chain resolved and flattened at vendor time.
  */
-import type { VsCodeTheme } from "@starbase/core"
+import type { VsCodeTheme } from "@jingler/core"
 
 export const ${camel(preset.id)}: VsCodeTheme = ${JSON.stringify(body, null, 2)}
 `

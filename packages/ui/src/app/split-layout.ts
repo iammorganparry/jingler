@@ -108,7 +108,7 @@ export const EMPTY_WORKSPACE: Workspace = { groups: [], activeGroupId: null }
  * payload values until drop, to stop pages snooping), so a dragover handler must
  * check `types.includes(...)` rather than reading the value.
  */
-export const SESSION_DND_MIME = "application/x-starbase-session-id"
+export const SESSION_DND_MIME = "application/x-jingler-session-id"
 
 // ---------------------------------------------------------------------------
 // Internals
@@ -470,7 +470,7 @@ export const focusAdjacent = (ws: Workspace, direction: -1 | 1): Workspace => {
  * Drop every pane naming a session that no longer exists.
  *
  * A workspace restored from storage outlives the sessions it names — deleting a
- * session in one window, or wiping `~/starbase/sessions.json`, would otherwise
+ * session in one window, or wiping `~/jingler/sessions.json`, would otherwise
  * leave a pane pointed at an id that resolves to nothing.
  */
 export const prune = (ws: Workspace, knownIds: ReadonlySet<string>): Workspace => {

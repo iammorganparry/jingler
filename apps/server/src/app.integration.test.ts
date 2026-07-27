@@ -6,12 +6,12 @@ import { runtime } from "./runtime.js"
 /**
  * End-to-end HTTP coverage of the auth backend against a REAL Postgres — exercises
  * BetterAuth + Drizzle + the repository layer through Hono's `app.request`, no
- * network server. Needs Docker Postgres, so it's gated behind STARBASE_DB_TESTS
+ * network server. Needs Docker Postgres, so it's gated behind JINGLER_DB_TESTS
  * and excluded from the CI unit run (see `vitest.config.ts`); run it with
- * `pnpm --filter @starbase/server test:integration` after `docker compose up -d db`
+ * `pnpm --filter @jingler/server test:integration` after `docker compose up -d db`
  * and `db:migrate`.
  */
-const RUN = process.env.STARBASE_DB_TESTS === "1"
+const RUN = process.env.JINGLER_DB_TESTS === "1"
 
 const cookieFrom = (res: Response): string => (res.headers.get("set-cookie") ?? "").split(";")[0] ?? ""
 
@@ -52,7 +52,7 @@ describe.skipIf(!RUN)("auth backend (integration, needs Postgres)", () => {
     const cookie = cookieFrom(verified)
     expect(cookie).toContain("=")
 
-    // 3. Desktop bridge: reads the session cookie → starbase:// deep link w/ token.
+    // 3. Desktop bridge: reads the session cookie → jingler:// deep link w/ token.
     const bridge = await app.request("/desktop/callback", { headers: { cookie } })
     expect(bridge.status).toBe(302)
     const location = bridge.headers.get("location") ?? ""

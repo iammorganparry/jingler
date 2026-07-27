@@ -11,7 +11,7 @@
 import { useCallback, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { QueryClient } from "@tanstack/react-query"
-import type { TerminalInfo } from "@starbase/core"
+import type { TerminalInfo } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
 
 const EMPTY_TABS: ReadonlyArray<TerminalInfo> = []

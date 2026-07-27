@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import type { Message } from "@starbase/core"
+import type { Message } from "@jingler/core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ConversationView } from "./conversation-view.js"
 

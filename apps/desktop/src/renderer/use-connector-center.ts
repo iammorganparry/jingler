@@ -3,7 +3,7 @@ import type {
   ConnectorProvider,
   ConnectorProviderDetail,
   OAuthClientInfo
-} from "@starbase/core"
+} from "@jingler/core"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useState } from "react"
 import { rpc } from "./rpc-client.js"
@@ -29,7 +29,7 @@ export const connectorProviderKey = (service: string) =>
   ["connector", "provider", service] as const
 
 /**
- * Field names mirror `ConnectorCenterProps` (in `@starbase/ui`) so the hook's
+ * Field names mirror `ConnectorCenterProps` (in `@jingler/ui`) so the hook's
  * return value can be spread straight onto `<ConnectorCenter>` / passed as the
  * `connector` prop with no adapter.
  */

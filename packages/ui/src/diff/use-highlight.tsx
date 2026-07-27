@@ -1,5 +1,5 @@
 import * as React from "react"
-import { toShikiTheme } from "@starbase/themes"
+import { toShikiTheme } from "@jingler/themes"
 import { useOptionalThemeTokens, useThemeSyntax } from "../theme-provider.js"
 import { langForPath, type Token, tokenizeLines } from "./highlight.js"
 

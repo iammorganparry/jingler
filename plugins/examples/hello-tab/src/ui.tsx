@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { definePlugin, usePluginStorage, type TabProps } from "@starbase/plugin-sdk"
+import { definePlugin, usePluginStorage, type TabProps } from "@jingler/plugin-sdk"
 import { manifest } from "./manifest.js"
 
 /**
@@ -9,7 +9,7 @@ import { manifest } from "./manifest.js"
  * Every colour here is a `--sb-*` theme token (`bg-editor`, `text-text`,
  * `border-line`, …) rather than a literal — which is why this tab looks correct
  * in all nine bundled themes and in whatever the operator drops into
- * `~/starbase/themes` next. A hardcoded hex would survive a theme switch
+ * `~/jingler/themes` next. A hardcoded hex would survive a theme switch
  * unchanged, and on a light theme that means white text on white.
  */
 function Greeting({ session }: TabProps) {
@@ -44,7 +44,7 @@ function Greeting({ session }: TabProps) {
         <h2 className="text-[15px] font-semibold text-text">Hello from a plugin</h2>
         <p className="mt-1 text-[12.5px] leading-[1.6] text-dim">
           This tab is rendered by <code className="text-blue">hello-tab</code>, loaded
-          from <code className="text-blue">~/starbase/plugins</code>. It shares the
+          from <code className="text-blue">~/jingler/plugins</code>. It shares the
           app&rsquo;s React and its theme tokens.
         </p>
       </div>

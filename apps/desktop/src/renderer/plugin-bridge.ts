@@ -16,7 +16,7 @@
  * every consumer a new callback each time and defeat every dependency array
  * downstream.
  */
-import type { HostBridge, PluginStorage, SessionActions } from "@starbase/plugin-sdk"
+import type { HostBridge, PluginStorage, SessionActions } from "@jingler/plugin-sdk"
 import { rpc } from "./rpc-client.js"
 import { publishSessionUpdate } from "./session-updates.js"
 
@@ -74,7 +74,7 @@ export const pluginBridge = (pluginId: string): HostBridge => {
       if (!/^https?:\/\//i.test(url)) {
         throw new Error(`openExternal refused a non-http(s) URL: ${url}`)
       }
-      await window.starbase.openExternal(url)
+      await window.jingler.openExternal(url)
     },
     // Shared, not per-plugin: it carries no plugin-scoped state, and a fresh
     // object per bridge would only give `useSessionActions` a new identity in

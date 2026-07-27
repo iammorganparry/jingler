@@ -2,13 +2,13 @@ import { createServer, type Server } from "node:http"
 import type { AddressInfo } from "node:net"
 
 /**
- * A tiny offline stand-in for `@starbase/server`'s BetterAuth backend, so the
+ * A tiny offline stand-in for `@jingler/server`'s BetterAuth backend, so the
  * auth e2e runs deterministically without Postgres/OAuth/email. It answers the
  * handful of endpoints `AuthService` calls:
  *   - GET  /api/auth/get-session  → the user, iff `Authorization: Bearer <token>`
  *   - POST /api/auth/sign-in/magic-link → records the email, returns {status:true}
  *   - POST /api/auth/sign-in/social     → returns the (fake) provider URL
- *   - GET  /desktop/callback            → 302 to the starbase:// deep link
+ *   - GET  /desktop/callback            → 302 to the jingler:// deep link
  *   - POST /api/auth/sign-out           → 200
  */
 export interface FakeAuthServer {
@@ -33,7 +33,7 @@ export const startFakeAuthServer = async (token = "e2e-token"): Promise<FakeAuth
       if (req.headers["authorization"] === `Bearer ${token}`) {
         return json(200, {
           session: { expiresAt: "2099-01-01T00:00:00Z", token },
-          user: { id: "u_e2e", email: "e2e@starbase.dev", name: "E2E User", image: null }
+          user: { id: "u_e2e", email: "e2e@jingler.dev", name: "E2E User", image: null }
         })
       }
       return json(401, {})
@@ -44,7 +44,7 @@ export const startFakeAuthServer = async (token = "e2e-token"): Promise<FakeAuth
     }
 
     if (url.pathname === "/desktop/callback") {
-      res.writeHead(302, { Location: `starbase://auth/callback?token=${token}` })
+      res.writeHead(302, { Location: `jingler://auth/callback?token=${token}` })
       return res.end()
     }
 

@@ -1,4 +1,4 @@
-import type { AuthProvider } from "@starbase/core"
+import type { AuthProvider } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 
 /** GitHub Octocat mark (monochrome, inherits currentColor). */

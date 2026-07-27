@@ -8,7 +8,7 @@ const FRIENDLY_WORKTREE_RE = /[\\/][a-z]+-[a-z]+$/
 /**
  * The full ⌘N create-session flow, end to end against real git: open the dialog,
  * name the session, pick a base branch, hit Create, and verify the real outcomes
- * — the session shows in the sidebar, a real worktree + `starbase/<slug>` branch
+ * — the session shows in the sidebar, a real worktree + `jingler/<slug>` branch
  * were created, and the session was persisted to sessions.json.
  */
 test("creating a session forks a real worktree and persists it", async ({ launchApp }) => {
@@ -35,7 +35,7 @@ test("creating a session forks a real worktree and persists it", async ({ launch
 
   // Real outcome: the trimmed operator title is pinned and its branch is
   // readable immediately.
-  const persisted = JSON.parse(readFileSync(join(home, "starbase", "sessions.json"), "utf-8"))
+  const persisted = JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf-8"))
   expect(persisted).toHaveLength(1)
   expect(persisted[0]).toMatchObject({
     title: "Fix token refresh",
@@ -43,7 +43,7 @@ test("creating a session forks a real worktree and persists it", async ({ launch
     status: "idle",
     autoTitle: false
   })
-  expect(persisted[0].branch).toMatch(/^starbase\/fix-token-refresh-[a-z0-9]+$/)
+  expect(persisted[0].branch).toMatch(/^jingler\/fix-token-refresh-[a-z0-9]+$/)
 
   // Real outcome: that branch + worktree actually exist on disk.
   expect(existsSync(persisted[0].worktreePath)).toBe(true)
@@ -81,7 +81,7 @@ test("creating a blank session stages a detached worktree for agent naming", asy
   await expect(sessionRow(window, "Untitled session")).toBeVisible()
 
   const persisted = JSON.parse(
-    readFileSync(join(home, "starbase", "sessions.json"), "utf-8")
+    readFileSync(join(home, "jingler", "sessions.json"), "utf-8")
   )
   expect(persisted).toHaveLength(1)
   expect(persisted[0]).toMatchObject({
@@ -166,9 +166,9 @@ test("creating a session from a PR checks out its head branch and links the PR",
   await expect(window.getByRole("heading", { name: "New session" })).toBeHidden()
   await expect(window.getByText("⑂ #482")).toBeVisible()
 
-  // Real outcome: the worktree is on the PR's head branch (not a starbase/ fork).
+  // Real outcome: the worktree is on the PR's head branch (not a jingler/ fork).
   // The from-PR slug carries the PR number, so same-titled PRs never collide.
-  const worktreePath = join(home, "starbase", "worktrees", "widget", "fix-auth-refresh-race-482")
+  const worktreePath = join(home, "jingler", "worktrees", "widget", "fix-auth-refresh-race-482")
   expect(existsSync(worktreePath)).toBe(true)
   const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
     cwd: worktreePath,
@@ -177,7 +177,7 @@ test("creating a session from a PR checks out its head branch and links the PR",
   expect(branch).toBe("chore/bump")
 
   // Real outcome: the session is persisted with the PR linked.
-  const persisted = JSON.parse(readFileSync(join(home, "starbase", "sessions.json"), "utf-8"))
+  const persisted = JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf-8"))
   expect(persisted).toHaveLength(1)
   expect(persisted[0]).toMatchObject({
     title: "Fix auth refresh race",
@@ -192,7 +192,7 @@ test("creating a session from a PR checks out its head branch and links the PR",
  * The "new session from a GitHub issue" flow, end to end against real git with a
  * deterministic fake `gh issue list`: toggle to "From issue", pick an open issue,
  * advance to the prefill step, create — and verify the session was forked onto a
- * fresh `starbase/<n>-slug` branch, linked to the issue, with the task seeded from
+ * fresh `jingler/<n>-slug` branch, linked to the issue, with the task seeded from
  * the issue and the automations persisted.
  */
 test("creating a session from an issue forks a linked branch and seeds the task", async ({
@@ -280,10 +280,10 @@ test("creating a session from an issue forks a linked branch and seeds the task"
   await expect(window.getByTestId("plugin-error-github-issues")).toHaveCount(0)
   await expect(window.getByRole("button", { name: "Issue" })).toBeVisible()
 
-  // Real outcome: a fresh `starbase/128-<slug>` worktree exists on that branch.
+  // Real outcome: a fresh `jingler/128-<slug>` worktree exists on that branch.
   const worktreePath = join(
     home,
-    "starbase",
+    "jingler",
     "worktrees",
     "widget",
     "128-refund-route-500s-on-a-stale-token"
@@ -293,14 +293,14 @@ test("creating a session from an issue forks a linked branch and seeds the task"
     cwd: repoPath,
     encoding: "utf-8"
   })
-  expect(branches).toContain("starbase/128-refund-route-500s-on-a-stale-token")
+  expect(branches).toContain("jingler/128-refund-route-500s-on-a-stale-token")
 
   // Real outcome: the session is persisted with the issue linked + task seeded.
-  const persisted = JSON.parse(readFileSync(join(home, "starbase", "sessions.json"), "utf-8"))
+  const persisted = JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf-8"))
   expect(persisted).toHaveLength(1)
   expect(persisted[0]).toMatchObject({
     title: "Refund route 500s on a stale token",
-    branch: "starbase/128-refund-route-500s-on-a-stale-token",
+    branch: "jingler/128-refund-route-500s-on-a-stale-token",
     baseBranch: "main",
     issueNumber: 128,
     issueUrl: "https://github.com/acme/widget/issues/128",
@@ -321,7 +321,7 @@ test("creating a session from an issue forks a linked branch and seeds the task"
   await expect
     .poll(
       () =>
-        JSON.parse(readFileSync(join(home, "starbase", "sessions.json"), "utf-8"))[0].initialPrompt,
+        JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf-8"))[0].initialPrompt,
       { timeout: 15_000 }
     )
     .toBeUndefined()

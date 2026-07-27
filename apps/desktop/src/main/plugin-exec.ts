@@ -18,7 +18,7 @@
  * operator's own credentials. There is no shell to inject into here.
  */
 import { spawn } from "node:child_process"
-import type { ExecReply, ExecRequest } from "@starbase/cli-adapters"
+import type { ExecReply, ExecRequest } from "@jingler/cli-adapters"
 
 /**
  * Hard ceiling on captured output PER STREAM, so a runaway process cannot

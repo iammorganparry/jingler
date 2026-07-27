@@ -5,7 +5,7 @@
  * script instead. Source: extensions/theme-tomorrow-night-blue/themes/tomorrow-night-blue-color-theme.json
  * Include chain resolved and flattened at vendor time.
  */
-import type { VsCodeTheme } from "@starbase/core"
+import type { VsCodeTheme } from "@jingler/core"
 
 export const tomorrowNightBlue: VsCodeTheme = {
   "type": "dark",

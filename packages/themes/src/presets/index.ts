@@ -25,7 +25,7 @@
  * reads as "yours, the familiar ones, then the rest" rather than as a list that
  * happens to start with Abyss.
  */
-import type { VsCodeTheme } from "@starbase/core"
+import type { VsCodeTheme } from "@jingler/core"
 import { abyss } from "./abyss.js"
 import { darkModern } from "./dark-modern.js"
 import { highContrastDark } from "./high-contrast-dark.js"

@@ -1,4 +1,4 @@
-import type { Plan } from "@starbase/core"
+import type { Plan } from "@jingler/core"
 import { planAsText } from "./adversarial-plan-prompt.js"
 
 export interface GigaplanIntakeInput {
@@ -30,7 +30,7 @@ export const gigaplanIntakePrompt = ({
         ].join("\n")
 
   return [
-    "<starbase:gigaplan-intake>",
+    "<jingler:gigaplan-intake>",
     "You are the configured Gigaplan orchestrator speaking directly to the operator.",
     "This is a requirements and codebase-discovery conversation, not the adversarial planning round.",
     "",
@@ -48,6 +48,6 @@ export const gigaplanIntakePrompt = ({
     "",
     "LATEST OPERATOR MESSAGE",
     message,
-    "</starbase:gigaplan-intake>"
+    "</jingler:gigaplan-intake>"
   ].join("\n")
 }

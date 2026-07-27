@@ -1,6 +1,6 @@
 import * as React from "react"
 import { ArrowLeft, Check, CircleHelp } from "lucide-react"
-import type { QuestionAnswer, QuestionRequest } from "@starbase/core"
+import type { QuestionAnswer, QuestionRequest } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"

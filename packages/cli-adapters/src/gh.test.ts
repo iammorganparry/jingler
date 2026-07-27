@@ -157,7 +157,7 @@ describe("mapPrView", () => {
 })
 
 /**
- * Trimmed from the real `reviewThreads` payload for starbase#36 — the PR whose
+ * Trimmed from the real `reviewThreads` payload for jingler#36 — the PR whose
  * Greptile review the thread UI was built against. The first thread is outdated
  * (so GitHub nulls `line`/`startLine`), bot-authored, and answered by the repo
  * owner with a reaction; that combination covers every branch of the mapper.

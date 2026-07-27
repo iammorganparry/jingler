@@ -7,7 +7,7 @@ import type {
   ReasoningEffort,
   ReasoningSetting,
   Skill
-} from "@starbase/core"
+} from "@jingler/core"
 import {
   Content as DropdownMenuContent,
   Item as DropdownMenuItem,

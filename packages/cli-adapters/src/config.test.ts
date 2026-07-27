@@ -1,8 +1,8 @@
 import { writeFileSync } from "node:fs"
 import { mkdirSync } from "node:fs"
 import { FileSystem } from "@effect/platform"
-import type { GigaplanRoutingConfig } from "@starbase/core"
-import { DEFAULT_THEME_ID } from "@starbase/core"
+import type { GigaplanRoutingConfig } from "@jingler/core"
+import { DEFAULT_THEME_ID } from "@jingler/core"
 import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AppPaths } from "./app-paths.js"
@@ -11,7 +11,7 @@ import { failureOf, runExit, withTempRoot } from "./test-support.js"
 
 /**
  * ConfigService is the first-run persistence layer. We run it against a real
- * temp `~/starbase` and assert observable outcomes: what `get()` returns, what
+ * temp `~/jingler` and assert observable outcomes: what `get()` returns, what
  * ends up on disk, and how malformed input surfaces — never how it parses.
  */
 describe("ConfigService", () => {

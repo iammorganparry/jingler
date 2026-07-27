@@ -1,4 +1,4 @@
-import { extensionToKind } from "@starbase/core"
+import { extensionToKind } from "@jingler/core"
 
 /**
  * Deciding whether a scrap of agent output is a file worth opening.

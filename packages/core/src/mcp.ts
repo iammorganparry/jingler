@@ -3,7 +3,7 @@ import { CliKind } from "./domain.js"
 
 /**
  * MCP (Model Context Protocol) servers, as configured in the *harness's own*
- * config files. Starbase never defines an MCP format of its own — it reads what
+ * config files. Jingler never defines an MCP format of its own — it reads what
  * `claude` / `codex` / `cursor` / `opencode` already load, and reports it back.
  */
 
@@ -90,7 +90,7 @@ export const McpInjectionSkip = Schema.Literal(
   "opted-out",
   /** No bearer token is stored, so no request could authenticate. */
   "no-token",
-  /** Starbase has no run path for this harness, so there is nothing to inject into. */
+  /** Jingler has no run path for this harness, so there is nothing to inject into. */
   "no-run-path"
 )
 export type McpInjectionSkip = Schema.Schema.Type<typeof McpInjectionSkip>

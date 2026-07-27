@@ -1,4 +1,4 @@
-import type { Skill } from "@starbase/core"
+import type { Skill } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { SlashCommandRow } from "./slash-command-row.js"
 

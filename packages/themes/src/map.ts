@@ -1,5 +1,5 @@
 /**
- * The fold: a VS Code theme in, Starbase's `ThemeTokens` out.
+ * The fold: a VS Code theme in, Jingler's `ThemeTokens` out.
  *
  * ## Why this is a table of fallbacks and not a lookup
  *
@@ -7,11 +7,11 @@
  * instead is inherit: a theme declares a `type`, and every key it omits comes
  * from VS Code's own per-type defaults. High Contrast Dark, one of the themes
  * vendored here, sets exactly ELEVEN colours — `editor.background`,
- * `editor.foreground` and nine odds and ends. Everything a Starbase panel,
+ * `editor.foreground` and nine odds and ends. Everything a Jingler panel,
  * border, accent or terminal needs has to be produced from those eleven.
  *
  * So each token below is a chain: the keys a theme might plausibly have set, in
- * descending order of how well they mean what Starbase means, ending in either
+ * descending order of how well they mean what Jingler means, ending in either
  * a derivation from an already-resolved token or the per-ground defaults table.
  * The chain is the specification. A key added to the wrong position produces a
  * theme that is subtly wrong in one place, which is much harder to notice than
@@ -28,8 +28,8 @@
  *    that straight to `--sb-panel` means the desktop shows through a frameless
  *    Electron window. `over()` flattens; see `color.ts`.
  */
-import type { ThemeKind, ThemeTokens, VsCodeTheme } from "@starbase/core"
-import { normalizeThemeKind } from "@starbase/core"
+import type { ThemeKind, ThemeTokens, VsCodeTheme } from "@jingler/core"
+import { normalizeThemeKind } from "@jingler/core"
 import {
   contrast,
   ensureContrast,

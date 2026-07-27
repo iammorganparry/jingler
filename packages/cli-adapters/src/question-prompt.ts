@@ -1,4 +1,4 @@
-import type { CliKind, Question, QuestionAnswer } from "@starbase/core"
+import type { CliKind, Question, QuestionAnswer } from "@jingler/core"
 
 /**
  * The fence Codex answers questions through.

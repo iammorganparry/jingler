@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { Attachment } from "@starbase/core"
+import type { Attachment } from "@jingler/core"
 import { StatusDot } from "./status-dot.js"
 import { Badge } from "./badge.js"
 import { Pill } from "./pill.js"

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { QuestionRequest } from "@starbase/core"
+import type { QuestionRequest } from "@jingler/core"
 import { QuestionCard } from "./question-card.js"
 
 const meta: Meta = { title: "AskUserQuestion" }

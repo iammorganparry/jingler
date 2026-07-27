@@ -14,8 +14,8 @@ import type {
   RouteEffort,
   RouteRisk,
   TaskKind
-} from "@starbase/core"
-import { CLI_KINDS, TASK_KINDS } from "@starbase/core"
+} from "@jingler/core"
+import { CLI_KINDS, TASK_KINDS } from "@jingler/core"
 
 /**
  * Turn the plan text Claude produces via `ExitPlanMode` into a structured `Plan`.
@@ -61,7 +61,7 @@ const SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
  * elsewhere.
  */
 export const planInstructions = (channel: PlanChannel): string =>
-  `${OPENING[channel]} Starbase renders the block as an interactive, reviewable plan.
+  `${OPENING[channel]} Jingler renders the block as an interactive, reviewable plan.
 
 Format of the \`\`\`plan block (one step per header line; two-space-indented fields):
 
@@ -207,7 +207,7 @@ const parseAssignee = (value: string): PlanStepAssignee | null => {
   if (!(CLI_KINDS as ReadonlyArray<string>).includes(cli)) return null
   // A step assigned back to the orchestrator would re-enter planning to execute
   // one step of the plan it just made. Steps run on real harnesses only.
-  if (cli === "starbase") return null
+  if (cli === "jingler") return null
   return { cli: cli as CliKind, model: m[2]!, reason: (m[3] ?? "").trim() }
 }
 

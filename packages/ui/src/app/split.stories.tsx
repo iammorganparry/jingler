@@ -1,6 +1,6 @@
 import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { Session } from "@starbase/core"
+import type { Session } from "@jingler/core"
 import { Columns2 } from "lucide-react"
 import { SessionRow } from "../composites/session-row.js"
 import { SplitRow } from "../composites/split-row.js"
@@ -37,8 +37,8 @@ import {
  */
 
 const session = (over: Partial<Session> & Pick<Session, "id" | "title">): Session => ({
-  repo: "starbase",
-  branch: "starbase/witty-berners",
+  repo: "jingler",
+  branch: "jingler/witty-berners",
   status: "idle",
   cli: "claude",
   diff: { added: 0, removed: 0 },
@@ -53,13 +53,13 @@ const session = (over: Partial<Session> & Pick<Session, "id" | "title">): Sessio
 })
 
 const FIXTURE: ReadonlyArray<Session> = [
-  session({ id: "s1", title: "Refactor auth flow", repo: "starbase", status: "running", diff: { added: 42, removed: 8 } }),
-  session({ id: "s2", title: "Fix token refresh", repo: "starbase", prNumber: 47 }),
+  session({ id: "s1", title: "Refactor auth flow", repo: "jingler", status: "running", diff: { added: 42, removed: 8 } }),
+  session({ id: "s2", title: "Fix token refresh", repo: "jingler", prNumber: 47 }),
   session({ id: "s3", title: "Watch CI on #204", repo: "gtm-grid", status: "running", prNumber: 204 }),
   session({ id: "s4", title: "Type-check watcher", repo: "gtm-grid" }),
   session({ id: "s5", title: "Awaiting approval", repo: "trigify-app", status: "needs-input" }),
   session({ id: "s6", title: "Big triage sweep", repo: "trigify-app" }),
-  session({ id: "s7", title: "Rewrite the composer", repo: "starbase", status: "running" }),
+  session({ id: "s7", title: "Rewrite the composer", repo: "jingler", status: "running" }),
   session({ id: "s8", title: "Bump the toolchain", repo: "gtm-grid" })
 ]
 
@@ -259,7 +259,7 @@ export const RepoPickerWithSearch: StoryObj = {
   render: function RepoPickerStory() {
     const REPOS = [
       "gtm-grid",
-      "starbase",
+      "jingler",
       "trigify-app",
       "athena",
       "avatarz",
@@ -279,7 +279,7 @@ export const RepoPickerWithSearch: StoryObj = {
     const [value, setValue] = useState("/code/hamburger")
     const [starred, setStarred] = useState<ReadonlyArray<string>>([
       "/code/gtm-grid",
-      "/code/starbase",
+      "/code/jingler",
       "/code/trigify-app"
     ])
     return (

@@ -5,7 +5,7 @@ import type {
   ContextSnapshot,
   Message,
   StreamEvent
-} from "@starbase/core"
+} from "@jingler/core"
 import {
   DEFAULT_CONTEXT_CONFIG,
   contextPhase,
@@ -15,7 +15,7 @@ import {
   reconcileWindow,
   shouldHoldSwap,
   triggerAt
-} from "@starbase/core"
+} from "@jingler/core"
 import { CommandExecutor, FileSystem, Path } from "@effect/platform"
 import { Effect, Fiber, Ref } from "effect"
 import { AppPaths } from "./app-paths.js"
@@ -142,7 +142,7 @@ export type DigestEnv =
   | AppPaths
 
 export class ContextManager extends Effect.Service<ContextManager>()(
-  "@starbase/ContextManager",
+  "@jingler/ContextManager",
   {
     accessors: true,
     effect: Effect.gen(function* () {

@@ -25,15 +25,15 @@
  * Here that is precisely the point, and the cost is one already-computed string
  * copied across a process boundary once per launch.
  */
-import { ThemeService, ConfigService } from "@starbase/cli-adapters"
-import { oneDarkPro, toCssText, toTokens } from "@starbase/themes"
-import type { ThemeTokens } from "@starbase/core"
+import { ThemeService, ConfigService } from "@jingler/cli-adapters"
+import { oneDarkPro, toCssText, toTokens } from "@jingler/themes"
+import type { ThemeTokens } from "@jingler/core"
 import { Effect } from "effect"
 import { ipcMain } from "electron"
 import { runtime } from "./runtime.js"
 
 /** The channel the preload reads synchronously. Must match `preload/index.ts`. */
-export const BOOT_THEME_CHANNEL = "starbase/boot-theme"
+export const BOOT_THEME_CHANNEL = "jingler/boot-theme"
 
 /**
  * The resolved boot theme, computed once during `whenReady`.

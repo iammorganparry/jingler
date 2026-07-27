@@ -14,7 +14,7 @@
  * session. Keeping the pure part here — `notificationFor` — means the edge rules
  * are testable without Electron, an actor, or a clock.
  */
-import type { NotificationKind, SessionActivity } from "@starbase/core"
+import type { NotificationKind, SessionActivity } from "@jingler/core"
 
 /** The slice of a session's state a notification decision depends on. */
 export interface NotifiableState {

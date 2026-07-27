@@ -1,4 +1,4 @@
 {
-  "extends": "@starbase/tsconfig/react.json",
+  "extends": "@jingler/tsconfig/react.json",
   "include": ["src", "vite.config.ts"]
 }

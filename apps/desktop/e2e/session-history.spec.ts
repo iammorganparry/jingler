@@ -20,7 +20,7 @@ import type { SeedSession } from "./fixtures.js"
 
 const baseSession = (over: Partial<SeedSession> & { id: string }): SeedSession => ({
   repo: "widget",
-  branch: `starbase/${over.id}`,
+  branch: `jingler/${over.id}`,
   title: over.id,
   status: "idle",
   cli: "claude",
@@ -114,7 +114,7 @@ test("a session's history survives a real app restart", async ({ launchApp }) =>
   await expect(first.window.getByText("It issues and verifies bearer tokens.")).toBeVisible()
   await first.app.close()
 
-  // Relaunch against the SAME ~/starbase — nothing is re-seeded, so the history
+  // Relaunch against the SAME ~/jingler — nothing is re-seeded, so the history
   // can only come from what the first run left on disk.
   const second = await launchApp({
     home: first.home,
@@ -143,7 +143,7 @@ test("a transcript zeroed by a killed write opens empty rather than breaking the
   })
   await first.app.close()
 
-  writeFileSync(join(first.home, "starbase", "transcripts", "s_zero.json"), "")
+  writeFileSync(join(first.home, "jingler", "transcripts", "s_zero.json"), "")
 
   const second = await launchApp({
     home: first.home,
@@ -190,12 +190,12 @@ test("history written during a run is still there after a restart", async ({ lau
   // ordinary case of polling before the first write into an instant ENOENT
   // failure, ~1s into a 20s budget, and made a timing gap look like a lost
   // transcript. Absent and empty both mean "keep waiting".
-  // Written under the CHAT id, not the session id — `~/starbase/transcripts/
+  // Written under the CHAT id, not the session id — `~/jingler/transcripts/
   // <chatId>.json`. A session seeded without chats migrates to one called
   // `c_<sessionId>_1`, so the old hardcoded `s_run.json` is a file the app has had
   // no reason to write since multi-chat landed. Count every file this session owns
   // (the legacy session-id name included) rather than guessing which one it is.
-  const transcriptsDir = join(first.home, "starbase", "transcripts")
+  const transcriptsDir = join(first.home, "jingler", "transcripts")
   const turnsOnDisk = (): number => {
     let total = 0
     for (const name of readdirSync(transcriptsDir)) {
@@ -238,7 +238,7 @@ test("a session whose PR merged stays in the sidebar instead of auto-archiving",
         {
           number: 7,
           title: "Multi PR session",
-          headRefName: "starbase/s_merged",
+          headRefName: "jingler/s_merged",
           baseRefName: "main",
           author: { login: "morgan" },
           state: "MERGED"
@@ -260,7 +260,7 @@ test("a session whose PR merged stays in the sidebar instead of auto-archiving",
   // Now the interesting part: merged, and STILL an active session. With archived
   // hidden by default, "still listed" IS "still active".
   await expect(sessionRow(window, "Multi PR session")).toBeVisible()
-  const persisted = JSON.parse(readFileSync(join(home, "starbase", "sessions.json"), "utf8"))
+  const persisted = JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf8"))
   expect(persisted[0]?.archived ?? false).toBe(false)
 })
 

@@ -5,7 +5,7 @@
  * script instead. Source: extensions/theme-monokai/themes/monokai-color-theme.json
  * Include chain resolved and flattened at vendor time.
  */
-import type { VsCodeTheme } from "@starbase/core"
+import type { VsCodeTheme } from "@jingler/core"
 
 export const monokai: VsCodeTheme = {
   "type": "dark",

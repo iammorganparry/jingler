@@ -90,7 +90,7 @@ describe("splitModelId", () => {
 describe("mapOpencodePermission", () => {
   /**
    * `ask` is what routes an action onto opencode's permission bus and thus onto
-   * Starbase's own `canUseTool`. Marking a mutating tool `allow` here would
+   * Jingler's own `canUseTool`. Marking a mutating tool `allow` here would
    * bypass the session's HITL mode entirely.
    */
   it("routes mutating tools to the bus for every mode except auto", () => {

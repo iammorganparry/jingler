@@ -5,11 +5,11 @@ import type { SeedSession } from "./fixtures.js"
  * The global command palette, end to end against the built app.
  *
  * What this proves that the unit tests cannot: that ⌘K reaches a listener at all
- * inside a real Electron window (the chord is claimed in `starbase-app.tsx`'s
+ * inside a real Electron window (the chord is claimed in `jingler-app.tsx`'s
  * window keydown, alongside the split map), that rebinding the sidebar filter to
  * ⌘F did not simply delete it, and that an action which lives in the RENDERER —
  * the terminal dock's visibility — is genuinely reachable from a palette rendered
- * inside `@starbase/ui`. That last one is the point of the two props added for
+ * inside `@jingler/ui`. That last one is the point of the two props added for
  * it; a unit test would only ever assert the prop was called.
  */
 
@@ -19,7 +19,7 @@ const seededSessions: ReadonlyArray<SeedSession> = [
   {
     id: "sess-alpha",
     repo: "widget",
-    branch: "starbase/alpha",
+    branch: "jingler/alpha",
     title: "Alpha session",
     status: "idle",
     cli: "claude",
@@ -33,7 +33,7 @@ const seededSessions: ReadonlyArray<SeedSession> = [
   {
     id: "sess-beta",
     repo: "widget",
-    branch: "starbase/beta",
+    branch: "jingler/beta",
     title: "Beta session",
     status: "idle",
     cli: "claude",

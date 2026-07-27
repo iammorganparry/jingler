@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { Attachment } from "@starbase/core"
+import type { Attachment } from "@jingler/core"
 import type { Input, UserInput } from "@openai/codex-sdk"
 
 const extensionFor = (mediaType: string): string => {
@@ -44,7 +44,7 @@ export const toCodexAppServerInput = (input: Input): ReadonlyArray<CodexAppServe
 }
 
 /**
- * Materialize Starbase's durable base64 attachments for Codex.
+ * Materialize Jingler's durable base64 attachments for Codex.
  *
  * Both transports accept local image paths. A private temporary directory keeps
  * transcript data out of the worktree and is removed whether the turn succeeds,
@@ -58,7 +58,7 @@ export const stageCodexInput = async (
     return { input: prompt, cleanup: () => Promise.resolve() }
   }
 
-  const directory = await mkdtemp(join(tmpdir(), "starbase-codex-images-"))
+  const directory = await mkdtemp(join(tmpdir(), "jingler-codex-images-"))
   const cleanup = () => rm(directory, { recursive: true, force: true })
   try {
     const input: Array<UserInput> = []

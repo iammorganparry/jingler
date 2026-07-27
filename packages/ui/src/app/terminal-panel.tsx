@@ -43,8 +43,8 @@ export interface TerminalDockProps {
 }
 
 // Persisted, clamped dock sizes — one per axis so switching sides keeps both.
-const HEIGHT = { key: "starbase.terminal.height", initial: 260, min: 140, max: 720 }
-const WIDTH = { key: "starbase.terminal.width", initial: 480, min: 300, max: 920 }
+const HEIGHT = { key: "jingler.terminal.height", initial: 260, min: 140, max: 720 }
+const WIDTH = { key: "jingler.terminal.width", initial: 480, min: 300, max: 920 }
 
 /** The dockable terminal shell. Renders every tab's cell (only the active one is
  * shown) so switching tabs — or hiding the dock — never tears down xterm. */

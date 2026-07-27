@@ -69,7 +69,7 @@ const SEPARATORS = new Set([" ", "-", "_", "/", ".", ":", "@"])
  * A subsequence matcher, not a substring one, and that is the entire point:
  * `filterSessions` in `session-filters.ts` uses `String.includes`, so "ssb"
  * finds nothing. In a palette, "ssb" is how a person asks for
- * `starbase/session-sidebar`, and a palette that answers "no results" to an
+ * `jingler/session-sidebar`, and a palette that answers "no results" to an
  * abbreviation is one people stop reaching for.
  *
  * The bonuses matter more than the base rate. A character matched at the start
@@ -186,10 +186,10 @@ export const itemKeywords = (item: PaletteItem): ReadonlyArray<string> =>
 /**
  * A command a plugin's manifest contributed, flattened for the palette.
  *
- * `CommandContribution` in `@starbase/core` is documented as "an entry in the
+ * `CommandContribution` in `@jingler/core` is documented as "an entry in the
  * command palette" and the `Plugins.invoke` RPC has existed alongside it — until
  * now there was simply no palette for it to be an entry in. This is the shape
- * the renderer hands across, because `@starbase/ui` cannot reach the RPC client
+ * the renderer hands across, because `@jingler/ui` cannot reach the RPC client
  * to fetch it itself.
  */
 export interface PluginPaletteCommand {
@@ -206,7 +206,7 @@ export interface PluginPaletteCommand {
 /**
  * The headings the app itself uses.
  *
- * Exported so `starbase-app.tsx` builds its groups from the same constants this
+ * Exported so `jingler-app.tsx` builds its groups from the same constants this
  * module defends — two lists spelled the same way in two files is how a reserved
  * name stops being reserved.
  */

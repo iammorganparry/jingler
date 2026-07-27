@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { AdversarialReview, PrFileChange, PrReviewThread, ReviewFinding } from "@starbase/core"
+import type { AdversarialReview, PrFileChange, PrReviewThread, ReviewFinding } from "@jingler/core"
 import { MessageSquare, PanelLeft, PanelRight, Sparkles, Undo2 } from "lucide-react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"

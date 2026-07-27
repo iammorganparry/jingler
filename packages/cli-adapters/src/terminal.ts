@@ -22,8 +22,8 @@
 import { spawn, type IPty } from "@homebridge/node-pty-prebuilt-multiarch"
 import { basename } from "node:path"
 import { randomUUID } from "node:crypto"
-import { TerminalError } from "@starbase/core"
-import type { TerminalChunk, TerminalInfo } from "@starbase/core"
+import { TerminalError } from "@jingler/core"
+import type { TerminalChunk, TerminalInfo } from "@jingler/core"
 import { Effect, Exit, Mailbox, Stream } from "effect"
 import { neutralCwd } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
@@ -144,7 +144,7 @@ const shellArgs = (): string[] => (isWindows ? [] : ["-l"])
 
 /**
  * The environment for a session's shell: terminal-friendly, and scrubbed of the
- * toolchain configuration Starbase itself was launched with.
+ * toolchain configuration Jingler itself was launched with.
  *
  * `worktreeEnv` is what stops this shell inheriting the ORIGIN repo's `.npmrc`
  * (as `npm_config_*`) and its `node_modules/.bin` on `PATH` — see that module
@@ -186,7 +186,7 @@ export interface CreateTerminalInput {
  * streaming seam the RPC handlers delegate to. No Effect environment required —
  * it only touches the process table + in-memory buffers.
  */
-export class TerminalService extends Effect.Service<TerminalService>()("@starbase/TerminalService", {
+export class TerminalService extends Effect.Service<TerminalService>()("@jingler/TerminalService", {
   effect: Effect.gen(function* () {
     const handles = new Map<string, Handle>()
 
@@ -195,7 +195,7 @@ export class TerminalService extends Effect.Service<TerminalService>()("@starbas
         try: () => {
           const shell = defaultShell()
           // A terminal with no session anchors to the user's home, NOT the app's
-          // cwd — which in dev is whichever worktree Starbase was launched from,
+          // cwd — which in dev is whichever worktree Jingler was launched from,
           // so commands typed here would run inside an unrelated repo.
           const worktree = input.cwd?.trim() || undefined
           const cwd = worktree ?? neutralCwd()

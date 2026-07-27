@@ -7,7 +7,7 @@ import type {
   PrTimelineItem,
   PullRequest,
   ReviewSubmitKind
-} from "@starbase/core"
+} from "@jingler/core"
 import { GitPullRequest, PanelRight } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"

@@ -1,4 +1,4 @@
-import type { CliKind, ProviderUsage, Usage, UsageStatus, UsageWindow } from "@starbase/core"
+import type { CliKind, ProviderUsage, Usage, UsageStatus, UsageWindow } from "@jingler/core"
 import { Gauge, RefreshCw } from "lucide-react"
 import { Badge } from "../components/badge.js"
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/dialog.js"

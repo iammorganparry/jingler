@@ -4,15 +4,15 @@ import { delimiter, isAbsolute, relative, resolve, sep } from "node:path"
  * Strip the PARENT process's toolchain configuration out of a child's
  * environment.
  *
- * Starbase is itself launched through a package-manager script (`pnpm --filter
- * @starbase/desktop dev`), and pnpm publishes its RESOLVED configuration into
+ * Jingler is itself launched through a package-manager script (`pnpm --filter
+ * @jingler/desktop dev`), and pnpm publishes its RESOLVED configuration into
  * the environment before running one: an `npm_config_*` variable for every
  * setting in the launching repo's `.npmrc`, `PNPM_SCRIPT_SRC_DIR` naming the
  * directory it was invoked from, and a `PATH` prefixed with that repo's
  * `node_modules/.bin`.
  *
  * Every agent session inherits the lot. So a session working in
- * `~/starbase/worktrees/acme/feature` runs its installs under the ORIGIN
+ * `~/jingler/worktrees/acme/feature` runs its installs under the ORIGIN
  * repo's `.npmrc` and resolves binaries from the ORIGIN repo's `.bin` — a
  * different repository, on a different branch, possibly a different package
  * manager. And because environment variables OUTRANK `.npmrc`, the worktree
@@ -21,7 +21,7 @@ import { delimiter, isAbsolute, relative, resolve, sep } from "node:path"
  *
  * Observed concretely while measuring worktree disk use:
  * `npm_config_node_linker=hoisted` and `npm_config_shamefully_hoist=true` were
- * reaching every session from `/Users/…/repos/starbase`, so a `pnpm install`
+ * reaching every session from `/Users/…/repos/jingler`, so a `pnpm install`
  * inside a worktree silently used the origin's linker no matter what that
  * worktree's `.npmrc` said.
  *
@@ -56,7 +56,7 @@ const DROP_EXACT: ReadonlySet<string> = new Set([
  *
  * `npm_config_*` is the whole resolved `.npmrc` of the launching repo — the
  * variables that actually caused the bug. `npm_package_*` and `npm_lifecycle_*`
- * describe the SCRIPT pnpm was running (Starbase's own `dev`), which is
+ * describe the SCRIPT pnpm was running (Jingler's own `dev`), which is
  * meaningless and misleading inside an unrelated repository.
  */
 const DROP_PREFIXES: ReadonlyArray<string> = ["npm_config_", "npm_package_", "npm_lifecycle_"]
@@ -94,7 +94,7 @@ const isWithin = (parent: string, child: string): boolean => {
  *
  * The worktree's own `.bin` is legitimate and stays — that is the session's
  * tooling. Anything else pointing into a `node_modules/.bin` belongs to the
- * repository Starbase was launched from and would shadow the session's own
+ * repository Jingler was launched from and would shadow the session's own
  * binaries with another branch's versions.
  *
  * Non-absolute entries are left alone: they are relative to the child's cwd,
@@ -107,7 +107,7 @@ const isForeignBin = (entry: string, worktreePath: string | undefined): boolean 
   if (!normalised.endsWith(tail)) return false
   // A BLANK worktree is "no worktree", not "the current directory".
   //
-  // `resolve("")` returns the process cwd — which for Starbase is the checkout
+  // `resolve("")` returns the process cwd — which for Jingler is the checkout
   // it was launched from. Treating that as "our" worktree would mark the
   // launcher's own `.bin` as legitimately ours and keep it, silently
   // reinstating the exact leak this module exists to close. Callers pass

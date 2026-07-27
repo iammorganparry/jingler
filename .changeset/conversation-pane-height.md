@@ -1,5 +1,5 @@
 ---
-"@starbase/ui": patch
+"@jingler/ui": patch
 ---
 
 Fixed: conversation panes sized to their content instead of filling their slot, stranding the composer mid-pane.

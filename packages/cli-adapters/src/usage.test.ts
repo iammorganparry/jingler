@@ -1,11 +1,11 @@
-import type { CliInfo } from "@starbase/core"
+import type { CliInfo } from "@jingler/core"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import { UsageService } from "./usage.js"
 
 /**
  * UsageService assembly. The live provider paths spawn their local harnesses, so
- * here we drive scripted mode (STARBASE_SCRIPTED_AGENT) to assert the hermetic
+ * here we drive scripted mode (JINGLER_SCRIPTED_AGENT) to assert the hermetic
  * behaviour: installed harnesses appear, none claim live data, uninstalled ones
  * are dropped, and a `fetchedAt` stamp is always set. Live reads are covered by
  * the provider-specific usage tests.
@@ -23,13 +23,13 @@ const run = <A>(effect: Effect.Effect<A, never, UsageService>) =>
   Effect.runPromise(effect.pipe(Effect.provide(UsageService.Default)))
 
 const withScripted = async <A>(fn: () => Promise<A>): Promise<A> => {
-  const prev = process.env.STARBASE_SCRIPTED_AGENT
-  process.env.STARBASE_SCRIPTED_AGENT = "1"
+  const prev = process.env.JINGLER_SCRIPTED_AGENT
+  process.env.JINGLER_SCRIPTED_AGENT = "1"
   try {
     return await fn()
   } finally {
-    if (prev === undefined) delete process.env.STARBASE_SCRIPTED_AGENT
-    else process.env.STARBASE_SCRIPTED_AGENT = prev
+    if (prev === undefined) delete process.env.JINGLER_SCRIPTED_AGENT
+    else process.env.JINGLER_SCRIPTED_AGENT = prev
   }
 }
 

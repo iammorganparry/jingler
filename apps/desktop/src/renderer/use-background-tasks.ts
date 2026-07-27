@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import type { BackgroundTask } from "@starbase/core"
+import type { BackgroundTask } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
 
 /** How often the dock re-reads the registry. An in-memory map read over IPC. */

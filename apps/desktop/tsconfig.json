@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
-  "extends": "@starbase/tsconfig/base.json",
+  "extends": "@jingler/tsconfig/base.json",
   "compilerOptions": {
     // One config typechecks all three Electron parts. Main/preload are Node,
     // the renderer is React 19 in the DOM — so we enable both `node` and the

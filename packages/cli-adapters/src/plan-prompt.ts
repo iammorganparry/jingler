@@ -1,5 +1,5 @@
-import type { CliKind } from "@starbase/core"
-import { supportsPlanMode } from "@starbase/core"
+import type { CliKind } from "@jingler/core"
+import { supportsPlanMode } from "@jingler/core"
 import { planInstructions } from "./plan-parse.js"
 
 /**
@@ -9,7 +9,7 @@ import { planInstructions } from "./plan-parse.js"
  * alongside `permissionMode: "plan"` (see `claude-adapter.ts`), and restating
  * the protocol in the prompt body would compete with the `ExitPlanMode` tool the
  * harness is already being steered toward. Null for anything that cannot plan at
- * all — cursor falls through to the scripted stub, starbase orchestrates rather
+ * all — cursor falls through to the scripted stub, jingler orchestrates rather
  * than runs turns.
  *
  * Everything else gets the SAME grammar via `planInstructions("reply")`, which is

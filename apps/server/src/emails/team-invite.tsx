@@ -24,7 +24,7 @@ export interface TeamInviteProps {
 }
 
 export const teamInviteSubject = (inviterName: string, teamName: string): string =>
-  `${inviterName} invited you to ${teamName} on Starbase`
+  `${inviterName} invited you to ${teamName} on Jingler`
 
 export function TeamInvite({
   inviterName,
@@ -118,7 +118,7 @@ TeamInvite.PreviewProps = {
   teamInitial: "A",
   roster: "6 members · 12 active sessions",
   role: "Member",
-  acceptUrl: "https://app.starbase.dev/invite/accept?t=inv_9f2c",
+  acceptUrl: "https://app.jingler.dev/invite/accept?t=inv_9f2c",
   email: "you@acme.dev"
 } satisfies TeamInviteProps
 

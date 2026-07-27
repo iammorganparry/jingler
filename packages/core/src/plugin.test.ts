@@ -200,7 +200,7 @@ describe("PluginCatalog", () => {
       plugins: [
         {
           manifest: HELLO,
-          dir: "/home/dev/starbase/plugins/hello",
+          dir: "/home/dev/jingler/plugins/hello",
           enabled: true,
           activated: false,
           builtin: false

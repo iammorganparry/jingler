@@ -5,8 +5,8 @@ import { fetchClaudeUsage, toClaudeProviderUsage } from "./claude-usage.js"
 /**
  * The mapper is pure and always tested against a captured real response. The
  * live read spawns the SDK and needs the user's `claude` login, so it's gated
- * behind STARBASE_LIVE_CLAUDE=1 (run locally: `STARBASE_LIVE_CLAUDE=1 pnpm
- * --filter @starbase/cli-adapters test claude-usage`).
+ * behind JINGLER_LIVE_CLAUDE=1 (run locally: `JINGLER_LIVE_CLAUDE=1 pnpm
+ * --filter @jingler/cli-adapters test claude-usage`).
  */
 
 // A real response captured from `usage_EXPERIMENTAL...` on a Max plan.
@@ -74,7 +74,7 @@ describe("toClaudeProviderUsage", () => {
 })
 
 describe("fetchClaudeUsage (live)", () => {
-  it.skipIf(!process.env.STARBASE_LIVE_CLAUDE)(
+  it.skipIf(!process.env.JINGLER_LIVE_CLAUDE)(
     "reads real plan usage from the logged-in SDK",
     async () => {
       const res = await fetchClaudeUsage(null)

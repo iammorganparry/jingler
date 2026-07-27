@@ -1,4 +1,4 @@
-import type { CliKind } from "@starbase/core"
+import type { CliKind } from "@jingler/core"
 import { Effect, Layer } from "effect"
 import { CliAdapter, scriptedRun } from "./adapter.js"
 import { runClaude } from "./claude-adapter.js"

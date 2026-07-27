@@ -8,7 +8,7 @@ import type {
   CreateSessionFromPrInput,
   CreateSessionInput,
   Session
-} from "@starbase/core"
+} from "@jingler/core"
 import { GhService } from "./gh.js"
 import { GitService } from "./git.js"
 import { SessionStore } from "./sessions.js"
@@ -37,7 +37,7 @@ describe("SessionStore", () => {
   let repoPath: string
   beforeEach(() => {
     temp = withTempRoot()
-    repos = mkTemp("starbase-repos-")
+    repos = mkTemp("jingler-repos-")
     repoPath = initGitRepo(join(repos.dir, "trigify-app"))
   })
   afterEach(() => {
@@ -164,7 +164,7 @@ describe("SessionStore", () => {
     expect(existsSync(second.value.worktreePath!)).toBe(true)
   })
 
-  it("creates an idle session with a starbase/<slug> branch and a worktree path", async () => {
+  it("creates an idle session with a jingler/<slug> branch and a worktree path", async () => {
     const exit = await runExit(
       SessionStore.create(input()).pipe(Effect.provide(services)),
       temp.layer
@@ -174,7 +174,7 @@ describe("SessionStore", () => {
     const s = exit.value
     expect(s.status).toBe("idle")
     // The slug folds in a unique stamp so auto-named sessions never collide.
-    expect(s.branch).toMatch(/^starbase\/fix-login-bug-[a-z0-9]+$/)
+    expect(s.branch).toMatch(/^jingler\/fix-login-bug-[a-z0-9]+$/)
     expect(s.baseBranch).toBe("main")
     expect(s.worktreePath).toMatch(
       new RegExp(`${join(temp.root, "worktrees", "trigify-app")}/fix-login-bug-[a-z0-9]+$`)
@@ -312,7 +312,7 @@ describe("SessionStore", () => {
       temp.layer
     )
     expect(exit._tag).toBe("Success")
-    if (exit._tag === "Success") expect(exit.value.branch).toMatch(/^starbase\/session-[a-z0-9]+$/)
+    if (exit._tag === "Success") expect(exit.value.branch).toMatch(/^jingler\/session-[a-z0-9]+$/)
   })
 
   it("stages an untitled session in a detached friendly-named worktree", async () => {
@@ -900,7 +900,7 @@ describe("SessionStore", () => {
     )
     if (created._tag !== "Success") throw new Error("expected session")
     const worktreePath = created.value.worktreePath!
-    const rescueBranch = `starbase/${basename(worktreePath)}`
+    const rescueBranch = `jingler/${basename(worktreePath)}`
     writeFileSync(join(worktreePath, "work.ts"), "saved\n")
     execFileSync("git", ["add", "work.ts"], { cwd: worktreePath })
     execFileSync("git", ["commit", "-m", "detached work", "--no-gpg-sign"], {
@@ -960,7 +960,7 @@ describe("SessionStore", () => {
     ...over
   })
 
-  it("createFromIssue forks a starbase/<n>-slug branch, links the issue, seeds the task", async () => {
+  it("createFromIssue forks a jingler/<n>-slug branch, links the issue, seeds the task", async () => {
     const exit = await runExit(
       SessionStore.createFromIssue(issueInput()).pipe(Effect.provide(services)),
       temp.layer
@@ -968,7 +968,7 @@ describe("SessionStore", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     const s = exit.value
-    expect(s.branch).toBe("starbase/128-refund-route-500s-on-a-stale-token")
+    expect(s.branch).toBe("jingler/128-refund-route-500s-on-a-stale-token")
     expect(s.issueNumber).toBe(128)
     expect(s.issueUrl).toBe("https://github.com/acme/api/issues/128")
     expect(s.issueTitle).toBe("Refund route 500s on a stale token")

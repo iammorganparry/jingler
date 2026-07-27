@@ -32,7 +32,7 @@ describe("fuzzyScore", () => {
    * anyone types into a palette.
    */
   it("matches an abbreviation that a substring filter cannot", () => {
-    const haystack = "starbase/session-sidebar"
+    const haystack = "jingler/session-sidebar"
     expect(haystack.includes("ssb")).toBe(false)
     expect(fuzzyScore(haystack, "ssb")).toBeGreaterThan(0)
   })
@@ -55,7 +55,7 @@ describe("fuzzyScore", () => {
   it("scores within 0..1 so cmdk's ordering stays comparable across rows", () => {
     for (const [haystack, query] of [
       ["theme tokens", "theme"],
-      ["starbase/session-sidebar", "ssb"],
+      ["jingler/session-sidebar", "ssb"],
       ["a", "a"]
     ] as const) {
       const score = fuzzyScore(haystack, query)
@@ -164,8 +164,8 @@ describe("itemKeywords", () => {
 
   it("includes the detail when there is one", () => {
     expect(
-      itemKeywords(item({ label: "auth", detail: "starbase · feat/auth", group: "Sessions" }))
-    ).toEqual(["auth", "starbase · feat/auth", "Sessions"])
+      itemKeywords(item({ label: "auth", detail: "jingler · feat/auth", group: "Sessions" }))
+    ).toEqual(["auth", "jingler · feat/auth", "Sessions"])
   })
 })
 

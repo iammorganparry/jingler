@@ -6,7 +6,7 @@
  * Nothing at runtime: both return their input untouched. Everything they do is
  * in the type system, and it is aimed at one failure mode.
  *
- * A plugin declares its tabs in `starbase.plugin.json` AND implements them in
+ * A plugin declares its tabs in `jingler.plugin.json` AND implements them in
  * its UI module. Those two lists have to agree, and nothing about writing them
  * separately makes them agree — declare `linear.issues`, export a view called
  * `linear.issue`, and the app loads, the tab appears, and clicking it shows an
@@ -35,7 +35,7 @@ import type { SessionSnapshot } from "./common.js"
 
 // ── What a manifest looks like, in TypeScript ────────────────────────────────
 
-/** When a tab should appear. Mirrors `TabVisibility` in `@starbase/core`. */
+/** When a tab should appear. Mirrors `TabVisibility` in `@jingler/core`. */
 export type TabVisibility = "always" | "hasPr" | "hasWorktree" | "hasIssue"
 
 /** One tab a plugin adds to the session pane. */
@@ -89,17 +89,17 @@ export type ActivationEvent =
 
 /** The manifest shape, before id capture. */
 export interface ManifestInput {
-  /** Lowercase kebab-case, and the directory name under `~/starbase/plugins`. */
+  /** Lowercase kebab-case, and the directory name under `~/jingler/plugins`. */
   readonly id: string
   readonly name: string
   readonly version: string
   readonly description?: string
   readonly publisher?: string
   /**
-   * The Starbase plugin API generation you built against — see
+   * The Jingler plugin API generation you built against — see
    * `PLUGIN_API_VERSION`, currently **1**.
    *
-   * Optional, and worth setting. A Starbase older than your plugin refuses it at
+   * Optional, and worth setting. A Jingler older than your plugin refuses it at
    * load with a sentence saying so; without this field the same mismatch is a
    * stack trace from inside your bundle, on someone else's machine.
    *
@@ -177,7 +177,7 @@ type NamespaceCheck<M> =
     : TabIdsOf<M> | PaneIdsOf<M> | CommandIdsOf<M> extends ContributionId<M>
       ? unknown
       : {
-          readonly __starbase_error: `every contribution id must start with "${IdOf<M>}."`
+          readonly __jingler_error: `every contribution id must start with "${IdOf<M>}."`
         }
 
 // ── The two calls ────────────────────────────────────────────────────────────
@@ -186,7 +186,7 @@ type NamespaceCheck<M> =
  * Declare a plugin's manifest with its ids captured as literal types.
  *
  * Returns its input unchanged — the value is exactly what belongs in
- * `starbase.plugin.json`, so the usual arrangement is to generate the JSON from
+ * `jingler.plugin.json`, so the usual arrangement is to generate the JSON from
  * this at build time and keep one source of truth.
  *
  * @example
@@ -287,7 +287,7 @@ type PanesFor<M> = [PaneIdsOf<M>] extends [never]
  *
  * @example
  * ```ts
- * import { defineManifest, definePlugin, type TabProps } from "@starbase/plugin-sdk"
+ * import { defineManifest, definePlugin, type TabProps } from "@jingler/plugin-sdk"
  *
  * const manifest = defineManifest({
  *   id: "linear", name: "Linear", version: "1.0.0", ui: "dist/ui.js",

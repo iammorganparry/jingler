@@ -21,7 +21,7 @@ export class DatabaseError extends Data.TaggedError("DatabaseError")<{
 /** The Drizzle client type, for repositories to type their query callbacks. */
 export type DrizzleClient = typeof db
 
-export class Database extends Effect.Service<Database>()("@starbase/server/Database", {
+export class Database extends Effect.Service<Database>()("@jingler/server/Database", {
   accessors: true,
   sync: () => ({
     /**

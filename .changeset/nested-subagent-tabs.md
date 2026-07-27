@@ -1,8 +1,8 @@
 ---
-"@starbase/cli-adapters": minor
-"@starbase/core": minor
-"@starbase/desktop": minor
-"@starbase/ui": minor
+"@jingler/cli-adapters": minor
+"@jingler/core": minor
+"@jingler/desktop": minor
+"@jingler/ui": minor
 ---
 
 Nested sub-agent tabs — a sub-agent that spawns its own sub-agents now gets them as tabs, at any depth.

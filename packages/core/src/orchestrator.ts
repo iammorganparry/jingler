@@ -5,7 +5,7 @@ import type { WorkspaceConfig } from "./domain.js"
 /**
  * The model the orchestrator speaks as.
  *
- * Deliberately ONE model rather than a per-message decision. Starbase's whole
+ * Deliberately ONE model rather than a per-message decision. Jingler's whole
  * claim is that it picks the right agent for a piece of work — but that claim is
  * only interesting where the answer varies, which is across the steps of a plan.
  * For everything else, an operator who selected the orchestrator wants a
@@ -28,7 +28,7 @@ export const ORCHESTRATOR_DEFAULT: { readonly cli: CliKind; readonly model: stri
 /**
  * Resolve the orchestrator's harness+model from config.
  *
- * Never returns `starbase`: the orchestrator cannot be its own backend, and a
+ * Never returns `jingler`: the orchestrator cannot be its own backend, and a
  * config that says otherwise (hand-edited, or written by an older build) would
  * otherwise recurse. Falling back is the only safe reading of that.
  */
@@ -36,7 +36,7 @@ export const resolveOrchestrator = (
   config: WorkspaceConfig | null
 ): { readonly cli: CliKind; readonly model: string } => {
   const chosen = config?.orchestrator
-  if (chosen === undefined || chosen.cli === "starbase") return ORCHESTRATOR_DEFAULT
+  if (chosen === undefined || chosen.cli === "jingler") return ORCHESTRATOR_DEFAULT
   return chosen
 }
 

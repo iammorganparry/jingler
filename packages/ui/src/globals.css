@@ -6,7 +6,7 @@
 @import "katex/dist/katex.min.css";
 
 /*
- * Starbase design system — a shadcn/Tailwind v4 base over swappable themes.
+ * Jingler design system — a shadcn/Tailwind v4 base over swappable themes.
  *
  * ## This block is the FALLBACK, not the theme
  *
@@ -14,12 +14,12 @@
  * the `@theme inline` block underneath, so components only ever say `bg-panel`
  * / `text-blue` / `border-line` and never a hex. That indirection is what makes
  * theming possible at all: `ThemeProvider` (packages/ui/src/theme-provider.tsx)
- * appends a single `<style id="starbase-theme">` that re-declares these same
+ * appends a single `<style id="jingler-theme">` that re-declares these same
  * properties on `:root`, and the whole app repaints without one component
  * knowing themes exist.
  *
  * The values here are One Dark Pro, which is also `DEFAULT_THEME_ID`. They are
- * kept in sync with what `@starbase/themes` folds the One Dark Pro preset down
+ * kept in sync with what `@jingler/themes` folds the One Dark Pro preset down
  * to — a test pins all 26 of them — so applying the default theme is a
  * pixel-exact no-op and the app is correctly styled during the instant before
  * the theme sheet is attached.

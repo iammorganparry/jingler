@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import type { CliInfo, CliKind } from "@starbase/core"
+import type { CliInfo, CliKind } from "@jingler/core"
 import type { CommandExecutor } from "@effect/platform"
 import { Effect } from "effect"
 import { expandHome, runString, which } from "./command.js"
@@ -13,7 +13,7 @@ interface CliSpec {
   readonly bins: ReadonlyArray<string>
   readonly candidates: ReadonlyArray<string>
   /**
-   * Lowest version Starbase can drive, as `[major, minor]`. Absent = any version
+   * Lowest version Jingler can drive, as `[major, minor]`. Absent = any version
    * goes (we adapt to whatever the user has). Present only where an older line is
    * genuinely undriveable rather than merely dated.
    */
@@ -90,9 +90,9 @@ const CLI_SPECS: Record<CliKind, CliSpec> = {
   // Order matters beyond cosmetics: callers take the first available harness as
   // the default for a NEW session, and defaulting to the orchestrator would put
   // every new session through a multi-minute, multi-model planning round nobody
-  // asked for. Selecting Starbase must stay a deliberate act.
-  starbase: {
-    label: "Starbase",
+  // asked for. Selecting Jingler must stay a deliberate act.
+  jingler: {
+    label: "Jingler",
     bins: [],
     candidates: []
   }
@@ -112,7 +112,7 @@ const CLI_SPECS: Record<CliKind, CliSpec> = {
  * override therefore replaces BOTH lookups — it is the only way to make discovery
  * hermetic.
  */
-const DISCOVERY_BIN_DIR = "STARBASE_DISCOVERY_BIN_DIR"
+const DISCOVERY_BIN_DIR = "JINGLER_DISCOVERY_BIN_DIR"
 
 /** The pinned discovery dir, or null when discovery should probe the real host. */
 const pinnedBinDir = (): string | null => {
@@ -157,7 +157,7 @@ const tooOld = (kind: CliKind, spec: CliSpec, version: string | null): CliInfo =
   return unavailable(
     kind,
     spec,
-    `${spec.label} ${version ?? "(unknown version)"} found — Starbase needs ${major}.${minor} or newer.${upgrade}`
+    `${spec.label} ${version ?? "(unknown version)"} found — Jingler needs ${major}.${minor} or newer.${upgrade}`
   )
 }
 
@@ -167,14 +167,14 @@ const probe = (
   spec: CliSpec
 ): Effect.Effect<CliInfo, never, CommandExecutor.CommandExecutor> =>
   Effect.gen(function* () {
-    // Starbase ships WITH the app, so "is it installed" is always yes and there
+    // Jingler ships WITH the app, so "is it installed" is always yes and there
     // is nothing on disk to look for. Availability here means exactly that;
     // whether a round can actually run on this host is a different question with
     // a different answer (`planningReadiness` — it needs two independent
     // vendors), and the picker renders that as a disabled entry with the reason.
     // Conflating the two here would report the orchestrator as "not installed",
     // which is both false and unactionable.
-    if (kind === "starbase") {
+    if (kind === "jingler") {
       return {
         kind,
         label: spec.label,
@@ -236,7 +236,7 @@ const probe = (
  * `NodeCommandExecutor.layer` in the Electron main process).
  */
 export class DiscoveryService extends Effect.Service<DiscoveryService>()(
-  "@starbase/DiscoveryService",
+  "@jingler/DiscoveryService",
   {
     accessors: true,
     sync: () => ({

@@ -1,5 +1,5 @@
 import type * as React from "react"
-import type { SessionPrStatus } from "@starbase/core"
+import type { SessionPrStatus } from "@jingler/core"
 import {
   Check,
   GitMerge,

@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react"
-import type { DiffStat, Session, SessionActivity, SessionDisplayStatus } from "@starbase/core"
-import { activityLabel, displayStatusOf, UNTITLED_SESSION } from "@starbase/core"
+import type { DiffStat, Session, SessionActivity, SessionDisplayStatus } from "@jingler/core"
+import { activityLabel, displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
 import { displayStatusLabel } from "../tokens.js"
 import { atLeast, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js"
 import { TabBar } from "../app/tab-bar.js"

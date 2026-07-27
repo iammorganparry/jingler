@@ -1,6 +1,6 @@
 ---
-"@starbase/cli-adapters": minor
-"@starbase/desktop": minor
+"@jingler/cli-adapters": minor
+"@jingler/desktop": minor
 ---
 
 Run multiple chats in one session at the same time.

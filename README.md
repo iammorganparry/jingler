@@ -1,11 +1,11 @@
-# Starbase
+# Jingler
 
-Starbase is a desktop workspace for running coding agents across multiple repositories. Each
+Jingler is a desktop workspace for running coding agents across multiple repositories. Each
 session gets its own git branch and isolated worktree, so agents can plan, edit, test, and open
 pull requests without colliding with one another.
 
-It is an Electron application backed by a small local authentication service. Starbase discovers
-the coding CLIs already installed on your machine and keeps its desktop state in `~/starbase`.
+It is an Electron application backed by a small local authentication service. Jingler discovers
+the coding CLIs already installed on your machine and keeps its desktop state in `~/jingler`.
 
 ## What you can do
 
@@ -26,16 +26,16 @@ the coding CLIs already installed on your machine and keeps its desktop state in
 [GitHub CLI](https://cli.github.com/) is optional. Install it and run `gh auth login` to enable
 pull-request and issue features.
 
-Starbase currently requires Codex CLI 0.144 or newer and OpenCode 1.18 or newer. The app reports
+Jingler currently requires Codex CLI 0.144 or newer and OpenCode 1.18 or newer. The app reports
 an upgrade command if it finds an older version.
 
-## Run Starbase from source
+## Run Jingler from source
 
 1. Clone the repository and install dependencies.
 
    ```bash
-   git clone https://github.com/iammorganparry/starbase.git
-   cd starbase
+   git clone https://github.com/iammorganparry/jingler.git
+   cd jingler
    pnpm install
    ```
 
@@ -53,7 +53,7 @@ an upgrade command if it finds an older version.
 
    ```bash
    docker compose up -d db
-   pnpm --filter @starbase/server db:migrate
+   pnpm --filter @jingler/server db:migrate
    ```
 
 4. Start the auth server and desktop app.
@@ -62,23 +62,23 @@ an upgrade command if it finds an older version.
    pnpm dev
    ```
 
-   The server listens on `http://localhost:9100`, and Electron opens the Starbase window.
+   The server listens on `http://localhost:9100`, and Electron opens the Jingler window.
 
 5. Sign in with an email address.
 
    In local development, copy the magic-link URL printed by the server process and open it in
-   your browser. The browser redirects back to the desktop app through the `starbase://` protocol.
+   your browser. The browser redirects back to the desktop app through the `jingler://` protocol.
 
 ## First session
 
 1. On the welcome screen, choose the parent folder that contains your git repositories, such as
-   `~/repos`. Starbase scans for repositories up to three directories deep.
+   `~/repos`. Jingler scans for repositories up to three directories deep.
 
 2. Open **New session** or press <kbd>⌘</kbd><kbd>N</kbd>, then select a repository and base
    branch. The default coding CLI is configured under **Settings → Providers**.
 
-3. Create the session. Starbase forks a branch into an isolated worktree under
-   `~/starbase/worktrees` and opens the conversation for that worktree.
+3. Create the session. Jingler forks a branch into an isolated worktree under
+   `~/jingler/worktrees` and opens the conversation for that worktree.
 
 4. Describe the task in the composer. Use the plan controls when you want a reviewable plan before
    implementation, and inspect file changes from the session's changes view.
@@ -101,11 +101,11 @@ Run these from the repository root:
 Useful focused commands:
 
 ```bash
-pnpm --filter @starbase/desktop dev
-pnpm --filter @starbase/server dev
-pnpm --filter @starbase/server test:integration
-pnpm --filter @starbase/desktop e2e
-pnpm --filter @starbase/desktop electron:pack
+pnpm --filter @jingler/desktop dev
+pnpm --filter @jingler/server dev
+pnpm --filter @jingler/server test:integration
+pnpm --filter @jingler/desktop e2e
+pnpm --filter @jingler/desktop electron:pack
 ```
 
 The integration tests require the Docker database and applied migrations. The Electron
@@ -114,9 +114,9 @@ Playwright suite runs locally and is not part of CI.
 ## Configuration and data
 
 The desktop stores configuration, sessions, transcripts, themes, worktrees, and encrypted auth
-state under `~/starbase`. Set `STARBASE_HOME` before starting the app to use another location.
+state under `~/jingler`. Set `JINGLER_HOME` before starting the app to use another location.
 
-The desktop connects to `http://localhost:9100` by default. Set `STARBASE_AUTH_URL` to point it at
+The desktop connects to `http://localhost:9100` by default. Set `JINGLER_AUTH_URL` to point it at
 another auth service.
 
 Server configuration lives in `apps/server/.env`. The local defaults need no third-party
@@ -142,13 +142,13 @@ so development changes are picked up without a separate package build.
 
 **No repositories appear**
 
-Choose the directory that contains your repositories, not an individual repository. Starbase
+Choose the directory that contains your repositories, not an individual repository. Jingler
 stops scanning after three nested directory levels and ignores build and dependency directories.
 
 **No coding CLI is available**
 
 Install and authenticate Claude Code, Codex CLI, Cursor Agent, or OpenCode, then reopen the new
-session dialog. GUI applications can have a limited `PATH`; Starbase also checks common install
+session dialog. GUI applications can have a limited `PATH`; Jingler also checks common install
 locations such as `~/.local/bin` and `/opt/homebrew/bin`.
 
 **Sign-in email does not arrive in local development**
@@ -159,14 +159,14 @@ terminal.
 **GitHub features are unavailable**
 
 Install GitHub CLI, run `gh auth login`, and use the welcome screen's recheck action or restart
-Starbase.
+Jingler.
 
 **The auth server cannot connect to PostgreSQL**
 
 Confirm the container is healthy with `docker compose ps`, then rerun:
 
 ```bash
-pnpm --filter @starbase/server db:migrate
+pnpm --filter @jingler/server db:migrate
 ```
 
 ## Contributing
@@ -184,11 +184,11 @@ and unit-test gates on every pull request.
 
 ## Plugins
 
-Starbase is extensible — plugins add tabs, dock panes and commands, dropped into
-`~/starbase/plugins` or installed from **Settings › Plugins › Install from
+Jingler is extensible — plugins add tabs, dock panes and commands, dropped into
+`~/jingler/plugins` or installed from **Settings › Plugins › Install from
 folder…**. They appear without a restart.
 
-- **Start from scratch:** `node scripts/create-starbase-plugin.mjs my-plugin`
+- **Start from scratch:** `node scripts/create-jingler-plugin.mjs my-plugin`
 - **Writing one:** [`packages/plugin-sdk/AGENTS.md`](packages/plugin-sdk/AGENTS.md) — the complete authoring contract
 - **Overview, dev loop, distribution:** [`docs/plugins/README.md`](docs/plugins/README.md)
 - **Something broken:** [`docs/plugins/debugging.md`](docs/plugins/debugging.md) — where each failure surfaces

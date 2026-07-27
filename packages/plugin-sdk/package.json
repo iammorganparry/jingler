@@ -1,9 +1,9 @@
 {
-  "name": "@starbase/plugin-sdk",
+  "name": "@jingler/plugin-sdk",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Types and helpers for writing a Starbase plugin \u2014 the renderer half (`.`) and the extension-host half (`./host`).",
+  "description": "Types and helpers for writing a Jingler plugin \u2014 the renderer half (`.`) and the extension-host half (`./host`).",
   "exports": {
     ".": "./src/index.ts",
     "./ui": "./src/ui.ts",
@@ -18,7 +18,7 @@
     "src",
     "vite.mjs",
     "vite.d.ts",
-    "starbase.plugin.schema.json",
+    "jingler.plugin.schema.json",
     "AGENTS.md",
     "api-digest.md"
   ],
@@ -29,20 +29,20 @@
   },
   "peerDependencies": {
     "react": "^19.2.0",
-    "@starbase/ui": "workspace:*"
+    "@jingler/ui": "workspace:*"
   },
   "peerDependenciesMeta": {
     "react": {
       "optional": true
     },
-    "@starbase/ui": {
+    "@jingler/ui": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@starbase/core": "workspace:*",
-    "@starbase/tsconfig": "workspace:*",
-    "@starbase/ui": "workspace:*",
+    "@jingler/core": "workspace:*",
+    "@jingler/tsconfig": "workspace:*",
+    "@jingler/ui": "workspace:*",
     "@types/react": "^19.2.0",
     "expect-type": "^1.4.0",
     "react": "^19.2.0",

@@ -36,7 +36,7 @@ const RERENDER_CEILING_MB = 12
 const seeded = (worktreePath: string): SeedSession => ({
   id: "s_review_mem",
   repo: "widget",
-  branch: "starbase/review-memory",
+  branch: "jingler/review-memory",
   title: "Review memory session",
   status: "idle",
   cli: "claude",

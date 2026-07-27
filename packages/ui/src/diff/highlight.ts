@@ -1,5 +1,5 @@
 import type { HighlighterCore } from "shiki/core"
-import type { ShikiThemeLike } from "@starbase/themes"
+import type { ShikiThemeLike } from "@jingler/themes"
 
 /**
  * Syntax highlighting for diff bodies.

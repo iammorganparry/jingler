@@ -1,14 +1,14 @@
 /**
  * Bridges the renderer's conversation machine to the presentational
  * `ConversationView` / `PlanReview`. Mounted keyed by session id (see
- * `StarbaseApp`), so each session drives its own machine instance. The machine
+ * `JinglerApp`), so each session drives its own machine instance. The machine
  * lives here — above the Conversation ↔ Plan Review view switch — so switching to
  * the Plan tab does NOT unmount the agent stream (which would abort a parked plan).
  */
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import type { Session } from "@starbase/core"
-import { agentChildren, agentPath } from "@starbase/core"
+import type { Session } from "@jingler/core"
+import { agentChildren, agentPath } from "@jingler/core"
 import {
   OpenAssetProvider,
   SubagentTabBar,
@@ -20,7 +20,7 @@ import {
   ResizeHandle,
   SubagentView,
   useResizableWidth
-} from "@starbase/ui"
+} from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
 import { publishSessionUpdate } from "./session-updates.js"
 import {

@@ -1,4 +1,4 @@
-import type { SessionActivity } from "@starbase/core"
+import type { SessionActivity } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import type { NotifiableState } from "./notifier.js"
 import { notificationFor, prNotification } from "./notifier.js"

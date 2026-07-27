@@ -1,26 +1,26 @@
 /**
  * The desktop-side auth seam. `AuthService` mediates between the OS keychain
- * (`SecretStore`, holding the bearer token) and the `@starbase/server` BetterAuth
+ * (`SecretStore`, holding the bearer token) and the `@jingler/server` BetterAuth
  * backend. The renderer drives it through the `Auth.*` RPCs:
  *   - `getSession` — validate the stored token against the server (clearing it if
  *     invalid/expired), returning the user or null.
  *   - `startSignIn` — ask the server for the provider's OAuth URL (the renderer
- *     opens it in the system browser; the flow returns via the `starbase://`
+ *     opens it in the system browser; the flow returns via the `jingler://`
  *     deep link handled in the main process).
  *   - `sendMagicLink` — request an email magic link.
  *   - `signOut` — revoke on the server (best effort) and clear the local token.
  *
  * The token is never logged and only ever read from / written to `SecretStore`.
  */
-import type { AuthProvider, AuthSession } from "@starbase/core"
-import { AuthError } from "@starbase/core"
+import type { AuthProvider, AuthSession } from "@jingler/core"
+import { AuthError } from "@jingler/core"
 import { Effect } from "effect"
 import { SecretStore } from "./secret-store.js"
 
 /** Base URL of the auth backend. Overridable (prod deploy, e2e fake server). */
-const authBaseUrl = (): string => process.env.STARBASE_AUTH_URL ?? "http://localhost:9100"
+const authBaseUrl = (): string => process.env.JINGLER_AUTH_URL ?? "http://localhost:9100"
 
-/** Where the browser flow bounces back to before redirecting to `starbase://`. */
+/** Where the browser flow bounces back to before redirecting to `jingler://`. */
 const desktopCallback = (base: string): string => `${base}/desktop/callback`
 
 interface SessionResponse {
@@ -30,7 +30,7 @@ interface SessionResponse {
     | null
 }
 
-export class AuthService extends Effect.Service<AuthService>()("@starbase/AuthService", {
+export class AuthService extends Effect.Service<AuthService>()("@jingler/AuthService", {
   accessors: true,
   effect: Effect.gen(function* () {
     const secrets = yield* SecretStore

@@ -5,7 +5,7 @@
  *
  * The obvious implementation is a module-level "current plugin" that the host
  * sets before rendering a view. It is also wrong, and wrong in a way that only
- * shows up once someone splits the window: Starbase renders up to four session
+ * shows up once someone splits the window: Jingler renders up to four session
  * panes at once, and two of them can be showing tabs from two different plugins
  * simultaneously. A global would hand both of them whichever plugin rendered
  * last, so `useHost()` in one plugin would invoke commands in another.
@@ -19,7 +19,7 @@
  * A React context object is only meaningful to the React instance that created
  * it. That is fine here precisely because of the importmap: a plugin's `react`
  * specifier resolves to a shim re-exporting the app's React instance, and its
- * `@starbase/plugin-sdk` specifier resolves to a shim re-exporting the app's
+ * `@jingler/plugin-sdk` specifier resolves to a shim re-exporting the app's
  * copy of THIS module. One React, one context object, one SDK — which is the
  * same reason a plugin must never bundle its own React.
  */
@@ -115,7 +115,7 @@ export interface PluginViewValue {
 export const PluginViewContext = createContext<PluginViewValue | null>(null)
 
 /**
- * Wraps one plugin view. Starbase does this for you — a plugin never renders it.
+ * Wraps one plugin view. Jingler does this for you — a plugin never renders it.
  *
  * `createElement` rather than JSX so this module stays a plain `.ts` and the SDK
  * needs no JSX build step of its own.

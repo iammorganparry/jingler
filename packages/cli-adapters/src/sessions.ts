@@ -10,9 +10,9 @@ import type {
   ReasoningSetting,
   Session,
   SettledSessionStatus
-} from "@starbase/core"
-import { GhError, GitError, SessionNotFoundError, supportsPlanMode, UNTITLED_SESSION } from "@starbase/core"
-import { Session as SessionSchema } from "@starbase/core"
+} from "@jingler/core"
+import { GhError, GitError, SessionNotFoundError, supportsPlanMode, UNTITLED_SESSION } from "@jingler/core"
+import { Session as SessionSchema } from "@jingler/core"
 import { basename } from "node:path"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
@@ -146,7 +146,7 @@ export const migrateSessionChats = (value: unknown): unknown => {
 /**
  * The longest slug we will put on disk.
  *
- * A slug becomes a DIRECTORY NAME (`~/starbase/worktrees/<repo>/<slug>`) and a
+ * A slug becomes a DIRECTORY NAME (`~/jingler/worktrees/<repo>/<slug>`) and a
  * branch name, and most filesystems cap a single name at 255 bytes. Slugs are
  * derived from PR and issue titles, which have no such limit — a long issue
  * title produced a path `git worktree add` rejected with ENAMETOOLONG, failing
@@ -179,13 +179,13 @@ let opSeq = 0
 const nextOpId = (): number => ++opSeq
 
 /**
- * The session store, persisted to `~/starbase/sessions.json`. Starts empty — real
+ * The session store, persisted to `~/jingler/sessions.json`. Starts empty — real
  * sessions are created via `create`, which forks an isolated git worktree
  * (`GitService`) before recording the session. Reads are best-effort: a missing
  * or malformed file yields an empty list so the app still boots.
  */
 export class SessionStore extends Effect.Service<SessionStore>()(
-  "@starbase/SessionStore",
+  "@jingler/SessionStore",
   {
     accessors: true,
     sync: () => {
@@ -206,7 +206,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
        * not the work.
        *
        * In-process only. It orders the app's own writers, which is what exists
-       * today; it would not order a second Starbase process against this one.
+       * today; it would not order a second Jingler process against this one.
        */
       const lock = Effect.unsafeMakeSemaphore(1)
       const atomically = <A, E, R>(
@@ -245,7 +245,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const paths = yield* AppPaths
           yield* fs
             .makeDirectory(paths.root, { recursive: true })
-            .pipe(Effect.mapError((cause) => new GitError({ message: "Failed to create ~/starbase", cause })))
+            .pipe(Effect.mapError((cause) => new GitError({ message: "Failed to create ~/jingler", cause })))
           const encoded = yield* Schema.encode(SessionArray)(sessions).pipe(
             Effect.mapError((cause) => new GitError({ message: "Failed to encode sessions", cause }))
           )
@@ -265,7 +265,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           // it, the first rename moves it away, and the second fails ENOENT —
           // which is a corrupted write dressed up as a missing file. The store
           // lock orders writers within a process; this keeps the scheme correct
-          // even when it does not (a second Starbase instance, a stray fibre).
+          // even when it does not (a second Jingler instance, a stray fibre).
           const tempFile = `${paths.sessionsFile}.${process.pid}.${nextOpId()}.tmp`
           yield* fs
             .writeFileString(tempFile, JSON.stringify(encoded, null, 2))
@@ -533,7 +533,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
 
       /**
        * Create a session from a GitHub issue. Like `create` it forks a FRESH
-       * `starbase/<number>-<slug>` branch off `baseBranch` (the issue number keys
+       * `jingler/<number>-<slug>` branch off `baseBranch` (the issue number keys
        * the slug so it's unique per repo and reads well), but it links the issue,
        * enables the chosen automations, and seeds `initialPrompt` from the issue
        * title + body (the composer pre-fills it once; HITL — the user sends it).

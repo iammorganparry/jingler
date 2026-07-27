@@ -1,9 +1,9 @@
 # Changesets
 
-Starbase versions the **whole monorepo in lockstep**. Every `@starbase/*`
-package (including `@starbase/desktop`) shares a single version — that version is
+Jingler versions the **whole monorepo in lockstep**. Every `@jingler/*`
+package (including `@jingler/desktop`) shares a single version — that version is
 the released **app** version, read by electron-builder and shown in-app as
-`__APP_VERSION__`. This is enforced by `fixed: [["@starbase/*"]]` in
+`__APP_VERSION__`. This is enforced by `fixed: [["@jingler/*"]]` in
 `config.json`, so a single changeset naming any one package bumps them all.
 
 Nothing is published to npm (all packages are `private`); Changesets is used only
@@ -19,11 +19,11 @@ pnpm changeset
 
 Pick `patch` / `minor` / `major` and write a one-line summary. It creates a
 `.changeset/*.md` file — commit it. (Because of `fixed`, it doesn't matter which
-`@starbase/*` package you select; the whole product moves together.)
+`@jingler/*` package you select; the whole product moves together.)
 
 ```md
 ---
-"@starbase/desktop": minor
+"@jingler/desktop": minor
 ---
 
 One-line summary of the user-facing change.

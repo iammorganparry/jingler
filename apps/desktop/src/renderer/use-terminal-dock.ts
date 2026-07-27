@@ -5,10 +5,10 @@
  * this only governs whether/where the dock is shown.
  */
 import { useCallback, useEffect, useState } from "react"
-import type { DockSide } from "@starbase/ui"
+import type { DockSide } from "@jingler/ui"
 
-const VISIBLE_KEY = "starbase.terminal.visible"
-const SIDE_KEY = "starbase.terminal.side"
+const VISIBLE_KEY = "jingler.terminal.visible"
+const SIDE_KEY = "jingler.terminal.side"
 
 const readVisible = (): boolean => {
   try {

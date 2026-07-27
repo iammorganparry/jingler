@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { McpInjectionTarget } from "@starbase/core"
+import type { McpInjectionTarget } from "@jingler/core"
 import { InjectionTargets } from "./injection-targets.js"
 
 afterEach(cleanup)
@@ -81,7 +81,7 @@ describe("InjectionTargets", () => {
   })
 
   /** A control that cannot change the outcome is worse than none: it implies it can. */
-  it("offers no toggle for a harness Starbase cannot launch", () => {
+  it("offers no toggle for a harness Jingler cannot launch", () => {
     render(<InjectionTargets targets={[skipped("cursor", "no-run-path")]} onToggle={vi.fn()} />)
 
     expect(screen.queryByRole("switch", { name: "Inject into Cursor" })).toBeNull()

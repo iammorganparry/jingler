@@ -6,8 +6,8 @@
  *
  *   - the operator picks a theme in Settings (a `Theme.setActive` write),
  *   - they edit a colour in the theme editor (a `Theme.save` write),
- *   - they edit `~/starbase/themes/<id>.json` in their OWN editor, with
- *     Starbase not involved at all (the `Theme.watch` stream).
+ *   - they edit `~/jingler/themes/<id>.json` in their OWN editor, with
+ *     Jingler not involved at all (the `Theme.watch` stream).
  *
  * The third is the reason this subscribes rather than just fetching. It is also
  * the one people will not believe works until they see it, so it is worth the
@@ -21,9 +21,9 @@
  */
 import { useEffect, useMemo, useRef } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import type { ThemeCatalog, ThemeTokens, VsCodeTheme, WorkspaceConfig } from "@starbase/core"
-import { DEFAULT_THEME_ID } from "@starbase/core"
-import { oneDarkPro, toTokens } from "@starbase/themes"
+import type { ThemeCatalog, ThemeTokens, VsCodeTheme, WorkspaceConfig } from "@jingler/core"
+import { DEFAULT_THEME_ID } from "@jingler/core"
+import { oneDarkPro, toTokens } from "@jingler/themes"
 import { rpc } from "./rpc-client.js"
 
 export const themeCatalogKey = ["themes"] as const

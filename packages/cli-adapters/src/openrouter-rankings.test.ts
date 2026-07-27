@@ -126,8 +126,8 @@ describe("RankingService", () => {
   })
 
   it("does not make a network request in scripted test/e2e mode", async () => {
-    const previous = process.env.STARBASE_SCRIPTED_AGENT
-    process.env.STARBASE_SCRIPTED_AGENT = "1"
+    const previous = process.env.JINGLER_SCRIPTED_AGENT
+    process.env.JINGLER_SCRIPTED_AGENT = "1"
     const fetcher = vi.fn(async () => new Response(payload))
     vi.stubGlobal("fetch", fetcher)
     try {
@@ -137,8 +137,8 @@ describe("RankingService", () => {
       expect(result).toBeNull()
       expect(fetcher).not.toHaveBeenCalled()
     } finally {
-      if (previous === undefined) delete process.env.STARBASE_SCRIPTED_AGENT
-      else process.env.STARBASE_SCRIPTED_AGENT = previous
+      if (previous === undefined) delete process.env.JINGLER_SCRIPTED_AGENT
+      else process.env.JINGLER_SCRIPTED_AGENT = previous
     }
   })
 })

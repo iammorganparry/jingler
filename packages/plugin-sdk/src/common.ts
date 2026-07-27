@@ -17,14 +17,14 @@
 /**
  * A read-only snapshot of the session a plugin is looking at.
  *
- * ## Why this is not Starbase's internal `Session`
+ * ## Why this is not Jingler's internal `Session`
  *
- * Starbase's own `Session` type carries ~25 fields — cost meters, token
+ * Jingler's own `Session` type carries ~25 fields — cost meters, token
  * accounting, chat arrays, worktree bookkeeping — most of which are churn a
  * plugin must never couple to. `SessionSnapshot` is the deliberately small,
  * deliberately stable subset a third-party tab can build on: the identity of
  * the repo/branch/PR it is decorating, and nothing that would break a plugin
- * every time Starbase reshapes its internals. Fields are added here only when a
+ * every time Jingler reshapes its internals. Fields are added here only when a
  * plugin genuinely cannot do its job without them.
  *
  * @example
@@ -49,7 +49,7 @@ export interface SessionSnapshot {
   /** The session's display title, as shown in the sidebar. */
   readonly title: string
   /** Which local agent is driving the session. */
-  readonly cli: "claude" | "codex" | "cursor" | "opencode" | "starbase"
+  readonly cli: "claude" | "codex" | "cursor" | "opencode" | "jingler"
   /** The linked pull-request number, or `null` when the session has no PR. */
   readonly prNumber: number | null
   /** The linked GitHub issue number, when one drove the session. */

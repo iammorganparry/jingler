@@ -6,7 +6,7 @@
  * paint a 58px thumbnail. Nothing downstream ever wanted those pixels: the
  * composer tile, the transcript thumbnail and the vision API all work from far
  * less. Left uncapped they dominate everything they touch — one measured 44MB
- * transcript was 29MB of base64 images, and 185 attachments across a `~/starbase`
+ * transcript was 29MB of base64 images, and 185 attachments across a `~/jingler`
  * home came to 105MB of image bytes, i.e. well over a gigabyte of decoded bitmap
  * if the operator scrolls past them all.
  *

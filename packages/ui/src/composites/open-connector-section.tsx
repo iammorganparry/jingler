@@ -1,4 +1,4 @@
-import type { McpServerStatus, OpenConnectorConfig, OpenConnectorDefaults } from "@starbase/core"
+import type { McpServerStatus, OpenConnectorConfig, OpenConnectorDefaults } from "@jingler/core"
 import * as React from "react"
 import { AsyncButton } from "../components/async-button.js"
 import { Callout } from "../components/callout.js"
@@ -85,7 +85,7 @@ export function OpenConnectorSection({
             <span className="text-[11px] text-text-body">
               {defaults.kind === "local"
                 ? `Detected a local OpenConnector at ${defaults.endpoint} — set it up in one click.`
-                : `Use the Starbase-hosted OpenConnector (${defaults.endpoint}).`}
+                : `Use the Jingler-hosted OpenConnector (${defaults.endpoint}).`}
             </span>
             <AsyncButton
               pendingLabel="Setting up…"

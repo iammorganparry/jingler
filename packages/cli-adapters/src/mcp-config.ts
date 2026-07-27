@@ -1,4 +1,4 @@
-import type { McpServer, McpTransport } from "@starbase/core"
+import type { McpServer, McpTransport } from "@jingler/core"
 
 /**
  * The write-side of MCP config: given the resolved OpenConnector server
@@ -6,7 +6,7 @@ import type { McpServer, McpTransport } from "@starbase/core"
  * harness's OWN launch vocabulary so every agent loads the same shared server, plus
  * the small parsing utilities the rest of the OpenConnector code shares.
  *
- * (Starbase used to READ each harness's own MCP config here too; that's gone —
+ * (Jingler used to READ each harness's own MCP config here too; that's gone —
  * OpenConnector is now the single source of truth, so only the injection side and
  * the shared `ParsedMcpServer` split remain.)
  *

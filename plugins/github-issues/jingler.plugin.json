@@ -1,9 +1,9 @@
 {
-  "$schema": "../../../packages/plugin-sdk/starbase.plugin.schema.json",
+  "$schema": "../../../packages/plugin-sdk/jingler.plugin.schema.json",
   "id": "github-issues",
   "name": "GitHub Issues",
   "version": "1.0.0",
-  "description": "Read the issue linked to a session, without leaving Starbase.",
+  "description": "Read the issue linked to a session, without leaving Jingler.",
   "ui": "dist/ui.js",
   "main": "dist/main.js",
   "activationEvents": [

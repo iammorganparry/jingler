@@ -16,7 +16,7 @@ const settled = () => waitFor(() => expect(md().textContent?.length ?? 0).toBeGr
  * so every assertion below is about the DOM actually produced.
  *
  * The HTML fragments are the real shapes GitHub review bots emit; they're taken
- * from Greptile's comments on starbase#36.
+ * from Greptile's comments on jingler#36.
  */
 describe("Markdown raw HTML (rehype-raw must survive)", () => {
   it("renders <details>/<summary> as real elements rather than literal text", async () => {

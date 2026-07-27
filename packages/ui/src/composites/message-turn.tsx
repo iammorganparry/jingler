@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react"
-import type { CliKind, ContentPart, ExecutionMode, GateDecision, Message, ToolCall as ToolCallModel } from "@starbase/core"
+import type { CliKind, ContentPart, ExecutionMode, GateDecision, Message, ToolCall as ToolCallModel } from "@jingler/core"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { AttachmentThumb } from "../components/attachment-thumb.js"

@@ -8,8 +8,8 @@ import type {
   IssueSummary,
   PrSummary,
   Repo
-} from "@starbase/core"
-import { startableClis } from "@starbase/core"
+} from "@jingler/core"
+import { startableClis } from "@jingler/core"
 import { useMachine } from "@xstate/react"
 import { CircleDot, GitBranch, GitPullRequest, Sparkles } from "lucide-react"
 import { cn } from "../lib/cn.js"
@@ -135,7 +135,7 @@ export function NewSessionDialog({
   loadIssues,
   onCreateFromIssue
 }: NewSessionDialogProps) {
-  // `startableClis` drops `starbase` as well as the uninstalled: the
+  // `startableClis` drops `jingler` as well as the uninstalled: the
   // orchestrator drives harnesses, it is not one you can start a session on.
   const availableClis = React.useMemo(() => startableClis(clis), [clis])
   const canFromPr = Boolean(loadPrs && onCreateFromPr)
@@ -304,7 +304,7 @@ export function NewSessionDialog({
             {/*
               No harness picker. It asked the same question every time and got
               the same answer, so the choice moved to Settings · Providers and
-              this only REPORTS the outcome. `starbase` is never offered there:
+              this only REPORTS the outcome. `jingler` is never offered there:
               the orchestrator is a per-turn mode on a session, not a harness to
               start one on.
             */}
@@ -458,7 +458,7 @@ export function NewSessionDialog({
                   <div className="flex items-center gap-2 rounded-md border border-line bg-sunken px-3 py-2">
                     <GitBranch size={14} className="flex-none text-cyan" />
                     <span className="flex-1 truncate font-mono text-[12.5px] text-text-bright">
-                      starbase/{selectedIssue.number}-{kebabTitle(selectedIssue.title)}
+                      jingler/{selectedIssue.number}-{kebabTitle(selectedIssue.title)}
                     </span>
                     <span className="font-mono text-[10px] text-dim">off {base || "base"}</span>
                   </div>

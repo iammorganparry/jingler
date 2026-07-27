@@ -37,14 +37,14 @@ const Rows = () => (
         <GitBranch size={14} className="shrink-0 text-dim" />
         <span className="truncate">refactor auth</span>
         <span className="truncate text-[12px] text-muted-foreground">
-          starbase · feat/auth
+          jingler · feat/auth
         </span>
       </CommandItem>
       <CommandItem value="theme tokens">
         <GitBranch size={14} className="shrink-0 text-dim" />
         <span className="truncate">theme tokens</span>
         <span className="truncate text-[12px] text-muted-foreground">
-          starbase · feat/theme
+          jingler · feat/theme
         </span>
       </CommandItem>
     </CommandGroup>

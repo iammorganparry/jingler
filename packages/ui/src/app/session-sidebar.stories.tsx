@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { Session, SessionActivity } from "@starbase/core"
+import type { Session, SessionActivity } from "@jingler/core"
 import { SessionSidebar } from "./session-sidebar.js"
 
 const meta = {
@@ -12,8 +12,8 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 const session = (over: Partial<Session> & Pick<Session, "id" | "title">): Session => ({
-  repo: "starbase",
-  branch: "starbase/witty-berners",
+  repo: "jingler",
+  branch: "jingler/witty-berners",
   status: "idle",
   cli: "claude",
   diff: { added: 0, removed: 0 },
@@ -34,8 +34,8 @@ const session = (over: Partial<Session> & Pick<Session, "id" | "title">): Sessio
  * the row.
  */
 const SESSIONS: ReadonlyArray<Session> = [
-  session({ id: "s1", title: "Refactor auth flow", repo: "starbase", diff: { added: 42, removed: 8 } }),
-  session({ id: "s2", title: "Fix token refresh", repo: "starbase", prNumber: 47 }),
+  session({ id: "s1", title: "Refactor auth flow", repo: "jingler", diff: { added: 42, removed: 8 } }),
+  session({ id: "s2", title: "Fix token refresh", repo: "jingler", prNumber: 47 }),
   session({ id: "s3", title: "Watch CI on #204", repo: "gtm-grid", prNumber: 204 }),
   session({ id: "s4", title: "Type-check watcher", repo: "gtm-grid" }),
   session({ id: "s5", title: "Awaiting approval", repo: "trigify-app" }),
@@ -81,10 +81,10 @@ export const AllStates: Story = {
 export const ToolWorkAllReadsAsRunning: Story = {
   args: {
     sessions: [
-      session({ id: "r1", title: "Reading", repo: "starbase" }),
-      session({ id: "r2", title: "Editing", repo: "starbase" }),
-      session({ id: "r3", title: "Delegating", repo: "starbase" }),
-      session({ id: "r4", title: "Searching the web", repo: "starbase" })
+      session({ id: "r1", title: "Reading", repo: "jingler" }),
+      session({ id: "r2", title: "Editing", repo: "jingler" }),
+      session({ id: "r3", title: "Delegating", repo: "jingler" }),
+      session({ id: "r4", title: "Searching the web", repo: "jingler" })
     ],
     activeSessionId: "r1",
     onSelect: () => {},
