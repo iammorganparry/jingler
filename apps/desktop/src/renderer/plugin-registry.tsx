@@ -224,21 +224,35 @@ export function PluginProvider({ children }: { children: ReactNode }) {
     )
 
     /**
-     * The palette entries a loaded plugin's manifest promised.
+     * The palette entries a plugin's manifest promised.
      *
-     * Read off the CATALOG's manifests but gated on the loader's active set:
-     * `ActivePlugin` carries only what the loader built (tabs, panes), the same
-     * reason `eventsFor` above goes to the catalog for activation events.
+     * ## Three gates, and each is a different question
+     *
+     * `enabled` is the operator's answer, `activeIds` is "did this plugin load",
+     * and **`manifest.main` is the one that decides whether a command can
+     * actually run**. That last one is not redundant with the other two, and
+     * getting it wrong was a real bug: a command handler lives in the HOST half
+     * (`ctx.commands.register`), which `PluginHost.activate` refuses to start
+     * without a `main` entry — while `ActivePlugin` reports only on the
+     * RENDERER's `ui` import, and a plugin with no `ui` at all enters the active
+     * set without importing anything. So a manifest declaring
+     * `contributes.commands` and no `main` sailed through both other gates and
+     * produced rows whose invoke could never be handled.
+     *
+     * `plugin-loader.ts` now refuses such a manifest outright, which is the
+     * honest place to catch it — the author is told rather than the row quietly
+     * vanishing. This check stays as the second line: the catalog lists every
+     * plugin on disk, including ones the loader rejected.
      */
     const activeIds = new Set(loaded.active.map((p) => p.id))
     const commands: ReadonlyArray<PluginPaletteCommand> = (catalog?.plugins ?? [])
-      .filter((p) => p.enabled && activeIds.has(p.manifest.id))
+      .filter((p) => p.enabled && activeIds.has(p.manifest.id) && p.manifest.main)
       .flatMap((p) =>
         (p.manifest.contributes?.commands ?? []).map((command) => ({
           pluginId: p.manifest.id,
           commandId: command.id,
           title: command.title,
-          ...(command.category === undefined ? {} : { category: command.category }),
+          category: command.category,
           pluginName: p.manifest.name
         }))
       )
