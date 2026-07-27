@@ -62,7 +62,6 @@ import {
 } from "./command-palette-model.js"
 import { SEED_PATCH } from "../seed.js"
 import {
-  BUILTIN_TAB_META,
   builtinTabContributions,
   type TabContext,
   type TabContribution,
