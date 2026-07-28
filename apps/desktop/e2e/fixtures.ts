@@ -68,11 +68,13 @@ export const showSessions = async (
  * those specs failed at once for a reason that had nothing to do with what they
  * were testing.
  *
- * The search field is a better sentinel than a heading anyway: it is a control
- * the operator uses rather than decoration, so it is far less likely to be
- * restyled away — and if it ever is, this is one line rather than fifty-six.
+ * The global-search field is a better sentinel than a heading anyway: it is a
+ * control the operator uses rather than decoration, so it is far less likely to
+ * be restyled away — and if it ever is, this is one line rather than fifty-six.
+ * It lives in the title bar now (the sidebar filter merged into the command
+ * palette), so it is present on every screen the shell can show.
  */
-export const appShell = (window: Page) => window.getByPlaceholder("Filter sessions…")
+export const appShell = (window: Page) => window.getByTestId("global-search")
 
 /**
  * The SIDEBAR row for a session, found by its title.

@@ -55,6 +55,7 @@ import {
   TerminalSquare
 } from "lucide-react"
 import { CommandPalette } from "./command-palette.js"
+import { TitleSearch } from "./title-search.js"
 import {
   matchPaletteChord,
   PALETTE_GROUP,
@@ -435,6 +436,14 @@ export function JinglerApp({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ghRechecking, setGhRechecking] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  // The title-bar search is the palette's front door: it opens seeded with
+  // whatever character was typed into the bar, so "type to search" and ⌘K land
+  // in the same place. Reset to empty on close so the next plain ⌘K starts clean.
+  const [paletteQuery, setPaletteQuery] = useState("")
+  const openPalette = useCallback((initialQuery = "") => {
+    setPaletteQuery(initialQuery)
+    setPaletteOpen(true)
+  }, [])
   /**
    * The palette's half of tab switching. Nonced, and CLEARED once applied.
    *
@@ -874,7 +883,7 @@ export function JinglerApp({
     // No layout picker in the title bar any more: the shape of the split is a
     // consequence of what you dragged where, not a mode you pick up front.
     <AppShell
-      title="Jingler"
+      center={<TitleSearch onOpen={openPalette} />}
       actions={
         onToggleBrowser ? (
           <PreviewToggleButton active={browserActive ?? false} onClick={onToggleBrowser} />
@@ -1016,7 +1025,15 @@ export function JinglerApp({
           onClose={() => setUsageOpen(false)}
         />
       )}
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} items={paletteItems} />
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={(next) => {
+          setPaletteOpen(next)
+          if (!next) setPaletteQuery("")
+        }}
+        initialQuery={paletteQuery}
+        items={paletteItems}
+      />
     </AppShell>
   )
 }

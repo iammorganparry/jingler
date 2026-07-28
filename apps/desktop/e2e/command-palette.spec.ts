@@ -6,9 +6,10 @@ import type { SeedSession } from "./fixtures.js"
  *
  * What this proves that the unit tests cannot: that ⌘K reaches a listener at all
  * inside a real Electron window (the chord is claimed in `jingler-app.tsx`'s
- * window keydown, alongside the split map), that rebinding the sidebar filter to
- * ⌘F did not simply delete it, and that an action which lives in the RENDERER —
- * the terminal dock's visibility — is genuinely reachable from a palette rendered
+ * window keydown, alongside the split map), that the title-bar search opens that
+ * same palette — seeded with whatever was typed into it, since global search and
+ * ⌘K are one search now — and that an action which lives in the RENDERER — the
+ * terminal dock's visibility — is genuinely reachable from a palette rendered
  * inside `@jingler/ui`. That last one is the point of the two props added for
  * it; a unit test would only ever assert the prop was called.
  */
@@ -114,34 +115,34 @@ test("reopening mid-exit leaves exactly one palette", async ({ launchApp }) => {
   await expect(window.getByTestId("palette-item-session:sess-beta")).toBeVisible()
 })
 
-test("⌘F still focuses the sidebar filter after the rebind", async ({ launchApp }) => {
+test("the title-bar search opens the palette, seeded with what you type", async ({
+  launchApp
+}) => {
   const { window } = await launchApp({ configured: true, sessions: seededSessions })
 
-  // Wait on the input itself, not on any surrounding chrome. Chrome paints
-  // before the sidebar is interactive, and a chord pressed into that gap is
-  // simply lost — which is what made this the one flaky test in the file.
-  const filter = window.getByPlaceholder("Filter sessions…")
-  await expect(filter).toBeVisible()
-  // …and on a session row, because "the input exists" is not "the app has
-  // finished mounting". The composer autofocuses when a pane mounts, so a ⌘F
-  // pressed before that lands and is then taken straight back — which reads as
-  // "the binding is broken" rather than "the press was too early".
+  const search = window.getByTestId("global-search")
+  await expect(search).toBeVisible()
+  // "The control exists" is not "the app has finished mounting" — wait on a real
+  // session row too, so the click below lands on a settled shell.
   await expect(sessionRow(window, "Alpha session").first()).toBeVisible()
 
-  // Retried rather than pressed once. Even settled, the first press can race a
-  // late focus steal; `toPass` re-presses instead of failing the run on it.
+  // Clicking the bar opens the palette. Retried rather than pressed once: a late
+  // focus steal can eat the first interaction on a freshly-mounted shell.
   await expect(async () => {
-    await window.keyboard.press("Meta+f")
-    await expect(filter).toBeFocused({ timeout: 1_000 })
+    await search.click()
+    await expect(window.getByTestId("command-palette")).toBeVisible({ timeout: 1_000 })
   }).toPass({ timeout: 15_000 })
-  // And it must NOT have opened the palette on the way.
+  await window.keyboard.press("Escape")
   await expect(window.getByTestId("command-palette")).toBeHidden()
 
-  // There is deliberately no `⌘F` chip in the field to assert on any more. It
-  // used to be here, and this test used to check it was not still advertising
-  // ⌘K — but the chip cost ~34px inside the narrowest field in the app and was
-  // truncating the placeholder that says what the field is for. The BINDING is
-  // what this test is about, and the binding is asserted above.
+  // Typing a character into the bar opens the palette SEEDED with it: global
+  // search and ⌘K are one search, so the keystroke that summoned the palette is
+  // the start of the query, not a thing to discard.
+  await search.focus()
+  await window.keyboard.press("b")
+  await expect(window.getByTestId("command-palette")).toBeVisible()
+  await expect(window.getByPlaceholder(PLACEHOLDER)).toHaveValue("b")
+  await expect(window.getByTestId("palette-item-session:sess-beta")).toBeVisible()
 })
 
 test("toggles the terminal dock — an action the shell cannot reach on its own", async ({

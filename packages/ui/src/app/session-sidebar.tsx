@@ -18,7 +18,7 @@ import { ResizeHandle, useResizableWidth } from "../components/resizable.js"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { StatusDot } from "../components/status-dot.js"
-import { SearchInput } from "../components/search-input.js"
+import { JinglerMark } from "../brand/jingler-mark.js"
 import { FilterMenu } from "../components/filter-menu.js"
 import { HoverCard } from "../components/hover-card.js"
 import { ProviderIcon } from "../components/provider-icon.js"
@@ -111,6 +111,13 @@ export interface SessionSidebarProps {
    * used by the app — there, the persisted set IS the right starting point.
    */
   defaultFilters?: SessionFilters
+  /**
+   * The text search, if any. The live app no longer renders a filter field in
+   * the sidebar — global search moved to the title bar and the command palette —
+   * so this is empty in practice; it stays a controlled prop so the split-pill
+   * regression tests can still drive `filterSessions` directly.
+   */
+  filter?: string
 }
 
 /** Left rail: sessions grouped by repository, with a first-run empty hint. */
@@ -152,6 +159,7 @@ function SidebarBody({
   onToggleCollapsed,
   version,
   defaultFilters,
+  filter = "",
   onCollapse
 }: SessionSidebarProps & {
   /** Current docked width in px. */
@@ -161,11 +169,9 @@ function SidebarBody({
   /** Collapse to the icon rail (the header's `PanelLeft` button). */
   onCollapse?: () => void
 }) {
-  const [filter, setFilter] = React.useState("")
   const [filters, setFiltersState] = React.useState<SessionFilters>(
     () => defaultFilters ?? loadFilters()
   )
-  const filterRef = React.useRef<HTMLInputElement>(null)
 
   const setFilters = React.useCallback((next: SessionFilters) => {
     setFiltersState(next)
@@ -180,31 +186,6 @@ function SidebarBody({
     const reconciled = reconcileRepo(filters, sessions)
     if (reconciled !== filters) setFilters(reconciled)
   }, [filters, sessions, setFilters])
-
-  /**
-   * ⌘F / Ctrl-F focuses the filter.
-   *
-   * This was ⌘K until the global command palette landed. ⌘K is the chord people
-   * arrive already knowing means "palette", and a ⌘K that instead put the caret
-   * in a list filter was the app quietly answering a different question — the
-   * `⌘K Command palette` hint in `screens/empty-conversation.tsx` had been
-   * advertising the palette for some time before one existed.
-   *
-   * ⌘F rather than nothing: "find within this list" is what the chord means
-   * everywhere else, and dropping the binding entirely would have been a
-   * regression paid for by whoever had already learnt it.
-   */
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.shiftKey || e.altKey) return
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
-        e.preventDefault()
-        filterRef.current?.focus()
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [])
 
   // The GROUP a session sits in. The row's own five-word rollup, with ONE further
   // fold: thinking → running. An agent flips between thinking and running every
@@ -348,20 +329,13 @@ function SidebarBody({
         />
       )}
       {/*
-        The header — collapse, search, filter and new-session, on ONE row.
+        The header — collapse, filter, new-session, and the brand mark, on ONE
+        row.
 
-        This used to be two rows: a title row reading "⌘ Sessions (4)" above a
-        search row. Both went, and neither is missed.
-
-        The title was labelling the only thing this panel has ever contained.
-        The count duplicated a list the operator is looking at. And the ⌘ tile
-        was a command-palette affordance parked next to a word it had nothing to
-        do with — the palette has ⌘K and the title bar, which is where people
-        already reach for it.
-
-        What replaced them is the row that was doing the work anyway. The
-        reclaimed ~34px is roughly one session row, and it comes back at every
-        window height rather than only when the list is long.
+        The text-search field that used to sit here is gone: it was the same
+        search as ⌘K (jump to a session OR run a command), so it merged into the
+        command palette, reached from the title bar. The space it freed holds the
+        logo, pushed to the top-right corner — mark only, no wordmark.
       */}
       <div className="flex items-center gap-1.5 px-3 pb-2 pt-3">
         {/* The rail's expand button lives in the same corner, so the control
@@ -377,24 +351,6 @@ function SidebarBody({
             <PanelLeft size={14} />
           </button>
         )}
-        <div className="min-w-0 flex-1">
-          {/*
-            No `⌘F` chip. It costs ~34px inside a field that is already the
-            narrowest thing in the app, and at the default sidebar width that
-            was enough to truncate the placeholder to "Filter sessi…" — the chip
-            was crowding out the label that says what the field is for.
-
-            The shortcut still works and is still discoverable: the command
-            palette lists it, and it is the shortcut everything else on the
-            platform uses for find-in-thing.
-          */}
-          <SearchInput
-            ref={filterRef}
-            value={filter}
-            onChange={setFilter}
-            placeholder="Filter sessions…"
-          />
-        </div>
         <FilterMenu axes={axes}>
           <button
             type="button"
@@ -436,6 +392,11 @@ function SidebarBody({
         >
           <Plus size={15} />
         </button>
+        {/* Push the brand mark into the top-right corner. Search left this row
+            for the title bar, so the space it freed is where the logo lives —
+            mark only, no wordmark. `text-brand` is the one spot of colour. */}
+        <div className="flex-1" />
+        <JinglerMark className="h-[15px] w-auto flex-none text-brand" />
       </div>
 
       {/* Groups (or the empty hint when there are no sessions yet) */}
@@ -463,7 +424,9 @@ function SidebarBody({
           <div className="m-auto flex flex-col items-center gap-2.5 px-4 text-center">
             <Search size={20} className="text-line-strong" />
             <span className="text-[12px] leading-[1.5] text-muted-foreground">
-              No sessions match “{filter.trim()}”.
+              {filter.trim()
+                ? `No sessions match “${filter.trim()}”.`
+                : "No sessions match these filters."}
             </span>
           </div>
         ) : (

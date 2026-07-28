@@ -5,11 +5,12 @@ import { TitleBar } from "./title-bar.js"
 
 /** The window frame: title bar plus routed content. */
 export function AppShell({
-  title,
+  center,
   actions,
   children
 }: {
-  title?: string
+  /** The title bar's centre slot — the global-search field. */
+  center?: ReactNode
   /** App-level controls pinned to the title bar's right edge. */
   actions?: ReactNode
   children: ReactNode
@@ -23,7 +24,7 @@ export function AppShell({
     // accessible by default.
     <MotionConfig reducedMotion="user">
       <div className="flex h-full flex-col overflow-hidden bg-editor text-text">
-        <TitleBar title={title} actions={actions} />
+        <TitleBar center={center} actions={actions} />
         {/*
           The outermost width boundary: this row is the whole content area, so
           `usePaneWidth()` beneath it reports how much room the SHELL has. The

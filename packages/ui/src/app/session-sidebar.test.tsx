@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { DEFAULT_FILTERS } from "./session-filters.js"
 import { SessionSidebar } from "./session-sidebar.js"
@@ -85,7 +85,8 @@ describe("SessionSidebar split pill presence", () => {
 
   const renderSidebar = (
     sessions: ReadonlyArray<ReturnType<typeof session>>,
-    filters = DEFAULT_FILTERS
+    filters = DEFAULT_FILTERS,
+    filter = ""
   ) =>
     render(
       <SessionSidebar
@@ -95,6 +96,7 @@ describe("SessionSidebar split pill presence", () => {
         splitGroups={[SPLIT]}
         activeGroupId="g:first"
         defaultFilters={filters}
+        filter={filter}
       />
     )
 
@@ -116,10 +118,7 @@ describe("SessionSidebar split pill presence", () => {
     // The regression: searching for pane 2's title left pane 1 with no entry to
     // hang the pill on, while pane 2's entry bowed out for not being first. The
     // search found a session and then rendered nothing whatsoever.
-    renderSidebar(both)
-    fireEvent.change(screen.getByPlaceholderText("Filter sessions…"), {
-      target: { value: "toolchain" }
-    })
+    renderSidebar(both, DEFAULT_FILTERS, "toolchain")
 
     expect(screen.getAllByTestId("split-row-g:first")).toHaveLength(1)
     expect(screen.getByTestId("split-segment-second")).toBeDefined()
@@ -150,10 +149,7 @@ describe("SessionSidebar split pill presence", () => {
   })
 
   it("draws no pill when the filter excludes every pane", () => {
-    renderSidebar(both)
-    fireEvent.change(screen.getByPlaceholderText("Filter sessions…"), {
-      target: { value: "nothing matches this" }
-    })
+    renderSidebar(both, DEFAULT_FILTERS, "nothing matches this")
 
     expect(screen.queryByTestId("split-row-g:first")).toBeNull()
   })

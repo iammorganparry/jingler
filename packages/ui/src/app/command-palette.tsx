@@ -42,12 +42,18 @@ export function CommandPalette({
   open,
   onOpenChange,
   items,
+  initialQuery = "",
   placeholder = PALETTE_PLACEHOLDER,
   emptyMessage = "No matching commands"
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   items: ReadonlyArray<PaletteItem>
+  /**
+   * The query to open on — the character the operator typed into the title-bar
+   * search that summoned the palette. Empty for a plain ⌘K.
+   */
+  initialQuery?: string
   placeholder?: string
   emptyMessage?: string
 }) {
@@ -55,10 +61,12 @@ export function CommandPalette({
 
   // The query is per-OPENING, not persistent. Reopening onto the last search is
   // the palette answering a question you asked a minute ago — and worse, the
-  // first keystroke then appends to it rather than starting a new search.
+  // first keystroke then appends to it rather than starting a new search. It
+  // opens SEEDED, though, when the title-bar search handed a character through:
+  // that keystroke is the start of the search, not a thing to discard.
   React.useEffect(() => {
-    if (!open) setQuery("")
-  }, [open])
+    setQuery(open ? initialQuery : "")
+  }, [open, initialQuery])
 
   const groups = React.useMemo(() => groupPaletteItems(items), [items])
 
