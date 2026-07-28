@@ -1,5 +1,5 @@
 import type { CliKind } from "@jingler/core"
-import { supportsPlanMode } from "@jingler/core"
+import { DEFAULT_PLAN_TEMPLATE, supportsPlanMode } from "@jingler/core"
 import { planInstructions } from "./plan-parse.js"
 
 /**
@@ -15,7 +15,7 @@ import { planInstructions } from "./plan-parse.js"
  * Everything else gets the SAME grammar via `planInstructions("reply")`, which is
  * the whole point: the block a Codex plan comes back in is parsed by the very
  * same `parsePlan` Claude's `ExitPlanMode` payload goes through, so a plan is a
- * plan regardless of who wrote it. Adversarial planning proved this route first
+ * plan regardless of who wrote it. Restart recovery depends on this route
  * — it deliberately refuses plan mode and reads a fenced block instead, so any
  * harness can hold any role.
  *
@@ -24,13 +24,16 @@ import { planInstructions } from "./plan-parse.js"
  * harness, and a mode the operator flips mid-session has to apply to the NEXT
  * turn — which a session-start injection could not do.
  */
-export const planNote = (cli: CliKind): string | null => {
+export const planNote = (
+  cli: CliKind,
+  template: string = DEFAULT_PLAN_TEMPLATE
+): string | null => {
   if (cli === "claude") return null
   if (!supportsPlanMode(cli)) return null
   return [
     "PLAN MODE — you are READ-ONLY this turn. The harness sandbox will reject any",
     "edit or write command, so do not attempt one: research, then plan.",
     "",
-    planInstructions("reply")
+    planInstructions("reply", template)
   ].join("\n")
 }

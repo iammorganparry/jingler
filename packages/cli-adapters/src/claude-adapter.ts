@@ -19,7 +19,12 @@ import { requireWorktree } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
 import { capOutput } from "./output-cap.js"
 import { formatQuestionAnswers } from "./question-prompt.js"
-import { hasPlanBlock, parsePlan, planModeInstructions } from "./plan-parse.js"
+import {
+  hasPlanBlock,
+  parsePlan,
+  PLAN_MDX_REFORMAT,
+  planModeInstructions
+} from "./plan-parse.js"
 import { turnContinuation } from "./turn-continuation.js"
 
 /**
@@ -90,10 +95,6 @@ const READ_ONLY_DISALLOWED: ReadonlyArray<string> = [
  * restores "default" mid-run (see `setPermissionMode` below).
  */
 export const mapPermissionMode = (mode: PermissionMode): SdkPermissionMode =>
-  // `gigaplan` maps to "default" (ask-like) rather than anything permissive.
-  // It is only ever seen here on the fall-through path — a Gigaplan send whose
-  // readiness check failed, running as an ordinary turn — and the cautious
-  // reading is the right one for a turn the operator expected to be a plan.
   mode === "accept-edits" ? "acceptEdits" : mode === "plan" ? "plan" : "default"
 
 /** Validate provider-native values for Claude's adaptive-thinking API. */
@@ -121,17 +122,7 @@ export const mapClaudeReasoning = (
  * plans from that block, so a fence-less plan has no steps to review — we ask for
  * one reformat before falling back to showing the raw markdown.
  */
-export const PLAN_REFORMAT = [
-  "Your plan is missing the required ```plan block, so Jingler cannot render it as a reviewable plan.",
-  "Re-call ExitPlanMode with the SAME plan, but put a fenced ```plan block at the top of it:",
-  "a `summary:` line, then each step as `01 Step title` with two-space-indented",
-  "`intent:` / `approach:` / `files:` / `guards:` fields. Keep your human-readable markdown below the block.",
-  "Do not change the substance of the plan — only its format.",
-  // Without this the model can "comply" by printing the reformatted plan as prose
-  // and ending the turn, which leaves no plan artifact at all. Calling the tool is
-  // the only thing that produces one.
-  "You MUST call the ExitPlanMode tool again — printing the plan as a message does not submit it."
-].join(" ")
+export const PLAN_REFORMAT = `${PLAN_MDX_REFORMAT} You MUST call ExitPlanMode again.`
 
 /**
  * The gate request for a tool the SDK asked about, or null for read-only tools
@@ -1095,6 +1086,10 @@ export const runClaude = (
             }
             planCount += 1
             const plan = parsePlan(raw, `plan_${sessionId}_${planCount}`)
+            if (plan.structured === false && !planReformatAsked) {
+              planReformatAsked = true
+              return { behavior: "deny", message: PLAN_REFORMAT }
+            }
             const decision = await runP(ctx.proposePlan(plan))
             if (decision._tag === "Approve") {
               // Exit plan mode via "default" — the same mode every non-plan run
@@ -1107,7 +1102,13 @@ export const runClaude = (
               } catch {
                 /* ignore — the tool is still allowed and canUseTool governs gating */
               }
-              return { behavior: "allow", updatedInput: input }
+              return {
+                behavior: "allow",
+                updatedInput:
+                  decision.plan === undefined
+                    ? input
+                    : { ...input, plan: decision.plan.raw }
+              }
             }
             return {
               behavior: "deny",
@@ -1223,7 +1224,9 @@ export const runClaude = (
             model: spec.model ?? undefined,
             permissionMode: mapPermissionMode(spec.mode),
             ...mapClaudeReasoning(spec.reasoningEffort, spec.thinkingEnabled),
-            ...(spec.mode === "plan" ? { planModeInstructions } : {}),
+            ...(spec.mode === "plan"
+              ? { planModeInstructions: planModeInstructions(spec.planTemplate) }
+              : {}),
             ...(spec.readOnly ? { disallowedTools: [...READ_ONLY_DISALLOWED] } : {}),
             includePartialMessages: true,
             canUseTool,

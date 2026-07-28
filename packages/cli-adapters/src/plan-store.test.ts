@@ -1,21 +1,18 @@
-import { existsSync, readFileSync } from "node:fs"
-import { basename, dirname } from "node:path"
-import type { Plan } from "@jingler/core"
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync
+} from "node:fs"
+import { basename, join } from "node:path"
 import { FileSystem, Path } from "@effect/platform"
-import { Effect, Layer } from "effect"
+import { Effect, Either, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { scriptedPlan } from "./adapter.js"
 import { AppPaths } from "./app-paths.js"
 import { PlanStore, planFileName } from "./plan-store.js"
 import { withTempRoot } from "./test-support.js"
-
-/**
- * The plan library is what makes a plan pickup-able in a later turn/session, so
- * the behaviours that matter are: a plan lands at a stable, worktree-scoped path;
- * its markdown round-trips; a revision overwrites in place; distinct plans and
- * distinct worktrees never collide; and listing reflects what was written. Real
- * temp filesystem, real round-trips.
- */
 
 let temp: ReturnType<typeof withTempRoot>
 beforeEach(() => {
@@ -23,91 +20,318 @@ beforeEach(() => {
 })
 afterEach(() => temp.cleanup())
 
-const run = <A>(
-  effect: Effect.Effect<A, never, PlanStore | FileSystem.FileSystem | Path.Path | AppPaths>
+const run = <A, E>(
+  effect: Effect.Effect<
+    A,
+    E,
+    PlanStore | FileSystem.FileSystem | Path.Path | AppPaths
+  >
 ) => Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(PlanStore.Default, temp.layer))))
 
-/** A plan with an overridable summary/raw/id, built off the shared fixture. */
-const planWith = (over: Partial<Plan>): Plan => ({ ...scriptedPlan("s1", 1), ...over })
-
 const WT = "/tmp/jingler/worktrees/jingler/terminal"
+const SOURCE = `# PRD: Ship safer planning
 
-describe("planFileName", () => {
-  it("kebab-cases and strips unsafe characters", () => {
-    expect(planFileName("Refactor Auth Flow!")).toBe("refactor-auth-flow")
-    expect(planFileName("  Add rate-limiting (v2)  ")).toBe("add-rate-limiting-v2")
+## Context
+
+One document is authoritative.
+
+<Stage id="01" title="Persist the document">
+
+### Intent
+
+Keep every reader on one revision.
+
+<Acceptance id="01.1" status="pending">
+The source survives restart.
+</Acceptance>
+
+</Stage>
+`
+
+const promote = (source = SOURCE) =>
+  PlanStore.promoteDocument(WT, {
+    sessionId: "s1",
+    producingChatId: "c1",
+    id: "plan-1",
+    source,
+    author: "agent" as const
   })
 
-  it("falls back to 'plan' for an empty/symbol-only name and caps length", () => {
-    expect(planFileName("")).toBe("plan")
-    expect(planFileName("***")).toBe("plan")
-    expect(planFileName("x".repeat(200))).toHaveLength(60)
-  })
-})
+describe("PlanStore canonical document", () => {
+  it("uses one stable current-plan.mdx with protected frontmatter", async () => {
+    const document = await run(promote())
+    const files = await run(PlanStore.list(WT))
 
-describe("PlanStore", () => {
-  it("writes the plan markdown under <plansDir>/<worktree-basename>/<slug>.md", async () => {
-    const plan = planWith({ summary: "Refactor auth flow", raw: "# Refactor auth flow\n\nDo the thing." })
-    const file = await run(PlanStore.write(WT, plan))
-
-    expect(basename(file)).toBe("refactor-auth-flow.md")
-    // Namespaced by the worktree's basename, not its full path.
-    expect(basename(dirname(file))).toBe("terminal")
-    expect(dirname(dirname(file)).endsWith("/.jingler")).toBe(true)
-    expect(existsSync(file)).toBe(true)
-    expect(readFileSync(file, "utf8")).toBe("# Refactor auth flow\n\nDo the thing.")
+    expect(document.revision).toBe(1)
+    expect(files).toHaveLength(1)
+    expect(basename(files[0]!)).toBe("current-plan.mdx")
+    const persisted = readFileSync(files[0]!, "utf8")
+    expect(persisted).toContain("jinglerPlan: 1")
+    expect(persisted).toContain('sessionId: "s1"')
+    expect(persisted).toContain(SOURCE.trimStart())
+    expect(planFileName("ignored")).toBe("current-plan")
   })
 
-  it("overwrites the same file when a plan with the same summary is revised (latest wins)", async () => {
-    const v1 = planWith({ id: "plan_s1_1", summary: "Ship feature", raw: "v1 body" })
-    const v2 = planWith({ id: "plan_s1_2", summary: "Ship feature", raw: "v2 body" })
-    const { first, second, files } = await run(
+  it("round-trips the canonical source and monotonically increments revisions", async () => {
+    const { first, second, read } = await run(
       Effect.gen(function* () {
-        const first = yield* PlanStore.write(WT, v1)
-        const second = yield* PlanStore.write(WT, v2)
-        const files = yield* PlanStore.list(WT)
-        return { first, second, files }
+        const first = yield* promote()
+        const second = yield* PlanStore.updateDocument(WT, {
+          planId: first.id,
+          baseRevision: first.revision,
+          source: SOURCE.replace("survives restart", "survives every restart"),
+          author: "user"
+        })
+        const read = yield* PlanStore.readDocument(WT)
+        return { first, second, read }
       })
     )
-    expect(second).toBe(first) // same path — a revision overwrites
-    expect(readFileSync(first, "utf8")).toBe("v2 body")
-    expect(files).toStrictEqual([first]) // exactly one plan file, not two
+
+    expect(first.revision).toBe(1)
+    expect(second.revision).toBe(2)
+    expect(second.updatedBy).toBe("user")
+    expect(read).toStrictEqual(second)
   })
 
-  it("keeps distinct plans (different summaries) in their own files", async () => {
-    const files = await run(
+  it("returns the latest document on a stale compare-and-swap without overwriting", async () => {
+    const result = await run(
       Effect.gen(function* () {
-        yield* PlanStore.write(WT, planWith({ summary: "Plan A", raw: "a" }))
-        yield* PlanStore.write(WT, planWith({ summary: "Plan B", raw: "b" }))
-        return yield* PlanStore.list(WT)
+        const first = yield* promote()
+        const second = yield* PlanStore.updateDocument(WT, {
+          planId: first.id,
+          baseRevision: first.revision,
+          source: SOURCE.replace("One document", "The canonical document"),
+          author: "user"
+        })
+        const stale = yield* Effect.either(
+          PlanStore.updateDocument(WT, {
+            planId: first.id,
+            baseRevision: first.revision,
+            source: SOURCE.replace("One document", "A stale local document"),
+            author: "user"
+          })
+        )
+        return { second, stale, current: yield* PlanStore.readDocument(WT) }
       })
     )
-    expect(files).toHaveLength(2)
-    expect(files.map((f) => basename(f))).toStrictEqual(["plan-a.md", "plan-b.md"]) // sorted
+
+    expect(Either.isLeft(result.stale)).toBe(true)
+    if (Either.isLeft(result.stale)) {
+      expect(result.stale.left._tag).toBe("PlanConflictError")
+      if (result.stale.left._tag === "PlanConflictError") {
+        expect(result.stale.left.latest).toStrictEqual(result.second)
+      }
+    }
+    expect(result.current).toStrictEqual(result.second)
   })
 
-  it("namespaces plans by worktree so different sessions never collide", async () => {
-    const other = "/tmp/jingler/worktrees/jingler/other"
-    const { here, there } = await run(
+  it("rejects invalid MDX before writing a new revision", async () => {
+    const result = await run(
       Effect.gen(function* () {
-        yield* PlanStore.write(WT, planWith({ summary: "Mine", raw: "mine" }))
-        yield* PlanStore.write(other, planWith({ summary: "Theirs", raw: "theirs" }))
-        const here = yield* PlanStore.list(WT)
-        const there = yield* PlanStore.list(other)
-        return { here, there }
+        const first = yield* promote()
+        const invalid = yield* Effect.either(
+          PlanStore.updateDocument(WT, {
+            planId: first.id,
+            baseRevision: first.revision,
+            source: "# PRD: unsafe\n\n<Widget value={run()} />",
+            author: "user"
+          })
+        )
+        return { first, invalid, current: yield* PlanStore.readDocument(WT) }
       })
     )
-    expect(here.map((f) => basename(f))).toStrictEqual(["mine.md"])
-    expect(there.map((f) => basename(f))).toStrictEqual(["theirs.md"])
+
+    expect(Either.isLeft(result.invalid)).toBe(true)
+    expect(result.current).toStrictEqual(result.first)
   })
 
-  it("lists nothing for a worktree that has no saved plans", async () => {
-    const files = await run(PlanStore.list("/tmp/jingler/worktrees/jingler/never-planned"))
-    expect(files).toStrictEqual([])
+  it("updates criteria and annotations without executing or losing special text", async () => {
+    const document = await run(
+      Effect.gen(function* () {
+        const first = yield* promote()
+        const criterion = yield* PlanStore.setCriterionStatus(WT, {
+          planId: first.id,
+          baseRevision: first.revision,
+          criterionId: "01.1",
+          status: "passed",
+          evidence: 'Test says "ok" <verified>',
+          author: "user"
+        })
+        return yield* PlanStore.addAnnotation(WT, {
+          planId: criterion.id,
+          baseRevision: criterion.revision,
+          stageId: "01",
+          body: "Keep {local} text and <Unknown /> inert.",
+          author: "user"
+        })
+      })
+    )
+
+    expect(document.revision).toBe(3)
+    expect(document.projection.stages[0]?.acceptance[0]).toMatchObject({
+      status: "passed",
+      evidence: 'Test says "ok" <verified>'
+    })
+    expect(document.projection.annotations[0]?.body).toBe(
+      "Keep {local} text and <Unknown /> inert."
+    )
+    expect(document.source.indexOf("<Annotation")).toBeLessThan(
+      document.source.indexOf("</Stage>")
+    )
   })
 
-  it("falls back to a summary heading when the plan has no raw body", async () => {
-    const file = await run(PlanStore.write(WT, planWith({ summary: "Bare plan", raw: "" })))
-    expect(readFileSync(file, "utf8")).toBe("# Bare plan\n")
+  it("serializes concurrent writers so one wins and one receives a conflict", async () => {
+    const results = await run(
+      Effect.gen(function* () {
+        const first = yield* promote()
+        return yield* Effect.all(
+          ["Writer A", "Writer B"].map((label) =>
+            Effect.either(
+              PlanStore.updateDocument(WT, {
+                planId: first.id,
+                baseRevision: first.revision,
+                source: SOURCE.replace("One document", label),
+                author: "user"
+              })
+            )
+          ),
+          { concurrency: "unbounded" }
+        )
+      })
+    )
+
+    expect(results.filter(Either.isRight)).toHaveLength(1)
+    expect(results.filter(Either.isLeft)).toHaveLength(1)
+    const dir = join(temp.root, ".jingler", "terminal")
+    expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toEqual([])
+  })
+
+  it("marks an interrupted in-flight revision stale without changing its source", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const proposed = yield* promote()
+        const stale = yield* PlanStore.markInterrupted(WT, "s1", "c1")
+        const unchanged = yield* PlanStore.markInterrupted(WT, "s1", "c1")
+        return { proposed, stale, unchanged }
+      })
+    )
+
+    expect(result.stale).toMatchObject({
+      status: "stale",
+      revision: 2,
+      source: result.proposed.source
+    })
+    expect(result.unchanged).toStrictEqual(result.stale)
+  })
+
+  it("does not stale a plan created after startup recovery began", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const proposed = yield* promote()
+        const recovered = yield* PlanStore.markInterrupted(
+          WT,
+          "s1",
+          "c1",
+          "2000-01-01T00:00:00.000Z"
+        )
+        return { proposed, recovered }
+      })
+    )
+
+    expect(result.recovered).toStrictEqual(result.proposed)
+    expect(result.recovered?.status).toBe("proposed")
+    expect(result.recovered?.revision).toBe(1)
+  })
+
+  it("imports current-plan.json once without losing prose, comments, status, or revision", async () => {
+    const dir = join(temp.root, ".jingler", "terminal")
+    mkdirSync(dir, { recursive: true })
+    const plan = {
+      ...scriptedPlan("s1", 1),
+      id: "legacy-plan",
+      summary: "Legacy migration",
+      raw: "Legacy prose with implementation detail.",
+      status: "revising" as const,
+      comments: [
+        {
+          id: "comment-1",
+          stepId: "step_1",
+          body: "Preserve this operator note.",
+          author: "user" as const,
+          createdAt: "2026-07-01T00:00:00.000Z",
+          routed: false
+        }
+      ]
+    }
+    writeFileSync(
+      join(dir, "current-plan.json"),
+      JSON.stringify({
+        sessionId: "s1",
+        producingChatId: "c1",
+        revision: 7,
+        plan,
+        updatedAt: "2026-07-02T00:00:00.000Z"
+      })
+    )
+
+    const first = await run(PlanStore.readDocument(WT, "s1", "c1"))
+    const second = await run(PlanStore.readDocument(WT, "other", "other"))
+
+    expect(first).not.toBeNull()
+    expect(first?.id).toBe("legacy-plan")
+    expect(first?.revision).toBe(7)
+    expect(first?.status).toBe("revising")
+    expect(first?.source).toContain("Legacy prose with implementation detail.")
+    expect(first?.projection.annotations[0]?.body).toBe("Preserve this operator note.")
+    expect(second).toStrictEqual(first)
+    expect(existsSync(join(dir, "current-plan.mdx"))).toBe(true)
+  })
+
+  it("imports legacy arrows and line-leading module prose without failing the read", async () => {
+    const dir = join(temp.root, ".jingler", "terminal")
+    mkdirSync(dir, { recursive: true })
+    const plan = {
+      ...scriptedPlan("s1", 1),
+      id: "hostile-legacy-plan",
+      raw: "import Widget from './widget.js'\nexport const next = true",
+      steps: [
+        {
+          ...scriptedPlan("s1", 1).steps[0]!,
+          title: "Rename a -> b"
+        }
+      ]
+    }
+    writeFileSync(
+      join(dir, "current-plan.json"),
+      JSON.stringify({
+        sessionId: "s1",
+        producingChatId: "c1",
+        revision: 3,
+        plan,
+        updatedAt: "2026-07-02T00:00:00.000Z"
+      })
+    )
+
+    const imported = await run(PlanStore.readDocument(WT, "s1", "c1"))
+
+    expect(imported).toMatchObject({
+      id: "hostile-legacy-plan",
+      revision: 3
+    })
+    expect(imported?.projection.stages[0]?.title).toBe("Rename a -> b")
+    expect(existsSync(join(dir, "current-plan.mdx"))).toBe(true)
+  })
+
+  it("returns a typed persistence error instead of dying when the target is unwritable", async () => {
+    const plansDir = join(temp.root, ".jingler")
+    mkdirSync(plansDir, { recursive: true })
+    writeFileSync(join(plansDir, "terminal"), "not a directory")
+
+    const result = await run(Effect.either(promote()))
+
+    expect(Either.isLeft(result)).toBe(true)
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe("PlanPersistenceError")
+    }
   })
 })

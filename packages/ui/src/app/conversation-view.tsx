@@ -49,30 +49,11 @@ const QUEUE_PREVIEW = 5
 /**
  * Shift+Tab cycles these three only.
  *
- * `plan` and `gigaplan` are deliberately absent. Both are deliberate acts —
- * Gigaplan especially, which spends minutes and real money the moment a message
- * is sent — and landing on either by tapping through a cycle would be an
- * expensive surprise. They are chosen from the chip, on purpose.
+ * Plan is appended only for harnesses that support it.
  */
 const MODE_CYCLE: ReadonlyArray<PermissionMode> = ["ask", "accept-edits", "auto"]
 const cycleFor = (cli: CliKind): ReadonlyArray<PermissionMode> =>
   supportsPlanMode(cli) ? [...MODE_CYCLE, "plan"] : MODE_CYCLE
-
-const hasGigaplanIntake = (messages: ReadonlyArray<Message>): boolean =>
-  messages.some((message) =>
-    message.source === "gigaplan-intake" &&
-    message.parts.some(
-      (part) =>
-        (part._tag === "Text" && part.text.trim().length > 0) ||
-        part._tag === "Question"
-    )
-  )
-
-const hasGigaplanPlan = (messages: ReadonlyArray<Message>): boolean =>
-  messages.some(
-    (message) =>
-      message.source === "gigaplan-handoff" && message.parts.some((part) => part._tag === "Plan")
-  )
 
 const useStickyBottomOnResize = (
   scrollRef: RefObject<HTMLDivElement | null>,
@@ -177,10 +158,6 @@ export interface ConversationViewProps {
   reasoningEffort?: ReasoningEffort
   thinkingEnabled?: boolean
   onSetReasoning?: (reasoning?: ReasoningSetting) => void
-  /** Adversarial-planning availability + reason; absent hides the entry entirely. */
-  adversarialPlanning?: { readonly ready: boolean; readonly reason: string | null }
-  /** Explicitly hand the Gigaplan intake thread to the adversarial planners. */
-  onHandoffPlan?: () => void
   /** A pending AskUserQuestion — replaces the composer with the question card. */
   question?: QuestionRequest | null
   onAnswerQuestion?: (requestId: string, answers: ReadonlyArray<QuestionAnswer>) => void
@@ -270,8 +247,6 @@ export function ConversationView({
   reasoningEffort,
   thinkingEnabled,
   onSetReasoning,
-  adversarialPlanning,
-  onHandoffPlan,
   question,
   onAnswerQuestion,
   onApprovePlan,
@@ -548,10 +523,6 @@ export function ConversationView({
                 reasoningEffort={reasoningEffort}
                 thinkingEnabled={thinkingEnabled}
                 onSetReasoning={onSetReasoning}
-                adversarialPlanning={adversarialPlanning}
-                onHandoffPlan={onHandoffPlan}
-                hasGigaplanIntake={hasGigaplanIntake(messages)}
-                hasPlan={plan !== null && hasGigaplanPlan(messages)}
                 allowPlan={supportsPlanMode(cli)}
                 onSend={onSend}
                 onStop={onStop}

@@ -3,7 +3,6 @@ import type {
   CliInfo,
   CliKind,
   GhStatus,
-  GigaplanRoutingConfig,
   GitConfig,
   GithubConfig,
   NotificationsConfig,
@@ -12,10 +11,9 @@ import type {
   OpencodeProviderSource,
   OutputStyle,
   PermissionMode,
+  PlanTemplateConfig,
   ProviderConfig,
   ProvidersConfig,
-  ProviderModels,
-  HarnessBilling,
   ReasoningEffort,
   ContextConfig,
   ContextSnapshot
@@ -57,8 +55,7 @@ import { Callout } from "../components/callout.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { GithubMark } from "../components/github-mark.js"
 import { ProviderIcon, PROVIDER_LABEL } from "../components/provider-icon.js"
-import { ORCHESTRATOR_DEFAULT } from "@jingler/core"
-import { GigaplanSettings } from "./gigaplan-settings.js"
+import { PlanSettings } from "./plan-settings.js"
 import { ThemesSettings, type ThemesSettingsProps } from "./themes-settings.js"
 import { PluginsSettings, type PluginsSettingsProps } from "./plugins-settings.js"
 import {
@@ -83,7 +80,7 @@ type SectionKey =
   | "general"
   | "providers"
   | "context"
-  | "gigaplan"
+  | "plan"
   | "agents"
   | "permissions"
   | "connectors"
@@ -104,7 +101,7 @@ const NAV: ReadonlyArray<NavItem> = [
   { key: "general", label: "General", icon: <SlidersHorizontal size={14} />, ready: true },
   { key: "providers", label: "Providers", icon: <Cpu size={14} />, ready: true },
   { key: "context", label: "Context", icon: <Gauge size={14} />, ready: true },
-  { key: "gigaplan", label: "Gigaplan", icon: <Sparkles size={14} />, ready: true },
+  { key: "plan", label: "Plan", icon: <Sparkles size={14} />, ready: true },
   { key: "agents", label: "Agents & skills", icon: <Sparkles size={14} />, ready: false },
   { key: "permissions", label: "Permissions", icon: <ShieldCheck size={14} />, ready: false },
   { key: "connectors", label: "Connectors", icon: <Plug size={14} />, ready: true },
@@ -116,12 +113,6 @@ const NAV: ReadonlyArray<NavItem> = [
 
 // ── Provider lever option sets (labels ← design E10) ─────────────────────────
 
-/**
- * Gigaplan is deliberately absent: this sets the mode NEW sessions start in, and
- * defaulting every new session to a mode that spends minutes and real money on
- * its first message would be indefensible. It is chosen per session, from the
- * composer's chip.
- */
 const MODE_ITEMS: ReadonlyArray<{ value: PermissionMode; label: string }> = [
   { value: "ask", label: "Ask each time" },
   { value: "accept-edits", label: "Accept edits" },
@@ -466,19 +457,9 @@ export interface SettingsViewProps {
   defaultCli?: CliKind | null
   /** Persist the default harness for new sessions. */
   onSaveDefaultCli?: (cli: CliKind) => Promise<void> | void
-  /** Every installed harness + its models, for the Gigaplan orchestrator picker. */
-  catalog?: ReadonlyArray<ProviderModels>
-  /** The configured orchestrator harness+model, or null for the default. */
-  orchestrator?: { readonly cli: CliKind; readonly model: string } | null
-  /** Persist the orchestrator's harness+model. */
-  onSaveOrchestrator?: (cli: CliKind, model: string) => void
-  /** Deterministic per-step routing policy; absence means shadow defaults. */
-  gigaplanRouting?: GigaplanRoutingConfig | null
-  onSaveGigaplanRouting?: (routing: GigaplanRoutingConfig) => void
-  /** Why Gigaplan can't run on this host, when it can't. */
-  gigaplanUnavailableReason?: string | null
-  /** What each installed harness is charged to. */
-  billing?: ReadonlyArray<HarnessBilling>
+  /** Custom PRD structure injected into every native planning harness. */
+  planTemplate?: PlanTemplateConfig | null
+  onSavePlanTemplate?: (template: PlanTemplateConfig) => Promise<void> | void
   /** Load the selectable models for a CLI (live discovery). */
   loadModels: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
   /** opencode's resolved providers + credential origins (opencode only). */
@@ -542,13 +523,8 @@ export function SettingsView({
   onSaveProvider,
   defaultCli,
   onSaveDefaultCli,
-  catalog,
-  orchestrator,
-  onSaveOrchestrator,
-  gigaplanRouting,
-  onSaveGigaplanRouting,
-  gigaplanUnavailableReason,
-  billing,
+  planTemplate,
+  onSavePlanTemplate,
   loadModels,
   loadOpencodeProviders,
   onSetOpencodeAuth,
@@ -672,17 +648,11 @@ export function SettingsView({
           onSaveContext={onSaveContext}
           onSaveProvider={onSaveProvider}
         />
-      ) : section === "gigaplan" ? (
+      ) : section === "plan" ? (
         <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
-          <GigaplanSettings
-            catalog={catalog ?? []}
-            orchestrator={orchestrator ?? null}
-            defaultOrchestrator={ORCHESTRATOR_DEFAULT}
-            onChange={onSaveOrchestrator ?? (() => {})}
-            routing={gigaplanRouting ?? null}
-            onRoutingChange={onSaveGigaplanRouting}
-            unavailableReason={gigaplanUnavailableReason ?? null}
-            billing={billing}
+          <PlanSettings
+            source={planTemplate?.source}
+            onSave={(source) => onSavePlanTemplate?.({ source })}
           />
         </div>
       ) : section === "connectors" ? (
@@ -830,12 +800,7 @@ function ProvidersSection({
                 )}
               </div>
             </div>
-            {/*
-              The New Session dialog has no harness picker — it asked the same
-              question every time. This is where that answer lives now. Only
-              startable harnesses qualify: `jingler` is the orchestrator, chosen
-              per turn via the Gigaplan mode chip, never as a session's harness.
-            */}
+            {/* The New Session dialog has no harness picker; this is its default. */}
             {onSaveDefaultCli && startable.some((c) => c.kind === selected) && (
               isDefaultCli ? (
                 <span className="rounded-md bg-blue/10 px-2 py-1 text-[10.5px] font-medium text-blue">

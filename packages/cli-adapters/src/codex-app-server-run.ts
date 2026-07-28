@@ -23,7 +23,7 @@ import {
 import { stageCodexInput, toCodexAppServerInput } from "./codex-input.js"
 import { codexMcpOverrides } from "./mcp-config.js"
 import { requireWorktree } from "./cwd.js"
-import { hasPlanBlock, parsePlan } from "./plan-parse.js"
+import { hasPlanBlock, parsePlan, PLAN_MDX_REFORMAT } from "./plan-parse.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
 import { harnessEnv, hasSubscriptionAuth } from "./subscription.js"
 import { worktreeEnv } from "./worktree-env.js"
@@ -542,6 +542,7 @@ export const runCodexAppServer = (
           }
           let questionRound = 0
           let planRound = 0
+          let planReformatAsked = false
           for (;;) {
             const state = makeCodexAppServerEventState()
             let followUp: string | null = null
@@ -611,6 +612,11 @@ export const runCodexAppServer = (
               if (proposed !== null) {
                 planRound += 1
                 const plan = parsePlan(proposed, `plan_${sessionId}_${planRound}`)
+                if (plan.structured === false && !planReformatAsked) {
+                  planReformatAsked = true
+                  followUp = PLAN_MDX_REFORMAT
+                  continue
+                }
                 const decision = await runP(ctx.proposePlan(plan))
                 if (decision._tag === "Revise") {
                   followUp = decision.feedback
@@ -627,7 +633,7 @@ export const runCodexAppServer = (
                     sandbox: activePolicy.sandbox,
                     approvalPolicy: activePolicy.approvalPolicy
                   })
-                  followUp = resumePlanPrompt(plan)
+                  followUp = resumePlanPrompt(decision.plan ?? plan)
                 }
                 continue
               }

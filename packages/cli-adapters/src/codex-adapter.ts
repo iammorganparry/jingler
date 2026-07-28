@@ -10,7 +10,7 @@ import type {
 import { Effect, Runtime } from "effect"
 import type { AgentContext, SessionSpec } from "./adapter.js"
 import { capOutput } from "./output-cap.js"
-import { hasPlanBlock, parsePlan } from "./plan-parse.js"
+import { hasPlanBlock, parsePlan, PLAN_MDX_REFORMAT } from "./plan-parse.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
 import { requireWorktree } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
@@ -50,10 +50,7 @@ import {
  * operator approves, and on Claude that promise is kept by the SDK's own plan
  * permission mode. Codex has no equivalent, so without this branch a planning
  * turn fell through to `workspace-write` and quietly rewrote the worktree while
- * claiming to be planning. `gigaplan` is deliberately NOT here: it never reaches
- * an adapter as a mode — `adversarial-plan.ts` runs its roles as `ask` +
- * `readOnly: true` — so a branch for it would be dead code implying a guarantee
- * nothing upholds.
+ * claiming to be planning.
  */
 export const mapCodexPolicy = (
   mode: PermissionMode,
@@ -493,6 +490,7 @@ export const runCodexSdk = (
         let turnPrompt: Input = staged.input
         let questionRound = 0
         let planRound = 0
+        let planReformatAsked = false
         let recoveredMissingRollout = false
         for (;;) {
           let followUp: string | null = null
@@ -580,6 +578,11 @@ export const runCodexSdk = (
               // payload. So this is deliberately not emitted as Assistant text —
               // the Plan card renders it, and doing both would double it up.
               const plan = parsePlan(proposed, `plan_${sessionId}_${planRound}`)
+              if (plan.structured === false && !planReformatAsked) {
+                planReformatAsked = true
+                followUp = PLAN_MDX_REFORMAT
+                continue
+              }
               const decision = await runP(ctx.proposePlan(plan))
               if (decision._tag === "Revise") followUp = decision.feedback
               else if (decision._tag === "Approve") {
@@ -600,7 +603,7 @@ export const runCodexSdk = (
                 if (threadId !== null) {
                   thread = codex.resumeThread(threadId, { ...threadOptions, ...policy })
                 }
-                followUp = resumePlanPrompt(plan)
+                followUp = resumePlanPrompt(decision.plan ?? plan)
               }
               // Reject: `followUp` stays null, so the turn ends here — which is
               // what rejection means. `Done` is emitted normally below.

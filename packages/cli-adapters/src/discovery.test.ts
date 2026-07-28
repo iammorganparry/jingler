@@ -4,13 +4,8 @@ import { DiscoveryService, meetsMinVersion } from "./discovery.js"
 import { fakeCommandExecutor, runExit } from "./test-support.js"
 import type { FakeCommandHandler } from "./test-support.js"
 
-/**
- * Just the harnesses this module actually probes the host for. `jingler` is
- * the app itself and is always present, so including it would make every
- * "nothing is installed" assertion permanently false.
- */
 const external = (cs: ReadonlyArray<{ kind: string; available: boolean }>) =>
-  cs.filter((c) => c.kind !== "jingler")
+  cs
 
 /**
  * DiscoveryService probes the host for coding CLIs. Those binaries aren't present
@@ -133,7 +128,7 @@ describe("DiscoveryService.list", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     const byKind = Object.fromEntries(exit.value.map((c) => [c.kind, c]))
-    expect(exit.value).toHaveLength(5) // one entry per CLI spec, incl. jingler
+    expect(exit.value).toHaveLength(4) // one entry per supported external CLI
 
     expect(byKind.claude).toMatchObject({ available: true, version: "claude 2.1.0" })
     expect(byKind.claude?.binPath).toBe("/usr/local/bin/claude")
@@ -148,19 +143,6 @@ describe("DiscoveryService.list", () => {
     if (exit._tag === "Success") {
       expect(external(exit.value).every((c) => !c.available)).toBe(true)
     }
-  })
-
-  it("still offers Jingler itself on a host with no CLI at all", async () => {
-    // The orchestrator is the app, not something installed beside it. Reporting
-    // it unavailable here would be both false and unactionable — there is
-    // nothing the operator could install to fix it. Whether a round can RUN is a
-    // separate question (`planningReadiness` wants two vendors), answered in the
-    // picker as a disabled entry with a reason.
-    const exit = await run(() => ({ stdout: "" }))
-    expect(exit._tag).toBe("Success")
-    if (exit._tag !== "Success") return
-    const jingler = exit.value.find((c) => c.kind === "jingler")
-    expect(jingler).toMatchObject({ available: true, binPath: null })
   })
 
   /**

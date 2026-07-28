@@ -1,5 +1,4 @@
 import type {
-  CliKind,
   DiffStat,
   Plan,
   PlanEdge,
@@ -9,19 +8,19 @@ import type {
   PlanNode,
   PlanNodeKind,
   PlanStep,
-  PlanStepAssignee,
-  PlanStepCode,
-  RouteEffort,
-  RouteRisk,
-  TaskKind
+  PlanStepCode
 } from "@jingler/core"
-import { CLI_KINDS, TASK_KINDS } from "@jingler/core"
+import {
+  DEFAULT_PLAN_TEMPLATE,
+  PLAN_EVIDENCE_INSTRUCTIONS
+} from "@jingler/core"
+import { planFromMdx } from "./plan-mdx.js"
 
 /**
  * Turn the plan text Claude produces via `ExitPlanMode` into a structured `Plan`.
  *
  * We can't rely on the model to emit JSON, so we ask it (via
- * `planModeInstructions`) to include a small, line-oriented ` ```plan ` block and
+ * `planModeInstructions`) to include a safe PRD ` ````mdx plan ` block and
  * parse that here. Everything is best-effort and forgiving: a missing/garbled
  * block falls back to a single step that carries the raw markdown, so the plan is
  * always renderable and never lost. Pure and deterministic given `(raw, id)` —
@@ -42,10 +41,18 @@ import { CLI_KINDS, TASK_KINDS } from "@jingler/core"
  */
 export type PlanChannel = "tool" | "reply"
 
+export const PLAN_MDX_REFORMAT = [
+  "The submitted PRD is not valid Jingler plan MDX.",
+  "Return the SAME plan as one complete four-backtick fenced ````mdx plan block.",
+  "Use Markdown plus only Stage, Acceptance, and Annotation components.",
+  "Every Stage needs a stable id, title, intent, and at least one Acceptance with a stable id.",
+  "Do not change the substance of the plan; change only its format."
+].join(" ")
+
 const OPENING: Readonly<Record<PlanChannel, string>> = {
-  tool: "When you present your plan with ExitPlanMode, put a fenced ```plan block at the top of the plan text, then your normal human-readable markdown below it.",
+  tool: "When you present your plan with ExitPlanMode, put a four-backtick fenced ````mdx plan block at the top of the plan text, then your normal human-readable markdown below it.",
   reply:
-    "When your plan is ready, put a fenced ```plan block at the top of your reply, then your normal human-readable markdown below it — and STOP there, without editing anything."
+    "When your plan is ready, put a four-backtick fenced ````mdx plan block at the top of your reply, then your normal human-readable markdown below it — and STOP there, without editing anything."
 }
 
 const SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
@@ -56,71 +63,39 @@ const SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
 
 /**
  * The plan output protocol injected for a plan-mode turn. Documents the
- * ` ```plan ` block so what the agent submits parses into structured steps. Kept
+ * ` ````mdx plan ` block so what the agent submits parses into structured steps. Kept
  * declarative: one block, documented field names, no per-call string assembly
  * elsewhere.
  */
-export const planInstructions = (channel: PlanChannel): string =>
-  `${OPENING[channel]} Jingler renders the block as an interactive, reviewable plan.
+export const planInstructions = (
+  channel: PlanChannel,
+  template: string = DEFAULT_PLAN_TEMPLATE
+): string =>
+  `${OPENING[channel]} Jingler renders the MDX as an interactive PRD.
 
-Format of the \`\`\`plan block (one step per header line; two-space-indented fields):
+${SUBMIT_RULE[channel]}
 
-  summary: <one short line naming the whole change>
-  01 <step title>
-    intent: <one sentence — why this step exists>
-    approach: <how, step one; how, step two>          (semicolon-separated)
-    files: M path/to/file.ts +12 -3; A path/to/new.ts +40   (A add / M modify / D delete, then +added -removed)
-    guards: <acceptance criterion>; <another> (warn)   (append (warn)/(open)/(review) to flag one)
-    depends: 01; blocks: 03
-  02 <next step title>
-    ...
-  04 <a branching step>
-    branch: <the yes/no condition, e.g. "token expired?">
-    4a <arm taken when yes>
-      intent: ...
-    4b <arm taken when no>
-      intent: ...
-  05 <step>
-  06 <step>
+Return one four-backtick fenced \`\`\`\`mdx plan block containing the COMPLETE PRD. Markdown is
+allowed. The only components are <Stage>, <Acceptance>, and <Annotation>. Do not
+use imports, exports, JavaScript expressions, or arbitrary React components.
+Every Stage requires a stable unique id, title, Intent section, and at least one
+Acceptance with its own stable unique id and status.
 
-Rules: number steps 01, 02, … in order; a branch's arms are numbered 4a, 4b under it (two extra spaces). Keep each step's title under ~6 words and its intent to one sentence. ${SUBMIT_RULE[channel]}
+Use this configured structure as the source of truth. Preserve its sections while
+replacing placeholders with task-specific content:
 
-ALSO, for each step whose logic actually branches or moves through states, include a fenced \`\`\`flow step <NN> block that maps THAT STEP's own control flow — a state machine, a user flow, or the decision tree grounded in the step's code. One flow PER STEP, scoped to what that step does. Skip the block entirely for steps that are a straight-line edit with no meaningful decisions (most simple steps need none). This is the most important visual: focus on the branch points, not a linear list of actions. One node or edge per line:
+\`\`\`mdx
+${template.trim()}
+\`\`\`
 
-  \`\`\`flow step 04
-  start   n0  "HTTP request"
-  action  n1  "authMiddleware" file src/auth/session.ts
-  decision n2 "token expired?"
-  action  n3  "refresh() + retry once"
-  action  n4  "proceed"
-  terminal n5 "response"
-  n0 -> n1
-  n1 -> n2
-  n2 -> n3 : yes
-  n2 -> n4 : no
-  n3 -> n5
-  n4 -> n5
-  \`\`\`
+After the operator approves the plan, implementation may continue in this same
+turn. Follow this completion protocol then:
 
-The block's info string MUST name the step (\`flow step <NN>\`, matching a plan step's number). Node syntax: \`<kind> <id> "<label>"\` where kind is start|decision|action|io|terminal|note; optionally add \`file <path>\` (a detail line). Edge syntax: \`<from> -> <to>\` with an optional \`: <condition>\` label (put the yes/no or condition on the edges LEAVING a decision node).
-
-FINALLY, for the steps where it aids review — new service methods, key types, and the tests that cover them — include a short illustrative code sample so the operator can scrutinise the SHAPE of the change (signatures, error handling, test cases) before approving. Emit it as a normal fenced code block whose info string names the step: put \`step <NN>\` after the language. One block per step; keep it to the essential lines (a method signature + body sketch, or a test's arrange/act/assert), not the whole file:
-
-  \`\`\`ts step 02
-  export class TokenStore extends Effect.Service<TokenStore>()("TokenStore", {
-    effect: Effect.gen(function* () {
-      return {
-        get: (id: string) => Effect.succeed(/* … */),
-        refresh: (session: Session) => Effect.gen(function* () { /* … */ })
-      }
-    })
-  }) {}
-  \`\`\`
-
-The language is the highlight hint (ts, tsx, py, go, …); \`step <NN>\` (or \`step=<NN>\`) links the sample to that plan step.`
+${PLAN_EVIDENCE_INSTRUCTIONS.join("\n")}`
 
 /** The Claude variant, passed to the SDK as `planModeInstructions`. */
-export const planModeInstructions = planInstructions("tool")
+export const planModeInstructions = (template: string = DEFAULT_PLAN_TEMPLATE): string =>
+  planInstructions("tool", template)
 
 // ── Parsing ───────────────────────────────────────────────────────────────────
 
@@ -145,13 +120,29 @@ const fenced = (raw: string, lang: string): string | null => {
 }
 
 /**
- * Whether the agent actually emitted the ` ```plan ` fence we asked for.
+ * Whether the agent actually emitted the ` ````mdx plan ` fence we asked for.
  *
  * `planModeInstructions` documents the format, but prompt compliance is never
  * guaranteed — the adapter uses this to bounce a fence-less plan back for one
  * reformat rather than degrading straight to the raw fallback.
  */
-export const hasPlanBlock = (raw: string): boolean => fenced(raw, "plan") !== null
+const fencedMdxPlan = (raw: string): string | null => {
+  const opening = /^[ \t]*(`{3,})mdx[ \t]+plan[ \t]*\r?\n/im.exec(raw)
+  if (opening === null) return null
+
+  const fenceLength = opening[1]!.length
+  const bodyStart = opening.index + opening[0].length
+  const body = raw.slice(bodyStart)
+  const closings = body.matchAll(/^[ \t]*(`{3,})[ \t]*$/gm)
+  for (const closing of closings) {
+    if (closing[1]!.length < fenceLength) continue
+    return body.slice(0, closing.index).replace(/\s+$/, "")
+  }
+  return null
+}
+
+export const hasPlanBlock = (raw: string): boolean =>
+  fencedMdxPlan(raw) !== null || fenced(raw, "plan") !== null
 
 /** Numeric-only ordinals pad to two digits ("4" → "04"); arms ("4a") stay as-is. */
 const normNum = (n: string): string => (/^\d+$/.test(n) ? n.padStart(2, "0") : n)
@@ -188,28 +179,6 @@ const splitRefs = (v: string): ReadonlyArray<string> => clean(v.split(/[;,]/))
 
 /** The relation fields — the only ones the format puts two-to-a-line. */
 const RELATION = /^\s*(depends|blocks)\s*:\s*(.*)$/i
-
-/**
- * Parse an `agent:` field — `<cli> <model> — <why>`.
- *
- * The harness and model are separate tokens rather than a single `cli/model`
- * pair on purpose: opencode's own ids are provider-qualified and routinely
- * contain slashes (`openrouter/anthropic/claude-opus-4.5`), so splitting on "/"
- * would tear a model id in half and name a harness that doesn't exist.
- *
- * An unknown harness yields null rather than a guess — an assignee naming a CLI
- * we can't run produces a broken session, which is worse than no assignee.
- */
-const parseAssignee = (value: string): PlanStepAssignee | null => {
-  const m = /^\s*(\S+)\s+(\S+)\s*(?:[—–-]\s*(.*))?$/.exec(value)
-  if (!m) return null
-  const cli = m[1]!.toLowerCase()
-  if (!(CLI_KINDS as ReadonlyArray<string>).includes(cli)) return null
-  // A step assigned back to the orchestrator would re-enter planning to execute
-  // one step of the plan it just made. Steps run on real harnesses only.
-  if (cli === "jingler") return null
-  return { cli: cli as CliKind, model: m[2]!, reason: (m[3] ?? "").trim() }
-}
 
 /**
  * Peel a trailing relation field out of a value.
@@ -343,36 +312,6 @@ const parseBlock = (block: string): { summary: string; steps: PlanStep[] } => {
             s.kind = "branch"
             s.condition = v
             break
-          case "task": {
-            // Only used by adversarial planning; plain plan mode never emits it.
-            // Silently ignored when the model invents a kind outside the closed
-            // vocabulary, because a bogus value would key learnings to a cell
-            // nothing else can ever read.
-            const kind = v.trim().toLowerCase()
-            if ((TASK_KINDS as ReadonlyArray<string>).includes(kind)) {
-              s.taskKind = kind as TaskKind
-            }
-            break
-          }
-          case "effort": {
-            const effort = v.trim().toLowerCase()
-            if (effort === "quick" || effort === "standard" || effort === "deep") {
-              s.effort = effort satisfies RouteEffort
-            }
-            break
-          }
-          case "risk": {
-            const risk = v.trim().toLowerCase()
-            if (risk === "low" || risk === "medium" || risk === "high") {
-              s.risk = risk satisfies RouteRisk
-            }
-            break
-          }
-          case "agent": {
-            const assignee = parseAssignee(v)
-            if (assignee !== null) s.assignee = assignee
-            break
-          }
         }
       }
       continue
@@ -519,6 +458,11 @@ export const parseStepCode = (raw: string): Map<string, PlanStepCode> => {
  * single step wrapping the markdown when there's no parseable ` ```plan ` block.
  */
 export const parsePlan = (raw: string, id: string): Plan => {
+  const mdx = fencedMdxPlan(raw)
+  if (mdx !== null) {
+    const plan = planFromMdx(mdx, id)
+    if (plan !== null) return plan
+  }
   const block = fenced(raw, "plan")
   const graph = parseFlow(raw)
   const code = parseStepCode(raw)

@@ -105,32 +105,3 @@ export const Paused: Story = {
     </div>
   )
 }
-
-/**
- * Gigaplan on a host that can't orchestrate: the model chip is gone and a
- * warning pill takes its place.
- *
- * The pill's copy is tier-dependent — "needs a second provider" is five words
- * that would otherwise wrap and push Send off screen for an advisory message.
- */
-export const GigaplanNotReady: Story = {
-  render: () => (
-    <div className="min-h-screen bg-canvas">
-      <LookFor>
-        <strong className="text-text-bright">Look for:</strong> the pill reading{" "}
-        <code>needs 2nd provider</code> below 780, no model chip at any width, and the full reason
-        still available on hover.
-      </LookFor>
-      <WidthLadder
-        height={200}
-        render={() => (
-          <Composer
-            {...loaded}
-            mode="gigaplan"
-            adversarialPlanning={{ ready: false, reason: "Only one provider is installed (claude)" }}
-          />
-        )}
-      />
-    </div>
-  )
-}

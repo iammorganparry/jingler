@@ -1,5 +1,11 @@
 import { useState } from "react"
-import type { ExecutionMode, Plan, PlanStatus } from "@jingler/core"
+import type {
+  ExecutionMode,
+  Plan,
+  PlanAcceptanceStatus,
+  PlanDocument,
+  PlanStatus
+} from "@jingler/core"
 import { ClipboardList, GitBranch, MousePointerClick, Play, Send } from "lucide-react"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
@@ -10,6 +16,10 @@ import { PlanStepChanges } from "../composites/plan-step-changes.js"
 import { PlanStepDetail } from "../composites/plan-step-detail.js"
 import { PlanStepList } from "../composites/plan-step-list.js"
 import { PlanApprovalActions } from "../composites/plan-approval-actions.js"
+import {
+  PlanEditor,
+  type PlanEditorSyncState
+} from "../composites/plan-editor.js"
 import { cn } from "../lib/cn.js"
 
 const STATUS_PILL: Partial<Record<PlanStatus, { label: string; tone: "yellow" | "blue" | "green" }>> = {
@@ -30,6 +40,12 @@ const branchCount = (plan: Plan): number => plan.steps.filter((s) => s.kind === 
  */
 export function PlanReview({
   plan,
+  document,
+  draft,
+  remote,
+  syncState = "clean",
+  syncError,
+  canApprove = true,
   patch = "",
   selectedStepId,
   compact = false,
@@ -37,9 +53,23 @@ export function PlanReview({
   onApprove,
   onResume,
   onRevise,
-  onComment
+  onComment,
+  onEditDocument,
+  onSaveDocument,
+  onRetryDocument,
+  onKeepLocal,
+  onAcceptRemote,
+  onCriterionChange,
+  onAnnotate
 }: {
   plan: Plan | null
+  /** Canonical MDX plan. When present it replaces the legacy step inspector. */
+  document?: PlanDocument | null
+  draft?: string
+  remote?: PlanDocument | null
+  syncState?: PlanEditorSyncState
+  syncError?: string | null
+  canApprove?: boolean
   /** The session worktree's live unified diff, sliced per-step into the changes rail. */
   patch?: string
   /**
@@ -57,6 +87,17 @@ export function PlanReview({
   onResume?: () => void
   onRevise?: () => void
   onComment?: (stepId: string, body: string) => void
+  onEditDocument?: (source: string) => void
+  onSaveDocument?: () => void
+  onRetryDocument?: () => void
+  onKeepLocal?: () => void
+  onAcceptRemote?: () => void
+  onCriterionChange?: (
+    criterionId: string,
+    status: PlanAcceptanceStatus,
+    evidence: string | null
+  ) => void
+  onAnnotate?: (stageId: string | null, body: string) => void
 }) {
   // Uncontrolled by default (Storybook, and the plain Plan tab); `selectedStepId`
   // layers a deep link on top without forcing every caller to own the selection.
@@ -64,7 +105,7 @@ export function PlanReview({
   const list = useResizableWidth({ storageKey: "sb.plan.list", initial: 280, min: 220, max: 420 })
   const changes = useResizableWidth({ storageKey: "sb.plan.changes", initial: 380, min: 280, max: 560 })
 
-  if (!plan) {
+  if (!plan && !document) {
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-editor text-center">
         <ClipboardList className="size-8 text-line-strong" />
@@ -75,6 +116,75 @@ export function PlanReview({
       </div>
     )
   }
+
+  if (document) {
+    const settled =
+      document.status === "approved" ||
+      document.status === "executing" ||
+      document.status === "needs-verification" ||
+      document.status === "done" ||
+      document.status === "rejected"
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-editor">
+        <div className="flex flex-none flex-wrap items-center gap-2 border-b border-hairline bg-panel px-4 py-2.5">
+          <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-text">
+            {document.projection.title}
+          </span>
+          <Pill
+            tone={
+              document.status === "done" || document.status === "approved"
+                ? "green"
+                : document.status === "needs-verification"
+                  ? "yellow"
+                  : "blue"
+            }
+            pulse={document.status === "executing"}
+          >
+            {document.status.replace("-", " ")}
+          </Pill>
+          <span className="font-mono text-[10px] text-muted-foreground">
+            revision {document.revision}
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            {document.status === "stale" ? (
+              <Button size="sm" disabled={!canApprove} onClick={onResume}>
+                <Play className="size-3.5" />
+                Approve &amp; implement
+              </Button>
+            ) : settled ? (
+              <span className="text-[11px] text-muted-foreground">
+                {document.status === "done" ? "All criteria verified" : document.status}
+              </span>
+            ) : (
+              <>
+                <Button variant="secondary" size="sm" onClick={onRevise}>
+                  <Send className="size-3.5" />
+                  Revise with agent
+                </Button>
+                <PlanApprovalActions onApprove={onApprove} disabled={!canApprove} />
+              </>
+            )}
+          </div>
+        </div>
+        <PlanEditor
+          document={document}
+          draft={draft ?? document.source}
+          remote={remote}
+          state={syncState}
+          error={syncError}
+          compact={compact}
+          onEdit={onEditDocument}
+          onSave={onSaveDocument}
+          onRetry={onRetryDocument}
+          onKeepLocal={onKeepLocal}
+          onAcceptRemote={onAcceptRemote}
+          onCriterionChange={onCriterionChange}
+          onAnnotate={onAnnotate}
+        />
+      </div>
+    )
+  }
+  if (plan === null) return null
 
   // Flows now live per-step. On entry (nothing explicitly selected) auto-open the
   // first step that carries a flow, so a diagram is visible immediately; if no

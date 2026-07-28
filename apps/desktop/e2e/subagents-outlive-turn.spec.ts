@@ -89,7 +89,7 @@ test("stopping a held-open turn clears every sub-agent tab", async ({ launchApp 
   await composer.press("Enter")
   await expect(window.getByRole("button", { name: FIRST_TAB })).toBeVisible({ timeout: 15_000 })
 
-  await window.getByRole("button", { name: /stop/i }).first().click()
+  await window.getByRole("button", { name: "Stop", exact: true }).click()
 
   await expect(window.getByRole("button", { name: FIRST_TAB })).toHaveCount(0)
   await expect(window.getByRole("button", { name: SECOND_TAB })).toHaveCount(0)

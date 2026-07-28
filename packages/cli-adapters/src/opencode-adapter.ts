@@ -5,7 +5,7 @@ import type { SessionPromptData } from "@opencode-ai/sdk/v2/client"
 import { Effect, Runtime } from "effect"
 import type { AgentContext, PermissionRequest, SessionSpec } from "./adapter.js"
 import { capOutput } from "./output-cap.js"
-import { hasPlanBlock, parsePlan } from "./plan-parse.js"
+import { hasPlanBlock, parsePlan, PLAN_MDX_REFORMAT } from "./plan-parse.js"
 import { stopChild, trackChild } from "./child-registry.js"
 import { requireWorktree } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
@@ -834,6 +834,7 @@ const driveOpencode = async (
       // as Codex has none — so both harnesses land on the same shape.
       let turnPrompt = spec.prompt
       let planRound = 0
+      let planReformatAsked = false
       for (;;) {
         let followUp: string | null = null
         const result = await client.session.prompt({
@@ -860,6 +861,12 @@ const driveOpencode = async (
           if (hasPlanBlock(reply) && planRound < MAX_PLAN_ROUNDS) {
             planRound += 1
             const plan = parsePlan(reply, `plan_${sessionId}_${planRound}`)
+            if (plan.structured === false && !planReformatAsked) {
+              planReformatAsked = true
+              followUp = PLAN_MDX_REFORMAT
+              turnPrompt = followUp
+              continue
+            }
             const decision = await runP(ctx.proposePlan(plan))
             if (decision._tag === "Revise") followUp = decision.feedback
             else if (decision._tag === "Approve") {
@@ -867,7 +874,7 @@ const driveOpencode = async (
               // still wins — a caller that pinned this run read-only (the
               // adversarial roles) is not handed write access by an approval.
               planning = spec.readOnly !== true && decision.mode !== "plan"
-              followUp = resumePlanPrompt(plan)
+              followUp = resumePlanPrompt(decision.plan ?? plan)
             }
             // Reject: `followUp` stays null and the turn ends, which is what
             // rejection means.

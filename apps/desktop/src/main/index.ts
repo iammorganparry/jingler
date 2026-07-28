@@ -16,8 +16,10 @@ import {
   killAllChildren,
   killAllPtysSync,
   ModelsService,
+  PlanStore,
   PluginHost,
-  SecretStore
+  SecretStore,
+  SessionStore
 } from "@jingler/cli-adapters"
 import { app, BrowserWindow, ipcMain, shell } from "electron"
 import { Effect } from "effect"
@@ -82,6 +84,34 @@ const prefetchModels = Effect.gen(function* () {
   const clis = yield* DiscoveryService.list()
   yield* ModelsService.catalog(clis)
 }).pipe(Effect.ignore)
+
+const recoverInterruptedPlans = (updatedBefore: string) => Effect.gen(function* () {
+  const sessions = yield* SessionStore.list()
+  yield* Effect.forEach(
+    sessions,
+    (session) =>
+      session.worktreePath
+        ? PlanStore.markInterrupted(
+            session.worktreePath,
+            session.id,
+            session.activeChatId,
+            updatedBefore
+          ).pipe(
+            Effect.asVoid,
+            Effect.catchAllCause((cause) =>
+              Effect.logError(
+                `Could not recover the interrupted plan for ${session.id}: ${String(cause)}`
+              )
+            )
+          )
+        : Effect.void,
+    { concurrency: "unbounded", discard: true }
+  )
+}).pipe(
+  Effect.catchAllCause((cause) =>
+    Effect.logError(`Could not enumerate interrupted plans: ${String(cause)}`)
+  )
+)
 
 // Only one instance may run: a second launch (e.g. the OS handing us a
 // `jingler://` deep link) must forward its argv into the primary instance
@@ -337,6 +367,11 @@ if (!gotPrimaryLock) {
     // Force the layer to build so the RPC server + `ipcMain` listener are live
     // before the renderer can send its first frame.
     await runtime.runPromise(Effect.void)
+    // Runs belong to the previous process and cannot still be parked. Recover
+    // their exact canonical revisions in parallel, but never put filesystem
+    // recovery on the window-creation path: a corrupt artifact or unavailable
+    // volume must not launch Jingler with no window.
+    void runtime.runPromise(recoverInterruptedPlans(new Date().toISOString()))
     // Not awaited — the catalogue warms in the background while the window opens.
     void runtime.runPromise(prefetchModels)
 
