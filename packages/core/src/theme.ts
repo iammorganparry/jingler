@@ -436,9 +436,12 @@ export type ThemeConfig = Schema.Schema.Type<typeof ThemeConfig>
  * pixel-exact no-op — which is the property that keeps "the theme failed to
  * load" from being indistinguishable from "the theme loaded".
  *
- * Changing this is a FOUR-file edit, not a one-line one: the `:root` block in
- * `packages/ui/src/globals.css` has to be regenerated from the new preset, and
- * the pinning test in `packages/themes/src/map.test.ts` re-pinned to match.
+ * Changing this is a FIVE-file edit, not a one-line one: the `:root` block in
+ * `packages/ui/src/globals.css` has to be regenerated from the new preset, the
+ * pinning test in `packages/themes/src/map.test.ts` re-pinned to match, and the
+ * two FALLBACK imports moved with it — `apps/desktop/src/main/boot-theme.ts`
+ * (the pre-React paint) and `apps/desktop/src/renderer/use-theme.ts` (the
+ * context value while config and catalog load, and after a theme is deleted).
  * Leave one of those and the app boots in one palette and repaints into another.
  *
  * This only affects installs with nothing saved. `config.theme.activeId` wins

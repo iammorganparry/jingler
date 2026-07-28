@@ -110,9 +110,12 @@ Other things worth knowing before touching this:
   config without a saved theme resolves to, and what every failure falls back to
   — so a test pins every one of its tokens to the literals in `globals.css`. If
   applying the default changed anything, "theming shipped" and "the theme failed
-  to load" would look identical. Moving the default is therefore a FOUR-file
+  to load" would look identical. Moving the default is therefore a FIVE-file
   edit: `DEFAULT_THEME_ID`, the regenerated `:root` block, the pin in
-  `map.test.ts`, and `main/boot-theme.ts`'s fallback import.
+  `map.test.ts`, and BOTH fallback imports — `main/boot-theme.ts` (pre-React
+  paint) and `renderer/use-theme.ts` (the context value while config and catalog
+  load, and after the active theme is deleted). Miss the renderer one and a
+  light install flashes a dark splash over a light boot stylesheet.
 - **`--sb-brand` is not `--sb-red`.** Jingler's brand IS a red, and they are
   still separate tokens: `--sb-red` drives `--destructive`, so collapsing them
   makes "Delete session" and "New session" the same swatch. Imported themes

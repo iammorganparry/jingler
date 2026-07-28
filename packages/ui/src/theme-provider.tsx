@@ -131,8 +131,8 @@ export function ThemeProvider({
    */
   React.useLayoutEffect(() => {
     // Electron injected the active theme before React mounted. While its async
-    // config/catalog queries are pending, `tokens` is only a One Dark context
-    // fallback and must not clobber that correct boot stylesheet.
+    // config/catalog queries are pending, `tokens` is only the default-theme
+    // context fallback and must not clobber that correct boot stylesheet.
     if (!applyToDocument) return
 
     const doc = globalThis.document

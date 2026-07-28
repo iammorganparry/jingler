@@ -158,11 +158,12 @@ describe("themeIdFromName", () => {
 
 describe("DEFAULT_THEME_ID", () => {
   /**
-   * Pinned, because moving it is a four-file change and only one of those files
-   * fails loudly. `globals.css`'s `:root` block and the no-op pin in
-   * `@jingler/themes`'s map.test.ts both have to move with it; a lone edit here
-   * ships an app that paints one palette before React mounts and a different
-   * one after.
+   * Pinned, because moving it is a five-file change and only one of those files
+   * fails loudly. `globals.css`'s `:root` block, the no-op pin in
+   * `@jingler/themes`'s map.test.ts, and the fallback imports in
+   * `main/boot-theme.ts` and `renderer/use-theme.ts` all have to move with it;
+   * a lone edit here ships an app that paints one palette before React mounts
+   * and a different one after.
    */
   it("is Jingler Dark — the brand palette globals.css is pinned to", () => {
     expect(DEFAULT_THEME_ID).toBe("jingler-dark")
