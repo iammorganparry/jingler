@@ -1313,6 +1313,74 @@ describe("conversationMachine — PlanUpdated across turns", () => {
     actor.stop()
   })
 
+  /**
+   * The other half of the graft. A chat that never proposed the plan has no
+   * message to graft onto, so the artifact has to arrive as one — otherwise the
+   * Plan tab is empty in every chat but the one that produced it.
+   *
+   * Pinned because the load walk decides this from a flag it sets DURING the
+   * walk (`grafted`), rather than by re-scanning the transcript afterwards. A
+   * flag that was set eagerly, or never reset, would take this branch away and
+   * the loss would be silent — a missing tab, not an error.
+   */
+  it("appends the shared artifact when no message in the transcript carries it", async () => {
+    h.transcript = [userMessage("u_1", "morning", "2026-07-25T00:00:00.000Z")]
+    h.currentPlan = {
+      sessionId: session.id,
+      producingChatId: "c_other",
+      revision: 3,
+      plan: planFixture("done"),
+      updatedAt: "2026-07-25T00:01:00.000Z"
+    }
+
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+
+    const { messages } = actor.getSnapshot().context
+    expect(messages).toHaveLength(2)
+    expect(messages[1]!.id).toBe("a_shared_plan_3")
+    expect(latestPlan(messages)?.steps[0]?.status).toBe("done")
+    expect(actor.getSnapshot().context.sharedPlanChatId).toBe("c_other")
+    actor.stop()
+  })
+
+  /**
+   * The load walk must not COPY a message it has nothing to change.
+   *
+   * Identity, not equality, is the assertion that means anything here: the walk
+   * used to spread every message and rebuild every `parts` array to replace a
+   * single Plan part, and transcripts on disk reach 44MB. Deep-equal would pass
+   * against exactly that. The renderer's footprint is a high-water mark of these
+   * loads — neither V8 nor PartitionAlloc return a spike's pages to the OS — so
+   * a copy nobody needed is paid for permanently.
+   */
+  it("passes messages the artifact does not touch through by reference", async () => {
+    const untouched = userMessage("u_1", "morning", "2026-07-25T00:00:00.000Z")
+    const carrier = applyStreamEvent(
+      assistantMessage("a_plan", "2026-07-25T00:00:30.000Z"),
+      { _tag: "PlanProposed", plan: planFixture("proposed") }
+    )
+    h.transcript = [untouched, carrier]
+    h.currentPlan = {
+      sessionId: session.id,
+      producingChatId: session.id,
+      revision: 1,
+      plan: planFixture("done"),
+      updatedAt: "2026-07-25T00:01:00.000Z"
+    }
+
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+
+    const { messages } = actor.getSnapshot().context
+    // Nothing to settle and no plan of the artifact's id: the SAME object.
+    expect(messages[0]).toBe(untouched)
+    // The one that does carry it is rebuilt, and carries the newer revision.
+    expect(messages[1]).not.toBe(carrier)
+    expect(latestPlan(messages)?.steps[0]?.status).toBe("done")
+    actor.stop()
+  })
+
   it("applies a shared plan broadcast to an existing chat actor", async () => {
     const actor = start()
     await waitFor(actor, (snapshot) => snapshot.matches(idle))
