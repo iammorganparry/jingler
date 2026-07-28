@@ -736,3 +736,36 @@ test("each pane of a split names its session in the top bar", async ({ launchApp
     "Beta session"
   )
 })
+
+/**
+ * Shift+Tab cycles the HITL mode of the FOCUSED pane only.
+ *
+ * A split mounts every pane's ConversationView at once, and the mode hotkey used
+ * to be a document-level binding — so one press cycled every composer's mode.
+ * It is now scoped to focus-within its own pane, so the pane you are typing in is
+ * the only one that moves.
+ */
+test("Shift+Tab cycles the mode of only the focused pane", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
+  await expect(sessionRow(window, "Alpha session")).toBeVisible()
+
+  await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
+  await expect.poll(() => paneSessions(window)).toEqual(["s_alpha", "s_beta"])
+  await settle(window)
+
+  const pane0 = window.getByTestId("split-pane-0")
+  const pane1 = window.getByTestId("split-pane-1")
+
+  // Both composers start on the default mode.
+  await expect(pane0.getByText("accept edits", { exact: true })).toBeVisible()
+  await expect(pane1.getByText("accept edits", { exact: true })).toBeVisible()
+
+  // Focus the RIGHT pane's composer, then cycle once: accept-edits → auto.
+  await pane1.getByPlaceholder("Message Claude…").click()
+  await window.keyboard.press("Shift+Tab")
+
+  // Only the focused pane moved; the other keeps its mode. Before the fix, both
+  // chips would read "auto" here.
+  await expect(pane1.getByText("auto", { exact: true })).toBeVisible()
+  await expect(pane0.getByText("accept edits", { exact: true })).toBeVisible()
+})

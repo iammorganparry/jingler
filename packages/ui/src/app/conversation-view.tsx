@@ -277,8 +277,14 @@ export function ConversationView({
 
   // Shift+Tab cycles the HITL mode (works while typing in the composer). Plan
   // mode joins the cycle on Claude sessions only (matches the composer's gate).
+  //
+  // Scoped to THIS pane via the ref `useHotkeys` returns (attached to the root
+  // below), so it only fires while focus is inside this view. A split view
+  // mounts one ConversationView per pane, and an unscoped document-level binding
+  // fires in EVERY mounted pane at once — so a single Shift+Tab cycled every
+  // composer's mode, not just the focused one's.
   const cycle = cycleFor(cli)
-  useHotkeys(
+  const modeHotkeyRef = useHotkeys<HTMLDivElement>(
     "shift+tab",
     () => {
       const i = cycle.indexOf(mode)
@@ -340,7 +346,7 @@ export function ConversationView({
   }, [])
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1">
+    <div ref={modeHotkeyRef} className="flex min-h-0 min-w-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {archived && (
           <ArchivedBanner
