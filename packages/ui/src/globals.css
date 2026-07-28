@@ -709,7 +709,7 @@
   cursor: pointer;
   list-style: none;
   color: var(--sb-text-bright);
-  font-size: 13px;
+  font-size: calc(13px * var(--sb-font-scale, 1));
   user-select: none;
 }
 .sb-md summary::-webkit-details-marker {
