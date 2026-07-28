@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js"
+import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -47,7 +47,7 @@ const parkABusyRun = async (window: import("@playwright/test").Page): Promise<vo
 
 test("a queued message can be rewritten before it is ever sent", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   await parkABusyRun(window)
 
   const busyComposer = window.getByPlaceholder("Queue a message while the agent works…")
@@ -69,7 +69,7 @@ test("a queued message can be rewritten before it is ever sent", async ({ launch
 
 test("a queued message can be handed off to a fresh chat", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   await expect(window.getByTitle("1. Chat 1")).toBeVisible()
   await parkABusyRun(window)
 

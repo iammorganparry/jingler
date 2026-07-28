@@ -15,7 +15,6 @@ import {
 import { cn } from "../lib/cn.js"
 import { usePaneWidth } from "../hooks/width-tier.js"
 import { ResizeHandle, useResizableWidth } from "../components/resizable.js"
-import { Kbd } from "../components/kbd.js"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { StatusDot } from "../components/status-dot.js"
@@ -348,59 +347,52 @@ function SidebarBody({
           className="absolute inset-y-0 right-0"
         />
       )}
-      {/* Header */}
-      <div className="flex items-center justify-between gap-1.5 px-3 pb-2 pt-4">
-        <div className="flex min-w-0 items-center gap-2">
-          {/* The rail's expand button lives in the same corner, so the control
-              that changes this state is in one place rather than two. */}
-          {onCollapse && (
-            <button
-              type="button"
-              onClick={onCollapse}
-              aria-label="Collapse sidebar"
-              title="Collapse sidebar (⌘B)"
-              className="flex size-6 flex-none items-center justify-center rounded-md text-dim outline-none transition-colors hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <PanelLeft size={14} />
-            </button>
-          )}
-          <span className="flex size-5 flex-none items-center justify-center rounded-md bg-blue font-mono text-[12px] font-semibold text-editor">
-            ⌘
-          </span>
-          <span className="text-[13px] font-semibold text-text-bright">Sessions</span>
-          <Badge tone="count" size="xs">
-            {sessions.length}
-          </Badge>
-        </div>
-        <button
-          type="button"
-          onClick={onNewSession}
-          title="New session"
-          className="flex items-center gap-1.5 rounded-md px-1 py-0.5 text-[11px] text-dim outline-none transition-colors hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <span className="text-[15px] leading-none text-text">+</span>
-          <Kbd>⌘N</Kbd>
-        </button>
-      </div>
-
       {/*
-        Search + the filter menu, on ONE row.
+        The header — collapse, search, filter and new-session, on ONE row.
 
-        This replaced a second row holding a "GROUP BY [Repository|Status]"
-        segmented control. Two axes already cost a permanent row above the list
-        they filter; the four axes this now offers would have cost more vertical
-        space than the first three sessions. The menu folds them into a 24px
-        button that still reports each axis's current value on its own row, so
-        nothing is hidden — only folded.
+        This used to be two rows: a title row reading "⌘ Sessions (4)" above a
+        search row. Both went, and neither is missed.
+
+        The title was labelling the only thing this panel has ever contained.
+        The count duplicated a list the operator is looking at. And the ⌘ tile
+        was a command-palette affordance parked next to a word it had nothing to
+        do with — the palette has ⌘K and the title bar, which is where people
+        already reach for it.
+
+        What replaced them is the row that was doing the work anyway. The
+        reclaimed ~34px is roughly one session row, and it comes back at every
+        window height rather than only when the list is long.
       */}
-      <div className="flex items-center gap-1.5 px-3 pb-2">
+      <div className="flex items-center gap-1.5 px-3 pb-2 pt-3">
+        {/* The rail's expand button lives in the same corner, so the control
+            that changes this state is in one place rather than two. */}
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar (⌘B)"
+            className="flex size-7 flex-none items-center justify-center rounded-md text-dim outline-none transition-colors hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <PanelLeft size={14} />
+          </button>
+        )}
         <div className="min-w-0 flex-1">
+          {/*
+            No `⌘F` chip. It costs ~34px inside a field that is already the
+            narrowest thing in the app, and at the default sidebar width that
+            was enough to truncate the placeholder to "Filter sessi…" — the chip
+            was crowding out the label that says what the field is for.
+
+            The shortcut still works and is still discoverable: the command
+            palette lists it, and it is the shortcut everything else on the
+            platform uses for find-in-thing.
+          */}
           <SearchInput
             ref={filterRef}
             value={filter}
             onChange={setFilter}
             placeholder="Filter sessions…"
-            kbd={<Kbd>⌘F</Kbd>}
           />
         </div>
         <FilterMenu axes={axes}>
@@ -425,6 +417,25 @@ function SidebarBody({
             )}
           </button>
         </FilterMenu>
+        {/*
+          Icon-only now that it shares a row. The `⌘N` chip that used to sit
+          beside it was the widest thing in the old header, and it was teaching
+          a shortcut to someone already reaching for the button — the tooltip
+          says it instead, which is where a shortcut is normally learnt.
+        */}
+        <button
+          type="button"
+          onClick={onNewSession}
+          aria-label="New session"
+          title="New session (⌘N)"
+          // Three buttons in the app answer to the accessible name "New
+          // session" — this one, the sidebar's empty-state prompt, and the
+          // dialog's own submit. A testid is the only unambiguous handle.
+          data-testid="new-session"
+          className="flex size-7 flex-none items-center justify-center rounded-md text-dim outline-none transition-colors hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Plus size={15} />
+        </button>
       </div>
 
       {/* Groups (or the empty hint when there are no sessions yet) */}

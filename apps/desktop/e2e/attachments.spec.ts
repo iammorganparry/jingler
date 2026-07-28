@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { expect, test } from "./fixtures.js"
+import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -49,7 +49,7 @@ test("attaching an image shows a thumbnail and persists it on the sent turn", as
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   const composer = window.getByPlaceholder("Message Claude…")
   await expect(composer).toBeVisible()
@@ -78,7 +78,7 @@ test("attaching an image shows a thumbnail and persists it on the sent turn", as
 
 test("a message sent while the agent is busy is queued, then processed", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   const composer = window.getByPlaceholder("Message Claude…")
   // `[[plan]]` proposes a plan and parks the run awaiting approval — the agent is

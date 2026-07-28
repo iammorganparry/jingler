@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js"
+import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -35,7 +35,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
 test("auto-spawns a terminal in the dock and the `+` button adds another", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // The dock is visible by default and auto-spawns one terminal for the active
   // session — so an xterm surface appears with no user action.
@@ -49,7 +49,7 @@ test("auto-spawns a terminal in the dock and the `+` button adds another", async
 test("keystrokes reach the PTY and its exit surfaces in the dock footer", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   const term = window.locator(".xterm").first()
   await expect(term).toBeVisible({ timeout: 20_000 })

@@ -1,4 +1,4 @@
-import { expect, sessionRow, test } from "./fixtures.js"
+import { appShell, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -30,7 +30,7 @@ test("a configured workspace boots into the app shell with its sessions", async 
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: [seeded] })
 
   // The sidebar (app shell) is present…
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   // …and the persisted session shows up (grouped under its repo).
   await expect(sessionRow(window, "Seeded session")).toBeVisible()
   // The setup screen is NOT shown.

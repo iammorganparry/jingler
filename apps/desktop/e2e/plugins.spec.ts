@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { mkdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { expect, test } from "./fixtures.js"
+import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -182,7 +182,7 @@ const openSession = async (window: import("@playwright/test").Page) => {
 
 /** Open Settings and land on the Plugins section. Mirrors the other specs. */
 const openPluginSettings = async (window: import("@playwright/test").Page) => {
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   await window.getByRole("button", { name: "Account menu" }).click()
   await window.getByRole("menuitem", { name: "Settings" }).click()
   await expect(window.getByRole("button", { name: "Close settings" })).toBeVisible()

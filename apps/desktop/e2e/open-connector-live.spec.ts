@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test"
-import { expect, test } from "./fixtures.js"
+import { appShell, expect, test } from "./fixtures.js"
 
 /**
  * The app against a REAL OpenConnector — the one from `docker compose up -d
@@ -36,7 +36,7 @@ const instanceReachable = async (): Promise<boolean> => {
 }
 
 const openConnectors = async (window: Page) => {
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   await window.getByRole("button", { name: "Account menu" }).click()
   await window.getByRole("menuitem", { name: "Settings" }).click()
   await window.getByRole("button", { name: /Connectors/ }).click()

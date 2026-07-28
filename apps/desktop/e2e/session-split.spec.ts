@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test"
-import { expect, sessionRow, test } from "./fixtures.js"
+import { appShell, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -280,7 +280,7 @@ test("closing a pane leaves the other one running and the app on screen", async 
   // The closed session is back to being its own row — no empty slot is left.
   await expect(window.getByTestId("session-row-s_beta")).toBeVisible()
   // The app shell is still here — NOT the "create a session" empty state.
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 })
 
 test("a segment's × in the sidebar closes that pane", async ({ launchApp }) => {

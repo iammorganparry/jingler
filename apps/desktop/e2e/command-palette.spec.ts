@@ -1,4 +1,4 @@
-import { expect, sessionRow, test } from "./fixtures.js"
+import { appShell, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -49,7 +49,7 @@ const seededSessions: ReadonlyArray<SeedSession> = [
 test("⌘K opens the palette and jumps to a session", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, sessions: seededSessions })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   // The newest session is the one on screen at rest, so jumping to the other is
   // an observable change rather than a coincidence.
   await expect(window.getByTestId("conversation-tab")).toContainText("Alpha session")
@@ -72,7 +72,7 @@ test("⌘K opens the palette and jumps to a session", async ({ launchApp }) => {
 test("⌘P opens the same palette, and Escape closes it", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, sessions: seededSessions })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   await window.keyboard.press("Meta+p")
   await expect(window.getByTestId("command-palette")).toBeVisible()
@@ -99,7 +99,7 @@ test("⌘P opens the same palette, and Escape closes it", async ({ launchApp }) 
  */
 test("reopening mid-exit leaves exactly one palette", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   for (let i = 0; i < 2; i++) {
     await window.keyboard.press("Meta+k")
@@ -117,19 +117,31 @@ test("reopening mid-exit leaves exactly one palette", async ({ launchApp }) => {
 test("⌘F still focuses the sidebar filter after the rebind", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, sessions: seededSessions })
 
-  // Wait on the input itself, not just the "Sessions" heading. The heading
-  // paints before the sidebar is interactive, and a chord pressed into that gap
-  // is simply lost — which is what made this the one flaky test in the file.
+  // Wait on the input itself, not on any surrounding chrome. Chrome paints
+  // before the sidebar is interactive, and a chord pressed into that gap is
+  // simply lost — which is what made this the one flaky test in the file.
   const filter = window.getByPlaceholder("Filter sessions…")
   await expect(filter).toBeVisible()
+  // …and on a session row, because "the input exists" is not "the app has
+  // finished mounting". The composer autofocuses when a pane mounts, so a ⌘F
+  // pressed before that lands and is then taken straight back — which reads as
+  // "the binding is broken" rather than "the press was too early".
+  await expect(sessionRow(window, "Alpha session").first()).toBeVisible()
 
-  await window.keyboard.press("Meta+f")
-  await expect(filter).toBeFocused()
+  // Retried rather than pressed once. Even settled, the first press can race a
+  // late focus steal; `toPass` re-presses instead of failing the run on it.
+  await expect(async () => {
+    await window.keyboard.press("Meta+f")
+    await expect(filter).toBeFocused({ timeout: 1_000 })
+  }).toPass({ timeout: 15_000 })
   // And it must NOT have opened the palette on the way.
   await expect(window.getByTestId("command-palette")).toBeHidden()
 
-  // The hint beside the box says so, rather than still advertising ⌘K.
-  await expect(window.getByText("⌘F", { exact: true })).toBeVisible()
+  // There is deliberately no `⌘F` chip in the field to assert on any more. It
+  // used to be here, and this test used to check it was not still advertising
+  // ⌘K — but the chip cost ~34px inside the narrowest field in the app and was
+  // truncating the placeholder that says what the field is for. The BINDING is
+  // what this test is about, and the binding is asserted above.
 })
 
 test("toggles the terminal dock — an action the shell cannot reach on its own", async ({
@@ -141,7 +153,7 @@ test("toggles the terminal dock — an action the shell cannot reach on its own"
     sessions: [{ ...seededSessions[0]!, worktreePath: undefined }]
   })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // The dock starts visible (see `terminal.spec.ts`), so the palette offers to
   // HIDE it — the label states the effect, not the current state.
@@ -178,7 +190,7 @@ test("does not hijack Ctrl+K from macOS text fields", async ({ launchApp }) => {
   test.skip(process.platform !== "darwin", "the Ctrl/⌘ split only bites on macOS")
 
   const { window } = await launchApp({ configured: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   await window.keyboard.press("Control+k")
   await expect(window.getByTestId("command-palette")).toBeHidden()
