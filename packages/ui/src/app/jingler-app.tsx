@@ -55,6 +55,7 @@ import {
   TerminalSquare
 } from "lucide-react"
 import { CommandPalette } from "./command-palette.js"
+import { TitleSearch } from "./title-search.js"
 import {
   matchPaletteChord,
   PALETTE_GROUP,
@@ -585,11 +586,23 @@ export function JinglerApp({
     const onKey = (e: KeyboardEvent) => {
       // The palette goes FIRST, and in this listener rather than one of its own.
       // Three window-level keydown handlers racing for the same event is how a
-      // chord ends up meaning two things depending on mount order; the sidebar's
-      // ⌘F is separate only because it lives in a component this one does not
-      // own. `setPaletteOpen(true)` is idempotent, so holding ⌘K cannot stack
-      // dialogs.
+      // chord ends up meaning two things depending on mount order.
+      // `setPaletteOpen(true)` is idempotent, so holding ⌘K cannot stack dialogs.
       if (matchPaletteChord(e)) {
+        e.preventDefault()
+        setPaletteOpen(true)
+        return
+      }
+
+      // ⌘F lands here too, now that search is global.
+      //
+      // It used to live in the sidebar and focus its "Filter sessions…" field.
+      // That field is gone — search moved to the title bar and is served by the
+      // palette, which already indexes every session, every archived session and
+      // every action. Leaving ⌘F bound to nothing would have been a regression
+      // paid for by whoever had learnt it, and binding it to a second, narrower
+      // search would be two implementations over one index.
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
         e.preventDefault()
         setPaletteOpen(true)
         return
@@ -875,6 +888,7 @@ export function JinglerApp({
     // consequence of what you dragged where, not a mode you pick up front.
     <AppShell
       title="Jingler"
+      search={<TitleSearch onOpen={() => setPaletteOpen(true)} />}
       actions={
         onToggleBrowser ? (
           <PreviewToggleButton active={browserActive ?? false} onClick={onToggleBrowser} />

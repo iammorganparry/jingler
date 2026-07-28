@@ -10,6 +10,7 @@ export * from "./tokens.js"
 
 // Where a transcript thumbnail fetches bytes the transcript deliberately omits.
 export * from "./components/attachment-source.js"
+export * from "./app/title-search.js"
 // Atoms / primitives (shadcn base)
 export * from "./components/status-dot.js"
 export * from "./components/signal-bars.js"

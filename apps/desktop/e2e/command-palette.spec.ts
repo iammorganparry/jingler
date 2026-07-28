@@ -114,34 +114,47 @@ test("reopening mid-exit leaves exactly one palette", async ({ launchApp }) => {
   await expect(window.getByTestId("palette-item-session:sess-beta")).toBeVisible()
 })
 
-test("⌘F still focuses the sidebar filter after the rebind", async ({ launchApp }) => {
+test("⌘F opens the palette too, now that search is global", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, sessions: seededSessions })
 
-  // Wait on the input itself, not on any surrounding chrome. Chrome paints
-  // before the sidebar is interactive, and a chord pressed into that gap is
-  // simply lost — which is what made this the one flaky test in the file.
-  const filter = window.getByPlaceholder("Filter sessions…")
-  await expect(filter).toBeVisible()
-  // …and on a session row, because "the input exists" is not "the app has
-  // finished mounting". The composer autofocuses when a pane mounts, so a ⌘F
-  // pressed before that lands and is then taken straight back — which reads as
-  // "the binding is broken" rather than "the press was too early".
+  // This test used to assert that ⌘F focused the sidebar's "Filter sessions…"
+  // field and pointedly did NOT open the palette. Both halves are obsolete:
+  // that field is gone and search lives in the title bar, served by the palette.
+  //
+  // The binding is kept rather than dropped for the reason it was created — it
+  // is the chord everything else on the platform uses for "find", and whoever
+  // learnt it here should not be punished for the search moving. It just has one
+  // destination now instead of two.
+  await expect(appShell(window)).toBeVisible()
+  // "The control exists" is not "the app has finished mounting". The composer
+  // autofocuses when a pane mounts, so a chord pressed before that lands and is
+  // then taken straight back — which reads as a broken binding rather than as a
+  // press that was too early.
   await expect(sessionRow(window, "Alpha session").first()).toBeVisible()
 
   // Retried rather than pressed once. Even settled, the first press can race a
   // late focus steal; `toPass` re-presses instead of failing the run on it.
   await expect(async () => {
     await window.keyboard.press("Meta+f")
-    await expect(filter).toBeFocused({ timeout: 1_000 })
+    await expect(window.getByTestId("command-palette")).toBeVisible({ timeout: 1_000 })
   }).toPass({ timeout: 15_000 })
-  // And it must NOT have opened the palette on the way.
+})
+
+test("the title bar's search control opens the palette", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, sessions: seededSessions })
+
+  // The palette was keyboard-only before this: ⌘K and nothing on screen, which
+  // is fine for whoever already knows and invisible to everyone else. The point
+  // of the control is that it is the discoverable route to the same thing.
+  const search = appShell(window)
+  await expect(search).toBeVisible()
   await expect(window.getByTestId("command-palette")).toBeHidden()
 
-  // There is deliberately no `⌘F` chip in the field to assert on any more. It
-  // used to be here, and this test used to check it was not still advertising
-  // ⌘K — but the chip cost ~34px inside the narrowest field in the app and was
-  // truncating the placeholder that says what the field is for. The BINDING is
-  // what this test is about, and the binding is asserted above.
+  await search.click()
+
+  await expect(window.getByTestId("command-palette")).toBeVisible()
+  // And it is the real palette, indexing sessions — not an empty dialog.
+  await expect(window.getByTestId("palette-item-session:sess-beta")).toBeVisible()
 })
 
 test("toggles the terminal dock — an action the shell cannot reach on its own", async ({

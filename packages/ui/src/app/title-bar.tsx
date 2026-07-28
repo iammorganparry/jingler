@@ -7,7 +7,8 @@ const noDrag = { WebkitAppRegion: "no-drag" } as CSSProperties
 /** macOS-style window title bar with traffic lights and a centered brand mark + title. */
 export function TitleBar({
   title = "Jingler",
-  actions
+  actions,
+  search
 }: {
   title?: string
   /**
@@ -15,6 +16,16 @@ export function TitleBar({
    * be swallowed by the window's drag region instead of reaching the button.
    */
   actions?: ReactNode
+  /**
+   * The global search affordance, centred. Supplying it REPLACES the mark and
+   * title, which is the trade the centre slot forces: there is one centred
+   * block, and a search field is worth more there than a word that never
+   * changes. The mark moved to the sidebar's top-left rather than being lost.
+   *
+   * Interactive, unlike the title it replaces, so this slot opts back into
+   * pointer events and out of the window's drag region — see below.
+   */
+  search?: ReactNode
 }) {
   return (
     <div
@@ -36,16 +47,32 @@ export function TitleBar({
         the window's own icon lands. Centred, it reads as the app's mark on every
         platform and never collides with system chrome.
       */}
-      <div className="pointer-events-none absolute inset-x-0 flex items-center justify-center gap-1.5 text-[12px] text-dim">
-        {/*
-          `text-brand` rather than inheriting `text-dim`: the mark is the one
-          spot of colour in an otherwise monochrome bar, and a grey logo reads
-          as a disabled control. It stays quiet by being 13px, not by being
-          desaturated.
-        */}
-        <JinglerMark className="h-[13px] w-auto text-brand" />
-        {title}
-      </div>
+      {search ? (
+        /*
+          `pointer-events-none` on the wrapper and `auto` on the child: the
+          centred block spans the FULL width (`inset-x-0`) so that its contents
+          centre against the window rather than against the gap between the
+          traffic lights and the actions. Left clickable, that invisible
+          full-width strip would sit on top of the drag region and the buttons
+          either side of it, so only the field itself takes events.
+        */
+        <div className="pointer-events-none absolute inset-x-0 flex items-center justify-center">
+          <div style={noDrag} className="pointer-events-auto">
+            {search}
+          </div>
+        </div>
+      ) : (
+        <div className="pointer-events-none absolute inset-x-0 flex items-center justify-center gap-1.5 text-[12px] text-dim">
+          {/*
+            `text-brand` rather than inheriting `text-dim`: the mark is the one
+            spot of colour in an otherwise monochrome bar, and a grey logo reads
+            as a disabled control. It stays quiet by being 13px, not by being
+            desaturated.
+          */}
+          <JinglerMark className="h-[13px] w-auto text-brand" />
+          {title}
+        </div>
+      )}
       {/*
         Literal hexes on purpose: these are macOS's own traffic-light colours,
         which stay put across every theme (and across macOS's own light/dark

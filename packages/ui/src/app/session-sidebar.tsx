@@ -13,12 +13,12 @@ import {
   Star
 } from "lucide-react"
 import { cn } from "../lib/cn.js"
+import { JinglerMark } from "../brand/jingler-mark.js"
 import { usePaneWidth } from "../hooks/width-tier.js"
 import { ResizeHandle, useResizableWidth } from "../components/resizable.js"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { StatusDot } from "../components/status-dot.js"
-import { SearchInput } from "../components/search-input.js"
 import { FilterMenu } from "../components/filter-menu.js"
 import { HoverCard } from "../components/hover-card.js"
 import { ProviderIcon } from "../components/provider-icon.js"
@@ -161,11 +161,9 @@ function SidebarBody({
   /** Collapse to the icon rail (the header's `PanelLeft` button). */
   onCollapse?: () => void
 }) {
-  const [filter, setFilter] = React.useState("")
   const [filters, setFiltersState] = React.useState<SessionFilters>(
     () => defaultFilters ?? loadFilters()
   )
-  const filterRef = React.useRef<HTMLInputElement>(null)
 
   const setFilters = React.useCallback((next: SessionFilters) => {
     setFiltersState(next)
@@ -181,30 +179,11 @@ function SidebarBody({
     if (reconciled !== filters) setFilters(reconciled)
   }, [filters, sessions, setFilters])
 
-  /**
-   * ⌘F / Ctrl-F focuses the filter.
-   *
-   * This was ⌘K until the global command palette landed. ⌘K is the chord people
-   * arrive already knowing means "palette", and a ⌘K that instead put the caret
-   * in a list filter was the app quietly answering a different question — the
-   * `⌘K Command palette` hint in `screens/empty-conversation.tsx` had been
-   * advertising the palette for some time before one existed.
-   *
-   * ⌘F rather than nothing: "find within this list" is what the chord means
-   * everywhere else, and dropping the binding entirely would have been a
-   * regression paid for by whoever had already learnt it.
-   */
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.shiftKey || e.altKey) return
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
-        e.preventDefault()
-        filterRef.current?.focus()
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [])
+  // ⌘F is no longer handled here. It used to focus this panel's "Filter
+  // sessions…" field; that field is gone and search is global, so the chord now
+  // opens the command palette from `jingler-app.tsx` alongside ⌘K. Keeping a
+  // second window-level listener here would be two handlers racing for one
+  // event — see the comment on that one.
 
   // The GROUP a session sits in. The row's own five-word rollup, with ONE further
   // fold: thinking → running. An agent flips between thinking and running every
@@ -219,8 +198,8 @@ function SidebarBody({
   )
 
   const filtered = React.useMemo(
-    () => filterSessions(sessions, filter, filters),
-    [sessions, filter, filters]
+    () => filterSessions(sessions, "", filters),
+    [sessions, filters]
   )
 
   /**
@@ -259,8 +238,8 @@ function SidebarBody({
   // than the whole store: while you're typing, "Archived 3" should mean three
   // matches, not three in existence.
   const searched = React.useMemo(
-    () => filterSessions(sessions, filter, { ...filters, status: "all", repo: null }),
-    [sessions, filter, filters]
+    () => filterSessions(sessions, "", { ...filters, status: "all", repo: null }),
+    [sessions, filters]
   )
 
   const axes = React.useMemo(
@@ -364,6 +343,15 @@ function SidebarBody({
         window height rather than only when the list is long.
       */}
       <div className="flex items-center gap-1.5 px-3 pb-2 pt-3">
+        {/*
+          The mark's home. It was centred in the title bar until global search
+          took that slot, and this is the better corner for it anyway: macOS
+          reserves the window's top-left for traffic lights, but the SIDEBAR's
+          top-left is below that chrome and collides with nothing on any
+          platform. `text-brand` for the same reason it was branded up there —
+          it is the one spot of colour in a monochrome column.
+        */}
+        <JinglerMark className="h-[14px] w-auto flex-none text-brand" />
         {/* The rail's expand button lives in the same corner, so the control
             that changes this state is in one place rather than two. */}
         {onCollapse && (
@@ -377,24 +365,20 @@ function SidebarBody({
             <PanelLeft size={14} />
           </button>
         )}
-        <div className="min-w-0 flex-1">
-          {/*
-            No `⌘F` chip. It costs ~34px inside a field that is already the
-            narrowest thing in the app, and at the default sidebar width that
-            was enough to truncate the placeholder to "Filter sessi…" — the chip
-            was crowding out the label that says what the field is for.
+        {/*
+          Where the "Filter sessions…" field used to be.
 
-            The shortcut still works and is still discoverable: the command
-            palette lists it, and it is the shortcut everything else on the
-            platform uses for find-in-thing.
-          */}
-          <SearchInput
-            ref={filterRef}
-            value={filter}
-            onChange={setFilter}
-            placeholder="Filter sessions…"
-          />
-        </div>
+          Search is global now: it lives in the title bar and is served by the
+          command palette, which already indexes every session, every archived
+          session and every action. A second field here would be a second search
+          implementation over the same index, and the two would drift.
+
+          What stays is the FILTER menu on the right — status, repo, starred.
+          Those are not search: they narrow by facet rather than by text, they
+          persist, and they are about which sessions belong on screen rather than
+          about finding one. The spacer keeps them pinned right.
+        */}
+        <div className="min-w-0 flex-1" />
         <FilterMenu axes={axes}>
           <button
             type="button"
@@ -462,8 +446,16 @@ function SidebarBody({
         ) : filtered.length === 0 ? (
           <div className="m-auto flex flex-col items-center gap-2.5 px-4 text-center">
             <Search size={20} className="text-line-strong" />
+            {/*
+              Names the FILTERS, not a search term. This panel no longer has a
+              text field — search is global and lives in the title bar — so the
+              only way to empty a non-empty store is the facet menu beside this
+              message. Quoting a search term here would name a control that is
+              not on screen, which is worse than saying nothing: the operator
+              would go looking for a box to clear.
+            */}
             <span className="text-[12px] leading-[1.5] text-muted-foreground">
-              No sessions match “{filter.trim()}”.
+              No sessions match these filters.
             </span>
           </div>
         ) : (
