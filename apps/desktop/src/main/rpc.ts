@@ -2338,6 +2338,24 @@ const HandlersLayer = JinglerRpcs.toLayer({
     Effect.flatMap(PreviewViewService, (b) => b.setVisible(visible)),
   "BrowserPreview.close": () => Effect.flatMap(PreviewViewService, (b) => b.close()),
 
+  // Browser control — the SAME native view, driven by an agent (via the
+  // browser-control MCP) so it can QA a preview URL where the operator watches.
+  // Each op reveals the dock inside PreviewViewService.
+  "BrowserControl.navigate": ({ url }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlNavigate(url)),
+  "BrowserControl.screenshot": () =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlScreenshot()),
+  "BrowserControl.click": ({ selector }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlClick(selector)),
+  "BrowserControl.type": ({ selector, text }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlType(selector, text)),
+  "BrowserControl.readText": () =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlReadText()),
+  "BrowserControl.evaluate": ({ expression }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlEvaluate(expression)),
+  "BrowserControl.waitForSelector": ({ selector, timeoutMs }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlWaitForSelector(selector, timeoutMs)),
+
   "Asset.read": (input) => assetRead(input),
   "Asset.reveal": (input) => assetReveal(input),
   "Asset.openPdf": (input) => assetOpenPdf(input),

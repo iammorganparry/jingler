@@ -41,13 +41,21 @@
  * `BrowserWindow.getAllWindows()[0]`.
  */
 import type { BrowserBounds } from "@jingler/core"
-import { BrowserPreviewError } from "@jingler/core"
+import { BrowserControlError, BrowserPreviewError } from "@jingler/core"
 import { pathToFileURL } from "node:url"
 import { BrowserWindow, WebContentsView } from "electron"
 import { Context, Effect, Layer } from "effect"
 
 /** Which tab a native view belongs to. */
 export type PreviewOwner = "browser" | "asset"
+
+/**
+ * Main→renderer push: "an agent is driving the browser — open the Preview dock
+ * onto it so the operator watches". Sent on every BrowserControl op; the
+ * renderer debounces it (see use-preview-dock). A bare channel name rather than
+ * a payload — the message IS the signal.
+ */
+export const PREVIEW_REVEAL_CHANNEL = "jingler/preview/reveal"
 
 export interface PreviewViewServiceShape {
   /** Show the browser view and load `url` at `bounds`. Rejects non-http(s) URLs. */
@@ -74,6 +82,28 @@ export interface PreviewViewServiceShape {
   readonly close: () => Effect.Effect<void>
   /** Test/diagnostic seam: which owner is currently painted, if any. */
   readonly visibleOwner: () => Effect.Effect<PreviewOwner | null>
+
+  // ── Agent QA (BrowserControl.*) ──────────────────────────────────────────────
+  // The same browser view, driven by an AGENT rather than the operator. Every op
+  // ensures the view exists and reveals the dock first, so QA happens where the
+  // operator can watch. Errors carry the failing `op`.
+  /** Load `url` (http/https only) into the browser and reveal the dock. */
+  readonly controlNavigate: (url: string) => Effect.Effect<void, BrowserControlError>
+  /** PNG screenshot of the current page, base64-encoded. */
+  readonly controlScreenshot: () => Effect.Effect<{ pngBase64: string }, BrowserControlError>
+  /** Click the first element matching `selector`; fails if nothing matches. */
+  readonly controlClick: (selector: string) => Effect.Effect<void, BrowserControlError>
+  /** Type `text` into the first element matching `selector`; fails if none. */
+  readonly controlType: (selector: string, text: string) => Effect.Effect<void, BrowserControlError>
+  /** The page's visible text (`document.body.innerText`). */
+  readonly controlReadText: () => Effect.Effect<{ text: string }, BrowserControlError>
+  /** Evaluate `expression` in the page; returns a string (JSON for non-strings). */
+  readonly controlEvaluate: (expression: string) => Effect.Effect<{ result: string }, BrowserControlError>
+  /** Resolve once `selector` appears in the DOM, or fail after `timeoutMs`. */
+  readonly controlWaitForSelector: (
+    selector: string,
+    timeoutMs: number
+  ) => Effect.Effect<void, BrowserControlError>
 }
 
 export class PreviewViewService extends Context.Tag("@jingler/PreviewViewService")<
@@ -175,6 +205,45 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
   const rejectBadUrl = (url: string) =>
     Effect.fail(new BrowserPreviewError({ message: `Only http(s) URLs can be previewed: ${url}` }))
 
+  const controlFail = (op: string) => (cause: unknown) =>
+    new BrowserControlError({
+      op,
+      message: cause instanceof Error ? cause.message : String(cause)
+    })
+
+  // A view an agent created (dock never opened) has no bounds, so `capturePage`
+  // would hand back an empty image. Give a fresh one a real size; the renderer's
+  // reveal loop then takes over positioning it against the real dock rect.
+  const ensureBrowserSized = (): WebContentsView | null => {
+    const v = ensure("browser")
+    if (v && v.getBounds().width === 0) {
+      v.setBounds({ x: 0, y: 0, width: 1280, height: 800 })
+    }
+    return v
+  }
+
+  // Paint the browser AND ask the renderer to open the dock onto it — the whole
+  // point of agent QA is that the operator sees it happen.
+  const reveal = () => {
+    showOnly("browser")
+    mainWindow()?.webContents.send(PREVIEW_REVEAL_CHANNEL)
+  }
+
+  const withPage = <A>(
+    op: string,
+    f: (wc: WebContentsView["webContents"]) => Promise<A>
+  ): Effect.Effect<A, BrowserControlError> =>
+    Effect.suspend(() => {
+      const v = ensureBrowserSized()
+      if (!v) {
+        return Effect.fail(
+          new BrowserControlError({ op, message: "No application window to attach the browser to" })
+        )
+      }
+      reveal()
+      return Effect.tryPromise({ try: () => f(v.webContents), catch: controlFail(op) })
+    })
+
   return {
     openBrowser: (url, bounds) =>
       isHttpUrl(url)
@@ -228,6 +297,75 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
         visible = null
       }),
 
-    visibleOwner: () => Effect.sync(() => visible)
+    visibleOwner: () => Effect.sync(() => visible),
+
+    controlNavigate: (url) =>
+      isHttpUrl(url)
+        ? Effect.sync(() => {
+            const v = ensureBrowserSized()
+            if (!v) return
+            load(v, url)
+            reveal()
+          })
+        : Effect.fail(
+            new BrowserControlError({ op: "navigate", message: `Only http(s) URLs can be opened: ${url}` })
+          ),
+
+    controlScreenshot: () =>
+      withPage("screenshot", async (wc) => {
+        const image = await wc.capturePage()
+        return { pngBase64: image.toPNG().toString("base64") }
+      }),
+
+    controlClick: (selector) =>
+      withPage("click", async (wc) => {
+        const hit = await wc.executeJavaScript(
+          `(() => { const el = document.querySelector(${JSON.stringify(selector)});` +
+            ` if (!el) return false; el.click(); return true; })()`
+        )
+        if (!hit) throw new Error(`No element matches selector: ${selector}`)
+      }),
+
+    controlType: (selector, text) =>
+      withPage("type", async (wc) => {
+        const hit = await wc.executeJavaScript(
+          `(() => { const el = document.querySelector(${JSON.stringify(selector)});` +
+            ` if (!el) return false; el.focus();` +
+            ` if ('value' in el) { el.value = ${JSON.stringify(text)}; }` +
+            ` el.dispatchEvent(new Event('input', { bubbles: true }));` +
+            ` el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`
+        )
+        if (!hit) throw new Error(`No element matches selector: ${selector}`)
+      }),
+
+    controlReadText: () =>
+      withPage("readText", async (wc) => {
+        const text = await wc.executeJavaScript(`document.body ? document.body.innerText : ""`)
+        return { text: typeof text === "string" ? text : String(text ?? "") }
+      }),
+
+    controlEvaluate: (expression) =>
+      withPage("evaluate", async (wc) => {
+        const result = await wc.executeJavaScript(
+          `(() => { const __r = (${expression});` +
+            ` return typeof __r === "string" ? __r : JSON.stringify(__r); })()`
+        )
+        return { result: typeof result === "string" ? result : String(result ?? "") }
+      }),
+
+    controlWaitForSelector: (selector, timeoutMs) =>
+      withPage("waitForSelector", async (wc) => {
+        await wc.executeJavaScript(
+          `new Promise((resolve, reject) => {` +
+            ` const sel = ${JSON.stringify(selector)};` +
+            ` if (document.querySelector(sel)) return resolve(true);` +
+            ` const start = Date.now();` +
+            ` const iv = setInterval(() => {` +
+            ` if (document.querySelector(sel)) { clearInterval(iv); resolve(true); }` +
+            ` else if (Date.now() - start > ${Number(timeoutMs)}) { clearInterval(iv);` +
+            ` reject(new Error("Timed out waiting for selector: " + sel)); }` +
+            ` }, 100); })`
+        )
+      })
   }
 })

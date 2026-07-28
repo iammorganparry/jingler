@@ -82,6 +82,7 @@ import {
   AssetTooLargeError,
   AssetUnsupportedError,
   AuthError,
+  BrowserControlError,
   BrowserPreviewError,
   ConfigError,
   ConnectorError,
@@ -1368,6 +1369,61 @@ export class JinglerRpcs extends RpcGroup.make(
 
   /** Hide + destroy the view (pane closed or session switched). Idempotent. */
   Rpc.make("BrowserPreview.close", {}),
+
+  // ── Browser control (agent QA) ───────────────────────────────────────────────
+  // The SAME embedded browser view as BrowserPreview, but driven by an AGENT
+  // rather than the operator — so it can QA a preview URL in the browser the
+  // operator is watching instead of spawning a headless Chrome out-of-band. Acts
+  // on the single global view; every op reveals the dock first (see
+  // PreviewViewService), which is the whole point: the agent works where the
+  // operator can see it. The browser-control MCP server is what actually calls
+  // these on the agent's behalf; the renderer never does.
+
+  /** Navigate the browser to `url` (http/https only) and reveal the dock. */
+  Rpc.make("BrowserControl.navigate", {
+    error: BrowserControlError,
+    payload: { url: Schema.String }
+  }),
+
+  /** A PNG screenshot of the current page, base64-encoded — the agent's eyes. */
+  Rpc.make("BrowserControl.screenshot", {
+    success: Schema.Struct({ pngBase64: Schema.String }),
+    error: BrowserControlError
+  }),
+
+  /** Click the first element matching `selector`. Fails if nothing matches. */
+  Rpc.make("BrowserControl.click", {
+    error: BrowserControlError,
+    payload: { selector: Schema.String }
+  }),
+
+  /**
+   * Type `text` into the first element matching `selector` (focus, set value,
+   * dispatch an `input` event so frameworks notice). Fails if nothing matches.
+   */
+  Rpc.make("BrowserControl.type", {
+    error: BrowserControlError,
+    payload: { selector: Schema.String, text: Schema.String }
+  }),
+
+  /** The page's visible text (`document.body.innerText`), for the agent to read. */
+  Rpc.make("BrowserControl.readText", {
+    success: Schema.Struct({ text: Schema.String }),
+    error: BrowserControlError
+  }),
+
+  /** Evaluate `expression` in the page and return its `String(...)` result. */
+  Rpc.make("BrowserControl.evaluate", {
+    success: Schema.Struct({ result: Schema.String }),
+    error: BrowserControlError,
+    payload: { expression: Schema.String }
+  }),
+
+  /** Resolve once `selector` appears in the DOM, or fail after `timeoutMs`. */
+  Rpc.make("BrowserControl.waitForSelector", {
+    error: BrowserControlError,
+    payload: { selector: Schema.String, timeoutMs: Schema.Number }
+  }),
 
   // ── Assets ───────────────────────────────────────────────────────────────────
   // Files an agent left in a session's worktree, opened as tabs in the Preview
