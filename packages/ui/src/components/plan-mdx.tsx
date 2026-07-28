@@ -1,22 +1,29 @@
 import type { PlanAcceptanceStatus, PlanDocument } from "@jingler/core"
+import { cn } from "../lib/cn.js"
 import { Markdown } from "./markdown.js"
 import { PlanAnnotation } from "../composites/plan-annotation.js"
+import { PlanProseEditor } from "../composites/plan-prose-editor.js"
 import { PlanStage } from "../composites/plan-stage.js"
 
 export function PlanMdx({
   document,
   disabled = false,
+  editable = false,
   onCriterionChange,
-  onAnnotate
+  onAnnotate,
+  onEditSection
 }: {
   document: PlanDocument
   disabled?: boolean
+  /** Render section bodies as inline WYSIWYG editors (the Notion-like "Edit" mode). */
+  editable?: boolean
   onCriterionChange?: (
     criterionId: string,
     status: PlanAcceptanceStatus,
     evidence: string | null
   ) => void
   onAnnotate?: (stageId: string | null, body: string) => void
+  onEditSection?: (sectionTitle: string, markdown: string) => void
 }) {
   const globalAnnotations = document.projection.annotations.filter(
     (annotation) => annotation.stageId === null
@@ -34,9 +41,24 @@ export function PlanMdx({
       </header>
 
       {document.projection.sections.map((section) => (
-        <section key={section.id} className="rounded-xl border border-line bg-panel p-5">
+        <section
+          key={section.id}
+          className={cn(
+            "rounded-xl border border-line bg-panel p-5",
+            editable && "border-line-strong ring-1 ring-inset ring-transparent focus-within:ring-blue/40"
+          )}
+        >
           <h2 className="text-[15px] font-semibold text-text-bright">{section.title}</h2>
-          <Markdown className="mt-3 text-[13px]">{section.markdown}</Markdown>
+          {editable && !disabled ? (
+            <PlanProseEditor
+              className="mt-3"
+              ariaLabel={`Edit section: ${section.title}`}
+              value={section.markdown}
+              onChange={(markdown) => onEditSection?.(section.title, markdown)}
+            />
+          ) : (
+            <Markdown className="mt-3 text-[13px]">{section.markdown}</Markdown>
+          )}
         </section>
       ))}
 

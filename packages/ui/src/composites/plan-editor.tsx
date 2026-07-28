@@ -1,4 +1,4 @@
-import type { PlanAcceptanceStatus, PlanDocument } from "@jingler/core"
+import { type PlanAcceptanceStatus, type PlanDocument, updatePlanSectionSource } from "@jingler/core"
 import { AlertTriangle, Check, Cloud, RefreshCw, Save, WifiOff } from "lucide-react"
 import { useState } from "react"
 import { Button } from "../components/button.js"
@@ -6,7 +6,7 @@ import { SegmentedControl } from "../components/segmented-control.js"
 import { cn } from "../lib/cn.js"
 import { PlanMdx } from "../components/plan-mdx.js"
 
-export type PlanEditorMode = "rendered" | "source" | "split"
+export type PlanEditorMode = "edit" | "rendered" | "source" | "split"
 export type PlanEditorSyncState =
   | "loading"
   | "clean"
@@ -63,6 +63,13 @@ export function PlanEditor({
   const [mode, setMode] = useState<PlanEditorMode>(compact ? "rendered" : "split")
   const sync = SYNC[state]
   const SyncIcon = sync.icon
+  // Inline (WYSIWYG) section edit: the editor emits fresh markdown for one
+  // section, which we splice back into the authoritative draft source. If the
+  // section can't be located the draft is left untouched (defensive).
+  const editSection = (sectionTitle: string, markdown: string): void => {
+    const next = updatePlanSectionSource(draft, sectionTitle, markdown)
+    if (next !== null && next !== draft) onEdit?.(next)
+  }
   const source = (
     <textarea
       aria-label="Plan MDX source"
@@ -82,6 +89,18 @@ export function PlanEditor({
       />
     </div>
   )
+  const edit = (
+    <div className="h-full overflow-auto bg-editor">
+      <PlanMdx
+        document={document}
+        editable
+        disabled={state === "conflict"}
+        onCriterionChange={onCriterionChange}
+        onAnnotate={onAnnotate}
+        onEditSection={editSection}
+      />
+    </div>
+  )
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -90,6 +109,7 @@ export function PlanEditor({
           value={mode}
           onChange={setMode}
           items={[
+            { value: "edit", label: "Edit" },
             { value: "rendered", label: "Rendered" },
             { value: "source", label: "Source" },
             { value: "split", label: "Split", disabled: compact }
@@ -150,6 +170,7 @@ export function PlanEditor({
             </div>
           )}
           <div className="min-h-0 flex-1">
+            {mode === "edit" && edit}
             {mode === "rendered" && rendered}
             {mode === "source" && source}
             {mode === "split" && (

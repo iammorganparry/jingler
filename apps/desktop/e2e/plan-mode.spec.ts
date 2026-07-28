@@ -288,6 +288,41 @@ test("mermaid fences render as diagrams, and a broken fence degrades to an error
   await expect(launched.window.getByText(/Rollout|Testing|Risks/)).toBeVisible()
 })
 
+test("inline (WYSIWYG) editing a section persists to the canonical source", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session()
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await proposePlan(launched.window)
+
+  const file = currentPlanPath(launched)
+  const startRevision = Number(
+    /^revision:\s*(\d+)$/m.exec(readFileSync(file, "utf8"))?.[1] ?? 0
+  )
+
+  await launched.window.getByRole("tab", { name: "Edit", exact: true }).click()
+  const editor = launched.window.locator('[aria-label^="Edit section:"]').first()
+  await expect(editor).toBeVisible()
+  await editor.click()
+  await launched.window.keyboard.press("End")
+  await launched.window.keyboard.type(" INLINE_EDIT_MARKER")
+
+  await expect(launched.window.getByRole("status")).toContainText("Synced", {
+    timeout: 20_000
+  })
+  await expect
+    .poll(() => readFileSync(file, "utf8"))
+    .toContain("INLINE_EDIT_MARKER")
+  const endRevision = Number(
+    /^revision:\s*(\d+)$/m.exec(readFileSync(file, "utf8"))?.[1] ?? 0
+  )
+  expect(endRevision).toBeGreaterThan(startRevision)
+})
+
 test("Claude, Codex, and opencode share native plan mode", async ({ launchApp }) => {
   for (const cli of ["claude", "codex", "opencode"] as const) {
     const launched = await launchApp({

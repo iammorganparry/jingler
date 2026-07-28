@@ -36,8 +36,11 @@ const blank = (value: string): string => value.replace(/[^\n]/g, " ")
  * Hide fenced and inline code while preserving every offset and newline.
  * Validation and component discovery share this view, so examples never become
  * executable MDX or phantom Stage/Acceptance records.
+ *
+ * Exported as `maskPlanCode` for surgical source rewriters (`plan-source.ts`),
+ * which must locate `##` headings without matching ones inside a code fence.
  */
-const withoutCode = (source: string): string => {
+export const maskPlanCode = (source: string): string => {
   let masked = source
   const opening = /^[ \t]*(`{3,})[^\n]*\r?\n/gm
   let match = opening.exec(masked)
@@ -123,7 +126,7 @@ const removeDiscovered = (
 /** Parse Jingler's data-only MDX dialect without compiling or executing it. */
 export const parsePlanMdx = (source: string): PlanMdxResult => {
   const diagnostics: Array<PlanMdxDiagnostic> = []
-  const safe = withoutCode(source)
+  const safe = maskPlanCode(source)
 
   for (const match of safe.matchAll(/^\s*(?:import|export)\b|(?<!\\)\{/gm)) {
     diagnostics.push({
