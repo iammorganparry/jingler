@@ -16,8 +16,10 @@ import {
   killAllChildren,
   killAllPtysSync,
   ModelsService,
+  PlanStore,
   PluginHost,
-  SecretStore
+  SecretStore,
+  SessionStore
 } from "@jingler/cli-adapters"
 import { app, BrowserWindow, ipcMain, shell } from "electron"
 import { Effect } from "effect"
@@ -81,6 +83,22 @@ const enableCodexDiagnostics = (): void => {
 const prefetchModels = Effect.gen(function* () {
   const clis = yield* DiscoveryService.list()
   yield* ModelsService.catalog(clis)
+}).pipe(Effect.ignore)
+
+const recoverInterruptedPlans = Effect.gen(function* () {
+  const sessions = yield* SessionStore.list()
+  yield* Effect.forEach(
+    sessions,
+    (session) =>
+      session.worktreePath
+        ? PlanStore.markInterrupted(
+            session.worktreePath,
+            session.id,
+            session.activeChatId
+          ).pipe(Effect.asVoid)
+        : Effect.void,
+    { discard: true }
+  )
 }).pipe(Effect.ignore)
 
 // Only one instance may run: a second launch (e.g. the OS handing us a
@@ -300,6 +318,9 @@ if (!gotPrimaryLock) {
     // Force the layer to build so the RPC server + `ipcMain` listener are live
     // before the renderer can send its first frame.
     await runtime.runPromise(Effect.void)
+    // Runs belong to the previous process and cannot still be parked. Recover
+    // their exact canonical revisions before the renderer performs its first read.
+    await runtime.runPromise(recoverInterruptedPlans)
     // Not awaited — the catalogue warms in the background while the window opens.
     void runtime.runPromise(prefetchModels)
 

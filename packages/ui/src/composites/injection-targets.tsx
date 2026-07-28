@@ -25,8 +25,7 @@ const LABEL: Record<CliKind, string> = {
   claude: "Claude Code",
   codex: "Codex",
   cursor: "Cursor",
-  opencode: "opencode",
-  jingler: "Jingler"
+  opencode: "opencode"
 }
 
 /** Operator-facing wording for each way injection can be off. */

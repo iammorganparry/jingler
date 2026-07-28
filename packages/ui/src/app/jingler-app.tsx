@@ -8,7 +8,6 @@ import type {
   CreateSessionFromPrInput,
   CreateSessionInput,
   GhStatus,
-  GigaplanRoutingConfig,
   GitConfig,
   GithubConfig,
   NotificationsConfig,
@@ -19,8 +18,7 @@ import type {
   SessionPrStatus,
   PrSummary,
   ProviderConfig,
-  ProviderModels,
-  HarnessBilling,
+  PlanTemplateConfig,
   ProvidersConfig,
   Repo,
   Session,
@@ -178,17 +176,8 @@ export interface JinglerAppProps {
   providersConfig?: ProvidersConfig | null
   /** Persist one CLI's provider defaults; presence wires the Settings gear. */
   onSaveProvider?: (cli: CliKind, config: ProviderConfig) => Promise<void> | void
-  /** Every installed harness + its models, for Gigaplan's orchestrator picker. */
-  modelCatalog?: ReadonlyArray<ProviderModels>
-  /** The configured orchestrator harness+model, or null for the default. */
-  orchestrator?: { readonly cli: CliKind; readonly model: string } | null
-  onSaveOrchestrator?: (cli: CliKind, model: string) => void
-  gigaplanRouting?: GigaplanRoutingConfig | null
-  onSaveGigaplanRouting?: (routing: GigaplanRoutingConfig) => void
-  /** Why Gigaplan can't run on this host, when it can't. */
-  gigaplanUnavailableReason?: string | null
-  /** What each installed harness is charged to. */
-  billing?: ReadonlyArray<HarnessBilling>
+  planTemplate?: PlanTemplateConfig | null
+  onSavePlanTemplate?: (template: PlanTemplateConfig) => void
   /** Load the selectable models for a CLI (Settings · Providers). */
   loadModels?: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
   /** opencode's resolved providers + credential origins (Settings · Providers). */
@@ -374,13 +363,8 @@ export function JinglerApp({
   onRecheckGh,
   providersConfig,
   onSaveProvider,
-  modelCatalog,
-  orchestrator,
-  onSaveOrchestrator,
-  gigaplanRouting,
-  onSaveGigaplanRouting,
-  gigaplanUnavailableReason,
-  billing,
+  planTemplate,
+  onSavePlanTemplate,
   loadModels,
   loadOpencodeProviders,
   onSetOpencodeAuth,
@@ -937,13 +921,8 @@ export function JinglerApp({
               onSaveProvider={onSaveProvider}
               defaultCli={defaultCli}
               onSaveDefaultCli={onSaveDefaultCli}
-              catalog={modelCatalog}
-              orchestrator={orchestrator}
-              onSaveOrchestrator={onSaveOrchestrator}
-              gigaplanRouting={gigaplanRouting}
-              onSaveGigaplanRouting={onSaveGigaplanRouting}
-              gigaplanUnavailableReason={gigaplanUnavailableReason}
-              billing={billing}
+              planTemplate={planTemplate}
+              onSavePlanTemplate={onSavePlanTemplate}
               loadModels={loadModels ?? (async () => [])}
               loadOpencodeProviders={loadOpencodeProviders}
               onSetOpencodeAuth={onSetOpencodeAuth}

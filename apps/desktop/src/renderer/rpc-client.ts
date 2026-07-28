@@ -8,8 +8,6 @@ import type {
   AssetPayload,
   BackgroundTask,
   AdversarialReview,
-  PlanningReadiness,
-  PlanRound,
   ArchiveReason,
   Attachment,
   AuthProvider,
@@ -26,7 +24,6 @@ import type {
   ExecutionMode,
   GateDecision,
   GhStatus,
-  GigaplanRoutingConfig,
   GitConfig,
   NotificationKind,
   NotificationsConfig,
@@ -49,6 +46,9 @@ import type {
   OpencodeProviderInfo,
   ProviderModels,
   PermissionMode,
+  PlanAcceptanceStatus,
+  PlanDocument,
+  PlanTemplateConfig,
   PrFileChange,
   PrMergeMethod,
   PrState,
@@ -62,7 +62,6 @@ import type {
   ReviewComment,
   ReviewSubmitKind,
   Session,
-  SessionPlanArtifact,
   SettledSessionStatus,
   Skill,
   StreamEvent,
@@ -380,9 +379,10 @@ export const rpc = {
   agentApprovePlan: (
     sessionId: string,
     planId: string,
-    executionMode?: ExecutionMode
+    executionMode?: ExecutionMode,
+    revision?: number
   ): Promise<void> =>
-    run((c) => c.Agent.approvePlan({ sessionId, planId, executionMode })),
+    run((c) => c.Agent.approvePlan({ sessionId, planId, executionMode, revision })),
   agentSetHarness: (sessionId: string, chatId: string, cli: CliKind, model: string): Promise<void> =>
     run((c) => c.Agent.setHarness({ sessionId, chatId, cli, model })),
   agentStop: (sessionId: string, chatId: string): Promise<void> =>
@@ -429,11 +429,8 @@ export const rpc = {
     run((c) => c.Config.setCollapsedRepos({ paths })),
   configSetLastRepoPath: (path: string): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setLastRepoPath({ path })),
-  /** Which harness+model Gigaplan itself runs on. */
-  configSetOrchestrator: (cli: CliKind, model: string): Promise<WorkspaceConfig> =>
-    run((c) => c.Config.setOrchestrator({ cli, model })),
-  configSetGigaplanRouting: (routing: GigaplanRoutingConfig): Promise<WorkspaceConfig> =>
-    run((c) => c.Config.setGigaplanRouting({ routing })),
+  configSetPlanTemplate: (template: PlanTemplateConfig): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setPlanTemplate({ template })),
   configSetProvider: (cli: CliKind, provider: ProviderConfig): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setProvider({ cli, provider })),
   githubPr: (sessionId: string): Promise<PullRequest | null> =>
@@ -526,7 +523,6 @@ export const rpc = {
     onEvent: (event: StreamEvent) => void,
     images: ReadonlyArray<Attachment> = [],
     options: {
-      readonly target?: "session" | "orchestrator"
       readonly reasoning?: ReasoningSetting | null
     } = {}
   ): (() => void) => {
@@ -547,6 +543,7 @@ export const rpc = {
     sessionId: string,
     chatId: string,
     planId: string,
+    revision: number | undefined,
     onEvent: (event: StreamEvent) => void
   ): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
@@ -554,7 +551,7 @@ export const rpc = {
     void clientPromise.then((client) => {
       if (cancelled) return
       fiber = runtime.runFork(
-        drainRun(client.Agent.resumePlan({ sessionId, chatId, planId }), onEvent)
+        drainRun(client.Agent.resumePlan({ sessionId, chatId, planId, revision }), onEvent)
       )
     })
     return () => {
@@ -639,71 +636,32 @@ export const rpc = {
    * nothing is running — it just stays quiet until a review starts. Returns the
    * unsubscribe.
    */
-  /**
-   * Run an adversarial planning round and stream its events. Returns a canceller.
-   *
-   * Shaped like `agentRun` rather than `reviewWatch` because the caller IS the
-   * trigger here — a planning round only exists because the operator asked for
-   * it, so there is no already-in-flight run to attach to.
-   */
-  planAdversarial: (
-    sessionId: string,
-    chatId: string,
-    brief: string | undefined,
-    onEvent: (event: StreamEvent) => void,
-    images: ReadonlyArray<Attachment> = []
-  ): (() => void) => {
-    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
-    let cancelled = false
-    void clientPromise.then((client) => {
-      if (cancelled) return
-      fiber = runtime.runFork(drainRun(client.Plan.adversarial({
-        sessionId,
-        chatId,
-        ...(brief === undefined ? {} : { brief }),
-        images
-      }), onEvent))
-    })
-    return () => {
-      cancelled = true
-      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
-    }
-  },
-
-  /** The stored planning round for a session, or null. */
-  /** Turn learning from finished work on or off. */
-
-  planRound: (sessionId: string): Promise<PlanRound | null> =>
-    run((c) => c.Plan.round({ sessionId })),
-  planCurrent: (sessionId: string): Promise<SessionPlanArtifact | null> =>
+  planCurrent: (sessionId: string): Promise<PlanDocument | null> =>
     run((c) => c.Plan.current({ sessionId })),
-
-  /** Whether adversarial planning is offerable here, and the reason when not. */
-  planReadiness: (): Promise<PlanningReadiness> => run((c) => c.Plan.readiness({})),
-
-  /** Run an approved plan step by step. Returns a cancel handle, like `agentRun`. */
-  planExecute: (
-    sessionId: string,
-    planId: string,
-    executionMode: ExecutionMode | null,
-    onEvent: (event: StreamEvent) => void
-  ): (() => void) => {
-    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
-    let cancelled = false
-    void clientPromise.then((client) => {
-      if (cancelled) return
-      fiber = runtime.runFork(
-        drainRun(
-          client.Plan.execute({ sessionId, planId, executionMode: executionMode ?? undefined }),
-          onEvent
-        )
-      )
-    })
-    return () => {
-      cancelled = true
-      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
-    }
-  },
+  planUpdateDocument: (input: {
+    sessionId: string
+    planId: string
+    baseRevision: number
+    source: string
+    author: "user" | "agent"
+  }): Promise<PlanDocument> => run((c) => c.Plan.updateDocument(input)),
+  planAddAnnotation: (input: {
+    sessionId: string
+    planId: string
+    baseRevision: number
+    stageId: string | null
+    body: string
+    author: "user" | "agent"
+  }): Promise<PlanDocument> => run((c) => c.Plan.addAnnotation(input)),
+  planSetCriterionStatus: (input: {
+    sessionId: string
+    planId: string
+    baseRevision: number
+    criterionId: string
+    status: PlanAcceptanceStatus
+    evidence: string | null
+    author: "user" | "agent"
+  }): Promise<PlanDocument> => run((c) => c.Plan.setCriterionStatus(input)),
 
 
   reviewWatch: (

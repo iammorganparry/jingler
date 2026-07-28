@@ -1,8 +1,7 @@
 import { writeFileSync } from "node:fs"
 import { mkdirSync } from "node:fs"
 import { FileSystem } from "@effect/platform"
-import type { GigaplanRoutingConfig } from "@jingler/core"
-import { DEFAULT_THEME_ID } from "@jingler/core"
+import { DEFAULT_PLAN_TEMPLATE, DEFAULT_THEME_ID } from "@jingler/core"
 import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AppPaths } from "./app-paths.js"
@@ -190,54 +189,31 @@ describe("ConfigService", () => {
     }
   })
 
-  /**
-   * `patch` is a whole-object read-modify-write, so a section it forgets to
-   * carry forward is erased by the next unrelated save. The orchestrator is the
-   * expensive one to lose silently: `resolveOrchestrator` falls back to a
-   * curated default, so Gigaplan would quietly start planning on a different
-   * harness and model than the operator chose, with nothing on screen to say so.
-   */
-  it("keeps the orchestrator when an unrelated setting is saved", async () => {
+  it("keeps the plan template when an unrelated setting is saved", async () => {
     const exit = await provided(
       Effect.gen(function* () {
         yield* ConfigService.setReposDir("/repos")
-        yield* ConfigService.setOrchestrator("codex", "gpt-5")
-        // Any other setter would do — the bug is in the shared read-modify-write.
+        yield* ConfigService.setPlanTemplate({ source: DEFAULT_PLAN_TEMPLATE })
         yield* ConfigService.setLastRepoPath("/repos/widget")
         return yield* ConfigService.get()
       })
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag === "Success") {
-      expect(exit.value?.orchestrator).toStrictEqual({ cli: "codex", model: "gpt-5" })
+      expect(exit.value?.planTemplate?.source).toBe(DEFAULT_PLAN_TEMPLATE)
     }
   })
 
-  it("persists routing and preserves it across unrelated settings writes", async () => {
-    const routing: GigaplanRoutingConfig = {
-      mode: "active",
-      overrides: [
-        {
-          taskKind: "schema",
-          routes: [
-            { cli: "codex", model: "gpt-5.6-sol" },
-            { cli: "claude", model: "opus" }
-          ]
-        }
-      ]
-    }
+  it("rejects an unsafe plan template without overwriting the saved one", async () => {
     const exit = await provided(
       Effect.gen(function* () {
-        yield* ConfigService.setGigaplanRouting(routing)
-        yield* ConfigService.setProvider("codex", { enabled: true, defaultMode: "ask" })
-        yield* ConfigService.setLastRepoPath("/repos/widget")
-        return yield* ConfigService.get()
+        yield* ConfigService.setPlanTemplate({ source: DEFAULT_PLAN_TEMPLATE })
+        return yield* ConfigService.setPlanTemplate({
+          source: 'import Danger from "./danger.js"\n# PRD'
+        })
       })
     )
-    expect(exit._tag).toBe("Success")
-    if (exit._tag === "Success") {
-      expect(exit.value?.gigaplanRouting).toStrictEqual(routing)
-    }
+    expect(exit._tag).toBe("Failure")
   })
 
   it("persists ADHD mode and reads it back", async () => {

@@ -30,6 +30,7 @@ import {
 } from "./conversation-registry.js"
 import { clearDraft, getDraft, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
 import { useConversation } from "./use-conversation.js"
+import { usePlanDocument } from "./use-plan-document.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
 
 export function ConversationPane({
@@ -83,6 +84,7 @@ export function ConversationPane({
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
   const convo = useConversation(session, activeChat.id)
+  const canonicalPlan = usePlanDocument(session.id)
 
   // Everything the transcript needs to turn a path into a link. `convo.files` is
   // the worktree's tracked-file list, already fetched for the composer's `@`
@@ -346,19 +348,37 @@ export function ConversationPane({
   // registry (from the actor's own subscription), so they stay correct even
   // while this pane is unmounted for a background session. Nothing to do here.
 
-  const planId = convo.plan?.id ?? null
+  const planId = canonicalPlan.document?.id ?? convo.plan?.id ?? null
 
   const planReview = (
     <PlanReview
       plan={convo.plan}
+      document={canonicalPlan.document}
+      draft={canonicalPlan.draft}
+      remote={canonicalPlan.remote}
+      syncState={canonicalPlan.state}
+      syncError={canonicalPlan.error}
+      canApprove={canonicalPlan.canApprove}
       compact={view === "split"}
       patch={convo.patch}
       selectedStepId={planStepId}
       onSelectStep={onPlanStepSelected}
-      onApprove={(executionMode) => planId && convo.approvePlan(planId, executionMode)}
-      onResume={() => planId && convo.resumePlan(planId)}
+      onApprove={(executionMode) =>
+        planId &&
+        convo.approvePlan(planId, executionMode, canonicalPlan.document?.revision)
+      }
+      onResume={() =>
+        planId && convo.resumePlan(planId, canonicalPlan.document?.revision)
+      }
       onRevise={() => planId && convo.revisePlan(planId)}
       onComment={(stepId, body) => planId && convo.commentPlanStep(planId, stepId, body)}
+      onEditDocument={canonicalPlan.edit}
+      onSaveDocument={canonicalPlan.save}
+      onRetryDocument={canonicalPlan.retry}
+      onKeepLocal={canonicalPlan.keepLocal}
+      onAcceptRemote={canonicalPlan.acceptRemote}
+      onCriterionChange={canonicalPlan.setCriterion}
+      onAnnotate={canonicalPlan.annotate}
     />
   )
 
@@ -470,8 +490,6 @@ export function ConversationPane({
           reasoningEffort={convo.reasoning?.effort}
           thinkingEnabled={convo.reasoning?.enabled}
           onSetReasoning={convo.setReasoning}
-          adversarialPlanning={convo.adversarialPlanning ?? undefined}
-          onHandoffPlan={convo.handoffPlan}
           question={convo.question}
           onAnswerQuestion={convo.answerQuestion}
           onApprovePlan={(id) => convo.approvePlan(id)}

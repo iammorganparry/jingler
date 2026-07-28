@@ -113,10 +113,7 @@ export class ModelsService extends Effect.Service<ModelsService>()("@jingler/Mod
        */
       catalog: (clis: ReadonlyArray<CliInfo>): Effect.Effect<ReadonlyArray<ProviderModels>> =>
         Effect.forEach(
-          // `jingler` is excluded: it is not a model provider, and Gigaplan —
-          // the mode that uses it — hides this picker entirely while it runs, so
-          // an entry here could only ever be selected in order to be ignored.
-          clis.filter((c) => c.available && c.kind !== "jingler"),
+          clis.filter((c) => c.available),
           (c) =>
             list(c.kind, c.binPath).pipe(
               Effect.map((models) => ({ cli: c.kind, label: c.label, models }))

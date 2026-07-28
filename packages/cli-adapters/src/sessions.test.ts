@@ -309,12 +309,11 @@ describe("SessionStore", () => {
     expect(reread.value.repo).not.toBe("old-name")
   })
 
-  it("keeps normal and Gigaplan resume ids independent", async () => {
+  it("keeps the native resume id while reasoning changes", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const created = yield* SessionStore.create(input({ title: "Two threads" }))
         yield* SessionStore.setResumeId(created.id, "normal-thread")
-        yield* SessionStore.setGigaplanResumeId(created.id, "intake-thread")
         yield* SessionStore.setReasoningEffort(created.id, "ultrathink")
         const configured = yield* SessionStore.get(created.id)
         yield* SessionStore.setReasoningEffort(created.id, undefined)
@@ -326,13 +325,11 @@ describe("SessionStore", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     expect(activeChat(exit.value.configured).resumeId).toBe("normal-thread")
-    expect(activeChat(exit.value.configured).gigaplanResumeId).toBe("intake-thread")
     expect(exit.value.configured.reasoning?.claude).toStrictEqual({
       enabled: true,
       effort: "xhigh"
     })
     expect(activeChat(exit.value.cleared).resumeId).toBe("normal-thread")
-    expect(activeChat(exit.value.cleared).gigaplanResumeId).toBe("intake-thread")
     expect(exit.value.cleared.reasoning?.claude).toBeUndefined()
   })
 

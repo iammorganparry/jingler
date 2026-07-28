@@ -271,16 +271,15 @@ describe("parsePlan — the unstructured fallback", () => {
 })
 
 describe("planModeInstructions", () => {
-  it("documents the plan + flow blocks and forbids execution", () => {
-    expect(planModeInstructions).toContain("```plan")
-    expect(planModeInstructions).toContain("```flow")
-    expect(planModeInstructions).toMatch(/ExitPlanMode/)
-    expect(planModeInstructions.toLowerCase()).toContain("do not edit")
+  it("documents safe PRD MDX and forbids execution", () => {
+    expect(planModeInstructions()).toContain("```mdx plan")
+    expect(planModeInstructions()).toContain("<Acceptance")
+    expect(planModeInstructions()).toMatch(/ExitPlanMode/)
+    expect(planModeInstructions().toLowerCase()).toContain("do not edit")
   })
 
-  it("documents the per-step code sample convention", () => {
-    expect(planModeInstructions).toMatch(/step <NN>/)
-    expect(planModeInstructions.toLowerCase()).toContain("code sample")
+  it("injects the configured source structure", () => {
+    expect(planModeInstructions("# PRD: Custom")).toContain("# PRD: Custom")
   })
 })
 
@@ -353,16 +352,6 @@ describe("parsePlan — fidelity of what the agent wrote", () => {
     const s = step("  intent: Refuse 1.0.x; blocks: nothing ships until it's gated")
     expect(s.intent).toBe("Refuse 1.0.x; blocks: nothing ships until it's gated")
     expect(s.blocks).toStrictEqual([])
-  })
-
-  it("parses the closed routing inputs and ignores malformed values", () => {
-    const routed = step("  task: schema\n  effort: deep\n  risk: high")
-    expect(routed).toMatchObject({ taskKind: "schema", effort: "deep", risk: "high" })
-
-    const malformed = step("  task: magic\n  effort: enormous\n  risk: catastrophic")
-    expect(malformed.taskKind).toBeUndefined()
-    expect(malformed.effort).toBeUndefined()
-    expect(malformed.risk).toBeUndefined()
   })
 
   it("keeps a comma in a file path", () => {

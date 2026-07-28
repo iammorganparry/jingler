@@ -13,7 +13,6 @@
  * Electron's structured-clone IPC.)
  */
 import {
-  AdversarialPlanService,
   AgentRunner,
   AssetService,
   AuthService,
@@ -30,17 +29,14 @@ import {
   SecretStoreUnavailable,
   planDraftPost,
   billingPath,
-  isScriptedEnv,
   subscriptionProbeFailed,
   hasSubscriptionAuth,
   resetSubscriptionCache,
   METERED_ENV_KEYS,
-  PlanExecutor,
   PlanStore,
   PluginRegistry,
   PluginHost,
   PluginAuth,
-  PlanRoundStore,
   planReviewPost,
   retitleSession,
   ReviewService,
@@ -52,9 +48,6 @@ import {
   TerminalService,
   ThemeService,
   BackgroundTaskStore,
-  RankingService,
-  releaseSessionRun,
-  reserveSessionRun,
   TranscriptStore,
   UsageService,
   WorkspaceService
@@ -62,39 +55,24 @@ import {
 import { homedir } from "node:os"
 import { dirname, resolve } from "node:path"
 import {
-  applyStreamEvent,
-  assistantMessage,
   ConfigError,
   ConnectorError,
   GhError,
   GitError,
-  latestPlan,
-  PlanError,
-  planningReadiness,
-  routeQuotaState,
-  routeQuotaStatus,
+  PlanConflictError,
   resolveFindings,
-  resolveOrchestrator,
   ReviewError,
   reviewModelFor,
   PluginError,
-  SessionNotFoundError,
-  TASK_KINDS,
-  userMessage
+  SessionNotFoundError
 } from "@jingler/core"
 import type {
   BrowserBounds,
   AdversarialReview,
-  Attachment,
   CliKind,
-  ExecutionMode,
-  Message,
   OpenConnectorConfig,
   OpenConnectorDefaults,
-  Plan,
-  PlanRound,
   StreamEvent,
-  VendorReach,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
@@ -107,13 +85,10 @@ import type {
   ReviewSubmitKind,
   ReasoningSetting,
   Session,
-  SettledSessionStatus,
-  ProviderModels,
-  ProvidersConfig,
-  Usage
+  SettledSessionStatus
 } from "@jingler/core"
 import { JinglerRpcs } from "@jingler/contracts"
-import { AppPaths, CliAdapter } from "@jingler/cli-adapters"
+import { AppPaths } from "@jingler/cli-adapters"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { RpcServer } from "@effect/rpc"
@@ -662,129 +637,6 @@ export const reviewGet = (sessionId: string) =>
   })
 
 /**
- * Whether an installed provider is honest to advertise as executable.
- *
- * Discovery proves a binary exists, not that it can authenticate. Claude and
- * Codex therefore need either subscription auth or a metered key. A failed
- * credential probe stays eligible (unknown is safer than a false negative),
- * while a conclusive missing credential does not. Scripted mode is the
- * hermetic test harness and never spawns the discovered binary.
- */
-export const providerCanRoute = (
-  cli: CliKind,
-  providers: ProvidersConfig | undefined,
-  env: Record<string, string | undefined>,
-  subscription: boolean,
-  probeFailed: boolean,
-  scripted: boolean
-): boolean => {
-  if (providers?.[cli]?.enabled === false) return false
-  if (scripted) return true
-  const keys = METERED_ENV_KEYS[cli]
-  if (keys === undefined) return true
-  return subscription || probeFailed || keys.some((key) => (env[key] ?? "").length > 0)
-}
-
-export const eligibleRoutingCatalog = (
-  catalog: ReadonlyArray<ProviderModels>,
-  providers: ProvidersConfig | undefined
-): ReadonlyArray<ProviderModels> => {
-  // Eligibility is an operator-triggered boundary: readiness, planning, and
-  // execution must all observe a login completed in another terminal. Keep the
-  // memo within this catalogue pass, but never carry its answer between passes.
-  resetSubscriptionCache()
-  return catalog.filter((provider) => {
-    const subscription = hasSubscriptionAuth(provider.cli)
-    return providerCanRoute(
-      provider.cli,
-      providers,
-      process.env,
-      subscription,
-      subscriptionProbeFailed(provider.cli),
-      isScriptedEnv()
-    )
-  })
-}
-
-/**
- * The live model catalogue, folded down to the labs this machine can reach.
- *
- * Shared by `Plan.readiness` and `Plan.adversarial` so the entry the operator
- * sees and the round that actually runs can never disagree about which vendors
- * exist — a readiness check computed from a different source than the run is a
- * button that lies.
- */
-const quotaEligiblePlanningCatalog = (
-  catalog: ReadonlyArray<ProviderModels>,
-  usage: Usage
-): ReadonlyArray<ProviderModels> =>
-  catalog.map((provider) => ({
-    ...provider,
-    models: provider.models.filter(
-      (model) => routeQuotaStatus({ cli: provider.cli, model: model.id }, usage) !== "limited"
-    )
-  }))
-
-const readableList = (values: ReadonlyArray<string>): string =>
-  values.length < 2
-    ? (values[0] ?? "a configured route")
-    : `${values.slice(0, -1).join(", ")} and ${values.at(-1)}`
-
-const planningVendors = Effect.gen(function* () {
-  const clis = yield* DiscoveryService.list()
-  const discoveredCatalog = yield* ModelsService.catalog(clis)
-  const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
-  const catalog = eligibleRoutingCatalog(discoveredCatalog, config?.providers)
-  const usage = yield* UsageService.get(clis)
-  const quotaCatalog = quotaEligiblePlanningCatalog(catalog, usage)
-  const readiness = planningReadiness(quotaCatalog)
-  const baseReadiness = planningReadiness(catalog)
-  if (!readiness.ready && baseReadiness.ready) {
-    const limitedRoutes = catalog.flatMap((provider) =>
-      provider.models
-        .filter(
-          (model) => routeQuotaStatus({ cli: provider.cli, model: model.id }, usage) === "limited"
-        )
-        .map((model) => ({ cli: provider.cli, label: `${provider.label} · ${model.label}` }))
-    )
-    const limitedClis = new Set(limitedRoutes.map((route) => route.cli))
-    const reset = usage.providers
-      .filter((provider) => limitedClis.has(provider.cli))
-      .flatMap((provider) =>
-        provider.windows.flatMap((window) =>
-          window.status === "limited" && window.resetsAt !== null ? [window.resetsAt] : []
-        )
-      )
-      .sort()
-      .at(-1)
-    return {
-      clis,
-      catalog,
-      config,
-      usage,
-      vendors: readiness.vendors,
-      readiness: {
-        ...readiness,
-        reason:
-          `Adversarial planning needs two model providers, but local usage limits remove ` +
-          `${readableList(limitedRoutes.map((route) => route.label))}${
-            reset === undefined ? "" : ` until ${reset}`
-          }. ` +
-          "Wait for the limit to reset or enable another route in Settings · Providers."
-      }
-    }
-  }
-  return {
-    clis,
-    catalog,
-    config,
-    usage,
-    vendors: readiness.vendors,
-    readiness
-  }
-})
-
-/**
  * `Billing.paths` handler — what each installed harness is charged to.
  *
  * Reports every available harness, including ones with no metered key of their
@@ -798,7 +650,7 @@ export const billingPaths = Effect.gen(function* () {
   resetSubscriptionCache()
   const clis = yield* DiscoveryService.list()
   return clis
-    .filter((c) => c.available && c.kind !== "jingler")
+    .filter((c) => c.available)
     .map((c) => {
       const subscription = hasSubscriptionAuth(c.kind)
       const keys = METERED_ENV_KEYS[c.kind] ?? []
@@ -811,610 +663,6 @@ export const billingPaths = Effect.gen(function* () {
       }
     })
 })
-
-/**
- * `Plan.readiness` handler — can we offer adversarial planning, and if not, why not?
- *
- * Derived from `planningVendors` rather than re-running discovery, so the claim
- * the button makes and the vendors the round actually gets are the same
- * computation. Duplicating those two lines is exactly how a readiness check
- * drifts from the run it describes.
- */
-export const planReadiness = Effect.map(planningVendors, ({ readiness }) => readiness)
-
-type PlanExecuteEnv =
-  | AppPaths
-  | CommandExecutor.CommandExecutor
-  | ConfigService
-  | SessionStore
-  | TranscriptStore
-  | DiscoveryService
-  | ModelsService
-  | PlanExecutor
-  | PlanStore
-  | CliAdapter
-  | UsageService
-  | FileSystem.FileSystem
-  | Path.Path
-
-/**
- * `Plan.execute` handler — run an approved plan, step by step.
- *
- * The payoff for everything the round does: it decides WHO should do each piece
- * of work, and until this runs that decision is decoration.
- *
- * The plan is read back from the session's own transcript rather than passed in
- * from the renderer. The renderer holds a copy that may have been edited on
- * screen, and executing anything other than the artifact the operator actually
- * approved would make the audit trail a lie.
- */
-export const planExecute = (
-  sessionId: string,
-  planId: string,
-  executionMode?: ExecutionMode
-): Stream.Stream<StreamEvent, PlanError, PlanExecuteEnv> =>
-  Stream.unwrapScoped(
-    Effect.gen(function* () {
-      const session = yield* resolveSession(sessionId)
-      if (!session?.worktreePath) {
-        return Stream.fail(
-          new PlanError({
-            message: "This session has no worktree to work in."
-          })
-        )
-      }
-      const worktreePath = session.worktreePath
-      // A plan is single-flight: a double-click on approve or a re-send would run
-      // two executors over the same steps in the shared worktree, applying every
-      // edit and command twice. Distinct chats/plans reserve distinct owners and
-      // still run concurrently.
-      const reservation = `plan:${planId}`
-      const holder = {}
-      const admitted = yield* reserveSessionRun(sessionId, reservation, holder)
-      if (!admitted) {
-        return Stream.fail(
-          new PlanError({ message: "This plan is already executing." })
-        )
-      }
-      yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, reservation, holder))
-      const persistedArtifact = yield* PlanStore.readArtifact(worktreePath)
-      const migrationChat = session.chats.find(
-        (chat) => chat.id === `c_${session.id}_1`
-      )
-      if (migrationChat !== undefined) {
-        yield* TranscriptStore.adoptLegacy(session.id, migrationChat.id)
-      }
-      const validPersistedArtifact =
-        persistedArtifact !== null &&
-        persistedArtifact.sessionId === session.id &&
-        session.chats.some((chat) => chat.id === persistedArtifact.producingChatId)
-          ? persistedArtifact
-          : null
-      const artifact =
-        validPersistedArtifact ??
-        (yield* (migrationChat === undefined
-          ? Effect.succeed([] as ReadonlyArray<Message>)
-          : TranscriptStore.list(migrationChat.id)).pipe(
-          Effect.orElseSucceed(() => [] as ReadonlyArray<Message>),
-          Effect.map((messages) =>
-            messages
-              .flatMap((message) =>
-                message.parts.flatMap((part) => part._tag === "Plan" ? [part.plan] : [])
-              )
-              .find((plan) => plan.id === planId && plan.structured !== false) ?? null
-          ),
-          Effect.flatMap((legacyPlan) =>
-            legacyPlan === null
-              ? Effect.succeed(null)
-              : PlanStore.promote(
-                  sessionId,
-                  worktreePath,
-                  migrationChat!.id,
-                  legacyPlan
-                )
-          )
-        ))
-      if (artifact === null || artifact.plan.id !== planId) {
-        return Stream.fail(
-          new PlanError({
-            message:
-              "The structured session plan is unavailable. Regenerate the plan before executing it."
-          })
-        )
-      }
-      const chatId = artifact.producingChatId
-      const messages = yield* TranscriptStore.list(chatId).pipe(
-        Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
-      )
-      const located = messages.reduce<{ plan: Plan; messageId: string } | null>(
-        (found, m) =>
-          m.parts.reduce<{ plan: Plan; messageId: string } | null>(
-            (inner, part) =>
-              part._tag === "Plan" && part.plan.id === planId
-                ? { plan: part.plan, messageId: m.id }
-                : inner,
-            found
-          ),
-        null
-      )
-      const plan = artifact.plan
-
-      const clis = yield* DiscoveryService.list()
-      const discoveredCatalog = yield* ModelsService.catalog(clis)
-      const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
-      const catalog = eligibleRoutingCatalog(discoveredCatalog, config?.providers)
-      const usage = yield* UsageService.get(clis)
-      // What this host can actually run, as (harness, model) pairs. The plan's
-      // assignee is only a recommendation — it was written on whatever machine
-      // reviewed the plan, and cannot conjure an install here.
-      const executionRoutes = catalog.flatMap((provider) =>
-        provider.models.map((model) => {
-          const candidate = { cli: provider.cli, model: model.id }
-          return { candidate, quota: routeQuotaState(candidate, usage) }
-        })
-      )
-      const available = executionRoutes
-        .filter((route) => route.quota.status !== "limited")
-        .map((route) => route.candidate)
-      const unavailable = executionRoutes.flatMap((route) =>
-        route.quota.status !== "limited"
-          ? []
-          : [
-              {
-                ...route.candidate,
-                reason:
-                  route.quota.resetsAt === null
-                    ? "quota limited (reset time unavailable)"
-                    : `quota limited until ${route.quota.resetsAt}`
-              }
-            ]
-      )
-
-      // Approval and the run itself have to reach disk, for two separate
-      // reasons. The plan is still `proposed` on the record until we say
-      // otherwise, and `settleLoaded` rewrites a proposed plan to `stale` on the
-      // next transcript load — so a plan that ran to completion would come back
-      // looking like one that never started, and could be approved a second
-      // time. The execution's own output needs persisting for the same reason
-      // the round's did: streaming to the renderer is not a record of anything.
-      const txCtx = yield* Effect.context<
-        TranscriptStore | PlanStore | FileSystem.FileSystem | Path.Path | AppPaths
-      >()
-      const approvedArtifact = yield* PlanStore.updateArtifact(worktreePath, planId, (stored) => ({
-        ...stored,
-        status: "approved"
-      }))
-      if (approvedArtifact === null) {
-        return Stream.fail(
-          new PlanError({
-            message: "This plan changed before execution began. Review the current plan and retry."
-          })
-        )
-      }
-      if (located !== null) {
-        yield* TranscriptStore.patchById(chatId, located.messageId, (m) => ({
-          ...m,
-          parts: m.parts.map((p) =>
-            p._tag === "Plan" && p.plan.id === planId
-              ? ({
-                  _tag: "Plan",
-                  plan: { ...p.plan, status: "approved" as const }
-                } as const)
-              : p
-          )
-        })).pipe(Effect.ignore)
-      }
-
-      const now = yield* Effect.sync(() => new Date().toISOString())
-      const maxN = messages.reduce((max, m) => {
-        const n = Number(m.id.split("_").pop())
-        return Number.isFinite(n) && n > max ? n : max
-      }, 0)
-      yield* TranscriptStore.append(
-        chatId,
-        userMessage(`u_${chatId}_${maxN + 1}`, `Approved: ${plan.summary}`, now, [])
-      ).pipe(Effect.ignore)
-      const assistantId = `a_${chatId}_${maxN + 2}`
-      yield* TranscriptStore.append(chatId, assistantMessage(assistantId, now)).pipe(
-        Effect.ignore
-      )
-      const persist = (event: StreamEvent) =>
-        TranscriptStore.patchById(chatId, assistantId, (m) => applyStreamEvent(m, event)).pipe(
-          Effect.provide(txCtx),
-          Effect.ignore
-        )
-
-      const executor = yield* PlanExecutor
-      if (executionMode !== undefined) {
-        yield* SessionStore.setMode(sessionId, chatId, executionMode).pipe(Effect.ignore)
-      }
-      const persistPlanStep = (
-        step: Plan["steps"][number],
-        phase: "attempt" | "completion"
-      ) => {
-        const applyStep = (storedPlan: Plan): Plan => ({
-          ...storedPlan,
-          steps: storedPlan.steps.map((stored) =>
-            stored.id !== step.id
-              ? stored
-              : phase === "attempt"
-                ? { ...step, status: stored.status }
-                : { ...step, status: "done" }
-          )
-        })
-        const updateTranscript =
-          located === null
-            ? Effect.void
-            : TranscriptStore.patchById(chatId, located.messageId, (message) => ({
-                ...message,
-                parts: message.parts.map((part) =>
-                  part._tag === "Plan" && part.plan.id === planId
-                    ? { _tag: "Plan" as const, plan: applyStep(part.plan) }
-                    : part
-                )
-              }))
-        return PlanStore.updateArtifact(worktreePath, planId, applyStep).pipe(
-          Effect.zipRight(updateTranscript),
-          Effect.provide(txCtx),
-          Effect.ignore
-        )
-      }
-      return executor
-        .run({
-          sessionId,
-          repo: session.repo,
-          branch: session.branch,
-          cwd: session.worktreePath,
-          plan,
-          context: planExecutionContextFromTranscript(
-            messages,
-            located?.messageId ?? assistantId
-          ),
-          available,
-          unavailable,
-          // The orchestrator's own model backs any step the plan left unassigned —
-          // the same identity Gigaplan speaks as, rather than an arbitrary pick.
-          fallback: resolveOrchestrator(config),
-          binPathFor: (cli: CliKind) => clis.find((c) => c.kind === cli)?.binPath ?? null,
-          executionMode,
-          // Wired, not just declared. `onStepDone` documents itself as the thing
-          // that makes progress survive a crash mid-run, and nothing was passing
-          // it — so a 12-step plan killed after step 9 came back with the plan
-          // already marked `approved` (we do that before starting, so it can't be
-          // re-approved), no record of which steps had run, and a half-applied
-          // worktree. Ticking the step on the stored plan is what that comment
-          // was promising.
-          // `current` is a live-stream-only state. Attempts are durable, but a
-          // process killed mid-step must reopen as resumable rather than running.
-          onStepUpdated: (step) => persistPlanStep(step, "attempt"),
-          onStepDone: (step) => persistPlanStep(step, "completion")
-        })
-        .pipe(
-          // `ToolDelta` excluded for the reason `AgentRunner` excludes it: it ticks
-          // constantly and every patch rewrites the whole transcript.
-          Stream.tap((event) => (event._tag === "ToolDelta" ? Effect.void : persist(event)))
-        )
-    })
-  )
-
-/** The persisted round for a session — proposal, critique and revision. */
-export const planRound = (sessionId: string) => PlanRoundStore.get(sessionId)
-
-type PlanAdversarialEnv =
-  | RankingService
-  | UsageService
-  | ConfigService
-  | GitService
-  | SessionStore
-  | TranscriptStore
-  | DiscoveryService
-  | ModelsService
-  | AdversarialPlanService
-  | PlanRoundStore
-  | PlanStore
-  | CliAdapter
-  | CommandExecutor.CommandExecutor
-  | FileSystem.FileSystem
-  | Path.Path
-  | AppPaths
-
-const GIGAPLAN_INTAKE_LIMIT = 60_000
-const EARLIER_INTAKE_TRUNCATED = "[earlier intake truncated]"
-
-/** Keep a contiguous newest suffix, so a planner never starts inside a turn. */
-const boundGigaplanIntake = (turns: ReadonlyArray<string>): string => {
-  const body = turns.join("\n\n").trim()
-  if (body.length <= GIGAPLAN_INTAKE_LIMIT) return body
-
-  // Reserve room for the explanation before choosing turns, so the displayed
-  // intake remains within the same bound after we say what was omitted.
-  const turnBudget = GIGAPLAN_INTAKE_LIMIT - EARLIER_INTAKE_TRUNCATED.length - 2
-  const retained: Array<string> = []
-  let length = 0
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const turn = turns[index]
-    if (turn === undefined) continue
-    const separator = retained.length === 0 ? 0 : 2
-    if (length + separator + turn.length > turnBudget) break
-    retained.unshift(turn)
-    length += separator + turn.length
-  }
-
-  return [EARLIER_INTAKE_TRUNCATED, ...retained].join("\n\n")
-}
-
-const latestGigaplanPlan = (messages: ReadonlyArray<Message>): Plan | null => {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]
-    if (message?.source !== "gigaplan-handoff") continue
-    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
-      const part = message.parts[partIndex]
-      if (part?._tag === "Plan") return part.plan
-    }
-  }
-  return null
-}
-
-/** Build the planner handoff from durable Gigaplan intake, never the working chat. */
-export const gigaplanBriefFromTranscript = (messages: ReadonlyArray<Message>): string => {
-  const turns = messages.flatMap((message) => {
-    if (message.source !== "gigaplan-intake") return []
-    const parts = message.parts.flatMap((part): ReadonlyArray<string> => {
-      if (part._tag === "Text" && part.text.trim().length > 0) return [part.text.trim()]
-      if (part._tag !== "Question") return []
-      return part.request.questions.map((question, index) => {
-        const answer = part.answers?.[index]
-        const response = answer
-          ? [...answer.selected, ...(answer.other ? [answer.other] : [])].join(", ")
-          : "Unanswered"
-        return `QUESTION: ${question.question}\nANSWER: ${response}`
-      })
-    })
-    return parts.length === 0
-      ? []
-      : [`${message.role === "user" ? "OPERATOR" : "ORCHESTRATOR"}\n${parts.join("\n\n")}`]
-  })
-  const activePlan = latestGigaplanPlan(messages)
-  if (activePlan !== null && activePlan.raw.trim().length > 0) {
-    turns.push(`ACTIVE PLAN\n${activePlan.raw.trim()}`)
-  }
-  // Keep the newest context when an intake has become very long. The active
-  // harness thread still holds the full discussion; the round needs a bounded
-  // brief that does not crowd out its repository inspection.
-  const bounded = boundGigaplanIntake(turns)
-  return bounded.length === 0
-    ? ""
-    : `Create or update the implementation plan from this reviewed Gigaplan intake.\n\n${bounded}`
-}
-
-/**
- * Carry the task that produced a plan into its fresh execution sessions.
- *
- * Plan steps deliberately run with `resumeId: null`, and Codex receives no
- * parent-thread messages in that case. Keep only human-visible text and answered
- * questions, stop at the plan artifact, and exclude Gigaplan's synthetic handoff
- * turns. The approved plan itself is supplied separately by `stepPrompt`.
- */
-export const planExecutionContextFromTranscript = (
-  messages: ReadonlyArray<Message>,
-  planMessageId: string
-): string => {
-  const planIndex = messages.findIndex((message) => message.id === planMessageId)
-  const beforePlan = planIndex < 0 ? messages : messages.slice(0, planIndex)
-  const turns = beforePlan.flatMap((message) => {
-    if (message.source === "gigaplan-handoff") return []
-    const parts = message.parts.flatMap((part): ReadonlyArray<string> => {
-      if (part._tag === "Text" && part.text.trim().length > 0) return [part.text.trim()]
-      if (part._tag !== "Question") return []
-      return part.request.questions.map((question, index) => {
-        const answer = part.answers?.[index]
-        const response = answer
-          ? [...answer.selected, ...(answer.other ? [answer.other] : [])].join(", ")
-          : "Unanswered"
-        return `QUESTION: ${question.question}\nANSWER: ${response}`
-      })
-    })
-    if (parts.length === 0) return []
-    return [
-      `${message.role === "user" ? "OPERATOR" : "ASSISTANT"}\n${parts.join("\n\n")}`
-    ]
-  })
-  return boundGigaplanIntake(turns)
-}
-
-const gigaplanImagesFromTranscript = (
-  messages: ReadonlyArray<Message>
-): ReadonlyArray<Attachment> => {
-  const seen = new Set<string>()
-  return messages
-    .filter(
-      (message) =>
-        message.source === "gigaplan-intake" || message.source === "gigaplan-handoff"
-    )
-    .flatMap((message) =>
-      message.parts.flatMap((part) => (part._tag === "Image" ? [part.attachment] : []))
-    )
-    .filter((attachment) => {
-      if (seen.has(attachment.id)) return false
-      seen.add(attachment.id)
-      return true
-    })
-    .slice(-8)
-}
-
-/**
- * `Plan.adversarial` handler — run a planning round and stream its events.
- *
- * Resolves the session's worktree up front and fails fast without one: the roles
- * run read-only *in the repo*, and a round that can't read the code would produce
- * a plan invented from the brief alone, which is worse than no plan.
- */
-export const planAdversarial = (
-  sessionId: string,
-  brief?: string,
-  images: ReadonlyArray<Attachment> = [],
-  requestedChatId?: string
-): Stream.Stream<StreamEvent, PlanError, PlanAdversarialEnv> =>
-  Stream.unwrapScoped(
-    Effect.gen(function* () {
-      const session = yield* resolveSession(sessionId)
-      if (!session?.worktreePath) {
-        return Stream.fail(
-          new PlanError({
-            message: "This session has no worktree to plan against."
-          })
-        )
-      }
-      const chatId =
-        requestedChatId &&
-        session.chats.some((chat) => chat.id === requestedChatId)
-          ? requestedChatId
-          : session.activeChatId
-      // Planning is single-flight PER SESSION, not per chat: PlanStore keeps one
-      // current-plan artifact per worktree (which a session's chats share), so
-      // two concurrent planning rounds would clobber it — the second chat's
-      // `promote` replaces the first's, and approving the first then fails with
-      // the artifact gone. A constant owner refuses any second round in the
-      // session until the artifact can hold more than one plan.
-      const reservation = "planning"
-      const holder = {}
-      const admitted = yield* reserveSessionRun(sessionId, reservation, holder)
-      if (!admitted) {
-        return Stream.fail(
-          new PlanError({
-            message: "A planning round is already running in this session."
-          })
-        )
-      }
-      yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, reservation, holder))
-      if (chatId === `c_${session.id}_1`) {
-        yield* TranscriptStore.adoptLegacy(sessionId, chatId)
-      }
-      const prior = yield* TranscriptStore.list(chatId).pipe(Effect.orElseSucceed(() => []))
-      const explicitBrief = brief?.trim() ?? ""
-      const roundBrief =
-        explicitBrief.length > 0 ? explicitBrief : gigaplanBriefFromTranscript(prior)
-      if (roundBrief.length === 0) {
-        return Stream.fail(
-          new PlanError({
-            message: "Gigaplan needs an intake conversation before it can create a plan."
-          })
-        )
-      }
-      const roundImages =
-        images.length > 0 ? images : gigaplanImagesFromTranscript(prior)
-      const { clis, catalog, config, usage, vendors } = yield* planningVendors
-      const routingMode = config?.gigaplanRouting?.mode ?? "shadow"
-      const ranking = routingMode === "active" ? yield* RankingService.latest : null
-      const service = yield* AdversarialPlanService
-      // Capture the store's context here so the persistence hook the service
-      // calls later — on its own fiber, with only the adapter in scope — is a
-      // fully-provided effect rather than one demanding an environment the
-      // round doesn't have.
-      const storeCtx = yield* Effect.context<
-        PlanRoundStore | FileSystem.FileSystem | Path.Path | AppPaths
-      >()
-      // The transcript needs the same treatment, and for a sharper reason: the
-      // round's plan has to LAND there. `Plan.execute` deliberately re-reads the
-      // approved plan from the transcript rather than trusting the renderer's
-      // copy, so a round that streams to the screen without persisting produces
-      // a plan the operator can see, approve, and then be told is "no longer in
-      // this session" — and loses the whole round on reopen. Streaming is not
-      // persistence; `AgentRunner` is the only other thing that writes here, and
-      // a round never goes through it.
-      const txCtx = yield* Effect.context<
-        TranscriptStore | FileSystem.FileSystem | Path.Path | AppPaths
-      >()
-      const now = yield* Effect.sync(() => new Date().toISOString())
-      // Seed past any id already in the transcript, for the reason `AgentRunner`
-      // does: ids are positional, and a round after a restart would otherwise
-      // collide with earlier turns and stack rows keyed by the same id.
-      const maxN = prior.reduce((max, m) => {
-        const n = Number(m.id.split("_").pop())
-        return Number.isFinite(n) && n > max ? n : max
-      }, 0)
-      // The brief, then an empty turn for the round to fold into — the same two
-      // messages an ordinary send appends.
-      yield* TranscriptStore.append(
-        chatId,
-        // Fresh attachments ride on the handoff turn, but transcript-derived
-        // fallback images are already durable and must not be appended again.
-        userMessage(
-          `u_${chatId}_${maxN + 1}`,
-          explicitBrief.length > 0
-            ? explicitBrief
-            : latestGigaplanPlan(prior) !== null
-              ? "Update the plan from this Gigaplan conversation."
-              : "Create a plan from this Gigaplan conversation.",
-          now,
-          images,
-          "gigaplan-handoff"
-        )
-      ).pipe(Effect.ignore)
-      const assistantId = `a_${chatId}_${maxN + 2}`
-      yield* TranscriptStore.append(
-        chatId,
-        assistantMessage(assistantId, now, "gigaplan-handoff")
-      ).pipe(
-        Effect.ignore
-      )
-      const persist = (event: StreamEvent) =>
-        // By id, not `patchLast`: the round is long, and nothing guarantees this
-        // turn is still the final message by the time an event lands.
-        TranscriptStore.patchById(chatId, assistantId, (m) => applyStreamEvent(m, event)).pipe(
-          Effect.provide(txCtx),
-          Effect.ignore
-        )
-      const binPathFor = (cli: CliKind) => clis.find((c) => c.kind === cli)?.binPath ?? null
-      return service
-        .run({
-          sessionId,
-          repo: session.repo,
-          branch: session.branch,
-          cwd: session.worktreePath,
-          brief: roundBrief,
-          images: roundImages,
-          vendors,
-          binPathFor,
-          assignAgents: true,
-          routing: {
-            catalog,
-            mode: routingMode,
-            overrides: config?.gigaplanRouting?.overrides ?? [],
-            systemDefault: resolveOrchestrator(config),
-            ranking,
-            usage,
-            affinityEnabled: false
-          },
-          ...(session.cli === "claude" ||
-          session.cli === "codex" ||
-          session.cli === "opencode"
-            ? { reasoning: session.reasoning?.[session.cli] }
-            : {}),
-          // Persistence is wired in here rather than inside the service so the
-          // round logic stays free of the filesystem and testable without one.
-          onRound: (round: PlanRound) => PlanRoundStore.set(round).pipe(Effect.provide(storeCtx))
-        })
-        .pipe(
-          // Best-effort, like every other transcript write: a round the operator
-          // watched succeed must not fail because a file could not be written.
-          // `ToolDelta` is skipped for the reason `AgentRunner` skips it — it
-          // ticks constantly and each patch rewrites the whole file.
-          Stream.tap((event) =>
-            event._tag === "PlanProposed"
-              ? PlanStore.promote(
-                  sessionId,
-                  session.worktreePath!,
-                  chatId,
-                  event.plan
-                ).pipe(Effect.zipRight(persist(event)))
-              : event._tag === "ToolDelta"
-                ? Effect.void
-                : persist(event)
-          )
-        )
-    })
-  )
 
 /**
  * `Review.markRouted` handler — record that the stored review's critical/major
@@ -2117,7 +1365,7 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Sessions.diff": ({ id }) => sessionDiff(id),
   // The streaming agent seam: unwrap the runner's `Stream<StreamEvent>` so the
   // renderer subscribes to normalized events, harness-agnostic.
-  "Agent.run": ({ sessionId, chatId, text, images, target, reasoning }) =>
+  "Agent.run": ({ sessionId, chatId, text, images, reasoning }) =>
     Stream.unwrap(
       Effect.map(AgentRunner, (runner) =>
         runner.prompt(
@@ -2125,7 +1373,6 @@ const HandlersLayer = JinglerRpcs.toLayer({
           chatId,
           text,
           images ?? [],
-          target ?? "session",
           reasoning
         )
       )
@@ -2148,12 +1395,14 @@ const HandlersLayer = JinglerRpcs.toLayer({
     ),
   "Agent.revisePlan": ({ sessionId, planId }) =>
     Effect.flatMap(AgentRunner, (runner) => runner.revisePlan(sessionId, planId)),
-  "Agent.approvePlan": ({ sessionId, planId, executionMode }) =>
-    Effect.flatMap(AgentRunner, (runner) => runner.approvePlan(sessionId, planId, executionMode)),
-  "Agent.resumePlan": ({ sessionId, chatId, planId }) =>
+  "Agent.approvePlan": ({ sessionId, planId, executionMode, revision }) =>
+    Effect.flatMap(AgentRunner, (runner) =>
+      runner.approvePlan(sessionId, planId, executionMode, revision)
+    ),
+  "Agent.resumePlan": ({ sessionId, chatId, planId, revision }) =>
     Stream.unwrap(
       Effect.map(AgentRunner, (runner) =>
-        runner.resumePlan(sessionId, chatId, planId)
+        runner.resumePlan(sessionId, chatId, planId, revision)
       )
     ),
   "Agent.setHarness": ({ sessionId, chatId, cli, model }) =>
@@ -2252,8 +1501,7 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Config.setStarredRepos": ({ paths }) => ConfigService.setStarredRepos(paths),
   "Config.setCollapsedRepos": ({ paths }) => ConfigService.setCollapsedRepos(paths),
   "Config.setLastRepoPath": ({ path }) => ConfigService.setLastRepoPath(path),
-  "Config.setOrchestrator": ({ cli, model }) => ConfigService.setOrchestrator(cli, model),
-  "Config.setGigaplanRouting": ({ routing }) => ConfigService.setGigaplanRouting(routing),
+  "Config.setPlanTemplate": ({ template }) => ConfigService.setPlanTemplate(template),
   "Config.setProvider": ({ cli, provider }) => ConfigService.setProvider(cli, provider),
   "Github.pr": ({ sessionId }) => githubPr(sessionId),
   "Github.prState": ({ sessionId }) => githubPrState(sessionId),
@@ -2265,29 +1513,96 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Github.files": ({ sessionId }) => githubFiles(sessionId),
   "Github.diff": ({ sessionId }) => githubDiff(sessionId),
   "Github.detectPr": ({ sessionId }) => githubDetectPr(sessionId),
-  "Plan.adversarial": ({ sessionId, chatId, brief, images }) =>
-    planAdversarial(sessionId, brief, images ?? [], chatId),
-  "Plan.round": ({ sessionId }) => planRound(sessionId),
   "Plan.current": ({ sessionId }) =>
     SessionStore.get(sessionId).pipe(
       Effect.flatMap((session) =>
         session.worktreePath
-          ? PlanStore.readArtifact(session.worktreePath).pipe(
-              Effect.map((artifact) =>
-                artifact !== null &&
-                artifact.sessionId === session.id &&
-                session.chats.some((chat) => chat.id === artifact.producingChatId)
-                  ? artifact
-                  : null
-              )
+          ? PlanStore.readDocument(
+              session.worktreePath,
+              session.id,
+              session.activeChatId
             )
           : Effect.succeed(null)
       ),
       Effect.orElseSucceed(() => null)
     ),
-  "Plan.readiness": () => planReadiness,
-  "Plan.execute": ({ sessionId, planId, executionMode }) =>
-    planExecute(sessionId, planId, executionMode),
+  "Plan.updateDocument": ({ sessionId, planId, baseRevision, source, author }) =>
+    SessionStore.get(sessionId).pipe(
+      Effect.map((session) => session.worktreePath),
+      Effect.flatMap((worktreePath) =>
+        worktreePath == null
+          ? Effect.fail(
+              new PlanConflictError({
+                message: "This session has no plan worktree.",
+                latestRevision: 0,
+                latest: null
+              })
+            )
+          : PlanStore.updateDocument(worktreePath, {
+              planId,
+              baseRevision,
+              source,
+              author
+            })
+      ),
+      Effect.catchTag("SessionNotFoundError", () =>
+        Effect.fail(
+          new PlanConflictError({
+            message: "The plan session no longer exists.",
+            latestRevision: 0,
+            latest: null
+          })
+        )
+      )
+    ),
+  "Plan.addAnnotation": ({ sessionId, ...input }) =>
+    SessionStore.get(sessionId).pipe(
+      Effect.map((session) => session.worktreePath),
+      Effect.flatMap((worktreePath) =>
+        worktreePath == null
+          ? Effect.fail(
+              new PlanConflictError({
+                message: "This session has no plan worktree.",
+                latestRevision: 0,
+                latest: null
+              })
+            )
+          : PlanStore.addAnnotation(worktreePath, input)
+      ),
+      Effect.catchTag("SessionNotFoundError", () =>
+        Effect.fail(
+          new PlanConflictError({
+            message: "The plan session no longer exists.",
+            latestRevision: 0,
+            latest: null
+          })
+        )
+      )
+    ),
+  "Plan.setCriterionStatus": ({ sessionId, ...input }) =>
+    SessionStore.get(sessionId).pipe(
+      Effect.map((session) => session.worktreePath),
+      Effect.flatMap((worktreePath) =>
+        worktreePath == null
+          ? Effect.fail(
+              new PlanConflictError({
+                message: "This session has no plan worktree.",
+                latestRevision: 0,
+                latest: null
+              })
+            )
+          : PlanStore.setCriterionStatus(worktreePath, input)
+      ),
+      Effect.catchTag("SessionNotFoundError", () =>
+        Effect.fail(
+          new PlanConflictError({
+            message: "The plan session no longer exists.",
+            latestRevision: 0,
+            latest: null
+          })
+        )
+      )
+    ),
   "Review.run": ({ sessionId, force }) => reviewRun(sessionId, force),
   // Unwrapped from the service like `Terminal.attach` — the reviewer outlives any
   // one watcher, so the stream attaches to it rather than starting it.

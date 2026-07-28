@@ -10,16 +10,15 @@ describe("planNote", () => {
   })
 
   it("is null for harnesses that cannot plan at all", () => {
-    // cursor falls through to the scripted stub; jingler orchestrates.
+    // cursor falls through to the scripted stub.
     expect(planNote("cursor")).toBe(null)
-    expect(planNote("jingler")).toBe(null)
   })
 
   it("hands codex and opencode the identical protocol", () => {
     // The two differ only in transport. A note that drifted between them would
     // mean a plan parses on one harness and degrades to raw text on the other.
     expect(planNote("codex")).toBe(planNote("opencode"))
-    expect(planNote("codex")).toContain("```plan")
+    expect(planNote("codex")).toContain("```mdx plan")
   })
 
   it("tells the harness it is read-only, not merely that it should behave", () => {
@@ -32,7 +31,7 @@ describe("planNote", () => {
     // The whole reason plan mode was Claude-only: steering a harness toward a
     // tool it does not have produces a turn that ends with nothing submitted.
     expect(planNote("codex")).not.toContain("ExitPlanMode")
-    expect(planModeInstructions).toContain("ExitPlanMode")
+    expect(planModeInstructions()).toContain("ExitPlanMode")
   })
 })
 
@@ -98,8 +97,8 @@ describe("the reply-channel grammar agrees with the real parser", () => {
     // Everything from the flow-block section down is byte-identical — which is
     // the guarantee that a plan written by Codex parses like one written by
     // Claude.
-    const grammarOf = (s: string) => s.slice(s.indexOf("ALSO, for each step"))
+    const grammarOf = (s: string) => s.slice(s.indexOf("Return one fenced"))
     expect(grammarOf(planInstructions("reply"))).toBe(grammarOf(planInstructions("tool")))
-    expect(planInstructions("reply")).toContain("Format of the ```plan block")
+    expect(planInstructions("reply")).toContain("```mdx plan")
   })
 })

@@ -1,9 +1,7 @@
 import type { Plan, PlanStep, PlanStepStatus } from "@jingler/core"
 import { Check, GitBranch, MessageSquareText } from "lucide-react"
 import { cn } from "../lib/cn.js"
-import { ChallengeBadge } from "./plan-challenges.js"
 import { StatusDot } from "../components/status-dot.js"
-import { PlanAssignee } from "./plan-assignee.js"
 
 /**
  * A step's dot colour. Exported because the Conversation progress rail shows the
@@ -109,15 +107,6 @@ function Row({
       >
         {step.title}
       </span>
-      {step.routing ? (
-        <PlanAssignee
-          assignee={step.routing.decision}
-          compact
-          labelPrefix="Will run on"
-        />
-      ) : step.assignee ? (
-        <PlanAssignee assignee={step.assignee} compact />
-      ) : null}
       {step.condition && (
         <span className="flex-none font-mono text-[9.5px] text-muted-foreground">{step.condition}</span>
       )}
@@ -126,7 +115,6 @@ function Row({
           updated
         </span>
       )}
-      <ChallengeBadge step={step} />
       {comments > 0 && (
         <span className="flex flex-none items-center gap-1 font-mono text-[9.5px] text-yellow">
           <MessageSquareText className="size-3" />

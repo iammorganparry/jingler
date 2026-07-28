@@ -1,9 +1,6 @@
 import {
   AdversarialReview,
-  PlanError,
   HarnessBilling,
-  PlanningReadiness,
-  PlanRound,
   ArchiveReason,
   AssetPayload,
   Attachment,
@@ -17,7 +14,6 @@ import {
   CreateSessionInput,
   GateDecision,
   GhStatus,
-  GigaplanRoutingConfig,
   GitConfig,
   GithubConfig,
   NotificationKind,
@@ -38,6 +34,9 @@ import {
   PluginId,
   ExecutionMode,
   PermissionMode,
+  PlanAcceptanceStatus,
+  PlanDocument,
+  PlanTemplateConfig,
   PrFileChange,
   McpInjectionTarget,
   McpServerStatus,
@@ -65,7 +64,6 @@ import {
   ReviewComment,
   ReviewSubmitKind,
   Session,
-  SessionPlanArtifact,
   SettledSessionStatus,
   Skill,
   StreamEvent,
@@ -89,6 +87,8 @@ import {
   GhError,
   GitError,
   PluginError,
+  PlanConflictError,
+  PlanValidationError,
   ReviewError,
   SessionNotFoundError,
   TerminalError,
@@ -339,11 +339,6 @@ export class JinglerRpcs extends RpcGroup.make(
       /** Images the operator attached as context (optional; omitted → none). */
       images: Schema.optional(Schema.Array(Attachment)),
       /**
-       * `orchestrator` runs the configured Gigaplan voice on its own durable
-       * thread; absent keeps the ordinary session harness.
-       */
-      target: Schema.optional(Schema.Literal("session", "orchestrator")),
-      /**
        * Per-turn override. Null deliberately means native default, which lets a
        * just-cleared composer value win even if its persistence RPC is in flight.
        */
@@ -412,7 +407,8 @@ export class JinglerRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
-      executionMode: Schema.optional(ExecutionMode)
+      executionMode: Schema.optional(ExecutionMode),
+      revision: Schema.optional(Schema.Number)
     }
   }),
 
@@ -424,7 +420,12 @@ export class JinglerRpcs extends RpcGroup.make(
   Rpc.make("Agent.resumePlan", {
     success: StreamEvent,
     stream: true,
-    payload: { sessionId: Schema.String, chatId: Schema.String, planId: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      planId: Schema.String,
+      revision: Schema.optional(Schema.Number)
+    }
   }),
 
   /**
@@ -829,27 +830,14 @@ export class JinglerRpcs extends RpcGroup.make(
     payload: { path: Schema.String }
   }),
 
+  /** Persist the editable PRD MDX template used by every native planning harness. */
+  Rpc.make("Config.setPlanTemplate", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: { template: PlanTemplateConfig }
+  }),
+
   /** Persist one CLI's provider defaults (model, mode, reasoning, …). */
-  /** Turn learning from finished work on or off. Absent config ⇒ off. */
-  /**
-   * Which harness+model Gigaplan itself runs on.
-   *
-   * One fixed model rather than a per-message choice — the intelligence this
-   * feature is for is spent choosing a model per PLAN STEP, which is the only
-   * place the right answer varies.
-   */
-  Rpc.make("Config.setOrchestrator", {
-    success: WorkspaceConfig,
-    error: ConfigError,
-    payload: { cli: CliKind, model: Schema.String }
-  }),
-
-  Rpc.make("Config.setGigaplanRouting", {
-    success: WorkspaceConfig,
-    error: ConfigError,
-    payload: { routing: GigaplanRoutingConfig }
-  }),
-
   Rpc.make("Config.setProvider", {
     success: WorkspaceConfig,
     error: ConfigError,
@@ -865,87 +853,50 @@ export class JinglerRpcs extends RpcGroup.make(
    * returns that review without spawning an agent, unless `force`. That is what
    * lets the auto-review trigger fire off a poll loop safely.
    */
-  /**
-   * Run an adversarial planning round: one flagship proposes a plan, a model
-   * from a DIFFERENT lab attacks it, and the proposer answers.
-   *
-   * Streams rather than returning the plan, because the three phases take
-   * minutes between them and each runs as a surfaced sub-agent — so the operator
-   * watches "proposing / attacking / revising" happen instead of staring at one
-   * spinner. The settled plan arrives as a `PlanProposed` event and folds into
-   * the transcript through the same path a single-agent plan does.
-   */
-  Rpc.make("Plan.adversarial", {
-    success: StreamEvent,
-    stream: true,
-    error: PlanError,
-    payload: {
-      sessionId: Schema.String,
-      chatId: Schema.String,
-      /**
-       * An explicit brief is retained for automation/tests. The composer omits it
-       * so main derives the handoff from the accumulated intake transcript.
-       */
-      brief: Schema.optional(Schema.String),
-      /**
-       * Screenshots attached to the brief (optional; omitted → none).
-       *
-       * A brief is very often "make it look like this" — the round used to have
-       * no image channel at all, so the composer had to refuse attachments in
-       * Gigaplan mode. Every role sees them, because a critic judging a plan
-       * drawn from a screenshot it cannot see is judging the wrong thing.
-       */
-      images: Schema.optional(Schema.Array(Attachment))
-    }
-  }),
-
-  /**
-   * The last planning round for a session, or null — the audit trail behind a
-   * plan, holding the pre-revision proposal beside the critique. Never errors:
-   * a missing or stale round costs an unavailable audit trail, not a broken tab.
-   */
-  Rpc.make("Plan.round", {
-    success: Schema.NullOr(PlanRound),
-    payload: { sessionId: Schema.String }
-  }),
-
-  /** The structured plan shared by every chat in this session. */
+  /** The canonical PRD MDX document shared by every chat in this session. */
   Rpc.make("Plan.current", {
-    success: Schema.NullOr(SessionPlanArtifact),
+    success: Schema.NullOr(PlanDocument),
     payload: { sessionId: Schema.String }
   }),
 
-  /**
-   * Whether adversarial planning is worth offering here, and if not, what would
-   * fix it.
-   *
-   * The renderer needs the REASON, not just a boolean: the entry is rendered
-   * disabled with an explanation rather than hidden, so a user with one provider
-   * learns why and what to install instead of never discovering the feature.
-   */
-  Rpc.make("Plan.readiness", {
-    success: PlanningReadiness,
-    payload: {}
-  }),
-
-  /**
-   * Run an approved plan, step by step, each on the harness it was assigned.
-   *
-   * A stream for the same reason `Agent.run` is: the operator watches steps go
-   * past as subagents. Takes only the plan's ID — main reads the artifact back
-   * from the session's transcript, because the renderer's copy may have been
-   * edited on screen and executing anything other than what was approved would
-   * make the audit trail a lie.
-   */
-  Rpc.make("Plan.execute", {
-    success: StreamEvent,
-    error: PlanError,
+  /** Compare-and-swap the canonical source after safe MDX validation. */
+  Rpc.make("Plan.updateDocument", {
+    success: PlanDocument,
+    error: Schema.Union(PlanConflictError, PlanValidationError),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
-      executionMode: Schema.optional(ExecutionMode)
-    },
-    stream: true
+      baseRevision: Schema.Number,
+      source: Schema.String,
+      author: Schema.Literal("user", "agent")
+    }
+  }),
+
+  Rpc.make("Plan.addAnnotation", {
+    success: PlanDocument,
+    error: Schema.Union(PlanConflictError, PlanValidationError),
+    payload: {
+      sessionId: Schema.String,
+      planId: Schema.String,
+      baseRevision: Schema.Number,
+      stageId: Schema.NullOr(Schema.String),
+      body: Schema.String,
+      author: Schema.Literal("user", "agent")
+    }
+  }),
+
+  Rpc.make("Plan.setCriterionStatus", {
+    success: PlanDocument,
+    error: Schema.Union(PlanConflictError, PlanValidationError),
+    payload: {
+      sessionId: Schema.String,
+      planId: Schema.String,
+      baseRevision: Schema.Number,
+      criterionId: Schema.String,
+      status: PlanAcceptanceStatus,
+      evidence: Schema.NullOr(Schema.String),
+      author: Schema.Literal("user", "agent")
+    }
   }),
 
   Rpc.make("Review.run", {

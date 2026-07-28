@@ -25,23 +25,10 @@ export interface AppPathsShape {
    */
   readonly reviewsDir: string
   /**
-   * `~/jingler/.jingler` — the plan library. Each session's plans live under
-   * `<plansDir>/<worktree-slug>/<plan-name>.md`, so a plan can be picked back up
-   * (read from disk) in a later turn or session on the same worktree.
+   * `~/jingler/.jingler` — the canonical plan workspace. Each worktree has one
+   * authoritative `current-plan.mdx`, which can be resumed after a restart.
    */
   readonly plansDir: string
-  /**
-   * `~/jingler/plan-rounds` — the last adversarial planning round per session,
-   * at `<planRoundsDir>/<sessionId>.json`.
-   *
-   * Separate from `plansDir` (which holds plan markdown keyed by worktree)
-   * because this is the audit trail rather than the artefact: it keeps the
-   * pre-revision proposal and the critique, so "did the critic actually attack,
-   * and did the proposer engage or cave?" stays answerable after the fact. Kept
-   * out of the transcript for the same reason reviews are — a critique carries
-   * an unbounded challenge list.
-   */
-  readonly planRoundsDir: string
   /**
    * `~/jingler/themes` — user-authored colour themes, one VS Code theme JSON
    * per file at `<themesDir>/<id>.json`.

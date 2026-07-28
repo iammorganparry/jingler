@@ -9,7 +9,6 @@ import {
   GhStatus,
   GithubConfig,
   Repo,
-  RouteCandidate,
   Session,
   newSessionCli,
   startableClis,
@@ -17,7 +16,6 @@ import {
   supportsSteer,
   WorkspaceConfig
 } from "./domain.js"
-import { RouteCandidate as ConversationRouteCandidate } from "./conversation.js"
 
 /**
  * These schemas back persistence (config.json, sessions.json) and the RPC wire
@@ -29,12 +27,6 @@ import { RouteCandidate as ConversationRouteCandidate } from "./conversation.js"
 
 const decode = <A, I>(schema: Schema.Schema<A, I>, input: unknown) =>
   Schema.decodeUnknownEither(schema)(input)
-
-describe("RouteCandidate", () => {
-  it("uses one schema for configuration and conversation routing", () => {
-    expect(ConversationRouteCandidate).toBe(RouteCandidate)
-  })
-})
 
 describe("WorkspaceConfig", () => {
   it("decodes a configured workspace", () => {
@@ -66,27 +58,6 @@ describe("WorkspaceConfig", () => {
     expect(roundTripped).toStrictEqual(config)
   })
 
-  it("accepts routing config while legacy absence remains valid", () => {
-    const configured = decode(WorkspaceConfig, {
-      reposDir: "/repos",
-      createdAt: "2026-07-22T00:00:00.000Z",
-      gigaplanRouting: {
-        mode: "shadow",
-        overrides: [
-          { taskKind: "frontend", routes: [{ cli: "claude", model: "opus" }] }
-        ]
-      }
-    })
-    expect(Either.isRight(configured)).toBe(true)
-    expect(
-      Either.isRight(
-        decode(WorkspaceConfig, {
-          reposDir: "/repos",
-          createdAt: "2026-07-22T00:00:00.000Z"
-        })
-      )
-    ).toBe(true)
-  })
 })
 
 describe("GithubConfig", () => {
@@ -349,10 +320,8 @@ describe("supportsPlanMode", () => {
 
   it("excludes the harnesses that would fabricate a plan", () => {
     // cursor falls through to the scripted stub in `harness-adapter.ts`, so its
-    // "plan" would be invented; jingler picks a harness per step rather than
-    // running turns itself.
+    // plan would be invented.
     expect(supportsPlanMode("cursor")).toBe(false)
-    expect(supportsPlanMode("jingler")).toBe(false)
   })
 
   it("classifies every CliKind, so a new harness cannot be forgotten", () => {
@@ -375,7 +344,6 @@ describe("supportsSteer", () => {
   it("excludes the harnesses whose turn cannot be added to", () => {
     expect(supportsSteer("cursor")).toBe(false)
     expect(supportsSteer("opencode")).toBe(false)
-    expect(supportsSteer("jingler")).toBe(false)
   })
 
   it("classifies every CliKind, so a new harness cannot be forgotten", () => {
@@ -414,15 +382,9 @@ describe("newSessionCli", () => {
     expect(newSessionCli(clis, "codex")).toBe("claude")
   })
 
-  it("never starts a session on the orchestrator", () => {
-    // `jingler` drives other harnesses; a session running "on" it would have
-    // nothing to dispatch to. Gigaplan is a per-turn mode instead.
-    const clis = [cli("jingler", true), cli("claude", true)]
-    expect(newSessionCli(clis, "jingler")).toBe("claude")
-    expect(startableClis(clis).map((c) => c.kind)).toEqual(["claude"])
-  })
-
   it("reports null when no harness can run a session", () => {
-    expect(newSessionCli([cli("jingler", true), cli("claude", false)], null)).toBe(null)
+    const clis = [cli("claude", false), cli("codex", false)]
+    expect(newSessionCli(clis, null)).toBe(null)
+    expect(startableClis(clis)).toEqual([])
   })
 })

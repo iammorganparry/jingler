@@ -1,11 +1,11 @@
 import type {
   CliKind,
   ContextConfig,
-  GigaplanRoutingConfig,
   GitConfig,
   GithubConfig,
   NotificationsConfig,
   OpenConnectorConfig,
+  PlanTemplateConfig,
   ProviderConfig
 } from "@jingler/core"
 import { DEFAULT_THEME_ID, WorkspaceConfig } from "@jingler/core"
@@ -13,6 +13,7 @@ import { ConfigError } from "@jingler/core"
 import { FileSystem } from "@effect/platform"
 import { Effect, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
+import { formatPlanDiagnostics, parsePlanMdx } from "./plan-mdx.js"
 
 type ConfigEnv = FileSystem.FileSystem | AppPaths
 
@@ -104,8 +105,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.lastRepoPath ? { lastRepoPath: existing.lastRepoPath } : {}),
             ...(existing?.providers ? { providers: existing.providers } : {}),
             ...(existing?.defaultCli ? { defaultCli: existing.defaultCli } : {}),
-            ...(existing?.gigaplanRouting ? { gigaplanRouting: existing.gigaplanRouting } : {}),
-            ...(existing?.orchestrator ? { orchestrator: existing.orchestrator } : {}),
+            ...(existing?.planTemplate ? { planTemplate: existing.planTemplate } : {}),
             ...(existing?.notifications ? { notifications: existing.notifications } : {}),
             // Booleans are checked against `undefined`, not truthiness — a saved
             // `false` is a real setting and must survive an unrelated write.
@@ -146,13 +146,17 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       /** Save the auto-compaction levers (master switch + working-set budget). */
       const setContext = (context: ContextConfig) => patch({ context })
 
-      /** Upsert one CLI's provider defaults, preserving the other providers. */
-      /** Persist the orchestrator's harness+model. Absent ⇒ the curated default. */
-      const setOrchestrator = (cli: CliKind, model: string) =>
-        patch({ orchestrator: { cli, model } })
-
-      const setGigaplanRouting = (gigaplanRouting: GigaplanRoutingConfig) =>
-        patch({ gigaplanRouting })
+      /** Persist the PRD/MDX structure injected into native plan mode. */
+      const setPlanTemplate = (planTemplate: PlanTemplateConfig) => {
+        const result = parsePlanMdx(planTemplate.source)
+        return result.valid
+          ? patch({ planTemplate })
+          : Effect.fail(
+              new ConfigError({
+                message: `Plan template is invalid:\n${formatPlanDiagnostics(result.diagnostics)}`
+              })
+            )
+      }
 
       /**
        * Which harness new sessions start on. Replaces the New Session dialog's
@@ -240,8 +244,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setContext,
         setDefaultCli,
         setProvider,
-        setOrchestrator,
-        setGigaplanRouting,
+        setPlanTemplate,
         setActiveTheme,
         setThemeCustomizations,
         setOpenConnector,

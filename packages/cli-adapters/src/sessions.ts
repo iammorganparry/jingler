@@ -31,16 +31,15 @@ const isRecord = (value: unknown): value is JsonRecord =>
 
 const chatIdFor = (sessionId: string, suffix: string): string => `c_${sessionId}_${suffix}`
 
-const legacyMode = (value: unknown): PermissionMode | undefined => {
+const persistedMode = (value: unknown): PermissionMode | undefined => {
   switch (value) {
     case "ask":
     case "accept-edits":
     case "auto":
     case "plan":
-    case "gigaplan":
       return value
     default:
-      return undefined
+      return typeof value === "string" ? "ask" : undefined
   }
 }
 
@@ -54,10 +53,7 @@ const initialChat = (
   createdAt: now,
   updatedAt: now,
   ...(typeof legacy.resumeId === "string" ? { resumeId: legacy.resumeId } : {}),
-  ...(typeof legacy.gigaplanResumeId === "string"
-    ? { gigaplanResumeId: legacy.gigaplanResumeId }
-    : {}),
-  ...(legacyMode(legacy.mode) === undefined ? {} : { mode: legacyMode(legacy.mode) }),
+  ...(persistedMode(legacy.mode) === undefined ? {} : { mode: persistedMode(legacy.mode) }),
   ...(Array.isArray(legacy.allowlist) &&
   legacy.allowlist.every((entry) => typeof entry === "string")
     ? { allowlist: legacy.allowlist }
@@ -105,10 +101,18 @@ const reasoningKey = (cli: unknown): "claude" | "codex" | "opencode" | null =>
 export const migrateSessionChats = (value: unknown): unknown => {
   if (!isRecord(value) || typeof value.id !== "string") return value
   const now = typeof value.updatedAt === "string" ? value.updatedAt : new Date(0).toISOString()
-  const chats =
+  const rawChats =
     Array.isArray(value.chats) && value.chats.length > 0
       ? value.chats
       : [initialChat(value.id, now, value)]
+  const chats = rawChats.map((chat) =>
+    isRecord(chat)
+      ? {
+          ...chat,
+          ...(persistedMode(chat.mode) === undefined ? {} : { mode: persistedMode(chat.mode) })
+        }
+      : chat
+  )
   const chatIds = new Set(
     chats.flatMap((chat) =>
       isRecord(chat) && typeof chat.id === "string" ? [chat.id] : []
@@ -128,7 +132,6 @@ export const migrateSessionChats = (value: unknown): unknown => {
         : undefined
   const {
     resumeId: _resumeId,
-    gigaplanResumeId: _gigaplanResumeId,
     mode: _mode,
     allowlist: _allowlist,
     model: _model,
@@ -776,7 +779,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       ) =>
         update(id, (session) => {
           const chatId = maybeMode === undefined ? session.activeChatId : chatIdOrMode
-          const mode = maybeMode ?? legacyMode(chatIdOrMode)
+          const mode = maybeMode ?? persistedMode(chatIdOrMode)
           if (mode === undefined) return session
           return {
             ...session,
@@ -906,7 +909,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                     ...chat,
                     model: chat.id === chatId ? model : undefined,
                     resumeId: undefined,
-                    gigaplanResumeId: undefined,
                     mode:
                       chat.mode === "plan" && !supportsPlanMode(cli)
                         ? "ask"
@@ -928,24 +930,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             resumeId,
             chats: session.chats.map((chat) =>
               chat.id === chatId ? { ...chat, resumeId } : chat
-            )
-          }
-        })
-
-      /** Persist the independent Gigaplan intake conversation id. */
-      const setGigaplanResumeId = (
-        id: string,
-        chatIdOrResumeId: string,
-        maybeResumeId?: string
-      ) =>
-        update(id, (session) => {
-          const chatId = maybeResumeId === undefined ? session.activeChatId : chatIdOrResumeId
-          const gigaplanResumeId = maybeResumeId ?? chatIdOrResumeId
-          return {
-            ...session,
-            gigaplanResumeId,
-            chats: session.chats.map((chat) =>
-              chat.id === chatId ? { ...chat, gigaplanResumeId } : chat
             )
           }
         })
@@ -1189,7 +1173,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         addUsage,
         setHarness,
         setResumeId,
-        setGigaplanResumeId,
         clearResumeId,
         setContextTokens,
         setChatContextTokens,

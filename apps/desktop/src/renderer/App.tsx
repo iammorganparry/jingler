@@ -9,7 +9,6 @@ import type {
   CreateSessionFromPrInput,
   CreateSessionInput,
   GhStatus,
-  GigaplanRoutingConfig,
   GitConfig,
   GithubConfig,
   NotificationsConfig,
@@ -166,11 +165,6 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
 
   // Renderer-side rpc reads, via react-query.
   const configQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
-  // Settings' Gigaplan pane needs both: the catalogue to choose an orchestrator
-  // model from, and readiness to explain itself when the mode cannot run here.
-  const catalogQuery = useQuery({ queryKey: ["models-catalog"], queryFn: () => rpc.modelsCatalog() })
-  const readinessQuery = useQuery({ queryKey: ["plan-readiness"], queryFn: () => rpc.planReadiness() })
-  const billingQuery = useQuery({ queryKey: ["billing-paths"], queryFn: () => rpc.billingPaths() })
   const ghStatusQuery = useQuery({ queryKey: ["gh-status"], queryFn: () => rpc.ghStatus() })
   const usageQuery = useQuery({ queryKey: ["usage"], queryFn: () => rpc.usageGet(), enabled: false })
 
@@ -285,13 +279,8 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       // snapshots rather than leaving meters reading against the old one.
       void qc.invalidateQueries({ queryKey: ["context"] })
     })
-  const saveOrchestrator = (cli: CliKind, model: string) => {
-    void rpc.configSetOrchestrator(cli, model).then((saved) => {
-      qc.setQueryData(["config"], saved)
-    })
-  }
-  const saveGigaplanRouting = (routing: GigaplanRoutingConfig) => {
-    void rpc.configSetGigaplanRouting(routing).then((saved) => {
+  const savePlanTemplate = (template: { readonly source: string }) => {
+    void rpc.configSetPlanTemplate(template).then((saved) => {
       qc.setQueryData(["config"], saved)
     })
   }
@@ -708,13 +697,8 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       onSaveDefaultCli={saveDefaultCli}
       contextConfig={contextConfig}
       onSaveContextConfig={saveContextConfig}
-      modelCatalog={catalogQuery.data ?? []}
-      orchestrator={configQuery.data?.orchestrator ?? null}
-      onSaveOrchestrator={saveOrchestrator}
-      gigaplanRouting={configQuery.data?.gigaplanRouting ?? null}
-      onSaveGigaplanRouting={saveGigaplanRouting}
-      gigaplanUnavailableReason={readinessQuery.data?.ready === false ? readinessQuery.data.reason : null}
-      billing={billingQuery.data ?? []}
+      planTemplate={configQuery.data?.planTemplate ?? null}
+      onSavePlanTemplate={savePlanTemplate}
       loadModels={rpc.modelsList}
       loadOpencodeProviders={rpc.opencodeListProviders}
       onSetOpencodeAuth={rpc.opencodeSetAuth}

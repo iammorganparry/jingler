@@ -1,4 +1,4 @@
-import type { Message, Plan, Session, SessionPlanArtifact, StreamEvent } from "@jingler/core"
+import type { Message, Plan, PlanDocument, Session, StreamEvent } from "@jingler/core"
 import {
   applyStreamEvent,
   assistantMessage,
@@ -29,8 +29,7 @@ const h = vi.hoisted(() => ({
     images: unknown
     options: unknown
   }>,
-  execCalls: [] as Array<{ sessionId: string; planId: string; executionMode: string | undefined }>,
-  resumeCalls: [] as Array<{ sessionId: string; planId: string }>,
+  resumeCalls: [] as Array<{ sessionId: string; planId: string; revision: number | undefined }>,
   diffValue: "diff-0",
   diffCalls: 0,
   statusWrites: [] as Array<string>,
@@ -52,16 +51,9 @@ const h = vi.hoisted(() => ({
   // Lets a test hold the transcript load, to drive the "typed before it lands" race.
   transcriptGate: Promise.resolve() as Promise<void>,
   transcript: [] as ReadonlyArray<Message>,
-  currentPlan: null as SessionPlanArtifact | null,
+  currentPlan: null as PlanDocument | null,
   setHarnessCalls: [] as Array<{ sessionId: string; cli: string; model: string }>,
-  planCalls: [] as Array<{ sessionId: string; brief: string | undefined }>,
   reasoningCalls: [] as Array<unknown>,
-  readinessGate: Promise.resolve() as Promise<void>,
-  readiness: { ready: true, vendors: [], reason: null } as {
-    ready: boolean
-    vendors: ReadonlyArray<unknown>
-    reason: string | null
-  },
   catalog: [
     { cli: "claude", label: "Claude Code", models: [{ id: "opus", label: "opus" }] },
     { cli: "codex", label: "Codex CLI", models: [{ id: "gpt-5.6-sol", label: "GPT-5.6-Sol" }] }
@@ -103,41 +95,14 @@ vi.mock("./rpc-client.js", () => ({
         h.streamCb = null
       }
     },
-    planReadiness: async () => {
-      await h.readinessGate
-      return h.readiness
-    },
     agentResumePlan: (
       sessionId: string,
       _chatId: string,
       planId: string,
+      revision: number | undefined,
       onEvent: (event: unknown) => void
     ) => {
-      h.resumeCalls.push({ sessionId, planId })
-      h.streamCb = onEvent
-      return () => {
-        h.streamCb = null
-      }
-    },
-    planExecute: (
-      sessionId: string,
-      planId: string,
-      executionMode: string | undefined,
-      onEvent: (event: unknown) => void
-    ) => {
-      h.execCalls.push({ sessionId, planId, executionMode })
-      h.streamCb = onEvent
-      return () => {
-        h.streamCb = null
-      }
-    },
-    planAdversarial: (
-      sessionId: string,
-      _chatId: string,
-      brief: string | undefined,
-      onEvent: (event: unknown) => void
-    ) => {
-      h.planCalls.push({ sessionId, brief })
+      h.resumeCalls.push({ sessionId, planId, revision })
       h.streamCb = onEvent
       return () => {
         h.streamCb = null
@@ -231,12 +196,8 @@ beforeEach(() => {
   h.transcript = []
   h.currentPlan = null
   h.reviewCb = null
-  h.planCalls.length = 0
   h.reasoningCalls.length = 0
-  h.execCalls.length = 0
   h.resumeCalls.length = 0
-  h.readinessGate = Promise.resolve()
-  h.readiness = { ready: true, vendors: [], reason: null }
 })
 
 describe("conversationMachine — context size", () => {
@@ -313,7 +274,7 @@ describe("conversationMachine — queue while busy", () => {
     // `toMatchObject`, because each queued message also carries the stable id its
     // row actions address it by (see `queuedId`).
     expect(actor.getSnapshot().context.queued).toMatchObject([
-      { text: "second", images: [], target: "session" }
+      { text: "second", images: [] }
     ])
     expect(h.agentRunCalls).toHaveLength(1)
 
@@ -325,32 +286,6 @@ describe("conversationMachine — queue while busy", () => {
     actor.stop()
   })
 
-  it("keeps each queued message on the target selected when it was sent", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-
-    actor.send({ type: "SEND", text: "first" })
-    await waitFor(actor, (s) => s.matches("running"))
-
-    actor.send({ type: "SEND", text: "working turn" })
-    actor.send({ type: "SET_MODE", mode: "gigaplan" })
-    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-    await waitFor(actor, () => h.agentRunCalls.length === 2, { timeout: 3000 })
-    expect(h.agentRunCalls[1]).toMatchObject({
-      text: "working turn",
-      options: { target: "session" }
-    })
-
-    actor.send({ type: "SEND", text: "intake turn" })
-    actor.send({ type: "SET_MODE", mode: "accept-edits" })
-    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-    await waitFor(actor, () => h.agentRunCalls.length === 3, { timeout: 3000 })
-    expect(h.agentRunCalls[2]).toMatchObject({
-      text: "intake turn",
-      options: { target: "orchestrator" }
-    })
-    actor.stop()
-  })
 
   it("UNQUEUE drops a still-pending queued message", async () => {
     const actor = start()
@@ -760,7 +695,7 @@ describe("conversationMachine — nothing gates the transcript on a CLI probe", 
     // Held, not dispatched — there's no transcript to append it to yet.
     expect(h.agentRunCalls).toHaveLength(0)
     expect(actor.getSnapshot().context.queued).toMatchObject([
-      { text: "typed on open", images: [], target: "session" }
+      { text: "typed on open", images: [] }
     ])
 
     release()
@@ -1013,7 +948,7 @@ describe("conversationMachine — image attachments", () => {
 })
 
 /**
- * The adversarial reviewer is surfaced as a tab in the same bar as the harness's
+ * The reviewer is surfaced as a tab in the same bar as the harness's
  * sub-agents — but it is NOT part of a turn (the PR button or the background
  * auto-review poll starts it), which is what makes its lifetime different.
  */
@@ -1299,10 +1234,27 @@ describe("conversationMachine — PlanUpdated across turns", () => {
       )
     ]
     h.currentPlan = {
+      id: "p1",
       sessionId: session.id,
       producingChatId: session.id,
       revision: 1,
-      plan: planFixture("done"),
+      status: "done",
+      source: "# PRD: plan\n\n<Stage id=\"s1\" title=\"Step\"><Acceptance id=\"a1\" status=\"passed\">Done</Acceptance></Stage>",
+      projection: {
+        title: "plan",
+        sections: [],
+        stages: [
+          {
+            id: "s1",
+            title: "Step",
+            intent: "",
+            markdown: "",
+            acceptance: [{ id: "a1", text: "Done", status: "passed", evidence: null }]
+          }
+        ],
+        annotations: []
+      },
+      updatedBy: "agent",
       updatedAt: "2026-07-25T00:01:00.000Z"
     }
 
@@ -1446,232 +1398,5 @@ describe("conversationMachine — stop", () => {
     await waitFor(actor, (s) => s.matches(idle))
     expect(actor.getSnapshot().context.messages.at(-1)!.streaming).toBe(false)
     actor.stop()
-  })
-})
-
-describe("conversationMachine — adversarial planning", () => {
-  it("continues Gigaplan as orchestrator chat until explicit handoff", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-    actor.send({ type: "SET_MODE", mode: "gigaplan" })
-
-    actor.send({ type: "SEND", text: "The export must preserve filters" })
-    await waitFor(actor, (s) => s.matches("running"))
-    expect(h.planCalls).toEqual([])
-    expect(h.agentRunCalls[0]).toMatchObject({
-      text: "The export must preserve filters",
-      options: { target: "orchestrator" }
-    })
-    expect(actor.getSnapshot().context.messages.at(-2)?.source).toBe("gigaplan-intake")
-    expect(actor.getSnapshot().context.messages.at(-1)?.source).toBe("gigaplan-intake")
-
-    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-    await waitFor(actor, (s) => s.matches(idle))
-    actor.send({ type: "HANDOFF_PLAN" })
-    await waitFor(actor, (s) => s.matches("running"))
-    expect(h.planCalls).toEqual([{ sessionId: "s1", brief: undefined }])
-    const localHandoff = actor.getSnapshot().context.messages.at(-2)
-    expect(localHandoff?.parts).toContainEqual({
-      _tag: "Text",
-      text: "Hand off this Gigaplan conversation to planning."
-    })
-  })
-
-  it("applies a changed thinking strength to the next turn", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-    actor.send({
-      type: "SET_REASONING",
-      reasoning: { enabled: true, effort: "high" }
-    })
-    actor.send({ type: "SEND", text: "inspect the repo" })
-    await waitFor(actor, (s) => s.matches("running"))
-
-    expect(h.reasoningCalls).toEqual([{ enabled: true, effort: "high" }])
-    expect(h.agentRunCalls[0]).toMatchObject({
-      options: { target: "session", reasoning: { enabled: true, effort: "high" } }
-    })
-  })
-
-  it("routes a handoff through the planning RPC, not a normal turn", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-
-    actor.send({ type: "HANDOFF_PLAN" })
-    await waitFor(actor, (s) => s.matches("running"))
-
-    expect(h.planCalls).toEqual([{ sessionId: "s1", brief: undefined }])
-    // Crucially NOT an Agent.run — a planning round is not a turn.
-    expect(h.agentRunCalls).toEqual([])
-  })
-
-  it("refuses to start when only one lab is reachable", async () => {
-    // The entry is disabled in the UI, but a stale readiness or a keyboard path
-    // must not start a round the service would only refuse.
-    h.readiness = { ready: false, vendors: [], reason: "needs a second provider" }
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-
-    actor.send({ type: "HANDOFF_PLAN" })
-    expect(actor.getSnapshot().matches(idle)).toBe(true)
-    expect(h.planCalls).toEqual([])
-  })
-
-  it("does not start before readiness has loaded", async () => {
-    // Null readiness means "we do not know yet". Starting on an assumption would
-    // burn two flagship runs to arrive at a refusal.
-    let release = () => {}
-    h.readinessGate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-
-    actor.send({ type: "HANDOFF_PLAN" })
-    expect(h.planCalls).toEqual([])
-
-    release()
-    await waitFor(actor, (s) => s.context.planReadiness !== null)
-    actor.send({ type: "HANDOFF_PLAN" })
-    await waitFor(actor, (s) => s.matches("running"))
-    expect(h.planCalls).toHaveLength(1)
-  })
-
-  it("folds the round's plan through the path a single-agent plan already uses", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-
-    actor.send({ type: "HANDOFF_PLAN" })
-    await waitFor(actor, (s) => s.matches("running"))
-
-    emit({
-      _tag: "PlanProposed",
-      plan: {
-        id: "p1",
-        summary: "Add a tier column",
-        steps: [],
-        comments: [],
-        status: "proposed",
-        structured: true,
-        raw: "# plan"
-      }
-    })
-    const plans = actor
-      .getSnapshot()
-      .context.messages.flatMap((m) => m.parts.filter((p) => p._tag === "Plan"))
-    expect(plans).toHaveLength(1)
-  })
-
-  it("clears handoff state so the next normal turn is not another round", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-
-    actor.send({ type: "HANDOFF_PLAN" })
-    await waitFor(actor, (s) => s.matches("running"))
-    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-    await waitFor(actor, (s) => s.matches(idle))
-
-    actor.send({ type: "SEND", text: "now build it" })
-    await waitFor(actor, (s) => s.matches("running"))
-
-    expect(h.planCalls).toHaveLength(1)
-    expect(h.agentRunCalls).toHaveLength(1)
-  })
-})
-
-/**
- * Approving is a fact about the PLAN, not about the composer.
- *
- * The approve button lives on the plan review screen, which outlives the mode
- * chip: a round finishes, the operator flips back to `accept-edits` to read
- * something, then approves. Guarding approval on the live mode meant that click
- * was swallowed — no run, no error, a button that simply did nothing.
- */
-describe("conversationMachine — approving a plan after the mode changed", () => {
-  const assignedPlan = {
-    id: "p_assigned",
-    summary: "Ship it",
-    steps: [
-      {
-        id: "s1",
-        number: "01",
-        title: "Do the thing",
-        intent: "i",
-        approach: [],
-        kind: "step",
-        condition: null,
-        parentId: null,
-        dependsOn: [],
-        blocks: [],
-        files: [],
-        guards: [],
-        code: null,
-        diff: null,
-        status: "proposed",
-        flagged: false,
-        assignee: { cli: "codex", model: "gpt-5", reason: "best at schema work" }
-      }
-    ],
-    comments: [],
-    status: "proposed",
-    structured: true,
-    raw: "x"
-  } as unknown as Plan
-
-  const seed = (actor: ReturnType<typeof start>, plan: Plan) => {
-    actor.send({ type: "HANDOFF_PLAN" })
-    h.streamCb?.({ _tag: "PlanProposed", plan })
-    h.streamCb?.({ _tag: "Done", costUsd: 0, tokens: 0 })
-  }
-
-  it("still runs an assigned plan per-step once the operator left Gigaplan", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-    seed(actor, assignedPlan)
-    await waitFor(actor, (s) => s.matches(idle))
-
-    // The exact sequence that used to drop the click.
-    actor.send({ type: "SET_MODE", mode: "accept-edits" })
-    actor.send({ type: "APPROVE_PLAN", planId: assignedPlan.id })
-
-    await waitFor(actor, (s) => s.matches("running"))
-    expect(h.execCalls).toEqual([
-      { sessionId: "s1", planId: "p_assigned", executionMode: "accept-edits" }
-    ])
-  })
-
-  it("runs an assigned plan in auto when approval explicitly asks for it", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-    seed(actor, assignedPlan)
-    await waitFor(actor, (s) => s.matches(idle))
-
-    actor.send({ type: "APPROVE_PLAN", planId: assignedPlan.id, executionMode: "auto" })
-
-    await waitFor(actor, (s) => s.matches("running"))
-    expect(h.execCalls).toEqual([
-      { sessionId: "s1", planId: "p_assigned", executionMode: "auto" }
-    ])
-  })
-
-  it("never swallows the click — an unassigned plan re-drives instead", async () => {
-    const plain = { ...assignedPlan, id: "p_plain", steps: [] } as unknown as Plan
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-    seed(actor, plain)
-    await waitFor(actor, (s) => s.matches(idle))
-
-    actor.send({ type: "SET_MODE", mode: "accept-edits" })
-    actor.send({ type: "APPROVE_PLAN", planId: "p_plain" })
-
-    // Whatever it does, it must not sit in idle doing nothing.
-    await waitFor(actor, (s) => s.matches("running"))
-    expect(h.execCalls).toEqual([])
-    // The assertion that matters, and the one this test originally lacked:
-    // it asserted only ABSENCES, so it passed while the machine quietly started
-    // a second full planning round — two flagship models — on an approval.
-    expect(h.planCalls).toHaveLength(1)
-    // And it actually re-drove, rather than merely not-doing-the-wrong-thing.
-    expect(h.resumeCalls).toEqual([{ sessionId: "s1", planId: "p_plain" }])
   })
 })

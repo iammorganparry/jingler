@@ -16,7 +16,7 @@ import {
   Separator as DropdownMenuSeparator,
   Trigger as DropdownMenuTrigger
 } from "@radix-ui/react-dropdown-menu"
-import { ArrowUp, GitBranch, ImagePlus, Plus, Sparkles, Square, WandSparkles } from "lucide-react"
+import { ArrowUp, GitBranch, ImagePlus, Plus, Sparkles, Square } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { downscaleImage } from "../lib/image-downscale.js"
 import { reasoningEffortsFor } from "../lib/reasoning-options.js"
@@ -79,15 +79,6 @@ const modeOptionsFor = (cli: CliKind | undefined): ReadonlyArray<ChipOption<Perm
         option.value === "ask" ? { ...option, label: "read only" } : option
       )
     : MODE_OPTIONS
-/**
- * Gigaplan — the orchestrated mode.
- *
- * Offered only where it can actually run: it needs two independent model
- * providers, because the whole point is that a rival lab attacks the plan. On a
- * one-provider host it is left out rather than shown broken, and the readiness
- * reason is surfaced beside the chip instead.
- */
-const GIGAPLAN_OPTION: ChipOption<PermissionMode> = { value: "gigaplan", label: "Gigaplan" }
 /** Offered on any harness that can hold a plan turn — see `supportsPlanMode`. */
 const PLAN_OPTION: ChipOption<PermissionMode> = { value: "plan", label: "plan" }
 
@@ -151,10 +142,6 @@ export function Composer({
   thinkingEnabled,
   onSetReasoning,
   allowPlan = false,
-  adversarialPlanning,
-  onHandoffPlan,
-  hasGigaplanIntake = false,
-  hasPlan = false,
   paused = false,
   busy = false,
   placeholder,
@@ -204,20 +191,6 @@ export function Composer({
   onSetReasoning?: (reasoning?: ReasoningSetting) => void
   /** Offer the Plan mode option (harnesses that pass `supportsPlanMode`). */
   allowPlan?: boolean
-  /**
-   * Whether an adversarial planning round can run here, and why not when it
-   * can't. Absent means the caller doesn't offer the feature at all; present
-   * with `ready: false` renders the entry DISABLED carrying its reason, rather
-   * than hiding it — a silently missing control teaches the operator nothing,
-   * and "you need a second provider" is the one message that would.
-   */
-  adversarialPlanning?: { readonly ready: boolean; readonly reason: string | null }
-  /** Explicitly hand the durable Gigaplan intake conversation to planning. */
-  onHandoffPlan?: () => void
-  /** Whether the transcript contains context the planners can consume. */
-  hasGigaplanIntake?: boolean
-  /** Whether that handoff updates an existing plan rather than creating one. */
-  hasPlan?: boolean
   paused?: boolean
   /**
    * The agent is producing a turn — sends are queued (processed once it's free)
@@ -239,19 +212,9 @@ export function Composer({
   focusKey?: string
   className?: string
 }) {
-  /**
-   * Whether Gigaplan is driving this turn.
-   *
-   * While it is, the model is its decision — taken per step from the plan it had
-   * reviewed — so the model picker comes off the composer rather than sitting
-   * there being silently overridden. Changing mode brings it straight back,
-   * which is why this is derived from `mode` and never stored.
-   */
-  const orchestrated = mode === "gigaplan"
   const modeOptions = [
     ...modeOptionsFor(cli),
-    ...(allowPlan ? [PLAN_OPTION] : []),
-    ...(adversarialPlanning?.ready === true ? [GIGAPLAN_OPTION] : [])
+    ...(allowPlan ? [PLAN_OPTION] : [])
   ]
   const accent = modeAccent[mode]
   // The chip's value and its bar count are the same fact; deriving it once keeps
@@ -651,11 +614,7 @@ export function Composer({
               </DropdownMenuContent>
             </DropdownMenuPortal>
           </DropdownMenuRoot>
-          {/* Gone while Gigaplan is driving: it assigns a model per step from
-              the plan it had reviewed, so a model chip here would be a control
-              that is silently overridden. It returns the moment the mode
-              changes — nothing about the operator's own choice is discarded. */}
-          {!orchestrated && modelValue.length > 0 && (
+          {modelValue.length > 0 && (
           <ChipMenu
             value={modelValue}
             groups={modelGroups}
@@ -679,22 +638,6 @@ export function Composer({
             // much room every other control gets.
             className={roomy ? "max-w-[190px]" : "max-w-[112px]"}
           />
-          )}
-          {/* Gigaplan is selected on a host that cannot orchestrate. Saying so
-              beats silently degrading to a normal turn, which looks exactly
-              like the feature being broken. Reachable because the mode can be
-              persisted from a machine that DID have two providers. */}
-          {orchestrated && adversarialPlanning?.ready === false && (
-            <span
-              title={adversarialPlanning.reason ?? undefined}
-              className="flex min-h-10 flex-none items-center px-1.5 font-mono text-[10px] tracking-[0.3px] text-yellow"
-            >
-              {/* The long form explains; the short form still points at the
-                  problem, and the `title` above carries the full reason either
-                  way. Wrapping this five-word pill onto its own line would push
-                  Send off screen for a message that is advisory, not blocking. */}
-              {roomy ? "needs a second provider" : "needs 2nd provider"}
-            </span>
           )}
           <ChipMenu
             value={mode}
@@ -728,25 +671,6 @@ export function Composer({
             }
             className="max-w-[112px]"
           />
-          {orchestrated && onHandoffPlan && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="min-h-10 gap-1.5 px-2"
-              disabled={busy || !hasGigaplanIntake || adversarialPlanning?.ready !== true}
-              title={
-                adversarialPlanning?.ready === false
-                  ? (adversarialPlanning.reason ?? undefined)
-                  : !hasGigaplanIntake
-                    ? "Send a Gigaplan message before creating a plan."
-                  : undefined
-              }
-              onClick={onHandoffPlan}
-            >
-              <WandSparkles size={13} />
-              {hasPlan ? "Update plan" : "Create plan"}
-            </Button>
-          )}
           {/* `min-w-[8px]` so the spacer still exists after a wrap — a bare
               `flex-1` on a wrapped line collapses to nothing and the send button
               ends up butted against the last chip. */}

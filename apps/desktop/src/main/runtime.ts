@@ -7,7 +7,6 @@
  * alive for the lifetime of the app.
  */
 import {
-  AdversarialPlanService,
   AgentRunner,
   AssetService,
   AuthService,
@@ -22,8 +21,6 @@ import {
   PluginRegistry,
   PluginHost,
   PluginAuth,
-  PlanExecutor,
-  PlanRoundStore,
   ReviewService,
   ReviewStore,
   SessionStore,
@@ -34,7 +31,6 @@ import {
   ThemeService,
   TranscriptStore,
   BackgroundTaskStore,
-  RankingService,
   UsageService,
   WorkspaceService
 } from "@jingler/cli-adapters"
@@ -60,9 +56,7 @@ const StoreLayers = Layer.mergeAll(
   TranscriptStore.Default,
   BackgroundTaskStore.Default,
   PlanStore.Default,
-  ReviewStore.Default,
-  PlanExecutor.Default,
-  PlanRoundStore.Default,
+  ReviewStore.Default
 )
 
 /**
@@ -76,8 +70,7 @@ const StoreLayers = Layer.mergeAll(
 const HarnessLayers = Layer.mergeAll(
   AgentRunner.Default,
   ReviewService.Default,
-  ContextManager.Default,
-  AdversarialPlanService.Default
+  ContextManager.Default
 )
 
 // Later `Layer.provide`s satisfy the requirements of earlier ones, so the leaf
@@ -94,8 +87,10 @@ const AppLayer = RpcServerLive.pipe(
   Layer.provide(Layer.mergeAll(WorkspaceService.Default, AssetService.Default)),
   // Before SessionStore so the stores below satisfy the daemon's requirements —
   // a stage is provided-to by everything that follows it.
-  Layer.provide(SessionStore.Default),
-  Layer.provide(StoreLayers),
+  // Merged so startup recovery can mark interrupted canonical plan revisions
+  // stale through the same store instances the RPC handlers use.
+  Layer.provideMerge(SessionStore.Default),
+  Layer.provideMerge(StoreLayers),
   Layer.provide(HarnessLayers),
   // provideMerge (not provide): the RPC handlers consume TerminalService AND the
   // runtime keeps it in context, so the `before-quit` kill-all can reach the very
@@ -121,7 +116,6 @@ const AppLayer = RpcServerLive.pipe(
   // provideMerge: the `Models.*` handlers consume ModelsService AND the startup
   // prefetch reaches the very same instance — a different one would warm a cache
   // nobody reads, so the merge is what makes the prefetch actually count. The
-  // rankings peer is also process-cached and has no dependencies.
   // PluginHost joins this group for two reasons. It needs provideMerge — main
   // installs the Electron-backed process factory into it at startup, so the RPC
   // handlers must later reach the SAME instance rather than a second one with
@@ -131,7 +125,6 @@ const AppLayer = RpcServerLive.pipe(
   Layer.provideMerge(
     Layer.mergeAll(
       ModelsService.Default,
-      RankingService.Default,
       PluginHost.Default,
       // provideMerge for the same reason as PluginHost: main installs the
       // native consent prompt and the built-in github provider into it at

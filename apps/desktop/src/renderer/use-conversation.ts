@@ -86,18 +86,18 @@ export interface Conversation {
   readonly plan: Plan | null
   readonly commentPlanStep: (planId: string, stepId: string, body: string) => void
   readonly revisePlan: (planId: string) => void
-  readonly approvePlan: (planId: string, executionMode?: ExecutionMode) => void
-  readonly resumePlan: (planId: string) => void
+  readonly approvePlan: (
+    planId: string,
+    executionMode?: ExecutionMode,
+    revision?: number
+  ) => void
+  readonly resumePlan: (planId: string, revision?: number) => void
   /** Live status for the sidebar/tab bar, or null when idle (use persisted). */
   readonly status: SessionStatus | null
   readonly sendPrompt: (text: string, images?: ReadonlyArray<Attachment>) => void
   readonly decideGate: (gateId: string, decision: GateDecision) => void
   readonly setMode: (mode: PermissionMode) => void
   readonly setReasoning: (reasoning?: ReasoningSetting) => void
-  /** Whether an adversarial planning round can run, and the reason when it can't. */
-  readonly adversarialPlanning: { readonly ready: boolean; readonly reason: string | null } | null
-  /** Hand the durable Gigaplan intake thread to the adversarial planners. */
-  readonly handoffPlan: () => void
   /** Picking a model implies its harness, so both are set together. */
   readonly setHarness: (cli: CliKind, model: string) => void
   /**
@@ -184,16 +184,15 @@ export function useConversation(
     plan,
     commentPlanStep: (planId, stepId, body) => send({ type: "COMMENT_PLAN_STEP", planId, stepId, body }),
     revisePlan: (planId) => send({ type: "REVISE_PLAN", planId }),
-    approvePlan: (planId, executionMode) => send({ type: "APPROVE_PLAN", planId, executionMode }),
-    resumePlan: (planId) => send({ type: "RESUME_PLAN", planId }),
+    approvePlan: (planId, executionMode, revision) =>
+      send({ type: "APPROVE_PLAN", planId, executionMode, revision }),
+    resumePlan: (planId, revision) => send({ type: "RESUME_PLAN", planId, revision }),
     status,
     sendPrompt: (text, images) => send({ type: "SEND", text, images }),
     decideGate: (gateId, decision) => send({ type: "DECIDE_GATE", gateId, decision }),
     answerQuestion: (requestId, answers) => send({ type: "ANSWER_QUESTION", requestId, answers }),
     setMode: (m) => send({ type: "SET_MODE", mode: m }),
     setReasoning: (value) => send({ type: "SET_REASONING", reasoning: value }),
-    adversarialPlanning: state.context.planReadiness,
-    handoffPlan: () => send({ type: "HANDOFF_PLAN" }),
     setHarness: (c, m) => send({ type: "SET_HARNESS", cli: c, model: m }),
     stop: () => send({ type: "STOP" }),
     stopSubagent: (agentId) => send({ type: "STOP_SUBAGENT", agentId }),

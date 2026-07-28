@@ -1,4 +1,5 @@
 import { Data, Schema } from "effect"
+import { PlanDocument } from "./plan-document.js"
 
 /**
  * Raised when a known CLI binary cannot be resolved on the host.
@@ -119,20 +120,28 @@ export class ReviewError extends Schema.TaggedError<ReviewError>()(
   }
 ) {}
 
-/**
- * An adversarial planning round could not produce a plan at all.
- *
- * Reserved for the cases where there is genuinely nothing to show: fewer than
- * two labs reachable, or the proposer itself failing. A missing or unhelpful
- * ADVERSARY is not an error — the round degrades to an unchallenged plan and
- * says so, because a plan that got less scrutiny than intended is still worth
- * having.
- */
-export class PlanError extends Schema.TaggedError<PlanError>()(
-  "PlanError",
+/** A proposed MDX document failed the safe PRD contract. */
+export class PlanValidationError extends Schema.TaggedError<PlanValidationError>()(
+  "PlanValidationError",
   {
     message: Schema.String,
-    cause: Schema.optional(Schema.Unknown)
+    diagnostics: Schema.Array(
+      Schema.Struct({
+        code: Schema.String,
+        message: Schema.String,
+        line: Schema.Number
+      })
+    )
+  }
+) {}
+
+/** A compare-and-swap plan write targeted an obsolete canonical revision. */
+export class PlanConflictError extends Schema.TaggedError<PlanConflictError>()(
+  "PlanConflictError",
+  {
+    message: Schema.String,
+    latestRevision: Schema.Number,
+    latest: Schema.NullOr(PlanDocument)
   }
 ) {}
 

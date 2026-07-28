@@ -56,7 +56,6 @@ export const AppPathsLive = Layer.succeed(AppPaths, {
   worktreesDir: join(jinglerRoot, "worktrees"),
   transcriptsDir: join(jinglerRoot, "transcripts"),
   reviewsDir: join(jinglerRoot, "reviews"),
-  planRoundsDir: join(jinglerRoot, "plan-rounds"),
   plansDir: join(jinglerRoot, ".jingler"),
   themesDir: join(jinglerRoot, "themes"),
   pluginsDir: join(jinglerRoot, "plugins"),

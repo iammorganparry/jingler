@@ -34,37 +34,4 @@ describe("Composer thinking strength", () => {
     expect(onSetReasoning).toHaveBeenLastCalledWith(undefined)
   })
 
-  it("offers an explicit plan handoff only in Gigaplan", () => {
-    const onHandoffPlan = vi.fn()
-    const { rerender } = render(
-      <Composer
-        mode="gigaplan"
-        hasGigaplanIntake
-        adversarialPlanning={{ ready: true, reason: null }}
-        onHandoffPlan={onHandoffPlan}
-      />
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Create plan" }))
-    expect(onHandoffPlan).toHaveBeenCalledOnce()
-
-    rerender(
-      <Composer
-        mode="gigaplan"
-        hasGigaplanIntake
-        hasPlan
-        adversarialPlanning={{ ready: true, reason: null }}
-        onHandoffPlan={onHandoffPlan}
-      />
-    )
-    expect(screen.getByRole("button", { name: "Update plan" })).toBeTruthy()
-
-    rerender(
-      <Composer
-        mode="accept-edits"
-        adversarialPlanning={{ ready: true, reason: null }}
-        onHandoffPlan={onHandoffPlan}
-      />
-    )
-    expect(screen.queryByRole("button", { name: /plan/i })).toBeNull()
-  })
 })

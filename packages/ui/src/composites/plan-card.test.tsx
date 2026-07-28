@@ -2,7 +2,6 @@ import type { ExecutionMode, Plan } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { PlanCard } from "./plan-card.js"
-import { PlanStepList } from "./plan-step-list.js"
 import { PlanReview } from "../screens/plan-review.js"
 
 afterEach(cleanup)
@@ -31,12 +30,7 @@ const plan: Plan = {
       code: null,
       diff: null,
       status: "proposed",
-      flagged: false,
-      assignee: {
-        cli: "codex",
-        model: "gpt-5.6-sol",
-        reason: "Best fit for implementation"
-      }
+      flagged: false
     }
   ]
 }
@@ -56,19 +50,11 @@ describe("PlanCard approval", () => {
   })
 })
 
-describe("Plan step assignments", () => {
-  it("makes the assigned provider and model visible in the step navigator", () => {
-    render(<PlanStepList plan={plan} />)
-
-    expect(screen.getByLabelText("Assigned to codex gpt-5.6-sol")).toBeTruthy()
-  })
-})
-
 describe("compact Plan Review", () => {
   it("opens the step detail without squeezing fixed-width navigation and changes rails beside it", () => {
     render(<PlanReview plan={plan} compact />)
 
-    expect(screen.getByText("Assigned model")).toBeTruthy()
+    expect(screen.getByText("Intent")).toBeTruthy()
     expect(screen.queryByLabelText("Resize step list")).toBeNull()
     expect(screen.queryByLabelText("Resize changes")).toBeNull()
   })

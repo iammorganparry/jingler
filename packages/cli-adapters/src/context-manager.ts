@@ -16,7 +16,8 @@ import {
   shouldHoldSwap,
   triggerAt
 } from "@jingler/core"
-import { CommandExecutor, FileSystem, Path } from "@effect/platform"
+import { FileSystem, Path } from "@effect/platform"
+import type { CommandExecutor } from "@effect/platform"
 import { Effect, Fiber, Ref } from "effect"
 import { AppPaths } from "./app-paths.js"
 import type { AgentContext, SessionSpec } from "./adapter.js"

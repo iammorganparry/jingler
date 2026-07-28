@@ -5,7 +5,7 @@ import type { AgentContext, SessionSpec } from "./adapter.js"
 /**
  * Interrupting a run must not report "stopped" while the run is still writing.
  *
- * `plan-executor` runs steps SEQUENTIALLY on purpose: they share one worktree,
+ * Sequential agent runs share one worktree,
  * so two agents editing at once interleave writes with no lock. A step that
  * exceeds `STEP_TIMEOUT` is interrupted and retried — and the retry starts the
  * moment interruption completes.

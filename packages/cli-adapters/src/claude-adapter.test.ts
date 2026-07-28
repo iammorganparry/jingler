@@ -69,9 +69,9 @@ describe("PLAN_REFORMAT", () => {
   it("names the missing block and tells the agent how to re-submit", () => {
     // Handed back through deny.message when a plan skips the fence — it's the only
     // channel that reaches the agent, so it has to be self-contained.
-    expect(PLAN_REFORMAT).toContain("```plan")
+    expect(PLAN_REFORMAT).toContain("```mdx plan")
     expect(PLAN_REFORMAT).toContain("ExitPlanMode")
-    expect(PLAN_REFORMAT).toMatch(/summary/)
+    expect(PLAN_REFORMAT).toMatch(/Stage/)
     expect(PLAN_REFORMAT).toMatch(/intent/)
   })
 

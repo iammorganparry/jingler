@@ -29,7 +29,6 @@ const tempPaths = async () => {
       worktreesDir: join(root, "worktrees"),
       transcriptsDir: join(root, "transcripts"),
       reviewsDir: join(root, "reviews"),
-      planRoundsDir: join(root, "plan-rounds"),
       plansDir: join(root, ".jingler"),
       themesDir: join(root, "themes"),
       pluginsDir: join(root, "plugins"),

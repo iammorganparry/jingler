@@ -10,10 +10,6 @@ import type {
 } from "@jingler/core"
 import { CliExecError } from "@jingler/core"
 import { Context, Data, Effect, Layer } from "effect"
-import {
-  GIGAPLAN_CRITIQUE_PROMPT_MARKER,
-  GIGAPLAN_PROPOSAL_PROMPT_MARKER
-} from "./adversarial-plan-prompt.js"
 import type { ParsedMcpServer } from "./mcp-config.js"
 
 /** Parameters for starting a new agent turn against a CLI. */
@@ -31,6 +27,8 @@ export interface SessionSpec {
   readonly mode: PermissionMode
   /** The model id to run, or null to use the harness default. */
   readonly model: string | null
+  /** The configured canonical PRD structure for a native plan-mode turn. */
+  readonly planTemplate?: string
   /** Whether provider thinking is enabled; absent leaves its default untouched. */
   readonly thinkingEnabled?: boolean
   /** Provider-native effort; absent leaves the harness default untouched. */
@@ -145,7 +143,7 @@ export type AskQuestion = (
  * - `Reject` — abandon the plan (e.g. the run was stopped).
  */
 export type PlanDecision = Data.TaggedEnum<{
-  Approve: { readonly mode: PermissionMode }
+  Approve: { readonly mode: PermissionMode; readonly plan?: Plan }
   Revise: { readonly feedback: string }
   Reject: {}
 }>
@@ -320,39 +318,6 @@ export const scriptedRun =
 
       yield* emit({ _tag: "Started", sessionId })
       yield* pause
-
-      // Full adversarial-planning E2E fixture. Stable machine-readable role
-      // markers drive the same proposal → critique → resolver path without a
-      // real model or coupling the fixture to editable prompt prose.
-      if (spec.prompt.startsWith(`${GIGAPLAN_PROPOSAL_PROMPT_MARKER}\n`)) {
-        yield* emit({
-          _tag: "Assistant",
-          text: `\`\`\`plan
-summary: Add deterministic request limits
-01 Add request limiter
-  intent: Protect the refund route from bursts.
-  approach: Reuse the repository limiter; cover the rejection path
-  files: M src/routes/billing.ts +12 -1; M src/routes/billing.test.ts +18 -0
-  guards: Requests over the threshold return 429
-  task: backend
-  effort: standard
-  risk: medium
-\`\`\`
-
-Add the existing limiter to the refund route and verify its rejection path.`
-        })
-        yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-        return
-      }
-
-      if (spec.prompt.startsWith(`${GIGAPLAN_CRITIQUE_PROMPT_MARKER}\n`)) {
-        yield* emit({
-          _tag: "Assistant",
-          text: '```json\n{ "challenges": [] }\n```'
-        })
-        yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-        return
-      }
 
       // A `[[background]]` marker starts a background task that keeps running
       // after the turn ends — the case the dock exists for, and the only way to
@@ -610,7 +575,28 @@ Add the existing limiter to the refund route and verify its rejection path.`
               yield* emit({ _tag: "ToolEnd", id: e.id, status: "success", meta: null, diff: e.diff, preview: e.preview })
               yield* pause
             }
-            yield* emit({ _tag: "Assistant", text: "Steps 2, 3 and 5 are done." })
+            yield* emit({
+              _tag: "Assistant",
+              text: [
+                "Steps 2, 3 and 5 are done.",
+                ...[
+                  "s_01.1",
+                  "s_02.1",
+                  "s_03.1",
+                  "s_04.1",
+                  "s_4a.1",
+                  "s_4a.2",
+                  "s_4a.3",
+                  "s_4a.4",
+                  "s_4b.1",
+                  "s_05.1",
+                  "s_06.1"
+                ].map(
+                  (criterion) =>
+                    `PLAN_RESULT criterion=${criterion} status=passed evidence=Scripted implementation completed and verified.`
+                )
+              ].join("\n")
+            })
             break
           }
           if (decision._tag === "Reject" || rev >= 2) {
@@ -751,27 +737,6 @@ Add the existing limiter to the refund route and verify its rejection path.`
  * A deterministic adapter driving the full contract without a real process —
  * the tests/e2e/fallback path. `delayMs` paces the stream.
  */
-/**
- * Whether an event is a CHILD run's own lifecycle, and must not reach the
- * parent stream.
- *
- * `Started`, `Done` and `Failed` describe a whole run. When an orchestrator
- * (the planning round, the plan executor) drives a nested `CliAdapter.run`, the
- * nested run emits its own — and unlike every other event they carry no
- * `agentId`, so they cannot be scoped to a subagent and arrive looking exactly
- * like the PARENT finishing.
- *
- * The renderer believes them: one `Done` ends the turn, tears down the stream
- * actor and interrupts the fiber behind it. Measured, this killed the plan
- * executor midway through step 2 and the adversarial round straight after the
- * proposer — the orchestrator was cut off by its own first child reporting
- * success.
- *
- * So orchestrators swallow these and emit their own once, at the real end.
- */
-export const isChildLifecycle = (event: StreamEvent): boolean =>
-  event._tag === "Started" || event._tag === "Done" || event._tag === "Failed"
-
 export const makeScriptedCliAdapter = (delayMs: number): Layer.Layer<CliAdapter> =>
   Layer.succeed(CliAdapter, CliAdapter.of({ run: scriptedRun(delayMs), stop: () => Effect.void }))
 

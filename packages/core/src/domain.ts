@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import { BUDGET_RANGE, DEFAULT_BUDGET_TOKENS } from "./context.js"
-import { TaskKind } from "./task-kind.js"
+import { PlanTemplateConfig } from "./plan-document.js"
 import { ThemeConfig } from "./theme.js"
 
 /**
@@ -11,23 +11,8 @@ import { ThemeConfig } from "./theme.js"
 
 // ── CLI discovery ────────────────────────────────────────────────────────────
 
-/** The coding CLIs Jingler knows how to wrap. */
-/**
- * Every harness a session can run on.
- *
- * `jingler` is us: not a CLI on the host but our own orchestrator, which drives
- * the other harnesses rather than being one. It lives in this union because a
- * session genuinely runs *on* it — it is what the model picker selects, what
- * `Session.cli` persists, and what `harness-adapter` dispatches on — so keeping
- * it out would mean a second, parallel notion of "what is running this session"
- * for every one of those to consult.
- *
- * It is deliberately excluded in three places, each for its own reason:
- * `vendorOf` (it is not a lab), the plan's step assignees (a step routed back to
- * the orchestrator would recurse), and discovery's binary probing (there is no
- * binary to find).
- */
-export const CliKind = Schema.Literal("claude", "codex", "cursor", "opencode", "jingler")
+/** Every coding harness a session can run on. */
+export const CliKind = Schema.Literal("claude", "codex", "cursor", "opencode")
 export type CliKind = Schema.Schema.Type<typeof CliKind>
 
 /** Every harness kind, for exhaustive iteration and for validating parsed input. */
@@ -78,16 +63,17 @@ export const CliInfo = Schema.Struct({
 })
 export type CliInfo = Schema.Schema.Type<typeof CliInfo>
 
-/**
- * Harnesses a session can be STARTED on — every available CLI except `jingler`.
- *
- * The orchestrator is excluded on purpose: it drives the other harnesses rather
- * than being one, so "start a session on Jingler" answers a question nobody
- * asked. Gigaplan is reached the other way round — a per-turn mode chip on a
- * session that already runs on a real CLI.
- */
+/** Which account an installed harness run is charged to. */
+export const HarnessBilling = Schema.Struct({
+  cli: CliKind,
+  path: Schema.Literal("subscription", "api-key", "unknown", "undetermined"),
+  keyWithheld: Schema.Boolean
+})
+export type HarnessBilling = Schema.Schema.Type<typeof HarnessBilling>
+
+/** Harnesses a session can be started on. */
 export const startableClis = (clis: ReadonlyArray<CliInfo>): ReadonlyArray<CliInfo> =>
-  clis.filter((c) => c.available && c.kind !== "jingler")
+  clis.filter((c) => c.available)
 
 /**
  * Which harness a NEW session runs on: the configured default when it is still
@@ -143,20 +129,9 @@ export type DiffStat = Schema.Schema.Type<typeof DiffStat>
  * - `accept-edits` — auto-apply file edits, still pause for shell commands,
  * - `auto` — auto-apply edits and run allowlisted commands without prompting,
  * - `plan` — read-only planning: the agent designs a plan for review and cannot
- *   edit or run commands until the operator approves it (see `supportsPlanMode`),
- * - `gigaplan` — the orchestrated mode. One flagship proposes a plan, a model
- *   from a rival lab attacks it, the proposer revises, and on approval each step
- *   runs on the harness the plan chose for it.
- *
- * `gigaplan` sits in this union rather than beside it because it answers the
- * same question the others do — how much autonomy this turn has, and who is in
- * the loop. Modelling it separately would mean two competing notions of "how is
- * this session running" for every consumer to reconcile. It is the one mode that
- * takes over model selection, which is why the composer hides the model picker
- * while it is active: Gigaplan chooses per step, so a model chip would be a
- * control that is silently overridden.
+ *   edit or run commands until the operator approves it (see `supportsPlanMode`).
  */
-export const PermissionMode = Schema.Literal("ask", "accept-edits", "auto", "plan", "gigaplan")
+export const PermissionMode = Schema.Literal("ask", "accept-edits", "auto", "plan")
 export type PermissionMode = Schema.Schema.Type<typeof PermissionMode>
 
 /** Claude's provider-native adaptive-thinking effort values. */
@@ -218,15 +193,9 @@ export type ExecutionMode = Schema.Schema.Type<typeof ExecutionMode>
  *
  * "Can" means two things, and a harness needs both: a way to be held read-only
  * while it thinks, and a channel to submit a plan through. Claude has a real
- * `ExitPlanMode` tool the adapter intercepts; Codex and opencode have neither,
- * so they are instructed to emit a fenced ` ```plan ` block instead, parsed by
- * the same `parsePlan` — the trick adversarial planning already relies on to run
- * any role on any harness.
- *
- * `cursor` and `jingler` are out for the same reason `vendorOf` excludes them:
- * cursor falls through to the scripted stub (its "plan" would be fabricated),
- * and jingler is an orchestrator that picks a harness per step rather than
- * running turns itself.
+ * `ExitPlanMode` tool the adapter intercepts; Codex and opencode submit the same
+ * plan protocol in a fenced reply. Cursor falls through to the scripted stub,
+ * so offering plan mode there would fabricate support it does not have.
  *
  * A predicate rather than a scatter of `cli === "claude"` checks because the
  * gate is enforced in four places — the composer chip, the Shift+Tab cycle, and
@@ -274,7 +243,6 @@ export const Chat = Schema.Struct({
   updatedAt: Schema.String,
   /** Provider thread identities belong to the chat, not the shared worktree. */
   resumeId: Schema.optional(Schema.String),
-  gigaplanResumeId: Schema.optional(Schema.String),
   /** Permission and model choices are restored independently for each chat. */
   mode: Schema.optional(PermissionMode),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
@@ -358,7 +326,6 @@ export const Session = Schema.Struct({
    * New code reads/writes the active `Chat`; `SessionStore` strips these on read.
    */
   resumeId: Schema.optional(Schema.String),
-  gigaplanResumeId: Schema.optional(Schema.String),
   mode: Schema.optional(PermissionMode),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
   model: Schema.optional(Schema.String),
@@ -590,29 +557,6 @@ export const ProvidersConfig = Schema.partial(
 )
 export type ProvidersConfig = Schema.Schema.Type<typeof ProvidersConfig>
 
-/** An exact harness/model pair used by both persisted policy and plan routing. */
-export const RouteCandidate = Schema.Struct({
-  cli: CliKind,
-  model: Schema.String
-})
-export type RouteCandidate = Schema.Schema.Type<typeof RouteCandidate>
-
-export const GigaplanRoutingConfig = Schema.Struct({
-  mode: Schema.Literal("shadow", "active"),
-  overrides: Schema.Array(
-    Schema.Struct({
-      taskKind: TaskKind,
-      routes: Schema.Array(RouteCandidate)
-    })
-  )
-})
-export type GigaplanRoutingConfig = Schema.Schema.Type<typeof GigaplanRoutingConfig>
-
-export const GIGAPLAN_ROUTING_DEFAULT: GigaplanRoutingConfig = {
-  mode: "shadow",
-  overrides: []
-}
-
 /**
  * The global auto-compaction levers, persisted at `WorkspaceConfig.context`.
  *
@@ -662,7 +606,7 @@ export const OpenConnectorConfig = Schema.Struct({
   /**
    * Per-harness opt-out. A CLI absent from the map defaults to ENABLED (when the
    * master switch is on); only an explicit `false` withholds the server from that
-   * harness. `jingler` is never a real launch target, so its entry is ignored.
+   * harness.
    *
    * Keyed by a bare string, not `CliKind`, on purpose: a `Record` over a literal
    * union is exhaustive under `Schema.encode` (every harness key would be
@@ -755,32 +699,11 @@ export const WorkspaceConfig = Schema.Struct({
    * surface masquerading as a form field.
    *
    * Absent, or naming a harness that is not installed, means "the first
-   * available one", so a fresh install can still create sessions. Never
-   * `jingler`: the orchestrator is a per-turn MODE, not a harness you start a
-   * session on (see `newSessionCli`).
+   * available one", so a fresh install can still create sessions.
    */
   defaultCli: Schema.optional(CliKind),
-  /** Semantic step routing; absent on legacy config means safe shadow mode. */
-  gigaplanRouting: Schema.optional(GigaplanRoutingConfig),
-  /**
-   * Whether Jingler may learn from finished work. Absent on older configs, and
-   * absent means OFF — the safe direction for anything that reads your history.
-   */
-  /**
-   * Which harness+model the ORCHESTRATOR itself runs on.
-   *
-   * One fixed model, not a per-message choice. Everything Jingler does in its
-   * own voice — general asks, and the planning it drives — runs here, so the
-   * operator has a single, predictable answer to "what am I talking to". The
-   * intelligence this feature is actually for is spent elsewhere: choosing a
-   * model per PLAN STEP, which is the only place the right answer genuinely
-   * varies.
-   *
-   * Absent means the default (see `ORCHESTRATOR_DEFAULT`).
-   */
-  orchestrator: Schema.optional(
-    Schema.Struct({ cli: CliKind, model: Schema.String })
-  ),
+  /** Custom PRD/MDX structure injected into every native planning turn. */
+  planTemplate: Schema.optional(PlanTemplateConfig),
   /**
    * Whether a session in PLAN mode may run commands without stopping for
    * approval. Absent means ON (see `PLAN_AUTO_RUN_DEFAULT`).
