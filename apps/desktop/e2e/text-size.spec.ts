@@ -74,14 +74,7 @@ test("Text size scales the conversation and persists to config", async ({ launch
   await sessionRow(window, "Text size demo").click()
   await expect(window.getByText(AGENT_LINE)).toBeVisible()
 
-  // Default (no saved fontScale): the multiplier is the 1× no-op.
-  await expect
-    .poll(() =>
-      window.evaluate(() =>
-        document.documentElement.style.getPropertyValue("--sb-font-scale")
-      )
-    )
-    .toBe("1")
+  // Default (no saved fontScale) is the 1× no-op.
   const before = await agentFontSize(window)
   expect(before).toBeGreaterThan(0)
 
@@ -92,15 +85,6 @@ test("Text size scales the conversation and persists to config", async ({ launch
   await expect(window.getByRole("button", { name: "Close settings" })).toBeVisible()
   await window.getByRole("button", { name: "General" }).click()
   await window.getByRole("button", { name: "Large", exact: true }).click()
-
-  // The variable flips immediately, before the pane even changes.
-  await expect
-    .poll(() =>
-      window.evaluate(() =>
-        document.documentElement.style.getPropertyValue("--sb-font-scale")
-      )
-    )
-    .toBe("1.15")
 
   // Saved to disk under `fontScale` — survives a restart, not just this session.
   await expect

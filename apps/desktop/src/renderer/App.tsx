@@ -219,14 +219,6 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       qc.setQueryData(["config"], saved)
     })
 
-  // Mirror the chosen multiplier onto the document root so the conversation's
-  // `calc(...px * var(--sb-font-scale))` sizes pick it up. Only the transcript
-  // reads it, so no pre-paint step is needed — config resolves long before a
-  // session is opened, and the default (1) is a visual no-op anyway.
-  useEffect(() => {
-    document.documentElement.style.setProperty("--sb-font-scale", String(fontScale))
-  }, [fontScale])
-
   /**
    * Settings › Themes.
    *
