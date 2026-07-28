@@ -416,6 +416,9 @@ export const rpc = {
   /** Persist ADHD mode; resolves with the whole updated config. */
   configSetAdhdMode: (adhdMode: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setAdhdMode({ adhdMode })),
+  /** Persist the conversation + code text-size multiplier. */
+  configSetFontScale: (fontScale: number): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setFontScale({ fontScale })),
   /** Which harness new sessions start on (Settings · Providers). */
   configSetDefaultCli: (cli: CliKind): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setDefaultCli({ cli })),

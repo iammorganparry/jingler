@@ -258,7 +258,12 @@ export function Markdown({ children, className }: { children: string; className?
   const source = useMemo(() => unwrapNoOpAnchors(children), [children])
   const urlTransform = useAssetUrlTransform()
   return (
-    <div className={cn("sb-md text-[14.5px] leading-[1.65] text-text-body", className)}>
+    <div
+      className={cn(
+        "sb-md text-[calc(14.5px*var(--sb-font-scale,1))] leading-[1.65] text-text-body",
+        className
+      )}
+    >
       <Streamdown
         parseIncompleteMarkdown
         plugins={PLUGINS}

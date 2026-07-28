@@ -35,7 +35,7 @@ export function ThoughtBlock({
         {collapsible && <span className="text-dim">{open ? "▾" : "▸"}</span>}
       </button>
       {collapsible && open && (
-        <div className="px-[11px] py-2 text-[11.5px] leading-[1.55] text-muted-foreground">
+        <div className="px-[11px] py-2 text-[calc(11.5px*var(--sb-font-scale,1))] leading-[1.55] text-muted-foreground">
           {children}
         </div>
       )}

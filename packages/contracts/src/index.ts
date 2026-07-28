@@ -73,7 +73,8 @@ import {
   ThemeSummary,
   Usage,
   VsCodeTheme,
-  WorkspaceConfig
+  WorkspaceConfig,
+  FONT_SCALE_RANGE
 } from "@jingler/core"
 import {
   AssetOutsideWorktreeError,
@@ -801,6 +802,20 @@ export class JinglerRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: Schema.Struct({ adhdMode: Schema.Boolean })
+  }),
+
+  /**
+   * Persist the conversation + code text-size multiplier. Returns the whole
+   * config so the renderer can patch its cache without a refetch.
+   */
+  Rpc.make("Config.setFontScale", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    // The usable range lives in the contract, not only the service — the schema
+    // is the single source of truth, so every client is bounded before main runs.
+    payload: Schema.Struct({
+      fontScale: Schema.Number.pipe(Schema.between(FONT_SCALE_RANGE.min, FONT_SCALE_RANGE.max))
+    })
   }),
 
   /**

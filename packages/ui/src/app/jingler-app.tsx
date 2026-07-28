@@ -163,6 +163,9 @@ export interface JinglerAppProps {
   /** Whether every agent turn is shaped for an ADHD reader; absent means off. */
   adhdMode?: boolean | null
   onSaveAdhdMode?: (adhdMode: boolean) => Promise<void> | void
+  /** Multiplier for conversation + code text size; absent means 1×. */
+  fontScale?: number | null
+  onSaveFontScale?: (fontScale: number) => Promise<void> | void
   /**
    * Everything Settings › Themes needs. Optional so the Storybook shell and the
    * component gallery can mount the app without a theme catalog; absent renders
@@ -361,6 +364,8 @@ export function JinglerApp({
   themes,
   plugins,
   onSaveAdhdMode,
+  fontScale,
+  onSaveFontScale,
   onRecheckGh,
   providersConfig,
   onSaveProvider,
@@ -959,6 +964,8 @@ export function JinglerApp({
               onSavePlanAutoRun={onSavePlanAutoRun}
               adhdMode={adhdMode}
               onSaveAdhdMode={onSaveAdhdMode}
+              fontScale={fontScale}
+              onSaveFontScale={onSaveFontScale}
               themes={themes}
               plugins={plugins}
               onClose={() => setSettingsOpen(false)}

@@ -727,6 +727,16 @@ export const WorkspaceConfig = Schema.Struct({
    */
   adhdMode: Schema.optional(Schema.Boolean),
   /**
+   * Multiplier applied to conversation + code text size. Absent means 1
+   * (`FONT_SCALE_DEFAULT`) — the unscaled default.
+   *
+   * Only the transcript and code blocks scale, not the app chrome, so the lever
+   * is a single number fed to a `--sb-font-scale` CSS variable consumed by
+   * `calc()`. Stored as the multiplier itself (e.g. 0.9 / 1 / 1.15 / 1.3) rather
+   * than a preset name, so the renderer paints it with no lookup table.
+   */
+  fontScale: Schema.optional(Schema.Number),
+  /**
    * The active colour theme, plus any per-key overrides on top of it.
    *
    * Absent means `DEFAULT_THEME_ID` (Jingler Dark) — which is also what every
@@ -761,6 +771,27 @@ export const PLAN_AUTO_RUN_DEFAULT = true
 
 /** ADHD response shaping is opt-in — it rewrites the voice of every session. */
 export const ADHD_MODE_DEFAULT = false
+
+/** Conversation + code text is unscaled (1×) unless the operator picks a size. */
+export const FONT_SCALE_DEFAULT = 1
+
+/**
+ * The usable band for the conversation text-size multiplier. The contract
+ * enforces it on the write path (`Config.setFontScale`); `clampFontScale` guards
+ * the READ path, where a hand-edited `config.json` can carry anything.
+ */
+export const FONT_SCALE_RANGE = { min: 0.5, max: 2 } as const
+
+/**
+ * Coerce a stored/incoming multiplier into the usable band, mapping anything
+ * non-finite (a hand-edited `NaN`, a missing value) back to the default. The one
+ * place the range is applied, so a bad value can never scale the transcript to
+ * zero or off-screen — on read or on write.
+ */
+export const clampFontScale = (value: number | null | undefined): number =>
+  typeof value === "number" && Number.isFinite(value)
+    ? Math.min(FONT_SCALE_RANGE.max, Math.max(FONT_SCALE_RANGE.min, value))
+    : FONT_SCALE_DEFAULT
 
 /** A git repository discovered under the configured repos directory. */
 export const Repo = Schema.Struct({
