@@ -505,6 +505,9 @@ export interface SettingsViewProps {
   /** Whether every agent turn is shaped for an ADHD reader; absent means off. */
   adhdMode?: boolean | null
   onSaveAdhdMode?: (adhdMode: boolean) => void | Promise<void>
+  /** Multiplier for conversation + code text size; absent means 1×. */
+  fontScale?: number | null
+  onSaveFontScale?: (fontScale: number) => void | Promise<void>
   /** Close the view and return to the active session. */
   onClose?: () => void
 }
@@ -547,6 +550,8 @@ export function SettingsView({
   onSavePlanAutoRun,
   adhdMode,
   onSaveAdhdMode,
+  fontScale,
+  onSaveFontScale,
   onClose
 }: SettingsViewProps) {
   const [section, setSection] = React.useState<SectionKey>("providers")
@@ -627,6 +632,8 @@ export function SettingsView({
           onSavePlanAutoRun={onSavePlanAutoRun}
           adhdMode={adhdMode}
           onSaveAdhdMode={onSaveAdhdMode}
+          fontScale={fontScale}
+          onSaveFontScale={onSaveFontScale}
         />
       ) : section === "providers" ? (
         <ProvidersSection
@@ -1332,6 +1339,63 @@ function ToggleRow({
 }
 
 /**
+ * The four conversation text-size steps. Stored as the raw multiplier the
+ * `--sb-font-scale` CSS var consumes, so the renderer needs no label→value map.
+ */
+const FONT_SCALE_PRESETS = [
+  { label: "Small", value: 0.9 },
+  { label: "Default", value: 1 },
+  { label: "Large", value: 1.15 },
+  { label: "Extra Large", value: 1.3 }
+] as const
+
+/**
+ * Segmented control for conversation + code text size. Four presets rather than
+ * a free slider: these are the multipliers that read cleanly against Jingler's
+ * hardcoded px sizes, and a preset can't land on an awkward half-pixel. Saves on
+ * click, like the toggles above — there is nothing to review.
+ */
+function FontSizeRow({
+  value,
+  onChange
+}: {
+  value: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <div className="flex items-start gap-3 py-2.5">
+      <div className="flex-1">
+        <div className="text-[12.5px] font-medium text-text-body">Text size</div>
+        <div className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
+          Scale the conversation and code text. The rest of the app stays put.
+        </div>
+      </div>
+      <div className="mt-0.5 flex flex-none overflow-hidden rounded-[6px] border border-hairline">
+        {FONT_SCALE_PRESETS.map((preset, i) => {
+          const active = Math.abs(value - preset.value) < 0.001
+          return (
+            <button
+              key={preset.value}
+              type="button"
+              onClick={() => onChange(preset.value)}
+              className={cn(
+                "px-2.5 py-1 text-[11px] font-medium transition-colors",
+                i > 0 && "border-l border-hairline",
+                active
+                  ? "bg-sunken text-blue"
+                  : "bg-transparent text-muted-foreground hover:text-text-body"
+              )}
+            >
+              {preset.label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/**
  * Settings → General. Today that means desktop notifications.
  *
  * Per-kind toggles rather than one switch, because the kinds are not equally
@@ -1348,7 +1412,9 @@ function GeneralSection({
   planAutoRun,
   onSavePlanAutoRun,
   adhdMode,
-  onSaveAdhdMode
+  onSaveAdhdMode,
+  fontScale,
+  onSaveFontScale
 }: {
   notifications?: NotificationsConfig | null
   onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
@@ -1356,6 +1422,8 @@ function GeneralSection({
   onSavePlanAutoRun?: (planAutoRun: boolean) => void | Promise<void>
   adhdMode?: boolean | null
   onSaveAdhdMode?: (adhdMode: boolean) => void | Promise<void>
+  fontScale?: number | null
+  onSaveFontScale?: (fontScale: number) => void | Promise<void>
 }) {
   // Absent means ON, matching `PLAN_AUTO_RUN_DEFAULT` in the domain.
   const [planDraft, setPlanDraft] = React.useState<boolean>(planAutoRun ?? true)
@@ -1363,6 +1431,9 @@ function GeneralSection({
   // Absent means OFF, matching `ADHD_MODE_DEFAULT` in the domain.
   const [adhdDraft, setAdhdDraft] = React.useState<boolean>(adhdMode ?? false)
   React.useEffect(() => setAdhdDraft(adhdMode ?? false), [adhdMode])
+  // Absent means 1×, matching `FONT_SCALE_DEFAULT` in the domain.
+  const [fontScaleDraft, setFontScaleDraft] = React.useState<number>(fontScale ?? 1)
+  React.useEffect(() => setFontScaleDraft(fontScale ?? 1), [fontScale])
   // Absent config means the DEFAULTS, not silence — an operator who never opened
   // this pane should still be told when an agent needs them.
   const [draft, setDraft] = React.useState<NotificationsConfig>(
@@ -1407,6 +1478,13 @@ function GeneralSection({
             onChange={(next) => {
               setAdhdDraft(next)
               void onSaveAdhdMode?.(next)
+            }}
+          />
+          <FontSizeRow
+            value={fontScaleDraft}
+            onChange={(next) => {
+              setFontScaleDraft(next)
+              void onSaveFontScale?.(next)
             }}
           />
         </div>

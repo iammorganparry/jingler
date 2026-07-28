@@ -111,6 +111,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             // `false` is a real setting and must survive an unrelated write.
             ...(existing?.planAutoRun !== undefined ? { planAutoRun: existing.planAutoRun } : {}),
             ...(existing?.adhdMode !== undefined ? { adhdMode: existing.adhdMode } : {}),
+            ...(existing?.fontScale !== undefined ? { fontScale: existing.fontScale } : {}),
             ...(existing?.theme ? { theme: existing.theme } : {}),
             ...(existing?.openConnector ? { openConnector: existing.openConnector } : {}),
             ...(existing?.disabledPlugins ? { disabledPlugins: existing.disabledPlugins } : {}),
@@ -134,6 +135,13 @@ export class ConfigService extends Effect.Service<ConfigService>()(
 
       /** Whether every agent turn is asked to shape its reply for an ADHD reader. */
       const setAdhdMode = (adhdMode: boolean) => patch({ adhdMode })
+
+      /**
+       * Conversation + code text-size multiplier. Clamped to a sane range so a
+       * malformed RPC can't scale the transcript to zero or off-screen.
+       */
+      const setFontScale = (fontScale: number) =>
+        patch({ fontScale: Math.min(2, Math.max(0.5, fontScale)) })
 
       const setStarredRepos = (starredRepos: ReadonlyArray<string>) =>
         patch({ starredRepos })
@@ -238,6 +246,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setNotifications,
         setPlanAutoRun,
         setAdhdMode,
+        setFontScale,
         setStarredRepos,
         setCollapsedRepos,
         setLastRepoPath,

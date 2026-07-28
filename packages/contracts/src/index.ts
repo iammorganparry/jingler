@@ -804,6 +804,16 @@ export class JinglerRpcs extends RpcGroup.make(
   }),
 
   /**
+   * Persist the conversation + code text-size multiplier. Returns the whole
+   * config so the renderer can patch its cache without a refetch.
+   */
+  Rpc.make("Config.setFontScale", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: Schema.Struct({ fontScale: Schema.Number })
+  }),
+
+  /**
    * Persist which harness NEW sessions start on. One standing answer, set in
    * Settings · Providers, in place of the New Session dialog's old select.
    */

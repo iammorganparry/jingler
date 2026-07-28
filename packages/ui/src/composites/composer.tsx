@@ -567,8 +567,8 @@ export function Composer({
           `flex-wrap` + `min-w-0`, and both are load-bearing.
 
           This row held eight controls with no wrap and no `min-w-0` anywhere in
-          the file. Two of them (the model chip, the branch) carry
-          variable-length text, and `Button` is `whitespace-nowrap`, so the row's
+          the file. The model chip carries variable-length text, and `Button` is
+          `whitespace-nowrap`, so the row's
           min-content floor sat well past the composer's own border — the
           controls didn't degrade, they overflowed the rounded box and got
           clipped. Wrapping is the right failure mode here rather than scrolling:
@@ -678,15 +678,6 @@ export function Composer({
               `flex-1` on a wrapped line collapses to nothing and the send button
               ends up butted against the last chip. */}
           <div className="min-w-[8px] flex-1" />
-          {branch && (
-            <span
-              title={`Working branch: ${branch}`}
-              className="flex min-w-0 max-w-[180px] items-center gap-1 px-1.5 font-mono text-[10.5px] text-dim"
-            >
-              <GitBranch size={12} className="flex-none" />
-              <span className="truncate">{branch}</span>
-            </span>
-          )}
           {/* The send/stop control is `flex-none` and LAST in DOM order, which
               together decide what a squeeze does: the row wraps the chips above
               it and the primary action keeps its full size on the trailing line,
@@ -730,17 +721,32 @@ export function Composer({
           )}
           </span>
         </div>
-        {/* The repository remains quieter metadata; the working branch sits by
-            Send because it is the destination of that action. */}
-        {repo && (
-          <div className="flex items-center gap-2 px-1.5 pt-1 font-mono text-[10.5px] text-dim">
-            <span
-              title={`Repository: ${repo}`}
-              className="flex min-w-0 items-center gap-1"
-            >
-              <FolderGit2 size={12} className="flex-none" />
-              <span className="truncate">{repo}</span>
-            </span>
+        {/* Lower row: repository sits bottom-left as quiet metadata, the working
+            branch bottom-right on the same line — `justify-between` splits them.
+            An empty span holds the left slot when there is no repo, so a lone
+            branch still lands on the right. */}
+        {(repo || branch) && (
+          <div className="flex items-center justify-between gap-2 px-1.5 pt-1 font-mono text-[10.5px] text-dim">
+            {repo ? (
+              <span
+                title={`Repository: ${repo}`}
+                className="flex min-w-0 items-center gap-1"
+              >
+                <FolderGit2 size={12} className="flex-none" />
+                <span className="truncate">{repo}</span>
+              </span>
+            ) : (
+              <span />
+            )}
+            {branch && (
+              <span
+                title={`Working branch: ${branch}`}
+                className="flex min-w-0 max-w-[180px] items-center gap-1"
+              >
+                <GitBranch size={12} className="flex-none" />
+                <span className="truncate">{branch}</span>
+              </span>
+            )}
           </div>
         )}
       </div>

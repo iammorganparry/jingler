@@ -177,6 +177,8 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   // Absent means off — ADHD mode rewrites the voice of every session, so it is
   // opt-in rather than a default the operator has to discover and undo.
   const adhdMode = configQuery.data?.adhdMode ?? false
+  // Absent means 1× — conversation + code text unscaled (FONT_SCALE_DEFAULT).
+  const fontScale = configQuery.data?.fontScale ?? 1
   const providersConfig = configQuery.data?.providers ?? null
   // Absent means "the first installed harness" — resolved downstream by
   // `newSessionCli`, so a fresh install creates sessions without a visit to
@@ -212,6 +214,18 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     rpc.configSetAdhdMode(value).then((saved) => {
       qc.setQueryData(["config"], saved)
     })
+  const saveFontScale = (value: number) =>
+    rpc.configSetFontScale(value).then((saved) => {
+      qc.setQueryData(["config"], saved)
+    })
+
+  // Mirror the chosen multiplier onto the document root so the conversation's
+  // `calc(...px * var(--sb-font-scale))` sizes pick it up. Only the transcript
+  // reads it, so no pre-paint step is needed — config resolves long before a
+  // session is opened, and the default (1) is a visual no-op anyway.
+  useEffect(() => {
+    document.documentElement.style.setProperty("--sb-font-scale", String(fontScale))
+  }, [fontScale])
 
   /**
    * Settings › Themes.
@@ -695,6 +709,8 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       onSavePlanAutoRun={savePlanAutoRun}
       adhdMode={adhdMode}
       onSaveAdhdMode={saveAdhdMode}
+      fontScale={fontScale}
+      onSaveFontScale={saveFontScale}
       themes={themeSettings}
       plugins={plugins}
       providersConfig={providersConfig}

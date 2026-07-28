@@ -88,16 +88,16 @@ function ToolCardView({ tool }: { tool: ToolCallModel }) {
           {/* The header truncates a long command to one line; this is where you
               read the whole thing. */}
           {tool.target && (
-            <pre className="overflow-x-auto px-3 py-2 font-mono text-[11px] leading-[1.5] text-text-bright">
+            <pre className="overflow-x-auto px-3 py-2 font-mono text-[calc(11px*var(--sb-font-scale,1))] leading-[1.5] text-text-bright">
               {tool.target}
             </pre>
           )}
           {tool.output === undefined ? (
-            <div className="px-3 pb-2 font-mono text-[11px] text-dim">
+            <div className="px-3 pb-2 font-mono text-[calc(11px*var(--sb-font-scale,1))] text-dim">
               {tool.status === "running" ? "Running…" : "No output."}
             </div>
           ) : (
-            <pre className="max-h-[320px] overflow-auto border-t border-line/60 px-3 py-2 font-mono text-[11px] leading-[1.5] text-muted-foreground">
+            <pre className="max-h-[320px] overflow-auto border-t border-line/60 px-3 py-2 font-mono text-[calc(11px*var(--sb-font-scale,1))] leading-[1.5] text-muted-foreground">
               {tool.output}
             </pre>
           )}
@@ -170,7 +170,7 @@ function PartView({
       return markdown ? (
         <Markdown className={WIDTH}>{part.text}</Markdown>
       ) : (
-        <p className={`m-0 ${WIDTH} whitespace-pre-wrap text-[14.5px] leading-[1.65] text-text-body`}>
+        <p className={`m-0 ${WIDTH} whitespace-pre-wrap text-[calc(14.5px*var(--sb-font-scale,1))] leading-[1.65] text-text-body`}>
           {part.text}
         </p>
       )

@@ -574,16 +574,16 @@
   color: var(--sb-text-bright);
 }
 .sb-md h1 {
-  font-size: 18px;
+  font-size: calc(18px * var(--sb-font-scale, 1));
 }
 .sb-md h2 {
-  font-size: 16px;
+  font-size: calc(16px * var(--sb-font-scale, 1));
 }
 .sb-md h3 {
-  font-size: 14.5px;
+  font-size: calc(14.5px * var(--sb-font-scale, 1));
 }
 .sb-md h4 {
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--sb-font-scale, 1));
 }
 .sb-md ul,
 .sb-md ol {
@@ -669,7 +669,7 @@
   border: none;
   padding: 0;
   color: var(--sb-text-body);
-  font-size: 12px;
+  font-size: calc(12px * var(--sb-font-scale, 1));
   line-height: 1.6;
 }
 .sb-md blockquote {
@@ -686,7 +686,7 @@
 .sb-md table {
   margin: 0 0 12px;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: calc(13px * var(--sb-font-scale, 1));
 }
 .sb-md th,
 .sb-md td {
