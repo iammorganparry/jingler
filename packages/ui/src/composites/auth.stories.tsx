@@ -2,7 +2,6 @@ import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { AuthDivider } from "../components/auth-divider.js"
 import { OAuthButton } from "../components/oauth-button.js"
-import { Starfield } from "../components/starfield.js"
 import { AuthCard } from "./auth-card.js"
 import { MagicLinkForm, type MagicLinkState } from "./magic-link-form.js"
 
@@ -42,14 +41,6 @@ export const Divider: Story = {
     <Frame>
       <AuthDivider />
     </Frame>
-  )
-}
-
-export const StarfieldBackdrop: Story = {
-  render: () => (
-    <div className="relative h-[360px] w-[560px] overflow-hidden rounded-lg border border-line">
-      <Starfield />
-    </div>
   )
 }
 

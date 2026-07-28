@@ -1,5 +1,23 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+/*
+ * The brand typefaces, SELF-HOSTED.
+ *
+ * Both are variable fonts, so the whole 100–900 range is one woff2 per subset
+ * rather than one per weight, and `font-display: swap` comes baked in.
+ *
+ * Bundled rather than linked because this is a desktop app: a `fonts.gstatic.com`
+ * link would make the app's typography depend on the operator's network, and the
+ * renderer's CSP (`default-src 'self'`) forbids the request anyway — it would fail
+ * silently and fall through to `system-ui`, which is exactly the bug this fixes.
+ *
+ * Each file ships every unicode subset (latin, latin-ext, cyrillic, greek,
+ * vietnamese) split by `unicode-range`. That looks wasteful on disk and is not:
+ * the browser fetches only the subsets the rendered text actually needs, so an
+ * English UI loads one file per family.
+ */
+@import "@fontsource-variable/hanken-grotesk";
+@import "@fontsource-variable/jetbrains-mono";
 /* Streamdown's animation keyframes (assistant markdown rendering). */
 @import "streamdown/styles.css";
 /* KaTeX styles for `$…$` / `$$…$$` math in agent markdown (see markdown.tsx). */
@@ -18,11 +36,21 @@
  * properties on `:root`, and the whole app repaints without one component
  * knowing themes exist.
  *
- * The values here are One Dark Pro, which is also `DEFAULT_THEME_ID`. They are
- * kept in sync with what `@jingler/themes` folds the One Dark Pro preset down
- * to — a test pins all 26 of them — so applying the default theme is a
+ * The values here are Jingler Dark, which is also `DEFAULT_THEME_ID`. They are
+ * kept in sync with what `@jingler/themes` folds the Jingler Dark preset down
+ * to — a test pins every one of them — so applying the default theme is a
  * pixel-exact no-op and the app is correctly styled during the instant before
  * the theme sheet is attached.
+ *
+ * That no-op property is the whole reason the test exists. If applying the
+ * default changed anything, "theming shipped" and "the theme failed to load"
+ * would look identical, and nobody would find out which had happened.
+ *
+ * Do not hand-edit these hexes. They are the OUTPUT of
+ * `toTokens(jinglerDark)` — regenerate them from the preset if the brand
+ * palette moves, because several of them (`sunken`, the contrast-corrected
+ * accents) are produced by `ramp.ts` rather than stated by the theme, and
+ * guessing at those puts the fallback quietly out of sync with every launch.
  *
  * ## Adding a token means three edits, in this order
  *
@@ -43,31 +71,71 @@
  */
 
 :root {
-  /* Surfaces (backmost → frontmost on a dark ground) */
-  --sb-canvas: #16181d;
-  --sb-sunken: #1e2228;
-  --sb-panel: #21252b;
-  --sb-editor: #282c34;
-  --sb-surface: #2c313a;
-  --sb-border: #181a1f;
-  --sb-line: #3e4451;
-  --sb-line-strong: #4b5263;
+  /*
+   * Surfaces (backmost → frontmost on a dark ground).
+   *
+   * Warm-NEUTRAL greys stepping off #212121, the wordmark's own colour — not
+   * red-tinted. A brand-washed editor looks committed for about ten minutes and
+   * unreadable for the rest of the day, and the mark is loud enough that it does
+   * not need the walls helping.
+   */
+  --sb-canvas: #141414;
+  --sb-sunken: #171717;
+  --sb-panel: #1b1b1b;
+  --sb-editor: #212121;
+  --sb-surface: #2b2b2b;
+  --sb-border: #0f0f0f;
+  --sb-line: #333333;
+  --sb-line-strong: #454545;
 
   /* Text ramp (loudest → quietest) */
-  --sb-text-bright: #d7dae0;
-  --sb-text-body: #c8ccd4;
-  --sb-text: #abb2bf;
-  --sb-muted: #828997;
-  --sb-dim: #5c6370;
+  --sb-text-bright: #f4f1f1;
+  --sb-text-body: #dedada;
+  --sb-text: #c6c1c1;
+  --sb-muted: #8d8686;
+  --sb-dim: #6a6363;
 
-  /* Accents */
-  --sb-blue: #61afef;
-  --sb-green: #98c379;
-  --sb-yellow: #e5c07b;
-  --sb-red: #e06c75;
-  --sb-purple: #c678dd;
-  --sb-cyan: #56b6c2;
-  --sb-orange: #d19a66;
+  /*
+   * Accents — a full seven hues, deliberately.
+   *
+   * The brand is one colour; syntax highlighting needs a spectrum. Collapsing
+   * these toward red to look "on brand" would make every diff a wall of near
+   * identical pinks, which is a worse outcome than a slightly less unified
+   * palette. Brand red appears in the CHROME (below), not in the code.
+   *
+   * What they DO share with the brand is an envelope. Every one sits at
+   * S 52-88% / L 60-75%, against the brand's S 85% / L 59%, so they read as one
+   * family rather than as seven colours that happened to be picked separately.
+   * The hues are warm-leaning for the same reason: purple sits at 288 (magenta
+   * side) rather than 275, and cyan at 184 rather than a flat 180.
+   *
+   * `red` is 8 deg — a vermilion, 16 deg off the brand's 352 rose, and ten
+   * points lighter. Close enough to belong, far enough that a destructive
+   * button never reads as the primary one.
+   */
+  --sb-blue: #6faef6;
+  --sb-green: #70d294;
+  --sb-yellow: #ebcb60;
+  --sb-red: #ee8372;
+  --sb-purple: #db91ed;
+  --sb-cyan: #5eccd4;
+  --sb-orange: #f1a35f;
+
+  /*
+   * Brand — the primary-action colour, and NOT `--sb-red`.
+   *
+   * `--sb-red` is wired to `--destructive` below. If the brand landed there,
+   * "Delete session" and "New session" would be the same swatch and the
+   * destructive tone would stop carrying any information at all. They stay
+   * neighbours rather than twins: brand is a saturated rose, destructive a
+   * lighter salmon.
+   *
+   * On an imported theme this is derived from that theme's own accent (see the
+   * `brand` chain in map.ts) — a Solarized user gets a Solarized focus ring,
+   * not ours leaking through.
+   */
+  --sb-brand: #ef3f57;
+  --sb-brand-hover: #f5687b;
 
   /*
    * Effects — translucent ON PURPOSE.
@@ -85,7 +153,9 @@
   --sb-overlay: rgb(0 0 0 / 0.55);
   --sb-shadow: rgb(0 0 0 / 0.45);
   --sb-shadow-strong: rgb(0 0 0 / 0.62);
-  --sb-selection: rgb(62 68 81 / 0.45);
+  /* Brand-tinted, and quieter than a grey wash would need to be: a saturated
+     selection can be read at a much lower alpha than a neutral one. */
+  --sb-selection: rgb(239 63 87 / 0.22);
   --sb-hover: rgb(255 255 255 / 0.055);
 
   /*
@@ -96,15 +166,15 @@
    * are deliberately dim — the wash already says "added", so a marker loud
    * enough to pass a UI-contrast check would compete with the code it annotates.
    */
-  --sb-diff-add-bg: rgb(152 195 121 / 0.13);
-  --sb-diff-del-bg: rgb(224 108 117 / 0.12);
-  --sb-diff-add-fg: #4e6b45;
-  --sb-diff-del-fg: #6b4a4e;
+  --sb-diff-add-bg: rgb(112 210 148 / 0.125);
+  --sb-diff-del-bg: rgb(238 131 114 / 0.125);
+  --sb-diff-add-fg: #447e59;
+  --sb-diff-del-fg: #855047;
 
   /* Chrome */
-  --sb-scrollbar: #3e4451;
-  --sb-scrollbar-hover: #4b5263;
-  --sb-link-hover: #7cc0f5;
+  --sb-scrollbar: rgb(255 255 255 / 0.125);
+  --sb-scrollbar-hover: rgb(255 255 255 / 0.2);
+  --sb-link-hover: #f5687b;
 
   /*
    * Which ground is active — `dark` | `light` | `high-contrast`.
@@ -129,8 +199,12 @@
   --card-foreground: var(--sb-text-bright);
   --popover: var(--sb-sunken);
   --popover-foreground: var(--sb-text-bright);
-  --primary: var(--sb-blue);
-  --primary-foreground: var(--sb-editor);
+  /* Primary is the BRAND, not `blue` — see the `--sb-brand` note above. */
+  --primary: var(--sb-brand);
+  /* White, not `--sb-editor`: a filled brand button is a saturated mid-tone, and
+     the near-black editor colour on it clears 4.5:1 in dark themes and fails it
+     in light ones. `#fff` is what the theme's own `button.foreground` states. */
+  --primary-foreground: #ffffff;
   --secondary: var(--sb-surface);
   --secondary-foreground: var(--sb-text);
   --muted: var(--sb-panel);
@@ -141,7 +215,9 @@
   --destructive-foreground: var(--sb-editor);
   --border: var(--sb-line);
   --input: var(--sb-line);
-  --ring: var(--sb-blue);
+  /* The focus ring is brand, so keyboard navigation reads as the app's own
+     rather than as a browser default that happened to be blue. */
+  --ring: var(--sb-brand);
 
   /* Editor-tight radii from the design (rows/cards 5, chips 4, gutters 3, callouts 7). */
   --radius: 5px;
@@ -188,6 +264,9 @@
   --color-purple: var(--sb-purple);
   --color-cyan: var(--sb-cyan);
   --color-orange: var(--sb-orange);
+  /* `text-brand`, `bg-brand`, `border-brand`, `hover:bg-brand-hover`. */
+  --color-brand: var(--sb-brand);
+  --color-brand-hover: var(--sb-brand-hover);
 
   /*
    * Effects → utilities (bg-overlay, bg-hover, shadow-[…] via var, …).
@@ -207,8 +286,23 @@
   --color-diff-del-fg: var(--sb-diff-del-fg);
   --color-link-hover: var(--sb-link-hover);
 
-  --font-sans: "Hanken Grotesk", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  /*
+   * The `Variable` suffix is load-bearing, and is the whole reason the app
+   * did not actually render in its own typefaces until now.
+   *
+   * These stacks used to start at `"Hanken Grotesk"` / `"JetBrains Mono"` with
+   * nothing bundled behind them, so the app silently rendered in `system-ui`
+   * on every machine that did not happen to have the fonts installed locally
+   * — which, for a shipped Electron app, is all of them. Fontsource registers
+   * its variable faces under `"<Family> Variable"`, so naming the bare family
+   * first would keep missing them even now that the woff2s ship.
+   *
+   * The static names stay in the chain BELOW the variable ones: a designer
+   * with the real fonts installed still gets them, and the bundled copy is the
+   * floor rather than the ceiling.
+   */
+  --font-sans: "Hanken Grotesk Variable", "Hanken Grotesk", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
   --radius-sm: 3px;
   --radius-md: 4px;

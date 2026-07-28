@@ -272,6 +272,38 @@ export const toTokens = (theme: VsCodeTheme, overrides?: Colors): ThemeTokens =>
   const cyan = accent(defaults.cyan, "terminal.ansiCyan", "editorInfo.foreground")
   const orange = accent(defaults.orange, "terminal.ansiBrightYellow", "editorWarning.foreground")
 
+  /**
+   * The primary-action colour. Jingler's own themes state it outright; every
+   * other theme has to have it inferred.
+   *
+   * The chain is ordered by how close a key is to meaning "the one colour this
+   * theme uses to say THIS IS THE ACTION". `progressBar.background` and
+   * `activityBarBadge.background` are both saturated accents by convention —
+   * a grey progress bar reads as broken, so authors do not ship one.
+   * `textLink.foreground` is next because a link is the other place a theme
+   * commits to its primary hue.
+   *
+   * `button.background` is deliberately ABSENT. It looks like the obvious first
+   * choice and is a trap: One Dark Pro sets it to #404754 and Dark Modern to
+   * #0e639c-adjacent greys, because VS Code's buttons are chrome rather than
+   * accents. Leading with it would give half the built-ins a grey focus ring.
+   *
+   * Falling back to `blue` rather than to Jingler red matters for the same
+   * reason the token exists at all: an operator running Solarized should get
+   * Solarized's accent on their focus rings, not ours bleeding through.
+   */
+  const brand = accent(
+    toHex(blue),
+    "progressBar.background",
+    "activityBarBadge.background",
+    "textLink.foreground"
+  )
+  // `button.hoverBackground` when the theme names one, else lift toward the
+  // ground's opposite pole — the same move `linkHover` makes on `blue`.
+  const brandHover =
+    pickOpaque(colors, panel, "button.hoverBackground", "textLink.activeForeground") ??
+    mix(brand, isDark(panel) ? WHITE : BLACK, 0.22)
+
   // ── Effects ────────────────────────────────────────────────────────────────
   // Derived from the ground, never read from the theme. A scrim's job is to
   // kill the contrast of what is behind it, and no theme states a colour whose
@@ -350,6 +382,8 @@ export const toTokens = (theme: VsCodeTheme, overrides?: Colors): ThemeTokens =>
     purple: toHex(purple),
     cyan: toHex(cyan),
     orange: toHex(orange),
+    brand: toHex(brand),
+    brandHover: toHex(brandHover),
 
     overlay,
     shadow,

@@ -61,7 +61,11 @@ export function XtermView({ terminalId, onExit }: XtermViewProps) {
 
     const term = new Terminal({
       scrollback: 5000,
-      fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace',
+      // Must lead with the `Variable` name — that is what Fontsource registers
+      // the bundled woff2 under, and xterm takes a raw string rather than
+      // reading `--font-mono`, so it cannot inherit the fix from globals.css.
+      fontFamily:
+        '"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, monospace',
       fontSize: 12,
       lineHeight: 1.4,
       cursorBlink: true,

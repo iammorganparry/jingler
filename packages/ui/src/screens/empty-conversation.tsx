@@ -1,6 +1,7 @@
 import type { CliInfo } from "@jingler/core"
 import { FolderOpen, Plus } from "lucide-react"
 import { StatusDot } from "../components/status-dot.js"
+import { JinglerMark } from "../brand/jingler-mark.js"
 
 /**
  * First-run / no-active-session empty state (design: "First Run Empty State").
@@ -24,8 +25,8 @@ export function EmptyConversation({
     <div className="flex flex-1 flex-col bg-editor">
       <div className="flex flex-1 flex-col items-center justify-center px-10">
         <div className="flex max-w-[452px] flex-col items-center text-center">
-          <span className="mb-[26px] flex size-14 items-center justify-center rounded-[14px] border border-blue/30 bg-blue/10">
-            <span className="animate-breathe font-mono text-[26px] font-semibold text-blue">✦</span>
+          <span className="mb-[26px] flex size-14 items-center justify-center rounded-[14px] border border-brand/30 bg-brand/10">
+            <JinglerMark className="animate-breathe h-7 w-auto text-brand" />
           </span>
 
           <h1 className="m-0 mb-3 text-[20px] font-semibold tracking-[-0.2px] text-text-bright">
