@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query"
 import type { Session } from "@jingler/core"
 import { agentChildren, agentPath } from "@jingler/core"
 import {
+  AttachmentSourceProvider,
   OpenAssetProvider,
   SubagentTabBar,
   BackgroundTaskDock,
@@ -302,6 +303,19 @@ export function ConversationPane({
   // before the Plan Review early-return so hook order stays stable. We derive the
   // effective selection so a finished (auto-removed) sub-agent falls back to Main
   // without an effect — its tab and view disappear together.
+  /**
+   * Fetch one transcript image's bytes. `Sessions.transcript` leaves them out —
+   * they are 80% of a transcript's weight — so a thumbnail asks for them when it
+   * mounts, which in a virtualized list means the few on screen.
+   *
+   * Keyed on the chat, not the session: attachments live in the chat's own
+   * transcript file, and two chats in one session have separate ones.
+   */
+  const resolveAttachment = useCallback(
+    (attachmentId: string) => rpc.sessionsAttachment(activeChat.id, attachmentId),
+    [activeChat.id]
+  )
+
   const [selectedAgent, setSelectedAgent] = useState<string>(MAIN_AGENT)
   // The reviewer sits in the same bar as the turn's sub-agents but is not one of
   // them (it is a whole agent run of its own, started by the PR tab or the
@@ -407,6 +421,7 @@ export function ConversationPane({
         knownFiles={knownFiles}
         worktreeRoot={session.worktreePath}
       >
+    <AttachmentSourceProvider resolve={resolveAttachment}>
     {/* `min-w-0` is load-bearing on BOTH rows, not decoration. A flex item
         defaults to `min-width: auto`, which refuses to shrink below its content —
         so a wide child (the sub-agent tab strip, whose cells are `flex-none` and
@@ -453,6 +468,7 @@ export function ConversationPane({
           files={convo.files}
           paused={convo.paused}
           branch={session.branch}
+          repo={session.repo}
           busy={convo.busy}
           tokens={convo.tokens}
           contextTriggerAt={contextQuery.data?.triggerAt ?? null}
@@ -577,6 +593,7 @@ export function ConversationPane({
         </>
       )}
     </div>
+    </AttachmentSourceProvider>
     </OpenAssetProvider>
   )
 }

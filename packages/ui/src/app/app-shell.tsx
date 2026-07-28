@@ -7,11 +7,14 @@ import { TitleBar } from "./title-bar.js"
 export function AppShell({
   title,
   actions,
+  search,
   children
 }: {
   title?: string
   /** App-level controls pinned to the title bar's right edge. */
   actions?: ReactNode
+  /** Global search, centred in the title bar. Replaces the mark + title there. */
+  search?: ReactNode
   children: ReactNode
 }) {
   return (
@@ -23,7 +26,7 @@ export function AppShell({
     // accessible by default.
     <MotionConfig reducedMotion="user">
       <div className="flex h-full flex-col overflow-hidden bg-editor text-text">
-        <TitleBar title={title} actions={actions} />
+        <TitleBar title={title} actions={actions} search={search} />
         {/*
           The outermost width boundary: this row is the whole content area, so
           `usePaneWidth()` beneath it reports how much room the SHELL has. The

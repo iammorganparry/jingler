@@ -1213,6 +1213,45 @@ describe("conversationMachine — PlanUpdated across turns", () => {
       ]
     }) as unknown as Plan
 
+  const documentFixture = (
+    stepStatus: "proposed" | "done",
+    producingChatId = session.id,
+    revision = 1
+  ): PlanDocument => ({
+    id: "plan_1",
+    sessionId: session.id,
+    producingChatId,
+    revision,
+    status: stepStatus === "done" ? "done" : "proposed",
+    source:
+      '# PRD: Refactor auth\n\n<Stage id="s_01" title="Create TokenStore"><Acceptance id="a1" status="' +
+      (stepStatus === "done" ? "passed" : "pending") +
+      '">Done</Acceptance></Stage>',
+    projection: {
+      title: "PRD: Refactor auth",
+      sections: [],
+      stages: [
+        {
+          id: "s_01",
+          title: "Create TokenStore",
+          intent: "A dedicated store.",
+          markdown: "",
+          acceptance: [
+            {
+              id: "a1",
+              text: "Done",
+              status: stepStatus === "done" ? "passed" : "pending",
+              evidence: null
+            }
+          ]
+        }
+      ],
+      annotations: []
+    },
+    updatedBy: "agent",
+    updatedAt: "2026-07-25T00:01:00.000Z"
+  })
+
   it("applies a PlanUpdated to the plan's own message, not the latest one", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
@@ -1242,35 +1281,68 @@ describe("conversationMachine — PlanUpdated across turns", () => {
         { _tag: "PlanProposed", plan: planFixture("proposed") }
       )
     ]
-    h.currentPlan = {
-      id: "p1",
-      sessionId: session.id,
-      producingChatId: session.id,
-      revision: 1,
-      status: "done",
-      source: "# PRD: plan\n\n<Stage id=\"s1\" title=\"Step\"><Acceptance id=\"a1\" status=\"passed\">Done</Acceptance></Stage>",
-      projection: {
-        title: "plan",
-        sections: [],
-        stages: [
-          {
-            id: "s1",
-            title: "Step",
-            intent: "",
-            markdown: "",
-            acceptance: [{ id: "a1", text: "Done", status: "passed", evidence: null }]
-          }
-        ],
-        annotations: []
-      },
-      updatedBy: "agent",
-      updatedAt: "2026-07-25T00:01:00.000Z"
-    }
+    h.currentPlan = documentFixture("done")
 
     const actor = start()
     await waitFor(actor, (snapshot) => snapshot.matches(idle))
 
     expect(latestPlan(actor.getSnapshot().context.messages)?.steps[0]?.status).toBe("done")
+    actor.stop()
+  })
+
+  /**
+   * The other half of the graft. A chat that never proposed the plan has no
+   * message to graft onto, so the artifact has to arrive as one — otherwise the
+   * Plan tab is empty in every chat but the one that produced it.
+   *
+   * Pinned because the load walk decides this from a flag it sets DURING the
+   * walk (`grafted`), rather than by re-scanning the transcript afterwards. A
+   * flag that was set eagerly, or never reset, would take this branch away and
+   * the loss would be silent — a missing tab, not an error.
+   */
+  it("appends the shared artifact when no message in the transcript carries it", async () => {
+    h.transcript = [userMessage("u_1", "morning", "2026-07-25T00:00:00.000Z")]
+    h.currentPlan = documentFixture("done", "c_other", 3)
+
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+
+    const { messages } = actor.getSnapshot().context
+    expect(messages).toHaveLength(2)
+    expect(messages[1]!.id).toBe("a_shared_plan_3")
+    expect(latestPlan(messages)?.steps[0]?.status).toBe("done")
+    expect(actor.getSnapshot().context.sharedPlanChatId).toBe("c_other")
+    actor.stop()
+  })
+
+  /**
+   * The load walk must not COPY a message it has nothing to change.
+   *
+   * Identity, not equality, is the assertion that means anything here: the walk
+   * used to spread every message and rebuild every `parts` array to replace a
+   * single Plan part, and transcripts on disk reach 44MB. Deep-equal would pass
+   * against exactly that. The renderer's footprint is a high-water mark of these
+   * loads — neither V8 nor PartitionAlloc return a spike's pages to the OS — so
+   * a copy nobody needed is paid for permanently.
+   */
+  it("passes messages the artifact does not touch through by reference", async () => {
+    const untouched = userMessage("u_1", "morning", "2026-07-25T00:00:00.000Z")
+    const carrier = applyStreamEvent(
+      assistantMessage("a_plan", "2026-07-25T00:00:30.000Z"),
+      { _tag: "PlanProposed", plan: planFixture("proposed") }
+    )
+    h.transcript = [untouched, carrier]
+    h.currentPlan = documentFixture("done")
+
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+
+    const { messages } = actor.getSnapshot().context
+    // Nothing to settle and no plan of the artifact's id: the SAME object.
+    expect(messages[0]).toBe(untouched)
+    // The one that does carry it is rebuilt, and carries the newer revision.
+    expect(messages[1]).not.toBe(carrier)
+    expect(latestPlan(messages)?.steps[0]?.status).toBe("done")
     actor.stop()
   })
 

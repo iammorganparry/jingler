@@ -65,6 +65,8 @@ import { DiscoveryService } from "./discovery.js"
 import { healedWorktreePath } from "./cli-project-dir.js"
 import { ensureWorktreeLinked } from "./git.js"
 import { OpenConnectorService } from "./open-connector.js"
+import { BrowserControlPort } from "./browser-control-port.js"
+import { buildBrowserControlMcp } from "./browser-control-mcp.js"
 import { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
@@ -244,6 +246,7 @@ type PromptEnv =
   | ContextManager
   | ConfigService
   | OpenConnectorService
+  | BrowserControlPort
   | SecretStore
   | CommandExecutor.CommandExecutor
   | FileSystem.FileSystem
@@ -949,6 +952,16 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             Effect.orElseSucceed(() => null)
           )
 
+          // Claude only: an in-process MCP server that hands the agent Jingler's
+          // OWN embedded browser to QA a preview URL in — the one the operator is
+          // watching — instead of a headless Chrome it would otherwise spawn via
+          // the browser-use CLI. An ACCESSOR (`yield* BrowserControlPort`), like
+          // OpenConnector above, so it stays in `PromptEnv` and never becomes a
+          // build-time dependency of the `AgentRunner` singleton (`R = never`).
+          // The other harnesses need an out-of-process MCP and aren't wired yet.
+          const browserMcp =
+            cli === "claude" ? buildBrowserControlMcp(yield* BrowserControlPort) : null
+
           const spec: SessionSpec = {
             cli,
             repo: session?.repo ?? "",
@@ -993,7 +1006,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             // over the spec, so a null id alone would silently resume anyway.
             resumeId: digest === null ? chat.resumeId ?? null : null,
             ...(digest === null ? {} : { fresh: true }),
-            ...(openConnectorServer ? { openConnector: openConnectorServer } : {})
+            ...(openConnectorServer ? { openConnector: openConnectorServer } : {}),
+            ...(browserMcp ? { browserMcp } : {})
           }
 
           // Clear the PERSISTED id too, so a crash between here and the harness

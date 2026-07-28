@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { DEFAULT_FILTERS } from "./session-filters.js"
 import { SessionSidebar } from "./session-sidebar.js"
@@ -112,14 +112,23 @@ describe("SessionSidebar split pill presence", () => {
     expect(rowOrder()).toStrictEqual([])
   })
 
-  it("still draws the pill when the filter matches only a LATER pane", () => {
-    // The regression: searching for pane 2's title left pane 1 with no entry to
-    // hang the pill on, while pane 2's entry bowed out for not being first. The
-    // search found a session and then rendered nothing whatsoever.
-    renderSidebar(both)
-    fireEvent.change(screen.getByPlaceholderText("Filter sessions…"), {
-      target: { value: "toolchain" }
-    })
+  it("still draws the pill when the narrowing keeps only a LATER pane", () => {
+    // The regression: narrowing to pane 2 left pane 1 with no entry to hang the
+    // pill on, while pane 2's entry bowed out for not being first. The sidebar
+    // found a session and then rendered nothing whatsoever.
+    //
+    // Driven by the REPO facet rather than by typing. This used to type
+    // "toolchain" into the sidebar's "Filter sessions…" field; that field is
+    // gone — search is global now and lives in the title bar — but the property
+    // being pinned is about the pill surviving a shrunken list, not about how
+    // the list shrank. The repo filter is the narrowing this panel still owns.
+    renderSidebar(
+      [
+        session({ id: "first", title: "Refactor auth flow", repo: "jingler" }),
+        session({ id: "second", title: "Bump the toolchain", repo: "gtm-grid" })
+      ],
+      { ...DEFAULT_FILTERS, repo: "gtm-grid" }
+    )
 
     expect(screen.getAllByTestId("split-row-g:first")).toHaveLength(1)
     expect(screen.getByTestId("split-segment-second")).toBeDefined()
@@ -149,11 +158,21 @@ describe("SessionSidebar split pill presence", () => {
     expect(rowOrder()).toStrictEqual([])
   })
 
-  it("draws no pill when the filter excludes every pane", () => {
-    renderSidebar(both)
-    fireEvent.change(screen.getByPlaceholderText("Filter sessions…"), {
-      target: { value: "nothing matches this" }
-    })
+  it("draws no pill when the narrowing excludes every pane", () => {
+    // Same conversion as the test above, with one wrinkle: the excluding repo
+    // has to EXIST. `reconcileRepo` deliberately clears a repo filter that no
+    // live session belongs to — a persisted filter naming a vanished repo would
+    // otherwise empty the sidebar with no visible cause — so filtering on a
+    // made-up name shows everything and pins nothing. Hence the third session:
+    // it makes "elsewhere" a real place for the filter to point at.
+    renderSidebar(
+      [
+        session({ id: "first", title: "Refactor auth flow", repo: "jingler" }),
+        session({ id: "second", title: "Bump the toolchain", repo: "jingler" }),
+        session({ id: "third", title: "Unrelated work", repo: "elsewhere" })
+      ],
+      { ...DEFAULT_FILTERS, repo: "elsewhere" }
+    )
 
     expect(screen.queryByTestId("split-row-g:first")).toBeNull()
   })

@@ -71,8 +71,17 @@ export const showSessions = async (
  * The search field is a better sentinel than a heading anyway: it is a control
  * the operator uses rather than decoration, so it is far less likely to be
  * restyled away — and if it ever is, this is one line rather than fifty-six.
+ *
+ * That prediction was half right. The sidebar's "Filter sessions…" field WAS
+ * removed — search went global and moved to the title bar — and this being one
+ * line is the only reason the whole suite did not fail with it. The sentinel is
+ * now the title bar's search control, found by its accessible name rather than
+ * by a placeholder: it is a button dressed as a field (it opens the command
+ * palette rather than accepting text), so `getByPlaceholder` has nothing to
+ * match and the label is the stabler handle regardless.
  */
-export const appShell = (window: Page) => window.getByPlaceholder("Filter sessions…")
+export const appShell = (window: Page) =>
+  window.getByRole("button", { name: "Search sessions and actions" })
 
 /**
  * The SIDEBAR row for a session, found by its title.

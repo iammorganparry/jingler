@@ -9,6 +9,9 @@ const RPC_CHANNEL = "jingler/rpc"
 const AUTH_COMPLETE_CHANNEL = "jingler/auth-complete"
 const NOTIFICATION_ACTIVATED_CHANNEL = "jingler/notification-activated"
 const BOOT_THEME_CHANNEL = "jingler/boot-theme"
+// Must match PREVIEW_REVEAL_CHANNEL in main/preview-view.ts (kept as a literal
+// here so the preload doesn't import the main bundle).
+const PREVIEW_REVEAL_CHANNEL = "jingler/preview/reveal"
 
 /**
  * The active theme's `:root` block, fetched SYNCHRONOUSLY at preload time.
@@ -73,5 +76,15 @@ contextBridge.exposeInMainWorld("jingler", {
       cb(payload)
     ipcRenderer.on(NOTIFICATION_ACTIVATED_CHANNEL, listener)
     return () => ipcRenderer.removeListener(NOTIFICATION_ACTIVATED_CHANNEL, listener)
+  },
+  /**
+   * Subscribe to "an agent is driving the embedded browser — open the Preview
+   * dock onto it". Fires on every BrowserControl op so QA is watchable; the
+   * renderer opens the dock and selects the Browser tab. Returns an unsubscribe fn.
+   */
+  onPreviewReveal: (cb: () => void) => {
+    const listener = () => cb()
+    ipcRenderer.on(PREVIEW_REVEAL_CHANNEL, listener)
+    return () => ipcRenderer.removeListener(PREVIEW_REVEAL_CHANNEL, listener)
   }
 })

@@ -16,6 +16,21 @@ import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore } from "./plan-store.js"
 import { withTempRoot } from "./test-support.js"
+import { BrowserControlPort } from "./browser-control-port.js"
+
+/** No-op browser-control port (see agent-runner.test.ts). */
+const BrowserControlPortTest = Layer.succeed(
+  BrowserControlPort,
+  BrowserControlPort.of({
+    navigate: async () => {},
+    screenshot: async () => ({ pngBase64: "" }),
+    click: async () => {},
+    type: async () => {},
+    readText: async () => ({ text: "" }),
+    evaluate: async () => ({ result: "" }),
+    waitForSelector: async () => {}
+  })
+)
 
 /**
  * Instrumentation for turns that end without settling.
@@ -89,6 +104,7 @@ const run = (adapter: Layer.Layer<CliAdapter>) => {
   const base = Layer.mergeAll(
     AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
     ConfigService.Default,
     SessionStore.Default,

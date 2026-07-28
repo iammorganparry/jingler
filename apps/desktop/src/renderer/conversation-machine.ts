@@ -242,32 +242,51 @@ const loadConversation = fromPromise<
   // A loaded transcript has no live run — settle any turn left mid-stream (the
   // app was closed mid-response) so it doesn't show the typing indicator forever,
   // and resolve orphaned approval gates / questions whose live run has died (their
-  // approve/deny buttons would otherwise be dead no-ops).
-  const settled = rawTranscript.map(settleLoaded)
+  // approve/deny buttons would otherwise be dead no-ops). The shared plan document
+  // is projected from canonical MDX and grafted over its stale transcript copy in
+  // the same walk.
+  //
+  // ONE pass, deliberately. This runs on every actor start — which includes every
+  // re-open after the residency cap evicted a session — and the transcripts it
+  // walks reach 44MB on disk. The shape this replaces settled with one `map`,
+  // grafted the artifact with a SECOND `map` that spread every message and rebuilt
+  // every `parts` array (when at most one message holds that plan), then scanned
+  // the result a third time to ask whether the graft had landed. Two of those
+  // three walks copied the whole object graph for the sake of a single part.
+  //
+  // That cost more than the wasted work suggests, because it is a PEAK and peaks
+  // here are permanent: neither V8 nor PartitionAlloc hand a spike's pages back to
+  // the OS, so the renderer's footprint became a high-water mark of transcript
+  // loads rather than a measure of what it was holding — 3.6GB of process against
+  // 127MB of live JS heap and 1,149 DOM nodes.
+  //
+  // So a message is passed through BY REFERENCE unless it actually carries the
+  // artifact's plan, and whether the graft landed is observed during the walk
+  // rather than by re-scanning after it.
+  let grafted = false
   const projectedPlan = artifact === null ? null : planDocumentToPlan(artifact)
-  const matchingArtifact =
-    artifact === null
-      ? settled
-      : settled.map((message) => ({
-          ...message,
-          parts: message.parts.map((part) =>
-            part._tag === "Plan" && part.plan.id === artifact.id
-              ? { _tag: "Plan" as const, plan: projectedPlan! }
-              : part
-          )
-        }))
-  const hasArtifact =
-    artifact === null ||
-    matchingArtifact.some((message) =>
-      message.parts.some(
-        (part) => part._tag === "Plan" && part.plan.id === artifact.id
-      )
+  const settled = rawTranscript.map((message) => {
+    const base = settleLoaded(message)
+    if (artifact === null) return base
+    const carriesPlan = base.parts.some(
+      (part) => part._tag === "Plan" && part.plan.id === artifact.id
     )
+    if (!carriesPlan) return base
+    grafted = true
+    return {
+      ...base,
+      parts: base.parts.map((part) =>
+        part._tag === "Plan" && part.plan.id === artifact.id
+          ? { _tag: "Plan" as const, plan: projectedPlan! }
+          : part
+      )
+    }
+  })
   const transcript =
-    artifact === null || hasArtifact
-      ? matchingArtifact
+    artifact === null || grafted
+      ? settled
       : [
-          ...matchingArtifact,
+          ...settled,
           {
             ...applyStreamEvent(
               assistantMessage(

@@ -122,6 +122,9 @@ export type PreviewDockEvent =
   | { type: "OPEN_ASSET"; sessionId: string; path: string }
   | { type: "CLOSE"; id: string }
   | { type: "PRUNE"; liveSessionIds: ReadonlySet<string> }
+  // An agent is driving the browser (BrowserControl.*): show the dock and focus
+  // the Browser tab so the operator watches it happen.
+  | { type: "REVEAL_BROWSER" }
 
 export const previewDockMachine = setup({
   types: {
@@ -138,6 +141,8 @@ export const previewDockMachine = setup({
       return { side: event.side }
     }),
     select: assign(({ event }) => (event.type === "SELECT" ? { activeId: event.id } : {})),
+    // Focus the pinned browser tab — the target of every agent QA action.
+    revealBrowser: assign(() => ({ activeId: BROWSER_TAB_ID })),
     // Reopening an already-open file focuses its tab. Appending a duplicate
     // would give two tabs with the same title that can never diverge.
     openAsset: assign(({ context, event }) => {
@@ -206,6 +211,9 @@ export const previewDockMachine = setup({
     // Opening an asset is an explicit request to LOOK at it, so it shows the
     // dock. Focusing a tab in a hidden panel would look like nothing happened.
     OPEN_ASSET: { target: ".shown", actions: "openAsset" },
+    // Same as OPEN_ASSET but for the browser: an agent action is a request to
+    // LOOK, so it shows the dock even if the operator had it hidden.
+    REVEAL_BROWSER: { target: ".shown", actions: "revealBrowser" },
     // Reconcile open tabs against the live session list. Orthogonal to
     // visibility — pruning a dead tab must not open or close the dock.
     PRUNE: { actions: "pruneTabs" }

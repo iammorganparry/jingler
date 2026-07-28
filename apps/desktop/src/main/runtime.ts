@@ -38,6 +38,7 @@ import { NodeContext } from "@effect/platform-node"
 import { Layer, ManagedRuntime } from "effect"
 import { AppPathsLive } from "./app-paths.js"
 import { PreviewViewServiceLive } from "./preview-view.js"
+import { BrowserControlPortLive } from "./browser-control-port-live.js"
 import { DialogServiceLive } from "./dialog.js"
 import { RpcServerLive } from "./rpc.js"
 import { PlaintextSecretStoreLive, SecretStoreLive } from "./secret-store.js"
@@ -144,7 +145,12 @@ const AppLayer = RpcServerLive.pipe(
   Layer.provideMerge(ConfigService.Default),
   Layer.provide(GitService.Default),
   Layer.provide(HarnessCliAdapterLive),
-  Layer.provide(DialogServiceLive),
+  // DialogService + the browser-control port, merged into ONE stage to stay
+  // inside `pipe`'s 20-argument limit. They are peers (no interdependency); the
+  // port's PreviewViewService requirement is satisfied by the NEXT stage. The
+  // port is what lets AgentRunner build the agent's browser-control MCP against
+  // the embedded browser (see agent-runner promptSetup).
+  Layer.provide(Layer.mergeAll(DialogServiceLive, BrowserControlPortLive)),
   Layer.provide(PreviewViewServiceLive),
   // provideMerge so ThemeService/ConfigService stay callable from the runtime
   // directly (boot theme), not only from inside an RPC handler.

@@ -42,6 +42,14 @@ import markSrc from "./assets/jingler-mark-shader.png"
  * or fails outright on some Linux/VM GPU stacks, and the splash is the FIRST
  * thing an operator sees — a blank rectangle there reads as "the app is broken",
  * not "the animation is unavailable".
+ *
+ * ## And one frame where it renders NEITHER
+ *
+ * Both of those checks need the DOM, so both resolve in an effect — one frame
+ * after mount. Until they do this renders an empty box of the right size, which
+ * is deliberate and is not the same as defaulting to the static mark: on the
+ * splash this component fills the window, so "default to static" put a
+ * viewport-sized logo on screen for a frame on every launch.
  */
 
 /**
@@ -84,7 +92,7 @@ const DARK = {
   outerGlow: 0.22,
   contour: 1,
   speed: 0.4,
-  scale: 0.55,
+  scale: 0.14,
   colors: ["#EF3F57", "#ffffff"],
   colorBack: BRAND_SHADER_BACKGROUND.dark
 }
@@ -95,9 +103,25 @@ const LIGHT = {
   outerGlow: 0.05,
   contour: 0.2,
   speed: 0.35,
-  scale: 0.59,
+  scale: 0.15,
   colors: ["#EF3F57", "#b80f26"],
   colorBack: BRAND_SHADER_BACKGROUND.light
+}
+
+/**
+ * Whether the mark will actually ANIMATE on this machine, answered synchronously.
+ *
+ * The component asks the same two questions through hooks, because it has to
+ * re-render when the answers arrive. The splash needs them before it renders at
+ * all — there is no point holding a screen open to let an animation play when
+ * the animation is a still image — so it gets this instead.
+ */
+export const brandCanAnimate = (): boolean => {
+  if (typeof window === "undefined" || typeof document === "undefined") return false
+  const still =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  return !still && probeWebGl()
 }
 
 /**
@@ -125,18 +149,41 @@ const useReducedMotion = (): boolean => {
  * Probed on a throwaway canvas rather than trusting `"WebGL2RenderingContext" in
  * window`: the constructor exists on machines where context creation still fails
  * (blocklisted drivers, a headless CI display, a VM with no GPU passthrough).
- * Runs once, after mount, so SSR and jsdom get the static fallback rather than
- * an exception.
+ *
+ * Memoised at module scope because the answer cannot change within a session and
+ * the probe allocates a real GL context. `null` means "not asked yet", which
+ * `useWebGl` needs to be able to distinguish — see below.
  */
-const useWebGl = (): boolean => {
-  const [ok, setOk] = useState(false)
+let webGlSupport: boolean | null = null
+export const probeWebGl = (): boolean => {
+  if (webGlSupport !== null) return webGlSupport
+  try {
+    const probe = document.createElement("canvas")
+    webGlSupport = Boolean(probe.getContext("webgl2") ?? probe.getContext("webgl"))
+  } catch {
+    webGlSupport = false
+  }
+  return webGlSupport
+}
+
+/**
+ * The probe's answer, or `null` until it has one.
+ *
+ * THREE states, not two, and the third is the whole point. The probe has to run
+ * after mount (jsdom and SSR have no canvas), so a two-state hook has to pick a
+ * value for the first render — and `false` meant every mount painted the STATIC
+ * fallback for a frame before swapping to the shader. At `size={320}` nobody
+ * noticed. On the splash, where this fills the window, that frame is the mark at
+ * 62% of the viewport: a giant logo that flashes once per launch, which is the
+ * opposite of the thing the splash is for.
+ *
+ * `null` renders neither variant — see the component. One empty frame on the
+ * shader's own ground is invisible; a full-screen logo is not.
+ */
+const useWebGl = (): boolean | null => {
+  const [ok, setOk] = useState<boolean | null>(null)
   useEffect(() => {
-    try {
-      const probe = document.createElement("canvas")
-      setOk(Boolean(probe.getContext("webgl2") ?? probe.getContext("webgl")))
-    } catch {
-      setOk(false)
-    }
+    setOk(probeWebGl())
   }, [])
   return ok
 }
@@ -174,6 +221,15 @@ export function BrandShader({ size = 320, fill = false, className, ground }: Bra
   // light variant's near-white `colorBack` would be a flashbang on it.
   const kind = ground ?? (tokens?.kind === "light" ? "light" : "dark")
   const box = fill ? { width: "100%", height: "100%" } : { width: size, height: size }
+
+  // The probe has not answered yet. Hold the space and paint nothing rather than
+  // guessing a variant — see `useWebGl`. Guessing meant the splash flashed the
+  // static mark across the whole window before the shader took over.
+  if (webgl === null) {
+    return (
+      <span className={className} style={box} data-jingler-brand="pending" aria-hidden="true" />
+    )
+  }
 
   if (reduced || !webgl) {
     // The vector mark, NOT `markSrc` — that PNG is filled black for the

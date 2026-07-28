@@ -253,6 +253,9 @@ importers:
       xstate:
         specifier: ^5.32.4
         version: 5.32.4
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
     devDependencies:
       '@effect/platform-node':
         specifier: ^0.107.0

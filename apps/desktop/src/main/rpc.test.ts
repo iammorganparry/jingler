@@ -43,6 +43,7 @@ import {
   sessionDiff,
   skillsList,
   workspaceRevertFile,
+  withoutAttachmentData,
   workspaceRevertLines
 } from "./rpc.js"
 
@@ -184,6 +185,51 @@ describe("RPC handlers", () => {
       expect(skills.map((s) => s.name)).not.toContain("/plan")
       expect(skills.map((s) => s.name)).not.toContain("/test")
       expect(skills.map((s) => s.name)).not.toContain("/commit")
+    })
+  })
+
+  describe("Sessions.transcript — attachment stripping", () => {
+    /**
+     * A transcript's images are 80% of its bytes (98MB of 123MB, measured across
+     * the six largest on a real install) and its text is 1.5%. Handing those to
+     * the renderer on open is what made a session cost hundreds of megabytes
+     * there, so the RPC ships the metadata and the renderer fetches bytes per
+     * thumbnail.
+     */
+    const image = (id: string, data: string) => ({
+      _tag: "Image" as const,
+      attachment: { id, name: `${id}.png`, mediaType: "image/png", data }
+    })
+    const message = (id: string, parts: ReadonlyArray<unknown>) =>
+      ({ id, role: "user", streaming: false, createdAt: "2026-07-11T00:00:00.000Z", parts }) as never
+
+    it("empties the base64 but keeps everything a thumbnail needs", () => {
+      const [out] = withoutAttachmentData([message("u_1", [image("att_1", "AAAABBBB")])])
+      const part = out!.parts[0] as ReturnType<typeof image>
+      expect(part.attachment.data).toBe("")
+      // The tile renders its frame, filename and alt text before the bytes land,
+      // and the id is how it asks for them — losing any of these turns a lazy
+      // image into a missing one.
+      expect(part.attachment.id).toBe("att_1")
+      expect(part.attachment.name).toBe("att_1.png")
+      expect(part.attachment.mediaType).toBe("image/png")
+    })
+
+    it("returns an image-free message BY REFERENCE", () => {
+      // Not a micro-optimisation: this walks transcripts that reach 46MB, on
+      // every session open, and the renderer's footprint is a high-water mark of
+      // exactly these loads. Copying a message to change nothing in it is the
+      // cost the whole function exists to avoid, and `toStrictEqual` would pass
+      // against a version that copied every one.
+      const plain = message("u_2", [{ _tag: "Text", text: "no pictures here" }])
+      const [out] = withoutAttachmentData([plain])
+      expect(out).toBe(plain)
+    })
+
+    it("leaves non-image parts of a message that HAS an image alone", () => {
+      const text = { _tag: "Text" as const, text: "what is wrong here" }
+      const [out] = withoutAttachmentData([message("u_3", [image("att_2", "CCCC"), text])])
+      expect(out!.parts[1]).toBe(text)
     })
   })
 

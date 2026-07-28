@@ -52,10 +52,20 @@ except ImportError:  # pragma: no cover - developer tooling
     sys.exit("Pillow is required: pip install pillow")
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT / "packages/ui/src/brand/assets/jingler-icon-color.png"
+SRC = ROOT / "packages/ui/src/brand/assets/jingler-icon-white.png"
 OUT = ROOT / "apps/desktop/build-resources"
 
-GROUND = (0x21, 0x21, 0x21, 0xFF)  # #212121 — the wordmark's own neutral
+# White mark on brand red — the inverse avatar from the brand package, which is
+# what the icon is SUPPOSED to be. It was previously the colour mark on #212121,
+# and that reads as a dark app tile with a small red squiggle: legible at 512px,
+# mud at the 32px the dock and the ⌘-Tab switcher actually use. Solid brand red
+# is recognisable at any size, and it is the one colour nothing else on a Mac
+# dock is.
+#
+# `jingler-icon-white.png` is white-on-TRANSPARENT (checked, not assumed — see
+# the source-asset gotcha above), so it composites over the ground rather than
+# painting it out.
+GROUND = (0xEF, 0x3F, 0x57, 0xFF)  # #EF3F57 — --sb-brand, the avatar's own red
 GLYPH = 0.60
 RADIUS = 0.2247
 MAC_MARGIN = 100
@@ -96,6 +106,18 @@ def main() -> None:
     )
 
     inset = compose(1024, 1024 - MAC_MARGIN * 2, MAC_MARGIN)
+
+    # The same inset art as a plain PNG, for `app.dock.setIcon` in development.
+    #
+    # A packaged .app takes its icon from the bundle and never reads this. An
+    # unpackaged one has to be handed a file, and handing it `icon.png` — the
+    # FULL-BLEED square — is what made Jingler sit visibly larger than every
+    # other app in the dock and the ⌘-Tab switcher. macOS does not inset anything
+    # for you: every other app's art already sits in the 824px box with the
+    # margin the system draws its shadow into, so full-bleed art is simply 24%
+    # bigger than its neighbours.
+    inset.save(OUT / "icon-mac.png")
+
     iconset = OUT / "Jingler.iconset"
     iconset.mkdir(exist_ok=True)
     try:
@@ -115,7 +137,7 @@ def main() -> None:
     finally:
         shutil.rmtree(iconset, ignore_errors=True)
 
-    for name in ("icon.png", "icon.ico", "icon.icns"):
+    for name in ("icon.png", "icon-mac.png", "icon.ico", "icon.icns"):
         path = OUT / name
         print(f"{name:12} {os.path.getsize(path):>8,} bytes")
 

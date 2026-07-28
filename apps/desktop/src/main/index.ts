@@ -199,12 +199,49 @@ if (!gotPrimaryLock) {
    * Returns `undefined` rather than a guessed path when the file is missing, so
    * a dev checkout that has not built icons still opens a window.
    */
+  /** Where a generated PNG icon lives, packaged or in a dev checkout. */
+  const iconPath = (file: string): string | null => {
+    const candidate = app.isPackaged
+      ? join(process.resourcesPath, file)
+      : join(import.meta.dirname, "../../build-resources", file)
+    return existsSync(candidate) ? candidate : null
+  }
+
   const windowIcon = (): string | undefined => {
     if (process.platform !== "linux") return undefined
-    const candidate = app.isPackaged
-      ? join(process.resourcesPath, "icon.png")
-      : join(import.meta.dirname, "../../build-resources/icon.png")
-    return existsSync(candidate) ? candidate : undefined
+    // Full-bleed, which IS the Linux convention — the inset variant below is
+    // macOS-only and would render as a small tile with a wide transparent frame.
+    return iconPath("icon.png") ?? undefined
+  }
+
+  /**
+   * The DOCK icon, on macOS, in development only.
+   *
+   * A packaged .app takes its icon from the bundle's `Info.plist` and needs
+   * nothing here. An UNPACKAGED one is running out of `node_modules/electron`,
+   * so macOS reads Electron's own bundle and shows the generic Electron diamond
+   * — which is what every `pnpm dev` session has looked like, and reads as "some
+   * Electron app" rather than as Jingler every time the app is alt-tabbed to.
+   *
+   * Uses `icon-mac.png`, NOT `icon.png`. The two differ by a 100px transparent
+   * margin on a 1024px canvas, and that margin is the whole point: macOS insets
+   * nothing for you, so every other app's art sits in an 824px box while
+   * full-bleed art renders about a quarter larger. The dock and the ⌘-Tab
+   * switcher put them side by side, which is exactly where that reads as wrong.
+   *
+   * `app.dock` is undefined off macOS, and a failed read must never stop the app
+   * launching over cosmetics — a checkout that has not generated icons yet (see
+   * `scripts/generate-brand-icons.py`) simply keeps the diamond.
+   */
+  const applyDevDockIcon = (): void => {
+    if (process.platform !== "darwin" || app.isPackaged) return
+    const candidate = iconPath("icon-mac.png")
+    if (candidate === null) return
+    try {
+      app.dock?.setIcon(candidate)
+    } catch {
+      /* cosmetic only — never block the launch */
+    }
   }
 
   const createWindow = () => {
@@ -352,6 +389,7 @@ if (!gotPrimaryLock) {
       console.error("Could not prepare the boot theme; using One Dark Pro.", cause)
     }
 
+    applyDevDockIcon()
     createWindow()
 
     // Self-update only makes sense in a packaged build (dev has no update feed).

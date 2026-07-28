@@ -16,7 +16,7 @@ import {
   Separator as DropdownMenuSeparator,
   Trigger as DropdownMenuTrigger
 } from "@radix-ui/react-dropdown-menu"
-import { ArrowUp, GitBranch, ImagePlus, Plus, Sparkles, Square } from "lucide-react"
+import { ArrowUp, FolderGit2, GitBranch, ImagePlus, Plus, Sparkles, Square } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { downscaleImage } from "../lib/image-downscale.js"
 import { reasoningEffortsFor } from "../lib/reasoning-options.js"
@@ -132,6 +132,7 @@ export function Composer({
   onSend,
   onStop,
   branch,
+  repo,
   cli,
   model,
   catalog = [],
@@ -161,6 +162,8 @@ export function Composer({
   onStop?: () => void
   /** Git branch backing this session's worktree. */
   branch?: string
+  /** Repository name backing this session — shown at the composer's bottom-left. */
+  repo?: string
   /** Seed the draft once on mount (e.g. a task prefilled from a linked issue). */
   initialValue?: string
   /**
@@ -675,18 +678,10 @@ export function Composer({
               `flex-1` on a wrapped line collapses to nothing and the send button
               ends up butted against the last chip. */}
           <div className="min-w-[8px] flex-1" />
-          {/* The branch rides with the send button rather than leading the row:
-              it's the answer to "where is this about to land?", which is a
-              question you ask at the moment you send, not while picking a model.
-              `min-w-0` + `truncate` so a long branch gives ground first — it is
-              the only control here that can lose characters and stay useful. */}
           {branch && (
             <span
               title={`Working branch: ${branch}`}
-              className={cn(
-                "flex h-8 min-w-0 items-center gap-1 rounded-md px-1.5 font-mono text-[10.5px] text-dim",
-                roomy ? "max-w-[180px]" : "max-w-[100px]"
-              )}
+              className="flex min-w-0 max-w-[180px] items-center gap-1 px-1.5 font-mono text-[10.5px] text-dim"
             >
               <GitBranch size={12} className="flex-none" />
               <span className="truncate">{branch}</span>
@@ -735,6 +730,19 @@ export function Composer({
           )}
           </span>
         </div>
+        {/* The repository remains quieter metadata; the working branch sits by
+            Send because it is the destination of that action. */}
+        {repo && (
+          <div className="flex items-center gap-2 px-1.5 pt-1 font-mono text-[10.5px] text-dim">
+            <span
+              title={`Repository: ${repo}`}
+              className="flex min-w-0 items-center gap-1"
+            >
+              <FolderGit2 size={12} className="flex-none" />
+              <span className="truncate">{repo}</span>
+            </span>
+          </div>
+        )}
       </div>
     </div>
   )

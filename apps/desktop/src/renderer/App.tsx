@@ -25,6 +25,7 @@ import {
   SetupScreen,
   JinglerApp,
   ThemeProvider,
+  useSplashHold,
   useThemeCatalog
 } from "@jingler/ui"
 import { appMachine } from "./app-machine.js"
@@ -624,7 +625,13 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     if (seeding) prBaselineRef.current = true
   }, [prLifecycle, sweepTargets])
 
-  if (state.matches("loading") || state.matches("starting")) {
+  const splashHeld = useSplashHold()
+
+  // The splash outstays the boot when the boot is quicker than the brand
+  // animation — see `useSplashHold`. Without it the shader's source image is
+  // still decoding when the machine leaves `starting`, so the mark never draws
+  // and the whole splash reads as a black flash.
+  if (splashHeld || state.matches("loading") || state.matches("starting")) {
     return <LoadingScreen />
   }
 
@@ -869,7 +876,12 @@ function AppContent({
   authState: ReturnType<typeof useMachine<typeof authMachine>>[0]
   authSend: ReturnType<typeof useMachine<typeof authMachine>>[1]
 }) {
-  if (authState.matches("checking") || authState.matches("signingOut")) {
+  // Both splash mounts consult the same floor, and the floor is measured from
+  // app start rather than from mount — so the auth check and the boot machine
+  // share one hold between them instead of queueing two.
+  const splashHeld = useSplashHold()
+
+  if (splashHeld || authState.matches("checking") || authState.matches("signingOut")) {
     return <LoadingScreen />
   }
 

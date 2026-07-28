@@ -78,6 +78,7 @@ import type {
   CreateSessionInput,
   IssueAutomations,
   IssueSummary,
+  Message,
   PluginCatalog,
   PrMergeMethod,
   ProviderConfig,
@@ -661,8 +662,28 @@ export const billingPaths = Effect.gen(function* () {
         // it is the one that silently cost money before.
         keyWithheld: subscription && keys.some((k) => (process.env[k] ?? "").length > 0)
       }
-    })
+  })
 })
+
+/**
+ * Strip image payload bytes from transcripts before they cross into the
+ * renderer. Metadata stays intact so the renderer can fetch each attachment
+ * lazily through `Sessions.attachment`.
+ */
+export const withoutAttachmentData = (
+  messages: ReadonlyArray<Message>
+): ReadonlyArray<Message> =>
+  messages.map((message) => {
+    if (!message.parts.some((part) => part._tag === "Image")) return message
+    return {
+      ...message,
+      parts: message.parts.map((part) =>
+        part._tag === "Image"
+          ? { ...part, attachment: { ...part.attachment, data: "" } }
+          : part
+      )
+    }
+  })
 
 /**
  * `Review.markRouted` handler — record that the stored review's critical/major
@@ -1360,8 +1381,29 @@ const HandlersLayer = JinglerRpcs.toLayer({
       if (chatId === `c_${session.id}_1`) {
         yield* TranscriptStore.adoptLegacy(sessionId, chatId)
       }
-      return yield* TranscriptStore.list(chatId)
+      return withoutAttachmentData(yield* TranscriptStore.list(chatId))
     }).pipe(Effect.orElseSucceed(() => [])),
+  /**
+   * The bytes `Sessions.transcript` left out, one attachment at a time.
+   *
+   * Reads the whole transcript to find one image, which sounds wasteful and is
+   * the right trade: the read happens in MAIN, where a 46MB parse is a
+   * measurable but survivable cost that is immediately collected, and it saves
+   * the renderer — where the same bytes are retained for the life of the actor
+   * and where neither V8 nor PartitionAlloc give a spike's pages back.
+   */
+  "Sessions.attachment": ({ chatId, attachmentId }) =>
+    Effect.gen(function* () {
+      const messages = yield* TranscriptStore.list(chatId)
+      for (const message of messages) {
+        for (const part of message.parts) {
+          if (part._tag !== "Image") continue
+          if (part.attachment.id !== attachmentId) continue
+          return part.attachment.data
+        }
+      }
+      return null
+    }).pipe(Effect.orElseSucceed(() => null)),
   "Sessions.diff": ({ id }) => sessionDiff(id),
   // The streaming agent seam: unwrap the runner's `Stream<StreamEvent>` so the
   // renderer subscribes to normalized events, harness-agnostic.
@@ -1604,6 +1646,24 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "BrowserPreview.setVisible": ({ visible }) =>
     Effect.flatMap(PreviewViewService, (b) => b.setVisible(visible)),
   "BrowserPreview.close": () => Effect.flatMap(PreviewViewService, (b) => b.close()),
+
+  // Browser control — the SAME native view, driven by an agent (via the
+  // browser-control MCP) so it can QA a preview URL where the operator watches.
+  // Each op reveals the dock inside PreviewViewService.
+  "BrowserControl.navigate": ({ url }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlNavigate(url)),
+  "BrowserControl.screenshot": () =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlScreenshot()),
+  "BrowserControl.click": ({ selector }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlClick(selector)),
+  "BrowserControl.type": ({ selector, text }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlType(selector, text)),
+  "BrowserControl.readText": () =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlReadText()),
+  "BrowserControl.evaluate": ({ expression }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlEvaluate(expression)),
+  "BrowserControl.waitForSelector": ({ selector, timeoutMs }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlWaitForSelector(selector, timeoutMs)),
 
   "Asset.read": (input) => assetRead(input),
   "Asset.reveal": (input) => assetReveal(input),
