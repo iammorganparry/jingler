@@ -46,6 +46,20 @@ describe("previewDockMachine", () => {
     expect(store.get("jingler.browser.visible")).toBe("false")
   })
 
+  it("REVEAL_BROWSER shows the dock and focuses the browser tab", () => {
+    const actor = start()
+    // Looking at an asset tab, dock hidden — the state an agent QA call interrupts.
+    actor.send({ type: "OPEN_ASSET", sessionId: "s1", path: "docs/a.md" })
+    actor.send({ type: "TOGGLE" })
+    expect(actor.getSnapshot().matches("hidden")).toBe(true)
+    expect(actor.getSnapshot().context.activeId).toBe(assetTabId("s1", "docs/a.md"))
+
+    // An agent drives the browser: the dock opens and the Browser tab is focused.
+    actor.send({ type: "REVEAL_BROWSER" })
+    expect(actor.getSnapshot().matches("shown")).toBe(true)
+    expect(actor.getSnapshot().context.activeId).toBe(BROWSER_TAB_ID)
+  })
+
   it("restores visibility, side and open paths from storage", () => {
     store.set("jingler.browser.visible", "true")
     store.set("jingler.browser.side", "bottom")
