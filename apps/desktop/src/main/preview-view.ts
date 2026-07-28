@@ -44,10 +44,23 @@ import type { BrowserBounds } from "@jingler/core"
 import { BrowserControlError, BrowserPreviewError } from "@jingler/core"
 import { pathToFileURL } from "node:url"
 import { BrowserWindow, WebContentsView } from "electron"
-import { Context, Effect, Layer } from "effect"
+import { Context, Duration, Effect, Layer } from "effect"
 
 /** Which tab a native view belongs to. */
 export type PreviewOwner = "browser" | "asset"
+
+/**
+ * The browser view's own persistent session, isolated from the app's default
+ * session. The view can now be SCRIPTED by an agent (BrowserControl.evaluate et
+ * al.), so its cookies must not be the operator's default-session cookies —
+ * a partition confines whatever the QA page logs into to this one view. It does
+ * not (and cannot) stop scripting the page currently loaded; that is bounded by
+ * the same trust boundary as every other privileged RPC. See the PR review note.
+ */
+const BROWSER_PARTITION = "persist:jingler-browser-preview"
+
+/** Hard ceiling on `controlWaitForSelector`, so a bad caller can't pin the RPC. */
+const MAX_WAIT_MS = 30_000
 
 /**
  * Main→renderer push: "an agent is driving the browser — open the Preview dock
@@ -177,7 +190,14 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
     const existing = viewFor(owner)
     if (existing) return existing
     const view = new WebContentsView({
-      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false }
+      webPreferences: {
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        // Only the browsable view is isolated; the asset view is a file:// PDF
+        // in Chromium's viewer with no login state to leak.
+        ...(owner === "browser" ? { partition: BROWSER_PARTITION } : {})
+      }
     })
     view.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
     view.webContents.on("will-navigate", (event, url) => {
@@ -251,7 +271,13 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
             const v = ensure("browser")
             if (!v) return
             v.setBounds(toRect(bounds))
-            load(v, url)
+            // Adopt a page an agent already navigated to (controlNavigate) rather
+            // than reloading over it. The renderer opens with its own DEFAULT_URL
+            // on first paint, unaware the QA target is already in the view — and
+            // clobbering it here would point every subsequent screenshot/click at
+            // the wrong page. A fresh view (getURL empty / about:blank) still loads.
+            const current = v.webContents.getURL()
+            if (current === "" || current === "about:blank") load(v, url)
             showOnly("browser")
           })
         : rejectBadUrl(url),
@@ -328,10 +354,20 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
 
     controlType: (selector, text) =>
       withPage("type", async (wc) => {
+        // Set the value through the ELEMENT-PROTOTYPE setter, not `el.value = …`.
+        // React installs its own `value` setter to track the last value it wrote;
+        // assigning directly leaves that tracker equal to the new DOM value, so
+        // React's onChange treats the synthetic `input` as a no-op and controlled
+        // components snap back. The native setter bypasses the tracker, which is
+        // how testing-library/user-event drive React inputs too.
         const hit = await wc.executeJavaScript(
           `(() => { const el = document.querySelector(${JSON.stringify(selector)});` +
             ` if (!el) return false; el.focus();` +
-            ` if ('value' in el) { el.value = ${JSON.stringify(text)}; }` +
+            ` const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype` +
+            ` : el instanceof HTMLInputElement ? HTMLInputElement.prototype : null;` +
+            ` const setter = proto && Object.getOwnPropertyDescriptor(proto, 'value')?.set;` +
+            ` if (setter) setter.call(el, ${JSON.stringify(text)});` +
+            ` else if ('value' in el) { el.value = ${JSON.stringify(text)}; }` +
             ` el.dispatchEvent(new Event('input', { bubbles: true }));` +
             ` el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`
         )
@@ -353,19 +389,35 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
         return { result: typeof result === "string" ? result : String(result ?? "") }
       }),
 
-    controlWaitForSelector: (selector, timeoutMs) =>
-      withPage("waitForSelector", async (wc) => {
-        await wc.executeJavaScript(
-          `new Promise((resolve, reject) => {` +
+    controlWaitForSelector: (selector, timeoutMs) => {
+      // Clamp first: a caller passing 1e12 must not be able to pin the RPC.
+      const budget = Math.min(Math.max(Math.trunc(Number(timeoutMs)) || 0, 0), MAX_WAIT_MS)
+      return withPage("waitForSelector", async (wc) => {
+        const found = await wc.executeJavaScript(
+          `new Promise((resolve) => {` +
             ` const sel = ${JSON.stringify(selector)};` +
             ` if (document.querySelector(sel)) return resolve(true);` +
             ` const start = Date.now();` +
             ` const iv = setInterval(() => {` +
             ` if (document.querySelector(sel)) { clearInterval(iv); resolve(true); }` +
-            ` else if (Date.now() - start > ${Number(timeoutMs)}) { clearInterval(iv);` +
-            ` reject(new Error("Timed out waiting for selector: " + sel)); }` +
+            ` else if (Date.now() - start > ${budget}) { clearInterval(iv); resolve(false); }` +
             ` }, 100); })`
         )
-      })
+        if (!found) throw new Error(`Timed out waiting for selector: ${selector}`)
+      }).pipe(
+        // Backstop the in-page timer in the MAIN process: a navigation, reload or
+        // HMR refresh destroys the script context while the poll is pending, so
+        // the injected Promise never settles and `executeJavaScript` would hang
+        // forever. This bounds the whole op regardless.
+        Effect.timeoutFail({
+          duration: Duration.millis(budget + 2_000),
+          onTimeout: () =>
+            new BrowserControlError({
+              op: "waitForSelector",
+              message: `Timed out waiting for selector: ${selector}`
+            })
+        })
+      )
+    }
   }
 })
