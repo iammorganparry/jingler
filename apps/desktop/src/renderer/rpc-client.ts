@@ -658,6 +658,25 @@ export const rpc = {
     source: string
     author: "user" | "agent"
   }): Promise<PlanDocument> => run((c) => c.Plan.updateDocument(input)),
+  planWatch: (
+    sessionId: string,
+    onDocument: (document: PlanDocument) => void
+  ): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then((client) => {
+      if (cancelled) return
+      fiber = runtime.runFork(
+        client.Plan.watch({ sessionId }).pipe(
+          Stream.runForEach((document) => Effect.sync(() => onDocument(document)))
+        )
+      )
+    })
+    return () => {
+      cancelled = true
+      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
+    }
+  },
   reviewWatch: (
     sessionId: string,
     chatId: string,

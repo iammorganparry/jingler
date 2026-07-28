@@ -1568,6 +1568,15 @@ const HandlersLayer = JinglerRpcs.toLayer({
       ),
       Effect.orElseSucceed(() => null)
     ),
+  "Plan.watch": ({ sessionId }) =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const session = yield* SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
+        if (session === null || !session.worktreePath) return Stream.empty
+        const store = yield* PlanStore
+        return store.watch(session.worktreePath, session.id, session.activeChatId)
+      })
+    ),
   "Plan.updateDocument": ({ sessionId, planId, baseRevision, source, author }) =>
     SessionStore.get(sessionId).pipe(
       Effect.map((session) => session.worktreePath),

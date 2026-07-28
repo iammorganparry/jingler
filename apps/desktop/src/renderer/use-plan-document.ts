@@ -11,32 +11,12 @@ import { planDocumentMachine } from "./plan-document-machine.js"
 import { rpc } from "./rpc-client.js"
 
 const listeners = new Map<string, Set<(document: PlanDocument) => void>>()
-const pollers = new Map<
-  string,
-  { timer: ReturnType<typeof setTimeout> | null; stopped: boolean }
->()
+// One live `Plan.watch` stream per session, shared by all subscribers; the value
+// is its stop handle. Replaces the previous fixed-interval `Plan.current` poll.
+const watchers = new Map<string, () => void>()
 
 const publish = (sessionId: string, document: PlanDocument): void => {
   for (const listener of listeners.get(sessionId) ?? []) listener(document)
-}
-
-const schedulePoll = (
-  sessionId: string,
-  poller: { timer: ReturnType<typeof setTimeout> | null; stopped: boolean },
-  delay: number
-): void => {
-  poller.timer = setTimeout(() => {
-    void rpc
-      .planCurrent(sessionId)
-      .then((document) => {
-        if (poller.stopped) return
-        if (document !== null) publish(sessionId, document)
-        schedulePoll(sessionId, poller, document === null ? 5000 : 2000)
-      })
-      .catch(() => {
-        if (!poller.stopped) schedulePoll(sessionId, poller, 5000)
-      })
-  }, delay)
 }
 
 const subscribe = (
@@ -46,20 +26,22 @@ const subscribe = (
   const existing = listeners.get(sessionId) ?? new Set()
   existing.add(listener)
   listeners.set(sessionId, existing)
-  if (!pollers.has(sessionId)) {
-    const poller = { timer: null, stopped: false }
-    pollers.set(sessionId, poller)
-    schedulePoll(sessionId, poller, 1500)
+  if (!watchers.has(sessionId)) {
+    // File-watch fires on the agent's writes AND external edits, and on the
+    // first write that creates the plan (the watcher is on the directory).
+    watchers.set(
+      sessionId,
+      rpc.planWatch(sessionId, (document) => publish(sessionId, document))
+    )
   }
   return () => {
     existing.delete(listener)
     if (existing.size > 0) return
     listeners.delete(sessionId)
-    const poller = pollers.get(sessionId)
-    if (poller !== undefined) {
-      poller.stopped = true
-      if (poller.timer !== null) clearTimeout(poller.timer)
-      pollers.delete(sessionId)
+    const stop = watchers.get(sessionId)
+    if (stop !== undefined) {
+      stop()
+      watchers.delete(sessionId)
     }
   }
 }

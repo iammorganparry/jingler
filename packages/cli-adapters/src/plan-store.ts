@@ -17,11 +17,14 @@ import {
   updatePlanCriterionSource
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Stream } from "effect"
 import { AppPaths } from "./app-paths.js"
 import { legacyPlanToMdx, parsePlanMdx } from "./plan-mdx.js"
 
 type PlanStoreEnv = FileSystem.FileSystem | Path.Path | AppPaths
+
+/** Editors save a file two or three times within a few ms; collapse the burst. */
+const WATCH_DEBOUNCE_MS = 150
 
 interface PlanEnvelope {
   readonly id: string
@@ -602,6 +605,43 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           return (yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false))) ? [file] : []
         })
 
+      /**
+       * Live-watch the canonical plan file, emitting the freshly-read document
+       * on every external write. Replaces the renderer's fixed-interval poll.
+       *
+       * Modelled on `ThemeService.watch` — watch the DIRECTORY (so the first
+       * write, which creates `current-plan.mdx`, is seen without a restart),
+       * debounce editors' multi-save bursts, re-read through the same lock as
+       * `readDocument`, and end silently if the OS watcher dies rather than take
+       * the app down with it. `null` reads (plan deleted / mid-write garbage)
+       * are filtered so subscribers only ever see a valid document.
+       *
+       * **Consume with `Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(...)))`,
+       * never the generated accessor** — an `Effect<Stream<…>>` type-checks where
+       * a `Stream` is wanted and silently yields a stream-of-one-stream. Same
+       * shape and reason as `Theme.watch` / `Review.watch`.
+       */
+      const watch = (
+        worktreePath: string,
+        sessionId?: string,
+        producingChatId?: string
+      ): Stream.Stream<PlanDocument, never, PlanStoreEnv> =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem
+            const dir = yield* dirFor(worktreePath)
+            yield* fs
+              .makeDirectory(dir, { recursive: true })
+              .pipe(Effect.orElseSucceed(() => undefined))
+            return fs.watch(dir).pipe(
+              Stream.debounce(WATCH_DEBOUNCE_MS),
+              Stream.mapEffect(() => readDocument(worktreePath, sessionId, producingChatId)),
+              Stream.filter((document): document is PlanDocument => document !== null),
+              Stream.catchAll(() => Stream.empty)
+            )
+          })
+        )
+
       const removeAll = (worktreePath: string): Effect.Effect<void, never, PlanStoreEnv> =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
@@ -615,6 +655,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         fileFor,
         currentFileFor,
         readDocument,
+        watch,
         promoteDocument,
         updateDocument,
         setCriterionStatus,

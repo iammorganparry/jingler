@@ -323,6 +323,33 @@ test("inline (WYSIWYG) editing a section persists to the canonical source", asyn
   expect(endRevision).toBeGreaterThan(startRevision)
 })
 
+test("an external write to the plan file live-updates the open editor (Plan.watch)", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session()
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await proposePlan(launched.window)
+
+  const file = currentPlanPath(launched)
+  const persisted = readFileSync(file, "utf8")
+  const revision = Number(/^revision:\s*(\d+)$/m.exec(persisted)?.[1] ?? 0)
+  // No local edits are pending, so a higher-revision external write is adopted
+  // (not a conflict) and must appear without the old fixed-interval poll.
+  const remote = persisted
+    .replace(/^revision:\s*\d+$/m, `revision: ${revision + 1}`)
+    .replace("Implement stages in order", "Implement stages in order WATCH_LIVE_UPDATE")
+  writeFileSync(file, remote)
+
+  await launched.window.getByRole("tab", { name: "Rendered" }).click()
+  await expect(launched.window.getByText(/WATCH_LIVE_UPDATE/)).toBeVisible({
+    timeout: 10_000
+  })
+})
+
 test("Claude, Codex, and opencode share native plan mode", async ({ launchApp }) => {
   for (const cli of ["claude", "codex", "opencode"] as const) {
     const launched = await launchApp({

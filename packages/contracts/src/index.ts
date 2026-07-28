@@ -898,6 +898,17 @@ export class JinglerRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
+  /**
+   * Live-stream the canonical PRD as it changes on disk — the agent writing a
+   * revision, or an external edit to `current-plan.mdx`. Replaces the renderer's
+   * fixed-interval poll of `Plan.current`. Emits the full document on each write.
+   */
+  Rpc.make("Plan.watch", {
+    success: PlanDocument,
+    stream: true,
+    payload: { sessionId: Schema.String }
+  }),
+
   /** Compare-and-swap the canonical source after safe MDX validation. */
   Rpc.make("Plan.updateDocument", {
     success: PlanDocument,

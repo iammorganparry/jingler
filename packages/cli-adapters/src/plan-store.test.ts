@@ -7,7 +7,7 @@ import {
 } from "node:fs"
 import { basename, join } from "node:path"
 import { FileSystem, Path } from "@effect/platform"
-import { Effect, Either, Layer } from "effect"
+import { Chunk, Effect, Either, Layer, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { scriptedPlan } from "./adapter.js"
 import { AppPaths } from "./app-paths.js"
@@ -71,6 +71,42 @@ describe("PlanStore canonical document", () => {
     expect(persisted).toContain(SOURCE.trimStart())
     expect(planFileName("ignored")).toBe("current-plan")
   })
+
+  it("watch emits the freshly-read document on an external write", async () => {
+    // Real filesystem watcher — a fake emitter would pass while `fs.watch`
+    // silently no-ops. Mirrors the ThemeService.watch test.
+    const first = await run(promote())
+    expect(first.revision).toBe(1)
+    const file = await run(PlanStore.currentFileFor(WT))
+    const c2 = readFileSync(file, "utf8")
+      .replace(/^revision:\s*1$/m, "revision: 2")
+      .replace("One document is authoritative.", "Edited externally.")
+
+    // Rewrite idempotently until the (async-attaching) watcher delivers an
+    // event; `Stream.take(1)` then completes. The interval MUST exceed the
+    // watch debounce (150ms) or every write resets the debounce timer and it
+    // never fires.
+    const interval = setInterval(() => {
+      try {
+        writeFileSync(file, c2)
+      } catch {
+        // ignore mid-rename races
+      }
+    }, 300)
+    try {
+      const chunk = await run(
+        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT))).pipe(
+          Stream.take(1),
+          Stream.runCollect
+        )
+      )
+      const document = Chunk.toReadonlyArray(chunk)[0]
+      expect(document?.revision).toBe(2)
+      expect(document?.source).toContain("Edited externally.")
+    } finally {
+      clearInterval(interval)
+    }
+  }, 15_000)
 
   it("round-trips the canonical source and monotonically increments revisions", async () => {
     const { first, second, read } = await run(
