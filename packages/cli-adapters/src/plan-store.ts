@@ -549,12 +549,14 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       const markInterrupted = (
         worktreePath: string,
         sessionId: string,
-        producingChatId: string
+        producingChatId: string,
+        updatedBefore?: string
       ): Effect.Effect<PlanDocument | null, never, PlanStoreEnv> =>
         Effect.gen(function* () {
           const current = yield* readDocument(worktreePath, sessionId, producingChatId)
           if (
             current === null ||
+            (updatedBefore !== undefined && current.updatedAt > updatedBefore) ||
             !["proposed", "revising", "approved", "executing"].includes(current.status)
           ) return current
           return yield* updateDocument(worktreePath, {

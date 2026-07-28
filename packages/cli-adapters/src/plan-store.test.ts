@@ -224,6 +224,25 @@ describe("PlanStore canonical document", () => {
     expect(result.unchanged).toStrictEqual(result.stale)
   })
 
+  it("does not stale a plan created after startup recovery began", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const proposed = yield* promote()
+        const recovered = yield* PlanStore.markInterrupted(
+          WT,
+          "s1",
+          "c1",
+          "2000-01-01T00:00:00.000Z"
+        )
+        return { proposed, recovered }
+      })
+    )
+
+    expect(result.recovered).toStrictEqual(result.proposed)
+    expect(result.recovered?.status).toBe("proposed")
+    expect(result.recovered?.revision).toBe(1)
+  })
+
   it("imports current-plan.json once without losing prose, comments, status, or revision", async () => {
     const dir = join(temp.root, ".jingler", "terminal")
     mkdirSync(dir, { recursive: true })

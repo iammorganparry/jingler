@@ -85,7 +85,7 @@ const prefetchModels = Effect.gen(function* () {
   yield* ModelsService.catalog(clis)
 }).pipe(Effect.ignore)
 
-const recoverInterruptedPlans = Effect.gen(function* () {
+const recoverInterruptedPlans = (updatedBefore: string) => Effect.gen(function* () {
   const sessions = yield* SessionStore.list()
   yield* Effect.forEach(
     sessions,
@@ -94,7 +94,8 @@ const recoverInterruptedPlans = Effect.gen(function* () {
         ? PlanStore.markInterrupted(
             session.worktreePath,
             session.id,
-            session.activeChatId
+            session.activeChatId,
+            updatedBefore
           ).pipe(
             Effect.asVoid,
             Effect.catchAllCause((cause) =>
@@ -333,7 +334,7 @@ if (!gotPrimaryLock) {
     // their exact canonical revisions in parallel, but never put filesystem
     // recovery on the window-creation path: a corrupt artifact or unavailable
     // volume must not launch Jingler with no window.
-    void runtime.runPromise(recoverInterruptedPlans)
+    void runtime.runPromise(recoverInterruptedPlans(new Date().toISOString()))
     // Not awaited — the catalogue warms in the background while the window opens.
     void runtime.runPromise(prefetchModels)
 

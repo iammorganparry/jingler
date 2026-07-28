@@ -209,8 +209,16 @@ function PartView({
       return (
         <PlanCard
           plan={part.plan}
-          onApprove={(executionMode) => onApprovePlan?.(part.plan.id, executionMode)}
-          onResume={() => onResumePlan?.(part.plan.id)}
+          onApprove={
+            onApprovePlan === undefined
+              ? undefined
+              : (executionMode) => onApprovePlan(part.plan.id, executionMode)
+          }
+          onResume={
+            onResumePlan === undefined
+              ? undefined
+              : () => onResumePlan(part.plan.id)
+          }
           onOpenReview={onOpenPlanReview}
         />
       )
