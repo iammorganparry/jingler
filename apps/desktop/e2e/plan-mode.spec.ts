@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join } from "node:path"
 import { DEFAULT_PLAN_TEMPLATE } from "@jingler/core"
 import type { Page } from "@playwright/test"
@@ -285,7 +285,7 @@ test("mermaid fences render as diagrams, and a broken fence degrades to an error
   await expect(launched.window.getByText("Diagram error")).toBeVisible({
     timeout: 20_000
   })
-  await expect(launched.window.getByText(/Rollout|Testing|Risks/)).toBeVisible()
+  await expect(launched.window.getByText(/Rollout|Testing|Risks/).first()).toBeVisible()
 })
 
 test("inline (WYSIWYG) editing a section persists to the canonical source", async ({
@@ -350,6 +350,37 @@ test("an external write to the plan file live-updates the open editor (Plan.watc
   })
 })
 
+test("the Plan Review tab is always present and can seed a draft to author", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session()
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+
+  // Present with NO plan proposed yet (previously gated on a plan existing).
+  const tab = launched.window.getByRole("button", { name: "Plan Review" }).first()
+  await expect(tab).toBeVisible()
+  await tab.click()
+
+  // Empty state offers a way to start authoring a plan for the agent.
+  await launched.window.getByRole("button", { name: "Start a plan" }).click()
+
+  // A blank draft (from the template) appears and is editable.
+  await expect(
+    launched.window.getByRole("tab", { name: "Edit", exact: true })
+  ).toBeVisible({ timeout: 20_000 })
+  await expect
+    .poll(() => readFileSync(currentPlanPath(launched), "utf8"))
+    .toContain('status: "draft"')
+  // A draft (no agent run yet) offers a handoff, not the no-op Revise/Approve.
+  await expect(
+    launched.window.getByRole("button", { name: "Send to agent" })
+  ).toBeVisible()
+})
+
 test("Claude, Codex, and opencode share native plan mode", async ({ launchApp }) => {
   for (const cli of ["claude", "codex", "opencode"] as const) {
     const launched = await launchApp({
@@ -369,7 +400,17 @@ test("Claude, Codex, and opencode share native plan mode", async ({ launchApp })
     await expect(
       launched.window.getByRole("button", { name: "Plan Review" }).first()
     ).toBeVisible({ timeout: 20_000 })
-    expect(readFileSync(currentPlanPath(launched), "utf8")).toContain("jinglerPlan: 1")
+    // The Plan Review tab is now always present, so it no longer implies a plan
+    // exists — wait for the agent to actually write the canonical file.
+    await expect
+      .poll(
+        () =>
+          existsSync(currentPlanPath(launched))
+            ? readFileSync(currentPlanPath(launched), "utf8")
+            : "",
+        { timeout: 20_000 }
+      )
+      .toContain("jinglerPlan: 1")
     await launched.app.close()
   }
 })

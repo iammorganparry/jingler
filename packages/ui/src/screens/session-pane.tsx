@@ -312,7 +312,9 @@ function SessionPaneBody(props: SessionPaneProps) {
   const roomy = atLeast(useWidthTier(), "wide")
   const splitAvailable =
     activeTab === BUILTIN_TAB.conversation &&
-    tabs.some((c) => c.id === BUILTIN_TAB.plan) &&
+    // The plan tab is now always present; only offer the split once there is an
+    // actual plan to show beside the conversation.
+    tabCtx.hasPlan &&
     roomy
   const splitOpen = split && splitAvailable
   // What this session's agent is doing — drives the tab bar's pill.

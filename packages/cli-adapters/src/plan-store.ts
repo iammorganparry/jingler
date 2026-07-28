@@ -9,6 +9,7 @@ import type {
 } from "@jingler/core"
 import {
   appendPlanAnnotationSource,
+  DEFAULT_PLAN_TEMPLATE,
   planDocumentToPlan,
   PlanConflictError,
   PlanPersistenceError,
@@ -301,6 +302,34 @@ export class PlanStore extends Effect.Service<PlanStore>()(
             )
           })
         )
+
+      /**
+       * Create a blank, user-authored draft plan from DEFAULT_PLAN_TEMPLATE so
+       * the operator can start filling in a plan for the agent BEFORE any agent
+       * run has proposed one. Idempotent: if a canonical plan already exists
+       * (agent-proposed or a prior draft) it is returned untouched — this never
+       * clobbers real content.
+       */
+      const startDraft = (
+        worktreePath: string,
+        sessionId: string,
+        producingChatId: string
+      ): Effect.Effect<
+        PlanDocument,
+        PlanValidationError | PlanPersistenceError,
+        PlanStoreEnv
+      > =>
+        Effect.gen(function* () {
+          const current = yield* readCanonical(worktreePath)
+          if (current !== null) return current
+          return yield* promoteDocument(worktreePath, {
+            sessionId,
+            producingChatId,
+            source: DEFAULT_PLAN_TEMPLATE,
+            status: "draft",
+            author: "user"
+          })
+        })
 
       const promoteDocument = (
         worktreePath: string,
@@ -656,6 +685,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         currentFileFor,
         readDocument,
         watch,
+        startDraft,
         promoteDocument,
         updateDocument,
         setCriterionStatus,

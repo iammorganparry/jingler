@@ -386,6 +386,24 @@ export function ConversationPane({
       }
       onRevise={() => planId && convo.revisePlan(planId)}
       onComment={(stepId, body) => planId && convo.commentPlanStep(planId, stepId, body)}
+      onStartDraft={canonicalPlan.startDraft}
+      onSendToAgent={() => {
+        // Hand the user-authored draft to the agent as a plan-mode turn: switch
+        // into plan mode and send the draft MDX as the starting point. The agent
+        // proposes a refined plan, which replaces the draft as the canonical doc.
+        const source = canonicalPlan.draft ?? canonicalPlan.document?.source ?? ""
+        convo.setMode("plan")
+        convo.sendPrompt(
+          [
+            "I've drafted the plan below. Treat it as the starting point:",
+            "review it, fill in the gaps, and propose a complete plan.",
+            "",
+            "````mdx plan",
+            source.trim(),
+            "````"
+          ].join("\n")
+        )
+      }}
       onEditDocument={canonicalPlan.edit}
       onSaveDocument={canonicalPlan.save}
       onRetryDocument={canonicalPlan.retry}

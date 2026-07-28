@@ -60,6 +60,7 @@ import {
   GhError,
   GitError,
   PlanConflictError,
+  PlanPersistenceError,
   resolveFindings,
   ReviewError,
   reviewModelFor,
@@ -1567,6 +1568,29 @@ const HandlersLayer = JinglerRpcs.toLayer({
           : Effect.succeed(null)
       ),
       Effect.orElseSucceed(() => null)
+    ),
+  "Plan.startDraft": ({ sessionId }) =>
+    SessionStore.get(sessionId).pipe(
+      // Collapse a missing session into the RPC's declared error union
+      // (SessionNotFoundError is not part of it).
+      Effect.catchAll(() =>
+        Effect.fail(
+          new PlanPersistenceError({
+            message: "This session has no plan worktree.",
+            cause: "no-session"
+          })
+        )
+      ),
+      Effect.flatMap((session) =>
+        session.worktreePath
+          ? PlanStore.startDraft(session.worktreePath, session.id, session.activeChatId)
+          : Effect.fail(
+              new PlanPersistenceError({
+                message: "This session has no plan worktree.",
+                cause: "no-worktree"
+              })
+            )
+      )
     ),
   "Plan.watch": ({ sessionId }) =>
     Stream.unwrap(

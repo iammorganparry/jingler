@@ -70,10 +70,13 @@ describe("visibleTabs", () => {
     expect(ids[1]).toBe("github-issues.issue")
   })
 
-  it("adds Plan only for sessions with a plan", () => {
+  it("shows Plan for any worktree-backed session, even before a plan exists", () => {
+    // The tab is now always present for a worktree session so the operator can
+    // author a plan for the agent; it needs a worktree to hold current-plan.mdx.
     const s = session({ id: "a" })
+    expect(idsFor(s, { hasPlan: false })).toContain("plan")
     expect(idsFor(s, { hasPlan: true })).toContain("plan")
-    expect(idsFor(s, { hasPlan: false })).not.toContain("plan")
+    expect(idsFor(session({ id: "b", worktreePath: undefined }))).not.toContain("plan")
   })
 
   it("swaps Changes for Review once a PR exists", () => {

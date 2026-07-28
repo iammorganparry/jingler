@@ -89,6 +89,15 @@ export function usePlanDocument(sessionId: string) {
     }
   })
 
+  // Create a blank draft from the template so the operator can start authoring a
+  // plan for the agent before any run has proposed one. The created document
+  // flows back through Plan.watch; publishing here just surfaces it immediately.
+  const startDraft = useCallback(() => {
+    void rpc
+      .planStartDraft(sessionId)
+      .then((document) => publish(sessionId, document))
+      .catch(() => {})
+  }, [sessionId])
   const edit = useCallback((source: string) => send({ type: "EDIT", source }), [send])
   const save = useCallback(() => send({ type: "SAVE_NOW" }), [send])
   const retry = useCallback(() => send({ type: "RETRY" }), [send])
@@ -146,6 +155,7 @@ export function usePlanDocument(sessionId: string) {
     acceptRemote,
     setCriterion,
     annotate,
+    startDraft,
     synced: snapshot.matches("clean"),
     canApprove: snapshot.matches("clean") && snapshot.context.document !== null
   }

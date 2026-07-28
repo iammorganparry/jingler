@@ -651,6 +651,8 @@ export const rpc = {
    */
   planCurrent: (sessionId: string): Promise<PlanDocument | null> =>
     run((c) => c.Plan.current({ sessionId })),
+  planStartDraft: (sessionId: string): Promise<PlanDocument> =>
+    run((c) => c.Plan.startDraft({ sessionId })),
   planUpdateDocument: (input: {
     sessionId: string
     planId: string

@@ -909,6 +909,17 @@ export class JinglerRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
+  /**
+   * Create a blank user-authored draft plan from the template so the operator
+   * can start filling in a plan for the agent before any agent run proposes one.
+   * Idempotent — returns the existing canonical plan if one is already present.
+   */
+  Rpc.make("Plan.startDraft", {
+    success: PlanDocument,
+    error: Schema.Union(PlanValidationError, PlanPersistenceError),
+    payload: { sessionId: Schema.String }
+  }),
+
   /** Compare-and-swap the canonical source after safe MDX validation. */
   Rpc.make("Plan.updateDocument", {
     success: PlanDocument,
