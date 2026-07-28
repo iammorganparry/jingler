@@ -1243,6 +1243,34 @@ const gigaplanImagesFromTranscript = (
 }
 
 /**
+ * Every message, with the base64 stripped out of its image attachments.
+ *
+ * Applied at the RPC boundary ONLY — never in `TranscriptStore`. Main's own
+ * consumers still need the real bytes: `gigaplanImagesFromTranscript` above
+ * replays them to the harness, and a store that forgot them would silently drop
+ * the operator's screenshots out of the next turn's context. This is about what
+ * crosses to the RENDERER, which is where the retention problem is.
+ *
+ * A message with no image is returned BY REFERENCE. Transcripts run to tens of
+ * megabytes and this walks all of them; copying a message to change nothing is
+ * the exact cost this function exists to avoid.
+ */
+export const withoutAttachmentData = (
+  messages: ReadonlyArray<Message>
+): ReadonlyArray<Message> =>
+  messages.map((message) => {
+    if (!message.parts.some((part) => part._tag === "Image")) return message
+    return {
+      ...message,
+      parts: message.parts.map((part) =>
+        part._tag === "Image"
+          ? { ...part, attachment: { ...part.attachment, data: "" } }
+          : part
+      )
+    }
+  })
+
+/**
  * `Plan.adversarial` handler — run a planning round and stream its events.
  *
  * Resolves the session's worktree up front and fails fast without one: the roles
@@ -2112,8 +2140,29 @@ const HandlersLayer = JinglerRpcs.toLayer({
       if (chatId === `c_${session.id}_1`) {
         yield* TranscriptStore.adoptLegacy(sessionId, chatId)
       }
-      return yield* TranscriptStore.list(chatId)
+      return withoutAttachmentData(yield* TranscriptStore.list(chatId))
     }).pipe(Effect.orElseSucceed(() => [])),
+  /**
+   * The bytes `Sessions.transcript` left out, one attachment at a time.
+   *
+   * Reads the whole transcript to find one image, which sounds wasteful and is
+   * the right trade: the read happens in MAIN, where a 46MB parse is a
+   * measurable but survivable cost that is immediately collected, and it saves
+   * the renderer — where the same bytes are retained for the life of the actor
+   * and where neither V8 nor PartitionAlloc give a spike's pages back.
+   */
+  "Sessions.attachment": ({ chatId, attachmentId }) =>
+    Effect.gen(function* () {
+      const messages = yield* TranscriptStore.list(chatId)
+      for (const message of messages) {
+        for (const part of message.parts) {
+          if (part._tag !== "Image") continue
+          if (part.attachment.id !== attachmentId) continue
+          return part.attachment.data
+        }
+      }
+      return null
+    }).pipe(Effect.orElseSucceed(() => null)),
   "Sessions.diff": ({ id }) => sessionDiff(id),
   // The streaming agent seam: unwrap the runner's `Stream<StreamEvent>` so the
   // renderer subscribes to normalized events, harness-agnostic.

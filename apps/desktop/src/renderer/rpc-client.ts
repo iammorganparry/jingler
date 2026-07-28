@@ -215,8 +215,15 @@ export const rpc = {
     run((c) => c.Sessions.renameChat({ sessionId, chatId, title })),
   sessionsCloseChat: (sessionId: string, chatId: string): Promise<Session> =>
     run((c) => c.Sessions.closeChat({ sessionId, chatId })),
+  /**
+   * A chat's transcript. Image attachments arrive with EMPTY `data` — fetch the
+   * bytes with `sessionsAttachment` when a thumbnail actually mounts.
+   */
   sessionsTranscript: (sessionId: string, chatId: string): Promise<ReadonlyArray<Message>> =>
     run((c) => c.Sessions.transcript({ sessionId, chatId })),
+  /** One image attachment's base64, or null when the id is unknown. */
+  sessionsAttachment: (chatId: string, attachmentId: string): Promise<string | null> =>
+    run((c) => c.Sessions.attachment({ chatId, attachmentId })),
   sessionsDiff: (id: string): Promise<string> => run((c) => c.Sessions.diff({ id })),
   workspaceFiles: (repoPath: string): Promise<ReadonlyArray<string>> =>
     run((c) => c.Workspace.files({ repoPath })),

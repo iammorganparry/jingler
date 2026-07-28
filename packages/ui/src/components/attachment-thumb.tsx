@@ -1,6 +1,7 @@
 import type { Attachment } from "@jingler/core"
-import { X } from "lucide-react"
+import { ImageIcon, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
+import { useAttachmentData } from "./attachment-source.js"
 
 /**
  * A thumbnail for an attached image: the image (object-cover) with its filename
@@ -8,6 +9,15 @@ import { cn } from "../lib/cn.js"
  * composer's pending attachments); omit it for a read-only transcript thumbnail.
  * Dimensions come from `className` so the same atom serves the 58px composer tile
  * and the wider transcript thumbnail.
+ *
+ * The bytes may not have arrived. A transcript's image attachments come over RPC
+ * with `data` empty — they are 80% of a transcript's weight, so they are fetched
+ * per-thumbnail instead (see `attachment-source.tsx`). The composer's own
+ * attachments always have their data inline and never reach that path.
+ *
+ * Until the bytes land, the tile renders its FRAME and filename with a muted
+ * glyph rather than a broken `<img>` or nothing at all: the layout is identical
+ * either way, so a transcript does not reflow as its images arrive.
  */
 export function AttachmentThumb({
   attachment,
@@ -18,6 +28,8 @@ export function AttachmentThumb({
   onRemove?: () => void
   className?: string
 }) {
+  const data = useAttachmentData(attachment)
+
   return (
     <div
       className={cn(
@@ -25,11 +37,17 @@ export function AttachmentThumb({
         className
       )}
     >
-      <img
-        src={`data:${attachment.mediaType};base64,${attachment.data}`}
-        alt={attachment.name}
-        className="size-full object-cover"
-      />
+      {data === null ? (
+        <div className="flex size-full items-center justify-center text-dim">
+          <ImageIcon size={14} />
+        </div>
+      ) : (
+        <img
+          src={`data:${attachment.mediaType};base64,${data}`}
+          alt={attachment.name}
+          className="size-full object-cover"
+        />
+      )}
       {onRemove && (
         <button
           type="button"
