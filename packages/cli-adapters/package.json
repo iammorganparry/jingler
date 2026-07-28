@@ -16,14 +16,15 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.207",
     "@effect/platform": "^0.96.2",
+    "@jingler/core": "workspace:*",
+    "@jingler/themes": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openai/codex-sdk": "^0.144.1",
     "@opencode-ai/sdk": "1.18.3",
-    "@jingler/core": "workspace:*",
-    "@jingler/themes": "workspace:*",
     "effect": "^3.21.4",
     "smol-toml": "^1.7.0",
-    "xstate": "^5.32.4"
+    "xstate": "^5.32.4",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@effect/platform-node": "^0.107.0",

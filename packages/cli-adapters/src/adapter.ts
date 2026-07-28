@@ -15,6 +15,7 @@ import {
   GIGAPLAN_PROPOSAL_PROMPT_MARKER
 } from "./adversarial-plan-prompt.js"
 import type { ParsedMcpServer } from "./mcp-config.js"
+import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk"
 
 /** Parameters for starting a new agent turn against a CLI. */
 export interface SessionSpec {
@@ -80,6 +81,18 @@ export interface SessionSpec {
    * `R = never` and don't each grow a service dependency.
    */
   readonly openConnector?: ParsedMcpServer | null
+
+  /**
+   * The in-process browser-control MCP server for this run (Claude only), giving
+   * the agent Jingler's own embedded browser to QA a preview URL in — the one
+   * the operator is watching — instead of a headless Chrome it spawns itself.
+   *
+   * A live `McpServer` instance, so it never crosses IPC and is never persisted.
+   * Built in `AgentRunner` from `BrowserControlPort` (which reaches
+   * `PreviewViewService`), for the same reason as `openConnector`: resolving it
+   * in the runner keeps the adapters `R = never`.
+   */
+  readonly browserMcp?: McpSdkServerConfigWithInstance | null
 
   readonly readOnly?: boolean
   /**

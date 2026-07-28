@@ -82,6 +82,14 @@ export function usePreviewDock(): PreviewDockPrefs {
     return () => window.removeEventListener("keydown", onKey)
   }, [toggle])
 
+  // Main pushes this on every BrowserControl op (an agent QA-ing a preview URL):
+  // open the dock and focus the Browser tab so the operator watches it happen.
+  // Idempotent when already shown; re-opens if the operator had closed it, which
+  // during active agent QA is the wanted behaviour, not a fight.
+  useEffect(() => {
+    return window.jingler.onPreviewReveal(() => send({ type: "REVEAL_BROWSER" }))
+  }, [send])
+
   return {
     visible: state.matches("shown"),
     toggle,

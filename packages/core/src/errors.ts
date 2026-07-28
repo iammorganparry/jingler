@@ -163,6 +163,22 @@ export class BrowserPreviewError extends Schema.TaggedError<BrowserPreviewError>
 ) {}
 
 /**
+ * Raised when the embedded browser can't act on an AGENT QA request — a
+ * selector that matched nothing, a script that threw, a wait that timed out, or
+ * a non-http(s) navigation. `op` names the failing operation ("click",
+ * "screenshot", …) so the agent gets a specific reason back. A
+ * `Schema.TaggedError` so it encodes across the RPC boundary; the error channel
+ * for every `BrowserControl.*` procedure.
+ */
+export class BrowserControlError extends Schema.TaggedError<BrowserControlError>()(
+  "BrowserControlError",
+  {
+    op: Schema.String,
+    message: Schema.String
+  }
+) {}
+
+/**
  * Raised when a theme cannot be read, written or deleted — a malformed JSON
  * file in `~/jingler/themes`, a write to a built-in id, or an import whose
  * shape isn't a VS Code theme.
