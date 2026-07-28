@@ -357,7 +357,7 @@ export function ConversationPane({
       draft={canonicalPlan.draft}
       remote={canonicalPlan.remote}
       syncState={canonicalPlan.state}
-      syncError={canonicalPlan.error}
+      syncError={canonicalPlan.error ?? convo.planActionError}
       canApprove={canonicalPlan.canApprove}
       compact={view === "split"}
       patch={convo.patch}
@@ -492,8 +492,17 @@ export function ConversationPane({
           onSetReasoning={convo.setReasoning}
           question={convo.question}
           onAnswerQuestion={convo.answerQuestion}
-          onApprovePlan={(id) => convo.approvePlan(id)}
-          onResumePlan={(id) => convo.resumePlan(id)}
+          onApprovePlan={
+            canonicalPlan.canApprove && canonicalPlan.document !== null
+              ? (id, executionMode) =>
+                  convo.approvePlan(id, executionMode, canonicalPlan.document?.revision)
+              : undefined
+          }
+          onResumePlan={
+            canonicalPlan.canApprove && canonicalPlan.document !== null
+              ? (id) => convo.resumePlan(id, canonicalPlan.document?.revision)
+              : undefined
+          }
           onOpenPlanReview={onOpenPlanReview}
           plan={convo.plan}
           draft={draft.text}

@@ -10,14 +10,17 @@ import type {
   PlanStep,
   PlanStepCode
 } from "@jingler/core"
-import { DEFAULT_PLAN_TEMPLATE } from "@jingler/core"
+import {
+  DEFAULT_PLAN_TEMPLATE,
+  PLAN_EVIDENCE_INSTRUCTIONS
+} from "@jingler/core"
 import { planFromMdx } from "./plan-mdx.js"
 
 /**
  * Turn the plan text Claude produces via `ExitPlanMode` into a structured `Plan`.
  *
  * We can't rely on the model to emit JSON, so we ask it (via
- * `planModeInstructions`) to include a small, line-oriented ` ```plan ` block and
+ * `planModeInstructions`) to include a safe PRD ` ````mdx plan ` block and
  * parse that here. Everything is best-effort and forgiving: a missing/garbled
  * block falls back to a single step that carries the raw markdown, so the plan is
  * always renderable and never lost. Pure and deterministic given `(raw, id)` —
@@ -40,16 +43,16 @@ export type PlanChannel = "tool" | "reply"
 
 export const PLAN_MDX_REFORMAT = [
   "The submitted PRD is not valid Jingler plan MDX.",
-  "Return the SAME plan as one complete fenced ```mdx plan block.",
+  "Return the SAME plan as one complete four-backtick fenced ````mdx plan block.",
   "Use Markdown plus only Stage, Acceptance, and Annotation components.",
   "Every Stage needs a stable id, title, intent, and at least one Acceptance with a stable id.",
   "Do not change the substance of the plan; change only its format."
 ].join(" ")
 
 const OPENING: Readonly<Record<PlanChannel, string>> = {
-  tool: "When you present your plan with ExitPlanMode, put a fenced ```plan block at the top of the plan text, then your normal human-readable markdown below it.",
+  tool: "When you present your plan with ExitPlanMode, put a four-backtick fenced ````mdx plan block at the top of the plan text, then your normal human-readable markdown below it.",
   reply:
-    "When your plan is ready, put a fenced ```plan block at the top of your reply, then your normal human-readable markdown below it — and STOP there, without editing anything."
+    "When your plan is ready, put a four-backtick fenced ````mdx plan block at the top of your reply, then your normal human-readable markdown below it — and STOP there, without editing anything."
 }
 
 const SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
@@ -60,7 +63,7 @@ const SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
 
 /**
  * The plan output protocol injected for a plan-mode turn. Documents the
- * ` ```plan ` block so what the agent submits parses into structured steps. Kept
+ * ` ````mdx plan ` block so what the agent submits parses into structured steps. Kept
  * declarative: one block, documented field names, no per-call string assembly
  * elsewhere.
  */
@@ -68,11 +71,11 @@ export const planInstructions = (
   channel: PlanChannel,
   template: string = DEFAULT_PLAN_TEMPLATE
 ): string =>
-  `${OPENING[channel].replace("```plan", "```mdx plan")} Jingler renders the MDX as an interactive PRD.
+  `${OPENING[channel]} Jingler renders the MDX as an interactive PRD.
 
 ${SUBMIT_RULE[channel]}
 
-Return one fenced \`\`\`mdx plan block containing the COMPLETE PRD. Markdown is
+Return one four-backtick fenced \`\`\`\`mdx plan block containing the COMPLETE PRD. Markdown is
 allowed. The only components are <Stage>, <Acceptance>, and <Annotation>. Do not
 use imports, exports, JavaScript expressions, or arbitrary React components.
 Every Stage requires a stable unique id, title, Intent section, and at least one
@@ -83,7 +86,12 @@ replacing placeholders with task-specific content:
 
 \`\`\`mdx
 ${template.trim()}
-\`\`\``
+\`\`\`
+
+After the operator approves the plan, implementation may continue in this same
+turn. Follow this completion protocol then:
+
+${PLAN_EVIDENCE_INSTRUCTIONS.join("\n")}`
 
 /** The Claude variant, passed to the SDK as `planModeInstructions`. */
 export const planModeInstructions = (template: string = DEFAULT_PLAN_TEMPLATE): string =>
@@ -112,15 +120,25 @@ const fenced = (raw: string, lang: string): string | null => {
 }
 
 /**
- * Whether the agent actually emitted the ` ```plan ` fence we asked for.
+ * Whether the agent actually emitted the ` ````mdx plan ` fence we asked for.
  *
  * `planModeInstructions` documents the format, but prompt compliance is never
  * guaranteed — the adapter uses this to bounce a fence-less plan back for one
  * reformat rather than degrading straight to the raw fallback.
  */
 const fencedMdxPlan = (raw: string): string | null => {
-  const match = /```mdx[ \t]+plan[ \t]*\r?\n([\s\S]*?)```/i.exec(raw)
-  return match?.[1]?.replace(/\s+$/, "") ?? null
+  const opening = /^[ \t]*(`{3,})mdx[ \t]+plan[ \t]*\r?\n/im.exec(raw)
+  if (opening === null) return null
+
+  const fenceLength = opening[1]!.length
+  const bodyStart = opening.index + opening[0].length
+  const body = raw.slice(bodyStart)
+  const closings = body.matchAll(/^[ \t]*(`{3,})[ \t]*$/gm)
+  for (const closing of closings) {
+    if (closing[1]!.length < fenceLength) continue
+    return body.slice(0, closing.index).replace(/\s+$/, "")
+  }
+  return null
 }
 
 export const hasPlanBlock = (raw: string): boolean =>

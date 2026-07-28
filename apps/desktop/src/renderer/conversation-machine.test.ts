@@ -48,6 +48,7 @@ const h = vi.hoisted(() => ({
   catalogGate: Promise.resolve() as Promise<void>,
   // Same, for the skills probe — it spawns the harness, so nothing may wait on it.
   skillsGate: Promise.resolve() as Promise<void>,
+  approvalRefused: false,
   // Lets a test hold the transcript load, to drive the "typed before it lands" race.
   transcriptGate: Promise.resolve() as Promise<void>,
   transcript: [] as ReadonlyArray<Message>,
@@ -130,7 +131,14 @@ vi.mock("./rpc-client.js", () => ({
     },
     agentCommentPlanStep: async () => {},
     agentRevisePlan: async () => {},
-    agentApprovePlan: async () => {},
+    agentApprovePlan: async () =>
+      h.approvalRefused
+        ? {
+            status: "refused",
+            message: "Canonical revision 2 replaced reviewed revision 1.",
+            latestRevision: 2
+          }
+        : { status: "accepted" },
     agentSteer: async (sessionId: string, chatId: string, text: string) => {
       h.steerCalls.push({ sessionId, chatId, text })
       // Lets a test hold the reply so the turn's terminal event overtakes it —
@@ -178,6 +186,7 @@ const idle = "awaitingInput" as const
 
 beforeEach(() => {
   h.streamCb = null
+  h.approvalRefused = false
   h.agentRunCalls.length = 0
   h.diffValue = "diff-0"
   h.diffCalls = 0
@@ -1277,6 +1286,26 @@ describe("conversationMachine — PlanUpdated across turns", () => {
 
     expect(latestPlan(actor.getSnapshot().context.messages)?.steps[0]?.status).toBe("done")
     expect(actor.getSnapshot().context.sharedPlanChatId).toBe("c_other")
+    actor.stop()
+  })
+
+  it("rolls back an optimistic live approval when the canonical revision is stale", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+
+    actor.send({ type: "SEND", text: "plan it" })
+    await waitFor(actor, (snapshot) => snapshot.matches("running"))
+    emit({ _tag: "PlanProposed", plan: planFixture("proposed") })
+
+    h.approvalRefused = true
+    actor.send({ type: "APPROVE_PLAN", planId: "plan_1", revision: 1 })
+
+    await waitFor(actor, (snapshot) => snapshot.context.planActionError !== null)
+    expect(actor.getSnapshot().matches("running")).toBe(true)
+    expect(actor.getSnapshot().context.planActionError).toBe(
+      "Canonical revision 2 replaced reviewed revision 1."
+    )
+    expect(latestPlan(actor.getSnapshot().context.messages)?.status).toBe("proposed")
     actor.stop()
   })
 })

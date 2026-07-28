@@ -459,7 +459,7 @@ export interface SettingsViewProps {
   onSaveDefaultCli?: (cli: CliKind) => Promise<void> | void
   /** Custom PRD structure injected into every native planning harness. */
   planTemplate?: PlanTemplateConfig | null
-  onSavePlanTemplate?: (template: PlanTemplateConfig) => void
+  onSavePlanTemplate?: (template: PlanTemplateConfig) => Promise<void> | void
   /** Load the selectable models for a CLI (live discovery). */
   loadModels: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
   /** opencode's resolved providers + credential origins (opencode only). */

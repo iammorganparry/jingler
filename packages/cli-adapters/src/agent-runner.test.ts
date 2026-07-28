@@ -660,9 +660,13 @@ describe("AgentRunner plan mode", () => {
     const observed: {
       staleApprovalStatus: string | null
       approvedRevision: number | null
+      staleApprovalResult: string | null
+      exactApprovalResult: string | null
     } = {
       staleApprovalStatus: null,
-      approvedRevision: null
+      approvedRevision: null,
+      staleApprovalResult: null,
+      exactApprovalResult: null
     }
     const program = Effect.gen(function* () {
       const runner = yield* AgentRunner
@@ -683,11 +687,25 @@ describe("AgentRunner plan mode", () => {
               ),
               author: "user"
             })
-            yield* runner.approvePlan(SESSION, event.plan.id, "auto", proposed!.revision)
+            observed.staleApprovalResult = (
+              yield* runner.approvePlan(
+                SESSION,
+                event.plan.id,
+                "auto",
+                proposed!.revision
+              )
+            ).status
             observed.staleApprovalStatus =
               (yield* PlanStore.readDocument(temp.root))?.status ?? null
             observed.approvedRevision = edited.revision
-            yield* runner.approvePlan(SESSION, event.plan.id, "auto", edited.revision)
+            observed.exactApprovalResult = (
+              yield* runner.approvePlan(
+                SESSION,
+                event.plan.id,
+                "auto",
+                edited.revision
+              )
+            ).status
           })
         }),
         Stream.runForEach((event) => Effect.sync(() => events.push(event)))
@@ -701,6 +719,8 @@ describe("AgentRunner plan mode", () => {
     const result = await Effect.runPromise(program.pipe(Effect.provide(base())))
 
     expect(observed.staleApprovalStatus).toBe("proposed")
+    expect(observed.staleApprovalResult).toBe("refused")
+    expect(observed.exactApprovalResult).toBe("accepted")
     expect(observed.approvedRevision).toBe(2)
     expect(ranTool(result.events, "plan-edit-1")).toBe(true)
     expect(planParts(result.transcript)[0]!.plan.raw).toContain(
@@ -866,6 +886,76 @@ describe("AgentRunner plan mode", () => {
       }).pipe(Effect.provide(base()))
     )
     expect(events).toHaveLength(0)
+  })
+
+  it("resumePlan emits a terminal refusal when the reviewed revision is stale", async () => {
+    const events = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        const first = yield* PlanStore.promoteDocument(temp.root, {
+          sessionId: SESSION,
+          producingChatId: SESSION,
+          id: "stale-plan",
+          source: `# PRD: Stale plan
+
+<Stage id="01" title="Implement">
+<Acceptance id="01.1" status="pending">It works.</Acceptance>
+</Stage>`,
+          author: "agent"
+        })
+        yield* PlanStore.updateDocument(temp.root, {
+          planId: first.id,
+          baseRevision: first.revision,
+          source: first.source.replace("It works.", "The newer revision works."),
+          author: "user"
+        })
+        const out: Array<StreamEvent> = []
+        yield* runner
+          .resumePlan(SESSION, SESSION, first.id, first.revision)
+          .pipe(
+            Stream.runForEach((event) =>
+              Effect.sync(() => out.push(event))
+            )
+          )
+        return out
+      }).pipe(Effect.provide(base()))
+    )
+
+    expect(events).toStrictEqual([
+      {
+        _tag: "Failed",
+        message:
+          "Plan execution refused because canonical revision 2 replaced reviewed revision 1. Review the latest revision and approve again."
+      }
+    ])
+  })
+
+  it("does not churn a needs-verification revision on an unrelated turn", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const before = yield* PlanStore.promoteDocument(temp.root, {
+          sessionId: SESSION,
+          producingChatId: SESSION,
+          id: "waiting-plan",
+          source: `# PRD: Waiting plan
+
+<Stage id="01" title="Verify">
+<Acceptance id="01.1" status="pending">Evidence is required.</Acceptance>
+</Stage>`,
+          status: "needs-verification",
+          author: "agent"
+        })
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "auto")
+        yield* runner
+          .prompt(SESSION, SESSION, "Unrelated question")
+          .pipe(Stream.runDrain)
+        return { before, after: yield* PlanStore.readDocument(temp.root) }
+      }).pipe(Effect.provide(base()))
+    )
+
+    expect(result.after?.revision).toBe(result.before.revision)
+    expect(result.after?.status).toBe("needs-verification")
   })
 
   it("routes an open comment as a revision, then executes the revised plan", async () => {

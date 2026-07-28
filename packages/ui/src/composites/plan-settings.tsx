@@ -1,31 +1,16 @@
-import { DEFAULT_PLAN_TEMPLATE } from "@jingler/core"
+import { DEFAULT_PLAN_TEMPLATE, parsePlanMdx } from "@jingler/core"
 import { RotateCcw, Save } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Button } from "../components/button.js"
 
 export interface PlanSettingsProps {
   readonly source?: string | null
-  readonly onSave?: (source: string) => void
+  readonly onSave?: (source: string) => Promise<void> | void
 }
 
 export const validatePlanTemplate = (source: string): ReadonlyArray<string> => {
-  const errors: Array<string> = []
-  const withoutFences = source.replace(/```[\s\S]*?```/g, "")
-  if (!/^#\s+PRD\b/im.test(source)) errors.push("Add a level-one PRD title.")
-  if (/^\s*(?:import|export)\b/m.test(withoutFences) || /\{[^}\n]*\}/.test(withoutFences)) {
-    errors.push("Imports, exports, and JavaScript expressions are not allowed.")
-  }
-  const unknown = [...withoutFences.matchAll(/<\/?([A-Z][A-Za-z0-9.]*)\b/g)]
-    .map((match) => match[1]!)
-    .find((name) => !["Stage", "Acceptance", "Annotation"].includes(name))
-  if (unknown) errors.push(`Unknown component <${unknown}>.`)
-  if (!/<Stage\b[^>]*\bid="[^"]+"[^>]*\btitle="[^"]+"/.test(source)) {
-    errors.push("Add at least one Stage with quoted id and title attributes.")
-  }
-  if (!/<Acceptance\b[^>]*\bid="[^"]+"/.test(source)) {
-    errors.push("Every template needs an Acceptance criterion with a stable id.")
-  }
-  return errors
+  const result = parsePlanMdx(source)
+  return result.valid ? [] : result.diagnostics.map((diagnostic) => diagnostic.message)
 }
 
 const headingsOf = (source: string): ReadonlyArray<string> =>
@@ -34,6 +19,8 @@ const headingsOf = (source: string): ReadonlyArray<string> =>
 export function PlanSettings({ source, onSave }: PlanSettingsProps) {
   const persisted = source ?? DEFAULT_PLAN_TEMPLATE
   const [draft, setDraft] = useState(persisted)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
   const diagnostics = useMemo(() => validatePlanTemplate(draft), [draft])
   const headings = useMemo(() => headingsOf(draft), [draft])
   const dirty = draft !== persisted
@@ -99,6 +86,12 @@ export function PlanSettings({ source, onSave }: PlanSettingsProps) {
               </div>
             </div>
           )}
+          {saveError !== null && (
+            <div className="mt-4 rounded-lg border border-red/35 bg-red/5 p-3" role="alert">
+              <p className="text-[11px] font-medium text-red">Template was not saved</p>
+              <p className="mt-1 whitespace-pre-wrap text-[11px] text-text-body">{saveError}</p>
+            </div>
+          )}
         </section>
       </div>
 
@@ -114,11 +107,20 @@ export function PlanSettings({ source, onSave }: PlanSettingsProps) {
         </Button>
         <Button
           size="sm"
-          onClick={() => onSave?.(draft)}
-          disabled={!dirty || diagnostics.length > 0}
+          onClick={() => {
+            setSaving(true)
+            setSaveError(null)
+            void Promise.resolve()
+              .then(() => onSave?.(draft))
+              .catch((error: unknown) =>
+                setSaveError(error instanceof Error ? error.message : String(error))
+              )
+              .finally(() => setSaving(false))
+          }}
+          disabled={!dirty || diagnostics.length > 0 || saving}
         >
           <Save size={13} />
-          Save template
+          {saving ? "Saving…" : "Save template"}
         </Button>
       </div>
     </div>

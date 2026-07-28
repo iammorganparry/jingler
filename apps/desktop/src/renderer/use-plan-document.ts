@@ -1,4 +1,9 @@
-import type { PlanAcceptanceStatus, PlanDocument } from "@jingler/core"
+import {
+  appendPlanAnnotationSource,
+  type PlanAcceptanceStatus,
+  type PlanDocument,
+  updatePlanCriterionSource
+} from "@jingler/core"
 import type { PlanEditorSyncState } from "@jingler/ui"
 import { useMachine } from "@xstate/react"
 import { useCallback } from "react"
@@ -6,9 +11,32 @@ import { planDocumentMachine } from "./plan-document-machine.js"
 import { rpc } from "./rpc-client.js"
 
 const listeners = new Map<string, Set<(document: PlanDocument) => void>>()
+const pollers = new Map<
+  string,
+  { timer: ReturnType<typeof setTimeout> | null; stopped: boolean }
+>()
 
 const publish = (sessionId: string, document: PlanDocument): void => {
   for (const listener of listeners.get(sessionId) ?? []) listener(document)
+}
+
+const schedulePoll = (
+  sessionId: string,
+  poller: { timer: ReturnType<typeof setTimeout> | null; stopped: boolean },
+  delay: number
+): void => {
+  poller.timer = setTimeout(() => {
+    void rpc
+      .planCurrent(sessionId)
+      .then((document) => {
+        if (poller.stopped) return
+        if (document !== null) publish(sessionId, document)
+        schedulePoll(sessionId, poller, document === null ? 5000 : 2000)
+      })
+      .catch(() => {
+        if (!poller.stopped) schedulePoll(sessionId, poller, 5000)
+      })
+  }, delay)
 }
 
 const subscribe = (
@@ -18,54 +46,22 @@ const subscribe = (
   const existing = listeners.get(sessionId) ?? new Set()
   existing.add(listener)
   listeners.set(sessionId, existing)
+  if (!pollers.has(sessionId)) {
+    const poller = { timer: null, stopped: false }
+    pollers.set(sessionId, poller)
+    schedulePoll(sessionId, poller, 1500)
+  }
   return () => {
     existing.delete(listener)
-    if (existing.size === 0) listeners.delete(sessionId)
+    if (existing.size > 0) return
+    listeners.delete(sessionId)
+    const poller = pollers.get(sessionId)
+    if (poller !== undefined) {
+      poller.stopped = true
+      if (poller.timer !== null) clearTimeout(poller.timer)
+      pollers.delete(sessionId)
+    }
   }
-}
-
-const escapedId = (id: string): string => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-const xmlAttribute = (value: string): string =>
-  value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-const xmlText = (value: string): string =>
-  value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll("{", "&#123;")
-
-export const updateCriterionSource = (
-  source: string,
-  criterionId: string,
-  status: PlanAcceptanceStatus,
-  evidence: string | null
-): string => {
-  const opening = new RegExp(
-    `<Acceptance\\b(?=[^>]*\\bid="${escapedId(criterionId)}")[^>]*>`
-  )
-  return source.replace(opening, (tag) => {
-    const clean = tag
-      .replace(/\sstatus="[^"]*"/, "")
-      .replace(/\sevidence="[^"]*"/, "")
-    const proof = evidence === null ? "" : ` evidence="${xmlAttribute(evidence)}"`
-    return `${clean.slice(0, -1)} status="${status}"${proof}>`
-  })
-}
-
-export const appendAnnotationSource = (
-  source: string,
-  stageId: string | null,
-  body: string
-): string => {
-  const id = `annotation-${crypto.randomUUID()}`
-  const component = `<Annotation id="${id}"${stageId === null ? "" : ` stageId="${xmlAttribute(stageId)}"`} author="user" status="open" createdAt="${new Date().toISOString()}">
-${xmlText(body)}
-</Annotation>`
-  return `${source.trimEnd()}\n\n${component}\n`
 }
 
 export function usePlanDocument(sessionId: string) {
@@ -74,29 +70,39 @@ export function usePlanDocument(sessionId: string) {
       sessionId,
       load: () => rpc.planCurrent(sessionId),
       save: async ({ document, source }) => {
-        const saved = await rpc.planUpdateDocument({
-          sessionId,
-          planId: document.id,
-          baseRevision: document.revision,
-          source,
-          author: "user"
-        })
+        let saved: PlanDocument
+        try {
+          saved = await rpc.planUpdateDocument({
+            sessionId,
+            planId: document.id,
+            baseRevision: document.revision,
+            source,
+            author: "user"
+          })
+        } catch (error) {
+          // Effect RPC preserves the typed failure in most transports, but
+          // Electron can surface only the squashed Error. Re-read once so a
+          // compare-and-swap refusal never degrades into a generic save error
+          // or lets the next poll silently replace the operator's local draft.
+          const latest = await rpc.planCurrent(sessionId).catch(() => null)
+          if (
+            latest !== null &&
+            (latest.id !== document.id || latest.revision !== document.revision)
+          ) {
+            throw {
+              message: "The canonical plan changed while this draft was being edited.",
+              latest
+            }
+          }
+          throw error
+        }
         // Let this machine consume its save result before peers receive the
         // broadcast; otherwise its own revision looks like a remote collision.
         setTimeout(() => publish(sessionId, saved), 0)
         return saved
       },
       subscribe: (listener) => {
-        const unsubscribe = subscribe(sessionId, listener)
-        const timer = setInterval(() => {
-          void rpc.planCurrent(sessionId).then((document) => {
-            if (document !== null) listener(document)
-          }).catch(() => {})
-        }, 1000)
-        return () => {
-          clearInterval(timer)
-          unsubscribe()
-        }
+        return subscribe(sessionId, listener)
       }
     }
   })
@@ -107,18 +113,28 @@ export function usePlanDocument(sessionId: string) {
   const keepLocal = useCallback(() => send({ type: "KEEP_LOCAL" }), [send])
   const acceptRemote = useCallback(() => send({ type: "ACCEPT_REMOTE" }), [send])
   const setCriterion = useCallback(
-    (criterionId: string, status: PlanAcceptanceStatus, evidence: string | null = null) =>
-      send({
-        type: "EDIT",
-        source: updateCriterionSource(snapshot.context.draft, criterionId, status, evidence)
-      }),
+    (criterionId: string, status: PlanAcceptanceStatus, evidence: string | null = null) => {
+      const source = updatePlanCriterionSource(
+        snapshot.context.draft,
+        criterionId,
+        status,
+        evidence
+      )
+      if (source !== null) send({ type: "EDIT", source })
+    },
     [send, snapshot.context.draft]
   )
   const annotate = useCallback(
     (stageId: string | null, body: string) =>
       send({
         type: "EDIT",
-        source: appendAnnotationSource(snapshot.context.draft, stageId, body)
+        source: appendPlanAnnotationSource(snapshot.context.draft, {
+          id: `annotation-${crypto.randomUUID()}`,
+          stageId,
+          body,
+          author: "user",
+          createdAt: new Date().toISOString()
+        })
       }),
     [send, snapshot.context.draft]
   )

@@ -575,28 +575,34 @@ export const scriptedRun =
               yield* emit({ _tag: "ToolEnd", id: e.id, status: "success", meta: null, diff: e.diff, preview: e.preview })
               yield* pause
             }
-            yield* emit({
-              _tag: "Assistant",
-              text: [
-                "Steps 2, 3 and 5 are done.",
-                ...[
-                  "s_01.1",
-                  "s_02.1",
-                  "s_03.1",
-                  "s_04.1",
-                  "s_4a.1",
-                  "s_4a.2",
-                  "s_4a.3",
-                  "s_4a.4",
-                  "s_4b.1",
-                  "s_05.1",
-                  "s_06.1"
-                ].map(
-                  (criterion) =>
-                    `PLAN_RESULT criterion=${criterion} status=passed evidence=Scripted implementation completed and verified.`
-                )
-              ].join("\n")
-            })
+            const evidenceReply = [
+              "Steps 2, 3 and 5 are done.",
+              ...[
+                "s_01.1",
+                "s_02.1",
+                "s_03.1",
+                "s_04.1",
+                "s_4a.1",
+                "s_4a.2",
+                "s_4a.3",
+                "s_4a.4",
+                "s_4b.1",
+                "s_05.1",
+                "s_06.1"
+              ].map(
+                (criterion) =>
+                  `PLAN_RESULT criterion=${criterion} status=passed evidence=Scripted implementation completed and verified.`
+              )
+            ].join("\n")
+            // Claude delivers text token-by-token. Fragment the protocol across
+            // arbitrary event boundaries so the runner must parse the settled
+            // assistant message, never one delta in isolation.
+            for (let offset = 0; offset < evidenceReply.length; offset += 17) {
+              yield* emit({
+                _tag: "Assistant",
+                text: evidenceReply.slice(offset, offset + 17)
+              })
+            }
             break
           }
           if (decision._tag === "Reject" || rev >= 2) {

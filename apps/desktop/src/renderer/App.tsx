@@ -279,11 +279,10 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       // snapshots rather than leaving meters reading against the old one.
       void qc.invalidateQueries({ queryKey: ["context"] })
     })
-  const savePlanTemplate = (template: { readonly source: string }) => {
-    void rpc.configSetPlanTemplate(template).then((saved) => {
+  const savePlanTemplate = (template: { readonly source: string }) =>
+    rpc.configSetPlanTemplate(template).then((saved) => {
       qc.setQueryData(["config"], saved)
     })
-  }
 
   // Toggle a repo's starred state, persist the whole list, and update the cache.
   const toggleStar = (repoPath: string) => {

@@ -34,7 +34,7 @@ import {
   PluginId,
   ExecutionMode,
   PermissionMode,
-  PlanAcceptanceStatus,
+  PlanApprovalResult,
   PlanDocument,
   PlanTemplateConfig,
   PrFileChange,
@@ -88,6 +88,7 @@ import {
   GitError,
   PluginError,
   PlanConflictError,
+  PlanPersistenceError,
   PlanValidationError,
   ReviewError,
   SessionNotFoundError,
@@ -404,6 +405,7 @@ export class JinglerRpcs extends RpcGroup.make(
 
   /** Approve a plan — restore the exec mode and start execution. */
   Rpc.make("Agent.approvePlan", {
+    success: PlanApprovalResult,
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -862,7 +864,11 @@ export class JinglerRpcs extends RpcGroup.make(
   /** Compare-and-swap the canonical source after safe MDX validation. */
   Rpc.make("Plan.updateDocument", {
     success: PlanDocument,
-    error: Schema.Union(PlanConflictError, PlanValidationError),
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError
+    ),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -872,32 +878,6 @@ export class JinglerRpcs extends RpcGroup.make(
     }
   }),
 
-  Rpc.make("Plan.addAnnotation", {
-    success: PlanDocument,
-    error: Schema.Union(PlanConflictError, PlanValidationError),
-    payload: {
-      sessionId: Schema.String,
-      planId: Schema.String,
-      baseRevision: Schema.Number,
-      stageId: Schema.NullOr(Schema.String),
-      body: Schema.String,
-      author: Schema.Literal("user", "agent")
-    }
-  }),
-
-  Rpc.make("Plan.setCriterionStatus", {
-    success: PlanDocument,
-    error: Schema.Union(PlanConflictError, PlanValidationError),
-    payload: {
-      sessionId: Schema.String,
-      planId: Schema.String,
-      baseRevision: Schema.Number,
-      criterionId: Schema.String,
-      status: PlanAcceptanceStatus,
-      evidence: Schema.NullOr(Schema.String),
-      author: Schema.Literal("user", "agent")
-    }
-  }),
 
   Rpc.make("Review.run", {
     success: AdversarialReview,

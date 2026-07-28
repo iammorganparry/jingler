@@ -135,6 +135,15 @@ export class PlanValidationError extends Schema.TaggedError<PlanValidationError>
   }
 ) {}
 
+/** The canonical plan could not be durably read or written. */
+export class PlanPersistenceError extends Schema.TaggedError<PlanPersistenceError>()(
+  "PlanPersistenceError",
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Unknown)
+  }
+) {}
+
 /** A compare-and-swap plan write targeted an obsolete canonical revision. */
 export class PlanConflictError extends Schema.TaggedError<PlanConflictError>()(
   "PlanConflictError",

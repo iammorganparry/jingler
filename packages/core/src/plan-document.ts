@@ -71,6 +71,19 @@ export type PlanDocumentStatus = Schema.Schema.Type<typeof PlanDocumentStatus>
 export const PlanDocumentAuthor = Schema.Literal("agent", "user")
 export type PlanDocumentAuthor = Schema.Schema.Type<typeof PlanDocumentAuthor>
 
+/** Outcome of approving a live parked plan without weakening revision guards. */
+export const PlanApprovalResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("accepted")
+  }),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    message: Schema.String,
+    latestRevision: Schema.Number
+  })
+)
+export type PlanApprovalResult = Schema.Schema.Type<typeof PlanApprovalResult>
+
 /**
  * `source` is authoritative. `projection` is derived from it on every accepted
  * write and crosses RPC so the renderer never needs an MDX compiler.
@@ -136,7 +149,7 @@ export const planDocumentToPlan = (document: PlanDocument): Plan => {
 
   return {
     id: document.id,
-    summary: document.projection.title,
+    summary: document.projection.title.replace(/^PRD:\s*/i, ""),
     steps: document.projection.stages.map((stage, index) => {
       const complete = stage.acceptance.every(
         (criterion) => criterion.status === "passed" || criterion.status === "waived"

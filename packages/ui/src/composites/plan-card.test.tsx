@@ -48,6 +48,19 @@ describe("PlanCard approval", () => {
 
     expect(approvals).toStrictEqual([undefined, "auto"])
   })
+
+  it("disables inline approval until the canonical revision is available", () => {
+    render(<PlanCard plan={plan} />)
+
+    expect(screen.getByRole("button", { name: /^Approve$/ })).toHaveProperty(
+      "disabled",
+      true
+    )
+    expect(screen.getByRole("button", { name: /^Approve and auto$/ })).toHaveProperty(
+      "disabled",
+      true
+    )
+  })
 })
 
 describe("compact Plan Review", () => {

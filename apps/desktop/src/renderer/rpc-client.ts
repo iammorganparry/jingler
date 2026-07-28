@@ -46,7 +46,7 @@ import type {
   OpencodeProviderInfo,
   ProviderModels,
   PermissionMode,
-  PlanAcceptanceStatus,
+  PlanApprovalResult,
   PlanDocument,
   PlanTemplateConfig,
   PrFileChange,
@@ -381,7 +381,7 @@ export const rpc = {
     planId: string,
     executionMode?: ExecutionMode,
     revision?: number
-  ): Promise<void> =>
+  ): Promise<PlanApprovalResult> =>
     run((c) => c.Agent.approvePlan({ sessionId, planId, executionMode, revision })),
   agentSetHarness: (sessionId: string, chatId: string, cli: CliKind, model: string): Promise<void> =>
     run((c) => c.Agent.setHarness({ sessionId, chatId, cli, model })),
@@ -645,25 +645,6 @@ export const rpc = {
     source: string
     author: "user" | "agent"
   }): Promise<PlanDocument> => run((c) => c.Plan.updateDocument(input)),
-  planAddAnnotation: (input: {
-    sessionId: string
-    planId: string
-    baseRevision: number
-    stageId: string | null
-    body: string
-    author: "user" | "agent"
-  }): Promise<PlanDocument> => run((c) => c.Plan.addAnnotation(input)),
-  planSetCriterionStatus: (input: {
-    sessionId: string
-    planId: string
-    baseRevision: number
-    criterionId: string
-    status: PlanAcceptanceStatus
-    evidence: string | null
-    author: "user" | "agent"
-  }): Promise<PlanDocument> => run((c) => c.Plan.setCriterionStatus(input)),
-
-
   reviewWatch: (
     sessionId: string,
     chatId: string,

@@ -89,7 +89,7 @@ test("the PRD template validates, persists, and resets", async ({ launchApp }) =
   )
   await source.fill(`${customised}\n\n{executePlan()}`)
   await expect(first.window.getByRole("alert")).toContainText(
-    "JavaScript expressions are not allowed"
+    "Plan MDX may not contain imports, exports, or JavaScript expressions."
   )
   await expect(first.window.getByRole("button", { name: "Save template" })).toBeDisabled()
 

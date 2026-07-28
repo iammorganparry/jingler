@@ -7,6 +7,7 @@ import type {
   Message,
   PermissionMode,
   Plan,
+  PlanApprovalResult,
   PlanComment,
   QuestionAnswer,
   QuestionRequest,
@@ -79,6 +80,20 @@ import {
 
 /** Tools that write to disk — a successful one advances the matching plan step. */
 const EDIT_TOOLS = new Set(["Write", "Edit", "Update", "MultiEdit", "NotebookEdit"])
+
+const approvalAccepted: PlanApprovalResult = { status: "accepted" }
+const approvalRefused = (
+  message: string,
+  latestRevision: number
+): PlanApprovalResult => ({
+  status: "refused",
+  message,
+  latestRevision
+})
+const failedStream = (message: string): Stream.Stream<StreamEvent> => {
+  const event: StreamEvent = { _tag: "Failed", message }
+  return Stream.make(event)
+}
 
 export interface PlanEvidenceMarker {
   readonly criterionId: string
@@ -177,6 +192,7 @@ interface RunFiber {
 interface ActiveRun {
   readonly readPlan: (planId: string) => Effect.Effect<Plan | null>
   readonly applyPlan: (planId: string, f: (plan: Plan) => Plan) => Effect.Effect<void>
+  readonly markPlanExecution: (planId: string) => Effect.Effect<void>
   readonly steer: (
     text: string,
     images: ReadonlyArray<Attachment>
@@ -461,11 +477,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             : [
                 `Revise canonical PRD revision ${canonical.document.revision}.`,
                 "Treat the full MDX below, including human edits and annotations, as the source of truth.",
-                "Return a complete replacement fenced ```mdx plan document.",
+                "Return a complete replacement four-backtick fenced ````mdx plan document.",
                 "",
-                "```mdx plan",
+                "````mdx plan",
                 canonical.document.source.trim(),
-                "```"
+                "````"
               ].join("\n")
         if (canonical !== null) {
           const routedIds = new Set(open.map((comment) => comment.id))
@@ -510,26 +526,44 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           canonical !== null &&
           expectedRevision !== undefined &&
           canonical.document.revision !== expectedRevision
-        ) return
+        ) {
+          return approvalRefused(
+            `Approval refused because canonical plan revision ${canonical.document.revision} replaced reviewed revision ${expectedRevision}. Review the latest revision and approve again.`,
+            canonical.document.revision
+          )
+        }
         const exactPlan =
           canonical === null
             ? run === undefined
               ? null
               : yield* run.readPlan(planId)
             : planDocumentToPlan(canonical.document)
-        if (exactPlan === null) return
+        if (exactPlan === null) {
+          return approvalRefused(
+            "Approval refused because the plan is no longer available.",
+            canonical?.document.revision ?? 0
+          )
+        }
         if (canonical !== null) {
           const approval = yield* PlanStore.updateDocument(canonical.worktreePath, {
             planId,
             baseRevision: canonical.document.revision,
             source: canonical.document.source,
             author: "user",
-            status: "approved"
+            status: "executing"
           }).pipe(Effect.either)
-          if (approval._tag === "Left") return
+          if (approval._tag === "Left") {
+            return approvalRefused(
+              approval.left.message,
+              approval.left._tag === "PlanConflictError"
+                ? approval.left.latestRevision
+                : canonical.document.revision
+            )
+          }
         }
         if (run !== undefined) {
           yield* run.applyPlan(planId, () => ({ ...exactPlan, status: "approved" }))
+          yield* run.markPlanExecution(planId)
         }
         // Precedence lives in `exec-mode.ts`, where the reason `prior` must beat
         // `configDefault` is stated once — getting that pair the wrong way round
@@ -546,6 +580,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           planId,
           PlanDecision.Approve({ mode, plan: { ...exactPlan, status: "approved" } })
         )
+        return approvalAccepted
       })
 
     /**
@@ -600,7 +635,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             canonical !== null &&
             expectedRevision !== undefined &&
             canonical.document.revision !== expectedRevision
-          ) return Stream.empty
+          ) {
+            return failedStream(
+              `Plan execution refused because canonical revision ${canonical.document.revision} replaced reviewed revision ${expectedRevision}. Review the latest revision and approve again.`
+            )
+          }
           const plan =
             canonical === null
               ? yield* sessionPlan(chatId, planId)
@@ -614,7 +653,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               author: "user",
               status: "executing"
             }).pipe(Effect.either)
-            if (execution._tag === "Left") return Stream.empty
+            if (execution._tag === "Left") {
+              return failedStream(
+                `Plan execution could not start: ${execution.left.message}`
+              )
+            }
           }
           // Restore the mode the operator actually runs this session in. Plan mode
           // is never persisted, so `session.mode` is their real exec mode (e.g.
@@ -626,7 +669,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const restore =
             persisted && persisted !== "plan" ? persisted : yield* resolveExecMode(sessionId)
           yield* setMode(sessionId, chatId, restore)
-          return prompt(sessionId, chatId, resumePlanPrompt(plan))
+          return prompt(sessionId, chatId, resumePlanPrompt(plan), [], undefined, plan.id)
         })
       )
     }
@@ -724,7 +767,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       chatId: string,
       text: string,
       images: ReadonlyArray<Attachment>,
-      reasoning: ReasoningSetting | null | undefined
+      reasoning: ReasoningSetting | null | undefined,
+      planExecutionId?: string
     ) =>
       Effect.suspend(() =>
         Effect.gen(function* () {
@@ -1002,6 +1046,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           yield* TranscriptStore.append(chatId, yield* Ref.get(acc))
           const turnSteer = yield* Ref.make<SteerTurn | null>(null)
           const turnMutation = yield* Effect.makeSemaphore(1)
+          const executingPlanId = yield* Ref.make<string | null>(planExecutionId ?? null)
 
           const out = yield* Mailbox.make<StreamEvent>()
 
@@ -1136,11 +1181,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const recordPlanEvidence = (text: string): Effect.Effect<void> =>
             Effect.gen(function* () {
               if (worktreePath.length === 0) return
+              const activePlanId = yield* Ref.get(executingPlanId)
+              if (activePlanId === null) return
               const markers = planEvidenceFromText(text)
               if (markers.length === 0) return
               const initial = yield* PlanStore.readDocument(worktreePath)
               if (
                 initial === null ||
+                initial.id !== activePlanId ||
                 !["approved", "executing", "needs-verification"].includes(initial.status)
               ) return
               let document: NonNullable<typeof initial> = initial
@@ -1180,10 +1228,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const finalizePlanVerification = (): Effect.Effect<void> =>
             Effect.gen(function* () {
               if (worktreePath.length === 0) return
+              const activePlanId = yield* Ref.get(executingPlanId)
+              if (activePlanId === null) return
               const document = yield* PlanStore.readDocument(worktreePath)
               if (
                 document === null ||
-                !["approved", "executing", "needs-verification"].includes(document.status)
+                document.id !== activePlanId ||
+                document.status !== "executing"
               ) return
               const complete = document.projection.stages.every((stage) =>
                 stage.acceptance.every(
@@ -1271,10 +1322,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // publishing it first lets that cancellation interrupt everything
               // below the offer, stranding a fully verified document in
               // `approved`/`executing`.
-              if (event._tag === "Assistant") {
-                yield* recordPlanEvidence(event.text)
-              }
               if (event._tag === "Done") {
+                const settledText = next.parts
+                  .filter((part) => part._tag === "Text")
+                  .map((part) => part.text)
+                  .join("\n")
+                yield* recordPlanEvidence(settledText)
                 yield* ContextManager.settle(chatId).pipe(Effect.ignore)
                 yield* finalizePlanVerification()
               }
@@ -1427,7 +1480,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             })).pipe(Effect.provide(env))
 
           yield* Ref.update(active, (m) =>
-            new Map(m).set(chatId, { readPlan, applyPlan, steer })
+            new Map(m).set(chatId, {
+              readPlan,
+              applyPlan,
+              markPlanExecution: (planId) => Ref.set(executingPlanId, planId),
+              steer
+            })
           )
 
           /** Identifies THIS run, so its cleanup can't evict a successor's fiber. */
@@ -1674,7 +1732,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       chatId: string,
       text: string,
       images: ReadonlyArray<Attachment> = [],
-      reasoning?: ReasoningSetting | null
+      reasoning?: ReasoningSetting | null,
+      planExecutionId?: string
     ): Stream.Stream<StreamEvent, never, PromptEnv> {
       return Stream.unwrapScoped(
         Effect.gen(function* () {
@@ -1737,7 +1796,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 chatId,
                 text,
                 images,
-                reasoning
+                reasoning,
+                planExecutionId
               ).pipe(
                 Effect.catchAll((error) =>
                   Effect.succeed(

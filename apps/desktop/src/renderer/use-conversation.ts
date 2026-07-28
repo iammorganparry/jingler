@@ -84,6 +84,8 @@ export interface Conversation {
   readonly answerQuestion: (requestId: string, answers: ReadonlyArray<QuestionAnswer>) => void
   /** The latest open plan (proposed / revising), for the Plan Review tab, or null. */
   readonly plan: Plan | null
+  /** A rejected exact-revision approval, shown in the Plan workspace. */
+  readonly planActionError: string | null
   readonly commentPlanStep: (planId: string, stepId: string, body: string) => void
   readonly revisePlan: (planId: string) => void
   readonly approvePlan: (
@@ -182,6 +184,7 @@ export function useConversation(
     editQueued: (id, text) => send({ type: "EDIT_QUEUED", id, text }),
     question,
     plan,
+    planActionError: state.context.planActionError,
     commentPlanStep: (planId, stepId, body) => send({ type: "COMMENT_PLAN_STEP", planId, stepId, body }),
     revisePlan: (planId) => send({ type: "REVISE_PLAN", planId }),
     approvePlan: (planId, executionMode, revision) =>

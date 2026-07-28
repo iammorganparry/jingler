@@ -31,7 +31,7 @@ const isRecord = (value: unknown): value is JsonRecord =>
 
 const chatIdFor = (sessionId: string, suffix: string): string => `c_${sessionId}_${suffix}`
 
-const persistedMode = (value: unknown): PermissionMode | undefined => {
+const runtimeMode = (value: unknown): PermissionMode | undefined => {
   switch (value) {
     case "ask":
     case "accept-edits":
@@ -39,9 +39,12 @@ const persistedMode = (value: unknown): PermissionMode | undefined => {
     case "plan":
       return value
     default:
-      return typeof value === "string" ? "ask" : undefined
+      return undefined
   }
 }
+
+const persistedMode = (value: unknown): PermissionMode | undefined =>
+  runtimeMode(value) ?? (typeof value === "string" ? "ask" : undefined)
 
 const initialChat = (
   sessionId: string,
@@ -779,7 +782,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       ) =>
         update(id, (session) => {
           const chatId = maybeMode === undefined ? session.activeChatId : chatIdOrMode
-          const mode = maybeMode ?? persistedMode(chatIdOrMode)
+          const mode = maybeMode ?? runtimeMode(chatIdOrMode)
           if (mode === undefined) return session
           return {
             ...session,

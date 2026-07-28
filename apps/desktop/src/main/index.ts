@@ -95,11 +95,22 @@ const recoverInterruptedPlans = Effect.gen(function* () {
             session.worktreePath,
             session.id,
             session.activeChatId
-          ).pipe(Effect.asVoid)
+          ).pipe(
+            Effect.asVoid,
+            Effect.catchAllCause((cause) =>
+              Effect.logError(
+                `Could not recover the interrupted plan for ${session.id}: ${String(cause)}`
+              )
+            )
+          )
         : Effect.void,
-    { discard: true }
+    { concurrency: "unbounded", discard: true }
   )
-}).pipe(Effect.ignore)
+}).pipe(
+  Effect.catchAllCause((cause) =>
+    Effect.logError(`Could not enumerate interrupted plans: ${String(cause)}`)
+  )
+)
 
 // Only one instance may run: a second launch (e.g. the OS handing us a
 // `jingler://` deep link) must forward its argv into the primary instance
@@ -319,8 +330,10 @@ if (!gotPrimaryLock) {
     // before the renderer can send its first frame.
     await runtime.runPromise(Effect.void)
     // Runs belong to the previous process and cannot still be parked. Recover
-    // their exact canonical revisions before the renderer performs its first read.
-    await runtime.runPromise(recoverInterruptedPlans)
+    // their exact canonical revisions in parallel, but never put filesystem
+    // recovery on the window-creation path: a corrupt artifact or unavailable
+    // volume must not launch Jingler with no window.
+    void runtime.runPromise(recoverInterruptedPlans)
     // Not awaited — the catalogue warms in the background while the window opens.
     void runtime.runPromise(prefetchModels)
 

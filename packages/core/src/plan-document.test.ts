@@ -4,7 +4,8 @@ import {
   DEFAULT_PLAN_TEMPLATE,
   PlanAcceptance,
   PlanDocument,
-  PlanTemplateConfig
+  PlanTemplateConfig,
+  planDocumentToPlan
 } from "./plan-document.js"
 
 describe("plan document schemas", () => {
@@ -54,5 +55,26 @@ describe("plan document schemas", () => {
         Schema.decodeUnknownEither(PlanTemplateConfig)({ source: DEFAULT_PLAN_TEMPLATE })
       )
     ).toBe(true)
+  })
+
+  it("uses the PRD outcome as the compatibility-card summary", () => {
+    const document = {
+      id: "p1",
+      sessionId: "s1",
+      producingChatId: "c1",
+      revision: 1,
+      status: "proposed" as const,
+      source: DEFAULT_PLAN_TEMPLATE,
+      projection: {
+        title: "PRD: Canonical interactive planning",
+        sections: [],
+        stages: [],
+        annotations: []
+      },
+      updatedAt: "2026-07-28T12:00:00.000Z",
+      updatedBy: "agent" as const
+    }
+
+    expect(planDocumentToPlan(document).summary).toBe("Canonical interactive planning")
   })
 })

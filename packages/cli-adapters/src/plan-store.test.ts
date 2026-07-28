@@ -175,6 +175,9 @@ describe("PlanStore canonical document", () => {
     expect(document.projection.annotations[0]?.body).toBe(
       "Keep {local} text and <Unknown /> inert."
     )
+    expect(document.source.indexOf("<Annotation")).toBeLessThan(
+      document.source.indexOf("</Stage>")
+    )
   })
 
   it("serializes concurrent writers so one wins and one receives a conflict", async () => {
@@ -263,5 +266,53 @@ describe("PlanStore canonical document", () => {
     expect(first?.projection.annotations[0]?.body).toBe("Preserve this operator note.")
     expect(second).toStrictEqual(first)
     expect(existsSync(join(dir, "current-plan.mdx"))).toBe(true)
+  })
+
+  it("imports legacy arrows and line-leading module prose without failing the read", async () => {
+    const dir = join(temp.root, ".jingler", "terminal")
+    mkdirSync(dir, { recursive: true })
+    const plan = {
+      ...scriptedPlan("s1", 1),
+      id: "hostile-legacy-plan",
+      raw: "import Widget from './widget.js'\nexport const next = true",
+      steps: [
+        {
+          ...scriptedPlan("s1", 1).steps[0]!,
+          title: "Rename a -> b"
+        }
+      ]
+    }
+    writeFileSync(
+      join(dir, "current-plan.json"),
+      JSON.stringify({
+        sessionId: "s1",
+        producingChatId: "c1",
+        revision: 3,
+        plan,
+        updatedAt: "2026-07-02T00:00:00.000Z"
+      })
+    )
+
+    const imported = await run(PlanStore.readDocument(WT, "s1", "c1"))
+
+    expect(imported).toMatchObject({
+      id: "hostile-legacy-plan",
+      revision: 3
+    })
+    expect(imported?.projection.stages[0]?.title).toBe("Rename a -> b")
+    expect(existsSync(join(dir, "current-plan.mdx"))).toBe(true)
+  })
+
+  it("returns a typed persistence error instead of dying when the target is unwritable", async () => {
+    const plansDir = join(temp.root, ".jingler")
+    mkdirSync(plansDir, { recursive: true })
+    writeFileSync(join(plansDir, "terminal"), "not a directory")
+
+    const result = await run(Effect.either(promote()))
+
+    expect(Either.isLeft(result)).toBe(true)
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe("PlanPersistenceError")
+    }
   })
 })

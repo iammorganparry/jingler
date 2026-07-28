@@ -248,6 +248,28 @@ describe("hasPlanBlock", () => {
     expect(hasPlanBlock("```ts\nconst x = 1\n```")).toBe(false)
     expect(hasPlanBlock("")).toBe(false)
   })
+
+  it("keeps nested code fences inside a four-backtick MDX plan", () => {
+    const raw = [
+      "````mdx plan",
+      "# PRD: Nested sample",
+      '<Stage id="s1" title="Build parser" intent="Keep examples intact">',
+      "```ts",
+      'const fence = "nested"',
+      "```",
+      '<Acceptance id="a1" status="pending">The full stage survives.</Acceptance>',
+      "</Stage>",
+      "````"
+    ].join("\n")
+
+    expect(hasPlanBlock(raw)).toBe(true)
+    const plan = parsePlan(raw, "plan_nested")
+    expect(plan.structured).toBe(true)
+    expect(plan.steps).toHaveLength(1)
+    expect(plan.steps[0]?.guards.map((guard) => guard.text)).toStrictEqual([
+      "The full stage survives."
+    ])
+  })
 })
 
 describe("parsePlan — the unstructured fallback", () => {
@@ -272,10 +294,13 @@ describe("parsePlan — the unstructured fallback", () => {
 
 describe("planModeInstructions", () => {
   it("documents safe PRD MDX and forbids execution", () => {
-    expect(planModeInstructions()).toContain("```mdx plan")
+    expect(planModeInstructions()).toContain("````mdx plan")
     expect(planModeInstructions()).toContain("<Acceptance")
     expect(planModeInstructions()).toMatch(/ExitPlanMode/)
     expect(planModeInstructions().toLowerCase()).toContain("do not edit")
+    expect(planModeInstructions()).toContain(
+      "PLAN_RESULT criterion=<id> status=<passed|failed>"
+    )
   })
 
   it("injects the configured source structure", () => {

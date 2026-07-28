@@ -81,7 +81,7 @@ export function PlanCard({
           </Button>
         )}
         {pending && (
-          <PlanApprovalActions onApprove={onApprove} />
+          <PlanApprovalActions onApprove={onApprove} disabled={onApprove === undefined} />
         )}
         {stale && onResume && (
           <Button size="sm" onClick={onResume}>

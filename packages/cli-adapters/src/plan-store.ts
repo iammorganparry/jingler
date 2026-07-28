@@ -8,10 +8,13 @@ import type {
   SessionPlanArtifact
 } from "@jingler/core"
 import {
+  appendPlanAnnotationSource,
   planDocumentToPlan,
   PlanConflictError,
+  PlanPersistenceError,
   PlanValidationError,
-  SessionPlanArtifact as SessionPlanArtifactSchema
+  SessionPlanArtifact as SessionPlanArtifactSchema,
+  updatePlanCriterionSource
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Schema } from "effect"
@@ -34,19 +37,6 @@ interface PlanEnvelope {
 export const planFileName = (_input: string): string => "current-plan"
 
 const quoted = (value: string): string => JSON.stringify(value)
-const xmlAttribute = (value: string): string =>
-  value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-const xmlText = (value: string): string =>
-  value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll("{", "&#123;")
-
 const serialize = (document: PlanDocument): string => `---
 jinglerPlan: 1
 id: ${quoted(document.id)}
@@ -171,7 +161,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       const atomicWrite = (
         worktreePath: string,
         document: PlanDocument
-      ): Effect.Effect<PlanDocument, never, PlanStoreEnv> =>
+      ): Effect.Effect<PlanDocument, PlanPersistenceError, PlanStoreEnv> =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
           const dir = yield* dirFor(worktreePath)
@@ -187,7 +177,13 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           Effect.tapError((error) =>
             Effect.logError(`Failed to atomically persist ${worktreePath}: ${String(error)}`)
           ),
-          Effect.orDie
+          Effect.mapError(
+            (error) =>
+              new PlanPersistenceError({
+                message: `Could not persist the canonical plan for ${worktreePath}.`,
+                cause: String(error)
+              })
+          )
         )
 
       const readCanonical = (
@@ -277,7 +273,13 @@ export class PlanStore extends Effect.Service<PlanStore>()(
               parsePlanMdx(legacyPlan.raw).valid
                 ? legacyPlan.raw
                 : legacyPlanToMdx(legacyPlan)
-            const projection = yield* validate(source).pipe(Effect.orDie)
+            const parsed = parsePlanMdx(source)
+            if (!parsed.valid) {
+              yield* Effect.logWarning(
+                `Could not safely import the legacy plan for ${worktreePath}; leaving the artifact untouched.`
+              )
+              return null
+            }
             const document: PlanDocument = {
               id: legacyPlan.id,
               sessionId: artifact?.sessionId ?? sessionId,
@@ -285,11 +287,15 @@ export class PlanStore extends Effect.Service<PlanStore>()(
               revision: Math.max(1, artifact?.revision ?? 1),
               status: statusFromPlan(legacyPlan),
               source,
-              projection,
+              projection: parsed.projection,
               updatedAt: artifact?.updatedAt ?? new Date().toISOString(),
               updatedBy: "agent"
             }
-            return yield* atomicWrite(worktreePath, document)
+            return yield* atomicWrite(worktreePath, document).pipe(
+              Effect.catchAll((error) =>
+                Effect.logError(error.message).pipe(Effect.as(document))
+              )
+            )
           })
         )
 
@@ -303,7 +309,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           readonly status?: PlanDocumentStatus
           readonly author?: PlanDocumentAuthor
         }
-      ): Effect.Effect<PlanDocument, PlanValidationError, PlanStoreEnv> =>
+      ): Effect.Effect<
+        PlanDocument,
+        PlanValidationError | PlanPersistenceError,
+        PlanStoreEnv
+      > =>
         lock.withPermits(1)(
           Effect.gen(function* () {
             const projection = yield* validate(input.source)
@@ -333,7 +343,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         }
       ): Effect.Effect<
         PlanDocument,
-        PlanConflictError | PlanValidationError,
+        PlanConflictError | PlanValidationError | PlanPersistenceError,
         PlanStoreEnv
       > =>
         lock.withPermits(1)(
@@ -383,12 +393,13 @@ export class PlanStore extends Effect.Service<PlanStore>()(
               latest: null
             })
           }
-          const escaped = input.criterionId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-          const opening = new RegExp(
-            `<Acceptance\\b(?=[^>]*\\bid="${escaped}")[^>]*>`,
-            "g"
+          const source = updatePlanCriterionSource(
+            current.source,
+            input.criterionId,
+            input.status,
+            input.evidence
           )
-          if (!opening.test(current.source)) {
+          if (source === null) {
             return yield* new PlanValidationError({
               message: `Acceptance "${input.criterionId}" was not found.`,
               diagnostics: [
@@ -400,16 +411,6 @@ export class PlanStore extends Effect.Service<PlanStore>()(
               ]
             })
           }
-          const source = current.source.replace(opening, (tag) => {
-            const withoutStatus = tag
-              .replace(/\sstatus="[^"]*"/, "")
-              .replace(/\sevidence="[^"]*"/, "")
-            const evidence =
-              input.evidence === null
-                ? ""
-                : ` evidence="${xmlAttribute(input.evidence)}"`
-            return `${withoutStatus.slice(0, -1)} status="${input.status}"${evidence}>`
-          })
           return yield* updateDocument(worktreePath, {
             planId: input.planId,
             baseRevision: input.baseRevision,
@@ -438,17 +439,13 @@ export class PlanStore extends Effect.Service<PlanStore>()(
             })
           }
           const id = `annotation-${crypto.randomUUID()}`
-          const component = `<Annotation id="${id}"${input.stageId === null ? "" : ` stageId="${xmlAttribute(input.stageId)}"`} author="${input.author}" status="open" createdAt="${new Date().toISOString()}">\n${xmlText(input.body)}\n</Annotation>`
-          let source = `${current.source.trimEnd()}\n\n${component}\n`
-          if (input.stageId !== null) {
-            const escaped = input.stageId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-            const stage = new RegExp(
-              `(<Stage\\b(?=[^>]*\\bid="${escaped}")[^>]*>[\\s\\S]*?)(</Stage>)`
-            )
-            if (stage.test(current.source)) {
-              source = current.source.replace(stage, `$1\n\n${component}\n\n$2`)
-            }
-          }
+          const source = appendPlanAnnotationSource(current.source, {
+            id,
+            stageId: input.stageId,
+            body: input.body,
+            author: input.author,
+            createdAt: new Date().toISOString()
+          })
           return yield* updateDocument(worktreePath, {
             planId: input.planId,
             baseRevision: input.baseRevision,
@@ -462,7 +459,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         worktreePath: string,
         producingChatId: string,
         plan: Plan
-      ): Effect.Effect<SessionPlanArtifact, never, PlanStoreEnv> =>
+      ): Effect.Effect<
+        SessionPlanArtifact,
+        PlanValidationError | PlanPersistenceError,
+        PlanStoreEnv
+      > =>
         promoteDocument(worktreePath, {
           sessionId,
           producingChatId,
@@ -477,8 +478,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
             revision: document.revision,
             plan: planDocumentToPlan(document),
             updatedAt: document.updatedAt
-          })),
-          Effect.orDie
+          }))
         )
 
       const readArtifact = (
@@ -497,31 +497,6 @@ export class PlanStore extends Effect.Service<PlanStore>()(
                 }
           )
         )
-
-      const updateArtifact = (
-        worktreePath: string,
-        planId: string,
-        update: (plan: Plan) => Plan
-      ): Effect.Effect<SessionPlanArtifact | null, never, PlanStoreEnv> =>
-        Effect.gen(function* () {
-          const current = yield* readCanonical(worktreePath)
-          if (current === null || current.id !== planId) return null
-          const plan = update(planDocumentToPlan(current))
-          const document = yield* updateDocument(worktreePath, {
-            planId,
-            baseRevision: current.revision,
-            source: legacyPlanToMdx(plan),
-            author: "agent",
-            status: statusFromPlan(plan)
-          }).pipe(Effect.orDie)
-          return {
-            sessionId: document.sessionId,
-            producingChatId: document.producingChatId,
-            revision: document.revision,
-            plan: planDocumentToPlan(document),
-            updatedAt: document.updatedAt
-          }
-        })
 
       const rehomeArtifact = (
         worktreePath: string,
@@ -558,6 +533,12 @@ export class PlanStore extends Effect.Service<PlanStore>()(
               updatedAt: document.updatedAt
             }
           })
+        ).pipe(
+          Effect.catchAll((error) =>
+            Effect.logError(
+              `Could not rehome the canonical plan for ${worktreePath}: ${error.message}`
+            ).pipe(Effect.as(null))
+          )
         )
 
       /**
@@ -593,7 +574,13 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           const file = yield* currentFileFor(worktreePath)
           const existing = yield* readCanonical(worktreePath)
           if (existing === null) {
-            yield* promote("unknown", worktreePath, "unknown", plan)
+            yield* promote("unknown", worktreePath, "unknown", plan).pipe(
+              Effect.catchAll((error) =>
+                Effect.logError(
+                  `Could not write the canonical plan for ${worktreePath}: ${error.message}`
+                )
+              )
+            )
           }
           return file
         })
@@ -626,7 +613,6 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         addAnnotation,
         readArtifact,
         promote,
-        updateArtifact,
         rehomeArtifact,
         markInterrupted,
         removeAll

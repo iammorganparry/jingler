@@ -16,6 +16,7 @@ import type {
   Message,
   PermissionMode,
   Plan,
+  PlanApprovalResult,
   PlanComment,
   ProviderModels,
   QuestionAnswer,
@@ -111,6 +112,8 @@ export interface ConversationContext {
   readonly resumePlanId: string | null
   /** Exact canonical revision the operator reviewed. */
   readonly resumePlanRevision: number | null
+  /** A revision/persistence refusal from the most recent live approval attempt. */
+  readonly planActionError: string | null
   readonly sharedPlanChatId: string | null
   /** Tokens currently occupying the main agent's context window. */
   readonly tokens: number
@@ -197,6 +200,7 @@ type ConversationEvent =
   | { type: "COMMENT_PLAN_STEP"; planId: string; stepId: string; body: string }
   | { type: "REVISE_PLAN"; planId: string }
   | { type: "APPROVE_PLAN"; planId: string; executionMode?: ExecutionMode; revision?: number }
+  | { type: "PLAN_APPROVAL_RESULT"; planId: string; result: PlanApprovalResult }
   | { type: "RESUME_PLAN"; planId: string; revision?: number }
   | { type: "REFRESH_DIFF" }
   | { type: "STOP" }
@@ -513,6 +517,7 @@ export const conversationMachine = setup({
       return {
         resumePlanId: event.planId,
         resumePlanRevision: event.revision ?? null,
+        planActionError: null,
         pendingText: "",
         pendingImages: [],
         // A fresh run (the plan re-drive) starts with no sub-agents carried over.
@@ -947,19 +952,53 @@ export const conversationMachine = setup({
       void rpc.agentRevisePlan(context.session.id, event.planId)
       return { messages: context.messages.map((m) => setPlanStatus(m, event.planId, "revising")) }
     }),
-    optimisticPlanApprove: assign(({ context, event }) => {
+    optimisticPlanApprove: assign(({ context, event, self }) => {
       if (event.type !== "APPROVE_PLAN") return {}
       const executionMode = event.executionMode ?? context.executionMode
-      void rpc.agentApprovePlan(
-        context.session.id,
-        event.planId,
-        event.executionMode,
-        event.revision
-      )
+      const latestRevision = event.revision ?? 0
+      void rpc
+        .agentApprovePlan(
+          context.session.id,
+          event.planId,
+          event.executionMode,
+          event.revision
+        )
+        .then((result) => {
+          self.send({
+            type: "PLAN_APPROVAL_RESULT",
+            planId: event.planId,
+            result
+          })
+        })
+        .catch((error: unknown) => {
+          self.send({
+            type: "PLAN_APPROVAL_RESULT",
+            planId: event.planId,
+            result: {
+              status: "refused",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : `Plan approval failed: ${String(error)}`,
+              latestRevision
+            }
+          })
+        })
       return {
         mode: executionMode,
         executionMode,
+        planActionError: null,
         messages: context.messages.map((m) => setPlanStatus(m, event.planId, "approved"))
+      }
+    }),
+    reconcilePlanApproval: assign(({ context, event }) => {
+      if (event.type !== "PLAN_APPROVAL_RESULT") return {}
+      if (event.result.status === "accepted") return { planActionError: null }
+      return {
+        planActionError: event.result.message,
+        messages: context.messages.map((message) =>
+          setPlanStatus(message, event.planId, "proposed")
+        )
       }
     }),
     /**
@@ -1140,7 +1179,8 @@ export const conversationMachine = setup({
     // spawned it, so closing one has to work in `idle` — and a stop request
     // races nothing, since the harness answers it on the ordinary stream.
     STOP_SUBAGENT: { actions: "requestStopSubagent" },
-    CLOSE_SUBAGENT: { actions: "closeSubagent" }
+    CLOSE_SUBAGENT: { actions: "closeSubagent" },
+    PLAN_APPROVAL_RESULT: { actions: "reconcilePlanApproval" }
   },
   context: ({ input }) => {
     const persistedChats = input.session.chats ?? []
@@ -1186,6 +1226,7 @@ export const conversationMachine = setup({
       subagents: [],
       resumePlanId: null,
       resumePlanRevision: null,
+      planActionError: null,
       sharedPlanChatId: null,
       // Rehydrate the last measured working set immediately. ContextManager owns
       // the trigger/phase snapshot, but the view reads this live field for the

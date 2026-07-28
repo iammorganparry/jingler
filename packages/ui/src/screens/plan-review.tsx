@@ -121,6 +121,7 @@ export function PlanReview({
     const settled =
       document.status === "approved" ||
       document.status === "executing" ||
+      document.status === "needs-verification" ||
       document.status === "done" ||
       document.status === "rejected"
     return (

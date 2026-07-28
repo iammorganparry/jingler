@@ -495,6 +495,23 @@ describe("SessionStore", () => {
     }
   })
 
+  it("does not turn an invalid runtime mode into ask", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Runtime mode" }))
+        yield* SessionStore.setMode(created.id, "auto")
+        yield* SessionStore.setMode(created.id, "not-a-mode")
+        return yield* SessionStore.get(created.id)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    const result = exit.value
+    expect(result.chats.find((chat) => chat.id === result.activeChatId)?.mode).toBe("auto")
+  })
+
   /**
    * Switching harness is not just a field write. `resumeId` holds the PREVIOUS
    * harness's thread id — handing a Codex thread id to Claude would resume

@@ -1555,54 +1555,6 @@ const HandlersLayer = JinglerRpcs.toLayer({
         )
       )
     ),
-  "Plan.addAnnotation": ({ sessionId, ...input }) =>
-    SessionStore.get(sessionId).pipe(
-      Effect.map((session) => session.worktreePath),
-      Effect.flatMap((worktreePath) =>
-        worktreePath == null
-          ? Effect.fail(
-              new PlanConflictError({
-                message: "This session has no plan worktree.",
-                latestRevision: 0,
-                latest: null
-              })
-            )
-          : PlanStore.addAnnotation(worktreePath, input)
-      ),
-      Effect.catchTag("SessionNotFoundError", () =>
-        Effect.fail(
-          new PlanConflictError({
-            message: "The plan session no longer exists.",
-            latestRevision: 0,
-            latest: null
-          })
-        )
-      )
-    ),
-  "Plan.setCriterionStatus": ({ sessionId, ...input }) =>
-    SessionStore.get(sessionId).pipe(
-      Effect.map((session) => session.worktreePath),
-      Effect.flatMap((worktreePath) =>
-        worktreePath == null
-          ? Effect.fail(
-              new PlanConflictError({
-                message: "This session has no plan worktree.",
-                latestRevision: 0,
-                latest: null
-              })
-            )
-          : PlanStore.setCriterionStatus(worktreePath, input)
-      ),
-      Effect.catchTag("SessionNotFoundError", () =>
-        Effect.fail(
-          new PlanConflictError({
-            message: "The plan session no longer exists.",
-            latestRevision: 0,
-            latest: null
-          })
-        )
-      )
-    ),
   "Review.run": ({ sessionId, force }) => reviewRun(sessionId, force),
   // Unwrapped from the service like `Terminal.attach` — the reviewer outlives any
   // one watcher, so the stream attaches to it rather than starting it.

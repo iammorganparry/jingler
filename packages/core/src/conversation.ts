@@ -1678,6 +1678,12 @@ export const displayStatusOf = (
  * resumed harness has no memory of the planning conversation, so the plan is
  * embedded here in full. Deterministic given the plan.
  */
+export const PLAN_EVIDENCE_INSTRUCTIONS: ReadonlyArray<string> = [
+  "In your final response, emit one evidence line for every acceptance criterion you verified:",
+  "PLAN_RESULT criterion=<id> status=<passed|failed> evidence=<concise observable evidence>",
+  "Do not claim passed without evidence. Unreported criteria remain pending and keep the plan in needs-verification."
+]
+
 export const resumePlanPrompt = (plan: Plan): string => {
   const steps = plan.steps
     .filter((s) => s.kind !== "branch-arm")
@@ -1686,9 +1692,7 @@ export const resumePlanPrompt = (plan: Plan): string => {
   return [
     "The plan below was approved. Implement it now — make the actual code changes and run what's needed.",
     "Do NOT re-plan or ask to enter plan mode again; proceed with the implementation.",
-    "In your final response, emit one evidence line for every acceptance criterion you verified:",
-    "PLAN_RESULT criterion=<id> status=<passed|failed> evidence=<concise observable evidence>",
-    "Do not claim passed without evidence. Unreported criteria remain pending and keep the plan in needs-verification.",
+    ...PLAN_EVIDENCE_INSTRUCTIONS,
     "",
     `Plan: ${plan.summary}`,
     ...(steps ? ["", "Steps:", steps] : []),
