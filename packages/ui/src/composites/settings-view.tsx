@@ -23,6 +23,7 @@ import {
   DEFAULT_CONTEXT_CONFIG,
   DEFAULT_REVIEW_MODEL,
   NOTIFICATIONS_DEFAULT,
+  clampFontScale,
   contextWindowFor,
   defaultModel,
   digestModelFor,
@@ -1342,18 +1343,24 @@ function ToggleRow({
  * The four conversation text-size steps. Stored as the raw multiplier the
  * `--sb-font-scale` CSS var consumes, so the renderer needs no label→value map.
  */
+/**
+ * Preset multipliers for conversation + code text. The value is the raw number
+ * the `--sb-font-scale` var consumes; `SegmentedControl` keys on strings, so the
+ * row converts at the boundary. Four presets rather than a free slider: these
+ * read cleanly against Jingler's hardcoded px sizes, and a preset can't land on
+ * an awkward half-pixel.
+ */
 const FONT_SCALE_PRESETS = [
-  { label: "Small", value: 0.9 },
-  { label: "Default", value: 1 },
-  { label: "Large", value: 1.15 },
-  { label: "Extra Large", value: 1.3 }
+  { value: 0.9, label: "Small" },
+  { value: 1, label: "Default" },
+  { value: 1.15, label: "Large" },
+  { value: 1.3, label: "Extra Large" }
 ] as const
 
 /**
- * Segmented control for conversation + code text size. Four presets rather than
- * a free slider: these are the multipliers that read cleanly against Jingler's
- * hardcoded px sizes, and a preset can't land on an awkward half-pixel. Saves on
- * click, like the toggles above — there is nothing to review.
+ * Text-size row: reuses the shared `SegmentedControl` (its `role="tablist"` +
+ * `aria-selected` come for free) rather than a hand-rolled button group. Saves
+ * on click, like the toggles above — there is nothing to review.
  */
 function FontSizeRow({
   value,
@@ -1370,27 +1377,15 @@ function FontSizeRow({
           Scale the conversation and code text. The rest of the app stays put.
         </div>
       </div>
-      <div className="mt-0.5 flex flex-none overflow-hidden rounded-[6px] border border-hairline">
-        {FONT_SCALE_PRESETS.map((preset, i) => {
-          const active = Math.abs(value - preset.value) < 0.001
-          return (
-            <button
-              key={preset.value}
-              type="button"
-              onClick={() => onChange(preset.value)}
-              className={cn(
-                "px-2.5 py-1 text-[11px] font-medium transition-colors",
-                i > 0 && "border-l border-hairline",
-                active
-                  ? "bg-sunken text-blue"
-                  : "bg-transparent text-muted-foreground hover:text-text-body"
-              )}
-            >
-              {preset.label}
-            </button>
-          )
-        })}
-      </div>
+      <SegmentedControl
+        className="mt-0.5 flex-none"
+        value={String(value)}
+        items={FONT_SCALE_PRESETS.map((preset) => ({
+          value: String(preset.value),
+          label: preset.label
+        }))}
+        onChange={(next) => onChange(Number(next))}
+      />
     </div>
   )
 }
@@ -1431,9 +1426,9 @@ function GeneralSection({
   // Absent means OFF, matching `ADHD_MODE_DEFAULT` in the domain.
   const [adhdDraft, setAdhdDraft] = React.useState<boolean>(adhdMode ?? false)
   React.useEffect(() => setAdhdDraft(adhdMode ?? false), [adhdMode])
-  // Absent means 1×, matching `FONT_SCALE_DEFAULT` in the domain.
-  const [fontScaleDraft, setFontScaleDraft] = React.useState<number>(fontScale ?? 1)
-  React.useEffect(() => setFontScaleDraft(fontScale ?? 1), [fontScale])
+  // Absent or malformed collapses to 1×, matching `FONT_SCALE_DEFAULT`.
+  const [fontScaleDraft, setFontScaleDraft] = React.useState<number>(clampFontScale(fontScale))
+  React.useEffect(() => setFontScaleDraft(clampFontScale(fontScale)), [fontScale])
   // Absent config means the DEFAULTS, not silence — an operator who never opened
   // this pane should still be told when an agent needs them.
   const [draft, setDraft] = React.useState<NotificationsConfig>(

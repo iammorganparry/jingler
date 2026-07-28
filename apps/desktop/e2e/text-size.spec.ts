@@ -84,13 +84,20 @@ test("Text size scales the conversation and persists to config", async ({ launch
   await window.getByRole("menuitem", { name: "Settings" }).click()
   await expect(window.getByRole("button", { name: "Close settings" })).toBeVisible()
   await window.getByRole("button", { name: "General" }).click()
-  await window.getByRole("button", { name: "Large", exact: true }).click()
+  // The presets are a shared SegmentedControl — each option is a role="tab".
+  await window.getByRole("tab", { name: "Large", exact: true }).click()
 
   // Saved to disk under `fontScale` — survives a restart, not just this session.
   await expect
     .poll(() => {
-      const raw = readFileSync(join(home, "jingler", "config.json"), "utf8")
-      return (JSON.parse(raw) as { fontScale?: number }).fontScale
+      // The config write isn't atomic (no temp-file rename), so a poll can catch
+      // a half-written file — treat an unreadable/partial read as "not yet".
+      try {
+        const raw = readFileSync(join(home, "jingler", "config.json"), "utf8")
+        return (JSON.parse(raw) as { fontScale?: number }).fontScale
+      } catch {
+        return undefined
+      }
     })
     .toBe(1.15)
 

@@ -8,7 +8,7 @@ import type {
   PlanTemplateConfig,
   ProviderConfig
 } from "@jingler/core"
-import { DEFAULT_THEME_ID, WorkspaceConfig } from "@jingler/core"
+import { clampFontScale, DEFAULT_THEME_ID, WorkspaceConfig } from "@jingler/core"
 import { ConfigError } from "@jingler/core"
 import { FileSystem } from "@effect/platform"
 import { Effect, Schema } from "effect"
@@ -137,11 +137,11 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       const setAdhdMode = (adhdMode: boolean) => patch({ adhdMode })
 
       /**
-       * Conversation + code text-size multiplier. Clamped to a sane range so a
-       * malformed RPC can't scale the transcript to zero or off-screen.
+       * Conversation + code text-size multiplier, clamped via the shared
+       * `clampFontScale` so the stored value can never scale the transcript to
+       * zero or off-screen — the same guard the read path uses.
        */
-      const setFontScale = (fontScale: number) =>
-        patch({ fontScale: Math.min(2, Math.max(0.5, fontScale)) })
+      const setFontScale = (fontScale: number) => patch({ fontScale: clampFontScale(fontScale) })
 
       const setStarredRepos = (starredRepos: ReadonlyArray<string>) =>
         patch({ starredRepos })

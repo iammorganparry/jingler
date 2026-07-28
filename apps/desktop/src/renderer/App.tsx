@@ -17,7 +17,7 @@ import type {
   SessionActivity,
   User
 } from "@jingler/core"
-import { DEFAULT_THEME_ID } from "@jingler/core"
+import { clampFontScale, DEFAULT_THEME_ID } from "@jingler/core"
 import {
   ConfirmDialog,
   LoadingScreen,
@@ -177,8 +177,10 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   // Absent means off — ADHD mode rewrites the voice of every session, so it is
   // opt-in rather than a default the operator has to discover and undo.
   const adhdMode = configQuery.data?.adhdMode ?? false
-  // Absent means 1× — conversation + code text unscaled (FONT_SCALE_DEFAULT).
-  const fontScale = configQuery.data?.fontScale ?? 1
+  // Absent or malformed collapses to 1× (FONT_SCALE_DEFAULT). This value only
+  // feeds the Settings control's active preset — the transcript reads the var
+  // set in conversation-pane.tsx, so scaling stays scoped there.
+  const fontScale = clampFontScale(configQuery.data?.fontScale)
   const providersConfig = configQuery.data?.providers ?? null
   // Absent means "the first installed harness" — resolved downstream by
   // `newSessionCli`, so a fresh install creates sessions without a visit to

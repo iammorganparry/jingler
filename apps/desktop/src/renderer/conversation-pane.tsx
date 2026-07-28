@@ -8,7 +8,7 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import type { Session } from "@jingler/core"
-import { agentChildren, agentPath } from "@jingler/core"
+import { agentChildren, agentPath, clampFontScale } from "@jingler/core"
 import {
   AttachmentSourceProvider,
   OpenAssetProvider,
@@ -117,7 +117,7 @@ export function ConversationPane({
   // conversation, never a PR description, plan or asset preview — which render the
   // same markdown but stay put, per the setting's stated scope. Elements outside
   // this wrapper never see the var, so their calc() falls back to 1×.
-  const fontScale = providersQuery.data?.fontScale ?? 1
+  const fontScale = clampFontScale(providersQuery.data?.fontScale)
   const handoffModel = providersQuery.data?.providers?.[convo.cli]?.defaultModel ?? null
   const backgroundTasksSupported =
     clisQuery.data?.find((c) => c.kind === convo.cli)?.backgroundTasks ?? false
