@@ -5,6 +5,7 @@ import remarkMath from "remark-math"
 import { cn } from "../lib/cn.js"
 import { DiffPeek } from "./diff-peek.js"
 import { HtmlPreview } from "./html-preview.js"
+import { MermaidDiagram } from "./mermaid-diagram.js"
 import { useOpenAsset, useOpenPath } from "../asset/open-asset-context.js"
 import { resolveOpenablePath } from "../asset/path-detect.js"
 
@@ -93,6 +94,11 @@ function MarkdownPre({ children }: { children?: ReactNode }) {
     // can switch to a sandboxed Preview. See HtmlPreview.
     const text = String(code?.props.children ?? "").replace(/\n$/, "")
     return <HtmlPreview code={text} />
+  }
+  if (lang === "mermaid") {
+    // A ```mermaid fence renders as an actual (themed, sandboxed) diagram.
+    const text = String(code?.props.children ?? "").replace(/\n$/, "")
+    return <MermaidDiagram source={text} />
   }
   // Non-diff code blocks: plain, styled by `.sb-md pre` (no chrome).
   return (

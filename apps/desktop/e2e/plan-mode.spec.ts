@@ -254,6 +254,40 @@ test("restart resumes the exact canonical revision", async ({ launchApp }) => {
   })
 })
 
+test("mermaid fences render as diagrams, and a broken fence degrades to an error card", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session()
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await proposePlan(launched.window)
+
+  // Inject one valid and one broken diagram into the plan source. parsePlanMdx
+  // masks fenced code, so neither trips validation — the source still saves.
+  const valid = "```mermaid\ngraph TD; A[Start] --> B[Done]\n```"
+  const broken = "```mermaid\n@@@ not a diagram @@@\n```"
+  await editSource(launched.window, (source) =>
+    source.replace(
+      "Implement stages in order",
+      `Implement stages in order.\n\n${valid}\n\n${broken}\n`
+    )
+  )
+
+  await launched.window.getByRole("tab", { name: "Rendered" }).click()
+  // 01.1 — the valid fence renders a themed SVG, not a code block.
+  await expect(launched.window.locator(".sb-mermaid svg").first()).toBeVisible({
+    timeout: 20_000
+  })
+  // 01.2 — the broken fence shows an inline error card and does not blank the doc.
+  await expect(launched.window.getByText("Diagram error")).toBeVisible({
+    timeout: 20_000
+  })
+  await expect(launched.window.getByText(/Rollout|Testing|Risks/)).toBeVisible()
+})
+
 test("Claude, Codex, and opencode share native plan mode", async ({ launchApp }) => {
   for (const cli of ["claude", "codex", "opencode"] as const) {
     const launched = await launchApp({
