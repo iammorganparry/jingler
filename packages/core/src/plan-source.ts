@@ -105,9 +105,18 @@ export const appendPlanAnnotationSource = (
     readonly body: string
     readonly author: PlanDocumentAuthor
     readonly createdAt: string
+    readonly anchor?: {
+      readonly quote: string
+      readonly prefix: string
+      readonly suffix: string
+    }
   }
 ): string => {
-  const component = `<Annotation id="${xmlAttribute(annotation.id)}"${annotation.stageId === null ? "" : ` stageId="${xmlAttribute(annotation.stageId)}"`} author="${annotation.author}" status="open" createdAt="${xmlAttribute(annotation.createdAt)}">
+  const anchorAttrs =
+    annotation.anchor === undefined
+      ? ""
+      : ` quote="${xmlAttribute(annotation.anchor.quote)}" prefix="${xmlAttribute(annotation.anchor.prefix)}" suffix="${xmlAttribute(annotation.anchor.suffix)}"`
+  const component = `<Annotation id="${xmlAttribute(annotation.id)}"${annotation.stageId === null ? "" : ` stageId="${xmlAttribute(annotation.stageId)}"`} author="${annotation.author}" status="open"${anchorAttrs} createdAt="${xmlAttribute(annotation.createdAt)}">
 ${xmlText(annotation.body)}
 </Annotation>`
   if (annotation.stageId === null) return `${source.trimEnd()}\n\n${component}\n`

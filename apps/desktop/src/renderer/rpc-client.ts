@@ -379,8 +379,14 @@ export const rpc = {
         ...(compatible === undefined ? {} : { reasoning: compatible })
       })
     }),
-  agentCommentPlanStep: (sessionId: string, planId: string, stepId: string, body: string): Promise<void> =>
-    run((c) => c.Agent.commentPlanStep({ sessionId, planId, stepId, body })),
+  agentCommentPlanStep: (
+    sessionId: string,
+    planId: string,
+    stepId: string,
+    body: string,
+    anchor?: { readonly quote: string; readonly prefix: string; readonly suffix: string }
+  ): Promise<void> =>
+    run((c) => c.Agent.commentPlanStep({ sessionId, planId, stepId, body, ...(anchor ? { anchor } : {}) })),
   agentRevisePlan: (sessionId: string, planId: string): Promise<void> =>
     run((c) => c.Agent.revisePlan({ sessionId, planId })),
   agentApprovePlan: (

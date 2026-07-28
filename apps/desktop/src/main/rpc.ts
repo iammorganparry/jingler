@@ -1431,9 +1431,9 @@ const HandlersLayer = JinglerRpcs.toLayer({
     Effect.flatMap(AgentRunner, (runner) => runner.setMode(sessionId, chatId, mode)),
   "Agent.setReasoning": ({ sessionId, cli, reasoning }) =>
     setReasoning(sessionId, cli, reasoning),
-  "Agent.commentPlanStep": ({ sessionId, planId, stepId, body }) =>
+  "Agent.commentPlanStep": ({ sessionId, planId, stepId, body, anchor }) =>
     Effect.flatMap(AgentRunner, (runner) =>
-      runner.commentPlanStep(sessionId, planId, stepId, body)
+      runner.commentPlanStep(sessionId, planId, stepId, body, anchor)
     ),
   "Agent.revisePlan": ({ sessionId, planId }) =>
     Effect.flatMap(AgentRunner, (runner) => runner.revisePlan(sessionId, planId)),

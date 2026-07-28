@@ -427,6 +427,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           readonly stageId: string | null
           readonly body: string
           readonly author: PlanDocumentAuthor
+          readonly anchor?: {
+            readonly quote: string
+            readonly prefix: string
+            readonly suffix: string
+          }
         }
       ) =>
         Effect.gen(function* () {
@@ -444,7 +449,8 @@ export class PlanStore extends Effect.Service<PlanStore>()(
             stageId: input.stageId,
             body: input.body,
             author: input.author,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            ...(input.anchor ? { anchor: input.anchor } : {})
           })
           return yield* updateDocument(worktreePath, {
             planId: input.planId,

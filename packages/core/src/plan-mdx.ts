@@ -190,7 +190,16 @@ export const parsePlanMdx = (source: string): PlanMdxResult => {
       body: textOf(bodyFrom(source, offset, match[0], "</Annotation>")),
       author: props.author === "agent" ? "agent" : "user",
       status: props.status === "resolved" ? "resolved" : "open",
-      createdAt: props.createdAt ?? new Date(0).toISOString()
+      createdAt: props.createdAt ?? new Date(0).toISOString(),
+      ...(props.quote
+        ? {
+            anchor: {
+              quote: props.quote,
+              prefix: props.prefix ?? "",
+              suffix: props.suffix ?? ""
+            }
+          }
+        : {})
     })
   }
 

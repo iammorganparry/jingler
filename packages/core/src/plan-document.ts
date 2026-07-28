@@ -21,13 +21,29 @@ export const PlanAcceptance = Schema.Struct({
 })
 export type PlanAcceptance = Schema.Schema.Type<typeof PlanAcceptance>
 
+/**
+ * A W3C-style TextQuote anchor: the exact `quote` plus a little `prefix`/`suffix`
+ * context. Quote-based anchoring is used instead of raw ProseMirror positions
+ * because plan source is edited and round-tripped through markdown, where numeric
+ * offsets drift but a quoted span with context can be re-found (or flagged
+ * orphaned when the text it quoted no longer exists). See `plan-anchor.ts`.
+ */
+export const PlanAnnotationAnchor = Schema.Struct({
+  quote: Schema.String,
+  prefix: Schema.String,
+  suffix: Schema.String
+})
+export type PlanAnnotationAnchor = Schema.Schema.Type<typeof PlanAnnotationAnchor>
+
 export const PlanAnnotation = Schema.Struct({
   id: Schema.String,
   stageId: Schema.NullOr(Schema.String),
   body: Schema.String,
   author: Schema.Literal("user", "agent"),
   status: Schema.Literal("open", "resolved"),
-  createdAt: Schema.String
+  createdAt: Schema.String,
+  /** Present when the comment is anchored to a highlighted span (vs. a whole stage). */
+  anchor: Schema.optional(PlanAnnotationAnchor)
 })
 export type PlanAnnotation = Schema.Schema.Type<typeof PlanAnnotation>
 

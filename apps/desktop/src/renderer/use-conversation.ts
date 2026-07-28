@@ -20,6 +20,7 @@ import type {
   ProviderModels,
   PermissionMode,
   Plan,
+  PlanAnnotationAnchor,
   QuestionAnswer,
   QuestionRequest,
   ReasoningSetting,
@@ -86,7 +87,12 @@ export interface Conversation {
   readonly plan: Plan | null
   /** A rejected exact-revision approval, shown in the Plan workspace. */
   readonly planActionError: string | null
-  readonly commentPlanStep: (planId: string, stepId: string, body: string) => void
+  readonly commentPlanStep: (
+    planId: string,
+    stepId: string,
+    body: string,
+    anchor?: PlanAnnotationAnchor
+  ) => void
   readonly revisePlan: (planId: string) => void
   readonly approvePlan: (
     planId: string,
@@ -185,7 +191,8 @@ export function useConversation(
     question,
     plan,
     planActionError: state.context.planActionError,
-    commentPlanStep: (planId, stepId, body) => send({ type: "COMMENT_PLAN_STEP", planId, stepId, body }),
+    commentPlanStep: (planId, stepId, body, anchor) =>
+      send({ type: "COMMENT_PLAN_STEP", planId, stepId, body, ...(anchor ? { anchor } : {}) }),
     revisePlan: (planId) => send({ type: "REVISE_PLAN", planId }),
     approvePlan: (planId, executionMode, revision) =>
       send({ type: "APPROVE_PLAN", planId, executionMode, revision }),

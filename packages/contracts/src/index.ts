@@ -34,6 +34,7 @@ import {
   PluginId,
   ExecutionMode,
   PermissionMode,
+  PlanAnnotationAnchor,
   PlanApprovalResult,
   PlanDocument,
   PlanTemplateConfig,
@@ -416,13 +417,21 @@ export class JinglerRpcs extends RpcGroup.make(
     )
   }),
 
-  /** Comment on a plan step (plan mode) — accumulates on the plan, doesn't resume. */
+  /**
+   * Comment on a plan (plan mode) — accumulates on the plan, doesn't resume.
+   *
+   * `stepId` targets a stage; pass "" for a section/global comment. An optional
+   * `anchor` attaches the comment to a highlighted span (a TextQuote selector)
+   * rather than the whole stage. Open comments are later batched to the agent by
+   * `Agent.revisePlan`, which embeds the full annotated MDX in one revision.
+   */
   Rpc.make("Agent.commentPlanStep", {
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
       stepId: Schema.String,
-      body: Schema.String
+      body: Schema.String,
+      anchor: Schema.optional(PlanAnnotationAnchor)
     }
   }),
 

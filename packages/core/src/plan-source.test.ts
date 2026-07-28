@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { parsePlanMdx } from "./plan-mdx.js"
-import { updatePlanSectionSource } from "./plan-source.js"
+import { appendPlanAnnotationSource, updatePlanSectionSource } from "./plan-source.js"
 
 const doc = `# PRD: Demo
 
@@ -107,5 +107,39 @@ fake
 
   it("returns null for an unknown section", () => {
     expect(updatePlanSectionSource(doc, "Nonexistent", "x")).toBeNull()
+  })
+})
+
+describe("appendPlanAnnotationSource with a text anchor", () => {
+  it("serializes an anchored comment that parses back to the same anchor", () => {
+    const next = appendPlanAnnotationSource(doc, {
+      id: "cm1",
+      stageId: "01",
+      body: "Tighten this criterion.",
+      author: "user",
+      createdAt: "2026-07-28T00:00:00.000Z",
+      anchor: { quote: "It works", prefix: '">\n', suffix: "\n</Acceptance" }
+    })
+    const result = parsePlanMdx(next)
+    expect(result.valid).toBe(true)
+    const annotation = result.projection?.annotations.find((a) => a.id === "cm1")
+    expect(annotation?.anchor?.quote).toBe("It works")
+    expect(annotation?.stageId).toBe("01")
+  })
+
+  it("escapes quotes/brackets in the anchor without breaking the tag", () => {
+    const next = appendPlanAnnotationSource(doc, {
+      id: "cm2",
+      stageId: null,
+      body: "note",
+      author: "user",
+      createdAt: "2026-07-28T00:00:00.000Z",
+      anchor: { quote: 'a "quoted" <tag>', prefix: "", suffix: "" }
+    })
+    const result = parsePlanMdx(next)
+    expect(result.valid).toBe(true)
+    expect(result.projection?.annotations.find((a) => a.id === "cm2")?.anchor?.quote).toBe(
+      'a "quoted" <tag>'
+    )
   })
 })

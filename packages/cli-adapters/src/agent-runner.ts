@@ -426,7 +426,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       })
 
     /** Thread a comment onto a plan step (persisted + streamed); doesn't resume the agent. */
-    const commentPlanStep = (sessionId: string, planId: string, stepId: string, body: string) =>
+    const commentPlanStep = (
+      sessionId: string,
+      planId: string,
+      stepId: string,
+      body: string,
+      anchor?: { readonly quote: string; readonly prefix: string; readonly suffix: string }
+    ) =>
       Effect.gen(function* () {
         const { run } = yield* pendingPlanRun(sessionId, planId)
         if (run === undefined) return
@@ -437,9 +443,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             : yield* PlanStore.addAnnotation(canonical.worktreePath, {
                 planId,
                 baseRevision: canonical.document.revision,
-                stageId: stepId,
+                // "" targets a section/global comment (no stage).
+                stageId: stepId === "" ? null : stepId,
                 body,
-                author: "user"
+                author: "user",
+                ...(anchor ? { anchor } : {})
               }).pipe(Effect.option)
         const persisted = Option.isSome(saved)
           ? planDocumentToPlan(saved.value).comments.at(-1)
