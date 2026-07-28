@@ -106,6 +106,8 @@ export interface ConversationViewProps {
   paused?: boolean
   /** Git branch backing the session's worktree, shown in the composer. */
   branch?: string
+  /** Repository backing the session, shown at the composer's bottom-left. */
+  repo?: string
   /** Current harness model id + every installed harness's models (model chip). */
   model?: string
   catalog?: ReadonlyArray<ProviderModels>
@@ -239,6 +241,7 @@ export function ConversationView({
   files = [],
   paused = false,
   branch,
+  repo,
   model,
   catalog = [],
   onSetHarness,
@@ -534,6 +537,7 @@ export function ConversationView({
                 files={files}
                 paused={paused}
                 branch={branch}
+                repo={repo}
                 busy={busy}
                 cli={cli}
                 model={model}

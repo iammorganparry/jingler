@@ -433,6 +433,7 @@ export function ConversationPane({
           files={convo.files}
           paused={convo.paused}
           branch={session.branch}
+          repo={session.repo}
           busy={convo.busy}
           tokens={convo.tokens}
           contextTriggerAt={contextQuery.data?.triggerAt ?? null}
