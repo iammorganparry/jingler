@@ -1173,8 +1173,8 @@ export const runClaude = (
         // opted in through Jingler's Settings. `launch.url` is always set for a
         // remote (http) entry; the `??` is just to satisfy the optional type.
         const oc = spec.openConnector
-        const mcpServers =
-          oc && oc.launch.url
+        const mcpEntries = {
+          ...(oc && oc.launch.url
             ? {
                 [oc.server.name]: {
                   type: "http" as const,
@@ -1182,7 +1182,13 @@ export const runClaude = (
                   headers: oc.launch.headers
                 }
               }
-            : undefined
+            : {}),
+          // The in-process browser-control server (a live McpServer instance),
+          // merged alongside OpenConnector. Built in AgentRunner from the
+          // BrowserControlPort so this adapter stays `R = never`.
+          ...(spec.browserMcp ? { [spec.browserMcp.name]: spec.browserMcp } : {})
+        }
+        const mcpServers = Object.keys(mcpEntries).length > 0 ? mcpEntries : undefined
 
         // Always the SDK's streaming-input form, and deliberately so: it is what
         // keeps the query open for `Agent.steer` to push into (see `makeLiveInput`).

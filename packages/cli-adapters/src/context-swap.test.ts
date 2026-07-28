@@ -17,6 +17,21 @@ import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { fakeCommandExecutor, withTempRoot } from "./test-support.js"
 import type { FakeCommandHandler } from "./test-support.js"
+import { BrowserControlPort } from "./browser-control-port.js"
+
+/** No-op browser-control port (see agent-runner.test.ts). */
+const BrowserControlPortTest = Layer.succeed(
+  BrowserControlPort,
+  BrowserControlPort.of({
+    navigate: async () => {},
+    screenshot: async () => ({ pngBase64: "" }),
+    click: async () => {},
+    type: async () => {},
+    readText: async () => ({ text: "" }),
+    evaluate: async () => ({ result: "" }),
+    waitForSelector: async () => {}
+  })
+)
 
 /**
  * The swap: the point where a prepared digest actually reseeds the harness.
@@ -79,6 +94,7 @@ const layers = () =>
   Layer.mergeAll(
     AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
     ContextManager.Default,
     SessionStore.Default,

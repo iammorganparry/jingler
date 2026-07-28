@@ -22,6 +22,22 @@ import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore } from "./plan-store.js"
 import { reserveSessionRun } from "./run-coordinator.js"
 import { withTempRoot } from "./test-support.js"
+import { BrowserControlPort } from "./browser-control-port.js"
+
+/** A no-op browser-control port. `promptSetup` builds a Claude MCP wrapper
+ *  around it, so it must be provided, but these tests never invoke the tools. */
+const BrowserControlPortTest = Layer.succeed(
+  BrowserControlPort,
+  BrowserControlPort.of({
+    navigate: async () => {},
+    screenshot: async () => ({ pngBase64: "" }),
+    click: async () => {},
+    type: async () => {},
+    readText: async () => ({ text: "" }),
+    evaluate: async () => ({ result: "" }),
+    waitForSelector: async () => {}
+  })
+)
 
 /**
  * The runner is the harness-agnostic HITL core. We assert on OUTCOMES the
@@ -75,6 +91,7 @@ const runPrompt = (mode: PermissionMode, decision: GateDecision) => {
   const base = Layer.mergeAll(
     AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
     ConfigService.Default,
     SessionStore.Default,
@@ -215,6 +232,7 @@ describe("AgentRunner HITL gating", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -336,6 +354,7 @@ describe("AgentRunner sub-agents", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -407,6 +426,7 @@ describe("AgentRunner image attachments", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -443,6 +463,7 @@ describe("AgentRunner AskUserQuestion", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -498,6 +519,7 @@ describe("AgentRunner ids", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -539,6 +561,7 @@ describe("AgentRunner allowlist", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -582,6 +605,7 @@ describe("AgentRunner plan mode", () => {
     Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -899,6 +923,7 @@ describe("AgentRunner model", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -969,6 +994,7 @@ describe("AgentRunner plan library", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1007,6 +1033,7 @@ describe("AgentRunner plan library", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1048,6 +1075,7 @@ describe("AgentRunner plan library", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1081,6 +1109,7 @@ describe("AgentRunner plan library", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1158,6 +1187,7 @@ describe("AgentRunner resume across restarts", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1250,6 +1280,7 @@ describe("AgentRunner resume across restarts", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1373,6 +1404,7 @@ describe("AgentRunner plan progress across turns", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1503,6 +1535,7 @@ describe("AgentRunner failures", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       ContextManager.Default,
@@ -1632,6 +1665,7 @@ describe("AgentRunner stop", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
@@ -1690,7 +1724,8 @@ describe("AgentRunner stop", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
         OpenConnectorService.Default,
-        InMemorySecretStoreLive,
+        BrowserControlPortTest,
+    InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
         TranscriptStore.Default,
@@ -1746,7 +1781,8 @@ describe("AgentRunner stop", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
         OpenConnectorService.Default,
-        InMemorySecretStoreLive,
+        BrowserControlPortTest,
+    InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
         TranscriptStore.Default,
@@ -1796,7 +1832,8 @@ describe("AgentRunner stop", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
         OpenConnectorService.Default,
-        InMemorySecretStoreLive,
+        BrowserControlPortTest,
+    InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
         TranscriptStore.Default,
@@ -1850,7 +1887,8 @@ describe("AgentRunner stop", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
         OpenConnectorService.Default,
-        InMemorySecretStoreLive,
+        BrowserControlPortTest,
+    InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
         TranscriptStore.Default,
@@ -1909,7 +1947,8 @@ describe("AgentRunner stop", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
         OpenConnectorService.Default,
-        InMemorySecretStoreLive,
+        BrowserControlPortTest,
+    InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
         TranscriptStore.Default,
@@ -1988,6 +2027,7 @@ describe("AgentRunner stop", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
@@ -2058,6 +2098,7 @@ describe("AgentRunner first-event watchdog", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
@@ -2109,6 +2150,7 @@ describe("AgentRunner first-event watchdog", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
@@ -2159,6 +2201,7 @@ describe("AgentRunner live tool output", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -2223,6 +2266,7 @@ describe("AgentRunner on the Jingler harness", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
         ConfigService.Default,
         ContextManager.Default,
@@ -2287,6 +2331,7 @@ describe("AgentRunner usage accrual", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
+    BrowserControlPortTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       ContextManager.Default,
