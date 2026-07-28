@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react"
-import { BRAND_SHADER_BACKGROUND, BrandShader } from "../brand/brand-shader.js"
+import { useEffect, useState } from "react"
+import { BRAND_SHADER_BACKGROUND, BrandShader, brandCanAnimate } from "../brand/brand-shader.js"
 import { useOptionalThemeTokens } from "../theme-provider.js"
 
 /**
@@ -7,78 +7,93 @@ import { useOptionalThemeTokens } from "../theme-provider.js"
  * (see `appMachine`'s loading/starting states and the `checking` branch in
  * App.tsx).
  *
- * The whole screen is the brand mark, run through a Paper Design shader —
- * see `../brand/brand-shader.tsx` for the two prop sets and the two ways it
- * refuses to animate. Everything else here is quiet by design: a status line, a
- * progress bar and the wordmark. The shader is the thing worth looking at, and a
- * splash that competes with itself just reads as busy.
+ * The whole screen is the brand mark, run through a Paper Design shader — see
+ * `../brand/brand-shader.tsx` for the two prop sets and the ways it refuses to
+ * animate. That is the entire screen. There is nothing else on it.
  *
- * ## Why the progress bar is a lie, carefully
+ * ## What used to be here, and why it went
  *
- * Nothing here knows how far along the boot is. Main resolves the config, the
- * theme, the session store and the plugin host on its own clock, and the
- * renderer is not told about any of it — it is told when the machine leaves
- * `loading`, and that is all.
+ * A progress bar and a cycling status line ("Waking up", "Loading workspace").
+ * Both were fiction. Nothing in the renderer knows how far along the boot is —
+ * main resolves the config, the theme, the session store and the plugin host on
+ * its own clock and reports none of it, so the bar eased toward 90% and stopped,
+ * and the status line was three strings on a timer that described no observed
+ * state.
  *
- * So the bar eases toward 90% and STOPS. It never completes on its own, because
- * a bar that fills and then sits there is a bar that says "finished" while the
- * app is still working, which is worse than no bar. The unmount is the
- * completion. The easing is asymptotic for the same reason: a slow boot should
- * keep showing movement without ever implying it is nearly done.
+ * Neither was load-bearing and both drew the eye away from the one honest thing
+ * on the screen. The mark animating IS the progress indication: it says the app
+ * is alive without claiming to know how much is left. See `useSplashHold` for
+ * the other half of that — an animation nobody sees indicates nothing at all.
  *
- * Honours `prefers-reduced-motion` — the bar holds at a static value and
- * `BrandShader` swaps itself for the still mark.
+ * `BrandShader` handles `prefers-reduced-motion` and a missing WebGL context by
+ * swapping itself for the still mark, so there is no motion decision to make
+ * here any more.
  */
 
-/** Status copy, in the order it appears. Cosmetic — nothing observes the boot. */
-const PHASES = ["Waking up", "Loading workspace", "Spinning up agents"] as const
+/**
+ * How long the splash stays up, at minimum, measured from app start.
+ *
+ * The shader loops rather than ending, so "until the animation finishes" has to
+ * mean "long enough to read as one deliberate beat" — this is that number. Below
+ * about two seconds the mark is a flicker on a fast boot, which is worse than no
+ * animation: it reads as a glitch rather than as branding.
+ */
+export const SPLASH_HOLD_MS = 2400
 
-/** How long the bar takes to ease from 0 to its ceiling, in ms. */
-const RAMP_MS = 6000
-/** The ceiling. Never 100 — see the note above. */
-const CEILING = 90
+/**
+ * When the renderer started, as close as this module can get to it — module
+ * evaluation happens before React mounts.
+ *
+ * The floor is measured from HERE and not from the splash's mount, which is what
+ * keeps it nearly free: the hold is `max(0, SPLASH_HOLD_MS - however long boot
+ * already took)`. A slow boot pays nothing, and only a boot that beats the
+ * animation waits at all.
+ */
+const bootAt = typeof performance === "object" ? performance.now() : 0
+
+const holdRemaining = (): number =>
+  typeof performance === "object" ? Math.max(0, SPLASH_HOLD_MS - (performance.now() - bootAt)) : 0
+
+/**
+ * Whether the splash should stay up even though whatever it was waiting for is
+ * ready.
+ *
+ * Callers OR this into their own loading condition. It exists because boot is
+ * often faster than the thing it shows: the mark would appear and vanish inside
+ * a couple of frames, and an operator would see a flash of red where a logo
+ * should have been. Holding the screen open costs a boot that was already
+ * imperceptible and buys the one moment the app has to look like itself.
+ *
+ * Returns false immediately — no hold at all — when the mark will not animate on
+ * this machine (`prefers-reduced-motion`, or no WebGL context). There is nothing
+ * to wait for then, and making someone who asked for less motion sit through a
+ * still image would be the exact opposite of honouring the request. That also
+ * means jsdom and headless runs are never delayed, since neither has a GL
+ * context to give.
+ */
+export const useSplashHold = (): boolean => {
+  const [held, setHeld] = useState(() => holdRemaining() > 0 && brandCanAnimate())
+
+  useEffect(() => {
+    if (!held) return
+    const timer = setTimeout(() => setHeld(false), holdRemaining())
+    return () => clearTimeout(timer)
+  }, [held])
+
+  return held
+}
 
 export function LoadingScreen() {
-  const bar = useRef<HTMLDivElement>(null)
-  const [phase, setPhase] = useState(0)
-  const [reduced, setReduced] = useState(false)
-
   // Resolved here rather than left to `BrandShader` because the PAGE has to be
   // painted the same colour as the tile, and both have to agree on which ground
   // that is. High contrast normalises to dark, matching the shader.
   const tokens = useOptionalThemeTokens()
   const ground = tokens?.kind === "light" ? "light" : "dark"
 
-  useEffect(() => {
-    const still =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    setReduced(still)
-
-    if (still) {
-      if (bar.current) bar.current.style.width = "40%"
-      return
-    }
-
-    let raf = 0
-    const start = performance.now()
-    const tick = () => {
-      const p = Math.min(1, (performance.now() - start) / RAMP_MS)
-      // Ease-out cubic: most of the travel happens early, so a fast boot looks
-      // fast and a slow one still creeps rather than freezing.
-      const eased = 1 - (1 - p) ** 3
-      if (bar.current) bar.current.style.width = `${(eased * CEILING).toFixed(1)}%`
-      setPhase(p < 0.3 ? 0 : p < 0.7 ? 1 : 2)
-      if (p < 1) raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [])
-
   return (
     <div
       data-testid="loading-screen"
-      className="relative flex h-full w-full flex-col items-center justify-center overflow-hidden font-sans"
+      className="relative h-full w-full overflow-hidden"
       style={{ background: BRAND_SHADER_BACKGROUND[ground] }}
     >
       {/*
@@ -97,32 +112,6 @@ export function LoadingScreen() {
       */}
       <div className="absolute inset-0">
         <BrandShader fill ground={ground} />
-      </div>
-
-      {/*
-        Pinned to the lower third rather than flowed under the mark. The shader
-        is out of flow now, so a flowed block would centre itself in the window
-        and land on top of the mark's brightest area.
-      */}
-      <div className="absolute bottom-[14%] flex w-[300px] flex-col items-center gap-3 text-text-body">
-        <span className="text-[13px] font-medium tracking-[-0.1px] text-text-body">
-          {reduced ? "Loading" : PHASES[phase]}
-        </span>
-
-        {/*
-          The track is a wash of the ground rather than `bg-surface`: the page is
-          the shader's `colorBack`, not a theme surface, so a `--sb-surface`
-          track reads as a grey bar that belongs to a different screen.
-        */}
-        <div className="h-[3px] w-full overflow-hidden rounded-full bg-current/15">
-          <div
-            ref={bar}
-            className="h-full w-0 rounded-full transition-[width] duration-150 ease-out"
-            style={{
-              background: "linear-gradient(90deg,var(--sb-brand),var(--sb-brand-hover))"
-            }}
-          />
-        </div>
       </div>
     </div>
   )

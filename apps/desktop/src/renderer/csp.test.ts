@@ -44,6 +44,24 @@ describe("renderer CSP", () => {
     expect(imgSrc).toContain("https://*.githubusercontent.com")
   })
 
+  it("allows blob: images, which the brand shader cannot render without", () => {
+    // The launch splash runs the mark through a Paper Design shader, and that
+    // shader rasterises its source image to a canvas, calls `toBlob`, and loads
+    // the result back through an `<img>` (it upscales anything under 1024px).
+    // That intermediate is a `blob:` URL, so a policy without `blob:` blocks it
+    // and the shader reports "Could not set uniforms".
+    //
+    // Which looked like NOTHING. The shader paints its own `colorBack` when it
+    // has no texture, the splash paints the page that same colour on purpose, so
+    // a blocked image and a working animation are the same black rectangle. The
+    // splash shipped that way.
+    //
+    // Cheap to allow: a `blob:` URL is minted by same-origin script and is
+    // unreadable by anyone else, so this grants the page its own bytes back —
+    // not a new origin. `default-src 'self'` still governs everything else.
+    expect(directive("img-src")).toContain("blob:")
+  })
+
   it("keeps script-src to 'self' plus the local plugin scheme, and nothing else", () => {
     // Plugin UI is ES modules the renderer imports, so `script-src` had to give
     // exactly one inch: the `jingler-plugin:` scheme, which the main process
