@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js"
+import { appShell, expect, test } from "./fixtures.js"
 import { FAKE_TOKEN, startFakeOpenConnector } from "./fake-open-connector.js"
 
 /**
@@ -19,7 +19,7 @@ const SECRET = "sk-oc-E2E-MUST-NOT-LEAK"
 
 /** Open Settings and land on the Connector Center section. */
 const openSettings = async (window: import("@playwright/test").Page) => {
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   await window.getByRole("button", { name: "Account menu" }).click()
   await window.getByRole("menuitem", { name: "Settings" }).click()
   await expect(window.getByRole("button", { name: "Close settings" })).toBeVisible()

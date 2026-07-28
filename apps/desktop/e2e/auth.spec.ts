@@ -1,4 +1,4 @@
-import { expect, sessionRow, test } from "./fixtures.js"
+import { appShell, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -28,7 +28,7 @@ test("signed out shows the sign-in wall", async ({ launchApp }) => {
   await expect(window.getByRole("button", { name: /continue with github/i })).toBeVisible()
   await expect(window.getByRole("button", { name: /continue with google/i })).toBeVisible()
   // The app shell must NOT be reachable behind the wall.
-  await expect(window.getByText("Sessions", { exact: true })).toHaveCount(0)
+  await expect(appShell(window)).toHaveCount(0)
 })
 
 test("requesting a magic link shows the sent confirmation", async ({ launchApp }) => {
@@ -75,7 +75,7 @@ test("OAuth opens the provider URL and the callback signs in", async ({ launchAp
 
   // The browser flow returns via the deep link → signed in → app shell.
   await completeDeepLinkSignIn()
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 })
 
 test("a deep-link callback signs in and reaches the app shell", async ({ launchApp }) => {
@@ -89,20 +89,20 @@ test("a deep-link callback signs in and reaches the app shell", async ({ launchA
   await expect(window.getByRole("heading", { name: "Sign in to Jingler" })).toBeVisible()
   // …then the OS hands back the jingler:// callback → signed in → app shell.
   await completeDeepLinkSignIn()
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   await expect(sessionRow(window, "Seeded session")).toBeVisible()
   await expect(window.getByRole("heading", { name: "Sign in to Jingler" })).toHaveCount(0)
 })
 
 test("a stored token boots straight past the wall", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: [seeded] })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   await expect(window.getByRole("heading", { name: "Sign in to Jingler" })).toHaveCount(0)
 })
 
 test("the account menu shows the user and signs out", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: [seeded] })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // The footer account menu shows the signed-in user (from the fake backend).
   const account = window.getByRole("button", { name: "Account menu" })

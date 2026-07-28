@@ -1,4 +1,4 @@
-import { DEFAULT_CLAUDE_MODEL, expect, test } from "./fixtures.js"
+import { appShell, DEFAULT_CLAUDE_MODEL, expect, test } from "./fixtures.js"
 import type { LaunchOptions, SeedSession } from "./fixtures.js"
 
 /**
@@ -56,7 +56,7 @@ const READY: NonNullable<LaunchOptions["opencode"]> = {
 
 /** Open Settings (it lands on Providers) and select the opencode card. */
 const openOpencodeProvider = async (window: import("@playwright/test").Page) => {
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   await window.getByRole("button", { name: "Account menu" }).click()
   await window.getByRole("menuitem", { name: "Settings" }).click()
   await expect(window.getByRole("button", { name: "Close settings" })).toBeVisible()

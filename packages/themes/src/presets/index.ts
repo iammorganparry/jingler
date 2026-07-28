@@ -29,6 +29,8 @@ import type { VsCodeTheme } from "@jingler/core"
 import { abyss } from "./abyss.js"
 import { darkModern } from "./dark-modern.js"
 import { highContrastDark } from "./high-contrast-dark.js"
+import { jinglerDark } from "./jingler-dark.js"
+import { jinglerLight } from "./jingler-light.js"
 import { lightModern } from "./light-modern.js"
 import { monokai } from "./monokai.js"
 import { oneDarkPro } from "./one-dark-pro.js"
@@ -43,6 +45,12 @@ export interface BuiltinTheme {
 }
 
 export const BUILTIN_THEMES: ReadonlyArray<BuiltinTheme> = [
+  // Jingler's own, and the only two hand-authored entries here — everything
+  // below is vendored from VS Code by `scripts/vendor-themes.mjs`. Dark first
+  // because it is `DEFAULT_THEME_ID`; light immediately after, because the
+  // commonest reason to open this picker at all is wanting the other ground.
+  { id: "jingler-dark", theme: jinglerDark },
+  { id: "jingler-light", theme: jinglerLight },
   { id: "one-dark-pro", theme: oneDarkPro },
   { id: "dark-modern", theme: darkModern },
   { id: "light-modern", theme: lightModern },
@@ -63,6 +71,8 @@ export {
   abyss,
   darkModern,
   highContrastDark,
+  jinglerDark,
+  jinglerLight,
   lightModern,
   monokai,
   oneDarkPro,

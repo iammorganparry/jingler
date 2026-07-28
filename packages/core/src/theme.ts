@@ -244,6 +244,22 @@ export const ThemeTokens = Schema.Struct({
   cyan: HexColor,
   orange: HexColor,
 
+  /**
+   * The theme's PRIMARY action colour — filled buttons, focus rings, the active
+   * tab's underline, links. In Jingler's own themes this is the brand red.
+   *
+   * Deliberately NOT `red`, even though Jingler's brand IS red. `red` is wired
+   * to `--destructive`, and collapsing the two would make "Delete session" and
+   * "Create session" the same colour — at which point the destructive tone has
+   * stopped carrying any information. They are close cousins in the Jingler
+   * palette (a saturated rose against a lighter salmon) and unrelated in most
+   * imported ones, which is exactly the point: an imported Solarized should get
+   * a Solarized focus ring, not a Jingler-red one.
+   */
+  brand: HexColor,
+  /** `brand` under a pointer — lifted toward the ground's opposite pole. */
+  brandHover: HexColor,
+
   // Effects — derived from `kind`, never read straight from a theme file.
   /** Modal scrim. Dark themes darken; light themes darken LESS, not lighten. */
   overlay: CssColor,
@@ -305,6 +321,8 @@ export const CSS_VAR_BY_TOKEN: Readonly<Record<Exclude<keyof ThemeTokens, "kind"
   purple: "--sb-purple",
   cyan: "--sb-cyan",
   orange: "--sb-orange",
+  brand: "--sb-brand",
+  brandHover: "--sb-brand-hover",
   overlay: "--sb-overlay",
   shadow: "--sb-shadow",
   shadowStrong: "--sb-shadow-strong",
@@ -413,13 +431,24 @@ export type ThemeConfig = Schema.Schema.Type<typeof ThemeConfig>
 /**
  * The theme a fresh install starts on, and the one every failure falls back to.
  *
- * One Dark Pro rather than a VS Code built-in because it is the palette the
- * whole design system was drawn against — `globals.css`'s fallback block, the
- * status accents in `tokens.ts` and every Storybook snapshot assume it. A
- * fallback that changed the app's appearance would make "the theme failed to
- * load" indistinguishable from "the theme loaded".
+ * Jingler Dark, because a fresh install should look like Jingler. It is also the
+ * palette `globals.css`'s fallback block is pinned to, so applying it is a
+ * pixel-exact no-op — which is the property that keeps "the theme failed to
+ * load" from being indistinguishable from "the theme loaded".
+ *
+ * Changing this is a FIVE-file edit, not a one-line one: the `:root` block in
+ * `packages/ui/src/globals.css` has to be regenerated from the new preset, the
+ * pinning test in `packages/themes/src/map.test.ts` re-pinned to match, and the
+ * two FALLBACK imports moved with it — `apps/desktop/src/main/boot-theme.ts`
+ * (the pre-React paint) and `apps/desktop/src/renderer/use-theme.ts` (the
+ * context value while config and catalog load, and after a theme is deleted).
+ * Leave one of those and the app boots in one palette and repaints into another.
+ *
+ * This only affects installs with nothing saved. `config.theme.activeId` wins
+ * whenever it is set, so an operator who chose One Dark Pro keeps it across the
+ * rebrand and never learns the default moved.
  */
-export const DEFAULT_THEME_ID = "one-dark-pro"
+export const DEFAULT_THEME_ID = "jingler-dark"
 
 /**
  * Filesystem-safe id from a display name: "Solarized Dark" → "solarized-dark".

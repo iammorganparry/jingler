@@ -23,16 +23,26 @@ import { useEffect, useMemo, useRef } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ThemeCatalog, ThemeTokens, VsCodeTheme, WorkspaceConfig } from "@jingler/core"
 import { DEFAULT_THEME_ID } from "@jingler/core"
-import { oneDarkPro, toTokens } from "@jingler/themes"
+import { jinglerDark, toTokens } from "@jingler/themes"
 import { rpc } from "./rpc-client.js"
 
 export const themeCatalogKey = ["themes"] as const
-const defaultTokens = toTokens(oneDarkPro)
+/**
+ * Must be the preset `DEFAULT_THEME_ID` names, and must match the one
+ * `main/boot-theme.ts` falls back to. Two reasons, both invisible in the happy
+ * path: this is the context value while config and catalog are still in flight,
+ * so `LoadingScreen` reads its `kind` off it to pick the shader's ground — wrong
+ * here and a light install flashes a full-bleed dark splash over the correct
+ * light boot stylesheet. And when the active theme is deleted or goes malformed,
+ * main and renderer must fall back to the SAME palette, or boot paints one theme
+ * and React repaints another.
+ */
+const defaultTokens = toTokens(jinglerDark)
 
 /**
  * The tokens to render with, resolved from the catalog and the config.
  *
- * Falls back to the bundled One Dark Pro whenever the active id names nothing —
+ * Falls back to Jingler Dark whenever the active id names nothing —
  * the theme was deleted, its file went malformed, the catalog has not loaded
  * yet. `ThemeService.resolve` makes the same choice on the main side; both
  * exist because both sides can be asked before the other has answered.

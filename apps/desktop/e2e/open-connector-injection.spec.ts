@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test"
-import { expect, test } from "./fixtures.js"
+import { appShell, expect, test } from "./fixtures.js"
 import { FAKE_TOKEN, FAKE_TOOL_COUNT, startFakeOpenConnector } from "./fake-open-connector.js"
 
 /**
@@ -23,7 +23,7 @@ import { FAKE_TOKEN, FAKE_TOOL_COUNT, startFakeOpenConnector } from "./fake-open
 const RUNNABLE = ["Claude Code", "Codex", "opencode"] as const
 
 const openSettings = async (window: Page) => {
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   await window.getByRole("button", { name: "Account menu" }).click()
   await window.getByRole("menuitem", { name: "Settings" }).click()
   await expect(window.getByRole("button", { name: "Close settings" })).toBeVisible()

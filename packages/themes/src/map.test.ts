@@ -124,68 +124,108 @@ describe("toTokens — every built-in theme", () => {
 })
 
 /**
- * One Dark Pro is `DEFAULT_THEME_ID`: a fresh install runs it, every
- * pre-theming config resolves to it, and every failure falls back to it. If the
- * fold moved a single value, then "theming shipped" and "the theme failed to
- * load" would both look like the app quietly changing colour — and every
+ * Jingler Dark is `DEFAULT_THEME_ID`: a fresh install runs it, every config
+ * without a saved theme resolves to it, and every failure falls back to it. If
+ * the fold moved a single value, then "theming shipped" and "the theme failed
+ * to load" would both look like the app quietly changing colour — and every
  * Storybook baseline would need rebuilding for a feature meant to be a no-op by
  * default. These are the literal values in `packages/ui/src/globals.css`.
+ *
+ * Half of them are NOT stated by the preset. `sunken` comes out of
+ * `enforceSurfaceRamp` (the theme's own `panel.background` sits too close to
+ * `sideBar.background` to read as a separate plane), and the accents pass
+ * through the contrast bar. That is exactly why this is pinned rather than
+ * eyeballed: those are the values a hand-written `:root` block would get wrong.
  */
-describe("toTokens — One Dark Pro is a visual no-op", () => {
-  const t = toTokens(BUILTIN_THEMES.find((b) => b.id === "one-dark-pro")!.theme)
+describe("toTokens — Jingler Dark is a visual no-op", () => {
+  const t = toTokens(BUILTIN_THEMES.find((b) => b.id === "jingler-dark")!.theme)
 
   it.each([
-    ["canvas", "#16181d"],
-    ["panel", "#21252b"],
-    ["sunken", "#1e2228"],
-    ["editor", "#282c34"],
-    ["surface", "#2c313a"],
-    ["hairline", "#181a1f"],
-    ["line", "#3e4451"],
-    ["lineStrong", "#4b5263"],
-    ["textBright", "#d7dae0"],
-    ["textBody", "#c8ccd4"],
-    ["text", "#abb2bf"],
-    ["muted", "#828997"],
-    ["dim", "#5c6370"],
-    ["blue", "#61afef"],
-    ["green", "#98c379"],
-    ["yellow", "#e5c07b"],
-    ["red", "#e06c75"],
-    ["purple", "#c678dd"],
-    ["cyan", "#56b6c2"],
-    ["orange", "#d19a66"]
+    ["canvas", "#141414"],
+    ["panel", "#1b1b1b"],
+    ["sunken", "#171717"],
+    ["editor", "#212121"],
+    ["surface", "#2b2b2b"],
+    ["hairline", "#0f0f0f"],
+    ["line", "#333333"],
+    ["lineStrong", "#454545"],
+    ["textBright", "#f4f1f1"],
+    ["textBody", "#dedada"],
+    ["text", "#c6c1c1"],
+    ["muted", "#8d8686"],
+    ["dim", "#6a6363"],
+    ["blue", "#6faef6"],
+    ["green", "#70d294"],
+    ["yellow", "#ebcb60"],
+    ["red", "#ee8372"],
+    ["purple", "#db91ed"],
+    ["cyan", "#5eccd4"],
+    ["orange", "#f1a35f"],
+    // Brand red, and NOT `red` — the two are neighbours on purpose. If these
+    // ever fold to the same value, `--primary` and `--destructive` have
+    // collapsed and a delete button is indistinguishable from a create one.
+    ["brand", "#ef3f57"],
+    ["brandHover", "#f5687b"]
   ] as const)("%s is exactly %s", (token, expected) => {
     expect(t[token].toLowerCase()).toBe(expected)
   })
 
   /**
-   * The diff viewer is the loudest place the no-op rule could break. One Dark
-   * Pro genuinely ships `diffEditor.insertedTextBackground: "#00809b33"` — a
-   * TEAL insert wash — while Jingler's diff has always painted
-   * `bg-green/[0.13]`. Taking the theme's own value would have recoloured every
-   * diff on upgrade, so the default preset pins these four the way it pins its
-   * surfaces. Other themes still get their own.
+   * The diff viewer is the loudest place the no-op rule could break — a wash
+   * that shifts recolours every line of every review at once. The preset states
+   * both washes outright rather than letting them be derived, so this pins the
+   * derived alpha alongside the stated hue.
    */
-  it("keeps the diff washes on the app's existing green and red", () => {
-    expect(t.diffAddBg).toContain("152 195 121") // green
-    expect(t.diffDelBg).toContain("224 108 117") // red
+  it("keeps the diff washes on the app's green and red", () => {
+    expect(t.diffAddBg).toContain("112 210 148") // green
+    expect(t.diffDelBg).toContain("238 131 114") // red
     expect(t.diffAddBg).toMatch(/0\.12\d?|0\.13/)
-    expect(t.diffDelBg).toMatch(/0\.12\d?/)
+    expect(t.diffDelBg).toMatch(/0\.12\d?|0\.13/)
   })
 
   /** The gutter markers are deliberately quiet, so they skip the accent bar. */
   it("keeps the dim gutter markers rather than brightening them to pass contrast", () => {
-    expect(t.diffAddFg.toLowerCase()).toBe("#4e6b45")
-    expect(t.diffDelFg.toLowerCase()).toBe("#6b4a4e")
+    expect(t.diffAddFg.toLowerCase()).toBe("#447e59")
+    expect(t.diffDelFg.toLowerCase()).toBe("#855047")
   })
 
   it.each([
-    ["scrollbar", "#3e4451"],
-    ["scrollbarHover", "#4b5263"],
-    ["linkHover", "#7cc0f5"]
+    ["scrollbar", "rgb(255 255 255 / 0.125)"],
+    ["scrollbarHover", "rgb(255 255 255 / 0.2)"],
+    ["selection", "rgb(239 63 87 / 0.22)"]
   ] as const)("%s matches the value already in globals.css", (token, expected) => {
-    expect(t[token].toLowerCase()).toBe(expected)
+    expect(t[token]).toBe(expected)
+  })
+
+  it("links hover to the brand's lifted tone, matching --sb-link-hover", () => {
+    expect(t.linkHover.toLowerCase()).toBe("#f5687b")
+  })
+
+  /**
+   * The accents were retuned to share the brand's saturation/lightness
+   * envelope, which is what makes them read as one family rather than seven
+   * separately-chosen colours. A future edit that drops one back to a stock
+   * VS Code hex would pass every other assertion here — the value would still
+   * be a valid colour with fine contrast — and only show up as the palette
+   * quietly looking unrelated to itself again.
+   */
+  it("keeps every accent inside the brand's saturation and lightness envelope", () => {
+    const hsl = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16) / 255)
+      const max = Math.max(r!, g!, b!)
+      const min = Math.min(r!, g!, b!)
+      const l = (max + min) / 2
+      const s = max === min ? 0 : (max - min) / (1 - Math.abs(2 * l - 1))
+      return { s: s * 100, l: l * 100 }
+    }
+
+    for (const token of ["blue", "green", "yellow", "red", "purple", "cyan", "orange"] as const) {
+      const { s, l } = hsl(t[token])
+      expect.soft(s, `${token} saturation`).toBeGreaterThanOrEqual(50)
+      expect.soft(s, `${token} saturation`).toBeLessThanOrEqual(90)
+      expect.soft(l, `${token} lightness`).toBeGreaterThanOrEqual(58)
+      expect.soft(l, `${token} lightness`).toBeLessThanOrEqual(78)
+    }
   })
 })
 

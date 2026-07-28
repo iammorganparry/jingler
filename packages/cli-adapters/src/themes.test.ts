@@ -54,10 +54,10 @@ describe("ThemeService", () => {
       const exit = await provided(ThemeService.list())
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
-      const oneDark = exit.value.themes.find((t) => t.id === DEFAULT_THEME_ID)!
-      expect(oneDark.tokens.editor.toLowerCase()).toBe("#282c34")
-      expect(oneDark.kind).toBe("dark")
-      expect(oneDark.source).toBe("builtin")
+      const fallback = exit.value.themes.find((t) => t.id === DEFAULT_THEME_ID)!
+      expect(fallback.tokens.editor.toLowerCase()).toBe("#212121")
+      expect(fallback.kind).toBe("dark")
+      expect(fallback.source).toBe("builtin")
     })
 
     it("picks up a user theme and marks where it came from", async () => {

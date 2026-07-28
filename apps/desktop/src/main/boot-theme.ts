@@ -9,7 +9,7 @@
  * change, and it is correct there. It cannot handle the first paint, because by
  * the time the renderer has mounted, asked main for the config and got an
  * answer, the browser has already painted at least one frame using the fallback
- * block in `globals.css` — which is One Dark. On a light theme that is a full
+ * block in `globals.css` — which is Jingler Dark. On a light theme that is a full
  * white-on-dark flash, and it happens on every single launch.
  *
  * There are two separate flashes to kill and they need different fixes:
@@ -26,7 +26,7 @@
  * copied across a process boundary once per launch.
  */
 import { ThemeService, ConfigService } from "@jingler/cli-adapters"
-import { oneDarkPro, toCssText, toTokens } from "@jingler/themes"
+import { jinglerDark, toCssText, toTokens } from "@jingler/themes"
 import type { ThemeTokens } from "@jingler/core"
 import { Effect } from "effect"
 import { ipcMain } from "electron"
@@ -49,12 +49,12 @@ let bootTokens: ThemeTokens | null = null
  * Read the config, resolve the active theme, and fold it to tokens.
  *
  * Never fails. Every branch — no config, a config naming a deleted theme, a
- * malformed theme file — resolves to One Dark Pro, because launching into an
+ * malformed theme file — resolves to Jingler Dark, because launching into an
  * unstyled window is worse than launching into the wrong theme. `ThemeService.resolve`
  * owns that fallback; this just refuses to let a config read failure escape.
  */
 export const resolveBootTheme = async (): Promise<ThemeTokens> => {
-  let tokens = toTokens(oneDarkPro)
+  let tokens = toTokens(jinglerDark)
   try {
     tokens = await runtime.runPromise(
       Effect.gen(function* () {
@@ -68,9 +68,9 @@ export const resolveBootTheme = async (): Promise<ThemeTokens> => {
     )
   } catch (cause) {
     // Typed failures are already handled inside the Effect. This catches
-    // defects and runtime failures too: booting in One Dark is preferable to
+    // defects and runtime failures too: booting in Jingler Dark is preferable to
     // never creating a window.
-    console.error("Could not resolve the boot theme; using One Dark Pro.", cause)
+    console.error("Could not resolve the boot theme; using Jingler Dark.", cause)
   }
   bootTokens = tokens
   return tokens

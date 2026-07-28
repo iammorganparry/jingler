@@ -1,9 +1,10 @@
 import type { CSSProperties, ReactNode } from "react"
+import { JinglerMark } from "../brand/jingler-mark.js"
 
 const drag = { WebkitAppRegion: "drag" } as CSSProperties
 const noDrag = { WebkitAppRegion: "no-drag" } as CSSProperties
 
-/** macOS-style window title bar with traffic lights and a centered title. */
+/** macOS-style window title bar with traffic lights and a centered brand mark + title. */
 export function TitleBar({
   title = "Jingler",
   actions
@@ -26,7 +27,23 @@ export function TitleBar({
         a five-button layout picker on the right — so a `flex-1` title would sit
         visibly off-centre in the only configuration the app actually renders.
       */}
-      <div className="pointer-events-none absolute inset-x-0 text-center text-[12px] text-dim">
+      {/*
+        Mark and title travel together, centred as one unit.
+
+        The mark is INSIDE the absolutely-centred block rather than pinned beside
+        the traffic lights, because the left block is the one place it cannot go:
+        macOS reserves that corner, and on Windows/Linux the same slot is where
+        the window's own icon lands. Centred, it reads as the app's mark on every
+        platform and never collides with system chrome.
+      */}
+      <div className="pointer-events-none absolute inset-x-0 flex items-center justify-center gap-1.5 text-[12px] text-dim">
+        {/*
+          `text-brand` rather than inheriting `text-dim`: the mark is the one
+          spot of colour in an otherwise monochrome bar, and a grey logo reads
+          as a disabled control. It stays quiet by being 13px, not by being
+          desaturated.
+        */}
+        <JinglerMark className="h-[13px] w-auto text-brand" />
         {title}
       </div>
       {/*

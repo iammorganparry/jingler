@@ -10,6 +10,16 @@ directories:
   output: release
   buildResources: build-resources
 
+# electron-builder WOULD auto-discover `build-resources/icon.{icns,ico,png}`,
+# but naming them is worth the four lines: a silently-missing icon falls back to
+# Electron's own default, which looks like a real icon and so never reads as a
+# failure. Generated from the brand mark by `scripts/generate-brand-icons.py` —
+# regenerate rather than hand-editing, so the macOS squircle grid stays right.
+#
+# `icon.png` is the full-bleed square (Windows/Linux convention). `icon.icns`
+# carries the inset-in-a-1024-canvas variant macOS wants, because the system
+# draws its own shadow into that margin.
+
 # electron-vite emits main/preload/renderer under out/. electron-builder also
 # includes the production `dependencies` node_modules automatically (effect,
 # @effect/*, electron-updater, …), so they don't need listing here.
@@ -35,6 +45,12 @@ files:
 # `dist/**` assumes the plugin has been BUILT. `pnpm build` (turbo) covers it:
 # `plugins/*` is in pnpm-workspace.yaml and each plugin has a `build` script.
 extraResources:
+  # Linux window/taskbar icon. `linux.icon` above dresses the AppImage and the
+  # .desktop entry, but the RUNNING window's icon comes from `BrowserWindow`,
+  # which needs a real file on disk outside the asar — so the same PNG ships
+  # twice on purpose. See `windowIcon()` in src/main/index.ts.
+  - from: build-resources/icon.png
+    to: icon.png
   - from: ../../plugins/github-issues
     to: plugins/github-issues
     filter:
@@ -63,6 +79,7 @@ publish:
   repo: jingler
 
 mac:
+  icon: build-resources/icon.icns
   category: public.app-category.developer-tools
   target:
     - target: dmg
@@ -76,6 +93,7 @@ mac:
   entitlementsInherit: build-resources/entitlements.mac.plist
 
 win:
+  icon: build-resources/icon.ico
   target:
     - target: nsis
       arch: [x64]
@@ -89,6 +107,7 @@ nsis:
   allowToChangeInstallationDirectory: true
 
 linux:
+  icon: build-resources/icon.png
   category: Development
   target:
     - target: AppImage

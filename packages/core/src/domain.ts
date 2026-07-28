@@ -806,9 +806,9 @@ export const WorkspaceConfig = Schema.Struct({
   /**
    * The active colour theme, plus any per-key overrides on top of it.
    *
-   * Absent means `DEFAULT_THEME_ID` (One Dark Pro) — which is also what every
-   * config written before theming existed means, so upgrading users see exactly
-   * the app they had. Only the CHOICE lives here; the themes themselves are
+   * Absent means `DEFAULT_THEME_ID` (Jingler Dark) — which is also what every
+   * config written before theming existed means. Only the CHOICE lives here;
+   * the themes themselves are
    * bundled presets or files under `~/jingler/themes`, because a theme is
    * kilobytes of colour table and `config.json` is read on every settings save.
    */

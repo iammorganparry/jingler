@@ -9,6 +9,7 @@
  * the session token (OS keychain, via `SecretStore`) before telling the renderer
  * to re-check auth.
  */
+import { existsSync } from "node:fs"
 import { join } from "node:path"
 import {
   DiscoveryService,
@@ -146,17 +147,41 @@ if (!gotPrimaryLock) {
   /**
    * The window's pre-paint background, resolved from the active theme.
    *
-   * Seeded with the One Dark canvas so a window created before the theme has
-   * resolved still looks like the app rather than like a white rectangle. In
-   * practice `whenReady` resolves the theme before the first `createWindow`;
+   * Seeded with the Jingler Dark canvas so a window created before the theme
+   * has resolved still looks like the app rather than like a white rectangle.
+   * In practice `whenReady` resolves the theme before the first `createWindow`;
    * this only covers the `activate` path on macOS if that somehow races.
+   *
+   * Must stay equal to `--sb-canvas` in globals.css — they are the same frame
+   * of the same launch, painted by two different processes.
    */
-  let themeBackgroundColor = "#16181d"
+  let themeBackgroundColor = "#141414"
+
+  /**
+   * The window icon, on the one platform that reads it.
+   *
+   * macOS takes the icon from the .app bundle and Windows from the .exe, both
+   * of which electron-builder stamps at package time — passing `icon` there is
+   * ignored at best. Linux is the exception: the running window's taskbar entry
+   * comes from `BrowserWindow.icon`, and without it the app sits in the dock as
+   * a generic Electron diamond even though the AppImage itself is branded.
+   *
+   * Returns `undefined` rather than a guessed path when the file is missing, so
+   * a dev checkout that has not built icons still opens a window.
+   */
+  const windowIcon = (): string | undefined => {
+    if (process.platform !== "linux") return undefined
+    const candidate = app.isPackaged
+      ? join(process.resourcesPath, "icon.png")
+      : join(import.meta.dirname, "../../build-resources/icon.png")
+    return existsSync(candidate) ? candidate : undefined
+  }
 
   const createWindow = () => {
     const window = new BrowserWindow({
       width: 1320,
       height: 860,
+      icon: windowIcon(),
       // The shell collapses gracefully (see `width-tier.tsx`) but it collapses
       // to a floor, not to nothing: below this the sidebar rail, a pane's tab
       // bar and the composer's wrapped toolbar have no room left to give, and

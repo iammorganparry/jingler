@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js"
+import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -64,7 +64,7 @@ test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", asyn
     }
   })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // LaTeX: KaTeX mounts a `.katex` node — the raw "$E = mc^2$" is never shown.
   await expect(window.locator(".katex").first()).toBeVisible({ timeout: 10_000 })

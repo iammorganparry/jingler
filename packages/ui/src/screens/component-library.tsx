@@ -21,10 +21,11 @@ import { SlashCommandRow } from "../composites/slash-command-row.js"
 import { SessionRow } from "../composites/session-row.js"
 import { Composer } from "../composites/composer.js"
 import { DiffHunk } from "../diff/diff-hunk.js"
+import { JinglerMark } from "../brand/jingler-mark.js"
 
 /*
  * The swatch ribbons name TOKENS, not hexes — this gallery is the one screen
- * that has to repaint with the theme, or it documents One Dark Pro forever
+ * that has to repaint with the theme, or it documents Jingler Dark forever
  * rather than whatever is actually active.
  */
 const SURFACES = ["editor", "panel", "sunken", "surface", "border"]
@@ -60,17 +61,17 @@ export function ComponentLibrary() {
       {/* Header */}
       <header className="flex flex-col gap-2">
         <div className="flex items-baseline gap-3">
-          <span className="flex size-[26px] items-center justify-center rounded-md bg-blue text-[14px] text-editor">
-            ✦
+          <span className="flex size-[26px] items-center justify-center rounded-md bg-brand">
+            <JinglerMark className="h-3.5 w-auto text-white" />
           </span>
           <span className="text-[22px] font-bold tracking-[-.2px] text-text-bright">
             Jingler component library
           </span>
-          <Badge tone="count">One Dark Pro</Badge>
+          <Badge tone="count">Jingler Dark</Badge>
         </div>
         <p className="m-0 max-w-[640px] text-[13.5px] leading-[1.6] text-muted-foreground">
           Atoms compose into molecules; molecules compose into the screens. shadcn primitives at the
-          base, styled to the One Dark style guide. Radii are editor-tight (rows/cards 5, chips 4,
+          base, styled to the Jingler style guide. Radii are editor-tight (rows/cards 5, chips 4,
           gutters 3, callouts 7).
         </p>
       </header>

@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js"
+import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -43,7 +43,7 @@ test("sub-agents outlive the main agent, and talking to it does not kill them", 
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   const composer = window.getByPlaceholder("Message Claude…")
   await composer.fill("[[held-subagents]] map the UI")
@@ -82,7 +82,7 @@ test("stopping a held-open turn clears every sub-agent tab", async ({ launchApp 
   // button — so the tabs go with it rather than lingering as rows nothing will ever
   // settle, which is how a "running" tab over a dead process reads as a hang.
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   const composer = window.getByPlaceholder("Message Claude…")
   await composer.fill("[[held-subagents]] map the UI")

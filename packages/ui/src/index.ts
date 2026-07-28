@@ -46,7 +46,6 @@ export * from "./components/provider-icon.js"
 export * from "./components/connector-logo.js"
 export * from "./components/oauth-button.js"
 export * from "./components/auth-divider.js"
-export * from "./components/starfield.js"
 
 // Molecules / composites
 export * from "./composites/tool-call.js"
@@ -161,6 +160,8 @@ export * from "./screens/component-library.js"
 export * from "./screens/stub-screen.js"
 export * from "./screens/setup-screen.js"
 export * from "./screens/loading-screen.js"
+export * from "./brand/jingler-mark.js"
+export * from "./brand/brand-shader.js"
 export * from "./screens/login-screen.js"
 
 // Seed data

@@ -60,6 +60,21 @@ export const showSessions = async (
 }
 
 /**
+ * "The app shell is on screen" — the sentinel ~19 specs assert before doing
+ * anything else.
+ *
+ * It used to be `getByText("Sessions", { exact: true })`, repeated 56 times. The
+ * sidebar header then merged into one row and lost that label, and every one of
+ * those specs failed at once for a reason that had nothing to do with what they
+ * were testing.
+ *
+ * The search field is a better sentinel than a heading anyway: it is a control
+ * the operator uses rather than decoration, so it is far less likely to be
+ * restyled away — and if it ever is, this is one line rather than fifty-six.
+ */
+export const appShell = (window: Page) => window.getByPlaceholder("Filter sessions…")
+
+/**
  * The SIDEBAR row for a session, found by its title.
  *
  * ## Why `getByText(title)` stopped working

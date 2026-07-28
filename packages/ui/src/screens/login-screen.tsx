@@ -4,7 +4,6 @@ import { TitleBar } from "../app/title-bar.js"
 import { AuthDivider } from "../components/auth-divider.js"
 import { Callout } from "../components/callout.js"
 import { OAuthButton } from "../components/oauth-button.js"
-import { Starfield } from "../components/starfield.js"
 import { AuthCard } from "../composites/auth-card.js"
 import { MagicLinkForm } from "../composites/magic-link-form.js"
 
@@ -34,8 +33,8 @@ const COPY: Record<AuthMode, { title: string; subtitle: string }> = {
 }
 
 /**
- * The sign-in wall — the whole app is gated behind this. A macOS titlebar over a
- * starfield, with the auth card (GitHub + Google OAuth, a divider, and the email
+ * The sign-in wall — the whole app is gated behind this. A macOS titlebar over
+ * a flat canvas, with the auth card (GitHub + Google OAuth, a divider, and the email
  * magic-link form). The footer toggles between sign-in and sign-up: sign-up adds
  * a name field and a terms notice, and reframes the copy. Both modes share the
  * same backend flow (magic link / OAuth); sign-up simply carries the display
@@ -69,8 +68,6 @@ export function LoginScreen({
     <div className="flex h-full flex-col bg-canvas">
       <TitleBar />
       <div className="relative flex flex-1 items-center justify-center overflow-hidden">
-        <Starfield />
-
         <AuthCard title={COPY[mode].title} subtitle={COPY[mode].subtitle}>
           {state === "error" ? (
             <Callout tone="red" glyph={<AlertCircle className="size-3.5" />} className="w-full">
@@ -108,11 +105,11 @@ export function LoginScreen({
           {signup ? (
             <p className="mt-2 text-center text-[11px] leading-normal text-dim">
               By continuing you agree to our{" "}
-              <a href="#" onClick={(event) => event.preventDefault()} className="text-blue hover:underline">
+              <a href="#" onClick={(event) => event.preventDefault()} className="text-brand hover:underline">
                 Terms
               </a>{" "}
               &amp;{" "}
-              <a href="#" onClick={(event) => event.preventDefault()} className="text-blue hover:underline">
+              <a href="#" onClick={(event) => event.preventDefault()} className="text-brand hover:underline">
                 Privacy Policy
               </a>
               .
@@ -134,7 +131,7 @@ export function LoginScreen({
           <button
             type="button"
             onClick={toggleMode}
-            className="text-blue hover:underline"
+            className="text-brand hover:underline"
           >
             {signup ? "Sign in" : "Create an account"}
           </button>

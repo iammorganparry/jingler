@@ -6,6 +6,7 @@ import { Callout } from "../components/callout.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { Spinner } from "../components/loading.js"
 import { StatusDot } from "../components/status-dot.js"
+import { JinglerMark } from "../brand/jingler-mark.js"
 
 export interface SetupScreenProps {
   /** Discovered coding CLIs (for a reassuring "harnesses ready" summary). */
@@ -48,8 +49,8 @@ export function SetupScreen({
     <div className="flex h-full flex-1 items-center justify-center overflow-auto bg-editor px-6 py-10">
       <div className="flex w-full max-w-[520px] flex-col gap-6">
         {/* Brand */}
-        <div className="flex size-12 items-center justify-center rounded-xl bg-blue font-mono text-[22px] leading-none text-editor">
-          ✦
+        <div className="flex size-12 items-center justify-center rounded-xl bg-brand">
+          <JinglerMark className="h-6 w-auto text-white" />
         </div>
 
         {/* Header */}

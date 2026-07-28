@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js"
+import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -43,7 +43,7 @@ test("two chats in one session run their agents concurrently", async ({ launchAp
     sessions: seededSessions
   })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // Chat 1: start a run. In accept-edits it streams, applies the edit, then
   // parks at the command gate — its run stays LIVE, awaiting approval.

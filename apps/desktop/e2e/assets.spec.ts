@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { expect, test } from "./fixtures.js"
+import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -136,7 +136,7 @@ test("opens worktree assets from the transcript in the Preview dock", async ({ l
     transcripts: { s_assets: TRANSCRIPT }
   })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // ── Route 1: the tool card's filename ────────────────────────────────────
   // A `Write` card is literally the moment the agent created the file, which is

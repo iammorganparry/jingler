@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { ALT_CLAUDE_MODEL, DEFAULT_CLAUDE_MODEL, expect, sessionRow, showSessions, test } from "./fixtures.js"
+import { ALT_CLAUDE_MODEL, appShell, DEFAULT_CLAUDE_MODEL, expect, sessionRow, showSessions, test } from "./fixtures.js"
 import type { Page } from "@playwright/test"
 import { reasoningEffortsFor } from "../../../packages/ui/src/lib/reasoning-options.js"
 import type { SeedSession } from "./fixtures.js"
@@ -57,7 +57,7 @@ test("streams a turn, pauses at a HITL gate, and resumes on approval", async ({ 
     sessions: seededSessions
   })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   const composer = window.getByPlaceholder("Message Claude…")
   await expect(composer).toBeVisible()
 
@@ -118,7 +118,7 @@ test("Auto mode runs the command without pausing for approval", async ({ launchA
     sessions: seededSessions
   })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   const composer = window.getByPlaceholder("Message Claude…")
   await composer.click()
@@ -149,7 +149,7 @@ test("the / menu surfaces built-in + project skills and the @ menu references fi
     }
   })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   const composer = window.getByPlaceholder("Message Claude…")
   await composer.click()
 
@@ -171,7 +171,7 @@ test("the mode chip lives in the composer and Shift+Tab cycles it (incl. Plan on
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   const composer = window.getByPlaceholder("Message Claude…")
   await composer.click()
@@ -220,7 +220,7 @@ test("thinking strength is a compact per-session composer control", async ({ lau
 
 test("the model chip shows the harness model and switches", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
 
   // The chip opens on the harness's default model (fallback list; no API key in e2e).
@@ -265,7 +265,7 @@ test("the model chip switches provider", async ({ launchApp }) => {
 
 test("the sidebar Usage & limits button opens the usage modal", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // The sidebar footer account menu surfaces the usage entry point.
   await window.getByRole("button", { name: "Account menu" }).click()
@@ -301,7 +301,7 @@ test("AskUserQuestion replaces the composer with a question card and resumes on 
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // The `[[ask]]` marker drives the scripted AskUserQuestion flow.
   const composer = window.getByPlaceholder("Message Claude…")
@@ -335,7 +335,7 @@ test("a storm of consecutive tool calls collapses to the latest with a +N more t
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   const composer = window.getByPlaceholder("Message Claude…")
   await composer.fill("[[storm]] scan the codebase")
@@ -357,7 +357,7 @@ test("Plan mode: propose a plan, review a step, and approve in auto", async ({
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // The `[[plan]]` marker drives the scripted plan-mode flow: the agent proposes
   // a structured plan and parks awaiting approval.
@@ -413,7 +413,7 @@ test("the plan can be split beside the conversation instead of replacing it", as
   // the REAL thing — and, crucially, without unmounting the conversation, since
   // that would abort a live run.
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   const composer = window.getByPlaceholder("Message Claude…")
   await composer.fill("[[plan]] refactor auth to a TokenStore")
@@ -456,7 +456,7 @@ test("a worktree session without a PR shows a Changes tab with the Code Review v
       writeFileSync(join(repoPath, "README.md"), "# e2e repo\nan uncommitted edit\n")
     }
   })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // No PR yet → the local worktree diff gets its own top-level Changes tab, which
   // is the Code Review view scoped to the uncommitted (local) source.
@@ -479,7 +479,7 @@ test("a linked PR shows the sidebar badge and the Pull Request / Code Review tab
     withRepo: true,
     sessions: seededPrSessions
   })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // The sidebar row badges the linked PR number.
   await expect(window.getByText(/#482/).first()).toBeVisible()
@@ -521,7 +521,7 @@ test("the Pull Request tab leads with the description, in the conversation's col
       ]
     }
   })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   await window.getByRole("button", { name: "Pull Request" }).click()
 
   // The description renders as the opening comment — markdown and all.
@@ -648,7 +648,7 @@ test("Code Review shows the Uncommitted source and reverts a whole file", async 
       writeFileSync(join(repoPath, "README.md"), "# e2e repo\nan uncommitted edit\n")
     }
   })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   await window.getByRole("button", { name: "Code Review" }).first().click()
 
@@ -668,7 +668,7 @@ test("the sidebar Settings cog opens the settings view with the GitHub section",
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   await window.getByRole("button", { name: "Account menu" }).click()
   await window.getByRole("menuitem", { name: "Settings" }).click()
@@ -723,7 +723,7 @@ test("an orphaned pending gate settles on load (its dead buttons disappear)", as
     }
   })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   // The seeded session auto-selects; its transcript (with the gate) loads.
   await expect(window.getByText("find . -name orphaned-gate")).toBeVisible()
 
@@ -789,7 +789,7 @@ test("a stale plan (reopened app) can be approved to re-drive execution", async 
     }
   })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   // The seeded session auto-selects; a plan present → the Plan Review tab shows.
   await window.getByRole("button", { name: "Plan Review" }).first().click()
   await expect(window.getByText("Refactor the auth flow").first()).toBeVisible()
@@ -834,7 +834,7 @@ test("an archived session shows in the Archived group, read-only, and restores",
     ]
   })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // Archived is a filter now, hidden by default — so the session is out of the
   // list until it is asked for, and that is the behaviour worth asserting.
@@ -893,7 +893,7 @@ const twoSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSess
 
 test("sidebar quick-actions: hover a row to archive an active session", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: twoSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // Both sessions are active, so both are listed under the default filter.
   await expect(sessionRow(window, "Second session")).toBeVisible()
@@ -915,7 +915,7 @@ test("sidebar quick-actions: right-click → Delete removes a session after conf
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: twoSessions })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
   await expect(sessionRow(window, "Second session")).toBeVisible()
 
   // Right-click the row opens the context menu; choose Delete.
@@ -983,7 +983,7 @@ test("a merged PR badges its linked session but never archives it", async ({ lau
     ]
   })
 
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // Waiting on the merge signal is what proves the PR-state poll actually ran —
   // without it, "was not archived" would pass trivially by asserting before the
@@ -1026,7 +1026,7 @@ test("a running adversarial review reports its phase and appears in the agent ta
       ]
     }
   })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // The preview dock covers the right rail, hiding the review button.
   // Collapse it only IF it's open: its visibility persists in localStorage across
@@ -1075,7 +1075,7 @@ test("a finished reviewer's tab is restored after a restart", async ({ launchApp
       ]
     }
   })
-  await expect(window.getByText("Sessions", { exact: true })).toBeVisible()
+  await expect(appShell(window)).toBeVisible()
 
   // The tab is back with the previous run's output readable behind it.
   const reviewerTab = window.getByRole("button", { name: /Reviewer/ })

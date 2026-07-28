@@ -212,8 +212,8 @@ export class ThemeService extends Effect.Service<ThemeService>()("@jingler/Theme
      *
      * Always succeeds. The active id can name a theme the user has since
      * deleted, or a file that has become malformed, and neither is a reason to
-     * launch into an unstyled window — so both fall back to One Dark Pro, which
-     * is bundled and therefore always resolvable.
+     * launch into an unstyled window — so both fall back to `DEFAULT_THEME_ID`
+     * (Jingler Dark), which is bundled and therefore always resolvable.
      */
     const resolve = (
       id: string | undefined

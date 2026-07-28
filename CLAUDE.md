@@ -79,10 +79,15 @@ Renderer UI state is driven by **XState** machines (e.g. `authMachine`, `appMach
 
 ### Theming
 
-The app ships **VS Code-compatible themes**: nine built in, and any VS Code theme
-JSON can be dropped into `~/jingler/themes/*.json` or pasted into Settings ›
+The app ships **VS Code-compatible themes**: eleven built in, and any VS Code
+theme JSON can be dropped into `~/jingler/themes/*.json` or pasted into Settings ›
 Themes. That format is the *stored* format on purpose — themes are a thing people
 already own, and a Jingler-shaped file would mean every one needs translating.
+
+Two of the eleven are **Jingler's own** — `jingler-dark` (the default) and
+`jingler-light`. They are hand-authored, NOT produced by `scripts/vendor-themes.mjs`;
+don't let a re-vendor overwrite them. **The brand rules live in `docs/brand.md`** —
+read it before touching a colour, a logo or a font.
 
 **Never hardcode a colour in a component.** Every colour is a `--sb-*` custom
 property re-exported to Tailwind (`bg-panel`, `text-blue`, `border-line`), and a
@@ -101,11 +106,25 @@ and no Tailwind utility exists. Only a missed (1) fails loudly.
 
 Other things worth knowing before touching this:
 
-- **One Dark Pro is a pixel-exact no-op.** It is `DEFAULT_THEME_ID`, what every
-  pre-theming config resolves to, and what every failure falls back to — so a
-  test pins all 26 of its tokens to the literals in `globals.css`. If applying
-  the default changed anything, "theming shipped" and "the theme failed to load"
-  would look identical.
+- **Jingler Dark is a pixel-exact no-op.** It is `DEFAULT_THEME_ID`, what every
+  config without a saved theme resolves to, and what every failure falls back to
+  — so a test pins every one of its tokens to the literals in `globals.css`. If
+  applying the default changed anything, "theming shipped" and "the theme failed
+  to load" would look identical. Moving the default is therefore a FIVE-file
+  edit: `DEFAULT_THEME_ID`, the regenerated `:root` block, the pin in
+  `map.test.ts`, and BOTH fallback imports — `main/boot-theme.ts` (pre-React
+  paint) and `renderer/use-theme.ts` (the context value while config and catalog
+  load, and after the active theme is deleted). Miss the renderer one and a
+  light install flashes a dark splash over a light boot stylesheet.
+- **`--sb-brand` is not `--sb-red`.** Jingler's brand IS a red, and they are
+  still separate tokens: `--sb-red` drives `--destructive`, so collapsing them
+  makes "Delete session" and "New session" the same swatch. Imported themes
+  derive `brand` from their own accent, never from ours.
+- **The `:root` block in `globals.css` is generated, not typed.** Its values are
+  the output of `toTokens(jinglerDark)`, and half of them (`sunken`, the
+  contrast-corrected accents) are produced by `ramp.ts` rather than stated by
+  the preset. Hand-editing them puts the pre-React paint quietly out of sync
+  with every launch.
 - **Themes are untrusted input on a path to a stylesheet.** Every token is
   interpolated into `:root { --sb-x: … }`, and the renderer injects that text
   into a `<style>` before React mounts. The mapper never passes a theme's string through —
