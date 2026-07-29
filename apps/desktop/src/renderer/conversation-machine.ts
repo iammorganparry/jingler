@@ -915,13 +915,23 @@ export const conversationMachine = setup({
         event.session.cli === "opencode"
           ? event.session.reasoning?.[event.session.cli]
           : undefined
-      const mode = chat.mode ?? "accept-edits"
+      const persistedMode = chat.mode ?? "accept-edits"
+      // Plan mode is intentionally transient and therefore never appears in the
+      // SessionStore echo. A model/harness update still emits SESSION_UPDATED;
+      // treating its persisted exec mode as the live mode would kick an in-flight
+      // Claude/Codex/opencode planning turn back to auto/ask/accept-edits.
+      const mode =
+        context.mode === "plan" && supportsPlanMode(event.session.cli)
+          ? "plan"
+          : persistedMode
       return {
         session: event.session,
         cli: event.session.cli,
         model: chat.model ?? defaultModel(event.session.cli),
         mode,
-        executionMode: isExecutionMode(mode) ? mode : context.executionMode,
+        executionMode: isExecutionMode(persistedMode)
+          ? persistedMode
+          : context.executionMode,
         reasoning,
         tokens: chat.contextTokens ?? context.tokens,
         persistedStatus: event.session.status

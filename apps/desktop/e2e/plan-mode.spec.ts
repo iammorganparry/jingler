@@ -4,6 +4,7 @@ import { DEFAULT_PLAN_TEMPLATE_HTML } from "@jingler/core"
 import type { Page } from "@playwright/test"
 import {
   appShell,
+  DEFAULT_CLAUDE_MODEL,
   expect,
   type LaunchedApp,
   type SeedSession,
@@ -478,4 +479,46 @@ test("Claude, Codex, and opencode share native plan mode", async ({ launchApp })
       .toContain("jinglerPlan: 1")
     await launched.app.close()
   }
+})
+
+test("switching to a Codex model keeps the active plan mode", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session()
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+
+  const composer = launched.window.getByPlaceholder("Message Claude…")
+  await composer.click()
+  await launched.window.keyboard.press("Shift+Tab")
+  await launched.window.keyboard.press("Shift+Tab")
+  const surface = launched.window.locator("[data-mode]").first()
+  await expect(surface).toHaveAttribute("data-mode", "plan")
+
+  await launched.window
+    .getByRole("button", { name: DEFAULT_CLAUDE_MODEL, exact: true })
+    .click()
+  await expect(launched.window.getByText("Codex CLI", { exact: true })).toBeVisible()
+  await launched.window
+    .getByRole("menuitem")
+    .filter({ hasText: /^GPT-5\./ })
+    .first()
+    .click()
+
+  const codexComposer = launched.window.getByPlaceholder("Message Codex…")
+  await expect(codexComposer).toBeVisible()
+  await expect(surface).toHaveAttribute("data-mode", "plan")
+
+  await codexComposer.fill("Plan this change after switching to Codex.")
+  await codexComposer.press("Enter")
+  await expect
+    .poll(
+      () =>
+        existsSync(currentPlanPath(launched))
+          ? readFileSync(currentPlanPath(launched), "utf8")
+          : "",
+      { timeout: 20_000 }
+    )
+    .toContain("jinglerPlan: 1")
 })
