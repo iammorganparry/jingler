@@ -2,7 +2,6 @@ import type { ExecutionMode, Plan } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { PlanCard } from "./plan-card.js"
-import { PlanReview } from "../screens/plan-review.js"
 
 afterEach(cleanup)
 
@@ -60,15 +59,5 @@ describe("PlanCard approval", () => {
       "disabled",
       true
     )
-  })
-})
-
-describe("compact Plan Review", () => {
-  it("opens the step detail without squeezing fixed-width navigation and changes rails beside it", () => {
-    render(<PlanReview plan={plan} compact />)
-
-    expect(screen.getByText("Intent")).toBeTruthy()
-    expect(screen.queryByLabelText("Resize step list")).toBeNull()
-    expect(screen.queryByLabelText("Resize changes")).toBeNull()
   })
 })

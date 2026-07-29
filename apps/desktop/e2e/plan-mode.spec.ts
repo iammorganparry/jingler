@@ -61,6 +61,9 @@ const proposePlan = async (window: Page): Promise<void> => {
   await expect(window.getByRole("status")).toContainText("Synced", {
     timeout: 20_000
   })
+  await expect(window.getByLabel("Plan document")).toBeVisible()
+  await expect(window.getByLabel("Resize step list")).toHaveCount(0)
+  await expect(window.getByLabel("Resize changes")).toHaveCount(0)
 }
 
 /**

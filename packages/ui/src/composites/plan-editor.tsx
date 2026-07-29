@@ -1,7 +1,9 @@
-import type { PlanDocument } from "@jingler/core"
-import { AlertTriangle, Check, Cloud, RefreshCw, Save, WifiOff } from "lucide-react"
+import type { ExecutionMode, PlanDocument } from "@jingler/core"
+import { AlertTriangle, Check, Cloud, Play, RefreshCw, Save, Send, WifiOff } from "lucide-react"
 import { Button } from "../components/button.js"
+import { Pill } from "../components/pill.js"
 import { cn } from "../lib/cn.js"
+import { PlanApprovalActions } from "./plan-approval-actions.js"
 import { PlanDocEditor } from "./plan-doc/plan-doc-editor.js"
 
 export type PlanEditorSyncState =
@@ -37,6 +39,11 @@ export function PlanEditor({
   remote,
   state,
   error,
+  canApprove = true,
+  onApprove,
+  onResume,
+  onRevise,
+  onSendToAgent,
   onEdit,
   onSave,
   onRetry,
@@ -48,6 +55,11 @@ export function PlanEditor({
   remote?: PlanDocument | null
   state: PlanEditorSyncState
   error?: string | null
+  canApprove?: boolean
+  onApprove?: (executionMode?: ExecutionMode) => void
+  onResume?: () => void
+  onRevise?: () => void
+  onSendToAgent?: () => void
   onEdit?: (source: string) => void
   onSave?: () => void
   onRetry?: () => void
@@ -56,10 +68,31 @@ export function PlanEditor({
 }) {
   const sync = SYNC[state]
   const SyncIcon = sync.icon
+  const settled =
+    _document.status === "approved" ||
+    _document.status === "executing" ||
+    _document.status === "needs-verification" ||
+    _document.status === "done" ||
+    _document.status === "rejected"
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex flex-none flex-wrap items-center gap-2 border-b border-hairline bg-panel px-3 py-2">
+        <Pill
+          tone={
+            _document.status === "done" || _document.status === "approved"
+              ? "green"
+              : _document.status === "needs-verification"
+                ? "yellow"
+                : "blue"
+          }
+          pulse={_document.status === "executing"}
+        >
+          {_document.status.replace("-", " ")}
+        </Pill>
+        <span className="font-mono text-[10px] text-muted-foreground">
+          revision {_document.revision}
+        </span>
         <span
           role="status"
           aria-live="polite"
@@ -71,6 +104,29 @@ export function PlanEditor({
           <SyncIcon className={cn("size-3.5", state === "saving" && "animate-spin")} />
           {sync.label}
         </span>
+        {_document.status === "draft" ? (
+          <Button size="sm" onClick={onSendToAgent}>
+            <Send className="size-3.5" />
+            Send to agent
+          </Button>
+        ) : _document.status === "stale" ? (
+          <Button size="sm" disabled={!canApprove} onClick={onResume}>
+            <Play className="size-3.5" />
+            Approve &amp; implement
+          </Button>
+        ) : settled ? (
+          <span className="text-[11px] text-muted-foreground">
+            {_document.status === "done" ? "All criteria verified" : _document.status}
+          </span>
+        ) : (
+          <>
+            <Button variant="secondary" size="sm" onClick={onRevise}>
+              <Send className="size-3.5" />
+              Revise with agent
+            </Button>
+            <PlanApprovalActions onApprove={onApprove} disabled={!canApprove} />
+          </>
+        )}
         {(state === "editing" || state === "error") && (
           <Button
             variant="secondary"
