@@ -1,4 +1,4 @@
-import { DEFAULT_PLAN_TEMPLATE, parsePlanMdx } from "@jingler/core"
+import { DEFAULT_PLAN_TEMPLATE_HTML, parsePlanHtml } from "@jingler/core"
 import { RotateCcw, Save } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Button } from "../components/button.js"
@@ -9,15 +9,17 @@ export interface PlanSettingsProps {
 }
 
 export const validatePlanTemplate = (source: string): ReadonlyArray<string> => {
-  const result = parsePlanMdx(source)
+  const result = parsePlanHtml(source)
   return result.valid ? [] : result.diagnostics.map((diagnostic) => diagnostic.message)
 }
 
 const headingsOf = (source: string): ReadonlyArray<string> =>
-  [...source.matchAll(/^#{1,2}\s+(.+)$/gm)].map((match) => match[1]!.trim())
+  [...source.matchAll(/<h[12][^>]*>([\s\S]*?)<\/h[12]>/gi)].map((match) =>
+    match[1]!.replace(/<[^>]+>/g, "").trim()
+  )
 
 export function PlanSettings({ source, onSave }: PlanSettingsProps) {
-  const persisted = source ?? DEFAULT_PLAN_TEMPLATE
+  const persisted = source ?? DEFAULT_PLAN_TEMPLATE_HTML
   const [draft, setDraft] = useState(persisted)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -33,8 +35,9 @@ export function PlanSettings({ source, onSave }: PlanSettingsProps) {
         </p>
         <h2 className="mt-1 text-[19px] font-semibold text-text-bright">PRD structure</h2>
         <p className="mt-1 max-w-[760px] text-[12px] leading-relaxed text-muted-foreground">
-          This MDX template is injected into every plan-mode turn. Markdown carries prose;
-          Stage, Acceptance, and Annotation are the only interactive components.
+          This HTML template is injected into every plan-mode turn. Prose is ordinary HTML;
+          stages, acceptance criteria, annotations, and flow diagrams are carried on
+          data-attributes and become interactive widgets in Plan Review.
         </p>
       </header>
 
@@ -99,8 +102,8 @@ export function PlanSettings({ source, onSave }: PlanSettingsProps) {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setDraft(DEFAULT_PLAN_TEMPLATE)}
-          disabled={draft === DEFAULT_PLAN_TEMPLATE}
+          onClick={() => setDraft(DEFAULT_PLAN_TEMPLATE_HTML)}
+          disabled={draft === DEFAULT_PLAN_TEMPLATE_HTML}
         >
           <RotateCcw size={13} />
           Reset default

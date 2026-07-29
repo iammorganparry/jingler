@@ -308,7 +308,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         )
 
       /**
-       * Create a blank, user-authored draft plan from DEFAULT_PLAN_TEMPLATE so
+       * Create a blank, user-authored draft plan from the HTML template so
        * the operator can start filling in a plan for the agent BEFORE any agent
        * run has proposed one. Idempotent: if a canonical plan already exists
        * (agent-proposed or a prior draft) it is returned untouched — this never

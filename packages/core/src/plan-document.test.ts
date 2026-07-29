@@ -1,7 +1,7 @@
 import { Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
+import { DEFAULT_PLAN_TEMPLATE_HTML } from "./plan-html.js"
 import {
-  DEFAULT_PLAN_TEMPLATE,
   PlanAcceptance,
   PlanDocument,
   PlanTemplateConfig,
@@ -10,11 +10,11 @@ import {
 
 describe("plan document schemas", () => {
   it("ships a PRD template with semantic stages and acceptance criteria", () => {
-    expect(DEFAULT_PLAN_TEMPLATE).toContain("# PRD:")
-    expect(DEFAULT_PLAN_TEMPLATE).toContain("<Stage ")
-    expect(DEFAULT_PLAN_TEMPLATE).toContain("<Acceptance ")
-    expect(DEFAULT_PLAN_TEMPLATE).toContain("## Testing")
-    expect(DEFAULT_PLAN_TEMPLATE).toContain("## Risks")
+    expect(DEFAULT_PLAN_TEMPLATE_HTML).toContain("<h1>PRD:")
+    expect(DEFAULT_PLAN_TEMPLATE_HTML).toContain("<section data-stage=")
+    expect(DEFAULT_PLAN_TEMPLATE_HTML).toContain("data-acceptance=")
+    expect(DEFAULT_PLAN_TEMPLATE_HTML).toContain("<h2>Testing</h2>")
+    expect(DEFAULT_PLAN_TEMPLATE_HTML).toContain("<h2>Risks</h2>")
   })
 
   it("accepts evidence-bearing criteria", () => {
@@ -44,7 +44,7 @@ describe("plan document schemas", () => {
       producingChatId: "c1",
       revision: 1,
       status: "proposed",
-      source: DEFAULT_PLAN_TEMPLATE,
+      source: DEFAULT_PLAN_TEMPLATE_HTML,
       projection: { title: "PRD", sections: [], stages: [], annotations: [] },
       updatedAt: "2026-07-28T12:00:00.000Z",
       updatedBy: "agent"
@@ -52,7 +52,7 @@ describe("plan document schemas", () => {
     expect(Either.isRight(decoded)).toBe(true)
     expect(
       Either.isRight(
-        Schema.decodeUnknownEither(PlanTemplateConfig)({ source: DEFAULT_PLAN_TEMPLATE })
+        Schema.decodeUnknownEither(PlanTemplateConfig)({ source: DEFAULT_PLAN_TEMPLATE_HTML })
       )
     ).toBe(true)
   })
@@ -64,7 +64,7 @@ describe("plan document schemas", () => {
       producingChatId: "c1",
       revision: 1,
       status: "proposed" as const,
-      source: DEFAULT_PLAN_TEMPLATE,
+      source: DEFAULT_PLAN_TEMPLATE_HTML,
       projection: {
         title: "PRD: Canonical interactive planning",
         sections: [],
