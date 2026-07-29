@@ -43,6 +43,7 @@ import {
   McpServerStatus,
   OpenConnectorConfig,
   OpenConnectorDefaults,
+  OrchestratorPreference,
   ConnectorProvider,
   ConnectorProviderDetail,
   ConnectorConnection,
@@ -468,6 +469,23 @@ export class JinglerRpcs extends RpcGroup.make(
     }
   }),
 
+  /** Stop one provider-neutral plan worker without interrupting its siblings. */
+  Rpc.make("Agent.stopWorker", {
+    payload: {
+      sessionId: Schema.String,
+      planId: Schema.String,
+      agentId: Schema.String
+    }
+  }),
+
+  /** Retry one settled worker from its latest durable checkpoint. */
+  Rpc.make("Agent.retryWorker", {
+    payload: {
+      planId: Schema.String,
+      agentId: Schema.String
+    }
+  }),
+
   /**
    * Change a session's harness and/or model (used on the next turn — a turn
    * already streaming finishes on the old one).
@@ -835,6 +853,13 @@ export class JinglerRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: Schema.Struct({ cli: CliKind })
+  }),
+
+  /** Persist the harness/model pair that plans every newly-created session. */
+  Rpc.make("Config.setOrchestrator", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: OrchestratorPreference
   }),
 
   /**

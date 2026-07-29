@@ -563,9 +563,12 @@ test("Code Review shows the Uncommitted source and reverts a whole file", async 
   // The pane mounts (gh calls for the empty PR source can be slow), the source
   // toggle shows "Uncommitted" selected (the view falls back to the local source),
   // and the local diff renders the changed file + edit.
-  await expectFileRail(window)
   await expect(window.getByRole("tab", { name: "Uncommitted" })).toBeVisible({ timeout: 20_000 })
   await expect(window.getByText("an uncommitted edit")).toBeVisible({ timeout: 20_000 })
+  // Open the responsive rail only after the diff has settled. Clicking while
+  // the pane's first width measurement is still landing can legitimately
+  // re-dock the rail and close its temporary sheet in the same render.
+  await expectFileRail(window)
 
   // Revert the whole file → the uncommitted change disappears from the diff.
   await window.getByRole("button", { name: /Revert file/ }).click()

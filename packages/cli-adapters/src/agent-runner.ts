@@ -19,8 +19,10 @@ import {
   ADHD_MODE_DEFAULT,
   applyStreamEvent,
   assistantMessage,
+  buildPlanExecutionGraph,
   CliExecError,
   defaultModel,
+  FALLBACK_MODELS,
   findApprovedPlan,
   isBackgroundTaskEvent,
   isSubagentEvent,
@@ -30,6 +32,7 @@ import {
   setQuestionAnswers,
   settleStreaming,
   STOPPED_NOTE,
+  supportsPlanMode,
   userMessage,
   DEFAULT_PLAN_TEMPLATE_HTML
 } from "@jingler/core"
@@ -528,6 +531,15 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       Effect.gen(function* () {
         const { pending, run } = yield* pendingPlanRun(sessionId, planId)
         const canonical = yield* canonicalPlan(sessionId, planId)
+        const session = yield* getSessionOrNull(sessionId)
+        const producingChatId =
+          pending?.chatId ??
+          canonical?.document.producingChatId ??
+          session?.activeChatId
+        const orchestrating =
+          producingChatId !== undefined &&
+          session?.chats.find((chat) => chat.id === producingChatId)?.role ===
+            "orchestrator"
         if (
           canonical !== null &&
           expectedRevision !== undefined &&
@@ -550,6 +562,40 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             canonical?.document.revision ?? 0
           )
         }
+        if (orchestrating && canonical !== null) {
+          const graph = buildPlanExecutionGraph(
+            canonical.document.projection.stages,
+            { requireAssignments: true }
+          )
+          if (!graph.valid) {
+            return approvalRefused(
+              [
+                "Approval refused because the worker graph is invalid.",
+                ...graph.diagnostics.map((diagnostic) => diagnostic.message)
+              ].join(" "),
+              canonical.document.revision
+            )
+          }
+          const available = new Set(
+            (yield* DiscoveryService.list().pipe(
+              Effect.orElseSucceed(() => [])
+            ))
+              .filter((cli) => cli.available)
+              .map((cli) => cli.kind)
+          )
+          const unavailable = canonical.document.projection.stages.find(
+            (stage) =>
+              stage.assignment !== null &&
+              stage.assignment !== undefined &&
+              !available.has(stage.assignment.cli)
+          )
+          if (unavailable?.assignment) {
+            return approvalRefused(
+              `Approval refused because stage "${unavailable.id}" is assigned to unavailable harness "${unavailable.assignment.cli}". Update its worker assignment and approve again.`,
+              canonical.document.revision
+            )
+          }
+        }
         if (canonical !== null) {
           const approval = yield* PlanStore.updateDocument(canonical.worktreePath, {
             planId,
@@ -569,7 +615,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         }
         if (run !== undefined) {
           yield* run.applyPlan(planId, () => ({ ...exactPlan, status: "approved" }))
-          yield* run.markPlanExecution(planId)
+          if (!orchestrating) yield* run.markPlanExecution(planId)
         }
         // Precedence lives in `exec-mode.ts`, where the reason `prior` must beat
         // `configDefault` is stated once — getting that pair the wrong way round
@@ -584,7 +630,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         yield* resolvePlan(
           sessionId,
           planId,
-          PlanDecision.Approve({ mode, plan: { ...exactPlan, status: "approved" } })
+          orchestrating
+            ? PlanDecision.Delegate()
+            : PlanDecision.Approve({
+                mode,
+                plan: { ...exactPlan, status: "approved" }
+              })
         )
         return approvalAccepted
       })
@@ -799,6 +850,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
 
           const sessionMode =
             (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? "accept-edits"
+          const orchestrating = chat.role === "orchestrator"
           const allow = new Set<string>([
             ...(yield* approvals.allowlistFor(chatId)),
             ...(chat.allowlist ?? [])
@@ -808,7 +860,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const discoveredClis = yield* DiscoveryService.list().pipe(
             Effect.orElseSucceed(() => [])
           )
-          const mode: PermissionMode = sessionMode
+          const mode: PermissionMode = orchestrating ? "plan" : sessionMode
           // Read once per turn: plan mode's commands run unattended unless the
           // operator switched that off in Settings.
           const planAutoRun = workspaceConfig?.planAutoRun ?? PLAN_AUTO_RUN_DEFAULT
@@ -816,6 +868,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // effect on the very next message of an already-running session.
           const adhdMode = workspaceConfig?.adhdMode ?? ADHD_MODE_DEFAULT
           const cli = sessionCli
+          const orchestrationRoutes = discoveredClis
+            .filter((candidate) => candidate.available && supportsPlanMode(candidate.kind))
+            .map((candidate) => ({
+              cli: candidate.kind,
+              models: FALLBACK_MODELS[candidate.kind]
+            }))
           // Cache the user's configured default exec mode so approving a plan can
           // restore it.
           const execDefault = yield* resolveExecMode(sessionId)
@@ -930,12 +988,31 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // toward. Everything else is told to end its reply with the block.
           const planProtocol =
             mode === "plan"
-              ? planNote(cli, workspaceConfig?.planTemplate?.source ?? DEFAULT_PLAN_TEMPLATE_HTML)
+              ? planNote(
+                  cli,
+                  workspaceConfig?.planTemplate?.source ?? DEFAULT_PLAN_TEMPLATE_HTML,
+                  orchestrating ? orchestrationRoutes : undefined
+                )
               : null
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
-          const promptText = text
+          const promptText = orchestrating
+            ? [
+                "You are this session's orchestrator and canonical planner.",
+                "For implementation work, inspect the repository read-only and return a complete",
+                "plan whose independent dependency groups are assigned to worker agents.",
+                "During execution, reconcile new user requests into the existing canonical plan;",
+                "preserve stable stage and acceptance ids so completed evidence is not lost.",
+                "",
+                "Available worker routes:",
+                ...orchestrationRoutes.flatMap((provider) =>
+                  provider.models.map((model) => `- ${provider.cli}/${model.id}`)
+                ),
+                "",
+                text
+              ].join("\n")
+            : text
           const providerReasoning =
             cli === "claude" || cli === "codex" || cli === "opencode"
               ? session.reasoning?.[cli]
@@ -990,6 +1067,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                     workspaceConfig?.planTemplate?.source ?? DEFAULT_PLAN_TEMPLATE_HTML
                 }
               : {}),
+            ...(orchestrating ? { orchestrationRoutes } : {}),
             ...(resolvedReasoning === null
               ? {}
               : {
@@ -1009,6 +1087,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             // over the spec, so a null id alone would silently resume anyway.
             resumeId: digest === null ? chat.resumeId ?? null : null,
             ...(digest === null ? {} : { fresh: true }),
+            ...(orchestrating ? { readOnly: true } : {}),
             ...(openConnectorServer ? { openConnector: openConnectorServer } : {}),
             ...(browserMcp ? { browserMcp } : {})
           }

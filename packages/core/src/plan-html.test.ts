@@ -11,9 +11,10 @@ const DOC = `<h1>PRD: Ship it</h1>
 <h2>Context</h2>
 <p>One document is authoritative.</p>
 <div data-diagram="mermaid"><pre>graph TD; A--&gt;B</pre></div>
-<section data-stage="01" data-title="Persist the document">
+<section data-stage="01" data-title="Persist the document" data-depends-on="" data-complexity="high">
 <h3>Intent</h3>
 <p>Keep every reader on one revision.</p>
+<div data-assignment data-agent-id="worker-core" data-cli="codex" data-model="gpt-5" data-reason="Persistence needs careful reasoning." data-status="running"></div>
 <div data-acceptance="01.1" data-status="pending">The source survives restart.</div>
 <aside data-annotation="a1" data-stage="01" data-author="user" data-status="open" data-quote="revision">Which revision?</aside>
 </section>
@@ -30,6 +31,17 @@ describe("parsePlanHtml", () => {
     expect(p.stages).toHaveLength(1)
     expect(p.stages[0]!.title).toBe("Persist the document")
     expect(p.stages[0]!.intent).toContain("one revision")
+    expect(p.stages[0]).toMatchObject({
+      dependencies: [],
+      complexity: "high",
+      assignment: {
+        agentId: "worker-core",
+        cli: "codex",
+        model: "gpt-5",
+        reason: "Persistence needs careful reasoning."
+      },
+      executionStatus: "running"
+    })
     expect(p.stages[0]!.acceptance[0]).toMatchObject({ id: "01.1", status: "pending" })
     expect(p.annotations[0]).toMatchObject({ id: "a1", stageId: "01" })
     expect(p.annotations[0]!.anchor?.quote).toBe("revision")
@@ -58,6 +70,62 @@ describe("parsePlanHtml", () => {
   it("validates the default template", () => {
     expect(parsePlanHtml(DEFAULT_PLAN_TEMPLATE_HTML).valid).toBe(true)
   })
+
+  it.each([
+    {
+      name: "dangling dependency",
+      stages: '<section data-stage="01" data-title="x" data-depends-on="02"><div data-acceptance="01.1" data-status="pending">a</div></section>',
+      code: "dangling-dependency"
+    },
+    {
+      name: "self dependency",
+      stages: '<section data-stage="01" data-title="x" data-depends-on="01"><div data-acceptance="01.1" data-status="pending">a</div></section>',
+      code: "self-dependency"
+    },
+    {
+      name: "dependency cycle",
+      stages: '<section data-stage="01" data-title="x" data-depends-on="02"><div data-acceptance="01.1" data-status="pending">a</div></section><section data-stage="02" data-title="y" data-depends-on="01"><div data-acceptance="02.1" data-status="pending">b</div></section>',
+      code: "dependency-cycle"
+    }
+  ])("reports an actionable $name", ({ stages, code }) => {
+    const result = parsePlanHtml(`<h1>T</h1>${stages}`)
+    expect(result.valid).toBe(false)
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code, message: expect.any(String) })])
+    )
+  })
+
+  it("prevents approval when connected stages have incompatible worker routes", () => {
+    const result = parsePlanHtml(`<h1>T</h1>
+<section data-stage="01" data-title="x">
+<div data-assignment data-agent-id="worker-a" data-cli="codex" data-model="gpt-5" data-reason="Core work." data-status="queued"></div>
+<div data-acceptance="01.1" data-status="pending">a</div>
+</section>
+<section data-stage="02" data-title="y" data-depends-on="01">
+<div data-assignment data-agent-id="worker-b" data-cli="claude" data-model="opus" data-reason="UI work." data-status="queued"></div>
+<div data-acceptance="02.1" data-status="pending">b</div>
+</section>`)
+    expect(result.valid).toBe(false)
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "assignment-conflict" })])
+    )
+  })
+
+  it("rejects malformed complexity, assignment, and execution state metadata", () => {
+    const result = parsePlanHtml(`<h1>T</h1>
+<section data-stage="01" data-title="x" data-complexity="enormous">
+<div data-assignment data-agent-id="" data-cli="other" data-model="" data-reason="" data-status="sleeping"></div>
+<div data-acceptance="01.1" data-status="pending">a</div>
+</section>`)
+    expect(result.valid).toBe(false)
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(
+      expect.arrayContaining([
+        "invalid-complexity",
+        "invalid-assignment",
+        "invalid-execution-status"
+      ])
+    )
+  })
 })
 
 describe("sanitizePlanHtml", () => {
@@ -81,8 +149,12 @@ describe("sanitizePlanHtml", () => {
   })
 
   it("preserves plan data-attributes", () => {
-    const out = sanitizePlanHtml('<section data-stage="01" data-title="x"><div data-acceptance="01.1" data-status="passed">c</div></section>')
+    const out = sanitizePlanHtml('<section data-stage="01" data-title="x" data-depends-on="00" data-complexity="high"><div data-assignment data-agent-id="worker-a" data-cli="codex" data-model="gpt-5" data-reason="Best fit" data-status="queued"></div><div data-acceptance="01.1" data-status="passed">c</div></section>')
     expect(out).toContain('data-stage="01"')
+    expect(out).toContain('data-depends-on="00"')
+    expect(out).toContain('data-complexity="high"')
+    expect(out).toContain('data-agent-id="worker-a"')
+    expect(out).toContain('data-cli="codex"')
     expect(out).toContain('data-status="passed"')
   })
 })

@@ -416,6 +416,12 @@ export function ConversationPane({
       onRetryDocument={canonicalPlan.retry}
       onKeepLocal={canonicalPlan.keepLocal}
       onAcceptRemote={canonicalPlan.acceptRemote}
+      onStopWorker={(agentId) => {
+        if (planId) void rpc.agentStopWorker(session.id, planId, agentId)
+      }}
+      onRetryWorker={(agentId) => {
+        if (planId) void rpc.agentRetryWorker(planId, agentId)
+      }}
     />
   )
 

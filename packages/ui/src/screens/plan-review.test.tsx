@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { Plan, PlanDocument } from "@jingler/core"
-import { cleanup, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { PlanReview } from "./plan-review.js"
 
 const source = `<h1>PRD: Editor-only plan</h1>
@@ -101,5 +101,67 @@ describe("PlanReview", () => {
     expect(screen.queryByText(/No plan yet/)).toBeNull()
     expect(screen.queryByLabelText("Resize step list")).toBeNull()
     expect(screen.queryByLabelText("Resize changes")).toBeNull()
+  })
+
+  it("shows worker identity and isolates stop/retry controls to that worker", async () => {
+    const onStopWorker = vi.fn()
+    const onRetryWorker = vi.fn()
+    const workerSource = source.replace(
+      '<section data-stage="01" data-title="Build">',
+      `<section data-stage="01" data-title="Build" data-depends-on="" data-complexity="high">
+<div data-assignment data-agent-id="worker-a" data-cli="codex" data-model="gpt-5.6-sol" data-reason="High complexity route." data-status="running"></div>`
+    )
+    const workerDocument: PlanDocument = {
+      ...document,
+      source: workerSource,
+      projection: {
+        ...document.projection,
+        stages: document.projection.stages.map((stage) => ({
+          ...stage,
+          dependencies: [],
+          complexity: "high" as const,
+          assignment: {
+            agentId: "worker-a",
+            cli: "codex" as const,
+            model: "gpt-5.6-sol",
+            reason: "High complexity route."
+          },
+          executionStatus: "running" as const
+        }))
+      }
+    }
+
+    const view = render(
+      <PlanReview
+        plan={null}
+        document={workerDocument}
+        onStopWorker={onStopWorker}
+        onRetryWorker={onRetryWorker}
+      />
+    )
+    expect(await screen.findByText("codex · gpt-5.6-sol")).toBeTruthy()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Stop worker worker-a" })
+    )
+    expect(onStopWorker).toHaveBeenCalledWith("worker-a")
+
+    view.rerender(
+      <PlanReview
+        plan={null}
+        document={{
+          ...workerDocument,
+          source: workerSource.replace(
+            'data-status="running"',
+            'data-status="blocked"'
+          )
+        }}
+        onStopWorker={onStopWorker}
+        onRetryWorker={onRetryWorker}
+      />
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Retry worker worker-a" })
+    )
+    expect(onRetryWorker).toHaveBeenCalledWith("worker-a")
   })
 })

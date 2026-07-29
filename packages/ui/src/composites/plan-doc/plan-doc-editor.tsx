@@ -9,6 +9,10 @@ import { HoverCard } from "../../components/hover-card.js"
 import { cn } from "../../lib/cn.js"
 import { applyPlanComment } from "./plan-doc-comment.js"
 import { planDocExtensions } from "./plan-doc-extensions.js"
+import {
+  type PlanWorkerControls,
+  PlanWorkerControlsProvider
+} from "./plan-worker-controls.js"
 
 /**
  * Full-document WYSIWYG editor for an HTML plan, rendered as a Notion-like doc.
@@ -34,12 +38,14 @@ export function PlanDocEditor({
   value,
   onChange,
   editable = true,
-  className
+  className,
+  workerControls
 }: {
   value: string
   onChange?: (html: string) => void
   editable?: boolean
   className?: string
+  workerControls?: PlanWorkerControls
 }) {
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
@@ -69,16 +75,18 @@ export function PlanDocEditor({
   }, [editor, editable])
 
   return (
-    <div className={cn("flex min-h-0 flex-col", className)}>
-      {editable && editor && <CommentBubbleMenu editor={editor} />}
-      <EditorContent
-        editor={editor}
-        className={cn(
-          "min-h-0 flex-1 overflow-y-auto text-[13px] leading-[1.65] text-text-body [&_.ProseMirror]:outline-none",
-          !editable && "opacity-95"
-        )}
-      />
-    </div>
+    <PlanWorkerControlsProvider controls={workerControls}>
+      <div className={cn("flex min-h-0 flex-col", className)}>
+        {editable && editor && <CommentBubbleMenu editor={editor} />}
+        <EditorContent
+          editor={editor}
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto text-[13px] leading-[1.65] text-text-body [&_.ProseMirror]:outline-none",
+            !editable && "opacity-95"
+          )}
+        />
+      </div>
+    </PlanWorkerControlsProvider>
   )
 }
 

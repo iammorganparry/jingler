@@ -1,6 +1,7 @@
 import type {
   Attachment,
   CliKind,
+  ModelOption,
   PermissionMode,
   Plan,
   QuestionAnswer,
@@ -12,6 +13,12 @@ import { CliExecError } from "@jingler/core"
 import { Context, Data, Effect, Layer } from "effect"
 import type { ParsedMcpServer } from "./mcp-config.js"
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk"
+
+/** Installed provider/model routes a planning turn may assign to workers. */
+export interface OrchestrationRoute {
+  readonly cli: CliKind
+  readonly models: ReadonlyArray<ModelOption>
+}
 
 /** Parameters for starting a new agent turn against a CLI. */
 export interface SessionSpec {
@@ -30,6 +37,12 @@ export interface SessionSpec {
   readonly model: string | null
   /** The configured canonical PRD structure for a native plan-mode turn. */
   readonly planTemplate?: string
+  /**
+   * Present only for an orchestrator turn. Native and reply-channel planners
+   * receive this same catalogue and assignment grammar, so choosing a smaller
+   * model cannot silently downgrade the plan procedure.
+   */
+  readonly orchestrationRoutes?: ReadonlyArray<OrchestrationRoute>
   /** Whether provider thinking is enabled; absent leaves its default untouched. */
   readonly thinkingEnabled?: boolean
   /** Provider-native effort; absent leaves the harness default untouched. */
@@ -152,11 +165,14 @@ export type AskQuestion = (
 /**
  * The operator's verdict on a proposed plan (mirrors ExitPlanMode's approval):
  * - `Approve` — start execution under `mode` (the session's restored exec mode),
+ * - `Delegate` — the plan was approved, but Jingler's provider-neutral
+ *   orchestrator owns execution rather than this planning harness,
  * - `Revise` — keep planning, addressing `feedback` (bundled step comments),
  * - `Reject` — abandon the plan (e.g. the run was stopped).
  */
 export type PlanDecision = Data.TaggedEnum<{
   Approve: { readonly mode: PermissionMode; readonly plan?: Plan }
+  Delegate: {}
   Revise: { readonly feedback: string }
   Reject: {}
 }>
@@ -278,54 +294,62 @@ const scriptedPlanHtml = (summary: string): string => `<h1>PRD: ${summary}</h1>
 <h2>Technical design</h2>
 <p>The request path flows through the auth middleware, which consults the new TokenStore before proceeding or refreshing an expired token.</p>
 <div data-diagram="mermaid"><pre>graph TD; A--&gt;B</pre></div>
-<section data-stage="s_01" data-title="Audit session middleware">
+<section data-stage="s_01" data-title="Audit session middleware" data-depends-on="" data-complexity="low">
 <h3>Intent</h3>
 <p>See how sessions read tokens today.</p>
+<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="sonnet" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <h3>Approach</h3>
 <ol><li>Read session.ts</li><li>Trace the token path</li></ol>
 <ul data-files><li data-change="M" data-added="0" data-removed="0">src/auth/memory-store.ts</li></ul>
 <div data-acceptance="s_01.1" data-status="pending">The current token read path is documented.</div>
 </section>
-<section data-stage="s_02" data-title="Create TokenStore module">
+<section data-stage="s_02" data-title="Create TokenStore module" data-depends-on="s_01" data-complexity="medium">
 <h3>Intent</h3>
 <p>A dedicated store for token lifecycle.</p>
+<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="sonnet" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <ul data-files><li data-change="A" data-added="40" data-removed="0">src/auth/token-store.ts</li></ul>
 <div data-acceptance="s_02.1" data-status="passed">TokenStore exposes get/set/refresh and is covered by tests.</div>
 </section>
-<section data-stage="s_03" data-title="Swap MemoryStore to TokenStore">
+<section data-stage="s_03" data-title="Swap MemoryStore to TokenStore" data-depends-on="s_02" data-complexity="medium">
 <h3>Intent</h3>
 <p>Route the session through the new store.</p>
+<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="sonnet" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <ul data-files><li data-change="M" data-added="8" data-removed="3">src/auth/session.ts</li></ul>
 <div data-acceptance="s_03.1" data-status="pending">Session reads route through TokenStore.</div>
 </section>
-<section data-stage="s_04" data-title="Handle token refresh">
+<section data-stage="s_04" data-title="Handle token refresh" data-depends-on="s_03" data-complexity="high">
 <h3>Intent</h3>
 <p>Decide the refresh path on expiry.</p>
+<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="sonnet" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <div data-acceptance="s_04.1" data-status="pending">The refresh decision is specified.</div>
 </section>
-<section data-stage="s_4a" data-title="refresh() and retry on 401">
+<section data-stage="s_4a" data-title="refresh() and retry on 401" data-depends-on="s_04" data-complexity="high">
 <h3>Intent</h3>
 <p>Mint a new token and replay once.</p>
+<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="sonnet" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <ul data-files><li data-change="M" data-added="18" data-removed="0">src/auth/refresh.ts</li><li data-change="A" data-added="15" data-removed="0">src/auth/retry.ts</li></ul>
 <div data-acceptance="s_4a.1" data-status="passed">A new token is written before the replay.</div>
 <div data-acceptance="s_4a.2" data-status="passed">Refresh fires at most once per request.</div>
 <div data-acceptance="s_4a.3" data-status="failed">No refresh loop on repeated 401s.</div>
 <div data-acceptance="s_4a.4" data-status="pending">Concurrent requests share a single refresh.</div>
 </section>
-<section data-stage="s_4b" data-title="Proceed with request">
+<section data-stage="s_4b" data-title="Proceed with request" data-depends-on="s_04" data-complexity="low">
 <h3>Intent</h3>
 <p>Token still valid, carry on.</p>
+<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="sonnet" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <div data-acceptance="s_4b.1" data-status="pending">A valid token proceeds without refreshing.</div>
 </section>
-<section data-stage="s_05" data-title="Update auth tests">
+<section data-stage="s_05" data-title="Update auth tests" data-depends-on="s_4a s_4b" data-complexity="medium">
 <h3>Intent</h3>
 <p>Cover the new store and the refresh path.</p>
+<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="sonnet" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <ul data-files><li data-change="M" data-added="24" data-removed="2">src/auth/session.test.ts</li></ul>
-<div data-acceptance="s_05.1" data-status="pending">Tests cover the store and the 401 retry.</div>
+<div data-acceptance="s_05.1" data-status="pending">Tests cover the store, the 401 retry${summary.includes("(revised)") ? ", and the requested audit amendment" : ""}.</div>
 </section>
-<section data-stage="s_06" data-title="Open PR #482">
+<section data-stage="s_06" data-title="Open PR #482" data-depends-on="" data-complexity="low">
 <h3>Intent</h3>
 <p>Ship the refactor for review.</p>
+<div data-assignment data-agent-id="worker-release" data-cli="codex" data-model="gpt-5.6-sol" data-reason="Release preparation is independent and can run concurrently on a lower-cost route." data-status="queued"></div>
 <div data-acceptance="s_06.1" data-status="pending">A PR is opened against main.</div>
 </section>
 <h2>Testing</h2>
@@ -405,6 +429,55 @@ export const scriptedRun =
 
       yield* emit({ _tag: "Started", sessionId })
       yield* pause
+
+      // Provider-neutral worker turns are launched by OrchestrationService, not
+      // by the session's planning harness. Keep this branch visibly paced so
+      // Electron coverage can observe independent owners running concurrently,
+      // then return the exact evidence protocol the service persists.
+      if (
+        spec.prompt.includes("[[orchestration-worker]]") ||
+        spec.prompt.includes("executing an approved Jingler plan")
+      ) {
+        yield* emit({
+          _tag: "Thinking",
+          text: "Executing the assigned stage and its verification.",
+          seconds: 2,
+          done: true
+        })
+        yield* pause
+        yield* emit({
+          _tag: "ToolStart",
+          id: `worker-test-${sessionId}`,
+          name: "Bash",
+          target: "pnpm test"
+        })
+        yield* pause
+        yield* emit({
+          _tag: "ToolEnd",
+          id: `worker-test-${sessionId}`,
+          status: "success",
+          meta: "scripted verification passed",
+          diff: null,
+          preview: null
+        })
+        yield* pause
+        const criteria =
+          /Criteria:\s*([^\n]+)/.exec(spec.prompt)?.[1]
+            ?.split(",")
+            .map((criterion) => criterion.trim())
+            .filter((criterion) => criterion.length > 0) ?? []
+        yield* emit({
+          _tag: "Assistant",
+          text: criteria
+            .map(
+              (criterion) =>
+                `PLAN_RESULT criterion=${criterion} status=passed evidence=Scripted worker completed and verified its assigned stage.`
+            )
+            .join("\n")
+        })
+        yield* emit({ _tag: "Done", costUsd: 0.01, tokens: 120 })
+        return
+      }
 
       // A `[[background]]` marker starts a background task that keeps running
       // after the turn ends — the case the dock exists for, and the only way to
@@ -643,7 +716,7 @@ export const scriptedRun =
       if (spec.prompt.includes("[[plan]]") || spec.mode === "plan") {
         yield* emit({ _tag: "Thinking", text: "Mapping out the work before touching anything.", seconds: 3, done: true })
         yield* pause
-        let rev = 1
+        let rev = spec.prompt.includes("[[amendment]]") ? 2 : 1
         while (true) {
           const decision = yield* proposePlan(scriptedPlan(sessionId, rev))
           if (decision._tag === "Approve") {
@@ -690,6 +763,13 @@ export const scriptedRun =
                 text: evidenceReply.slice(offset, offset + 17)
               })
             }
+            break
+          }
+          if (decision._tag === "Delegate") {
+            yield* emit({
+              _tag: "Assistant",
+              text: "Plan approved — Jingler assigned it to worker agents."
+            })
             break
           }
           if (decision._tag === "Reject" || rev >= 2) {

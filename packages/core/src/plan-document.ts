@@ -55,12 +55,49 @@ export const PlanPrdSection = Schema.Struct({
 })
 export type PlanPrdSection = Schema.Schema.Type<typeof PlanPrdSection>
 
+/** Planner-owned estimate used to choose an appropriate worker model. */
+export const PlanStageComplexity = Schema.Literal("low", "medium", "high")
+export type PlanStageComplexity = Schema.Schema.Type<typeof PlanStageComplexity>
+
+/**
+ * Kept local to the plan schema to avoid a runtime schema cycle:
+ * `domain.ts` owns `CliKind` and imports `PlanTemplateConfig` from this module.
+ * The literal set intentionally mirrors `CliKind` and remains structurally
+ * assignable to it.
+ */
+const PlanWorkerCli = Schema.Literal("claude", "codex", "cursor", "opencode")
+
+/** Provider-neutral route selected by the orchestrator for one logical worker. */
+export const PlanStageAssignment = Schema.Struct({
+  agentId: Schema.String,
+  cli: PlanWorkerCli,
+  model: Schema.String,
+  reason: Schema.String
+})
+export type PlanStageAssignment = Schema.Schema.Type<typeof PlanStageAssignment>
+
+/** Durable state written by the orchestration service as a worker progresses. */
+export const PlanStageExecutionStatus = Schema.Literal(
+  "queued",
+  "running",
+  "blocked",
+  "failed",
+  "interrupted",
+  "completed"
+)
+export type PlanStageExecutionStatus = Schema.Schema.Type<typeof PlanStageExecutionStatus>
+
 export const PlanPrdStage = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
   intent: Schema.String,
   markdown: Schema.String,
-  acceptance: Schema.Array(PlanAcceptance)
+  acceptance: Schema.Array(PlanAcceptance),
+  /** Optional at the persistence boundary so projections written before orchestration still decode. */
+  dependencies: Schema.optional(Schema.Array(Schema.String)),
+  complexity: Schema.optional(PlanStageComplexity),
+  assignment: Schema.optional(Schema.NullOr(PlanStageAssignment)),
+  executionStatus: Schema.optional(PlanStageExecutionStatus)
 })
 export type PlanPrdStage = Schema.Schema.Type<typeof PlanPrdStage>
 
@@ -188,7 +225,7 @@ export const planDocumentToPlan = (document: PlanDocument): Plan => {
         kind: "step",
         condition: null,
         parentId: null,
-        dependsOn: [],
+        dependsOn: stage.dependencies ?? [],
         blocks: [],
         files: stageFiles(stage.markdown),
         guards: stage.acceptance.map((criterion) => ({

@@ -26,6 +26,7 @@ import {
   ModelsService,
   OpenConnectorService,
   OpenConnectorApi,
+  OrchestrationService,
   SecretStoreUnavailable,
   planDraftPost,
   billingPath,
@@ -64,6 +65,7 @@ import {
   resolveFindings,
   ReviewError,
   reviewModelFor,
+  resolveOrchestratorPreference,
   PluginError,
   SessionNotFoundError
 } from "@jingler/core"
@@ -87,8 +89,13 @@ import type {
   ReviewSubmitKind,
   ReasoningSetting,
   Session,
-  SettledSessionStatus
+  SettledSessionStatus,
+  WorkspaceConfig
 } from "@jingler/core"
+import type {
+  OrchestrationExecutionReport,
+  OrchestrationStageStatus
+} from "@jingler/cli-adapters"
 import { JinglerRpcs } from "@jingler/contracts"
 import { AppPaths } from "@jingler/cli-adapters"
 import { FileSystem, Path } from "@effect/platform"
@@ -266,6 +273,174 @@ const providerReasoning = (
   }
 }
 
+/** Resolve the provider-neutral planner route from the host's live catalogue. */
+const newSessionOrchestrator = (config: WorkspaceConfig | null) =>
+  Effect.gen(function* () {
+    const clis = yield* DiscoveryService.list()
+    const catalog = yield* ModelsService.catalog(clis)
+    return resolveOrchestratorPreference(config, catalog)
+  })
+
+const persistedStageStatus = (
+  status: OrchestrationStageStatus
+): "queued" | "running" | "blocked" | "failed" | "interrupted" | "completed" | null =>
+  status === "skipped" ? null : status
+
+/**
+ * Execute the latest approved canonical revision through provider-neutral
+ * workers. Every callback is rebased by PlanStore onto the latest source, so
+ * concurrent planner amendments and worker evidence cannot erase one another.
+ */
+export const executeOrchestration = (
+  sessionId: string,
+  planId: string
+): Effect.Effect<
+  OrchestrationExecutionReport | null,
+  never,
+  | OrchestrationService
+  | SessionStore
+  | DiscoveryService
+  | PlanStore
+  | CommandExecutor.CommandExecutor
+  | FileSystem.FileSystem
+  | Path.Path
+  | AppPaths
+> =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(sessionId).pipe(
+      Effect.orElseSucceed(() => null)
+    )
+    if (session?.worktreePath == null) return null
+    const worktreePath = session.worktreePath
+    const document = yield* PlanStore.readDocument(
+      worktreePath,
+      session.id,
+      session.activeChatId
+    )
+    if (document === null || document.id !== planId) return null
+
+    const clis = yield* DiscoveryService.list().pipe(
+      Effect.orElseSucceed(() => [])
+    )
+    const binByCli = new Map(clis.map((cli) => [cli.kind, cli.binPath]))
+    const service = yield* OrchestrationService
+    const store = yield* PlanStore
+    const persistence = yield* Effect.context<
+      FileSystem.FileSystem | Path.Path | AppPaths
+    >()
+    const checkpoints = yield* store
+      .readOrchestrationCheckpoints(worktreePath, planId)
+      .pipe(Effect.provide(persistence))
+    const completedStageIds = new Set(
+      document.projection.stages
+        .filter((stage) => stage.executionStatus === "completed")
+        .map((stage) => stage.id)
+    )
+    const currentCheckpoints = checkpoints.map((checkpoint) => ({
+      ...checkpoint,
+      completedStageIds: checkpoint.completedStageIds.filter((stageId) =>
+        completedStageIds.has(stageId)
+      )
+    }))
+
+    const report = yield* service
+      .execute({
+        sessionId,
+        planId,
+        planRevision: document.revision,
+        stages: document.projection.stages,
+        checkpoints: currentCheckpoints,
+        maxConcurrency: 4,
+        makeSessionSpec: ({ group, prompt, resumeId }) => ({
+          cli: group.assignment.cli,
+          repo: session.repo,
+          branch: session.branch,
+          cwd: worktreePath,
+          prompt,
+          images: [],
+          binPath: binByCli.get(group.assignment.cli) ?? null,
+          mode: "auto",
+          model: group.assignment.model,
+          resumeId
+        }),
+        refreshStage: (_agentId, stageId) =>
+          store
+            .readDocument(worktreePath, session.id, session.activeChatId)
+            .pipe(
+              Effect.provide(persistence),
+              Effect.map(
+                (latest) =>
+                  latest?.projection.stages.find(
+                    (stage) => stage.id === stageId
+                  ) ?? null
+              )
+            ),
+        callbacks: {
+          onStageState: (update) => {
+            const status = persistedStageStatus(update.status)
+            return status === null
+              ? Effect.void
+              : store
+                  .setStageExecutionStatus(worktreePath, {
+                    planId,
+                    stageId: update.stageId,
+                    agentId: update.agentId,
+                    status,
+                    message: update.message
+                  })
+                  .pipe(Effect.provide(persistence), Effect.asVoid)
+          },
+          onEvidence: (evidence) =>
+            store
+              .setCriterionStatusLatest(worktreePath, {
+                planId,
+                criterionId: evidence.criterionId,
+                status: evidence.status,
+                evidence: evidence.evidence
+              })
+              .pipe(Effect.provide(persistence), Effect.asVoid),
+          onCheckpoint: (checkpoint) =>
+            store
+              .writeOrchestrationCheckpoint(
+                worktreePath,
+                planId,
+                checkpoint
+              )
+              .pipe(Effect.provide(persistence))
+        }
+      })
+      .pipe(Effect.either)
+
+    if (report._tag === "Left") {
+      yield* store
+        .settleOrchestration(worktreePath, {
+          planId,
+          workersCompleted: false
+        })
+        .pipe(Effect.provide(persistence))
+      yield* Effect.logError(
+        `Could not execute orchestration ${planId}: ${report.left.message}`
+      )
+      return null
+    }
+
+    yield* store
+      .settleOrchestration(worktreePath, {
+        planId,
+        workersCompleted: report.right.workers.every(
+          (worker) => worker.status === "completed"
+        )
+      })
+      .pipe(Effect.provide(persistence))
+    return report.right
+  }).pipe(
+    Effect.catchAllCause((cause) =>
+      Effect.logError(
+        `Orchestration ${planId} failed: ${String(cause)}`
+      ).pipe(Effect.as(null))
+    )
+  )
+
 /** Resolve a session only when it has an active pull request. */
 const sessionWithPr = (sessionId: string) =>
   resolveSession(sessionId).pipe(
@@ -281,11 +456,14 @@ export const createSessionFromPr = (input: CreateSessionFromPrInput) =>
   Effect.gen(function* () {
     const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
     const allowSharedCheckout = config?.git?.shareCheckedOutBranches ?? true
-    const provider = config?.providers?.[input.cli]
-    return yield* SessionStore.createFromPr(input, {
+    const orchestrator = yield* newSessionOrchestrator(config)
+    const cli = orchestrator?.preference.cli ?? input.cli
+    const provider = config?.providers?.[cli]
+    return yield* SessionStore.createFromPr({ ...input, cli }, {
       allowSharedCheckout,
-      defaultMode: provider?.defaultMode,
-      defaultModel: provider?.defaultModel,
+      chatRole: "orchestrator",
+      defaultMode: orchestrator ? "plan" : provider?.defaultMode,
+      defaultModel: orchestrator?.preference.model ?? provider?.defaultModel,
       defaultReasoning: providerReasoning(provider)
     })
   })
@@ -299,10 +477,13 @@ export const createSessionFromPr = (input: CreateSessionFromPrInput) =>
 export const createSession = (input: CreateSessionInput) =>
   Effect.gen(function* () {
     const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
-    const provider = config?.providers?.[input.cli]
-    return yield* SessionStore.create(input, {
-      defaultMode: provider?.defaultMode,
-      defaultModel: provider?.defaultModel,
+    const orchestrator = yield* newSessionOrchestrator(config)
+    const cli = orchestrator?.preference.cli ?? input.cli
+    const provider = config?.providers?.[cli]
+    return yield* SessionStore.create({ ...input, cli }, {
+      chatRole: "orchestrator",
+      defaultMode: orchestrator ? "plan" : provider?.defaultMode,
+      defaultModel: orchestrator?.preference.model ?? provider?.defaultModel,
       defaultReasoning: providerReasoning(provider)
     })
   })
@@ -387,10 +568,13 @@ export const opencodeSetAuth = (providerId: string, key: string) =>
 export const createSessionFromIssue = (input: CreateSessionFromIssueInput) =>
   Effect.gen(function* () {
     const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
-    const provider = config?.providers?.[input.cli]
-    return yield* SessionStore.createFromIssue(input, {
-      defaultMode: provider?.defaultMode,
-      defaultModel: provider?.defaultModel,
+    const orchestrator = yield* newSessionOrchestrator(config)
+    const cli = orchestrator?.preference.cli ?? input.cli
+    const provider = config?.providers?.[cli]
+    return yield* SessionStore.createFromIssue({ ...input, cli }, {
+      chatRole: "orchestrator",
+      defaultMode: orchestrator ? "plan" : provider?.defaultMode,
+      defaultModel: orchestrator?.preference.model ?? provider?.defaultModel,
       defaultReasoning: providerReasoning(provider)
     })
   })
@@ -1439,15 +1623,95 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Agent.revisePlan": ({ sessionId, planId }) =>
     Effect.flatMap(AgentRunner, (runner) => runner.revisePlan(sessionId, planId)),
   "Agent.approvePlan": ({ sessionId, planId, executionMode, revision }) =>
-    Effect.flatMap(AgentRunner, (runner) =>
-      runner.approvePlan(sessionId, planId, executionMode, revision)
-    ),
+    Effect.gen(function* () {
+      const runner = yield* AgentRunner
+      const result = yield* runner.approvePlan(
+        sessionId,
+        planId,
+        executionMode,
+        revision
+      )
+      if (result.status !== "accepted") return result
+      const session = yield* SessionStore.get(sessionId).pipe(
+        Effect.orElseSucceed(() => null)
+      )
+      const orchestrating =
+        session?.chats.find((chat) => chat.id === session.activeChatId)?.role ===
+        "orchestrator"
+      if (orchestrating) {
+        yield* executeOrchestration(sessionId, planId).pipe(Effect.forkDaemon)
+      }
+      return result
+    }),
   "Agent.resumePlan": ({ sessionId, chatId, planId, revision }) =>
     Stream.unwrap(
-      Effect.map(AgentRunner, (runner) =>
-        runner.resumePlan(sessionId, chatId, planId, revision)
-      )
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        const session = yield* SessionStore.get(sessionId).pipe(
+          Effect.orElseSucceed(() => null)
+        )
+        const orchestrating =
+          session?.chats.find((chat) => chat.id === chatId)?.role ===
+          "orchestrator"
+        if (!orchestrating) {
+          return runner.resumePlan(sessionId, chatId, planId, revision)
+        }
+        const approval = yield* runner.approvePlan(
+          sessionId,
+          planId,
+          undefined,
+          revision
+        )
+        if (approval.status === "refused") {
+          const events: ReadonlyArray<StreamEvent> = [
+            {
+              _tag: "Failed",
+              message: approval.message
+            }
+          ]
+          return Stream.fromIterable(events)
+        }
+        yield* executeOrchestration(sessionId, planId).pipe(Effect.forkDaemon)
+        const events: ReadonlyArray<StreamEvent> = [
+          {
+            _tag: "Assistant",
+            text: "Resumed the assigned worker agents from their latest checkpoints."
+          },
+          { _tag: "Done", costUsd: 0, tokens: 0 }
+        ]
+        return Stream.fromIterable(events)
+      })
     ),
+  "Agent.stopWorker": ({ sessionId, planId, agentId }) =>
+    Effect.flatMap(OrchestrationService, (service) =>
+      service.stopWorker({ sessionId, planId, agentId })
+    ),
+  "Agent.retryWorker": ({ planId, agentId }) =>
+    Effect.gen(function* () {
+      const service = yield* OrchestrationService
+      const result = yield* service
+        .retryWorker({ planId, agentId })
+        .pipe(Effect.either)
+      if (result._tag === "Left") {
+        yield* Effect.logWarning(result.left.message)
+        return
+      }
+      const sessions = yield* SessionStore.list()
+      for (const session of sessions) {
+        if (session.worktreePath == null) continue
+        const document = yield* PlanStore.readDocument(
+          session.worktreePath,
+          session.id,
+          session.activeChatId
+        )
+        if (document?.id !== planId) continue
+        yield* PlanStore.settleOrchestration(session.worktreePath, {
+          planId,
+          workersCompleted: result.right.status === "completed"
+        })
+        break
+      }
+    }),
   "Agent.setHarness": ({ sessionId, chatId, cli, model }) =>
     SessionStore.setHarness(sessionId, chatId, cli, model).pipe(Effect.ignore),
   "Agent.stop": ({ sessionId, chatId }) =>
@@ -1515,6 +1779,7 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Config.setAdhdMode": ({ adhdMode }) => ConfigService.setAdhdMode(adhdMode),
   "Config.setFontScale": ({ fontScale }) => ConfigService.setFontScale(fontScale),
   "Config.setDefaultCli": ({ cli }) => ConfigService.setDefaultCli(cli),
+  "Config.setOrchestrator": (orchestrator) => ConfigService.setOrchestrator(orchestrator),
   /**
    * Deliver an OS notification. Main decides whether to actually show it: it
    * owns the window's focus state, which the renderer cannot observe reliably,

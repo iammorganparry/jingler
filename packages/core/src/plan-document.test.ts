@@ -4,6 +4,7 @@ import { DEFAULT_PLAN_TEMPLATE_HTML } from "./plan-html.js"
 import {
   PlanAcceptance,
   PlanDocument,
+  PlanPrdStage,
   PlanTemplateConfig,
   planDocumentToPlan
 } from "./plan-document.js"
@@ -35,6 +36,35 @@ describe("plan document schemas", () => {
       evidence: null
     })
     expect(Either.isLeft(decoded)).toBe(true)
+  })
+
+  it("decodes typed execution metadata while keeping legacy stages compatible", () => {
+    const stage = {
+      id: "02",
+      title: "Execute workers",
+      intent: "Run independent work concurrently.",
+      markdown: "<p>Work.</p>",
+      acceptance: [],
+      dependencies: ["01"],
+      complexity: "high",
+      assignment: {
+        agentId: "worker-a",
+        cli: "codex",
+        model: "gpt-5",
+        reason: "The stage spans concurrency and persistence."
+      },
+      executionStatus: "running"
+    }
+    expect(Either.isRight(Schema.decodeUnknownEither(PlanPrdStage)(stage))).toBe(true)
+
+    const legacy = {
+      id: "01",
+      title: "Legacy",
+      intent: "Keep old projections readable.",
+      markdown: "<p>Old.</p>",
+      acceptance: []
+    }
+    expect(Either.isRight(Schema.decodeUnknownEither(PlanPrdStage)(legacy))).toBe(true)
   })
 
   it("keeps source and projection together at the RPC boundary", () => {

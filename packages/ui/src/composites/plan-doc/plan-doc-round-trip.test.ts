@@ -25,9 +25,10 @@ const FIXTURE = `<h1>PRD: Ship the plan doc editor</h1>
 <p>Plans are now HTML documents edited in a Notion-like Tiptap editor.</p>
 <h2>Goals</h2>
 <ul><li>Round-trip the structural markup losslessly.</li></ul>
-<section data-stage="01" data-title="Build the Tiptap nodes">
+<section data-stage="01" data-title="Build the Tiptap nodes" data-depends-on="" data-complexity="high">
 <h3>Intent</h3>
 <p>Author the four custom nodes.</p>
+<div data-assignment data-agent-id="worker-ui" data-cli="codex" data-model="gpt-5" data-reason="Complex editor schema work." data-status="running"></div>
 <div data-acceptance="01.1" data-status="passed" data-evidence="round-trip test is green">Nodes round-trip the data-attribute format.</div>
 <div data-acceptance="01.2" data-status="pending">The insert toolbar adds every widget.</div>
 <aside data-annotation="a1" data-stage="01" data-author="user" data-status="open" data-created-at="2026-07-29T10:00:00.000Z">Cycle the status pill on click.</aside>
@@ -76,6 +77,19 @@ describe("plan doc HTML round-trip", () => {
     const stage = projection.stages[0]!
     expect(stage.id).toBe("01")
     expect(stage.title).toBe("Build the Tiptap nodes")
+    expect(stage).toMatchObject({
+      dependencies: [],
+      complexity: "high",
+      assignment: {
+        agentId: "worker-ui",
+        cli: "codex",
+        model: "gpt-5",
+        reason: "Complex editor schema work."
+      },
+      executionStatus: "running"
+    })
+    expect(html).toContain('data-assignment=""')
+    expect(html).toContain('data-agent-id="worker-ui"')
 
     // Acceptance ids + statuses survive on the <div data-acceptance>.
     expect(stage.acceptance.map((a) => a.id)).toEqual(["01.1", "01.2"])

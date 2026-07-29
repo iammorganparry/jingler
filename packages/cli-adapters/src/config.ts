@@ -5,6 +5,7 @@ import type {
   GithubConfig,
   NotificationsConfig,
   OpenConnectorConfig,
+  OrchestratorPreference,
   PlanTemplateConfig,
   ProviderConfig
 } from "@jingler/core"
@@ -105,6 +106,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.lastRepoPath ? { lastRepoPath: existing.lastRepoPath } : {}),
             ...(existing?.providers ? { providers: existing.providers } : {}),
             ...(existing?.defaultCli ? { defaultCli: existing.defaultCli } : {}),
+            ...(existing?.orchestrator ? { orchestrator: existing.orchestrator } : {}),
             ...(existing?.planTemplate ? { planTemplate: existing.planTemplate } : {}),
             ...(existing?.notifications ? { notifications: existing.notifications } : {}),
             // Booleans are checked against `undefined`, not truthiness — a saved
@@ -171,6 +173,10 @@ export class ConfigService extends Effect.Service<ConfigService>()(
        * harness select — one standing answer instead of the same click per session.
        */
       const setDefaultCli = (defaultCli: CliKind) => patch({ defaultCli })
+
+      /** Persist the provider-neutral planner route used by every new session. */
+      const setOrchestrator = (orchestrator: OrchestratorPreference) =>
+        patch({ orchestrator })
 
       /**
        * Switch the active colour theme, preserving any `colorCustomizations`
@@ -252,6 +258,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setLastRepoPath,
         setContext,
         setDefaultCli,
+        setOrchestrator,
         setProvider,
         setPlanTemplate,
         setActiveTheme,

@@ -103,6 +103,37 @@ test("creating a blank session stages a detached worktree for agent naming", asy
   expect(liveBranch).toBe("HEAD")
 })
 
+test("a new session inherits the preferred orchestrator harness, model, and chat role", async ({
+  launchApp
+}) => {
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: {
+      orchestrator: { cli: "codex", model: "gpt-5.6-sol" }
+    }
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await window.getByTestId("new-session").click()
+  await window.getByPlaceholder("Leave blank for agent naming").fill("Orchestrated task")
+  await window.getByRole("button", { name: "Create" }).click()
+  await expect(sessionRow(window, "Orchestrated task")).toBeVisible()
+
+  const persisted = JSON.parse(
+    readFileSync(join(home, "jingler", "sessions.json"), "utf-8")
+  )
+  expect(persisted[0]).toMatchObject({
+    cli: "codex",
+    chats: [
+      {
+        role: "orchestrator",
+        model: "gpt-5.6-sol"
+      }
+    ]
+  })
+})
+
 /**
  * The "new session from an existing PR" flow, end to end against real git with a
  * deterministic fake `gh`: toggle the dialog to "From PR", pick an open PR, hit

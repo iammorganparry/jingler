@@ -225,6 +225,7 @@ describe("SessionStore", () => {
   it("stamps provider mode, model, and reasoning defaults when supplied", async () => {
     const withDefaults = await runExit(
       SessionStore.create(input(), {
+        chatRole: "orchestrator",
         defaultMode: "plan",
         defaultModel: "opus",
         defaultReasoning: { enabled: false, effort: "high" }
@@ -233,6 +234,7 @@ describe("SessionStore", () => {
     )
     expect(withDefaults._tag).toBe("Success")
     if (withDefaults._tag === "Success") {
+      expect(activeChat(withDefaults.value).role).toBe("orchestrator")
       expect(activeChat(withDefaults.value).mode).toBe("plan")
       expect(activeChat(withDefaults.value).model).toBe("opus")
       expect(withDefaults.value.reasoning?.claude).toStrictEqual({
@@ -770,7 +772,11 @@ describe("SessionStore", () => {
     const calls: Array<string> = []
     const env = Layer.mergeAll(temp.layer, fakeCommandExecutor(prExecutor("chore/bump", calls)))
     const exit = await runExit(
-      SessionStore.createFromPr(prInput()).pipe(Effect.provide(prServices)),
+      SessionStore.createFromPr(prInput(), {
+        chatRole: "orchestrator",
+        defaultMode: "plan",
+        defaultModel: "opus"
+      }).pipe(Effect.provide(prServices)),
       env
     )
     expect(exit._tag).toBe("Success")
@@ -780,6 +786,11 @@ describe("SessionStore", () => {
     expect(s.branch).toBe("chore/bump") // the live branch after `gh pr checkout`
     expect(s.baseBranch).toBe("main")
     expect(s.title).toBe("Fix Auth Refresh")
+    expect(activeChat(s)).toMatchObject({
+      role: "orchestrator",
+      mode: "plan",
+      model: "opus"
+    })
     // The slug carries the PR number so same-titled PRs never collide.
     expect(s.worktreePath).toBe(join(temp.root, "worktrees", "trigify-app", "fix-auth-refresh-482"))
 
@@ -1006,7 +1017,11 @@ describe("SessionStore", () => {
 
   it("createFromIssue forks a jingler/<n>-slug branch, links the issue, seeds the task", async () => {
     const exit = await runExit(
-      SessionStore.createFromIssue(issueInput()).pipe(Effect.provide(services)),
+      SessionStore.createFromIssue(issueInput(), {
+        chatRole: "orchestrator",
+        defaultMode: "plan",
+        defaultModel: "opus"
+      }).pipe(Effect.provide(services)),
       temp.layer
     )
     expect(exit._tag).toBe("Success")
@@ -1023,6 +1038,11 @@ describe("SessionStore", () => {
     expect(s.autoTitle).toBe(false)
     expect(s.initialPrompt).toBe("Refund route 500s on a stale token\n\nFix the refund route.")
     expect(s.prNumber).toBe(null)
+    expect(activeChat(s)).toMatchObject({
+      role: "orchestrator",
+      mode: "plan",
+      model: "opus"
+    })
   })
 
   it("createFromIssue prefers the edited task over the issue body", async () => {

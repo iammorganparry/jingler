@@ -5,6 +5,7 @@ import type {
   PlanDocumentAuthor,
   PlanDocumentStatus,
   PlanPrd,
+  PlanStageExecutionStatus,
   SessionPlanArtifact
 } from "@jingler/core"
 import {
@@ -14,11 +15,16 @@ import {
   PlanConflictError,
   PlanPersistenceError,
   PlanValidationError,
+  reconcilePlanAmendment,
+  resolvePlanWorkerAnnotationHtml,
   SessionPlanArtifact as SessionPlanArtifactSchema,
-  updatePlanCriterionHtml
+  updatePlanCriterionHtml,
+  updatePlanStageExecutionHtml,
+  upsertPlanWorkerAnnotationHtml
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Schema, Stream } from "effect"
+import type { OrchestrationCheckpoint } from "./orchestration-service.js"
 import { AppPaths } from "./app-paths.js"
 import { legacyPlanToHtml, parsePlanHtml } from "./plan-html.js"
 
@@ -159,6 +165,17 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         Effect.gen(function* () {
           const path = yield* Path.Path
           return path.join(yield* dirFor(worktreePath), "current-plan.html")
+        })
+
+      const checkpointFileFor = (
+        worktreePath: string
+      ): Effect.Effect<string, never, Path.Path | AppPaths> =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path
+          return path.join(
+            yield* dirFor(worktreePath),
+            "orchestration-checkpoints.json"
+          )
         })
 
       const fileFor = (
@@ -352,10 +369,35 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       > =>
         lock.withPermits(1)(
           Effect.gen(function* () {
-            const { projection, html } = yield* validate(input.source)
             const current = yield* readCanonical(worktreePath)
+            const reconciled =
+              current === null
+                ? null
+                : reconcilePlanAmendment(current, input.source)
+            if (reconciled !== null && !reconciled.valid) {
+              return yield* new PlanValidationError({
+                message: "The amended plan is not valid PRD HTML.",
+                diagnostics: reconciled.diagnostics.map((diagnostic) => ({
+                  code: diagnostic.code,
+                  message: diagnostic.message,
+                  line: 0
+                }))
+              })
+            }
+            const { projection, html } =
+              reconciled?.valid === true
+                ? {
+                    projection: reconciled.projection,
+                    html: reconciled.source
+                  }
+                : yield* validate(input.source)
             return yield* atomicWrite(worktreePath, {
-              id: input.id ?? current?.id ?? crypto.randomUUID(),
+              // A planner may mint a fresh proposal id for every amendment,
+              // but the canonical document is the coordination identity held
+              // by live workers, approvals, checkpoints, and editor clients.
+              // Preserve it while reconciling an existing document so those
+              // revision-safe writers continue targeting the same plan.
+              id: current?.id ?? input.id ?? crypto.randomUUID(),
               sessionId: input.sessionId,
               producingChatId: input.producingChatId,
               revision: (current?.revision ?? 0) + 1,
@@ -376,6 +418,8 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           readonly source: string
           readonly author: PlanDocumentAuthor
           readonly status?: PlanDocumentStatus
+          /** False for mechanical criterion/annotation/status mutations. */
+          readonly semantic?: boolean
         }
       ): Effect.Effect<
         PlanDocument,
@@ -396,17 +440,255 @@ export class PlanStore extends Effect.Service<PlanStore>()(
                 latest: current
               })
             }
-            const { projection, html } = yield* validate(input.source)
+            const reconciled =
+              input.semantic !== false && input.author === "user"
+                ? reconcilePlanAmendment(current, input.source)
+                : null
+            if (reconciled !== null && !reconciled.valid) {
+              return yield* new PlanValidationError({
+                message: "The amended plan is not valid PRD HTML.",
+                diagnostics: reconciled.diagnostics.map((diagnostic) => ({
+                  code: diagnostic.code,
+                  message: diagnostic.message,
+                  line: 0
+                }))
+              })
+            }
+            const parsed =
+              reconciled?.valid === true
+                ? {
+                    projection: reconciled.projection,
+                    html: reconciled.source
+                  }
+                : yield* validate(input.source)
             return yield* atomicWrite(worktreePath, {
               ...current,
               revision: current.revision + 1,
-              source: html,
-              projection,
+              source: parsed.html,
+              projection: parsed.projection,
               status: input.status ?? current.status,
               updatedAt: new Date().toISOString(),
               updatedBy: input.author
             })
           })
+        )
+
+      /**
+       * Mechanical worker writes always rebase onto the latest canonical source
+       * while holding the same per-store lock as semantic edits. This preserves
+       * both sides when an orchestrator revision and worker evidence arrive
+       * together instead of letting a stale base revision overwrite either one.
+       */
+      const updateMechanical = (
+        worktreePath: string,
+        planId: string,
+        transform: (
+          source: string,
+          document: PlanDocument
+        ) => {
+          readonly source: string | null
+          readonly status?: PlanDocumentStatus
+        }
+      ): Effect.Effect<PlanDocument | null, never, PlanStoreEnv> =>
+        lock.withPermits(1)(
+          Effect.gen(function* () {
+            const current = yield* readCanonical(worktreePath)
+            if (current === null || current.id !== planId) return current
+            const change = transform(current.source, current)
+            if (change.source === null) return current
+            const parsed = yield* validate(change.source)
+            return yield* atomicWrite(worktreePath, {
+              ...current,
+              revision: current.revision + 1,
+              source: parsed.html,
+              projection: parsed.projection,
+              status: change.status ?? current.status,
+              updatedAt: new Date().toISOString(),
+              updatedBy: "agent"
+            })
+          }).pipe(
+            Effect.catchAll((error) =>
+              Effect.logError(
+                `Could not persist worker progress for ${worktreePath}: ${error.message}`
+              ).pipe(Effect.as(null))
+            )
+          )
+        )
+
+      const setStageExecutionStatus = (
+        worktreePath: string,
+        input: {
+          readonly planId: string
+          readonly stageId: string
+          readonly agentId: string
+          readonly status: PlanStageExecutionStatus
+          readonly message?: string | null
+        }
+      ): Effect.Effect<PlanDocument | null, never, PlanStoreEnv> =>
+        updateMechanical(worktreePath, input.planId, (source) => {
+          const withStatus = updatePlanStageExecutionHtml(
+            source,
+            input.stageId,
+            input.status
+          )
+          if (withStatus === null) return { source: null }
+          const noteId = `worker-${input.agentId}-${input.stageId}`
+          const message = input.message?.trim() ?? ""
+          if (message.length > 0) {
+            return {
+              source: upsertPlanWorkerAnnotationHtml(withStatus, {
+                id: noteId,
+                stageId: input.stageId,
+                body: message,
+                status: "open",
+                createdAt: new Date().toISOString()
+              })
+            }
+          }
+          return {
+            source:
+              input.status === "completed"
+                ? resolvePlanWorkerAnnotationHtml(withStatus, noteId)
+                : withStatus
+          }
+        })
+
+      const setCriterionStatusLatest = (
+        worktreePath: string,
+        input: {
+          readonly planId: string
+          readonly criterionId: string
+          readonly status: PlanAcceptanceStatus
+          readonly evidence: string | null
+        }
+      ): Effect.Effect<PlanDocument | null, never, PlanStoreEnv> =>
+        updateMechanical(worktreePath, input.planId, (source) => ({
+          source: updatePlanCriterionHtml(
+            source,
+            input.criterionId,
+            input.status,
+            input.evidence
+          )
+        }))
+
+      const settleOrchestration = (
+        worktreePath: string,
+        input: {
+          readonly planId: string
+          readonly workersCompleted: boolean
+        }
+      ): Effect.Effect<PlanDocument | null, never, PlanStoreEnv> =>
+        updateMechanical(worktreePath, input.planId, (source, document) => {
+          if (
+            document.status !== "executing" &&
+            document.status !== "needs-verification"
+          ) {
+            return { source: null }
+          }
+          const criteriaComplete = document.projection.stages.every((stage) =>
+            stage.acceptance.every(
+              (criterion) =>
+                criterion.status === "passed" || criterion.status === "waived"
+            )
+          )
+          return {
+            source,
+            status:
+              input.workersCompleted && criteriaComplete
+                ? "done"
+                : "needs-verification"
+          }
+        })
+
+      const readOrchestrationCheckpoints = (
+        worktreePath: string,
+        planId: string
+      ): Effect.Effect<ReadonlyArray<OrchestrationCheckpoint>, never, PlanStoreEnv> =>
+        lock.withPermits(1)(
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem
+            const file = yield* checkpointFileFor(worktreePath)
+            const raw = yield* fs
+              .readFileString(file)
+              .pipe(Effect.orElseSucceed(() => ""))
+            if (raw.length === 0) return []
+            const parsed = JSON.parse(raw) as {
+              readonly planId?: unknown
+              readonly workers?: unknown
+            }
+            if (parsed.planId !== planId || !Array.isArray(parsed.workers)) {
+              return []
+            }
+            return parsed.workers.filter(
+              (value): value is OrchestrationCheckpoint => {
+                if (typeof value !== "object" || value === null) return false
+                const checkpoint = value as Partial<OrchestrationCheckpoint>
+                return (
+                  typeof checkpoint.agentId === "string" &&
+                  typeof checkpoint.state === "string" &&
+                  Array.isArray(checkpoint.completedStageIds) &&
+                  checkpoint.completedStageIds.every(
+                    (stageId) => typeof stageId === "string"
+                  ) &&
+                  (checkpoint.resumeId === null ||
+                    typeof checkpoint.resumeId === "string") &&
+                  (checkpoint.message === null ||
+                    typeof checkpoint.message === "string") &&
+                  typeof checkpoint.attempt === "number"
+                )
+              }
+            )
+          }).pipe(Effect.catchAll(() => Effect.succeed([])))
+        )
+
+      const writeOrchestrationCheckpoint = (
+        worktreePath: string,
+        planId: string,
+        checkpoint: OrchestrationCheckpoint
+      ): Effect.Effect<void, never, PlanStoreEnv> =>
+        lock.withPermits(1)(
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem
+            const dir = yield* dirFor(worktreePath)
+            const file = yield* checkpointFileFor(worktreePath)
+            yield* fs.makeDirectory(dir, { recursive: true })
+            const raw = yield* fs
+              .readFileString(file)
+              .pipe(Effect.orElseSucceed(() => ""))
+            let workers: ReadonlyArray<OrchestrationCheckpoint> = []
+            if (raw.length > 0) {
+              try {
+                const parsed = JSON.parse(raw) as {
+                  readonly planId?: unknown
+                  readonly workers?: unknown
+                }
+                if (parsed.planId === planId && Array.isArray(parsed.workers)) {
+                  workers =
+                    parsed.workers as ReadonlyArray<OrchestrationCheckpoint>
+                }
+              } catch {
+                workers = []
+              }
+            }
+            const next = [
+              ...workers.filter(
+                (worker) => worker.agentId !== checkpoint.agentId
+              ),
+              checkpoint
+            ]
+            const temp = `${file}.tmp`
+            yield* fs.writeFileString(
+              temp,
+              JSON.stringify({ planId, workers: next }, null, 2)
+            )
+            yield* fs.rename(temp, file)
+          }).pipe(
+            Effect.catchAll((error) =>
+              Effect.logError(
+                `Could not persist orchestration checkpoint: ${String(error)}`
+              )
+            )
+          )
         )
 
       const setCriterionStatus = (
@@ -451,7 +733,8 @@ export class PlanStore extends Effect.Service<PlanStore>()(
             planId: input.planId,
             baseRevision: input.baseRevision,
             source,
-            author: input.author
+            author: input.author,
+            semantic: false
           })
         })
 
@@ -492,7 +775,8 @@ export class PlanStore extends Effect.Service<PlanStore>()(
             planId: input.planId,
             baseRevision: input.baseRevision,
             source,
-            author: input.author
+            author: input.author,
+            semantic: false
           })
         })
 
@@ -601,10 +885,17 @@ export class PlanStore extends Effect.Service<PlanStore>()(
             (updatedBefore !== undefined && current.updatedAt > updatedBefore) ||
             !["proposed", "revising", "approved", "executing"].includes(current.status)
           ) return current
+          let source = current.source
+          for (const stage of current.projection.stages) {
+            if (stage.executionStatus !== "running") continue
+            source =
+              updatePlanStageExecutionHtml(source, stage.id, "interrupted") ??
+              source
+          }
           return yield* updateDocument(worktreePath, {
             planId: current.id,
             baseRevision: current.revision,
-            source: current.source,
+            source,
             author: "agent",
             status: "stale"
           }).pipe(Effect.orElseSucceed(() => current))
@@ -666,10 +957,21 @@ export class PlanStore extends Effect.Service<PlanStore>()(
             yield* fs
               .makeDirectory(dir, { recursive: true })
               .pipe(Effect.orElseSucceed(() => undefined))
+            const baseline = yield* readDocument(
+              worktreePath,
+              sessionId,
+              producingChatId
+            )
             return fs.watch(dir).pipe(
               Stream.debounce(WATCH_DEBOUNCE_MS),
               Stream.mapEffect(() => readDocument(worktreePath, sessionId, producingChatId)),
               Stream.filter((document): document is PlanDocument => document !== null),
+              Stream.filter(
+                (document) =>
+                  baseline === null ||
+                  document.revision !== baseline.revision ||
+                  document.source !== baseline.source
+              ),
               Stream.catchAll(() => Stream.empty)
             )
           })
@@ -692,6 +994,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         startDraft,
         promoteDocument,
         updateDocument,
+        setStageExecutionStatus,
+        setCriterionStatusLatest,
+        settleOrchestration,
+        readOrchestrationCheckpoints,
+        writeOrchestrationCheckpoint,
         setCriterionStatus,
         addAnnotation,
         readArtifact,

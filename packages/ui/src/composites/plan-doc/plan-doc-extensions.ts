@@ -5,7 +5,7 @@ import { PlanAnnotationNode } from "./plan-annotation-node.js"
 import { PlanDiagramNode } from "./plan-diagram-node.js"
 import { PlanCommentDecorations } from "./plan-doc-comment.js"
 import { PlanSlashCommand } from "./plan-doc-slash.js"
-import { PlanStageNode } from "./plan-stage-node.js"
+import { PlanAssignmentNode, PlanStageNode } from "./plan-stage-node.js"
 
 /**
  * The Tiptap extension set behind the full-document plan editor.
@@ -28,6 +28,7 @@ import { PlanStageNode } from "./plan-stage-node.js"
 export const planDocExtensions = ({ slash = true }: { slash?: boolean } = {}): Extensions => [
   StarterKit,
   PlanStageNode,
+  PlanAssignmentNode,
   PlanAcceptanceNode,
   PlanAnnotationNode,
   PlanDiagramNode,

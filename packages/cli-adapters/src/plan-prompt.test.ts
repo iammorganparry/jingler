@@ -3,6 +3,17 @@ import { parsePlan, planInstructions, planModeInstructions } from "./plan-parse.
 import { planNote } from "./plan-prompt.js"
 
 describe("planNote", () => {
+  const orchestration = [
+    {
+      cli: "claude" as const,
+      models: [{ id: "haiku", label: "Haiku 4.5" }]
+    },
+    {
+      cli: "codex" as const,
+      models: [{ id: "gpt-5.6-sol", label: "gpt-5.6-sol" }]
+    }
+  ]
+
   it("is null for Claude, which has a real tool to be steered toward", () => {
     // Restating the protocol in the prompt body would compete with the
     // `planModeInstructions` SDK option the adapter already passes.
@@ -32,6 +43,29 @@ describe("planNote", () => {
     // tool it does not have produces a turn that ends with nothing submitted.
     expect(planNote("codex")).not.toContain("ExitPlanMode")
     expect(planModeInstructions()).toContain("ExitPlanMode")
+  })
+
+  it("gives Claude Haiku and reply-channel models the same orchestrator procedure", () => {
+    const claude = planModeInstructions(undefined, orchestration)
+    const codex = planNote("codex", undefined, orchestration)
+
+    for (const instruction of [
+      "data-complexity",
+      "data-assignment",
+      "data-agent-id",
+      "data-depends-on",
+      "claude/haiku",
+      "codex/gpt-5.6-sol",
+      "workers own mechanical progress and PLAN_RESULT evidence"
+    ]) {
+      expect(claude).toContain(instruction)
+      expect(codex).toContain(instruction)
+    }
+    for (const prompt of [claude, codex]) {
+      expect(prompt).toContain("planning harness never implements")
+      expect(prompt).not.toContain("implementation may continue in this same")
+      expect(prompt).not.toContain("prompted again, with write access")
+    }
   })
 })
 

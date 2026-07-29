@@ -1,5 +1,6 @@
 import type {
   Chat,
+  ChatRole,
   CliKind,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -46,6 +47,9 @@ const runtimeMode = (value: unknown): PermissionMode | undefined => {
 const persistedMode = (value: unknown): PermissionMode | undefined =>
   runtimeMode(value) ?? (typeof value === "string" ? "ask" : undefined)
 
+const persistedChatRole = (value: unknown): ChatRole | undefined =>
+  value === "direct" || value === "orchestrator" ? value : undefined
+
 const initialChat = (
   sessionId: string,
   now: string,
@@ -55,6 +59,9 @@ const initialChat = (
   title: null,
   createdAt: now,
   updatedAt: now,
+  ...(persistedChatRole(legacy.role) === undefined
+    ? {}
+    : { role: persistedChatRole(legacy.role) }),
   ...(typeof legacy.resumeId === "string" ? { resumeId: legacy.resumeId } : {}),
   ...(persistedMode(legacy.mode) === undefined ? {} : { mode: persistedMode(legacy.mode) }),
   ...(Array.isArray(legacy.allowlist) &&
@@ -332,6 +339,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         input: CreateSessionInput,
         /** Provider defaults (from config) to stamp onto the new session. */
         options: {
+          chatRole?: ChatRole
           defaultMode?: PermissionMode
           defaultModel?: string
           defaultReasoning?: ReasoningSetting
@@ -413,6 +421,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                 })
           const id = `s_${slug}`
           const chat = initialChat(id, now, {
+            role: options.chatRole,
             mode: options.defaultMode,
             model: options.defaultModel
           })
@@ -469,6 +478,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         input: CreateSessionFromPrInput,
         opts: {
           allowSharedCheckout?: boolean
+          chatRole?: ChatRole
           defaultMode?: PermissionMode
           defaultModel?: string
           defaultReasoning?: ReasoningSetting
@@ -528,6 +538,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const stamp = yield* Effect.sync(() => Date.now().toString(36))
           const id = `s_${slug}_${stamp}`
           const chat = initialChat(id, now, {
+            role: opts.chatRole,
             mode: opts.defaultMode,
             model: opts.defaultModel
           })
@@ -581,6 +592,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const createFromIssue = (
         input: CreateSessionFromIssueInput,
         options: {
+          chatRole?: ChatRole
           defaultMode?: PermissionMode
           defaultModel?: string
           defaultReasoning?: ReasoningSetting
@@ -621,6 +633,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               .join("\n\n")
           const id = `s_${slug}_${stamp}`
           const chat = initialChat(id, now, {
+            role: options.chatRole,
             mode: options.defaultMode,
             model: options.defaultModel
           })
@@ -709,6 +722,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               title: null,
               createdAt: now,
               updatedAt: now,
+              ...(source?.role === undefined ? {} : { role: source.role }),
               ...(source?.mode === undefined ? {} : { mode: source.mode }),
               ...(source?.model === undefined ? {} : { model: source.model }),
               ...(source?.allowlist === undefined ? {} : { allowlist: source.allowlist })

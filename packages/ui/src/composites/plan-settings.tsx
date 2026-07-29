@@ -1,11 +1,36 @@
-import { DEFAULT_PLAN_TEMPLATE_HTML, parsePlanHtml } from "@jingler/core"
+import type {
+  CliInfo,
+  CliKind,
+  ModelOption,
+  OrchestratorPreference
+} from "@jingler/core"
+import {
+  DEFAULT_PLAN_TEMPLATE_HTML,
+  defaultModel,
+  parsePlanHtml,
+  supportsPlanMode
+} from "@jingler/core"
 import { RotateCcw, Save } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Button } from "../components/button.js"
+import { PROVIDER_LABEL, ProviderIcon } from "../components/provider-icon.js"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../components/select.js"
 
 export interface PlanSettingsProps {
   readonly source?: string | null
   readonly onSave?: (source: string) => Promise<void> | void
+  readonly clis?: ReadonlyArray<CliInfo>
+  readonly orchestrator?: OrchestratorPreference | null
+  readonly loadModels?: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
+  readonly onSaveOrchestrator?: (
+    orchestrator: OrchestratorPreference
+  ) => Promise<void> | void
 }
 
 export const validatePlanTemplate = (source: string): ReadonlyArray<string> => {
@@ -18,7 +43,176 @@ const headingsOf = (source: string): ReadonlyArray<string> =>
     match[1]!.replace(/<[^>]+>/g, "").trim()
   )
 
-export function PlanSettings({ source, onSave }: PlanSettingsProps) {
+export const resolveEffectiveOrchestrator = (
+  clis: ReadonlyArray<CliInfo>,
+  orchestrator: OrchestratorPreference | null | undefined
+): OrchestratorPreference | null => {
+  const planning = clis.filter((cli) => cli.available && supportsPlanMode(cli.kind))
+  const configured = planning.find((cli) => cli.kind === orchestrator?.cli)
+  if (configured !== undefined && orchestrator !== null && orchestrator !== undefined) {
+    return orchestrator
+  }
+  const fallback = planning[0]
+  return fallback === undefined
+    ? null
+    : { cli: fallback.kind, model: defaultModel(fallback.kind) }
+}
+
+function OrchestratorSettings({
+  clis,
+  orchestrator,
+  loadModels,
+  onSave
+}: {
+  clis: ReadonlyArray<CliInfo>
+  orchestrator?: OrchestratorPreference | null
+  loadModels?: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
+  onSave?: (orchestrator: OrchestratorPreference) => Promise<void> | void
+}) {
+  const effective = resolveEffectiveOrchestrator(clis, orchestrator)
+  const planning = clis.filter((cli) => cli.available && supportsPlanMode(cli.kind))
+  const [selectedCli, setSelectedCli] = useState<CliKind | null>(effective?.cli ?? null)
+  const [models, setModels] = useState<ReadonlyArray<ModelOption>>([])
+  const [modelsLoaded, setModelsLoaded] = useState(false)
+  const selected = planning.find((cli) => cli.kind === selectedCli) ?? planning[0]
+  const harnessFallback =
+    orchestrator !== null &&
+    orchestrator !== undefined &&
+    effective !== null &&
+    effective.cli !== orchestrator.cli
+
+  useEffect(() => {
+    setSelectedCli(effective?.cli ?? null)
+  }, [effective?.cli])
+
+  useEffect(() => {
+    if (selected === undefined || loadModels === undefined) {
+      setModels([])
+      setModelsLoaded(false)
+      return
+    }
+    setModelsLoaded(false)
+    let live = true
+    void loadModels(selected.kind)
+      .then((options) => {
+        if (live) {
+          setModels(options)
+          setModelsLoaded(true)
+        }
+      })
+      .catch(() => {
+        if (live) {
+          setModels([])
+          setModelsLoaded(true)
+        }
+      })
+    return () => {
+      live = false
+    }
+  }, [selected, loadModels])
+
+  if (effective === null || selected === undefined) {
+    return (
+      <section className="rounded-xl border border-yellow/35 bg-yellow/5 p-4">
+        <p className="text-[12px] font-medium text-yellow">No planning provider is available</p>
+        <p className="mt-1 text-[11.5px] text-text-body">
+          Install Claude Code, Codex, or OpenCode before starting an orchestrated session.
+        </p>
+      </section>
+    )
+  }
+
+  const selectedModel =
+    selected.kind === orchestrator?.cli &&
+    models.some((model) => model.id === orchestrator.model)
+      ? orchestrator.model
+      : models[0]?.id ?? defaultModel(selected.kind)
+  const modelFallback =
+    !harnessFallback &&
+    modelsLoaded &&
+    selected.kind === orchestrator?.cli &&
+    !models.some((model) => model.id === orchestrator.model)
+
+  return (
+    <section className="rounded-xl border border-line bg-panel p-4">
+      <div className="flex items-start gap-3">
+        <span className="grid size-9 flex-none place-items-center rounded-lg bg-surface">
+          <ProviderIcon cli={selected.kind} size={18} />
+        </span>
+        <div>
+          <h2 className="text-[14px] font-semibold text-text-bright">Preferred orchestrator</h2>
+          <p className="mt-1 max-w-[720px] text-[11.5px] leading-relaxed text-muted-foreground">
+            New sessions use this model to inspect the repository, author the plan, assign
+            worker agents, and reconcile progress. Worker stages may use different models.
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 grid max-w-[620px] gap-3 sm:grid-cols-2">
+        <Select
+          value={selected.kind}
+          onValueChange={(value) => {
+            const cli = value as CliKind
+            setSelectedCli(cli)
+            void onSave?.({ cli, model: defaultModel(cli) })
+          }}
+        >
+          <SelectTrigger aria-label="Orchestrator harness">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {planning.map((cli) => (
+              <SelectItem key={cli.kind} value={cli.kind}>
+                {PROVIDER_LABEL[cli.kind]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={selectedModel}
+          onValueChange={(model) => void onSave?.({ cli: selected.kind, model })}
+        >
+          <SelectTrigger aria-label="Orchestrator model">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(models.length > 0
+              ? models
+              : [{ id: selectedModel, label: selectedModel }]
+            ).map((model) => (
+              <SelectItem key={model.id} value={model.id}>
+                {model.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {(harnessFallback || modelFallback) && (
+        <p className="mt-3 rounded-md border border-yellow/35 bg-yellow/5 px-3 py-2 text-[11px] text-yellow">
+          {harnessFallback ? (
+            <>
+              {PROVIDER_LABEL[orchestrator.cli]} is unavailable. New sessions will use{" "}
+              {PROVIDER_LABEL[effective.cli]} until the configured provider returns.
+            </>
+          ) : (
+            <>
+              {PROVIDER_LABEL[selected.kind]} model {orchestrator?.model} is unavailable.
+              New sessions will use {PROVIDER_LABEL[selected.kind]} model {selectedModel}.
+            </>
+          )}
+        </p>
+      )}
+    </section>
+  )
+}
+
+export function PlanSettings({
+  source,
+  onSave,
+  clis = [],
+  orchestrator,
+  loadModels,
+  onSaveOrchestrator
+}: PlanSettingsProps) {
   const persisted = source ?? DEFAULT_PLAN_TEMPLATE_HTML
   const [draft, setDraft] = useState(persisted)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -29,6 +223,12 @@ export function PlanSettings({ source, onSave }: PlanSettingsProps) {
 
   return (
     <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-5">
+      <OrchestratorSettings
+        clis={clis}
+        orchestrator={orchestrator}
+        loadModels={loadModels}
+        onSave={onSaveOrchestrator}
+      />
       <header>
         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-purple">
           Native planning

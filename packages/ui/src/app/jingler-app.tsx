@@ -11,6 +11,7 @@ import type {
   GitConfig,
   GithubConfig,
   NotificationsConfig,
+  OrchestratorPreference,
   DiffStat,
   IssueSummary,
   ModelOption,
@@ -104,6 +105,11 @@ export interface JinglerAppProps {
   defaultCli?: CliKind | null
   /** Persist the default harness for new sessions. */
   onSaveDefaultCli?: (cli: CliKind) => Promise<void> | void
+  /** Preferred harness/model for orchestrator chats created in new sessions. */
+  orchestrator?: OrchestratorPreference | null
+  onSaveOrchestrator?: (
+    orchestrator: OrchestratorPreference
+  ) => Promise<void> | void
   sessions: ReadonlyArray<Session>
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
@@ -334,6 +340,8 @@ export function JinglerApp({
   clis,
   defaultCli,
   onSaveDefaultCli,
+  orchestrator,
+  onSaveOrchestrator,
   sessions,
   user,
   onSignOut,
@@ -940,6 +948,8 @@ export function JinglerApp({
               onSaveProvider={onSaveProvider}
               defaultCli={defaultCli}
               onSaveDefaultCli={onSaveDefaultCli}
+              orchestrator={orchestrator}
+              onSaveOrchestrator={onSaveOrchestrator}
               planTemplate={planTemplate}
               onSavePlanTemplate={onSavePlanTemplate}
               loadModels={loadModels ?? (async () => [])}

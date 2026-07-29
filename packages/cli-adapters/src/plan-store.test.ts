@@ -38,6 +38,13 @@ const SOURCE = `<h1>PRD: Ship safer planning</h1>
 <div data-acceptance="01.1" data-status="pending">The source survives restart.</div>
 </section>`
 
+const ORCHESTRATED_SOURCE = `<h1>PRD: Orchestrated change</h1>
+<section data-stage="01" data-title="Implement" data-depends-on="" data-complexity="high">
+<h3>Intent</h3><p>Ship the change.</p>
+<div data-assignment data-agent-id="worker-a" data-cli="codex" data-model="gpt-5.6-sol" data-reason="High complexity implementation." data-status="running"></div>
+<div data-acceptance="01.1" data-status="pending">The change is verified.</div>
+</section>`
+
 const promote = (source = SOURCE) =>
   PlanStore.promoteDocument(WT, {
     sessionId: "s1",
@@ -246,6 +253,115 @@ describe("PlanStore canonical document", () => {
     expect(results.filter(Either.isLeft)).toHaveLength(1)
     const dir = join(temp.root, ".jingler", "terminal")
     expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toEqual([])
+  })
+
+  it("rebases concurrent worker evidence onto an orchestrator amendment", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(ORCHESTRATED_SOURCE)
+        yield* Effect.all(
+          [
+            PlanStore.promoteDocument(WT, {
+              sessionId: "s1",
+              producingChatId: "c1",
+              id: first.id,
+              source: ORCHESTRATED_SOURCE.replace(
+                "Ship the change.",
+                "Ship the amended change."
+              ),
+              status: "executing",
+              author: "agent"
+            }),
+            PlanStore.setCriterionStatusLatest(WT, {
+              planId: first.id,
+              criterionId: "01.1",
+              status: "passed",
+              evidence: "Focused integration test passed."
+            })
+          ],
+          { concurrency: "unbounded" }
+        )
+        return yield* PlanStore.readDocument(WT)
+      })
+    )
+
+    expect(result?.source).toContain("Ship the amended change.")
+    expect(result?.projection.stages[0]?.acceptance[0]).toMatchObject({
+      status: "passed",
+      evidence: "Focused integration test passed."
+    })
+  })
+
+  it("keeps the canonical plan identity when an amendment carries a fresh proposal id", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(ORCHESTRATED_SOURCE)
+        const amended = yield* PlanStore.promoteDocument(WT, {
+          sessionId: "s1",
+          producingChatId: "c1",
+          id: "fresh-planner-proposal-id",
+          source: ORCHESTRATED_SOURCE.replace(
+            "Ship the change.",
+            "Ship the amended change."
+          ),
+          status: "executing",
+          author: "agent"
+        })
+        yield* PlanStore.setStageExecutionStatus(WT, {
+          planId: first.id,
+          stageId: "01",
+          agentId: "worker-a",
+          status: "completed"
+        })
+        return {
+          first,
+          amended,
+          latest: yield* PlanStore.readDocument(WT)
+        }
+      })
+    )
+
+    expect(result.amended.id).toBe(result.first.id)
+    expect(result.latest?.projection.stages[0]?.executionStatus).toBe(
+      "completed"
+    )
+  })
+
+  it("persists worker checkpoints and exposes running workers as interrupted after restart", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(ORCHESTRATED_SOURCE)
+        yield* PlanStore.writeOrchestrationCheckpoint(WT, first.id, {
+          agentId: "worker-a",
+          state: "running",
+          completedStageIds: [],
+          resumeId: "resume-a",
+          message: null,
+          attempt: 1
+        })
+        const checkpoints = yield* PlanStore.readOrchestrationCheckpoints(
+          WT,
+          first.id
+        )
+        const interrupted = yield* PlanStore.markInterrupted(WT, "s1", "c1")
+        return { checkpoints, interrupted }
+      })
+    )
+
+    expect(result.checkpoints).toEqual([
+      {
+        agentId: "worker-a",
+        state: "running",
+        completedStageIds: [],
+        resumeId: "resume-a",
+        message: null,
+        attempt: 1
+      }
+    ])
+    expect(result.interrupted?.status).toBe("stale")
+    expect(
+      result.interrupted?.projection.stages[0]?.executionStatus
+    ).toBe("interrupted")
   })
 
   it("marks an interrupted in-flight revision stale without changing its source", async () => {

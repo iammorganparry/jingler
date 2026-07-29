@@ -1,9 +1,16 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { DEFAULT_PLAN_TEMPLATE_HTML } from "@jingler/core"
-import { afterEach, describe, expect, it, vi } from "vitest"
-import { PlanSettings, validatePlanTemplate } from "./plan-settings.js"
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+import {
+  PlanSettings,
+  resolveEffectiveOrchestrator,
+  validatePlanTemplate
+} from "./plan-settings.js"
 
 afterEach(cleanup)
+beforeAll(() => {
+  Element.prototype.scrollIntoView = vi.fn()
+})
 
 describe("PlanSettings", () => {
   it("previews and saves a valid custom PRD structure", async () => {
@@ -44,5 +51,86 @@ describe("PlanSettings", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "Save template" }))
     expect(await screen.findByText("Plan template transport is unavailable")).toBeTruthy()
+  })
+
+  it("persists a preferred orchestrator model from the live provider catalogue", async () => {
+    const onSaveOrchestrator = vi.fn()
+    render(
+      <PlanSettings
+        source={DEFAULT_PLAN_TEMPLATE_HTML}
+        clis={[
+          {
+            kind: "codex",
+            label: "Codex",
+            binPath: "/bin/codex",
+            version: "1",
+            available: true
+          }
+        ]}
+        orchestrator={{ cli: "codex", model: "gpt-5.6-sol" }}
+        loadModels={async () => [
+          { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+          { id: "gpt-5.5-codex", label: "GPT-5.5 Codex" }
+        ]}
+        onSaveOrchestrator={onSaveOrchestrator}
+      />
+    )
+    fireEvent.click(await screen.findByRole("combobox", { name: "Orchestrator model" }))
+    fireEvent.click(await screen.findByRole("option", { name: "GPT-5.5 Codex" }))
+    expect(onSaveOrchestrator).toHaveBeenCalledWith({
+      cli: "codex",
+      model: "gpt-5.5-codex"
+    })
+  })
+
+  it("resolves an unavailable preference to the first installed planning provider", () => {
+    expect(
+      resolveEffectiveOrchestrator(
+        [
+          {
+            kind: "claude",
+            label: "Claude Code",
+            binPath: "/bin/claude",
+            version: "1",
+            available: true
+          },
+          {
+            kind: "codex",
+            label: "Codex",
+            binPath: null,
+            version: null,
+            available: false
+          }
+        ],
+        { cli: "codex", model: "gpt-5.6-sol" }
+      )
+    ).toMatchObject({ cli: "claude" })
+  })
+
+  it("names the effective model when the configured model disappeared", async () => {
+    render(
+      <PlanSettings
+        source={DEFAULT_PLAN_TEMPLATE_HTML}
+        clis={[
+          {
+            kind: "codex",
+            label: "Codex",
+            binPath: "/bin/codex",
+            version: "1",
+            available: true
+          }
+        ]}
+        orchestrator={{ cli: "codex", model: "retired-model" }}
+        loadModels={async () => [
+          { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" }
+        ]}
+      />
+    )
+
+    expect(
+      await screen.findByText(
+        /Codex model retired-model is unavailable\. New sessions will use Codex model gpt-5\.6-sol\./
+      )
+    ).toBeTruthy()
   })
 })

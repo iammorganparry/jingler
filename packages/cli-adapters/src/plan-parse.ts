@@ -14,6 +14,7 @@ import {
   DEFAULT_PLAN_TEMPLATE_HTML,
   PLAN_EVIDENCE_INSTRUCTIONS
 } from "@jingler/core"
+import type { OrchestrationRoute } from "./adapter.js"
 import { planFromHtml } from "./plan-html.js"
 
 /**
@@ -55,10 +56,17 @@ const OPENING: Readonly<Record<PlanChannel, string>> = {
     "When your plan is ready, put a four-backtick fenced ````html plan block at the top of your reply, then your normal human-readable markdown below it — and STOP there, without editing anything."
 }
 
-const SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
+const DIRECT_SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
   tool: "Only ExitPlanMode; do not edit files or run commands in plan mode.",
   reply:
     "Emit the block and stop — do not edit files or run commands in plan mode. The block is parsed into an interactive plan the operator approves, comments on, or sends back for revision; if they approve it you will be prompted again, with write access, to carry it out."
+}
+
+const ORCHESTRATOR_SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
+  tool:
+    "Only ExitPlanMode; do not edit files or run commands. After submission, stop: Jingler—not this planning harness—executes an approved plan through assigned workers.",
+  reply:
+    "Emit the block and stop — do not edit files or run commands. Jingler parses it for approval and delegates an approved plan to assigned workers; this planning harness never implements it."
 }
 
 /**
@@ -69,12 +77,40 @@ const SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
  */
 export const planInstructions = (
   channel: PlanChannel,
-  template: string = DEFAULT_PLAN_TEMPLATE_HTML
+  template: string = DEFAULT_PLAN_TEMPLATE_HTML,
+  orchestration?: ReadonlyArray<OrchestrationRoute>
 ): string =>
   `${OPENING[channel]} Jingler renders the HTML as an interactive PRD in a Notion-style editor.
 
-${SUBMIT_RULE[channel]}
+${orchestration === undefined
+  ? DIRECT_SUBMIT_RULE[channel]
+  : ORCHESTRATOR_SUBMIT_RULE[channel]}
 
+${orchestration === undefined
+  ? ""
+  : `ORCHESTRATOR PROCEDURE — the planning harness never implements an approved plan.
+Jingler hands approved stages to provider-neutral worker agents.
+- Every executable stage MUST declare data-complexity="low|medium|high".
+- Every executable stage MUST contain exactly one data-assignment child with
+  data-agent-id, data-cli, data-model, data-reason, and data-status="queued".
+- Use data-depends-on="stage-id ..." for dependencies.
+- Stages connected by any dependency path MUST share one agent id, harness, and model.
+- Give independent dependency components distinct agent ids so they can run in parallel.
+- Use stable stage and acceptance ids across amendments. Do not mark criteria passed or
+  add evidence: workers own mechanical progress and PLAN_RESULT evidence.
+- Assign only these installed routes:
+${orchestration
+  .flatMap((provider) =>
+    provider.models.map((model) => `  - ${provider.cli}/${model.id}`)
+  )
+  .join("\n")}
+
+Assignment child example:
+<div data-assignment="worker-api" data-agent-id="worker-api" data-cli="codex"
+data-model="gpt-5.6-sol" data-reason="High-complexity implementation"
+data-status="queued"></div>
+
+`}
 Return one four-backtick fenced \`\`\`\`html plan block containing the COMPLETE PRD as HTML.
 Use ordinary HTML for prose (h1 title, h2 sections, p, ul/ol/li, strong/em, code, pre,
 blockquote, table). Carry structure on data-attributes — never <script>, <style>, event
@@ -99,14 +135,20 @@ replacing placeholders with task-specific content:
 ${template.trim()}
 \`\`\`
 
-After the operator approves the plan, implementation may continue in this same
+${orchestration === undefined
+  ? `After the operator approves the plan, implementation may continue in this same
 turn. Follow this completion protocol then:
 
 ${PLAN_EVIDENCE_INSTRUCTIONS.join("\n")}`
+  : `After submission, STOP. Do not wait for approval, implement stages, mutate files,
+or claim progress or evidence. Jingler owns approval, worker execution, mechanical
+status updates, and PLAN_RESULT evidence.`}`
 
 /** The Claude variant, passed to the SDK as `planModeInstructions`. */
-export const planModeInstructions = (template: string = DEFAULT_PLAN_TEMPLATE_HTML): string =>
-  planInstructions("tool", template)
+export const planModeInstructions = (
+  template: string = DEFAULT_PLAN_TEMPLATE_HTML,
+  orchestration?: ReadonlyArray<OrchestrationRoute>
+): string => planInstructions("tool", template, orchestration)
 
 // ── Parsing ───────────────────────────────────────────────────────────────────
 

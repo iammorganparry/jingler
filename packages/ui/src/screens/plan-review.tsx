@@ -44,6 +44,8 @@ export function PlanReview(props: {
   onRetryDocument?: () => void
   onKeepLocal?: () => void
   onAcceptRemote?: () => void
+  onStopWorker?: (agentId: string) => void
+  onRetryWorker?: (agentId: string) => void
 }) {
   const {
     plan,
@@ -62,7 +64,9 @@ export function PlanReview(props: {
     onSaveDocument,
     onRetryDocument,
     onKeepLocal,
-    onAcceptRemote
+    onAcceptRemote,
+    onStopWorker,
+    onRetryWorker
   } = props
 
   if (!document && plan) {
@@ -114,6 +118,8 @@ export function PlanReview(props: {
       onRetry={onRetryDocument}
       onKeepLocal={onKeepLocal}
       onAcceptRemote={onAcceptRemote}
+      onStopWorker={onStopWorker}
+      onRetryWorker={onRetryWorker}
     />
   )
 }

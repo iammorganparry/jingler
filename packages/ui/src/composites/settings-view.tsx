@@ -7,6 +7,7 @@ import type {
   GithubConfig,
   NotificationsConfig,
   ModelOption,
+  OrchestratorPreference,
   OpencodeProviderInfo,
   OpencodeProviderSource,
   OutputStyle,
@@ -458,6 +459,11 @@ export interface SettingsViewProps {
   defaultCli?: CliKind | null
   /** Persist the default harness for new sessions. */
   onSaveDefaultCli?: (cli: CliKind) => Promise<void> | void
+  /** Harness/model that leads every newly-created orchestrated chat. */
+  orchestrator?: OrchestratorPreference | null
+  onSaveOrchestrator?: (
+    orchestrator: OrchestratorPreference
+  ) => Promise<void> | void
   /** Custom PRD structure injected into every native planning harness. */
   planTemplate?: PlanTemplateConfig | null
   onSavePlanTemplate?: (template: PlanTemplateConfig) => Promise<void> | void
@@ -527,6 +533,8 @@ export function SettingsView({
   onSaveProvider,
   defaultCli,
   onSaveDefaultCli,
+  orchestrator,
+  onSaveOrchestrator,
   planTemplate,
   onSavePlanTemplate,
   loadModels,
@@ -661,6 +669,10 @@ export function SettingsView({
           <PlanSettings
             source={planTemplate?.source}
             onSave={(source) => onSavePlanTemplate?.({ source })}
+            clis={clis}
+            orchestrator={orchestrator}
+            loadModels={loadModels}
+            onSaveOrchestrator={onSaveOrchestrator}
           />
         </div>
       ) : section === "connectors" ? (
