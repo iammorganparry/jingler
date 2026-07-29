@@ -1513,6 +1513,7 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Config.setNotifications": (notifications) => ConfigService.setNotifications(notifications),
   "Config.setPlanAutoRun": ({ planAutoRun }) => ConfigService.setPlanAutoRun(planAutoRun),
   "Config.setAdhdMode": ({ adhdMode }) => ConfigService.setAdhdMode(adhdMode),
+  "Config.setFontScale": ({ fontScale }) => ConfigService.setFontScale(fontScale),
   "Config.setDefaultCli": ({ cli }) => ConfigService.setDefaultCli(cli),
   /**
    * Deliver an OS notification. Main decides whether to actually show it: it

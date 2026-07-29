@@ -5,10 +5,10 @@
  * lives here — above the Conversation ↔ Plan Review view switch — so switching to
  * the Plan tab does NOT unmount the agent stream (which would abort a parked plan).
  */
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import type { Session } from "@jingler/core"
-import { agentChildren, agentPath } from "@jingler/core"
+import { agentChildren, agentPath, clampFontScale } from "@jingler/core"
 import {
   AttachmentSourceProvider,
   OpenAssetProvider,
@@ -111,6 +111,13 @@ export function ConversationPane({
    * which means "leave the new chat on whatever it starts with".
    */
   const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
+  // Conversation text-size multiplier, scoped to the transcript wrapper below via
+  // a `--sb-font-scale` CSS var. Set HERE rather than on document.documentElement
+  // on purpose: the shared `.sb-md` calc() rules must only scale inside the
+  // conversation, never a PR description, plan or asset preview — which render the
+  // same markdown but stay put, per the setting's stated scope. Elements outside
+  // this wrapper never see the var, so their calc() falls back to 1×.
+  const fontScale = clampFontScale(providersQuery.data?.fontScale)
   const handoffModel = providersQuery.data?.providers?.[convo.cli]?.defaultModel ?? null
   const backgroundTasksSupported =
     clisQuery.data?.find((c) => c.kind === convo.cli)?.backgroundTasks ?? false
@@ -444,7 +451,7 @@ export function ConversationPane({
         `whitespace-nowrap`) pushes this row past the viewport instead of letting
         the strip's own `overflow-x-auto` take over. The inner column already had
         it; this outer row did not, so the constraint stopped one level short. */}
-    <div className="flex min-h-0 min-w-0 flex-1">
+    <div className="flex min-h-0 min-w-0 flex-1" style={{ "--sb-font-scale": fontScale } as CSSProperties}>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {barAgents.length > 0 && (
         <SubagentTabBar

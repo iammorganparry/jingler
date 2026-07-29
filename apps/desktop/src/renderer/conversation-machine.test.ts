@@ -1441,6 +1441,40 @@ describe("conversationMachine — persisted session reconciliation", () => {
     })
     actor.stop()
   })
+
+  it("keeps a transient plan selection when a session sync lands", async () => {
+    // REGRESSION: the backend never persists plan mode (`agent-runner.setMode`
+    // holds it in memory and only writes the exec mode). A SESSION_UPDATED
+    // therefore always carries a concrete mode, and reconcile used to adopt it
+    // blindly — snapping the operator straight back out of plan into auto the
+    // moment any sync landed.
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    actor.send({ type: "SET_MODE", mode: "plan" })
+    expect(actor.getSnapshot().context.mode).toBe("plan")
+
+    const updated = {
+      ...session,
+      activeChatId: session.id,
+      mode: "auto",
+      chats: [{
+        id: session.id,
+        title: "Chat 1",
+        createdAt: "2026-07-25T00:00:00.000Z",
+        updatedAt: "2026-07-25T00:00:00.000Z",
+        mode: "auto",
+        model: session.model
+      }]
+    } as Session
+
+    actor.send({ type: "SESSION_UPDATED", session: updated })
+
+    // The overlay survives the sync…
+    expect(actor.getSnapshot().context.mode).toBe("plan")
+    // …while the restore-on-approval exec mode still tracks the backend.
+    expect(actor.getSnapshot().context.executionMode).toBe("auto")
+    actor.stop()
+  })
 })
 
 describe("conversationMachine — stop", () => {

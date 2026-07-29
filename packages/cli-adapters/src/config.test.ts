@@ -249,6 +249,39 @@ describe("ConfigService", () => {
   })
 
   /**
+   * `fontScale` rides the same `patch()` preservation spread as every other
+   * lever, so an unrelated save must not drop it — the failure mode is a chosen
+   * text size silently reverting to default the next time any setting is saved.
+   */
+  it("keeps the font scale across an unrelated save", async () => {
+    const exit = await provided(
+      Effect.gen(function* () {
+        yield* ConfigService.setFontScale(1.15)
+        yield* ConfigService.setLastRepoPath("/repos/widget")
+        return yield* ConfigService.get()
+      })
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") expect(exit.value?.fontScale).toBe(1.15)
+  })
+
+  /**
+   * The clamp is the only logic in `setFontScale`: an out-of-range multiplier (a
+   * hand-edited config, a future caller) must land in the usable band rather
+   * than scaling the transcript to zero or off-screen.
+   */
+  it("clamps an out-of-range font scale to the usable band", async () => {
+    const exit = await provided(
+      Effect.gen(function* () {
+        yield* ConfigService.setFontScale(9)
+        return yield* ConfigService.get()
+      })
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") expect(exit.value?.fontScale).toBe(2)
+  })
+
+  /**
    * The default harness is the ONLY record of which CLI new sessions start on
    * now that the New Session dialog stopped asking — losing it on an unrelated
    * write would silently move every future session onto a different harness.

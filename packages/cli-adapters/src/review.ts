@@ -62,9 +62,30 @@ export const extractJsonBlock = (text: string): string | null => {
     const body = fences[i]![1]!.trim()
     if (body.startsWith("{") || body.startsWith("[")) return body
   }
-  // Unfenced fallback: the last top-level object that mentions findings.
-  const bare = text.lastIndexOf('{"findings"')
-  if (bare !== -1) return text.slice(bare).trim()
+  // Fallback for unfenced JSON and for models that put both fences on one line.
+  // Walk the object rather than slicing to EOF so a trailing ``` is excluded,
+  // while braces inside rationale/suggestion strings remain harmless.
+  const candidates = [...text.matchAll(/\{\s*"findings"\s*:/g)]
+  const start = candidates[candidates.length - 1]?.index
+  if (start === undefined) return null
+
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < text.length; i++) {
+    const char = text[i]!
+    if (inString) {
+      if (escaped) escaped = false
+      else if (char === "\\") escaped = true
+      else if (char === '"') inString = false
+    } else if (char === '"') {
+      inString = true
+    } else if (char === "{") {
+      depth++
+    } else if (char === "}" && --depth === 0) {
+      return text.slice(start, i + 1)
+    }
+  }
   return null
 }
 

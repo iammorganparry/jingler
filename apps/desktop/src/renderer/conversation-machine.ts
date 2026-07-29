@@ -916,22 +916,20 @@ export const conversationMachine = setup({
           ? event.session.reasoning?.[event.session.cli]
           : undefined
       const persistedMode = chat.mode ?? "accept-edits"
-      // Plan mode is intentionally transient and therefore never appears in the
-      // SessionStore echo. A model/harness update still emits SESSION_UPDATED;
-      // treating its persisted exec mode as the live mode would kick an in-flight
-      // Claude/Codex/opencode planning turn back to auto/ask/accept-edits.
-      const mode =
-        context.mode === "plan" && supportsPlanMode(event.session.cli)
-          ? "plan"
-          : persistedMode
+      // Plan/Gigaplan are TRANSIENT client overlays the backend never persists
+      // (see `agent-runner.setMode`: plan is held in memory, only the exec mode
+      // reaches `session.mode`). A `SESSION_UPDATED` therefore always carries a
+      // concrete exec mode, so adopting it blindly would yank a live plan
+      // selection back to auto the instant any session sync lands. Keep the
+      // operator's transient selection; still sync `executionMode` to whatever
+      // the backend now says the restore-on-approval mode is.
+      const mode = isExecutionMode(context.mode) ? persistedMode : context.mode
       return {
         session: event.session,
         cli: event.session.cli,
         model: chat.model ?? defaultModel(event.session.cli),
         mode,
-        executionMode: isExecutionMode(persistedMode)
-          ? persistedMode
-          : context.executionMode,
+        executionMode: isExecutionMode(persistedMode) ? persistedMode : context.executionMode,
         reasoning,
         tokens: chat.contextTokens ?? context.tokens,
         persistedStatus: event.session.status

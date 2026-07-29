@@ -8,7 +8,7 @@ import type {
   PlanTemplateConfig,
   ProviderConfig
 } from "@jingler/core"
-import { DEFAULT_THEME_ID, WorkspaceConfig } from "@jingler/core"
+import { clampFontScale, DEFAULT_THEME_ID, WorkspaceConfig } from "@jingler/core"
 import { ConfigError } from "@jingler/core"
 import { FileSystem } from "@effect/platform"
 import { Effect, Schema } from "effect"
@@ -111,6 +111,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             // `false` is a real setting and must survive an unrelated write.
             ...(existing?.planAutoRun !== undefined ? { planAutoRun: existing.planAutoRun } : {}),
             ...(existing?.adhdMode !== undefined ? { adhdMode: existing.adhdMode } : {}),
+            ...(existing?.fontScale !== undefined ? { fontScale: existing.fontScale } : {}),
             ...(existing?.theme ? { theme: existing.theme } : {}),
             ...(existing?.openConnector ? { openConnector: existing.openConnector } : {}),
             ...(existing?.disabledPlugins ? { disabledPlugins: existing.disabledPlugins } : {}),
@@ -134,6 +135,13 @@ export class ConfigService extends Effect.Service<ConfigService>()(
 
       /** Whether every agent turn is asked to shape its reply for an ADHD reader. */
       const setAdhdMode = (adhdMode: boolean) => patch({ adhdMode })
+
+      /**
+       * Conversation + code text-size multiplier, clamped via the shared
+       * `clampFontScale` so the stored value can never scale the transcript to
+       * zero or off-screen — the same guard the read path uses.
+       */
+      const setFontScale = (fontScale: number) => patch({ fontScale: clampFontScale(fontScale) })
 
       const setStarredRepos = (starredRepos: ReadonlyArray<string>) =>
         patch({ starredRepos })
@@ -238,6 +246,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setNotifications,
         setPlanAutoRun,
         setAdhdMode,
+        setFontScale,
         setStarredRepos,
         setCollapsedRepos,
         setLastRepoPath,
