@@ -16,6 +16,7 @@ import type {
   Message,
   PermissionMode,
   Plan,
+  PlanAnnotationAnchor,
   PlanApprovalResult,
   PlanComment,
   ProviderModels,
@@ -197,7 +198,13 @@ type ConversationEvent =
   | { type: "SKILLS_LOADED"; skills: ReadonlyArray<Skill> }
   | { type: "CATALOG_LOADED"; catalog: ReadonlyArray<ProviderModels> }
   | { type: "REVIEW_EVENT"; event: StreamEvent }
-  | { type: "COMMENT_PLAN_STEP"; planId: string; stepId: string; body: string }
+  | {
+      type: "COMMENT_PLAN_STEP"
+      planId: string
+      stepId: string
+      body: string
+      anchor?: PlanAnnotationAnchor
+    }
   | { type: "REVISE_PLAN"; planId: string }
   | { type: "APPROVE_PLAN"; planId: string; executionMode?: ExecutionMode; revision?: number }
   | { type: "PLAN_APPROVAL_RESULT"; planId: string; result: PlanApprovalResult }
@@ -963,7 +970,13 @@ export const conversationMachine = setup({
     // The runner echoes a `PlanUpdated` so the authoritative state reconciles.
     optimisticPlanComment: assign(({ context, event }) => {
       if (event.type !== "COMMENT_PLAN_STEP") return {}
-      void rpc.agentCommentPlanStep(context.session.id, event.planId, event.stepId, event.body)
+      void rpc.agentCommentPlanStep(
+        context.session.id,
+        event.planId,
+        event.stepId,
+        event.body,
+        event.anchor
+      )
       const comment: PlanComment = {
         id: `pc_local_${stamp()}`,
         stepId: event.stepId,

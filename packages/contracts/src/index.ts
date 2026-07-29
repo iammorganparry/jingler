@@ -34,6 +34,7 @@ import {
   PluginId,
   ExecutionMode,
   PermissionMode,
+  PlanAnnotationAnchor,
   PlanApprovalResult,
   PlanDocument,
   PlanTemplateConfig,
@@ -417,13 +418,21 @@ export class JinglerRpcs extends RpcGroup.make(
     )
   }),
 
-  /** Comment on a plan step (plan mode) — accumulates on the plan, doesn't resume. */
+  /**
+   * Comment on a plan (plan mode) — accumulates on the plan, doesn't resume.
+   *
+   * `stepId` targets a stage; pass "" for a section/global comment. An optional
+   * `anchor` attaches the comment to a highlighted span (a TextQuote selector)
+   * rather than the whole stage. Open comments are later batched to the agent by
+   * `Agent.revisePlan`, which embeds the full annotated MDX in one revision.
+   */
   Rpc.make("Agent.commentPlanStep", {
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
       stepId: Schema.String,
-      body: Schema.String
+      body: Schema.String,
+      anchor: Schema.optional(PlanAnnotationAnchor)
     }
   }),
 
@@ -901,6 +910,28 @@ export class JinglerRpcs extends RpcGroup.make(
   /** The canonical PRD MDX document shared by every chat in this session. */
   Rpc.make("Plan.current", {
     success: Schema.NullOr(PlanDocument),
+    payload: { sessionId: Schema.String }
+  }),
+
+  /**
+   * Live-stream the canonical PRD as it changes on disk — the agent writing a
+   * revision, or an external edit to `current-plan.mdx`. Replaces the renderer's
+   * fixed-interval poll of `Plan.current`. Emits the full document on each write.
+   */
+  Rpc.make("Plan.watch", {
+    success: PlanDocument,
+    stream: true,
+    payload: { sessionId: Schema.String }
+  }),
+
+  /**
+   * Create a blank user-authored draft plan from the template so the operator
+   * can start filling in a plan for the agent before any agent run proposes one.
+   * Idempotent — returns the existing canonical plan if one is already present.
+   */
+  Rpc.make("Plan.startDraft", {
+    success: PlanDocument,
+    error: Schema.Union(PlanValidationError, PlanPersistenceError),
     payload: { sessionId: Schema.String }
   }),
 

@@ -706,7 +706,7 @@ describe("AgentRunner plan mode", () => {
               planId: proposed!.id,
               baseRevision: proposed!.revision,
               source: proposed!.source.replace(
-                "Deliver the approved implementation safely",
+                "Implement stages in order and keep the canonical revision recoverable.",
                 "Deliver the operator-edited canonical implementation safely"
               ),
               author: "user"
@@ -920,11 +920,10 @@ describe("AgentRunner plan mode", () => {
           sessionId: SESSION,
           producingChatId: SESSION,
           id: "stale-plan",
-          source: `# PRD: Stale plan
-
-<Stage id="01" title="Implement">
-<Acceptance id="01.1" status="pending">It works.</Acceptance>
-</Stage>`,
+          source: `<h1>PRD: Stale plan</h1>
+<section data-stage="01" data-title="Implement">
+<div data-acceptance="01.1" data-status="pending">It works.</div>
+</section>`,
           author: "agent"
         })
         yield* PlanStore.updateDocument(temp.root, {
@@ -961,11 +960,10 @@ describe("AgentRunner plan mode", () => {
           sessionId: SESSION,
           producingChatId: SESSION,
           id: "waiting-plan",
-          source: `# PRD: Waiting plan
-
-<Stage id="01" title="Verify">
-<Acceptance id="01.1" status="pending">Evidence is required.</Acceptance>
-</Stage>`,
+          source: `<h1>PRD: Waiting plan</h1>
+<section data-stage="01" data-title="Verify">
+<div data-acceptance="01.1" data-status="pending">Evidence is required.</div>
+</section>`,
           status: "needs-verification",
           author: "agent"
         })
@@ -1170,7 +1168,7 @@ describe("AgentRunner plan library", () => {
       }).pipe(Effect.provide(base))
     )
     // One stable canonical file is namespaced by worktree under the plan library.
-    const file = join(temp.root, ".jingler", basename(WT), "current-plan.mdx")
+    const file = join(temp.root, ".jingler", basename(WT), "current-plan.html")
     expect(existsSync(file)).toBe(true)
     expect(readFileSync(file, "utf8")).toContain("Refactor auth flow")
   })
@@ -1500,6 +1498,7 @@ describe("AgentRunner plan progress across turns", () => {
   /** Point step s_01 at a bare filename — the shape that breaks a naive suffix match. */
   const bareFilenameStep = (p: Plan): Plan => ({
     ...p,
+    raw: p.raw.replace(">src/auth/memory-store.ts</li>", ">session.ts</li>"),
     steps: p.steps.map((s) =>
       s.id === "s_01"
         ? { ...s, files: [{ path: "session.ts", change: "M" as const, added: 1, removed: 0 }] }

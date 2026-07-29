@@ -13,7 +13,7 @@ import { ConfigError } from "@jingler/core"
 import { FileSystem } from "@effect/platform"
 import { Effect, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
-import { formatPlanDiagnostics, parsePlanMdx } from "./plan-mdx.js"
+import { formatPlanHtmlDiagnostics, parsePlanHtml } from "./plan-html.js"
 
 type ConfigEnv = FileSystem.FileSystem | AppPaths
 
@@ -156,12 +156,12 @@ export class ConfigService extends Effect.Service<ConfigService>()(
 
       /** Persist the PRD/MDX structure injected into native plan mode. */
       const setPlanTemplate = (planTemplate: PlanTemplateConfig) => {
-        const result = parsePlanMdx(planTemplate.source)
+        const result = parsePlanHtml(planTemplate.source)
         return result.valid
           ? patch({ planTemplate })
           : Effect.fail(
               new ConfigError({
-                message: `Plan template is invalid:\n${formatPlanDiagnostics(result.diagnostics)}`
+                message: `Plan template is invalid:\n${formatPlanHtmlDiagnostics(result.diagnostics)}`
               })
             )
       }

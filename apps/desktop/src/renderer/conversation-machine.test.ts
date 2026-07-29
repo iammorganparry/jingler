@@ -1383,6 +1383,34 @@ describe("conversationMachine — PlanUpdated across turns", () => {
 })
 
 describe("conversationMachine — persisted session reconciliation", () => {
+  it("keeps transient plan mode when a Codex model update echoes the persisted exec mode", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    actor.send({ type: "SET_MODE", mode: "plan" })
+
+    const updated = {
+      ...session,
+      cli: "codex",
+      model: "gpt-5.6-sol",
+      activeChatId: session.id,
+      chats: [{
+        id: session.id,
+        title: "Chat 1",
+        createdAt: "2026-07-25T00:00:00.000Z",
+        updatedAt: "2026-07-25T00:00:00.000Z",
+        // Plan mode is transient and deliberately absent from persistence.
+        mode: "accept-edits",
+        model: "gpt-5.6-sol"
+      }]
+    } as Session
+
+    actor.send({ type: "SESSION_UPDATED", session: updated })
+
+    expect(actor.getSnapshot().context.cli).toBe("codex")
+    expect(actor.getSnapshot().context.mode).toBe("plan")
+    actor.stop()
+  })
+
   it("refreshes provider, model, mode, and reasoning on an existing actor", async () => {
     const actor = start()
     await waitFor(actor, (snapshot) => snapshot.matches(idle))

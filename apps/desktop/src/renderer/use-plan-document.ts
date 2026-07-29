@@ -1,9 +1,4 @@
-import {
-  appendPlanAnnotationSource,
-  type PlanAcceptanceStatus,
-  type PlanDocument,
-  updatePlanCriterionSource
-} from "@jingler/core"
+import type { PlanDocument } from "@jingler/core"
 import type { PlanEditorSyncState } from "@jingler/ui"
 import { useMachine } from "@xstate/react"
 import { useCallback } from "react"
@@ -11,32 +6,12 @@ import { planDocumentMachine } from "./plan-document-machine.js"
 import { rpc } from "./rpc-client.js"
 
 const listeners = new Map<string, Set<(document: PlanDocument) => void>>()
-const pollers = new Map<
-  string,
-  { timer: ReturnType<typeof setTimeout> | null; stopped: boolean }
->()
+// One live `Plan.watch` stream per session, shared by all subscribers; the value
+// is its stop handle. Replaces the previous fixed-interval `Plan.current` poll.
+const watchers = new Map<string, () => void>()
 
 const publish = (sessionId: string, document: PlanDocument): void => {
   for (const listener of listeners.get(sessionId) ?? []) listener(document)
-}
-
-const schedulePoll = (
-  sessionId: string,
-  poller: { timer: ReturnType<typeof setTimeout> | null; stopped: boolean },
-  delay: number
-): void => {
-  poller.timer = setTimeout(() => {
-    void rpc
-      .planCurrent(sessionId)
-      .then((document) => {
-        if (poller.stopped) return
-        if (document !== null) publish(sessionId, document)
-        schedulePoll(sessionId, poller, document === null ? 5000 : 2000)
-      })
-      .catch(() => {
-        if (!poller.stopped) schedulePoll(sessionId, poller, 5000)
-      })
-  }, delay)
 }
 
 const subscribe = (
@@ -46,20 +21,22 @@ const subscribe = (
   const existing = listeners.get(sessionId) ?? new Set()
   existing.add(listener)
   listeners.set(sessionId, existing)
-  if (!pollers.has(sessionId)) {
-    const poller = { timer: null, stopped: false }
-    pollers.set(sessionId, poller)
-    schedulePoll(sessionId, poller, 1500)
+  if (!watchers.has(sessionId)) {
+    // File-watch fires on the agent's writes AND external edits, and on the
+    // first write that creates the plan (the watcher is on the directory).
+    watchers.set(
+      sessionId,
+      rpc.planWatch(sessionId, (document) => publish(sessionId, document))
+    )
   }
   return () => {
     existing.delete(listener)
     if (existing.size > 0) return
     listeners.delete(sessionId)
-    const poller = pollers.get(sessionId)
-    if (poller !== undefined) {
-      poller.stopped = true
-      if (poller.timer !== null) clearTimeout(poller.timer)
-      pollers.delete(sessionId)
+    const stop = watchers.get(sessionId)
+    if (stop !== undefined) {
+      stop()
+      watchers.delete(sessionId)
     }
   }
 }
@@ -107,37 +84,23 @@ export function usePlanDocument(sessionId: string) {
     }
   })
 
+  // Create a blank draft from the template so the operator can start authoring a
+  // plan for the agent before any run has proposed one. The created document
+  // flows back through Plan.watch; publishing here just surfaces it immediately.
+  const startDraft = useCallback(() => {
+    void rpc
+      .planStartDraft(sessionId)
+      .then((document) => publish(sessionId, document))
+      .catch(() => {})
+  }, [sessionId])
   const edit = useCallback((source: string) => send({ type: "EDIT", source }), [send])
   const save = useCallback(() => send({ type: "SAVE_NOW" }), [send])
   const retry = useCallback(() => send({ type: "RETRY" }), [send])
   const keepLocal = useCallback(() => send({ type: "KEEP_LOCAL" }), [send])
   const acceptRemote = useCallback(() => send({ type: "ACCEPT_REMOTE" }), [send])
-  const setCriterion = useCallback(
-    (criterionId: string, status: PlanAcceptanceStatus, evidence: string | null = null) => {
-      const source = updatePlanCriterionSource(
-        snapshot.context.draft,
-        criterionId,
-        status,
-        evidence
-      )
-      if (source !== null) send({ type: "EDIT", source })
-    },
-    [send, snapshot.context.draft]
-  )
-  const annotate = useCallback(
-    (stageId: string | null, body: string) =>
-      send({
-        type: "EDIT",
-        source: appendPlanAnnotationSource(snapshot.context.draft, {
-          id: `annotation-${crypto.randomUUID()}`,
-          stageId,
-          body,
-          author: "user",
-          createdAt: new Date().toISOString()
-        })
-      }),
-    [send, snapshot.context.draft]
-  )
+  // Acceptance status + annotations are now edited in-document via the Tiptap
+  // node views (they serialize to HTML through `edit`), so there is no separate
+  // criterion/annotate helper here anymore.
   const state: PlanEditorSyncState =
     snapshot.matches("loading")
       ? "loading"
@@ -162,8 +125,7 @@ export function usePlanDocument(sessionId: string) {
     retry,
     keepLocal,
     acceptRemote,
-    setCriterion,
-    annotate,
+    startDraft,
     synced: snapshot.matches("clean"),
     canApprove: snapshot.matches("clean") && snapshot.context.document !== null
   }

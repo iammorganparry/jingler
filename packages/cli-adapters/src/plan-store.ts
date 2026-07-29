@@ -8,20 +8,24 @@ import type {
   SessionPlanArtifact
 } from "@jingler/core"
 import {
-  appendPlanAnnotationSource,
+  appendPlanAnnotationHtml,
+  DEFAULT_PLAN_TEMPLATE_HTML,
   planDocumentToPlan,
   PlanConflictError,
   PlanPersistenceError,
   PlanValidationError,
   SessionPlanArtifact as SessionPlanArtifactSchema,
-  updatePlanCriterionSource
+  updatePlanCriterionHtml
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Stream } from "effect"
 import { AppPaths } from "./app-paths.js"
-import { legacyPlanToMdx, parsePlanMdx } from "./plan-mdx.js"
+import { legacyPlanToHtml, parsePlanHtml } from "./plan-html.js"
 
 type PlanStoreEnv = FileSystem.FileSystem | Path.Path | AppPaths
+
+/** Editors save a file two or three times within a few ms; collapse the burst. */
+const WATCH_DEBOUNCE_MS = 150
 
 interface PlanEnvelope {
   readonly id: string
@@ -101,21 +105,25 @@ const parseEnvelope = (
 const asDocument = (raw: string): PlanDocument | null => {
   const parsed = parseEnvelope(raw)
   if (parsed === null) return null
-  const result = parsePlanMdx(parsed.source)
+  const result = parsePlanHtml(parsed.source)
   if (!result.valid) return null
-  return { ...parsed.envelope, source: parsed.source, projection: result.projection }
+  return { ...parsed.envelope, source: result.html, projection: result.projection }
 }
 
+/**
+ * Validate + sanitize a plan on the write path. Returns the SANITIZED html (the
+ * bytes to persist — never the raw input) alongside its projection.
+ */
 const validate = (
   source: string
-): Effect.Effect<PlanPrd, PlanValidationError> => {
-  const result = parsePlanMdx(source)
+): Effect.Effect<{ readonly projection: PlanPrd; readonly html: string }, PlanValidationError> => {
+  const result = parsePlanHtml(source)
   return result.valid
-    ? Effect.succeed(result.projection)
+    ? Effect.succeed({ projection: result.projection, html: result.html })
     : Effect.fail(
         new PlanValidationError({
-          message: "The plan is not valid PRD MDX.",
-          diagnostics: [...result.diagnostics]
+          message: "The plan is not valid PRD HTML.",
+          diagnostics: result.diagnostics.map((d) => ({ code: d.code, message: d.message, line: 0 }))
         })
       )
 }
@@ -150,7 +158,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       ): Effect.Effect<string, never, Path.Path | AppPaths> =>
         Effect.gen(function* () {
           const path = yield* Path.Path
-          return path.join(yield* dirFor(worktreePath), "current-plan.mdx")
+          return path.join(yield* dirFor(worktreePath), "current-plan.html")
         })
 
       const fileFor = (
@@ -270,10 +278,10 @@ export class PlanStore extends Effect.Service<PlanStore>()(
                 raw: legacy ?? ""
               }
             const source =
-              parsePlanMdx(legacyPlan.raw).valid
+              parsePlanHtml(legacyPlan.raw).valid
                 ? legacyPlan.raw
-                : legacyPlanToMdx(legacyPlan)
-            const parsed = parsePlanMdx(source)
+                : legacyPlanToHtml(legacyPlan)
+            const parsed = parsePlanHtml(source)
             if (!parsed.valid) {
               yield* Effect.logWarning(
                 `Could not safely import the legacy plan for ${worktreePath}; leaving the artifact untouched.`
@@ -299,6 +307,34 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           })
         )
 
+      /**
+       * Create a blank, user-authored draft plan from the HTML template so
+       * the operator can start filling in a plan for the agent BEFORE any agent
+       * run has proposed one. Idempotent: if a canonical plan already exists
+       * (agent-proposed or a prior draft) it is returned untouched — this never
+       * clobbers real content.
+       */
+      const startDraft = (
+        worktreePath: string,
+        sessionId: string,
+        producingChatId: string
+      ): Effect.Effect<
+        PlanDocument,
+        PlanValidationError | PlanPersistenceError,
+        PlanStoreEnv
+      > =>
+        Effect.gen(function* () {
+          const current = yield* readCanonical(worktreePath)
+          if (current !== null) return current
+          return yield* promoteDocument(worktreePath, {
+            sessionId,
+            producingChatId,
+            source: DEFAULT_PLAN_TEMPLATE_HTML,
+            status: "draft",
+            author: "user"
+          })
+        })
+
       const promoteDocument = (
         worktreePath: string,
         input: {
@@ -316,7 +352,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       > =>
         lock.withPermits(1)(
           Effect.gen(function* () {
-            const projection = yield* validate(input.source)
+            const { projection, html } = yield* validate(input.source)
             const current = yield* readCanonical(worktreePath)
             return yield* atomicWrite(worktreePath, {
               id: input.id ?? current?.id ?? crypto.randomUUID(),
@@ -324,7 +360,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
               producingChatId: input.producingChatId,
               revision: (current?.revision ?? 0) + 1,
               status: input.status ?? "proposed",
-              source: input.source,
+              source: html,
               projection,
               updatedAt: new Date().toISOString(),
               updatedBy: input.author ?? "agent"
@@ -360,11 +396,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
                 latest: current
               })
             }
-            const projection = yield* validate(input.source)
+            const { projection, html } = yield* validate(input.source)
             return yield* atomicWrite(worktreePath, {
               ...current,
               revision: current.revision + 1,
-              source: input.source,
+              source: html,
               projection,
               status: input.status ?? current.status,
               updatedAt: new Date().toISOString(),
@@ -393,7 +429,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
               latest: null
             })
           }
-          const source = updatePlanCriterionSource(
+          const source = updatePlanCriterionHtml(
             current.source,
             input.criterionId,
             input.status,
@@ -427,6 +463,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           readonly stageId: string | null
           readonly body: string
           readonly author: PlanDocumentAuthor
+          readonly anchor?: {
+            readonly quote: string
+            readonly prefix: string
+            readonly suffix: string
+          }
         }
       ) =>
         Effect.gen(function* () {
@@ -439,12 +480,13 @@ export class PlanStore extends Effect.Service<PlanStore>()(
             })
           }
           const id = `annotation-${crypto.randomUUID()}`
-          const source = appendPlanAnnotationSource(current.source, {
+          const source = appendPlanAnnotationHtml(current.source, {
             id,
             stageId: input.stageId,
             body: input.body,
             author: input.author,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            ...(input.anchor ? { anchor: input.anchor } : {})
           })
           return yield* updateDocument(worktreePath, {
             planId: input.planId,
@@ -468,7 +510,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           sessionId,
           producingChatId,
           id: plan.id,
-          source: parsePlanMdx(plan.raw).valid ? plan.raw : legacyPlanToMdx(plan),
+          source: parsePlanHtml(plan.raw).valid ? plan.raw : legacyPlanToHtml(plan),
           status: statusFromPlan(plan),
           author: "agent"
         }).pipe(
@@ -596,6 +638,43 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           return (yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false))) ? [file] : []
         })
 
+      /**
+       * Live-watch the canonical plan file, emitting the freshly-read document
+       * on every external write. Replaces the renderer's fixed-interval poll.
+       *
+       * Modelled on `ThemeService.watch` — watch the DIRECTORY (so the first
+       * write, which creates `current-plan.html`, is seen without a restart),
+       * debounce editors' multi-save bursts, re-read through the same lock as
+       * `readDocument`, and end silently if the OS watcher dies rather than take
+       * the app down with it. `null` reads (plan deleted / mid-write garbage)
+       * are filtered so subscribers only ever see a valid document.
+       *
+       * **Consume with `Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(...)))`,
+       * never the generated accessor** — an `Effect<Stream<…>>` type-checks where
+       * a `Stream` is wanted and silently yields a stream-of-one-stream. Same
+       * shape and reason as `Theme.watch` / `Review.watch`.
+       */
+      const watch = (
+        worktreePath: string,
+        sessionId?: string,
+        producingChatId?: string
+      ): Stream.Stream<PlanDocument, never, PlanStoreEnv> =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem
+            const dir = yield* dirFor(worktreePath)
+            yield* fs
+              .makeDirectory(dir, { recursive: true })
+              .pipe(Effect.orElseSucceed(() => undefined))
+            return fs.watch(dir).pipe(
+              Stream.debounce(WATCH_DEBOUNCE_MS),
+              Stream.mapEffect(() => readDocument(worktreePath, sessionId, producingChatId)),
+              Stream.filter((document): document is PlanDocument => document !== null),
+              Stream.catchAll(() => Stream.empty)
+            )
+          })
+        )
+
       const removeAll = (worktreePath: string): Effect.Effect<void, never, PlanStoreEnv> =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
@@ -609,6 +688,8 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         fileFor,
         currentFileFor,
         readDocument,
+        watch,
+        startDraft,
         promoteDocument,
         updateDocument,
         setCriterionStatus,

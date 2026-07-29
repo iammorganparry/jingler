@@ -22,7 +22,7 @@ import { formatQuestionAnswers } from "./question-prompt.js"
 import {
   hasPlanBlock,
   parsePlan,
-  PLAN_MDX_REFORMAT,
+  PLAN_HTML_REFORMAT,
   planModeInstructions
 } from "./plan-parse.js"
 import { turnContinuation } from "./turn-continuation.js"
@@ -122,7 +122,7 @@ export const mapClaudeReasoning = (
  * plans from that block, so a fence-less plan has no steps to review — we ask for
  * one reformat before falling back to showing the raw markdown.
  */
-export const PLAN_REFORMAT = `${PLAN_MDX_REFORMAT} You MUST call ExitPlanMode again.`
+export const PLAN_REFORMAT = `${PLAN_HTML_REFORMAT} You MUST call ExitPlanMode again.`
 
 /**
  * The gate request for a tool the SDK asked about, or null for read-only tools

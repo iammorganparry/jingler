@@ -10,7 +10,7 @@ import type {
 import { Effect, Runtime } from "effect"
 import type { AgentContext, SessionSpec } from "./adapter.js"
 import { capOutput } from "./output-cap.js"
-import { hasPlanBlock, parsePlan, PLAN_MDX_REFORMAT } from "./plan-parse.js"
+import { hasPlanBlock, parsePlan, PLAN_HTML_REFORMAT } from "./plan-parse.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
 import { requireWorktree } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
@@ -580,7 +580,7 @@ export const runCodexSdk = (
               const plan = parsePlan(proposed, `plan_${sessionId}_${planRound}`)
               if (plan.structured === false && !planReformatAsked) {
                 planReformatAsked = true
-                followUp = PLAN_MDX_REFORMAT
+                followUp = PLAN_HTML_REFORMAT
                 continue
               }
               const decision = await runP(ctx.proposePlan(plan))

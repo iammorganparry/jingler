@@ -259,6 +259,80 @@ const refreshFlow: NonNullable<Plan["steps"][number]["graph"]> = {
   ]
 }
 
+/**
+ * The canonical plan the scripted agent hands back, as valid plan HTML.
+ *
+ * Plans are HTML documents now (`@jingler/core` `plan-html.ts`), rendered in the
+ * Tiptap "Notion-doc" editor. `PlanStore.promote` persists `plan.raw` verbatim
+ * when it is already valid plan HTML (else it folds the legacy structured plan),
+ * so emitting the document directly here is what drives `current-plan.html`. The
+ * `data-acceptance` ids MUST match the `PLAN_RESULT criterion=…` markers the
+ * approval run streams below, or the plan never reaches "done". Every criterion
+ * starts `pending` so a resume (which streams no evidence) lands on
+ * "needs-verification" while an approval (which does) reaches "done". A mermaid
+ * `data-diagram` block exercises the diagram render path in Plan Review.
+ */
+const scriptedPlanHtml = (summary: string): string => `<h1>PRD: ${summary}</h1>
+<h2>Context</h2>
+<p>Move session token handling into a dedicated TokenStore, add a guarded 401-retry refresh path, update the tests, and open a PR.</p>
+<h2>Technical design</h2>
+<p>The request path flows through the auth middleware, which consults the new TokenStore before proceeding or refreshing an expired token.</p>
+<div data-diagram="mermaid"><pre>graph TD; A--&gt;B</pre></div>
+<section data-stage="s_01" data-title="Audit session middleware">
+<h3>Intent</h3>
+<p>See how sessions read tokens today.</p>
+<h3>Approach</h3>
+<ol><li>Read session.ts</li><li>Trace the token path</li></ol>
+<ul data-files><li data-change="M" data-added="0" data-removed="0">src/auth/memory-store.ts</li></ul>
+<div data-acceptance="s_01.1" data-status="pending">The current token read path is documented.</div>
+</section>
+<section data-stage="s_02" data-title="Create TokenStore module">
+<h3>Intent</h3>
+<p>A dedicated store for token lifecycle.</p>
+<ul data-files><li data-change="A" data-added="40" data-removed="0">src/auth/token-store.ts</li></ul>
+<div data-acceptance="s_02.1" data-status="passed">TokenStore exposes get/set/refresh and is covered by tests.</div>
+</section>
+<section data-stage="s_03" data-title="Swap MemoryStore to TokenStore">
+<h3>Intent</h3>
+<p>Route the session through the new store.</p>
+<ul data-files><li data-change="M" data-added="8" data-removed="3">src/auth/session.ts</li></ul>
+<div data-acceptance="s_03.1" data-status="pending">Session reads route through TokenStore.</div>
+</section>
+<section data-stage="s_04" data-title="Handle token refresh">
+<h3>Intent</h3>
+<p>Decide the refresh path on expiry.</p>
+<div data-acceptance="s_04.1" data-status="pending">The refresh decision is specified.</div>
+</section>
+<section data-stage="s_4a" data-title="refresh() and retry on 401">
+<h3>Intent</h3>
+<p>Mint a new token and replay once.</p>
+<ul data-files><li data-change="M" data-added="18" data-removed="0">src/auth/refresh.ts</li><li data-change="A" data-added="15" data-removed="0">src/auth/retry.ts</li></ul>
+<div data-acceptance="s_4a.1" data-status="passed">A new token is written before the replay.</div>
+<div data-acceptance="s_4a.2" data-status="passed">Refresh fires at most once per request.</div>
+<div data-acceptance="s_4a.3" data-status="failed">No refresh loop on repeated 401s.</div>
+<div data-acceptance="s_4a.4" data-status="pending">Concurrent requests share a single refresh.</div>
+</section>
+<section data-stage="s_4b" data-title="Proceed with request">
+<h3>Intent</h3>
+<p>Token still valid, carry on.</p>
+<div data-acceptance="s_4b.1" data-status="pending">A valid token proceeds without refreshing.</div>
+</section>
+<section data-stage="s_05" data-title="Update auth tests">
+<h3>Intent</h3>
+<p>Cover the new store and the refresh path.</p>
+<ul data-files><li data-change="M" data-added="24" data-removed="2">src/auth/session.test.ts</li></ul>
+<div data-acceptance="s_05.1" data-status="pending">Tests cover the store and the 401 retry.</div>
+</section>
+<section data-stage="s_06" data-title="Open PR #482">
+<h3>Intent</h3>
+<p>Ship the refactor for review.</p>
+<div data-acceptance="s_06.1" data-status="pending">A PR is opened against main.</div>
+</section>
+<h2>Testing</h2>
+<p>Each stage records acceptance evidence before the plan can be marked done.</p>
+<h2>Rollout</h2>
+<p>Implement stages in order and keep the canonical revision recoverable.</p>`
+
 export const scriptedPlan = (sessionId: string, rev: number): Plan => ({
   id: `plan_${sessionId}_${rev}`,
   summary: rev > 1 ? "Refactor auth flow (revised)" : "Refactor auth flow",
@@ -276,7 +350,7 @@ export const scriptedPlan = (sessionId: string, rev: number): Plan => ({
   ],
   comments: [],
   status: "proposed",
-  raw: "# Refactor auth flow\n\nMove session token handling into a dedicated `TokenStore`, add a guarded 401-retry refresh path, update the tests, and open a PR."
+  raw: scriptedPlanHtml(rev > 1 ? "Refactor auth flow (revised)" : "Refactor auth flow")
 })
 
 /**

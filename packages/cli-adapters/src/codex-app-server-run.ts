@@ -23,7 +23,7 @@ import {
 import { stageCodexInput, toCodexAppServerInput } from "./codex-input.js"
 import { codexMcpOverrides } from "./mcp-config.js"
 import { requireWorktree } from "./cwd.js"
-import { hasPlanBlock, parsePlan, PLAN_MDX_REFORMAT } from "./plan-parse.js"
+import { hasPlanBlock, parsePlan, PLAN_HTML_REFORMAT } from "./plan-parse.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
 import { harnessEnv, hasSubscriptionAuth } from "./subscription.js"
 import { worktreeEnv } from "./worktree-env.js"
@@ -614,7 +614,7 @@ export const runCodexAppServer = (
                 const plan = parsePlan(proposed, `plan_${sessionId}_${planRound}`)
                 if (plan.structured === false && !planReformatAsked) {
                   planReformatAsked = true
-                  followUp = PLAN_MDX_REFORMAT
+                  followUp = PLAN_HTML_REFORMAT
                   continue
                 }
                 const decision = await runP(ctx.proposePlan(plan))

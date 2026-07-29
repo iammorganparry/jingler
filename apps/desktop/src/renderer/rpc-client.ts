@@ -379,8 +379,14 @@ export const rpc = {
         ...(compatible === undefined ? {} : { reasoning: compatible })
       })
     }),
-  agentCommentPlanStep: (sessionId: string, planId: string, stepId: string, body: string): Promise<void> =>
-    run((c) => c.Agent.commentPlanStep({ sessionId, planId, stepId, body })),
+  agentCommentPlanStep: (
+    sessionId: string,
+    planId: string,
+    stepId: string,
+    body: string,
+    anchor?: { readonly quote: string; readonly prefix: string; readonly suffix: string }
+  ): Promise<void> =>
+    run((c) => c.Agent.commentPlanStep({ sessionId, planId, stepId, body, ...(anchor ? { anchor } : {}) })),
   agentRevisePlan: (sessionId: string, planId: string): Promise<void> =>
     run((c) => c.Agent.revisePlan({ sessionId, planId })),
   agentApprovePlan: (
@@ -648,6 +654,8 @@ export const rpc = {
    */
   planCurrent: (sessionId: string): Promise<PlanDocument | null> =>
     run((c) => c.Plan.current({ sessionId })),
+  planStartDraft: (sessionId: string): Promise<PlanDocument> =>
+    run((c) => c.Plan.startDraft({ sessionId })),
   planUpdateDocument: (input: {
     sessionId: string
     planId: string
@@ -655,6 +663,25 @@ export const rpc = {
     source: string
     author: "user" | "agent"
   }): Promise<PlanDocument> => run((c) => c.Plan.updateDocument(input)),
+  planWatch: (
+    sessionId: string,
+    onDocument: (document: PlanDocument) => void
+  ): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then((client) => {
+      if (cancelled) return
+      fiber = runtime.runFork(
+        client.Plan.watch({ sessionId }).pipe(
+          Stream.runForEach((document) => Effect.sync(() => onDocument(document)))
+        )
+      )
+    })
+    return () => {
+      cancelled = true
+      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
+    }
+  },
   reviewWatch: (
     sessionId: string,
     chatId: string,

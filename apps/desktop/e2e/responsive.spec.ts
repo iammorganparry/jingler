@@ -109,7 +109,12 @@ test("nothing non-scrollable overflows its box at the window minimum", async ({ 
   await setWindowSize(window, 900, 600)
 
   // Deliberately broad: the point is to catch the control nobody thought about,
-  // which is by definition not the one a targeted assertion would name.
-  const offenders = await overflowing(window, `div:not(${SCROLLABLE}):not(:has(${SCROLLABLE}))`)
+  // which is by definition not the one a targeted assertion would name. Xterm's
+  // hidden helper deliberately overflows while measuring cell geometry; its
+  // visible `.xterm` shell is still covered by this scan.
+  const offenders = await overflowing(
+    window,
+    `div:not(.xterm-helpers):not(${SCROLLABLE}):not(:has(${SCROLLABLE}))`
+  )
   expect(offenders).toEqual({})
 })

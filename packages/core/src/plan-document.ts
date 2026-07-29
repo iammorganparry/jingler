@@ -1,12 +1,13 @@
 import { Schema } from "effect"
+import { parse } from "node-html-parser"
 import type { Plan } from "./conversation.js"
 
 /**
- * Jingler's plan document is a deliberately small MDX dialect.
+ * Jingler's plan document is a deliberately small HTML dialect.
  *
- * Markdown carries prose. `Stage`, `Acceptance`, and `Annotation` are data-only
- * elements parsed by Jingler and rendered through a fixed React registry. Plan
- * documents never execute expressions, imports, exports, or arbitrary component
+ * Ordinary HTML carries prose. `data-stage`, `data-acceptance`, and
+ * `data-annotation` attributes carry structure through a fixed parser and Tiptap
+ * schema. Plan documents never execute scripts, styles, or arbitrary component
  * code.
  */
 
@@ -21,13 +22,29 @@ export const PlanAcceptance = Schema.Struct({
 })
 export type PlanAcceptance = Schema.Schema.Type<typeof PlanAcceptance>
 
+/**
+ * A W3C-style TextQuote anchor: the exact `quote` plus a little `prefix`/`suffix`
+ * context. Quote-based anchoring is used instead of raw ProseMirror positions
+ * because plan source is edited and round-tripped through markdown, where numeric
+ * offsets drift but a quoted span with context can be re-found (or flagged
+ * orphaned when the text it quoted no longer exists). See `plan-anchor.ts`.
+ */
+export const PlanAnnotationAnchor = Schema.Struct({
+  quote: Schema.String,
+  prefix: Schema.String,
+  suffix: Schema.String
+})
+export type PlanAnnotationAnchor = Schema.Schema.Type<typeof PlanAnnotationAnchor>
+
 export const PlanAnnotation = Schema.Struct({
   id: Schema.String,
   stageId: Schema.NullOr(Schema.String),
   body: Schema.String,
   author: Schema.Literal("user", "agent"),
   status: Schema.Literal("open", "resolved"),
-  createdAt: Schema.String
+  createdAt: Schema.String,
+  /** Present when the comment is anchored to a highlighted span (vs. a whole stage). */
+  anchor: Schema.optional(PlanAnnotationAnchor)
 })
 export type PlanAnnotation = Schema.Schema.Type<typeof PlanAnnotation>
 
@@ -86,7 +103,7 @@ export type PlanApprovalResult = Schema.Schema.Type<typeof PlanApprovalResult>
 
 /**
  * `source` is authoritative. `projection` is derived from it on every accepted
- * write and crosses RPC so the renderer never needs an MDX compiler.
+ * write and crosses RPC so the renderer never needs to parse the source itself.
  */
 export const PlanDocument = Schema.Struct({
   id: Schema.String,
@@ -106,29 +123,36 @@ export const PlanTemplateConfig = Schema.Struct({
 })
 export type PlanTemplateConfig = Schema.Schema.Type<typeof PlanTemplateConfig>
 
-const markdownSection = (markdown: string, title: string): string => {
-  const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  return (
-    new RegExp(`(?:^|\\n)###\\s+${escaped}\\s*\\n([\\s\\S]*?)(?=\\n###\\s|$)`, "i")
-      .exec(markdown)?.[1]
-      ?.trim() ?? ""
-  )
+const CHANGES = new Set(["A", "M", "D"])
+
+/** The `<li>` texts under a stage's `<h3>Approach</h3>` heading's following list. */
+const stageApproach = (html: string): ReadonlyArray<string> => {
+  const heading = parse(html)
+    .querySelectorAll("h3")
+    .find((h) => /approach/i.test(h.text))
+  const list = heading?.nextElementSibling
+  const tag = list?.rawTagName?.toLowerCase()
+  if (list == null || (tag !== "ol" && tag !== "ul")) return []
+  return list.querySelectorAll("li").map((li) => li.text.trim()).filter((t) => t.length > 0)
 }
 
-const stageFiles = (markdown: string): Plan["steps"][number]["files"] =>
-  [
-    ...markdownSection(markdown, "Files").matchAll(
-      /^\s*-\s*([AMD])\s+`([^`]+)`\s+\(\+(\d+)\s+[−-](\d+)\)\s*$/gm
-    )
-  ].map((match) => ({
-    change: match[1] as "A" | "M" | "D",
-    path: match[2]!,
-    added: Number(match[3]),
-    removed: Number(match[4])
-  }))
+/** Parse `<ul data-files><li data-change data-added data-removed>path</li></ul>`. */
+const stageFiles = (html: string): Plan["steps"][number]["files"] => {
+  const list = parse(html).querySelector("ul[data-files]")
+  if (list === null) return []
+  return list.querySelectorAll("li").map((li) => {
+    const change = (li.getAttribute("data-change") ?? "M").toUpperCase()
+    return {
+      change: (CHANGES.has(change) ? change : "M") as "A" | "M" | "D",
+      path: li.text.trim(),
+      added: Number(li.getAttribute("data-added") ?? "0") || 0,
+      removed: Number(li.getAttribute("data-removed") ?? "0") || 0
+    }
+  })
+}
 
 /**
- * Compatibility projection for transcript cards. The MDX source remains
+ * Compatibility projection for transcript cards. The HTML source remains
  * authoritative; this shape is derived whenever an older Plan consumer needs
  * to render the current document.
  */
@@ -154,10 +178,7 @@ export const planDocumentToPlan = (document: PlanDocument): Plan => {
       const complete = stage.acceptance.every(
         (criterion) => criterion.status === "passed" || criterion.status === "waived"
       )
-      const approach = markdownSection(stage.markdown, "Approach")
-        .split(/\n+/)
-        .map((line) => line.replace(/^\s*(?:[-*]|\d+\.)\s*/, "").trim())
-        .filter(Boolean)
+      const approach = stageApproach(stage.markdown)
       return {
         id: stage.id,
         number: String(index + 1).padStart(2, "0"),
@@ -211,54 +232,3 @@ export const planDocumentToPlan = (document: PlanDocument): Plan => {
     raw: document.source
   }
 }
-
-export const DEFAULT_PLAN_TEMPLATE = `# PRD: [short outcome]
-
-## Context
-
-[Why this work matters and who needs it.]
-
-## Goals
-
-- [Outcome this plan must achieve.]
-
-## Non-goals
-
-- [Boundary that keeps this plan focused.]
-
-## User experience
-
-[Describe the end-to-end human experience.]
-
-## Technical design
-
-[Describe the architecture and data flow.]
-
-<Stage id="01" title="[First independently verifiable stage]">
-
-### Intent
-
-[Why this stage exists.]
-
-### Approach
-
-1. [Bounded implementation action.]
-
-<Acceptance id="01.1" status="pending">
-[Observable assertion that proves this stage succeeded.]
-</Acceptance>
-
-</Stage>
-
-## Testing
-
-[Unit, integration, and end-to-end coverage.]
-
-## Risks
-
-- [Risk and mitigation.]
-
-## Rollout
-
-[How the change is introduced and, if necessary, reversed.]
-`

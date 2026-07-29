@@ -54,13 +54,13 @@ export function PlanReview({
   onResume,
   onRevise,
   onComment,
+  onStartDraft,
+  onSendToAgent,
   onEditDocument,
   onSaveDocument,
   onRetryDocument,
   onKeepLocal,
-  onAcceptRemote,
-  onCriterionChange,
-  onAnnotate
+  onAcceptRemote
 }: {
   plan: Plan | null
   /** Canonical MDX plan. When present it replaces the legacy step inspector. */
@@ -87,17 +87,15 @@ export function PlanReview({
   onResume?: () => void
   onRevise?: () => void
   onComment?: (stepId: string, body: string) => void
+  /** Seed a blank editable draft plan from the template (empty-state CTA). */
+  onStartDraft?: () => void
+  /** Hand a user-authored draft to the agent as a plan-mode turn. */
+  onSendToAgent?: () => void
   onEditDocument?: (source: string) => void
   onSaveDocument?: () => void
   onRetryDocument?: () => void
   onKeepLocal?: () => void
   onAcceptRemote?: () => void
-  onCriterionChange?: (
-    criterionId: string,
-    status: PlanAcceptanceStatus,
-    evidence: string | null
-  ) => void
-  onAnnotate?: (stageId: string | null, body: string) => void
 }) {
   // Uncontrolled by default (Storybook, and the plain Plan tab); `selectedStepId`
   // layers a deep link on top without forcing every caller to own the selection.
@@ -111,8 +109,14 @@ export function PlanReview({
         <ClipboardList className="size-8 text-line-strong" />
         <div className="max-w-xs text-[13px] leading-[1.5] text-muted-foreground">
           No plan yet. In <span className="font-semibold text-text">Plan</span> mode, ask the agent for a
-          change and it will map out an approach here for you to review.
+          change and it will map out an approach here — or start one yourself and hand it to the agent.
         </div>
+        {onStartDraft && (
+          <Button size="sm" onClick={onStartDraft}>
+            <ClipboardList className="size-3.5" />
+            Start a plan
+          </Button>
+        )}
       </div>
     )
   }
@@ -146,7 +150,14 @@ export function PlanReview({
             revision {document.revision}
           </span>
           <div className="ml-auto flex items-center gap-2">
-            {document.status === "stale" ? (
+            {document.status === "draft" ? (
+              // A user-authored draft has no agent run yet — hand it over to
+              // start one, rather than showing Revise/Approve which would no-op.
+              <Button size="sm" onClick={onSendToAgent}>
+                <Send className="size-3.5" />
+                Send to agent
+              </Button>
+            ) : document.status === "stale" ? (
               <Button size="sm" disabled={!canApprove} onClick={onResume}>
                 <Play className="size-3.5" />
                 Approve &amp; implement
@@ -172,14 +183,11 @@ export function PlanReview({
           remote={remote}
           state={syncState}
           error={syncError}
-          compact={compact}
           onEdit={onEditDocument}
           onSave={onSaveDocument}
           onRetry={onRetryDocument}
           onKeepLocal={onKeepLocal}
           onAcceptRemote={onAcceptRemote}
-          onCriterionChange={onCriterionChange}
-          onAnnotate={onAnnotate}
         />
       </div>
     )
