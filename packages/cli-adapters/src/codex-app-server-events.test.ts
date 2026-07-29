@@ -97,6 +97,98 @@ describe("codex app-server event mapping", () => {
     ])
   })
 
+  it("maps completed update and create diffs to an edit-card preview", () => {
+    const state = makeCodexAppServerEventState()
+    const events = codexAppServerMessageToStreamEvents(
+      {
+        method: "item/completed",
+        params: {
+          item: {
+            type: "fileChange",
+            id: "f1",
+            status: "completed",
+            changes: [
+              {
+                path: "src/a.ts",
+                kind: "update",
+                diff: [
+                  "diff --git a/src/a.ts b/src/a.ts",
+                  "--- a/src/a.ts",
+                  "+++ b/src/a.ts",
+                  "@@ -1 +1 @@",
+                  "-export const oldName = true",
+                  "+export const newName = true"
+                ].join("\n")
+              },
+              {
+                path: "src/new.ts",
+                kind: "add",
+                diff: [
+                  "diff --git a/src/new.ts b/src/new.ts",
+                  "--- /dev/null",
+                  "+++ b/src/new.ts",
+                  "@@ -0,0 +1,2 @@",
+                  "+export const answer = 42",
+                  "+export const ready = true"
+                ].join("\n")
+              }
+            ]
+          }
+        }
+      },
+      "t1",
+      state
+    )
+
+    expect(events).toStrictEqual([
+      { _tag: "ToolStart", id: "f1", name: "Edit", target: "src/a.ts" },
+      {
+        _tag: "ToolEnd",
+        id: "f1",
+        status: "success",
+        meta: "2 files",
+        diff: { added: 3, removed: 1 },
+        preview: [
+          "-export const oldName = true",
+          "+export const newName = true",
+          " ",
+          "+export const answer = 42",
+          "+export const ready = true"
+        ].join("\n")
+      }
+    ])
+  })
+
+  it("keeps the legacy null preview when a completed file change has no diff", () => {
+    expect(
+      codexAppServerMessageToStreamEvents(
+        {
+          method: "item/completed",
+          params: {
+            item: {
+              type: "fileChange",
+              id: "f1",
+              status: "completed",
+              changes: [{ path: "src/a.ts", kind: "update" }]
+            }
+          }
+        },
+        "t1",
+        makeCodexAppServerEventState()
+      )
+    ).toStrictEqual([
+      { _tag: "ToolStart", id: "f1", name: "Edit", target: "src/a.ts" },
+      {
+        _tag: "ToolEnd",
+        id: "f1",
+        status: "success",
+        meta: "1 file",
+        diff: null,
+        preview: null
+      }
+    ])
+  })
+
   it("holds agent deltas and emits the completed text for interception", () => {
     const state = makeCodexAppServerEventState()
     const delta = codexAppServerMessageToStreamEvents(
