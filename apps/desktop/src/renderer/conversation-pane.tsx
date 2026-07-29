@@ -575,6 +575,9 @@ export function ConversationPane({
       ) : (
         <ConversationView
           messages={convo.messages}
+          hasMoreHistory={convo.hasMoreHistory}
+          loadingHistory={convo.loadingHistory}
+          onLoadEarlier={convo.loadOlder}
           mode={convo.mode}
           cli={convo.cli}
           skills={convo.skills}

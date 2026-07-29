@@ -78,6 +78,45 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
       const list = (chatId: string) => readAll(chatId)
 
       /**
+       * A window of the transcript, newest-anchored, for lazy back-loading.
+       *
+       * The renderer opens a session with only the tail in hand (a 46MB
+       * transcript held whole as a parsed `Message[]` was hundreds of MB of
+       * renderer heap per live session), then pages older turns in on demand.
+       *
+       * The whole file is still read and parsed HERE, in main — the same trade
+       * `Sessions.attachment` makes: a transient parse that is immediately
+       * collected, so the renderer never retains what it isn't showing. Windowing
+       * the file read itself would mean a reverse streaming parser for a saving
+       * main doesn't need.
+       *
+       * `before` is the id of the oldest message the caller already holds; the
+       * window is the `limit` messages immediately before it. Omitted, the window
+       * is the last `limit` messages. `hasMore` says whether older turns remain
+       * beyond the window's start — the "Load earlier" affordance's gate. An
+       * unknown `before` (a transcript edited underneath us) yields an empty
+       * window with `hasMore: false` rather than silently restarting from the tail.
+       */
+      const listPage = (
+        chatId: string,
+        options: { before?: string; limit: number }
+      ): Effect.Effect<
+        { messages: ReadonlyArray<Message>; hasMore: boolean },
+        never,
+        TranscriptEnv
+      > =>
+        Effect.gen(function* () {
+          const all = yield* readAll(chatId)
+          const end =
+            options.before === undefined
+              ? all.length
+              : all.findIndex((m) => m.id === options.before)
+          if (end === -1) return { messages: [], hasMore: false }
+          const start = Math.max(0, end - options.limit)
+          return { messages: all.slice(start, end), hasMore: start > 0 }
+        })
+
+      /**
        * Move a legacy session-keyed transcript into its synthesized first chat.
        * Rename makes adoption one-shot and atomic; if the chat already has a
        * transcript it always wins.
@@ -145,7 +184,7 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           yield* writeAll(chatId, next)
         })
 
-      return { list, adoptLegacy, remove, append, patchLast, patchById }
+      return { list, listPage, adoptLegacy, remove, append, patchLast, patchById }
     }
   }
 ) {}
