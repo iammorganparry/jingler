@@ -1,5 +1,5 @@
 import type { CliKind } from "@jingler/core"
-import { DEFAULT_PLAN_TEMPLATE, supportsPlanMode } from "@jingler/core"
+import { DEFAULT_PLAN_TEMPLATE_HTML, supportsPlanMode } from "@jingler/core"
 import { planInstructions } from "./plan-parse.js"
 
 /**
@@ -26,7 +26,7 @@ import { planInstructions } from "./plan-parse.js"
  */
 export const planNote = (
   cli: CliKind,
-  template: string = DEFAULT_PLAN_TEMPLATE
+  template: string = DEFAULT_PLAN_TEMPLATE_HTML
 ): string | null => {
   if (cli === "claude") return null
   if (!supportsPlanMode(cli)) return null

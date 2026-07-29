@@ -18,7 +18,7 @@ describe("planNote", () => {
     // The two differ only in transport. A note that drifted between them would
     // mean a plan parses on one harness and degrades to raw text on the other.
     expect(planNote("codex")).toBe(planNote("opencode"))
-    expect(planNote("codex")).toContain("```mdx plan")
+    expect(planNote("codex")).toContain("```html plan")
   })
 
   it("tells the harness it is read-only, not merely that it should behave", () => {
@@ -99,6 +99,6 @@ describe("the reply-channel grammar agrees with the real parser", () => {
     // Claude.
     const grammarOf = (s: string) => s.slice(s.indexOf("Return one fenced"))
     expect(grammarOf(planInstructions("reply"))).toBe(grammarOf(planInstructions("tool")))
-    expect(planInstructions("reply")).toContain("```mdx plan")
+    expect(planInstructions("reply")).toContain("```html plan")
   })
 })

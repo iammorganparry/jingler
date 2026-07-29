@@ -5,7 +5,7 @@ import type { SessionPromptData } from "@opencode-ai/sdk/v2/client"
 import { Effect, Runtime } from "effect"
 import type { AgentContext, PermissionRequest, SessionSpec } from "./adapter.js"
 import { capOutput } from "./output-cap.js"
-import { hasPlanBlock, parsePlan, PLAN_MDX_REFORMAT } from "./plan-parse.js"
+import { hasPlanBlock, parsePlan, PLAN_HTML_REFORMAT } from "./plan-parse.js"
 import { stopChild, trackChild } from "./child-registry.js"
 import { requireWorktree } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
@@ -863,7 +863,7 @@ const driveOpencode = async (
             const plan = parsePlan(reply, `plan_${sessionId}_${planRound}`)
             if (plan.structured === false && !planReformatAsked) {
               planReformatAsked = true
-              followUp = PLAN_MDX_REFORMAT
+              followUp = PLAN_HTML_REFORMAT
               turnPrompt = followUp
               continue
             }

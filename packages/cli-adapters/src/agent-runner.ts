@@ -31,7 +31,7 @@ import {
   settleStreaming,
   STOPPED_NOTE,
   userMessage,
-  DEFAULT_PLAN_TEMPLATE
+  DEFAULT_PLAN_TEMPLATE_HTML
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
@@ -487,10 +487,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             ? revisionText(plan, open)
             : [
                 `Revise canonical PRD revision ${canonical.document.revision}.`,
-                "Treat the full MDX below, including human edits and annotations, as the source of truth.",
-                "Return a complete replacement four-backtick fenced ````mdx plan document.",
+                "Treat the full HTML below, including human edits and annotations, as the source of truth.",
+                "Return a complete replacement four-backtick fenced ````html plan document.",
                 "",
-                "````mdx plan",
+                "````html plan",
                 canonical.document.source.trim(),
                 "````"
               ].join("\n")
@@ -935,7 +935,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // toward. Everything else is told to end its reply with the block.
           const planProtocol =
             mode === "plan"
-              ? planNote(cli, workspaceConfig?.planTemplate?.source ?? DEFAULT_PLAN_TEMPLATE)
+              ? planNote(cli, workspaceConfig?.planTemplate?.source ?? DEFAULT_PLAN_TEMPLATE_HTML)
               : null
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
@@ -992,7 +992,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             ...(mode === "plan"
               ? {
                   planTemplate:
-                    workspaceConfig?.planTemplate?.source ?? DEFAULT_PLAN_TEMPLATE
+                    workspaceConfig?.planTemplate?.source ?? DEFAULT_PLAN_TEMPLATE_HTML
                 }
               : {}),
             ...(resolvedReasoning === null

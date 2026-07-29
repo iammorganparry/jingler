@@ -11,10 +11,10 @@ import type {
   PlanStepCode
 } from "@jingler/core"
 import {
-  DEFAULT_PLAN_TEMPLATE,
+  DEFAULT_PLAN_TEMPLATE_HTML,
   PLAN_EVIDENCE_INSTRUCTIONS
 } from "@jingler/core"
-import { planFromMdx } from "./plan-mdx.js"
+import { planFromHtml } from "./plan-html.js"
 
 /**
  * Turn the plan text Claude produces via `ExitPlanMode` into a structured `Plan`.
@@ -41,18 +41,18 @@ import { planFromMdx } from "./plan-mdx.js"
  */
 export type PlanChannel = "tool" | "reply"
 
-export const PLAN_MDX_REFORMAT = [
-  "The submitted PRD is not valid Jingler plan MDX.",
-  "Return the SAME plan as one complete four-backtick fenced ````mdx plan block.",
-  "Use Markdown plus only Stage, Acceptance, and Annotation components.",
-  "Every Stage needs a stable id, title, intent, and at least one Acceptance with a stable id.",
+export const PLAN_HTML_REFORMAT = [
+  "The submitted PRD is not valid Jingler plan HTML.",
+  "Return the SAME plan as one complete four-backtick fenced ````html plan block.",
+  "Use HTML with <section data-stage>, <div data-acceptance data-status>, and <aside data-annotation> for structure.",
+  "Every stage needs a stable id + title and at least one acceptance with a stable id and status.",
   "Do not change the substance of the plan; change only its format."
 ].join(" ")
 
 const OPENING: Readonly<Record<PlanChannel, string>> = {
-  tool: "When you present your plan with ExitPlanMode, put a four-backtick fenced ````mdx plan block at the top of the plan text, then your normal human-readable markdown below it.",
+  tool: "When you present your plan with ExitPlanMode, put a four-backtick fenced ````html plan block at the top of the plan text, then your normal human-readable markdown below it.",
   reply:
-    "When your plan is ready, put a four-backtick fenced ````mdx plan block at the top of your reply, then your normal human-readable markdown below it — and STOP there, without editing anything."
+    "When your plan is ready, put a four-backtick fenced ````html plan block at the top of your reply, then your normal human-readable markdown below it — and STOP there, without editing anything."
 }
 
 const SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
@@ -69,22 +69,33 @@ const SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
  */
 export const planInstructions = (
   channel: PlanChannel,
-  template: string = DEFAULT_PLAN_TEMPLATE
+  template: string = DEFAULT_PLAN_TEMPLATE_HTML
 ): string =>
-  `${OPENING[channel]} Jingler renders the MDX as an interactive PRD.
+  `${OPENING[channel]} Jingler renders the HTML as an interactive PRD in a Notion-style editor.
 
 ${SUBMIT_RULE[channel]}
 
-Return one four-backtick fenced \`\`\`\`mdx plan block containing the COMPLETE PRD. Markdown is
-allowed. The only components are <Stage>, <Acceptance>, and <Annotation>. Do not
-use imports, exports, JavaScript expressions, or arbitrary React components.
-Every Stage requires a stable unique id, title, Intent section, and at least one
-Acceptance with its own stable unique id and status.
+Return one four-backtick fenced \`\`\`\`html plan block containing the COMPLETE PRD as HTML.
+Use ordinary HTML for prose (h1 title, h2 sections, p, ul/ol/li, strong/em, code, pre,
+blockquote, table). Carry structure on data-attributes — never <script>, <style>, event
+handlers, inline styles, or JavaScript:
+
+- Title: <h1>PRD: ...</h1>
+- Section: <h2>Context</h2> then prose.
+- Stage: <section data-stage="01" data-title="..."> with an <h3>Intent</h3>, an
+  <h3>Approach</h3>, and at least one acceptance criterion inside it.
+- Acceptance: <div data-acceptance="01.1" data-status="pending">observable assertion</div>
+  (status is one of pending | passed | failed | waived).
+- Flow diagram: <div data-diagram="mermaid"><pre>graph TD; A--&gt;B</pre></div>
+- Comment: <aside data-annotation="a1" data-stage="01">note for the agent</aside>
+
+Every stage needs a stable unique id + title and at least one acceptance with its own
+stable unique id and status.
 
 Use this configured structure as the source of truth. Preserve its sections while
 replacing placeholders with task-specific content:
 
-\`\`\`mdx
+\`\`\`html
 ${template.trim()}
 \`\`\`
 
@@ -94,7 +105,7 @@ turn. Follow this completion protocol then:
 ${PLAN_EVIDENCE_INSTRUCTIONS.join("\n")}`
 
 /** The Claude variant, passed to the SDK as `planModeInstructions`. */
-export const planModeInstructions = (template: string = DEFAULT_PLAN_TEMPLATE): string =>
+export const planModeInstructions = (template: string = DEFAULT_PLAN_TEMPLATE_HTML): string =>
   planInstructions("tool", template)
 
 // ── Parsing ───────────────────────────────────────────────────────────────────
@@ -126,8 +137,8 @@ const fenced = (raw: string, lang: string): string | null => {
  * guaranteed — the adapter uses this to bounce a fence-less plan back for one
  * reformat rather than degrading straight to the raw fallback.
  */
-const fencedMdxPlan = (raw: string): string | null => {
-  const opening = /^[ \t]*(`{3,})mdx[ \t]+plan[ \t]*\r?\n/im.exec(raw)
+const fencedHtmlPlan = (raw: string): string | null => {
+  const opening = /^[ \t]*(`{3,})html[ \t]+plan[ \t]*\r?\n/im.exec(raw)
   if (opening === null) return null
 
   const fenceLength = opening[1]!.length
@@ -142,7 +153,7 @@ const fencedMdxPlan = (raw: string): string | null => {
 }
 
 export const hasPlanBlock = (raw: string): boolean =>
-  fencedMdxPlan(raw) !== null || fenced(raw, "plan") !== null
+  fencedHtmlPlan(raw) !== null || fenced(raw, "plan") !== null
 
 /** Numeric-only ordinals pad to two digits ("4" → "04"); arms ("4a") stay as-is. */
 const normNum = (n: string): string => (/^\d+$/.test(n) ? n.padStart(2, "0") : n)
@@ -458,9 +469,9 @@ export const parseStepCode = (raw: string): Map<string, PlanStepCode> => {
  * single step wrapping the markdown when there's no parseable ` ```plan ` block.
  */
 export const parsePlan = (raw: string, id: string): Plan => {
-  const mdx = fencedMdxPlan(raw)
-  if (mdx !== null) {
-    const plan = planFromMdx(mdx, id)
+  const html = fencedHtmlPlan(raw)
+  if (html !== null) {
+    const plan = planFromHtml(html, id)
     if (plan !== null) return plan
   }
   const block = fenced(raw, "plan")

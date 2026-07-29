@@ -8,19 +8,19 @@ import type {
   SessionPlanArtifact
 } from "@jingler/core"
 import {
-  appendPlanAnnotationSource,
-  DEFAULT_PLAN_TEMPLATE,
+  appendPlanAnnotationHtml,
+  DEFAULT_PLAN_TEMPLATE_HTML,
   planDocumentToPlan,
   PlanConflictError,
   PlanPersistenceError,
   PlanValidationError,
   SessionPlanArtifact as SessionPlanArtifactSchema,
-  updatePlanCriterionSource
+  updatePlanCriterionHtml
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Schema, Stream } from "effect"
 import { AppPaths } from "./app-paths.js"
-import { legacyPlanToMdx, parsePlanMdx } from "./plan-mdx.js"
+import { legacyPlanToHtml, parsePlanHtml } from "./plan-html.js"
 
 type PlanStoreEnv = FileSystem.FileSystem | Path.Path | AppPaths
 
@@ -105,21 +105,25 @@ const parseEnvelope = (
 const asDocument = (raw: string): PlanDocument | null => {
   const parsed = parseEnvelope(raw)
   if (parsed === null) return null
-  const result = parsePlanMdx(parsed.source)
+  const result = parsePlanHtml(parsed.source)
   if (!result.valid) return null
-  return { ...parsed.envelope, source: parsed.source, projection: result.projection }
+  return { ...parsed.envelope, source: result.html, projection: result.projection }
 }
 
+/**
+ * Validate + sanitize a plan on the write path. Returns the SANITIZED html (the
+ * bytes to persist — never the raw input) alongside its projection.
+ */
 const validate = (
   source: string
-): Effect.Effect<PlanPrd, PlanValidationError> => {
-  const result = parsePlanMdx(source)
+): Effect.Effect<{ readonly projection: PlanPrd; readonly html: string }, PlanValidationError> => {
+  const result = parsePlanHtml(source)
   return result.valid
-    ? Effect.succeed(result.projection)
+    ? Effect.succeed({ projection: result.projection, html: result.html })
     : Effect.fail(
         new PlanValidationError({
-          message: "The plan is not valid PRD MDX.",
-          diagnostics: [...result.diagnostics]
+          message: "The plan is not valid PRD HTML.",
+          diagnostics: result.diagnostics.map((d) => ({ code: d.code, message: d.message, line: 0 }))
         })
       )
 }
@@ -154,7 +158,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       ): Effect.Effect<string, never, Path.Path | AppPaths> =>
         Effect.gen(function* () {
           const path = yield* Path.Path
-          return path.join(yield* dirFor(worktreePath), "current-plan.mdx")
+          return path.join(yield* dirFor(worktreePath), "current-plan.html")
         })
 
       const fileFor = (
@@ -274,10 +278,10 @@ export class PlanStore extends Effect.Service<PlanStore>()(
                 raw: legacy ?? ""
               }
             const source =
-              parsePlanMdx(legacyPlan.raw).valid
+              parsePlanHtml(legacyPlan.raw).valid
                 ? legacyPlan.raw
-                : legacyPlanToMdx(legacyPlan)
-            const parsed = parsePlanMdx(source)
+                : legacyPlanToHtml(legacyPlan)
+            const parsed = parsePlanHtml(source)
             if (!parsed.valid) {
               yield* Effect.logWarning(
                 `Could not safely import the legacy plan for ${worktreePath}; leaving the artifact untouched.`
@@ -325,7 +329,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           return yield* promoteDocument(worktreePath, {
             sessionId,
             producingChatId,
-            source: DEFAULT_PLAN_TEMPLATE,
+            source: DEFAULT_PLAN_TEMPLATE_HTML,
             status: "draft",
             author: "user"
           })
@@ -348,7 +352,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       > =>
         lock.withPermits(1)(
           Effect.gen(function* () {
-            const projection = yield* validate(input.source)
+            const { projection, html } = yield* validate(input.source)
             const current = yield* readCanonical(worktreePath)
             return yield* atomicWrite(worktreePath, {
               id: input.id ?? current?.id ?? crypto.randomUUID(),
@@ -356,7 +360,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
               producingChatId: input.producingChatId,
               revision: (current?.revision ?? 0) + 1,
               status: input.status ?? "proposed",
-              source: input.source,
+              source: html,
               projection,
               updatedAt: new Date().toISOString(),
               updatedBy: input.author ?? "agent"
@@ -392,11 +396,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
                 latest: current
               })
             }
-            const projection = yield* validate(input.source)
+            const { projection, html } = yield* validate(input.source)
             return yield* atomicWrite(worktreePath, {
               ...current,
               revision: current.revision + 1,
-              source: input.source,
+              source: html,
               projection,
               status: input.status ?? current.status,
               updatedAt: new Date().toISOString(),
@@ -425,7 +429,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
               latest: null
             })
           }
-          const source = updatePlanCriterionSource(
+          const source = updatePlanCriterionHtml(
             current.source,
             input.criterionId,
             input.status,
@@ -476,7 +480,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
             })
           }
           const id = `annotation-${crypto.randomUUID()}`
-          const source = appendPlanAnnotationSource(current.source, {
+          const source = appendPlanAnnotationHtml(current.source, {
             id,
             stageId: input.stageId,
             body: input.body,
@@ -506,7 +510,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           sessionId,
           producingChatId,
           id: plan.id,
-          source: parsePlanMdx(plan.raw).valid ? plan.raw : legacyPlanToMdx(plan),
+          source: parsePlanHtml(plan.raw).valid ? plan.raw : legacyPlanToHtml(plan),
           status: statusFromPlan(plan),
           author: "agent"
         }).pipe(

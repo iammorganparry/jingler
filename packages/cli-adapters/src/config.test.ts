@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs"
 import { mkdirSync } from "node:fs"
 import { FileSystem } from "@effect/platform"
-import { DEFAULT_PLAN_TEMPLATE, DEFAULT_THEME_ID } from "@jingler/core"
+import { DEFAULT_PLAN_TEMPLATE_HTML, DEFAULT_THEME_ID } from "@jingler/core"
 import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AppPaths } from "./app-paths.js"
@@ -193,21 +193,21 @@ describe("ConfigService", () => {
     const exit = await provided(
       Effect.gen(function* () {
         yield* ConfigService.setReposDir("/repos")
-        yield* ConfigService.setPlanTemplate({ source: DEFAULT_PLAN_TEMPLATE })
+        yield* ConfigService.setPlanTemplate({ source: DEFAULT_PLAN_TEMPLATE_HTML })
         yield* ConfigService.setLastRepoPath("/repos/widget")
         return yield* ConfigService.get()
       })
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag === "Success") {
-      expect(exit.value?.planTemplate?.source).toBe(DEFAULT_PLAN_TEMPLATE)
+      expect(exit.value?.planTemplate?.source).toBe(DEFAULT_PLAN_TEMPLATE_HTML)
     }
   })
 
   it("rejects an unsafe plan template without overwriting the saved one", async () => {
     const exit = await provided(
       Effect.gen(function* () {
-        yield* ConfigService.setPlanTemplate({ source: DEFAULT_PLAN_TEMPLATE })
+        yield* ConfigService.setPlanTemplate({ source: DEFAULT_PLAN_TEMPLATE_HTML })
         return yield* ConfigService.setPlanTemplate({
           source: 'import Danger from "./danger.js"\n# PRD'
         })

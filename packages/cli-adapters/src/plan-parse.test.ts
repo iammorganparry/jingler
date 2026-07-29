@@ -249,16 +249,16 @@ describe("hasPlanBlock", () => {
     expect(hasPlanBlock("")).toBe(false)
   })
 
-  it("keeps nested code fences inside a four-backtick MDX plan", () => {
+  it("keeps nested code fences inside a four-backtick HTML plan", () => {
     const raw = [
-      "````mdx plan",
-      "# PRD: Nested sample",
-      '<Stage id="s1" title="Build parser" intent="Keep examples intact">',
-      "```ts",
-      'const fence = "nested"',
-      "```",
-      '<Acceptance id="a1" status="pending">The full stage survives.</Acceptance>',
-      "</Stage>",
+      "````html plan",
+      "<h1>PRD: Nested sample</h1>",
+      "<h2>Context</h2><p>Keep examples intact.</p>",
+      '<section data-stage="s1" data-title="Build parser">',
+      "<h3>Intent</h3><p>Keep examples intact</p>",
+      "<pre>```ts\nconst fence = \"nested\"\n```</pre>",
+      '<div data-acceptance="a1" data-status="pending">The full stage survives.</div>',
+      "</section>",
       "````"
     ].join("\n")
 
@@ -293,9 +293,9 @@ describe("parsePlan — the unstructured fallback", () => {
 })
 
 describe("planModeInstructions", () => {
-  it("documents safe PRD MDX and forbids execution", () => {
-    expect(planModeInstructions()).toContain("````mdx plan")
-    expect(planModeInstructions()).toContain("<Acceptance")
+  it("documents safe PRD HTML and forbids execution", () => {
+    expect(planModeInstructions()).toContain("````html plan")
+    expect(planModeInstructions()).toContain("data-acceptance")
     expect(planModeInstructions()).toMatch(/ExitPlanMode/)
     expect(planModeInstructions().toLowerCase()).toContain("do not edit")
     expect(planModeInstructions()).toContain(

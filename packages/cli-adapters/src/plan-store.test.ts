@@ -29,24 +29,14 @@ const run = <A, E>(
 ) => Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(PlanStore.Default, temp.layer))))
 
 const WT = "/tmp/jingler/worktrees/jingler/terminal"
-const SOURCE = `# PRD: Ship safer planning
-
-## Context
-
-One document is authoritative.
-
-<Stage id="01" title="Persist the document">
-
-### Intent
-
-Keep every reader on one revision.
-
-<Acceptance id="01.1" status="pending">
-The source survives restart.
-</Acceptance>
-
-</Stage>
-`
+const SOURCE = `<h1>PRD: Ship safer planning</h1>
+<h2>Context</h2>
+<p>One document is authoritative.</p>
+<section data-stage="01" data-title="Persist the document">
+<h3>Intent</h3>
+<p>Keep every reader on one revision.</p>
+<div data-acceptance="01.1" data-status="pending">The source survives restart.</div>
+</section>`
 
 const promote = (source = SOURCE) =>
   PlanStore.promoteDocument(WT, {
@@ -58,17 +48,24 @@ const promote = (source = SOURCE) =>
   })
 
 describe("PlanStore canonical document", () => {
-  it("uses one stable current-plan.mdx with protected frontmatter", async () => {
+  it("uses one stable current-plan.html with protected frontmatter", async () => {
     const document = await run(promote())
     const files = await run(PlanStore.list(WT))
 
     expect(document.revision).toBe(1)
     expect(files).toHaveLength(1)
-    expect(basename(files[0]!)).toBe("current-plan.mdx")
+    expect(basename(files[0]!)).toBe("current-plan.html")
     const persisted = readFileSync(files[0]!, "utf8")
     expect(persisted).toContain("jinglerPlan: 1")
     expect(persisted).toContain('sessionId: "s1"')
-    expect(persisted).toContain(SOURCE.trimStart())
+    // The persisted body is the SANITIZED html, so assert on stable structure
+    // (title + stage/acceptance markers) rather than byte-equality with SOURCE.
+    expect(persisted).toContain("<h1>PRD: Ship safer planning</h1>")
+    expect(persisted).toContain('data-stage="01"')
+    expect(persisted).toContain('data-acceptance="01.1"')
+    expect(document.projection.title).toBe("PRD: Ship safer planning")
+    expect(document.projection.stages[0]?.id).toBe("01")
+    expect(document.projection.stages[0]?.acceptance[0]?.id).toBe("01.1")
     expect(planFileName("ignored")).toBe("current-plan")
   })
 
@@ -126,7 +123,12 @@ describe("PlanStore canonical document", () => {
     expect(first.revision).toBe(1)
     expect(second.revision).toBe(2)
     expect(second.updatedBy).toBe("user")
+    // Assert the parsed projection round-trips (not raw-string identity — the
+    // store persists sanitized html): the reopened document is the last write.
     expect(read).toStrictEqual(second)
+    expect(read?.projection.stages[0]?.acceptance[0]?.text).toBe(
+      "The source survives every restart."
+    )
   })
 
   it("returns the latest document on a stale compare-and-swap without overwriting", async () => {
@@ -161,7 +163,7 @@ describe("PlanStore canonical document", () => {
     expect(result.current).toStrictEqual(result.second)
   })
 
-  it("rejects invalid MDX before writing a new revision", async () => {
+  it("rejects invalid plan HTML before writing a new revision", async () => {
     const result = await run(
       Effect.gen(function* () {
         const first = yield* promote()
@@ -169,7 +171,8 @@ describe("PlanStore canonical document", () => {
           PlanStore.updateDocument(WT, {
             planId: first.id,
             baseRevision: first.revision,
-            source: "# PRD: unsafe\n\n<Widget value={run()} />",
+            // No <h1> title and no <section data-stage> — fails validation.
+            source: "<p>no title, no stage</p>",
             author: "user"
           })
         )
@@ -211,8 +214,11 @@ describe("PlanStore canonical document", () => {
     expect(document.projection.annotations[0]?.body).toBe(
       "Keep {local} text and <Unknown /> inert."
     )
-    expect(document.source.indexOf("<Annotation")).toBeLessThan(
-      document.source.indexOf("</Stage>")
+    // The annotation is appended inside its stage's <section>, and the special
+    // characters survive as escaped html (never executed).
+    expect(document.source).toContain('data-status="passed"')
+    expect(document.source.indexOf("data-annotation")).toBeLessThan(
+      document.source.indexOf("</section>")
     )
   })
 
@@ -320,7 +326,7 @@ describe("PlanStore canonical document", () => {
     expect(first?.source).toContain("Legacy prose with implementation detail.")
     expect(first?.projection.annotations[0]?.body).toBe("Preserve this operator note.")
     expect(second).toStrictEqual(first)
-    expect(existsSync(join(dir, "current-plan.mdx"))).toBe(true)
+    expect(existsSync(join(dir, "current-plan.html"))).toBe(true)
   })
 
   it("imports legacy arrows and line-leading module prose without failing the read", async () => {
@@ -355,7 +361,7 @@ describe("PlanStore canonical document", () => {
       revision: 3
     })
     expect(imported?.projection.stages[0]?.title).toBe("Rename a -> b")
-    expect(existsSync(join(dir, "current-plan.mdx"))).toBe(true)
+    expect(existsSync(join(dir, "current-plan.html"))).toBe(true)
   })
 
   it("returns a typed persistence error instead of dying when the target is unwritable", async () => {
