@@ -643,7 +643,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
        * on every external write. Replaces the renderer's fixed-interval poll.
        *
        * Modelled on `ThemeService.watch` — watch the DIRECTORY (so the first
-       * write, which creates `current-plan.mdx`, is seen without a restart),
+       * write, which creates `current-plan.html`, is seen without a restart),
        * debounce editors' multi-save bursts, re-read through the same lock as
        * `readDocument`, and end silently if the OS watcher dies rather than take
        * the app down with it. `null` reads (plan deleted / mid-write garbage)

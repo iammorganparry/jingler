@@ -65,7 +65,7 @@ export type PlanHtmlResult =
 
 const ALLOWED_TAGS = new Set([
   "h1", "h2", "h3", "h4", "h5", "h6", "p", "br", "hr",
-  "strong", "em", "b", "i", "u", "s", "code", "pre", "kbd",
+  "strong", "em", "b", "i", "u", "s", "code", "pre", "kbd", "mark",
   "blockquote", "ul", "ol", "li",
   "a", "table", "thead", "tbody", "tr", "td", "th",
   "section", "aside", "div", "span"
@@ -81,6 +81,8 @@ const ALLOWED_ATTRS = new Set([
   "data-stage", "data-title", "data-acceptance", "data-status", "data-evidence",
   "data-annotation", "data-author", "data-created-at",
   "data-quote", "data-prefix", "data-suffix", "data-diagram",
+  // Per-stage file linkage: <ul data-files><li data-change data-added data-removed>path</li></ul>.
+  "data-files", "data-change", "data-added", "data-removed",
   "colspan", "rowspan"
 ])
 

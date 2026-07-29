@@ -1,5 +1,5 @@
 import type { Plan } from "@jingler/core"
-import { parsePlanHtml } from "@jingler/core"
+import { parsePlanHtml, planDocumentToPlan } from "@jingler/core"
 
 export {
   DEFAULT_PLAN_TEMPLATE_HTML,
@@ -17,6 +17,11 @@ const text = (value: string): string =>
 
 const statusAttr = (s: "ok" | "warn" | "open" | "under-review"): string =>
   s === "ok" ? "passed" : s === "warn" ? "failed" : s === "under-review" ? "waived" : "pending"
+
+const CANONICAL_ANNOTATION_TAG = /<aside\b[^>]*>/g
+const ANNOTATION_ID_ATTR = /\bdata-annotation=(["'])([^"']+)\1/
+const ANNOTATION_STATUS_ATTR = /\bdata-status=(["'])[^"']*\1/
+const TAG_END = />$/
 
 /** Convert the former structured `Plan` projection into canonical plan HTML. */
 export const legacyPlanToHtml = (plan: Plan): string => {
@@ -49,7 +54,17 @@ export const legacyPlanToHtml = (plan: Plan): string => {
         step.approach.length === 0
           ? ""
           : `<h3>Approach</h3><ol>${step.approach.map((a) => `<li>${text(a)}</li>`).join("")}</ol>`
-      return `<section data-stage="${attr(step.id)}" data-title="${attr(step.title)}"><h3>Intent</h3><p>${text(step.intent)}</p>${approach}${acceptance}</section>`
+      const stepFiles = "files" in step ? step.files : []
+      const files =
+        stepFiles.length === 0
+          ? ""
+          : `<ul data-files>${stepFiles
+              .map(
+                (f) =>
+                  `<li data-change="${attr(f.change)}" data-added="${f.added}" data-removed="${f.removed}">${text(f.path)}</li>`
+              )
+              .join("")}</ul>`
+      return `<section data-stage="${attr(step.id)}" data-title="${attr(step.title)}"><h3>Intent</h3><p>${text(step.intent)}</p>${approach}${files}${acceptance}</section>`
     })
     .join("\n")
   const annotations = plan.comments
@@ -77,44 +92,34 @@ ${annotations}
 export const planFromHtml = (source: string, id: string): Plan | null => {
   const result = parsePlanHtml(source)
   if (!result.valid) return null
-  return {
+  return planDocumentToPlan({
     id,
-    summary: result.projection.title.replace(/^PRD:\s*/i, ""),
-    structured: true,
-    graph: null,
-    steps: result.projection.stages.map((stage, index) => ({
-      id: stage.id,
-      number: stage.id || String(index + 1).padStart(2, "0"),
-      title: stage.title,
-      intent: stage.intent,
-      approach: [],
-      kind: "step",
-      condition: null,
-      parentId: null,
-      dependsOn: [],
-      blocks: [],
-      files: [],
-      guards: stage.acceptance.map((criterion) => ({
-        text: criterion.text,
-        status:
-          criterion.status === "passed" ? "ok" : criterion.status === "failed" ? "warn" : "open"
-      })),
-      code: null,
-      graph: null,
-      diff: null,
-      status: "proposed",
-      flagged: false,
-      changed: false
-    })),
-    comments: result.projection.annotations.map((annotation) => ({
-      id: annotation.id,
-      stepId: annotation.stageId ?? "",
-      body: annotation.body,
-      author: annotation.author,
-      createdAt: annotation.createdAt,
-      routed: annotation.status === "resolved"
-    })),
+    sessionId: "",
+    producingChatId: "",
+    revision: 1,
     status: "proposed",
-    raw: source
-  }
+    source: result.html,
+    projection: result.projection,
+    updatedAt: new Date(0).toISOString(),
+    updatedBy: "agent"
+  })
 }
+
+/**
+ * Mark only the routed canonical annotations resolved. Attribute order is not
+ * significant in HTML, so inspect each `<aside>` tag rather than matching one
+ * serializer's exact layout.
+ */
+export const resolvePlanAnnotations = (
+  source: string,
+  annotationIds: ReadonlySet<string>
+): string =>
+  source.replace(CANONICAL_ANNOTATION_TAG, (tag) => {
+    const idMatch = ANNOTATION_ID_ATTR.exec(tag)
+    const id = idMatch?.[2]
+    if (id === undefined || !annotationIds.has(id)) return tag
+    if (ANNOTATION_STATUS_ATTR.test(tag)) {
+      return tag.replace(ANNOTATION_STATUS_ATTR, 'data-status="resolved"')
+    }
+    return tag.replace(TAG_END, ' data-status="resolved">')
+  })

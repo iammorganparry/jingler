@@ -72,6 +72,7 @@ import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore } from "./plan-store.js"
+import { resolvePlanAnnotations } from "./plan-html.js"
 import type { RunHolder } from "./run-coordinator.js"
 import {
   anySessionRunActive,
@@ -482,6 +483,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             : planDocumentToPlan(canonical.document)
         if (plan === null) return
         const open = plan.comments.filter((c) => !c.routed && c.author === "user")
+        const routedIds = new Set(open.map((comment) => comment.id))
+        const routedSource =
+          canonical === null
+            ? null
+            : resolvePlanAnnotations(canonical.document.source, routedIds)
         const feedback =
           canonical === null
             ? revisionText(plan, open)
@@ -491,25 +497,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 "Return a complete replacement four-backtick fenced ````html plan document.",
                 "",
                 "````html plan",
-                canonical.document.source.trim(),
+                routedSource?.trim() ?? canonical.document.source.trim(),
                 "````"
               ].join("\n")
-        if (canonical !== null) {
-          const routedIds = new Set(open.map((comment) => comment.id))
-          const source = canonical.document.source.replace(
-            /<Annotation\b([^>]*)>/g,
-            (tag, attributes: string) => {
-              const id = /\bid="([^"]+)"/.exec(attributes)?.[1]
-              if (id === undefined || !routedIds.has(id)) return tag
-              return /\bstatus="[^"]*"/.test(tag)
-                ? tag.replace(/\bstatus="[^"]*"/, 'status="resolved"')
-                : tag.replace(/>$/, ' status="resolved">')
-            }
-          )
+        if (canonical !== null && routedSource !== null) {
           yield* PlanStore.updateDocument(canonical.worktreePath, {
             planId,
             baseRevision: canonical.document.revision,
-            source,
+            source: routedSource,
             author: "user",
             status: "revising"
           }).pipe(Effect.ignore)
@@ -1165,9 +1160,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 // accumulator alone (it holds a different, later message).
                 yield* TranscriptStore.patchById(chatId, located.messageId, patch).pipe(Effect.ignore)
               }
-              // The transcript is a projection. Canonical MDX writes happen
+              // The transcript is a projection. Canonical HTML writes happen
               // through revision-aware PlanStore operations at the intent that
-              // caused them; deriving MDX back from this legacy card would lose
+              // caused them; deriving HTML back from this legacy card would lose
               // operator-authored PRD sections.
               yield* out.offer({ _tag: "PlanUpdated", plan: nextPlan })
             }).pipe(Effect.provide(env), Effect.asVoid)
