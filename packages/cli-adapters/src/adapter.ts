@@ -793,6 +793,36 @@ export const scriptedRun =
         return
       }
 
+      // Models the older/partial Codex file-change shape that reports a
+      // successful Edit without diff metadata. The Electron regression creates
+      // this file after the initial workspace listing, then proves the ToolEnd
+      // refresh makes the absolute path in the response open the Preview dock.
+      if (spec.prompt.includes("[[codex-open-created-file]]")) {
+        const relativePath = "reports/codex-created.md"
+        const absolutePath = `${spec.cwd}/${relativePath}`
+        yield* emit({
+          _tag: "ToolStart",
+          id: "codex-open-created-1",
+          name: "Edit",
+          target: absolutePath
+        })
+        yield* pause
+        yield* emit({
+          _tag: "ToolEnd",
+          id: "codex-open-created-1",
+          status: "success",
+          meta: null,
+          diff: null,
+          preview: null
+        })
+        yield* emit({
+          _tag: "Assistant",
+          text: `Created [codex-created.md](${absolutePath}).`
+        })
+        yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        return
+      }
+
       yield* emit({ _tag: "Thinking", text: "No limiter middleware exists yet. ", seconds: null, done: false })
       yield* pause
       yield* emit({

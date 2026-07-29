@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
@@ -41,4 +43,34 @@ test("shows Codex update and create diffs inline", async ({ launchApp }) => {
   await expect(window.getByText("src/created.ts")).toBeVisible()
   await expect(window.getByText("export const created = true", { exact: true })).toBeVisible()
   await expect(window.getByText("+1 −0", { exact: true })).toBeVisible()
+})
+
+test("opens a path Codex created after the initial workspace listing", async ({ launchApp }) => {
+  const { window, repoPath } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: seededSessions
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  // Create this only after the conversation loaded its initial file list. The
+  // null-diff Edit below is therefore the only signal that can make it openable.
+  mkdirSync(join(repoPath, "reports"), { recursive: true })
+  writeFileSync(
+    join(repoPath, "reports", "codex-created.md"),
+    "# Codex-created report\n\nOpened inside Jingler.\n"
+  )
+
+  const composer = window.getByPlaceholder("Message Codex…")
+  await composer.fill("[[codex-open-created-file]] Create the report.")
+  await composer.press("Enter")
+
+  const absolutePath = join(repoPath, "reports", "codex-created.md")
+  const link = window.getByTitle(`Open ${absolutePath}`, { exact: true })
+  await expect(link).toBeVisible({ timeout: 20_000 })
+  await link.click()
+  await expect(window.getByRole("button", { name: "Hide preview" })).toBeVisible()
+  await expect(window.getByRole("heading", { name: "Codex-created report" })).toBeVisible({
+    timeout: 20_000
+  })
 })

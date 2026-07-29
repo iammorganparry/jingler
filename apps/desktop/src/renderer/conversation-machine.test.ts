@@ -32,6 +32,8 @@ const h = vi.hoisted(() => ({
   resumeCalls: [] as Array<{ sessionId: string; planId: string; revision: number | undefined }>,
   diffValue: "diff-0",
   diffCalls: 0,
+  filesValue: [] as ReadonlyArray<string>,
+  filesCalls: 0,
   statusWrites: [] as Array<string>,
   skillsListCalls: 0,
   stopCalls: [] as Array<string>,
@@ -73,7 +75,10 @@ vi.mock("./rpc-client.js", () => ({
       await h.skillsGate
       return [{ name: "/deploy", description: "Ship it", source: "skill" }]
     },
-    workspaceFiles: async () => [],
+    workspaceFiles: async () => {
+      h.filesCalls += 1
+      return h.filesValue
+    },
     modelsCatalog: async () => {
       await h.catalogGate
       return h.catalog
@@ -190,6 +195,8 @@ beforeEach(() => {
   h.agentRunCalls.length = 0
   h.diffValue = "diff-0"
   h.diffCalls = 0
+  h.filesValue = []
+  h.filesCalls = 0
   h.statusWrites.length = 0
   h.skillsListCalls = 0
   h.stopCalls.length = 0
@@ -776,6 +783,39 @@ describe("conversationMachine — realtime Changes rail", () => {
 
     // A Read reports no diff → no live refresh fires.
     expect(h.diffCalls).toBe(before)
+    actor.stop()
+  })
+
+  it("refreshes openable files after a Codex edit with no diff", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "create a report" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    const before = h.filesCalls
+    h.filesValue = ["reports/codex-created.md"]
+    emit({
+      _tag: "ToolStart",
+      id: "codex-edit-1",
+      name: "Edit",
+      target: "/worktree/reports/codex-created.md"
+    })
+    emit({
+      _tag: "ToolEnd",
+      id: "codex-edit-1",
+      status: "success",
+      meta: null,
+      diff: null,
+      preview: null
+    })
+
+    await waitFor(
+      actor,
+      (s) => s.context.files.includes("reports/codex-created.md"),
+      { timeout: 3000 }
+    )
+    expect(h.filesCalls).toBeGreaterThan(before)
+    expect(actor.getSnapshot().matches("running")).toBe(true)
     actor.stop()
   })
 })
