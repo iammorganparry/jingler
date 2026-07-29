@@ -191,16 +191,54 @@ describe("codexEventToStreamEvents", () => {
   })
 
   it("maps a file_change completion to an Edit tool card with a file count", () => {
+    const diff = [
+      "diff --git a/src/a.ts b/src/a.ts",
+      "--- a/src/a.ts",
+      "+++ b/src/a.ts",
+      "@@ -1 +1 @@",
+      "-export const oldName = true",
+      "+export const newName = true"
+    ].join("\n")
     const end = codexEventToStreamEvents(
       ev({
         type: "item.completed",
-        item: { id: "f1", type: "file_change", changes: [{ path: "src/a.ts", kind: "update" }, { path: "src/b.ts", kind: "add" }], status: "completed" }
+        item: {
+          id: "f1",
+          type: "file_change",
+          changes: [
+            { path: "src/a.ts", kind: "update", diff },
+            {
+              path: "src/b.ts",
+              kind: "add",
+              diff: [
+                "diff --git a/src/b.ts b/src/b.ts",
+                "--- /dev/null",
+                "+++ b/src/b.ts",
+                "@@ -0,0 +1 @@",
+                "+export const created = true"
+              ].join("\n")
+            }
+          ],
+          status: "completed"
+        }
       }),
       "s1"
     )
     expect(end).toStrictEqual([
       { _tag: "ToolStart", id: "f1", name: "Edit", target: "src/a.ts" },
-      { _tag: "ToolEnd", id: "f1", status: "success", meta: "2 files", diff: null, preview: null }
+      {
+        _tag: "ToolEnd",
+        id: "f1",
+        status: "success",
+        meta: "2 files",
+        diff: { added: 2, removed: 1 },
+        preview: [
+          "-export const oldName = true",
+          "+export const newName = true",
+          " ",
+          "+export const created = true"
+        ].join("\n")
+      }
     ])
   })
 

@@ -10,6 +10,7 @@ import type {
 import { Effect, Runtime } from "effect"
 import type { AgentContext, SessionSpec } from "./adapter.js"
 import { capOutput } from "./output-cap.js"
+import { codexFileChangeStats } from "./codex-file-change.js"
 import { hasPlanBlock, parsePlan, PLAN_HTML_REFORMAT } from "./plan-parse.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
 import { requireWorktree } from "./cwd.js"
@@ -334,7 +335,8 @@ export const codexEventToStreamEvents = (
             }
           ]
         }
-        case "file_change":
+        case "file_change": {
+          const stats = codexFileChangeStats(it.changes)
           return [
             ...ensureToolStart(it, startedTools),
             {
@@ -342,10 +344,11 @@ export const codexEventToStreamEvents = (
               id: it.id,
               status: it.status === "failed" ? "error" : "success",
               meta: `${it.changes.length} file${it.changes.length === 1 ? "" : "s"}`,
-              diff: null,
-              preview: null
+              diff: stats.diff,
+              preview: stats.preview
             }
           ]
+        }
         case "web_search":
           return [
             ...ensureToolStart(it, startedTools),

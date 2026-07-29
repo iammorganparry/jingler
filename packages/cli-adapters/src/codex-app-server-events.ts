@@ -2,6 +2,7 @@ import type { StreamEvent } from "@jingler/core"
 import { capOutput } from "./output-cap.js"
 import type { JsonRpcMessage } from "./codex-app-server-client.js"
 import { codexContextUsageFromMessage } from "./codex-app-server.js"
+import { codexFileChangeStats } from "./codex-file-change.js"
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -131,6 +132,7 @@ const completedItemEvents = (
   if (type === "fileChange") {
     const changes = arrayAt(item, "changes")
     const status = stringAt(item, "status")
+    const stats = codexFileChangeStats(changes)
     return [
       ...starts,
       {
@@ -138,8 +140,8 @@ const completedItemEvents = (
         id,
         status: status === "failed" || status === "declined" ? "error" : "success",
         meta: `${changes.length} file${changes.length === 1 ? "" : "s"}`,
-        diff: null,
-        preview: null
+        diff: stats.diff,
+        preview: stats.preview
       }
     ]
   }

@@ -762,6 +762,37 @@ export const scriptedRun =
         yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
         return
       }
+
+      // A `[[codex-edit-preview]]` marker gives the Electron suite a deterministic
+      // Codex-labelled update + create pair. The scripted adapter stands in for
+      // the harness there; the adapter unit tests separately prove that real
+      // Codex fileChange payloads produce this same normalized contract.
+      if (spec.prompt.includes("[[codex-edit-preview]]")) {
+        yield* emit({ _tag: "ToolStart", id: "codex-edit-1", name: "Edit", target: "src/config.ts" })
+        yield* pause
+        yield* emit({
+          _tag: "ToolEnd",
+          id: "codex-edit-1",
+          status: "success",
+          meta: null,
+          diff: { added: 1, removed: 1 },
+          preview: "-export const mode = 'legacy'\n+export const mode = 'modern'"
+        })
+        yield* pause
+        yield* emit({ _tag: "ToolStart", id: "codex-create-1", name: "Edit", target: "src/created.ts" })
+        yield* pause
+        yield* emit({
+          _tag: "ToolEnd",
+          id: "codex-create-1",
+          status: "success",
+          meta: null,
+          diff: { added: 1, removed: 0 },
+          preview: "+export const created = true"
+        })
+        yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        return
+      }
+
       yield* emit({ _tag: "Thinking", text: "No limiter middleware exists yet. ", seconds: null, done: false })
       yield* pause
       yield* emit({
