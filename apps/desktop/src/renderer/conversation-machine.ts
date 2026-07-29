@@ -59,6 +59,45 @@ import { publishSessionUpdate } from "./session-updates.js"
 const isExecutionMode = (mode: PermissionMode): mode is ExecutionMode =>
   mode !== "plan"
 
+/**
+ * Tools that can change which worktree paths exist even when their provider
+ * cannot calculate a diff. Codex file-change events have historically emitted
+ * a successful `Edit` with `diff: null`, so the diff alone is not a reliable
+ * mutation signal.
+ */
+const FILE_MUTATION_TOOLS: ReadonlySet<string> = new Set([
+  "Write",
+  "Edit",
+  "Update",
+  "MultiEdit",
+  "NotebookEdit"
+])
+
+const toolNameInMessage = (message: Message, id: string): string | null => {
+  for (let i = message.parts.length - 1; i >= 0; i--) {
+    const part = message.parts[i]!
+    if (part._tag === "Tool" && part.tool.id === id) return part.tool.name
+  }
+  return null
+}
+
+/** Resolve a ToolEnd back to its ToolStart, including sub-agent transcripts. */
+const toolNameFor = (
+  context: ConversationContext,
+  id: string,
+  agentId?: string
+): string | null => {
+  if (agentId !== undefined) {
+    const agent = context.subagents.find((candidate) => candidate.id === agentId)
+    return agent ? toolNameInMessage(agent.message, id) : null
+  }
+  for (let i = context.messages.length - 1; i >= 0; i--) {
+    const name = toolNameInMessage(context.messages[i]!, id)
+    if (name !== null) return name
+  }
+  return null
+}
+
 export interface ConversationContext {
   readonly session: Session
   readonly chatId: string
@@ -820,14 +859,19 @@ export const conversationMachine = setup({
       if (!agent || agent.status === "working") return {}
       return { subagents: retractSubagent(context.subagents, event.agentId) }
     }),
-    // Realtime Changes rail: when a tool that touched files lands mid-run, re-read
-    // the worktree diff right away (fire-and-forget) so the rail reflects edits as
-    // they happen, not only after the whole turn settles. `ToolEnd.diff` is the
-    // harness's own signal that this tool changed files.
+    // Realtime Changes rail + asset links: when a tool that touched files lands
+    // mid-run, re-read the worktree right away (fire-and-forget) so both surfaces
+    // reflect edits as they happen, not only after the conversation reloads.
+    //
+    // Prefer `ToolEnd.diff`, but do not require it: Codex has emitted successful
+    // `Edit` events with `diff: null`. Resolve those back to their ToolStart name
+    // so a newly created path mentioned in the response becomes openable.
     liveRefreshDiff: ({ context, event, self }) => {
       if (event.type !== "STREAM_EVENT") return
       const e = event.event
-      if (e._tag !== "ToolEnd" || e.status !== "success" || e.diff === null) return
+      if (e._tag !== "ToolEnd" || e.status !== "success") return
+      const toolName = toolNameFor(context, e.id, e.agentId)
+      if (e.diff === null && (toolName === null || !FILE_MUTATION_TOOLS.has(toolName))) return
       void rpc
         .sessionsDiff(context.session.id)
         .then((patch) => self.send({ type: "PATCH_UPDATED", patch }))
