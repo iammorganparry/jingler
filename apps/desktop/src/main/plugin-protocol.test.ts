@@ -29,7 +29,8 @@ const load = async () => await import("./plugin-protocol.js")
  * import in the file transforms — and that took ~1.4s locally, which under a
  * fully loaded parallel run tipped the first test past the 5s default and made
  * this file fail intermittently in CI while passing every time in isolation.
- * Warming here moves the cost to a hook, where no timeout applies.
+ * Warming here moves the cost to a hook with enough headroom for a saturated
+ * full-suite run.
  *
  * The temp home is not set up yet, so this import is discarded; it exists purely
  * for its side effect on the transform cache.
@@ -39,7 +40,7 @@ beforeAll(async () => {
   process.env.JINGLER_HOME = home
   await load()
   await rm(home, { recursive: true, force: true })
-})
+}, 30_000)
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "jingler-plugin-protocol-"))
