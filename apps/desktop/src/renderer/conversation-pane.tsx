@@ -398,7 +398,7 @@ export function ConversationPane({
             "I've drafted the plan below. Treat it as the starting point:",
             "review it, fill in the gaps, and propose a complete plan.",
             "",
-            "````mdx plan",
+            "````html plan",
             source.trim(),
             "````"
           ].join("\n")
@@ -409,8 +409,6 @@ export function ConversationPane({
       onRetryDocument={canonicalPlan.retry}
       onKeepLocal={canonicalPlan.keepLocal}
       onAcceptRemote={canonicalPlan.acceptRemote}
-      onCriterionChange={canonicalPlan.setCriterion}
-      onAnnotate={canonicalPlan.annotate}
     />
   )
 

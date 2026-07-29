@@ -1,12 +1,9 @@
-import { type PlanAcceptanceStatus, type PlanDocument, updatePlanSectionSource } from "@jingler/core"
+import type { PlanDocument } from "@jingler/core"
 import { AlertTriangle, Check, Cloud, RefreshCw, Save, WifiOff } from "lucide-react"
-import { useState } from "react"
 import { Button } from "../components/button.js"
-import { SegmentedControl } from "../components/segmented-control.js"
 import { cn } from "../lib/cn.js"
-import { PlanMdx } from "../components/plan-mdx.js"
+import { PlanDocEditor } from "./plan-doc/plan-doc-editor.js"
 
-export type PlanEditorMode = "edit" | "rendered" | "source" | "split"
 export type PlanEditorSyncState =
   | "loading"
   | "clean"
@@ -27,98 +24,49 @@ const SYNC: Record<
   error: { label: "Save failed", className: "text-red", icon: WifiOff }
 }
 
+/**
+ * The plan workspace body: one Notion-style Tiptap document. The whole plan —
+ * prose, stages, acceptance criteria, annotations, flow diagrams — is edited in
+ * place; edits serialize to sanitized HTML and flow out through `onEdit`, which
+ * the sync machine debounces and compare-and-swaps. A remote revision arriving
+ * mid-edit surfaces the conflict banner (local editable vs remote read-only).
+ */
 export function PlanEditor({
-  document,
+  document: _document,
   draft,
   remote,
   state,
   error,
-  compact = false,
   onEdit,
   onSave,
   onRetry,
   onKeepLocal,
-  onAcceptRemote,
-  onCriterionChange,
-  onAnnotate
+  onAcceptRemote
 }: {
   document: PlanDocument
   draft: string
   remote?: PlanDocument | null
   state: PlanEditorSyncState
   error?: string | null
-  compact?: boolean
   onEdit?: (source: string) => void
   onSave?: () => void
   onRetry?: () => void
   onKeepLocal?: () => void
   onAcceptRemote?: () => void
-  onCriterionChange?: (
-    criterionId: string,
-    status: PlanAcceptanceStatus,
-    evidence: string | null
-  ) => void
-  onAnnotate?: (stageId: string | null, body: string) => void
 }) {
-  const [mode, setMode] = useState<PlanEditorMode>(compact ? "rendered" : "split")
   const sync = SYNC[state]
   const SyncIcon = sync.icon
-  // Inline (WYSIWYG) section edit: the editor emits fresh markdown for one
-  // section, which we splice back into the authoritative draft source. If the
-  // section can't be located the draft is left untouched (defensive).
-  const editSection = (sectionTitle: string, markdown: string): void => {
-    const next = updatePlanSectionSource(draft, sectionTitle, markdown)
-    if (next !== null && next !== draft) onEdit?.(next)
-  }
-  const source = (
-    <textarea
-      aria-label="Plan MDX source"
-      value={draft}
-      onChange={(event) => onEdit?.(event.target.value)}
-      spellCheck={false}
-      className="h-full min-h-[360px] w-full resize-none bg-editor p-4 font-mono text-[11.5px] leading-[1.65] text-text-body outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-    />
-  )
-  const rendered = (
-    <div className="h-full overflow-auto bg-editor">
-      <PlanMdx
-        document={document}
-        disabled={state === "conflict"}
-        onCriterionChange={onCriterionChange}
-        onAnnotate={onAnnotate}
-      />
-    </div>
-  )
-  const edit = (
-    <div className="h-full overflow-auto bg-editor">
-      <PlanMdx
-        document={document}
-        editable
-        disabled={state === "conflict"}
-        onCriterionChange={onCriterionChange}
-        onAnnotate={onAnnotate}
-        onEditSection={editSection}
-      />
-    </div>
-  )
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex flex-none flex-wrap items-center gap-2 border-b border-hairline bg-panel px-3 py-2">
-        <SegmentedControl
-          value={mode}
-          onChange={setMode}
-          items={[
-            { value: "edit", label: "Edit" },
-            { value: "rendered", label: "Rendered" },
-            { value: "source", label: "Source" },
-            { value: "split", label: "Split", disabled: compact }
-          ]}
-        />
         <span
           role="status"
           aria-live="polite"
-          className={cn("ml-auto flex items-center gap-1.5 text-[10.5px] font-medium", sync.className)}
+          className={cn(
+            "ml-auto flex items-center gap-1.5 text-[10.5px] font-medium",
+            sync.className
+          )}
         >
           <SyncIcon className={cn("size-3.5", state === "saving" && "animate-spin")} />
           {sync.label}
@@ -146,19 +94,17 @@ export function PlanEditor({
             <Button size="sm" onClick={onKeepLocal}>Keep local and save</Button>
           </div>
           <div className="grid min-h-0 flex-1 divide-x divide-line lg:grid-cols-2">
-            <section className="flex min-h-0 flex-col">
-              <p className="border-b border-line px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-yellow">
+            <section className="flex min-h-0 flex-col overflow-auto">
+              <p className="sticky top-0 z-10 border-b border-line bg-panel px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-yellow">
                 Local draft
               </p>
-              {source}
+              <PlanDocEditor value={draft} onChange={onEdit} />
             </section>
-            <section className="flex min-h-0 flex-col">
-              <p className="border-b border-line px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-blue">
+            <section className="flex min-h-0 flex-col overflow-auto">
+              <p className="sticky top-0 z-10 border-b border-line bg-panel px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-blue">
                 Remote revision {remote.revision}
               </p>
-              <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap bg-sunken p-4 font-mono text-[11.5px] leading-[1.65] text-text-body">
-                {remote.source}
-              </pre>
+              <PlanDocEditor value={remote.source} editable={false} />
             </section>
           </div>
         </div>
@@ -169,16 +115,8 @@ export function PlanEditor({
               {error}
             </div>
           )}
-          <div className="min-h-0 flex-1">
-            {mode === "edit" && edit}
-            {mode === "rendered" && rendered}
-            {mode === "source" && source}
-            {mode === "split" && (
-              <div className="grid h-full min-h-0 divide-x divide-line xl:grid-cols-2">
-                <div className="min-h-0 overflow-hidden">{source}</div>
-                <div className="min-h-0 overflow-hidden">{rendered}</div>
-              </div>
-            )}
+          <div className="min-h-0 flex-1 overflow-auto bg-editor">
+            <PlanDocEditor value={draft} onChange={onEdit} />
           </div>
         </>
       )}

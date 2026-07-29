@@ -60,9 +60,7 @@ export function PlanReview({
   onSaveDocument,
   onRetryDocument,
   onKeepLocal,
-  onAcceptRemote,
-  onCriterionChange,
-  onAnnotate
+  onAcceptRemote
 }: {
   plan: Plan | null
   /** Canonical MDX plan. When present it replaces the legacy step inspector. */
@@ -98,12 +96,6 @@ export function PlanReview({
   onRetryDocument?: () => void
   onKeepLocal?: () => void
   onAcceptRemote?: () => void
-  onCriterionChange?: (
-    criterionId: string,
-    status: PlanAcceptanceStatus,
-    evidence: string | null
-  ) => void
-  onAnnotate?: (stageId: string | null, body: string) => void
 }) {
   // Uncontrolled by default (Storybook, and the plain Plan tab); `selectedStepId`
   // layers a deep link on top without forcing every caller to own the selection.
@@ -191,14 +183,11 @@ export function PlanReview({
           remote={remote}
           state={syncState}
           error={syncError}
-          compact={compact}
           onEdit={onEditDocument}
           onSave={onSaveDocument}
           onRetry={onRetryDocument}
           onKeepLocal={onKeepLocal}
           onAcceptRemote={onAcceptRemote}
-          onCriterionChange={onCriterionChange}
-          onAnnotate={onAnnotate}
         />
       </div>
     )

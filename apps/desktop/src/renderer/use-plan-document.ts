@@ -1,9 +1,4 @@
-import {
-  appendPlanAnnotationSource,
-  type PlanAcceptanceStatus,
-  type PlanDocument,
-  updatePlanCriterionSource
-} from "@jingler/core"
+import type { PlanDocument } from "@jingler/core"
 import type { PlanEditorSyncState } from "@jingler/ui"
 import { useMachine } from "@xstate/react"
 import { useCallback } from "react"
@@ -103,32 +98,9 @@ export function usePlanDocument(sessionId: string) {
   const retry = useCallback(() => send({ type: "RETRY" }), [send])
   const keepLocal = useCallback(() => send({ type: "KEEP_LOCAL" }), [send])
   const acceptRemote = useCallback(() => send({ type: "ACCEPT_REMOTE" }), [send])
-  const setCriterion = useCallback(
-    (criterionId: string, status: PlanAcceptanceStatus, evidence: string | null = null) => {
-      const source = updatePlanCriterionSource(
-        snapshot.context.draft,
-        criterionId,
-        status,
-        evidence
-      )
-      if (source !== null) send({ type: "EDIT", source })
-    },
-    [send, snapshot.context.draft]
-  )
-  const annotate = useCallback(
-    (stageId: string | null, body: string) =>
-      send({
-        type: "EDIT",
-        source: appendPlanAnnotationSource(snapshot.context.draft, {
-          id: `annotation-${crypto.randomUUID()}`,
-          stageId,
-          body,
-          author: "user",
-          createdAt: new Date().toISOString()
-        })
-      }),
-    [send, snapshot.context.draft]
-  )
+  // Acceptance status + annotations are now edited in-document via the Tiptap
+  // node views (they serialize to HTML through `edit`), so there is no separate
+  // criterion/annotate helper here anymore.
   const state: PlanEditorSyncState =
     snapshot.matches("loading")
       ? "loading"
@@ -153,8 +125,6 @@ export function usePlanDocument(sessionId: string) {
     retry,
     keepLocal,
     acceptRemote,
-    setCriterion,
-    annotate,
     startDraft,
     synced: snapshot.matches("clean"),
     canApprove: snapshot.matches("clean") && snapshot.context.document !== null
