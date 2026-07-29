@@ -337,6 +337,34 @@ export class JinglerRpcs extends RpcGroup.make(
   }),
 
   /**
+   * A newest-anchored WINDOW of the transcript — the lazy-loading counterpart to
+   * `Sessions.transcript`, which returned the whole array.
+   *
+   * A session opens with only its tail, then pages older turns in when the
+   * operator asks ("Load earlier"). Holding a 46MB transcript whole as a parsed
+   * `Message[]` cost hundreds of MB of renderer heap PER live session, and the
+   * residency cap allows several — so a real install's footprint became a
+   * high-water mark of the largest transcripts ever opened.
+   *
+   * `before` is the id of the oldest message the renderer already holds; the
+   * reply is the `limit` messages immediately before it (omit `before` for the
+   * newest page). `hasMore` gates the affordance: false once the window reaches
+   * the start. Image `data` is stripped exactly as in `Sessions.transcript`.
+   */
+  Rpc.make("Sessions.transcriptPage", {
+    success: Schema.Struct({
+      messages: Schema.Array(Message),
+      hasMore: Schema.Boolean
+    }),
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      before: Schema.optional(Schema.String),
+      limit: Schema.Number
+    }
+  }),
+
+  /**
    * One image attachment's base64 bytes, by id — the other half of the
    * transcript's empty `data`.
    *

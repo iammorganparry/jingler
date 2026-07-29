@@ -1756,6 +1756,20 @@ const HandlersLayer = JinglerRpcs.toLayer({
       }
       return withoutAttachmentData(yield* TranscriptStore.list(chatId))
     }).pipe(Effect.orElseSucceed(() => [])),
+  // The windowed read the renderer opens sessions with — only the tail loads,
+  // older turns page in on demand. Same attachment-stripping as the whole read.
+  "Sessions.transcriptPage": ({ sessionId, chatId, before, limit }) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId)
+      if (!session.chats.some((chat) => chat.id === chatId)) {
+        return { messages: [], hasMore: false }
+      }
+      if (chatId === `c_${session.id}_1`) {
+        yield* TranscriptStore.adoptLegacy(sessionId, chatId)
+      }
+      const page = yield* TranscriptStore.listPage(chatId, { before, limit })
+      return { messages: withoutAttachmentData(page.messages), hasMore: page.hasMore }
+    }).pipe(Effect.orElseSucceed(() => ({ messages: [], hasMore: false }))),
   /**
    * The bytes `Sessions.transcript` left out, one attachment at a time.
    *

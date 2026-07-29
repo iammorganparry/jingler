@@ -182,6 +182,13 @@ export interface ConversationContext {
    * derived from it (see `persistSettledStatus`).
    */
   readonly loaded: boolean
+  /**
+   * Whether older turns remain on disk before `messages[0]` — the "Load earlier"
+   * affordance's gate. A session opens with only its tail (see `HISTORY_PAGE_SIZE`).
+   */
+  readonly hasMoreHistory: boolean
+  /** An older-page fetch is in flight; blocks a second and shows the spinner. */
+  readonly loadingHistory: boolean
   /** Review progress lives outside an individual harness turn. */
   readonly reviewer: Subagent | null
   /** Where the running review has got to — the PR button's label. */
@@ -254,12 +261,26 @@ type ConversationEvent =
   | { type: "STOP_SUBAGENT"; agentId: string }
   /** Drop a SETTLED sub-agent's tab. Local only — nothing to tell the harness. */
   | { type: "CLOSE_SUBAGENT"; agentId: string }
+  /** "Load earlier": page the next window of older turns onto the front. */
+  | { type: "LOAD_OLDER" }
+  /** One older page came back — prepend it, or clear the spinner on failure. */
+  | { type: "HISTORY_LOADED"; messages: ReadonlyArray<Message>; hasMore: boolean }
+
+/**
+ * How many messages a page holds — both the tail loaded on open and each older
+ * page fetched by "Load earlier". Big enough that most sessions open whole and
+ * the button never appears; small enough that a 46MB transcript no longer lands
+ * in the renderer as one parsed array (the memory this windowing exists to save).
+ */
+const HISTORY_PAGE_SIZE = 200
 
 interface LoadedData {
   readonly transcript: ReadonlyArray<Message>
   readonly files: ReadonlyArray<string>
   readonly patch: string
   readonly sharedPlanChatId: string | null
+  /** Whether older turns remain on disk before the loaded tail. */
+  readonly hasMore: boolean
 }
 
 /**
@@ -277,14 +298,17 @@ const loadConversation = fromPromise<
   LoadedData,
   { session: Session; chatId: string }
 >(async ({ input }) => {
-  const [rawTranscript, artifact, files, patch] = await Promise.all([
-    rpc.sessionsTranscript(input.session.id, input.chatId),
+  const [page, artifact, files, patch] = await Promise.all([
+    // Only the tail — older turns page in via LOAD_OLDER. A whole 46MB
+    // transcript held as one parsed array was the renderer's high-water mark.
+    rpc.sessionsTranscriptPage(input.session.id, input.chatId, undefined, HISTORY_PAGE_SIZE),
     rpc.planCurrent(input.session.id),
     input.session.worktreePath
       ? rpc.workspaceFiles(input.session.worktreePath)
       : Promise.resolve([] as ReadonlyArray<string>),
     rpc.sessionsDiff(input.session.id)
   ])
+  const rawTranscript = page.messages
   // A loaded transcript has no live run — settle any turn left mid-stream (the
   // app was closed mid-response) so it doesn't show the typing indicator forever,
   // and resolve orphaned approval gates / questions whose live run has died (their
@@ -348,7 +372,8 @@ const loadConversation = fromPromise<
     transcript,
     files,
     patch,
-    sharedPlanChatId: artifact?.producingChatId ?? null
+    sharedPlanChatId: artifact?.producingChatId ?? null,
+    hasMore: page.hasMore
   }
 })
 
@@ -537,7 +562,8 @@ export const conversationMachine = setup({
       if (!supportsSteer(context.cli)) return false
       return context.resumePlanId === null
     },
-
+    /** Older turns remain, and no page is already in flight. */
+    canLoadOlder: ({ context }) => context.hasMoreHistory && !context.loadingHistory,
   },
   actions: {
     appendTurns: assign(({ context, event }) => {
@@ -832,6 +858,36 @@ export const conversationMachine = setup({
       return e._tag === "Started" && e.model ? { messages, model: e.model } : { messages }
     }),
     clearSubagents: assign(() => ({ subagents: [] as ReadonlyArray<Subagent> })),
+    /**
+     * Kick off an older-page fetch (fire-and-forget → `HISTORY_LOADED`, the same
+     * shape as `loadCatalog`/`loadSkills`). `loadingHistory` blocks a second and
+     * drives the button's spinner. A failure keeps `hasMore` true so the button
+     * stays offered for a retry; only `applyHistory` clears the spinner.
+     */
+    loadOlderHistory: assign(({ context, self }) => {
+      const before = context.messages[0]?.id
+      if (before === undefined) return {}
+      void rpc
+        .sessionsTranscriptPage(context.session.id, context.chatId, before, HISTORY_PAGE_SIZE)
+        .then((page) =>
+          self.send({ type: "HISTORY_LOADED", messages: page.messages, hasMore: page.hasMore })
+        )
+        .catch(() => self.send({ type: "HISTORY_LOADED", messages: [], hasMore: true }))
+      return { loadingHistory: true }
+    }),
+    /**
+     * Prepend an older page. No overlap to dedupe — the store returns messages
+     * strictly before the cursor. `settleLoaded` because an older turn could have
+     * been left mid-stream by a past crash, exactly as on the initial load.
+     */
+    applyHistory: assign(({ context, event }) => {
+      if (event.type !== "HISTORY_LOADED") return {}
+      return {
+        messages: [...event.messages.map(settleLoaded), ...context.messages],
+        hasMoreHistory: event.hasMore,
+        loadingHistory: false
+      }
+    }),
     /**
      * Ask the harness to kill ONE sub-agent. Fire-and-forget, and with NO
      * optimistic status change: the pill stays `working` until the harness's own
@@ -1264,7 +1320,12 @@ export const conversationMachine = setup({
     // races nothing, since the harness answers it on the ordinary stream.
     STOP_SUBAGENT: { actions: "requestStopSubagent" },
     CLOSE_SUBAGENT: { actions: "closeSubagent" },
-    PLAN_APPROVAL_RESULT: { actions: "reconcilePlanApproval" }
+    PLAN_APPROVAL_RESULT: { actions: "reconcilePlanApproval" },
+    // Paging older history races nothing (it only prepends to `messages`), so it
+    // lives at the root and works in every state — including `running`, where the
+    // operator may scroll back while the agent works.
+    LOAD_OLDER: { guard: "canLoadOlder", actions: "loadOlderHistory" },
+    HISTORY_LOADED: { actions: "applyHistory" }
   },
   context: ({ input }) => {
     const persistedChats = input.session.chats ?? []
@@ -1321,6 +1382,8 @@ export const conversationMachine = setup({
       lastOutcome: null,
       persistedStatus: input.session.status,
       loaded: false,
+      hasMoreHistory: false,
+      loadingHistory: false,
       reviewer: null,
       reviewPhase: "starting",
       reviewStartedAt: null
@@ -1372,6 +1435,7 @@ export const conversationMachine = setup({
                 files: event.output.files,
                 patch: event.output.patch,
                 sharedPlanChatId: event.output.sharedPlanChatId,
+                hasMoreHistory: event.output.hasMore,
                 loaded: true
               })),
               "dequeueTurn"
@@ -1384,6 +1448,7 @@ export const conversationMachine = setup({
               files: event.output.files,
               patch: event.output.patch,
               sharedPlanChatId: event.output.sharedPlanChatId,
+              hasMoreHistory: event.output.hasMore,
               loaded: true
             }))
           }

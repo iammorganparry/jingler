@@ -218,4 +218,73 @@ describe("TranscriptStore", () => {
     )
     expect(messages).toStrictEqual([])
   })
+
+  describe("listPage — the renderer's windowed read", () => {
+    // Ten user turns, u0 (oldest) .. u9 (newest), so a window's contents pin
+    // exactly which slice came back.
+    const turns = Array.from({ length: 10 }, (_, i) =>
+      userMessage(`u${i}`, `turn ${i}`, `2026-07-11T10:00:0${i}.000Z`)
+    )
+    const seed = (chatId: string) =>
+      Effect.forEach(turns, (m) => TranscriptStore.append(chatId, m), { discard: true })
+
+    it("returns the newest window and flags older turns when omitting `before`", async () => {
+      const page = await run(
+        Effect.gen(function* () {
+          yield* seed("s1")
+          return yield* TranscriptStore.listPage("s1", { limit: 3 })
+        })
+      )
+      expect(page.messages.map((m) => m.id)).toStrictEqual(["u7", "u8", "u9"])
+      expect(page.hasMore).toBe(true)
+    })
+
+    it("returns the whole transcript with hasMore false when it fits in one window", async () => {
+      const page = await run(
+        Effect.gen(function* () {
+          yield* seed("s1")
+          return yield* TranscriptStore.listPage("s1", { limit: 50 })
+        })
+      )
+      expect(page.messages).toHaveLength(10)
+      expect(page.hasMore).toBe(false)
+    })
+
+    it("pages the window immediately before a cursor", async () => {
+      const page = await run(
+        Effect.gen(function* () {
+          yield* seed("s1")
+          // The renderer holds u7..u9 and asks for what's before u7.
+          return yield* TranscriptStore.listPage("s1", { before: "u7", limit: 3 })
+        })
+      )
+      expect(page.messages.map((m) => m.id)).toStrictEqual(["u4", "u5", "u6"])
+      expect(page.hasMore).toBe(true)
+    })
+
+    it("reaches the start and clears hasMore on the final page", async () => {
+      const page = await run(
+        Effect.gen(function* () {
+          yield* seed("s1")
+          return yield* TranscriptStore.listPage("s1", { before: "u2", limit: 5 })
+        })
+      )
+      expect(page.messages.map((m) => m.id)).toStrictEqual(["u0", "u1"])
+      expect(page.hasMore).toBe(false)
+    })
+
+    it("yields an empty window for a cursor that no longer exists", async () => {
+      // A transcript edited underneath the renderer: the anchor id is gone. Empty
+      // + hasMore:false is deliberate — silently restarting from the tail would
+      // duplicate the messages the renderer already holds.
+      const page = await run(
+        Effect.gen(function* () {
+          yield* seed("s1")
+          return yield* TranscriptStore.listPage("s1", { before: "nope", limit: 3 })
+        })
+      )
+      expect(page.messages).toStrictEqual([])
+      expect(page.hasMore).toBe(false)
+    })
+  })
 })

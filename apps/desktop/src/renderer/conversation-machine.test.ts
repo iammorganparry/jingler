@@ -54,6 +54,7 @@ const h = vi.hoisted(() => ({
   // Lets a test hold the transcript load, to drive the "typed before it lands" race.
   transcriptGate: Promise.resolve() as Promise<void>,
   transcript: [] as ReadonlyArray<Message>,
+  transcriptPageCalls: [] as Array<{ before: string | undefined; limit: number }>,
   currentPlan: null as PlanDocument | null,
   setHarnessCalls: [] as Array<{ sessionId: string; cli: string; model: string }>,
   reasoningCalls: [] as Array<unknown>,
@@ -68,6 +69,23 @@ vi.mock("./rpc-client.js", () => ({
     sessionsTranscript: async () => {
       await h.transcriptGate
       return h.transcript
+    },
+    sessionsTranscriptPage: async (
+      _sessionId: string,
+      _chatId: string,
+      before: string | undefined,
+      limit: number
+    ) => {
+      await h.transcriptGate
+      h.transcriptPageCalls.push({ before, limit })
+      // Mirror the real store's windowing so tests can drive "Load earlier":
+      // a window ends at `before` (exclusive) or the tail, and reports whether
+      // older turns remain.
+      const all = h.transcript
+      const end = before === undefined ? all.length : all.findIndex((m) => m.id === before)
+      if (end === -1) return { messages: [], hasMore: false }
+      const start = Math.max(0, end - limit)
+      return { messages: all.slice(start, end), hasMore: start > 0 }
     },
     planCurrent: async () => h.currentPlan,
     skillsList: async () => {
@@ -210,6 +228,7 @@ beforeEach(() => {
   h.skillsGate = Promise.resolve()
   h.transcriptGate = Promise.resolve()
   h.transcript = []
+  h.transcriptPageCalls.length = 0
   h.currentPlan = null
   h.reviewCb = null
   h.reasoningCalls.length = 0
@@ -271,6 +290,67 @@ describe("conversationMachine — context size", () => {
     await waitFor(actor, (s) => s.matches(idle))
 
     expect(actor.getSnapshot().context.tokens).toBe(42_000)
+    actor.stop()
+  })
+})
+
+describe("conversationMachine — lazy history", () => {
+  // HISTORY_PAGE_SIZE is 200; the mocked page RPC windows `h.transcript` the same
+  // way the real store does, so these drive the whole open → page-back flow.
+  const makeTurns = (n: number) =>
+    Array.from({ length: n }, (_, i) => userMessage(`u${i}`, `turn ${i}`, "2026-07-11T10:00:00.000Z"))
+
+  it("opens with only the newest window and flags older history", async () => {
+    h.transcript = makeTurns(500)
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+
+    const ctx = actor.getSnapshot().context
+    expect(ctx.messages).toHaveLength(200)
+    expect(ctx.messages[0]!.id).toBe("u300")
+    expect(ctx.hasMoreHistory).toBe(true)
+    actor.stop()
+  })
+
+  it("prepends an older page on LOAD_OLDER, cursored on the oldest held id", async () => {
+    h.transcript = makeTurns(500)
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+
+    actor.send({ type: "LOAD_OLDER" })
+    await waitFor(actor, (s) => s.context.messages.length > 200)
+
+    const ctx = actor.getSnapshot().context
+    expect(ctx.messages).toHaveLength(400)
+    expect(ctx.messages[0]!.id).toBe("u100")
+    expect(ctx.hasMoreHistory).toBe(true)
+    expect(h.transcriptPageCalls.at(-1)).toStrictEqual({ before: "u300", limit: 200 })
+    actor.stop()
+  })
+
+  it("clears hasMoreHistory once the start is reached", async () => {
+    h.transcript = makeTurns(300)
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+
+    actor.send({ type: "LOAD_OLDER" })
+    await waitFor(actor, (s) => s.context.messages.length === 300)
+    expect(actor.getSnapshot().context.hasMoreHistory).toBe(false)
+    actor.stop()
+  })
+
+  it("blocks a second page while one is already in flight", async () => {
+    h.transcript = makeTurns(500)
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    const before = h.transcriptPageCalls.length
+
+    // Two clicks in one tick — `canLoadOlder` blocks the second (loadingHistory).
+    actor.send({ type: "LOAD_OLDER" })
+    actor.send({ type: "LOAD_OLDER" })
+    await waitFor(actor, (s) => s.context.messages.length > 200)
+
+    expect(h.transcriptPageCalls.length - before).toBe(1)
     actor.stop()
   })
 })
