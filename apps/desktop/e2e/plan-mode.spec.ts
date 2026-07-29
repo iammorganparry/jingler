@@ -61,6 +61,9 @@ const proposePlan = async (window: Page): Promise<void> => {
   await expect(window.getByRole("status")).toContainText("Synced", {
     timeout: 20_000
   })
+  await expect(window.getByLabel("Plan document")).toBeVisible()
+  await expect(window.getByLabel("Resize step list")).toHaveCount(0)
+  await expect(window.getByLabel("Resize changes")).toHaveCount(0)
 }
 
 /**
@@ -103,6 +106,82 @@ const selectText = async (window: Page, needle: string): Promise<void> => {
     element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }))
   }, needle)
 }
+
+test("older plans render their original Markdown without the legacy review workspace", async ({
+  launchApp
+}) => {
+  const legacySessionId = "s_legacy_plan"
+  const legacyRaw = `# Stored migration plan
+
+This older thread keeps its **original Markdown output**.
+
+1. Preserve the plan.
+2. Avoid the retired review rails.`
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session("claude", legacySessionId),
+    transcripts: {
+      [legacySessionId]: [
+        {
+          id: "a_legacy_plan",
+          role: "assistant",
+          parts: [
+            {
+              _tag: "Plan",
+              plan: {
+                id: "plan_legacy",
+                summary: "Stored migration plan",
+                graph: null,
+                steps: [
+                  {
+                    id: "step_legacy",
+                    number: "01",
+                    title: "Retired structured step",
+                    intent: "This legacy projection must stay hidden.",
+                    approach: [],
+                    kind: "step",
+                    condition: null,
+                    parentId: null,
+                    dependsOn: [],
+                    blocks: [],
+                    files: [],
+                    guards: [],
+                    code: null,
+                    graph: null,
+                    diff: null,
+                    status: "done",
+                    flagged: false
+                  }
+                ],
+                comments: [],
+                status: "approved",
+                structured: true,
+                raw: legacyRaw
+              }
+            }
+          ],
+          streaming: false,
+          createdAt: "2026-07-01T00:00:00.000Z"
+        }
+      ]
+    }
+  })
+
+  await expect(appShell(launched.window)).toBeVisible()
+  const review = launched.window.getByRole("button", { name: "Plan Review" }).first()
+  await expect(review).toBeVisible()
+  await review.click()
+
+  await expect(
+    launched.window.getByRole("heading", { name: "Stored migration plan" })
+  ).toBeVisible()
+  await expect(launched.window.getByText("original Markdown output")).toBeVisible()
+  await expect(launched.window.getByText("Retired structured step")).toHaveCount(0)
+  await expect(launched.window.getByLabel("Plan document")).toHaveCount(0)
+  await expect(launched.window.getByLabel("Resize step list")).toHaveCount(0)
+  await expect(launched.window.getByLabel("Resize changes")).toHaveCount(0)
+})
 
 test("the PRD template validates, persists, and resets", async ({ launchApp }) => {
   const first = await launchApp({
