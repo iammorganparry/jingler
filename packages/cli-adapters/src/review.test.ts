@@ -483,6 +483,13 @@ describe("extractJsonBlock", () => {
     expect(extractJsonBlock('```\n{"findings":[]}\n```')).toBe('{"findings":[]}')
   })
 
+  it("accepts a single-line fenced response with spaced JSON", () => {
+    const text =
+      'Review complete.```json { "findings": [{ "title": "Lost update", "severity": "major" }] } ```'
+
+    expect(parseFindings(text)?.[0]?.title).toBe("Lost update")
+  })
+
   it("skips fenced blocks that are not JSON", () => {
     const text = '```ts\nconst x = 1\n```\n```json\n{"findings":[]}\n```'
     expect(extractJsonBlock(text)).toBe('{"findings":[]}')
