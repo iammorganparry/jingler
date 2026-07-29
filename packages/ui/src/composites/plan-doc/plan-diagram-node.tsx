@@ -1,5 +1,6 @@
 import { mergeAttributes, Node } from "@tiptap/core"
 import { type NodeViewProps, NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react"
+import { Workflow } from "lucide-react"
 import { useEffect, useState } from "react"
 import { MermaidDiagram } from "../../components/mermaid-diagram.js"
 
@@ -26,8 +27,16 @@ function DiagramView({ node, updateAttributes, editor }: NodeViewProps) {
 
   return (
     <NodeViewWrapper className="my-3" contentEditable={false}>
-      <div className="overflow-hidden rounded-xl border border-line bg-panel">
-        <MermaidDiagram source={draft} />
+      <div className="overflow-hidden rounded-md border border-line">
+        <div className="flex w-full items-center gap-[9px] bg-surface px-2.5 py-1.5 font-mono text-[11.5px]">
+          <Workflow className="size-3 shrink-0 text-blue" />
+          <span className="text-muted-foreground">flow</span>
+          <span className="flex-1" />
+          <span className="shrink-0 text-dim">mermaid</span>
+        </div>
+        <div className="border-t border-line bg-editor px-3 py-2">
+          <MermaidDiagram source={draft} />
+        </div>
         {editor.isEditable && (
           <textarea
             value={draft}
@@ -39,7 +48,7 @@ function DiagramView({ node, updateAttributes, editor }: NodeViewProps) {
             spellCheck={false}
             aria-label="Mermaid diagram source"
             placeholder="graph TD; A--&gt;B"
-            className="w-full resize-y border-t border-line bg-editor px-3 py-2 font-mono text-[11.5px] leading-[1.6] text-text-body outline-none placeholder:text-dim focus-visible:ring-2 focus-visible:ring-ring"
+            className="w-full resize-y border-t border-line bg-editor px-3 py-2 font-mono text-[11px] leading-[1.5] text-text-body outline-none placeholder:text-dim focus-visible:ring-2 focus-visible:ring-ring"
           />
         )}
       </div>

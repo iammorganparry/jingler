@@ -418,6 +418,9 @@ importers:
       '@tiptap/starter-kit':
         specifier: ^3.29.2
         version: 3.29.2
+      '@tiptap/suggestion':
+        specifier: ^3.29
+        version: 3.29.2(@floating-ui/dom@1.8.0)(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))(@tiptap/pm@3.29.2)
       '@xstate/react':
         specifier: ^6.1.0
         version: 6.1.0(@types/react@19.2.17)(react@19.2.7)(xstate@5.32.4)
@@ -3311,6 +3314,13 @@ packages:
 
   '@tiptap/starter-kit@3.29.2':
     resolution: {integrity: sha512-oTu0tysiqk4zgjEtxRHjAQgxUKaAevZwueOWwSWubHdokqp7SpcbE5n9USJv89HKuTUDm3GjnQH6q8HNn/2DsA==}
+
+  '@tiptap/suggestion@3.29.2':
+    resolution: {integrity: sha512-ZEhRm0gnRCwCScR9IrnIBhm9sr6U8vpR9oeznYk3hiedZ48zsgohqvgoIYpWcwYWrT2Pb0NrfhCT8IuSzdJHzQ==}
+    peerDependencies:
+      '@floating-ui/dom': ^1.0.0
+      '@tiptap/core': 3.29.2
+      '@tiptap/pm': 3.29.2
 
   '@tootallnate/once@2.0.1':
     resolution: {integrity: sha512-HqmEUIGRJ5fSXchkVgR5F7qn48bDBzv0kWj/Kfu5e6uci4UlEeng4331LnBkWffb++Ei3FOVLxo8JJWMFBDMeQ==}
@@ -10011,6 +10021,12 @@ snapshots:
       '@tiptap/extension-text': 3.29.2(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))
       '@tiptap/extension-underline': 3.29.2(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))
       '@tiptap/extensions': 3.29.2(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))(@tiptap/pm@3.29.2)
+      '@tiptap/pm': 3.29.2
+
+  '@tiptap/suggestion@3.29.2(@floating-ui/dom@1.8.0)(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))(@tiptap/pm@3.29.2)':
+    dependencies:
+      '@floating-ui/dom': 1.8.0
+      '@tiptap/core': 3.29.2(@tiptap/pm@3.29.2)
       '@tiptap/pm': 3.29.2
 
   '@tootallnate/once@2.0.1': {}

@@ -23,27 +23,41 @@ function StageView({ node }: NodeViewProps) {
   const [open, setOpen] = useState(true)
   const id = (node.attrs.id as string) || "—"
   const title = (node.attrs.title as string) || "Untitled stage"
-  const Chevron = open ? ChevronDown : ChevronRight
   return (
-    <NodeViewWrapper className="my-4 overflow-hidden rounded-xl border border-line bg-panel">
-      <div
-        className="flex items-center gap-2 border-b border-line px-4 py-2.5"
+    <NodeViewWrapper className="my-4 overflow-hidden rounded-md border border-line">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
         contentEditable={false}
+        aria-expanded={open}
+        aria-label={open ? "Collapse stage" : "Expand stage"}
+        className="flex min-h-10 w-full items-center gap-[9px] bg-surface px-2.5 py-1.5 text-left font-mono text-[11.5px] outline-none transition-colors hover:bg-line/20 focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          className="flex-none rounded text-dim transition-colors hover:text-text"
-          aria-label={open ? "Collapse stage" : "Expand stage"}
-        >
-          <Chevron className="size-4" />
-        </button>
-        <span className="rounded-md border border-purple/30 bg-purple/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-purple">
+        <span className="relative size-3 shrink-0 text-line-strong">
+          <ChevronDown
+            className={cn(
+              "absolute inset-0 size-3 transition-[opacity,filter,scale] duration-300 [transition-timing-function:cubic-bezier(0.2,0,0,1)]",
+              open ? "scale-100 opacity-100 blur-0" : "scale-[0.25] opacity-0 blur-[4px]"
+            )}
+          />
+          <ChevronRight
+            className={cn(
+              "absolute inset-0 size-3 transition-[opacity,filter,scale] duration-300 [transition-timing-function:cubic-bezier(0.2,0,0,1)]",
+              open ? "scale-[0.25] opacity-0 blur-[4px]" : "scale-100 opacity-100 blur-0"
+            )}
+          />
+        </span>
+        <span className="shrink-0 rounded-[3px] border border-purple/30 bg-purple/10 px-1.5 py-0.5 font-semibold text-purple">
           {id}
         </span>
-        <span className="min-w-0 truncate text-[13px] font-semibold text-text-bright">{title}</span>
-      </div>
-      <NodeViewContent className={cn("px-4 py-3", !open && "hidden")} />
+        <span className="min-w-0 flex-1 truncate text-text-bright">{title}</span>
+      </button>
+      <NodeViewContent
+        className={cn(
+          "border-t border-line bg-editor px-3 py-2 text-[13px] leading-relaxed text-text-body",
+          !open && "hidden"
+        )}
+      />
     </NodeViewWrapper>
   )
 }

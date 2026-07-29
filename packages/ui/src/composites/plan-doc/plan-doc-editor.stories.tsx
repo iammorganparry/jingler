@@ -4,17 +4,28 @@ import { PlanDocEditor } from "./plan-doc-editor.js"
 
 /**
  * The Notion-like plan document editor — a full-document Tiptap surface that
- * edits an HTML plan in place. Use the **Editable** story to exercise the insert
- * toolbar (Heading, lists, Stage, Acceptance, Flow diagram), cycle an acceptance
- * status by clicking its pill, and edit a mermaid source live. **ReadOnly**
- * renders the same plan with the chrome and editing disabled.
+ * edits an HTML plan in place. The insert toolbar is gone; blocks and widgets
+ * are added from the two floating menus the **Editable** story demonstrates:
+ *
+ * - **Select text → Comment.** Drag-select any prose (e.g. the word
+ *   "losslessly" in Goals). A bubble menu appears with Bold / Italic / Code and
+ *   a primary **Comment**. Click Comment, type a note, press **Send**: the span
+ *   is highlighted and an anchored annotation drops in below (watch the HTML
+ *   pane gain an `<aside data-annotation … data-quote>`).
+ * - **`/` to insert.** Put the cursor on an empty line and type `/`. A command
+ *   menu opens; arrow-key or click to **Stage** and press Enter to insert a
+ *   fully-formed plan stage at the cursor. Heading 2, Bullet/Numbered list,
+ *   Acceptance and Flow diagram are there too.
+ *
+ * Cycle an acceptance status by clicking its pill, and edit a mermaid source
+ * live. **ReadOnly** renders the same plan with the chrome and editing disabled.
  */
 
 const PLAN_HTML = `<h1>PRD: Ship the plan doc editor</h1>
 <h2>Context</h2>
 <p>Plans are now HTML documents edited in a Notion-like Tiptap editor, replacing the old MDX engine.</p>
 <h2>Goals</h2>
-<ul><li>Round-trip the structural markup losslessly.</li><li>Let users insert plan widgets from a toolbar.</li></ul>
+<ul><li>Round-trip the structural markup losslessly.</li><li>Let users insert plan widgets from the slash menu.</li></ul>
 <section data-stage="01" data-title="Build the Tiptap nodes">
 <h3>Intent</h3>
 <p>Author the four custom nodes so structure survives a serialize/parse cycle.</p>
