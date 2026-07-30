@@ -79,11 +79,12 @@ contextBridge.exposeInMainWorld("jingler", {
   },
   /**
    * Subscribe to "an agent is driving the embedded browser — open the Preview
-   * dock onto it". Fires on every BrowserControl op so QA is watchable; the
-   * renderer opens the dock and selects the Browser tab. Returns an unsubscribe fn.
+   * dock onto it". Fires on every BrowserControl op with the native view's URL
+   * so QA is watchable and the visible address bar stays truthful. Returns an
+   * unsubscribe fn.
    */
-  onPreviewReveal: (cb: () => void) => {
-    const listener = () => cb()
+  onPreviewReveal: (cb: (url: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, url: string) => cb(url)
     ipcRenderer.on(PREVIEW_REVEAL_CHANNEL, listener)
     return () => ipcRenderer.removeListener(PREVIEW_REVEAL_CHANNEL, listener)
   }

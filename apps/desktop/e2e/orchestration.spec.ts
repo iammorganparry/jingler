@@ -22,6 +22,12 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
     .getByRole("combobox", { name: "Low complexity worker harness" })
     .click()
   await window.getByRole("option", { name: "Codex" }).click()
+  const lowWorkerModel = window.getByRole("combobox", {
+    name: "Low complexity worker model"
+  })
+  await expect(lowWorkerModel).toHaveText("GPT-5.6 Sol")
+  await lowWorkerModel.click()
+  await window.getByRole("option", { name: "GPT-5.6 Terra" }).click()
   await expect
     .poll(
       () =>
@@ -31,7 +37,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
     )
     .toMatchObject({
       default: { cli: "claude", model: "opus" },
-      low: { cli: "codex", model: "gpt-5.6-sol" },
+      low: { cli: "codex", model: "gpt-5.6-terra" },
       medium: { cli: "claude", model: "opus" },
       high: { cli: "claude", model: "opus" }
     })
@@ -71,7 +77,12 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   await expect(window.getByText("worker-auth").first()).toBeVisible()
   await expect(window.getByText("claude · opus").first()).toBeVisible()
   await expect(window.getByText("worker-release").first()).toBeVisible()
-  await expect(window.getByText("codex · gpt-5.6-sol").first()).toBeVisible()
+  await expect(window.getByText("codex · gpt-5.6-terra").first()).toBeVisible()
+  await expect
+    .poll(() => readFileSync(planFile, "utf8"))
+    .toContain(
+      'data-agent-id="worker-release" data-cli="codex" data-model="gpt-5.6-terra"'
+    )
 
   await window
     .getByRole("button", { name: "Approve and auto", exact: true })
@@ -113,15 +124,15 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
 
   await expect(window.getByRole("button", { name: "Use remote" })).toBeVisible()
   await window.getByRole("button", { name: "Use remote" }).click()
-  await window
-    .getByRole("button", { name: "Approve and auto", exact: true })
-    .click()
   await expect(window.getByText("All criteria verified")).toBeVisible({
     timeout: 30_000
   })
 
   const persisted = readFileSync(planFile, "utf8")
   expect(persisted).toContain('status: "done"')
+  expect(persisted).toContain(
+    'data-agent-id="worker-release" data-cli="codex" data-model="gpt-5.6-terra"'
+  )
   expect(persisted).toContain("requested audit amendment")
   expect(persisted).toContain('data-evidence="Scripted worker completed')
   const checkpoints = JSON.parse(

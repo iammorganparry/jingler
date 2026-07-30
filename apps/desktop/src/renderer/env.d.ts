@@ -38,7 +38,7 @@ interface JinglerBridge {
    * Subscribe to "an agent is driving the embedded browser — reveal the dock".
    * Fires on every BrowserControl op. Returns an unsubscribe fn.
    */
-  readonly onPreviewReveal: (cb: () => void) => () => void
+  readonly onPreviewReveal: (cb: (url: string) => void) => () => void
 }
 
 interface Window {

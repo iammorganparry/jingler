@@ -738,9 +738,9 @@ const driveOpencode = async (
         // their providers/keys/levers survive and we only pin what this run needs.
         OPENCODE_CONFIG_CONTENT: JSON.stringify({
           permission: mapOpencodePermission(spec.mode, spec.readOnly ?? false),
-          // Inject the unified OpenConnector server as a remote MCP. Spread, so a
-          // disabled feature adds nothing and the operator's own config still wins.
-          ...opencodeMcpConfig(spec.openConnector)
+          // Inject every normalized remote server into this process-local config;
+          // no bearer is written to the operator's persistent opencode config.
+          ...opencodeMcpConfig(spec.remoteMcpServers)
         })
       },
       stdio: ["ignore", "pipe", "pipe"]

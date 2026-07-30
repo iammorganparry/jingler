@@ -406,8 +406,9 @@ export const runCodexAppServer = (
             binPath: spec.binPath,
             env,
             diagnostics,
-            // Inject the unified OpenConnector server as a remote MCP via `-c`.
-            configOverrides: codexMcpOverrides(spec.openConnector)
+            // Inline launch overrides keep both authenticated remote entries
+            // out of the worktree and Codex's persistent user configuration.
+            configOverrides: codexMcpOverrides(spec.remoteMcpServers)
           })
         } catch (cause) {
           endDiagnostics("run.failed", {

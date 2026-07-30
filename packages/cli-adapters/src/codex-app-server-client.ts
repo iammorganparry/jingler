@@ -295,7 +295,7 @@ export interface StartCodexAppServerOptions {
   readonly diagnostics?: CodexAppServerDiagnostics | null
   /**
    * Codex `-c key=value` config overrides, prepended before `app-server` — used to
-   * inject the unified OpenConnector MCP server (see `codexMcpOverrides`). Each
+   * inject normalized remote MCP attachments (see `codexMcpOverrides`). Each
    * entry becomes a separate `-c <entry>` argv pair. Empty by default.
    */
   readonly configOverrides?: ReadonlyArray<string>

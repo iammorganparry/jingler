@@ -53,6 +53,16 @@ export interface PreviewDockViewProps {
 
 export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
   const [url, setUrl] = useState(DEFAULT_URL)
+  // Agent browser tools navigate the native view in main, outside this
+  // component's normal address-bar flow. Mirror that authoritative URL into the
+  // visible chrome whenever main reveals the driven browser.
+  useEffect(
+    () =>
+      window.jingler.onPreviewReveal((revealedUrl) => {
+        if (revealedUrl.length > 0) setUrl(revealedUrl)
+      }),
+    []
+  )
   const browsing = dock.activeId === BROWSER_TAB_ID
   // The native view is only wanted when the dock is open AND the Browser tab is
   // the one on screen. Both halves matter: hiding the dock and switching tabs

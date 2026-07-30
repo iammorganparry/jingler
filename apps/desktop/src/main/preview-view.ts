@@ -64,9 +64,9 @@ const MAX_WAIT_MS = 30_000
 
 /**
  * Main→renderer push: "an agent is driving the browser — open the Preview dock
- * onto it so the operator watches". Sent on every BrowserControl op; the
- * renderer debounces it (see use-preview-dock). A bare channel name rather than
- * a payload — the message IS the signal.
+ * onto it so the operator watches". Sent on every BrowserControl op with the
+ * native view's URL, so the visible address bar cannot drift from the page the
+ * agent actually controls.
  */
 export const PREVIEW_REVEAL_CHANNEL = "jingler/preview/reveal"
 
@@ -244,9 +244,9 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
 
   // Paint the browser AND ask the renderer to open the dock onto it — the whole
   // point of agent QA is that the operator sees it happen.
-  const reveal = () => {
+  const reveal = (url: string) => {
     showOnly("browser")
-    mainWindow()?.webContents.send(PREVIEW_REVEAL_CHANNEL)
+    mainWindow()?.webContents.send(PREVIEW_REVEAL_CHANNEL, url)
   }
 
   const withPage = <A>(
@@ -260,7 +260,7 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
           new BrowserControlError({ op, message: "No application window to attach the browser to" })
         )
       }
-      reveal()
+      reveal(v.webContents.getURL())
       return Effect.tryPromise({ try: () => f(v.webContents), catch: controlFail(op) })
     })
 
@@ -331,7 +331,7 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
             const v = ensureBrowserSized()
             if (!v) return
             load(v, url)
-            reveal()
+            reveal(url)
           })
         : Effect.fail(
             new BrowserControlError({ op: "navigate", message: `Only http(s) URLs can be opened: ${url}` })

@@ -30,6 +30,12 @@ describe("ModelsService", () => {
     expect(models[0]!.id).toBe(defaultModel("cursor"))
   })
 
+  it("returns the curated fallback when the Codex app-server exits during discovery", async () => {
+    const models = await run(ModelsService.list("codex", "/bin/echo"))
+    expect(models).toStrictEqual(FALLBACK_MODELS.codex)
+    expect(models[0]!.id).toBe(defaultModel("codex"))
+  })
+
   /**
    * The startup prefetch (apps/desktop/src/main/index.ts) only pays off because
    * this cache is per-process and shared with the `Models.*` RPC handlers: warm

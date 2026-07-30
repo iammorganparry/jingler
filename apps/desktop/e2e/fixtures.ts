@@ -327,7 +327,7 @@ if (process.argv.includes("--version") || process.argv.includes("-v")) {
   process.stdout.write("codex-cli 0.144.1\\n")
   process.exit(0)
 }
-if (process.argv[2] !== "app-server") process.exit(0)
+if (!process.argv.includes("app-server")) process.exit(0)
 
 const fs = require("node:fs")
 const models = [
@@ -353,6 +353,142 @@ const notifyUsage = (tokens, turnId) =>
 const record = (method) => {
   if (process.env.JINGLER_E2E_CODEX_LOG) {
     fs.appendFileSync(process.env.JINGLER_E2E_CODEX_LOG, method + "\\n")
+  }
+}
+const configOverride = (key) => {
+  for (let index = 2; index < process.argv.length - 1; index += 1) {
+    if (process.argv[index] !== "-c") continue
+    const entry = process.argv[index + 1]
+    const prefix = key + "="
+    if (!entry.startsWith(prefix)) continue
+    const encoded = entry.slice(prefix.length)
+    try {
+      return JSON.parse(encoded)
+    } catch {
+      throw new Error("Invalid Codex MCP override for " + key)
+    }
+  }
+  return undefined
+}
+const browserMcpTarget = (input) => {
+  const prefix = "[[browser-control-mcp="
+  const start = input.indexOf(prefix)
+  if (start < 0) return null
+  const valueStart = start + prefix.length
+  const end = input.indexOf("]]", valueStart)
+  if (end < 0) throw new Error("Browser MCP fixture marker is missing ]]")
+  return input.slice(valueStart, end)
+}
+const browserMcpRequest = async (id, method, params, protocolVersion) => {
+  const url = configOverride("mcp_servers.jingler-browser.url")
+  const authorization = configOverride(
+    "mcp_servers.jingler-browser.http_headers.Authorization"
+  )
+  if (typeof url !== "string" || url.length === 0) {
+    throw new Error("Codex launch is missing the jingler-browser URL override")
+  }
+  if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
+    throw new Error("Codex launch is missing the jingler-browser Authorization override")
+  }
+  const headers = {
+    Accept: "application/json, text/event-stream",
+    Authorization: authorization,
+    "Content-Type": "application/json"
+  }
+  if (protocolVersion) headers["MCP-Protocol-Version"] = protocolVersion
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ jsonrpc: "2.0", id, method, params })
+  })
+  const raw = await response.text()
+  if (!response.ok) {
+    throw new Error("Browser MCP " + method + " returned " + response.status + ": " + raw)
+  }
+  if (response.status === 202) return null
+  const message = JSON.parse(raw)
+  if (message.error) {
+    throw new Error("Browser MCP " + method + " failed: " + message.error.message)
+  }
+  return message.result
+}
+const initializeBrowserMcp = async () => {
+  const initialized = await browserMcpRequest(901, "initialize", {
+    protocolVersion: "2025-11-25",
+    capabilities: {},
+    clientInfo: { name: "jingler-e2e-codex", version: "1.0.0" }
+  })
+  const protocolVersion = initialized?.protocolVersion
+  if (typeof protocolVersion !== "string") {
+    throw new Error("Browser MCP initialize did not return a protocol version")
+  }
+  record("browser-mcp:initialize")
+  await browserMcpRequest(
+    undefined,
+    "notifications/initialized",
+    {},
+    protocolVersion
+  )
+  return protocolVersion
+}
+const navigateBrowserMcp = async (targetUrl) => {
+  const protocolVersion = await initializeBrowserMcp()
+  const result = await browserMcpRequest(
+    903,
+    "tools/call",
+    { name: "navigate", arguments: { url: targetUrl } },
+    protocolVersion
+  )
+  if (result?.isError === true) {
+    const detail = JSON.stringify(result.content ?? [])
+    throw new Error("Browser MCP navigate returned a tool error: " + detail)
+  }
+  record("browser-mcp:tools/call:navigate")
+}
+const completeBrowserMcpTurn = async (targetUrl) => {
+  try {
+    await navigateBrowserMcp(targetUrl)
+    send({
+      method: "item/completed",
+      params: {
+        threadId: "thread-e2e",
+        turnId: "turn-e2e",
+        item: {
+          type: "agentMessage",
+          id: "message-e2e",
+          text: "Codex browser MCP complete."
+        }
+      }
+    })
+    send({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-e2e",
+        turn: { id: "turn-e2e", status: "completed", error: null }
+      }
+    })
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause)
+    record("browser-mcp:error:" + message)
+    send({
+      method: "item/completed",
+      params: {
+        threadId: "thread-e2e",
+        turnId: "turn-e2e",
+        item: {
+          type: "agentMessage",
+          id: "message-e2e",
+          text: "Codex browser MCP failed: " + message
+        }
+      }
+    })
+    send({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-e2e",
+        turn: { id: "turn-e2e", status: "failed", error: { message } }
+      }
+    })
   }
 }
 let buffer = ""
@@ -392,12 +528,19 @@ process.stdin.on("data", (chunk) => {
       }
       if (msg.method === "turn/start") {
         send({ id: msg.id, result: { turn: { id: "turn-e2e" } } })
-        const isDigest = JSON.stringify(msg.params?.input ?? "").includes(
+        const input = JSON.stringify(msg.params?.input ?? "")
+        const isDigest = input.includes(
           "You are compacting a coding session's context"
         )
-        const holdForSteer = JSON.stringify(msg.params?.input ?? "").includes(
+        const holdForSteer = input.includes(
           "Exercise native steering"
         )
+        const browserTarget = browserMcpTarget(input)
+        if (browserTarget !== null) {
+          void completeBrowserMcpTurn(browserTarget)
+          index = buffer.indexOf("\\n")
+          continue
+        }
         const reply = isDigest
           ? '{"goal":"Continue the legacy Codex session.","recentWork":["Loaded the existing session transcript."],"nextStep":"Continue the implementation.","decisions":[],"filesTouched":[],"openThreads":["The implementation is still active."],"preferences":[],"midFlow":true,"midFlowReason":"The implementation is still active."}'
           : "Codex E2E complete."

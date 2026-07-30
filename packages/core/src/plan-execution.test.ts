@@ -198,6 +198,7 @@ describe("buildPlanExecutionGraph", () => {
 })
 
 describe("worker routing", () => {
+  const laterPageCodexModel = "gpt-5.6-terra"
   const catalog = [
     {
       cli: "claude" as const,
@@ -205,7 +206,7 @@ describe("worker routing", () => {
     },
     {
       cli: "codex" as const,
-      models: [{ id: "gpt-5.6-sol" }]
+      models: [{ id: "gpt-5.6-sol" }, { id: laterPageCodexModel }]
     }
   ]
   const configured: WorkerRoutingConfig = {
@@ -272,5 +273,40 @@ describe("worker routing", () => {
     expect(
       workerRoutingMismatch(normalized.projection.stages, configured)
     ).toBeNull()
+  })
+
+  it("preserves the exact configured Codex model id in canonical HTML", () => {
+    const source = `<h1>PRD: Preserve the route</h1>
+<section data-stage="01" data-title="Ship" data-complexity="medium">
+<div data-assignment data-agent-id="worker-ship" data-cli="claude" data-model="opus" data-reason="Planner choice" data-status="queued"></div>
+<ul data-files><li>src/ship.ts</li></ul>
+<div data-acceptance="01.1" data-status="pending">The route is preserved.</div>
+</section>`
+    const parsed = parsePlanHtml(source)
+    expect(parsed.valid).toBe(true)
+    if (!parsed.valid) return
+
+    const routing: WorkerRoutingConfig = {
+      ...configured,
+      medium: { cli: "codex", model: laterPageCodexModel }
+    }
+    const canonical = parsePlanHtml(
+      applyWorkerRoutingToPlanHtml(
+        parsed.html,
+        parsed.projection.stages,
+        routing
+      )
+    )
+
+    expect(canonical.valid).toBe(true)
+    if (!canonical.valid) return
+    expect(canonical.html).toContain('data-cli="codex"')
+    expect(canonical.html).toContain(
+      `data-model="${laterPageCodexModel}"`
+    )
+    expect(canonical.projection.stages[0]?.assignment).toMatchObject({
+      cli: "codex",
+      model: laterPageCodexModel
+    })
   })
 })
