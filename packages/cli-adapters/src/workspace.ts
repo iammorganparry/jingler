@@ -5,7 +5,7 @@ import type { CommandExecutor } from "@effect/platform"
 import { Effect, Option } from "effect"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
-import { gitLine, runGit } from "./command.js"
+import { gitLine, runGit, runGitDiff } from "./command.js"
 
 /** How deep to descend from the repos directory before giving up on a branch. */
 const MAX_DEPTH = 3
@@ -220,12 +220,13 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()(
         }),
 
       /**
-       * The unified working diff for a worktree, for the Changes view. `git diff
-       * HEAD` alone covers modified + DELETED tracked files but omits NEW
-       * (untracked) files, so we `add -N` (intent-to-add) exactly the untracked
-       * paths first — which makes them appear as full additions — then `reset`
-       * only those paths so any pre-existing staged state is untouched. Empty
-       * string when the tree is clean.
+       * The unified working diff for a worktree, including untracked files.
+       *
+       * This is intentionally index-free. The previous `git add -N` + `reset`
+       * implementation turned a background read into two index writes and could
+       * unstage a developer's concurrent work in a direct session. `--no-index`
+       * produces the same full-addition patch for each untracked path without
+       * touching repository state.
        */
       diff: (
         worktreePath: string
@@ -239,14 +240,27 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()(
             .split("\n")
             .map((l) => l.trim())
             .filter(Boolean)
-          if (untracked.length > 0) {
-            yield* runGit(worktreePath, ["add", "-N", "--", ...untracked]).pipe(Effect.ignore)
-          }
-          const out = yield* runGit(worktreePath, ["diff", "HEAD"])
-          if (untracked.length > 0) {
-            yield* runGit(worktreePath, ["reset", "--quiet", "--", ...untracked]).pipe(Effect.ignore)
-          }
-          return out
+          const tracked = yield* runGitDiff(worktreePath, [
+            "diff",
+            "--binary",
+            "HEAD"
+          ])
+          const additions = yield* Effect.forEach(
+            untracked,
+            (path) =>
+              runGitDiff(worktreePath, [
+                "diff",
+                "--no-index",
+                "--binary",
+                "--",
+                "/dev/null",
+                path
+              ]),
+            { concurrency: 4 }
+          )
+          return [tracked, ...additions]
+            .filter((part) => part.length > 0)
+            .join("\n")
         }),
 
       /** The uncommitted working diff for one file (`git diff HEAD -- <path>`). */

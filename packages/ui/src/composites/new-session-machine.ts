@@ -70,6 +70,8 @@ export interface NewSessionContext {
   title: string
   cli: CliKind | ""
   base: string
+  /** Blank sessions default to an isolated linked worktree on every open. */
+  useWorktree: boolean
   branches: ReadonlyArray<string>
   search: string
   mine: boolean
@@ -91,6 +93,7 @@ export type NewSessionEvent =
   | { type: "SET_REPO"; repoPath: string }
   | { type: "SET_TITLE"; title: string }
   | { type: "SET_BASE"; base: string }
+  | { type: "SET_USE_WORKTREE"; useWorktree: boolean }
   | { type: "SET_SEARCH"; search: string }
   | { type: "SET_MINE"; mine: boolean }
   | { type: "SELECT_PR"; pr: PrSummary }
@@ -196,6 +199,7 @@ export const newSessionMachine = setup({
         // creates sessions.
         cli: newSessionCli(deps.availableClis, deps.defaultCli) ?? ("" as CliKind | ""),
         base: "",
+        useWorktree: true,
         branches: [] as ReadonlyArray<string>,
         search: "",
         mine: false,
@@ -236,6 +240,7 @@ export const newSessionMachine = setup({
     title: "",
     cli: "",
     base: "",
+    useWorktree: true,
     branches: [],
     search: "",
     mine: false,
@@ -309,7 +314,8 @@ export const newSessionMachine = setup({
                   // Omit when blank → the session is auto-named (title is optional).
                   ...(title ? { title } : {}),
                   cli: context.cli,
-                  baseBranch: context.base
+                  baseBranch: context.base,
+                  useWorktree: context.useWorktree
                 })
               }
             }),
@@ -416,6 +422,9 @@ export const newSessionMachine = setup({
     },
     SET_TITLE: { actions: assign({ title: ({ event }) => event.title }) },
     SET_BASE: { actions: assign({ base: ({ event }) => event.base }) },
+    SET_USE_WORKTREE: {
+      actions: assign({ useWorktree: ({ event }) => event.useWorktree })
+    },
     SET_SEARCH: {
       actions: [
         assign({ search: ({ event }) => event.search }),

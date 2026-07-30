@@ -1,6 +1,6 @@
 import * as React from "react"
 import type { SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@jingler/core"
-import { displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
+import { displayStatusOf, persistentOf, UNTITLED_SESSION } from "@jingler/core"
 import {
   ChevronRight,
   Columns2,
@@ -22,6 +22,7 @@ import { StatusDot } from "../components/status-dot.js"
 import { FilterMenu } from "../components/filter-menu.js"
 import { HoverCard } from "../components/hover-card.js"
 import { ProviderIcon } from "../components/provider-icon.js"
+import { PersistentSessionTile } from "../composites/persistent-session-tile.js"
 import { SessionRow } from "../composites/session-row.js"
 import { SessionHoverCard } from "../composites/session-hover-card.js"
 import { SplitRow } from "../composites/split-row.js"
@@ -67,6 +68,8 @@ export interface SessionSidebarProps {
   onSelect: (id: string) => void
   /** Manually rename a session (double-click its title) — pins the auto-name. */
   onRename?: (id: string, title: string) => void
+  /** Promote or demote a session from the persistent tray. */
+  onSetPersistent?: (id: string, persistent: boolean) => void
   /** Archive an active session from its row quick-actions (undoable via restore). */
   onArchive?: (id: string) => void
   /** Restore an archived session from its row quick-actions. */
@@ -135,6 +138,7 @@ function SidebarBody({
   onSplitWith,
   onSelect,
   onRename,
+  onSetPersistent,
   onArchive,
   onRestore,
   onDelete,
@@ -202,6 +206,14 @@ function SidebarBody({
     [sessions, filters]
   )
 
+  // The tray is fixed navigation, independent of the list filters below it.
+  // Archived persistent sessions step out until restored, while keeping their
+  // flag in storage so restoration puts them straight back here.
+  const persistentSessions = React.useMemo(
+    () => sessions.filter((session) => persistentOf(session) && !session.archived),
+    [sessions]
+  )
+
   /**
    * Sessions that sit inside a SPLIT of two panes or more.
    *
@@ -226,7 +238,9 @@ function SidebarBody({
   const groups = React.useMemo(
     () =>
       groupSessions(
-        filtered.filter((s) => !splitMemberIds.has(s.id)),
+        filtered.filter(
+          (s) => !(persistentOf(s) && !s.archived) && !splitMemberIds.has(s.id)
+        ),
         filters,
         statusOf,
         starredRepoNames
@@ -281,6 +295,7 @@ function SidebarBody({
       onClosePane={onClosePane}
       onSeparateAll={onSeparateAll}
       onSplitWith={onSplitWith}
+      onSetPersistent={onSetPersistent}
       splitCandidates={sessions.filter(
         (c) => !c.archived && !split.panes.some((p) => p.sessionId === c.id)
       )}
@@ -304,6 +319,7 @@ function SidebarBody({
         slotIndex={slotBySession?.get(s.id) ?? null}
         onSelect={onSelect}
         onRename={onRename}
+        onSetPersistent={onSetPersistent}
         onArchive={onArchive}
         onRestore={onRestore}
         onDelete={onDelete}
@@ -422,18 +438,47 @@ function SidebarBody({
         </button>
       </div>
 
+      {/* Fixed persistent navigation: never narrowed by the ordinary list's
+          status/repo filters, and never duplicated in those groups. */}
+      <div
+        data-testid="persistent-session-tray"
+        className="grid max-h-64 flex-none grid-cols-3 gap-1.5 overflow-y-auto px-3 pb-2"
+      >
+        {persistentSessions.length > 0 ? (
+          persistentSessions.map((session) => (
+            <PersistentSessionTile
+              key={session.id}
+              session={session}
+              activity={liveActivity?.[session.id]}
+              active={session.id === activeSessionId}
+              onSelect={onSelect}
+              onUnpersist={
+                onSetPersistent
+                  ? (id) => onSetPersistent(id, false)
+                  : undefined
+              }
+              onArchive={onArchive}
+              onDelete={onDelete}
+            />
+          ))
+        ) : (
+          <button
+            type="button"
+            data-testid="persistent-session-add"
+            onClick={onNewSession}
+            aria-label="New session"
+            title="New session"
+            className="flex h-[68px] min-w-0 items-center justify-center rounded-lg border border-dashed border-line text-dim outline-none transition-colors hover:border-blue hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Plus size={16} />
+          </button>
+        )}
+      </div>
+
       {/* Groups (or the empty hint when there are no sessions yet) */}
       <div className="flex flex-1 flex-col overflow-auto px-2 pb-2 pt-0.5">
         {sessions.length === 0 ? (
           <div className="flex flex-1 flex-col px-1">
-            <button
-              type="button"
-              onClick={onNewSession}
-              className="flex items-center gap-2.5 rounded-lg border border-dashed border-line px-3 py-2.5 text-[13px] text-text-body outline-none transition-colors hover:border-blue hover:bg-surface hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <Plus size={15} />
-              New session
-            </button>
             <div className="m-auto flex flex-col items-center gap-2.5 px-4 text-center">
               <Layers size={22} className="text-line-strong" />
               <span className="text-[12px] leading-[1.5] text-muted-foreground">
@@ -647,6 +692,84 @@ function SessionRail({
   onExpand: () => void
 }) {
   const live = sessions.filter((s) => !s.archived)
+  const persistent = live.filter(persistentOf)
+  const ordinary = live.filter((session) => !persistentOf(session))
+
+  const renderCell = (s: Session) => {
+    const active = s.id === activeSessionId
+    const status = displayStatusOf(liveActivity?.[s.id], s.status)
+    return (
+      <HoverCard
+        key={s.id}
+        delayMs={HOVER_INTENT_MS}
+        content={
+          <SessionHoverCard
+            session={s}
+            activity={liveActivity?.[s.id]}
+            prState={prStates?.[s.id]}
+          />
+        }
+      >
+        <button
+          type="button"
+          data-session-id={s.id}
+          data-persistent={persistentOf(s) ? "true" : undefined}
+          onClick={() => onSelect?.(s.id)}
+          aria-current={active ? "page" : undefined}
+          // No `title` — the card IS the tooltip, and a native tooltip
+          // fading in on top of it would cover the thing it duplicates.
+          // The accessible NAME still carries the session's title.
+          aria-label={s.title || UNTITLED_SESSION}
+          className={cn(
+            "group relative flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+            // The active cell was a half-opacity blue ring on a surface
+            // fill — two low-contrast signals that, at 32px against a
+            // panel that is nearly the same value, read as "slightly
+            // smudged" rather than as "you are here". It now gets the
+            // accent BAR (see below) plus a solid fill, and the ring is
+            // gone: a ring and a bar both claiming selection is one signal
+            // too many, and the bar is the one that survives at a glance.
+            // `bg-surface` for the fill matches `SessionRow`'s active
+            // treatment, so the same session looks selected the same way
+            // in both sidebar states.
+            active ? "bg-surface" : "hover:bg-surface/40"
+          )}
+        >
+          {/* The rail's own left edge, not the cell's: 32px of cell centred
+              in 52px of rail leaves exactly 10px, so `-left-2.5` lands the
+              bar on the panel border where every editor puts it. */}
+          {active && (
+            <span
+              aria-hidden
+              className="absolute -left-2.5 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-blue"
+            />
+          )}
+          {/* The HARNESS, not two initials. Initials of an auto-generated
+              title ("UN" for Untitled) say nothing you didn't already
+              know, and two sessions on the same feature collide; which
+              agent is driving is the fact you actually navigate by. */}
+          <ProviderIcon
+            cli={s.cli}
+            size={16}
+            // Brand colour for the active session, monochrome for the
+            // rest — so the rail reads as one selected thing among peers
+            // rather than as a row of competing logos.
+            mono={!active}
+            className={cn(
+              "transition-colors",
+              !active && "text-muted-foreground group-hover:text-text"
+            )}
+          />
+          {/* Bottom-right rather than inline: a 32px cell has no room for a
+              dot beside the icon without pushing it off-centre. */}
+          <span className="absolute -bottom-px -right-px">
+            <StatusDot status={displayStatusTone[status]} size={7} />
+          </span>
+        </button>
+      </HoverCard>
+    )
+  }
+
   return (
     <div
       style={{ width: RAIL_WIDTH }}
@@ -673,78 +796,14 @@ function SessionRail({
       </button>
       <span className="my-1 h-px w-6 flex-none bg-hairline" />
       <div className="sb-no-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto">
-        {live.map((s) => {
-          const active = s.id === activeSessionId
-          const status = displayStatusOf(liveActivity?.[s.id], s.status)
-          return (
-            <HoverCard
-              key={s.id}
-              delayMs={HOVER_INTENT_MS}
-              content={
-                <SessionHoverCard
-                  session={s}
-                  activity={liveActivity?.[s.id]}
-                  prState={prStates?.[s.id]}
-                />
-              }
-            >
-              <button
-                type="button"
-                onClick={() => onSelect?.(s.id)}
-                aria-current={active ? "page" : undefined}
-                // No `title` — the card IS the tooltip, and a native tooltip
-                // fading in on top of it would cover the thing it duplicates.
-                // The accessible NAME still carries the session's title.
-                aria-label={s.title || UNTITLED_SESSION}
-                className={cn(
-                  "group relative flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-                  // The active cell was a half-opacity blue ring on a surface
-                  // fill — two low-contrast signals that, at 32px against a
-                  // panel that is nearly the same value, read as "slightly
-                  // smudged" rather than as "you are here". It now gets the
-                  // accent BAR (see below) plus a solid fill, and the ring is
-                  // gone: a ring and a bar both claiming selection is one signal
-                  // too many, and the bar is the one that survives at a glance.
-                  // `bg-surface` for the fill matches `SessionRow`'s active
-                  // treatment, so the same session looks selected the same way
-                  // in both sidebar states.
-                  active ? "bg-surface" : "hover:bg-surface/40"
-                )}
-              >
-                {/* The rail's own left edge, not the cell's: 32px of cell centred
-                    in 52px of rail leaves exactly 10px, so `-left-2.5` lands the
-                    bar on the panel border where every editor puts it. */}
-                {active && (
-                  <span
-                    aria-hidden
-                    className="absolute -left-2.5 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-blue"
-                  />
-                )}
-                {/* The HARNESS, not two initials. Initials of an auto-generated
-                    title ("UN" for Untitled) say nothing you didn't already
-                    know, and two sessions on the same feature collide; which
-                    agent is driving is the fact you actually navigate by. */}
-                <ProviderIcon
-                  cli={s.cli}
-                  size={16}
-                  // Brand colour for the active session, monochrome for the
-                  // rest — so the rail reads as one selected thing among peers
-                  // rather than as a row of competing logos.
-                  mono={!active}
-                  className={cn(
-                    "transition-colors",
-                    !active && "text-muted-foreground group-hover:text-text"
-                  )}
-                />
-                {/* Bottom-right rather than inline: a 32px cell has no room for a
-                    dot beside the icon without pushing it off-centre. */}
-                <span className="absolute -bottom-px -right-px">
-                  <StatusDot status={displayStatusTone[status]} size={7} />
-                </span>
-              </button>
-            </HoverCard>
-          )
-        })}
+        {persistent.map(renderCell)}
+        {persistent.length > 0 && ordinary.length > 0 && (
+          <span
+            data-testid="persistent-rail-separator"
+            className="my-1 h-px w-6 flex-none bg-hairline"
+          />
+        )}
+        {ordinary.map(renderCell)}
       </div>
     </div>
   )
@@ -821,4 +880,3 @@ export function SessionSidebar(props: SessionSidebarProps) {
     />
   )
 }
-

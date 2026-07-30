@@ -72,7 +72,10 @@ const loadBranches = async (): Promise<ReadonlyArray<string>> => [
   "chore/deps"
 ]
 
-/** The ⌘N New Session dialog (shadcn Dialog + Select + Input). */
+/**
+ * The ⌘N New Session dialog with its default-on isolated-worktree choice.
+ * Turn it off to inspect the direct-checkout warning copy.
+ */
 export const NewSession: Story = {
   render: () => (
     <div className="h-screen w-full bg-editor">

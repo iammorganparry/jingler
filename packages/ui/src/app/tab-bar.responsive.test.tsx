@@ -54,11 +54,46 @@ describe("TabBar at width", () => {
     expect(screen.getByRole("button", { name: "Conversation" })).toBeTruthy()
   })
 
-  it("wears the session's name on the conversation tab, not the word 'Conversation'", () => {
-    // The chip and the Conversation tab used to be two controls for one idea,
-    // one of which you couldn't click. This is the merge.
+  it("shows the session title separately from the Conversation tab", () => {
     renderAt(1200, { sessionTitle: "feat(signals): account-first resolution" })
     expect(screen.getByText("feat(signals): account-first resolution")).toBeTruthy()
+    expect(screen.getByTestId("conversation-tab").tagName).toBe("DIV")
+    expect(screen.getByRole("button", { name: "Conversation" })).toBeTruthy()
+  })
+
+  it("keeps the current view on title click and renames on title double-click", () => {
+    const onChange = vi.fn()
+    const onRenameTitle = vi.fn()
+    renderAt(1200, {
+      sessionTitle: "Original title",
+      onChange,
+      onRenameTitle
+    })
+
+    fireEvent.click(screen.getByTestId("conversation-tab"))
+    expect(onChange).not.toHaveBeenCalled()
+
+    fireEvent.doubleClick(screen.getByTestId("conversation-tab"))
+    const input = screen.getByRole("textbox", { name: "Session title" })
+    fireEvent.change(input, { target: { value: "Renamed session" } })
+    // Selecting a word with a double-click must not bubble back to the title
+    // shell and restart editing with the original value.
+    fireEvent.doubleClick(input)
+    expect(input).toHaveProperty("value", "Renamed session")
+    fireEvent.blur(input)
+    expect(onRenameTitle).toHaveBeenCalledWith("Renamed session")
+  })
+
+  it("places the view tabs immediately before the session status", () => {
+    renderAt(1200, {
+      status: { label: "Running", tone: "yellow" }
+    })
+    const actions = screen.getByTestId("session-tab-actions")
+    const viewTabs = screen.getByTestId("view-tab-controls")
+    const status = screen.getByTestId("session-status")
+    expect(viewTabs.parentElement).toBe(actions)
+    expect(status.parentElement).toBe(actions)
+    expect(viewTabs.nextElementSibling).toBe(status)
   })
 
   it("gives the session title less room as the pane narrows, and drops it at tiny", () => {

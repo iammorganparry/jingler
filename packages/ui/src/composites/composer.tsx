@@ -22,6 +22,7 @@ import { downscaleImage } from "../lib/image-downscale.js"
 import { reasoningEffortsFor } from "../lib/reasoning-options.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { modeAccent } from "../tokens.js"
+import { JinglerMark } from "../brand/jingler-mark.js"
 import { AttachmentThumb } from "../components/attachment-thumb.js"
 import { Button } from "../components/button.js"
 import { ChipMenu, type ChipOption } from "../components/chip-menu.js"
@@ -141,6 +142,7 @@ export function Composer({
   onSetMode,
   showJinglerToggle = false,
   jinglerMode = false,
+  jinglerModePending = false,
   onToggleJinglerMode,
   reasoningEffort,
   thinkingEnabled,
@@ -205,7 +207,9 @@ export function Composer({
    * source harness directly.
    */
   jinglerMode?: boolean
-  /** Flip Jingler mode (persisted globally in config). */
+  /** Disable the toggle while the active chat's setting is being persisted. */
+  jinglerModePending?: boolean
+  /** Flip Jingler mode for the active chat; workspace config is its fallback. */
   onToggleJinglerMode?: (enabled: boolean) => void
   /** Per-session thinking strength; absent preserves the harness default. */
   reasoningEffort?: ReasoningEffort
@@ -477,6 +481,7 @@ export function Composer({
         // Reflects the active HITL mode so the per-mode theming is inspectable
         // (and assertable in e2e) — the visual accent is derived from it.
         data-mode={mode}
+        data-jingler-mode={showJinglerToggle ? String(jinglerMode) : undefined}
         onDragOver={(e) => {
           if (paused) return
           e.preventDefault()
@@ -495,9 +500,9 @@ export function Composer({
           "flex flex-col gap-[11px] rounded-xl border bg-sunken px-[13px] py-2.5 transition-colors",
           // "Nightlight": the active mode tints the composer border/background and
           // casts an ambient glow, so the current HITL mode is legible at a glance.
-          accent.border,
-          accent.bg,
-          accent.glow,
+          hideModeControls && !dragging
+            ? "composer-jingler-active"
+            : [accent.border, accent.bg, accent.glow],
           paused && "opacity-70",
           // A drag-over always wins visually (cyan), and drops the mode glow.
           dragging && "border-cyan/60 bg-cyan/5 shadow-none"
@@ -643,6 +648,8 @@ export function Composer({
           {showJinglerToggle && (
             <button
               type="button"
+              disabled={jinglerModePending}
+              aria-busy={jinglerModePending}
               onClick={() => onToggleJinglerMode?.(!jinglerMode)}
               aria-pressed={jinglerMode}
               title={
@@ -651,14 +658,16 @@ export function Composer({
                   : "Jingler mode off — you're driving the harness directly. Click to let the orchestrator plan and hand off."
               }
               className={cn(
-                "inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[11.5px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]",
-                jinglerMode
-                  ? "bg-brand/15 text-brand hover:bg-brand/20"
-                  : "text-muted-foreground hover:text-text"
+                "jingler-mode-toggle inline-flex items-center gap-1.5 whitespace-nowrap px-2 py-1 text-[11.5px] font-semibold outline-none transition-colors active:scale-[0.96] disabled:cursor-wait disabled:opacity-60",
+                jinglerMode ? "is-active" : "text-muted-foreground hover:text-text"
               )}
             >
-              <Sparkles size={13} className="flex-none" />
-              Jingler
+              <JinglerMark
+                aria-hidden="true"
+                focusable="false"
+                className="jingler-mode-toggle__mark h-[14px] w-auto flex-none"
+              />
+              <span className="jingler-mode-toggle__label">Jingler</span>
             </button>
           )}
           {!hideModeControls && modelValue.length > 0 && (

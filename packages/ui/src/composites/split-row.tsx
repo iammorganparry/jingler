@@ -1,8 +1,8 @@
 import { type DragEvent, useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import type { Session, SessionActivity } from "@jingler/core"
-import { displayStatusOf } from "@jingler/core"
-import { Columns2, Scissors, X } from "lucide-react"
+import { displayStatusOf, persistentOf } from "@jingler/core"
+import { Columns2, Pin, PinOff, Scissors, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { displayStatusLabel, displayStatusTone } from "../tokens.js"
 import { StatusDot } from "../components/status-dot.js"
@@ -38,6 +38,7 @@ export function SplitRow({
   onClosePane,
   onSeparateAll,
   onSplitWith,
+  onSetPersistent,
   splitCandidates = [],
   className
 }: {
@@ -53,6 +54,8 @@ export function SplitRow({
   onSeparateAll?: (groupId: string) => void
   /** A session was dropped on the pill — merge it in at the right-hand end. */
   onSplitWith?: (groupId: string, sessionId: string, at: number) => void
+  /** Promote or demote any member without first separating the split. */
+  onSetPersistent?: (sessionId: string, persistent: boolean) => void
   /** Sessions offered under "Split with ▸" (everything not already in here). */
   splitCandidates?: ReadonlyArray<Session>
   className?: string
@@ -105,6 +108,42 @@ export function SplitRow({
             onSelect: () => onSplitWith?.(group.id, s.id, group.panes.length)
           }))
     },
+    ...(onSetPersistent
+      ? [
+          {
+            label: "Persist session",
+            icon: Pin,
+            onSelect: () => {},
+            submenu: group.panes
+              .map((pane) => byId(pane.sessionId))
+              .filter(
+                (session): session is Session =>
+                  session !== null && !persistentOf(session)
+              )
+              .map((session) => ({
+                id: session.id,
+                label: session.title,
+                onSelect: () => onSetPersistent(session.id, true)
+              }))
+          },
+          {
+            label: "Unpersist session",
+            icon: PinOff,
+            onSelect: () => {},
+            submenu: group.panes
+              .map((pane) => byId(pane.sessionId))
+              .filter(
+                (session): session is Session =>
+                  session !== null && persistentOf(session)
+              )
+              .map((session) => ({
+                id: session.id,
+                label: session.title,
+                onSelect: () => onSetPersistent(session.id, false)
+              }))
+          }
+        ]
+      : []),
     ...(onSeparateAll
       ? [
           {

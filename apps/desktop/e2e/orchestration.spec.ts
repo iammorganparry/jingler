@@ -1,6 +1,91 @@
 import { existsSync, readFileSync } from "node:fs"
-import { basename, join } from "node:path"
-import { appShell, expect, sessionRow, test } from "./fixtures.js"
+import { join } from "node:path"
+import {
+  appShell,
+  expect,
+  planDirectory,
+  sessionRow,
+  test
+} from "./fixtures.js"
+
+test("Jingler mode uses the static brand treatment and the animated Jingler mark", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: {
+      orchestrator: { cli: "codex", model: "gpt-5.6-sol" }
+    }
+  })
+  await window.emulateMedia({ reducedMotion: "no-preference" })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.getByTestId("new-session").click()
+  await window
+    .getByPlaceholder("Leave blank for agent naming")
+    .fill("Branded Jingler mode")
+  await window.getByRole("button", { name: "Create" }).click()
+  await expect(sessionRow(window, "Branded Jingler mode")).toBeVisible()
+
+  const toggle = window.getByRole("button", { name: "Jingler", exact: true })
+  const surface = window.getByTestId("composer").locator("[data-jingler-mode]")
+
+  await expect(toggle).toHaveAttribute("aria-pressed", "true")
+  await expect(toggle.locator('svg[aria-label="Jingler"]')).toBeVisible()
+  await expect(toggle.locator(".lucide-sparkles")).toHaveCount(0)
+  await expect(surface).toHaveAttribute("data-jingler-mode", "true")
+
+  const activeTreatment = await surface.evaluate((element) => {
+    const surfaceStyle = getComputedStyle(element)
+    const glowStyle = getComputedStyle(element, "::before")
+    return {
+      animation: surfaceStyle.animationName,
+      background: surfaceStyle.backgroundImage,
+      glowAnimation: glowStyle.animationName
+    }
+  })
+  expect(activeTreatment.animation).toBe("none")
+  expect(activeTreatment.background).toContain("conic-gradient")
+  expect(activeTreatment.glowAnimation).toBe("none")
+
+  const toggleTreatment = await toggle.evaluate((element) => {
+    const buttonStyle = getComputedStyle(element)
+    const labelStyle = getComputedStyle(element.querySelector("span")!)
+    const markStyle = getComputedStyle(element.querySelector("svg")!)
+    return {
+      border: buttonStyle.borderStyle,
+      background: buttonStyle.backgroundColor,
+      labelAnimation: labelStyle.animationName,
+      markAnimation: markStyle.animationName
+    }
+  })
+  expect(toggleTreatment).toMatchObject({
+    border: "none",
+    background: "rgba(0, 0, 0, 0)",
+    labelAnimation: "sb-jingler-text-shine",
+    markAnimation: "sb-jingler-mark-shine"
+  })
+
+  await window.getByRole("button", { name: "New chat" }).click()
+  await expect(window.getByTitle("2. Chat 2")).toHaveAttribute(
+    "aria-current",
+    "page"
+  )
+
+  await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-pressed", "false")
+  await expect(surface).toHaveAttribute("data-jingler-mode", "false")
+  await expect(window.getByRole("button", { name: "GPT-5.6 Sol" })).toBeVisible()
+
+  await window.getByTitle("1. Chat 1").click()
+  await expect(toggle).toHaveAttribute("aria-pressed", "true")
+  await expect(surface).toHaveAttribute("data-jingler-mode", "true")
+
+  await window.getByTitle("2. Chat 2").click()
+  await expect(toggle).toHaveAttribute("aria-pressed", "false")
+  await expect(surface).toHaveAttribute("data-jingler-mode", "false")
+})
 
 const WORKER_AUTH_TAB = /^worker-auth /
 const WORKER_RELEASE_TAB = /^worker-release /
@@ -59,10 +144,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   )
   const worktreePath = sessions[0].worktreePath as string
   const planFile = join(
-    home,
-    "jingler",
-    ".jingler",
-    basename(worktreePath),
+    planDirectory(home, worktreePath),
     "current-plan.html"
   )
 
@@ -155,10 +237,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   const checkpoints = JSON.parse(
     readFileSync(
       join(
-        home,
-        "jingler",
-        ".jingler",
-        basename(worktreePath),
+        planDirectory(home, worktreePath),
         "orchestration-checkpoints.json"
       ),
       "utf8"
@@ -195,12 +274,7 @@ test("a stopped worker stays interrupted across restart and retries from its che
     readFileSync(join(first.home, "jingler", "sessions.json"), "utf8")
   )
   const worktreePath = sessions[0].worktreePath as string
-  const planDir = join(
-    first.home,
-    "jingler",
-    ".jingler",
-    basename(worktreePath)
-  )
+  const planDir = planDirectory(first.home, worktreePath)
   const checkpointFile = join(
     planDir,
     "orchestration-checkpoints.json"

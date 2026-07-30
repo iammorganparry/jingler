@@ -135,6 +135,21 @@ describe("Composer Jingler toggle", () => {
     expect(onToggle).toHaveBeenCalledWith(false)
   })
 
+  it("disables the Jingler toggle while its chat setting is being persisted", () => {
+    render(
+      <Composer
+        cli="claude"
+        model="opus"
+        catalog={catalog}
+        showJinglerToggle
+        jinglerMode
+        jinglerModePending
+      />
+    )
+    expect(jinglerButton()).toHaveProperty("disabled", true)
+    expect(jinglerButton()?.getAttribute("aria-busy")).toBe("true")
+  })
+
   it("never renders the toggle on a plain (non-orchestrator) chat", () => {
     render(<Composer cli="claude" model="opus" catalog={catalog} />)
     expect(jinglerButton()).toBeUndefined()

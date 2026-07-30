@@ -6,7 +6,7 @@ import type { Attachment } from "@jingler/core"
  * Where a transcript thumbnail gets its bytes, when the transcript did not carry
  * them.
  *
- * `Sessions.transcript` returns image attachments with `data` empty on purpose:
+ * `Sessions.transcriptPage` returns image attachments with `data` empty on purpose:
  * across the six largest transcripts on a real install, `Image` parts were 80%
  * of all bytes and `Text` was 1.5%, so loading a session meant pulling a
  * session's worth of base64 screenshots into the renderer and holding them for

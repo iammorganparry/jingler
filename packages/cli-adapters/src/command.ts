@@ -84,6 +84,49 @@ export const runGit = (
   )
 
 /**
+ * Run a read-only `git diff` command.
+ *
+ * Git exits 1 when `--no-index` finds differences. That is a successful diff,
+ * not an execution failure, so this variant accepts both 0 and 1 while retaining
+ * `runGit`'s stderr-rich failures for every other exit.
+ */
+export const runGitDiff = (
+  cwd: string,
+  args: ReadonlyArray<string>
+): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const proc = yield* Command.make("git", ...args).pipe(
+        Command.workingDirectory(cwd),
+        Command.start
+      )
+      const [stdout, stderr, exitCode] = yield* Effect.all(
+        [decodeStream(proc.stdout), decodeStream(proc.stderr), proc.exitCode],
+        { concurrency: 3 }
+      )
+      if (exitCode !== 0 && exitCode !== 1) {
+        const detail =
+          stderr.trim() ||
+          stdout.trim() ||
+          `git ${args.join(" ")} exited ${exitCode}`
+        return yield* Effect.fail(new GitError({ message: detail }))
+      }
+      return stdout.trim()
+    })
+  ).pipe(
+    Effect.catchAll((error) =>
+      error instanceof GitError
+        ? Effect.fail(error)
+        : Effect.fail(
+            new GitError({
+              message: `git ${args.join(" ")} failed`,
+              cause: error
+            })
+          )
+    )
+  )
+
+/**
  * The shared body of `runGh` / `runGhInput`: run `gh` in `cwd`, capture both
  * streams, and FAIL with `GhError` on a non-zero exit. `input`, when non-null,
  * is fed to the process on stdin.

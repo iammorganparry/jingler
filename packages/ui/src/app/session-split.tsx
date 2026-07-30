@@ -41,6 +41,8 @@ export interface SessionSplitProps {
    * here would drag the RPC client into the component library.
    */
   renderChatTabs?: (session: Session) => ReactNode
+  /** Rename a session from its pane title. */
+  onRenameSession?: (id: string, title: string) => void
   planSessions?: ReadonlySet<string>
   liveActivity?: Record<string, SessionActivity>
   liveDiff?: Record<string, DiffStat>
@@ -103,6 +105,7 @@ export function SessionSplit(props: SessionSplitProps) {
         renderConversation={props.renderConversation}
         conversationPane={props.conversationPane}
         renderChatTabs={props.renderChatTabs}
+        onRenameSession={props.onRenameSession}
         planSessions={props.planSessions}
         liveActivity={props.liveActivity}
         liveDiff={props.liveDiff}

@@ -6,7 +6,7 @@
  * the Plan tab does NOT unmount the agent stream (which would abort a parked plan).
  */
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import type { Session } from "@jingler/core"
 import { agentChildren, agentPath, clampFontScale } from "@jingler/core"
 import {
@@ -120,23 +120,21 @@ export function ConversationPane({
    * handing off is to escape this chat's setup. Null when they've never set one,
    * which means "leave the new chat on whatever it starts with".
    */
-  const queryClient = useQueryClient()
   const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
-  // The agentic orchestrator flow ("Jingler mode"). Global config, default ON —
-  // the toggle lives on the orchestrator composer. Off, the orchestrator chat
-  // runs as a plain chat on the source harness (see agent-runner's `orchestrating`).
-  const jinglerMode = providersQuery.data?.orchestratorEnabled ?? true
+  // The agentic orchestrator flow ("Jingler mode"). The persisted choice belongs
+  // to this chat; the workspace setting is only the backward-compatible default.
+  const jinglerMode =
+    activeChat.orchestratorEnabled ??
+    providersQuery.data?.orchestratorEnabled ??
+    true
+  const jinglerModeMutation = useMutation({
+    mutationFn: (enabled: boolean) =>
+      rpc.sessionsSetOrchestratorEnabled(session.id, activeChat.id, enabled),
+    onSuccess: publishSessionUpdate
+  })
   const toggleJinglerMode = (enabled: boolean) => {
-    // Optimistic: paint the toggle immediately, then persist. The RPC returns the
-    // whole config, so the cache is refreshed from the source of truth on resolve.
-    queryClient.setQueryData(
-      ["config"],
-      providersQuery.data ? { ...providersQuery.data, orchestratorEnabled: enabled } : undefined
-    )
-    void rpc
-      .configSetOrchestratorEnabled(enabled)
-      .then((config) => queryClient.setQueryData(["config"], config))
-      .catch(() => queryClient.invalidateQueries({ queryKey: ["config"] }))
+    jinglerModeMutation.reset()
+    jinglerModeMutation.mutate(enabled)
   }
   // Conversation text-size multiplier, scoped to the transcript wrapper below via
   // a `--sb-font-scale` CSS var. Set HERE rather than on document.documentElement
@@ -338,7 +336,7 @@ export function ConversationPane({
   // effective selection so a finished (auto-removed) sub-agent falls back to Main
   // without an effect — its tab and view disappear together.
   /**
-   * Fetch one transcript image's bytes. `Sessions.transcript` leaves them out —
+   * Fetch one transcript image's bytes. `Sessions.transcriptPage` leaves them out —
    * they are 80% of a transcript's weight — so a thumbnail asks for them when it
    * mounts, which in a virtualized list means the few on screen.
    *
@@ -570,6 +568,26 @@ export function ConversationPane({
           }}
         />
       )}
+      {jinglerModeMutation.error !== null && (
+        <div
+          role="alert"
+          className="flex flex-none items-center gap-2 border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red"
+        >
+          <span className="min-w-0 flex-1">
+            {jinglerModeMutation.error instanceof Error
+              ? jinglerModeMutation.error.message
+              : "Could not update Jingler mode."}
+          </span>
+          <button
+            type="button"
+            aria-label="Dismiss Jingler mode error"
+            onClick={() => jinglerModeMutation.reset()}
+            className="flex-none rounded px-1 text-red outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {activeAgentTranscript !== null ? (
         <AgentView agent={activeAgentTranscript} />
       ) : (
@@ -655,6 +673,7 @@ export function ConversationPane({
           focusKey={activeChat.id}
           orchestrator={activeChat.role === "orchestrator"}
           jinglerMode={jinglerMode}
+          jinglerModePending={jinglerModeMutation.isPending}
           onToggleJinglerMode={toggleJinglerMode}
           archived={
             session.archived

@@ -53,6 +53,8 @@ export interface SessionConversationProps {
   slotBySession?: ReadonlyMap<string, number>
   /** Manually rename a session (double-click its sidebar title). */
   onRenameSession?: (id: string, title: string) => void
+  /** Promote or demote a session from the persistent tray. */
+  onSetSessionPersistent?: (id: string, persistent: boolean) => void
   /** Archive an active session from the sidebar quick-actions (undoable). */
   onArchiveSession?: (id: string) => void
   /** Restore an archived session from the sidebar quick-actions. */
@@ -198,6 +200,7 @@ export function SessionConversation(props: SessionConversationProps) {
         onSplitWith={props.onSplitGroupWith}
         onSelect={props.onSelectSession}
         onRename={props.onRenameSession}
+        onSetPersistent={props.onSetSessionPersistent}
         onArchive={props.onArchiveSession}
         onRestore={props.onRestoreSession}
         onDelete={props.onDeleteSession}
@@ -241,6 +244,7 @@ export function SessionConversation(props: SessionConversationProps) {
             renderConversation={props.renderConversation}
             conversationPane={props.conversationPane}
             renderChatTabs={props.renderChatTabs}
+            onRenameSession={props.onRenameSession}
             planSessions={props.planSessions}
             liveActivity={props.liveActivity}
             liveDiff={props.liveDiff}

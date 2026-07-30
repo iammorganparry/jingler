@@ -1,5 +1,11 @@
 import type { Message } from "@jingler/core"
-import { GitError, buildTitlePrompt, cleanTitle, fallbackTitle } from "@jingler/core"
+import {
+  GitError,
+  buildTitlePrompt,
+  cleanTitle,
+  fallbackTitle,
+  workspaceModeOf
+} from "@jingler/core"
 import { Effect } from "effect"
 import { SessionStore, taskSlug } from "./sessions.js"
 import { GitService } from "./git.js"
@@ -76,6 +82,12 @@ export const retitleSession = (sessionId: string, gen: TitleGenerator) =>
     if (session.autoTitle !== true) return session
     const messages = yield* TranscriptStore.list(sessionId).pipe(Effect.orElseSucceed(() => []))
     const title = yield* gen.generate(messages)
+    // A direct session never owns a task branch. Retitling still updates its
+    // display name, but branch creation belongs exclusively to linked worktrees.
+    if (workspaceModeOf(session) === "direct") {
+      if (title !== session.title) yield* SessionStore.setTitle(sessionId, title)
+      return { ...session, title }
+    }
     if (!session.worktreePath) {
       if (title !== session.title) yield* SessionStore.setTitle(sessionId, title)
       return { ...session, title }

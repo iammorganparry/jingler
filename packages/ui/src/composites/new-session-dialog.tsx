@@ -167,6 +167,7 @@ export function NewSessionDialog({
     title,
     cli,
     base,
+    useWorktree,
     branches,
     search,
     mine,
@@ -347,9 +348,40 @@ export function NewSessionDialog({
                     ))}
                   </SelectContent>
                 </Select>
-                <span className="text-[10.5px] text-dim">
-                  The new worktree forks from this branch.
-                </span>
+                {mode === "blank" ? (
+                  <div className="mt-1 flex flex-col gap-1.5 rounded-md border border-line bg-sunken px-3 py-2.5">
+                    <div className="flex items-center gap-3">
+                      <label
+                        htmlFor="new-session-use-worktree"
+                        className="flex-1 text-[12.5px] font-medium text-text"
+                      >
+                        Use isolated worktree
+                      </label>
+                      <Toggle
+                        id="new-session-use-worktree"
+                        checked={useWorktree}
+                        onCheckedChange={(next) =>
+                          send({ type: "SET_USE_WORKTREE", useWorktree: next })
+                        }
+                        aria-label="Use isolated worktree"
+                      />
+                    </div>
+                    <span
+                      className={cn(
+                        "text-[10.5px] leading-[1.45]",
+                        useWorktree ? "text-dim" : "text-yellow"
+                      )}
+                    >
+                      {useWorktree
+                        ? "Creates an isolated fork of this branch for the session."
+                        : "The agent shares this repository checkout and works directly on the selected branch."}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-[10.5px] text-dim">
+                    The new worktree forks from this branch.
+                  </span>
+                )}
               </div>
             )}
 

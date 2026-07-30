@@ -31,13 +31,14 @@ const makeDeps = (created: CreateSessionInput[]): NewSessionDeps => ({
   onClose: () => {}
 })
 
-const submit = async (title: string) => {
+const submit = async (title: string, useWorktree = true) => {
   const created: CreateSessionInput[] = []
   const deps = makeDeps(created)
   const actor = createActor(newSessionMachine, { input: { getDeps: () => deps } }).start()
   actor.send({ type: "OPEN" })
   await waitFor(actor, (state) => state.context.base === "main")
   actor.send({ type: "SET_TITLE", title })
+  actor.send({ type: "SET_USE_WORKTREE", useWorktree })
   actor.send({ type: "SUBMIT" })
   await waitFor(actor, (state) => state.matches({ submission: "done" }))
   actor.stop()
@@ -56,5 +57,35 @@ describe("newSessionMachine blank session naming", () => {
     const input = await submit("   ")
     expect(input).toBeDefined()
     expect(input).not.toHaveProperty("title")
+  })
+})
+
+describe("newSessionMachine workspace mode", () => {
+  it("seeds isolated worktree creation on every open", () => {
+    const deps = makeDeps([])
+    const actor = createActor(newSessionMachine, {
+      input: { getDeps: () => deps }
+    }).start()
+
+    actor.send({ type: "OPEN" })
+    expect(actor.getSnapshot().context.useWorktree).toBe(true)
+    actor.send({ type: "SET_USE_WORKTREE", useWorktree: false })
+    expect(actor.getSnapshot().context.useWorktree).toBe(false)
+
+    actor.send({ type: "OPEN" })
+    expect(actor.getSnapshot().context.useWorktree).toBe(true)
+    actor.stop()
+  })
+
+  it("submits the default worktree choice", async () => {
+    await expect(submit("Isolated task")).resolves.toMatchObject({
+      useWorktree: true
+    })
+  })
+
+  it("submits direct-checkout creation when switched off", async () => {
+    await expect(submit("Direct task", false)).resolves.toMatchObject({
+      useWorktree: false
+    })
   })
 })

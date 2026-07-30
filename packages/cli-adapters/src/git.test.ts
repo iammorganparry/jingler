@@ -154,6 +154,38 @@ describe("GitService.createWorktree", () => {
     expect(exit.value.baseBranch).toBe("feature-x")
   })
 
+  it("switchBranch moves the primary checkout without creating a task branch or worktree", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "direct"), { branches: ["feature-x"] })
+    const registeredPaths = () =>
+      execFileSync("git", ["worktree", "list", "--porcelain"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      })
+        .split("\n")
+        .filter((line) => line.startsWith("worktree "))
+    const before = registeredPaths()
+
+    const exit = await runExit(
+      GitService.switchBranch(repoPath, "feature-x").pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    expect(
+      execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe("feature-x")
+    expect(registeredPaths()).toStrictEqual(before)
+    expect(
+      execFileSync("git", ["branch", "--list", "jingler/*"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe("")
+  })
+
   it("createDetachedWorktree reclaims a leftover worktree at the same path (retry-safe)", async () => {
     const repoPath = initGitRepo(join(repos.dir, "retry"))
     const detached = () =>

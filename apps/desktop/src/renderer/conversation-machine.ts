@@ -52,7 +52,14 @@ import {
   supportsSteer,
   userMessage
 } from "@jingler/core"
-import { assign, fromCallback, fromPromise, setup } from "xstate"
+import {
+  assign,
+  fromCallback,
+  fromPromise,
+  setup,
+  spawnChild,
+  stopChild
+} from "xstate"
 import { rpc } from "./rpc-client.js"
 import { publishSessionUpdate } from "./session-updates.js"
 
@@ -155,6 +162,8 @@ export interface ConversationContext {
   /** A revision/persistence refusal from the most recent live approval attempt. */
   readonly planActionError: string | null
   readonly sharedPlanChatId: string | null
+  /** Canonical plan projected over every transcript page as it is loaded. */
+  readonly sharedPlan: Plan | null
   /** Tokens currently occupying the main agent's context window. */
   readonly tokens: number
   /** Epoch ms the current run started, or null when idle — drives the elapsed timer. */
@@ -187,6 +196,8 @@ export interface ConversationContext {
    * affordance's gate. A session opens with only its tail (see `HISTORY_PAGE_SIZE`).
    */
   readonly hasMoreHistory: boolean
+  /** Opaque store position for the next older page. */
+  readonly historyCursor: string | null
   /** An older-page fetch is in flight; blocks a second and shows the spinner. */
   readonly loadingHistory: boolean
   /** Review progress lives outside an individual harness turn. */
@@ -264,7 +275,12 @@ type ConversationEvent =
   /** "Load earlier": page the next window of older turns onto the front. */
   | { type: "LOAD_OLDER" }
   /** One older page came back — prepend it, or clear the spinner on failure. */
-  | { type: "HISTORY_LOADED"; messages: ReadonlyArray<Message>; hasMore: boolean }
+  | {
+      type: "HISTORY_LOADED"
+      messages: ReadonlyArray<Message>
+      hasMore: boolean
+      cursor: string | null
+    }
 
 /**
  * How many messages a page holds — both the tail loaded on open and each older
@@ -274,13 +290,79 @@ type ConversationEvent =
  */
 const HISTORY_PAGE_SIZE = 200
 
+const projectLoadedPlan = (
+  messages: ReadonlyArray<Message>,
+  plan: Plan | null
+): { readonly messages: ReadonlyArray<Message>; readonly grafted: boolean } => {
+  let grafted = false
+  const projected = messages.map((message) => {
+    const base = settleLoaded(message)
+    if (plan === null) return base
+    const carriesPlan = base.parts.some(
+      (part) => part._tag === "Plan" && part.plan.id === plan.id
+    )
+    if (!carriesPlan) return base
+    grafted = true
+    return {
+      ...base,
+      parts: base.parts.map((part) =>
+        part._tag === "Plan" && part.plan.id === plan.id
+          ? { _tag: "Plan" as const, plan }
+          : part
+      )
+    }
+  })
+  return { messages: projected, grafted }
+}
+
+/**
+ * One cancellable history request. Unlike a Promise launched from `assign`, the
+ * child is stopped with its owning conversation and ignores a late RPC reply.
+ */
+const historyPage = fromCallback<
+  ConversationEvent,
+  { sessionId: string; chatId: string; before: string }
+>(({ input, sendBack }) => {
+  let active = true
+  void rpc
+    .sessionsTranscriptPage(
+      input.sessionId,
+      input.chatId,
+      input.before,
+      HISTORY_PAGE_SIZE
+    )
+    .then((page) => {
+      if (!active) return
+      sendBack({
+        type: "HISTORY_LOADED",
+        messages: page.messages,
+        hasMore: page.hasMore,
+        cursor: page.cursor ?? null
+      })
+    })
+    .catch(() => {
+      if (!active) return
+      sendBack({
+        type: "HISTORY_LOADED",
+        messages: [],
+        hasMore: true,
+        cursor: input.before
+      })
+    })
+  return () => {
+    active = false
+  }
+})
+
 interface LoadedData {
   readonly transcript: ReadonlyArray<Message>
   readonly files: ReadonlyArray<string>
   readonly patch: string
   readonly sharedPlanChatId: string | null
+  readonly sharedPlan: Plan | null
   /** Whether older turns remain on disk before the loaded tail. */
   readonly hasMore: boolean
+  readonly cursor: string | null
 }
 
 /**
@@ -333,25 +415,11 @@ const loadConversation = fromPromise<
   // So a message is passed through BY REFERENCE unless it actually carries the
   // artifact's plan, and whether the graft landed is observed during the walk
   // rather than by re-scanning after it.
-  let grafted = false
   const projectedPlan = artifact === null ? null : planDocumentToPlan(artifact)
-  const settled = rawTranscript.map((message) => {
-    const base = settleLoaded(message)
-    if (artifact === null) return base
-    const carriesPlan = base.parts.some(
-      (part) => part._tag === "Plan" && part.plan.id === artifact.id
-    )
-    if (!carriesPlan) return base
-    grafted = true
-    return {
-      ...base,
-      parts: base.parts.map((part) =>
-        part._tag === "Plan" && part.plan.id === artifact.id
-          ? { _tag: "Plan" as const, plan: projectedPlan! }
-          : part
-      )
-    }
-  })
+  const { messages: settled, grafted } = projectLoadedPlan(
+    rawTranscript,
+    projectedPlan
+  )
   const transcript =
     artifact === null || grafted
       ? settled
@@ -373,7 +441,9 @@ const loadConversation = fromPromise<
     files,
     patch,
     sharedPlanChatId: artifact?.producingChatId ?? null,
-    hasMore: page.hasMore
+    sharedPlan: projectedPlan,
+    hasMore: page.hasMore,
+    cursor: page.cursor ?? null
   }
 })
 
@@ -522,7 +592,14 @@ export const conversationMachine = setup({
     events: {} as ConversationEvent,
     input: {} as { session: Session; chatId?: string }
   },
-  actors: { loadConversation, agentStream, refreshDiff, reviewStream, stopAgent },
+  actors: {
+    loadConversation,
+    historyPage,
+    agentStream,
+    refreshDiff,
+    reviewStream,
+    stopAgent
+  },
   guards: {
     isTerminal: ({ event }) =>
       event.type === "STREAM_EVENT" &&
@@ -563,7 +640,10 @@ export const conversationMachine = setup({
       return context.resumePlanId === null
     },
     /** Older turns remain, and no page is already in flight. */
-    canLoadOlder: ({ context }) => context.hasMoreHistory && !context.loadingHistory,
+    canLoadOlder: ({ context }) =>
+      context.hasMoreHistory &&
+      context.historyCursor !== null &&
+      !context.loadingHistory,
   },
   actions: {
     appendTurns: assign(({ context, event }) => {
@@ -811,7 +891,8 @@ export const conversationMachine = setup({
       if (e._tag === "PlanProposed") {
         return {
           messages: patchLast(context.messages, (last) => applyStreamEvent(last, e)),
-          sharedPlanChatId: context.chatId
+          sharedPlanChatId: context.chatId,
+          sharedPlan: e.plan
         }
       }
       // A `PlanUpdated` addresses a plan by id, and that plan part lives in the
@@ -825,7 +906,8 @@ export const conversationMachine = setup({
             m.parts.some((p) => p._tag === "Plan" && p.plan.id === e.plan.id)
               ? applyStreamEvent(m, e)
               : m
-          )
+          ),
+          sharedPlan: e.plan
         }
       }
       const messages = patchLast(context.messages, (last) => applyStreamEvent(last, e))
@@ -858,23 +940,7 @@ export const conversationMachine = setup({
       return e._tag === "Started" && e.model ? { messages, model: e.model } : { messages }
     }),
     clearSubagents: assign(() => ({ subagents: [] as ReadonlyArray<Subagent> })),
-    /**
-     * Kick off an older-page fetch (fire-and-forget → `HISTORY_LOADED`, the same
-     * shape as `loadCatalog`/`loadSkills`). `loadingHistory` blocks a second and
-     * drives the button's spinner. A failure keeps `hasMore` true so the button
-     * stays offered for a retry; only `applyHistory` clears the spinner.
-     */
-    loadOlderHistory: assign(({ context, self }) => {
-      const before = context.messages[0]?.id
-      if (before === undefined) return {}
-      void rpc
-        .sessionsTranscriptPage(context.session.id, context.chatId, before, HISTORY_PAGE_SIZE)
-        .then((page) =>
-          self.send({ type: "HISTORY_LOADED", messages: page.messages, hasMore: page.hasMore })
-        )
-        .catch(() => self.send({ type: "HISTORY_LOADED", messages: [], hasMore: true }))
-      return { loadingHistory: true }
-    }),
+    markHistoryLoading: assign(() => ({ loadingHistory: true })),
     /**
      * Prepend an older page. No overlap to dedupe — the store returns messages
      * strictly before the cursor. `settleLoaded` because an older turn could have
@@ -882,9 +948,25 @@ export const conversationMachine = setup({
      */
     applyHistory: assign(({ context, event }) => {
       if (event.type !== "HISTORY_LOADED") return {}
+      const projected = projectLoadedPlan(event.messages, context.sharedPlan)
+      const existing =
+        projected.grafted && context.sharedPlan !== null
+          ? context.messages.filter(
+              (message) =>
+                !(
+                  message.id.startsWith("a_shared_plan_") &&
+                  message.parts.some(
+                    (part) =>
+                      part._tag === "Plan" &&
+                      part.plan.id === context.sharedPlan!.id
+                  )
+                )
+            )
+          : context.messages
       return {
-        messages: [...event.messages.map(settleLoaded), ...context.messages],
+        messages: [...projected.messages, ...existing],
         hasMoreHistory: event.hasMore,
+        historyCursor: event.cursor,
         loadingHistory: false
       }
     }),
@@ -1063,7 +1145,8 @@ export const conversationMachine = setup({
           ]
       return {
         messages,
-        sharedPlanChatId: event.producingChatId
+        sharedPlanChatId: event.producingChatId,
+        sharedPlan: event.plan
       }
     }),
     // Plan mode (optimistic + fire-and-forget, like the gate/question actions).
@@ -1324,8 +1407,23 @@ export const conversationMachine = setup({
     // Paging older history races nothing (it only prepends to `messages`), so it
     // lives at the root and works in every state — including `running`, where the
     // operator may scroll back while the agent works.
-    LOAD_OLDER: { guard: "canLoadOlder", actions: "loadOlderHistory" },
-    HISTORY_LOADED: { actions: "applyHistory" }
+    LOAD_OLDER: {
+      guard: "canLoadOlder",
+      actions: [
+        "markHistoryLoading",
+        spawnChild("historyPage", {
+          id: "history-page",
+          input: ({ context }) => ({
+            sessionId: context.session.id,
+            chatId: context.chatId,
+            before: context.historyCursor!
+          })
+        })
+      ]
+    },
+    HISTORY_LOADED: {
+      actions: ["applyHistory", stopChild("history-page")]
+    }
   },
   context: ({ input }) => {
     const persistedChats = input.session.chats ?? []
@@ -1373,6 +1471,7 @@ export const conversationMachine = setup({
       resumePlanRevision: null,
       planActionError: null,
       sharedPlanChatId: null,
+      sharedPlan: null,
       // Rehydrate the last measured working set immediately. ContextManager owns
       // the trigger/phase snapshot, but the view reads this live field for the
       // meter's numerator; starting at zero hid the whole component after every
@@ -1383,6 +1482,7 @@ export const conversationMachine = setup({
       persistedStatus: input.session.status,
       loaded: false,
       hasMoreHistory: false,
+      historyCursor: null,
       loadingHistory: false,
       reviewer: null,
       reviewPhase: "starting",
@@ -1435,7 +1535,9 @@ export const conversationMachine = setup({
                 files: event.output.files,
                 patch: event.output.patch,
                 sharedPlanChatId: event.output.sharedPlanChatId,
+                sharedPlan: event.output.sharedPlan,
                 hasMoreHistory: event.output.hasMore,
+                historyCursor: event.output.cursor,
                 loaded: true
               })),
               "dequeueTurn"
@@ -1448,7 +1550,9 @@ export const conversationMachine = setup({
               files: event.output.files,
               patch: event.output.patch,
               sharedPlanChatId: event.output.sharedPlanChatId,
+              sharedPlan: event.output.sharedPlan,
               hasMoreHistory: event.output.hasMore,
+              historyCursor: event.output.cursor,
               loaded: true
             }))
           }

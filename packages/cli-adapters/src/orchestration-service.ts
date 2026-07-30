@@ -1519,6 +1519,35 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
         })
       }
 
+      /** Stop and await every orchestration worker owned by one session. */
+      const stopSession = (sessionId: string): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          const prefix = `session:${sessionId}:plan:`
+          const ownerIds = new Set<string>()
+          for (const ownerId of (yield* Ref.get(liveAdapterFibers)).keys()) {
+            if (ownerId.startsWith(prefix)) ownerIds.add(ownerId)
+          }
+          for (const ownerId of (yield* Ref.get(workerSettled)).keys()) {
+            if (ownerId.startsWith(prefix)) ownerIds.add(ownerId)
+          }
+          yield* Effect.forEach(
+            ownerIds,
+            (ownerId) =>
+              Effect.gen(function* () {
+                yield* Ref.update(
+                  cancelled,
+                  (current) => new Set(current).add(ownerId)
+                )
+                yield* adapter.stop(ownerId).pipe(Effect.ignore)
+                const fiber = (yield* Ref.get(liveAdapterFibers)).get(ownerId)
+                if (fiber !== undefined) yield* Fiber.interrupt(fiber)
+                const settled = (yield* Ref.get(workerSettled)).get(ownerId)
+                if (settled !== undefined) yield* Deferred.await(settled)
+              }),
+            { discard: true }
+          )
+        })
+
       const isPlanRunning = (
         sessionId: string,
         planId: string
@@ -1530,6 +1559,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
       return {
         execute,
         stopWorker,
+        stopSession,
         isPlanRunning,
         watch,
         activityFeedCount
