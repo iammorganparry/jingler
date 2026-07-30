@@ -98,8 +98,11 @@ export const codexMcpOverrides = (
   for (const entry of uniqueRemoteMcpServers(entries)) {
     overrides.push(`mcp_servers.${entry.name}.url=${JSON.stringify(entry.url)}`)
     for (const [key, value] of Object.entries(entry.headers)) {
+      const environmentName = entry.headerEnvironment?.[key]
       overrides.push(
-        `mcp_servers.${entry.name}.http_headers.${key}=${JSON.stringify(value)}`
+        environmentName === undefined
+          ? `mcp_servers.${entry.name}.http_headers.${key}=${JSON.stringify(value)}`
+          : `mcp_servers.${entry.name}.env_http_headers.${key}=${JSON.stringify(environmentName)}`
       )
     }
   }
@@ -107,26 +110,48 @@ export const codexMcpOverrides = (
 }
 
 /**
- * The opencode `mcp` config fragment to merge into `OPENCODE_CONFIG_CONTENT`:
- * `{ mcp: { <name>: { type: "remote", url, enabled, headers? }, … } }`. Empty
- * when absent, so spreading it is a no-op.
+ * Secret environment variables referenced by `codexMcpOverrides`. The
+ * environment exists only for this app-server process and keeps bearer values
+ * out of command-line arguments.
  */
-export const opencodeMcpConfig = (
+export const codexMcpEnvironment = (
   entries: ReadonlyArray<RemoteMcpServer> | null | undefined
-): Record<string, unknown> => {
-  const unique = uniqueRemoteMcpServers(entries)
-  if (unique.length === 0) return {}
-  return {
-    mcp: Object.fromEntries(
-      unique.map((entry) => [
-        entry.name,
-        {
-          type: "remote",
-          url: entry.url,
-          enabled: true,
-          ...(Object.keys(entry.headers).length > 0 ? { headers: entry.headers } : {})
+): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    uniqueRemoteMcpServers(entries).flatMap((entry) =>
+      Object.entries(entry.headerEnvironment ?? {}).flatMap(
+        ([header, environmentName]) => {
+          const value = entry.headers[header]
+          return value === undefined ? [] : [[environmentName, value] as const]
         }
-      ])
+      )
     )
+  )
+
+export interface OpencodeMcpEntry {
+  readonly name: string
+  readonly config: {
+    readonly type: "remote"
+    readonly url: string
+    readonly enabled: true
+    readonly headers?: Readonly<Record<string, string>>
   }
 }
+
+/**
+ * OpenCode remote MCP registrations for its authenticated, process-local API.
+ * They are added after startup so bearer values never enter the child process's
+ * inheritable `OPENCODE_CONFIG_CONTENT` environment.
+ */
+export const opencodeMcpEntries = (
+  entries: ReadonlyArray<RemoteMcpServer> | null | undefined
+): ReadonlyArray<OpencodeMcpEntry> =>
+  uniqueRemoteMcpServers(entries).map((entry) => ({
+    name: entry.name,
+    config: {
+      type: "remote",
+      url: entry.url,
+      enabled: true,
+      ...(Object.keys(entry.headers).length > 0 ? { headers: entry.headers } : {})
+    }
+  }))

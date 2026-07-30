@@ -30,6 +30,12 @@ export interface RemoteMcpServer {
   readonly name: string
   readonly url: string
   readonly headers: Readonly<Record<string, string>>
+  /**
+   * Optional header-to-environment-name map for harnesses that can resolve
+   * secret headers from their launch environment instead of exposing values in
+   * command-line arguments.
+   */
+  readonly headerEnvironment?: Readonly<Record<string, string>>
 }
 
 /** Parameters for starting a new agent turn against a CLI. */

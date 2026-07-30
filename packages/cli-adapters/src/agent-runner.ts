@@ -1169,10 +1169,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             Effect.orElseSucceed(() => null)
           )
 
-          // The app-scoped service exposes the same authenticated loopback HTTP
-          // attachment to every harness. It is launch-only data: compose it here,
-          // hand it to the adapter, and never write it to a store.
-          const browserAttachment = (yield* BrowserControlMcpService).attachment
+          // The app-scoped service exposes one native Preview view, so browser
+          // control is leased exclusively for this run. The scoped lease revokes
+          // its bearer when the run stream completes; a concurrent run continues
+          // normally without the internal browser attachment.
+          const browserAttachment = yield* (
+            yield* BrowserControlMcpService
+          ).acquire(`${sessionId}:${chatId}`)
           const remoteMcpServers = composeRemoteMcpServers(
             remoteMcpServer(openConnectorServer),
             browserAttachment

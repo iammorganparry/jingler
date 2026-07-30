@@ -2,18 +2,20 @@ import { randomBytes, timingSafeEqual } from "node:crypto"
 import {
   createServer,
   type IncomingMessage,
+  type RequestListener,
   type Server,
   type ServerResponse
 } from "node:http"
 import type { AddressInfo } from "node:net"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
-import { Context, Data, Effect, Layer, type Scope } from "effect"
+import { Context, Data, Effect, Layer, Runtime, type Scope } from "effect"
 import { BROWSER_MCP_NAME, buildBrowserControlMcp } from "./browser-control-mcp.js"
 import { BrowserControlPort, type BrowserControlPortShape } from "./browser-control-port.js"
 
 const LOOPBACK_HOST = "127.0.0.1"
 const MCP_PATH = "/mcp"
 const AUTH_HEADER = "Authorization"
+export const BROWSER_MCP_AUTH_ENV = "JINGLER_BROWSER_MCP_AUTHORIZATION"
 
 export interface BrowserControlMcpRequestMetadata {
   readonly host: string | undefined
@@ -63,7 +65,7 @@ const pathOf = (request: IncomingMessage): string =>
 export const browserControlMcpRequestRejection = (
   request: BrowserControlMcpRequestMetadata,
   expectedHost: string,
-  expectedAuthorization: string
+  expectedAuthorization: string | null
 ): BrowserControlMcpRequestRejection | null => {
   if (request.host !== expectedHost) {
     return {
@@ -73,7 +75,10 @@ export const browserControlMcpRequestRejection = (
     }
   }
 
-  if (!sameSecret(request.authorization, expectedAuthorization)) {
+  if (
+    expectedAuthorization === null ||
+    !sameSecret(request.authorization, expectedAuthorization)
+  ) {
     return {
       status: 401,
       code: -32_001,
@@ -101,7 +106,7 @@ export const browserControlMcpRequestRejection = (
 interface HandleMcpRequestOptions {
   readonly browser: BrowserControlPortShape
   readonly expectedHost: string
-  readonly authorization: string
+  readonly authorization: () => string | null
   readonly request: IncomingMessage
   readonly response: ServerResponse
 }
@@ -121,7 +126,7 @@ const handleMcpRequest = async ({
       method: request.method
     },
     expectedHost,
-    authorization
+    authorization()
   )
   if (rejection !== null) {
     jsonError(response, rejection)
@@ -243,14 +248,22 @@ export interface BrowserControlMcpAttachment {
   readonly name: typeof BROWSER_MCP_NAME
   readonly url: string
   readonly headers: Readonly<Record<string, string>>
+  /**
+   * Header values that Codex should resolve from its process environment instead
+   * of exposing in `-c` argv. The process receives the value only for this run.
+   */
+  readonly headerEnvironment: Readonly<Record<string, string>>
 }
 
 export interface BrowserControlMcpServiceShape {
   /**
-   * Null when loopback binding failed. Ordinary sessions continue without the
-   * internal browser MCP attachment.
+   * Acquire exclusive browser control for one run. Null means the listener is
+   * unavailable or another run currently owns the single native Preview view.
+   * The bearer is revoked automatically with the caller's Effect scope.
    */
-  readonly attachment: BrowserControlMcpAttachment | null
+  readonly acquire: (
+    ownerId: string
+  ) => Effect.Effect<BrowserControlMcpAttachment | null, never, Scope.Scope>
 }
 
 export class BrowserControlMcpService extends Context.Tag("@jingler/BrowserControlMcpService")<
@@ -263,65 +276,100 @@ export interface BrowserControlMcpServiceOptions {
   readonly port?: number
   /** In-process test seam; production always uses the scoped Node listener below. */
   readonly acquireListener?: BrowserControlMcpListenerAcquirer
+  /** Test seam for emitting a post-listen Server error on the real lifecycle path. */
+  readonly serverFactory?: BrowserControlMcpServerFactory
 }
+
+export interface BrowserControlMcpListener {
+  readonly port: number
+  readonly isAvailable: () => boolean
+}
+
+export type BrowserControlMcpServerFactory = (listener: RequestListener) => Server
 
 export type BrowserControlMcpListenerAcquirer = (
   browser: BrowserControlPortShape,
-  authorization: string,
+  authorization: () => string | null,
   port: number
-) => Effect.Effect<number, BrowserControlMcpStartupError, Scope.Scope>
+) => Effect.Effect<BrowserControlMcpListener, BrowserControlMcpStartupError, Scope.Scope>
 
-const acquireNodeListener: BrowserControlMcpListenerAcquirer = (
-  browser,
-  authorization,
-  port
-) =>
-  Effect.gen(function* () {
-    let expectedHost = ""
-    const server = yield* Effect.try({
-      try: () =>
-        createServer((request, response) => {
-          handleMcpRequest({
-            browser,
-            expectedHost,
-            authorization,
-            request,
-            response
-          }).catch((cause) => {
-            if (!response.headersSent) {
-              jsonError(response, {
-                status: 500,
-                code: -32_603,
-                message: "Internal server error."
-              })
-            } else if (cause instanceof Error) {
-              response.destroy(cause)
-            } else {
-              response.destroy()
-            }
+const nodeServerFactory: BrowserControlMcpServerFactory = (listener) =>
+  createServer(listener)
+
+const acquireNodeListener = (
+  serverFactory: BrowserControlMcpServerFactory
+): BrowserControlMcpListenerAcquirer =>
+  (browser, authorization, port) =>
+    Effect.gen(function* () {
+      let expectedHost = ""
+      const server = yield* Effect.try({
+        try: () =>
+          serverFactory((request, response) => {
+            handleMcpRequest({
+              browser,
+              expectedHost,
+              authorization,
+              request,
+              response
+            }).catch((cause) => {
+              if (!response.headersSent) {
+                jsonError(response, {
+                  status: 500,
+                  code: -32_603,
+                  message: "Internal server error."
+                })
+              } else if (cause instanceof Error) {
+                response.destroy(cause)
+              } else {
+                response.destroy()
+              }
+            })
+          }),
+        catch: (cause) =>
+          new BrowserControlMcpStartupError({
+            message: "Browser MCP listener could not be created.",
+            cause
           })
-        }),
-      catch: (cause) =>
-        new BrowserControlMcpStartupError({
-          message: "Browser MCP listener could not be created.",
-          cause
-        })
+      })
+
+      const listener = yield* listen(server, port)
+      const address = yield* addressInfo(listener)
+      expectedHost = `${LOOPBACK_HOST}:${address.port}`
+
+      let available = true
+      const runtime = yield* Effect.runtime<never>()
+      const onLifetimeError = (cause: Error): void => {
+        available = false
+        Runtime.runFork(runtime)(
+          Effect.logError(`Browser MCP listener stopped after startup: ${cause.message}`)
+        )
+        try {
+          listener.close()
+          listener.closeAllConnections()
+        } catch {
+          // The error may already have closed the listener.
+        }
+      }
+      listener.on("error", onLifetimeError)
+      yield* Effect.addFinalizer(() =>
+        closeListener(listener).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              listener.off("error", onLifetimeError)
+            })
+          )
+        )
+      )
+
+      return {
+        port: address.port,
+        isAvailable: () => available && listener.listening
+      }
     })
 
-    const listener = yield* Effect.acquireRelease(listen(server, port), closeListener)
-    const address = yield* addressInfo(listener)
-    expectedHost = `${LOOPBACK_HOST}:${address.port}`
-    return address.port
-  })
-
-const acquireAttachment = (
-  browser: BrowserControlPortShape,
-  options: BrowserControlMcpServiceOptions
-): Effect.Effect<
-  BrowserControlMcpAttachment,
-  BrowserControlMcpStartupError,
-  Scope.Scope
-> =>
+const createAttachment = (
+  listenerPort: number
+): Effect.Effect<BrowserControlMcpAttachment, BrowserControlMcpStartupError> =>
   Effect.gen(function* () {
     const token = yield* Effect.try({
       try: () => randomBytes(32).toString("base64url"),
@@ -332,17 +380,13 @@ const acquireAttachment = (
         })
     })
     const authorization = `Bearer ${token}`
-    const listenerPort = yield* (options.acquireListener ?? acquireNodeListener)(
-      browser,
-      authorization,
-      options.port ?? 0
-    )
     const expectedHost = `${LOOPBACK_HOST}:${listenerPort}`
 
     return {
       name: BROWSER_MCP_NAME,
       url: `http://${expectedHost}${MCP_PATH}`,
-      headers: { [AUTH_HEADER]: authorization }
+      headers: { [AUTH_HEADER]: authorization },
+      headerEnvironment: { [AUTH_HEADER]: BROWSER_MCP_AUTH_ENV }
     }
   })
 
@@ -353,12 +397,53 @@ export const makeBrowserControlMcpServiceLayer = (
     BrowserControlMcpService,
     Effect.gen(function* () {
       const browser = yield* BrowserControlPort
-      const attachment = yield* acquireAttachment(browser, options).pipe(
+      let activeAttachment: BrowserControlMcpAttachment | null = null
+      const listener = yield* (
+        options.acquireListener ??
+        acquireNodeListener(options.serverFactory ?? nodeServerFactory)
+      )(
+        browser,
+        () => activeAttachment?.headers[AUTH_HEADER] ?? null,
+        options.port ?? 0
+      ).pipe(
         Effect.catchAll((error) =>
-          Effect.logWarning(error.message).pipe(Effect.as<BrowserControlMcpAttachment | null>(null))
+          Effect.logWarning(error.message).pipe(
+            Effect.as<BrowserControlMcpListener | null>(null)
+          )
         )
       )
-      return BrowserControlMcpService.of({ attachment })
+
+      const acquire = (
+        ownerId: string
+      ): Effect.Effect<BrowserControlMcpAttachment | null, never, Scope.Scope> =>
+        Effect.acquireRelease(
+          Effect.gen(function* () {
+            if (
+              listener === null ||
+              !listener.isAvailable() ||
+              activeAttachment !== null
+            ) {
+              return null
+            }
+            const attachment = yield* createAttachment(listener.port)
+            activeAttachment = attachment
+            return attachment
+          }).pipe(
+            Effect.catchAll((error) =>
+              Effect.logWarning(
+                `Browser MCP lease for ${ownerId} could not be created: ${error.message}`
+              ).pipe(Effect.as<BrowserControlMcpAttachment | null>(null))
+            )
+          ),
+          (attachment) =>
+            Effect.sync(() => {
+              if (attachment !== null && activeAttachment === attachment) {
+                activeAttachment = null
+              }
+            })
+        )
+
+      return BrowserControlMcpService.of({ acquire })
     })
   )
 

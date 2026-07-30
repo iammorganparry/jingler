@@ -51,15 +51,27 @@ export interface PreviewDockViewProps {
   dock: PreviewDockPrefs
 }
 
+interface BrowserNavigation {
+  readonly url: string
+  readonly source: "operator" | "agent"
+}
+
 export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
-  const [url, setUrl] = useState(DEFAULT_URL)
+  const [navigation, setNavigation] = useState<BrowserNavigation>({
+    url: DEFAULT_URL,
+    source: "operator"
+  })
+  const { url } = navigation
   // Agent browser tools navigate the native view in main, outside this
   // component's normal address-bar flow. Mirror that authoritative URL into the
-  // visible chrome whenever main reveals the driven browser.
+  // visible chrome whenever main reveals the driven browser. The source marker
+  // prevents BrowserBody from treating that state sync as a second navigation.
   useEffect(
     () =>
       window.jingler.onPreviewReveal((revealedUrl) => {
-        if (revealedUrl.length > 0) setUrl(revealedUrl)
+        if (revealedUrl.length > 0) {
+          setNavigation({ url: revealedUrl, source: "agent" })
+        }
       }),
     []
   )
@@ -72,11 +84,11 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
   const renderTab = useCallback(
     (tab: PreviewTab, active: boolean) =>
       tab.kind === "browser" ? (
-        <BrowserBody url={url} session={session} nativeWanted={nativeWanted} />
+        <BrowserBody navigation={navigation} session={session} nativeWanted={nativeWanted} />
       ) : (
         <AssetTab tabId={tab.id} assets={dock.assets} active={active} dockVisible={dock.visible} />
       ),
-    [url, session, nativeWanted, dock.assets, dock.visible]
+    [navigation, session, nativeWanted, dock.assets, dock.visible]
   )
 
   return (
@@ -90,7 +102,7 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
       onSelect={dock.select}
       onClose={dock.close}
       url={url}
-      onNavigate={setUrl}
+      onNavigate={(nextUrl) => setNavigation({ url: nextUrl, source: "operator" })}
       onReload={() => void rpc.browserPreviewReload()}
       renderTab={renderTab}
     />
@@ -102,14 +114,15 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
  * plus the effects that keep the two in sync.
  */
 function BrowserBody({
-  url,
+  navigation,
   session,
   nativeWanted
 }: {
-  url: string
+  navigation: BrowserNavigation
   session: Session | null
   nativeWanted: boolean
 }) {
+  const { url } = navigation
   // The URL last loaded into the native view (via open OR navigate), so a URL
   // change navigates IN PLACE instead of tearing the view down. Held in a ref so
   // it doesn't drive the lifecycle effects below.
@@ -158,8 +171,9 @@ function BrowserBody({
   useEffect(() => {
     if (!nativeWanted || loadedUrl.current === null || loadedUrl.current === url) return
     loadedUrl.current = url
+    if (navigation.source === "agent") return
     void rpc.browserPreviewNavigate(url).catch(() => {})
-  }, [nativeWanted, url])
+  }, [nativeWanted, navigation, url])
 
   const empty = useMemo(
     () => (

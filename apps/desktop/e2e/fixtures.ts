@@ -381,14 +381,18 @@ const browserMcpTarget = (input) => {
 }
 const browserMcpRequest = async (id, method, params, protocolVersion) => {
   const url = configOverride("mcp_servers.jingler-browser.url")
-  const authorization = configOverride(
-    "mcp_servers.jingler-browser.http_headers.Authorization"
+  const authorizationEnvironment = configOverride(
+    "mcp_servers.jingler-browser.env_http_headers.Authorization"
   )
+  const authorization =
+    typeof authorizationEnvironment === "string"
+      ? process.env[authorizationEnvironment]
+      : undefined
   if (typeof url !== "string" || url.length === 0) {
     throw new Error("Codex launch is missing the jingler-browser URL override")
   }
   if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
-    throw new Error("Codex launch is missing the jingler-browser Authorization override")
+    throw new Error("Codex launch is missing the jingler-browser Authorization environment")
   }
   const headers = {
     Accept: "application/json, text/event-stream",

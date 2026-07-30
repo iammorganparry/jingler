@@ -1,14 +1,16 @@
 import { createServer, request as httpRequest, type Server } from "node:http"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, type Scope } from "effect"
 import { describe, expect, it } from "vitest"
 import {
   browserControlMcpRequestRejection,
   BrowserControlMcpService,
   BrowserControlMcpStartupError,
   makeBrowserControlMcpServiceLayer,
+  type BrowserControlMcpAttachment,
   type BrowserControlMcpListenerAcquirer,
+  type BrowserControlMcpServerFactory,
   type BrowserControlMcpServiceOptions,
   type BrowserControlMcpServiceShape
 } from "./browser-control-mcp-service.js"
@@ -30,16 +32,18 @@ const stubPort = (over: Partial<BrowserControlPortShape> = {}): BrowserControlPo
   ...over
 })
 
-const runWithService = <A>(
+const runWithServiceEffect = <A>(
   browser: BrowserControlPortShape,
-  use: (service: BrowserControlMcpServiceShape) => Promise<A>,
+  use: (
+    service: BrowserControlMcpServiceShape
+  ) => Effect.Effect<A, never, Scope.Scope>,
   options: BrowserControlMcpServiceOptions = {}
 ): Promise<A> =>
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
         const service = yield* BrowserControlMcpService
-        return yield* Effect.promise(() => use(service))
+        return yield* use(service)
       }).pipe(
         Effect.provide(
           makeBrowserControlMcpServiceLayer(options).pipe(
@@ -48,6 +52,21 @@ const runWithService = <A>(
         )
       )
     )
+  )
+
+const runWithLease = <A>(
+  browser: BrowserControlPortShape,
+  use: (attachment: BrowserControlMcpAttachment | null) => Promise<A>,
+  options: BrowserControlMcpServiceOptions = {}
+): Promise<A> =>
+  runWithServiceEffect(
+    browser,
+    (service) =>
+      Effect.gen(function* () {
+        const attachment = yield* service.acquire("test-run")
+        return yield* Effect.promise(() => use(attachment))
+      }),
+    options
   )
 
 const startListener = async (port = 0): Promise<{ readonly server: Server; readonly port: number }> => {
@@ -103,13 +122,13 @@ loopbackDescribe("BrowserControlMcpService authenticated loopback", () => {
   it("serves the native browser MCP to an authenticated standard client", async () => {
     const navigated: Array<string> = []
 
-    await runWithService(
+    await runWithLease(
       stubPort({
         navigate: async (url) => {
           navigated.push(url)
         }
       }),
-      async ({ attachment }) => {
+      async (attachment) => {
         expect(attachment).not.toBeNull()
         if (attachment === null) throw new Error("Browser MCP listener was unavailable")
 
@@ -146,7 +165,7 @@ loopbackDescribe("BrowserControlMcpService authenticated loopback", () => {
 
 loopbackDescribe("BrowserControlMcpService loopback security", () => {
   it("rejects missing, incorrect, and invalid-host credentials with JSON errors", async () => {
-    await runWithService(stubPort(), async ({ attachment }) => {
+    await runWithLease(stubPort(), async (attachment) => {
       expect(attachment).not.toBeNull()
       if (attachment === null) throw new Error("Browser MCP listener was unavailable")
 
@@ -194,12 +213,37 @@ loopbackDescribe("BrowserControlMcpService loopback security", () => {
       expect(attachment.url).not.toContain(secret)
     })
   })
+
+  it("revokes an old bearer when its run scope closes and mints a replacement", async () => {
+    await runWithServiceEffect(stubPort(), (service) =>
+      Effect.gen(function* () {
+        const first = yield* Effect.scoped(service.acquire("first"))
+        expect(first).not.toBeNull()
+        if (first === null) throw new Error("Browser MCP listener was unavailable")
+
+        const revoked = yield* Effect.promise(() =>
+          requestJson(first.url, "POST", first.headers, "{}")
+        )
+        expect(revoked.status).toBe(401)
+
+        const second = yield* service.acquire("second")
+        expect(second).not.toBeNull()
+        if (second === null) throw new Error("Replacement browser lease was unavailable")
+        expect(second.headers.Authorization).not.toBe(first.headers.Authorization)
+
+        const accepted = yield* Effect.promise(() =>
+          requestJson(second.url, "GET", second.headers)
+        )
+        expect(accepted.status).toBe(405)
+      })
+    )
+  })
 })
 
 loopbackDescribe("BrowserControlMcpService loopback disposal", () => {
   it("closes the loopback listener when its Effect scope is disposed", async () => {
     let releasedPort = 0
-    await runWithService(stubPort(), async ({ attachment }) => {
+    await runWithLease(stubPort(), async (attachment) => {
       expect(attachment).not.toBeNull()
       if (attachment === null) throw new Error("Browser MCP listener was unavailable")
       releasedPort = Number(new URL(attachment.url).port)
@@ -228,6 +272,9 @@ describe("BrowserControlMcpService request policy", () => {
         expectedHost,
         expectedAuthorization
       )
+    ).toMatchObject({ status: 401, code: -32_001, message: "Unauthorized." })
+    expect(
+      browserControlMcpRequestRejection(valid, expectedHost, null)
     ).toMatchObject({ status: 401, code: -32_001, message: "Unauthorized." })
     expect(
       browserControlMcpRequestRejection(
@@ -273,20 +320,23 @@ describe("BrowserControlMcpService request policy", () => {
 })
 
 describe("BrowserControlMcpService scoped attachment", () => {
-  it("generates a main-only bearer and releases its listener with the Effect scope", async () => {
+  it("generates a per-run bearer and releases its listener with the Effect scope", async () => {
     let released = false
     const acquireListener: BrowserControlMcpListenerAcquirer = () =>
       Effect.acquireRelease(
-        Effect.succeed(43_210),
+        Effect.succeed({
+          port: 43_210,
+          isAvailable: () => true
+        }),
         () =>
           Effect.sync(() => {
             released = true
           })
       )
 
-    const attachment = await runWithService(
+    const attachment = await runWithLease(
       stubPort(),
-      async (service) => service.attachment,
+      async (lease) => lease,
       { acquireListener }
     )
 
@@ -296,7 +346,32 @@ describe("BrowserControlMcpService scoped attachment", () => {
     expect(secret).toMatch(TOKEN_PATTERN)
     expect(attachment.url).toBe("http://127.0.0.1:43210/mcp")
     expect(attachment.url).not.toContain(secret)
+    expect(attachment.headerEnvironment).toStrictEqual({
+      Authorization: "JINGLER_BROWSER_MCP_AUTHORIZATION"
+    })
     expect(released).toBe(true)
+  })
+
+  it("grants one exclusive lease and rejects a concurrent owner", async () => {
+    const acquireListener: BrowserControlMcpListenerAcquirer = () =>
+      Effect.succeed({
+        port: 43_210,
+        isAvailable: () => true
+      })
+
+    const leases = await runWithServiceEffect(
+      stubPort(),
+      (service) =>
+        Effect.gen(function* () {
+          const first = yield* service.acquire("first")
+          const second = yield* service.acquire("second")
+          return { first, second }
+        }),
+      { acquireListener }
+    )
+
+    expect(leases.first).not.toBeNull()
+    expect(leases.second).toBeNull()
   })
 })
 
@@ -310,9 +385,9 @@ describe("BrowserControlMcpService startup degradation", () => {
         })
       )
 
-    const result = await runWithService(
+    const result = await runWithLease(
       stubPort(),
-      async ({ attachment }) => ({ attachment, ordinarySession: "usable" }),
+      async (attachment) => ({ attachment, ordinarySession: "usable" }),
       { acquireListener }
     )
 
@@ -320,5 +395,30 @@ describe("BrowserControlMcpService startup degradation", () => {
       attachment: null,
       ordinarySession: "usable"
     })
+  })
+
+  it("handles a listener error after startup and disables future leases", async () => {
+    let server: Server | null = null
+    const serverFactory: BrowserControlMcpServerFactory = (listener) => {
+      server = createServer(listener)
+      return server
+    }
+
+    const result = await runWithServiceEffect(
+      stubPort(),
+      (service) =>
+        Effect.gen(function* () {
+          const initial = yield* Effect.scoped(service.acquire("initial"))
+          expect(initial).not.toBeNull()
+          if (server === null) throw new Error("Browser MCP server was not created")
+
+          server.emit("error", new Error("simulated accept failure"))
+          const afterError = yield* service.acquire("after-error")
+          return { afterError }
+        }),
+      { serverFactory }
+    )
+
+    expect(result.afterError).toBeNull()
   })
 })

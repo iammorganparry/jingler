@@ -54,6 +54,7 @@ test("Codex drives the native Preview browser through jingler-browser", async ({
     throw new Error("Browser MCP target server has no TCP address")
   }
   const targetUrl = `http://127.0.0.1:${address.port}/browser-mcp-parity`
+  const initialUrl = `http://127.0.0.1:${address.port}/already-open`
 
   try {
     const { window, codexCalls } = await launchApp({
@@ -64,6 +65,17 @@ test("Codex drives the native Preview browser through jingler-browser", async ({
     })
 
     await expect(appShell(window)).toBeVisible()
+    const previewToggle = window.getByRole("button", { name: "Preview", exact: true })
+    if ((await previewToggle.getAttribute("aria-pressed")) !== "true") {
+      await previewToggle.click()
+    }
+    const previewUrl = window.getByLabel("Preview URL")
+    await previewUrl.fill(initialUrl)
+    await previewUrl.press("Enter")
+    await expect
+      .poll(() => requests.filter((path) => path === "/already-open"))
+      .toHaveLength(1)
+
     const composer = window.getByPlaceholder("Message Codex…")
     await composer.fill(`[[browser-control-mcp=${targetUrl}]] Navigate the operator's Preview.`)
     await composer.press("Enter")
@@ -81,10 +93,13 @@ test("Codex drives the native Preview browser through jingler-browser", async ({
       )
 
     await expect(window.getByRole("button", { name: "Hide preview" })).toBeVisible()
-    await expect(window.getByLabel("Preview URL")).toHaveValue(targetUrl)
+    await expect(previewUrl).toHaveValue(targetUrl)
     await expect
-      .poll(() => requests, { timeout: 10_000 })
-      .toContain("/browser-mcp-parity")
+      .poll(
+        () => requests.filter((path) => path === "/browser-mcp-parity").length,
+        { timeout: 10_000 }
+      )
+      .toBe(1)
   } finally {
     await closeServer(targetServer)
   }

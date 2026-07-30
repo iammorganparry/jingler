@@ -9,7 +9,7 @@ import { hasPlanBlock, parsePlan, PLAN_HTML_REFORMAT } from "./plan-parse.js"
 import { stopChild, trackChild } from "./child-registry.js"
 import { requireWorktree } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
-import { opencodeMcpConfig } from "./mcp-config.js"
+import { opencodeMcpEntries } from "./mcp-config.js"
 
 /**
  * Real opencode harness, driven by `@opencode-ai/sdk`'s CLIENT against a server
@@ -737,10 +737,7 @@ const driveOpencode = async (
         // Layers OVER the user's own opencode config rather than replacing it, so
         // their providers/keys/levers survive and we only pin what this run needs.
         OPENCODE_CONFIG_CONTENT: JSON.stringify({
-          permission: mapOpencodePermission(spec.mode, spec.readOnly ?? false),
-          // Inject every normalized remote server into this process-local config;
-          // no bearer is written to the operator's persistent opencode config.
-          ...opencodeMcpConfig(spec.remoteMcpServers)
+          permission: mapOpencodePermission(spec.mode, spec.readOnly ?? false)
         })
       },
       stdio: ["ignore", "pipe", "pipe"]
@@ -753,6 +750,12 @@ const driveOpencode = async (
   try {
     const url = await waitForServer(proc, signal)
     const client = createOpencodeClient({ baseUrl: url })
+    for (const entry of opencodeMcpEntries(spec.remoteMcpServers)) {
+      await client.mcp.add({
+        body: entry,
+        throwOnError: true
+      })
+    }
 
     let opencodeSessionId: string | null = null
     // Whether the NEXT prompt is a planning one. Starts true in plan mode and

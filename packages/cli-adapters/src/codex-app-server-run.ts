@@ -21,7 +21,7 @@ import {
   createCodexAppServerDiagnostics
 } from "./codex-app-server-diagnostics.js"
 import { stageCodexInput, toCodexAppServerInput } from "./codex-input.js"
-import { codexMcpOverrides } from "./mcp-config.js"
+import { codexMcpEnvironment, codexMcpOverrides } from "./mcp-config.js"
 import { requireWorktree } from "./cwd.js"
 import { hasPlanBlock, parsePlan, PLAN_HTML_REFORMAT } from "./plan-parse.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
@@ -389,7 +389,10 @@ export const runCodexAppServer = (
     yield* Effect.tryPromise({
       try: async () => {
         const cwd = requireWorktree(spec.cwd, `session ${sessionId}`)
-        const env = harnessEnv("codex", worktreeEnv(process.env, cwd), hasSubscriptionAuth("codex"))
+        const env = {
+          ...harnessEnv("codex", worktreeEnv(process.env, cwd), hasSubscriptionAuth("codex")),
+          ...codexMcpEnvironment(spec.remoteMcpServers)
+        }
         diagnostics = createCodexAppServerDiagnostics(process.env.JINGLER_CODEX_DIAGNOSTICS_DIR, {
           sessionId,
           model: spec.model ?? null,

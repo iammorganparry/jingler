@@ -35,13 +35,14 @@ import {
 const PREVIEW_MCP: BrowserControlMcpAttachment = {
   name: "jingler-browser",
   url: "http://127.0.0.1:32123/mcp",
-  headers: { Authorization: "Bearer preview-secret" }
+  headers: { Authorization: "Bearer preview-secret" },
+  headerEnvironment: { Authorization: "JINGLER_BROWSER_MCP_AUTHORIZATION" }
 }
 
 /** Main-only Preview attachment normally owned by the app-scoped listener. */
 const BrowserControlMcpServiceTest = Layer.succeed(
   BrowserControlMcpService,
-  BrowserControlMcpService.of({ attachment: PREVIEW_MCP })
+  BrowserControlMcpService.of({ acquire: () => Effect.succeed(PREVIEW_MCP) })
 )
 
 /**

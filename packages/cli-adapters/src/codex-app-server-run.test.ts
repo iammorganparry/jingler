@@ -227,7 +227,10 @@ describe("runCodexAppServer", () => {
             {
               name: "jingler-browser",
               url: "http://127.0.0.1:32123/mcp",
-              headers: { Authorization: "Bearer preview-token" }
+              headers: { Authorization: "Bearer preview-token" },
+              headerEnvironment: {
+                Authorization: "JINGLER_BROWSER_MCP_AUTHORIZATION"
+              }
             }
           ]
         }),
@@ -241,8 +244,14 @@ describe("runCodexAppServer", () => {
       'mcp_servers.open-connector.url="https://connector.example/mcp"',
       'mcp_servers.open-connector.http_headers.Authorization="Bearer connector-token"',
       'mcp_servers.jingler-browser.url="http://127.0.0.1:32123/mcp"',
-      'mcp_servers.jingler-browser.http_headers.Authorization="Bearer preview-token"'
+      'mcp_servers.jingler-browser.env_http_headers.Authorization="JINGLER_BROWSER_MCP_AUTHORIZATION"'
     ])
+    expect(server.state.launches[0]?.configOverrides?.join(" ")).not.toContain(
+      "preview-token"
+    )
+    expect(
+      server.state.launches[0]?.env.JINGLER_BROWSER_MCP_AUTHORIZATION
+    ).toBe("Bearer preview-token")
   })
 
   it("replaces a persisted thread whose local rollout no longer exists", async () => {
