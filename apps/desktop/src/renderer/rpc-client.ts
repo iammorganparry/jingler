@@ -75,6 +75,7 @@ import type {
   ContextConfig,
   ContextSnapshot,
   Usage,
+  WorkerActivity,
   WorkspaceConfig
 } from "@jingler/core"
 import { JinglerRpcs } from "@jingler/contracts"
@@ -437,6 +438,55 @@ export const rpc = {
     agentId: string
   ): Promise<void> =>
     run((c) => c.Agent.retryWorker({ sessionId, planId, agentId })),
+  /**
+   * Observe one canonical plan's orchestration workers without starting or
+   * resuming execution. The returned handle only detaches this renderer.
+   */
+  agentWatchWorkers: (
+    sessionId: string,
+    planId: string,
+    chatId: string,
+    onActivity: (activity: WorkerActivity) => void,
+    onFailure: (error: unknown) => void
+  ): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then(
+      (client) => {
+        if (cancelled) return
+        const streamFiber = runtime.runFork(
+          client.Agent.watchWorkers({ sessionId, planId, chatId }).pipe(
+            Stream.runForEach((activity) =>
+              Effect.sync(() => onActivity(activity))
+            )
+          )
+        )
+        fiber = streamFiber
+        runtime.runFork(
+          Fiber.await(streamFiber).pipe(
+            Effect.tap((exit) =>
+              Effect.sync(() => {
+                if (cancelled) return
+                onFailure(
+                  Exit.isFailure(exit)
+                    ? Cause.squash(exit.cause)
+                    : new Error("Worker activity stream ended unexpectedly.")
+                )
+              })
+            ),
+            Effect.asVoid
+          )
+        )
+      },
+      (error) => {
+        if (!cancelled) onFailure(error)
+      }
+    )
+    return () => {
+      cancelled = true
+      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
+    }
+  },
   agentSetHarness: (sessionId: string, chatId: string, cli: CliKind, model: string): Promise<void> =>
     run((c) => c.Agent.setHarness({ sessionId, chatId, cli, model })),
   agentStop: (sessionId: string, chatId: string): Promise<void> =>

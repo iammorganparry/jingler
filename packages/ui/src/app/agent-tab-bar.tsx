@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { ChevronRight, MessagesSquare, Plus, X } from "lucide-react"
-import type { SubagentStatus } from "@jingler/core"
+import type { SubagentStatus, WorkerLifecycleStatus } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier, type WidthTier } from "../hooks/width-tier.js"
 import { StatusDot } from "../components/status-dot.js"
@@ -8,25 +8,27 @@ import { StatusDot } from "../components/status-dot.js"
 /** The "Main" tab id — the parent conversation, always the first crumb. */
 export const MAIN_AGENT = "main"
 
-/** One sub-agent cell's data (a projection of `Subagent`, sans transcript). */
+/** Every lifecycle rendered in the shared agent rail. */
+export type VisibleAgentStatus = SubagentStatus | WorkerLifecycleStatus
+
+/** One visible-agent cell's data, sans transcript. */
 export interface AgentTabItem {
   id: string
-  /** Sub-agent type, e.g. "Explore" / "general-purpose". */
+  /** Agent label, e.g. "Explore", "Reviewer", or "worker-auth". */
   name: string
-  /** The task description — shown as the cell's tooltip. */
+  /** Task/route description — shown as the cell's tooltip. */
   description: string
-  status: SubagentStatus
-  /** This agent spawned sub-agents of its own — offer a drill-in affordance. */
+  status: VisibleAgentStatus
+  /** This Claude agent spawned children — offer a drill-in affordance. */
   hasChildren: boolean
   /**
-   * May the operator stop/close this one? Default `true`.
+   * The source-authoritative action for this tab.
    *
-   * False for the adversarial reviewer, which borrows this rail's shape but is
-   * not a harness sub-agent: no `Task` spawned it, so there is no task to kill
-   * and no entry in the list `retractSubagent` operates on. A × there would be
-   * a control that visibly does nothing.
+   * Claude sub-agents stop while working and close once settled. A running
+   * orchestration worker can stop, but replay-backed workers never close.
+   * Reviewers and queued workers expose no action.
    */
-  closable?: boolean
+  action?: "stop" | "close"
 }
 
 /** One crumb in the drill path — `MAIN_AGENT`, then each drilled-into agent. */
@@ -50,18 +52,21 @@ export interface ChatTabBarProps {
   onCloseChat: (id: string) => void
 }
 
-export interface SubagentTabBarProps {
+export interface AgentTabBarProps {
   agents: ReadonlyArray<AgentTabItem>
   trail: ReadonlyArray<AgentCrumb>
   active: string
   onChange: (key: string) => void
   onDrill: (id: string) => void
   onNavigate: (id: string) => void
-  /** Kill a still-working sub-agent. Only ever called for `status === "working"`. */
+  /** Stop the live agent identified by a tab whose action is `stop`. */
   onStop: (id: string) => void
-  /** Drop a settled sub-agent's pill. Never called while it is working. */
+  /** Dismiss a settled Claude sub-agent whose action is `close`. */
   onClose: (id: string) => void
 }
+
+/** Backwards-compatible name for consumers still referring to the old rail. */
+export type SubagentTabBarProps = AgentTabBarProps
 
 /**
  * Status → dot tone + pulse (working pulses like a live run).
@@ -70,11 +75,17 @@ export interface SubagentTabBarProps {
  * settled business, not something to go and read. Red is reserved for the agent
  * that failed on its own and wants attention.
  */
-const DOT: Record<SubagentStatus, { tone: string; pulse: boolean }> = {
+const DOT: Record<VisibleAgentStatus, { tone: string; pulse: boolean }> = {
   working: { tone: "bg-yellow", pulse: true },
   done: { tone: "bg-green", pulse: false },
   error: { tone: "bg-red", pulse: false },
-  stopped: { tone: "bg-dim", pulse: false }
+  stopped: { tone: "bg-dim", pulse: false },
+  queued: { tone: "bg-dim", pulse: false },
+  running: { tone: "bg-yellow", pulse: true },
+  blocked: { tone: "bg-yellow", pulse: false },
+  failed: { tone: "bg-red", pulse: false },
+  interrupted: { tone: "bg-dim", pulse: false },
+  completed: { tone: "bg-green", pulse: false }
 }
 
 /**
@@ -99,7 +110,7 @@ const DOT: Record<SubagentStatus, { tone: string; pulse: boolean }> = {
  * Presentational only — the pane owns the drill level, derives each level's cells,
  * and owns which cell is active.
  */
-export function SubagentTabBar({
+export function AgentTabBar({
   agents,
   trail,
   active,
@@ -108,7 +119,7 @@ export function SubagentTabBar({
   onNavigate,
   onStop,
   onClose
-}: SubagentTabBarProps) {
+}: AgentTabBarProps) {
   const tier = useWidthTier()
   // The task description is the first thing to go. It's the longest string in the
   // rail by far and it's already the hover title on the pill it belongs to.
@@ -154,16 +165,14 @@ export function SubagentTabBar({
       {agents.map((agent) => {
         const isActive = agent.id === active
         const dot = DOT[agent.status]
-        // ONE × with two meanings, chosen by the agent's own state — the same
-        // affordance a chat pill has, and the same thing the operator means by
-        // it: "I am done with this". While it is working that has to reach the
-        // harness (the agent keeps burning tokens otherwise); once it has
-        // settled there is nothing to kill and the click is just tidying.
-        const working = agent.status === "working"
-        const closeLabel = `${working ? "Stop" : "Close"} ${agent.name}`
+        const actionLabel =
+          agent.action === undefined
+            ? null
+            : `${agent.action === "stop" ? "Stop" : "Close"} ${agent.name}`
         return (
           <div
             key={agent.id}
+            data-agent-status={agent.status}
             className={cn(
               "group flex flex-none items-center rounded-md transition-colors",
               isActive
@@ -180,11 +189,12 @@ export function SubagentTabBar({
                 "flex items-center gap-1.5 py-0.5 pl-2 text-[11.5px] outline-none",
                 // `pr-2` only when nothing follows. A pill with a `>` or a ×
                 // after it would otherwise carry the gap twice.
-                agent.hasChildren || agent.closable !== false ? "pr-1" : "pr-2"
+                agent.hasChildren || agent.action !== undefined ? "pr-1" : "pr-2"
               )}
             >
               <StatusDot tone={dot.tone} pulse={dot.pulse} size={7} />
               <span className="whitespace-nowrap font-medium">{agent.name}</span>
+              <span className="sr-only">{agent.status}</span>
               {agent.description && showDescription && (
                 <span className="max-w-[180px] truncate text-dim group-hover:text-muted-foreground">
                   {agent.description}
@@ -202,12 +212,16 @@ export function SubagentTabBar({
                 <ChevronRight className="size-3 flex-none" />
               </button>
             )}
-            {agent.closable !== false && (
+            {actionLabel !== null && (
               <button
                 type="button"
-                aria-label={closeLabel}
-                title={closeLabel}
-                onClick={() => (working ? onStop(agent.id) : onClose(agent.id))}
+                aria-label={actionLabel}
+                title={actionLabel}
+                onClick={() =>
+                  agent.action === "stop"
+                    ? onStop(agent.id)
+                    : onClose(agent.id)
+                }
                 className="mr-1 rounded p-0.5 text-dim opacity-0 outline-none hover:bg-editor hover:text-text focus-visible:opacity-100 group-hover:opacity-100"
               >
                 <X className="size-3" />
@@ -219,6 +233,9 @@ export function SubagentTabBar({
     </div>
   )
 }
+
+/** @deprecated Use `AgentTabBar`; retained while downstream plugins migrate. */
+export const SubagentTabBar = AgentTabBar
 
 /** How wide a chat pill's title may grow, per tier. `null` = show it on hover only. */
 const CHAT_WIDTH: Record<WidthTier, string | null> = {

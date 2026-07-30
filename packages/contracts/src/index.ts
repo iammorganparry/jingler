@@ -44,6 +44,7 @@ import {
   OpenConnectorConfig,
   OpenConnectorDefaults,
   OrchestratorPreference,
+  WorkerActivity,
   WorkerRoutingConfig,
   ConnectorProvider,
   ConnectorProviderDetail,
@@ -513,6 +514,22 @@ export class JinglerRpcs extends RpcGroup.make(
       chatId: Schema.String,
       planId: Schema.String,
       revision: Schema.optional(Schema.Number)
+    }
+  }),
+
+  /**
+   * Observe a plan's workers without starting or retrying them.
+   *
+   * The stream begins with a reset snapshot and then carries lifecycle and
+   * normalized harness activity for the producing chat that owns execution.
+   */
+  Rpc.make("Agent.watchWorkers", {
+    success: WorkerActivity,
+    stream: true,
+    payload: {
+      sessionId: Schema.String,
+      planId: Schema.String,
+      chatId: Schema.String
     }
   }),
 

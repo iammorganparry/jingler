@@ -17,20 +17,12 @@ import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { fakeCommandExecutor, withTempRoot } from "./test-support.js"
 import type { FakeCommandHandler } from "./test-support.js"
-import { BrowserControlPort } from "./browser-control-port.js"
+import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
 
-/** No-op browser-control port (see agent-runner.test.ts). */
-const BrowserControlPortTest = Layer.succeed(
-  BrowserControlPort,
-  BrowserControlPort.of({
-    navigate: async () => {},
-    screenshot: async () => ({ pngBase64: "" }),
-    click: async () => {},
-    type: async () => {},
-    readText: async () => ({ text: "" }),
-    evaluate: async () => ({ result: "" }),
-    waitForSelector: async () => {}
-  })
+/** Browser hosting is independent of context swapping. */
+const BrowserControlMcpServiceTest = Layer.succeed(
+  BrowserControlMcpService,
+  BrowserControlMcpService.of({ acquire: () => Effect.succeed(null) })
 )
 
 /**
@@ -94,7 +86,7 @@ const layers = () =>
   Layer.mergeAll(
     AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
     ContextManager.Default,
     SessionStore.Default,

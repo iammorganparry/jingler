@@ -51,8 +51,34 @@ export interface PreviewDockViewProps {
   dock: PreviewDockPrefs
 }
 
+interface BrowserNavigation {
+  readonly url: string
+  readonly source: "operator" | "native"
+}
+
 export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
-  const [url, setUrl] = useState(DEFAULT_URL)
+  const [navigation, setNavigation] = useState<BrowserNavigation>({
+    url: DEFAULT_URL,
+    source: "operator"
+  })
+  const { url } = navigation
+  // Main owns the native WebContents URL. Agent reveals update immediately with
+  // the requested/current URL; committed navigation events then correct it for
+  // redirects, clicks, and History API changes. Native updates are state sync,
+  // not navigation intents, so BrowserBody must not issue another RPC for them.
+  useEffect(() => {
+    const syncNativeUrl = (nativeUrl: string) => {
+      if (nativeUrl.length > 0) {
+        setNavigation({ url: nativeUrl, source: "native" })
+      }
+    }
+    const stopReveal = window.jingler.onPreviewReveal(syncNativeUrl)
+    const stopUrlChanged = window.jingler.onPreviewUrlChanged(syncNativeUrl)
+    return () => {
+      stopReveal()
+      stopUrlChanged()
+    }
+  }, [])
   const browsing = dock.activeId === BROWSER_TAB_ID
   // The native view is only wanted when the dock is open AND the Browser tab is
   // the one on screen. Both halves matter: hiding the dock and switching tabs
@@ -62,11 +88,11 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
   const renderTab = useCallback(
     (tab: PreviewTab, active: boolean) =>
       tab.kind === "browser" ? (
-        <BrowserBody url={url} session={session} nativeWanted={nativeWanted} />
+        <BrowserBody navigation={navigation} session={session} nativeWanted={nativeWanted} />
       ) : (
         <AssetTab tabId={tab.id} assets={dock.assets} active={active} dockVisible={dock.visible} />
       ),
-    [url, session, nativeWanted, dock.assets, dock.visible]
+    [navigation, session, nativeWanted, dock.assets, dock.visible]
   )
 
   return (
@@ -80,7 +106,7 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
       onSelect={dock.select}
       onClose={dock.close}
       url={url}
-      onNavigate={setUrl}
+      onNavigate={(nextUrl) => setNavigation({ url: nextUrl, source: "operator" })}
       onReload={() => void rpc.browserPreviewReload()}
       renderTab={renderTab}
     />
@@ -92,14 +118,15 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
  * plus the effects that keep the two in sync.
  */
 function BrowserBody({
-  url,
+  navigation,
   session,
   nativeWanted
 }: {
-  url: string
+  navigation: BrowserNavigation
   session: Session | null
   nativeWanted: boolean
 }) {
+  const { url } = navigation
   // The URL last loaded into the native view (via open OR navigate), so a URL
   // change navigates IN PLACE instead of tearing the view down. Held in a ref so
   // it doesn't drive the lifecycle effects below.
@@ -148,8 +175,9 @@ function BrowserBody({
   useEffect(() => {
     if (!nativeWanted || loadedUrl.current === null || loadedUrl.current === url) return
     loadedUrl.current = url
+    if (navigation.source === "native") return
     void rpc.browserPreviewNavigate(url).catch(() => {})
-  }, [nativeWanted, url])
+  }, [nativeWanted, navigation, url])
 
   const empty = useMemo(
     () => (

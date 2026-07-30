@@ -10,16 +10,17 @@ import { useQuery } from "@tanstack/react-query"
 import type { Session } from "@jingler/core"
 import { agentChildren, agentPath, clampFontScale } from "@jingler/core"
 import {
+  AgentTabBar,
+  AgentView,
+  type AgentTabItem,
   AttachmentSourceProvider,
   OpenAssetProvider,
-  SubagentTabBar,
   BackgroundTaskDock,
   BackgroundTaskOutput,
   ConversationView,
   MAIN_AGENT,
   PlanReview,
   ResizeHandle,
-  SubagentView,
   useResizableWidth
 } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
@@ -31,8 +32,12 @@ import {
 } from "./conversation-registry.js"
 import { clearDraft, getDraft, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
 import { useConversation } from "./use-conversation.js"
+import { useOrchestrationAgents } from "./use-orchestration-agents.js"
 import { usePlanDocument } from "./use-plan-document.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
+
+const workerTabId = (planId: string, agentId: string): string =>
+  `worker:${planId.length}:${planId}${agentId}`
 
 export function ConversationPane({
   session,
@@ -86,6 +91,11 @@ export function ConversationPane({
     session.chats[0]!
   const convo = useConversation(session, activeChat.id)
   const canonicalPlan = usePlanDocument(session.id)
+  const orchestration = useOrchestrationAgents(
+    session.id,
+    activeChat.id,
+    canonicalPlan.document
+  )
 
   // Everything the transcript needs to turn a path into a link. `convo.files` is
   // the worktree's tracked-file list, already fetched for the composer's `@`
@@ -338,9 +348,24 @@ export function ConversationPane({
   // The reviewer sits in the same bar as the turn's sub-agents but is not one of
   // them (it is a whole agent run of its own, started by the PR tab or the
   // background auto-review), so it is appended here rather than living in the list.
-  const agents = convo.reviewer ? [...convo.subagents, convo.reviewer] : convo.subagents
-  const activeSubagent = agents.find((s) => s.id === selectedAgent) ?? null
-  const activeAgent = activeSubagent ? selectedAgent : MAIN_AGENT
+  const subagentsAndReviewer =
+    convo.reviewer ? [...convo.subagents, convo.reviewer] : convo.subagents
+  const workerPlanId = orchestration.planId
+  const workerTabs =
+    workerPlanId === null
+      ? []
+      : orchestration.agents.map((agent) => ({
+          id: workerTabId(workerPlanId, agent.id),
+          agent
+        }))
+  const activeSubagent =
+    subagentsAndReviewer.find((agent) => agent.id === selectedAgent) ?? null
+  const activeWorker =
+    workerTabs.find((worker) => worker.id === selectedAgent)?.agent ?? null
+  const activeAgent =
+    activeSubagent !== null || activeWorker !== null
+      ? selectedAgent
+      : MAIN_AGENT
 
   // Sub-agents nest, so the bar shows one level at a time: `level` is the agent
   // whose children are listed (MAIN_AGENT = the top level). Derived the same way
@@ -353,17 +378,59 @@ export function ConversationPane({
     convo.subagents,
     effectiveLevel === MAIN_AGENT ? null : effectiveLevel
   )
-  // The reviewer is a top-level agent of its own — a whole run started by the PR
-  // tab or the background auto-review, not a `Task` spawn — so it joins the top
-  // level of the bar, but never the children of a sub-agent drilled into.
-  const barAgents =
-    effectiveLevel === MAIN_AGENT && convo.reviewer
-      ? [...levelAgents, convo.reviewer]
-      : levelAgents
+  // Workers are plan-scoped peers of top-level Claude sub-agents. They never
+  // enter the Claude drill tree, and the reviewer remains last as before.
+  const barAgents: ReadonlyArray<AgentTabItem> = [
+    ...levelAgents.map(
+      (agent): AgentTabItem => ({
+        id: agent.id,
+        name: agent.name,
+        description: agent.description,
+        status: agent.status,
+        hasChildren: convo.subagents.some((child) => child.parentId === agent.id),
+        action: agent.status === "working" ? "stop" : "close"
+      })
+    ),
+    ...(effectiveLevel === MAIN_AGENT
+      ? workerTabs.map(
+          ({ id, agent }): AgentTabItem => ({
+            id,
+            name: agent.id,
+            description: `${agent.harness} · ${agent.model} · ${agent.stageIds.length} ${
+              agent.stageIds.length === 1 ? "stage" : "stages"
+            } · attempt ${agent.attempt}`,
+            status: agent.status,
+            hasChildren: false,
+            ...(agent.status === "running" ? { action: "stop" } : {})
+          })
+        )
+      : []),
+    ...(effectiveLevel === MAIN_AGENT && convo.reviewer !== null
+      ? [
+          {
+            id: convo.reviewer.id,
+            name: convo.reviewer.name,
+            description: convo.reviewer.description,
+            status: convo.reviewer.status,
+            hasChildren: false
+          }
+        ]
+      : [])
+  ]
   const trail =
     effectiveLevel === MAIN_AGENT
       ? []
       : agentPath(convo.subagents, effectiveLevel).map((s) => ({ id: s.id, name: s.name }))
+
+  const activeAgentTranscript =
+    activeSubagent !== null
+      ? {
+          message: activeSubagent.message,
+          cli: activeSubagent.cli ?? convo.cli
+        }
+      : activeWorker !== null
+        ? { message: activeWorker.message, cli: activeWorker.harness }
+        : null
 
   // Drilling into an agent shows its children AND its own transcript; a crumb
   // jumps the level back up. Both keep the two states in step.
@@ -471,23 +538,23 @@ export function ConversationPane({
     <div className="flex min-h-0 min-w-0 flex-1" style={{ "--sb-font-scale": fontScale } as CSSProperties}>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {barAgents.length > 0 && (
-        <SubagentTabBar
-          agents={barAgents.map((s) => ({
-            id: s.id,
-            name: s.name,
-            description: s.description,
-            status: s.status,
-            hasChildren: convo.subagents.some((c) => c.parentId === s.id),
-            // The reviewer is not a harness sub-agent — see `closable`.
-            closable: s.id !== convo.reviewer?.id
-          }))}
+        <AgentTabBar
+          agents={barAgents}
           trail={trail}
           active={activeAgent}
           onChange={setSelectedAgent}
           onDrill={goToAgent}
           onNavigate={(id) => (id === MAIN_AGENT ? goToMain() : goToAgent(id))}
-          onStop={convo.stopSubagent}
+          onStop={(id) => {
+            const worker = workerTabs.find((candidate) => candidate.id === id)?.agent
+            if (worker !== undefined && orchestration.planId !== null) {
+              void rpc.agentStopWorker(session.id, orchestration.planId, worker.id)
+              return
+            }
+            convo.stopSubagent(id)
+          }}
           onClose={(id) => {
+            if (workerTabs.some((worker) => worker.id === id)) return
             // Back to Main FIRST. Both the transcript being read and the level
             // being browsed can point at the tab about to vanish (or at one of
             // its children, which go with it), and a pane left pointing at a
@@ -497,8 +564,8 @@ export function ConversationPane({
           }}
         />
       )}
-      {activeSubagent ? (
-        <SubagentView subagent={activeSubagent} cli={convo.cli} />
+      {activeAgentTranscript !== null ? (
+        <AgentView agent={activeAgentTranscript} />
       ) : (
         <ConversationView
           messages={convo.messages}

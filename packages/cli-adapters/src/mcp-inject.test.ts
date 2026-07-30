@@ -1,74 +1,188 @@
 import { describe, expect, it } from "vitest"
-import { codexMcpOverrides, opencodeMcpConfig, type ParsedMcpServer } from "./mcp-config.js"
+import type { RemoteMcpServer } from "./adapter.js"
+import {
+  codexMcpEnvironment,
+  codexMcpOverrides,
+  opencodeMcpEntries
+} from "./mcp-config.js"
 
 /**
- * The write-side of MCP config: rendering the resolved OpenConnector server into
- * codex's `-c` overrides and opencode's config block, so all harnesses load the
- * same shared server. Both are pure, so we assert the exact rendered shapes.
+ * The write-side of MCP config: rendering normalized remote attachments into
+ * Codex's ordered `-c` overrides and opencode's single `mcp` object. Both are
+ * pure, so these assertions pin the exact launch shapes without spawning a CLI.
  */
 
-const remote = (headers: Record<string, string> = { Authorization: "Bearer tok" }): ParsedMcpServer => ({
-  server: {
-    name: "open-connector",
-    cli: "codex",
-    transport: "http",
-    scope: "user",
-    target: "https://oc.test/mcp",
-    envKeys: [],
-    headerKeys: Object.keys(headers),
-    enabled: true
-  },
-  launch: { transport: "http", args: [], env: {}, url: "https://oc.test/mcp", headers }
-})
+const OPEN_CONNECTOR: RemoteMcpServer = {
+  name: "open-connector",
+  url: "https://connector.example/mcp",
+  headers: {
+    Authorization: "Bearer connector-token",
+    "X-Connector-Scope": "workspace"
+  }
+}
 
-const stdio: ParsedMcpServer = {
-  server: {
-    name: "local",
-    cli: "codex",
-    transport: "stdio",
-    scope: "user",
-    target: "npx x",
-    envKeys: [],
-    headerKeys: [],
-    enabled: true
-  },
-  launch: { transport: "stdio", command: "npx", args: ["x"], env: {}, headers: {} }
+const PREVIEW_BROWSER: RemoteMcpServer = {
+  name: "jingler-browser",
+  url: "http://127.0.0.1:32123/mcp",
+  headers: { Authorization: "Bearer preview-token" },
+  headerEnvironment: { Authorization: "JINGLER_BROWSER_MCP_AUTHORIZATION" }
 }
 
 describe("codexMcpOverrides", () => {
-  it("renders url + header overrides with TOML-safe (JSON) string values", () => {
-    expect(codexMcpOverrides(remote())).toEqual([
-      'mcp_servers.open-connector.url="https://oc.test/mcp"',
-      'mcp_servers.open-connector.http_headers.Authorization="Bearer tok"'
+  it("renders independent URL and HTTP-header overrides for every server in order", () => {
+    expect(codexMcpOverrides([OPEN_CONNECTOR, PREVIEW_BROWSER])).toEqual([
+      'mcp_servers.open-connector.url="https://connector.example/mcp"',
+      'mcp_servers.open-connector.http_headers.Authorization="Bearer connector-token"',
+      'mcp_servers.open-connector.http_headers.X-Connector-Scope="workspace"',
+      'mcp_servers.jingler-browser.url="http://127.0.0.1:32123/mcp"',
+      'mcp_servers.jingler-browser.env_http_headers.Authorization="JINGLER_BROWSER_MCP_AUTHORIZATION"',
+      'shell_environment_policy.filters.JINGLER_BROWSER_MCP_AUTHORIZATION="exclude"'
     ])
   })
 
-  it("is empty for a missing entry or a non-remote (stdio) one", () => {
+  it("is empty for an absent or empty collection", () => {
     expect(codexMcpOverrides(null)).toEqual([])
     expect(codexMcpOverrides(undefined)).toEqual([])
-    expect(codexMcpOverrides(stdio)).toEqual([])
+    expect(codexMcpOverrides([])).toEqual([])
+  })
+
+  it("keeps either available server independently", () => {
+    expect(codexMcpOverrides([PREVIEW_BROWSER])).toEqual([
+      'mcp_servers.jingler-browser.url="http://127.0.0.1:32123/mcp"',
+      'mcp_servers.jingler-browser.env_http_headers.Authorization="JINGLER_BROWSER_MCP_AUTHORIZATION"',
+      'shell_environment_policy.filters.JINGLER_BROWSER_MCP_AUTHORIZATION="exclude"'
+    ])
+    expect(codexMcpOverrides([OPEN_CONNECTOR])).toEqual([
+      'mcp_servers.open-connector.url="https://connector.example/mcp"',
+      'mcp_servers.open-connector.http_headers.Authorization="Bearer connector-token"',
+      'mcp_servers.open-connector.http_headers.X-Connector-Scope="workspace"'
+    ])
+  })
+
+  it("renders a duplicate name once and keeps its first attachment", () => {
+    expect(
+      codexMcpOverrides([
+        OPEN_CONNECTOR,
+        {
+          name: OPEN_CONNECTOR.name,
+          url: "https://duplicate.example/mcp",
+          headers: { Authorization: "Bearer duplicate-token" }
+        }
+      ])
+    ).toEqual([
+      'mcp_servers.open-connector.url="https://connector.example/mcp"',
+      'mcp_servers.open-connector.http_headers.Authorization="Bearer connector-token"',
+      'mcp_servers.open-connector.http_headers.X-Connector-Scope="workspace"'
+    ])
+  })
+
+  it("keeps mapped bearer values out of argv and supplies them through the run environment", () => {
+    const overrides = codexMcpOverrides([PREVIEW_BROWSER])
+    expect(overrides.join(" ")).not.toContain("preview-token")
+    expect(codexMcpEnvironment([PREVIEW_BROWSER])).toStrictEqual({
+      JINGLER_BROWSER_MCP_AUTHORIZATION: "Bearer preview-token"
+    })
+    expect(overrides).toContain(
+      'shell_environment_policy.filters.JINGLER_BROWSER_MCP_AUTHORIZATION="exclude"'
+    )
   })
 })
 
-describe("opencodeMcpConfig", () => {
-  it("renders a remote mcp block keyed by the server name", () => {
-    expect(opencodeMcpConfig(remote())).toEqual({
-      mcp: {
-        "open-connector": {
+describe("opencodeMcpEntries", () => {
+  it("renders dynamic registrations with per-server headers intact", () => {
+    expect(opencodeMcpEntries([OPEN_CONNECTOR, PREVIEW_BROWSER])).toEqual([
+      {
+        name: "open-connector",
+        config: {
           type: "remote",
-          url: "https://oc.test/mcp",
+          url: "https://connector.example/mcp",
           enabled: true,
-          headers: { Authorization: "Bearer tok" }
+          headers: {
+            Authorization: "Bearer connector-token",
+            "X-Connector-Scope": "workspace"
+          }
+        }
+      },
+      {
+        name: "jingler-browser",
+        config: {
+          type: "remote",
+          url: "http://127.0.0.1:32123/mcp",
+          enabled: true,
+          headers: { Authorization: "Bearer preview-token" }
         }
       }
-    })
+    ])
   })
 
-  it("omits headers when there are none, and is empty for a missing/stdio entry", () => {
-    expect(opencodeMcpConfig(remote({}))).toEqual({
-      mcp: { "open-connector": { type: "remote", url: "https://oc.test/mcp", enabled: true } }
-    })
-    expect(opencodeMcpConfig(null)).toEqual({})
-    expect(opencodeMcpConfig(stdio)).toEqual({})
+  it("omits empty headers and is empty for an absent collection", () => {
+    expect(
+      opencodeMcpEntries([
+        { name: "public-tools", url: "https://public.example/mcp", headers: {} }
+      ])
+    ).toEqual([
+      {
+        name: "public-tools",
+        config: {
+          type: "remote",
+          url: "https://public.example/mcp",
+          enabled: true
+        }
+      }
+    ])
+    expect(opencodeMcpEntries(null)).toEqual([])
+    expect(opencodeMcpEntries(undefined)).toEqual([])
+    expect(opencodeMcpEntries([])).toEqual([])
+  })
+
+  it("keeps either available server independently", () => {
+    expect(opencodeMcpEntries([PREVIEW_BROWSER])).toEqual([
+      {
+        name: "jingler-browser",
+        config: {
+          type: "remote",
+          url: "http://127.0.0.1:32123/mcp",
+          enabled: true,
+          headers: { Authorization: "Bearer preview-token" }
+        }
+      }
+    ])
+    expect(opencodeMcpEntries([OPEN_CONNECTOR])).toEqual([
+      {
+        name: "open-connector",
+        config: {
+          type: "remote",
+          url: "https://connector.example/mcp",
+          enabled: true,
+          headers: {
+            Authorization: "Bearer connector-token",
+            "X-Connector-Scope": "workspace"
+          }
+        }
+      }
+    ])
+  })
+
+  it("renders a duplicate name once and keeps its first attachment", () => {
+    expect(
+      opencodeMcpEntries([
+        PREVIEW_BROWSER,
+        {
+          name: PREVIEW_BROWSER.name,
+          url: "http://127.0.0.1:49999/mcp",
+          headers: { Authorization: "Bearer duplicate-token" }
+        }
+      ])
+    ).toEqual([
+      {
+        name: "jingler-browser",
+        config: {
+          type: "remote",
+          url: "http://127.0.0.1:32123/mcp",
+          enabled: true,
+          headers: { Authorization: "Bearer preview-token" }
+        }
+      }
+    ])
   })
 })

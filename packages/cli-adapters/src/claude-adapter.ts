@@ -8,9 +8,21 @@ import type {
   StreamEvent
 } from "@jingler/core"
 import { CliExecError } from "@jingler/core"
-import type { PermissionMode as SdkPermissionMode, PermissionResult, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
+import type {
+  McpServerConfig,
+  PermissionMode as SdkPermissionMode,
+  PermissionResult,
+  Query,
+  SDKMessage,
+  SDKUserMessage
+} from "@anthropic-ai/claude-agent-sdk"
 import { Effect, Runtime } from "effect"
-import type { AgentContext, PermissionRequest, SessionSpec } from "./adapter.js"
+import type {
+  AgentContext,
+  PermissionRequest,
+  RemoteMcpServer,
+  SessionSpec
+} from "./adapter.js"
 import { startTeeStream, type TeeStream } from "./bash-tee.js"
 import { escapingPath } from "./confinement.js"
 import { unattendedSandbox } from "./sandbox.js"
@@ -987,6 +999,23 @@ const STEER_CONTINUE_GRACE = 2_500
  */
 const SUBAGENT_LINGER_CAP = 10 * 60_000
 
+/** Translate normalized remote attachments into Claude's inline HTTP MCP map. */
+export const claudeMcpServers = (
+  attachments: ReadonlyArray<RemoteMcpServer> | undefined
+): Record<string, McpServerConfig> | undefined => {
+  if (attachments === undefined || attachments.length === 0) return undefined
+  const entries = new Map<string, McpServerConfig>()
+  for (const attachment of attachments) {
+    if (entries.has(attachment.name)) continue
+    entries.set(attachment.name, {
+      type: "http",
+      url: attachment.url,
+      headers: attachment.headers
+    })
+  }
+  return entries.size === 0 ? undefined : Object.fromEntries(entries)
+}
+
 export const runClaude = (
   sessionId: string,
   spec: SessionSpec,
@@ -1174,27 +1203,10 @@ export const runClaude = (
           ? undefined
           : (resume.get(sessionId) ?? spec.resumeId ?? undefined)
 
-        // The unified OpenConnector server, passed INLINE (not via `.mcp.json`) so
-        // it bypasses Claude's project-approval prompt — the operator already
-        // opted in through Jingler's Settings. `launch.url` is always set for a
-        // remote (http) entry; the `??` is just to satisfy the optional type.
-        const oc = spec.openConnector
-        const mcpEntries = {
-          ...(oc && oc.launch.url
-            ? {
-                [oc.server.name]: {
-                  type: "http" as const,
-                  url: oc.launch.url,
-                  headers: oc.launch.headers
-                }
-              }
-            : {}),
-          // The in-process browser-control server (a live McpServer instance),
-          // merged alongside OpenConnector. Built in AgentRunner from the
-          // BrowserControlPort so this adapter stays `R = never`.
-          ...(spec.browserMcp ? { [spec.browserMcp.name]: spec.browserMcp } : {})
-        }
-        const mcpServers = Object.keys(mcpEntries).length > 0 ? mcpEntries : undefined
+        // Passed INLINE (not via `.mcp.json`) so configured sources bypass
+        // Claude's project-approval prompt after the operator opted in through
+        // Jingler. The same HTTP shape carries the authenticated Preview server.
+        const mcpServers = claudeMcpServers(spec.remoteMcpServers)
 
         // Always the SDK's streaming-input form, and deliberately so: it is what
         // keeps the query open for `Agent.steer` to push into (see `makeLiveInput`).

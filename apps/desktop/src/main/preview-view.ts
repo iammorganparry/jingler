@@ -64,11 +64,16 @@ const MAX_WAIT_MS = 30_000
 
 /**
  * Main→renderer push: "an agent is driving the browser — open the Preview dock
- * onto it so the operator watches". Sent on every BrowserControl op; the
- * renderer debounces it (see use-preview-dock). A bare channel name rather than
- * a payload — the message IS the signal.
+ * onto it so the operator watches". Sent on every BrowserControl op.
  */
 export const PREVIEW_REVEAL_CHANNEL = "jingler/preview/reveal"
+
+/**
+ * Main→renderer push for the browser's committed main-frame URL. This is
+ * separate from PREVIEW_REVEAL_CHANNEL: redirects and history changes should
+ * keep the address bar truthful without stealing focus from another dock tab.
+ */
+export const PREVIEW_URL_CHANNEL = "jingler/preview/url"
 
 export interface PreviewViewServiceShape {
   /** Show the browser view and load `url` at `bounds`. Rejects non-http(s) URLs. */
@@ -205,6 +210,17 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
       // followable — a file-origin page that can navigate can walk the disk.
       if (owner === "asset" || !isHttpUrl(url)) event.preventDefault()
     })
+    if (owner === "browser") {
+      const publishUrl = (url: string) => {
+        if (isHttpUrl(url)) {
+          mainWindow()?.webContents.send(PREVIEW_URL_CHANNEL, url)
+        }
+      }
+      view.webContents.on("did-navigate", (_event, url) => publishUrl(url))
+      view.webContents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
+        if (isMainFrame) publishUrl(url)
+      })
+    }
     win.contentView.addChildView(view)
     if (owner === "browser") browserView = view
     else assetView = view
@@ -243,10 +259,11 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
   }
 
   // Paint the browser AND ask the renderer to open the dock onto it — the whole
-  // point of agent QA is that the operator sees it happen.
-  const reveal = () => {
+  // point of agent QA is that the operator sees it happen. Navigation listeners
+  // publish the eventual committed URL separately.
+  const reveal = (url: string) => {
     showOnly("browser")
-    mainWindow()?.webContents.send(PREVIEW_REVEAL_CHANNEL)
+    mainWindow()?.webContents.send(PREVIEW_REVEAL_CHANNEL, url)
   }
 
   const withPage = <A>(
@@ -260,7 +277,7 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
           new BrowserControlError({ op, message: "No application window to attach the browser to" })
         )
       }
-      reveal()
+      reveal(v.webContents.getURL())
       return Effect.tryPromise({ try: () => f(v.webContents), catch: controlFail(op) })
     })
 
@@ -331,7 +348,7 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
             const v = ensureBrowserSized()
             if (!v) return
             load(v, url)
-            reveal()
+            reveal(url)
           })
         : Effect.fail(
             new BrowserControlError({ op: "navigate", message: `Only http(s) URLs can be opened: ${url}` })

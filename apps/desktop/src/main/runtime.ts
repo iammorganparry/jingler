@@ -10,6 +10,7 @@ import {
   AgentRunner,
   AssetService,
   AuthService,
+  BrowserControlMcpServiceLive,
   ConfigService,
   ContextManager,
   DiscoveryService,
@@ -95,10 +96,14 @@ const AppLayer = RpcServerLive.pipe(
   Layer.provideMerge(SessionStore.Default),
   Layer.provideMerge(StoreLayers),
   Layer.provide(HarnessLayers),
-  // provideMerge (not provide): the RPC handlers consume TerminalService AND the
-  // runtime keeps it in context, so the `before-quit` kill-all can reach the very
-  // same instance to reap PTYs.
-  Layer.provideMerge(TerminalService.Default),
+  // provideMerge (not provide): both app-lifetime services must stay in runtime
+  // context. TerminalService is reached by the before-quit PTY reap; the browser
+  // MCP service owns its scoped loopback listener and will be reached by the
+  // harness injection stage. They are independent peers, merged to remain inside
+  // Effect.pipe's 20-argument limit. BrowserControlPort is supplied below.
+  Layer.provideMerge(
+    Layer.mergeAll(TerminalService.Default, BrowserControlMcpServiceLive)
+  ),
   // provideMerge: the RPC auth handlers consume SecretStore AND the main process
   // reaches the same instance directly (deep-link token storage in index.ts).
   Layer.provideMerge(SecretStoreLayer),

@@ -28,7 +28,7 @@ const FIXTURE = `<h1>PRD: Ship the plan doc editor</h1>
 <section data-stage="01" data-title="Build the Tiptap nodes" data-depends-on="" data-complexity="high">
 <h3>Intent</h3>
 <p>Author the four custom nodes.</p>
-<div data-assignment data-agent-id="worker-ui" data-cli="codex" data-model="gpt-5" data-reason="Complex editor schema work." data-status="running"></div>
+<div data-assignment data-agent-id="worker-ui" data-cli="codex" data-model="gpt-5.6-terra" data-reason="Complex editor schema work." data-status="running"></div>
 <ul data-files><li data-change="M" data-added="12" data-removed="3">src/plan-doc.ts</li></ul>
 <div data-acceptance="01.1" data-status="passed" data-evidence="round-trip test is green">Nodes round-trip the data-attribute format.</div>
 <div data-acceptance="01.2" data-status="pending">The insert toolbar adds every widget.</div>
@@ -84,13 +84,15 @@ describe("plan doc HTML round-trip", () => {
       assignment: {
         agentId: "worker-ui",
         cli: "codex",
-        model: "gpt-5",
+        model: "gpt-5.6-terra",
         reason: "Complex editor schema work."
       },
       executionStatus: "running"
     })
     expect(html).toContain('data-assignment=""')
     expect(html).toContain('data-agent-id="worker-ui"')
+    expect(html).toContain('data-cli="codex"')
+    expect(html).toContain('data-model="gpt-5.6-terra"')
     expect(html).toContain('data-files=""')
     expect(html).toContain('data-change="M"')
     expect(html).toContain('data-added="12"')

@@ -12,13 +12,30 @@ import type {
 } from "@jingler/core"
 import { CliExecError } from "@jingler/core"
 import { Context, Data, Effect, Layer } from "effect"
-import type { ParsedMcpServer } from "./mcp-config.js"
-import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk"
 
 /** Installed provider/model routes a planning turn may assign to workers. */
 export interface OrchestrationRoute {
   readonly cli: CliKind
   readonly models: ReadonlyArray<ModelOption>
+}
+
+/**
+ * A remote MCP attachment ready for a harness launch.
+ *
+ * Main-process only: headers may contain bearer credentials. AgentRunner builds
+ * this source-neutral shape immediately before a run; adapters consume it
+ * in-memory and never persist or expose it through RPC.
+ */
+export interface RemoteMcpServer {
+  readonly name: string
+  readonly url: string
+  readonly headers: Readonly<Record<string, string>>
+  /**
+   * Optional header-to-environment-name map for harnesses that can resolve
+   * secret headers from their launch environment instead of exposing values in
+   * command-line arguments.
+   */
+  readonly headerEnvironment?: Readonly<Record<string, string>>
 }
 
 /** Parameters for starting a new agent turn against a CLI. */
@@ -83,30 +100,17 @@ export interface SessionSpec {
    * field only one adapter understands is a guarantee only one adapter keeps.
    */
   /**
-   * The unified OpenConnector server to inject into this run, already resolved
-   * (config + secret joined) by `AgentRunner`, or absent when the feature is off
-   * for this harness. Carries the secret-bearing `launch` half, so it stays inside
-   * the main process — each adapter registers it in its own vocabulary, none of
-   * which touches the worktree (see `codexMcpOverrides` / `opencodeMcpConfig`):
-   *   - Claude   → the SDK `mcpServers` option;
-   *   - Codex    → `-c mcp_servers.<name>.*` overrides on the app-server spawn;
-   *   - opencode → the `mcp` block baked into `OPENCODE_CONFIG_CONTENT`.
-   * Resolved in the runner rather than the adapter so the adapters keep
-   * `R = never` and don't each grow a service dependency.
-   */
-  readonly openConnector?: ParsedMcpServer | null
-
-  /**
-   * The in-process browser-control MCP server for this run (Claude only), giving
-   * the agent Jingler's own embedded browser to QA a preview URL in — the one
-   * the operator is watching — instead of a headless Chrome it spawns itself.
+   * Every remote MCP server attached to this run, regardless of where it came
+   * from. AgentRunner joins configured and internal sources once, immediately
+   * before launch, and each adapter translates this collection into its native
+   * vocabulary. It is optional for direct adapter callers; AgentRunner always
+   * supplies the collection (including an empty one).
    *
-   * A live `McpServer` instance, so it never crosses IPC and is never persisted.
-   * Built in `AgentRunner` from `BrowserControlPort` (which reaches
-   * `PreviewViewService`), for the same reason as `openConnector`: resolving it
-   * in the runner keeps the adapters `R = never`.
+   * This is secret-bearing launch data. It stays in the Electron main process,
+   * is consumed in-memory by the adapter, and must never be persisted or sent
+   * through RPC.
    */
-  readonly browserMcp?: McpSdkServerConfigWithInstance | null
+  readonly remoteMcpServers?: ReadonlyArray<RemoteMcpServer>
 
   readonly readOnly?: boolean
   /**
@@ -730,6 +734,26 @@ export const scriptedRun =
         yield* emit({ _tag: "Assistant", text: "Started a watcher in the background." })
         // The turn ENDS while the task runs on — exactly the situation that made
         // this work invisible before the dock existed.
+        yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        return
+      }
+
+      // Once an orchestrator plan is approved, later plan amendments run in auto
+      // mode and return the complete revised document inline. Model that contract
+      // directly so the runner exercises amendment reconciliation without opening
+      // a second approval gate.
+      if (spec.prompt.includes("[[amendment]]") && spec.mode !== "plan") {
+        yield* emit({
+          _tag: "Thinking",
+          text: "Folding the requested audit amendment into the approved plan.",
+          seconds: 2,
+          done: true
+        })
+        yield* pause
+        yield* emit({
+          _tag: "Assistant",
+          text: `Folding that in.\n\n\`\`\`\`html plan\n${scriptedPlanHtml("Refactor auth flow (revised)")}\n\`\`\`\``
+        })
         yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
         return
       }

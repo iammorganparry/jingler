@@ -3,8 +3,10 @@ import { Effect, Fiber } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentContext, PlanDecision as PlanDecisionType, SessionSpec } from "./adapter.js"
 import { PlanDecision } from "./adapter.js"
+import type { StartCodexAppServerOptions } from "./codex-app-server-client.js"
 
 const server = vi.hoisted(() => {
+  const launches: StartCodexAppServerOptions[] = []
   const state = {
     messages: [] as Array<Record<string, unknown>>,
     replay: [] as Array<Record<string, unknown>>,
@@ -28,7 +30,8 @@ const server = vi.hoisted(() => {
     compactionNumber: 0,
     turnSteer: null as import("./adapter.js").SteerTurn | null,
     diagnosticsCloseCount: 0,
-    closed: false
+    closed: false,
+    launches
   }
   const connection = {
     request: (method: string, params: unknown, options?: { timeoutMs?: number }) => {
@@ -105,7 +108,10 @@ const server = vi.hoisted(() => {
 })
 
 vi.mock("./codex-app-server-client.js", () => ({
-  startCodexAppServer: () => Promise.resolve(server.connection)
+  startCodexAppServer: (options: StartCodexAppServerOptions) => {
+    server.state.launches.push(options)
+    return Promise.resolve(server.connection)
+  }
 }))
 
 vi.mock("./codex-app-server-diagnostics.js", async (importOriginal) => {
@@ -188,6 +194,7 @@ beforeEach(() => {
   server.state.turnSteer = null
   server.state.diagnosticsCloseCount = 0
   server.state.closed = false
+  server.state.launches = []
 })
 
 afterEach(() => {
@@ -195,6 +202,59 @@ afterEach(() => {
 })
 
 describe("runCodexAppServer", () => {
+  it("passes every normalized remote MCP attachment to app-server startup", async () => {
+    server.state.messages = [
+      {
+        method: "turn/completed",
+        params: {
+          threadId: "thread-1",
+          turn: { id: "turn-1", status: "completed", error: null }
+        }
+      }
+    ]
+    const { ctx } = harness()
+
+    await Effect.runPromise(
+      runCodexAppServer(
+        "s1",
+        spec({
+          remoteMcpServers: [
+            {
+              name: "open-connector",
+              url: "https://connector.example/mcp",
+              headers: { Authorization: "Bearer connector-token" }
+            },
+            {
+              name: "jingler-browser",
+              url: "http://127.0.0.1:32123/mcp",
+              headers: { Authorization: "Bearer preview-token" },
+              headerEnvironment: {
+                Authorization: "JINGLER_BROWSER_MCP_AUTHORIZATION"
+              }
+            }
+          ]
+        }),
+        ctx,
+        new Map()
+      )
+    )
+
+    expect(server.state.launches).toHaveLength(1)
+    expect(server.state.launches[0]?.configOverrides).toStrictEqual([
+      'mcp_servers.open-connector.url="https://connector.example/mcp"',
+      'mcp_servers.open-connector.http_headers.Authorization="Bearer connector-token"',
+      'mcp_servers.jingler-browser.url="http://127.0.0.1:32123/mcp"',
+      'mcp_servers.jingler-browser.env_http_headers.Authorization="JINGLER_BROWSER_MCP_AUTHORIZATION"',
+      'shell_environment_policy.filters.JINGLER_BROWSER_MCP_AUTHORIZATION="exclude"'
+    ])
+    expect(server.state.launches[0]?.configOverrides?.join(" ")).not.toContain(
+      "preview-token"
+    )
+    expect(
+      server.state.launches[0]?.env?.JINGLER_BROWSER_MCP_AUTHORIZATION
+    ).toBe("Bearer preview-token")
+  })
+
   it("replaces a persisted thread whose local rollout no longer exists", async () => {
     vi.stubEnv("JINGLER_CODEX_DIAGNOSTICS_DIR", "/tmp")
     server.state.threadId = "replacement-thread"

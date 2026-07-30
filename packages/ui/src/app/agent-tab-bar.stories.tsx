@@ -2,9 +2,9 @@ import type { ReactNode } from "react"
 import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import {
+  AgentTabBar,
   ChatTabBar,
   MAIN_AGENT,
-  SubagentTabBar,
   type AgentTabItem,
   type ChatTabItem
 } from "./agent-tab-bar.js"
@@ -118,14 +118,16 @@ const AGENTS: ReadonlyArray<AgentTabItem> = [
     name: "Explore",
     description: "Map the RPC surface",
     status: "done",
-    hasChildren: false
+    hasChildren: false,
+    action: "close"
   },
   {
     id: "t2",
     name: "general-purpose",
     description: "Adversarial review",
     status: "working",
-    hasChildren: true
+    hasChildren: true,
+    action: "stop"
   }
 ]
 
@@ -140,10 +142,80 @@ export const SubagentDrillIn: Story = {
     onCloseChat: () => {}
   },
   render: () => (
-    <SubagentTabBar
+    <AgentTabBar
       agents={AGENTS}
       trail={[]}
       active={MAIN_AGENT}
+      onChange={() => {}}
+      onDrill={() => {}}
+      onNavigate={() => {}}
+      onStop={() => {}}
+      onClose={() => {}}
+    />
+  )
+}
+
+const WORKERS: ReadonlyArray<AgentTabItem> = [
+  {
+    id: "worker-auth",
+    name: "worker-auth",
+    description: "claude · opus · 7 stages · attempt 1",
+    status: "running",
+    hasChildren: false,
+    action: "stop"
+  },
+  {
+    id: "worker-release",
+    name: "worker-release",
+    description: "codex · gpt-5.6-sol · 1 stage · attempt 1",
+    status: "queued",
+    hasChildren: false
+  },
+  {
+    id: "worker-tests",
+    name: "worker-tests",
+    description: "claude · opus · 2 stages · attempt 2",
+    status: "blocked",
+    hasChildren: false
+  },
+  {
+    id: "worker-failed",
+    name: "worker-failed",
+    description: "codex · gpt-5.6-sol · 1 stage · attempt 1",
+    status: "failed",
+    hasChildren: false
+  },
+  {
+    id: "worker-stopped",
+    name: "worker-stopped",
+    description: "claude · opus · 1 stage · attempt 1",
+    status: "interrupted",
+    hasChildren: false
+  },
+  {
+    id: "worker-done",
+    name: "worker-done",
+    description: "codex · gpt-5.6-sol · 3 stages · attempt 1",
+    status: "completed",
+    hasChildren: false
+  }
+]
+
+/** Every provider-neutral worker lifecycle in the shared top-level rail. */
+export const OrchestrationWorkers: Story = {
+  args: {
+    chats: CHATS,
+    activeChatId: "c1",
+    onSelectChat: () => {},
+    onCreateChat: () => {},
+    onRenameChat: () => {},
+    onCloseChat: () => {}
+  },
+  render: () => (
+    <AgentTabBar
+      agents={WORKERS}
+      trail={[]}
+      active="worker-auth"
       onChange={() => {}}
       onDrill={() => {}}
       onNavigate={() => {}}
