@@ -16,13 +16,13 @@ import {
   type WorkerRoutingConfig
 } from "@jingler/core"
 import type { OrchestrationRoute } from "./adapter.js"
-import { planFromHtml } from "./plan-html.js"
+import { parsePlanHtml, planFromHtml } from "./plan-html.js"
 
 /**
  * Turn the plan text Claude produces via `ExitPlanMode` into a structured `Plan`.
  *
  * We can't rely on the model to emit JSON, so we ask it (via
- * `planModeInstructions`) to include a safe PRD ` ````mdx plan ` block and
+ * `planModeInstructions`) to include a safe PRD ` ````html ` block and
  * parse that here. Everything is best-effort and forgiving: a missing/garbled
  * block falls back to a single step that carries the raw markdown, so the plan is
  * always renderable and never lost. Pure and deterministic given `(raw, id)` —
@@ -43,18 +43,21 @@ import { planFromHtml } from "./plan-html.js"
  */
 export type PlanChannel = "tool" | "reply"
 
+const PLAN_HTML_FENCE_RULE =
+  "The opening fence must be exactly ````html on its own line and the closing fence must be exactly ````."
+
 export const PLAN_HTML_REFORMAT = [
   "The submitted PRD is not valid Jingler plan HTML.",
-  "Return the SAME plan as one complete four-backtick fenced ````html plan block.",
+  "Return the SAME plan as one complete four-backtick fenced HTML block.",
+  PLAN_HTML_FENCE_RULE,
   "Use HTML with <section data-stage>, <div data-acceptance data-status>, and <aside data-annotation> for structure.",
   "Every stage needs a stable id + title and at least one acceptance with a stable id and status.",
   "Do not change the substance of the plan; change only its format."
 ].join(" ")
 
 const OPENING: Readonly<Record<PlanChannel, string>> = {
-  tool: "When you present your plan with ExitPlanMode, put a four-backtick fenced ````html plan block at the top of the plan text, then your normal human-readable markdown below it.",
-  reply:
-    "When your plan is ready, put a four-backtick fenced ````html plan block at the top of your reply, then your normal human-readable markdown below it — and STOP there, without editing anything."
+  tool: `When you present your plan with ExitPlanMode, put a four-backtick fenced HTML block at the top of the plan text, then your normal human-readable markdown below it. ${PLAN_HTML_FENCE_RULE}`,
+  reply: `When your plan is ready, put a four-backtick fenced HTML block at the top of your reply, then your normal human-readable markdown below it — and STOP there, without editing anything. ${PLAN_HTML_FENCE_RULE}`
 }
 
 const DIRECT_SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
@@ -72,7 +75,7 @@ const ORCHESTRATOR_SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
 
 /**
  * The plan output protocol injected for a plan-mode turn. Documents the
- * ` ````mdx plan ` block so what the agent submits parses into structured steps. Kept
+ * ` ````html ` block so what the agent submits parses into structured steps. Kept
  * declarative: one block, documented field names, no per-call string assembly
  * elsewhere.
  */
@@ -130,7 +133,8 @@ data-model="gpt-5.6-sol" data-reason="High-complexity implementation"
 data-status="queued"></div>
 
 `}
-Return one four-backtick fenced \`\`\`\`html plan block containing the COMPLETE PRD as HTML.
+Return one four-backtick fenced HTML block containing the COMPLETE PRD as HTML.
+${PLAN_HTML_FENCE_RULE}
 Use ordinary HTML for prose (h1 title, h2 sections, p, ul/ol/li, strong/em, code, pre,
 blockquote, table). Carry structure on data-attributes — never <script>, <style>, event
 handlers, inline styles, or JavaScript:
@@ -193,26 +197,93 @@ const fenced = (raw: string, lang: string): string | null => {
 }
 
 /**
- * Whether the agent actually emitted the ` ````mdx plan ` fence we asked for.
+ * Whether the agent actually emitted the ` ````html ` fence we asked for.
  *
  * `planModeInstructions` documents the format, but prompt compliance is never
  * guaranteed — the adapter uses this to bounce a fence-less plan back for one
  * reformat rather than degrading straight to the raw fallback.
  */
-export const fencedHtmlPlan = (raw: string): string | null => {
-  const opening = /^[ \t]*(`{3,})html[ \t]+plan[ \t]*\r?\n/im.exec(raw)
-  if (opening === null) return null
-
-  const fenceLength = opening[1]!.length
-  const bodyStart = opening.index + opening[0].length
-  const body = raw.slice(bodyStart)
-  const closings = body.matchAll(/^[ \t]*(`{3,})[ \t]*$/gm)
-  for (const closing of closings) {
-    if (closing[1]!.length < fenceLength) continue
-    return body.slice(0, closing.index).replace(/\s+$/, "")
-  }
-  return null
+export interface HtmlPlanSubmission {
+  readonly body: string
+  readonly block: string
+  readonly start: number
+  readonly end: number
 }
+
+/**
+ * Find every complete, structurally valid HTML plan submission.
+ *
+ * `html` is the canonical CommonMark info string. `html plan` remains accepted
+ * for agents prompted before the contract was corrected. Both forms require the
+ * exact four-backtick transport documented by the prompt; ordinary triple-fenced
+ * HTML examples are user-visible content, never protocol.
+ *
+ * This is a forward parser rather than an opening-fence scan. Advancing past each
+ * outer block makes the returned ranges disjoint and prevents a nested
+ * triple-backtick HTML example from becoming a top-level candidate.
+ */
+const htmlPlanSubmissions = (raw: string): ReadonlyArray<HtmlPlanSubmission> => {
+  const found: Array<HtmlPlanSubmission> = []
+  const openings = /^[ \t]*`{4}(?!`)html(?:[ \t]+plan)?[ \t]*\r?\n/gim
+  const closings = /^[ \t]*`{4}(?!`)[ \t]*(?=\r?$)/gm
+  let cursor = 0
+  while (cursor < raw.length) {
+    openings.lastIndex = cursor
+    const opening = openings.exec(raw)
+    if (opening === null) break
+    const bodyStart = opening.index + opening[0].length
+    closings.lastIndex = bodyStart
+    const closing = closings.exec(raw)
+    if (closing === null) break
+    const end = closing.index + closing[0].length
+    const body = raw.slice(bodyStart, closing.index).replace(/\s+$/, "")
+    cursor = end
+    if (parsePlanHtml(body).valid) {
+      found.push({
+        body,
+        block: raw.slice(opening.index, end),
+        start: opening.index,
+        end
+      })
+    }
+  }
+  return found
+}
+
+/**
+ * The protocol requires one block at the top. Select the first valid submission
+ * so later human-readable HTML examples cannot replace it; malformed earlier
+ * attempts are filtered before selection, so a corrected retry still wins.
+ */
+export const fencedHtmlPlanSubmission = (
+  raw: string
+): HtmlPlanSubmission | null => htmlPlanSubmissions(raw)[0] ?? null
+
+export const fencedHtmlPlan = (raw: string): string | null =>
+  fencedHtmlPlanSubmission(raw)?.body ?? null
+
+/** Remove one selected plan transport while preserving every other HTML block. */
+export const stripHtmlPlanBlock = (
+  raw: string,
+  submittedBlock?: string
+): string => {
+  const selected =
+    submittedBlock === undefined
+      ? fencedHtmlPlanSubmission(raw)
+      : (() => {
+          const start = raw.indexOf(submittedBlock)
+          return start < 0
+            ? null
+            : { start, end: start + submittedBlock.length }
+        })()
+  if (selected === null) return raw.trim()
+  const stripped =
+    raw.slice(0, selected.start) + raw.slice(selected.end)
+  return stripped.replace(/\n{3,}/g, "\n\n").trim()
+}
+
+/** @deprecated Use `stripHtmlPlanBlock`; only one protocol block is selected. */
+export const stripHtmlPlanBlocks = stripHtmlPlanBlock
 
 export const hasPlanBlock = (raw: string): boolean =>
   fencedHtmlPlan(raw) !== null || fenced(raw, "plan") !== null

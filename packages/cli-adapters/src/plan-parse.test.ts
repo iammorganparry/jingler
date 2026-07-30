@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest"
 import {
+  fencedHtmlPlan,
   hasPlanBlock,
   parseFlow,
   parsePlan,
   parseStepCode,
   parseStepFlows,
-  planModeInstructions
+  planModeInstructions,
+  stripHtmlPlanBlock
 } from "./plan-parse.js"
 
 /**
@@ -251,7 +253,7 @@ describe("hasPlanBlock", () => {
 
   it("keeps nested code fences inside a four-backtick HTML plan", () => {
     const raw = [
-      "````html plan",
+      "````html",
       "<h1>PRD: Nested sample</h1>",
       "<h2>Context</h2><p>Keep examples intact.</p>",
       '<section data-stage="s1" data-title="Build parser">',
@@ -269,6 +271,126 @@ describe("hasPlanBlock", () => {
     expect(plan.steps[0]?.guards.map((guard) => guard.text)).toStrictEqual([
       "The full stage survives."
     ])
+  })
+
+  it("rejects ordinary triple-backtick HTML even when the example resembles a plan", () => {
+    const ordinaryExample = [
+      "```html",
+      "<h1>PRD: Example only</h1>",
+      '<section data-stage="01" data-title="Do not submit">',
+      '<div data-acceptance="01.1" data-status="pending">This is only documentation.</div>',
+      "</section>",
+      "```"
+    ].join("\n")
+
+    expect(hasPlanBlock(ordinaryExample)).toBe(false)
+    expect(parsePlan(ordinaryExample, "plan_example").structured).toBe(false)
+  })
+
+  it("ignores later invalid HTML examples and selects the first valid PRD submission", () => {
+    const valid = [
+      "````html",
+      "<h1>PRD: Submitted plan</h1>",
+      '<section data-stage="01" data-title="Implement">',
+      '<div data-acceptance="01.1" data-status="pending">The implementation works.</div>',
+      "</section>",
+      "````"
+    ].join("\n")
+    const laterExample = [
+      "````html",
+      "<div>Useful HTML example, not a complete PRD.</div>",
+      "````"
+    ].join("\n")
+
+    const raw = `${valid}\n\nHuman-readable notes:\n\n${laterExample}`
+    expect(fencedHtmlPlan(raw)).toContain("PRD: Submitted plan")
+    expect(parsePlan(raw, "plan_first_valid").summary).toBe("Submitted plan")
+  })
+
+  it("treats nested triple-backtick HTML as plan content and strips only the outer transport", () => {
+    const raw = [
+      "Before the plan.",
+      "",
+      "````html",
+      "<h1>PRD: Nested HTML</h1>",
+      '<section data-stage="01" data-title="Preserve examples">',
+      "<pre>```html",
+      '<section data-stage="example" data-title="Example only">',
+      '<div data-acceptance="example.1" data-status="pending">Nested sample.</div>',
+      "</section>",
+      "```</pre>",
+      '<div data-acceptance="01.1" data-status="pending">The outer plan survives.</div>',
+      "</section>",
+      "````",
+      "",
+      "After the plan."
+    ].join("\n")
+
+    expect(parsePlan(raw, "plan_nested_html").summary).toBe("Nested HTML")
+    expect(stripHtmlPlanBlock(raw)).toBe("Before the plan.\n\nAfter the plan.")
+  })
+
+  it("strips only the selected plan transport and preserves later HTML fences", () => {
+    const selected = [
+      "````html",
+      "<h1>PRD: Selected</h1>",
+      '<section data-stage="01" data-title="Selected stage">',
+      '<div data-acceptance="01.1" data-status="pending">Selected criterion.</div>',
+      "</section>",
+      "````"
+    ].join("\n")
+    const usefulExample = [
+      "````html",
+      "<h1>PRD: Documentation example</h1>",
+      '<section data-stage="example" data-title="Example stage">',
+      '<div data-acceptance="example.1" data-status="pending">Example criterion.</div>',
+      "</section>",
+      "````"
+    ].join("\n")
+    const raw = `${selected}\n\nKeep this example:\n\n${usefulExample}`
+
+    const stripped = stripHtmlPlanBlock(raw)
+    expect(stripped).toContain("Keep this example:")
+    expect(stripped).toContain("PRD: Documentation example")
+    expect(stripped).not.toContain("PRD: Selected")
+  })
+
+  it("accepts the canonical html fence and the legacy html plan fence", () => {
+    const html = [
+      "<h1>PRD: Canonical HTML</h1>",
+      '<section data-stage="01" data-title="Parse it">',
+      "<h3>Intent</h3><p>Render the plan.</p>",
+      '<div data-acceptance="01.1" data-status="pending">The stage renders.</div>',
+      "</section>"
+    ].join("\n")
+
+    for (const opening of ["````html", "````html plan"]) {
+      const raw = `${opening}\n${html}\n\`\`\`\``
+      expect(hasPlanBlock(raw)).toBe(true)
+      expect(parsePlan(raw, `plan_${opening.length}`).structured).toBe(true)
+    }
+  })
+
+  it("uses the newest complete HTML plan after a reformat attempt", () => {
+    const invalid = [
+      "````html",
+      "<h1>PRD: Incomplete</h1>",
+      "<p>No stage yet.</p>",
+      "````"
+    ].join("\n")
+    const valid = [
+      "````html",
+      "<h1>PRD: Corrected</h1>",
+      '<section data-stage="01" data-title="Correct">',
+      "<h3>Intent</h3><p>Use the corrected submission.</p>",
+      '<div data-acceptance="01.1" data-status="pending">The correction wins.</div>',
+      "</section>",
+      "````"
+    ].join("\n")
+    const raw = `${invalid}\n\nReformatted:\n\n${valid}`
+
+    expect(fencedHtmlPlan(raw)).toContain("PRD: Corrected")
+    expect(parsePlan(raw, "plan_corrected").summary).toBe("Corrected")
   })
 })
 
@@ -294,7 +416,8 @@ describe("parsePlan — the unstructured fallback", () => {
 
 describe("planModeInstructions", () => {
   it("documents safe PRD HTML and forbids execution", () => {
-    expect(planModeInstructions()).toContain("````html plan")
+    expect(planModeInstructions()).toContain("````html")
+    expect(planModeInstructions()).not.toContain("````html plan")
     expect(planModeInstructions()).toContain("data-acceptance")
     expect(planModeInstructions()).toMatch(/ExitPlanMode/)
     expect(planModeInstructions().toLowerCase()).toContain("do not edit")

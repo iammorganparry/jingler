@@ -96,6 +96,11 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
             .pipe(
               Effect.andThen(fs.rename(tmp, file)),
               Effect.tapError(() => fs.remove(tmp).pipe(Effect.ignore)),
+              Effect.tapError((error) =>
+                Effect.logError(
+                  `Failed to persist transcript ${chatId}: ${String(error)}`
+                )
+              ),
               Effect.as(true),
               Effect.orElseSucceed(() => false)
             )

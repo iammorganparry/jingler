@@ -46,7 +46,8 @@ const openSettings = async (window: Page): Promise<void> => {
   await expect(window.getByRole("button", { name: "Close settings" })).toBeVisible()
 }
 
-const proposePlan = async (window: Page): Promise<void> => {
+const proposePlan = async (launched: LaunchedApp): Promise<void> => {
+  const { window } = launched
   const composer = window.getByPlaceholder(/Message .+…/)
   await composer.fill("[[plan]] refactor auth to a TokenStore")
   await composer.press("Enter")
@@ -57,6 +58,16 @@ const proposePlan = async (window: Page): Promise<void> => {
     timeout: 20_000
   })
   await expect(window.getByLabel("Plan document")).toBeVisible()
+  await expect(
+    window.getByText("PRD: Refactor auth flow", { exact: true })
+  ).toBeVisible()
+  await expect(
+    window.getByText("Audit session middleware", { exact: true })
+  ).toBeVisible()
+  await expect.poll(() => existsSync(currentPlanPath(launched))).toBe(true)
+  await expect.poll(() => readFileSync(currentPlanPath(launched), "utf8")).toContain(
+    'data-stage="s_01"'
+  )
   await expect(window.getByLabel("Resize step list")).toHaveCount(0)
   await expect(window.getByLabel("Resize changes")).toHaveCount(0)
 }
@@ -197,7 +208,7 @@ test("comments stay aligned with their highlighted line, escape clipping, and ca
     sessions: session()
   })
   await expect(appShell(launched.window)).toBeVisible()
-  await proposePlan(launched.window)
+  await proposePlan(launched)
 
   await selectText(launched.window, "Implement stages in order")
   await launched.window.getByRole("button", { name: "Comment", exact: true }).click()
@@ -274,7 +285,7 @@ test("live edits and conflicts preserve both drafts", async ({
     sessions: session()
   })
   await expect(appShell(launched.window)).toBeVisible()
-  await proposePlan(launched.window)
+  await proposePlan(launched)
 
   const file = currentPlanPath(launched)
   await editSource(launched.window, "OPERATOR_MARKER")
@@ -322,7 +333,7 @@ test("approval executes the saved revision and finishes from criterion evidence"
     sessions: session()
   })
   await expect(appShell(launched.window)).toBeVisible()
-  await proposePlan(launched.window)
+  await proposePlan(launched)
 
   const exactText = "OPERATOR_APPROVED_REVISION"
   await editSource(launched.window, exactText)
@@ -351,7 +362,7 @@ test("restart resumes the exact canonical revision", async ({ launchApp }) => {
     sessions: session()
   })
   await expect(appShell(first.window)).toBeVisible()
-  await proposePlan(first.window)
+  await proposePlan(first)
 
   const exactText = "RESTART_SAFE_CRITERION"
   await editSource(first.window, exactText)
@@ -387,7 +398,7 @@ test("a plan diagram renders, and a broken source degrades to an error card", as
     sessions: session()
   })
   await expect(appShell(launched.window)).toBeVisible()
-  await proposePlan(launched.window)
+  await proposePlan(launched)
 
   // The canned plan ships a valid `data-diagram="mermaid"` block — it renders a
   // themed SVG in the doc, not a raw <pre>.
@@ -413,7 +424,7 @@ test("inline (WYSIWYG) editing the document persists to the canonical source", a
     sessions: session()
   })
   await expect(appShell(launched.window)).toBeVisible()
-  await proposePlan(launched.window)
+  await proposePlan(launched)
 
   const file = currentPlanPath(launched)
   const startRevision = revisionOf(file)
@@ -435,7 +446,7 @@ test("an external write to the plan file live-updates the open editor (Plan.watc
     sessions: session()
   })
   await expect(appShell(launched.window)).toBeVisible()
-  await proposePlan(launched.window)
+  await proposePlan(launched)
 
   const file = currentPlanPath(launched)
   const persisted = readFileSync(file, "utf8")

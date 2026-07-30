@@ -3,13 +3,14 @@ import { parseOrchestratorAmendment, stripOrchestratorAmendment } from "./orches
 
 /**
  * The orchestrator amends its approved plan by re-issuing the whole plan as a
- * ` ````html plan ` block in an auto-mode reply. These cover the "is this an
+ * ` ````html ` block in an auto-mode reply. These cover the "is this an
  * amendment?" decision — a plan block with a stage is one; prose, or a block
  * with no stage, is not — and that the block is scrubbed from what the operator
  * reads.
  */
 
-const planBlock = (body: string) => `\`\`\`\`html plan\n${body}\n\`\`\`\``
+const planBlock = (body: string, legacy = false) =>
+  `\`\`\`\`html${legacy ? " plan" : ""}\n${body}\n\`\`\`\``
 
 const twoStages = planBlock(
   '<h1>PRD: x</h1><section data-stage="01" data-title="A"><div data-acceptance="01.1" data-status="pending">a</div></section>'
@@ -22,12 +23,34 @@ describe("parseOrchestratorAmendment", () => {
     expect(html).toContain('data-stage="01"')
   })
 
+  it("continues to accept a legacy html plan amendment", () => {
+    const html = parseOrchestratorAmendment(
+      planBlock(
+        '<h1>PRD: legacy</h1><section data-stage="01" data-title="A"><div data-acceptance="01.1" data-status="pending">a</div></section>',
+        true
+      )
+    )
+    expect(html).toContain("PRD: legacy")
+  })
+
   it("returns null for an ordinary reply with no plan block", () => {
     expect(parseOrchestratorAmendment("The build passed. Anything else?")).toBeNull()
   })
 
   it("returns null for a plan block that declares no stage (an illustration)", () => {
     expect(parseOrchestratorAmendment(planBlock("<h1>PRD: x</h1><p>just prose</p>"))).toBeNull()
+  })
+
+  it("does not treat an ordinary triple-backtick HTML example as an amendment", () => {
+    const example = [
+      "```html",
+      "<h1>PRD: Documentation example</h1>",
+      '<section data-stage="01" data-title="Example">',
+      '<div data-acceptance="01.1" data-status="pending">Example only.</div>',
+      "</section>",
+      "```"
+    ].join("\n")
+    expect(parseOrchestratorAmendment(example)).toBeNull()
   })
 })
 
@@ -40,5 +63,18 @@ describe("stripOrchestratorAmendment", () => {
 
   it("leaves a reply with no block untouched", () => {
     expect(stripOrchestratorAmendment("Done — PR opened.")).toBe("Done — PR opened.")
+  })
+
+  it("preserves later HTML examples that were not selected as the amendment", () => {
+    const example = planBlock(
+      '<h1>PRD: Documentation example</h1><section data-stage="example" data-title="Example"><div data-acceptance="example.1" data-status="pending">Example only.</div></section>'
+    )
+    const reply = stripOrchestratorAmendment(
+      `Folding that in.\n\n${twoStages}\n\nUseful example:\n\n${example}`
+    )
+
+    expect(reply).toContain("Useful example:")
+    expect(reply).toContain("PRD: Documentation example")
+    expect(reply).not.toContain("PRD: x")
   })
 })

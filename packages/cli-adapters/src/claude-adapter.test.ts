@@ -113,7 +113,8 @@ describe("PLAN_REFORMAT", () => {
   it("names the missing block and tells the agent how to re-submit", () => {
     // Handed back through deny.message when a plan skips the HTML block — it's the only
     // channel that reaches the agent, so it has to be self-contained.
-    expect(PLAN_REFORMAT).toContain("````html plan")
+    expect(PLAN_REFORMAT).toContain("````html")
+    expect(PLAN_REFORMAT).not.toContain("````html plan")
     expect(PLAN_REFORMAT).toContain("<section data-stage>")
     expect(PLAN_REFORMAT).toContain("ExitPlanMode")
     expect(PLAN_REFORMAT).toContain("stable id + title")

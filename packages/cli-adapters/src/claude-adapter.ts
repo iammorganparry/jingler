@@ -32,7 +32,7 @@ import { worktreeEnv } from "./worktree-env.js"
 import { capOutput } from "./output-cap.js"
 import { formatQuestionAnswers } from "./question-prompt.js"
 import {
-  hasPlanBlock,
+  fencedHtmlPlanSubmission,
   parsePlan,
   PLAN_HTML_REFORMAT,
   planModeInstructions
@@ -139,7 +139,7 @@ export const mapClaudeReasoning = (
 }
 
 /**
- * Handed back when a plan arrives without its ` ```plan ` fence. Jingler renders
+ * Handed back when a plan arrives without its fenced HTML PRD. Jingler renders
  * plans from that block, so a fence-less plan has no steps to review — we ask for
  * one reformat before falling back to showing the raw markdown.
  */
@@ -1099,6 +1099,12 @@ export const runClaude = (
         let planQuery: Query | null = null
         let planCount = 0
         let qn = 0
+        // Claude's native plan flow normally supplies the PRD through
+        // `ExitPlanMode.input.plan`, but read-only orchestrator runs can instead
+        // stream the complete fenced document as assistant text and call the
+        // tool with `{}`. Keep the main agent's visible reply as the transport
+        // fallback; sub-agent text is never eligible to become the root plan.
+        let planReplyText = ""
         // Whether we've already bounced a fence-less plan back for a reformat on
         // this run. Exactly one retry: a model that still won't comply degrades to
         // the raw fallback instead of ping-ponging forever.
@@ -1112,23 +1118,47 @@ export const runClaude = (
           // Plan mode: the SDK routes ExitPlanMode approval here. Turn the plan
           // into a structured, reviewable Plan and honour the operator's verdict.
           if (toolName === "ExitPlanMode") {
-            const raw = strOf(input.plan) ?? ""
-            // `planModeInstructions` documents the ` ```plan ` fence, but a model
+            const payload = strOf(input.plan)?.trim() ?? ""
+            const planId = `plan_${sessionId}_${planCount + 1}`
+            const payloadPlan =
+              payload.length === 0
+                ? null
+                : parsePlan(payload, planId)
+            const replyPlan =
+              planReplyText.length === 0
+                ? null
+                : parsePlan(planReplyText, planId)
+            const structuredPayload =
+              payloadPlan?.structured === true ? payloadPlan : null
+            const structuredReply =
+              replyPlan?.structured === true ? replyPlan : null
+            const plan = structuredPayload ?? structuredReply
+            const raw = payload || planReplyText
+            // `planModeInstructions` documents the ` ````html ` fence, but a model
             // can still skip it — and then the operator gets a plan with no
             // reviewable steps. Bounce the FIRST offender back through the same
             // deny.message channel a revision uses; it re-calls ExitPlanMode with
             // the fence and nobody sees the broken version.
-            if (!hasPlanBlock(raw) && !planReformatAsked) {
+            if (plan === null && !planReformatAsked) {
               planReformatAsked = true
+              planReplyText = ""
               return { behavior: "deny", message: PLAN_REFORMAT }
             }
             planCount += 1
-            const plan = parsePlan(raw, `plan_${sessionId}_${planCount}`)
-            if (plan.structured === false && !planReformatAsked) {
-              planReformatAsked = true
-              return { behavior: "deny", message: PLAN_REFORMAT }
-            }
-            const decision = await runP(ctx.proposePlan(plan))
+            const proposedPlan = plan ?? parsePlan(raw, planId)
+            const submittedBlock =
+              structuredPayload === null && structuredReply !== null
+                ? fencedHtmlPlanSubmission(planReplyText)?.block
+                : undefined
+            const decision = await runP(
+              ctx.proposePlan(proposedPlan, submittedBlock)
+            ).finally(() => {
+              // Assistant text belongs to one ExitPlanMode submission. A valid
+              // proposal followed by Revise must not make an empty retry reuse
+              // the previously reviewed document.
+              planReplyText = ""
+              planReformatAsked = false
+            })
             if (decision._tag === "Approve") {
               // Exit plan mode via "default" — the same mode every non-plan run
               // uses (see `mapPermissionMode`), so canUseTool below keeps being
@@ -1372,6 +1402,13 @@ export const runClaude = (
              * nothing below depends on it having run late.
              */
             const events = streamEventsFor(msg, tools, bgState)
+            if (spec.mode === "plan") {
+              for (const event of events) {
+                if (event._tag === "Assistant" && event.agentId === undefined) {
+                  planReplyText += event.text
+                }
+              }
+            }
             // Keep the live sub-agent set current before anything reads it. Both
             // edges come from the mapper: `SubagentStarted` off the `Task` tool_use,
             // `SubagentEnded` off the `task_notification` bookend. The errored
