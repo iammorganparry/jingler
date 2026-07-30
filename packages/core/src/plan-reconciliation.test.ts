@@ -26,7 +26,7 @@ const assignment = (
   agentId: string,
   status: "queued" | "running" | "completed"
 ): string =>
-  `<div data-assignment data-agent-id="${agentId}" data-cli="codex" data-model="gpt-5" data-reason="Stable component owner." data-status="${status}"></div>`
+  `<div data-assignment data-agent-id="${agentId}" data-cli="codex" data-model="gpt-5" data-reason="Stable component owner." data-status="${status}"></div><ul data-files></ul>`
 
 describe("reconcilePlanAmendment", () => {
   it("resets evidence for a changed running stage and preserves its existing assignee", () => {
@@ -137,6 +137,55 @@ ${assignment("worker-a", "running")}
         'Running stage "01" cannot be removed. Stop its worker before removing the stage.'
     })
   })
+
+  it("accepts a replacement route while retaining a compatible logical agent id", () => {
+    const previous = documentFrom(`<h1>PRD: Reroute work</h1>
+<section data-stage="01" data-title="Worker stage" data-complexity="medium">
+${assignment("worker-a", "queued")}
+<div data-acceptance="01.1" data-status="pending">The work completes.</div>
+</section>`)
+    const replacement = `<h1>PRD: Reroute work</h1>
+<section data-stage="01" data-title="Worker stage" data-complexity="high">
+<div data-assignment data-agent-id="replacement" data-cli="claude" data-model="opus" data-reason="Updated high-complexity route." data-status="queued"></div>
+<div data-acceptance="01.1" data-status="pending">The work completes.</div>
+</section>`
+
+    const result = reconcilePlanAmendment(previous, replacement)
+
+    expect(result.valid).toBe(true)
+    if (!result.valid) return
+    expect(result.projection.stages[0]?.assignment).toMatchObject({
+      agentId: "worker-a",
+      cli: "claude",
+      model: "opus"
+    })
+  })
+
+  it("preserves prior user comments and unresolved worker annotations", () => {
+    const previous = documentFrom(`<h1>PRD: Preserve notes</h1>
+<section data-stage="01" data-title="Worker stage" data-complexity="medium">
+${assignment("worker-a", "queued")}
+<div data-acceptance="01.1" data-status="pending">The work completes.</div>
+<aside data-annotation="user-note" data-stage="01" data-author="user" data-status="open">Keep the accessibility requirement.</aside>
+<aside data-annotation="worker-note" data-stage="01" data-author="agent" data-status="open">Waiting for a fixture.</aside>
+</section>`)
+    const replacement = `<h1>PRD: Preserve notes</h1>
+<section data-stage="01" data-title="Worker stage" data-complexity="medium">
+${assignment("worker-a", "queued")}
+<div data-acceptance="01.1" data-status="pending">The work completes.</div>
+</section>`
+
+    const result = reconcilePlanAmendment(previous, replacement)
+
+    expect(result.valid).toBe(true)
+    if (!result.valid) return
+    expect(result.projection.annotations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "user-note", author: "user", status: "open" }),
+        expect.objectContaining({ id: "worker-note", author: "agent", status: "open" })
+      ])
+    )
+  })
 })
 
 describe("planStageSemanticFingerprint", () => {
@@ -199,5 +248,24 @@ ${assignment("worker-b", "queued")}
         { id: "01.1", status: "passed", evidence: "green" }
       ]
     })
+  })
+
+  it("changes when semantic HTML attributes change", () => {
+    const before = documentFrom(`<h1>PRD: Semantic attributes</h1>
+<section data-stage="01" data-title="Stable" data-complexity="medium">
+<ul data-files><li data-change="M">src/a.ts</li></ul>
+<p><a href="https://example.com/old">Reference</a></p>
+<div data-acceptance="01.1" data-status="pending">The change works.</div>
+</section>`).projection.stages[0]!
+    const after = documentFrom(`<h1>PRD: Semantic attributes</h1>
+<section data-stage="01" data-title="Stable" data-complexity="medium">
+<ul data-files><li data-change="D">src/a.ts</li></ul>
+<p><a href="https://example.com/new">Reference</a></p>
+<div data-acceptance="01.1" data-status="pending">The change works.</div>
+</section>`).projection.stages[0]!
+
+    expect(planStageSemanticFingerprint(after)).not.toBe(
+      planStageSemanticFingerprint(before)
+    )
   })
 })

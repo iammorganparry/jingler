@@ -41,6 +41,7 @@ import {
   modelsCatalog,
   modelsList,
   mergeCanonicalOrchestrationCheckpoints,
+  newSessionOrchestrator,
   orchestrationStagesCompleted,
   planUsesOrchestration,
   reviewGet,
@@ -89,6 +90,36 @@ describe("RPC handlers", () => {
         defaultModel: undefined
       }
     })
+  })
+
+  it("falls back to direct session creation when model discovery crashes", async () => {
+    const brokenDiscovery = Layer.succeed(
+      DiscoveryService,
+      new DiscoveryService({ list: () => Effect.die("catalogue unavailable") })
+    )
+    const unusedModels = Layer.succeed(
+      ModelsService,
+      new ModelsService({
+        list: () => Effect.succeed([]),
+        catalog: () => Effect.succeed([])
+      })
+    )
+
+    const resolution = await Effect.runPromise(
+      newSessionOrchestrator(null).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            brokenDiscovery,
+            unusedModels,
+            fakeCommandExecutor(() => ({ exitCode: 0, stdout: "" }))
+          )
+        )
+      )
+    )
+
+    expect(resolution).toBeNull()
+    expect(sessionCreationDefaults("codex", null, resolution).options.chatRole)
+      .toBe("direct")
   })
 
   it("derives plan execution strategy from the producing chat, not the active chat", () => {

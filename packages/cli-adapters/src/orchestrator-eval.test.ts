@@ -29,16 +29,19 @@ const source = (amendment = ""): string => `<h1>PRD: Eval fixture</h1>
 <section data-stage="schema" data-title="Schema" data-depends-on="" data-complexity="high">
 <h3>Intent</h3><p>Add storage.</p>
 <div data-assignment="worker-api" data-agent-id="worker-api" data-cli="claude" data-model="haiku" data-reason="Shared API dependency" data-status="queued"></div>
+<ul data-files><li>src/schema.ts</li></ul>
 <div data-acceptance="schema.1" data-status="pending">Schema test passes.</div>
 </section>
 <section data-stage="api" data-title="API" data-depends-on="schema" data-complexity="high">
 <h3>Intent</h3><p>Expose storage.</p>
 <div data-assignment="worker-api" data-agent-id="worker-api" data-cli="claude" data-model="haiku" data-reason="Shares schema dependency" data-status="queued"></div>
+<ul data-files><li>src/api.ts</li></ul>
 <div data-acceptance="api.1" data-status="pending">API test passes.</div>
 </section>
 <section data-stage="docs" data-title="Docs" data-depends-on="" data-complexity="low">
 <h3>Intent</h3><p>Document the API.</p>
 <div data-assignment="worker-docs" data-agent-id="worker-docs" data-cli="codex" data-model="gpt-5.6-sol" data-reason="Independent documentation" data-status="queued"></div>
+<ul data-files><li>docs/api.md</li></ul>
 <div data-acceptance="docs.1" data-status="pending">Docs are accurate.</div>
 </section>`
 

@@ -26,11 +26,11 @@ export function PlanReview(props: {
   canApprove?: boolean
   /** @deprecated Legacy step-review input retained for caller compatibility. */
   patch?: string
-  /** @deprecated The document editor owns selection through anchored nodes. */
+  /** One-shot stable stage id requested by the composer progress dock. */
   selectedStepId?: string | null
   /** @deprecated Split panes render the same responsive document editor. */
   compact?: boolean
-  /** @deprecated Legacy step selection no longer exists. */
+  /** Called after the requested stage has been scrolled into view. */
   onSelectStep?: (stepId: string) => void
   onApprove?: (executionMode?: ExecutionMode) => void
   onResume?: () => void
@@ -66,7 +66,9 @@ export function PlanReview(props: {
     onKeepLocal,
     onAcceptRemote,
     onStopWorker,
-    onRetryWorker
+    onRetryWorker,
+    selectedStepId,
+    onSelectStep
   } = props
 
   if (!document && plan) {
@@ -120,6 +122,10 @@ export function PlanReview(props: {
       onAcceptRemote={onAcceptRemote}
       onStopWorker={onStopWorker}
       onRetryWorker={onRetryWorker}
+      targetStageId={selectedStepId}
+      onTargetStageConsumed={
+        selectedStepId ? () => onSelectStep?.(selectedStepId) : undefined
+      }
     />
   )
 }

@@ -97,7 +97,9 @@ Jingler hands approved stages to provider-neutral worker agents.
   data-agent-id, data-cli, data-model, data-reason, and data-status="queued".
 - Use data-depends-on="stage-id ..." for dependencies.
 - Stages connected by any dependency path MUST share one agent id, harness, and model.
-- Declare repository-relative files in <ul data-files>; normalize paths without "." or "..".
+- Every stage MUST include <ul data-files>. List each repository-relative path it may
+  edit, normalized without "." or ".."; use an empty <ul data-files></ul> only when
+  the stage cannot edit repository files. Undeclared stages are serialized together.
 - Stages whose declared files overlap MUST share one agent id, harness, and model even
   when they have no dependency edge. Give only dependency- and file-independent
   components distinct agent ids so they can run in parallel.

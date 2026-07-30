@@ -327,6 +327,7 @@ const scriptedPlanHtml = (
 <h3>Intent</h3>
 <p>Decide the refresh path on expiry.</p>
 <div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
+<ul data-files><li>src/auth/refresh.ts</li></ul>
 <div data-acceptance="s_04.1" data-status="pending">The refresh decision is specified.</div>
 </section>
 <section data-stage="s_4a" data-title="refresh() and retry on 401" data-depends-on="s_04" data-complexity="high">
@@ -343,6 +344,7 @@ const scriptedPlanHtml = (
 <h3>Intent</h3>
 <p>Token still valid, carry on.</p>
 <div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
+<ul data-files><li>src/auth/session.ts</li></ul>
 <div data-acceptance="s_4b.1" data-status="pending">A valid token proceeds without refreshing.</div>
 </section>
 <section data-stage="s_05" data-title="Update auth tests" data-depends-on="s_4a s_4b" data-complexity="medium">
@@ -357,6 +359,7 @@ const scriptedPlanHtml = (
 <p>Ship the refactor for review.</p>
 ${holdWorker ? "<p>[[worker-hold]] Wait for an explicit stop before completing the first attempt.</p>" : ""}
 <div data-assignment data-agent-id="worker-release" data-cli="codex" data-model="gpt-5.6-sol" data-reason="Release preparation is independent and can run concurrently on a lower-cost route." data-status="queued"></div>
+<ul data-files><li>CHANGELOG.md</li></ul>
 <div data-acceptance="s_06.1" data-status="pending">A PR is opened against main.</div>
 </section>
 <h2>Testing</h2>

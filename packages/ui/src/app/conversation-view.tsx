@@ -8,6 +8,7 @@ import type {
   ProviderModels,
   PermissionMode,
   Plan,
+  PlanDocument,
   PlanStatus,
   QuestionAnswer,
   QuestionRequest,
@@ -30,6 +31,7 @@ import { MessageTurn } from "../composites/message-turn.js"
 import { ArchivedBanner } from "../composites/archived-banner.js"
 import { ContextMeter } from "../composites/context-meter.js"
 import { RunStats } from "../composites/run-stats.js"
+import { PlanProgressDock } from "../composites/plan-progress-dock.js"
 
 /**
  * Shift+Tab cycles through the HITL modes, Claude-Code style. Plan mode is
@@ -167,14 +169,18 @@ export interface ConversationViewProps {
   onResumePlan?: (planId: string) => void
   /**
    * Open the full Plan Review view — bare from a transcript plan card, or with a
-   * step id from the progress rail.
+   * stage id from the composer progress dock.
    */
   onOpenPlanReview?: (stepId?: string) => void
   /**
-   * The session's live plan. When set, a step-progress rail shows beside the
-   * transcript so execution is legible without leaving the Conversation.
+   * Legacy transcript projection retained for inline plan-card compatibility.
    */
   plan?: Plan | null
+  /**
+   * Canonical live plan document. Unlike the legacy `plan` projection, this
+   * carries each worker's mechanical execution status from Plan.watch.
+   */
+  planDocument?: PlanDocument | null
   /**
    * When set, the session is archived (its PR merged/closed): a banner is shown,
    * the transcript dims to read-only, and the composer is replaced by a locked bar.
@@ -253,6 +259,7 @@ export function ConversationView({
   onResumePlan,
   onOpenPlanReview,
   plan = null,
+  planDocument = null,
   draft,
   onDraftChange,
   draftAttachments,
@@ -405,7 +412,14 @@ export function ConversationView({
         {/* Same gutter + centered max-width as the transcript column above. */}
         <div className={cn("flex-none pb-[18px] pt-[11px]", gutter)}>
           <div className="mx-auto w-full max-w-[760px]">
-          {/* Live session analytics — elapsed time + current context size, right
+            {!archived && planDocument && (
+              <PlanProgressDock
+                document={planDocument}
+                onOpenStage={(stageId) => onOpenPlanReview?.(stageId)}
+                className="mb-2"
+              />
+            )}
+            {/* Live session analytics — elapsed time + current context size, right
               above the composer so it stays visible while the user works. */}
           {!archived && (busy || runStartedAt !== null || tokens > 0) && (
             <div className="mb-1.5 flex min-w-0 flex-wrap items-center justify-end gap-x-2.5 gap-y-1">
@@ -545,13 +559,6 @@ export function ConversationView({
           </div>
         </div>
       </div>
-
-      {/*
-        The step-progress rail used to live here. It was a lossy summary of Plan
-        Review shown in a column too narrow to act on, so it has been replaced by
-        the split view (see `session-conversation`), which puts the REAL plan
-        beside the transcript instead of a second, worse copy of it.
-      */}
     </div>
   )
 }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { parsePlanHtml } from "@jingler/core"
+import { parsePlanHtml, planStageSemanticFingerprint } from "@jingler/core"
 import { Editor } from "@tiptap/core"
 import { afterEach, describe, expect, it } from "vitest"
 import {
@@ -29,6 +29,7 @@ const FIXTURE = `<h1>PRD: Ship the plan doc editor</h1>
 <h3>Intent</h3>
 <p>Author the four custom nodes.</p>
 <div data-assignment data-agent-id="worker-ui" data-cli="codex" data-model="gpt-5" data-reason="Complex editor schema work." data-status="running"></div>
+<ul data-files><li data-change="M" data-added="12" data-removed="3">src/plan-doc.ts</li></ul>
 <div data-acceptance="01.1" data-status="passed" data-evidence="round-trip test is green">Nodes round-trip the data-attribute format.</div>
 <div data-acceptance="01.2" data-status="pending">The insert toolbar adds every widget.</div>
 <aside data-annotation="a1" data-stage="01" data-author="user" data-status="open" data-created-at="2026-07-29T10:00:00.000Z">Cycle the status pill on click.</aside>
@@ -90,6 +91,10 @@ describe("plan doc HTML round-trip", () => {
     })
     expect(html).toContain('data-assignment=""')
     expect(html).toContain('data-agent-id="worker-ui"')
+    expect(html).toContain('data-files=""')
+    expect(html).toContain('data-change="M"')
+    expect(html).toContain('data-added="12"')
+    expect(html).toContain('data-removed="3"')
 
     // Acceptance ids + statuses survive on the <div data-acceptance>.
     expect(stage.acceptance.map((a) => a.id)).toEqual(["01.1", "01.2"])
@@ -112,6 +117,18 @@ describe("plan doc HTML round-trip", () => {
     expect(a.valid).toBe(true)
     expect(b.valid).toBe(true)
     expect(b.html).toBe(a.html)
+  })
+
+  it("preserves the semantic fingerprint used by in-flight workers", () => {
+    const before = parsePlanHtml(FIXTURE)
+    const after = parsePlanHtml(roundTripHtml(FIXTURE))
+    expect(before.valid).toBe(true)
+    expect(after.valid).toBe(true)
+    if (!before.valid || !after.valid) return
+
+    expect(planStageSemanticFingerprint(after.projection.stages[0]!)).toBe(
+      planStageSemanticFingerprint(before.projection.stages[0]!)
+    )
   })
 
   it("commenting a selection round-trips to an <aside data-annotation> with the quote", () => {

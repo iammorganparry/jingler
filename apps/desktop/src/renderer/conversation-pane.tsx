@@ -56,10 +56,10 @@ export function ConversationPane({
   view?: "conversation" | "plan" | "split"
   /**
    * Switch the pane to the Plan Review view — bare from the inline plan card, or
-   * with a step id from the Conversation progress rail (a deep link).
+   * with a stage id from the composer progress dock (a deep link).
    */
   onOpenPlanReview?: (stepId?: string) => void
-  /** The step Plan Review should open at (a pending deep link from the rail). */
+  /** The stage Plan Review should open at (a pending deep link from the dock). */
   planStepId?: string | null
   /** Plan Review's selection moved — lets the host retire a spent deep link. */
   onPlanStepSelected?: () => void
@@ -550,6 +550,7 @@ export function ConversationPane({
           }
           onOpenPlanReview={onOpenPlanReview}
           plan={convo.plan}
+          planDocument={canonicalPlan.document}
           draft={draft.text}
           // Merge against the LIVE draft, never the render-time `draft` closure:
           // on send the composer fires onSend → setValue("") → setAttachments([])
@@ -605,10 +606,10 @@ export function ConversationPane({
       </div>
 
       {/*
-        Split view: the real Plan Review beside the transcript. This replaced a
-        narrow step-progress rail, which could only ever be a lossy restatement of
-        this screen in a column too small to act on. Kept OUTSIDE the transcript's
-        scrolling column so the virtualizer measures against a stable width.
+        Split view: the real Plan Review beside the transcript. The composer dock
+        remains a compact status summary; this is the complete editable source of
+        truth. Kept OUTSIDE the transcript's scrolling column so the virtualizer
+        measures against a stable width.
       */}
       {view === "split" && (
         <>

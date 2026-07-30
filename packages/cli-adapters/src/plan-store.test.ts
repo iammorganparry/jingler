@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -401,6 +402,48 @@ describe("PlanStore canonical document", () => {
     expect(result.second.projection.stages[0]?.executionStatus).toBe("queued")
   })
 
+  it("generates a new coordination id when a fresh plan reuses the completed plan id", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(ORCHESTRATED_SOURCE)
+        yield* PlanStore.writeOrchestrationCheckpoint(WT, first.id, {
+          agentId: "worker-a",
+          state: "completed",
+          completedStageIds: ["01"],
+          resumeId: "old-provider-thread",
+          message: null,
+          attempt: 1
+        })
+        yield* PlanStore.updateDocument(WT, {
+          planId: first.id,
+          baseRevision: first.revision,
+          source: first.source,
+          author: "agent",
+          status: "done"
+        })
+        const second = yield* PlanStore.promoteDocument(WT, {
+          sessionId: "s1",
+          producingChatId: "c1",
+          id: first.id,
+          source: ORCHESTRATED_SOURCE.replace(
+            "Ship the change.",
+            "Ship unrelated work."
+          ),
+          author: "agent"
+        })
+        const checkpoints = yield* PlanStore.readOrchestrationCheckpoints(
+          WT,
+          second.id
+        )
+        return { first, second, checkpoints }
+      })
+    )
+
+    expect(result.second.id).not.toBe(result.first.id)
+    expect(result.second.revision).toBe(1)
+    expect(result.checkpoints).toEqual([])
+  })
+
   it("persists worker checkpoints and exposes running workers as interrupted after restart", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -560,6 +603,54 @@ describe("PlanStore canonical document", () => {
     writeFileSync(join(plansDir, "terminal"), "not a directory")
 
     const result = await run(Effect.either(promote()))
+
+    expect(Either.isLeft(result)).toBe(true)
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe("PlanPersistenceError")
+    }
+  })
+
+  it("propagates mechanical progress persistence failures", async () => {
+    const first = await run(promote(ORCHESTRATED_SOURCE))
+    const dir = join(temp.root, ".jingler", "terminal")
+    chmodSync(dir, 0o500)
+    try {
+      const result = await run(
+        Effect.either(
+          PlanStore.setStageExecutionStatus(WT, {
+            planId: first.id,
+            stageId: "01",
+            agentId: "worker-a",
+            status: "completed"
+          })
+        )
+      )
+      expect(Either.isLeft(result)).toBe(true)
+      if (Either.isLeft(result)) {
+        expect(result.left._tag).toBe("PlanPersistenceError")
+      }
+    } finally {
+      chmodSync(dir, 0o700)
+    }
+  })
+
+  it("propagates checkpoint persistence failures", async () => {
+    const plansDir = join(temp.root, ".jingler")
+    mkdirSync(plansDir, { recursive: true })
+    writeFileSync(join(plansDir, "terminal"), "not a directory")
+
+    const result = await run(
+      Effect.either(
+        PlanStore.writeOrchestrationCheckpoint(WT, "plan-1", {
+          agentId: "worker-a",
+          state: "running",
+          completedStageIds: [],
+          resumeId: "provider-thread",
+          message: null,
+          attempt: 1
+        })
+      )
+    )
 
     expect(Either.isLeft(result)).toBe(true)
     if (Either.isLeft(result)) {

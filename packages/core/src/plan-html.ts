@@ -509,6 +509,7 @@ export const DEFAULT_PLAN_TEMPLATE_HTML = `<h1>PRD: [short outcome]</h1>
 <p>[Why this stage exists.]</p>
 <h3>Approach</h3>
 <ol><li>[Bounded implementation action.]</li></ol>
+<ul data-files><li>[Repository-relative file this stage may edit, or leave this list empty.]</li></ul>
 <div data-acceptance="01.1" data-status="pending">[Observable assertion that proves this stage succeeded.]</div>
 </section>
 <h2>Testing</h2>

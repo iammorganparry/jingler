@@ -38,11 +38,11 @@ const DISPLAY_TONE: Record<SessionDisplayStatus, "yellow" | "blue" | "green"> = 
  */
 export interface ConversationPaneCtx {
   /**
-   * Switch to the Plan Review tab, optionally focused on a step (the Conversation
-   * progress rail deep-links; the inline plan card calls it bare).
+   * Switch to the Plan Review tab, optionally focused on a stage (the composer
+   * progress dock deep-links; the inline plan card calls it bare).
    */
   onOpenPlanReview: (stepId?: string) => void
-  /** The step Plan Review should open at, until the user picks another. */
+  /** The stage Plan Review should open at, until the one-shot target is consumed. */
   planStepId?: string | null
   /** Plan Review's selection moved — retires a spent `planStepId`. */
   onPlanStepSelected?: () => void
@@ -176,7 +176,7 @@ export function SessionPane(props: SessionPaneProps) {
 
 function SessionPaneBody(props: SessionPaneProps) {
   const [tab, setTab] = useState<TabKey>("conversation")
-  // A pending deep link into Plan Review (set when the Conversation rail jumps to
+  // A pending deep link into Plan Review (set when the composer dock jumps to
   // a step). One-shot: Plan Review reports its own selection back and we drop it,
   // so a later manual pick isn't overridden by a stale target.
   //

@@ -50,7 +50,9 @@ export function PlanEditor({
   onKeepLocal,
   onAcceptRemote,
   onStopWorker,
-  onRetryWorker
+  onRetryWorker,
+  targetStageId,
+  onTargetStageConsumed
 }: {
   document: PlanDocument
   draft: string
@@ -69,6 +71,8 @@ export function PlanEditor({
   onAcceptRemote?: () => void
   onStopWorker?: (agentId: string) => void
   onRetryWorker?: (agentId: string) => void
+  targetStageId?: string | null
+  onTargetStageConsumed?: () => void
 }) {
   const sync = SYNC[state]
   const SyncIcon = sync.icon
@@ -161,6 +165,8 @@ export function PlanEditor({
               <PlanDocEditor
                 value={draft}
                 onChange={onEdit}
+                targetStageId={targetStageId}
+                onTargetStageConsumed={onTargetStageConsumed}
                 workerControls={{
                   stop: onStopWorker,
                   retry: onRetryWorker
@@ -186,6 +192,8 @@ export function PlanEditor({
             <PlanDocEditor
               value={draft}
               onChange={onEdit}
+              targetStageId={targetStageId}
+              onTargetStageConsumed={onTargetStageConsumed}
               workerControls={{
                 stop: onStopWorker,
                 retry: onRetryWorker

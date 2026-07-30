@@ -824,7 +824,10 @@ export const resolveOrchestratorPreference = (
   }>
 ): OrchestratorResolution | null => {
   const planning = catalog.filter(
-    (provider) => supportsPlanMode(provider.cli) && provider.models.length > 0
+    (provider) =>
+      supportsPlanMode(provider.cli) &&
+      provider.models.length > 0 &&
+      config?.providers?.[provider.cli]?.enabled !== false
   )
   const preferred = config?.orchestrator
   const exactProvider = preferred

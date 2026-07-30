@@ -18,7 +18,7 @@ const stage = (
   id,
   title: `Stage ${id}`,
   intent: "Ship an observable outcome.",
-  markdown: "<p>Work.</p>",
+  markdown: "<p>Work.</p><ul data-files></ul>",
   acceptance: [],
   complexity: "medium",
   dependencies: [],
@@ -75,6 +75,46 @@ describe("buildPlanExecutionGraph", () => {
     expect(result.valid).toBe(true)
     expect(result.groups.map((group) => group.stageIds)).toEqual([["01", "03"], ["02"]])
     expect(result.groups[0]!.files).toEqual(["packages/core/src/a.ts"])
+  })
+
+  it("serializes undeclared stages while allowing explicit no-file stages to run independently", () => {
+    const sharedAssignment = stage("01").assignment
+    const conservative = buildPlanExecutionGraph([
+      stage("01", { markdown: "<p>Undeclared work.</p>" }),
+      stage("02", {
+        markdown: "<p>Also undeclared.</p>",
+        assignment: sharedAssignment
+      })
+    ])
+    const explicit = buildPlanExecutionGraph([stage("01"), stage("02")])
+
+    expect(conservative.valid).toBe(true)
+    expect(conservative.groups.map((group) => group.stageIds)).toEqual([
+      ["01", "02"]
+    ])
+    expect(explicit.valid).toBe(true)
+    expect(explicit.groups.map((group) => group.stageIds)).toEqual([
+      ["01"],
+      ["02"]
+    ])
+  })
+
+  it("aggregates overlaps from every declared file list", () => {
+    const result = buildPlanExecutionGraph([
+      stage("01", {
+        markdown:
+          "<ul data-files><li>src/first.ts</li></ul>" +
+          "<ul data-files><li>src/shared.ts</li></ul>"
+      }),
+      stage("02", {
+        markdown: "<ul data-files><li>src/shared.ts</li></ul>",
+        assignment: stage("01").assignment
+      })
+    ])
+
+    expect(result.valid).toBe(true)
+    expect(result.groups.map((group) => group.stageIds)).toEqual([["01", "02"]])
+    expect(result.groups[0]?.files).toEqual(["src/first.ts", "src/shared.ts"])
   })
 
   it("rejects absolute and repository-escaping file declarations", () => {
@@ -202,9 +242,11 @@ describe("worker routing", () => {
 </section>
 <section data-stage="02" data-title="Implement" data-depends-on="01" data-complexity="high">
 <div data-assignment data-agent-id="worker-auth" data-cli="codex" data-model="gpt-5.6-sol" data-reason="Planner choice" data-status="queued"></div>
+<ul data-files></ul>
 <div data-acceptance="02.1" data-status="pending">The change works.</div>
 </section>
 <section data-stage="03" data-title="Release" data-complexity="medium">
+<ul data-files></ul>
 <div data-acceptance="03.1" data-status="pending">The release is ready.</div>
 </section>`
     const parsed = parsePlanHtml(source)

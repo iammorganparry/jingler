@@ -7,6 +7,7 @@ import { CliAdapter } from "./adapter.js"
 import type { AgentContext, CliAdapterShape, SessionSpec } from "./adapter.js"
 import {
   buildOrchestrationGroups,
+  OrchestrationPersistenceError,
   OrchestrationService,
   orchestrationWorkerMachine,
   recoverOrchestrationCheckpoints
@@ -37,6 +38,7 @@ const stage = (
     readonly dependsOn?: ReadonlyArray<string>
     readonly files?: ReadonlyArray<string>
     readonly harness?: CliKind
+    readonly declaresFiles?: boolean
   } = {}
 ): OrchestrationStage => ({
   id,
@@ -44,9 +46,9 @@ const stage = (
   intent: `Complete ${id}`,
   markdown: [
     `<p>Implement ${id}</p>`,
-    options.files === undefined
+    options.declaresFiles === false
       ? ""
-      : `<ul data-files>${options.files.map((file) => `<li>${file}</li>`).join("")}</ul>`
+      : `<ul data-files>${(options.files ?? []).map((file) => `<li>${file}</li>`).join("")}</ul>`
   ].join(""),
   acceptance: [
     {
@@ -202,7 +204,10 @@ describe("OrchestrationService", () => {
 
     expect(maximum).toBe(2)
     expect(new Set(owners)).toEqual(
-      new Set(["plan:plan-1:agent:agent-a", "plan:plan-1:agent:agent-b"])
+      new Set([
+        "session:session-1:plan:plan-1:agent:agent-a",
+        "session:session-1:plan:plan-1:agent:agent-b"
+      ])
     )
     expect(report.workers.map((worker) => worker.status)).toEqual([
       "completed",
@@ -240,8 +245,8 @@ describe("OrchestrationService", () => {
     )
 
     expect(runs.map((run) => run.ownerId)).toEqual([
-      "plan:plan-1:agent:agent-a",
-      "plan:plan-1:agent:agent-a"
+      "session:session-1:plan:plan-1:agent:agent-a",
+      "session:session-1:plan:plan-1:agent:agent-a"
     ])
     expect(runs.map((run) => run.resumeId)).toEqual([null, "resume-agent-a"])
     expect(runs[0]?.prompt).toContain("Stage: 01")
@@ -376,6 +381,61 @@ describe("OrchestrationService", () => {
     expect(prompts[1]).toContain(
       "Complete the user amendment with the existing worker"
     )
+  })
+
+  it("skips a queued stage removed before its execution boundary", async () => {
+    const prompts: Array<string> = []
+    const states: Array<string> = []
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) => {
+        prompts.push(spec.prompt)
+        return passCurrentStage(spec, context)
+      },
+      stop: () => Effect.void
+    }
+
+    const report = await Effect.runPromise(
+      OrchestrationService.execute(
+        input([
+          stage("01", "agent-a"),
+          stage("02", "agent-a", { dependsOn: ["01"] })
+        ], {
+          refreshStage: (_agentId, stageId) =>
+            Effect.succeed(stageId === "01" ? stage("01", "agent-a") : null),
+          callbacks: {
+            onStageState: (update) =>
+              Effect.sync(() => states.push(`${update.stageId}:${update.status}`))
+          }
+        })
+      ).pipe(Effect.provide(layerFor(adapter)))
+    )
+
+    expect(prompts).toHaveLength(1)
+    expect(states).toContain("02:skipped")
+    expect(report.workers[0]?.completedStageIds).toEqual(["01"])
+  })
+
+  it("preserves assistant event boundaries while parsing evidence", async () => {
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, _spec, context) =>
+        Effect.gen(function* () {
+          yield* context.emit({ _tag: "Assistant", text: "Verification complete." })
+          yield* context.emit({
+            _tag: "Assistant",
+            text:
+              "PLAN_RESULT criterion=01.1 status=passed evidence=targeted test passed"
+          })
+        }),
+      stop: () => Effect.void
+    }
+
+    const report = await Effect.runPromise(
+      OrchestrationService.execute(input([stage("01", "agent-a")])).pipe(
+        Effect.provide(layerFor(adapter))
+      )
+    )
+
+    expect(report.workers[0]?.status).toBe("completed")
   })
 
   it("discards evidence when a stage changes during its harness run", async () => {
@@ -673,7 +733,7 @@ describe("OrchestrationService", () => {
     expect(report.workers.map((worker) => worker.agentId)).toEqual(["agent-a"])
     expect(observed).toEqual([
       {
-        ownerId: "plan:plan-1:agent:agent-a",
+        ownerId: "session:session-1:plan:plan-1:agent:agent-a",
         resumeId: "durable-resume"
       }
     ])
@@ -709,6 +769,102 @@ describe("OrchestrationService", () => {
       )
     }
     expect(result.completed.workers[0]?.status).toBe("completed")
+  })
+
+  it("scopes identical plan ids to their owning sessions", async () => {
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) =>
+        Effect.sleep(15).pipe(Effect.zipRight(passCurrentStage(spec, context))),
+      stop: () => Effect.void
+    }
+    const program = Effect.all(
+      [
+        OrchestrationService.execute(
+          input([stage("01", "agent-a")], { sessionId: "session-a" })
+        ),
+        OrchestrationService.execute(
+          input([stage("01", "agent-a")], { sessionId: "session-b" })
+        )
+      ],
+      { concurrency: "unbounded" }
+    )
+
+    const reports = await Effect.runPromise(
+      program.pipe(Effect.provide(layerFor(adapter)))
+    )
+
+    expect(reports.map((report) => report.workers[0]?.status)).toEqual([
+      "completed",
+      "completed"
+    ])
+    expect(reports[0]?.workers[0]?.ownerId).not.toBe(
+      reports[1]?.workers[0]?.ownerId
+    )
+  })
+
+  it("checkpoints a Started resume id before the provider turn settles", async () => {
+    const checkpoints: Array<OrchestrationCheckpoint> = []
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, _spec, context) =>
+        context
+          .emit({ _tag: "Started", sessionId: "durable-in-flight-resume" })
+          .pipe(Effect.zipRight(Effect.never)),
+      stop: () => Effect.void
+    }
+    const program = Effect.gen(function* () {
+      const execution = yield* Effect.fork(
+        OrchestrationService.execute(
+          input([stage("01", "agent-a")], {
+            callbacks: {
+              onCheckpoint: (checkpoint) =>
+                Effect.sync(() => checkpoints.push(checkpoint))
+            }
+          })
+        )
+      )
+      while (
+        !checkpoints.some(
+          (checkpoint) => checkpoint.resumeId === "durable-in-flight-resume"
+        )
+      ) {
+        yield* Effect.yieldNow()
+      }
+      yield* Fiber.interrupt(execution)
+    })
+
+    await Effect.runPromise(program.pipe(Effect.provide(layerFor(adapter))))
+    expect(checkpoints).toContainEqual(
+      expect.objectContaining({
+        state: "running",
+        resumeId: "durable-in-flight-resume"
+      })
+    )
+  })
+
+  it("fails execution when durable progress cannot be persisted", async () => {
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) => passCurrentStage(spec, context),
+      stop: () => Effect.void
+    }
+    const result = await Effect.runPromise(
+      OrchestrationService.execute(
+        input([stage("01", "agent-a")], {
+          callbacks: {
+            onCheckpoint: () =>
+              Effect.fail(
+                new OrchestrationPersistenceError({
+                  message: "Checkpoint storage is unavailable."
+                })
+              )
+          }
+        })
+      ).pipe(Effect.either, Effect.provide(layerFor(adapter)))
+    )
+
+    expect(result._tag).toBe("Left")
+    if (result._tag === "Left") {
+      expect(result.left._tag).toBe("OrchestrationPersistenceError")
+    }
   })
 })
 

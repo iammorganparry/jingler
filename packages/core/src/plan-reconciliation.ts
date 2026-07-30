@@ -55,6 +55,20 @@ export const planStageSemanticFingerprint = (stage: PlanPrdStage): string => {
   for (const annotation of element.querySelectorAll("[data-annotation]")) {
     annotation.remove()
   }
+  // HTML boolean-style attributes are semantically identical whether authored
+  // as `data-files` or serialized by Tiptap as `data-files=""`.
+  for (const files of element.querySelectorAll("[data-files]")) {
+    files.setAttribute("data-files", "")
+  }
+  for (const paragraph of element.querySelectorAll("li > p")) {
+    const parent = paragraph.parentNode
+    const meaningfulChildren = parent.childNodes.filter(
+      (child) => child.toString().trim().length > 0
+    )
+    if (meaningfulChildren.length === 1 && meaningfulChildren[0] === paragraph) {
+      paragraph.replaceWith(...paragraph.childNodes)
+    }
+  }
   return JSON.stringify({
     id: stage.id,
     title: stage.title,
@@ -65,9 +79,9 @@ export const planStageSemanticFingerprint = (stage: PlanPrdStage): string => {
       id: criterion.id,
       text: criterion.text
     })),
-    // Tiptap and the sanitizer may add harmless paragraph wrappers. Text order
-    // is semantic; those serialization details are not.
-    body: element.structuredText.replace(/\s+/g, " ").trim()
+    // Preserve semantic attributes such as href and data-change while ignoring
+    // only formatting whitespace and Tiptap's harmless list-item paragraph.
+    body: element.innerHTML.replace(/>\s+</g, "><").trim()
   })
 }
 
@@ -127,6 +141,16 @@ const reconcileStages = (
   replacementStages: ReadonlyMap<string, PlanPrdStage>
 ): ReadonlyArray<string> => {
   const changedStageIds: Array<string> = []
+  const priorAgentsByReplacementAgent = new Map<string, Set<string>>()
+  for (const [stageId, replacementStage] of replacementStages) {
+    const replacementAgentId = replacementStage.assignment?.agentId
+    const previousAgentId = previousStages.get(stageId)?.assignment?.agentId
+    if (replacementAgentId === undefined || previousAgentId === undefined) continue
+    const priorAgents =
+      priorAgentsByReplacementAgent.get(replacementAgentId) ?? new Set<string>()
+    priorAgents.add(previousAgentId)
+    priorAgentsByReplacementAgent.set(replacementAgentId, priorAgents)
+  }
   for (const [stageId, replacementElement] of replacementElements) {
     const previousStage = previousStages.get(stageId)
     const replacementStage = replacementStages.get(stageId)
@@ -136,9 +160,26 @@ const reconcileStages = (
       planStageSemanticFingerprint(previousStage) !==
         planStageSemanticFingerprint(replacementStage)
     if (changed) changedStageIds.push(stageId)
-    const assignment =
-      previousStage?.assignment ?? replacementStage.assignment ?? null
     const previousStatus = previousStage?.executionStatus ?? "queued"
+    const replacementAssignment = replacementStage.assignment ?? null
+    const previousAssignment = previousStage?.assignment ?? null
+    const compatiblePriorAgents =
+      replacementAssignment === null
+        ? undefined
+        : priorAgentsByReplacementAgent.get(replacementAssignment.agentId)
+    const stableAgentId =
+      compatiblePriorAgents?.size === 1
+        ? [...compatiblePriorAgents][0]
+        : replacementAssignment?.agentId
+    const assignment =
+      previousStatus === "running"
+        ? previousAssignment ?? replacementAssignment
+        : replacementAssignment === null || previousAssignment === null
+          ? replacementAssignment ?? previousAssignment
+          : {
+              ...replacementAssignment,
+              agentId: stableAgentId ?? replacementAssignment.agentId
+            }
     const status: PlanStageExecutionStatus =
       previousStage === undefined
         ? "queued"
@@ -148,6 +189,43 @@ const reconcileStages = (
     writeStageRouting(replacementElement, assignment, status)
   }
   return changedStageIds
+}
+
+const reconcileAnnotations = (
+  previousRoot: HTMLElement,
+  replacementRoot: HTMLElement,
+  replacementStageElements: ReadonlyMap<string, HTMLElement>
+): void => {
+  const replacementAnnotations = new Map(
+    replacementRoot
+      .querySelectorAll("[data-annotation]")
+      .map((annotation) => [
+        annotation.getAttribute("data-annotation") ?? "",
+        annotation
+      ])
+  )
+  for (const previousAnnotation of previousRoot.querySelectorAll(
+    "[data-annotation]"
+  )) {
+    const annotationId =
+      previousAnnotation.getAttribute("data-annotation") ?? ""
+    if (annotationId.length === 0) continue
+    const existing = replacementAnnotations.get(annotationId)
+    const clone = parse(previousAnnotation.toString()).firstChild
+    if (clone === undefined) continue
+    if (existing !== undefined) {
+      existing.replaceWith(clone)
+      continue
+    }
+    const stageId = previousAnnotation.getAttribute("data-stage")
+    const target =
+      stageId === undefined ? replacementRoot : replacementStageElements.get(stageId)
+    const annotationParent = target ?? replacementRoot
+    annotationParent.insertAdjacentHTML(
+      "beforeend",
+      previousAnnotation.toString()
+    )
+  }
 }
 
 const reconcileCriteria = (
@@ -189,7 +267,16 @@ const reconcileCriteria = (
  */
 export const reconcilePlanAmendment = (
   previousDocument: PlanDocument,
-  replacementHtml: string
+  replacementHtml: string,
+  options: {
+    /**
+     * Agent-authored replacements may omit operational notes they did not
+     * reproduce, so preserve them by default. A revision-checked user edit
+     * already starts from the latest source; omission there is an intentional
+     * delete and must be honoured.
+     */
+    readonly preserveAnnotations?: boolean
+  } = {}
 ): PlanAmendmentReconciliation => {
   const previous = parsePlanHtml(previousDocument.source)
   if (!previous.valid) return invalidResult(previous, "previous")
@@ -197,6 +284,7 @@ export const reconcilePlanAmendment = (
   if (!replacement.valid) return invalidResult(replacement, "replacement")
 
   const replacementRoot = parse(sanitizePlanHtml(replacement.html))
+  const previousRoot = parse(sanitizePlanHtml(previous.html))
   const replacementElements = stageElements(replacementRoot)
   const previousStages = stagesById(previous.projection.stages)
   const replacementStages = stagesById(replacement.projection.stages)
@@ -235,6 +323,9 @@ export const reconcilePlanAmendment = (
     criteriaById(replacement.projection.stages),
     changedCriterionIds
   )
+  if (options.preserveAnnotations !== false) {
+    reconcileAnnotations(previousRoot, replacementRoot, replacementElements)
+  }
 
   const reconciled = parsePlanHtml(replacementRoot.toString())
   if (!reconciled.valid) return invalidResult(reconciled, "reconciled")

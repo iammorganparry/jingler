@@ -1600,10 +1600,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                       )
                     }
                   : plan
-              // Announced (and persisted) only once the plan can be answered — see
-              // `awaitPlan`. Persisting to the library lets a later turn or session
-              // pick the plan back up; best-effort, so a write failure never blocks
-              // plan review.
+              // Announced only after the exact canonical proposal is durably
+              // persisted. A rejected promotion emits a terminal failure instead
+              // of presenting an unapprovable draft that differs from PlanStore.
               return yield* approvals.awaitPlan(
                 sessionId,
                 chatId,
@@ -1622,7 +1621,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                       current.status !== "rejected"
                         ? current.id
                         : undefined
-                    yield* PlanStore.promote(
+                    const promotion = yield* PlanStore.promote(
                       sessionId,
                       worktreePath,
                       chatId,
@@ -1630,8 +1629,15 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                       basePlanId
                     ).pipe(
                       Effect.provide(env),
-                      Effect.ignore
+                      Effect.either
                     )
+                    if (promotion._tag === "Left") {
+                      yield* emit({
+                        _tag: "Failed",
+                        message: promotion.left.message
+                      })
+                      return yield* Effect.interrupt
+                    }
                   }
                   yield* emit({ _tag: "PlanProposed", plan: proposedPlan })
                 })

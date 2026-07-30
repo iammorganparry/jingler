@@ -77,6 +77,27 @@ const legacyPlan: Plan = {
 afterEach(cleanup)
 
 describe("PlanReview", () => {
+  it("scrolls a progress-dock deep link to its stable stage id", async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    const onSelectStep = vi.fn()
+    render(
+      <PlanReview
+        plan={null}
+        document={document}
+        selectedStepId="01"
+        onSelectStep={onSelectStep}
+      />
+    )
+
+    expect(await screen.findByText("Build")).toBeTruthy()
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      behavior: "smooth",
+      block: "center"
+    })
+    expect(onSelectStep).toHaveBeenCalledWith("01")
+  })
+
   it("renders only the canonical Notion-style editor when a document exists", () => {
     render(<PlanReview plan={legacyPlan} document={document} />)
 

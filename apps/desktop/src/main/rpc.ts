@@ -26,6 +26,7 @@ import {
   ModelsService,
   OpenConnectorService,
   OpenConnectorApi,
+  OrchestrationPersistenceError,
   OrchestrationService,
   SecretStoreUnavailable,
   planDraftPost,
@@ -62,6 +63,7 @@ import {
   GitError,
   PlanConflictError,
   PlanPersistenceError,
+  planStageSemanticFingerprint,
   resolveFindings,
   ReviewError,
   reviewModelFor,
@@ -277,12 +279,12 @@ const providerReasoning = (
 }
 
 /** Resolve the provider-neutral planner route from the host's live catalogue. */
-const newSessionOrchestrator = (config: WorkspaceConfig | null) =>
+export const newSessionOrchestrator = (config: WorkspaceConfig | null) =>
   Effect.gen(function* () {
     const clis = yield* DiscoveryService.list()
     const catalog = yield* ModelsService.catalog(clis)
     return resolveOrchestratorPreference(config, catalog)
-  })
+  }).pipe(Effect.catchAllCause(() => Effect.succeed(null)))
 
 /** Shared route/default policy for blank, PR, and issue session creation. */
 export const sessionCreationDefaults = (
@@ -366,6 +368,50 @@ const canonicalPlanForSession = (session: Session, planId: string) =>
       ).pipe(
         Effect.map((document) => document?.id === planId ? document : null)
       )
+
+const orchestrationPersistenceError = (
+  error: PlanPersistenceError | { readonly message: string }
+): OrchestrationPersistenceError =>
+  new OrchestrationPersistenceError({
+    message: error.message,
+    cause: error
+  })
+
+const recordOrchestrationFailure = (
+  sessionId: string,
+  planId: string,
+  message: string
+) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(sessionId).pipe(
+      Effect.orElseSucceed(() => null)
+    )
+    if (session?.worktreePath == null) return
+    const worktreePath = session.worktreePath
+    const document = yield* PlanStore.readDocument(
+      worktreePath,
+      session.id,
+      session.activeChatId
+    )
+    if (document === null || document.id !== planId) return
+    const stage = document.projection.stages.find(
+      (candidate) => candidate.executionStatus !== "completed"
+    )
+    if (stage?.assignment !== null && stage?.assignment !== undefined) {
+      yield* PlanStore.setStageExecutionStatus(worktreePath, {
+        planId,
+        stageId: stage.id,
+        agentId: stage.assignment.agentId,
+        status: "failed",
+        message: `Orchestration failed: ${message}`,
+        expectedStageFingerprint: planStageSemanticFingerprint(stage)
+      })
+    }
+    yield* PlanStore.settleOrchestration(worktreePath, {
+      planId,
+      workersCompleted: false
+    })
+  })
 
 /**
  * Execute the latest approved canonical revision through provider-neutral
@@ -463,7 +509,11 @@ export const executeOrchestration = (
                     message: update.message,
                     expectedStageFingerprint: update.stageFingerprint
                   })
-                  .pipe(Effect.provide(persistence), Effect.asVoid)
+                  .pipe(
+                    Effect.provide(persistence),
+                    Effect.mapError(orchestrationPersistenceError),
+                    Effect.asVoid
+                  )
           },
           onEvidence: (evidence) =>
             store
@@ -475,7 +525,11 @@ export const executeOrchestration = (
                 stageId: evidence.stageId,
                 expectedStageFingerprint: evidence.stageFingerprint
               })
-              .pipe(Effect.provide(persistence), Effect.asVoid),
+              .pipe(
+                Effect.provide(persistence),
+                Effect.mapError(orchestrationPersistenceError),
+                Effect.asVoid
+              ),
           onCheckpoint: (checkpoint) =>
             store
               .writeOrchestrationCheckpoint(
@@ -483,7 +537,10 @@ export const executeOrchestration = (
                 planId,
                 checkpoint
               )
-              .pipe(Effect.provide(persistence))
+              .pipe(
+                Effect.provide(persistence),
+                Effect.mapError(orchestrationPersistenceError)
+              )
         }
       })
       .pipe(Effect.either)
@@ -493,12 +550,17 @@ export const executeOrchestration = (
         yield* Effect.logWarning(report.left.message)
         return null
       }
-      yield* store
-        .settleOrchestration(worktreePath, {
-          planId,
-          workersCompleted: false
-        })
-        .pipe(Effect.provide(persistence))
+      yield* recordOrchestrationFailure(
+        sessionId,
+        planId,
+        report.left.message
+      ).pipe(
+        Effect.catchAllCause((cause) =>
+          Effect.logError(
+            `Could not persist orchestration failure for ${planId}: ${String(cause)}`
+          )
+        )
+      )
       yield* Effect.logError(
         `Could not execute orchestration ${planId}: ${report.left.message}`
       )
@@ -519,9 +581,19 @@ export const executeOrchestration = (
     return report.right
   }).pipe(
     Effect.catchAllCause((cause) =>
-      Effect.logError(
-        `Orchestration ${planId} failed: ${String(cause)}`
-      ).pipe(Effect.as(null))
+      recordOrchestrationFailure(sessionId, planId, String(cause)).pipe(
+        Effect.catchAllCause((persistenceCause) =>
+          Effect.logError(
+            `Could not persist orchestration failure for ${planId}: ${String(persistenceCause)}`
+          )
+        ),
+        Effect.zipRight(
+          Effect.logError(
+            `Orchestration ${planId} failed: ${String(cause)}`
+          )
+        ),
+        Effect.as(null)
+      )
     )
   )
 
@@ -1710,7 +1782,7 @@ const HandlersLayer = JinglerRpcs.toLayer({
         before !== null &&
         document !== null &&
         planUsesOrchestration(before, document) &&
-        (yield* OrchestrationService.isPlanRunning(planId))
+        (yield* OrchestrationService.isPlanRunning(sessionId, planId))
       ) {
         return {
           status: "refused" as const,
@@ -1757,6 +1829,19 @@ const HandlersLayer = JinglerRpcs.toLayer({
           session !== null &&
           document !== null &&
           planUsesOrchestration(session, document)
+        if (
+          orchestrating &&
+          (yield* OrchestrationService.isPlanRunning(sessionId, planId))
+        ) {
+          const events: ReadonlyArray<StreamEvent> = [
+            {
+              _tag: "Failed",
+              message:
+                "Resume refused because this plan still has live workers. Stop them or wait for them to settle before resuming it."
+            }
+          ]
+          return Stream.fromIterable(events)
+        }
         if (!orchestrating) {
           return runner.resumePlan(sessionId, chatId, planId, revision)
         }

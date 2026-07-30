@@ -14,6 +14,7 @@ import {
   Square
 } from "lucide-react"
 import { useState } from "react"
+import { Button } from "../../components/button.js"
 import { cn } from "../../lib/cn.js"
 import { usePlanWorkerControls } from "./plan-worker-controls.js"
 
@@ -37,7 +38,10 @@ function StageView({ node }: NodeViewProps) {
   const complexity = (node.attrs.complexity as string) || "medium"
   const dependencies = splitDependencies((node.attrs.dependencies as string) || "")
   return (
-    <NodeViewWrapper className="my-4 overflow-hidden rounded-md border border-line">
+    <NodeViewWrapper
+      data-plan-stage-id={id}
+      className="my-4 overflow-hidden rounded-md border border-line"
+    >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -173,26 +177,30 @@ function AssignmentView({ node }: NodeViewProps) {
         <span className="mt-0.5 block text-muted">{reason}</span>
       </span>
       {stoppable && (
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="icon"
           aria-label={`Stop worker ${agentId}`}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => controls.stop?.(agentId)}
-          className="flex size-7 shrink-0 items-center justify-center rounded-md border border-line text-muted outline-none hover:bg-line/30 hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring"
+          className="shrink-0 rounded-md text-muted hover:text-text-bright"
         >
           <Square className="size-3" />
-        </button>
+        </Button>
       )}
       {retryable && (
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="icon"
           aria-label={`Retry worker ${agentId}`}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => controls.retry?.(agentId)}
-          className="flex size-7 shrink-0 items-center justify-center rounded-md border border-line text-muted outline-none hover:bg-line/30 hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring"
+          className="shrink-0 rounded-md text-muted hover:text-text-bright"
         >
           <RefreshCw className="size-3" />
-        </button>
+        </Button>
       )}
     </NodeViewWrapper>
   )

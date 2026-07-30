@@ -39,16 +39,24 @@ export function PlanDocEditor({
   onChange,
   editable = true,
   className,
-  workerControls
+  workerControls,
+  targetStageId,
+  onTargetStageConsumed
 }: {
   value: string
   onChange?: (html: string) => void
   editable?: boolean
   className?: string
   workerControls?: PlanWorkerControls
+  /** Stable stage id to reveal after the Plan view opens from the progress dock. */
+  targetStageId?: string | null
+  /** Retire the one-shot target once its stage is on screen. */
+  onTargetStageConsumed?: () => void
 }) {
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  const onTargetStageConsumedRef = useRef(onTargetStageConsumed)
+  onTargetStageConsumedRef.current = onTargetStageConsumed
 
   const editor = useEditor({
     editable,
@@ -73,6 +81,25 @@ export function PlanDocEditor({
   useEffect(() => {
     editor?.setEditable(editable)
   }, [editor, editable])
+
+  useEffect(() => {
+    if (!editor || !targetStageId) return
+    const reveal = () => {
+      const target = Array.from(
+        editor.view.dom.querySelectorAll<HTMLElement>("[data-plan-stage-id]")
+      ).find((element) => element.dataset.planStageId === targetStageId)
+      if (!target) return false
+      target.scrollIntoView({ behavior: "smooth", block: "center" })
+      target.querySelector<HTMLButtonElement>("button")?.focus({
+        preventScroll: true
+      })
+      onTargetStageConsumedRef.current?.()
+      return true
+    }
+    if (reveal()) return
+    const retry = window.setTimeout(reveal, 0)
+    return () => window.clearTimeout(retry)
+  }, [editor, targetStageId, value])
 
   return (
     <PlanWorkerControlsProvider controls={workerControls}>

@@ -342,6 +342,29 @@ describe("resolveOrchestratorPreference", () => {
       )
     ).toBeNull()
   })
+
+  it("excludes providers the operator explicitly disabled", () => {
+    const resolution = resolveOrchestratorPreference(
+      {
+        orchestrator: { cli: "claude", model: "opus" },
+        providers: {
+          claude: { enabled: false, defaultMode: "plan" },
+          codex: {
+            enabled: true,
+            defaultMode: "plan",
+            defaultModel: "gpt-5.5"
+          }
+        }
+      },
+      catalog
+    )
+
+    expect(resolution?.preference).toStrictEqual({
+      cli: "codex",
+      model: "gpt-5.5"
+    })
+    expect(resolution?.isFallback).toBe(true)
+  })
 })
 
 describe("Repo", () => {

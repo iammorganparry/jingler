@@ -422,7 +422,9 @@ export class PlanStore extends Effect.Service<PlanStore>()(
             return yield* atomicWrite(worktreePath, {
               id: amending
                 ? current.id
-                : input.id ?? crypto.randomUUID(),
+                : input.id === undefined || input.id === current?.id
+                  ? crypto.randomUUID()
+                  : input.id,
               sessionId: input.sessionId,
               producingChatId: input.producingChatId,
               revision: amending ? current.revision + 1 : 1,
@@ -467,7 +469,9 @@ export class PlanStore extends Effect.Service<PlanStore>()(
             }
             const reconciled =
               input.semantic !== false && input.author === "user"
-                ? reconcilePlanAmendment(current, input.source)
+                ? reconcilePlanAmendment(current, input.source, {
+                    preserveAnnotations: false
+                  })
                 : null
             if (reconciled !== null && !reconciled.valid) {
               return yield* new PlanValidationError({
@@ -514,7 +518,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           readonly source: string | null
           readonly status?: PlanDocumentStatus
         }
-      ): Effect.Effect<PlanDocument | null, never, PlanStoreEnv> =>
+      ): Effect.Effect<
+        PlanDocument | null,
+        PlanValidationError | PlanPersistenceError,
+        PlanStoreEnv
+      > =>
         lock.withPermits(1)(
           Effect.gen(function* () {
             const current = yield* readCanonical(worktreePath)
@@ -531,13 +539,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
               updatedAt: new Date().toISOString(),
               updatedBy: "agent"
             })
-          }).pipe(
-            Effect.catchAll((error) =>
-              Effect.logError(
-                `Could not persist worker progress for ${worktreePath}: ${error.message}`
-              ).pipe(Effect.as(null))
-            )
-          )
+          })
         )
 
       const setStageExecutionStatus = (
@@ -550,7 +552,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           readonly message?: string | null
           readonly expectedStageFingerprint?: string
         }
-      ): Effect.Effect<PlanDocument | null, never, PlanStoreEnv> =>
+      ): Effect.Effect<
+        PlanDocument | null,
+        PlanValidationError | PlanPersistenceError,
+        PlanStoreEnv
+      > =>
         updateMechanical(worktreePath, input.planId, (source, document) => {
           const stage = document.projection.stages.find(
             (candidate) => candidate.id === input.stageId
@@ -598,7 +604,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           readonly stageId?: string
           readonly expectedStageFingerprint?: string
         }
-      ): Effect.Effect<PlanDocument | null, never, PlanStoreEnv> =>
+      ): Effect.Effect<
+        PlanDocument | null,
+        PlanValidationError | PlanPersistenceError,
+        PlanStoreEnv
+      > =>
         updateMechanical(worktreePath, input.planId, (source, document) => {
           const stage = document.projection.stages.find((candidate) =>
             input.stageId === undefined
@@ -629,7 +639,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           readonly planId: string
           readonly workersCompleted: boolean
         }
-      ): Effect.Effect<PlanDocument | null, never, PlanStoreEnv> =>
+      ): Effect.Effect<
+        PlanDocument | null,
+        PlanValidationError | PlanPersistenceError,
+        PlanStoreEnv
+      > =>
         updateMechanical(worktreePath, input.planId, (source, document) => {
           if (
             document.status !== "executing" &&
@@ -697,7 +711,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         worktreePath: string,
         planId: string,
         checkpoint: OrchestrationCheckpoint
-      ): Effect.Effect<void, never, PlanStoreEnv> =>
+      ): Effect.Effect<void, PlanPersistenceError, PlanStoreEnv> =>
         lock.withPermits(1)(
           Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem
@@ -735,10 +749,12 @@ export class PlanStore extends Effect.Service<PlanStore>()(
             )
             yield* fs.rename(temp, file)
           }).pipe(
-            Effect.catchAll((error) =>
-              Effect.logError(
-                `Could not persist orchestration checkpoint: ${String(error)}`
-              )
+            Effect.mapError(
+              (cause) =>
+                new PlanPersistenceError({
+                  message: "Could not persist the orchestration checkpoint.",
+                  cause
+                })
             )
           )
         )

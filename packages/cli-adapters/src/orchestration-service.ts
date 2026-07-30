@@ -132,6 +132,13 @@ export class OrchestrationAlreadyRunningError extends Data.TaggedError(
   readonly planId: string
 }> {}
 
+export class OrchestrationPersistenceError extends Data.TaggedError(
+  "OrchestrationPersistenceError"
+)<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
+
 /**
  * Validate the stage DAG and turn it into maximally parallel worker groups.
  *
@@ -218,10 +225,10 @@ export const recoverOrchestrationCheckpoints = (
 export interface OrchestrationCallbacks {
   readonly onWorkerState?: (
     update: OrchestrationWorkerUpdate
-  ) => Effect.Effect<void, never, never>
+  ) => Effect.Effect<void, OrchestrationPersistenceError, never>
   readonly onStageState?: (
     update: OrchestrationStageUpdate
-  ) => Effect.Effect<void, never, never>
+  ) => Effect.Effect<void, OrchestrationPersistenceError, never>
   readonly onEvent?: (
     agentId: string,
     stageId: string,
@@ -229,7 +236,7 @@ export interface OrchestrationCallbacks {
   ) => Effect.Effect<void, never, never>
   readonly onEvidence?: (
     evidence: OrchestrationEvidence
-  ) => Effect.Effect<void, never, never>
+  ) => Effect.Effect<void, OrchestrationPersistenceError, never>
   /**
    * Persist this beside the canonical plan. The orchestration service emits a
    * checkpoint at every mechanical state change but stays independent of the
@@ -237,7 +244,7 @@ export interface OrchestrationCallbacks {
    */
   readonly onCheckpoint?: (
     checkpoint: OrchestrationCheckpoint
-  ) => Effect.Effect<void, never, never>
+  ) => Effect.Effect<void, OrchestrationPersistenceError, never>
 }
 
 export interface OrchestrationSessionSpecRequest {
@@ -287,8 +294,14 @@ export interface OrchestrationExecutionReport {
   readonly workers: ReadonlyArray<OrchestrationWorkerResult>
 }
 
-const ownerIdFor = (planId: string, agentId: string): string =>
-  `plan:${planId}:agent:${agentId}`
+const planRunKeyFor = (sessionId: string, planId: string): string =>
+  `${sessionId}\u0000${planId}`
+
+const ownerIdFor = (
+  sessionId: string,
+  planId: string,
+  agentId: string
+): string => `session:${sessionId}:plan:${planId}:agent:${agentId}`
 
 const workerStatusFrom = (value: unknown): OrchestrationWorkerStatus => {
   switch (value) {
@@ -424,17 +437,20 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
       const notifyWorker = (
         callbacks: OrchestrationCallbacks | undefined,
         update: OrchestrationWorkerUpdate
-      ): Effect.Effect<void> => callbacks?.onWorkerState?.(update) ?? Effect.void
+      ): Effect.Effect<void, OrchestrationPersistenceError> =>
+        callbacks?.onWorkerState?.(update) ?? Effect.void
 
       const notifyStage = (
         callbacks: OrchestrationCallbacks | undefined,
         update: OrchestrationStageUpdate
-      ): Effect.Effect<void> => callbacks?.onStageState?.(update) ?? Effect.void
+      ): Effect.Effect<void, OrchestrationPersistenceError> =>
+        callbacks?.onStageState?.(update) ?? Effect.void
 
       const checkpoint = (
         callbacks: OrchestrationCallbacks | undefined,
         value: OrchestrationCheckpoint
-      ): Effect.Effect<void> => callbacks?.onCheckpoint?.(value) ?? Effect.void
+      ): Effect.Effect<void, OrchestrationPersistenceError> =>
+        callbacks?.onCheckpoint?.(value) ?? Effect.void
 
       const runGroup = (
         input: OrchestrationExecuteInput,
@@ -442,9 +458,13 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
         initialCompleted: ReadonlySet<string>,
         initialResumeId: string | null,
         attempt: number
-      ): Effect.Effect<OrchestrationWorkerResult> =>
+      ): Effect.Effect<OrchestrationWorkerResult, OrchestrationPersistenceError> =>
         Effect.gen(function* () {
-          const ownerId = ownerIdFor(input.planId, group.agentId)
+          const ownerId = ownerIdFor(
+            input.sessionId,
+            input.planId,
+            group.agentId
+          )
           const settled = yield* Deferred.make<void>()
           yield* Ref.update(workerSettled, (workers) =>
             new Map(workers).set(ownerId, settled)
@@ -476,7 +496,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
           const saveCheckpoint = (
             state: OrchestrationWorkerStatus,
             nextMessage: string | null
-          ): Effect.Effect<void> =>
+          ): Effect.Effect<void, OrchestrationPersistenceError> =>
             checkpoint(input.callbacks, {
               agentId: group.agentId,
               state,
@@ -549,10 +569,23 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                 })
                 continue
               }
-              const latestStage =
+              const refreshedStage =
                 input.refreshStage === undefined
                   ? stage
-                  : (yield* input.refreshStage(group.agentId, stage.id)) ?? stage
+                  : yield* input.refreshStage(group.agentId, stage.id)
+              if (refreshedStage === null) {
+                yield* notifyStage(input.callbacks, {
+                  sessionId: input.sessionId,
+                  planId: input.planId,
+                  agentId: group.agentId,
+                  stageId: stage.id,
+                  status: "skipped",
+                  message: "Stage removed from the canonical plan before execution.",
+                  stageFingerprint: planStageSemanticFingerprint(stage)
+                })
+                continue
+              }
+              const latestStage = refreshedStage
               const stageFingerprint =
                 planStageSemanticFingerprint(latestStage)
               if ((yield* Ref.get(cancelled)).has(ownerId)) {
@@ -578,6 +611,8 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
               const assistant = yield* Ref.make<ReadonlyArray<string>>([])
               const emittedFailure = yield* Ref.make<string | null>(null)
               const blocker = yield* Ref.make<string | null>(null)
+              const persistenceFailure =
+                yield* Ref.make<OrchestrationPersistenceError | null>(null)
               const prompt = workerPrompt(input, group, latestStage)
               const requested = input.makeSessionSpec({
                 ownerId,
@@ -598,7 +633,17 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
 
               const emit = (event: StreamEvent): Effect.Effect<void> =>
                 Effect.gen(function* () {
-                  if (event._tag === "Started") resumeId = event.sessionId
+                  if (event._tag === "Started") {
+                    resumeId = event.sessionId
+                    const persisted = yield* saveCheckpoint(
+                      "running",
+                      null
+                    ).pipe(Effect.either)
+                    if (persisted._tag === "Left") {
+                      yield* Ref.set(persistenceFailure, persisted.left)
+                      return yield* Effect.interrupt
+                    }
+                  }
                   if (event._tag === "Assistant") {
                     yield* Ref.update(assistant, (chunks) => [...chunks, event.text])
                   }
@@ -660,6 +705,9 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                 }
               }
 
+              const persistenceError = yield* Ref.get(persistenceFailure)
+              if (persistenceError !== null) return yield* persistenceError
+
               const blocked = yield* Ref.get(blocker)
               if (blocked !== null) {
                 yield* notifyStage(input.callbacks, {
@@ -710,7 +758,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
               }
 
               const stageEvidence = evidenceFrom(
-                (yield* Ref.get(assistant)).join(""),
+                (yield* Ref.get(assistant)).join("\n"),
                 latestStage,
                 group.agentId,
                 stageFingerprint
@@ -859,8 +907,10 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
         | OrchestrationValidationError
         | OrchestrationWorkerNotFoundError
         | OrchestrationAlreadyRunningError
+        | OrchestrationPersistenceError
       > =>
         Effect.gen(function* () {
+          const planRunKey = planRunKeyFor(input.sessionId, input.planId)
           const graph = buildOrchestrationGroups(input.stages)
           if (!graph.valid) {
             return yield* new OrchestrationValidationError({
@@ -891,9 +941,9 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
             })
           }
           const claimed = yield* Ref.modify(activePlans, (plans) =>
-            plans.has(input.planId)
+            plans.has(planRunKey)
               ? [false, plans]
-              : [true, new Set(plans).add(input.planId)]
+              : [true, new Set(plans).add(planRunKey)]
           )
           if (!claimed) {
             return yield* new OrchestrationAlreadyRunningError({
@@ -908,8 +958,11 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
               )
             )
             for (const group of groups) {
-              const ownerId = ownerIdFor(input.planId, group.agentId)
-              const prior = checkpoints.get(group.agentId)
+              const ownerId = ownerIdFor(
+                input.sessionId,
+                input.planId,
+                group.agentId
+              )
               yield* Ref.update(cancelled, (current) => {
                 const next = new Set(current)
                 next.delete(ownerId)
@@ -939,7 +992,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
             Effect.ensuring(
               Ref.update(activePlans, (plans) => {
                 const next = new Set(plans)
-                next.delete(input.planId)
+                next.delete(planRunKey)
                 return next
               })
             )
@@ -951,7 +1004,11 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
         readonly planId: string
         readonly agentId: string
       }): Effect.Effect<void> => {
-        const ownerId = ownerIdFor(request.planId, request.agentId)
+        const ownerId = ownerIdFor(
+          request.sessionId,
+          request.planId,
+          request.agentId
+        )
         return Effect.gen(function* () {
           yield* Ref.update(
             cancelled,
@@ -965,9 +1022,12 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
         })
       }
 
-      const isPlanRunning = (planId: string): Effect.Effect<boolean> =>
+      const isPlanRunning = (
+        sessionId: string,
+        planId: string
+      ): Effect.Effect<boolean> =>
         Ref.get(activePlans).pipe(
-          Effect.map((plans) => plans.has(planId))
+          Effect.map((plans) => plans.has(planRunKeyFor(sessionId, planId)))
         )
 
       return {

@@ -199,6 +199,23 @@ test("a stopped worker stays interrupted across restart and retries from its che
     })
   ).toBeVisible({ timeout: 20_000 })
 
+  await first.window.getByRole("button", { name: "Conversation" }).first().click()
+  const progress = first.window.getByRole("button", {
+    name: /Plan progress: \d+ of 8 done/
+  })
+  await expect(progress).toBeVisible()
+  await progress.click()
+  await expect(
+    first.window.getByTestId("plan-progress-stage-s_06")
+  ).toContainText("In progress")
+  await expect(
+    first.window.getByTestId("plan-progress-stage-s_06")
+  ).toContainText("worker-release · opus")
+  await first.window.getByTestId("plan-progress-stage-s_06").click()
+  await expect(
+    first.window.locator('[data-plan-stage-id="s_06"] button').first()
+  ).toBeFocused()
+
   await first.window
     .getByRole("button", { name: "Stop worker worker-release" })
     .click()

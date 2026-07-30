@@ -309,10 +309,8 @@ export const makeApprovals: Effect.Effect<Approvals> = Effect.gen(function* () {
         const deferred = yield* Deferred.make<PlanDecision>()
         yield* Ref.update(plans, (m) => new Map(m).set(planId, { sessionId, chatId, deferred }))
         yield* announce
-        const decision = yield* Deferred.await(deferred)
-        yield* forget(plans, planId)
-        return decision
-      }),
+        return yield* Deferred.await(deferred)
+      }).pipe(Effect.ensuring(forget(plans, planId))),
 
     pendingPlan: (planId) =>
       Effect.map(Ref.get(plans), (m) => {

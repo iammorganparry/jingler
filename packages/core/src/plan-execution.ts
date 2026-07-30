@@ -94,21 +94,24 @@ export const normalizePlanFilePath = (value: string): string | null => {
 const declaredFiles = (
   stage: PlanPrdStage
 ): {
+  readonly declared: boolean
   readonly files: ReadonlyArray<string>
   readonly invalid: ReadonlyArray<string>
 } => {
-  const list = parse(stage.markdown).querySelector("ul[data-files]")
-  if (list === null) return { files: [], invalid: [] }
+  const lists = parse(stage.markdown).querySelectorAll("ul[data-files]")
+  if (lists.length === 0) return { declared: false, files: [], invalid: [] }
   const files = new Set<string>()
   const invalid: Array<string> = []
-  for (const item of list.querySelectorAll("li")) {
-    const raw = item.text.trim()
-    if (raw.length === 0) continue
-    const normalized = normalizePlanFilePath(raw)
-    if (normalized === null) invalid.push(raw)
-    else files.add(normalized)
+  for (const list of lists) {
+    for (const item of list.querySelectorAll("li")) {
+      const raw = item.text.trim()
+      if (raw.length === 0) continue
+      const normalized = normalizePlanFilePath(raw)
+      if (normalized === null) invalid.push(raw)
+      else files.add(normalized)
+    }
   }
-  return { files: [...files], invalid }
+  return { declared: true, files: [...files], invalid }
 }
 
 const assignmentRoute = (assignment: PlanStageAssignment): string =>
@@ -308,9 +311,23 @@ export const buildPlanExecutionGraph = (
     }
   }
 
+  const declarations = new Map(
+    [...stageById.values()].map((stage) => [stage.id, declaredFiles(stage)])
+  )
+  const undeclaredStageIds = [...declarations.entries()]
+    .filter(([, declaration]) => !declaration.declared)
+    .map(([stageId]) => stageId)
+  if (undeclaredStageIds.length > 0) {
+    const firstStageId = stageById.keys().next().value
+    if (firstStageId !== undefined) {
+      for (const stageId of stageById.keys()) union(firstStageId, stageId)
+    }
+  }
+
   const firstStageByFile = new Map<string, string>()
   for (const stage of stageById.values()) {
-    const declaration = declaredFiles(stage)
+    const declaration = declarations.get(stage.id)
+    if (declaration === undefined) continue
     for (const path of declaration.invalid) {
       diagnostics.push({
         code: "invalid-file-path",
