@@ -43,19 +43,21 @@ import { parsePlanHtml, planFromHtml } from "./plan-html.js"
  */
 export type PlanChannel = "tool" | "reply"
 
+const PLAN_HTML_FENCE_RULE =
+  "The opening fence must be exactly ````html on its own line and the closing fence must be exactly ````."
+
 export const PLAN_HTML_REFORMAT = [
   "The submitted PRD is not valid Jingler plan HTML.",
   "Return the SAME plan as one complete four-backtick fenced HTML block.",
-  "The opening fence must be exactly ````html on its own line and the closing fence must be exactly ````.",
+  PLAN_HTML_FENCE_RULE,
   "Use HTML with <section data-stage>, <div data-acceptance data-status>, and <aside data-annotation> for structure.",
   "Every stage needs a stable id + title and at least one acceptance with a stable id and status.",
   "Do not change the substance of the plan; change only its format."
 ].join(" ")
 
 const OPENING: Readonly<Record<PlanChannel, string>> = {
-  tool: "When you present your plan with ExitPlanMode, put a four-backtick fenced HTML block at the top of the plan text, then your normal human-readable markdown below it. The opening fence must be exactly ````html on its own line and the closing fence must be exactly ````.",
-  reply:
-    "When your plan is ready, put a four-backtick fenced HTML block at the top of your reply, then your normal human-readable markdown below it — and STOP there, without editing anything. The opening fence must be exactly ````html on its own line and the closing fence must be exactly ````."
+  tool: `When you present your plan with ExitPlanMode, put a four-backtick fenced HTML block at the top of the plan text, then your normal human-readable markdown below it. ${PLAN_HTML_FENCE_RULE}`,
+  reply: `When your plan is ready, put a four-backtick fenced HTML block at the top of your reply, then your normal human-readable markdown below it — and STOP there, without editing anything. ${PLAN_HTML_FENCE_RULE}`
 }
 
 const DIRECT_SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
@@ -132,8 +134,7 @@ data-status="queued"></div>
 
 `}
 Return one four-backtick fenced HTML block containing the COMPLETE PRD as HTML.
-The opening fence must be exactly \`\`\`\`html on its own line and the closing fence
-must be exactly \`\`\`\`.
+${PLAN_HTML_FENCE_RULE}
 Use ordinary HTML for prose (h1 title, h2 sections, p, ul/ol/li, strong/em, code, pre,
 blockquote, table). Carry structure on data-attributes — never <script>, <style>, event
 handlers, inline styles, or JavaScript:

@@ -1326,6 +1326,23 @@ describe("AgentRunner plan library", () => {
       })
     )
 
+  const baseWithAdapter = (adapter: Layer.Layer<CliAdapter>) =>
+    Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlMcpServiceTest,
+      InMemorySecretStoreLive,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      PlanStore.Default,
+      adapter,
+      DiscoveryService.Default,
+      ContextManager.Default,
+      temp.layer
+    )
+
   it("writes a proposed plan into the session's plan library (~/jingler/.jingler/<worktree>/)", async () => {
     seedSessionWithWorktree("plan")
     const base = Layer.mergeAll(
@@ -1381,21 +1398,7 @@ describe("AgentRunner plan library", () => {
         stop: () => Effect.void
       })
     )
-    const base = Layer.mergeAll(
-      AgentRunner.Default,
-      OpenConnectorService.Default,
-      BrowserControlMcpServiceTest,
-      InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      fallbackAdapter,
-      DiscoveryService.Default,
-      ContextManager.Default,
-      temp.layer
-    )
+    const base = baseWithAdapter(fallbackAdapter)
     const proposed: Plan[] = []
 
     await Effect.runPromise(
@@ -1454,21 +1457,7 @@ describe("AgentRunner plan library", () => {
         stop: () => Effect.void
       })
     )
-    const base = Layer.mergeAll(
-      AgentRunner.Default,
-      OpenConnectorService.Default,
-      BrowserControlMcpServiceTest,
-      InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      streamedAdapter,
-      DiscoveryService.Default,
-      ContextManager.Default,
-      temp.layer
-    )
+    const base = baseWithAdapter(streamedAdapter)
 
     const transcript = await Effect.runPromise(
       Effect.gen(function* () {
@@ -1533,21 +1522,7 @@ describe("AgentRunner plan library", () => {
         stop: () => Effect.void
       })
     )
-    const testLayer = Layer.mergeAll(
-      AgentRunner.Default,
-      OpenConnectorService.Default,
-      BrowserControlMcpServiceTest,
-      InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      payloadAdapter,
-      DiscoveryService.Default,
-      ContextManager.Default,
-      temp.layer
-    )
+    const testLayer = baseWithAdapter(payloadAdapter)
 
     const transcript = await Effect.runPromise(
       Effect.gen(function* () {
