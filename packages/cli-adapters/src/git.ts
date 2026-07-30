@@ -329,6 +329,18 @@ export class GitService extends Effect.Service<GitService>()(
         })
 
       /**
+       * Switch the repository's primary checkout to an existing local branch.
+       *
+       * Direct sessions deliberately use the checkout the developer already
+       * owns: no fetch, task branch, or linked worktree is created here.
+       */
+      const switchBranch = (
+        repoPath: string,
+        branch: string
+      ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
+        runGit(repoPath, ["switch", branch]).pipe(Effect.as(branch))
+
+      /**
        * Keep commits made on a detached session reachable before its worktree is
        * removed. A detached HEAD already contained by any local or remote ref is
        * safe; otherwise create a collision-safe `jingler/<slug>` branch at HEAD.
@@ -509,6 +521,7 @@ export class GitService extends Effect.Service<GitService>()(
         worktreePathFor,
         createWorktree,
         createDetachedWorktree,
+        switchBranch,
         branchAt,
         createTaskBranch,
         preserveDetachedHead,

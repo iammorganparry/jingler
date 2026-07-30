@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { Session, SessionActivity } from "@jingler/core"
 import { SessionSidebar } from "./session-sidebar.js"
+import { DEFAULT_FILTERS } from "./session-filters.js"
 
 const meta = {
   title: "App/SessionSidebar",
@@ -71,6 +72,85 @@ export const AllStates: Story = {
       <SessionSidebar {...args} />
     </div>
   )
+}
+
+/** Active persistent sessions occupy the fixed tray and disappear from groups. */
+export const PersistentTray: Story = {
+  args: {
+    sessions: [
+      session({ id: "kept-auth", title: "Auth", persistent: true, cli: "claude" }),
+      session({ id: "kept-tests", title: "Tests", persistent: true, cli: "codex" }),
+      ...SESSIONS.slice(2)
+    ],
+    activeSessionId: "kept-tests",
+    onSelect: () => {},
+    onSetPersistent: () => {},
+    onArchive: () => {},
+    onDelete: () => {},
+    liveActivity: {
+      "kept-tests": {
+        kind: "running",
+        verb: "Running",
+        target: "pnpm test"
+      }
+    }
+  },
+  render: (args) => (
+    <div className="flex h-screen bg-editor">
+      <SessionSidebar {...args} />
+    </div>
+  )
+}
+
+/** No active persistent sessions leaves one dashed creation tile. */
+export const EmptyPersistentTray: Story = {
+  args: {
+    sessions: SESSIONS.slice(0, 3),
+    activeSessionId: "s1",
+    onSelect: () => {},
+    onNewSession: () => {}
+  },
+  render: PersistentTray.render
+}
+
+/** Archiving hides the tile without clearing the persistent flag. */
+export const ArchivedPersistent: Story = {
+  args: {
+    sessions: [
+      session({
+        id: "kept-archived",
+        title: "Archived keeper",
+        persistent: true,
+        archived: true,
+        archiveReason: "closed",
+        archivedAt: "2026-07-18T08:00:00.000Z"
+      })
+    ],
+    activeSessionId: null,
+    onSelect: () => {},
+    onRestore: () => {},
+    defaultFilters: { ...DEFAULT_FILTERS, status: "archived" }
+  },
+  render: PersistentTray.render
+}
+
+/** List facets narrow ordinary rows but do not hide fixed persistent navigation. */
+export const FilteredWithPersistentTray: Story = {
+  args: {
+    sessions: [
+      session({
+        id: "kept-filtered",
+        title: "Always reachable",
+        persistent: true,
+        repo: "jingler"
+      }),
+      session({ id: "other-filtered", title: "Filtered repo", repo: "gtm-grid" })
+    ],
+    activeSessionId: "kept-filtered",
+    onSelect: () => {},
+    defaultFilters: { ...DEFAULT_FILTERS, repo: "gtm-grid" }
+  },
+  render: PersistentTray.render
 }
 
 /**

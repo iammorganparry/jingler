@@ -251,6 +251,11 @@ export const Chat = Schema.Struct({
    * keeps sessions written before orchestration behaving exactly as they did.
    */
   role: Schema.optional(ChatRole),
+  /**
+   * Whether this orchestrator chat uses Jingler's worker flow. Per-chat so one
+   * composer's toggle cannot change another conversation.
+   */
+  orchestratorEnabled: Schema.optional(Schema.Boolean),
   mode: Schema.optional(PermissionMode),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
   model: Schema.optional(Schema.String),
@@ -262,6 +267,10 @@ export type ChatId = Chat["id"]
 /** Backward-compatible semantic role for a persisted chat. */
 export const chatRoleOf = (chat: Pick<Chat, "role">): ChatRole =>
   chat.role ?? "direct"
+
+/** How a session uses its repository checkout. */
+export const WorkspaceMode = Schema.Literal("worktree", "direct")
+export type WorkspaceMode = Schema.Schema.Type<typeof WorkspaceMode>
 
 export const Session = Schema.Struct({
   id: Schema.String,
@@ -314,8 +323,18 @@ export const Session = Schema.Struct({
   chats: Schema.Array(Chat),
   /** The chat restored when the session is next opened. */
   activeChatId: Schema.String,
-  /** Absolute path to this session's isolated git worktree, when one exists. */
+  /** Absolute path to the checkout this session works in. */
   worktreePath: Schema.optional(Schema.String),
+  /**
+   * Whether Jingler owns an isolated linked worktree or is using the repository's
+   * primary checkout directly. Absent on legacy sessions, which are worktrees.
+   */
+  workspaceMode: Schema.optional(WorkspaceMode),
+  /**
+   * Whether this session should remain available across ordinary lifecycle
+   * cleanup. Absent on legacy sessions, which are not persistent.
+   */
+  persistent: Schema.optional(Schema.Boolean),
   /**
    * Absolute path to the ORIGIN repo this session was forked from.
    *
@@ -373,6 +392,15 @@ export const Session = Schema.Struct({
   archivedAt: Schema.optional(Schema.String)
 })
 export type Session = Schema.Schema.Type<typeof Session>
+
+/** Backward-compatible workspace ownership for persisted sessions. */
+export const workspaceModeOf = (
+  session: Pick<Session, "workspaceMode">
+): WorkspaceMode => session.workspaceMode ?? "worktree"
+
+/** Backward-compatible persistence status for persisted sessions. */
+export const persistentOf = (session: Pick<Session, "persistent">): boolean =>
+  session.persistent ?? false
 
 /** Why a session was archived — matches `Session.archiveReason`. */
 export const ArchiveReason = Schema.Literal("merged", "closed")
@@ -1392,7 +1420,7 @@ export const AdversarialReview = Schema.Struct({
 })
 export type AdversarialReview = Schema.Schema.Type<typeof AdversarialReview>
 
-/** Parameters for creating a new session (and its isolated worktree). */
+/** Parameters for creating a new session. */
 export const CreateSessionInput = Schema.Struct({
   /** Absolute path to the origin repo. */
   repoPath: Schema.String,
@@ -1406,8 +1434,13 @@ export const CreateSessionInput = Schema.Struct({
   title: Schema.optional(Schema.String),
   /** Which CLI will drive the session. */
   cli: CliKind,
-  /** The branch to fork the worktree from. */
-  baseBranch: Schema.String
+  /** The branch to fork the worktree from, or check out for a direct session. */
+  baseBranch: Schema.String,
+  /**
+   * Whether to create an isolated linked worktree. Omitted defaults to true so
+   * existing callers and persisted RPC requests retain the current behaviour.
+   */
+  useWorktree: Schema.optional(Schema.Boolean)
 })
 export type CreateSessionInput = Schema.Schema.Type<typeof CreateSessionInput>
 

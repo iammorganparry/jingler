@@ -2,6 +2,8 @@ import type { ExecutionMode, Plan, PlanDocument } from "@jingler/core"
 import { ClipboardList } from "lucide-react"
 import { Button } from "../components/button.js"
 import { Markdown } from "../components/markdown.js"
+import { atLeast, useWidthTier } from "../hooks/width-tier.js"
+import { cn } from "../lib/cn.js"
 import {
   PlanEditor,
   type PlanEditorSyncState
@@ -47,6 +49,10 @@ export function PlanReview(props: {
   onStopWorker?: (agentId: string) => void
   onRetryWorker?: (agentId: string) => void
 }) {
+  // Match the conversation transcript/composer column exactly. The plan used to
+  // span the whole pane, which made prose line lengths jump when switching tabs
+  // and made the same document feel unrelated to the chat that produced it.
+  const gutter = atLeast(useWidthTier(), "mid") ? "px-[30px]" : "px-3"
   const {
     plan,
     document,
@@ -73,10 +79,10 @@ export function PlanReview(props: {
 
   if (!document && plan) {
     return (
-      <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-editor">
+      <div className={cn("min-h-0 min-w-0 flex-1 overflow-auto bg-editor", gutter)}>
         <article
           aria-label="Legacy plan markdown"
-          className="mx-auto w-full max-w-[860px] px-6 py-10 sm:px-10"
+          className="mx-auto w-full max-w-[760px] py-10"
         >
           <Markdown>{plan.raw}</Markdown>
         </article>
@@ -104,28 +110,35 @@ export function PlanReview(props: {
   }
 
   return (
-    <PlanEditor
-      document={document}
-      draft={draft ?? document.source}
-      remote={remote}
-      state={syncState}
-      error={syncError}
-      canApprove={canApprove}
-      onApprove={onApprove}
-      onResume={onResume}
-      onRevise={onRevise}
-      onSendToAgent={onSendToAgent}
-      onEdit={onEditDocument}
-      onSave={onSaveDocument}
-      onRetry={onRetryDocument}
-      onKeepLocal={onKeepLocal}
-      onAcceptRemote={onAcceptRemote}
-      onStopWorker={onStopWorker}
-      onRetryWorker={onRetryWorker}
-      targetStageId={selectedStepId}
-      onTargetStageConsumed={
-        selectedStepId ? () => onSelectStep?.(selectedStepId) : undefined
-      }
-    />
+    <div className={cn("flex min-h-0 min-w-0 flex-1 bg-editor", gutter)}>
+      <div
+        data-testid="plan-review-container"
+        className="mx-auto flex min-h-0 w-full max-w-[760px] flex-1"
+      >
+        <PlanEditor
+          document={document}
+          draft={draft ?? document.source}
+          remote={remote}
+          state={syncState}
+          error={syncError}
+          canApprove={canApprove}
+          onApprove={onApprove}
+          onResume={onResume}
+          onRevise={onRevise}
+          onSendToAgent={onSendToAgent}
+          onEdit={onEditDocument}
+          onSave={onSaveDocument}
+          onRetry={onRetryDocument}
+          onKeepLocal={onKeepLocal}
+          onAcceptRemote={onAcceptRemote}
+          onStopWorker={onStopWorker}
+          onRetryWorker={onRetryWorker}
+          targetStageId={selectedStepId}
+          onTargetStageConsumed={
+            selectedStepId ? () => onSelectStep?.(selectedStepId) : undefined
+          }
+        />
+      </div>
+    </div>
   )
 }

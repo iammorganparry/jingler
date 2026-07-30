@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join } from "node:path"
 import { Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -9,6 +9,7 @@ import type {
   CreateSessionInput,
   Session
 } from "@jingler/core"
+import { workspaceModeOf } from "@jingler/core"
 import { GhService } from "./gh.js"
 import { GitService } from "./git.js"
 import { SessionStore, migrateRepoName } from "./sessions.js"
@@ -26,10 +27,11 @@ const activeChat = (session: Session) =>
   session.chats.find((chat) => chat.id === session.activeChatId)!
 
 /**
- * SessionStore persists sessions to disk and forks a real worktree per session.
- * We assert the outcomes a user sees: the session's shape, that new sessions lead
- * the list, that they survive a fresh read (persistence), and that a missing id
- * fails with the typed error. The slug rule is checked only via `session.branch`.
+ * SessionStore persists sessions to disk and prepares their real Git checkout.
+ * We assert the outcomes a user sees: the session's shape, that new sessions
+ * lead the list, that they survive a fresh read (persistence), and that a
+ * missing id fails with the typed error. The slug rule is checked only via
+ * `session.branch`.
  */
 describe("SessionStore", () => {
   let temp: ReturnType<typeof withTempRoot>
@@ -107,6 +109,41 @@ describe("SessionStore", () => {
       expect(result.value.map((s) => s.title)).toEqual(["Keeper"])
       expect(activeChat(result.value[0]!).model).toBe("opus")
     })
+
+    it("admits only one of two racing direct creates for the same repository", async () => {
+      const result = await runExit(
+        Effect.gen(function* () {
+          const store = yield* SessionStore
+          const outcomes = yield* Effect.all(
+            [
+              store.create(
+                input({ title: "Direct A", useWorktree: false })
+              ).pipe(Effect.either),
+              store.create(
+                input({ title: "Direct B", useWorktree: false })
+              ).pipe(Effect.either)
+            ],
+            { concurrency: 2 }
+          )
+          return { outcomes, sessions: yield* store.list() }
+        }).pipe(Effect.provide(services)),
+        temp.layer
+      )
+
+      expect(result._tag).toBe("Success")
+      if (result._tag !== "Success") return
+      expect(
+        result.value.outcomes.filter((outcome) => outcome._tag === "Right")
+      ).toHaveLength(1)
+      expect(
+        result.value.outcomes.filter((outcome) => outcome._tag === "Left")
+      ).toHaveLength(1)
+      expect(
+        result.value.sessions.filter(
+          (session) => workspaceModeOf(session) === "direct"
+        )
+      ).toHaveLength(1)
+    })
   })
 
   /**
@@ -173,6 +210,7 @@ describe("SessionStore", () => {
     if (exit._tag !== "Success") return
     const s = exit.value
     expect(s.status).toBe("idle")
+    expect(workspaceModeOf(s)).toBe("worktree")
     // The slug folds in a unique stamp so auto-named sessions never collide.
     expect(s.branch).toMatch(/^jingler\/fix-login-bug-[a-z0-9]+$/)
     expect(s.baseBranch).toBe("main")
@@ -183,6 +221,105 @@ describe("SessionStore", () => {
     expect(s.autoTitle).toBe(false)
     expect(s.title).toBe("Fix Login Bug!")
     expect(s.diff).toStrictEqual({ added: 0, removed: 0 })
+  })
+
+  it("uses the selected branch in the primary checkout for a direct session", async () => {
+    execFileSync("git", ["branch", "feature/direct"], { cwd: repoPath })
+    const registeredPaths = () =>
+      execFileSync("git", ["worktree", "list", "--porcelain"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      })
+        .split("\n")
+        .filter((line) => line.startsWith("worktree "))
+    const registrationsBefore = registeredPaths()
+
+    const exit = await runExit(
+      SessionStore.create(
+        input({
+          title: "Work in place",
+          baseBranch: "feature/direct",
+          useWorktree: false
+        })
+      ).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.workspaceMode).toBe("direct")
+    expect(exit.value.worktreePath).toBe(repoPath)
+    expect(exit.value.repoPath).toBe(repoPath)
+    expect(exit.value.branch).toBe("feature/direct")
+    expect(
+      execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe("feature/direct")
+    expect(registeredPaths()).toStrictEqual(registrationsBefore)
+    expect(
+      execFileSync("git", ["branch", "--list", "jingler/*"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe("")
+  })
+
+  it("rejects a second direct session for the same repository", async () => {
+    const direct = input({ title: "First direct", useWorktree: false })
+    const first = await runExit(
+      SessionStore.create(direct).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(first._tag).toBe("Success")
+
+    const second = await runExit(
+      SessionStore.create(input({ title: "Second direct", useWorktree: false })).pipe(
+        Effect.provide(services)
+      ),
+      temp.layer
+    )
+    expect(second._tag).toBe("Failure")
+    expect(failureOf(second)?.message).toMatch(/direct session already uses this repository/i)
+    expect(failureOf(second)?.message).toMatch(/isolated worktree/i)
+  })
+
+  it("setPersistent atomically persists and returns the updated session", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const store = yield* SessionStore
+        const created = yield* store.create(input({ title: "Keep me" }))
+        const { updated } = yield* Effect.all(
+          {
+            updated: store.setPersistent(created.id, true),
+            model: store.setModel(created.id, "opus")
+          },
+          { concurrency: 2 }
+        )
+        return {
+          updated,
+          reloaded: yield* store.get(created.id)
+        }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.updated.persistent).toBe(true)
+    expect(exit.value.reloaded.persistent).toBe(true)
+    expect(activeChat(exit.value.reloaded).model).toBe("opus")
+    expect(
+      JSON.parse(readFileSync(join(temp.root, "sessions.json"), "utf-8"))
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: exit.value.reloaded.id,
+          persistent: true
+        })
+      ])
+    )
   })
 
   it("persists chat create, rename, selection, and adjacent close fallback", async () => {
@@ -497,6 +634,37 @@ describe("SessionStore", () => {
       expect(activeChat(reread.value).mode).toBe("auto")
       expect(activeChat(reread.value).model).toBe("sonnet")
     }
+  })
+
+  it("persists Jingler mode per chat without changing sibling chats", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Per-chat Jingler" }), {
+          chatRole: "orchestrator"
+        })
+        const firstChatId = created.activeChatId
+        const withSecond = yield* SessionStore.createChat(created.id)
+        const secondChatId = withSecond.activeChatId
+        yield* SessionStore.setOrchestratorEnabled(created.id, secondChatId, false)
+        return {
+          session: yield* SessionStore.get(created.id),
+          firstChatId,
+          secondChatId
+        }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    const first = exit.value.session.chats.find(
+      (chat) => chat.id === exit.value.firstChatId
+    )
+    const second = exit.value.session.chats.find(
+      (chat) => chat.id === exit.value.secondChatId
+    )
+    expect(first?.orchestratorEnabled).toBeUndefined()
+    expect(second?.orchestratorEnabled).toBe(false)
   })
 
   it("does not turn an invalid runtime mode into ask", async () => {
@@ -948,6 +1116,63 @@ describe("SessionStore", () => {
     expect(existsSync(worktreePath)).toBe(false)
     const worktrees = execFileSync("git", ["worktree", "list"], { cwd: repoPath, encoding: "utf-8" })
     expect(worktrees).not.toContain(worktreePath)
+  })
+
+  it("remove drops direct-session metadata without touching the repository", async () => {
+    execFileSync("git", ["branch", "feature/direct-delete"], { cwd: repoPath })
+    const created = await runExit(
+      SessionStore.create(
+        input({
+          title: "Direct delete",
+          baseBranch: "feature/direct-delete",
+          useWorktree: false
+        })
+      ).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(created._tag).toBe("Success")
+    if (created._tag !== "Success") return
+    const branchesBefore = execFileSync("git", ["branch", "--format=%(refname:short)"], {
+      cwd: repoPath,
+      encoding: "utf-8"
+    })
+    const registrationsBefore = execFileSync("git", ["worktree", "list", "--porcelain"], {
+      cwd: repoPath,
+      encoding: "utf-8"
+    })
+
+    const removed = await runExit(
+      Effect.gen(function* () {
+        yield* SessionStore.remove(created.value.id)
+        return yield* SessionStore.list()
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(removed._tag).toBe("Success")
+    if (removed._tag === "Success") {
+      expect(removed.value.some((session) => session.id === created.value.id)).toBe(false)
+    }
+    expect(existsSync(repoPath)).toBe(true)
+    expect(existsSync(join(repoPath, "README.md"))).toBe(true)
+    expect(
+      execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe("feature/direct-delete")
+    expect(
+      execFileSync("git", ["branch", "--format=%(refname:short)"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      })
+    ).toBe(branchesBefore)
+    expect(
+      execFileSync("git", ["worktree", "list", "--porcelain"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      })
+    ).toBe(registrationsBefore)
   })
 
   it("remove preserves commits made before an untitled session is retitled", async () => {

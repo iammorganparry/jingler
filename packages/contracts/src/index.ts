@@ -190,7 +190,7 @@ export class JinglerRpcs extends RpcGroup.make(
     payload: { id: Schema.String }
   }),
 
-  /** Create a session: fork an isolated git worktree, persist, and return it. */
+  /** Create a worktree-backed or direct-checkout session, persist, and return it. */
   Rpc.make("Sessions.create", {
     success: Session,
     error: GitError,
@@ -284,6 +284,13 @@ export class JinglerRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, status: SettledSessionStatus }
   }),
 
+  /** Mark a session persistent or ordinary; returns the updated record. */
+  Rpc.make("Sessions.setPersistent", {
+    success: Session,
+    error: GitError,
+    payload: { sessionId: Schema.String, persistent: Schema.Boolean }
+  }),
+
   /** Permanently delete a session and remove its worktree. Irreversible. */
   Rpc.make("Sessions.delete", {
     error: GitError,
@@ -316,6 +323,17 @@ export class JinglerRpcs extends RpcGroup.make(
     success: Session,
     error: GitError,
     payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
+  /** Toggle Jingler orchestration for one chat without affecting its siblings. */
+  Rpc.make("Sessions.setOrchestratorEnabled", {
+    success: Session,
+    error: GitError,
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      orchestratorEnabled: Schema.Boolean
+    }
   }),
 
   /**

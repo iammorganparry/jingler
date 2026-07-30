@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join } from "node:path"
 import type { GateDecision, Message, PermissionMode, Plan, Session, StreamEvent } from "@jingler/core"
@@ -21,7 +22,7 @@ import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore } from "./plan-store.js"
 import { reserveSessionRun } from "./run-coordinator.js"
-import { withTempRoot } from "./test-support.js"
+import { initGitRepo, withTempRoot } from "./test-support.js"
 import { BrowserControlPort } from "./browser-control-port.js"
 
 /** A no-op browser-control port. `promptSetup` builds a Claude MCP wrapper
@@ -1546,6 +1547,78 @@ const noHarnesses: Layer.Layer<DiscoveryService> = Layer.succeed(
 )
 
 describe("AgentRunner failures", () => {
+  it("refuses a direct turn after the shared checkout moves to another branch", async () => {
+    const repoPath = initGitRepo(join(temp.root, "direct-repo"), {
+      branches: ["feature/other"]
+    })
+    const now = "2026-07-20T00:00:00.000Z"
+    writeFileSync(
+      join(temp.root, "sessions.json"),
+      JSON.stringify([
+        {
+          id: SESSION,
+          repo: "direct-repo",
+          branch: "main",
+          title: "Direct",
+          status: "idle",
+          cli: "claude",
+          diff: { added: 0, removed: 0 },
+          prNumber: null,
+          costUsd: 0,
+          tokens: 0,
+          updatedAt: now,
+          worktreePath: repoPath,
+          repoPath,
+          workspaceMode: "direct",
+          chats: [chatForSession(now)],
+          activeChatId: SESSION
+        }
+      ])
+    )
+    execFileSync("git", ["switch", "feature/other"], { cwd: repoPath })
+
+    let adapterCalled = false
+    const unusedAdapter = Layer.succeed(
+      CliAdapter,
+      CliAdapter.of({
+        run: () =>
+          Effect.sync(() => {
+            adapterCalled = true
+          }),
+        stop: () => Effect.void
+      })
+    )
+    const base = Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlPortTest,
+      InMemorySecretStoreLive,
+      ConfigService.Default,
+      ContextManager.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      PlanStore.Default,
+      unusedAdapter,
+      noHarnesses,
+      temp.layer
+    )
+
+    const events = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        return yield* runner.prompt(SESSION, SESSION, "continue").pipe(Stream.runCollect)
+      }).pipe(Effect.provide(base))
+    )
+
+    expect(adapterCalled).toBe(false)
+    expect(Array.from(events)).toContainEqual({
+      _tag: "Failed",
+      message:
+        'This direct session is pinned to branch "main", but the repository checkout is now on branch "feature/other". Switch the repository back to "main" before continuing.'
+    })
+  })
+
   it("surfaces an adapter's actionable failure instead of replacing it with a generic message", async () => {
     mkdirSync(temp.root, { recursive: true })
     writeFileSync(

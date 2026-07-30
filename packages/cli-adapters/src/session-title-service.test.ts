@@ -83,6 +83,33 @@ describe("retitleSession", () => {
     if (exit._tag === "Success") expect(exit.value.title).toBe("Refactor the auth middleware")
   })
 
+  it("retitles a direct session without creating a task branch", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const session = yield* SessionStore.create(
+          input({ title: undefined, useWorktree: false })
+        )
+        yield* TranscriptStore.append(
+          session.id,
+          userMessage("u1", "Improve the cache", "2026-07-13T00:00:00.000Z")
+        )
+        return yield* retitleSession(session.id, fixed("Improve cache"))
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.title).toBe("Improve cache")
+    expect(exit.value.branch).toBe("main")
+    expect(
+      execFileSync("git", ["branch", "--list", "jingler/*"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe("")
+  })
+
   it("skips a pinned session (autoTitle false) — the generator is never called", async () => {
     let called = false
     const spyGen: TitleGenerator = {

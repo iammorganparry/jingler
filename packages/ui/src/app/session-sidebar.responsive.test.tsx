@@ -40,6 +40,38 @@ describe("SessionSidebar at shell width", () => {
     expect(onSelect).toHaveBeenCalledWith("b")
   })
 
+  it("orders persistent sessions before ordinary sessions with a separator", () => {
+    render(
+      <WidthTierValue width={820}>
+        <SessionSidebar
+          onSelect={() => {}}
+          activeSessionId="persistent"
+          sessions={[
+            session({ id: "ordinary-a", title: "Ordinary A" }),
+            session({ id: "persistent", title: "Persistent", persistent: true }),
+            session({ id: "ordinary-b", title: "Ordinary B" }),
+            session({
+              id: "archived-persistent",
+              title: "Archived persistent",
+              persistent: true,
+              archived: true
+            })
+          ]}
+        />
+      </WidthTierValue>
+    )
+
+    const ids = Array.from(
+      screen.getByTestId("session-rail").querySelectorAll("[data-session-id]")
+    ).map((element) => element.getAttribute("data-session-id"))
+    expect(ids).toStrictEqual(["persistent", "ordinary-a", "ordinary-b"])
+    expect(screen.getByTestId("persistent-rail-separator")).toBeDefined()
+    expect(
+      screen.getByRole("button", { name: "Persistent" }).getAttribute("data-persistent")
+    ).toBe("true")
+    expect(screen.queryByRole("button", { name: "Archived persistent" })).toBeNull()
+  })
+
   it("stays docked while the shell is unmeasured, so launch doesn't flash a rail", () => {
     renderAt(0)
     expect(screen.getByTestId("session-sidebar")).toBeTruthy()

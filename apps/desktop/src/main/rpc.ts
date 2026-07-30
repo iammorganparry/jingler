@@ -985,6 +985,14 @@ export const setSessionStatus = (sessionId: string, status: SettledSessionStatus
     )
   )
 
+/** `Sessions.setPersistent` handler — persist and return the updated record. */
+export const setSessionPersistent = (sessionId: string, persistent: boolean) =>
+  SessionStore.setPersistent(sessionId, persistent).pipe(
+    Effect.catchTag("SessionNotFoundError", (cause) =>
+      Effect.fail(new GitError({ message: "Session not found", cause }))
+    )
+  )
+
 /** `Github.files` handler — the PR's changed files (empty without a linked PR). */
 export const githubFiles = (sessionId: string) =>
   Effect.gen(function* () {
@@ -1687,6 +1695,8 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Sessions.retitle": ({ sessionId }) => retitleSession(sessionId, claudeTitleGenerator),
   "Sessions.rename": ({ sessionId, title }) => renameSession(sessionId, title),
   "Sessions.setStatus": ({ sessionId, status }) => setSessionStatus(sessionId, status),
+  "Sessions.setPersistent": ({ sessionId, persistent }) =>
+    setSessionPersistent(sessionId, persistent),
   "Sessions.delete": ({ sessionId }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId).pipe(
@@ -1714,6 +1724,20 @@ const HandlersLayer = JinglerRpcs.toLayer({
     ),
   "Sessions.renameChat": ({ sessionId, chatId, title }) =>
     SessionStore.renameChat(sessionId, chatId, title).pipe(
+      Effect.catchTag("SessionNotFoundError", (cause) =>
+        Effect.fail(new GitError({ message: "Session not found", cause }))
+      )
+    ),
+  "Sessions.setOrchestratorEnabled": ({
+    sessionId,
+    chatId,
+    orchestratorEnabled
+  }) =>
+    SessionStore.setOrchestratorEnabled(
+      sessionId,
+      chatId,
+      orchestratorEnabled
+    ).pipe(
       Effect.catchTag("SessionNotFoundError", (cause) =>
         Effect.fail(new GitError({ message: "Session not found", cause }))
       )

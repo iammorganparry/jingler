@@ -19,7 +19,7 @@ import type {
   SessionActivity,
   User
 } from "@jingler/core"
-import { clampFontScale, DEFAULT_THEME_ID } from "@jingler/core"
+import { clampFontScale, DEFAULT_THEME_ID, workspaceModeOf } from "@jingler/core"
 import {
   ConfirmDialog,
   LoadingScreen,
@@ -380,6 +380,13 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   const [pendingDelete, setPendingDelete] = useState<Session | null>(null)
   const renameSession = (sessionId: string, title: string) => {
     void rpc.sessionsRename(sessionId, title).then((session) => send({ type: "SESSION_UPDATED", session }))
+  }
+  const setSessionPersistent = async (
+    sessionId: string,
+    persistent: boolean
+  ): Promise<void> => {
+    const session = await rpc.sessionsSetPersistent(sessionId, persistent)
+    send({ type: "SESSION_UPDATED", session })
   }
   const deleteSession = async (sessionId: string) => {
     const chatIds = sessions
@@ -745,6 +752,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       loadBranches={rpc.workspaceBranches}
       onCreateSession={createSession}
       onRenameSession={renameSession}
+      onSetSessionPersistent={setSessionPersistent}
       onArchiveSession={archiveSession}
       onRestoreSession={restoreSession}
       onDeleteSession={(id) => setPendingDelete(sessions.find((s) => s.id === id) ?? null)}
@@ -821,7 +829,9 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       title="Delete session?"
       description={
         pendingDelete
-          ? `“${pendingDelete.title}” and its isolated worktree will be permanently removed. This can't be undone.`
+          ? workspaceModeOf(pendingDelete) === "direct"
+            ? `“${pendingDelete.title}” session data will be permanently removed. The repository checkout will be left untouched. This can't be undone.`
+            : `“${pendingDelete.title}” and its isolated worktree will be permanently removed. This can't be undone.`
           : undefined
       }
       confirmLabel="Delete"

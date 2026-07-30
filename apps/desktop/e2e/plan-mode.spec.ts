@@ -468,6 +468,8 @@ test("the Plan Review tab is always present and can seed a draft to author", asy
   await expect(appShell(launched.window)).toBeVisible()
 
   // Present with NO plan proposed yet (previously gated on a plan existing).
+  const chatContainer = await launched.window.getByTestId("composer").boundingBox()
+  expect(chatContainer).not.toBeNull()
   const tab = launched.window.getByRole("button", { name: "Plan Review" }).first()
   await expect(tab).toBeVisible()
   await tab.click()
@@ -479,6 +481,11 @@ test("the Plan Review tab is always present and can seed a draft to author", asy
   await expect(launched.window.getByLabel("Plan document")).toBeVisible({
     timeout: 20_000
   })
+  const planContainer = await launched.window
+    .getByTestId("plan-review-container")
+    .boundingBox()
+  expect(planContainer).not.toBeNull()
+  expect(planContainer!.width).toBeCloseTo(chatContainer!.width, 0)
   await expect
     .poll(() => readFileSync(currentPlanPath(launched), "utf8"))
     .toContain('status: "draft"')

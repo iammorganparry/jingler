@@ -49,6 +49,7 @@ import {
   reviewReconcile,
   reviewRun,
   setReasoning,
+  setSessionPersistent,
   sessionCreationDefaults,
   sessionDiff,
   skillsList,
@@ -90,6 +91,49 @@ describe("RPC handlers", () => {
         defaultModel: undefined
       }
     })
+  })
+
+  it("Sessions.setPersistent returns and persists the updated session", async () => {
+    const now = "2026-07-30T10:00:00.000Z"
+    mkdirSync(root, { recursive: true })
+    writeFileSync(
+      join(root, "sessions.json"),
+      JSON.stringify([
+        {
+          id: "s1",
+          repo: "widget",
+          branch: "jingler/widget",
+          title: "Widget",
+          status: "idle",
+          cli: "claude",
+          diff: { added: 0, removed: 0 },
+          prNumber: null,
+          costUsd: 0,
+          tokens: 0,
+          updatedAt: now,
+          chats: [
+            {
+              id: "c1",
+              title: null,
+              createdAt: now,
+              updatedAt: now
+            }
+          ],
+          activeChatId: "c1"
+        }
+      ])
+    )
+    const layer = Layer.mergeAll(base, SessionStore.Default)
+
+    const updated = await Effect.runPromise(
+      setSessionPersistent("s1", true).pipe(Effect.provide(layer))
+    )
+    const reloaded = await Effect.runPromise(
+      SessionStore.get("s1").pipe(Effect.provide(layer))
+    )
+
+    expect(updated.persistent).toBe(true)
+    expect(reloaded.persistent).toBe(true)
   })
 
   it("falls back to direct session creation when model discovery crashes", async () => {

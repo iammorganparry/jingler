@@ -14,7 +14,7 @@ import {
   Workflow,
   X
 } from "lucide-react"
-import type { ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import type { TabDescriptor, TabKey } from "./tab-contributions.js"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier, type WidthTier } from "../hooks/width-tier.js"
@@ -141,17 +141,14 @@ const DOT_TONE = { yellow: "bg-yellow", blue: "bg-blue", green: "bg-green" } as 
  * ruled rows and ~20 vertical rules before a word of transcript — the chrome
  * out-shouting the thing it framed. Two moves fix it:
  *
- * 1. **There is no Conversation tab.** The session chip IS it. The chip was
- *    already a permanent, unclickable label sitting beside a tab that meant
- *    "show me this session" — two controls for one idea, one of them dead. Merged,
- *    it buys back the chip's width and drops the tab count by one. `TabKey` still
- *    carries `"conversation"`, because every caller, machine and test names the
- *    view that way; only its rendering moved.
+ * 1. **The session title is identity, not navigation.** A single click leaves
+ *    the current view alone; a double-click renames the session. Conversation
+ *    remains an explicit view tab, alongside Plan, PR, and Changes.
  * 2. **The chat pills share this row** (`chatSlot`), behind a divider. So a pane
  *    mid-turn is two rows — this one and the sub-agent rail — where it used to
  *    be three.
  *
- * The non-conversation tabs are glyph-first: their labels only appear when
+ * The view tabs are glyph-first: their labels only appear when
  * selected (and only from `mid` up), because the row now has to hold the chat
  * titles too, and a chat title is the thing you actually read to tell two
  * conversations apart. Every glyph keeps its `aria-label` and `title`.
@@ -163,6 +160,7 @@ export function TabBar({
   status,
   pane,
   sessionTitle,
+  onRenameTitle,
   chatSlot,
   onToggleSplit,
   splitActive = false,
@@ -201,12 +199,14 @@ export function TabBar({
    */
   pane?: { index: number; title: string; focused: boolean }
   /**
-   * The session's name, shown on the conversation chip. Distinct from
+   * The session's name, shown as the pane identity. Distinct from
    * `pane.title` (which is the same string, but only supplied in a split): the
-   * chip is now a TAB, and a tab that renders as an empty pill in a group of one
-   * is not a tab. Falls back to the pane title, then to a generic label.
+   * title remains visible in a group of one and falls back to the pane title,
+   * then to a generic label.
    */
   sessionTitle?: string
+  /** Rename the session title. Double-clicking the title enters edit mode. */
+  onRenameTitle?: (title: string) => void
   /**
    * The chat pills, rendered inside this row behind a divider. A `ReactNode`
    * rather than data because chat state lives in the desktop renderer (rpc calls
@@ -251,16 +251,22 @@ export function TabBar({
   const collapseActions = !atLeast(tier, "mid")
   const titleWidth = TITLE_WIDTH[tier]
   const title = sessionTitle ?? pane?.title ?? "Conversation"
-  const conversationActive = active === "conversation"
-  // `"conversation"` is still special — the redesign folded it into the session
-  // chip rather than giving it a pill — but it is matched by id on a descriptor
-  // now, not by a member of a closed union.
-  const conversationTab = tabs.find((tab) => tab.id === "conversation")
-  const hasConversation = conversationTab !== undefined
-  // Its accessible name comes from the descriptor rather than a local constant,
-  // so it cannot drift from `BUILTIN_TAB_META`.
-  const conversationLabel = conversationTab?.label ?? "Conversation"
-  const viewTabs = tabs.filter((tab) => tab.id !== "conversation")
+  const canRenameTitle = onRenameTitle !== undefined && titleWidth !== null
+  const [titleDraft, setTitleDraft] = useState<string | null>(null)
+
+  useEffect(() => {
+    setTitleDraft(null)
+  }, [title])
+
+  const beginTitleEdit = () => {
+    if (canRenameTitle) setTitleDraft(title)
+  }
+
+  const commitTitle = () => {
+    const nextTitle = titleDraft?.trim()
+    setTitleDraft(null)
+    if (nextTitle && nextTitle !== title) onRenameTitle?.(nextTitle)
+  }
 
   return (
     <div
@@ -280,131 +286,73 @@ export function TabBar({
       */}
       <div className="sb-no-scrollbar flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
         {/*
-          The conversation tab, wearing the session's name. `data-testid` is kept
-          as `pane-chip-N` where a pane index exists, so the split's "which pane
-          am I looking at" tests keep pointing at the thing that answers it.
+          The session title identifies the pane but never changes its view on a
+          single click. `data-testid` stays stable for split and command-palette
+          coverage that reads the active session name.
         */}
-        {hasConversation && (
-          <button
-            type="button"
-            onClick={() => onChange("conversation")}
-            aria-current={conversationActive ? "page" : undefined}
-            aria-label={conversationLabel}
-            data-testid={pane ? `pane-chip-${pane.index}` : "conversation-tab"}
-            title={
-              pane
-                ? `Pane ${pane.index + 1} — ${title} (⌃⇧${pane.index + 1})`
-                : `${conversationLabel} — ${title}`
+        <div
+          aria-label={`Session title: ${title}`}
+          data-testid={pane ? `pane-chip-${pane.index}` : "conversation-tab"}
+          title={
+            pane
+              ? `Pane ${pane.index + 1} — ${title} (double-click to rename)`
+              : `${title} (double-click to rename)`
+          }
+          tabIndex={canRenameTitle ? 0 : undefined}
+          onDoubleClick={beginTitleEdit}
+          onKeyDown={(event) => {
+            if (event.key === "F2") {
+              event.preventDefault()
+              beginTitleEdit()
             }
-            className={cn(
-              "flex flex-none items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] outline-none transition-colors",
-              conversationActive
-                ? "bg-surface font-medium text-text-bright"
-                : "text-muted-foreground hover:bg-panel hover:text-text",
-              // Dimmed when the pane isn't the focused one, so the chips answer
-              // "which is which" and "which is listening" with one glance rather
-              // than competing with the focus ring for the second question.
-              //
-              // Applied even when this tab is SELECTED — and last, so it wins the
-              // merge. Every pane's conversation tab is selected most of the time,
-              // so gating the dim on "not selected" would mean the focus signal
-              // was absent in exactly the case it exists for.
-              pane && !pane.focused && "text-dim"
-            )}
-          >
-            {pane ? (
-              <Badge tone={pane.focused ? "blue" : "count"} size="xs">
-                {pane.index + 1}
-              </Badge>
-            ) : (
-              <MessagesSquare
-                className={cn("size-3.5 flex-none", conversationActive ? "text-blue" : "text-dim")}
-              />
-            )}
-            {titleWidth ? (
-              <span className={cn("truncate", titleWidth)}>{title}</span>
-            ) : (
-              // No room for a name — but the session still has a state worth
-              // showing, and the dot is the same vocabulary the sidebar uses.
-              // The tone is looked up, never interpolated: Tailwind scans source
-              // text, so a built `bg-${tone}` class is one that never got built.
-              status && <StatusDot tone={DOT_TONE[status.tone]} pulse size={7} />
-            )}
-          </button>
-        )}
-
-        {viewTabs.map((tab) => {
-          const key = tab.id
-          const Icon = tab.icon
-          const isActive = key === active
-          const showLabel = isActive && showActiveLabel
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => onChange(key)}
-              aria-current={isActive ? "page" : undefined}
-              // The name has to survive the label being hidden — this is what a
-              // screen reader and `getByRole("tab", { name })` read once the
-              // text is gone, and it doubles as the hover tooltip.
-              aria-label={tab.label}
-              title={tab.label}
-              className={cn(
-                "group flex flex-none items-center gap-1.5 rounded-md py-1 text-[12.5px] outline-none transition-colors",
-                // Glyph-only pills lose the label's optical weight, so the
-                // horizontal padding tightens with it rather than leaving each
-                // glyph marooned in a 60px cell.
-                showLabel ? "px-2.5" : "px-2",
-                isActive
-                  ? "bg-surface font-medium text-text-bright"
-                  : "text-muted-foreground hover:bg-panel hover:text-text"
-              )}
-            >
-              <Icon
+          }}
+          className={cn(
+            "flex flex-none select-none items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] font-medium text-text-bright outline-none",
+            canRenameTitle &&
+              "cursor-text focus-visible:ring-2 focus-visible:ring-blue focus-visible:ring-offset-1 focus-visible:ring-offset-sunken",
+            pane && !pane.focused && "text-dim"
+          )}
+        >
+          {pane ? (
+            <Badge tone={pane.focused ? "blue" : "count"} size="xs">
+              {pane.index + 1}
+            </Badge>
+          ) : (
+            <MessagesSquare className="size-3.5 flex-none text-dim" />
+          )}
+          {titleWidth ? (
+            titleDraft !== null ? (
+              <input
+                autoFocus
+                aria-label="Session title"
+                value={titleDraft}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onBlur={commitTitle}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    event.currentTarget.blur()
+                  } else if (event.key === "Escape") {
+                    event.preventDefault()
+                    setTitleDraft(null)
+                  }
+                }}
                 className={cn(
-                  "size-3.5 flex-none",
-                  isActive ? "text-blue" : "text-dim group-hover:text-muted-foreground"
+                  "min-w-0 bg-transparent text-[12.5px] font-medium text-text-bright outline-none",
+                  titleWidth
                 )}
               />
-              {showLabel && <span className="whitespace-nowrap">{tab.label}</span>}
-              {/*
-                Badges come off the DESCRIPTOR, not from `key === "pr"` /
-                `key === "changes"` against dedicated props.
-
-                Both spellings drew the same two pixels; the difference is that
-                keying off the id made "a tab this file knows about" a
-                precondition for decorating one, which is exactly what a plugin
-                cannot satisfy. A contribution supplies its own badge, so a
-                plugin can show an unread count without anyone editing this file.
-              */}
-              {tab.badge?.kind === "count" && (
-                <Badge tone="count" size="xs">
-                  {tab.badge.text}
-                </Badge>
-              )}
-              {tab.badge?.kind === "diff" &&
-                tab.badge.added + tab.badge.removed > 0 &&
-                // Below `mid` the counts collapse to one dot: "+681 −0" is four
-                // to seven characters of tabular numerals per tab, and at that
-                // width they cost a whole chat pill to say something the Changes
-                // view says better.
-                (atLeast(tier, "mid") ? (
-                  <span className="flex items-center gap-1 font-mono text-[10.5px] tabular-nums">
-                    <span className="text-green">+{tab.badge.added}</span>
-                    <span className="text-red">−{tab.badge.removed}</span>
-                  </span>
-                ) : (
-                  <StatusDot tone="bg-green" size={5} />
-                ))}
-            </button>
-          )
-        })}
+            ) : (
+              <span className={cn("truncate", titleWidth)}>{title}</span>
+            )
+          ) : (
+            status && <StatusDot tone={DOT_TONE[status.tone]} pulse size={7} />
+          )}
+        </div>
 
         {/*
-          The chat pills. The divider is the only rule left inside the row, and it
-          earns its keep: left of it you pick WHAT you're looking at, right of it
-          WHICH conversation — two different questions that otherwise read as one
-          undifferentiated run of pills.
+          The divider keeps pane identity separate from its chat choices. View
+          navigation lives in the right cluster beside status.
         */}
         {chatSlot && (
           <>
@@ -419,12 +367,70 @@ export function TabBar({
         pane and move-pane vanished before a single tab label did — the controls
         you reach for precisely because the pane is too narrow.
       */}
-      <div className="flex flex-none items-center justify-end gap-1.5 pl-1">
+      <div
+        data-testid="session-tab-actions"
+        className="flex min-w-0 max-w-[60%] flex-none items-center justify-end gap-1.5 pl-1"
+      >
+        <div
+          data-testid="view-tab-controls"
+          className="sb-no-scrollbar flex min-w-0 items-center gap-0.5 overflow-x-auto"
+        >
+          {tabs.map((tab) => {
+            const key = tab.id
+            const Icon = tab.icon
+            const isActive = key === active
+            const showLabel = isActive && showActiveLabel
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => onChange(key)}
+                aria-current={isActive ? "page" : undefined}
+                aria-label={tab.label}
+                title={tab.label}
+                className={cn(
+                  "group flex flex-none items-center gap-1.5 rounded-md py-1 text-[12.5px] outline-none transition-colors",
+                  showLabel ? "px-2.5" : "px-2",
+                  isActive
+                    ? "bg-surface font-medium text-text-bright"
+                    : "text-muted-foreground hover:bg-panel hover:text-text"
+                )}
+              >
+                <Icon
+                  className={cn(
+                    "size-3.5 flex-none",
+                    isActive ? "text-blue" : "text-dim group-hover:text-muted-foreground"
+                  )}
+                />
+                {showLabel && <span className="whitespace-nowrap">{tab.label}</span>}
+                {tab.badge?.kind === "count" && (
+                  <Badge tone="count" size="xs">
+                    {tab.badge.text}
+                  </Badge>
+                )}
+                {tab.badge?.kind === "diff" &&
+                  tab.badge.added + tab.badge.removed > 0 &&
+                  (atLeast(tier, "mid") ? (
+                    <span className="flex items-center gap-1 font-mono text-[10.5px] tabular-nums">
+                      <span className="text-green">+{tab.badge.added}</span>
+                      <span className="text-red">−{tab.badge.removed}</span>
+                    </span>
+                  ) : (
+                    <StatusDot tone="bg-green" size={5} />
+                  ))}
+              </button>
+            )
+          })}
+        </div>
+
         {status && (
           // The status word is the first thing to go: it's a duplicate of the
           // sidebar row's own indicator, so nothing is lost that isn't on screen
           // a few hundred pixels to the left.
-          <span className={cn("flex-none", !atLeast(tier, "mid") && "hidden")}>
+          <span
+            data-testid="session-status"
+            className={cn("flex-none", !atLeast(tier, "mid") && "hidden")}
+          >
             <Pill tone={status.tone} pulse title={status.detail}>
               {status.label}
             </Pill>

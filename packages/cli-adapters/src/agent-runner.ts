@@ -39,6 +39,7 @@ import {
   stripPlanResultProtocol,
   supportsPlanMode,
   userMessage,
+  workspaceModeOf,
   DEFAULT_PLAN_TEMPLATE_HTML,
   resolveWorkerRoutingConfig,
   workerRoutingMismatch
@@ -77,7 +78,7 @@ import { readDefaultMode } from "./default-mode.js"
 import { DiscoveryService } from "./discovery.js"
 import { ModelsService } from "./models.js"
 import { healedWorktreePath } from "./cli-project-dir.js"
-import { ensureWorktreeLinked } from "./git.js"
+import { branchAt, ensureWorktreeLinked } from "./git.js"
 import { OpenConnectorService } from "./open-connector.js"
 import { BrowserControlPort } from "./browser-control-port.js"
 import { buildBrowserControlMcp } from "./browser-control-mcp.js"
@@ -914,13 +915,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           ])
           const sessionCli = session.cli
           const workspaceConfig = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
-          // Read per turn: the operator can turn the orchestrator flow off in
-          // Settings mid-session, and the very next turn must obey. When it is
-          // off, an orchestrator chat is treated as a plain chat on the session's
-          // own harness — no orchestrator persona, no forced plan turn, its own
-          // mode/model chips — so the operator drives the source harness directly.
+          // Read per turn: each orchestrator chat can independently opt out of
+          // the worker flow. The workspace setting remains the fallback for
+          // chats written before the per-chat field existed.
           const orchestratorEnabled =
-            workspaceConfig?.orchestratorEnabled ?? ORCHESTRATOR_ENABLED_DEFAULT
+            chat.orchestratorEnabled ??
+            workspaceConfig?.orchestratorEnabled ??
+            ORCHESTRATOR_ENABLED_DEFAULT
           const orchestrating = chat.role === "orchestrator" && orchestratorEnabled
           const discoveredClis = yield* DiscoveryService.list().pipe(
             Effect.orElseSucceed(() => [])
@@ -950,7 +951,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // Resolve the harness binary; null → the dispatcher uses the scripted
           // fallback (also the path when the CLI isn't installed).
           const binPath = discoveredClis.find((c) => c.kind === cli)?.binPath ?? null
-          // The agent always runs in the session's isolated worktree.
+          // The agent always runs in the session's recorded working checkout.
           //
           // This comment used to claim an empty value "would fail loudly on a
           // missing worktree". It did the exact opposite: the adapters mapped
@@ -973,7 +974,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const storedWorktree = session?.worktreePath ?? ""
           const healPaths = yield* AppPaths
           const worktreePath = session
-            ? yield* healedWorktreePath(storedWorktree, session.repo, healPaths.worktreesDir)
+            ? workspaceModeOf(session) === "direct"
+              ? storedWorktree
+              : yield* healedWorktreePath(
+                  storedWorktree,
+                  session.repo,
+                  healPaths.worktreesDir
+                )
             : storedWorktree
           if (worktreePath !== storedWorktree) {
             yield* SessionStore.setWorktreePath(sessionId, worktreePath).pipe(
@@ -987,8 +994,32 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // files, and only fail at diff/commit time with "not a git
           // repository". Memoised per worktree, so this is one `rev-parse` on
           // the first turn and nothing after.
-          if (worktreePath.length > 0 && session?.repoPath) {
+          if (
+            worktreePath.length > 0 &&
+            session?.repoPath &&
+            workspaceModeOf(session) === "worktree"
+          ) {
             yield* ensureWorktreeLinked(session.repoPath, worktreePath)
+          }
+          // A direct session shares the repository's primary checkout with the
+          // developer. Refuse every turn after that checkout moves: continuing
+          // would run the agent on a branch different from the one recorded in
+          // the session, while plans and review state still name the old branch.
+          if (workspaceModeOf(session) === "direct") {
+            const liveBranch = yield* branchAt(worktreePath)
+            if (liveBranch !== session.branch) {
+              const actual =
+                liveBranch === null ? "detached HEAD" : `branch "${liveBranch}"`
+              return yield* Effect.fail(
+                new CliExecError({
+                  kind: session.cli,
+                  message:
+                    `This direct session is pinned to branch "${session.branch}", but ` +
+                    `the repository checkout is now on ${actual}. Switch the repository ` +
+                    `back to "${session.branch}" before continuing.`
+                })
+              )
+            }
           }
           // Saved plans for this worktree, so a "implement/continue the plan" turn
           // can be pointed at the plan file on disk (best-effort — never blocks).

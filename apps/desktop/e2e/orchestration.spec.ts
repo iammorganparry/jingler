@@ -2,6 +2,84 @@ import { existsSync, readFileSync } from "node:fs"
 import { basename, join } from "node:path"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
 
+test("Jingler mode uses the animated brand treatment and the Jingler mark", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: {
+      orchestrator: { cli: "codex", model: "gpt-5.6-sol" }
+    }
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.getByTestId("new-session").click()
+  await window
+    .getByPlaceholder("Leave blank for agent naming")
+    .fill("Branded Jingler mode")
+  await window.getByRole("button", { name: "Create" }).click()
+  await expect(sessionRow(window, "Branded Jingler mode")).toBeVisible()
+
+  const toggle = window.getByRole("button", { name: "Jingler", exact: true })
+  const surface = window.getByTestId("composer").locator("[data-jingler-mode]")
+
+  await expect(toggle).toHaveAttribute("aria-pressed", "true")
+  await expect(toggle.locator('svg[aria-label="Jingler"]')).toBeVisible()
+  await expect(toggle.locator(".lucide-sparkles")).toHaveCount(0)
+  await expect(surface).toHaveAttribute("data-jingler-mode", "true")
+
+  const activeTreatment = await surface.evaluate((element) => {
+    const surfaceStyle = getComputedStyle(element)
+    const glowStyle = getComputedStyle(element, "::before")
+    return {
+      animation: surfaceStyle.animationName,
+      background: surfaceStyle.backgroundImage,
+      glowAnimation: glowStyle.animationName
+    }
+  })
+  expect(activeTreatment.animation).toContain("sb-jingler-border-rotate")
+  expect(activeTreatment.background).toContain("conic-gradient")
+  expect(activeTreatment.glowAnimation).toContain("sb-jingler-border-rotate")
+
+  const toggleTreatment = await toggle.evaluate((element) => {
+    const buttonStyle = getComputedStyle(element)
+    const labelStyle = getComputedStyle(element.querySelector("span")!)
+    const markStyle = getComputedStyle(element.querySelector("svg")!)
+    return {
+      border: buttonStyle.borderStyle,
+      background: buttonStyle.backgroundColor,
+      labelAnimation: labelStyle.animationName,
+      markAnimation: markStyle.animationName
+    }
+  })
+  expect(toggleTreatment).toMatchObject({
+    border: "none",
+    background: "rgba(0, 0, 0, 0)",
+    labelAnimation: "sb-jingler-text-shine",
+    markAnimation: "sb-jingler-mark-shine"
+  })
+
+  await window.getByRole("button", { name: "New chat" }).click()
+  await expect(window.getByTitle("2. Chat 2")).toHaveAttribute(
+    "aria-current",
+    "page"
+  )
+
+  await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-pressed", "false")
+  await expect(surface).toHaveAttribute("data-jingler-mode", "false")
+  await expect(window.getByRole("button", { name: "GPT-5.6 Sol" })).toBeVisible()
+
+  await window.getByTitle("1. Chat 1").click()
+  await expect(toggle).toHaveAttribute("aria-pressed", "true")
+  await expect(surface).toHaveAttribute("data-jingler-mode", "true")
+
+  await window.getByTitle("2. Chat 2").click()
+  await expect(toggle).toHaveAttribute("aria-pressed", "false")
+  await expect(surface).toHaveAttribute("data-jingler-mode", "false")
+})
+
 test("a new orchestrator session runs parallel workers and reconciles a mid-run amendment", async ({
   launchApp
 }) => {

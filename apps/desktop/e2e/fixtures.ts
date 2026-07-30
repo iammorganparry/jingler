@@ -149,6 +149,8 @@ export interface SeedSession {
   readonly archived?: boolean
   readonly archiveReason?: "merged" | "closed"
   readonly archivedAt?: string
+  readonly persistent?: boolean
+  readonly workspaceMode?: "worktree" | "direct"
 }
 
 export interface LaunchOptions {
