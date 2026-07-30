@@ -75,3 +75,69 @@ describe("Composer model chip", () => {
     expect(screen.queryByRole("menuitem")).toBeNull()
   })
 })
+
+/**
+ * Jingler mode owns the model + mode chips. On the orchestrator composer a
+ * toggle stands in for them; when it is on there is nothing valid to pick (the
+ * orchestrator is automatic on its Settings model), so both chips disappear.
+ * Off — or on a plain chat, where the toggle never renders — the chips return.
+ */
+describe("Composer Jingler toggle", () => {
+  const jinglerButton = () =>
+    screen.getAllByRole("button").find((b) => b.textContent?.includes("Jingler"))
+  const chip = (text: string) =>
+    screen.getAllByRole("button").find((b) => b.textContent?.includes(text))
+
+  it("hides the model and mode chips when Jingler mode is on", () => {
+    render(
+      <Composer
+        cli="claude"
+        model="opus"
+        catalog={catalog}
+        allowPlan
+        showJinglerToggle
+        jinglerMode
+      />
+    )
+    expect(jinglerButton()).toBeDefined()
+    expect(chip("opus")).toBeUndefined()
+    expect(chip("accept edits")).toBeUndefined()
+  })
+
+  it("shows both chips (and the toggle) when Jingler mode is off", () => {
+    render(
+      <Composer
+        cli="claude"
+        model="opus"
+        catalog={catalog}
+        allowPlan
+        showJinglerToggle
+        jinglerMode={false}
+      />
+    )
+    expect(jinglerButton()).toBeDefined()
+    expect(chip("opus")).toBeDefined()
+  })
+
+  it("reports the flipped value when the toggle is clicked", () => {
+    const onToggle = vi.fn()
+    render(
+      <Composer
+        cli="claude"
+        model="opus"
+        catalog={catalog}
+        showJinglerToggle
+        jinglerMode
+        onToggleJinglerMode={onToggle}
+      />
+    )
+    fireEvent.click(jinglerButton()!)
+    expect(onToggle).toHaveBeenCalledWith(false)
+  })
+
+  it("never renders the toggle on a plain (non-orchestrator) chat", () => {
+    render(<Composer cli="claude" model="opus" catalog={catalog} />)
+    expect(jinglerButton()).toBeUndefined()
+    expect(chip("opus")).toBeDefined()
+  })
+})

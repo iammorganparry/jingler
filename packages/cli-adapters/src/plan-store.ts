@@ -447,6 +447,14 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           readonly status?: PlanDocumentStatus
           /** False for mechanical criterion/annotation/status mutations. */
           readonly semantic?: boolean
+          /**
+           * Force amendment reconciliation regardless of author. Set for an
+           * agent-authored amendment (the orchestrator re-issuing its plan mid
+           * execution): prior evidence, assignments, and execution state are
+           * carried onto matching ids, changed/new stages are requeued, and the
+           * agent's omitted operational notes are preserved.
+           */
+          readonly reconcile?: boolean
         }
       ): Effect.Effect<
         PlanDocument,
@@ -468,11 +476,15 @@ export class PlanStore extends Effect.Service<PlanStore>()(
               })
             }
             const reconciled =
-              input.semantic !== false && input.author === "user"
+              input.reconcile === true
                 ? reconcilePlanAmendment(current, input.source, {
-                    preserveAnnotations: false
+                    preserveAnnotations: true
                   })
-                : null
+                : input.semantic !== false && input.author === "user"
+                  ? reconcilePlanAmendment(current, input.source, {
+                      preserveAnnotations: false
+                    })
+                  : null
             if (reconciled !== null && !reconciled.valid) {
               return yield* new PlanValidationError({
                 message: "The amended plan is not valid PRD HTML.",

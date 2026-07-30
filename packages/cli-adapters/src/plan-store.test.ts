@@ -78,6 +78,52 @@ describe("PlanStore canonical document", () => {
     expect(planFileName("ignored")).toBe("current-plan")
   })
 
+  it("reconcile:true applies an agent amendment — ids/evidence kept, new stage queued", async () => {
+    // An approved orchestration plan: stage 01 completed with durable evidence.
+    const base = `<h1>PRD: Amend</h1>
+<section data-stage="01" data-title="First" data-depends-on="" data-complexity="high">
+<h3>Intent</h3><p>First.</p>
+<ul data-files><li>a.ts</li></ul>
+<div data-assignment data-agent-id="worker-a" data-cli="codex" data-model="gpt-5.6-sol" data-reason="impl" data-status="completed"></div>
+<div data-acceptance="01.1" data-status="passed" data-evidence="landed in abc123">The first is done.</div>
+</section>`
+    const initial = await run(promote(base))
+    expect(initial.projection.stages[0]?.executionStatus).toBe("completed")
+
+    // The orchestrator re-issues the whole plan adding stage 02 (its own file, so
+    // it is a distinct parallel worker), stage 01 verbatim.
+    const amendment = `${base}
+<section data-stage="02" data-title="Second" data-depends-on="" data-complexity="high">
+<h3>Intent</h3><p>Second.</p>
+<ul data-files><li>b.ts</li></ul>
+<div data-assignment data-agent-id="worker-b" data-cli="codex" data-model="gpt-5.6-sol" data-reason="impl" data-status="queued"></div>
+<div data-acceptance="02.1" data-status="pending">The second is done.</div>
+</section>`
+    const amended = await run(
+      PlanStore.updateDocument(WT, {
+        planId: "plan-1",
+        baseRevision: initial.revision,
+        source: amendment,
+        author: "agent",
+        reconcile: true,
+        status: "executing"
+      })
+    )
+
+    expect(amended.revision).toBe(initial.revision + 1)
+    expect(amended.status).toBe("executing")
+    const [stage1, stage2] = amended.projection.stages
+    // Unchanged completed stage keeps its execution state AND its evidence.
+    expect(stage1?.id).toBe("01")
+    expect(stage1?.executionStatus).toBe("completed")
+    expect(stage1?.acceptance[0]?.status).toBe("passed")
+    expect(stage1?.acceptance[0]?.evidence).toContain("abc123")
+    // The newly added stage is queued for its worker — ready to dispatch.
+    expect(stage2?.id).toBe("02")
+    expect(stage2?.executionStatus).toBe("queued")
+    expect(stage2?.assignment?.agentId).toBe("worker-b")
+  })
+
   it("watch emits the freshly-read document on an external write", async () => {
     // Real filesystem watcher — a fake emitter would pass while `fs.watch`
     // silently no-ops. Mirrors the ThemeService.watch test.

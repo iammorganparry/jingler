@@ -199,7 +199,7 @@ const fenced = (raw: string, lang: string): string | null => {
  * guaranteed — the adapter uses this to bounce a fence-less plan back for one
  * reformat rather than degrading straight to the raw fallback.
  */
-const fencedHtmlPlan = (raw: string): string | null => {
+export const fencedHtmlPlan = (raw: string): string | null => {
   const opening = /^[ \t]*(`{3,})html[ \t]+plan[ \t]*\r?\n/im.exec(raw)
   if (opening === null) return null
 

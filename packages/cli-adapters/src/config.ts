@@ -115,6 +115,9 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             // `false` is a real setting and must survive an unrelated write.
             ...(existing?.planAutoRun !== undefined ? { planAutoRun: existing.planAutoRun } : {}),
             ...(existing?.adhdMode !== undefined ? { adhdMode: existing.adhdMode } : {}),
+            ...(existing?.orchestratorEnabled !== undefined
+              ? { orchestratorEnabled: existing.orchestratorEnabled }
+              : {}),
             ...(existing?.fontScale !== undefined ? { fontScale: existing.fontScale } : {}),
             ...(existing?.theme ? { theme: existing.theme } : {}),
             ...(existing?.openConnector ? { openConnector: existing.openConnector } : {}),
@@ -139,6 +142,10 @@ export class ConfigService extends Effect.Service<ConfigService>()(
 
       /** Whether every agent turn is asked to shape its reply for an ADHD reader. */
       const setAdhdMode = (adhdMode: boolean) => patch({ adhdMode })
+
+      /** Whether the agentic orchestrator flow is on (the "Jingler mode" toggle). */
+      const setOrchestratorEnabled = (orchestratorEnabled: boolean) =>
+        patch({ orchestratorEnabled })
 
       /**
        * Conversation + code text-size multiplier, clamped via the shared
@@ -258,6 +265,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setNotifications,
         setPlanAutoRun,
         setAdhdMode,
+        setOrchestratorEnabled,
         setFontScale,
         setStarredRepos,
         setCollapsedRepos,

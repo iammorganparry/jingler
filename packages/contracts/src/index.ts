@@ -851,6 +851,18 @@ export class JinglerRpcs extends RpcGroup.make(
   }),
 
   /**
+   * Persist whether the agentic orchestrator flow is on — the "Jingler mode"
+   * composer toggle. Off drops the session back to driving the source harness
+   * directly. Returns the whole config so the renderer can patch its cache
+   * without a refetch.
+   */
+  Rpc.make("Config.setOrchestratorEnabled", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: Schema.Struct({ orchestratorEnabled: Schema.Boolean })
+  }),
+
+  /**
    * Persist the conversation + code text-size multiplier. Returns the whole
    * config so the renderer can patch its cache without a refetch.
    */
