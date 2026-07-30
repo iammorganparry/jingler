@@ -1,4 +1,4 @@
-import { type RefObject, useCallback, useLayoutEffect, useRef, useState } from "react"
+import { type RefObject, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type {
   Attachment,
   CliKind,
@@ -18,7 +18,7 @@ import type {
 } from "@jingler/core"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useHotkeys } from "react-hotkeys-hook"
-import { Lock, RotateCcw } from "lucide-react"
+import { ArrowUp, Lock, RotateCcw } from "lucide-react"
 import type { ArchiveReason, ContextPhase } from "@jingler/core"
 import { supportsPlanMode } from "@jingler/core"
 import { cn } from "../lib/cn.js"
@@ -81,6 +81,12 @@ const useStickyBottomOnResize = (
 
 export interface ConversationViewProps {
   messages: ReadonlyArray<Message>
+  /** Older turns remain before `messages[0]` — show the "Load earlier" control. */
+  hasMoreHistory?: boolean
+  /** An older page is being fetched — spinner + disabled control. */
+  loadingHistory?: boolean
+  /** Page the next window of older turns onto the front of `messages`. */
+  onLoadEarlier?: () => void
   mode: PermissionMode
   /** The harness driving this session — sets the assistant eyebrow logo/name. */
   cli?: CliKind
@@ -227,6 +233,9 @@ export interface ConversationViewProps {
  */
 export function ConversationView({
   messages,
+  hasMoreHistory = false,
+  loadingHistory = false,
+  onLoadEarlier,
   mode,
   cli = "claude",
   skills = [],
@@ -325,19 +334,45 @@ export function ConversationView({
     [busy, archived, onStop]
   )
 
+  // Stable per-message virtualizer keys — the identity a row keeps when older
+  // pages are PREPENDED (the index would shift under every "Load earlier", so an
+  // index-based key would drop every measured height and jump the scroll). A
+  // duplicate id (from an older transcript recorded before ids were seeded per
+  // session) still can't collide: the second occurrence is disambiguated by its
+  // count, which is stable as long as the dupes don't reorder — and prepend only
+  // adds distinct older messages ahead of them.
+  const itemKeys = useMemo(() => {
+    const seen = new Map<string, number>()
+    return messages.map((m) => {
+      const n = seen.get(m.id) ?? 0
+      seen.set(m.id, n + 1)
+      return n === 0 ? m.id : `${m.id}#${n}`
+    })
+  }, [messages])
+
   // Virtualize the transcript so large sessions stay fast. Heights are dynamic
   // (markdown, tool cards, diffs) so we measure each turn as it renders/grows.
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 140,
-    // Include the index so a stray duplicate message id (e.g. from an older
-    // transcript recorded before ids were seeded per-session) can't collide in
-    // the measurement cache and stack rows. The transcript is append-only, so
-    // the index is stable per message.
-    getItemKey: (i) => `${messages[i]!.id}-${i}`,
+    getItemKey: (i) => itemKeys[i]!,
     overscan: 6
   })
+
+  // Preserve the viewport across a "Load earlier" prepend: capture the scroll
+  // metrics at click, then after the older page lands add back exactly the height
+  // it introduced above the reader. Anchoring by height delta (not an index) is
+  // robust to the new rows still sitting at their estimated size — they re-measure
+  // and self-correct as they scroll into view.
+  const restoreScroll = useRef<{ height: number; top: number } | null>(null)
+  const handleLoadEarlier = useCallback(() => {
+    const el = scrollRef.current
+    if (el) restoreScroll.current = { height: el.scrollHeight, top: el.scrollTop }
+    // Never let the sticky-bottom follow yank the reader back down mid-prepend.
+    stick.current = false
+    onLoadEarlier?.()
+  }, [onLoadEarlier])
 
   // Standard chat scroll: keep the newest content in view while stuck to the
   // bottom, so the transcript grows downward and never leaves trailing dead
@@ -348,6 +383,17 @@ export function ConversationView({
       virtualizer.scrollToIndex(messages.length - 1, { align: "end" })
     }
   }, [messages, virtualizer])
+
+  // Runs on the SAME `messages` change as the prepend (stick is false here, so
+  // the sticky-bottom effect above no-ops and doesn't fight this). An errored
+  // load prepends nothing, so heights are equal and this is a no-op.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    const saved = restoreScroll.current
+    if (!el || !saved) return
+    el.scrollTop = el.scrollHeight - saved.height + saved.top
+    restoreScroll.current = null
+  }, [messages])
 
   // A restored transcript is not fully sized on the first layout pass: virtual
   // rows are measured after render, and rich content can grow later as it loads.
@@ -389,6 +435,24 @@ export function ConversationView({
             archived && "opacity-60"
           )}
         >
+          {/* Sits above the virtualized list, at the very top of the scroll —
+              the reader meets it only after scrolling back to the oldest loaded
+              turn. Older turns page in on click; the viewport is held steady by
+              the anchor effect above. */}
+          {hasMoreHistory && (
+            <div className="mx-auto mb-2 flex w-full max-w-[760px] justify-center">
+              <button
+                type="button"
+                data-testid="load-earlier"
+                onClick={handleLoadEarlier}
+                disabled={loadingHistory}
+                className="flex items-center gap-1.5 rounded-full border border-line bg-sunken px-3 py-1 text-[12px] text-muted-foreground outline-none transition-colors hover:text-foreground disabled:opacity-60"
+              >
+                <ArrowUp size={13} className="flex-none" />
+                {loadingHistory ? "Loading earlier messages…" : "Load earlier messages"}
+              </button>
+            </div>
+          )}
           <div
             ref={transcriptRef}
             className="relative w-full"

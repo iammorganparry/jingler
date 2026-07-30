@@ -36,6 +36,12 @@ import { getConversationActor } from "./conversation-registry.js"
 
 export interface Conversation {
   readonly messages: ReadonlyArray<Message>
+  /** Older turns remain before `messages[0]` — show the "Load earlier" control. */
+  readonly hasMoreHistory: boolean
+  /** An older page is being fetched — disable the control and show a spinner. */
+  readonly loadingHistory: boolean
+  /** Page the next window of older turns onto the front of `messages`. */
+  readonly loadOlder: () => void
   readonly mode: PermissionMode
   readonly reasoning?: ReasoningSetting
   readonly skills: ReadonlyArray<Skill>
@@ -139,7 +145,7 @@ export function useConversation(
   const send = actor.send
   const {
     messages, mode, reasoning, skills, files, cli, model, catalog, patch, queued, steeringId,
-    subagents, tokens,
+    subagents, tokens, hasMoreHistory, loadingHistory,
     runStartedAt, reviewer, reviewPhase, reviewStartedAt
   } = state.context
 
@@ -167,6 +173,9 @@ export function useConversation(
 
   return {
     messages,
+    hasMoreHistory,
+    loadingHistory,
+    loadOlder: () => send({ type: "LOAD_OLDER" }),
     mode,
     reasoning,
     skills,

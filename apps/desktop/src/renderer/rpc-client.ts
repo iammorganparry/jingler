@@ -223,6 +223,19 @@ export const rpc = {
    */
   sessionsTranscript: (sessionId: string, chatId: string): Promise<ReadonlyArray<Message>> =>
     run((c) => c.Sessions.transcript({ sessionId, chatId })),
+  /**
+   * A newest-anchored window of the transcript. Omit `before` for the newest
+   * page; pass the oldest held message's id to page further back. `hasMore`
+   * gates the "Load earlier" affordance. Images arrive with EMPTY `data`, as
+   * with `sessionsTranscript`.
+   */
+  sessionsTranscriptPage: (
+    sessionId: string,
+    chatId: string,
+    before: string | undefined,
+    limit: number
+  ): Promise<{ messages: ReadonlyArray<Message>; hasMore: boolean }> =>
+    run((c) => c.Sessions.transcriptPage({ sessionId, chatId, before, limit })),
   /** One image attachment's base64, or null when the id is unknown. */
   sessionsAttachment: (chatId: string, attachmentId: string): Promise<string | null> =>
     run((c) => c.Sessions.attachment({ chatId, attachmentId })),

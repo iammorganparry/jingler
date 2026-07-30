@@ -105,9 +105,18 @@ const READ_ONLY_DISALLOWED: ReadonlyArray<string> = [
  * returns "allow" for every request in "auto", so our own gate keeps the mode
  * ungated. This is the same reasoning the plan-approval path uses when it
  * restores "default" mid-run (see `setPermissionMode` below).
+ *
+ * "plan" ALSO maps to "default", NOT the SDK's "plan" mode — deliberately. The
+ * SDK's plan mode hard-blocks every edit tool BEFORE `canUseTool` runs, so a
+ * planning agent that tries to write (e.g. drafting the plan to a file) gets an
+ * opaque tool error and derails instead of planning. In Jingler, writes are
+ * always enabled in plan mode and gated only by our own `canUseTool` — the plan
+ * OUTPUT protocol still comes from `planModeInstructions` (injected on
+ * `spec.mode === "plan"`, independent of this permission mode) and `ExitPlanMode`
+ * is still intercepted by `canUseTool` in "default" mode.
  */
 export const mapPermissionMode = (mode: PermissionMode): SdkPermissionMode =>
-  mode === "accept-edits" ? "acceptEdits" : mode === "plan" ? "plan" : "default"
+  mode === "accept-edits" ? "acceptEdits" : "default"
 
 /** Validate provider-native values for Claude's adaptive-thinking API. */
 export const mapClaudeReasoning = (

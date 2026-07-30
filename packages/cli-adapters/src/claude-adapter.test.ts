@@ -764,8 +764,11 @@ describe("streamEventsFor — sub-agents", () => {
 })
 
 describe("plan mode + AskUserQuestion (canUseTool path)", () => {
-  it("maps our 'plan' mode onto the SDK's plan permission mode", () => {
-    expect(mapPermissionMode("plan")).toBe("plan")
+  it("maps our 'plan' mode onto 'default' so writes stay enabled and canUseTool gates them", () => {
+    // NOT the SDK's "plan" mode: that hard-blocks edits before canUseTool runs,
+    // derailing a planning agent that writes. Writes are always enabled in plan
+    // mode; the plan-output protocol comes from planModeInstructions instead.
+    expect(mapPermissionMode("plan")).toBe("default")
     expect(mapPermissionMode("accept-edits")).toBe("acceptEdits")
     expect(mapPermissionMode("ask")).toBe("default")
   })
