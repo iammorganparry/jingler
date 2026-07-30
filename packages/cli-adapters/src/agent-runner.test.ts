@@ -758,6 +758,13 @@ describe("AgentRunner plan mode", () => {
         criterion.status === "passed" || criterion.status === "waived"
       )
     ).toBe(true)
+    const assistantText = result.transcript
+      .flatMap((message) => message.parts)
+      .filter((part) => part._tag === "Text")
+      .map((part) => part.text)
+      .join("\n")
+    expect(assistantText).toContain("Steps 2, 3 and 5 are done.")
+    expect(assistantText).not.toContain("PLAN_RESULT")
   })
 
   it("marks a plan step done when an executed edit touches one of its files", async () => {

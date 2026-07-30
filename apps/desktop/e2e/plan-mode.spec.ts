@@ -344,6 +344,9 @@ test("approval executes the saved revision and finishes from criterion evidence"
   expect(persisted).toContain('status: "done"')
   expect(persisted).toContain(exactText)
   expect(persisted).toContain('data-status="passed"')
+  await launched.window.getByRole("button", { name: "Conversation" }).first().click()
+  await expect(launched.window.getByText("Steps 2, 3 and 5 are done.")).toBeVisible()
+  await expect(launched.window.getByText(/PLAN_RESULT/)).toHaveCount(0)
 })
 
 test("restart resumes the exact canonical revision", async ({ launchApp }) => {

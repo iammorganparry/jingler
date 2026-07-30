@@ -2,6 +2,7 @@ import type {
   ApprovalGate,
   Attachment,
   CliKind,
+  ContentPart,
   ExecutionMode,
   GateDecision,
   Message,
@@ -34,6 +35,7 @@ import {
   setQuestionAnswers,
   settleStreaming,
   STOPPED_NOTE,
+  stripPlanResultProtocol,
   supportsPlanMode,
   userMessage,
   DEFAULT_PLAN_TEMPLATE_HTML,
@@ -1464,7 +1466,27 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   tokens: event.tokens
                 }).pipe(Effect.provide(env), Effect.ignore)
               }
-              const next = applyStreamEvent(yield* Ref.get(acc), event)
+              let next = applyStreamEvent(yield* Ref.get(acc), event)
+              if (event._tag === "Done") {
+                const settledText = next.parts
+                  .filter((part) => part._tag === "Text")
+                  .map((part) => part.text)
+                  .join("\n")
+                yield* recordPlanEvidence(settledText)
+              }
+              if (
+                (event._tag === "Done" || event._tag === "Failed") &&
+                (yield* Ref.get(executingPlanId)) !== null
+              ) {
+                next = {
+                  ...next,
+                  parts: next.parts.flatMap((part): ReadonlyArray<ContentPart> => {
+                    if (part._tag !== "Text") return [part]
+                    const text = stripPlanResultProtocol(part.text)
+                    return text.length === 0 ? [] : [{ ...part, text }]
+                  })
+                }
+              }
               yield* Ref.set(acc, next)
               yield* TranscriptStore.patchLast(chatId, () => next).pipe(Effect.ignore)
               // Persist the harness's actual model (reported on init) so the chip
@@ -1491,11 +1513,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // below the offer, stranding a fully verified document in
               // `approved`/`executing`.
               if (event._tag === "Done") {
-                const settledText = next.parts
-                  .filter((part) => part._tag === "Text")
-                  .map((part) => part.text)
-                  .join("\n")
-                yield* recordPlanEvidence(settledText)
                 yield* ContextManager.settle(chatId).pipe(Effect.ignore)
                 yield* finalizePlanVerification()
               }
