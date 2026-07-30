@@ -6,7 +6,8 @@ import {
   parsePlan,
   parseStepCode,
   parseStepFlows,
-  planModeInstructions
+  planModeInstructions,
+  stripHtmlPlanBlock
 } from "./plan-parse.js"
 
 /**
@@ -270,6 +271,88 @@ describe("hasPlanBlock", () => {
     expect(plan.steps[0]?.guards.map((guard) => guard.text)).toStrictEqual([
       "The full stage survives."
     ])
+  })
+
+  it("rejects ordinary triple-backtick HTML even when the example resembles a plan", () => {
+    const ordinaryExample = [
+      "```html",
+      "<h1>PRD: Example only</h1>",
+      '<section data-stage="01" data-title="Do not submit">',
+      '<div data-acceptance="01.1" data-status="pending">This is only documentation.</div>',
+      "</section>",
+      "```"
+    ].join("\n")
+
+    expect(hasPlanBlock(ordinaryExample)).toBe(false)
+    expect(parsePlan(ordinaryExample, "plan_example").structured).toBe(false)
+  })
+
+  it("ignores later invalid HTML examples and selects the first valid PRD submission", () => {
+    const valid = [
+      "````html",
+      "<h1>PRD: Submitted plan</h1>",
+      '<section data-stage="01" data-title="Implement">',
+      '<div data-acceptance="01.1" data-status="pending">The implementation works.</div>',
+      "</section>",
+      "````"
+    ].join("\n")
+    const laterExample = [
+      "````html",
+      "<div>Useful HTML example, not a complete PRD.</div>",
+      "````"
+    ].join("\n")
+
+    const raw = `${valid}\n\nHuman-readable notes:\n\n${laterExample}`
+    expect(fencedHtmlPlan(raw)).toContain("PRD: Submitted plan")
+    expect(parsePlan(raw, "plan_first_valid").summary).toBe("Submitted plan")
+  })
+
+  it("treats nested triple-backtick HTML as plan content and strips only the outer transport", () => {
+    const raw = [
+      "Before the plan.",
+      "",
+      "````html",
+      "<h1>PRD: Nested HTML</h1>",
+      '<section data-stage="01" data-title="Preserve examples">',
+      "<pre>```html",
+      '<section data-stage="example" data-title="Example only">',
+      '<div data-acceptance="example.1" data-status="pending">Nested sample.</div>',
+      "</section>",
+      "```</pre>",
+      '<div data-acceptance="01.1" data-status="pending">The outer plan survives.</div>',
+      "</section>",
+      "````",
+      "",
+      "After the plan."
+    ].join("\n")
+
+    expect(parsePlan(raw, "plan_nested_html").summary).toBe("Nested HTML")
+    expect(stripHtmlPlanBlock(raw)).toBe("Before the plan.\n\nAfter the plan.")
+  })
+
+  it("strips only the selected plan transport and preserves later HTML fences", () => {
+    const selected = [
+      "````html",
+      "<h1>PRD: Selected</h1>",
+      '<section data-stage="01" data-title="Selected stage">',
+      '<div data-acceptance="01.1" data-status="pending">Selected criterion.</div>',
+      "</section>",
+      "````"
+    ].join("\n")
+    const usefulExample = [
+      "````html",
+      "<h1>PRD: Documentation example</h1>",
+      '<section data-stage="example" data-title="Example stage">',
+      '<div data-acceptance="example.1" data-status="pending">Example criterion.</div>',
+      "</section>",
+      "````"
+    ].join("\n")
+    const raw = `${selected}\n\nKeep this example:\n\n${usefulExample}`
+
+    const stripped = stripHtmlPlanBlock(raw)
+    expect(stripped).toContain("Keep this example:")
+    expect(stripped).toContain("PRD: Documentation example")
+    expect(stripped).not.toContain("PRD: Selected")
   })
 
   it("accepts the canonical html fence and the legacy html plan fence", () => {

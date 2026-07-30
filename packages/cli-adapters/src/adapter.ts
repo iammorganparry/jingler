@@ -188,9 +188,14 @@ export const PlanDecision = Data.taggedEnum<PlanDecision>()
 /**
  * Present a structured plan (from ExitPlanMode) and await the operator's
  * decision. The `AgentRunner` supplies one that emits `PlanProposed` and parks
- * until approve/revise/reject, mirroring `askQuestion`.
+ * until approve/revise/reject, mirroring `askQuestion`. `submittedBlock` is the
+ * exact visible protocol fence when the harness streamed it into the transcript;
+ * payload-only submissions omit it so unrelated visible HTML is preserved.
  */
-export type ProposePlan = (plan: Plan) => Effect.Effect<PlanDecision>
+export type ProposePlan = (
+  plan: Plan,
+  submittedBlock?: string
+) => Effect.Effect<PlanDecision>
 
 /**
  * What the adapter is handed for a run: an ordered `emit` sink for normalized

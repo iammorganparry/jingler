@@ -1,4 +1,4 @@
-import { fencedHtmlPlan, stripHtmlPlanBlocks } from "./plan-parse.js"
+import { fencedHtmlPlan, stripHtmlPlanBlock } from "./plan-parse.js"
 
 /**
  * Pull an orchestrator amendment out of an auto-mode reply.
@@ -30,4 +30,6 @@ export const parseOrchestratorAmendment = (text: string): string | null => {
  * so the raw HTML fence would only be noise in the transcript.
  */
 export const stripOrchestratorAmendment = (text: string): string =>
-  stripHtmlPlanBlocks(text)
+  parseOrchestratorAmendment(text) === null
+    ? text
+    : stripHtmlPlanBlock(text)

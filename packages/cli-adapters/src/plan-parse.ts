@@ -16,7 +16,7 @@ import {
   type WorkerRoutingConfig
 } from "@jingler/core"
 import type { OrchestrationRoute } from "./adapter.js"
-import { planFromHtml } from "./plan-html.js"
+import { parsePlanHtml, planFromHtml } from "./plan-html.js"
 
 /**
  * Turn the plan text Claude produces via `ExitPlanMode` into a structured `Plan`.
@@ -196,59 +196,93 @@ const fenced = (raw: string, lang: string): string | null => {
 }
 
 /**
- * Whether the agent actually emitted the ` ````mdx plan ` fence we asked for.
+ * Whether the agent actually emitted the ` ````html ` fence we asked for.
  *
  * `planModeInstructions` documents the format, but prompt compliance is never
  * guaranteed — the adapter uses this to bounce a fence-less plan back for one
  * reformat rather than degrading straight to the raw fallback.
  */
-interface HtmlPlanFence {
+export interface HtmlPlanSubmission {
   readonly body: string
+  readonly block: string
   readonly start: number
   readonly end: number
 }
 
 /**
- * Find every complete HTML plan fence.
+ * Find every complete, structurally valid HTML plan submission.
  *
  * `html` is the canonical CommonMark info string. `html plan` remains accepted
- * for transcripts and agents prompted before the contract was corrected.
- * Returning every match lets a reformat attempt supersede the malformed block
- * already present earlier in the same assistant turn.
+ * for agents prompted before the contract was corrected. Both forms require the
+ * exact four-backtick transport documented by the prompt; ordinary triple-fenced
+ * HTML examples are user-visible content, never protocol.
+ *
+ * This is a forward parser rather than an opening-fence scan. Advancing past each
+ * outer block makes the returned ranges disjoint and prevents a nested
+ * triple-backtick HTML example from becoming a top-level candidate.
  */
-const htmlPlanFences = (raw: string): ReadonlyArray<HtmlPlanFence> => {
-  const found: Array<HtmlPlanFence> = []
-  const openings = raw.matchAll(
-    /^[ \t]*(`{3,})html(?:[ \t]+plan)?[ \t]*\r?\n/gim
-  )
-  for (const opening of openings) {
-    const fenceLength = opening[1]!.length
+const htmlPlanSubmissions = (raw: string): ReadonlyArray<HtmlPlanSubmission> => {
+  const found: Array<HtmlPlanSubmission> = []
+  const openings = /^[ \t]*`{4}(?!`)html(?:[ \t]+plan)?[ \t]*\r?\n/gim
+  const closings = /^[ \t]*`{4}(?!`)[ \t]*(?=\r?$)/gm
+  let cursor = 0
+  while (cursor < raw.length) {
+    openings.lastIndex = cursor
+    const opening = openings.exec(raw)
+    if (opening === null) break
     const bodyStart = opening.index + opening[0].length
-    const body = raw.slice(bodyStart)
-    for (const closing of body.matchAll(/^[ \t]*(`{3,})[ \t]*$/gm)) {
-      if (closing[1]!.length < fenceLength) continue
+    closings.lastIndex = bodyStart
+    const closing = closings.exec(raw)
+    if (closing === null) break
+    const end = closing.index + closing[0].length
+    const body = raw.slice(bodyStart, closing.index).replace(/\s+$/, "")
+    cursor = end
+    if (parsePlanHtml(body).valid) {
       found.push({
-        body: body.slice(0, closing.index).replace(/\s+$/, ""),
+        body,
+        block: raw.slice(opening.index, end),
         start: opening.index,
-        end: bodyStart + closing.index + closing[0].length
+        end
       })
-      break
     }
   }
   return found
 }
 
-export const fencedHtmlPlan = (raw: string): string | null =>
-  htmlPlanFences(raw).at(-1)?.body ?? null
+/**
+ * The protocol requires one block at the top. Select the first valid submission
+ * so later human-readable HTML examples cannot replace it; malformed earlier
+ * attempts are filtered before selection, so a corrected retry still wins.
+ */
+export const fencedHtmlPlanSubmission = (
+  raw: string
+): HtmlPlanSubmission | null => htmlPlanSubmissions(raw)[0] ?? null
 
-/** Remove plan protocol machinery while preserving prose around the block. */
-export const stripHtmlPlanBlocks = (raw: string): string => {
-  let stripped = raw
-  for (const fence of [...htmlPlanFences(raw)].reverse()) {
-    stripped = stripped.slice(0, fence.start) + stripped.slice(fence.end)
-  }
+export const fencedHtmlPlan = (raw: string): string | null =>
+  fencedHtmlPlanSubmission(raw)?.body ?? null
+
+/** Remove one selected plan transport while preserving every other HTML block. */
+export const stripHtmlPlanBlock = (
+  raw: string,
+  submittedBlock?: string
+): string => {
+  const selected =
+    submittedBlock === undefined
+      ? fencedHtmlPlanSubmission(raw)
+      : (() => {
+          const start = raw.indexOf(submittedBlock)
+          return start < 0
+            ? null
+            : { start, end: start + submittedBlock.length }
+        })()
+  if (selected === null) return raw.trim()
+  const stripped =
+    raw.slice(0, selected.start) + raw.slice(selected.end)
   return stripped.replace(/\n{3,}/g, "\n\n").trim()
 }
+
+/** @deprecated Use `stripHtmlPlanBlock`; only one protocol block is selected. */
+export const stripHtmlPlanBlocks = stripHtmlPlanBlock
 
 export const hasPlanBlock = (raw: string): boolean =>
   fencedHtmlPlan(raw) !== null || fenced(raw, "plan") !== null

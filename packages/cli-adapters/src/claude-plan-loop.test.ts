@@ -27,6 +27,9 @@ const planHtml = (title: string): string => [
 let visibleReply = ""
 let exitInput: Record<string, unknown> = {}
 let exitDecision: unknown = null
+let followupReply: string | null = null
+let followupInput: Record<string, unknown> = {}
+let followupDecision: unknown = null
 
 interface QueryArgs {
   readonly prompt: AsyncIterable<SDKUserMessage>
@@ -100,6 +103,14 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
         exitInput,
         { toolUseID: "exit-plan-1" }
       )
+      if (followupReply !== null) {
+        yield textDelta(followupReply)
+        followupDecision = await options.canUseTool(
+          "ExitPlanMode",
+          followupInput,
+          { toolUseID: "exit-plan-2" }
+        )
+      }
       yield result
       await drained
     },
@@ -124,7 +135,13 @@ const spec: SessionSpec = {
   readOnly: true
 }
 
-const harness = () => {
+const harness = (
+  decisions: ReadonlyArray<
+    { readonly _tag: "Approve"; readonly mode: "auto" } |
+    { readonly _tag: "Revise"; readonly feedback: string } |
+    { readonly _tag: "Reject" }
+  > = [{ _tag: "Reject" }]
+) => {
   const events: StreamEvent[] = []
   const proposed: Plan[] = []
   const ctx: AgentContext = {
@@ -134,7 +151,7 @@ const harness = () => {
     proposePlan: (plan) =>
       Effect.sync(() => {
         proposed.push(plan)
-        return { _tag: "Reject" }
+        return decisions[proposed.length - 1] ?? { _tag: "Reject" }
       }),
     registerBackgroundStop: () => Effect.void
   }
@@ -145,6 +162,9 @@ beforeEach(() => {
   visibleReply = `The complete plan follows.\n\n${planHtml("Buffered plan")}`
   exitInput = {}
   exitDecision = null
+  followupReply = null
+  followupInput = {}
+  followupDecision = null
 })
 
 describe("Claude plan submission", () => {
@@ -171,5 +191,41 @@ describe("Claude plan submission", () => {
 
     expect(proposed).toHaveLength(1)
     expect(proposed[0]?.summary).toBe("Payload plan")
+  })
+
+  it("prefers a structured streamed PRD over a complete but invalid explicit fence", async () => {
+    exitInput = {
+      plan: [
+        "````html",
+        "<h1>PRD: Incomplete payload</h1>",
+        "<p>No stage or acceptance criteria.</p>",
+        "````"
+      ].join("\n")
+    }
+    const { ctx, proposed } = harness()
+
+    await Effect.runPromise(runClaude("session-3", spec, ctx, new Map()))
+
+    expect(proposed).toHaveLength(1)
+    expect(proposed[0]).toMatchObject({
+      summary: "Buffered plan",
+      structured: true
+    })
+  })
+
+  it("does not reuse the previous streamed plan after the operator requests a revision", async () => {
+    followupReply = ""
+    const { ctx, proposed } = harness([
+      { _tag: "Revise", feedback: "Address the operator comment." }
+    ])
+
+    await Effect.runPromise(runClaude("session-4", spec, ctx, new Map()))
+
+    expect(proposed).toHaveLength(1)
+    expect(proposed[0]?.summary).toBe("Buffered plan")
+    expect(followupDecision).toMatchObject({
+      behavior: "deny",
+      message: expect.stringContaining("not valid Jingler plan HTML")
+    })
   })
 })

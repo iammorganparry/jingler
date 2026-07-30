@@ -32,7 +32,7 @@ import { worktreeEnv } from "./worktree-env.js"
 import { capOutput } from "./output-cap.js"
 import { formatQuestionAnswers } from "./question-prompt.js"
 import {
-  hasPlanBlock,
+  fencedHtmlPlanSubmission,
   parsePlan,
   PLAN_HTML_REFORMAT,
   planModeInstructions
@@ -1119,29 +1119,46 @@ export const runClaude = (
           // into a structured, reviewable Plan and honour the operator's verdict.
           if (toolName === "ExitPlanMode") {
             const payload = strOf(input.plan)?.trim() ?? ""
-            const raw = hasPlanBlock(payload)
-              ? payload
-              : hasPlanBlock(planReplyText)
-                ? planReplyText
-                : payload || planReplyText
+            const planId = `plan_${sessionId}_${planCount + 1}`
+            const payloadPlan =
+              payload.length === 0
+                ? null
+                : parsePlan(payload, planId)
+            const replyPlan =
+              planReplyText.length === 0
+                ? null
+                : parsePlan(planReplyText, planId)
+            const structuredPayload =
+              payloadPlan?.structured === true ? payloadPlan : null
+            const structuredReply =
+              replyPlan?.structured === true ? replyPlan : null
+            const plan = structuredPayload ?? structuredReply
+            const raw = payload || planReplyText
             // `planModeInstructions` documents the ` ````html ` fence, but a model
             // can still skip it — and then the operator gets a plan with no
             // reviewable steps. Bounce the FIRST offender back through the same
             // deny.message channel a revision uses; it re-calls ExitPlanMode with
             // the fence and nobody sees the broken version.
-            if (!hasPlanBlock(raw) && !planReformatAsked) {
+            if (plan === null && !planReformatAsked) {
               planReformatAsked = true
               planReplyText = ""
               return { behavior: "deny", message: PLAN_REFORMAT }
             }
             planCount += 1
-            const plan = parsePlan(raw, `plan_${sessionId}_${planCount}`)
-            if (plan.structured === false && !planReformatAsked) {
-              planReformatAsked = true
+            const proposedPlan = plan ?? parsePlan(raw, planId)
+            const submittedBlock =
+              structuredPayload === null && structuredReply !== null
+                ? fencedHtmlPlanSubmission(planReplyText)?.block
+                : undefined
+            const decision = await runP(
+              ctx.proposePlan(proposedPlan, submittedBlock)
+            ).finally(() => {
+              // Assistant text belongs to one ExitPlanMode submission. A valid
+              // proposal followed by Revise must not make an empty retry reuse
+              // the previously reviewed document.
               planReplyText = ""
-              return { behavior: "deny", message: PLAN_REFORMAT }
-            }
-            const decision = await runP(ctx.proposePlan(plan))
+              planReformatAsked = false
+            })
             if (decision._tag === "Approve") {
               // Exit plan mode via "default" — the same mode every non-plan run
               // uses (see `mapPermissionMode`), so canUseTool below keeps being

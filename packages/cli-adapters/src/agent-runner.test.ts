@@ -756,6 +756,104 @@ describe("AgentRunner plan mode", () => {
     expect(plan.steps.find((s) => s.id === "s_4a")?.flagged).toBe(true)
   })
 
+  it("registers the approval gate before the canonical proposal becomes visible", async () => {
+    let approvalStatus: string | null = null
+    let promotionObserved = false
+    let revealPromotion!: (planId: string) => void
+    let releasePromotion!: () => void
+    const visiblePromotion = new Promise<string>((resolve) => {
+      revealPromotion = resolve
+    })
+    const promotionReleased = new Promise<void>((resolve) => {
+      releasePromotion = resolve
+    })
+    const realPlanStore = await Effect.runPromise(
+      Effect.gen(function* () {
+        return yield* PlanStore
+      }).pipe(
+        Effect.provide(Layer.merge(PlanStore.Default, temp.layer))
+      )
+    )
+    const planStoreWithImmediateWatcher = Layer.succeed(
+      PlanStore,
+      {
+        ...realPlanStore,
+        promote: (
+          ...args: Parameters<typeof realPlanStore.promote>
+        ): ReturnType<typeof realPlanStore.promote> =>
+          realPlanStore.promote(...args).pipe(
+            Effect.tap((artifact) =>
+              Effect.sync(() => {
+                promotionObserved = true
+                revealPromotion(artifact.plan.id)
+              })
+            ),
+            Effect.tap(() => Effect.promise(() => promotionReleased))
+          )
+      }
+    )
+    const testLayer = Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlMcpServiceTest,
+      InMemorySecretStoreLive,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      planStoreWithImmediateWatcher,
+      makeScriptedCliAdapter(0),
+      DiscoveryService.Default,
+      ContextManager.Default,
+      temp.layer
+    )
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* Effect.fork(
+          Effect.promise(() => visiblePromotion).pipe(
+            Effect.flatMap((planId) =>
+              runner.approvePlan(SESSION, planId)
+            ),
+            Effect.tap((approval) =>
+              Effect.sync(() => {
+                approvalStatus = approval.status
+              })
+            ),
+            Effect.ensuring(
+              Effect.sync(() => {
+                releasePromotion()
+              })
+            )
+          )
+        )
+        yield* runner.setMode(SESSION, "plan")
+        const out: StreamEvent[] = []
+        yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
+          Stream.runForEach((event) =>
+            Effect.sync(() => {
+              out.push(event)
+            })
+          )
+        )
+        return out
+      }).pipe(
+        Effect.provide(testLayer),
+        Effect.timeout("10 seconds"),
+        Effect.either
+      )
+    )
+
+    expect(promotionObserved).toBe(true)
+    expect(approvalStatus).toBe("accepted")
+    expect(result._tag).toBe("Right")
+    if (result._tag === "Left") return
+    const events = result.right
+    expect(events.some((event) => event._tag === "PlanProposed")).toBe(true)
+    expect(ranTool(events, "plan-edit-1")).toBe(true)
+  })
+
   it("approves the exact edited canonical revision and completes only from criterion evidence", async () => {
     const observed: {
       staleApprovalStatus: string | null
@@ -1347,7 +1445,10 @@ describe("AgentRunner plan library", () => {
           Effect.gen(function* () {
             yield* ctx.emit({ _tag: "Started", sessionId })
             yield* ctx.emit({ _tag: "Assistant", text: reply })
-            yield* ctx.proposePlan(streamedPlan)
+            yield* ctx.proposePlan(
+              streamedPlan,
+              reply.slice(reply.indexOf("````html"))
+            )
             yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
           }) as ReturnType<CliAdapterShape["run"]>,
         stop: () => Effect.void
@@ -1392,6 +1493,85 @@ describe("AgentRunner plan library", () => {
       .join("\n")
     expect(visibleText).toBe("Planning complete.")
     expect(assistant?.parts.some((part) => part._tag === "Plan")).toBe(true)
+  })
+
+  it("preserves visible HTML when the selected plan came from a separate payload", async () => {
+    seedSessionWithWorktree("plan")
+    const visiblePlanHtml = scriptedPlan("visible-example", 1).raw.replace(
+      "Refactor auth flow",
+      "Visible documentation"
+    )
+    const visibleExample = [
+      "Payload submitted separately; keep this documentation:",
+      "",
+      "````html",
+      visiblePlanHtml,
+      "````"
+    ].join("\n")
+    const payloadPlanHtml = scriptedPlan("payload", 1).raw.replace(
+      "Refactor auth flow",
+      "Payload canonical plan"
+    )
+    const payloadPlan = parsePlan(
+      [
+        "````html",
+        payloadPlanHtml,
+        "````"
+      ].join("\n"),
+      "plan_payload"
+    )
+    const payloadAdapter = Layer.succeed(
+      CliAdapter,
+      CliAdapter.of({
+        run: (sessionId, _spec, ctx) =>
+          Effect.gen(function* () {
+            yield* ctx.emit({ _tag: "Started", sessionId })
+            yield* ctx.emit({ _tag: "Assistant", text: visibleExample })
+            yield* ctx.proposePlan(payloadPlan)
+            yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+          }) as ReturnType<CliAdapterShape["run"]>,
+        stop: () => Effect.void
+      })
+    )
+    const testLayer = Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlMcpServiceTest,
+      InMemorySecretStoreLive,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      PlanStore.Default,
+      payloadAdapter,
+      DiscoveryService.Default,
+      ContextManager.Default,
+      temp.layer
+    )
+
+    const transcript = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "plan")
+        yield* runner.prompt(SESSION, SESSION, "Plan the auth refactor.").pipe(
+          Stream.tap((event) =>
+            event._tag === "PlanProposed"
+              ? runner.approvePlan(SESSION, event.plan.id)
+              : Effect.void
+          ),
+          Stream.runDrain
+        )
+        return yield* TranscriptStore.list(SESSION)
+      }).pipe(Effect.provide(testLayer))
+    )
+
+    const visibleText = transcript
+      .flatMap((message) => message.parts)
+      .filter((part) => part._tag === "Text")
+      .map((part) => part.text)
+      .join("\n")
+    expect(visibleText).toContain("Payload submitted separately")
+    expect(visibleText).toContain("Visible documentation")
   })
 
   it("prepends the saved-plan pointer (with the file path) to the next run", async () => {

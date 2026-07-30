@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import type {
   ApprovalGate,
   Attachment,
@@ -59,7 +60,7 @@ import {
 import { buildGate, makeApprovals, verdict } from "./approvals.js"
 import { runLifetime } from "./run-lifetime.js"
 import { planNote } from "./plan-prompt.js"
-import { stripHtmlPlanBlocks } from "./plan-parse.js"
+import { stripHtmlPlanBlock } from "./plan-parse.js"
 import { questionNote } from "./question-prompt.js"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
@@ -1733,7 +1734,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               return answers
             })
 
-          const proposePlan = (plan: Plan): Effect.Effect<PlanDecision> =>
+          const proposePlan = (
+            plan: Plan,
+            submittedBlock?: string
+          ): Effect.Effect<PlanDecision> =>
             Effect.gen(function* () {
               const parsedForRouting =
                 orchestrating && workerRouting !== null
@@ -1752,74 +1756,92 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   : plan
               let canonicalPlan = proposedPlan
               let revisingCanonicalPlan = false
+              let basePlanId: string | undefined
               if (worktreePath.length > 0) {
                 const current = yield* PlanStore.readDocument(
                   worktreePath,
                   sessionId,
                   chatId
                 ).pipe(Effect.provide(env))
-                const basePlanId =
+                basePlanId =
                   current !== null &&
                   current.producingChatId === chatId &&
                   current.status !== "done" &&
                   current.status !== "rejected"
                     ? current.id
                     : undefined
-                const promotion = yield* PlanStore.promote(
-                  sessionId,
-                  worktreePath,
-                  chatId,
-                  proposedPlan,
-                  basePlanId
-                ).pipe(
-                  Effect.provide(env),
-                  Effect.either
-                )
-                if (promotion._tag === "Left") {
-                  yield* emit({
-                    _tag: "Failed",
-                    message: promotion.left.message
-                  })
-                  return yield* Effect.interrupt
+                const approvalPlanId =
+                  basePlanId ??
+                  (current?.id === proposedPlan.id
+                    ? randomUUID()
+                    : proposedPlan.id)
+                canonicalPlan = {
+                  ...proposedPlan,
+                  id: approvalPlanId
                 }
-                // PlanStore owns validation, sanitization, legacy fallback,
-                // and amendment reconciliation. Publish exactly its projection
-                // so transcript and Plan Review share one identity and source.
-                canonicalPlan = promotion.right.plan
-                revisingCanonicalPlan = basePlanId === canonicalPlan.id
+                revisingCanonicalPlan = basePlanId !== undefined
               }
-              // Announced only after the exact canonical proposal is durably
-              // persisted. A rejected promotion emits a terminal failure instead
-              // of presenting an unapprovable draft that differs from PlanStore.
+              // Register the approval waiter BEFORE PlanStore makes the proposal
+              // visible to file watchers. The announce effect then promotes and
+              // publishes the exact canonical projection while the gate is live.
               return yield* approvals.awaitPlan(
                 sessionId,
                 chatId,
                 canonicalPlan.id,
                 Effect.gen(function* () {
+                  if (worktreePath.length > 0) {
+                    const promotion = yield* PlanStore.promote(
+                      sessionId,
+                      worktreePath,
+                      chatId,
+                      canonicalPlan,
+                      basePlanId
+                    ).pipe(
+                      Effect.provide(env),
+                      Effect.either
+                    )
+                    if (promotion._tag === "Left") {
+                      yield* emit({
+                        _tag: "Failed",
+                        message: promotion.left.message
+                      })
+                      return yield* Effect.interrupt
+                    }
+                    // PlanStore owns validation, sanitization, legacy fallback,
+                    // and amendment reconciliation. Publish exactly its
+                    // projection so transcript and Plan Review share one
+                    // identity and source.
+                    canonicalPlan = promotion.right.plan
+                  }
                   // Claude streams plan text before ExitPlanMode asks us to
                   // promote it. Once the canonical Plan card owns that document,
-                  // remove the protocol block from the transcript while keeping
-                  // any surrounding progress prose.
-                  yield* turnMutation.withPermits(1)(
-                    Effect.gen(function* () {
-                      const current = yield* Ref.get(acc)
-                      const next = {
-                        ...current,
-                        parts: current.parts.flatMap(
-                          (part): ReadonlyArray<ContentPart> => {
-                            if (part._tag !== "Text") return [part]
-                            const text = stripHtmlPlanBlocks(part.text)
-                            return text.length === 0 ? [] : [{ ...part, text }]
-                          }
+                  // remove only that exact visible transport. Payload-only plans
+                  // omit `submittedBlock`, preserving unrelated HTML examples.
+                  if (submittedBlock !== undefined) {
+                    yield* turnMutation.withPermits(1)(
+                      Effect.gen(function* () {
+                        const current = yield* Ref.get(acc)
+                        const next = {
+                          ...current,
+                          parts: current.parts.flatMap(
+                            (part): ReadonlyArray<ContentPart> => {
+                              if (part._tag !== "Text") return [part]
+                              const text = stripHtmlPlanBlock(
+                                part.text,
+                                submittedBlock
+                              )
+                              return text.length === 0 ? [] : [{ ...part, text }]
+                            }
+                          )
+                        }
+                        yield* Ref.set(acc, next)
+                        yield* TranscriptStore.patchLast(chatId, () => next).pipe(
+                          Effect.provide(env),
+                          Effect.ignore
                         )
-                      }
-                      yield* Ref.set(acc, next)
-                      yield* TranscriptStore.patchLast(chatId, () => next).pipe(
-                        Effect.provide(env),
-                        Effect.ignore
-                      )
-                    })
-                  )
+                      })
+                    )
+                  }
                   yield* emit(
                     revisingCanonicalPlan
                       ? { _tag: "PlanUpdated", plan: canonicalPlan }
