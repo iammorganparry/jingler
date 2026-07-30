@@ -244,13 +244,14 @@ describe("runCodexAppServer", () => {
       'mcp_servers.open-connector.url="https://connector.example/mcp"',
       'mcp_servers.open-connector.http_headers.Authorization="Bearer connector-token"',
       'mcp_servers.jingler-browser.url="http://127.0.0.1:32123/mcp"',
-      'mcp_servers.jingler-browser.env_http_headers.Authorization="JINGLER_BROWSER_MCP_AUTHORIZATION"'
+      'mcp_servers.jingler-browser.env_http_headers.Authorization="JINGLER_BROWSER_MCP_AUTHORIZATION"',
+      'shell_environment_policy.filters.JINGLER_BROWSER_MCP_AUTHORIZATION="exclude"'
     ])
     expect(server.state.launches[0]?.configOverrides?.join(" ")).not.toContain(
       "preview-token"
     )
     expect(
-      server.state.launches[0]?.env.JINGLER_BROWSER_MCP_AUTHORIZATION
+      server.state.launches[0]?.env?.JINGLER_BROWSER_MCP_AUTHORIZATION
     ).toBe("Bearer preview-token")
   })
 

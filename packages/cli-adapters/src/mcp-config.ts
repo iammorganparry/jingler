@@ -95,16 +95,23 @@ export const codexMcpOverrides = (
   entries: ReadonlyArray<RemoteMcpServer> | null | undefined
 ): ReadonlyArray<string> => {
   const overrides: string[] = []
+  const secretEnvironmentNames = new Set<string>()
   for (const entry of uniqueRemoteMcpServers(entries)) {
     overrides.push(`mcp_servers.${entry.name}.url=${JSON.stringify(entry.url)}`)
     for (const [key, value] of Object.entries(entry.headers)) {
       const environmentName = entry.headerEnvironment?.[key]
+      if (environmentName !== undefined) secretEnvironmentNames.add(environmentName)
       overrides.push(
         environmentName === undefined
           ? `mcp_servers.${entry.name}.http_headers.${key}=${JSON.stringify(value)}`
           : `mcp_servers.${entry.name}.env_http_headers.${key}=${JSON.stringify(environmentName)}`
       )
     }
+  }
+  for (const environmentName of secretEnvironmentNames) {
+    overrides.push(
+      `shell_environment_policy.filters.${environmentName}=${JSON.stringify("exclude")}`
+    )
   }
   return overrides
 }

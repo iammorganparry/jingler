@@ -35,7 +35,8 @@ describe("codexMcpOverrides", () => {
       'mcp_servers.open-connector.http_headers.Authorization="Bearer connector-token"',
       'mcp_servers.open-connector.http_headers.X-Connector-Scope="workspace"',
       'mcp_servers.jingler-browser.url="http://127.0.0.1:32123/mcp"',
-      'mcp_servers.jingler-browser.env_http_headers.Authorization="JINGLER_BROWSER_MCP_AUTHORIZATION"'
+      'mcp_servers.jingler-browser.env_http_headers.Authorization="JINGLER_BROWSER_MCP_AUTHORIZATION"',
+      'shell_environment_policy.filters.JINGLER_BROWSER_MCP_AUTHORIZATION="exclude"'
     ])
   })
 
@@ -48,7 +49,8 @@ describe("codexMcpOverrides", () => {
   it("keeps either available server independently", () => {
     expect(codexMcpOverrides([PREVIEW_BROWSER])).toEqual([
       'mcp_servers.jingler-browser.url="http://127.0.0.1:32123/mcp"',
-      'mcp_servers.jingler-browser.env_http_headers.Authorization="JINGLER_BROWSER_MCP_AUTHORIZATION"'
+      'mcp_servers.jingler-browser.env_http_headers.Authorization="JINGLER_BROWSER_MCP_AUTHORIZATION"',
+      'shell_environment_policy.filters.JINGLER_BROWSER_MCP_AUTHORIZATION="exclude"'
     ])
     expect(codexMcpOverrides([OPEN_CONNECTOR])).toEqual([
       'mcp_servers.open-connector.url="https://connector.example/mcp"',
@@ -80,6 +82,9 @@ describe("codexMcpOverrides", () => {
     expect(codexMcpEnvironment([PREVIEW_BROWSER])).toStrictEqual({
       JINGLER_BROWSER_MCP_AUTHORIZATION: "Bearer preview-token"
     })
+    expect(overrides).toContain(
+      'shell_environment_policy.filters.JINGLER_BROWSER_MCP_AUTHORIZATION="exclude"'
+    )
   })
 })
 
