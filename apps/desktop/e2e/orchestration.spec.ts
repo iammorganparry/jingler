@@ -2,6 +2,10 @@ import { existsSync, readFileSync } from "node:fs"
 import { basename, join } from "node:path"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
 
+const WORKER_AUTH_TAB = /^worker-auth /
+const WORKER_RELEASE_TAB = /^worker-release /
+const WORKER_STAGE_THOUGHT = "Executing the assigned stage and its verification."
+
 test("a new orchestrator session runs parallel workers and reconciles a mid-run amendment", async ({
   launchApp
 }) => {
@@ -89,6 +93,15 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
     .toBeGreaterThanOrEqual(2)
 
   await window.getByRole("button", { name: "Conversation" }).first().click()
+  const workerAuthTab = window
+    .locator("[data-agent-status]")
+    .getByRole("button", { name: WORKER_AUTH_TAB })
+  const workerReleaseTab = window
+    .locator("[data-agent-status]")
+    .getByRole("button", { name: WORKER_RELEASE_TAB })
+  await expect(workerAuthTab).toBeVisible()
+  await expect(workerReleaseTab).toBeVisible()
+
   await composer.fill(
     "[[amendment]] add the requested audit coverage without stopping the workers"
   )
@@ -96,6 +109,10 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   await expect
     .poll(() => readFileSync(planFile, "utf8"), { timeout: 20_000 })
     .toContain("requested audit amendment")
+  // Worker tabs belong to the canonical plan, not to the orchestrator's latest
+  // turn. Amending that same plan must not sweep either transcript away.
+  await expect(workerAuthTab).toBeVisible()
+  await expect(workerReleaseTab).toBeVisible()
 
   await window.getByRole("button", { name: "Plan Review" }).first().click()
   await expect(window.getByText(/requested audit amendment/)).toBeVisible()
@@ -200,6 +217,28 @@ test("a stopped worker stays interrupted across restart and retries from its che
   ).toBeVisible({ timeout: 20_000 })
 
   await first.window.getByRole("button", { name: "Conversation" }).first().click()
+  const workerAuthTab = first.window
+    .locator("[data-agent-status]")
+    .getByRole("button", { name: WORKER_AUTH_TAB })
+  const workerReleaseTab = first.window
+    .locator("[data-agent-status]")
+    .getByRole("button", { name: WORKER_RELEASE_TAB })
+  await expect(workerAuthTab).toBeVisible()
+  await expect(workerReleaseTab).toBeVisible()
+
+  // Each tab owns one transcript projection. Auth's evidence must disappear
+  // when the held release worker is selected, while release's live tool remains.
+  await workerAuthTab.click()
+  await expect(
+    first.window.getByText(WORKER_STAGE_THOUGHT, { exact: true })
+  ).toHaveCount(7, { timeout: 20_000 })
+  await workerReleaseTab.click()
+  await expect(
+    first.window.getByText(WORKER_STAGE_THOUGHT, { exact: true })
+  ).toHaveCount(1)
+  await expect(first.window.getByText("pnpm test", { exact: true })).toBeVisible()
+
+  await first.window.getByRole("button", { name: "Main", exact: true }).click()
   const progress = first.window.getByRole("button", {
     name: /Plan progress: \d+ of 8 done/
   })
@@ -216,9 +255,18 @@ test("a stopped worker stays interrupted across restart and retries from its che
     first.window.locator('[data-plan-stage-id="s_06"] button').first()
   ).toBeFocused()
 
+  await first.window.getByRole("button", { name: "Conversation" }).first().click()
   await first.window
-    .getByRole("button", { name: "Stop worker worker-release" })
+    .getByRole("button", { name: "Stop worker-release", exact: true })
     .click()
+  await expect(workerReleaseTab).toBeVisible()
+  await expect(workerAuthTab).toBeVisible()
+  await expect(
+    first.window.getByRole("button", {
+      name: "Close worker-release",
+      exact: true
+    })
+  ).toHaveCount(0)
   await expect
     .poll(() => checkpoints().find((worker) => worker.agentId === "worker-release"))
     .toMatchObject({
@@ -228,6 +276,22 @@ test("a stopped worker stays interrupted across restart and retries from its che
   await expect
     .poll(() => checkpoints().find((worker) => worker.agentId === "worker-auth"))
     .toMatchObject({ state: "completed" })
+
+  // Stopping release must not retract or disturb its completed sibling. Assert
+  // both the authoritative tab state and the replay-backed transcript after the
+  // stop, rather than relying only on the checkpoint file.
+  await expect(workerAuthTab.locator("..")).toHaveAttribute(
+    "data-agent-status",
+    "completed"
+  )
+  await expect(workerReleaseTab.locator("..")).toHaveAttribute(
+    "data-agent-status",
+    "interrupted"
+  )
+  await workerAuthTab.click()
+  await expect(
+    first.window.getByText(WORKER_STAGE_THOUGHT, { exact: true })
+  ).toHaveCount(7)
 
   await first.app.close()
   const reopened = await launchApp({

@@ -466,6 +466,7 @@ export const executeOrchestration = (
       .execute({
         sessionId,
         planId,
+        producingChatId: document.producingChatId,
         planRevision: document.revision,
         stages: document.projection.stages,
         checkpoints: currentCheckpoints,
@@ -594,6 +595,19 @@ export const executeOrchestration = (
         ),
         Effect.as(null)
       )
+    )
+  )
+
+/** Attach to orchestration activity without starting, resuming, or retrying it. */
+export const watchOrchestrationWorkers = (
+  sessionId: string,
+  planId: string,
+  chatId: string
+) =>
+  Stream.unwrap(
+    Effect.map(
+      OrchestrationService,
+      (service) => service.watch(sessionId, planId, chatId)
     )
   )
 
@@ -1871,6 +1885,8 @@ const HandlersLayer = JinglerRpcs.toLayer({
         return Stream.fromIterable(events)
       })
     ),
+  "Agent.watchWorkers": ({ sessionId, planId, chatId }) =>
+    watchOrchestrationWorkers(sessionId, planId, chatId),
   "Agent.stopWorker": ({ sessionId, planId, agentId }) =>
     Effect.flatMap(OrchestrationService, (service) =>
       service.stopWorker({ sessionId, planId, agentId })

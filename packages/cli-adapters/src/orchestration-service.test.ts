@@ -1,6 +1,6 @@
 import { CliExecError } from "@jingler/core"
-import type { CliKind } from "@jingler/core"
-import { Effect, Fiber, Layer } from "effect"
+import type { CliKind, WorkerActivity } from "@jingler/core"
+import { Deferred, Effect, Fiber, Layer, Stream } from "effect"
 import { createActor } from "xstate"
 import { describe, expect, it } from "vitest"
 import { CliAdapter } from "./adapter.js"
@@ -9,6 +9,7 @@ import {
   buildOrchestrationGroups,
   OrchestrationPersistenceError,
   OrchestrationService,
+  WORKER_ACTIVITY_REPLAY_CAP,
   orchestrationWorkerMachine,
   recoverOrchestrationCheckpoints
 } from "./orchestration-service.js"
@@ -83,6 +84,7 @@ const input = (
 ): OrchestrationExecuteInput => ({
   sessionId: "session-1",
   planId: "plan-1",
+  producingChatId: "chat-1",
   planRevision: 7,
   stages,
   makeSessionSpec: sessionSpec,
@@ -865,6 +867,402 @@ describe("OrchestrationService", () => {
     if (result._tag === "Left") {
       expect(result.left._tag).toBe("OrchestrationPersistenceError")
     }
+  })
+})
+
+describe("OrchestrationService worker activity", () => {
+  it("gives early and late watchers each event exactly once and in order", async () => {
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) => passCurrentStage(spec, context),
+      stop: () => Effect.void
+    }
+    const program = Effect.gen(function* () {
+      const service = yield* OrchestrationService
+      const earlyFiber = yield* service
+        .watch("session-1", "plan-1", "chat-1")
+        .pipe(Stream.take(6), Stream.runCollect, Effect.fork)
+      yield* Effect.yieldNow()
+      yield* service.execute(input([stage("01", "agent-a")]))
+      const early = [...(yield* Fiber.join(earlyFiber))]
+      const late = [
+        ...(yield* service
+          .watch("session-1", "plan-1", "chat-1")
+          .pipe(Stream.take(6), Stream.runCollect))
+      ]
+      return { early, late }
+    })
+
+    const result = await Effect.runPromise(
+      program.pipe(Effect.provide(layerFor(adapter)))
+    )
+    expect(result.early.map((activity) => activity._tag)).toEqual([
+      "Reset",
+      "State",
+      "State",
+      "HarnessEvent",
+      "HarnessEvent",
+      "State"
+    ])
+    expect(result.late).toEqual(result.early)
+  })
+
+  it("joins buffered replay to live activity without a gap or duplicate", async () => {
+    let releaseWorker = (): void => {}
+    const workerReleased = new Promise<void>((resolve) => {
+      releaseWorker = resolve
+    })
+    let firstEventPublished = false
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) =>
+        Effect.gen(function* () {
+          yield* context.emit({ _tag: "Assistant", text: "buffered" })
+          firstEventPublished = true
+          yield* Effect.promise(() => workerReleased)
+          yield* context.emit({ _tag: "Assistant", text: "live" })
+          yield* passCurrentStage(spec, context)
+        }),
+      stop: () => Effect.void
+    }
+    const program = Effect.gen(function* () {
+      const service = yield* OrchestrationService
+      const execution = yield* service
+        .execute(input([stage("01", "agent-a")]))
+        .pipe(Effect.fork)
+      while (!firstEventPublished) yield* Effect.yieldNow()
+
+      const watcherAttached = yield* Deferred.make<void>()
+      const watcher = yield* service
+        .watch("session-1", "plan-1", "chat-1")
+        .pipe(
+          Stream.tap(() => Deferred.succeed(watcherAttached, undefined)),
+          Stream.take(8),
+          Stream.runCollect,
+          Effect.fork
+        )
+      yield* Deferred.await(watcherAttached)
+      releaseWorker()
+      yield* Fiber.join(execution)
+      const replayAndLive = [...(yield* Fiber.join(watcher))]
+      const lateReplay = [
+        ...(yield* service
+          .watch("session-1", "plan-1", "chat-1")
+          .pipe(Stream.take(8), Stream.runCollect))
+      ]
+      return { replayAndLive, lateReplay }
+    })
+
+    const result = await Effect.runPromise(
+      program.pipe(Effect.provide(layerFor(adapter)))
+    )
+    expect(result.replayAndLive).toEqual(result.lateReplay)
+    expect(
+      result.replayAndLive.flatMap((activity) =>
+        activity._tag === "HarnessEvent" &&
+        activity.event._tag === "Assistant"
+          ? [activity.event.text]
+          : []
+      )
+    ).toEqual([
+      "buffered",
+      "live",
+      "PLAN_RESULT criterion=01.1 status=passed evidence=targeted verification passed"
+    ])
+  })
+
+  it("keeps simultaneous worker identities and transcripts independently routable", async () => {
+    const adapter: CliAdapterShape = {
+      run: (ownerId, spec, context) => {
+        const agentId = ownerId.endsWith("agent-a") ? "agent-a" : "agent-b"
+        return Effect.gen(function* () {
+          yield* context.emit({
+            _tag: "Assistant",
+            text: `${agentId}:first`
+          })
+          yield* Effect.yieldNow()
+          yield* passCurrentStage(spec, context)
+        })
+      },
+      stop: () => Effect.void
+    }
+    const program = Effect.gen(function* () {
+      const service = yield* OrchestrationService
+      yield* service.execute(
+        input([stage("01", "agent-a"), stage("02", "agent-b")])
+      )
+      return yield* service
+        .watch("session-1", "plan-1", "chat-1")
+        .pipe(Stream.take(13), Stream.runCollect)
+    })
+
+    const activities = [
+      ...(await Effect.runPromise(
+        program.pipe(Effect.provide(layerFor(adapter)))
+      ))
+    ]
+    const transcripts = new Map<string, Array<string>>()
+    for (const activity of activities) {
+      if (
+        activity._tag !== "HarnessEvent" ||
+        activity.event._tag !== "Assistant"
+      ) continue
+      const chunks = transcripts.get(activity.worker.agentId) ?? []
+      transcripts.set(activity.worker.agentId, [...chunks, activity.event.text])
+    }
+    expect(transcripts.get("agent-a")?.join("\n")).toContain("agent-a:first")
+    expect(transcripts.get("agent-a")?.join("\n")).not.toContain("agent-b:first")
+    expect(transcripts.get("agent-b")?.join("\n")).toContain("agent-b:first")
+    expect(transcripts.get("agent-b")?.join("\n")).not.toContain("agent-a:first")
+    expect(
+      activities
+        .filter((activity) => activity._tag !== "Reset")
+        .every(
+          (activity) =>
+            activity.worker.planId === "plan-1" &&
+            activity.worker.producingChatId === "chat-1"
+        )
+    ).toBe(true)
+  })
+
+  it("replaces a session replay with the next plan and keeps it in the producing chat", async () => {
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) => passCurrentStage(spec, context),
+      stop: () => Effect.void
+    }
+    const program = Effect.gen(function* () {
+      const service = yield* OrchestrationService
+      yield* service.execute(input([stage("01", "agent-a")]))
+      const wrongChat: Array<WorkerActivity> = []
+      const wrongChatWatcher = yield* service
+        .watch("session-1", "plan-2", "chat-1")
+        .pipe(
+          Stream.runForEach((activity) =>
+            Effect.sync(() => wrongChat.push(activity))
+          ),
+          Effect.fork
+        )
+      yield* Effect.yieldNow()
+      yield* service.execute(
+        input([stage("02", "agent-b")], {
+          planId: "plan-2",
+          producingChatId: "chat-2"
+        })
+      )
+      yield* Effect.yieldNow()
+      yield* Fiber.interrupt(wrongChatWatcher)
+      const replay = yield* service
+        .watch("session-1", "plan-2", "chat-2")
+        .pipe(Stream.take(6), Stream.runCollect)
+      return { wrongChat, replay: [...replay] }
+    })
+
+    const result = await Effect.runPromise(
+      program.pipe(Effect.provide(layerFor(adapter)))
+    )
+    expect(result.wrongChat).toEqual([])
+    expect(
+      result.replay.every((activity) => {
+        const scope =
+          activity._tag === "Reset" ? activity : activity.worker
+        return (
+          scope.planId === "plan-2" &&
+          scope.producingChatId === "chat-2"
+        )
+      })
+    ).toBe(true)
+  })
+
+  it("resets only a targeted retry and preserves its settled sibling", async () => {
+    const attempts = new Map<string, number>()
+    const checkpoints = new Map<string, OrchestrationCheckpoint>()
+    const adapter: CliAdapterShape = {
+      run: (ownerId, spec, context) => {
+        const agentId = ownerId.endsWith("agent-a") ? "agent-a" : "agent-b"
+        const attempt = (attempts.get(agentId) ?? 0) + 1
+        attempts.set(agentId, attempt)
+        if (agentId === "agent-a" && attempt === 1) {
+          return context
+            .emit({ _tag: "Assistant", text: "agent-a:first-attempt" })
+            .pipe(
+              Effect.zipRight(
+                Effect.fail(
+                  new CliExecError({
+                    kind: spec.cli,
+                    message: "Compilation failed"
+                  })
+                )
+              )
+            )
+        }
+        return passCurrentStage(spec, context)
+      },
+      stop: () => Effect.void
+    }
+    const callbacks = {
+      onCheckpoint: (checkpoint: OrchestrationCheckpoint) =>
+        Effect.sync(() => {
+          checkpoints.set(checkpoint.agentId, checkpoint)
+        })
+    }
+    const stages = [stage("01", "agent-a"), stage("02", "agent-b")]
+    const program = Effect.gen(function* () {
+      const service = yield* OrchestrationService
+      const watcher = yield* service
+        .watch("session-1", "plan-1", "chat-1")
+        .pipe(Stream.take(16), Stream.runCollect, Effect.fork)
+      yield* Effect.yieldNow()
+      yield* service.execute(input(stages, { callbacks }))
+      yield* service.execute(
+        input(stages, {
+          callbacks,
+          checkpoints: [...checkpoints.values()],
+          agentIds: ["agent-a"]
+        })
+      )
+      return yield* Fiber.join(watcher)
+    })
+
+    const activities = [
+      ...(await Effect.runPromise(
+        program.pipe(Effect.provide(layerFor(adapter)))
+      ))
+    ]
+    const resets = activities.filter(
+      (activity): activity is Extract<WorkerActivity, { _tag: "Reset" }> =>
+        activity._tag === "Reset"
+    )
+    expect(resets).toHaveLength(2)
+    expect(resets[0]?.workers.map((state) => state.worker.agentId)).toEqual([
+      "agent-a",
+      "agent-b"
+    ])
+    expect(resets[1]?.workers).toMatchObject([
+      { worker: { agentId: "agent-a", attempt: 2 }, status: "queued" }
+    ])
+    const retryIndex = activities.lastIndexOf(resets[1]!)
+    expect(
+      activities
+        .slice(retryIndex + 1)
+        .some(
+          (activity) =>
+            activity._tag !== "Reset" &&
+            activity.worker.agentId === "agent-b"
+        )
+    ).toBe(false)
+    expect(
+      activities.some(
+        (activity) =>
+          activity._tag === "State" &&
+          activity.worker.agentId === "agent-a" &&
+          activity.status === "failed"
+      )
+    ).toBe(true)
+    expect(
+      activities.some(
+        (activity) =>
+          activity._tag === "State" &&
+          activity.worker.agentId === "agent-b" &&
+          activity.status === "completed"
+      )
+    ).toBe(true)
+    expect(activities.at(-1)).toMatchObject({
+      _tag: "State",
+      worker: { agentId: "agent-a", attempt: 2 },
+      status: "completed"
+    })
+  })
+
+  it("publishes blocked and interrupted terminal states", async () => {
+    const blockedAdapter: CliAdapterShape = {
+      run: (_ownerId, spec) =>
+        Effect.fail(
+          new CliExecError({
+            kind: spec.cli,
+            message: "Authentication failed: sign in required"
+          })
+        ),
+      stop: () => Effect.void
+    }
+    const blockedProgram = Effect.gen(function* () {
+      const service = yield* OrchestrationService
+      yield* service.execute(input([stage("01", "agent-a")]))
+      return yield* service
+        .watch("session-1", "plan-1", "chat-1")
+        .pipe(Stream.take(4), Stream.runCollect)
+    })
+    const blocked = await Effect.runPromise(
+      blockedProgram.pipe(Effect.provide(layerFor(blockedAdapter)))
+    )
+    expect([...blocked].at(-1)).toMatchObject({
+      _tag: "State",
+      status: "blocked"
+    })
+
+    let started = false
+    const interruptedAdapter: CliAdapterShape = {
+      run: () =>
+        Effect.sync(() => {
+          started = true
+        }).pipe(Effect.zipRight(Effect.never)),
+      stop: () => Effect.void
+    }
+    const interruptedProgram = Effect.gen(function* () {
+      const service = yield* OrchestrationService
+      const execution = yield* service
+        .execute(input([stage("01", "agent-a")]))
+        .pipe(Effect.fork)
+      while (!started) yield* Effect.yieldNow()
+      yield* service.stopWorker({
+        sessionId: "session-1",
+        planId: "plan-1",
+        agentId: "agent-a"
+      })
+      yield* Fiber.join(execution)
+      return yield* service
+        .watch("session-1", "plan-1", "chat-1")
+        .pipe(Stream.take(4), Stream.runCollect)
+    })
+    const interrupted = await Effect.runPromise(
+      interruptedProgram.pipe(Effect.provide(layerFor(interruptedAdapter)))
+    )
+    expect([...interrupted].at(-1)).toMatchObject({
+      _tag: "State",
+      status: "interrupted"
+    })
+  })
+
+  it("caps late-watcher replay by dropping the oldest activity", async () => {
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) =>
+        Effect.gen(function* () {
+          for (let index = 0; index < WORKER_ACTIVITY_REPLAY_CAP + 5; index++) {
+            yield* context.emit({
+              _tag: "Assistant",
+              text: `chunk:${index}`
+            })
+          }
+          yield* passCurrentStage(spec, context)
+        }),
+      stop: () => Effect.void
+    }
+    const program = Effect.gen(function* () {
+      const service = yield* OrchestrationService
+      yield* service.execute(input([stage("01", "agent-a")]))
+      return yield* service
+        .watch("session-1", "plan-1", "chat-1")
+        .pipe(Stream.take(WORKER_ACTIVITY_REPLAY_CAP), Stream.runCollect)
+    })
+
+    const replay = [
+      ...(await Effect.runPromise(
+        program.pipe(Effect.provide(layerFor(adapter)))
+      ))
+    ]
+    expect(replay).toHaveLength(WORKER_ACTIVITY_REPLAY_CAP)
+    expect(replay[0]?._tag).not.toBe("Reset")
+    expect(replay.at(-1)).toMatchObject({
+      _tag: "State",
+      status: "completed"
+    })
   })
 })
 

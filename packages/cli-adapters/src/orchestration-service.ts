@@ -8,7 +8,10 @@ import type {
   PlanExecutionDiagnostic,
   PlanPrdStage,
   PlanStageAssignment,
-  StreamEvent
+  StreamEvent,
+  WorkerActivity,
+  WorkerIdentity,
+  WorkerState
 } from "@jingler/core"
 import {
   Cause,
@@ -18,7 +21,9 @@ import {
   Exit,
   Fiber,
   Option,
-  Ref
+  PubSub,
+  Ref,
+  Stream
 } from "effect"
 import { createActor, createMachine } from "xstate"
 import type { AgentContext, SessionSpec } from "./adapter.js"
@@ -27,6 +32,12 @@ import { classifyProviderFailure } from "./provider-failure.js"
 import { releaseSessionRun, reserveSessionRun } from "./run-coordinator.js"
 
 export const MAX_ORCHESTRATION_CONCURRENCY = 4
+
+/**
+ * Maximum activity records retained for a late watcher. Overflow drops the
+ * oldest record, matching the adversarial-review feed's bounded replay policy.
+ */
+export const WORKER_ACTIVITY_REPLAY_CAP = 2000
 
 export type OrchestrationWorkerStatus =
   | "queued"
@@ -258,6 +269,7 @@ export interface OrchestrationSessionSpecRequest {
 export interface OrchestrationExecuteInput {
   readonly sessionId: string
   readonly planId: string
+  readonly producingChatId: string
   readonly planRevision: number
   readonly stages: ReadonlyArray<OrchestrationStage>
   readonly checkpoints?: ReadonlyArray<OrchestrationCheckpoint>
@@ -419,6 +431,32 @@ const evidenceFrom = (
 const boundedConcurrency = (requested: number | undefined): number =>
   Math.max(1, Math.min(MAX_ORCHESTRATION_CONCURRENCY, Math.floor(requested ?? MAX_ORCHESTRATION_CONCURRENCY)))
 
+const activityScope = (
+  activity: WorkerActivity
+): {
+  readonly sessionId: string
+  readonly planId: string
+  readonly producingChatId: string
+} =>
+  activity._tag === "Reset"
+    ? activity
+    : activity.worker
+
+const workerIdentityFor = (
+  input: OrchestrationExecuteInput,
+  group: OrchestrationWorkerGroup,
+  attempt: number
+): WorkerIdentity => ({
+  sessionId: input.sessionId,
+  planId: input.planId,
+  producingChatId: input.producingChatId,
+  agentId: group.agentId,
+  stageIds: group.stages.map((stage) => stage.id),
+  harness: group.assignment.cli,
+  model: group.assignment.model,
+  attempt
+})
+
 export class OrchestrationService extends Effect.Service<OrchestrationService>()(
   "@jingler/OrchestrationService",
   {
@@ -434,11 +472,132 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
       )
       const activePlans = yield* Ref.make(new Set<string>())
 
+      /**
+       * One activity feed per session. The semaphore is shared by publishers and
+       * watchers so replay snapshot + live subscription is one atomic operation.
+       */
+      const activityFor = yield* Effect.cachedFunction((_sessionId: string) =>
+        Effect.gen(function* () {
+          const hub = yield* PubSub.unbounded<WorkerActivity>()
+          const buffer = yield* Ref.make<ReadonlyArray<WorkerActivity>>([])
+          const scope = yield* Ref.make<{
+            readonly planId: string
+            readonly producingChatId: string
+          } | null>(null)
+          const gate = yield* Effect.makeSemaphore(1)
+          return { hub, buffer, scope, gate }
+        })
+      )
+
+      const appendActivity = (
+        buffer: ReadonlyArray<WorkerActivity>,
+        activity: WorkerActivity
+      ): ReadonlyArray<WorkerActivity> =>
+        buffer.length >= WORKER_ACTIVITY_REPLAY_CAP
+          ? [...buffer.slice(1), activity]
+          : [...buffer, activity]
+
+      const publishActivity = (
+        activity: WorkerActivity
+      ): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          const scope = activityScope(activity)
+          const live = yield* activityFor(scope.sessionId)
+          yield* live.gate.withPermits(1)(
+            Effect.gen(function* () {
+              const current = yield* Ref.get(live.scope)
+              if (
+                current?.planId !== scope.planId ||
+                current.producingChatId !== scope.producingChatId
+              ) return
+              yield* Ref.update(live.buffer, (buffer) =>
+                appendActivity(buffer, activity)
+              )
+              yield* PubSub.publish(live.hub, activity)
+            })
+          )
+        })
+
+      const resetWorkerActivity = (
+        input: OrchestrationExecuteInput,
+        workers: ReadonlyArray<WorkerState>
+      ): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          const live = yield* activityFor(input.sessionId)
+          const activity = {
+            _tag: "Reset",
+            sessionId: input.sessionId,
+            planId: input.planId,
+            producingChatId: input.producingChatId,
+            workers
+          } satisfies WorkerActivity
+          yield* live.gate.withPermits(1)(
+            Effect.gen(function* () {
+              const current = yield* Ref.get(live.scope)
+              const replacing =
+                current === null ||
+                current.planId !== input.planId ||
+                current.producingChatId !== input.producingChatId
+              yield* Ref.set(live.scope, {
+                planId: input.planId,
+                producingChatId: input.producingChatId
+              })
+              yield* Ref.update(
+                live.buffer,
+                (buffer) =>
+                  replacing
+                    ? [activity]
+                    : appendActivity(buffer, activity)
+              )
+              yield* PubSub.publish(live.hub, activity)
+            })
+          )
+        })
+
+      const watch = (
+        sessionId: string,
+        planId: string,
+        chatId: string
+      ): Stream.Stream<WorkerActivity> =>
+        Stream.unwrapScoped(
+          Effect.gen(function* () {
+            const live = yield* activityFor(sessionId)
+            return yield* live.gate.withPermits(1)(
+              Effect.gen(function* () {
+                const belongs = (activity: WorkerActivity): boolean => {
+                  const scope = activityScope(activity)
+                  return (
+                    scope.sessionId === sessionId &&
+                    scope.planId === planId &&
+                    scope.producingChatId === chatId
+                  )
+                }
+                const replay = (yield* Ref.get(live.buffer)).filter(belongs)
+                const subscription = yield* PubSub.subscribe(live.hub)
+                const tail = Stream.fromQueue(subscription).pipe(
+                  Stream.filter(belongs)
+                )
+                return Stream.concat(Stream.fromIterable(replay), tail)
+              })
+            )
+          })
+        )
+
       const notifyWorker = (
         callbacks: OrchestrationCallbacks | undefined,
+        worker: WorkerIdentity,
         update: OrchestrationWorkerUpdate
       ): Effect.Effect<void, OrchestrationPersistenceError> =>
-        callbacks?.onWorkerState?.(update) ?? Effect.void
+        publishActivity({
+          _tag: "State",
+          worker,
+          status: update.status,
+          message: update.message
+        }).pipe(
+          Effect.zipRight(
+            callbacks?.onWorkerState?.(update) ?? Effect.void
+          )
+        )
 
       const notifyStage = (
         callbacks: OrchestrationCallbacks | undefined,
@@ -477,6 +636,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
             const allEvidence: Array<OrchestrationEvidence> = []
             let message: string | null = null
 
+          const worker = workerIdentityFor(input, group, attempt)
           const workerUpdate = (
             status: OrchestrationWorkerStatus,
             nextMessage: string | null
@@ -507,17 +667,25 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
             })
 
           const queuedStatus = workerStatusFrom(machine.getSnapshot().value)
-          yield* notifyWorker(input.callbacks, workerUpdate(queuedStatus, null))
+          yield* notifyWorker(
+            input.callbacks,
+            worker,
+            workerUpdate(queuedStatus, null)
+          )
           yield* saveCheckpoint(queuedStatus, null)
 
           if ((yield* Ref.get(cancelled)).has(ownerId)) {
             machine.send({ type: "STOP" })
             const status = workerStatusFrom(machine.getSnapshot().value)
             message = "Worker stopped before it started."
-            yield* notifyWorker(input.callbacks, workerUpdate(status, message))
+            yield* notifyWorker(
+              input.callbacks,
+              worker,
+              workerUpdate(status, message)
+            )
             yield* saveCheckpoint(status, message)
             machine.stop()
-            return {
+          return {
               agentId: group.agentId,
               ownerId,
               status,
@@ -535,7 +703,11 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
             machine.send({ type: "FAIL" })
             const status = workerStatusFrom(machine.getSnapshot().value)
             message = `Worker "${group.agentId}" is already running.`
-            yield* notifyWorker(input.callbacks, workerUpdate(status, message))
+            yield* notifyWorker(
+              input.callbacks,
+              worker,
+              workerUpdate(status, message)
+            )
             yield* saveCheckpoint(status, message)
             machine.stop()
             return {
@@ -552,7 +724,11 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
 
           machine.send({ type: "START" })
           const runningStatus = workerStatusFrom(machine.getSnapshot().value)
-          yield* notifyWorker(input.callbacks, workerUpdate(runningStatus, null))
+          yield* notifyWorker(
+            input.callbacks,
+            worker,
+            workerUpdate(runningStatus, null)
+          )
           yield* saveCheckpoint(runningStatus, null)
 
           const outcome = yield* Effect.gen(function* () {
@@ -648,7 +824,17 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                     yield* Ref.update(assistant, (chunks) => [...chunks, event.text])
                   }
                   if (event._tag === "Failed") yield* Ref.set(emittedFailure, event.message)
-                  yield* input.callbacks?.onEvent?.(group.agentId, stage.id, event) ?? Effect.void
+                  yield* publishActivity({
+                    _tag: "HarnessEvent",
+                    worker,
+                    stageId: stage.id,
+                    event
+                  })
+                  yield* input.callbacks?.onEvent?.(
+                    group.agentId,
+                    stage.id,
+                    event
+                  ) ?? Effect.void
                 })
               const context: AgentContext = {
                 emit,
@@ -868,7 +1054,11 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
           else machine.send({ type: "STOP" })
 
           const status = workerStatusFrom(machine.getSnapshot().value)
-          yield* notifyWorker(input.callbacks, workerUpdate(status, message))
+          yield* notifyWorker(
+            input.callbacks,
+            worker,
+            workerUpdate(status, message)
+          )
           yield* saveCheckpoint(status, message)
           machine.stop()
             return {
@@ -957,6 +1147,18 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                 (value) => [value.agentId, value]
               )
             )
+            yield* resetWorkerActivity(
+              input,
+              groups.map((group) => ({
+                worker: workerIdentityFor(
+                  input,
+                  group,
+                  (checkpoints.get(group.agentId)?.attempt ?? 0) + 1
+                ),
+                status: "queued",
+                message: null
+              }))
+            )
             for (const group of groups) {
               const ownerId = ownerIdFor(
                 input.sessionId,
@@ -1033,7 +1235,8 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
       return {
         execute,
         stopWorker,
-        isPlanRunning
+        isPlanRunning,
+        watch
       }
     })
   }

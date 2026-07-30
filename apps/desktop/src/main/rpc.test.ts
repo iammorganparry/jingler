@@ -9,6 +9,7 @@ import {
   GhService,
   GitService,
   ModelsService,
+  OrchestrationService,
   ReviewService,
   ReviewStore,
   SessionStore,
@@ -22,7 +23,8 @@ import type {
   Attachment,
   PlanDocument,
   Session,
-  StreamEvent
+  StreamEvent,
+  WorkerActivity
 } from "@jingler/core"
 import { GitError } from "@jingler/core"
 import { appPathsFor, fakeCommandExecutor } from "@jingler/cli-adapters/test-support"
@@ -52,6 +54,7 @@ import {
   sessionCreationDefaults,
   sessionDiff,
   skillsList,
+  watchOrchestrationWorkers,
   workspaceRevertFile,
   withoutAttachmentData,
   workspaceRevertLines
@@ -191,6 +194,36 @@ describe("RPC handlers", () => {
         }
       })
     ).toBe(true)
+  })
+
+  it("watches the requested worker scope without starting execution", async () => {
+    const calls: Array<ReadonlyArray<string>> = []
+    const activity: WorkerActivity = {
+      _tag: "Reset",
+      sessionId: "session-1",
+      planId: "plan-1",
+      producingChatId: "chat-1",
+      workers: []
+    }
+    const service = OrchestrationService.make({
+      execute: () => Effect.die("watch must not execute workers"),
+      stopWorker: () => Effect.void,
+      isPlanRunning: () => Effect.succeed(false),
+      watch: (sessionId, planId, chatId) => {
+        calls.push([sessionId, planId, chatId])
+        return Stream.make(activity)
+      }
+    })
+
+    const received = await Effect.runPromise(
+      watchOrchestrationWorkers("session-1", "plan-1", "chat-1").pipe(
+        Stream.runCollect,
+        Effect.provide(Layer.succeed(OrchestrationService, service))
+      )
+    )
+
+    expect(calls).toEqual([["session-1", "plan-1", "chat-1"]])
+    expect([...received]).toEqual([activity])
   })
 
   describe("Agent.setReasoning", () => {
