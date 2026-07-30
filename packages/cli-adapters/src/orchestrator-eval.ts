@@ -79,10 +79,22 @@ const assignmentRoute = (stage: PlanPrdStage): string | null => {
 const mutationAfterHandoff = (event: StreamEvent): boolean =>
   event._tag === "ToolStart" || event._tag === "ToolEnd" || event._tag === "ToolDelta"
 
-const previousStageIds = (source: string | undefined): ReadonlyArray<string> => {
-  if (source === undefined) return []
+const previousStableIds = (
+  source: string | undefined
+): {
+  readonly stageIds: ReadonlyArray<string>
+  readonly acceptanceIds: ReadonlyArray<string>
+} => {
+  if (source === undefined) return { stageIds: [], acceptanceIds: [] }
   const parsed = parsePlanHtml(source)
-  return parsed.valid ? parsed.projection.stages.map((stage) => stage.id) : []
+  return parsed.valid
+    ? {
+        stageIds: parsed.projection.stages.map((stage) => stage.id),
+        acceptanceIds: parsed.projection.stages.flatMap((stage) =>
+          stage.acceptance.map((criterion) => criterion.id)
+        )
+      }
+    : { stageIds: [], acceptanceIds: [] }
 }
 
 /**
@@ -118,9 +130,21 @@ export const evaluateOrchestratorProcedure = (
       )
       .map((criterion) => criterion.id)
   ])
-  const oldIds = previousStageIds(observation.previousSource)
-  const currentIds = new Set(stages.map((stage) => stage.id))
-  const missingStableIds = oldIds.filter((id) => !currentIds.has(id))
+  const previousIds = previousStableIds(observation.previousSource)
+  const currentStageIds = new Set(stages.map((stage) => stage.id))
+  const currentAcceptanceIds = new Set(
+    stages.flatMap((stage) =>
+      stage.acceptance.map((criterion) => criterion.id)
+    )
+  )
+  const missingStableIds = [
+    ...previousIds.stageIds
+      .filter((id) => !currentStageIds.has(id))
+      .map((id) => `stage:${id}`),
+    ...previousIds.acceptanceIds
+      .filter((id) => !currentAcceptanceIds.has(id))
+      .map((id) => `acceptance:${id}`)
+  ]
   const amendmentPresent =
     observation.expectedAmendment === undefined ||
     observation.source?.includes(observation.expectedAmendment) === true
@@ -191,9 +215,9 @@ export const evaluateOrchestratorProcedure = (
       passed: missingStableIds.length === 0 && amendmentPresent,
       evidence:
         missingStableIds.length > 0
-          ? `removed stable stage ids: ${missingStableIds.join(", ")}`
+          ? `removed or renamed stable ids: ${missingStableIds.join(", ")}`
           : amendmentPresent
-            ? `${oldIds.length} prior stage ids retained and amendment present`
+            ? `${previousIds.stageIds.length} stage ids and ${previousIds.acceptanceIds.length} acceptance ids retained; amendment present`
             : `missing requested amendment: ${observation.expectedAmendment}`
     }
   ]

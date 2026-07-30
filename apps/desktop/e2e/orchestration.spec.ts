@@ -143,3 +143,108 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
     )
   ).toBe(true)
 })
+
+test("a stopped worker stays interrupted across restart and retries from its checkpoint", async ({
+  launchApp
+}) => {
+  const first = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: {
+      orchestrator: { cli: "codex", model: "gpt-5.6-sol" }
+    }
+  })
+  await expect(appShell(first.window)).toBeVisible()
+
+  await first.window.getByTestId("new-session").click()
+  await first.window
+    .getByPlaceholder("Leave blank for agent naming")
+    .fill("Restartable orchestration")
+  await first.window.getByRole("button", { name: "Create" }).click()
+  await expect(sessionRow(first.window, "Restartable orchestration")).toBeVisible()
+
+  const sessions = JSON.parse(
+    readFileSync(join(first.home, "jingler", "sessions.json"), "utf8")
+  )
+  const worktreePath = sessions[0].worktreePath as string
+  const planDir = join(
+    first.home,
+    "jingler",
+    ".jingler",
+    basename(worktreePath)
+  )
+  const checkpointFile = join(
+    planDir,
+    "orchestration-checkpoints.json"
+  )
+  const checkpoints = () =>
+    JSON.parse(readFileSync(checkpointFile, "utf8")).workers as ReadonlyArray<{
+      agentId: string
+      state: string
+      resumeId: string | null
+    }>
+
+  const composer = first.window.getByPlaceholder("Message Codex…")
+  await composer.fill(
+    "[[plan]] [[worker-hold]] refactor auth to a TokenStore"
+  )
+  await composer.press("Enter")
+  await first.window.getByRole("button", { name: "Plan Review" }).first().click()
+  await first.window
+    .getByRole("button", { name: "Approve and auto", exact: true })
+    .click()
+  await expect(
+    first.window.getByRole("button", {
+      name: "Stop worker worker-release"
+    })
+  ).toBeVisible({ timeout: 20_000 })
+
+  await first.window
+    .getByRole("button", { name: "Stop worker worker-release" })
+    .click()
+  await expect
+    .poll(() => checkpoints().find((worker) => worker.agentId === "worker-release"))
+    .toMatchObject({
+      state: "interrupted",
+      resumeId: expect.any(String)
+    })
+  await expect
+    .poll(() => checkpoints().find((worker) => worker.agentId === "worker-auth"))
+    .toMatchObject({ state: "completed" })
+
+  await first.app.close()
+  const reopened = await launchApp({
+    home: first.home,
+    reposDir: first.reposDir,
+    userDataDir: first.userDataDir,
+    configured: true,
+    withRepo: true
+  })
+  await expect(appShell(reopened.window)).toBeVisible()
+  await reopened.window
+    .getByRole("button", { name: "Plan Review" })
+    .first()
+    .click()
+  await expect(
+    reopened.window.getByRole("button", {
+      name: "Retry worker worker-release"
+    })
+  ).toBeVisible()
+
+  await reopened.window
+    .getByRole("button", { name: "Retry worker worker-release" })
+    .click()
+  await expect
+    .poll(() => checkpoints().find((worker) => worker.agentId === "worker-release"))
+    .toMatchObject({
+      state: "completed",
+      resumeId: expect.any(String)
+    })
+  await expect(
+    reopened.window.getByRole("button", { name: "Use remote" })
+  ).toBeVisible()
+  await reopened.window.getByRole("button", { name: "Use remote" }).click()
+  await expect(reopened.window.getByText("All criteria verified")).toBeVisible({
+    timeout: 30_000
+  })
+})

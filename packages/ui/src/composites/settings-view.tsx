@@ -678,6 +678,7 @@ export function SettingsView({
             onSave={(source) => onSavePlanTemplate?.({ source })}
             clis={clis}
             orchestrator={orchestrator}
+            providers={providers}
             loadModels={loadModels}
             onSaveOrchestrator={onSaveOrchestrator}
             workerRouting={workerRouting}

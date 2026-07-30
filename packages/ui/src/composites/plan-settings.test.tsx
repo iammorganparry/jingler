@@ -170,4 +170,37 @@ describe("PlanSettings", () => {
       )
     ).toBeTruthy()
   })
+
+  it("uses the core resolver's provider default when a saved model disappeared", () => {
+    expect(
+      resolveEffectiveOrchestrator(
+        [
+          {
+            kind: "codex",
+            label: "Codex",
+            binPath: "/bin/codex",
+            version: "1",
+            available: true
+          }
+        ],
+        { cli: "codex", model: "retired-model" },
+        [
+          {
+            cli: "codex",
+            models: [
+              { id: "first-live", label: "First live" },
+              { id: "configured-default", label: "Configured default" }
+            ]
+          }
+        ],
+        {
+          codex: {
+            enabled: true,
+            defaultMode: "ask",
+            defaultModel: "configured-default"
+          }
+        }
+      )
+    ).toEqual({ cli: "codex", model: "configured-default" })
+  })
 })

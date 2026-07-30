@@ -146,4 +146,28 @@ describe("orchestrator procedure eval failures", () => {
       ])
     )
   })
+
+  it("fails an amendment that renames a stable acceptance id", () => {
+    const report = evaluateOrchestratorProcedure({
+      route: { cli: "claude", model: "haiku" },
+      source: source("Require an immutable audit record.").replace(
+        'data-acceptance="schema.1"',
+        'data-acceptance="schema.renamed"'
+      ),
+      previousSource: source(),
+      expectedAmendment: "immutable audit record",
+      availableRoutes: routes,
+      delegated: true,
+      eventsAfterDelegation: []
+    })
+
+    expect(
+      report.assertions.find(
+        (assertion) => assertion.id === "stable-amendment"
+      )
+    ).toMatchObject({
+      passed: false,
+      evidence: expect.stringContaining("acceptance:schema.1")
+    })
+  })
 })

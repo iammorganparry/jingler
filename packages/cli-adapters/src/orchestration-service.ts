@@ -287,16 +287,22 @@ export interface OrchestrationExecutionReport {
   readonly workers: ReadonlyArray<OrchestrationWorkerResult>
 }
 
-interface CachedWorker {
-  readonly input: OrchestrationExecuteInput
-  readonly group: OrchestrationWorkerGroup
-  readonly completedStageIds: ReadonlySet<string>
-  readonly resumeId: string | null
-  readonly attempt: number
-}
-
 const ownerIdFor = (planId: string, agentId: string): string =>
   `plan:${planId}:agent:${agentId}`
+
+const workerStatusFrom = (value: unknown): OrchestrationWorkerStatus => {
+  switch (value) {
+    case "queued":
+    case "running":
+    case "blocked":
+    case "failed":
+    case "interrupted":
+    case "completed":
+      return value
+    default:
+      throw new Error(`Unexpected orchestration worker state: ${String(value)}`)
+  }
+}
 
 const workerPrompt = (
   input: OrchestrationExecuteInput,
@@ -407,7 +413,6 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
     effect: Effect.gen(function* () {
       const adapter = yield* CliAdapter
       const cancelled = yield* Ref.make(new Set<string>())
-      const cachedWorkers = yield* Ref.make(new Map<string, CachedWorker>())
       const liveAdapterFibers = yield* Ref.make(
         new Map<string, Fiber.RuntimeFiber<void, CliExecError>>()
       )
@@ -472,40 +477,30 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
             state: OrchestrationWorkerStatus,
             nextMessage: string | null
           ): Effect.Effect<void> =>
-            Ref.update(cachedWorkers, (workers) =>
-              new Map(workers).set(ownerId, {
-                input,
-                group,
-                completedStageIds: new Set(completed),
-                resumeId,
-                attempt
-              })
-            ).pipe(
-              Effect.zipRight(
-                checkpoint(input.callbacks, {
-                  agentId: group.agentId,
-                  state,
-                  completedStageIds: [...completed],
-                  resumeId,
-                  message: nextMessage,
-                  attempt
-                })
-              )
-            )
+            checkpoint(input.callbacks, {
+              agentId: group.agentId,
+              state,
+              completedStageIds: [...completed],
+              resumeId,
+              message: nextMessage,
+              attempt
+            })
 
-          yield* notifyWorker(input.callbacks, workerUpdate("queued", null))
-          yield* saveCheckpoint("queued", null)
+          const queuedStatus = workerStatusFrom(machine.getSnapshot().value)
+          yield* notifyWorker(input.callbacks, workerUpdate(queuedStatus, null))
+          yield* saveCheckpoint(queuedStatus, null)
 
           if ((yield* Ref.get(cancelled)).has(ownerId)) {
             machine.send({ type: "STOP" })
+            const status = workerStatusFrom(machine.getSnapshot().value)
             message = "Worker stopped before it started."
-            yield* notifyWorker(input.callbacks, workerUpdate("interrupted", message))
-            yield* saveCheckpoint("interrupted", message)
+            yield* notifyWorker(input.callbacks, workerUpdate(status, message))
+            yield* saveCheckpoint(status, message)
             machine.stop()
             return {
               agentId: group.agentId,
               ownerId,
-              status: "interrupted",
+              status,
               completedStageIds: [...completed],
               resumeId,
               message,
@@ -518,14 +513,15 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
           if (!reserved) {
             machine.send({ type: "START" })
             machine.send({ type: "FAIL" })
+            const status = workerStatusFrom(machine.getSnapshot().value)
             message = `Worker "${group.agentId}" is already running.`
-            yield* notifyWorker(input.callbacks, workerUpdate("failed", message))
-            yield* saveCheckpoint("failed", message)
+            yield* notifyWorker(input.callbacks, workerUpdate(status, message))
+            yield* saveCheckpoint(status, message)
             machine.stop()
             return {
               agentId: group.agentId,
               ownerId,
-              status: "failed",
+              status,
               completedStageIds: [...completed],
               resumeId,
               message,
@@ -535,8 +531,9 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
           }
 
           machine.send({ type: "START" })
-          yield* notifyWorker(input.callbacks, workerUpdate("running", null))
-          yield* saveCheckpoint("running", null)
+          const runningStatus = workerStatusFrom(machine.getSnapshot().value)
+          yield* notifyWorker(input.callbacks, workerUpdate(runningStatus, null))
+          yield* saveCheckpoint(runningStatus, null)
 
           const outcome = yield* Effect.gen(function* () {
             for (const stage of group.stages) {
@@ -796,15 +793,6 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                 }
               }
               completed.add(stage.id)
-              yield* Ref.update(cachedWorkers, (workers) =>
-                new Map(workers).set(ownerId, {
-                  input,
-                  group,
-                  completedStageIds: new Set(completed),
-                  resumeId,
-                  attempt
-                })
-              )
               yield* notifyStage(input.callbacks, {
                 sessionId: input.sessionId,
                 planId: input.planId,
@@ -831,13 +819,14 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
           else if (outcome.status === "failed") machine.send({ type: "FAIL" })
           else machine.send({ type: "STOP" })
 
-          yield* notifyWorker(input.callbacks, workerUpdate(outcome.status, message))
-          yield* saveCheckpoint(outcome.status, message)
+          const status = workerStatusFrom(machine.getSnapshot().value)
+          yield* notifyWorker(input.callbacks, workerUpdate(status, message))
+          yield* saveCheckpoint(status, message)
           machine.stop()
             return {
               agentId: group.agentId,
               ownerId,
-              status: outcome.status,
+              status,
               completedStageIds: [...completed],
               resumeId,
               message,
@@ -926,17 +915,6 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                 next.delete(ownerId)
                 return next
               })
-              yield* Ref.update(cachedWorkers, (workers) =>
-                new Map(workers).set(ownerId, {
-                  input,
-                  group,
-                  completedStageIds: new Set(
-                    prior?.completedStageIds ?? []
-                  ),
-                  resumeId: prior?.resumeId ?? null,
-                  attempt: (prior?.attempt ?? 0) + 1
-                })
-              )
             }
             const workers = yield* Effect.forEach(
               groups,
@@ -992,38 +970,9 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
           Effect.map((plans) => plans.has(planId))
         )
 
-      const retryWorker = (request: {
-        readonly planId: string
-        readonly agentId: string
-      }): Effect.Effect<OrchestrationWorkerResult, OrchestrationWorkerNotFoundError> =>
-        Effect.gen(function* () {
-          const ownerId = ownerIdFor(request.planId, request.agentId)
-          const cached = (yield* Ref.get(cachedWorkers)).get(ownerId)
-          if (cached === undefined) {
-            return yield* new OrchestrationWorkerNotFoundError({
-              message: `No worker "${request.agentId}" exists for plan "${request.planId}".`,
-              planId: request.planId,
-              agentId: request.agentId
-            })
-          }
-          yield* Ref.update(cancelled, (current) => {
-            const next = new Set(current)
-            next.delete(ownerId)
-            return next
-          })
-          return yield* runGroup(
-            cached.input,
-            cached.group,
-            cached.completedStageIds,
-            cached.resumeId,
-            cached.attempt + 1
-          )
-        })
-
       return {
         execute,
         stopWorker,
-        retryWorker,
         isPlanRunning
       }
     })

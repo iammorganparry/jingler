@@ -3,6 +3,7 @@ import type {
   CliKind,
   ModelOption,
   OrchestratorPreference,
+  ProvidersConfig,
   WorkerModelRoute,
   WorkerRoutingConfig
 } from "@jingler/core"
@@ -10,6 +11,7 @@ import {
   DEFAULT_PLAN_TEMPLATE_HTML,
   defaultModel,
   parsePlanHtml,
+  resolveOrchestratorPreference,
   resolveWorkerRoutingConfig,
   supportsPlanMode
 } from "@jingler/core"
@@ -30,6 +32,7 @@ export interface PlanSettingsProps {
   readonly onSave?: (source: string) => Promise<void> | void
   readonly clis?: ReadonlyArray<CliInfo>
   readonly orchestrator?: OrchestratorPreference | null
+  readonly providers?: ProvidersConfig | null
   readonly loadModels?: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
   readonly onSaveOrchestrator?: (
     orchestrator: OrchestratorPreference
@@ -235,36 +238,97 @@ const headingsOf = (source: string): ReadonlyArray<string> =>
 
 export const resolveEffectiveOrchestrator = (
   clis: ReadonlyArray<CliInfo>,
-  orchestrator: OrchestratorPreference | null | undefined
+  orchestrator: OrchestratorPreference | null | undefined,
+  catalog: ReadonlyArray<{
+    readonly cli: CliKind
+    readonly models: ReadonlyArray<ModelOption>
+  }> = clis
+    .filter((cli) => cli.available && supportsPlanMode(cli.kind))
+    .map((cli) => ({
+      cli: cli.kind,
+      models: [
+        { id: defaultModel(cli.kind), label: defaultModel(cli.kind) }
+      ]
+    })),
+  providers?: ProvidersConfig | null
 ): OrchestratorPreference | null => {
-  const planning = clis.filter((cli) => cli.available && supportsPlanMode(cli.kind))
-  const configured = planning.find((cli) => cli.kind === orchestrator?.cli)
-  if (configured !== undefined && orchestrator !== null && orchestrator !== undefined) {
-    return orchestrator
+  const config = {
+    ...(orchestrator === null || orchestrator === undefined
+      ? {}
+      : { orchestrator }),
+    ...(providers === null || providers === undefined ? {} : { providers })
   }
-  const fallback = planning[0]
-  return fallback === undefined
-    ? null
-    : { cli: fallback.kind, model: defaultModel(fallback.kind) }
+  return resolveOrchestratorPreference(config, catalog)?.preference ?? null
 }
 
 function OrchestratorSettings({
   clis,
   orchestrator,
+  providers,
   loadModels,
   onSave
 }: {
   clis: ReadonlyArray<CliInfo>
   orchestrator?: OrchestratorPreference | null
+  providers?: ProvidersConfig | null
   loadModels?: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
   onSave?: (orchestrator: OrchestratorPreference) => Promise<void> | void
 }) {
-  const effective = resolveEffectiveOrchestrator(clis, orchestrator)
-  const planning = clis.filter((cli) => cli.available && supportsPlanMode(cli.kind))
+  type ModelCatalog = ReadonlyArray<{
+    readonly cli: CliKind
+    readonly models: ReadonlyArray<ModelOption>
+  }>
+  const planning = useMemo(
+    () => clis.filter((cli) => cli.available && supportsPlanMode(cli.kind)),
+    [clis]
+  )
+  const fallbackCatalog = useMemo<ModelCatalog>(
+    () =>
+      planning.map((cli) => ({
+        cli: cli.kind,
+        models: [
+          { id: defaultModel(cli.kind), label: defaultModel(cli.kind) }
+        ]
+      })),
+    [planning]
+  )
+  const [catalog, setCatalog] = useState<ModelCatalog>(fallbackCatalog)
+  const [catalogLoaded, setCatalogLoaded] = useState(false)
+  useEffect(() => {
+    let live = true
+    setCatalog(fallbackCatalog)
+    setCatalogLoaded(false)
+    if (loadModels === undefined) {
+      return () => {
+        live = false
+      }
+    }
+    void Promise.all(
+      planning.map(async (cli) => ({
+        cli: cli.kind,
+        models: await loadModels(cli.kind).catch(() => [])
+      }))
+    ).then((next) => {
+      if (live) {
+        setCatalog(next)
+        setCatalogLoaded(true)
+      }
+    })
+    return () => {
+      live = false
+    }
+  }, [fallbackCatalog, loadModels, planning])
+
+  const effective = resolveEffectiveOrchestrator(
+    clis,
+    orchestrator,
+    catalog,
+    providers
+  )
   const [selectedCli, setSelectedCli] = useState<CliKind | null>(effective?.cli ?? null)
-  const [models, setModels] = useState<ReadonlyArray<ModelOption>>([])
-  const [modelsLoaded, setModelsLoaded] = useState(false)
   const selected = planning.find((cli) => cli.kind === selectedCli) ?? planning[0]
+  const models =
+    catalog.find((provider) => provider.cli === selected?.kind)?.models ?? []
   const harnessFallback =
     orchestrator !== null &&
     orchestrator !== undefined &&
@@ -274,32 +338,6 @@ function OrchestratorSettings({
   useEffect(() => {
     setSelectedCli(effective?.cli ?? null)
   }, [effective?.cli])
-
-  useEffect(() => {
-    if (selected === undefined || loadModels === undefined) {
-      setModels([])
-      setModelsLoaded(false)
-      return
-    }
-    setModelsLoaded(false)
-    let live = true
-    void loadModels(selected.kind)
-      .then((options) => {
-        if (live) {
-          setModels(options)
-          setModelsLoaded(true)
-        }
-      })
-      .catch(() => {
-        if (live) {
-          setModels([])
-          setModelsLoaded(true)
-        }
-      })
-    return () => {
-      live = false
-    }
-  }, [selected, loadModels])
 
   if (effective === null || selected === undefined) {
     return (
@@ -313,13 +351,13 @@ function OrchestratorSettings({
   }
 
   const selectedModel =
-    selected.kind === orchestrator?.cli &&
-    models.some((model) => model.id === orchestrator.model)
-      ? orchestrator.model
+    selected.kind === effective.cli &&
+    models.some((model) => model.id === effective.model)
+      ? effective.model
       : models[0]?.id ?? defaultModel(selected.kind)
   const modelFallback =
     !harnessFallback &&
-    modelsLoaded &&
+    catalogLoaded &&
     selected.kind === orchestrator?.cli &&
     !models.some((model) => model.id === orchestrator.model)
 
@@ -343,7 +381,10 @@ function OrchestratorSettings({
           onValueChange={(value) => {
             const cli = value as CliKind
             setSelectedCli(cli)
-            void onSave?.({ cli, model: defaultModel(cli) })
+            const model =
+              catalog.find((provider) => provider.cli === cli)?.models[0]?.id ??
+              defaultModel(cli)
+            void onSave?.({ cli, model })
           }}
         >
           <SelectTrigger aria-label="Orchestrator harness">
@@ -400,6 +441,7 @@ export function PlanSettings({
   onSave,
   clis = [],
   orchestrator,
+  providers,
   loadModels,
   onSaveOrchestrator,
   workerRouting,
@@ -418,6 +460,7 @@ export function PlanSettings({
       <OrchestratorSettings
         clis={clis}
         orchestrator={orchestrator}
+        providers={providers}
         loadModels={loadModels}
         onSave={onSaveOrchestrator}
       />

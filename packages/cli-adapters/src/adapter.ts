@@ -291,7 +291,10 @@ const refreshFlow: NonNullable<Plan["steps"][number]["graph"]> = {
  * "needs-verification" while an approval (which does) reaches "done". A mermaid
  * `data-diagram` block exercises the diagram render path in Plan Review.
  */
-const scriptedPlanHtml = (summary: string): string => `<h1>PRD: ${summary}</h1>
+const scriptedPlanHtml = (
+  summary: string,
+  holdWorker = false
+): string => `<h1>PRD: ${summary}</h1>
 <h2>Context</h2>
 <p>Move session token handling into a dedicated TokenStore, add a guarded 401-retry refresh path, update the tests, and open a PR.</p>
 <h2>Technical design</h2>
@@ -352,6 +355,7 @@ const scriptedPlanHtml = (summary: string): string => `<h1>PRD: ${summary}</h1>
 <section data-stage="s_06" data-title="Open PR #482" data-depends-on="" data-complexity="low">
 <h3>Intent</h3>
 <p>Ship the refactor for review.</p>
+${holdWorker ? "<p>[[worker-hold]] Wait for an explicit stop before completing the first attempt.</p>" : ""}
 <div data-assignment data-agent-id="worker-release" data-cli="codex" data-model="gpt-5.6-sol" data-reason="Release preparation is independent and can run concurrently on a lower-cost route." data-status="queued"></div>
 <div data-acceptance="s_06.1" data-status="pending">A PR is opened against main.</div>
 </section>
@@ -360,7 +364,11 @@ const scriptedPlanHtml = (summary: string): string => `<h1>PRD: ${summary}</h1>
 <h2>Rollout</h2>
 <p>Implement stages in order and keep the canonical revision recoverable.</p>`
 
-export const scriptedPlan = (sessionId: string, rev: number): Plan => ({
+export const scriptedPlan = (
+  sessionId: string,
+  rev: number,
+  holdWorker = false
+): Plan => ({
   id: `plan_${sessionId}_${rev}`,
   summary: rev > 1 ? "Refactor auth flow (revised)" : "Refactor auth flow",
   structured: true,
@@ -377,7 +385,10 @@ export const scriptedPlan = (sessionId: string, rev: number): Plan => ({
   ],
   comments: [],
   status: "proposed",
-  raw: scriptedPlanHtml(rev > 1 ? "Refactor auth flow (revised)" : "Refactor auth flow")
+  raw: scriptedPlanHtml(
+    rev > 1 ? "Refactor auth flow (revised)" : "Refactor auth flow",
+    holdWorker
+  )
 })
 
 /**
@@ -454,6 +465,12 @@ export const scriptedRun =
           name: "Bash",
           target: "pnpm test"
         })
+        if (
+          spec.prompt.includes("[[worker-hold]]") &&
+          spec.resumeId === null
+        ) {
+          yield* Effect.never
+        }
         yield* pause
         yield* emit({
           _tag: "ToolEnd",
@@ -721,7 +738,13 @@ export const scriptedRun =
         yield* pause
         let rev = spec.prompt.includes("[[amendment]]") ? 2 : 1
         while (true) {
-          const decision = yield* proposePlan(scriptedPlan(sessionId, rev))
+          const decision = yield* proposePlan(
+            scriptedPlan(
+              sessionId,
+              rev,
+              spec.prompt.includes("[[worker-hold]]")
+            )
+          )
           if (decision._tag === "Approve") {
             yield* emit({ _tag: "Assistant", text: "Plan approved — executing the steps." })
             yield* pause

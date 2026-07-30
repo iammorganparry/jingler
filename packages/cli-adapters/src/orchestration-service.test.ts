@@ -13,6 +13,7 @@ import {
 } from "./orchestration-service.js"
 import type {
   OrchestrationAssignment,
+  OrchestrationCheckpoint,
   OrchestrationExecuteInput,
   OrchestrationSessionSpecRequest,
   OrchestrationStage
@@ -311,17 +312,29 @@ describe("OrchestrationService", () => {
       stop: () => Effect.void
     }
     const serviceLayer = layerFor(adapter)
+    const stages = [
+      stage("01", "agent-a"),
+      stage("02", "agent-a", { dependsOn: ["01"] })
+    ]
+    const checkpoints = new Map<string, OrchestrationCheckpoint>()
+    const callbacks = {
+      onCheckpoint: (checkpoint: OrchestrationCheckpoint) =>
+        Effect.sync(() => {
+          checkpoints.set(checkpoint.agentId, checkpoint)
+        })
+    }
     const program = Effect.gen(function* () {
       const first = yield* OrchestrationService.execute(
-        input([
-          stage("01", "agent-a"),
-          stage("02", "agent-a", { dependsOn: ["01"] })
-        ])
+        input(stages, { callbacks })
       )
-      const retried = yield* OrchestrationService.retryWorker({
-        planId: "plan-1",
-        agentId: "agent-a"
-      })
+      const retryReport = yield* OrchestrationService.execute(
+        input(stages, {
+          callbacks,
+          checkpoints: [...checkpoints.values()],
+          agentIds: ["agent-a"]
+        })
+      )
+      const retried = retryReport.workers[0]!
       return { first, retried }
     }).pipe(Effect.provide(serviceLayer))
 
@@ -598,14 +611,26 @@ describe("OrchestrationService", () => {
         }),
       stop: () => Effect.void
     }
+    const stages = [stage("01", "agent-a")]
+    const checkpoints = new Map<string, OrchestrationCheckpoint>()
+    const callbacks = {
+      onCheckpoint: (checkpoint: OrchestrationCheckpoint) =>
+        Effect.sync(() => {
+          checkpoints.set(checkpoint.agentId, checkpoint)
+        })
+    }
     const program = Effect.gen(function* () {
       const first = yield* OrchestrationService.execute(
-        input([stage("01", "agent-a")])
+        input(stages, { callbacks })
       )
-      const retried = yield* OrchestrationService.retryWorker({
-        planId: "plan-1",
-        agentId: "agent-a"
-      })
+      const retryReport = yield* OrchestrationService.execute(
+        input(stages, {
+          callbacks,
+          checkpoints: [...checkpoints.values()],
+          agentIds: ["agent-a"]
+        })
+      )
+      const retried = retryReport.workers[0]!
       return { first, retried }
     })
 

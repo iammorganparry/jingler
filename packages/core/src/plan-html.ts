@@ -1,4 +1,5 @@
 import { type HTMLElement, NodeType, parse } from "node-html-parser"
+import { CLI_KINDS } from "./cli.js"
 import type {
   PlanAcceptance,
   PlanAcceptanceStatus,
@@ -152,13 +153,6 @@ const EXECUTION_STATUSES: ReadonlyArray<PlanStageExecutionStatus> = [
   "interrupted",
   "completed"
 ]
-const WORKER_CLIS: ReadonlyArray<PlanStageAssignment["cli"]> = [
-  "claude",
-  "codex",
-  "cursor",
-  "opencode"
-]
-
 const dependenciesFrom = (el: HTMLElement): ReadonlyArray<string> => [
   ...new Set(
     (el.getAttribute("data-depends-on") ?? "")
@@ -284,7 +278,7 @@ export const parsePlanHtml = (source: string): PlanHtmlResult => {
         assignmentElement.getAttribute("data-assignment") ??
         ""
       const rawCli = assignmentElement.getAttribute("data-cli") ?? ""
-      const cli = WORKER_CLIS.find((candidate) => candidate === rawCli)
+      const cli = CLI_KINDS.find((candidate) => candidate === rawCli)
       const model = assignmentElement.getAttribute("data-model") ?? ""
       const reason = assignmentElement.getAttribute("data-reason") ?? ""
       const rawExecutionStatus = assignmentElement.getAttribute("data-status") ?? "queued"

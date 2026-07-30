@@ -1,5 +1,6 @@
 import { Schema } from "effect"
 import { parse } from "node-html-parser"
+import { CliKind } from "./cli.js"
 import type { Plan } from "./conversation.js"
 
 /**
@@ -59,18 +60,8 @@ export type PlanPrdSection = Schema.Schema.Type<typeof PlanPrdSection>
 export const PlanStageComplexity = Schema.Literal("low", "medium", "high")
 export type PlanStageComplexity = Schema.Schema.Type<typeof PlanStageComplexity>
 
-/**
- * Kept local to the plan schema to avoid a runtime schema cycle:
- * `domain.ts` owns `CliKind` and imports `PlanTemplateConfig` from this module.
- * The literal set intentionally mirrors `CliKind` and remains structurally
- * assignable to it.
- */
-export const PlanWorkerCli = Schema.Literal(
-  "claude",
-  "codex",
-  "cursor",
-  "opencode"
-)
+/** Worker routes use the same provider schema as sessions and discovery. */
+export const PlanWorkerCli = CliKind
 export type PlanWorkerCli = Schema.Schema.Type<typeof PlanWorkerCli>
 
 /** One concrete provider/model target selected by the worker router. */

@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { CLI_KINDS, CliKind } from "./cli.js"
 import { BUDGET_RANGE, DEFAULT_BUDGET_TOKENS } from "./context.js"
 import {
   PlanTemplateConfig,
@@ -14,12 +15,7 @@ import { ThemeConfig } from "./theme.js"
 
 // ── CLI discovery ────────────────────────────────────────────────────────────
 
-/** Every coding harness a session can run on. */
-export const CliKind = Schema.Literal("claude", "codex", "cursor", "opencode")
-export type CliKind = Schema.Schema.Type<typeof CliKind>
-
-/** Every harness kind, for exhaustive iteration and for validating parsed input. */
-export const CLI_KINDS: ReadonlyArray<CliKind> = CliKind.literals
+export { CLI_KINDS, CliKind } from "./cli.js"
 
 /** The outcome of probing for one CLI on the host. */
 export const CliInfo = Schema.Struct({

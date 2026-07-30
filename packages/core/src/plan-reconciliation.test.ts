@@ -29,7 +29,7 @@ const assignment = (
   `<div data-assignment data-agent-id="${agentId}" data-cli="codex" data-model="gpt-5" data-reason="Stable component owner." data-status="${status}"></div>`
 
 describe("reconcilePlanAmendment", () => {
-  it("preserves unchanged evidence and the running component's existing assignee", () => {
+  it("resets evidence for a changed running stage and preserves its existing assignee", () => {
     const previous = documentFrom(`<h1>PRD: Amend safely</h1>
 <section data-stage="01" data-title="Worker stage" data-complexity="high">
 ${assignment("worker-a", "running")}
@@ -55,8 +55,8 @@ ${assignment("worker-b", "queued")}
       {
         id: "01.1",
         text: "The stable behavior works.",
-        status: "passed",
-        evidence: "unit test green"
+        status: "pending",
+        evidence: null
       },
       {
         id: "01.2",
@@ -167,6 +167,34 @@ ${assignment("worker-b", "queued")}
     expect(reconciled.projection.stages[0]).toMatchObject({
       executionStatus: "completed",
       assignment: { agentId: "worker-a" },
+      acceptance: [
+        { id: "01.1", status: "passed", evidence: "green" }
+      ]
+    })
+  })
+
+  it("ignores agent-authored worker annotations", () => {
+    const previous = documentFrom(`<h1>PRD: Fingerprint annotations</h1>
+<section data-stage="01" data-title="Stable" data-complexity="medium">
+${assignment("worker-a", "completed")}
+<p>Implement the stable behavior.</p>
+<div data-acceptance="01.1" data-status="passed" data-evidence="green">Tests pass.</div>
+</section>`)
+    const replacement = `<h1>PRD: Fingerprint annotations</h1>
+<section data-stage="01" data-title="Stable" data-complexity="medium">
+${assignment("worker-b", "queued")}
+<p>Implement the stable behavior.</p>
+<div data-acceptance="01.1" data-status="pending">Tests pass.</div>
+<aside data-annotation="worker-note" data-stage="01" data-author="agent" data-status="open">Worker was interrupted.</aside>
+</section>`
+
+    const reconciled = reconcilePlanAmendment(previous, replacement)
+
+    expect(reconciled.valid).toBe(true)
+    if (!reconciled.valid) return
+    expect(reconciled.changedStageIds).toEqual([])
+    expect(reconciled.projection.stages[0]).toMatchObject({
+      executionStatus: "completed",
       acceptance: [
         { id: "01.1", status: "passed", evidence: "green" }
       ]

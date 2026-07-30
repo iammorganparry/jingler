@@ -153,13 +153,19 @@ const reconcileStages = (
 const reconcileCriteria = (
   replacementRoot: HTMLElement,
   previousCriteria: ReadonlyMap<string, PlanAcceptance>,
-  replacementCriteria: ReadonlyMap<string, PlanAcceptance>
+  replacementCriteria: ReadonlyMap<string, PlanAcceptance>,
+  changedCriterionIds: ReadonlySet<string>
 ): void => {
   for (const criterionElement of replacementRoot.querySelectorAll("[data-acceptance]")) {
     const criterionId = criterionElement.getAttribute("data-acceptance") ?? ""
     const current = replacementCriteria.get(criterionId)
     const prior = previousCriteria.get(criterionId)
-    if (prior !== undefined && current !== undefined && prior.text === current.text) {
+    if (
+      !changedCriterionIds.has(criterionId) &&
+      prior !== undefined &&
+      current !== undefined &&
+      prior.text === current.text
+    ) {
       criterionElement.setAttribute("data-status", prior.status)
       if (prior.evidence === null || prior.evidence.length === 0) {
         criterionElement.removeAttribute("data-evidence")
@@ -216,10 +222,18 @@ export const reconcilePlanAmendment = (
     previousStages,
     replacementStages
   )
+  const changedCriterionIds = new Set(
+    changedStageIds.flatMap(
+      (stageId) =>
+        replacementStages.get(stageId)?.acceptance.map((criterion) => criterion.id) ??
+        []
+    )
+  )
   reconcileCriteria(
     replacementRoot,
     criteriaById(previous.projection.stages),
-    criteriaById(replacement.projection.stages)
+    criteriaById(replacement.projection.stages),
+    changedCriterionIds
   )
 
   const reconciled = parsePlanHtml(replacementRoot.toString())
