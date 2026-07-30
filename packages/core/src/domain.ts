@@ -1,6 +1,10 @@
 import { Schema } from "effect"
+import { CLI_KINDS, CliKind } from "./cli.js"
 import { BUDGET_RANGE, DEFAULT_BUDGET_TOKENS } from "./context.js"
-import { PlanTemplateConfig } from "./plan-document.js"
+import {
+  PlanTemplateConfig,
+  WorkerRoutingConfig
+} from "./plan-document.js"
 import { ThemeConfig } from "./theme.js"
 
 /**
@@ -11,12 +15,7 @@ import { ThemeConfig } from "./theme.js"
 
 // ── CLI discovery ────────────────────────────────────────────────────────────
 
-/** Every coding harness a session can run on. */
-export const CliKind = Schema.Literal("claude", "codex", "cursor", "opencode")
-export type CliKind = Schema.Schema.Type<typeof CliKind>
-
-/** Every harness kind, for exhaustive iteration and for validating parsed input. */
-export const CLI_KINDS: ReadonlyArray<CliKind> = CliKind.literals
+export { CLI_KINDS, CliKind } from "./cli.js"
 
 /** The outcome of probing for one CLI on the host. */
 export const CliInfo = Schema.Struct({
@@ -235,6 +234,9 @@ export type IssueAutomations = Schema.Schema.Type<typeof IssueAutomations>
 
 /** A single agent session shown in the sidebar and opened in the main pane. */
 /** One isolated conversation inside a session's shared worktree. */
+export const ChatRole = Schema.Literal("direct", "orchestrator")
+export type ChatRole = Schema.Schema.Type<typeof ChatRole>
+
 export const Chat = Schema.Struct({
   id: Schema.String,
   /** Null until the first message provides an automatic title. */
@@ -244,6 +246,11 @@ export const Chat = Schema.Struct({
   /** Provider thread identities belong to the chat, not the shared worktree. */
   resumeId: Schema.optional(Schema.String),
   /** Permission and model choices are restored independently for each chat. */
+  /**
+   * What this conversation is responsible for. Absent means `direct`, which
+   * keeps sessions written before orchestration behaving exactly as they did.
+   */
+  role: Schema.optional(ChatRole),
   mode: Schema.optional(PermissionMode),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
   model: Schema.optional(Schema.String),
@@ -251,6 +258,10 @@ export const Chat = Schema.Struct({
 })
 export type Chat = Schema.Schema.Type<typeof Chat>
 export type ChatId = Chat["id"]
+
+/** Backward-compatible semantic role for a persisted chat. */
+export const chatRoleOf = (chat: Pick<Chat, "role">): ChatRole =>
+  chat.role ?? "direct"
 
 export const Session = Schema.Struct({
   id: Schema.String,
@@ -519,6 +530,25 @@ export const ProviderConfig = Schema.Struct({
 export type ProviderConfig = Schema.Schema.Type<typeof ProviderConfig>
 
 /**
+ * The harness/model pair that owns planning for every newly-created session.
+ * This is deliberately a real `CliKind`, not a synthetic Jingler provider:
+ * orchestration is a role Jingler layers over any planning-capable harness.
+ */
+export const OrchestratorPreference = Schema.Struct({
+  cli: CliKind,
+  model: Schema.String
+})
+export type OrchestratorPreference = Schema.Schema.Type<typeof OrchestratorPreference>
+
+/** The effective route plus enough information for Settings to name a fallback. */
+export const OrchestratorResolution = Schema.Struct({
+  preference: OrchestratorPreference,
+  isFallback: Schema.Boolean,
+  fallbackReason: Schema.optional(Schema.String)
+})
+export type OrchestratorResolution = Schema.Schema.Type<typeof OrchestratorResolution>
+
+/**
  * Where an opencode provider's credential came from. opencode resolves providers
  * from the user's own setup, and this says which part of it:
  *  - `env` — an environment variable they exported (`OPENROUTER_API_KEY`, …)
@@ -702,6 +732,17 @@ export const WorkspaceConfig = Schema.Struct({
    * available one", so a fresh install can still create sessions.
    */
   defaultCli: Schema.optional(CliKind),
+  /**
+   * The preferred planner for new sessions. Absent on legacy configs; the
+   * resolver chooses the first installed planning-capable harness in that case.
+   */
+  orchestrator: Schema.optional(OrchestratorPreference),
+  /**
+   * Concrete implementation-worker routes by plan-stage complexity. Kept
+   * separate from `orchestrator`: choosing a cheap planner must not silently
+   * downgrade high-complexity implementation work.
+   */
+  workerRouting: Schema.optional(WorkerRoutingConfig),
   /** Custom PRD/MDX structure injected into every native planning turn. */
   planTemplate: Schema.optional(PlanTemplateConfig),
   /**
@@ -765,6 +806,58 @@ export const WorkspaceConfig = Schema.Struct({
   disabledPlugins: Schema.optional(Schema.Array(Schema.String))
 })
 export type WorkspaceConfig = Schema.Schema.Type<typeof WorkspaceConfig>
+
+/**
+ * Resolve a stored orchestrator against the live, uncurated model catalogue.
+ *
+ * Catalogue order is discovery order, so the fallback is deterministic. A
+ * provider default is preferred when it still exists; otherwise the provider's
+ * first live model is used. `null` means this host has no planning-capable
+ * harness/model pair and the caller must retain its existing no-provider
+ * behaviour.
+ */
+export const resolveOrchestratorPreference = (
+  config: Pick<WorkspaceConfig, "orchestrator" | "providers"> | null | undefined,
+  catalog: ReadonlyArray<{
+    readonly cli: CliKind
+    readonly models: ReadonlyArray<{ readonly id: string }>
+  }>
+): OrchestratorResolution | null => {
+  const planning = catalog.filter(
+    (provider) =>
+      supportsPlanMode(provider.cli) &&
+      provider.models.length > 0 &&
+      config?.providers?.[provider.cli]?.enabled !== false
+  )
+  const preferred = config?.orchestrator
+  const exactProvider = preferred
+    ? planning.find((provider) => provider.cli === preferred.cli)
+    : undefined
+  const exactModel = exactProvider?.models.find((model) => model.id === preferred?.model)
+  if (preferred && exactModel) {
+    return {
+      preference: preferred,
+      isFallback: false
+    }
+  }
+
+  const provider = exactProvider ?? planning[0]
+  if (!provider) return null
+  const configuredModel = config?.providers?.[provider.cli]?.defaultModel
+  const model =
+    provider.models.find((candidate) => candidate.id === configuredModel) ??
+    provider.models[0]
+  if (!model) return null
+
+  const preference = { cli: provider.cli, model: model.id }
+  return {
+    preference,
+    isFallback: true,
+    fallbackReason: preferred
+      ? `Configured orchestrator ${preferred.cli}/${preferred.model} is unavailable; using ${preference.cli}/${preference.model}.`
+      : `No orchestrator is configured; using ${preference.cli}/${preference.model}.`
+  }
+}
 
 /** Plan mode runs its (read-only) commands unattended unless told otherwise. */
 export const PLAN_AUTO_RUN_DEFAULT = true

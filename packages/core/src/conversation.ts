@@ -1684,6 +1684,34 @@ export const PLAN_EVIDENCE_INSTRUCTIONS: ReadonlyArray<string> = [
   "Do not claim passed without evidence. Unreported criteria remain pending and keep the plan in needs-verification."
 ]
 
+/**
+ * Remove the line-oriented plan evidence protocol from user-facing prose.
+ *
+ * PLAN_RESULT is a machine channel: AgentRunner parses it into the canonical
+ * plan before this text is persisted, and Plan.watch drives the progress UI
+ * from that structured state. Keeping the marker in the transcript exposes an
+ * implementation detail and makes a completed turn read like a log dump.
+ *
+ * A trailing partial protocol prefix is removed too. Assistant output is
+ * streamed in arbitrary chunks, so the renderer can briefly receive
+ * `PLAN_RES` before the remainder of the marker arrives.
+ */
+export const stripPlanResultProtocol = (text: string): string => {
+  const protocol = "PLAN_RESULT"
+  const lines = text.split(/\r?\n/)
+  return lines
+    .filter((line) => {
+      const trimmed = line.trimStart()
+      return !(
+        trimmed.startsWith(protocol) ||
+        (trimmed.startsWith("PLAN_") && protocol.startsWith(trimmed))
+      )
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd()
+}
+
 export const resumePlanPrompt = (plan: Plan): string => {
   const steps = plan.steps
     .filter((s) => s.kind !== "branch-arm")

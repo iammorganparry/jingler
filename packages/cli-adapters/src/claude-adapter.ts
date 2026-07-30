@@ -1112,7 +1112,12 @@ export const runClaude = (
             }
             return {
               behavior: "deny",
-              message: decision._tag === "Revise" ? decision.feedback : "Plan rejected by the operator."
+              message:
+                decision._tag === "Revise"
+                  ? decision.feedback
+                  : decision._tag === "Delegate"
+                    ? "Plan approved. Jingler is executing it with assigned worker agents."
+                    : "Plan rejected by the operator."
             }
           }
           // Confinement first, and ahead of `toPermissionRequest`: read tools
@@ -1225,7 +1230,13 @@ export const runClaude = (
             permissionMode: mapPermissionMode(spec.mode),
             ...mapClaudeReasoning(spec.reasoningEffort, spec.thinkingEnabled),
             ...(spec.mode === "plan"
-              ? { planModeInstructions: planModeInstructions(spec.planTemplate) }
+              ? {
+                  planModeInstructions: planModeInstructions(
+                    spec.planTemplate,
+                    spec.orchestrationRoutes,
+                    spec.workerRouting
+                  )
+                }
               : {}),
             ...(spec.readOnly ? { disallowedTools: [...READ_ONLY_DISALLOWED] } : {}),
             includePartialMessages: true,

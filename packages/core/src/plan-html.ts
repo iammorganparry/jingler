@@ -1,12 +1,20 @@
 import { type HTMLElement, NodeType, parse } from "node-html-parser"
+import { CLI_KINDS } from "./cli.js"
 import type {
   PlanAcceptance,
   PlanAcceptanceStatus,
   PlanAnnotation,
   PlanPrd,
   PlanPrdSection,
-  PlanPrdStage
+  PlanPrdStage,
+  PlanStageAssignment,
+  PlanStageComplexity,
+  PlanStageExecutionStatus
 } from "./plan-document.js"
+import {
+  buildPlanExecutionGraph,
+  type PlanExecutionDiagnosticCode
+} from "./plan-execution.js"
 
 /**
  * Jingler plans are HTML documents rendered/edited in a Tiptap ("Notion-doc")
@@ -24,7 +32,10 @@ import type {
  *   <h1>PRD: ...</h1>                                 the title
  *   <h2>Context</h2><p>...</p>                        a prose section (h2 + body)
  *   <div data-diagram="mermaid"><pre>graph TD...</pre> an embeddable flow diagram
- *   <section data-stage="01" data-title="...">        a stage
+ *   <section data-stage="01" data-title="..." data-depends-on="00"
+ *            data-complexity="high">                  a stage
+ *     <div data-assignment data-agent-id="worker-a" data-cli="codex"
+ *          data-model="gpt-5" data-reason="..." data-status="queued"></div>
  *     <div data-acceptance="01.1" data-status="pending" data-evidence="...">...</div>
  *     <aside data-annotation="a1" data-stage="01" data-author="user"
  *            data-status="open" data-quote="..." data-prefix="..." data-suffix="...">...</aside>
@@ -46,6 +57,11 @@ export interface PlanHtmlDiagnostic {
     | "missing-acceptance"
     | "duplicate-id"
     | "invalid-status"
+    | "invalid-complexity"
+    | "invalid-assignment"
+    | "invalid-execution-status"
+    | "running-stage-removed"
+    | PlanExecutionDiagnosticCode
   readonly message: string
 }
 
@@ -81,6 +97,8 @@ const ALLOWED_ATTRS = new Set([
   "data-stage", "data-title", "data-acceptance", "data-status", "data-evidence",
   "data-annotation", "data-author", "data-created-at",
   "data-quote", "data-prefix", "data-suffix", "data-diagram",
+  "data-depends-on", "data-complexity", "data-assignment", "data-agent-id",
+  "data-cli", "data-model", "data-reason", "data-execution-status",
   // Per-stage file linkage: <ul data-files><li data-change data-added data-removed>path</li></ul>.
   "data-files", "data-change", "data-added", "data-removed",
   "colspan", "rowspan"
@@ -126,6 +144,23 @@ export const sanitizePlanHtml = (html: string): string => {
 }
 
 const STATUSES: ReadonlyArray<PlanAcceptanceStatus> = ["pending", "passed", "failed", "waived"]
+const COMPLEXITIES: ReadonlyArray<PlanStageComplexity> = ["low", "medium", "high"]
+const EXECUTION_STATUSES: ReadonlyArray<PlanStageExecutionStatus> = [
+  "queued",
+  "running",
+  "blocked",
+  "failed",
+  "interrupted",
+  "completed"
+]
+const dependenciesFrom = (el: HTMLElement): ReadonlyArray<string> => [
+  ...new Set(
+    (el.getAttribute("data-depends-on") ?? "")
+      .split(/[\s,]+/)
+      .map((dependency) => dependency.trim())
+      .filter((dependency) => dependency.length > 0)
+  )
+]
 
 const acceptanceFrom = (el: HTMLElement): PlanAcceptance | { readonly invalid: true } => {
   const status = (el.getAttribute("data-status") ?? "pending") as PlanAcceptanceStatus
@@ -218,16 +253,92 @@ export const parsePlanHtml = (source: string): PlanHtmlResult => {
       })
     }
     const intent = el.querySelectorAll("h3").find((h) => /intent/i.test(h.text))
+    const rawComplexity = el.getAttribute("data-complexity") ?? "medium"
+    const complexity = COMPLEXITIES.find((candidate) => candidate === rawComplexity)
+    if (complexity === undefined) {
+      diagnostics.push({
+        code: "invalid-complexity",
+        message: `Stage "${id}" has invalid complexity "${rawComplexity}". Use low, medium, or high.`
+      })
+    }
+
+    const assignmentElements = el.querySelectorAll("[data-assignment]")
+    if (assignmentElements.length > 1) {
+      diagnostics.push({
+        code: "invalid-assignment",
+        message: `Stage "${id}" must contain at most one worker assignment.`
+      })
+    }
+    const assignmentElement = assignmentElements[0]
+    let assignment: PlanStageAssignment | null = null
+    let executionStatus: PlanStageExecutionStatus = "queued"
+    if (assignmentElement !== undefined) {
+      const agentId =
+        assignmentElement.getAttribute("data-agent-id") ??
+        assignmentElement.getAttribute("data-assignment") ??
+        ""
+      const rawCli = assignmentElement.getAttribute("data-cli") ?? ""
+      const cli = CLI_KINDS.find((candidate) => candidate === rawCli)
+      const model = assignmentElement.getAttribute("data-model") ?? ""
+      const reason = assignmentElement.getAttribute("data-reason") ?? ""
+      const rawExecutionStatus = assignmentElement.getAttribute("data-status") ?? "queued"
+      const parsedExecutionStatus = EXECUTION_STATUSES.find(
+        (candidate) => candidate === rawExecutionStatus
+      )
+      if (parsedExecutionStatus === undefined) {
+        diagnostics.push({
+          code: "invalid-execution-status",
+          message: `Stage "${id}" has invalid execution status "${rawExecutionStatus}".`
+        })
+      } else {
+        executionStatus = parsedExecutionStatus
+      }
+      if (
+        agentId.trim().length === 0 ||
+        cli === undefined ||
+        model.trim().length === 0 ||
+        reason.trim().length === 0
+      ) {
+        diagnostics.push({
+          code: "invalid-assignment",
+          message: `Stage "${id}" assignment needs data-agent-id, a supported data-cli, data-model, and data-reason.`
+        })
+      } else {
+        assignment = { agentId, cli, model, reason }
+      }
+    } else {
+      const rawExecutionStatus = el.getAttribute("data-execution-status")
+      if (rawExecutionStatus !== undefined) {
+        const parsedExecutionStatus = EXECUTION_STATUSES.find(
+          (candidate) => candidate === rawExecutionStatus
+        )
+        if (parsedExecutionStatus === undefined) {
+          diagnostics.push({
+            code: "invalid-execution-status",
+            message: `Stage "${id}" has invalid execution status "${rawExecutionStatus}".`
+          })
+        } else {
+          executionStatus = parsedExecutionStatus
+        }
+      }
+    }
     stages.push({
       id,
       title: el.getAttribute("data-title") ?? "",
       intent: intent?.nextElementSibling?.text.trim() ?? "",
       markdown: el.innerHTML.trim(),
-      acceptance
+      acceptance,
+      dependencies: dependenciesFrom(el),
+      complexity: complexity ?? "medium",
+      assignment,
+      executionStatus
     })
   }
   if (stages.length === 0) {
     diagnostics.push({ code: "missing-stage", message: "A plan must contain at least one stage." })
+  }
+  for (const diagnostic of buildPlanExecutionGraph(stages).diagnostics) {
+    diagnostics.push({ code: diagnostic.code, message: diagnostic.message })
   }
 
   // Prose sections: each top-level <h2> and the flow until the next <h2>/stage.
@@ -293,6 +404,64 @@ export const updatePlanCriterionHtml = (
   return root.toString()
 }
 
+/**
+ * Update one stage's durable worker state without rewriting planner-owned
+ * prose. Assigned stages carry the state on their assignment card; legacy
+ * stages use the section-level fallback attribute.
+ */
+export const updatePlanStageExecutionHtml = (
+  html: string,
+  stageId: string,
+  status: PlanStageExecutionStatus
+): string | null => {
+  const root = parse(html)
+  const stage = root.querySelector(`section[data-stage="${stageId}"]`)
+  if (stage === null) return null
+  const assignment = stage.querySelector("[data-assignment]")
+  if (assignment === null) stage.setAttribute("data-execution-status", status)
+  else assignment.setAttribute("data-status", status)
+  return root.toString()
+}
+
+/**
+ * Record or replace a mechanical worker note using a stable annotation id.
+ * Replacing keeps retries from appending the same blocker repeatedly.
+ */
+export const upsertPlanWorkerAnnotationHtml = (
+  html: string,
+  annotation: {
+    readonly id: string
+    readonly stageId: string
+    readonly body: string
+    readonly status: "open" | "resolved"
+    readonly createdAt: string
+  }
+): string | null => {
+  const root = parse(html)
+  const stage = root.querySelector(
+    `section[data-stage="${annotation.stageId}"]`
+  )
+  if (stage === null) return null
+  root.querySelector(`[data-annotation="${annotation.id}"]`)?.remove()
+  stage.insertAdjacentHTML(
+    "beforeend",
+    `<aside data-annotation="${escapeAttr(annotation.id)}" data-stage="${escapeAttr(annotation.stageId)}" data-author="agent" data-status="${annotation.status}" data-created-at="${escapeAttr(annotation.createdAt)}">${escapeText(annotation.body)}</aside>`
+  )
+  return root.toString()
+}
+
+/** Resolve a prior worker blocker/failure note after a successful retry. */
+export const resolvePlanWorkerAnnotationHtml = (
+  html: string,
+  annotationId: string
+): string => {
+  const root = parse(html)
+  root
+    .querySelector(`[data-annotation="${annotationId}"]`)
+    ?.setAttribute("data-status", "resolved")
+  return root.toString()
+}
+
 /** Append an annotation into its stage (or globally) as an <aside> node. */
 export const appendPlanAnnotationHtml = (
   html: string,
@@ -335,11 +504,12 @@ export const DEFAULT_PLAN_TEMPLATE_HTML = `<h1>PRD: [short outcome]</h1>
 <ul><li>[Boundary that keeps this plan focused.]</li></ul>
 <h2>Technical design</h2>
 <p>[Describe the architecture and data flow.]</p>
-<section data-stage="01" data-title="[First independently verifiable stage]">
+<section data-stage="01" data-title="[First independently verifiable stage]" data-depends-on="" data-complexity="medium">
 <h3>Intent</h3>
 <p>[Why this stage exists.]</p>
 <h3>Approach</h3>
 <ol><li>[Bounded implementation action.]</li></ol>
+<ul data-files><li>[Repository-relative file this stage may edit, or leave this list empty.]</li></ul>
 <div data-acceptance="01.1" data-status="pending">[Observable assertion that proves this stage succeeded.]</div>
 </section>
 <h2>Testing</h2>

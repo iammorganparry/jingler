@@ -1,12 +1,88 @@
 import { describe, expect, it } from "vitest"
 import { parsePlan, planInstructions, planModeInstructions } from "./plan-parse.js"
+import {
+  planningOrchestrationRoutes,
+  unavailableOrchestrationAssignment
+} from "./agent-runner.js"
 import { planNote } from "./plan-prompt.js"
 
 describe("planNote", () => {
+  const orchestration = [
+    {
+      cli: "claude" as const,
+      models: [{ id: "haiku", label: "Haiku 4.5" }]
+    },
+    {
+      cli: "codex" as const,
+      models: [{ id: "gpt-5.6-sol", label: "gpt-5.6-sol" }]
+    }
+  ]
+
   it("is null for Claude, which has a real tool to be steered toward", () => {
     // Restating the protocol in the prompt body would compete with the
     // `planModeInstructions` SDK option the adapter already passes.
     expect(planNote("claude")).toBe(null)
+  })
+
+  it("advertises live provider models and rejects retired assignments", () => {
+    const routes = planningOrchestrationRoutes([
+      {
+        cli: "opencode",
+        models: [{ id: "user/provider-model", label: "User model" }]
+      },
+      {
+        cli: "cursor",
+        models: [{ id: "auto", label: "Auto" }]
+      }
+    ])
+    expect(routes).toEqual([
+      {
+        cli: "opencode",
+        models: [{ id: "user/provider-model", label: "User model" }]
+      }
+    ])
+    const baseStage = {
+      id: "01",
+      title: "Implement",
+      intent: "Ship it.",
+      markdown: "<p>Ship it.</p>",
+      acceptance: [],
+      dependencies: [],
+      complexity: "medium" as const,
+      executionStatus: "queued" as const
+    }
+    expect(
+      unavailableOrchestrationAssignment(
+        [
+          {
+            ...baseStage,
+            assignment: {
+              agentId: "worker-a",
+              cli: "opencode",
+              model: "retired-model",
+              reason: "Assigned by planner."
+            }
+          }
+        ],
+        routes
+      )?.id
+    ).toBe("01")
+    expect(
+      unavailableOrchestrationAssignment(
+        [
+          {
+            ...baseStage,
+            assignment: {
+              agentId: "worker-a",
+              cli: "opencode",
+              model: "user/provider-model",
+              reason: "Assigned by planner."
+            }
+          }
+        ],
+        routes
+      )
+    ).toBeNull()
   })
 
   it("is null for harnesses that cannot plan at all", () => {
@@ -32,6 +108,39 @@ describe("planNote", () => {
     // tool it does not have produces a turn that ends with nothing submitted.
     expect(planNote("codex")).not.toContain("ExitPlanMode")
     expect(planModeInstructions()).toContain("ExitPlanMode")
+  })
+
+  it("gives Claude Haiku and reply-channel models the same orchestrator procedure", () => {
+    const routing = {
+      default: { cli: "claude" as const, model: "opus" },
+      low: { cli: "claude" as const, model: "haiku" },
+      medium: { cli: "codex" as const, model: "gpt-5.6-sol" },
+      high: { cli: "claude" as const, model: "opus" }
+    }
+    const claude = planModeInstructions(undefined, orchestration, routing)
+    const codex = planNote("codex", undefined, orchestration, routing)
+
+    for (const instruction of [
+      "data-complexity",
+      "data-assignment",
+      "data-agent-id",
+      "data-depends-on",
+      "declared files overlap",
+      "claude/haiku",
+      "codex/gpt-5.6-sol",
+      "low: claude/haiku",
+      "medium: codex/gpt-5.6-sol",
+      "operator settings are authoritative",
+      "workers own mechanical progress and PLAN_RESULT evidence"
+    ]) {
+      expect(claude).toContain(instruction)
+      expect(codex).toContain(instruction)
+    }
+    for (const prompt of [claude, codex]) {
+      expect(prompt).toContain("planning harness never implements")
+      expect(prompt).not.toContain("implementation may continue in this same")
+      expect(prompt).not.toContain("prompted again, with write access")
+    }
   })
 })
 

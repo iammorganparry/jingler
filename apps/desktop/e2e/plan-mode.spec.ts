@@ -158,6 +158,41 @@ test("the PRD template validates, persists, and resets", async ({ launchApp }) =
   )
 })
 
+test("the preferred orchestrator persists across restart", async ({ launchApp }) => {
+  const first = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session()
+  })
+  await expect(appShell(first.window)).toBeVisible()
+  await openSettings(first.window)
+  await first.window.getByRole("button", { name: "Plan", exact: true }).click()
+
+  await first.window.getByRole("combobox", { name: "Orchestrator harness" }).click()
+  await first.window.getByRole("option", { name: "Codex" }).click()
+  await expect
+    .poll(() =>
+      JSON.parse(
+        readFileSync(join(first.home, "jingler", "config.json"), "utf8")
+      ).orchestrator
+    )
+    .toEqual({ cli: "codex", model: "gpt-5.6-sol" })
+  await first.app.close()
+
+  const reopened = await launchApp({
+    home: first.home,
+    reposDir: first.reposDir,
+    userDataDir: first.userDataDir,
+    configured: true,
+    withRepo: true
+  })
+  await openSettings(reopened.window)
+  await reopened.window.getByRole("button", { name: "Plan", exact: true }).click()
+  await expect(
+    reopened.window.getByRole("combobox", { name: "Orchestrator harness" })
+  ).toContainText("Codex")
+})
+
 test("comments stay aligned with their highlighted line, escape clipping, and can be deleted", async ({
   launchApp
 }) => {
@@ -309,6 +344,9 @@ test("approval executes the saved revision and finishes from criterion evidence"
   expect(persisted).toContain('status: "done"')
   expect(persisted).toContain(exactText)
   expect(persisted).toContain('data-status="passed"')
+  await launched.window.getByRole("button", { name: "Conversation" }).first().click()
+  await expect(launched.window.getByText("Steps 2, 3 and 5 are done.")).toBeVisible()
+  await expect(launched.window.getByText(/PLAN_RESULT/)).toHaveCount(0)
 })
 
 test("restart resumes the exact canonical revision", async ({ launchApp }) => {

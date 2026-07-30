@@ -12,6 +12,8 @@ import type {
   GitConfig,
   GithubConfig,
   NotificationsConfig,
+  OrchestratorPreference,
+  WorkerRoutingConfig,
   ProviderConfig,
   Session,
   SessionActivity,
@@ -186,6 +188,8 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   // `newSessionCli`, so a fresh install creates sessions without a visit to
   // Settings.
   const defaultCli = configQuery.data?.defaultCli ?? null
+  const orchestrator = configQuery.data?.orchestrator ?? null
+  const workerRouting = configQuery.data?.workerRouting ?? null
   const contextConfig = configQuery.data?.context ?? null
   const starredRepos = configQuery.data?.starredRepos ?? []
   const collapsedRepos = configQuery.data?.collapsedRepos ?? []
@@ -275,6 +279,14 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   }
   const saveDefaultCli = (cli: CliKind) =>
     rpc.configSetDefaultCli(cli).then((saved) => {
+      qc.setQueryData(["config"], saved)
+    })
+  const saveOrchestrator = (preference: OrchestratorPreference) =>
+    rpc.configSetOrchestrator(preference).then((saved) => {
+      qc.setQueryData(["config"], saved)
+    })
+  const saveWorkerRouting = (routing: WorkerRoutingConfig) =>
+    rpc.configSetWorkerRouting(routing).then((saved) => {
       qc.setQueryData(["config"], saved)
     })
   const saveProvider = (cli: CliKind, config: ProviderConfig) =>
@@ -711,6 +723,10 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       onSaveProvider={saveProvider}
       defaultCli={defaultCli}
       onSaveDefaultCli={saveDefaultCli}
+      orchestrator={orchestrator}
+      onSaveOrchestrator={saveOrchestrator}
+      workerRouting={workerRouting}
+      onSaveWorkerRouting={saveWorkerRouting}
       contextConfig={contextConfig}
       onSaveContextConfig={saveContextConfig}
       planTemplate={configQuery.data?.planTemplate ?? null}

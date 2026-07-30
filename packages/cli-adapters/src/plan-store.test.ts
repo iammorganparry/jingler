@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -7,6 +8,7 @@ import {
 } from "node:fs"
 import { basename, join } from "node:path"
 import { FileSystem, Path } from "@effect/platform"
+import { planStageSemanticFingerprint } from "@jingler/core"
 import { Chunk, Effect, Either, Layer, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { scriptedPlan } from "./adapter.js"
@@ -36,6 +38,13 @@ const SOURCE = `<h1>PRD: Ship safer planning</h1>
 <h3>Intent</h3>
 <p>Keep every reader on one revision.</p>
 <div data-acceptance="01.1" data-status="pending">The source survives restart.</div>
+</section>`
+
+const ORCHESTRATED_SOURCE = `<h1>PRD: Orchestrated change</h1>
+<section data-stage="01" data-title="Implement" data-depends-on="" data-complexity="high">
+<h3>Intent</h3><p>Ship the change.</p>
+<div data-assignment data-agent-id="worker-a" data-cli="codex" data-model="gpt-5.6-sol" data-reason="High complexity implementation." data-status="running"></div>
+<div data-acceptance="01.1" data-status="pending">The change is verified.</div>
 </section>`
 
 const promote = (source = SOURCE) =>
@@ -248,6 +257,230 @@ describe("PlanStore canonical document", () => {
     expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toEqual([])
   })
 
+  it("rebases concurrent worker evidence onto an orchestrator amendment", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(ORCHESTRATED_SOURCE)
+        yield* Effect.all(
+          [
+            PlanStore.promoteDocument(WT, {
+              sessionId: "s1",
+              producingChatId: "c1",
+              id: first.id,
+              basePlanId: first.id,
+              source: ORCHESTRATED_SOURCE.replace(
+                "Ship the change.",
+                "Ship the amended change."
+              ),
+              status: "executing",
+              author: "agent"
+            }),
+            PlanStore.setCriterionStatusLatest(WT, {
+              planId: first.id,
+              criterionId: "01.1",
+              status: "passed",
+              evidence: "Focused integration test passed."
+            })
+          ],
+          { concurrency: "unbounded" }
+        )
+        return yield* PlanStore.readDocument(WT)
+      })
+    )
+
+    expect(result?.source).toContain("Ship the amended change.")
+    expect(result?.projection.stages[0]?.acceptance[0]).toMatchObject({
+      status: "passed",
+      evidence: "Focused integration test passed."
+    })
+  })
+
+  it("rejects stale worker evidence after the stage semantics change", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(ORCHESTRATED_SOURCE)
+        const oldFingerprint = planStageSemanticFingerprint(
+          first.projection.stages[0]!
+        )
+        const amended = yield* PlanStore.promoteDocument(WT, {
+          sessionId: "s1",
+          producingChatId: "c1",
+          id: "replacement-id",
+          basePlanId: first.id,
+          source: ORCHESTRATED_SOURCE.replace(
+            "The change is verified.",
+            "The amended behavior is verified."
+          ),
+          status: "executing",
+          author: "agent"
+        })
+        yield* PlanStore.setCriterionStatusLatest(WT, {
+          planId: first.id,
+          stageId: "01",
+          criterionId: "01.1",
+          status: "passed",
+          evidence: "Evidence from the old requirement.",
+          expectedStageFingerprint: oldFingerprint
+        })
+        return {
+          amended,
+          latest: yield* PlanStore.readDocument(WT)
+        }
+      })
+    )
+
+    expect(result.latest?.revision).toBe(result.amended.revision)
+    expect(result.latest?.projection.stages[0]?.acceptance[0]).toMatchObject({
+      text: "The amended behavior is verified.",
+      status: "pending",
+      evidence: null
+    })
+  })
+
+  it("keeps the canonical plan identity when an amendment carries a fresh proposal id", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(ORCHESTRATED_SOURCE)
+        const amended = yield* PlanStore.promoteDocument(WT, {
+          sessionId: "s1",
+          producingChatId: "c1",
+          id: "fresh-planner-proposal-id",
+          basePlanId: first.id,
+          source: ORCHESTRATED_SOURCE.replace(
+            "Ship the change.",
+            "Ship the amended change."
+          ),
+          status: "executing",
+          author: "agent"
+        })
+        yield* PlanStore.setStageExecutionStatus(WT, {
+          planId: first.id,
+          stageId: "01",
+          agentId: "worker-a",
+          status: "completed"
+        })
+        return {
+          first,
+          amended,
+          latest: yield* PlanStore.readDocument(WT)
+        }
+      })
+    )
+
+    expect(result.amended.id).toBe(result.first.id)
+    expect(result.latest?.projection.stages[0]?.executionStatus).toBe(
+      "completed"
+    )
+  })
+
+  it("replaces a completed plan with a fresh coordination identity", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(ORCHESTRATED_SOURCE)
+        const completed = yield* PlanStore.updateDocument(WT, {
+          planId: first.id,
+          baseRevision: first.revision,
+          source: first.source,
+          author: "agent",
+          status: "done"
+        })
+        const second = yield* PlanStore.promoteDocument(WT, {
+          sessionId: "s1",
+          producingChatId: "c1",
+          id: "plan-2",
+          source: ORCHESTRATED_SOURCE.replace("Ship the change.", "Ship plan two."),
+          status: "proposed",
+          author: "agent"
+        })
+        return { completed, second }
+      })
+    )
+
+    expect(result.second.id).toBe("plan-2")
+    expect(result.second.revision).toBe(1)
+    expect(result.second.source).toContain("Ship plan two.")
+    expect(result.second.projection.stages[0]?.executionStatus).toBe("queued")
+  })
+
+  it("generates a new coordination id when a fresh plan reuses the completed plan id", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(ORCHESTRATED_SOURCE)
+        yield* PlanStore.writeOrchestrationCheckpoint(WT, first.id, {
+          agentId: "worker-a",
+          state: "completed",
+          completedStageIds: ["01"],
+          resumeId: "old-provider-thread",
+          message: null,
+          attempt: 1
+        })
+        yield* PlanStore.updateDocument(WT, {
+          planId: first.id,
+          baseRevision: first.revision,
+          source: first.source,
+          author: "agent",
+          status: "done"
+        })
+        const second = yield* PlanStore.promoteDocument(WT, {
+          sessionId: "s1",
+          producingChatId: "c1",
+          id: first.id,
+          source: ORCHESTRATED_SOURCE.replace(
+            "Ship the change.",
+            "Ship unrelated work."
+          ),
+          author: "agent"
+        })
+        const checkpoints = yield* PlanStore.readOrchestrationCheckpoints(
+          WT,
+          second.id
+        )
+        return { first, second, checkpoints }
+      })
+    )
+
+    expect(result.second.id).not.toBe(result.first.id)
+    expect(result.second.revision).toBe(1)
+    expect(result.checkpoints).toEqual([])
+  })
+
+  it("persists worker checkpoints and exposes running workers as interrupted after restart", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(ORCHESTRATED_SOURCE)
+        yield* PlanStore.writeOrchestrationCheckpoint(WT, first.id, {
+          agentId: "worker-a",
+          state: "running",
+          completedStageIds: [],
+          resumeId: "resume-a",
+          message: null,
+          attempt: 1
+        })
+        const checkpoints = yield* PlanStore.readOrchestrationCheckpoints(
+          WT,
+          first.id
+        )
+        const interrupted = yield* PlanStore.markInterrupted(WT, "s1", "c1")
+        return { checkpoints, interrupted }
+      })
+    )
+
+    expect(result.checkpoints).toEqual([
+      {
+        agentId: "worker-a",
+        state: "running",
+        completedStageIds: [],
+        resumeId: "resume-a",
+        message: null,
+        attempt: 1
+      }
+    ])
+    expect(result.interrupted?.status).toBe("stale")
+    expect(
+      result.interrupted?.projection.stages[0]?.executionStatus
+    ).toBe("interrupted")
+  })
+
   it("marks an interrupted in-flight revision stale without changing its source", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -370,6 +603,54 @@ describe("PlanStore canonical document", () => {
     writeFileSync(join(plansDir, "terminal"), "not a directory")
 
     const result = await run(Effect.either(promote()))
+
+    expect(Either.isLeft(result)).toBe(true)
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe("PlanPersistenceError")
+    }
+  })
+
+  it("propagates mechanical progress persistence failures", async () => {
+    const first = await run(promote(ORCHESTRATED_SOURCE))
+    const dir = join(temp.root, ".jingler", "terminal")
+    chmodSync(dir, 0o500)
+    try {
+      const result = await run(
+        Effect.either(
+          PlanStore.setStageExecutionStatus(WT, {
+            planId: first.id,
+            stageId: "01",
+            agentId: "worker-a",
+            status: "completed"
+          })
+        )
+      )
+      expect(Either.isLeft(result)).toBe(true)
+      if (Either.isLeft(result)) {
+        expect(result.left._tag).toBe("PlanPersistenceError")
+      }
+    } finally {
+      chmodSync(dir, 0o700)
+    }
+  })
+
+  it("propagates checkpoint persistence failures", async () => {
+    const plansDir = join(temp.root, ".jingler")
+    mkdirSync(plansDir, { recursive: true })
+    writeFileSync(join(plansDir, "terminal"), "not a directory")
+
+    const result = await run(
+      Effect.either(
+        PlanStore.writeOrchestrationCheckpoint(WT, "plan-1", {
+          agentId: "worker-a",
+          state: "running",
+          completedStageIds: [],
+          resumeId: "provider-thread",
+          message: null,
+          attempt: 1
+        })
+      )
+    )
 
     expect(Either.isLeft(result)).toBe(true)
     if (Either.isLeft(result)) {

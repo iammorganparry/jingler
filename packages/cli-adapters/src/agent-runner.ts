@@ -2,6 +2,7 @@ import type {
   ApprovalGate,
   Attachment,
   CliKind,
+  ContentPart,
   ExecutionMode,
   GateDecision,
   Message,
@@ -9,6 +10,7 @@ import type {
   Plan,
   PlanApprovalResult,
   PlanComment,
+  PlanPrdStage,
   QuestionAnswer,
   QuestionRequest,
   ReasoningSetting,
@@ -17,21 +19,28 @@ import type {
 } from "@jingler/core"
 import {
   ADHD_MODE_DEFAULT,
+  applyWorkerRoutingToPlanHtml,
   applyStreamEvent,
   assistantMessage,
+  buildPlanExecutionGraph,
   CliExecError,
   defaultModel,
   findApprovedPlan,
   isBackgroundTaskEvent,
   isSubagentEvent,
+  parsePlanHtml,
   planDocumentToPlan,
   PLAN_AUTO_RUN_DEFAULT,
   resumePlanPrompt,
   setQuestionAnswers,
   settleStreaming,
   STOPPED_NOTE,
+  stripPlanResultProtocol,
+  supportsPlanMode,
   userMessage,
-  DEFAULT_PLAN_TEMPLATE_HTML
+  DEFAULT_PLAN_TEMPLATE_HTML,
+  resolveWorkerRoutingConfig,
+  workerRoutingMismatch
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
@@ -52,6 +61,7 @@ import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
 import { CliAdapter, PlanDecision } from "./adapter.js"
 import type {
+  OrchestrationRoute,
   PermissionDecision,
   PermissionRequest,
   SessionSpec,
@@ -62,6 +72,7 @@ import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
 import { readDefaultMode } from "./default-mode.js"
 import { DiscoveryService } from "./discovery.js"
+import { ModelsService } from "./models.js"
 import { healedWorktreePath } from "./cli-project-dir.js"
 import { ensureWorktreeLinked } from "./git.js"
 import { OpenConnectorService } from "./open-connector.js"
@@ -96,6 +107,30 @@ const approvalRefused = (
 const failedStream = (message: string): Stream.Stream<StreamEvent> => {
   const event: StreamEvent = { _tag: "Failed", message }
   return Stream.make(event)
+}
+
+/** Keep planner advertisement and approval validation on one live route set. */
+export const planningOrchestrationRoutes = (
+  catalog: ReadonlyArray<OrchestrationRoute>
+): ReadonlyArray<OrchestrationRoute> =>
+  catalog.filter((provider) => supportsPlanMode(provider.cli))
+
+export const unavailableOrchestrationAssignment = (
+  stages: ReadonlyArray<PlanPrdStage>,
+  routes: ReadonlyArray<OrchestrationRoute>
+): PlanPrdStage | null => {
+  const available = new Map(
+    routes.map((provider) => [
+      provider.cli,
+      new Set(provider.models.map((model) => model.id))
+    ])
+  )
+  return stages.find(
+    (stage) =>
+      stage.assignment !== null &&
+      stage.assignment !== undefined &&
+      !available.get(stage.assignment.cli)?.has(stage.assignment.model)
+  ) ?? null
 }
 
 export interface PlanEvidenceMarker {
@@ -263,7 +298,9 @@ type PromptEnv =
  * paused run.
  */
 export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRunner", {
+  dependencies: [ModelsService.Default],
   effect: Effect.gen(function* () {
+    const modelsService = yield* ModelsService
     // gateId → the pending gate (shared across prompt/decideGate/stop calls).
     /** Human-in-the-loop state, and the rule that decides what needs approval. */
     const approvals = yield* makeApprovals
@@ -528,6 +565,15 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       Effect.gen(function* () {
         const { pending, run } = yield* pendingPlanRun(sessionId, planId)
         const canonical = yield* canonicalPlan(sessionId, planId)
+        const session = yield* getSessionOrNull(sessionId)
+        const producingChatId =
+          pending?.chatId ??
+          canonical?.document.producingChatId ??
+          session?.activeChatId
+        const orchestrating =
+          producingChatId !== undefined &&
+          session?.chats.find((chat) => chat.id === producingChatId)?.role ===
+            "orchestrator"
         if (
           canonical !== null &&
           expectedRevision !== undefined &&
@@ -550,6 +596,61 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             canonical?.document.revision ?? 0
           )
         }
+        if (orchestrating && canonical !== null) {
+          const graph = buildPlanExecutionGraph(
+            canonical.document.projection.stages,
+            { requireAssignments: true }
+          )
+          if (!graph.valid) {
+            return approvalRefused(
+              [
+                "Approval refused because the worker graph is invalid.",
+                ...graph.diagnostics.map((diagnostic) => diagnostic.message)
+              ].join(" "),
+              canonical.document.revision
+            )
+          }
+          const discovered = yield* DiscoveryService.list().pipe(
+            Effect.orElseSucceed(() => [])
+          )
+          const catalog = planningOrchestrationRoutes(
+            yield* modelsService.catalog(discovered)
+          )
+          const workspaceConfig = yield* ConfigService.get().pipe(
+            Effect.orElseSucceed(() => null)
+          )
+          const workerRouting = resolveWorkerRoutingConfig(
+            workspaceConfig?.workerRouting,
+            catalog
+          )
+          if (workerRouting === null) {
+            return approvalRefused(
+              "Approval refused because no planning-capable worker route is available.",
+              canonical.document.revision
+            )
+          }
+          const unavailable = unavailableOrchestrationAssignment(
+            canonical.document.projection.stages,
+            catalog
+          )
+          if (unavailable?.assignment) {
+            return approvalRefused(
+              `Approval refused because stage "${unavailable.id}" is assigned to unavailable route "${unavailable.assignment.cli}/${unavailable.assignment.model}". Update its worker assignment from the live model catalogue and approve again.`,
+              canonical.document.revision
+            )
+          }
+          const routingMismatch = workerRoutingMismatch(
+            canonical.document.projection.stages,
+            workerRouting
+          )
+          if (routingMismatch?.assignment) {
+            const expected = workerRouting[routingMismatch.complexity]
+            return approvalRefused(
+              `Approval refused because worker "${routingMismatch.id}" uses ${routingMismatch.assignment.cli}/${routingMismatch.assignment.model}, but the ${routingMismatch.complexity}-complexity router requires ${expected.cli}/${expected.model}. Revise the plan to apply the current worker routing settings.`,
+              canonical.document.revision
+            )
+          }
+        }
         if (canonical !== null) {
           const approval = yield* PlanStore.updateDocument(canonical.worktreePath, {
             planId,
@@ -569,7 +670,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         }
         if (run !== undefined) {
           yield* run.applyPlan(planId, () => ({ ...exactPlan, status: "approved" }))
-          yield* run.markPlanExecution(planId)
+          if (!orchestrating) yield* run.markPlanExecution(planId)
         }
         // Precedence lives in `exec-mode.ts`, where the reason `prior` must beat
         // `configDefault` is stated once — getting that pair the wrong way round
@@ -584,7 +685,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         yield* resolvePlan(
           sessionId,
           planId,
-          PlanDecision.Approve({ mode, plan: { ...exactPlan, status: "approved" } })
+          orchestrating
+            ? PlanDecision.Delegate()
+            : PlanDecision.Approve({
+                mode,
+                plan: { ...exactPlan, status: "approved" }
+              })
         )
         return approvalAccepted
       })
@@ -799,6 +905,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
 
           const sessionMode =
             (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? "accept-edits"
+          const orchestrating = chat.role === "orchestrator"
           const allow = new Set<string>([
             ...(yield* approvals.allowlistFor(chatId)),
             ...(chat.allowlist ?? [])
@@ -808,7 +915,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const discoveredClis = yield* DiscoveryService.list().pipe(
             Effect.orElseSucceed(() => [])
           )
-          const mode: PermissionMode = sessionMode
+          const mode: PermissionMode = orchestrating ? "plan" : sessionMode
           // Read once per turn: plan mode's commands run unattended unless the
           // operator switched that off in Settings.
           const planAutoRun = workspaceConfig?.planAutoRun ?? PLAN_AUTO_RUN_DEFAULT
@@ -816,6 +923,17 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // effect on the very next message of an already-running session.
           const adhdMode = workspaceConfig?.adhdMode ?? ADHD_MODE_DEFAULT
           const cli = sessionCli
+          const orchestrationRoutes = planningOrchestrationRoutes(
+            yield* modelsService.catalog(discoveredClis)
+          )
+            .map((provider) => ({
+              cli: provider.cli,
+              models: provider.models
+            }))
+          const workerRouting = resolveWorkerRoutingConfig(
+            workspaceConfig?.workerRouting,
+            orchestrationRoutes
+          )
           // Cache the user's configured default exec mode so approving a plan can
           // restore it.
           const execDefault = yield* resolveExecMode(sessionId)
@@ -930,12 +1048,42 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // toward. Everything else is told to end its reply with the block.
           const planProtocol =
             mode === "plan"
-              ? planNote(cli, workspaceConfig?.planTemplate?.source ?? DEFAULT_PLAN_TEMPLATE_HTML)
+              ? planNote(
+                  cli,
+                  workspaceConfig?.planTemplate?.source ?? DEFAULT_PLAN_TEMPLATE_HTML,
+                  orchestrating ? orchestrationRoutes : undefined,
+                  orchestrating ? workerRouting ?? undefined : undefined
+                )
               : null
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
-          const promptText = text
+          const promptText = orchestrating
+            ? [
+                "You are this session's orchestrator and canonical planner.",
+                "For implementation work, inspect the repository read-only and return a complete",
+                "plan whose independent dependency groups are assigned to worker agents.",
+                "During execution, reconcile new user requests into the existing canonical plan;",
+                "preserve stable stage and acceptance ids so completed evidence is not lost.",
+                "",
+                "Available worker routes:",
+                ...orchestrationRoutes.flatMap((provider) =>
+                  provider.models.map((model) => `- ${provider.cli}/${model.id}`)
+                ),
+                ...(workerRouting === null
+                  ? []
+                  : [
+                      "",
+                      "Configured worker router:",
+                      `- low: ${workerRouting.low.cli}/${workerRouting.low.model}`,
+                      `- medium: ${workerRouting.medium.cli}/${workerRouting.medium.model}`,
+                      `- high: ${workerRouting.high.cli}/${workerRouting.high.model}`,
+                      `- default: ${workerRouting.default.cli}/${workerRouting.default.model}`
+                    ]),
+                "",
+                text
+              ].join("\n")
+            : text
           const providerReasoning =
             cli === "claude" || cli === "codex" || cli === "opencode"
               ? session.reasoning?.[cli]
@@ -990,6 +1138,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                     workspaceConfig?.planTemplate?.source ?? DEFAULT_PLAN_TEMPLATE_HTML
                 }
               : {}),
+            ...(orchestrating ? { orchestrationRoutes } : {}),
+            ...(orchestrating && workerRouting !== null
+              ? { workerRouting }
+              : {}),
             ...(resolvedReasoning === null
               ? {}
               : {
@@ -1009,6 +1161,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             // over the spec, so a null id alone would silently resume anyway.
             resumeId: digest === null ? chat.resumeId ?? null : null,
             ...(digest === null ? {} : { fresh: true }),
+            ...(orchestrating ? { readOnly: true } : {}),
             ...(openConnectorServer ? { openConnector: openConnectorServer } : {}),
             ...(browserMcp ? { browserMcp } : {})
           }
@@ -1313,7 +1466,27 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   tokens: event.tokens
                 }).pipe(Effect.provide(env), Effect.ignore)
               }
-              const next = applyStreamEvent(yield* Ref.get(acc), event)
+              let next = applyStreamEvent(yield* Ref.get(acc), event)
+              if (event._tag === "Done") {
+                const settledText = next.parts
+                  .filter((part) => part._tag === "Text")
+                  .map((part) => part.text)
+                  .join("\n")
+                yield* recordPlanEvidence(settledText)
+              }
+              if (
+                (event._tag === "Done" || event._tag === "Failed") &&
+                (yield* Ref.get(executingPlanId)) !== null
+              ) {
+                next = {
+                  ...next,
+                  parts: next.parts.flatMap((part): ReadonlyArray<ContentPart> => {
+                    if (part._tag !== "Text") return [part]
+                    const text = stripPlanResultProtocol(part.text)
+                    return text.length === 0 ? [] : [{ ...part, text }]
+                  })
+                }
+              }
               yield* Ref.set(acc, next)
               yield* TranscriptStore.patchLast(chatId, () => next).pipe(Effect.ignore)
               // Persist the harness's actual model (reported on init) so the chip
@@ -1340,11 +1513,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // below the offer, stranding a fully verified document in
               // `approved`/`executing`.
               if (event._tag === "Done") {
-                const settledText = next.parts
-                  .filter((part) => part._tag === "Text")
-                  .map((part) => part.text)
-                  .join("\n")
-                yield* recordPlanEvidence(settledText)
                 yield* ContextManager.settle(chatId).pipe(Effect.ignore)
                 yield* finalizePlanVerification()
               }
@@ -1434,22 +1602,61 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
 
           const proposePlan = (plan: Plan): Effect.Effect<PlanDecision> =>
             Effect.gen(function* () {
-              // Announced (and persisted) only once the plan can be answered — see
-              // `awaitPlan`. Persisting to the library lets a later turn or session
-              // pick the plan back up; best-effort, so a write failure never blocks
-              // plan review.
+              const parsedForRouting =
+                orchestrating && workerRouting !== null
+                  ? parsePlanHtml(plan.raw)
+                  : null
+              const proposedPlan =
+                parsedForRouting?.valid === true && workerRouting !== null
+                  ? {
+                      ...plan,
+                      raw: applyWorkerRoutingToPlanHtml(
+                        parsedForRouting.html,
+                        parsedForRouting.projection.stages,
+                        workerRouting
+                      )
+                    }
+                  : plan
+              // Announced only after the exact canonical proposal is durably
+              // persisted. A rejected promotion emits a terminal failure instead
+              // of presenting an unapprovable draft that differs from PlanStore.
               return yield* approvals.awaitPlan(
                 sessionId,
                 chatId,
-                plan.id,
+                proposedPlan.id,
                 Effect.gen(function* () {
                   if (worktreePath.length > 0 && plan.structured !== false) {
-                    yield* PlanStore.promote(sessionId, worktreePath, chatId, plan).pipe(
+                    const current = yield* PlanStore.readDocument(
+                      worktreePath,
+                      sessionId,
+                      chatId
+                    ).pipe(Effect.provide(env))
+                    const basePlanId =
+                      current !== null &&
+                      current.producingChatId === chatId &&
+                      current.status !== "done" &&
+                      current.status !== "rejected"
+                        ? current.id
+                        : undefined
+                    const promotion = yield* PlanStore.promote(
+                      sessionId,
+                      worktreePath,
+                      chatId,
+                      proposedPlan,
+                      basePlanId
+                    ).pipe(
                       Effect.provide(env),
-                      Effect.ignore
+                      Effect.either
                     )
+                    if (promotion._tag === "Left") {
+                      yield* emit({
+                        _tag: "Failed",
+                        message: promotion.left.message
+                      })
+                      return yield* Effect.interrupt
+                    }
                   }
-                  yield* emit({ _tag: "PlanProposed", plan })
+                  yield* emit({ _tag: "PlanProposed", plan: proposedPlan })
                 })
               )
             })

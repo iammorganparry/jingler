@@ -11,6 +11,7 @@ import type {
   GitConfig,
   GithubConfig,
   NotificationsConfig,
+  OrchestratorPreference,
   DiffStat,
   IssueSummary,
   ModelOption,
@@ -24,7 +25,8 @@ import type {
   Session,
   SessionActivity,
   Usage,
-  User
+  User,
+  WorkerRoutingConfig
 } from "@jingler/core"
 import { UNTITLED_SESSION } from "@jingler/core"
 import type { DockSide } from "./terminal-panel.js"
@@ -104,6 +106,16 @@ export interface JinglerAppProps {
   defaultCli?: CliKind | null
   /** Persist the default harness for new sessions. */
   onSaveDefaultCli?: (cli: CliKind) => Promise<void> | void
+  /** Preferred harness/model for orchestrator chats created in new sessions. */
+  orchestrator?: OrchestratorPreference | null
+  onSaveOrchestrator?: (
+    orchestrator: OrchestratorPreference
+  ) => Promise<void> | void
+  /** Complexity-based concrete routes for implementation workers. */
+  workerRouting?: WorkerRoutingConfig | null
+  onSaveWorkerRouting?: (
+    routing: WorkerRoutingConfig
+  ) => Promise<void> | void
   sessions: ReadonlyArray<Session>
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
@@ -334,6 +346,10 @@ export function JinglerApp({
   clis,
   defaultCli,
   onSaveDefaultCli,
+  orchestrator,
+  onSaveOrchestrator,
+  workerRouting,
+  onSaveWorkerRouting,
   sessions,
   user,
   onSignOut,
@@ -940,6 +956,10 @@ export function JinglerApp({
               onSaveProvider={onSaveProvider}
               defaultCli={defaultCli}
               onSaveDefaultCli={onSaveDefaultCli}
+              orchestrator={orchestrator}
+              onSaveOrchestrator={onSaveOrchestrator}
+              workerRouting={workerRouting}
+              onSaveWorkerRouting={onSaveWorkerRouting}
               planTemplate={planTemplate}
               onSavePlanTemplate={onSavePlanTemplate}
               loadModels={loadModels ?? (async () => [])}

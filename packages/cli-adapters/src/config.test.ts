@@ -178,6 +178,47 @@ describe("ConfigService", () => {
     }
   })
 
+  it("setOrchestrator persists the harness/model pair across a fresh service read", async () => {
+    const saved = await provided(
+      Effect.gen(function* () {
+        yield* ConfigService.setReposDir("/repos/a")
+        yield* ConfigService.setOrchestrator({
+          cli: "codex",
+          model: "gpt-5.6-sol"
+        })
+        yield* ConfigService.setReposDir("/repos/b")
+      })
+    )
+    expect(saved._tag).toBe("Success")
+
+    const reread = await provided(ConfigService.get())
+    expect(reread._tag).toBe("Success")
+    if (reread._tag === "Success") {
+      expect(reread.value?.orchestrator).toStrictEqual({
+        cli: "codex",
+        model: "gpt-5.6-sol"
+      })
+      expect(reread.value?.reposDir).toBe("/repos/b")
+    }
+  })
+
+  it("setWorkerRouting persists every concrete complexity route", async () => {
+    const routing = {
+      default: { cli: "claude" as const, model: "opus" },
+      low: { cli: "claude" as const, model: "haiku" },
+      medium: { cli: "codex" as const, model: "gpt-5.6-sol" },
+      high: { cli: "claude" as const, model: "opus" }
+    }
+    const saved = await provided(ConfigService.setWorkerRouting(routing))
+    expect(saved._tag).toBe("Success")
+
+    const reread = await provided(ConfigService.get())
+    expect(reread._tag).toBe("Success")
+    if (reread._tag === "Success") {
+      expect(reread.value?.workerRouting).toStrictEqual(routing)
+    }
+  })
+
   it("decodes a config written without a providers field (backward compatible)", async () => {
     mkdirSync(temp.root, { recursive: true })
     writeFileSync(`${temp.root}/config.json`, JSON.stringify({ reposDir: "/x", createdAt: "2026-01-01" }))

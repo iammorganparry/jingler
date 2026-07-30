@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from "react"
+import { stripPlanResultProtocol } from "@jingler/core"
 import type { CliKind, ContentPart, ExecutionMode, GateDecision, Message, ToolCall as ToolCallModel } from "@jingler/core"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { cn } from "../lib/cn.js"
@@ -166,14 +167,17 @@ function PartView({
   onOpenPlanReview?: () => void
 }) {
   switch (part._tag) {
-    case "Text":
+    case "Text": {
+      const text = markdown ? stripPlanResultProtocol(part.text) : part.text
+      if (text.length === 0) return null
       return markdown ? (
-        <Markdown className={WIDTH}>{part.text}</Markdown>
+        <Markdown className={WIDTH}>{text}</Markdown>
       ) : (
         <p className={`m-0 ${WIDTH} whitespace-pre-wrap text-[calc(14.5px*var(--sb-font-scale,1))] leading-[1.65] text-text-body`}>
-          {part.text}
+          {text}
         </p>
       )
+    }
     case "Image":
       // Images are normally grouped into a row (see renderParts); this covers a
       // lone image part rendered directly.

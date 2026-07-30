@@ -48,7 +48,11 @@ export function PlanEditor({
   onSave,
   onRetry,
   onKeepLocal,
-  onAcceptRemote
+  onAcceptRemote,
+  onStopWorker,
+  onRetryWorker,
+  targetStageId,
+  onTargetStageConsumed
 }: {
   document: PlanDocument
   draft: string
@@ -65,6 +69,10 @@ export function PlanEditor({
   onRetry?: () => void
   onKeepLocal?: () => void
   onAcceptRemote?: () => void
+  onStopWorker?: (agentId: string) => void
+  onRetryWorker?: (agentId: string) => void
+  targetStageId?: string | null
+  onTargetStageConsumed?: () => void
 }) {
   const sync = SYNC[state]
   const SyncIcon = sync.icon
@@ -154,7 +162,16 @@ export function PlanEditor({
               <p className="sticky top-0 z-10 border-b border-line bg-panel px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-yellow">
                 Local draft
               </p>
-              <PlanDocEditor value={draft} onChange={onEdit} />
+              <PlanDocEditor
+                value={draft}
+                onChange={onEdit}
+                targetStageId={targetStageId}
+                onTargetStageConsumed={onTargetStageConsumed}
+                workerControls={{
+                  stop: onStopWorker,
+                  retry: onRetryWorker
+                }}
+              />
             </section>
             <section className="flex min-h-0 flex-col overflow-auto">
               <p className="sticky top-0 z-10 border-b border-line bg-panel px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-blue">
@@ -172,7 +189,16 @@ export function PlanEditor({
             </div>
           )}
           <div className="min-h-0 flex-1 overflow-auto bg-editor">
-            <PlanDocEditor value={draft} onChange={onEdit} />
+            <PlanDocEditor
+              value={draft}
+              onChange={onEdit}
+              targetStageId={targetStageId}
+              onTargetStageConsumed={onTargetStageConsumed}
+              workerControls={{
+                stop: onStopWorker,
+                retry: onRetryWorker
+              }}
+            />
           </div>
         </>
       )}

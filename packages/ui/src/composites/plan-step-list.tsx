@@ -4,9 +4,7 @@ import { cn } from "../lib/cn.js"
 import { StatusDot } from "../components/status-dot.js"
 
 /**
- * A step's dot colour. Exported because the Conversation progress rail shows the
- * same steps and must read identically — two private copies would drift the first
- * time a tone changed.
+ * A step's dot colour, exported for consumers of the legacy Plan projection.
  */
 export const STEP_STATUS_TONE: Record<PlanStepStatus, string> = {
   proposed: "bg-line-strong",

@@ -35,6 +35,7 @@ import {
   setQuestionAnswers,
   settleLoaded,
   settleStreaming,
+  stripPlanResultProtocol,
   userMessage
 } from "./conversation.js"
 import type { Plan, PlanComment, QuestionRequest } from "./conversation.js"
@@ -102,6 +103,27 @@ describe("ContentPart", () => {
       tool: { id: "t", name: "Bash", target: null, status: "exploded", meta: null, diff: null, preview: null }
     })
     expect(Either.isLeft(result)).toBe(true)
+  })
+})
+
+describe("stripPlanResultProtocol", () => {
+  it("keeps readable prose and removes valid, malformed, and partial evidence records", () => {
+    expect(
+      stripPlanResultProtocol(
+        [
+          "Implementation complete.",
+          "PLAN_RESULT criterion=01.1 status=passed evidence=pnpm test passed",
+          "  PLAN_RESULT criterion=01.2 status=passed",
+          "PLAN_RES"
+        ].join("\n")
+      )
+    ).toBe("Implementation complete.")
+  })
+
+  it("does not strip ordinary plan prose", () => {
+    expect(stripPlanResultProtocol("Plan complete.\nThe results are in Plan Review.")).toBe(
+      "Plan complete.\nThe results are in Plan Review."
+    )
   })
 })
 

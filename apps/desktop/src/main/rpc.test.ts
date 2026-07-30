@@ -18,7 +18,12 @@ import {
   WorkspaceService
 } from "@jingler/cli-adapters"
 import type { AgentContext, CliAdapterShape, SessionSpec } from "@jingler/cli-adapters"
-import type { Attachment, StreamEvent } from "@jingler/core"
+import type {
+  Attachment,
+  PlanDocument,
+  Session,
+  StreamEvent
+} from "@jingler/core"
 import { GitError } from "@jingler/core"
 import { appPathsFor, fakeCommandExecutor } from "@jingler/cli-adapters/test-support"
 import { NodeContext } from "@effect/platform-node"
@@ -35,11 +40,16 @@ import {
   githubPr,
   modelsCatalog,
   modelsList,
+  mergeCanonicalOrchestrationCheckpoints,
+  newSessionOrchestrator,
+  orchestrationStagesCompleted,
+  planUsesOrchestration,
   reviewGet,
   reviewMarkRouted,
   reviewReconcile,
   reviewRun,
   setReasoning,
+  sessionCreationDefaults,
   sessionDiff,
   skillsList,
   workspaceRevertFile,
@@ -70,6 +80,118 @@ describe("RPC handlers", () => {
 
   const fakeDialog = (chosen: string | null) =>
     Layer.succeed(DialogService, { chooseDirectory: () => Effect.succeed(chosen) })
+
+  it("keeps a new session direct when no planning route exists", () => {
+    expect(sessionCreationDefaults("codex", null, null)).toMatchObject({
+      cli: "codex",
+      options: {
+        chatRole: "direct",
+        defaultMode: undefined,
+        defaultModel: undefined
+      }
+    })
+  })
+
+  it("falls back to direct session creation when model discovery crashes", async () => {
+    const brokenDiscovery = Layer.succeed(
+      DiscoveryService,
+      new DiscoveryService({ list: () => Effect.die("catalogue unavailable") })
+    )
+    const unusedModels = Layer.succeed(
+      ModelsService,
+      new ModelsService({
+        list: () => Effect.succeed([]),
+        catalog: () => Effect.succeed([])
+      })
+    )
+
+    const resolution = await Effect.runPromise(
+      newSessionOrchestrator(null).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            brokenDiscovery,
+            unusedModels,
+            fakeCommandExecutor(() => ({ exitCode: 0, stdout: "" }))
+          )
+        )
+      )
+    )
+
+    expect(resolution).toBeNull()
+    expect(sessionCreationDefaults("codex", null, resolution).options.chatRole)
+      .toBe("direct")
+  })
+
+  it("derives plan execution strategy from the producing chat, not the active chat", () => {
+    const session = {
+      activeChatId: "direct-chat",
+      chats: [
+        { id: "direct-chat", role: "direct" },
+        { id: "planner-chat", role: "orchestrator" }
+      ]
+    } as unknown as Session
+    const document = {
+      producingChatId: "planner-chat"
+    } as unknown as PlanDocument
+
+    expect(planUsesOrchestration(session, document)).toBe(true)
+    expect(
+      planUsesOrchestration(
+        { ...session, activeChatId: "planner-chat" },
+        { ...document, producingChatId: "direct-chat" }
+      )
+    ).toBe(false)
+  })
+
+  it("restores canonical completion across a checkpoint crash window", () => {
+    const assignment = {
+      agentId: "worker-a",
+      cli: "codex" as const,
+      model: "gpt-5",
+      reason: "Test."
+    }
+    const document = {
+      projection: {
+        stages: [
+          {
+            id: "01",
+            assignment,
+            executionStatus: "completed"
+          },
+          {
+            id: "02",
+            assignment,
+            executionStatus: "queued"
+          }
+        ]
+      }
+    } as unknown as PlanDocument
+    const restored = mergeCanonicalOrchestrationCheckpoints(document, [
+      {
+        agentId: "worker-a",
+        state: "running",
+        completedStageIds: ["01", "02"],
+        resumeId: "resume-a",
+        message: null,
+        attempt: 1
+      }
+    ])
+
+    expect(restored[0]?.completedStageIds).toEqual(["01"])
+    expect(orchestrationStagesCompleted(document)).toBe(false)
+    expect(
+      orchestrationStagesCompleted({
+        ...document,
+        projection: {
+          ...document.projection,
+          stages: document.projection.stages.map((stage) => ({
+            ...stage,
+            executionStatus: "completed" as const
+          }))
+        }
+      })
+    ).toBe(true)
+  })
 
   describe("Agent.setReasoning", () => {
     it("logs a best-effort persistence failure", async () => {

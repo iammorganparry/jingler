@@ -2,6 +2,7 @@ import { Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
   AdversarialReview,
+  chatRoleOf,
   CLI_KINDS,
   type CliInfo,
   type CliKind,
@@ -11,6 +12,7 @@ import {
   Repo,
   Session,
   newSessionCli,
+  resolveOrchestratorPreference,
   startableClis,
   supportsPlanMode,
   supportsSteer,
@@ -56,6 +58,24 @@ describe("WorkspaceConfig", () => {
       Schema.encodeSync(WorkspaceConfig)(config)
     )
     expect(roundTripped).toStrictEqual(config)
+  })
+
+  it("round-trips a preferred orchestrator while older configs omit it", () => {
+    const legacy = Schema.decodeUnknownSync(WorkspaceConfig)({
+      reposDir: "/repos",
+      createdAt: "2026-07-11T10:00:00.000Z"
+    })
+    expect(legacy.orchestrator).toBeUndefined()
+
+    const configured: WorkspaceConfig = {
+      ...legacy,
+      orchestrator: { cli: "codex", model: "gpt-5.6-sol" }
+    }
+    expect(
+      Schema.decodeUnknownSync(WorkspaceConfig)(
+        Schema.encodeSync(WorkspaceConfig)(configured)
+      ).orchestrator
+    ).toStrictEqual(configured.orchestrator)
   })
 
 })
@@ -217,7 +237,8 @@ describe("Session", () => {
   }
 
   it("decodes a session without the optional worktree fields", () => {
-    expect(Either.isRight(decode(Session, base))).toBe(true)
+    const decoded = Schema.decodeUnknownSync(Session)(base)
+    expect(chatRoleOf(decoded.chats[0]!)).toBe("direct")
   })
 
   it("round-trips the optional worktreePath / baseBranch / mode / model when present", () => {
@@ -239,6 +260,110 @@ describe("Session", () => {
 
   it("rejects an unknown cli kind", () => {
     expect(Either.isLeft(decode(Session, { ...base, cli: "copilot" }))).toBe(true)
+  })
+})
+
+describe("resolveOrchestratorPreference", () => {
+  const catalog = [
+    {
+      cli: "claude" as const,
+      models: [{ id: "opus" }, { id: "sonnet" }]
+    },
+    {
+      cli: "codex" as const,
+      models: [{ id: "gpt-5.6-sol" }, { id: "gpt-5.5" }]
+    },
+    {
+      cli: "cursor" as const,
+      models: [{ id: "auto" }]
+    }
+  ]
+
+  it("keeps an available configured harness/model pair", () => {
+    expect(
+      resolveOrchestratorPreference(
+        {
+          orchestrator: { cli: "codex", model: "gpt-5.5" }
+        },
+        catalog
+      )
+    ).toStrictEqual({
+      preference: { cli: "codex", model: "gpt-5.5" },
+      isFallback: false
+    })
+  })
+
+  it("falls back deterministically to a planning provider's configured default", () => {
+    const resolution = resolveOrchestratorPreference(
+      {
+        orchestrator: { cli: "opencode", model: "missing" },
+        providers: {
+          claude: {
+            enabled: true,
+            defaultMode: "plan",
+            defaultModel: "sonnet"
+          }
+        }
+      },
+      catalog
+    )
+    expect(resolution?.preference).toStrictEqual({ cli: "claude", model: "sonnet" })
+    expect(resolution?.isFallback).toBe(true)
+    expect(resolution?.fallbackReason).toContain("opencode/missing")
+  })
+
+  it("keeps the configured provider when only its preferred model disappeared", () => {
+    const resolution = resolveOrchestratorPreference(
+      {
+        orchestrator: { cli: "codex", model: "retired" },
+        providers: {
+          codex: {
+            enabled: true,
+            defaultMode: "plan",
+            defaultModel: "gpt-5.5"
+          }
+        }
+      },
+      catalog
+    )
+
+    expect(resolution?.preference).toStrictEqual({
+      cli: "codex",
+      model: "gpt-5.5"
+    })
+    expect(resolution?.isFallback).toBe(true)
+  })
+
+  it("never chooses an installed harness that cannot plan", () => {
+    expect(
+      resolveOrchestratorPreference(
+        null,
+        [{ cli: "cursor", models: [{ id: "auto" }] }]
+      )
+    ).toBeNull()
+  })
+
+  it("excludes providers the operator explicitly disabled", () => {
+    const resolution = resolveOrchestratorPreference(
+      {
+        orchestrator: { cli: "claude", model: "opus" },
+        providers: {
+          claude: { enabled: false, defaultMode: "plan" },
+          codex: {
+            enabled: true,
+            defaultMode: "plan",
+            defaultModel: "gpt-5.5"
+          }
+        }
+      },
+      catalog
+    )
+
+    expect(resolution?.preference).toStrictEqual({
+      cli: "codex",
+      model: "gpt-5.5"
+    })
+    expect(resolution?.isFallback).toBe(true)
   })
 })
 

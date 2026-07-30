@@ -9,6 +9,10 @@ import { HoverCard } from "../../components/hover-card.js"
 import { cn } from "../../lib/cn.js"
 import { applyPlanComment } from "./plan-doc-comment.js"
 import { planDocExtensions } from "./plan-doc-extensions.js"
+import {
+  type PlanWorkerControls,
+  PlanWorkerControlsProvider
+} from "./plan-worker-controls.js"
 
 /**
  * Full-document WYSIWYG editor for an HTML plan, rendered as a Notion-like doc.
@@ -34,15 +38,25 @@ export function PlanDocEditor({
   value,
   onChange,
   editable = true,
-  className
+  className,
+  workerControls,
+  targetStageId,
+  onTargetStageConsumed
 }: {
   value: string
   onChange?: (html: string) => void
   editable?: boolean
   className?: string
+  workerControls?: PlanWorkerControls
+  /** Stable stage id to reveal after the Plan view opens from the progress dock. */
+  targetStageId?: string | null
+  /** Retire the one-shot target once its stage is on screen. */
+  onTargetStageConsumed?: () => void
 }) {
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  const onTargetStageConsumedRef = useRef(onTargetStageConsumed)
+  onTargetStageConsumedRef.current = onTargetStageConsumed
 
   const editor = useEditor({
     editable,
@@ -68,17 +82,38 @@ export function PlanDocEditor({
     editor?.setEditable(editable)
   }, [editor, editable])
 
+  useEffect(() => {
+    if (!editor || !targetStageId) return
+    const reveal = () => {
+      const target = Array.from(
+        editor.view.dom.querySelectorAll<HTMLElement>("[data-plan-stage-id]")
+      ).find((element) => element.dataset.planStageId === targetStageId)
+      if (!target) return false
+      target.scrollIntoView({ behavior: "smooth", block: "center" })
+      target.querySelector<HTMLButtonElement>("button")?.focus({
+        preventScroll: true
+      })
+      onTargetStageConsumedRef.current?.()
+      return true
+    }
+    if (reveal()) return
+    const retry = window.setTimeout(reveal, 0)
+    return () => window.clearTimeout(retry)
+  }, [editor, targetStageId, value])
+
   return (
-    <div className={cn("flex min-h-0 flex-col", className)}>
-      {editable && editor && <CommentBubbleMenu editor={editor} />}
-      <EditorContent
-        editor={editor}
-        className={cn(
-          "min-h-0 flex-1 overflow-y-auto text-[13px] leading-[1.65] text-text-body [&_.ProseMirror]:outline-none",
-          !editable && "opacity-95"
-        )}
-      />
-    </div>
+    <PlanWorkerControlsProvider controls={workerControls}>
+      <div className={cn("flex min-h-0 flex-col", className)}>
+        {editable && editor && <CommentBubbleMenu editor={editor} />}
+        <EditorContent
+          editor={editor}
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto text-[13px] leading-[1.65] text-text-body [&_.ProseMirror]:outline-none",
+            !editable && "opacity-95"
+          )}
+        />
+      </div>
+    </PlanWorkerControlsProvider>
   )
 }
 

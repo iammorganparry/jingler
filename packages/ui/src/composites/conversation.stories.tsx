@@ -1,5 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { Attachment, Message } from "@jingler/core"
+import type {
+  Attachment,
+  Message,
+  PlanDocument,
+  PlanPrdStage
+} from "@jingler/core"
+import { ConversationView } from "../app/conversation-view.js"
 import { SEED_CONVERSATION } from "../seed.js"
 import { CodeChip } from "../components/code-chip.js"
 import { DiffPeek } from "../components/diff-peek.js"
@@ -18,6 +24,72 @@ type Story = StoryObj
 const PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 const img = (name: string): Attachment => ({ id: name, name, mediaType: "image/png", data: PNG })
+
+const planStage = (
+  id: string,
+  title: string,
+  executionStatus: PlanPrdStage["executionStatus"],
+  passed = false,
+  assignment: NonNullable<PlanPrdStage["assignment"]> = {
+    agentId: "worker-core",
+    cli: "codex",
+    model: "gpt-5.6-sol",
+    reason: "Assigned by the approved plan."
+  }
+): PlanPrdStage => ({
+  id,
+  title,
+  intent: title,
+  markdown: "",
+  acceptance: [
+    {
+      id: `${id}.1`,
+      text: `${title} is verified.`,
+      status: passed ? "passed" : "pending",
+      evidence: passed ? "Verified by the worker." : null
+    }
+  ],
+  assignment,
+  executionStatus
+})
+
+const LIVE_PLAN: PlanDocument = {
+  id: "plan-chat-progress",
+  sessionId: "session-story",
+  producingChatId: "chat-story",
+  revision: 8,
+  status: "executing",
+  source: "<h1>PRD: Provider-neutral orchestration</h1>",
+  projection: {
+    title: "PRD: Provider-neutral orchestration",
+    sections: [],
+    stages: [
+      planStage("01", "Persist orchestrator settings", "completed", true),
+      planStage("02", "Build execution graph", "completed", true),
+      planStage("03", "Run independent workers", "running", false, {
+        agentId: "worker-execution",
+        cli: "claude",
+        model: "claude-opus-4-1",
+        reason: "High-complexity execution route."
+      }),
+      planStage("04", "Reconcile amendments", "queued", false, {
+        agentId: "worker-execution",
+        cli: "claude",
+        model: "claude-opus-4-1",
+        reason: "Shares dependencies with execution."
+      }),
+      planStage("05", "Verify the workflow", "queued", false, {
+        agentId: "worker-release",
+        cli: "opencode",
+        model: "anthropic/claude-sonnet-4",
+        reason: "Independent verification route."
+      })
+    ],
+    annotations: []
+  },
+  updatedAt: "2026-07-30T09:00:00.000Z",
+  updatedBy: "agent"
+}
 
 /** A user turn that attached two screenshots as context, plus a line of text. */
 const USER_TURN_WITH_IMAGES: Message = {
@@ -189,6 +261,27 @@ export const ComposerBusy: Story = {
         cli="claude"
         model="sonnet"
         catalog={[{ cli: "claude", label: "Claude Code", models: [{ id: "sonnet", label: "sonnet" }] }]}
+      />
+    </div>
+  )
+}
+
+/** The live canonical plan dock in its real position immediately above the composer. */
+export const WithPlanProgress: Story = {
+  render: () => (
+    <div className="h-[760px] w-[760px] overflow-hidden bg-editor">
+      <ConversationView
+        messages={SEED_CONVERSATION}
+        mode="accept-edits"
+        cli="codex"
+        model="gpt-5.6-sol"
+        busy
+        branch="feature/provider-neutral-orchestration"
+        repo="jingler"
+        planDocument={LIVE_PLAN}
+        onOpenPlanReview={(stageId) =>
+          console.info("Open plan review", stageId)
+        }
       />
     </div>
   )

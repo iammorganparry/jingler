@@ -17,6 +17,7 @@ import {
   GitService,
   HarnessCliAdapterLive,
   ModelsService,
+  OrchestrationService,
   PlanStore,
   PluginRegistry,
   PluginHost,
@@ -70,6 +71,7 @@ const StoreLayers = Layer.mergeAll(
  */
 const HarnessLayers = Layer.mergeAll(
   AgentRunner.Default,
+  OrchestrationService.Default,
   ReviewService.Default,
   ContextManager.Default
 )
