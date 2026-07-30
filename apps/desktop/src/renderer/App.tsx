@@ -13,6 +13,7 @@ import type {
   GithubConfig,
   NotificationsConfig,
   OrchestratorPreference,
+  WorkerRoutingConfig,
   ProviderConfig,
   Session,
   SessionActivity,
@@ -188,6 +189,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   // Settings.
   const defaultCli = configQuery.data?.defaultCli ?? null
   const orchestrator = configQuery.data?.orchestrator ?? null
+  const workerRouting = configQuery.data?.workerRouting ?? null
   const contextConfig = configQuery.data?.context ?? null
   const starredRepos = configQuery.data?.starredRepos ?? []
   const collapsedRepos = configQuery.data?.collapsedRepos ?? []
@@ -281,6 +283,10 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     })
   const saveOrchestrator = (preference: OrchestratorPreference) =>
     rpc.configSetOrchestrator(preference).then((saved) => {
+      qc.setQueryData(["config"], saved)
+    })
+  const saveWorkerRouting = (routing: WorkerRoutingConfig) =>
+    rpc.configSetWorkerRouting(routing).then((saved) => {
       qc.setQueryData(["config"], saved)
     })
   const saveProvider = (cli: CliKind, config: ProviderConfig) =>
@@ -719,6 +725,8 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       onSaveDefaultCli={saveDefaultCli}
       orchestrator={orchestrator}
       onSaveOrchestrator={saveOrchestrator}
+      workerRouting={workerRouting}
+      onSaveWorkerRouting={saveWorkerRouting}
       contextConfig={contextConfig}
       onSaveContextConfig={saveContextConfig}
       planTemplate={configQuery.data?.planTemplate ?? null}

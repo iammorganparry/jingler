@@ -45,6 +45,7 @@ import type {
   ModelOption,
   OpencodeProviderInfo,
   OrchestratorPreference,
+  WorkerRoutingConfig,
   ProviderModels,
   PermissionMode,
   PlanApprovalResult,
@@ -403,8 +404,12 @@ export const rpc = {
     agentId: string
   ): Promise<void> =>
     run((c) => c.Agent.stopWorker({ sessionId, planId, agentId })),
-  agentRetryWorker: (planId: string, agentId: string): Promise<void> =>
-    run((c) => c.Agent.retryWorker({ planId, agentId })),
+  agentRetryWorker: (
+    sessionId: string,
+    planId: string,
+    agentId: string
+  ): Promise<void> =>
+    run((c) => c.Agent.retryWorker({ sessionId, planId, agentId })),
   agentSetHarness: (sessionId: string, chatId: string, cli: CliKind, model: string): Promise<void> =>
     run((c) => c.Agent.setHarness({ sessionId, chatId, cli, model })),
   agentStop: (sessionId: string, chatId: string): Promise<void> =>
@@ -440,6 +445,8 @@ export const rpc = {
   /** Persist the provider-neutral planner used by newly-created sessions. */
   configSetOrchestrator: (orchestrator: OrchestratorPreference): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setOrchestrator(orchestrator)),
+  configSetWorkerRouting: (workerRouting: WorkerRoutingConfig): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setWorkerRouting(workerRouting)),
   /**
    * Ask main to raise an OS notification. Main decides whether it actually
    * surfaces — it owns window focus and the stored prefs.

@@ -14,6 +14,7 @@ import {
   planDocumentToPlan,
   PlanConflictError,
   PlanPersistenceError,
+  planStageSemanticFingerprint,
   PlanValidationError,
   reconcilePlanAmendment,
   resolvePlanWorkerAnnotationHtml,
@@ -358,6 +359,8 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           readonly sessionId: string
           readonly producingChatId: string
           readonly id?: string
+          /** Reconcile only when this exact canonical plan is being amended. */
+          readonly basePlanId?: string
           readonly source: string
           readonly status?: PlanDocumentStatus
           readonly author?: PlanDocumentAuthor
@@ -370,8 +373,12 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         lock.withPermits(1)(
           Effect.gen(function* () {
             const current = yield* readCanonical(worktreePath)
+            const amending =
+              current !== null &&
+              input.basePlanId !== undefined &&
+              current.id === input.basePlanId
             const reconciled =
-              current === null
+              !amending
                 ? null
                 : reconcilePlanAmendment(current, input.source)
             if (reconciled !== null && !reconciled.valid) {
@@ -384,23 +391,41 @@ export class PlanStore extends Effect.Service<PlanStore>()(
                 }))
               })
             }
-            const { projection, html } =
+            const parsed =
               reconciled?.valid === true
                 ? {
                     projection: reconciled.projection,
                     html: reconciled.source
                   }
                 : yield* validate(input.source)
+            let projection = parsed.projection
+            let html = parsed.html
+            if (current !== null && !amending) {
+              for (const stage of projection.stages) {
+                html =
+                  updatePlanStageExecutionHtml(html, stage.id, "queued") ??
+                  html
+                for (const criterion of stage.acceptance) {
+                  html =
+                    updatePlanCriterionHtml(
+                      html,
+                      criterion.id,
+                      "pending",
+                      null
+                    ) ?? html
+                }
+              }
+              const fresh = yield* validate(html)
+              projection = fresh.projection
+              html = fresh.html
+            }
             return yield* atomicWrite(worktreePath, {
-              // A planner may mint a fresh proposal id for every amendment,
-              // but the canonical document is the coordination identity held
-              // by live workers, approvals, checkpoints, and editor clients.
-              // Preserve it while reconciling an existing document so those
-              // revision-safe writers continue targeting the same plan.
-              id: current?.id ?? input.id ?? crypto.randomUUID(),
+              id: amending
+                ? current.id
+                : input.id ?? crypto.randomUUID(),
               sessionId: input.sessionId,
               producingChatId: input.producingChatId,
-              revision: (current?.revision ?? 0) + 1,
+              revision: amending ? current.revision + 1 : 1,
               status: input.status ?? "proposed",
               source: html,
               projection,
@@ -523,9 +548,19 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           readonly agentId: string
           readonly status: PlanStageExecutionStatus
           readonly message?: string | null
+          readonly expectedStageFingerprint?: string
         }
       ): Effect.Effect<PlanDocument | null, never, PlanStoreEnv> =>
-        updateMechanical(worktreePath, input.planId, (source) => {
+        updateMechanical(worktreePath, input.planId, (source, document) => {
+          const stage = document.projection.stages.find(
+            (candidate) => candidate.id === input.stageId
+          )
+          if (
+            stage === undefined ||
+            (input.expectedStageFingerprint !== undefined &&
+              planStageSemanticFingerprint(stage) !==
+                input.expectedStageFingerprint)
+          ) return { source: null }
           const withStatus = updatePlanStageExecutionHtml(
             source,
             input.stageId,
@@ -560,16 +595,33 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           readonly criterionId: string
           readonly status: PlanAcceptanceStatus
           readonly evidence: string | null
+          readonly stageId?: string
+          readonly expectedStageFingerprint?: string
         }
       ): Effect.Effect<PlanDocument | null, never, PlanStoreEnv> =>
-        updateMechanical(worktreePath, input.planId, (source) => ({
-          source: updatePlanCriterionHtml(
-            source,
-            input.criterionId,
-            input.status,
-            input.evidence
+        updateMechanical(worktreePath, input.planId, (source, document) => {
+          const stage = document.projection.stages.find((candidate) =>
+            input.stageId === undefined
+              ? candidate.acceptance.some(
+                  (criterion) => criterion.id === input.criterionId
+                )
+              : candidate.id === input.stageId
           )
-        }))
+          if (
+            stage === undefined ||
+            (input.expectedStageFingerprint !== undefined &&
+              planStageSemanticFingerprint(stage) !==
+                input.expectedStageFingerprint)
+          ) return { source: null }
+          return {
+            source: updatePlanCriterionHtml(
+              source,
+              input.criterionId,
+              input.status,
+              input.evidence
+            )
+          }
+        })
 
       const settleOrchestration = (
         worktreePath: string,
@@ -784,7 +836,8 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         sessionId: string,
         worktreePath: string,
         producingChatId: string,
-        plan: Plan
+        plan: Plan,
+        basePlanId?: string
       ): Effect.Effect<
         SessionPlanArtifact,
         PlanValidationError | PlanPersistenceError,
@@ -794,6 +847,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           sessionId,
           producingChatId,
           id: plan.id,
+          ...(basePlanId === undefined ? {} : { basePlanId }),
           source: parsePlanHtml(plan.raw).valid ? plan.raw : legacyPlanToHtml(plan),
           status: statusFromPlan(plan),
           author: "agent"

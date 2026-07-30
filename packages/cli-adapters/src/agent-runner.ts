@@ -9,6 +9,7 @@ import type {
   Plan,
   PlanApprovalResult,
   PlanComment,
+  PlanPrdStage,
   QuestionAnswer,
   QuestionRequest,
   ReasoningSetting,
@@ -17,15 +18,16 @@ import type {
 } from "@jingler/core"
 import {
   ADHD_MODE_DEFAULT,
+  applyWorkerRoutingToPlanHtml,
   applyStreamEvent,
   assistantMessage,
   buildPlanExecutionGraph,
   CliExecError,
   defaultModel,
-  FALLBACK_MODELS,
   findApprovedPlan,
   isBackgroundTaskEvent,
   isSubagentEvent,
+  parsePlanHtml,
   planDocumentToPlan,
   PLAN_AUTO_RUN_DEFAULT,
   resumePlanPrompt,
@@ -34,7 +36,9 @@ import {
   STOPPED_NOTE,
   supportsPlanMode,
   userMessage,
-  DEFAULT_PLAN_TEMPLATE_HTML
+  DEFAULT_PLAN_TEMPLATE_HTML,
+  resolveWorkerRoutingConfig,
+  workerRoutingMismatch
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
@@ -55,6 +59,7 @@ import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
 import { CliAdapter, PlanDecision } from "./adapter.js"
 import type {
+  OrchestrationRoute,
   PermissionDecision,
   PermissionRequest,
   SessionSpec,
@@ -65,6 +70,7 @@ import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
 import { readDefaultMode } from "./default-mode.js"
 import { DiscoveryService } from "./discovery.js"
+import { ModelsService } from "./models.js"
 import { healedWorktreePath } from "./cli-project-dir.js"
 import { ensureWorktreeLinked } from "./git.js"
 import { OpenConnectorService } from "./open-connector.js"
@@ -99,6 +105,30 @@ const approvalRefused = (
 const failedStream = (message: string): Stream.Stream<StreamEvent> => {
   const event: StreamEvent = { _tag: "Failed", message }
   return Stream.make(event)
+}
+
+/** Keep planner advertisement and approval validation on one live route set. */
+export const planningOrchestrationRoutes = (
+  catalog: ReadonlyArray<OrchestrationRoute>
+): ReadonlyArray<OrchestrationRoute> =>
+  catalog.filter((provider) => supportsPlanMode(provider.cli))
+
+export const unavailableOrchestrationAssignment = (
+  stages: ReadonlyArray<PlanPrdStage>,
+  routes: ReadonlyArray<OrchestrationRoute>
+): PlanPrdStage | null => {
+  const available = new Map(
+    routes.map((provider) => [
+      provider.cli,
+      new Set(provider.models.map((model) => model.id))
+    ])
+  )
+  return stages.find(
+    (stage) =>
+      stage.assignment !== null &&
+      stage.assignment !== undefined &&
+      !available.get(stage.assignment.cli)?.has(stage.assignment.model)
+  ) ?? null
 }
 
 export interface PlanEvidenceMarker {
@@ -266,7 +296,9 @@ type PromptEnv =
  * paused run.
  */
 export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRunner", {
+  dependencies: [ModelsService.Default],
   effect: Effect.gen(function* () {
+    const modelsService = yield* ModelsService
     // gateId → the pending gate (shared across prompt/decideGate/stop calls).
     /** Human-in-the-loop state, and the rule that decides what needs approval. */
     const approvals = yield* makeApprovals
@@ -576,22 +608,43 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               canonical.document.revision
             )
           }
-          const available = new Set(
-            (yield* DiscoveryService.list().pipe(
-              Effect.orElseSucceed(() => [])
-            ))
-              .filter((cli) => cli.available)
-              .map((cli) => cli.kind)
+          const discovered = yield* DiscoveryService.list().pipe(
+            Effect.orElseSucceed(() => [])
           )
-          const unavailable = canonical.document.projection.stages.find(
-            (stage) =>
-              stage.assignment !== null &&
-              stage.assignment !== undefined &&
-              !available.has(stage.assignment.cli)
+          const catalog = planningOrchestrationRoutes(
+            yield* modelsService.catalog(discovered)
+          )
+          const workspaceConfig = yield* ConfigService.get().pipe(
+            Effect.orElseSucceed(() => null)
+          )
+          const workerRouting = resolveWorkerRoutingConfig(
+            workspaceConfig?.workerRouting,
+            catalog
+          )
+          if (workerRouting === null) {
+            return approvalRefused(
+              "Approval refused because no planning-capable worker route is available.",
+              canonical.document.revision
+            )
+          }
+          const unavailable = unavailableOrchestrationAssignment(
+            canonical.document.projection.stages,
+            catalog
           )
           if (unavailable?.assignment) {
             return approvalRefused(
-              `Approval refused because stage "${unavailable.id}" is assigned to unavailable harness "${unavailable.assignment.cli}". Update its worker assignment and approve again.`,
+              `Approval refused because stage "${unavailable.id}" is assigned to unavailable route "${unavailable.assignment.cli}/${unavailable.assignment.model}". Update its worker assignment from the live model catalogue and approve again.`,
+              canonical.document.revision
+            )
+          }
+          const routingMismatch = workerRoutingMismatch(
+            canonical.document.projection.stages,
+            workerRouting
+          )
+          if (routingMismatch?.assignment) {
+            const expected = workerRouting[routingMismatch.complexity]
+            return approvalRefused(
+              `Approval refused because worker "${routingMismatch.id}" uses ${routingMismatch.assignment.cli}/${routingMismatch.assignment.model}, but the ${routingMismatch.complexity}-complexity router requires ${expected.cli}/${expected.model}. Revise the plan to apply the current worker routing settings.`,
               canonical.document.revision
             )
           }
@@ -868,12 +921,17 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // effect on the very next message of an already-running session.
           const adhdMode = workspaceConfig?.adhdMode ?? ADHD_MODE_DEFAULT
           const cli = sessionCli
-          const orchestrationRoutes = discoveredClis
-            .filter((candidate) => candidate.available && supportsPlanMode(candidate.kind))
-            .map((candidate) => ({
-              cli: candidate.kind,
-              models: FALLBACK_MODELS[candidate.kind]
+          const orchestrationRoutes = planningOrchestrationRoutes(
+            yield* modelsService.catalog(discoveredClis)
+          )
+            .map((provider) => ({
+              cli: provider.cli,
+              models: provider.models
             }))
+          const workerRouting = resolveWorkerRoutingConfig(
+            workspaceConfig?.workerRouting,
+            orchestrationRoutes
+          )
           // Cache the user's configured default exec mode so approving a plan can
           // restore it.
           const execDefault = yield* resolveExecMode(sessionId)
@@ -991,7 +1049,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               ? planNote(
                   cli,
                   workspaceConfig?.planTemplate?.source ?? DEFAULT_PLAN_TEMPLATE_HTML,
-                  orchestrating ? orchestrationRoutes : undefined
+                  orchestrating ? orchestrationRoutes : undefined,
+                  orchestrating ? workerRouting ?? undefined : undefined
                 )
               : null
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
@@ -1009,6 +1068,16 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 ...orchestrationRoutes.flatMap((provider) =>
                   provider.models.map((model) => `- ${provider.cli}/${model.id}`)
                 ),
+                ...(workerRouting === null
+                  ? []
+                  : [
+                      "",
+                      "Configured worker router:",
+                      `- low: ${workerRouting.low.cli}/${workerRouting.low.model}`,
+                      `- medium: ${workerRouting.medium.cli}/${workerRouting.medium.model}`,
+                      `- high: ${workerRouting.high.cli}/${workerRouting.high.model}`,
+                      `- default: ${workerRouting.default.cli}/${workerRouting.default.model}`
+                    ]),
                 "",
                 text
               ].join("\n")
@@ -1068,6 +1137,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 }
               : {}),
             ...(orchestrating ? { orchestrationRoutes } : {}),
+            ...(orchestrating && workerRouting !== null
+              ? { workerRouting }
+              : {}),
             ...(resolvedReasoning === null
               ? {}
               : {
@@ -1513,6 +1585,21 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
 
           const proposePlan = (plan: Plan): Effect.Effect<PlanDecision> =>
             Effect.gen(function* () {
+              const parsedForRouting =
+                orchestrating && workerRouting !== null
+                  ? parsePlanHtml(plan.raw)
+                  : null
+              const proposedPlan =
+                parsedForRouting?.valid === true && workerRouting !== null
+                  ? {
+                      ...plan,
+                      raw: applyWorkerRoutingToPlanHtml(
+                        parsedForRouting.html,
+                        parsedForRouting.projection.stages,
+                        workerRouting
+                      )
+                    }
+                  : plan
               // Announced (and persisted) only once the plan can be answered — see
               // `awaitPlan`. Persisting to the library lets a later turn or session
               // pick the plan back up; best-effort, so a write failure never blocks
@@ -1520,15 +1607,33 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               return yield* approvals.awaitPlan(
                 sessionId,
                 chatId,
-                plan.id,
+                proposedPlan.id,
                 Effect.gen(function* () {
                   if (worktreePath.length > 0 && plan.structured !== false) {
-                    yield* PlanStore.promote(sessionId, worktreePath, chatId, plan).pipe(
+                    const current = yield* PlanStore.readDocument(
+                      worktreePath,
+                      sessionId,
+                      chatId
+                    ).pipe(Effect.provide(env))
+                    const basePlanId =
+                      current !== null &&
+                      current.producingChatId === chatId &&
+                      current.status !== "done" &&
+                      current.status !== "rejected"
+                        ? current.id
+                        : undefined
+                    yield* PlanStore.promote(
+                      sessionId,
+                      worktreePath,
+                      chatId,
+                      proposedPlan,
+                      basePlanId
+                    ).pipe(
                       Effect.provide(env),
                       Effect.ignore
                     )
                   }
-                  yield* emit({ _tag: "PlanProposed", plan })
+                  yield* emit({ _tag: "PlanProposed", plan: proposedPlan })
                 })
               )
             })

@@ -189,6 +189,7 @@ describe("SessionStore", () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const created = yield* SessionStore.create(input({ title: "Multi chat" }), {
+          chatRole: "orchestrator",
           defaultMode: "auto",
           defaultModel: "opus"
         })
@@ -220,6 +221,7 @@ describe("SessionStore", () => {
     expect(exit.value.replaced.activeChatId).not.toBe(exit.value.secondChatId)
     expect(exit.value.replaced.chats[0]!.mode).toBe("auto")
     expect(exit.value.replaced.chats[0]!.model).toBe("opus")
+    expect(exit.value.replaced.chats[0]!.role).toBe("orchestrator")
   })
 
   it("stamps provider mode, model, and reasoning defaults when supplied", async () => {

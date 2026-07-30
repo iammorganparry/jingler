@@ -1,6 +1,9 @@
 import { Schema } from "effect"
 import { BUDGET_RANGE, DEFAULT_BUDGET_TOKENS } from "./context.js"
-import { PlanTemplateConfig } from "./plan-document.js"
+import {
+  PlanTemplateConfig,
+  WorkerRoutingConfig
+} from "./plan-document.js"
 import { ThemeConfig } from "./theme.js"
 
 /**
@@ -738,6 +741,12 @@ export const WorkspaceConfig = Schema.Struct({
    * resolver chooses the first installed planning-capable harness in that case.
    */
   orchestrator: Schema.optional(OrchestratorPreference),
+  /**
+   * Concrete implementation-worker routes by plan-stage complexity. Kept
+   * separate from `orchestrator`: choosing a cheap planner must not silently
+   * downgrade high-complexity implementation work.
+   */
+  workerRouting: Schema.optional(WorkerRoutingConfig),
   /** Custom PRD/MDX structure injected into every native planning turn. */
   planTemplate: Schema.optional(PlanTemplateConfig),
   /**
@@ -833,7 +842,7 @@ export const resolveOrchestratorPreference = (
     }
   }
 
-  const provider = planning[0]
+  const provider = exactProvider ?? planning[0]
   if (!provider) return null
   const configuredModel = config?.providers?.[provider.cli]?.defaultModel
   const model =

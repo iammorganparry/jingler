@@ -7,6 +7,7 @@ import {
 } from "node:fs"
 import { basename, join } from "node:path"
 import { FileSystem, Path } from "@effect/platform"
+import { planStageSemanticFingerprint } from "@jingler/core"
 import { Chunk, Effect, Either, Layer, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { scriptedPlan } from "./adapter.js"
@@ -265,6 +266,7 @@ describe("PlanStore canonical document", () => {
               sessionId: "s1",
               producingChatId: "c1",
               id: first.id,
+              basePlanId: first.id,
               source: ORCHESTRATED_SOURCE.replace(
                 "Ship the change.",
                 "Ship the amended change."
@@ -292,6 +294,48 @@ describe("PlanStore canonical document", () => {
     })
   })
 
+  it("rejects stale worker evidence after the stage semantics change", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(ORCHESTRATED_SOURCE)
+        const oldFingerprint = planStageSemanticFingerprint(
+          first.projection.stages[0]!
+        )
+        const amended = yield* PlanStore.promoteDocument(WT, {
+          sessionId: "s1",
+          producingChatId: "c1",
+          id: "replacement-id",
+          basePlanId: first.id,
+          source: ORCHESTRATED_SOURCE.replace(
+            "The change is verified.",
+            "The amended behavior is verified."
+          ),
+          status: "executing",
+          author: "agent"
+        })
+        yield* PlanStore.setCriterionStatusLatest(WT, {
+          planId: first.id,
+          stageId: "01",
+          criterionId: "01.1",
+          status: "passed",
+          evidence: "Evidence from the old requirement.",
+          expectedStageFingerprint: oldFingerprint
+        })
+        return {
+          amended,
+          latest: yield* PlanStore.readDocument(WT)
+        }
+      })
+    )
+
+    expect(result.latest?.revision).toBe(result.amended.revision)
+    expect(result.latest?.projection.stages[0]?.acceptance[0]).toMatchObject({
+      text: "The amended behavior is verified.",
+      status: "pending",
+      evidence: null
+    })
+  })
+
   it("keeps the canonical plan identity when an amendment carries a fresh proposal id", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -300,6 +344,7 @@ describe("PlanStore canonical document", () => {
           sessionId: "s1",
           producingChatId: "c1",
           id: "fresh-planner-proposal-id",
+          basePlanId: first.id,
           source: ORCHESTRATED_SOURCE.replace(
             "Ship the change.",
             "Ship the amended change."
@@ -325,6 +370,35 @@ describe("PlanStore canonical document", () => {
     expect(result.latest?.projection.stages[0]?.executionStatus).toBe(
       "completed"
     )
+  })
+
+  it("replaces a completed plan with a fresh coordination identity", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(ORCHESTRATED_SOURCE)
+        const completed = yield* PlanStore.updateDocument(WT, {
+          planId: first.id,
+          baseRevision: first.revision,
+          source: first.source,
+          author: "agent",
+          status: "done"
+        })
+        const second = yield* PlanStore.promoteDocument(WT, {
+          sessionId: "s1",
+          producingChatId: "c1",
+          id: "plan-2",
+          source: ORCHESTRATED_SOURCE.replace("Ship the change.", "Ship plan two."),
+          status: "proposed",
+          author: "agent"
+        })
+        return { completed, second }
+      })
+    )
+
+    expect(result.second.id).toBe("plan-2")
+    expect(result.second.revision).toBe(1)
+    expect(result.second.source).toContain("Ship plan two.")
+    expect(result.second.projection.stages[0]?.executionStatus).toBe("queued")
   })
 
   it("persists worker checkpoints and exposes running workers as interrupted after restart", async () => {

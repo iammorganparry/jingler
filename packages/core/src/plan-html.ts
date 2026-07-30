@@ -59,6 +59,7 @@ export interface PlanHtmlDiagnostic {
     | "invalid-complexity"
     | "invalid-assignment"
     | "invalid-execution-status"
+    | "running-stage-removed"
     | PlanExecutionDiagnosticCode
   readonly message: string
 }

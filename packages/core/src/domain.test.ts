@@ -312,6 +312,28 @@ describe("resolveOrchestratorPreference", () => {
     expect(resolution?.fallbackReason).toContain("opencode/missing")
   })
 
+  it("keeps the configured provider when only its preferred model disappeared", () => {
+    const resolution = resolveOrchestratorPreference(
+      {
+        orchestrator: { cli: "codex", model: "retired" },
+        providers: {
+          codex: {
+            enabled: true,
+            defaultMode: "plan",
+            defaultModel: "gpt-5.5"
+          }
+        }
+      },
+      catalog
+    )
+
+    expect(resolution?.preference).toStrictEqual({
+      cli: "codex",
+      model: "gpt-5.5"
+    })
+    expect(resolution?.isFallback).toBe(true)
+  })
+
   it("never chooses an installed harness that cannot plan", () => {
     expect(
       resolveOrchestratorPreference(

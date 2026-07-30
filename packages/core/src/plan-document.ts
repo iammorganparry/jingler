@@ -65,7 +65,33 @@ export type PlanStageComplexity = Schema.Schema.Type<typeof PlanStageComplexity>
  * The literal set intentionally mirrors `CliKind` and remains structurally
  * assignable to it.
  */
-const PlanWorkerCli = Schema.Literal("claude", "codex", "cursor", "opencode")
+export const PlanWorkerCli = Schema.Literal(
+  "claude",
+  "codex",
+  "cursor",
+  "opencode"
+)
+export type PlanWorkerCli = Schema.Schema.Type<typeof PlanWorkerCli>
+
+/** One concrete provider/model target selected by the worker router. */
+export const WorkerModelRoute = Schema.Struct({
+  cli: PlanWorkerCli,
+  model: Schema.String
+})
+export type WorkerModelRoute = Schema.Schema.Type<typeof WorkerModelRoute>
+
+/**
+ * Complexity router for implementation workers. `default` is the durable
+ * fallback for unavailable or unclassified work; explicit buckets let the
+ * operator trade capability and cost without changing the orchestrator model.
+ */
+export const WorkerRoutingConfig = Schema.Struct({
+  default: WorkerModelRoute,
+  low: WorkerModelRoute,
+  medium: WorkerModelRoute,
+  high: WorkerModelRoute
+})
+export type WorkerRoutingConfig = Schema.Schema.Type<typeof WorkerRoutingConfig>
 
 /** Provider-neutral route selected by the orchestrator for one logical worker. */
 export const PlanStageAssignment = Schema.Struct({

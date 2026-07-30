@@ -1,10 +1,10 @@
 import { CliExecError } from "@jingler/core"
 import type { CliKind } from "@jingler/core"
-import { Effect, Layer } from "effect"
+import { Effect, Fiber, Layer } from "effect"
 import { createActor } from "xstate"
 import { describe, expect, it } from "vitest"
 import { CliAdapter } from "./adapter.js"
-import type { CliAdapterShape, SessionSpec } from "./adapter.js"
+import type { AgentContext, CliAdapterShape, SessionSpec } from "./adapter.js"
 import {
   buildOrchestrationGroups,
   OrchestrationService,
@@ -91,6 +91,20 @@ const layerFor = (adapter: CliAdapterShape) =>
     Layer.provide(Layer.succeed(CliAdapter, CliAdapter.of(adapter)))
   )
 
+const passCurrentStage = (
+  spec: SessionSpec,
+  context: AgentContext
+): Effect.Effect<void> => {
+  const criterionId = /Criteria: (\S+)/.exec(spec.prompt)?.[1] ?? "missing"
+  return Effect.gen(function* () {
+    yield* context.emit({
+      _tag: "Assistant",
+      text: `PLAN_RESULT criterion=${criterionId} status=passed evidence=targeted verification passed`
+    })
+    yield* context.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+  })
+}
+
 describe("orchestrationWorkerMachine", () => {
   it("models the legal worker lifecycle and retry transition", () => {
     const actor = createActor(orchestrationWorkerMachine).start()
@@ -171,7 +185,7 @@ describe("OrchestrationService", () => {
           })
           yield* context.emit({ _tag: "Started", sessionId: `resume:${ownerId}` })
           yield* Effect.sleep(20)
-          yield* context.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+          yield* passCurrentStage(_spec, context)
           yield* Effect.sync(() => {
             active -= 1
           })
@@ -250,7 +264,7 @@ describe("OrchestrationService", () => {
             )
           : Effect.sleep(25).pipe(
               Effect.zipRight(
-                context.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+                passCurrentStage(spec, context)
               )
             ),
       stop: () => Effect.void
@@ -291,7 +305,7 @@ describe("OrchestrationService", () => {
         }
         return Effect.gen(function* () {
           yield* context.emit({ _tag: "Started", sessionId: "resume-agent-a" })
-          yield* context.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+          yield* passCurrentStage(spec, context)
         })
       },
       stop: () => Effect.void
@@ -328,7 +342,7 @@ describe("OrchestrationService", () => {
     const adapter: CliAdapterShape = {
       run: (_ownerId, spec, context) => {
         prompts.push(spec.prompt)
-        return context.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        return passCurrentStage(spec, context)
       },
       stop: () => Effect.void
     }
@@ -337,7 +351,11 @@ describe("OrchestrationService", () => {
       OrchestrationService.execute(
         input([stage("01", "agent-a"), initialSecond], {
           refreshStage: (_agentId, stageId) =>
-            Effect.succeed(stageId === "02" ? amendedSecond : null)
+            Effect.succeed(
+              stageId === "02"
+                ? amendedSecond
+                : stage("01", "agent-a")
+            )
         })
       ).pipe(Effect.provide(layerFor(adapter)))
     )
@@ -347,11 +365,45 @@ describe("OrchestrationService", () => {
     )
   })
 
+  it("discards evidence when a stage changes during its harness run", async () => {
+    const original = stage("01", "agent-a")
+    const amended = {
+      ...original,
+      intent: "Complete the amended requirement"
+    }
+    let refreshes = 0
+    const evidence: Array<string> = []
+    const states: Array<string> = []
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) => passCurrentStage(spec, context),
+      stop: () => Effect.void
+    }
+
+    const report = await Effect.runPromise(
+      OrchestrationService.execute(
+        input([original], {
+          refreshStage: () =>
+            Effect.sync(() => refreshes++ === 0 ? original : amended),
+          callbacks: {
+            onEvidence: (item) =>
+              Effect.sync(() => evidence.push(item.criterionId)),
+            onStageState: (update) =>
+              Effect.sync(() => states.push(update.status))
+          }
+        })
+      ).pipe(Effect.provide(layerFor(adapter)))
+    )
+
+    expect(report.workers[0]?.status).toBe("interrupted")
+    expect(evidence).toEqual([])
+    expect(states).toEqual(["running", "interrupted"])
+  })
+
   it("uses identical execution semantics for Claude, Codex, and OpenCode", async () => {
     const harnesses: ReadonlyArray<CliKind> = ["claude", "codex", "opencode"]
     const adapter: CliAdapterShape = {
-      run: (_ownerId, _spec, context) =>
-        context.emit({ _tag: "Done", costUsd: 0, tokens: 0 }),
+      run: (_ownerId, spec, context) =>
+        passCurrentStage(spec, context),
       stop: () => Effect.void
     }
 
@@ -393,6 +445,245 @@ describe("OrchestrationService", () => {
         { agentId: "agent-b", status: "completed", completed: ["03"] }
       ]
     ])
+  })
+
+  it.each([
+    {
+      name: "missing evidence",
+      output: "",
+      message: "has no PLAN_RESULT evidence"
+    },
+    {
+      name: "malformed evidence",
+      output: "PLAN_RESULT criterion=01.1 status=passed",
+      message: "malformed"
+    },
+    {
+      name: "explicitly failed evidence",
+      output:
+        "PLAN_RESULT criterion=01.1 status=failed evidence=verification failed",
+      message: "was reported failed"
+    },
+    {
+      name: "another stage's evidence",
+      output:
+        "PLAN_RESULT criterion=02.1 status=passed evidence=wrong owner",
+      message: "does not belong"
+    }
+  ])("leaves a stage retryable for $name", async ({ output, message }) => {
+    const persisted: Array<string> = []
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, _spec, context) =>
+        Effect.gen(function* () {
+          if (output.length > 0) {
+            yield* context.emit({ _tag: "Assistant", text: output })
+          }
+          yield* context.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        }),
+      stop: () => Effect.void
+    }
+
+    const report = await Effect.runPromise(
+      OrchestrationService.execute(
+        input([stage("01", "agent-a")], {
+          callbacks: {
+            onEvidence: (evidence) =>
+              Effect.sync(() => persisted.push(evidence.criterionId))
+          }
+        })
+      ).pipe(Effect.provide(layerFor(adapter)))
+    )
+
+    expect(report.workers[0]).toMatchObject({
+      status: "failed",
+      completedStageIds: [],
+      message: expect.stringContaining(message)
+    })
+    if (message === "does not belong" || message === "malformed") {
+      expect(persisted).toEqual([])
+    }
+  })
+
+  it("interrupts the harness and waits for teardown when a worker is stopped", async () => {
+    let started = false
+    let finalized = false
+    const adapter: CliAdapterShape = {
+      run: () =>
+        Effect.sync(() => {
+          started = true
+        }).pipe(
+          Effect.zipRight(Effect.never),
+          Effect.ensuring(
+            Effect.sync(() => {
+              finalized = true
+            })
+          )
+        ),
+      stop: () => Effect.void
+    }
+    const program = Effect.gen(function* () {
+      const execution = yield* Effect.fork(
+        OrchestrationService.execute(input([stage("01", "agent-a")]))
+      )
+      while (!started) yield* Effect.yieldNow()
+      yield* OrchestrationService.stopWorker({
+        sessionId: "session-1",
+        planId: "plan-1",
+        agentId: "agent-a"
+      })
+      return yield* Fiber.join(execution)
+    })
+
+    const report = await Effect.runPromise(
+      program.pipe(Effect.provide(layerFor(adapter)))
+    )
+    expect(finalized).toBe(true)
+    expect(report.workers[0]?.status).toBe("interrupted")
+  })
+
+  it("stops immediately when an unattended worker asks for operator input", async () => {
+    let mutatedAfterQuestion = false
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, _spec, context) =>
+        Effect.gen(function* () {
+          yield* context.askQuestion({
+            id: "q1",
+            questions: [
+              {
+                question: "Which implementation?",
+                header: "Choice",
+                options: [],
+                multiSelect: false
+              }
+            ]
+          })
+          mutatedAfterQuestion = true
+        }),
+      stop: () => Effect.void
+    }
+
+    const report = await Effect.runPromise(
+      OrchestrationService.execute(
+        input([stage("01", "agent-a")])
+      ).pipe(Effect.provide(layerFor(adapter)))
+    )
+
+    expect(mutatedAfterQuestion).toBe(false)
+    expect(report.workers[0]).toMatchObject({
+      status: "blocked",
+      message: expect.stringContaining("operator input")
+    })
+  })
+
+  it("retains a first-stage resume identity when that stage fails", async () => {
+    let attempt = 0
+    const observedResumeIds: Array<string | null> = []
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) =>
+        Effect.gen(function* () {
+          observedResumeIds.push(spec.resumeId)
+          if (attempt++ === 0) {
+            yield* context.emit({
+              _tag: "Started",
+              sessionId: "resume-first-stage"
+            })
+            return yield* Effect.fail(
+              new CliExecError({
+                kind: spec.cli,
+                message: "First attempt failed"
+              })
+            )
+          }
+          yield* passCurrentStage(spec, context)
+        }),
+      stop: () => Effect.void
+    }
+    const program = Effect.gen(function* () {
+      const first = yield* OrchestrationService.execute(
+        input([stage("01", "agent-a")])
+      )
+      const retried = yield* OrchestrationService.retryWorker({
+        planId: "plan-1",
+        agentId: "agent-a"
+      })
+      return { first, retried }
+    })
+
+    const result = await Effect.runPromise(
+      program.pipe(Effect.provide(layerFor(adapter)))
+    )
+    expect(result.first.workers[0]?.status).toBe("failed")
+    expect(result.retried.status).toBe("completed")
+    expect(observedResumeIds).toEqual([null, "resume-first-stage"])
+  })
+
+  it("reconstructs a targeted retry from a durable checkpoint", async () => {
+    const observed: Array<{ ownerId: string; resumeId: string | null }> = []
+    const adapter: CliAdapterShape = {
+      run: (ownerId, spec, context) => {
+        observed.push({ ownerId, resumeId: spec.resumeId })
+        return passCurrentStage(spec, context)
+      },
+      stop: () => Effect.void
+    }
+
+    const report = await Effect.runPromise(
+      OrchestrationService.execute(
+        input([stage("01", "agent-a"), stage("02", "agent-b")], {
+          agentIds: ["agent-a"],
+          checkpoints: [
+            {
+              agentId: "agent-a",
+              state: "interrupted",
+              completedStageIds: [],
+              resumeId: "durable-resume",
+              message: "Desktop restarted.",
+              attempt: 2
+            }
+          ]
+        })
+      ).pipe(Effect.provide(layerFor(adapter)))
+    )
+
+    expect(report.workers.map((worker) => worker.agentId)).toEqual(["agent-a"])
+    expect(observed).toEqual([
+      {
+        ownerId: "plan:plan-1:agent:agent-a",
+        resumeId: "durable-resume"
+      }
+    ])
+  })
+
+  it("refuses a second execution while the same plan still has live workers", async () => {
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) =>
+        Effect.sleep(30).pipe(
+          Effect.zipRight(passCurrentStage(spec, context))
+        ),
+      stop: () => Effect.void
+    }
+    const program = Effect.gen(function* () {
+      const first = yield* Effect.fork(
+        OrchestrationService.execute(input([stage("01", "agent-a")]))
+      )
+      yield* Effect.sleep(5)
+      const second = yield* OrchestrationService.execute(
+        input([stage("01", "agent-a")])
+      ).pipe(Effect.either)
+      const completed = yield* Fiber.join(first)
+      return { second, completed }
+    })
+
+    const result = await Effect.runPromise(
+      program.pipe(Effect.provide(layerFor(adapter)))
+    )
+    expect(result.second._tag).toBe("Left")
+    if (result.second._tag === "Left") {
+      expect(result.second.left._tag).toBe(
+        "OrchestrationAlreadyRunningError"
+      )
+    }
+    expect(result.completed.workers[0]?.status).toBe("completed")
   })
 })
 

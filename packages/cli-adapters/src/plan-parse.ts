@@ -12,7 +12,8 @@ import type {
 } from "@jingler/core"
 import {
   DEFAULT_PLAN_TEMPLATE_HTML,
-  PLAN_EVIDENCE_INSTRUCTIONS
+  PLAN_EVIDENCE_INSTRUCTIONS,
+  type WorkerRoutingConfig
 } from "@jingler/core"
 import type { OrchestrationRoute } from "./adapter.js"
 import { planFromHtml } from "./plan-html.js"
@@ -78,7 +79,8 @@ const ORCHESTRATOR_SUBMIT_RULE: Readonly<Record<PlanChannel, string>> = {
 export const planInstructions = (
   channel: PlanChannel,
   template: string = DEFAULT_PLAN_TEMPLATE_HTML,
-  orchestration?: ReadonlyArray<OrchestrationRoute>
+  orchestration?: ReadonlyArray<OrchestrationRoute>,
+  workerRouting?: WorkerRoutingConfig
 ): string =>
   `${OPENING[channel]} Jingler renders the HTML as an interactive PRD in a Notion-style editor.
 
@@ -95,7 +97,10 @@ Jingler hands approved stages to provider-neutral worker agents.
   data-agent-id, data-cli, data-model, data-reason, and data-status="queued".
 - Use data-depends-on="stage-id ..." for dependencies.
 - Stages connected by any dependency path MUST share one agent id, harness, and model.
-- Give independent dependency components distinct agent ids so they can run in parallel.
+- Declare repository-relative files in <ul data-files>; normalize paths without "." or "..".
+- Stages whose declared files overlap MUST share one agent id, harness, and model even
+  when they have no dependency edge. Give only dependency- and file-independent
+  components distinct agent ids so they can run in parallel.
 - Use stable stage and acceptance ids across amendments. Do not mark criteria passed or
   add evidence: workers own mechanical progress and PLAN_RESULT evidence.
 - Assign only these installed routes:
@@ -104,6 +109,18 @@ ${orchestration
     provider.models.map((model) => `  - ${provider.cli}/${model.id}`)
   )
   .join("\n")}
+${workerRouting === undefined
+  ? ""
+  : `
+- Route each dependency/file component by its strongest stage complexity:
+  - low: ${workerRouting.low.cli}/${workerRouting.low.model}
+  - medium: ${workerRouting.medium.cli}/${workerRouting.medium.model}
+  - high: ${workerRouting.high.cli}/${workerRouting.high.model}
+  - default fallback: ${workerRouting.default.cli}/${workerRouting.default.model}
+- These operator settings are authoritative. Jingler normalizes assignments to them
+  before approval, so explain the routed choice in data-reason rather than substituting
+  another model.
+`}
 
 Assignment child example:
 <div data-assignment="worker-api" data-agent-id="worker-api" data-cli="codex"
@@ -147,8 +164,9 @@ status updates, and PLAN_RESULT evidence.`}`
 /** The Claude variant, passed to the SDK as `planModeInstructions`. */
 export const planModeInstructions = (
   template: string = DEFAULT_PLAN_TEMPLATE_HTML,
-  orchestration?: ReadonlyArray<OrchestrationRoute>
-): string => planInstructions("tool", template, orchestration)
+  orchestration?: ReadonlyArray<OrchestrationRoute>,
+  workerRouting?: WorkerRoutingConfig
+): string => planInstructions("tool", template, orchestration, workerRouting)
 
 // ── Parsing ───────────────────────────────────────────────────────────────────
 

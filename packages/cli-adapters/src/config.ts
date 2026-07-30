@@ -7,7 +7,8 @@ import type {
   OpenConnectorConfig,
   OrchestratorPreference,
   PlanTemplateConfig,
-  ProviderConfig
+  ProviderConfig,
+  WorkerRoutingConfig
 } from "@jingler/core"
 import { clampFontScale, DEFAULT_THEME_ID, WorkspaceConfig } from "@jingler/core"
 import { ConfigError } from "@jingler/core"
@@ -107,6 +108,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.providers ? { providers: existing.providers } : {}),
             ...(existing?.defaultCli ? { defaultCli: existing.defaultCli } : {}),
             ...(existing?.orchestrator ? { orchestrator: existing.orchestrator } : {}),
+            ...(existing?.workerRouting ? { workerRouting: existing.workerRouting } : {}),
             ...(existing?.planTemplate ? { planTemplate: existing.planTemplate } : {}),
             ...(existing?.notifications ? { notifications: existing.notifications } : {}),
             // Booleans are checked against `undefined`, not truthiness — a saved
@@ -177,6 +179,10 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       /** Persist the provider-neutral planner route used by every new session. */
       const setOrchestrator = (orchestrator: OrchestratorPreference) =>
         patch({ orchestrator })
+
+      /** Persist concrete implementation-worker routes by plan complexity. */
+      const setWorkerRouting = (workerRouting: WorkerRoutingConfig) =>
+        patch({ workerRouting })
 
       /**
        * Switch the active colour theme, preserving any `colorCustomizations`
@@ -259,6 +265,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setContext,
         setDefaultCli,
         setOrchestrator,
+        setWorkerRouting,
         setProvider,
         setPlanTemplate,
         setActiveTheme,

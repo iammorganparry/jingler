@@ -15,6 +15,28 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   const { window, home } = launched
   await expect(appShell(window)).toBeVisible()
 
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: "Settings" }).click()
+  await window.getByRole("button", { name: "Plan", exact: true }).click()
+  await window
+    .getByRole("combobox", { name: "Low complexity worker harness" })
+    .click()
+  await window.getByRole("option", { name: "Codex" }).click()
+  await expect
+    .poll(
+      () =>
+        JSON.parse(
+          readFileSync(join(home, "jingler", "config.json"), "utf8")
+        ).workerRouting
+    )
+    .toMatchObject({
+      default: { cli: "claude", model: "opus" },
+      low: { cli: "codex", model: "gpt-5.6-sol" },
+      medium: { cli: "claude", model: "opus" },
+      high: { cli: "claude", model: "opus" }
+    })
+  await window.getByRole("button", { name: "Close settings" }).click()
+
   await window.getByTestId("new-session").click()
   await window
     .getByPlaceholder("Leave blank for agent naming")
@@ -47,7 +69,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   await window.getByRole("button", { name: "Plan Review" }).first().click()
   await expect(window.locator('[data-plan-assignment-card="true"]')).toHaveCount(8)
   await expect(window.getByText("worker-auth").first()).toBeVisible()
-  await expect(window.getByText("claude · sonnet").first()).toBeVisible()
+  await expect(window.getByText("claude · opus").first()).toBeVisible()
   await expect(window.getByText("worker-release").first()).toBeVisible()
   await expect(window.getByText("codex · gpt-5.6-sol").first()).toBeVisible()
 

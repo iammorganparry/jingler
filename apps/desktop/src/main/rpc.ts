@@ -75,6 +75,7 @@ import type {
   CliKind,
   OpenConnectorConfig,
   OpenConnectorDefaults,
+  OrchestratorResolution,
   StreamEvent,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -82,6 +83,7 @@ import type {
   IssueAutomations,
   IssueSummary,
   Message,
+  PlanDocument,
   PluginCatalog,
   PrMergeMethod,
   ProviderConfig,
@@ -93,6 +95,7 @@ import type {
   WorkspaceConfig
 } from "@jingler/core"
 import type {
+  OrchestrationCheckpoint,
   OrchestrationExecutionReport,
   OrchestrationStageStatus
 } from "@jingler/cli-adapters"
@@ -281,10 +284,88 @@ const newSessionOrchestrator = (config: WorkspaceConfig | null) =>
     return resolveOrchestratorPreference(config, catalog)
   })
 
+/** Shared route/default policy for blank, PR, and issue session creation. */
+export const sessionCreationDefaults = (
+  requestedCli: CliKind,
+  config: WorkspaceConfig | null,
+  orchestrator: OrchestratorResolution | null
+) => {
+  const cli = orchestrator?.preference.cli ?? requestedCli
+  const provider = config?.providers?.[cli]
+  return {
+    cli,
+    options: {
+      chatRole: orchestrator === null ? "direct" as const : "orchestrator" as const,
+      defaultMode: orchestrator ? "plan" as const : provider?.defaultMode,
+      defaultModel: orchestrator?.preference.model ?? provider?.defaultModel,
+      defaultReasoning: providerReasoning(provider)
+    }
+  }
+}
+
 const persistedStageStatus = (
   status: OrchestrationStageStatus
 ): "queued" | "running" | "blocked" | "failed" | "interrupted" | "completed" | null =>
   status === "skipped" ? null : status
+
+/** The canonical producing chat owns execution strategy, never the selected tab. */
+export const planUsesOrchestration = (
+  session: Session,
+  document: PlanDocument
+): boolean =>
+  session.chats.find((chat) => chat.id === document.producingChatId)?.role ===
+  "orchestrator"
+
+export const mergeCanonicalOrchestrationCheckpoints = (
+  document: PlanDocument,
+  checkpoints: ReadonlyArray<OrchestrationCheckpoint>
+): ReadonlyArray<OrchestrationCheckpoint> => {
+  const checkpointByAgent = new Map(
+    checkpoints.map((checkpoint) => [checkpoint.agentId, checkpoint])
+  )
+  for (const stage of document.projection.stages) {
+    const agentId = stage.assignment?.agentId
+    if (agentId === undefined) continue
+    const prior = checkpointByAgent.get(agentId)
+    const completedStageIds = document.projection.stages
+      .filter(
+        (candidate) =>
+          candidate.assignment?.agentId === agentId &&
+          candidate.executionStatus === "completed"
+      )
+      .map((candidate) => candidate.id)
+    checkpointByAgent.set(agentId, {
+      agentId,
+      state:
+        prior?.state ??
+        (completedStageIds.length > 0 ? "completed" : "queued"),
+      completedStageIds,
+      resumeId: prior?.resumeId ?? null,
+      message: prior?.message ?? null,
+      attempt: prior?.attempt ?? 0
+    })
+  }
+  return [...checkpointByAgent.values()]
+}
+
+export const orchestrationStagesCompleted = (
+  document: PlanDocument | null
+): boolean =>
+  document !== null &&
+  document.projection.stages.every(
+    (stage) => stage.executionStatus === "completed"
+  )
+
+const canonicalPlanForSession = (session: Session, planId: string) =>
+  session.worktreePath === null || session.worktreePath === undefined
+    ? Effect.succeed(null)
+    : PlanStore.readDocument(
+        session.worktreePath,
+        session.id,
+        session.activeChatId
+      ).pipe(
+        Effect.map((document) => document?.id === planId ? document : null)
+      )
 
 /**
  * Execute the latest approved canonical revision through provider-neutral
@@ -293,7 +374,8 @@ const persistedStageStatus = (
  */
 export const executeOrchestration = (
   sessionId: string,
-  planId: string
+  planId: string,
+  agentIds?: ReadonlyArray<string>
 ): Effect.Effect<
   OrchestrationExecutionReport | null,
   never,
@@ -331,17 +413,8 @@ export const executeOrchestration = (
     const checkpoints = yield* store
       .readOrchestrationCheckpoints(worktreePath, planId)
       .pipe(Effect.provide(persistence))
-    const completedStageIds = new Set(
-      document.projection.stages
-        .filter((stage) => stage.executionStatus === "completed")
-        .map((stage) => stage.id)
-    )
-    const currentCheckpoints = checkpoints.map((checkpoint) => ({
-      ...checkpoint,
-      completedStageIds: checkpoint.completedStageIds.filter((stageId) =>
-        completedStageIds.has(stageId)
-      )
-    }))
+    const currentCheckpoints =
+      mergeCanonicalOrchestrationCheckpoints(document, checkpoints)
 
     const report = yield* service
       .execute({
@@ -351,6 +424,7 @@ export const executeOrchestration = (
         stages: document.projection.stages,
         checkpoints: currentCheckpoints,
         maxConcurrency: 4,
+        ...(agentIds === undefined ? {} : { agentIds }),
         makeSessionSpec: ({ group, prompt, resumeId }) => ({
           cli: group.assignment.cli,
           repo: session.repo,
@@ -386,7 +460,8 @@ export const executeOrchestration = (
                     stageId: update.stageId,
                     agentId: update.agentId,
                     status,
-                    message: update.message
+                    message: update.message,
+                    expectedStageFingerprint: update.stageFingerprint
                   })
                   .pipe(Effect.provide(persistence), Effect.asVoid)
           },
@@ -396,7 +471,9 @@ export const executeOrchestration = (
                 planId,
                 criterionId: evidence.criterionId,
                 status: evidence.status,
-                evidence: evidence.evidence
+                evidence: evidence.evidence,
+                stageId: evidence.stageId,
+                expectedStageFingerprint: evidence.stageFingerprint
               })
               .pipe(Effect.provide(persistence), Effect.asVoid),
           onCheckpoint: (checkpoint) =>
@@ -412,6 +489,10 @@ export const executeOrchestration = (
       .pipe(Effect.either)
 
     if (report._tag === "Left") {
+      if (report.left._tag === "OrchestrationAlreadyRunningError") {
+        yield* Effect.logWarning(report.left.message)
+        return null
+      }
       yield* store
         .settleOrchestration(worktreePath, {
           planId,
@@ -424,12 +505,15 @@ export const executeOrchestration = (
       return null
     }
 
+    const latest = yield* store
+      .readDocument(worktreePath, session.id, session.activeChatId)
+      .pipe(Effect.provide(persistence))
     yield* store
       .settleOrchestration(worktreePath, {
         planId,
-        workersCompleted: report.right.workers.every(
-          (worker) => worker.status === "completed"
-        )
+        workersCompleted:
+          latest?.id === planId &&
+          orchestrationStagesCompleted(latest)
       })
       .pipe(Effect.provide(persistence))
     return report.right
@@ -457,14 +541,10 @@ export const createSessionFromPr = (input: CreateSessionFromPrInput) =>
     const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
     const allowSharedCheckout = config?.git?.shareCheckedOutBranches ?? true
     const orchestrator = yield* newSessionOrchestrator(config)
-    const cli = orchestrator?.preference.cli ?? input.cli
-    const provider = config?.providers?.[cli]
-    return yield* SessionStore.createFromPr({ ...input, cli }, {
+    const route = sessionCreationDefaults(input.cli, config, orchestrator)
+    return yield* SessionStore.createFromPr({ ...input, cli: route.cli }, {
       allowSharedCheckout,
-      chatRole: "orchestrator",
-      defaultMode: orchestrator ? "plan" : provider?.defaultMode,
-      defaultModel: orchestrator?.preference.model ?? provider?.defaultModel,
-      defaultReasoning: providerReasoning(provider)
+      ...route.options
     })
   })
 
@@ -478,14 +558,11 @@ export const createSession = (input: CreateSessionInput) =>
   Effect.gen(function* () {
     const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
     const orchestrator = yield* newSessionOrchestrator(config)
-    const cli = orchestrator?.preference.cli ?? input.cli
-    const provider = config?.providers?.[cli]
-    return yield* SessionStore.create({ ...input, cli }, {
-      chatRole: "orchestrator",
-      defaultMode: orchestrator ? "plan" : provider?.defaultMode,
-      defaultModel: orchestrator?.preference.model ?? provider?.defaultModel,
-      defaultReasoning: providerReasoning(provider)
-    })
+    const route = sessionCreationDefaults(input.cli, config, orchestrator)
+    return yield* SessionStore.create(
+      { ...input, cli: route.cli },
+      route.options
+    )
   })
 
 /**
@@ -569,14 +646,11 @@ export const createSessionFromIssue = (input: CreateSessionFromIssueInput) =>
   Effect.gen(function* () {
     const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
     const orchestrator = yield* newSessionOrchestrator(config)
-    const cli = orchestrator?.preference.cli ?? input.cli
-    const provider = config?.providers?.[cli]
-    return yield* SessionStore.createFromIssue({ ...input, cli }, {
-      chatRole: "orchestrator",
-      defaultMode: orchestrator ? "plan" : provider?.defaultMode,
-      defaultModel: orchestrator?.preference.model ?? provider?.defaultModel,
-      defaultReasoning: providerReasoning(provider)
-    })
+    const route = sessionCreationDefaults(input.cli, config, orchestrator)
+    return yield* SessionStore.createFromIssue(
+      { ...input, cli: route.cli },
+      route.options
+    )
   })
 
 /** `Sessions.linkIssue` handler — attach an issue (+ automations) to a live session. */
@@ -1625,6 +1699,26 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Agent.approvePlan": ({ sessionId, planId, executionMode, revision }) =>
     Effect.gen(function* () {
       const runner = yield* AgentRunner
+      const before = yield* SessionStore.get(sessionId).pipe(
+        Effect.orElseSucceed(() => null)
+      )
+      const document =
+        before === null
+          ? null
+          : yield* canonicalPlanForSession(before, planId)
+      if (
+        before !== null &&
+        document !== null &&
+        planUsesOrchestration(before, document) &&
+        (yield* OrchestrationService.isPlanRunning(planId))
+      ) {
+        return {
+          status: "refused" as const,
+          message:
+            "Approval refused because this plan still has live workers. Stop them or wait for them to settle before approving the amendment.",
+          latestRevision: document.revision
+        }
+      }
       const result = yield* runner.approvePlan(
         sessionId,
         planId,
@@ -1635,10 +1729,15 @@ const HandlersLayer = JinglerRpcs.toLayer({
       const session = yield* SessionStore.get(sessionId).pipe(
         Effect.orElseSucceed(() => null)
       )
-      const orchestrating =
-        session?.chats.find((chat) => chat.id === session.activeChatId)?.role ===
-        "orchestrator"
-      if (orchestrating) {
+      const approvedDocument =
+        session === null
+          ? null
+          : yield* canonicalPlanForSession(session, planId)
+      if (
+        session !== null &&
+        approvedDocument !== null &&
+        planUsesOrchestration(session, approvedDocument)
+      ) {
         yield* executeOrchestration(sessionId, planId).pipe(Effect.forkDaemon)
       }
       return result
@@ -1650,9 +1749,14 @@ const HandlersLayer = JinglerRpcs.toLayer({
         const session = yield* SessionStore.get(sessionId).pipe(
           Effect.orElseSucceed(() => null)
         )
+        const document =
+          session === null
+            ? null
+            : yield* canonicalPlanForSession(session, planId)
         const orchestrating =
-          session?.chats.find((chat) => chat.id === chatId)?.role ===
-          "orchestrator"
+          session !== null &&
+          document !== null &&
+          planUsesOrchestration(session, document)
         if (!orchestrating) {
           return runner.resumePlan(sessionId, chatId, planId, revision)
         }
@@ -1686,32 +1790,8 @@ const HandlersLayer = JinglerRpcs.toLayer({
     Effect.flatMap(OrchestrationService, (service) =>
       service.stopWorker({ sessionId, planId, agentId })
     ),
-  "Agent.retryWorker": ({ planId, agentId }) =>
-    Effect.gen(function* () {
-      const service = yield* OrchestrationService
-      const result = yield* service
-        .retryWorker({ planId, agentId })
-        .pipe(Effect.either)
-      if (result._tag === "Left") {
-        yield* Effect.logWarning(result.left.message)
-        return
-      }
-      const sessions = yield* SessionStore.list()
-      for (const session of sessions) {
-        if (session.worktreePath == null) continue
-        const document = yield* PlanStore.readDocument(
-          session.worktreePath,
-          session.id,
-          session.activeChatId
-        )
-        if (document?.id !== planId) continue
-        yield* PlanStore.settleOrchestration(session.worktreePath, {
-          planId,
-          workersCompleted: result.right.status === "completed"
-        })
-        break
-      }
-    }),
+  "Agent.retryWorker": ({ sessionId, planId, agentId }) =>
+    executeOrchestration(sessionId, planId, [agentId]).pipe(Effect.asVoid),
   "Agent.setHarness": ({ sessionId, chatId, cli, model }) =>
     SessionStore.setHarness(sessionId, chatId, cli, model).pipe(Effect.ignore),
   "Agent.stop": ({ sessionId, chatId }) =>
@@ -1780,6 +1860,8 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Config.setFontScale": ({ fontScale }) => ConfigService.setFontScale(fontScale),
   "Config.setDefaultCli": ({ cli }) => ConfigService.setDefaultCli(cli),
   "Config.setOrchestrator": (orchestrator) => ConfigService.setOrchestrator(orchestrator),
+  "Config.setWorkerRouting": (workerRouting) =>
+    ConfigService.setWorkerRouting(workerRouting),
   /**
    * Deliver an OS notification. Main decides whether to actually show it: it
    * owns the window's focus state, which the renderer cannot observe reliably,

@@ -83,6 +83,43 @@ describe("PlanSettings", () => {
     })
   })
 
+  it("persists concrete worker routes independently for each complexity", async () => {
+    const onSaveWorkerRouting = vi.fn()
+    render(
+      <PlanSettings
+        source={DEFAULT_PLAN_TEMPLATE_HTML}
+        clis={[
+          {
+            kind: "claude",
+            label: "Claude Code",
+            binPath: "/bin/claude",
+            version: "1",
+            available: true
+          }
+        ]}
+        loadModels={async () => [
+          { id: "opus", label: "Opus" },
+          { id: "haiku", label: "Haiku" }
+        ]}
+        onSaveWorkerRouting={onSaveWorkerRouting}
+      />
+    )
+
+    fireEvent.click(
+      await screen.findByRole("combobox", {
+        name: "Low complexity worker model"
+      })
+    )
+    fireEvent.click(await screen.findByRole("option", { name: "Haiku" }))
+
+    expect(onSaveWorkerRouting).toHaveBeenCalledWith({
+      default: { cli: "claude", model: "opus" },
+      low: { cli: "claude", model: "haiku" },
+      medium: { cli: "claude", model: "opus" },
+      high: { cli: "claude", model: "opus" }
+    })
+  })
+
   it("resolves an unavailable preference to the first installed planning provider", () => {
     expect(
       resolveEffectiveOrchestrator(

@@ -44,6 +44,7 @@ import {
   OpenConnectorConfig,
   OpenConnectorDefaults,
   OrchestratorPreference,
+  WorkerRoutingConfig,
   ConnectorProvider,
   ConnectorProviderDetail,
   ConnectorConnection,
@@ -481,6 +482,7 @@ export class JinglerRpcs extends RpcGroup.make(
   /** Retry one settled worker from its latest durable checkpoint. */
   Rpc.make("Agent.retryWorker", {
     payload: {
+      sessionId: Schema.String,
       planId: Schema.String,
       agentId: Schema.String
     }
@@ -860,6 +862,13 @@ export class JinglerRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: OrchestratorPreference
+  }),
+
+  /** Persist concrete implementation-worker routes by plan complexity. */
+  Rpc.make("Config.setWorkerRouting", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: WorkerRoutingConfig
   }),
 
   /**

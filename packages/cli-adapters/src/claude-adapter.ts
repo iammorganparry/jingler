@@ -1233,7 +1233,8 @@ export const runClaude = (
               ? {
                   planModeInstructions: planModeInstructions(
                     spec.planTemplate,
-                    spec.orchestrationRoutes
+                    spec.orchestrationRoutes,
+                    spec.workerRouting
                   )
                 }
               : {}),

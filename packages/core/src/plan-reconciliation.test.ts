@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest"
 import type { PlanDocument } from "./plan-document.js"
 import { parsePlanHtml } from "./plan-html.js"
-import { reconcilePlanAmendment } from "./plan-reconciliation.js"
+import {
+  planStageSemanticFingerprint,
+  reconcilePlanAmendment
+} from "./plan-reconciliation.js"
 
 const documentFrom = (source: string): PlanDocument => {
   const parsed = parsePlanHtml(source)
@@ -109,5 +112,64 @@ ${assignment("replacement-owner-2", "queued")}
       evidence: "still green"
     })
     expect(result.changedStageIds).toEqual(["01"])
+  })
+
+  it("rejects removing a stage while its worker is running", () => {
+    const previous = documentFrom(`<h1>PRD: Keep live ownership</h1>
+<section data-stage="01" data-title="Running" data-complexity="medium">
+${assignment("worker-a", "running")}
+<div data-acceptance="01.1" data-status="pending">The work completes.</div>
+</section>`)
+
+    const result = reconcilePlanAmendment(
+      previous,
+      `<h1>PRD: Keep live ownership</h1>
+<section data-stage="02" data-title="Replacement">
+<div data-acceptance="02.1" data-status="pending">Replacement works.</div>
+</section>`
+    )
+
+    expect(result.valid).toBe(false)
+    if (result.valid) return
+    expect(result.diagnostics).toContainEqual({
+      code: "running-stage-removed",
+      message:
+        'Running stage "01" cannot be removed. Stop its worker before removing the stage.'
+    })
+  })
+})
+
+describe("planStageSemanticFingerprint", () => {
+  it("ignores editor wrapper and mechanical metadata changes", () => {
+    const previous = documentFrom(`<h1>PRD: Fingerprint</h1>
+<section data-stage="01" data-title="Stable" data-complexity="medium">
+${assignment("worker-a", "completed")}
+<ol><li>Run tests</li></ol>
+<div data-acceptance="01.1" data-status="passed" data-evidence="green">Tests pass.</div>
+</section>`)
+    const compact = previous.projection.stages[0]!
+    const replacement = `<h1>PRD: Fingerprint</h1>
+<section data-stage="01" data-title="Stable" data-complexity="medium">
+${assignment("worker-b", "queued")}
+<ol><li><p>Run tests</p></li></ol>
+<div data-acceptance="01.1" data-status="pending">Tests pass.</div>
+</section>`
+    const replacementDocument = documentFrom(replacement)
+    const roundTripped = replacementDocument.projection.stages[0]!
+
+    expect(planStageSemanticFingerprint(roundTripped)).toBe(
+      planStageSemanticFingerprint(compact)
+    )
+    const reconciled = reconcilePlanAmendment(previous, replacement)
+    expect(reconciled.valid).toBe(true)
+    if (!reconciled.valid) return
+    expect(reconciled.changedStageIds).toEqual([])
+    expect(reconciled.projection.stages[0]).toMatchObject({
+      executionStatus: "completed",
+      assignment: { agentId: "worker-a" },
+      acceptance: [
+        { id: "01.1", status: "passed", evidence: "green" }
+      ]
+    })
   })
 })

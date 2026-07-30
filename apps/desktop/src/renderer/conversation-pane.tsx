@@ -420,7 +420,7 @@ export function ConversationPane({
         if (planId) void rpc.agentStopWorker(session.id, planId, agentId)
       }}
       onRetryWorker={(agentId) => {
-        if (planId) void rpc.agentRetryWorker(planId, agentId)
+        if (planId) void rpc.agentRetryWorker(session.id, planId, agentId)
       }}
     />
   )

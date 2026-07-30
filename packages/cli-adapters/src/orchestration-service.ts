@@ -1,12 +1,25 @@
-import { buildPlanExecutionGraph } from "@jingler/core"
+import {
+  buildPlanExecutionGraph,
+  planStageSemanticFingerprint
+} from "@jingler/core"
 import type {
+  CliExecError,
   CliKind,
   PlanExecutionDiagnostic,
   PlanPrdStage,
   PlanStageAssignment,
   StreamEvent
 } from "@jingler/core"
-import { Data, Effect, Ref } from "effect"
+import {
+  Cause,
+  Data,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Option,
+  Ref
+} from "effect"
 import { createActor, createMachine } from "xstate"
 import type { AgentContext, SessionSpec } from "./adapter.js"
 import { CliAdapter } from "./adapter.js"
@@ -112,6 +125,13 @@ export class OrchestrationWorkerNotFoundError extends Data.TaggedError(
   readonly agentId: string
 }> {}
 
+export class OrchestrationAlreadyRunningError extends Data.TaggedError(
+  "OrchestrationAlreadyRunningError"
+)<{
+  readonly message: string
+  readonly planId: string
+}> {}
+
 /**
  * Validate the stage DAG and turn it into maximally parallel worker groups.
  *
@@ -146,6 +166,7 @@ export interface OrchestrationEvidence {
   readonly evidence: string
   readonly stageId: string
   readonly agentId: string
+  readonly stageFingerprint: string
 }
 
 export interface OrchestrationWorkerUpdate {
@@ -169,6 +190,7 @@ export interface OrchestrationStageUpdate {
   readonly stageId: string
   readonly status: OrchestrationStageStatus
   readonly message: string | null
+  readonly stageFingerprint: string
 }
 
 export interface OrchestrationCheckpoint {
@@ -233,6 +255,8 @@ export interface OrchestrationExecuteInput {
   readonly stages: ReadonlyArray<OrchestrationStage>
   readonly checkpoints?: ReadonlyArray<OrchestrationCheckpoint>
   readonly maxConcurrency?: number
+  /** Run only these logical workers, used by durable per-worker retry. */
+  readonly agentIds?: ReadonlyArray<string>
   readonly makeSessionSpec: (request: OrchestrationSessionSpecRequest) => SessionSpec
   /**
    * Re-read a stage from the latest canonical revision at its execution
@@ -296,35 +320,81 @@ PLAN_RESULT criterion=<id> status=<passed|failed> evidence=<concise observable e
 
 Criteria: ${stage.acceptance.map((criterion) => criterion.id).join(", ")}`
 
+interface ParsedStageEvidence {
+  readonly evidence: ReadonlyArray<OrchestrationEvidence>
+  readonly structuralErrors: ReadonlyArray<string>
+  readonly verificationErrors: ReadonlyArray<string>
+}
+
 const evidenceFrom = (
   output: string,
   stage: OrchestrationStage,
-  agentId: string
-): ReadonlyArray<OrchestrationEvidence> => {
+  agentId: string,
+  stageFingerprint: string
+): ParsedStageEvidence => {
   const evidence: Array<OrchestrationEvidence> = []
   const seen = new Set<string>()
-  const pattern =
-    /^PLAN_RESULT criterion=(\S+) status=(passed|failed) evidence=(.+)$/gm
-  for (const match of output.matchAll(pattern)) {
+  const allowed = new Set(
+    stage.acceptance
+      .filter((criterion) => criterion.status !== "waived")
+      .map((criterion) => criterion.id)
+  )
+  const structuralErrors: Array<string> = []
+  for (const line of output.split(/\r?\n/)) {
+    if (!line.trimStart().startsWith("PLAN_RESULT")) continue
+    const match =
+      /^PLAN_RESULT criterion=(\S+) status=(passed|failed) evidence=(\S.*)$/.exec(
+        line.trim()
+      )
+    if (match === null) {
+      structuralErrors.push("A PLAN_RESULT line was malformed.")
+      continue
+    }
     const criterionId = match[1]
     const status = match[2]
     const detail = match[3]
     if (
       criterionId === undefined ||
       (status !== "passed" && status !== "failed") ||
-      detail === undefined ||
-      seen.has(criterionId)
-    ) continue
+      detail === undefined
+    ) {
+      structuralErrors.push("A PLAN_RESULT line was malformed.")
+      continue
+    }
+    if (!allowed.has(criterionId)) {
+      structuralErrors.push(
+        `Criterion "${criterionId}" does not belong to stage "${stage.id}".`
+      )
+      continue
+    }
+    if (seen.has(criterionId)) {
+      structuralErrors.push(
+        `Criterion "${criterionId}" was reported more than once.`
+      )
+      continue
+    }
     seen.add(criterionId)
     evidence.push({
       criterionId,
       status,
       evidence: detail.trim(),
       stageId: stage.id,
-      agentId
+      agentId,
+      stageFingerprint
     })
   }
-  return evidence
+  const verificationErrors = [
+    ...[...allowed]
+      .filter((criterionId) => !seen.has(criterionId))
+      .map(
+        (criterionId) =>
+          `Criterion "${criterionId}" has no PLAN_RESULT evidence.`
+      ),
+    ...evidence
+      .filter((item) => item.status !== "passed")
+      .map((item) => `Criterion "${item.criterionId}" was reported failed.`)
+  ]
+  return { evidence, structuralErrors, verificationErrors }
 }
 
 const boundedConcurrency = (requested: number | undefined): number =>
@@ -338,6 +408,13 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
       const adapter = yield* CliAdapter
       const cancelled = yield* Ref.make(new Set<string>())
       const cachedWorkers = yield* Ref.make(new Map<string, CachedWorker>())
+      const liveAdapterFibers = yield* Ref.make(
+        new Map<string, Fiber.RuntimeFiber<void, CliExecError>>()
+      )
+      const workerSettled = yield* Ref.make(
+        new Map<string, Deferred.Deferred<void>>()
+      )
+      const activePlans = yield* Ref.make(new Set<string>())
 
       const notifyWorker = (
         callbacks: OrchestrationCallbacks | undefined,
@@ -363,12 +440,17 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
       ): Effect.Effect<OrchestrationWorkerResult> =>
         Effect.gen(function* () {
           const ownerId = ownerIdFor(input.planId, group.agentId)
-          const holder = {}
-          const machine = createActor(orchestrationWorkerMachine).start()
-          const completed = new Set(initialCompleted)
-          let resumeId = initialResumeId
-          const allEvidence: Array<OrchestrationEvidence> = []
-          let message: string | null = null
+          const settled = yield* Deferred.make<void>()
+          yield* Ref.update(workerSettled, (workers) =>
+            new Map(workers).set(ownerId, settled)
+          )
+          return yield* Effect.gen(function* () {
+            const holder = {}
+            const machine = createActor(orchestrationWorkerMachine).start()
+            const completed = new Set(initialCompleted)
+            let resumeId = initialResumeId
+            const allEvidence: Array<OrchestrationEvidence> = []
+            let message: string | null = null
 
           const workerUpdate = (
             status: OrchestrationWorkerStatus,
@@ -390,14 +472,26 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
             state: OrchestrationWorkerStatus,
             nextMessage: string | null
           ): Effect.Effect<void> =>
-            checkpoint(input.callbacks, {
-              agentId: group.agentId,
-              state,
-              completedStageIds: [...completed],
-              resumeId,
-              message: nextMessage,
-              attempt
-            })
+            Ref.update(cachedWorkers, (workers) =>
+              new Map(workers).set(ownerId, {
+                input,
+                group,
+                completedStageIds: new Set(completed),
+                resumeId,
+                attempt
+              })
+            ).pipe(
+              Effect.zipRight(
+                checkpoint(input.callbacks, {
+                  agentId: group.agentId,
+                  state,
+                  completedStageIds: [...completed],
+                  resumeId,
+                  message: nextMessage,
+                  attempt
+                })
+              )
+            )
 
           yield* notifyWorker(input.callbacks, workerUpdate("queued", null))
           yield* saveCheckpoint("queued", null)
@@ -417,7 +511,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
               message,
               evidence: allEvidence,
               attempt
-            }
+            } satisfies OrchestrationWorkerResult
           }
 
           const reserved = yield* reserveSessionRun(input.sessionId, ownerId, holder)
@@ -437,7 +531,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
               message,
               evidence: allEvidence,
               attempt
-            }
+            } satisfies OrchestrationWorkerResult
           }
 
           machine.send({ type: "START" })
@@ -453,7 +547,8 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                   agentId: group.agentId,
                   stageId: stage.id,
                   status: "skipped",
-                  message: "Already completed in the latest checkpoint."
+                  message: "Already completed in the latest checkpoint.",
+                  stageFingerprint: planStageSemanticFingerprint(stage)
                 })
                 continue
               }
@@ -461,6 +556,8 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                 input.refreshStage === undefined
                   ? stage
                   : (yield* input.refreshStage(group.agentId, stage.id)) ?? stage
+              const stageFingerprint =
+                planStageSemanticFingerprint(latestStage)
               if ((yield* Ref.get(cancelled)).has(ownerId)) {
                 return {
                   status: "interrupted",
@@ -477,7 +574,8 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                 agentId: group.agentId,
                 stageId: stage.id,
                 status: "running",
-                message: null
+                message: null,
+                stageFingerprint
               })
 
               const assistant = yield* Ref.make<ReadonlyArray<string>>([])
@@ -512,21 +610,39 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                 })
               const context: AgentContext = {
                 emit,
-                canUseTool: () => Effect.succeed("allow"),
+                canUseTool: () =>
+                  Ref.get(blocker).pipe(
+                    Effect.map((value) => value === null ? "allow" : "deny")
+                  ),
                 askQuestion: (request) =>
                   Ref.set(
                     blocker,
                     `Worker asked for operator input: ${request.questions[0]?.question ?? "question"}`
-                  ).pipe(Effect.as([])),
+                  ).pipe(Effect.zipRight(Effect.interrupt)),
                 proposePlan: () =>
                   Ref.set(blocker, "Worker attempted to replace the approved plan.").pipe(
-                    Effect.as({ _tag: "Reject" })
+                    Effect.zipRight(Effect.interrupt)
                   ),
                 registerBackgroundStop: () => Effect.void,
                 registerTurnSteer: () => Effect.void
               }
 
-              const adapterOutcome = yield* adapter.run(ownerId, spec, context).pipe(Effect.either)
+              const adapterFiber = yield* Effect.fork(
+                adapter.run(ownerId, spec, context)
+              )
+              yield* Ref.update(liveAdapterFibers, (fibers) =>
+                new Map(fibers).set(ownerId, adapterFiber)
+              )
+              const adapterExit = yield* Fiber.await(adapterFiber).pipe(
+                Effect.ensuring(
+                  Ref.update(liveAdapterFibers, (fibers) => {
+                    if (fibers.get(ownerId) !== adapterFiber) return fibers
+                    const next = new Map(fibers)
+                    next.delete(ownerId)
+                    return next
+                  })
+                )
+              )
               const stopped = (yield* Ref.get(cancelled)).has(ownerId)
               if (stopped) {
                 yield* notifyStage(input.callbacks, {
@@ -535,7 +651,8 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                   agentId: group.agentId,
                   stageId: stage.id,
                   status: "interrupted",
-                  message: "Worker stopped by the operator."
+                  message: "Worker stopped by the operator.",
+                  stageFingerprint
                 })
                 return {
                   status: "interrupted",
@@ -554,7 +671,8 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                   agentId: group.agentId,
                   stageId: stage.id,
                   status: "blocked",
-                  message: blocked
+                  message: blocked,
+                  stageFingerprint
                 })
                 return {
                   status: "blocked",
@@ -567,7 +685,11 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
 
               const failedEvent = yield* Ref.get(emittedFailure)
               const failure =
-                adapterOutcome._tag === "Left" ? adapterOutcome.left : failedEvent
+                Exit.isFailure(adapterExit)
+                  ? Option.getOrUndefined(
+                      Cause.failureOption(adapterExit.cause)
+                    ) ?? Cause.pretty(adapterExit.cause)
+                  : failedEvent
               if (failure !== null) {
                 const classified = classifyProviderFailure(failure)
                 const status =
@@ -578,7 +700,8 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                   agentId: group.agentId,
                   stageId: stage.id,
                   status,
-                  message: classified.message
+                  message: classified.message,
+                  stageFingerprint
                 })
                 return {
                   status,
@@ -592,11 +715,85 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
               const stageEvidence = evidenceFrom(
                 (yield* Ref.get(assistant)).join(""),
                 latestStage,
-                group.agentId
+                group.agentId,
+                stageFingerprint
               )
-              for (const evidence of stageEvidence) {
+              if (stageEvidence.structuralErrors.length > 0) {
+                const verificationMessage =
+                  stageEvidence.structuralErrors.join(" ")
+                yield* notifyStage(input.callbacks, {
+                  sessionId: input.sessionId,
+                  planId: input.planId,
+                  agentId: group.agentId,
+                  stageId: stage.id,
+                  status: "failed",
+                  message: verificationMessage,
+                  stageFingerprint
+                })
+                return {
+                  status: "failed",
+                  message: verificationMessage
+                } satisfies {
+                  readonly status: OrchestrationWorkerStatus
+                  readonly message: string
+                }
+              }
+              const stageAfterRun =
+                input.refreshStage === undefined
+                  ? latestStage
+                  : yield* input.refreshStage(group.agentId, stage.id)
+              const stageAfterRunFingerprint =
+                stageAfterRun === null
+                  ? null
+                  : planStageSemanticFingerprint(stageAfterRun)
+              if (
+                stageAfterRun === null ||
+                stageAfterRunFingerprint !== stageFingerprint
+              ) {
+                const amendedFingerprint =
+                  stageAfterRunFingerprint ?? stageFingerprint
+                const amendedMessage =
+                  `Stage "${stage.id}" changed while its worker was running; its old results were discarded and the existing worker can resume the amended stage.`
+                yield* notifyStage(input.callbacks, {
+                  sessionId: input.sessionId,
+                  planId: input.planId,
+                  agentId: group.agentId,
+                  stageId: stage.id,
+                  status: "interrupted",
+                  message: amendedMessage,
+                  stageFingerprint: amendedFingerprint
+                })
+                return {
+                  status: "interrupted",
+                  message: amendedMessage
+                } satisfies {
+                  readonly status: OrchestrationWorkerStatus
+                  readonly message: string
+                }
+              }
+              for (const evidence of stageEvidence.evidence) {
                 allEvidence.push(evidence)
                 yield* input.callbacks?.onEvidence?.(evidence) ?? Effect.void
+              }
+              if (stageEvidence.verificationErrors.length > 0) {
+                const verificationMessage =
+                  stageEvidence.verificationErrors.join(" ")
+                yield* notifyStage(input.callbacks, {
+                  sessionId: input.sessionId,
+                  planId: input.planId,
+                  agentId: group.agentId,
+                  stageId: stage.id,
+                  status: "failed",
+                  message: verificationMessage,
+                  stageFingerprint
+                })
+                return {
+                  status: "failed",
+                  message: verificationMessage
+                } satisfies {
+                  readonly status: OrchestrationWorkerStatus
+                  readonly message: string
+                }
               }
               completed.add(stage.id)
               yield* Ref.update(cachedWorkers, (workers) =>
@@ -614,7 +811,8 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                 agentId: group.agentId,
                 stageId: stage.id,
                 status: "completed",
-                message: null
+                message: null,
+                stageFingerprint
               })
               yield* saveCheckpoint("running", null)
             }
@@ -636,21 +834,43 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
           yield* notifyWorker(input.callbacks, workerUpdate(outcome.status, message))
           yield* saveCheckpoint(outcome.status, message)
           machine.stop()
-          return {
-            agentId: group.agentId,
-            ownerId,
-            status: outcome.status,
-            completedStageIds: [...completed],
-            resumeId,
-            message,
-            evidence: allEvidence,
-            attempt
-          }
+            return {
+              agentId: group.agentId,
+              ownerId,
+              status: outcome.status,
+              completedStageIds: [...completed],
+              resumeId,
+              message,
+              evidence: allEvidence,
+              attempt
+            } satisfies OrchestrationWorkerResult
+          }).pipe(
+            Effect.ensuring(
+              Effect.gen(function* () {
+                yield* Ref.update(liveAdapterFibers, (fibers) => {
+                  const next = new Map(fibers)
+                  next.delete(ownerId)
+                  return next
+                })
+                yield* Ref.update(workerSettled, (workers) => {
+                  const next = new Map(workers)
+                  next.delete(ownerId)
+                  return next
+                })
+                yield* Deferred.succeed(settled, undefined)
+              })
+            )
+          )
         })
 
       const execute = (
         input: OrchestrationExecuteInput
-      ): Effect.Effect<OrchestrationExecutionReport, OrchestrationValidationError> =>
+      ): Effect.Effect<
+        OrchestrationExecutionReport,
+        | OrchestrationValidationError
+        | OrchestrationWorkerNotFoundError
+        | OrchestrationAlreadyRunningError
+      > =>
         Effect.gen(function* () {
           const graph = buildOrchestrationGroups(input.stages)
           if (!graph.valid) {
@@ -659,44 +879,93 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
               issues: graph.issues
             })
           }
-          const checkpoints = new Map(
-            recoverOrchestrationCheckpoints(input.checkpoints ?? []).map((value) => [
-              value.agentId,
-              value
-            ])
+          const requestedAgents =
+            input.agentIds === undefined ? null : new Set(input.agentIds)
+          const groups =
+            requestedAgents === null
+              ? graph.groups
+              : graph.groups.filter((group) =>
+                  requestedAgents.has(group.agentId)
+                )
+          if (
+            requestedAgents !== null &&
+            groups.length !== requestedAgents.size
+          ) {
+            const found = new Set(groups.map((group) => group.agentId))
+            const missing = [...requestedAgents].find(
+              (agentId) => !found.has(agentId)
+            )!
+            return yield* new OrchestrationWorkerNotFoundError({
+              message: `No worker "${missing}" exists for plan "${input.planId}".`,
+              planId: input.planId,
+              agentId: missing
+            })
+          }
+          const claimed = yield* Ref.modify(activePlans, (plans) =>
+            plans.has(input.planId)
+              ? [false, plans]
+              : [true, new Set(plans).add(input.planId)]
           )
-          for (const group of graph.groups) {
-            const ownerId = ownerIdFor(input.planId, group.agentId)
-            const prior = checkpoints.get(group.agentId)
-            yield* Ref.update(cachedWorkers, (workers) =>
-              new Map(workers).set(ownerId, {
-                input,
-                group,
-                completedStageIds: new Set(prior?.completedStageIds ?? []),
-                resumeId: prior?.resumeId ?? null,
-                attempt: (prior?.attempt ?? 0) + 1
+          if (!claimed) {
+            return yield* new OrchestrationAlreadyRunningError({
+              message: `Plan "${input.planId}" already has live workers. Wait for them to settle before approving or retrying it again.`,
+              planId: input.planId
+            })
+          }
+          return yield* Effect.gen(function* () {
+            const checkpoints = new Map(
+              recoverOrchestrationCheckpoints(input.checkpoints ?? []).map(
+                (value) => [value.agentId, value]
+              )
+            )
+            for (const group of groups) {
+              const ownerId = ownerIdFor(input.planId, group.agentId)
+              const prior = checkpoints.get(group.agentId)
+              yield* Ref.update(cancelled, (current) => {
+                const next = new Set(current)
+                next.delete(ownerId)
+                return next
+              })
+              yield* Ref.update(cachedWorkers, (workers) =>
+                new Map(workers).set(ownerId, {
+                  input,
+                  group,
+                  completedStageIds: new Set(
+                    prior?.completedStageIds ?? []
+                  ),
+                  resumeId: prior?.resumeId ?? null,
+                  attempt: (prior?.attempt ?? 0) + 1
+                })
+              )
+            }
+            const workers = yield* Effect.forEach(
+              groups,
+              (group) => {
+                const prior = checkpoints.get(group.agentId)
+                return runGroup(
+                  input,
+                  group,
+                  new Set(prior?.completedStageIds ?? []),
+                  prior?.resumeId ?? null,
+                  (prior?.attempt ?? 0) + 1
+                )
+              },
+              { concurrency: boundedConcurrency(input.maxConcurrency) }
+            )
+            return {
+              planId: input.planId,
+              planRevision: input.planRevision,
+              workers
+            }
+          }).pipe(
+            Effect.ensuring(
+              Ref.update(activePlans, (plans) => {
+                const next = new Set(plans)
+                next.delete(input.planId)
+                return next
               })
             )
-          }
-          const workers = yield* Effect.forEach(
-            graph.groups,
-            (group) => {
-              const prior = checkpoints.get(group.agentId)
-              return runGroup(
-                input,
-                group,
-                new Set(prior?.completedStageIds ?? []),
-                prior?.resumeId ?? null,
-                (prior?.attempt ?? 0) + 1
-              )
-            },
-            { concurrency: boundedConcurrency(input.maxConcurrency) }
           )
-          return {
-            planId: input.planId,
-            planRevision: input.planRevision,
-            workers
-          }
         })
 
       const stopWorker = (request: {
@@ -705,10 +974,23 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
         readonly agentId: string
       }): Effect.Effect<void> => {
         const ownerId = ownerIdFor(request.planId, request.agentId)
-        return Ref.update(cancelled, (current) => new Set(current).add(ownerId)).pipe(
-          Effect.zipRight(adapter.stop(ownerId).pipe(Effect.ignore))
-        )
+        return Effect.gen(function* () {
+          yield* Ref.update(
+            cancelled,
+            (current) => new Set(current).add(ownerId)
+          )
+          yield* adapter.stop(ownerId).pipe(Effect.ignore)
+          const fiber = (yield* Ref.get(liveAdapterFibers)).get(ownerId)
+          if (fiber !== undefined) yield* Fiber.interrupt(fiber)
+          const settled = (yield* Ref.get(workerSettled)).get(ownerId)
+          if (settled !== undefined) yield* Deferred.await(settled)
+        })
       }
+
+      const isPlanRunning = (planId: string): Effect.Effect<boolean> =>
+        Ref.get(activePlans).pipe(
+          Effect.map((plans) => plans.has(planId))
+        )
 
       const retryWorker = (request: {
         readonly planId: string
@@ -741,7 +1023,8 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
       return {
         execute,
         stopWorker,
-        retryWorker
+        retryWorker,
+        isPlanRunning
       }
     })
   }

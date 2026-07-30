@@ -7,7 +7,8 @@ import type {
   QuestionAnswer,
   QuestionRequest,
   ReasoningEffort,
-  StreamEvent
+  StreamEvent,
+  WorkerRoutingConfig
 } from "@jingler/core"
 import { CliExecError } from "@jingler/core"
 import { Context, Data, Effect, Layer } from "effect"
@@ -43,6 +44,8 @@ export interface SessionSpec {
    * model cannot silently downgrade the plan procedure.
    */
   readonly orchestrationRoutes?: ReadonlyArray<OrchestrationRoute>
+  /** Effective concrete worker routes by component complexity. */
+  readonly workerRouting?: WorkerRoutingConfig
   /** Whether provider thinking is enabled; absent leaves its default untouched. */
   readonly thinkingEnabled?: boolean
   /** Provider-native effort; absent leaves the harness default untouched. */
@@ -297,7 +300,7 @@ const scriptedPlanHtml = (summary: string): string => `<h1>PRD: ${summary}</h1>
 <section data-stage="s_01" data-title="Audit session middleware" data-depends-on="" data-complexity="low">
 <h3>Intent</h3>
 <p>See how sessions read tokens today.</p>
-<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="sonnet" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
+<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <h3>Approach</h3>
 <ol><li>Read session.ts</li><li>Trace the token path</li></ol>
 <ul data-files><li data-change="M" data-added="0" data-removed="0">src/auth/memory-store.ts</li></ul>
@@ -306,27 +309,27 @@ const scriptedPlanHtml = (summary: string): string => `<h1>PRD: ${summary}</h1>
 <section data-stage="s_02" data-title="Create TokenStore module" data-depends-on="s_01" data-complexity="medium">
 <h3>Intent</h3>
 <p>A dedicated store for token lifecycle.</p>
-<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="sonnet" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
+<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <ul data-files><li data-change="A" data-added="40" data-removed="0">src/auth/token-store.ts</li></ul>
 <div data-acceptance="s_02.1" data-status="passed">TokenStore exposes get/set/refresh and is covered by tests.</div>
 </section>
 <section data-stage="s_03" data-title="Swap MemoryStore to TokenStore" data-depends-on="s_02" data-complexity="medium">
 <h3>Intent</h3>
 <p>Route the session through the new store.</p>
-<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="sonnet" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
+<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <ul data-files><li data-change="M" data-added="8" data-removed="3">src/auth/session.ts</li></ul>
 <div data-acceptance="s_03.1" data-status="pending">Session reads route through TokenStore.</div>
 </section>
 <section data-stage="s_04" data-title="Handle token refresh" data-depends-on="s_03" data-complexity="high">
 <h3>Intent</h3>
 <p>Decide the refresh path on expiry.</p>
-<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="sonnet" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
+<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <div data-acceptance="s_04.1" data-status="pending">The refresh decision is specified.</div>
 </section>
 <section data-stage="s_4a" data-title="refresh() and retry on 401" data-depends-on="s_04" data-complexity="high">
 <h3>Intent</h3>
 <p>Mint a new token and replay once.</p>
-<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="sonnet" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
+<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <ul data-files><li data-change="M" data-added="18" data-removed="0">src/auth/refresh.ts</li><li data-change="A" data-added="15" data-removed="0">src/auth/retry.ts</li></ul>
 <div data-acceptance="s_4a.1" data-status="passed">A new token is written before the replay.</div>
 <div data-acceptance="s_4a.2" data-status="passed">Refresh fires at most once per request.</div>
@@ -336,13 +339,13 @@ const scriptedPlanHtml = (summary: string): string => `<h1>PRD: ${summary}</h1>
 <section data-stage="s_4b" data-title="Proceed with request" data-depends-on="s_04" data-complexity="low">
 <h3>Intent</h3>
 <p>Token still valid, carry on.</p>
-<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="sonnet" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
+<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <div data-acceptance="s_4b.1" data-status="pending">A valid token proceeds without refreshing.</div>
 </section>
 <section data-stage="s_05" data-title="Update auth tests" data-depends-on="s_4a s_4b" data-complexity="medium">
 <h3>Intent</h3>
 <p>Cover the new store and the refresh path.</p>
-<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="sonnet" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
+<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <ul data-files><li data-change="M" data-added="24" data-removed="2">src/auth/session.test.ts</li></ul>
 <div data-acceptance="s_05.1" data-status="pending">Tests cover the store, the 401 retry${summary.includes("(revised)") ? ", and the requested audit amendment" : ""}.</div>
 </section>

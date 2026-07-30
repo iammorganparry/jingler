@@ -25,7 +25,8 @@ import type {
   Session,
   SessionActivity,
   Usage,
-  User
+  User,
+  WorkerRoutingConfig
 } from "@jingler/core"
 import { UNTITLED_SESSION } from "@jingler/core"
 import type { DockSide } from "./terminal-panel.js"
@@ -109,6 +110,11 @@ export interface JinglerAppProps {
   orchestrator?: OrchestratorPreference | null
   onSaveOrchestrator?: (
     orchestrator: OrchestratorPreference
+  ) => Promise<void> | void
+  /** Complexity-based concrete routes for implementation workers. */
+  workerRouting?: WorkerRoutingConfig | null
+  onSaveWorkerRouting?: (
+    routing: WorkerRoutingConfig
   ) => Promise<void> | void
   sessions: ReadonlyArray<Session>
   /** The signed-in user, shown in the sidebar footer account menu. */
@@ -342,6 +348,8 @@ export function JinglerApp({
   onSaveDefaultCli,
   orchestrator,
   onSaveOrchestrator,
+  workerRouting,
+  onSaveWorkerRouting,
   sessions,
   user,
   onSignOut,
@@ -950,6 +958,8 @@ export function JinglerApp({
               onSaveDefaultCli={onSaveDefaultCli}
               orchestrator={orchestrator}
               onSaveOrchestrator={onSaveOrchestrator}
+              workerRouting={workerRouting}
+              onSaveWorkerRouting={onSaveWorkerRouting}
               planTemplate={planTemplate}
               onSavePlanTemplate={onSavePlanTemplate}
               loadModels={loadModels ?? (async () => [])}

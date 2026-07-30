@@ -774,6 +774,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               title: null,
               createdAt: now,
               updatedAt: now,
+              ...(closed?.role === undefined ? {} : { role: closed.role }),
               ...(closed?.mode === undefined ? {} : { mode: closed.mode }),
               ...(closed?.model === undefined ? {} : { model: closed.model }),
               ...(closed?.allowlist === undefined ? {} : { allowlist: closed.allowlist })

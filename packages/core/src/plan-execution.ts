@@ -2,7 +2,9 @@ import { parse } from "node-html-parser"
 import type {
   PlanPrdStage,
   PlanStageAssignment,
-  PlanStageComplexity
+  PlanStageComplexity,
+  WorkerModelRoute,
+  WorkerRoutingConfig
 } from "./plan-document.js"
 
 export type PlanExecutionDiagnosticCode =
@@ -12,6 +14,7 @@ export type PlanExecutionDiagnosticCode =
   | "dependency-cycle"
   | "missing-assignment"
   | "assignment-conflict"
+  | "invalid-file-path"
 
 export interface PlanExecutionDiagnostic {
   readonly code: PlanExecutionDiagnosticCode
@@ -41,6 +44,11 @@ export interface PlanExecutionGraphOptions {
   readonly requireAssignments?: boolean
 }
 
+export interface WorkerRouteCatalogEntry {
+  readonly cli: WorkerModelRoute["cli"]
+  readonly models: ReadonlyArray<{ readonly id: string }>
+}
+
 const COMPLEXITY_WEIGHT: Record<PlanStageComplexity, number> = {
   low: 0,
   medium: 1,
@@ -56,22 +64,177 @@ const assignmentOf = (stage: PlanPrdStage): PlanStageAssignment | null =>
 const dependenciesOf = (stage: PlanPrdStage): ReadonlyArray<string> =>
   stage.dependencies ?? []
 
+/**
+ * Normalize one planner-authored file declaration to a repository-relative key.
+ * Both slash variants are accepted, but absolute paths and traversal outside
+ * the repository are invalid.
+ */
+export const normalizePlanFilePath = (value: string): string | null => {
+  const path = value.trim().replaceAll("\\", "/")
+  if (
+    path.length === 0 ||
+    path.startsWith("/") ||
+    /^[A-Za-z]:\//.test(path) ||
+    path.includes("\0")
+  ) return null
+  const segments: Array<string> = []
+  for (const segment of path.split("/")) {
+    if (segment.length === 0 || segment === ".") continue
+    if (segment === "..") {
+      if (segments.length === 0) return null
+      segments.pop()
+      continue
+    }
+    segments.push(segment)
+  }
+  return segments.length === 0 ? null : segments.join("/")
+}
+
 /** Read the authoritative `<ul data-files>` declaration from a stage body. */
-const declaredFiles = (stage: PlanPrdStage): ReadonlyArray<string> => {
+const declaredFiles = (
+  stage: PlanPrdStage
+): {
+  readonly files: ReadonlyArray<string>
+  readonly invalid: ReadonlyArray<string>
+} => {
   const list = parse(stage.markdown).querySelector("ul[data-files]")
-  if (list === null) return []
-  return [
-    ...new Set(
-      list
-        .querySelectorAll("li")
-        .map((item) => item.text.trim())
-        .filter((path) => path.length > 0)
-    )
-  ]
+  if (list === null) return { files: [], invalid: [] }
+  const files = new Set<string>()
+  const invalid: Array<string> = []
+  for (const item of list.querySelectorAll("li")) {
+    const raw = item.text.trim()
+    if (raw.length === 0) continue
+    const normalized = normalizePlanFilePath(raw)
+    if (normalized === null) invalid.push(raw)
+    else files.add(normalized)
+  }
+  return { files: [...files], invalid }
 }
 
 const assignmentRoute = (assignment: PlanStageAssignment): string =>
   `${assignment.agentId}\u0000${assignment.cli}\u0000${assignment.model}`
+
+const routeAvailable = (
+  route: WorkerModelRoute | undefined,
+  catalog: ReadonlyArray<WorkerRouteCatalogEntry>
+): route is WorkerModelRoute =>
+  route !== undefined &&
+  catalog.some(
+    (provider) =>
+      provider.cli === route.cli &&
+      provider.models.some((model) => model.id === route.model)
+  )
+
+/**
+ * Resolve persisted worker routing against the same live catalogue used for
+ * planner advertising and approval. An unavailable bucket falls back to the
+ * configured default; an unavailable default falls back to the first live
+ * planning route. With no saved config, every bucket uses that capability-first
+ * route so a cheap orchestrator cannot downgrade implementation by accident.
+ */
+export const resolveWorkerRoutingConfig = (
+  configured: WorkerRoutingConfig | null | undefined,
+  catalog: ReadonlyArray<WorkerRouteCatalogEntry>
+): WorkerRoutingConfig | null => {
+  const firstProvider = catalog.find((provider) => provider.models.length > 0)
+  const firstModel = firstProvider?.models[0]
+  if (firstProvider === undefined || firstModel === undefined) return null
+  const safeDefault: WorkerModelRoute = {
+    cli: firstProvider.cli,
+    model: firstModel.id
+  }
+  const fallback = routeAvailable(configured?.default, catalog)
+    ? configured.default
+    : safeDefault
+  const bucket = (
+    route: WorkerModelRoute | undefined
+  ): WorkerModelRoute => routeAvailable(route, catalog) ? route : fallback
+  return {
+    default: fallback,
+    low: bucket(configured?.low),
+    medium: bucket(configured?.medium),
+    high: bucket(configured?.high)
+  }
+}
+
+const stagesWithoutAssignments = (
+  stages: ReadonlyArray<PlanPrdStage>
+): ReadonlyArray<PlanPrdStage> =>
+  stages.map((stage) => ({ ...stage, assignment: null }))
+
+/**
+ * Rewrite planner-authored assignments to the operator's concrete complexity
+ * routes before the document becomes canonical. Logical agent ids remain
+ * stable where possible; dependencies and overlapping files still determine
+ * ownership, so one connected component receives exactly one route.
+ */
+export const applyWorkerRoutingToPlanHtml = (
+  html: string,
+  stages: ReadonlyArray<PlanPrdStage>,
+  routing: WorkerRoutingConfig
+): string => {
+  const graph = buildPlanExecutionGraph(stagesWithoutAssignments(stages))
+  const root = parse(html)
+  const stageElements = new Map(
+    root
+      .querySelectorAll("section[data-stage]")
+      .map((element) => [element.getAttribute("data-stage") ?? "", element])
+  )
+  const stageById = new Map(stages.map((stage) => [stage.id, stage]))
+  const usedAgentIds = new Set<string>()
+
+  for (const [index, group] of graph.groups.entries()) {
+    const preferredAgentId = group.stageIds
+      .map((stageId) => stageById.get(stageId)?.assignment?.agentId)
+      .find((agentId): agentId is string => agentId !== undefined)
+    const baseAgentId =
+      preferredAgentId ?? `agent-${String(index + 1).padStart(2, "0")}`
+    let agentId = baseAgentId
+    let suffix = 2
+    while (usedAgentIds.has(agentId)) {
+      agentId = `${baseAgentId}-${suffix}`
+      suffix += 1
+    }
+    usedAgentIds.add(agentId)
+    const route = routing[group.complexity] ?? routing.default
+    const reason =
+      `Worker router selected ${route.cli}/${route.model} for this ` +
+      `${group.complexity}-complexity dependency/file component.`
+
+    for (const stageId of group.stageIds) {
+      const stage = stageElements.get(stageId)
+      if (stage === undefined) continue
+      let assignment = stage.querySelector("[data-assignment]")
+      if (assignment === null) {
+        stage.insertAdjacentHTML("afterbegin", "<div data-assignment></div>")
+        assignment = stage.querySelector("[data-assignment]")
+      }
+      if (assignment === null) continue
+      assignment.setAttribute("data-agent-id", agentId)
+      assignment.setAttribute("data-cli", route.cli)
+      assignment.setAttribute("data-model", route.model)
+      assignment.setAttribute("data-reason", reason)
+      assignment.setAttribute("data-status", "queued")
+    }
+  }
+  return root.toString()
+}
+
+/** Return the first canonical component that disagrees with the active router. */
+export const workerRoutingMismatch = (
+  stages: ReadonlyArray<PlanPrdStage>,
+  routing: WorkerRoutingConfig
+): PlanExecutionGroup | null => {
+  const graph = buildPlanExecutionGraph(stages, { requireAssignments: true })
+  return graph.groups.find((group) => {
+    const expected = routing[group.complexity] ?? routing.default
+    return (
+      group.assignment !== null &&
+      (group.assignment.cli !== expected.cli ||
+        group.assignment.model !== expected.model)
+    )
+  }) ?? null
+}
 
 /**
  * Validate and group stages for provider-neutral execution.
@@ -147,7 +310,15 @@ export const buildPlanExecutionGraph = (
 
   const firstStageByFile = new Map<string, string>()
   for (const stage of stageById.values()) {
-    for (const path of declaredFiles(stage)) {
+    const declaration = declaredFiles(stage)
+    for (const path of declaration.invalid) {
+      diagnostics.push({
+        code: "invalid-file-path",
+        message: `Stage "${stage.id}" declares "${path}", which must be a repository-relative path without traversal outside the repository.`,
+        stageId: stage.id
+      })
+    }
+    for (const path of declaration.files) {
       const first = firstStageByFile.get(path)
       if (first === undefined) firstStageByFile.set(path, stage.id)
       else union(first, stage.id)
@@ -272,7 +443,7 @@ export const buildPlanExecutionGraph = (
       "low"
     )
     const files = [
-      ...new Set(componentStages.flatMap((stage) => declaredFiles(stage)))
+      ...new Set(componentStages.flatMap((stage) => declaredFiles(stage).files))
     ].sort()
     const assignment = assignments[0] ?? null
     if (assignment !== null) {

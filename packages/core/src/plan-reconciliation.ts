@@ -1,4 +1,4 @@
-import { type HTMLElement, NodeType, parse } from "node-html-parser"
+import { type HTMLElement, parse } from "node-html-parser"
 import type {
   PlanAcceptance,
   PlanDocument,
@@ -38,37 +38,37 @@ const stageElements = (root: HTMLElement): Map<string, HTMLElement> =>
       .map((element) => [element.getAttribute("data-stage") ?? "", element])
   )
 
-const sortAttributes = (element: HTMLElement): void => {
-  const attributes = Object.entries(element.attributes).sort(([left], [right]) =>
-    left.localeCompare(right)
-  )
-  for (const name of Object.keys(element.attributes)) element.removeAttribute(name)
-  for (const [name, value] of attributes) element.setAttribute(name, value)
-  for (const child of element.childNodes) {
-    if (child.nodeType === NodeType.ELEMENT_NODE) sortAttributes(child as HTMLElement)
-  }
-}
-
 /**
- * A stage signature without orchestration's mechanical fields. Attribute order
- * and formatting whitespace are normalized so an editor serialize pass alone
- * cannot reopen completed work.
+ * Stable semantic identity for one dispatched stage. Worker status, assignment,
+ * evidence, and annotation resolution are mechanical and deliberately omitted.
  */
-const semanticStage = (element: HTMLElement): string => {
-  const cloneRoot = parse(element.toString())
-  const clone = cloneRoot.querySelector("section[data-stage]")
-  if (clone === null) return ""
-  clone.removeAttribute("data-execution-status")
-  for (const assignment of clone.querySelectorAll("[data-assignment]")) assignment.remove()
-  for (const criterion of clone.querySelectorAll("[data-acceptance]")) {
-    criterion.removeAttribute("data-status")
-    criterion.removeAttribute("data-evidence")
+export const planStageSemanticFingerprint = (stage: PlanPrdStage): string => {
+  const root = parse(`<section>${stage.markdown}</section>`)
+  const element = root.querySelector("section")
+  if (element === null) return ""
+  for (const assignment of element.querySelectorAll("[data-assignment]")) {
+    assignment.remove()
   }
-  for (const annotation of clone.querySelectorAll("[data-annotation]")) {
-    annotation.removeAttribute("data-status")
+  for (const criterion of element.querySelectorAll("[data-acceptance]")) {
+    criterion.remove()
   }
-  sortAttributes(clone)
-  return clone.toString().replace(/>\s+</g, "><").trim()
+  for (const annotation of element.querySelectorAll("[data-annotation]")) {
+    annotation.remove()
+  }
+  return JSON.stringify({
+    id: stage.id,
+    title: stage.title,
+    intent: stage.intent,
+    dependencies: [...(stage.dependencies ?? [])].sort(),
+    complexity: stage.complexity ?? "medium",
+    acceptance: stage.acceptance.map((criterion) => ({
+      id: criterion.id,
+      text: criterion.text
+    })),
+    // Tiptap and the sanitizer may add harmless paragraph wrappers. Text order
+    // is semantic; those serialization details are not.
+    body: element.structuredText.replace(/\s+/g, " ").trim()
+  })
 }
 
 const ensureAssignmentElement = (stage: HTMLElement): HTMLElement => {
@@ -122,22 +122,20 @@ const invalidResult = (
 })
 
 const reconcileStages = (
-  previousElements: ReadonlyMap<string, HTMLElement>,
   replacementElements: ReadonlyMap<string, HTMLElement>,
   previousStages: ReadonlyMap<string, PlanPrdStage>,
   replacementStages: ReadonlyMap<string, PlanPrdStage>
 ): ReadonlyArray<string> => {
   const changedStageIds: Array<string> = []
   for (const [stageId, replacementElement] of replacementElements) {
-    const previousElement = previousElements.get(stageId)
-    const changed =
-      previousElement === undefined ||
-      semanticStage(previousElement) !== semanticStage(replacementElement)
-    if (changed) changedStageIds.push(stageId)
-
     const previousStage = previousStages.get(stageId)
     const replacementStage = replacementStages.get(stageId)
     if (replacementStage === undefined) continue
+    const changed =
+      previousStage === undefined ||
+      planStageSemanticFingerprint(previousStage) !==
+        planStageSemanticFingerprint(replacementStage)
+    if (changed) changedStageIds.push(stageId)
     const assignment =
       previousStage?.assignment ?? replacementStage.assignment ?? null
     const previousStatus = previousStage?.executionStatus ?? "queued"
@@ -192,14 +190,28 @@ export const reconcilePlanAmendment = (
   const replacement = parsePlanHtml(replacementHtml)
   if (!replacement.valid) return invalidResult(replacement, "replacement")
 
-  const previousRoot = parse(previous.html)
   const replacementRoot = parse(sanitizePlanHtml(replacement.html))
-  const previousElements = stageElements(previousRoot)
   const replacementElements = stageElements(replacementRoot)
   const previousStages = stagesById(previous.projection.stages)
   const replacementStages = stagesById(replacement.projection.stages)
+  const removedRunning = previous.projection.stages.filter(
+    (stage) =>
+      stage.executionStatus === "running" &&
+      !replacementStages.has(stage.id)
+  )
+  if (removedRunning.length > 0) {
+    return {
+      valid: false,
+      source: replacement.html,
+      projection: null,
+      diagnostics: removedRunning.map((stage) => ({
+        code: "running-stage-removed" as const,
+        message: `Running stage "${stage.id}" cannot be removed. Stop its worker before removing the stage.`
+      })),
+      cause: "replacement"
+    }
+  }
   const changedStageIds = reconcileStages(
-    previousElements,
     replacementElements,
     previousStages,
     replacementStages

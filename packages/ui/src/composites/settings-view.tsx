@@ -17,7 +17,8 @@ import type {
   ProvidersConfig,
   ReasoningEffort,
   ContextConfig,
-  ContextSnapshot
+  ContextSnapshot,
+  WorkerRoutingConfig
 } from "@jingler/core"
 import {
   BUDGET_RANGE,
@@ -464,6 +465,10 @@ export interface SettingsViewProps {
   onSaveOrchestrator?: (
     orchestrator: OrchestratorPreference
   ) => Promise<void> | void
+  workerRouting?: WorkerRoutingConfig | null
+  onSaveWorkerRouting?: (
+    routing: WorkerRoutingConfig
+  ) => Promise<void> | void
   /** Custom PRD structure injected into every native planning harness. */
   planTemplate?: PlanTemplateConfig | null
   onSavePlanTemplate?: (template: PlanTemplateConfig) => Promise<void> | void
@@ -535,6 +540,8 @@ export function SettingsView({
   onSaveDefaultCli,
   orchestrator,
   onSaveOrchestrator,
+  workerRouting,
+  onSaveWorkerRouting,
   planTemplate,
   onSavePlanTemplate,
   loadModels,
@@ -673,6 +680,8 @@ export function SettingsView({
             orchestrator={orchestrator}
             loadModels={loadModels}
             onSaveOrchestrator={onSaveOrchestrator}
+            workerRouting={workerRouting}
+            onSaveWorkerRouting={onSaveWorkerRouting}
           />
         </div>
       ) : section === "connectors" ? (
