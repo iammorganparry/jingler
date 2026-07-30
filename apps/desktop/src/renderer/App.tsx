@@ -787,7 +787,9 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
           paneFocused={ctx.paneFocused ?? true}
         />
       )}
-      renderChatTabs={(session: Session) => <SessionChatTabs session={session} />}
+      renderChatTabs={(session: Session, onSelectConversation) => (
+        <SessionChatTabs session={session} onSelectConversation={onSelectConversation} />
+      )}
       renderPullRequest={(session, ctx) => (
         <PullRequestPane
           session={session}

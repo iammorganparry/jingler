@@ -40,7 +40,7 @@ export interface SessionSplitProps {
    * + live per-chat activity) lives in the desktop renderer, so building the bar
    * here would drag the RPC client into the component library.
    */
-  renderChatTabs?: (session: Session) => ReactNode
+  renderChatTabs?: (session: Session, onSelectConversation: () => void) => ReactNode
   /** Rename a session from its pane title. */
   onRenameSession?: (id: string, title: string) => void
   planSessions?: ReadonlySet<string>

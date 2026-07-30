@@ -100,7 +100,7 @@ export interface SessionPaneProps {
    * per-chat activity — lives in the desktop renderer, so building the bar here
    * would drag the RPC client into the component library. Absent in stories.
    */
-  renderChatTabs?: (session: Session) => ReactNode
+  renderChatTabs?: (session: Session, onSelectConversation: () => void) => ReactNode
   /** Rename the session from the tab-row title. */
   onRenameSession?: (id: string, title: string) => void
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
@@ -333,7 +333,16 @@ function SessionPaneBody(props: SessionPaneProps) {
   return (
     <>
       <TabBar
-        tabs={tabs.map((c) => describeTab(c, tabCtx))}
+        tabs={tabs
+          // The desktop always supplies chat pills, and each pill is now the
+          // route back to the transcript. Standalone stories may omit them, so
+          // keep Conversation there rather than creating a one-way tab bar.
+          .filter(
+            (contribution) =>
+              props.renderChatTabs === undefined ||
+              contribution.id !== BUILTIN_TAB.conversation
+          )
+          .map((contribution) => describeTab(contribution, tabCtx))}
         active={activeTab}
         onChange={setTab}
         status={
@@ -362,7 +371,7 @@ function SessionPaneBody(props: SessionPaneProps) {
         }
         // The chat pills share the tab row, behind a divider. Built by the
         // renderer (RPCs + live activity), threaded in as an opaque node.
-        chatSlot={props.renderChatTabs?.(active)}
+        chatSlot={props.renderChatTabs?.(active, () => setTab(BUILTIN_TAB.conversation))}
         // The title comes from the session rather than from the caller, so the
         // chip follows a rename the moment it lands.
         pane={

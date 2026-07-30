@@ -148,6 +148,10 @@ test("the title bar's search control opens the palette", async ({ launchApp }) =
   // of the control is that it is the discoverable route to the same thing.
   const search = appShell(window)
   await expect(search).toBeVisible()
+  const searchBox = await search.boundingBox()
+  expect(searchBox).not.toBeNull()
+  expect(searchBox!.width).toBeGreaterThan(500)
+  expect(searchBox!.height).toBe(30)
   await expect(window.getByTestId("command-palette")).toBeHidden()
 
   await search.click()

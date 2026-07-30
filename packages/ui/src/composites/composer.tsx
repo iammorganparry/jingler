@@ -498,10 +498,10 @@ export function Composer({
         }}
         className={cn(
           "flex flex-col gap-[11px] rounded-xl border bg-sunken px-[13px] py-2.5 transition-colors",
-          // "Nightlight": the active mode tints the composer border/background and
-          // casts an ambient glow, so the current HITL mode is legible at a glance.
+          // Jingler mode is already legible from its animated toggle. Keep its
+          // composer neutral; direct harness modes retain their nightlight accent.
           hideModeControls && !dragging
-            ? "composer-jingler-active"
+            ? "border-line shadow-none"
             : [accent.border, accent.bg, accent.glow],
           paused && "opacity-70",
           // A drag-over always wins visually (cyan), and drops the mode glow.

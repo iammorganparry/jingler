@@ -468,7 +468,7 @@ function SidebarBody({
             onClick={onNewSession}
             aria-label="New session"
             title="New session"
-            className="flex h-[68px] min-w-0 items-center justify-center rounded-lg border border-dashed border-line text-dim outline-none transition-colors hover:border-blue hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex h-[68px] min-w-0 items-center justify-center rounded-2xl border border-dashed border-line text-dim outline-none transition-colors hover:border-blue hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Plus size={16} />
           </button>

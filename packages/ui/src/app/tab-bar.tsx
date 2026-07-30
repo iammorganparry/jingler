@@ -142,8 +142,9 @@ const DOT_TONE = { yellow: "bg-yellow", blue: "bg-blue", green: "bg-green" } as 
  * out-shouting the thing it framed. Two moves fix it:
  *
  * 1. **The session title is identity, not navigation.** A single click leaves
- *    the current view alone; a double-click renames the session. Conversation
- *    remains an explicit view tab, alongside Plan, PR, and Changes.
+ *    the current view alone; a double-click renames the session. The active chat
+ *    pill is the route back to the conversation, so view tabs only carry Plan,
+ *    PR, Changes, and plugin contributions.
  * 2. **The chat pills share this row** (`chatSlot`), behind a divider. So a pane
  *    mid-turn is two rows — this one and the sub-agent rail — where it used to
  *    be three.

@@ -299,6 +299,7 @@ export function ChatTabBar({
           >
             <button
               type="button"
+              data-testid={active ? "active-chat-tab" : undefined}
               aria-current={active ? "page" : undefined}
               onClick={() => onSelectChat(chat.id)}
               onDoubleClick={() => {

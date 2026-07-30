@@ -379,7 +379,7 @@ test("a worktree session without a PR shows a Changes tab with the Code Review v
   await expect(window.getByText("an uncommitted edit")).toBeVisible({ timeout: 20_000 })
 })
 
-test("the session title renames without navigating and view tabs stay in the right controls", async ({
+test("the session title renames without navigating and the active chat replaces the Conversation tab", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -410,7 +410,8 @@ test("the session title renames without navigating and view tabs stay in the rig
   expect(controlsBox).not.toBeNull()
   expect(controlsBox!.x).toBeGreaterThan(rowBox!.x + rowBox!.width / 2)
 
-  await window.getByRole("button", { name: "Conversation" }).click()
+  await expect(window.getByRole("button", { name: "Conversation" })).toHaveCount(0)
+  await window.getByTestId("active-chat-tab").click()
   await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
 })
 
@@ -925,7 +926,7 @@ test("a running adversarial review reports its phase and appears in the agent ta
   ).toBeVisible({ timeout: 20_000 })
 
   // …and the reviewer is watchable in the agent tab bar, mid-run.
-  await window.getByRole("button", { name: "Conversation" }).first().click()
+  await window.getByTestId("active-chat-tab").first().click()
   await expect(window.getByRole("button", { name: /Reviewer/ })).toBeVisible()
 })
 

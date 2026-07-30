@@ -8,7 +8,7 @@ import {
   test
 } from "./fixtures.js"
 
-test("Jingler mode uses the static brand treatment and the animated Jingler mark", async ({
+test("Jingler mode keeps the composer neutral and animates the Jingler mark", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -38,16 +38,9 @@ test("Jingler mode uses the static brand treatment and the animated Jingler mark
 
   const activeTreatment = await surface.evaluate((element) => {
     const surfaceStyle = getComputedStyle(element)
-    const glowStyle = getComputedStyle(element, "::before")
-    return {
-      animation: surfaceStyle.animationName,
-      background: surfaceStyle.backgroundImage,
-      glowAnimation: glowStyle.animationName
-    }
+    return surfaceStyle.backgroundImage
   })
-  expect(activeTreatment.animation).toBe("none")
-  expect(activeTreatment.background).toContain("conic-gradient")
-  expect(activeTreatment.glowAnimation).toBe("none")
+  expect(activeTreatment).toBe("none")
 
   const toggleTreatment = await toggle.evaluate((element) => {
     const buttonStyle = getComputedStyle(element)
@@ -185,7 +178,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
     )
     .toBeGreaterThanOrEqual(2)
 
-  await window.getByRole("button", { name: "Conversation" }).first().click()
+  await window.getByTestId("active-chat-tab").first().click()
   const workerAuthTab = window
     .locator("[data-agent-status]")
     .getByRole("button", { name: WORKER_AUTH_TAB })
@@ -301,7 +294,7 @@ test("a stopped worker stays interrupted across restart and retries from its che
     })
   ).toBeVisible({ timeout: 20_000 })
 
-  await first.window.getByRole("button", { name: "Conversation" }).first().click()
+  await first.window.getByTestId("active-chat-tab").first().click()
   const workerAuthTab = first.window
     .locator("[data-agent-status]")
     .getByRole("button", { name: WORKER_AUTH_TAB })
@@ -340,7 +333,7 @@ test("a stopped worker stays interrupted across restart and retries from its che
     first.window.locator('[data-plan-stage-id="s_06"] button').first()
   ).toBeFocused()
 
-  await first.window.getByRole("button", { name: "Conversation" }).first().click()
+  await first.window.getByTestId("active-chat-tab").first().click()
   await first.window
     .getByRole("button", { name: "Stop worker-release", exact: true })
     .click()

@@ -77,7 +77,7 @@ export function PersistentSessionTile({
       title={`${name} · ${detail}`}
       onClick={() => onSelect?.(session.id)}
       className={cn(
-        "group flex h-[68px] min-w-0 flex-col rounded-lg border px-2 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+        "group flex h-[68px] min-w-0 flex-col rounded-2xl border px-2 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
         active
           ? "border-blue/40 bg-surface"
           : "border-line bg-sunken hover:border-line-strong hover:bg-surface/50",

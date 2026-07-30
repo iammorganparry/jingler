@@ -296,8 +296,8 @@ export default definePlugin(
   await expect(window.getByTestId("plugin-error-e2e-tab")).toBeVisible()
   await expect(window.getByText(/plugin exploded/)).toBeVisible()
 
-  // The app is intact: Conversation still works.
-  await window.getByRole("button", { name: "Conversation" }).click()
+  // The app is intact: the active chat still returns to the conversation.
+  await window.getByTestId("active-chat-tab").click()
   await expect(window.getByTestId("plugin-error-e2e-tab")).toHaveCount(0)
 })
 
@@ -535,7 +535,7 @@ test("a disabled plugin stays disabled after a restart", async ({ launchApp }) =
   await openSession(second.window)
   // Wait for a tab that IS expected before asserting on absence, or this passes
   // simply by racing the plugin load.
-  await expect(second.window.getByRole("button", { name: "Conversation" })).toBeVisible({
+  await expect(second.window.getByTestId("active-chat-tab")).toBeVisible({
     timeout: 15_000
   })
   await expect(second.window.getByRole("button", { name: "E2E" })).toHaveCount(0)
@@ -988,7 +988,7 @@ test("declaring a keybinding fails loudly rather than doing nothing", async ({ l
   // And it contributed nothing, rather than half-loading its tab.
   await window.getByRole("button", { name: "Close settings" }).click()
   await openSession(window)
-  await expect(window.getByRole("button", { name: "Conversation" })).toBeVisible({
+  await expect(window.getByTestId("active-chat-tab")).toBeVisible({
     timeout: 15_000
   })
   await expect(window.getByRole("button", { name: "E2E" })).toHaveCount(0)
@@ -1028,7 +1028,7 @@ test("declaring untrusted-repo capabilities fails loudly, because nothing honour
 
   await window.getByRole("button", { name: "Close settings" }).click()
   await openSession(window)
-  await expect(window.getByRole("button", { name: "Conversation" })).toBeVisible({
+  await expect(window.getByTestId("active-chat-tab")).toBeVisible({
     timeout: 15_000
   })
   // Crucially the restricted contribution is NOT mounted. Loading the plugin and
@@ -1287,7 +1287,7 @@ export default definePlugin(
 
   // The app is intact — this is the assertion that failed before the boundary
   // existed, because the window was blank.
-  await expect(window.getByRole("button", { name: "Conversation" })).toBeVisible()
+  await expect(window.getByTestId("active-chat-tab")).toBeVisible()
   await expect(window.getByTestId(`session-row-${SESSION.id}`)).toBeVisible()
 })
 
@@ -1590,6 +1590,6 @@ export default definePlugin(
 
   // And the pane falls back to a real tab rather than rendering nothing or a
   // boundary card — the failure this test exists for.
-  await expect(window.getByRole("button", { name: "Conversation" })).toBeVisible()
+  await expect(window.getByTestId("active-chat-tab")).toBeVisible()
   await expect(window.getByTestId("plugin-error-hasissue-plugin")).toHaveCount(0)
 })

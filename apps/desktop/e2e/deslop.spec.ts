@@ -52,7 +52,7 @@ test("Deslop button sends the file to the session's agent", async ({ launchApp }
 
   // The cleanup runs as a turn on THIS session — its prompt lands in the
   // Conversation tab, not a new session.
-  await window.getByRole("button", { name: "Conversation" }).click()
+  await window.getByTestId("active-chat-tab").click()
   await expect(
     window.getByText(/Pull repeated logic into shared helpers/).first()
   ).toBeVisible({ timeout: 30_000 })

@@ -86,6 +86,7 @@ test("a persistent tile survives an Electron restart and can be unpersisted", as
     "persistent-session-tile-s_kept"
   )
   await expect(restoredTile).toBeVisible()
+  await expect(restoredTile).toHaveCSS("border-radius", "16px")
   await expect(sessionRow(second.window, "Keep auth warm")).toHaveCount(0)
   expect(storedSession(second.home).persistent).toBe(true)
 
@@ -97,6 +98,9 @@ test("a persistent tile survives an Electron restart and can be unpersisted", as
   await expect(
     second.window.getByTestId("persistent-session-add")
   ).toHaveCount(1)
+  await expect(
+    second.window.getByTestId("persistent-session-add")
+  ).toHaveCSS("border-radius", "16px")
   expect(storedSession(second.home).persistent).toBe(false)
 })
 

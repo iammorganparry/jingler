@@ -27,6 +27,11 @@ const planHtml = (title: string): string => [
 let visibleReply = ""
 let exitInput: Record<string, unknown> = {}
 let exitDecision: unknown = null
+let callExitPlanMode = true
+let callEnterPlanMode = false
+let writeInput: Record<string, unknown> | null = null
+let writeDecision: unknown = null
+let disallowedTools: ReadonlyArray<string> = []
 let followupReply: string | null = null
 let followupInput: Record<string, unknown> = {}
 let followupDecision: unknown = null
@@ -34,6 +39,7 @@ let followupDecision: unknown = null
 interface QueryArgs {
   readonly prompt: AsyncIterable<SDKUserMessage>
   readonly options: {
+    readonly disallowedTools?: ReadonlyArray<string>
     readonly canUseTool: (
       name: string,
       input: Record<string, unknown>,
@@ -92,17 +98,34 @@ const result: SDKMessage = {
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   query: ({ prompt, options }: QueryArgs) => ({
     async *[Symbol.asyncIterator]() {
+      disallowedTools = options.disallowedTools ?? []
       const drained = (async () => {
         for await (const _message of prompt) {
           // Keep the streaming input alive until runClaude closes it at result.
         }
       })()
       yield textDelta(visibleReply)
-      exitDecision = await options.canUseTool(
-        "ExitPlanMode",
-        exitInput,
-        { toolUseID: "exit-plan-1" }
-      )
+      if (callEnterPlanMode) {
+        await options.canUseTool(
+          "EnterPlanMode",
+          {},
+          { toolUseID: "enter-plan-1" }
+        )
+      }
+      if (writeInput !== null) {
+        writeDecision = await options.canUseTool(
+          "Write",
+          writeInput,
+          { toolUseID: "write-plan-1" }
+        )
+      }
+      if (callExitPlanMode) {
+        exitDecision = await options.canUseTool(
+          "ExitPlanMode",
+          exitInput,
+          { toolUseID: "exit-plan-1" }
+        )
+      }
       if (followupReply !== null) {
         yield textDelta(followupReply)
         followupDecision = await options.canUseTool(
@@ -132,7 +155,8 @@ const spec: SessionSpec = {
   mode: "plan",
   model: null,
   resumeId: null,
-  readOnly: true
+  readOnly: true,
+  orchestrationRoutes: []
 }
 
 const harness = (
@@ -162,12 +186,71 @@ beforeEach(() => {
   visibleReply = `The complete plan follows.\n\n${planHtml("Buffered plan")}`
   exitInput = {}
   exitDecision = null
+  callExitPlanMode = true
+  callEnterPlanMode = false
+  writeInput = null
+  writeDecision = null
+  disallowedTools = []
   followupReply = null
   followupInput = {}
   followupDecision = null
 })
 
 describe("Claude plan submission", () => {
+  it("captures a native plan-file Write after Auto enters plan mode mid-turn", async () => {
+    callEnterPlanMode = true
+    callExitPlanMode = false
+    writeInput = {
+      file_path: "/Users/test/.claude/plans/widget.md",
+      content: planHtml("Auto native plan")
+    }
+    const { ctx, proposed } = harness()
+
+    await Effect.runPromise(
+      runClaude(
+        "session-auto-write",
+        { ...spec, mode: "auto" },
+        ctx,
+        new Map()
+      )
+    )
+
+    expect(disallowedTools).not.toContain("Write")
+    expect(proposed).toHaveLength(1)
+    expect(proposed[0]?.summary).toBe("Auto native plan")
+    expect(writeDecision).toMatchObject({ behavior: "deny" })
+  })
+
+  it("captures a structured native plan-file Write without allowing the filesystem edit", async () => {
+    visibleReply = "Writing the completed plan."
+    writeInput = {
+      file_path: "/Users/test/.claude/plans/widget.md",
+      content: planHtml("Native plan file")
+    }
+    callExitPlanMode = false
+    const { ctx, proposed } = harness()
+
+    await Effect.runPromise(runClaude("session-write", spec, ctx, new Map()))
+
+    expect(disallowedTools).not.toContain("Write")
+    expect(proposed).toHaveLength(1)
+    expect(proposed[0]?.summary).toBe("Native plan file")
+    expect(writeDecision).toMatchObject({ behavior: "deny" })
+  })
+
+  it("uses the streamed inline PRD when Claude ends without calling ExitPlanMode", async () => {
+    callExitPlanMode = false
+    const { ctx, proposed } = harness()
+
+    await Effect.runPromise(runClaude("session-0", spec, ctx, new Map()))
+
+    expect(proposed).toHaveLength(1)
+    expect(proposed[0]).toMatchObject({
+      summary: "Buffered plan",
+      structured: true
+    })
+  })
+
   it("uses the streamed inline PRD when ExitPlanMode has an empty payload", async () => {
     const { ctx, proposed } = harness()
 

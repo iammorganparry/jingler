@@ -365,28 +365,6 @@
   }
 }
 
-/*
- * Jingler mode is the one composer state that belongs to Jingler itself rather
- * than the selected harness. Its border therefore uses the brand token, with a
- * narrow text-bright highlight travelling through it like a reflection.
- *
- * The custom angle is animated instead of rotating the whole pseudo-element:
- * the composer is a wide rectangle, so a transformed rectangle would expose its
- * corners and visibly wobble. Electron's bundled Chromium supports registered
- * custom properties, which lets the conic gradient rotate in place.
- */
-@property --sb-jingler-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
-@keyframes sb-jingler-border-rotate {
-  to {
-    --sb-jingler-angle: 360deg;
-  }
-}
-
 @keyframes sb-jingler-text-shine {
   from {
     background-position: 150% 0;
@@ -597,53 +575,6 @@
   height: 0;
 }
 
-/*
- * Jingler-mode composer chrome.
- *
- * These selectors are deliberately unlayered. Tailwind's generated utilities
- * live in a cascade layer; keeping this state class outside that layer lets it
- * replace the ordinary mode tint without `!important` or class-order tricks.
- */
-.composer-jingler-active {
-  position: relative;
-  isolation: isolate;
-  border-color: transparent;
-  background:
-    linear-gradient(var(--sb-sunken), var(--sb-sunken)) padding-box,
-    conic-gradient(
-        from var(--sb-jingler-angle),
-        var(--sb-brand),
-        color-mix(in srgb, var(--sb-brand) 45%, var(--sb-text-bright)),
-        var(--sb-text-bright),
-        var(--sb-brand),
-        color-mix(in srgb, var(--sb-brand) 72%, transparent),
-        var(--sb-brand)
-      )
-      border-box;
-  box-shadow:
-    0 0 18px -4px color-mix(in srgb, var(--sb-brand) 70%, transparent),
-    0 0 36px -12px color-mix(in srgb, var(--sb-brand) 55%, transparent);
-}
-
-.composer-jingler-active::before {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  inset: -3px;
-  border-radius: inherit;
-  background: conic-gradient(
-    from var(--sb-jingler-angle),
-    transparent,
-    color-mix(in srgb, var(--sb-brand) 50%, transparent),
-    var(--sb-text-bright),
-    var(--sb-brand),
-    transparent
-  );
-  filter: blur(10px);
-  opacity: 0.5;
-  pointer-events: none;
-}
-
 /* A text action, not a chip: no resting container, border, or pill silhouette. */
 .jingler-mode-toggle {
   border: 0;
@@ -682,8 +613,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-jingler-active,
-  .composer-jingler-active::before,
   .jingler-mode-toggle.is-active .jingler-mode-toggle__label,
   .jingler-mode-toggle.is-active .jingler-mode-toggle__mark {
     animation: none;

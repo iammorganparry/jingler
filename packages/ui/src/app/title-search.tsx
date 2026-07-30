@@ -28,9 +28,9 @@ export function TitleSearch({ onOpen }: { onOpen: () => void }) {
       onClick={onOpen}
       aria-label="Search sessions and actions"
       aria-keyshortcuts="Meta+K"
-      className="flex h-[24px] w-[min(42vw,420px)] items-center gap-2 rounded-md border border-hairline bg-sunken px-2 text-[12px] text-dim outline-none transition-colors hover:border-line hover:text-text-body focus-visible:ring-2 focus-visible:ring-ring"
+      className="flex h-[30px] w-[min(52vw,560px)] items-center gap-2.5 rounded-lg border border-hairline bg-sunken px-3 text-[13px] text-dim outline-none transition-colors hover:border-line hover:text-text-body focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <Search size={12} className="flex-none" />
+      <Search size={14} className="flex-none" />
       {/*
         `truncate` + `text-left` on a flexed span: at a narrow window this label
         gives ground before the ⌘K hint does. The hint is the part that teaches

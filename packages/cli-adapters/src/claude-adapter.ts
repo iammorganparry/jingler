@@ -1099,6 +1099,11 @@ export const runClaude = (
         let planQuery: Query | null = null
         let planCount = 0
         let qn = 0
+        // A session can enter Claude's native plan mode during an otherwise
+        // ordinary Auto turn. `spec.mode` only describes how the turn started,
+        // so it cannot tell us whether a later native plan-file Write is really
+        // a plan submission.
+        let nativePlanActive = spec.mode === "plan"
         // Claude's native plan flow normally supplies the PRD through
         // `ExitPlanMode.input.plan`, but read-only orchestrator runs can instead
         // stream the complete fenced document as assistant text and call the
@@ -1115,6 +1120,58 @@ export const runClaude = (
           input: Record<string, unknown>,
           options: { toolUseID: string }
         ): Promise<PermissionResult> => {
+          if (
+            toolName === "EnterPlanMode" &&
+            spec.orchestrationRoutes !== undefined
+          ) {
+            nativePlanActive = true
+            return { behavior: "allow", updatedInput: input }
+          }
+          // Claude sometimes follows its native plan-file convention even
+          // though Jingler's orchestrator protocol says to use ExitPlanMode.
+          // Let only Write reach this callback, capture a valid structured PRD
+          // as the proposal, and still deny the filesystem mutation.
+          if (
+            toolName === "Write" &&
+            nativePlanActive &&
+            spec.orchestrationRoutes !== undefined
+          ) {
+            const content = strOf(input.content)?.trim() ?? ""
+            const planId = `plan_${sessionId}_${planCount + 1}`
+            const plan =
+              content.length === 0
+                ? null
+                : parsePlan(content, planId)
+            if (plan?.structured === true) {
+              planCount += 1
+              const decision = await runP(ctx.proposePlan(plan))
+              planReplyText = ""
+              planReformatAsked = false
+              return {
+                behavior: "deny",
+                message:
+                  decision._tag === "Revise"
+                    ? decision.feedback
+                    : decision._tag === "Reject"
+                      ? "Plan rejected by the operator."
+                      : "Plan captured by Jingler. Do not write a native plan file."
+              }
+            }
+            return {
+              behavior: "deny",
+              message:
+                "Jingler orchestrator planning is read-only. Submit the complete structured PRD with ExitPlanMode."
+            }
+          }
+          // `Write` is removed from the SDK denylist for orchestrator runs so a
+          // native plan-file write can reach the capture branch above. Preserve
+          // read-only confinement for every non-plan Write that uses that seam.
+          if (toolName === "Write" && spec.readOnly) {
+            return {
+              behavior: "deny",
+              message: "This orchestrator is read-only. Delegate implementation to a worker."
+            }
+          }
           // Plan mode: the SDK routes ExitPlanMode approval here. Turn the plan
           // into a structured, reviewable Plan and honour the operator's verdict.
           if (toolName === "ExitPlanMode") {
@@ -1160,6 +1217,7 @@ export const runClaude = (
               planReformatAsked = false
             })
             if (decision._tag === "Approve") {
+              nativePlanActive = false
               // Exit plan mode via "default" — the same mode every non-plan run
               // uses (see `mapPermissionMode`), so canUseTool below keeps being
               // consulted and enforces the session's restored HITL mode; an
@@ -1289,7 +1347,14 @@ export const runClaude = (
                   )
                 }
               : {}),
-            ...(spec.readOnly ? { disallowedTools: [...READ_ONLY_DISALLOWED] } : {}),
+            ...(spec.readOnly
+              ? {
+                  disallowedTools:
+                    spec.orchestrationRoutes !== undefined
+                      ? READ_ONLY_DISALLOWED.filter((tool) => tool !== "Write")
+                      : [...READ_ONLY_DISALLOWED]
+                }
+              : {}),
             includePartialMessages: true,
             canUseTool,
             abortController: abort,
@@ -1402,7 +1467,7 @@ export const runClaude = (
              * nothing below depends on it having run late.
              */
             const events = streamEventsFor(msg, tools, bgState)
-            if (spec.mode === "plan") {
+            if (nativePlanActive) {
               for (const event of events) {
                 if (event._tag === "Assistant" && event.agentId === undefined) {
                   planReplyText += event.text
@@ -1438,6 +1503,33 @@ export const runClaude = (
              */
             let extended = false
             if ((msg as { type?: unknown }).type === "result") {
+              // A Jingler orchestrator can ignore the ExitPlanMode instruction
+              // and stream the complete PRD before ending the turn instead. The
+              // reply is still the authoritative plan transport: promote it at
+              // the terminal boundary rather than leaving Plan Review empty.
+              //
+              // Keep this orchestrator-only. A direct Claude planning turn needs
+              // ExitPlanMode's live approval result so it can continue into
+              // implementation under the restored execution mode.
+              if (
+                nativePlanActive &&
+                spec.orchestrationRoutes !== undefined &&
+                planCount === 0 &&
+                events.some((event) => event._tag === "Done")
+              ) {
+                const planId = `plan_${sessionId}_1`
+                const replyPlan =
+                  planReplyText.length === 0
+                    ? null
+                    : parsePlan(planReplyText, planId)
+                if (replyPlan?.structured === true) {
+                  planCount += 1
+                  const submittedBlock =
+                    fencedHtmlPlanSubmission(planReplyText)?.block
+                  await runP(ctx.proposePlan(replyPlan, submittedBlock))
+                  planReplyText = ""
+                }
+              }
               // The turn is ending: ask the harness how full the window actually
               // is, and emit that BEFORE the `Done` it belongs to. Ordering is
               // load-bearing — `Done` is what starts a compaction decision, and

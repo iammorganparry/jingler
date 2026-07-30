@@ -15,7 +15,13 @@ import { publishSessionUpdate } from "./session-updates.js"
 import { disposeChatActor, rehomeSharedPlan, useChatActivities } from "./conversation-registry.js"
 import { clearDraft } from "./draft-store.js"
 
-export function SessionChatTabs({ session }: { session: Session }) {
+export function SessionChatTabs({
+  session,
+  onSelectConversation
+}: {
+  session: Session
+  onSelectConversation: () => void
+}) {
   const activeChat =
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
@@ -25,6 +31,7 @@ export function SessionChatTabs({ session }: { session: Session }) {
     void rpc.sessionsCreateChat(session.id).then(publishSessionUpdate)
   }
   const selectChat = (chatId: string) => {
+    onSelectConversation()
     if (chatId === activeChat.id) return
     void rpc.sessionsSelectChat(session.id, chatId).then(publishSessionUpdate)
   }

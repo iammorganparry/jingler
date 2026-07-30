@@ -86,7 +86,7 @@ export interface SessionConversationProps {
    * + live per-chat activity) lives in the desktop renderer, so building the bar
    * here would drag the RPC client into the component library. Absent in stories.
    */
-  renderChatTabs?: (session: Session) => ReactNode
+  renderChatTabs?: (session: Session, onSelectConversation: () => void) => ReactNode
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>
   /**

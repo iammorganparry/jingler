@@ -130,7 +130,7 @@ test("the code review tab holds a large changeset without mounting all of it", a
     for (let n = 0; n < FILES; n++) {
       writeFileSync(join(repoPath, `module_${n}.ts`), bigSource(n, rev))
     }
-    await window.getByRole("button", { name: "Conversation" }).click()
+    await window.getByTestId("active-chat-tab").click()
     await window.waitForTimeout(300)
     await openChanges()
   }

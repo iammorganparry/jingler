@@ -320,6 +320,11 @@ describe("SessionPane", () => {
       <SessionPane
         session={session({ id: "a", prNumber: 5 })}
         renderConversation={(s) => <div>transcript {s.id}</div>}
+        renderChatTabs={(_session, onSelectConversation) => (
+          <button type="button" onClick={onSelectConversation}>
+            Active chat
+          </button>
+        )}
         renderReview={() => <div>review view</div>}
         {...props}
       />
@@ -370,7 +375,8 @@ describe("SessionPane", () => {
         pane({ selectTabRequest: { tabId: "review", nonce: 1 }, onTabRequestHandled })
       )
       rerender(pane({ selectTabRequest: null, onTabRequestHandled }))
-      fireEvent.click(screen.getByRole("button", { name: "Conversation" }))
+      expect(screen.queryByRole("button", { name: "Conversation" })).toBeNull()
+      fireEvent.click(screen.getByRole("button", { name: "Active chat" }))
       expect(screen.getByText("transcript a")).toBeTruthy()
 
       // Asking for the SAME tab a second time has to work — that is what the

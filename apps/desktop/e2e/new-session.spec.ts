@@ -404,7 +404,7 @@ test("creating a session from an issue forks a linked branch and seeds the task"
   // seeded text, and a clear-on-mount left nothing to re-seed it from. So the seed
   // is still persisted here, and the composer still shows it after coming back.
   expect(persisted[0].initialPrompt).toContain("Fix the refund route")
-  await window.getByRole("button", { name: "Conversation" }).click()
+  await window.getByTestId("active-chat-tab").click()
   await expect(window.getByPlaceholder("Message Claude…")).toHaveValue(/Fix the refund route/)
 
   // Sending consumes it — only then is it cleared, so re-opening never re-seeds.
