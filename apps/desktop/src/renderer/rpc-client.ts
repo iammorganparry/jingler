@@ -419,18 +419,42 @@ export const rpc = {
     sessionId: string,
     planId: string,
     chatId: string,
-    onActivity: (activity: WorkerActivity) => void
+    onActivity: (activity: WorkerActivity) => void,
+    onFailure: (error: unknown) => void
   ): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
     let cancelled = false
-    void clientPromise.then((client) => {
-      if (cancelled) return
-      fiber = runtime.runFork(
-        client.Agent.watchWorkers({ sessionId, planId, chatId }).pipe(
-          Stream.runForEach((activity) => Effect.sync(() => onActivity(activity)))
+    void clientPromise.then(
+      (client) => {
+        if (cancelled) return
+        const streamFiber = runtime.runFork(
+          client.Agent.watchWorkers({ sessionId, planId, chatId }).pipe(
+            Stream.runForEach((activity) =>
+              Effect.sync(() => onActivity(activity))
+            )
+          )
         )
-      )
-    })
+        fiber = streamFiber
+        runtime.runFork(
+          Fiber.await(streamFiber).pipe(
+            Effect.tap((exit) =>
+              Effect.sync(() => {
+                if (cancelled) return
+                onFailure(
+                  Exit.isFailure(exit)
+                    ? Cause.squash(exit.cause)
+                    : new Error("Worker activity stream ended unexpectedly.")
+                )
+              })
+            ),
+            Effect.asVoid
+          )
+        )
+      },
+      (error) => {
+        if (!cancelled) onFailure(error)
+      }
+    )
     return () => {
       cancelled = true
       if (fiber) runtime.runFork(Fiber.interrupt(fiber))

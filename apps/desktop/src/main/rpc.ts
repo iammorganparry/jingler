@@ -16,6 +16,7 @@ import {
   AgentRunner,
   AssetService,
   AuthService,
+  buildOrchestrationGroups,
   ConfigService,
   claudeTitleGenerator,
   DiscoveryService,
@@ -28,6 +29,7 @@ import {
   OpenConnectorApi,
   OrchestrationPersistenceError,
   OrchestrationService,
+  recoverOrchestrationCheckpoints,
   SecretStoreUnavailable,
   planDraftPost,
   billingPath,
@@ -94,6 +96,8 @@ import type {
   ReasoningSetting,
   Session,
   SettledSessionStatus,
+  WorkerActivityReset,
+  WorkerState,
   WorkspaceConfig
 } from "@jingler/core"
 import type {
@@ -348,6 +352,57 @@ export const mergeCanonicalOrchestrationCheckpoints = (
     })
   }
   return [...checkpointByAgent.values()]
+}
+
+/**
+ * Rebuild the durable worker rail after the main process restarts.
+ *
+ * Checkpoints intentionally restore lifecycle and routing only. Full worker
+ * transcripts remain process-local by design; retry resumes the harness from
+ * its durable resume id and starts a fresh attempt transcript.
+ */
+export const restoredOrchestrationSnapshot = (
+  sessionId: string,
+  document: PlanDocument,
+  checkpoints: ReadonlyArray<OrchestrationCheckpoint>
+): WorkerActivityReset | null => {
+  if (checkpoints.length === 0) return null
+  const graph = buildOrchestrationGroups(document.projection.stages)
+  if (!graph.valid) return null
+  const recovered = new Map(
+    recoverOrchestrationCheckpoints(
+      mergeCanonicalOrchestrationCheckpoints(document, checkpoints)
+    ).map((checkpoint) => [checkpoint.agentId, checkpoint])
+  )
+  const workers = graph.groups.flatMap((group): ReadonlyArray<WorkerState> => {
+    const checkpoint = recovered.get(group.agentId)
+    if (checkpoint === undefined) return []
+    return [
+      {
+        worker: {
+          sessionId,
+          planId: document.id,
+          producingChatId: document.producingChatId,
+          agentId: group.agentId,
+          stageIds: group.stages.map((stage) => stage.id),
+          harness: group.assignment.cli,
+          model: group.assignment.model,
+          attempt: checkpoint.attempt
+        },
+        status: checkpoint.state,
+        message: checkpoint.message
+      }
+    ]
+  })
+  if (workers.length === 0) return null
+  return {
+    _tag: "Reset",
+    sessionId,
+    planId: document.id,
+    producingChatId: document.producingChatId,
+    mode: "replace",
+    workers
+  }
 }
 
 export const orchestrationStagesCompleted = (
@@ -605,10 +660,40 @@ export const watchOrchestrationWorkers = (
   chatId: string
 ) =>
   Stream.unwrap(
-    Effect.map(
-      OrchestrationService,
-      (service) => service.watch(sessionId, planId, chatId)
-    )
+    Effect.gen(function* () {
+      const service = yield* OrchestrationService
+      const session = yield* SessionStore.get(sessionId).pipe(
+        Effect.orElseSucceed(() => null)
+      )
+      if (session?.worktreePath == null) {
+        return service.watch(sessionId, planId, chatId)
+      }
+      const document = yield* PlanStore.readDocument(
+        session.worktreePath,
+        sessionId,
+        chatId
+      )
+      if (
+        document === null ||
+        document.id !== planId ||
+        document.producingChatId !== chatId
+      ) {
+        return service.watch(sessionId, planId, chatId)
+      }
+      const checkpoints = yield* PlanStore.readOrchestrationCheckpoints(
+        session.worktreePath,
+        planId
+      )
+      const restored = restoredOrchestrationSnapshot(
+        sessionId,
+        document,
+        checkpoints
+      )
+      const live = service.watch(sessionId, planId, chatId)
+      return restored === null
+        ? live
+        : Stream.concat(Stream.make(restored), live)
+    })
   )
 
 /** Resolve a session only when it has an active pull request. */

@@ -39,12 +39,14 @@ export interface OrchestrationAgentsInput {
   readonly scope: OrchestrationAgentsScope | null
   readonly subscribe: (
     scope: OrchestrationAgentsScope,
-    listener: (activity: WorkerActivity) => void
+    listener: (activity: WorkerActivity) => void,
+    onFailure: (error: unknown) => void
   ) => () => void
 }
 
 export interface OrchestrationAgentsContext extends OrchestrationAgentsInput {
   readonly agents: ReadonlyArray<OrchestrationAgent>
+  readonly reconnectAttempt: number
 }
 
 export type OrchestrationAgentsEvent =
@@ -53,6 +55,11 @@ export type OrchestrationAgentsEvent =
       readonly scope: OrchestrationAgentsScope | null
     }
   | { readonly type: "ACTIVITY"; readonly activity: WorkerActivity }
+  | { readonly type: "STREAM_FAILED"; readonly error: unknown }
+
+export const MAX_WORKER_STREAM_RECONNECTS = 5
+export const WORKER_STREAM_RECONNECT_BASE_MS = 250
+export const WORKER_STREAM_RECONNECT_MAX_MS = 4000
 
 const sameScope = (
   left: OrchestrationAgentsScope | null,
@@ -90,6 +97,18 @@ const isTerminal = (status: WorkerLifecycleStatus): boolean =>
   status === "failed" ||
   status === "interrupted" ||
   status === "completed"
+
+const settleDisconnectedAgent = (
+  agent: OrchestrationAgent
+): OrchestrationAgent =>
+  agent.status === "queued" || agent.status === "running"
+    ? {
+        ...agent,
+        status: "interrupted",
+        statusMessage: "Worker activity stream disconnected.",
+        message: settleStreaming(agent.message)
+      }
+    : agent
 
 const messageId = (worker: WorkerIdentity): string =>
   `orchestration:${worker.planId}:${worker.agentId}:${worker.attempt}`
@@ -145,7 +164,8 @@ const applyState = (
 const applyReset = (
   agents: ReadonlyArray<OrchestrationAgent>,
   workers: ReadonlyArray<WorkerState>,
-  scope: OrchestrationAgentsScope
+  scope: OrchestrationAgentsScope,
+  mode: "replace" | "patch"
 ): ReadonlyArray<OrchestrationAgent> =>
   workers.reduce(
     (next, worker) => {
@@ -155,7 +175,7 @@ const applyReset = (
         ? next
         : replaceAgent(next, freshAgent(worker))
     },
-    agents
+    mode === "replace" ? [] : agents
   )
 
 const applyHarnessEvent = (
@@ -185,7 +205,7 @@ const foldActivity = (
   const { scope } = context
   if (scope === null || !activityInScope(activity, scope)) return context.agents
   if (activity._tag === "Reset") {
-    return applyReset(context.agents, activity.workers, scope)
+    return applyReset(context.agents, activity.workers, scope, activity.mode)
   }
   if (activity._tag === "State") {
     return applyState(context.agents, activity)
@@ -207,8 +227,10 @@ export const orchestrationAgentsMachine = setup({
         readonly subscribe: OrchestrationAgentsInput["subscribe"]
       }
     >(({ sendBack, input }) =>
-      input.subscribe(input.scope, (activity) =>
-        sendBack({ type: "ACTIVITY", activity })
+      input.subscribe(
+        input.scope,
+        (activity) => sendBack({ type: "ACTIVITY", activity }),
+        (error) => sendBack({ type: "STREAM_FAILED", error })
       )
     )
   },
@@ -217,24 +239,43 @@ export const orchestrationAgentsMachine = setup({
     sameRequestedScope: ({ context, event }) =>
       event.type === "SCOPE_CHANGED" && sameScope(context.scope, event.scope),
     receivedInScope: ({ context, event }) =>
-      event.type === "ACTIVITY" && activityInScope(event.activity, context.scope)
+      event.type === "ACTIVITY" && activityInScope(event.activity, context.scope),
+    canReconnect: ({ context }) =>
+      context.reconnectAttempt < MAX_WORKER_STREAM_RECONNECTS
   },
   actions: {
     replaceScope: assign(({ event }) =>
       event.type === "SCOPE_CHANGED"
-        ? { scope: event.scope, agents: [] }
+        ? { scope: event.scope, agents: [], reconnectAttempt: 0 }
         : {}
     ),
     foldActivity: assign(({ context, event }) =>
       event.type === "ACTIVITY"
-        ? { agents: foldActivity(context, event.activity) }
+        ? {
+            agents: foldActivity(context, event.activity),
+            reconnectAttempt: 0
+          }
         : {}
-    )
+    ),
+    noteStreamFailure: assign(({ context }) => ({
+      reconnectAttempt: context.reconnectAttempt + 1
+    })),
+    settleDisconnected: assign(({ context }) => ({
+      agents: context.agents.map(settleDisconnectedAgent)
+    }))
+  },
+  delays: {
+    reconnectDelay: ({ context }) =>
+      Math.min(
+        WORKER_STREAM_RECONNECT_BASE_MS *
+          2 ** Math.max(0, context.reconnectAttempt - 1),
+        WORKER_STREAM_RECONNECT_MAX_MS
+      )
   }
 }).createMachine({
   id: "orchestrationAgents",
   initial: "routing",
-  context: ({ input }) => ({ ...input, agents: [] }),
+  context: ({ input }) => ({ ...input, agents: [], reconnectAttempt: 0 }),
   on: {
     SCOPE_CHANGED: [
       { guard: "sameRequestedScope" },
@@ -264,8 +305,21 @@ export const orchestrationAgentsMachine = setup({
         ACTIVITY: {
           guard: "receivedInScope",
           actions: "foldActivity"
+        },
+        STREAM_FAILED: {
+          target: "reconnecting",
+          actions: "noteStreamFailure"
         }
       }
-    }
+    },
+    reconnecting: {
+      after: {
+        reconnectDelay: [
+          { guard: "canReconnect", target: "watching" },
+          { target: "disconnected", actions: "settleDisconnected" }
+        ]
+      }
+    },
+    disconnected: {}
   }
 })

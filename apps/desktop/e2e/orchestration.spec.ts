@@ -302,6 +302,20 @@ test("a stopped worker stays interrupted across restart and retries from its che
     withRepo: true
   })
   await expect(appShell(reopened.window)).toBeVisible()
+  const reopenedAuthTab = reopened.window
+    .locator("[data-agent-status]")
+    .getByRole("button", { name: WORKER_AUTH_TAB })
+  const reopenedReleaseTab = reopened.window
+    .locator("[data-agent-status]")
+    .getByRole("button", { name: WORKER_RELEASE_TAB })
+  await expect(reopenedAuthTab.locator("..")).toHaveAttribute(
+    "data-agent-status",
+    "completed"
+  )
+  await expect(reopenedReleaseTab.locator("..")).toHaveAttribute(
+    "data-agent-status",
+    "interrupted"
+  )
   await reopened.window
     .getByRole("button", { name: "Plan Review" })
     .first()

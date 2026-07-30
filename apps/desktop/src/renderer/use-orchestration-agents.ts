@@ -10,9 +10,16 @@ import { rpc } from "./rpc-client.js"
 
 const subscribe = (
   scope: OrchestrationAgentsScope,
-  listener: (activity: WorkerActivity) => void
+  listener: (activity: WorkerActivity) => void,
+  onFailure: (error: unknown) => void
 ): (() => void) =>
-  rpc.agentWatchWorkers(scope.sessionId, scope.planId, scope.chatId, listener)
+  rpc.agentWatchWorkers(
+    scope.sessionId,
+    scope.planId,
+    scope.chatId,
+    listener,
+    onFailure
+  )
 
 export interface OrchestrationAgentsState {
   readonly planId: string | null

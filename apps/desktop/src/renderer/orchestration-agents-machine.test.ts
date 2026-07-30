@@ -9,8 +9,11 @@ import type {
 import { createActor, waitFor } from "xstate"
 import { describe, expect, it, vi } from "vitest"
 import {
+  MAX_WORKER_STREAM_RECONNECTS,
   orchestrationAgentsMachine,
-  type OrchestrationAgentsScope
+  type OrchestrationAgentsScope,
+  WORKER_STREAM_RECONNECT_BASE_MS,
+  WORKER_STREAM_RECONNECT_MAX_MS
 } from "./orchestration-agents-machine.js"
 
 const scope = (
@@ -50,12 +53,14 @@ const state = (
 const reset = (
   workers: ReadonlyArray<WorkerState>,
   planId = "plan-1",
-  chatId = "chat-1"
+  chatId = "chat-1",
+  mode: "replace" | "patch" = "replace"
 ): WorkerActivity => ({
   _tag: "Reset",
   sessionId: "session-1",
   planId,
   producingChatId: chatId,
+  mode,
   workers
 })
 
@@ -94,15 +99,17 @@ const makeHarness = () => {
   const subscriptions: Array<{
     readonly scope: OrchestrationAgentsScope
     readonly listener: (activity: WorkerActivity) => void
+    readonly fail: (error: unknown) => void
     readonly cancel: ReturnType<typeof vi.fn>
   }> = []
   const subscribe = vi.fn(
     (
       watched: OrchestrationAgentsScope,
-      listener: (activity: WorkerActivity) => void
+      listener: (activity: WorkerActivity) => void,
+      fail: (error: unknown) => void
     ) => {
       const cancel = vi.fn()
-      subscriptions.push({ scope: watched, listener, cancel })
+      subscriptions.push({ scope: watched, listener, fail, cancel })
       return cancel
     }
   )
@@ -152,7 +159,7 @@ describe("orchestrationAgentsMachine", () => {
     expect(beforeRetry.every((agent) => !agent.message.streaming)).toBe(true)
 
     const retriedA = worker("agent-a", "claude", { attempt: 2 })
-    emit(reset([state(retriedA, "queued")]))
+    emit(reset([state(retriedA, "queued")], "plan-1", "chat-1", "patch"))
     emit(lifecycle(retriedA, "running"))
     emit(harnessEvent(retriedA, { _tag: "Assistant", text: "alpha retry" }))
 
@@ -166,6 +173,23 @@ describe("orchestrationAgentsMachine", () => {
     emit(harnessEvent(agentA, { _tag: "Assistant", text: " stale" }))
     emit(lifecycle(agentA, "failed", "old attempt failed late"))
     expect(actor.getSnapshot().context.agents[0]).toStrictEqual(afterRetry[0])
+    actor.stop()
+  })
+
+  it("removes omitted workers on a replacement snapshot", async () => {
+    const harness = makeHarness()
+    const actor = start(scope(), harness.subscribe)
+    await waitFor(actor, (snapshot) => snapshot.matches("watching"))
+    const emit = harness.subscriptions[0]!.listener
+    const agentA = worker("agent-a", "claude")
+    const agentB = worker("agent-b", "codex")
+
+    emit(reset([state(agentA, "completed"), state(agentB, "completed")]))
+    emit(reset([state(agentA, "completed")]))
+
+    expect(
+      actor.getSnapshot().context.agents.map(({ id }) => id)
+    ).toStrictEqual(["agent-a"])
     actor.stop()
   })
 
@@ -272,5 +296,42 @@ describe("orchestrationAgentsMachine", () => {
     expect(actor.getSnapshot().context.scope).toBeNull()
     expect(actor.getSnapshot().context.agents).toStrictEqual([])
     actor.stop()
+  })
+
+  it("reconnects failed streams with bounded backoff and settles stale running workers", async () => {
+    vi.useFakeTimers()
+    try {
+      const harness = makeHarness()
+      const actor = start(scope(), harness.subscribe)
+      await waitFor(actor, (snapshot) => snapshot.matches("watching"))
+      harness.subscriptions[0]!.listener(
+        reset([state(worker("agent-a", "claude"), "running")])
+      )
+
+      for (let attempt = 1; attempt <= MAX_WORKER_STREAM_RECONNECTS; attempt++) {
+        harness.subscriptions.at(-1)!.fail(
+          new Error(`transport failed ${attempt}`)
+        )
+        expect(actor.getSnapshot().matches("reconnecting")).toBe(true)
+        const delay = Math.min(
+          WORKER_STREAM_RECONNECT_BASE_MS * 2 ** Math.max(0, attempt - 1),
+          WORKER_STREAM_RECONNECT_MAX_MS
+        )
+        await vi.advanceTimersByTimeAsync(delay)
+      }
+
+      expect(harness.subscribe).toHaveBeenCalledTimes(
+        MAX_WORKER_STREAM_RECONNECTS
+      )
+      expect(actor.getSnapshot().matches("disconnected")).toBe(true)
+      expect(actor.getSnapshot().context.agents[0]).toMatchObject({
+        status: "interrupted",
+        statusMessage: "Worker activity stream disconnected.",
+        message: { streaming: false }
+      })
+      actor.stop()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

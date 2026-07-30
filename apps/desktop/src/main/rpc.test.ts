@@ -10,6 +10,7 @@ import {
   GitService,
   ModelsService,
   OrchestrationService,
+  PlanStore,
   ReviewService,
   ReviewStore,
   SessionStore,
@@ -50,6 +51,7 @@ import {
   reviewMarkRouted,
   reviewReconcile,
   reviewRun,
+  restoredOrchestrationSnapshot,
   setReasoning,
   sessionCreationDefaults,
   sessionDiff,
@@ -196,6 +198,95 @@ describe("RPC handlers", () => {
     ).toBe(true)
   })
 
+  it("restores worker tabs from durable checkpoints after a main-process restart", () => {
+    const document: PlanDocument = {
+      id: "plan-1",
+      sessionId: "session-1",
+      producingChatId: "chat-1",
+      revision: 2,
+      status: "needs-verification",
+      source: "<h1>Plan</h1>",
+      updatedAt: "2026-07-30T12:00:00.000Z",
+      updatedBy: "agent",
+      projection: {
+        title: "Plan",
+        sections: [],
+        annotations: [],
+        stages: [
+          {
+            id: "01",
+            title: "Auth",
+            intent: "Implement auth",
+                    markdown: "<p>Auth</p><ul data-files><li>src/auth.ts</li></ul>",
+            acceptance: [],
+            dependencies: [],
+            complexity: "medium",
+            assignment: {
+              agentId: "worker-auth",
+              cli: "claude",
+              model: "opus",
+              reason: "Test route"
+            },
+            executionStatus: "running"
+          },
+          {
+            id: "02",
+            title: "Release",
+            intent: "Implement release",
+                    markdown: "<p>Release</p><ul data-files><li>src/release.ts</li></ul>",
+            acceptance: [],
+            dependencies: [],
+            complexity: "medium",
+            assignment: {
+              agentId: "worker-release",
+              cli: "codex",
+              model: "gpt-5.6-sol",
+              reason: "Test route"
+            },
+            executionStatus: "completed"
+          }
+        ]
+      }
+    }
+    const restored = restoredOrchestrationSnapshot(
+      "session-1",
+      document,
+      [
+        {
+          agentId: "worker-auth",
+          state: "running",
+          completedStageIds: [],
+          resumeId: "resume-auth",
+          message: null,
+          attempt: 1
+        },
+        {
+          agentId: "worker-release",
+          state: "completed",
+          completedStageIds: ["02"],
+          resumeId: "resume-release",
+          message: null,
+          attempt: 1
+        }
+      ]
+    )
+
+    expect(restored).toMatchObject({
+      _tag: "Reset",
+      mode: "replace",
+      workers: [
+        {
+          worker: { agentId: "worker-auth", harness: "claude" },
+          status: "interrupted"
+        },
+        {
+          worker: { agentId: "worker-release", harness: "codex" },
+          status: "completed"
+        }
+      ]
+    })
+  })
+
   it("watches the requested worker scope without starting execution", async () => {
     const calls: Array<ReadonlyArray<string>> = []
     const activity: WorkerActivity = {
@@ -203,12 +294,14 @@ describe("RPC handlers", () => {
       sessionId: "session-1",
       planId: "plan-1",
       producingChatId: "chat-1",
+      mode: "replace",
       workers: []
     }
     const service = OrchestrationService.make({
       execute: () => Effect.die("watch must not execute workers"),
       stopWorker: () => Effect.void,
       isPlanRunning: () => Effect.succeed(false),
+      activityFeedCount: () => Effect.succeed(0),
       watch: (sessionId, planId, chatId) => {
         calls.push([sessionId, planId, chatId])
         return Stream.make(activity)
@@ -218,7 +311,13 @@ describe("RPC handlers", () => {
     const received = await Effect.runPromise(
       watchOrchestrationWorkers("session-1", "plan-1", "chat-1").pipe(
         Stream.runCollect,
-        Effect.provide(Layer.succeed(OrchestrationService, service))
+        Effect.provide(
+          Layer.mergeAll(
+            SessionStore.Default,
+            PlanStore.Default,
+            Layer.succeed(OrchestrationService, service)
+          ).pipe(Layer.provideMerge(base))
+        )
       )
     )
 

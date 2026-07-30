@@ -51,14 +51,16 @@ export type WorkerState = Schema.Schema.Type<typeof WorkerState>
 /**
  * Reset the listed workers' lifecycle projections and transcripts.
  *
- * A new plan lists all of its workers; a targeted retry lists only the selected
- * worker so settled siblings remain untouched. The plan scope is carried
- * independently of `workers` so even an empty reset is unambiguous.
+ * `replace` is a complete snapshot and removes workers that are not listed.
+ * `patch` resets only the listed workers, so a targeted retry leaves settled
+ * siblings untouched. The plan scope is carried independently of `workers` so
+ * even an empty reset is unambiguous.
  */
 export const WorkerActivityReset = Schema.TaggedStruct("Reset", {
   sessionId: IdentityString,
   planId: IdentityString,
   producingChatId: IdentityString,
+  mode: Schema.Literal("replace", "patch"),
   workers: Schema.Array(WorkerState)
 })
 export type WorkerActivityReset = Schema.Schema.Type<typeof WorkerActivityReset>

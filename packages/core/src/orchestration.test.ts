@@ -24,6 +24,7 @@ describe("WorkerActivity decoding", () => {
         sessionId: "session-1",
         planId: "plan-1",
         producingChatId: "chat-1",
+        mode: "replace",
         workers: [{ worker, status: "queued", message: null }]
       }
     },
@@ -60,6 +61,7 @@ describe("WorkerActivity decoding", () => {
       sessionId: "session-1",
       planId: "plan-1",
       producingChatId: "chat-1",
+      mode: "replace",
       workers: []
     })
 
@@ -75,6 +77,7 @@ describe("WorkerActivity rejection", () => {
         _tag: "Reset",
         sessionId: "session-1",
         producingChatId: "chat-1",
+        mode: "replace",
         workers: []
       }
     },
@@ -115,6 +118,20 @@ describe("WorkerActivity rejection", () => {
           worker,
           status: "starting",
           message: null
+        })
+      )
+    ).toBe(true)
+  })
+
+  it("rejects a reset without explicit replace or patch semantics", () => {
+    expect(
+      Either.isLeft(
+        decode({
+          _tag: "Reset",
+          sessionId: "session-1",
+          planId: "plan-1",
+          producingChatId: "chat-1",
+          workers: []
         })
       )
     ).toBe(true)

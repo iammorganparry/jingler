@@ -9,6 +9,8 @@ import {
   buildOrchestrationGroups,
   OrchestrationPersistenceError,
   OrchestrationService,
+  WORKER_ACTIVITY_FEED_CAP,
+  WORKER_ACTIVITY_LIVE_CAP,
   WORKER_ACTIVITY_REPLAY_CAP,
   orchestrationWorkerMachine,
   recoverOrchestrationCheckpoints
@@ -903,7 +905,15 @@ describe("OrchestrationService worker activity", () => {
       "HarnessEvent",
       "State"
     ])
-    expect(result.late).toEqual(result.early)
+            expect(result.late.map((activity) => activity._tag)).toEqual(
+                result.early.map((activity) => activity._tag),
+            )
+            expect(result.late[0]).toMatchObject({
+                _tag: "Reset",
+                mode: "replace",
+                workers: [{ worker: { agentId: "agent-a" }, status: "completed" }],
+            })
+            expect(result.late.slice(1)).toEqual(result.early.slice(1))
   })
 
   it("joins buffered replay to live activity without a gap or duplicate", async () => {
@@ -954,7 +964,20 @@ describe("OrchestrationService worker activity", () => {
     const result = await Effect.runPromise(
       program.pipe(Effect.provide(layerFor(adapter)))
     )
-    expect(result.replayAndLive).toEqual(result.lateReplay)
+            expect(result.replayAndLive.map((activity) => activity._tag)).toEqual(
+                result.lateReplay.map((activity) => activity._tag),
+            )
+            expect(result.replayAndLive[0]).toMatchObject({
+                _tag: "Reset",
+                mode: "replace",
+                workers: [{ worker: { agentId: "agent-a" } }],
+            })
+            expect(result.lateReplay[0]).toMatchObject({
+                _tag: "Reset",
+                mode: "replace",
+                workers: [{ worker: { agentId: "agent-a" } }],
+            })
+            expect(result.replayAndLive.slice(1)).toEqual(result.lateReplay.slice(1))
     expect(
       result.replayAndLive.flatMap((activity) =>
         activity._tag === "HarnessEvent" &&
@@ -1131,10 +1154,12 @@ describe("OrchestrationService worker activity", () => {
         activity._tag === "Reset"
     )
     expect(resets).toHaveLength(2)
+    expect(resets[0]?.mode).toBe("replace")
     expect(resets[0]?.workers.map((state) => state.worker.agentId)).toEqual([
       "agent-a",
       "agent-b"
     ])
+    expect(resets[1]?.mode).toBe("patch")
     expect(resets[1]?.workers).toMatchObject([
       { worker: { agentId: "agent-a", attempt: 2 }, status: "queued" }
     ])
@@ -1230,14 +1255,62 @@ describe("OrchestrationService worker activity", () => {
     })
   })
 
-  it("caps late-watcher replay by dropping the oldest activity", async () => {
+  it("keeps a complete reset snapshot ahead of capped late-watcher replay", async () => {
+    const adapter: CliAdapterShape = {
+      run: (ownerId, spec, context) =>
+        Effect.gen(function* () {
+          if (ownerId.endsWith("agent-a")) {
+            for (
+              let index = 0;
+              index < WORKER_ACTIVITY_REPLAY_CAP + 5;
+              index++
+            ) {
+              yield* context.emit({
+                _tag: "Assistant",
+                text: `chunk:${index}`
+              })
+            }
+          }
+          yield* passCurrentStage(spec, context)
+        }),
+      stop: () => Effect.void
+    }
+    const program = Effect.gen(function* () {
+      const service = yield* OrchestrationService
+      yield* service.execute(
+        input([stage("01", "agent-a"), stage("02", "agent-b")])
+      )
+      return yield* service
+        .watch("session-1", "plan-1", "chat-1")
+        .pipe(Stream.take(WORKER_ACTIVITY_REPLAY_CAP + 1), Stream.runCollect)
+    })
+
+    const replay = [
+      ...(await Effect.runPromise(
+        program.pipe(Effect.provide(layerFor(adapter)))
+      ))
+    ]
+    expect(replay).toHaveLength(WORKER_ACTIVITY_REPLAY_CAP + 1)
+    expect(replay[0]).toMatchObject({
+      _tag: "Reset",
+      mode: "replace",
+      workers: [
+        { worker: { agentId: "agent-a" }, status: "completed" },
+        { worker: { agentId: "agent-b" }, status: "completed" }
+      ]
+    })
+  })
+
+  it("bounds a stalled subscriber and rebuilds it from a fresh snapshot after a gap", async () => {
+    const firstActivity = await Effect.runPromise(Deferred.make<void>())
+    const releaseWatcher = await Effect.runPromise(Deferred.make<void>())
     const adapter: CliAdapterShape = {
       run: (_ownerId, spec, context) =>
         Effect.gen(function* () {
-          for (let index = 0; index < WORKER_ACTIVITY_REPLAY_CAP + 5; index++) {
+          for (let index = 0; index < WORKER_ACTIVITY_LIVE_CAP + 50; index++) {
             yield* context.emit({
               _tag: "Assistant",
-              text: `chunk:${index}`
+              text: `live:${index}`
             })
           }
           yield* passCurrentStage(spec, context)
@@ -1246,23 +1319,72 @@ describe("OrchestrationService worker activity", () => {
     }
     const program = Effect.gen(function* () {
       const service = yield* OrchestrationService
-      yield* service.execute(input([stage("01", "agent-a")]))
-      return yield* service
+      let held = false
+      const watcher = yield* service
         .watch("session-1", "plan-1", "chat-1")
-        .pipe(Stream.take(WORKER_ACTIVITY_REPLAY_CAP), Stream.runCollect)
+        .pipe(
+          Stream.tap(() => {
+            if (held) return Effect.void
+            held = true
+            return Deferred.succeed(firstActivity, undefined).pipe(
+              Effect.zipRight(Deferred.await(releaseWatcher))
+            )
+          }),
+          Stream.takeUntil(
+            (activity) =>
+              activity._tag === "State" &&
+              activity.status === "completed"
+          ),
+          Stream.runCollect,
+          Effect.fork
+        )
+      yield* Effect.yieldNow()
+      const execution = yield* service
+        .execute(input([stage("01", "agent-a")]))
+        .pipe(Effect.fork)
+      yield* Deferred.await(firstActivity)
+      yield* Fiber.join(execution)
+      yield* Deferred.succeed(releaseWatcher, undefined)
+      return [...(yield* Fiber.join(watcher))]
     })
 
-    const replay = [
-      ...(await Effect.runPromise(
-        program.pipe(Effect.provide(layerFor(adapter)))
-      ))
-    ]
-    expect(replay).toHaveLength(WORKER_ACTIVITY_REPLAY_CAP)
-    expect(replay[0]?._tag).not.toBe("Reset")
-    expect(replay.at(-1)).toMatchObject({
+    const replayed = await Effect.runPromise(
+      program.pipe(Effect.provide(layerFor(adapter)))
+    )
+    expect(
+      replayed.filter((activity) => activity._tag === "Reset").length
+    ).toBeGreaterThanOrEqual(2)
+    expect(replayed.at(-1)).toMatchObject({
       _tag: "State",
       status: "completed"
     })
+  })
+
+  it("evicts inactive session feeds instead of caching them forever", async () => {
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) => passCurrentStage(spec, context),
+      stop: () => Effect.void
+    }
+    const count = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* OrchestrationService
+        for (
+          let index = 0;
+          index < WORKER_ACTIVITY_FEED_CAP + 3;
+          index++
+        ) {
+          yield* service.execute(
+            input([stage("01", "agent-a")], {
+              sessionId: `session-${index}`,
+              planId: `plan-${index}`
+            })
+          )
+        }
+        return yield* service.activityFeedCount()
+      }).pipe(Effect.provide(layerFor(adapter)))
+    )
+
+    expect(count).toBe(WORKER_ACTIVITY_FEED_CAP)
   })
 })
 
