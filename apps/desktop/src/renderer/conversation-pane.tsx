@@ -6,7 +6,7 @@
  * the Plan tab does NOT unmount the agent stream (which would abort a parked plan).
  */
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import type { Session } from "@jingler/core"
 import { agentChildren, agentPath, clampFontScale } from "@jingler/core"
 import {
@@ -127,10 +127,14 @@ export function ConversationPane({
     activeChat.orchestratorEnabled ??
     providersQuery.data?.orchestratorEnabled ??
     true
+  const jinglerModeMutation = useMutation({
+    mutationFn: (enabled: boolean) =>
+      rpc.sessionsSetOrchestratorEnabled(session.id, activeChat.id, enabled),
+    onSuccess: publishSessionUpdate
+  })
   const toggleJinglerMode = (enabled: boolean) => {
-    void rpc
-      .sessionsSetOrchestratorEnabled(session.id, activeChat.id, enabled)
-      .then(publishSessionUpdate)
+    jinglerModeMutation.reset()
+    jinglerModeMutation.mutate(enabled)
   }
   // Conversation text-size multiplier, scoped to the transcript wrapper below via
   // a `--sb-font-scale` CSS var. Set HERE rather than on document.documentElement
@@ -564,6 +568,26 @@ export function ConversationPane({
           }}
         />
       )}
+      {jinglerModeMutation.error !== null && (
+        <div
+          role="alert"
+          className="flex flex-none items-center gap-2 border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red"
+        >
+          <span className="min-w-0 flex-1">
+            {jinglerModeMutation.error instanceof Error
+              ? jinglerModeMutation.error.message
+              : "Could not update Jingler mode."}
+          </span>
+          <button
+            type="button"
+            aria-label="Dismiss Jingler mode error"
+            onClick={() => jinglerModeMutation.reset()}
+            className="flex-none rounded px-1 text-red outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {activeAgentTranscript !== null ? (
         <AgentView agent={activeAgentTranscript} />
       ) : (
@@ -649,6 +673,7 @@ export function ConversationPane({
           focusKey={activeChat.id}
           orchestrator={activeChat.role === "orchestrator"}
           jinglerMode={jinglerMode}
+          jinglerModePending={jinglerModeMutation.isPending}
           onToggleJinglerMode={toggleJinglerMode}
           archived={
             session.archived

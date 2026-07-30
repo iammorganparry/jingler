@@ -219,7 +219,9 @@ export interface ConversationViewProps {
   orchestrator?: boolean
   /** Whether Jingler mode is on (hides the model/mode chips when it is). */
   jinglerMode?: boolean
-  /** Flip Jingler mode (persisted globally in config). */
+  /** Whether the active chat's Jingler-mode update is in flight. */
+  jinglerModePending?: boolean
+  /** Flip Jingler mode for the active chat; workspace config is its fallback. */
   onToggleJinglerMode?: (enabled: boolean) => void
 }
 
@@ -286,6 +288,7 @@ export function ConversationView({
   focusKey,
   orchestrator = false,
   jinglerMode = true,
+  jinglerModePending = false,
   onToggleJinglerMode,
   archived,
   initialDraft
@@ -639,6 +642,7 @@ export function ConversationView({
                 onSetMode={onSetMode}
                 showJinglerToggle={orchestrator}
                 jinglerMode={jinglerMode}
+                jinglerModePending={jinglerModePending}
                 onToggleJinglerMode={onToggleJinglerMode}
                 reasoningEffort={reasoningEffort}
                 thinkingEnabled={thinkingEnabled}
