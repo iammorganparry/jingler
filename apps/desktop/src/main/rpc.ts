@@ -597,6 +597,48 @@ export const executeOrchestration = (
     )
   )
 
+/**
+ * After an orchestrator turn, dispatch any worker stages its amendment requeued
+ * — with no approval gate. This is the auto-dispatch half of "amend in place":
+ * the runner applies the amendment to the canonical document (reconciled, kept
+ * in the executing lane), and this fires only when that document is an
+ * approved/executing orchestration plan, not already running, with at least one
+ * queued assigned stage — precisely the state an in-turn amendment leaves. A
+ * plain answer queues nothing, so nothing dispatches. `executeOrchestration`
+ * merges checkpoints, so already-completed stages are skipped and only the
+ * requeued/new workers run.
+ */
+const dispatchPendingOrchestration = (sessionId: string, chatId: string) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(sessionId).pipe(
+      Effect.orElseSucceed(() => null)
+    )
+    if (session?.worktreePath == null) return
+    const chat = session.chats.find((candidate) => candidate.id === chatId)
+    if (chat?.role !== "orchestrator") return
+    const document = yield* PlanStore.readDocument(
+      session.worktreePath,
+      session.id,
+      chatId
+    )
+    if (
+      document === null ||
+      !planUsesOrchestration(session, document) ||
+      !["approved", "executing", "needs-verification"].includes(document.status)
+    ) {
+      return
+    }
+    const hasQueuedWork = document.projection.stages.some(
+      (stage) =>
+        stage.assignment !== null &&
+        stage.assignment !== undefined &&
+        stage.executionStatus === "queued"
+    )
+    if (!hasQueuedWork) return
+    if (yield* OrchestrationService.isPlanRunning(sessionId, document.id)) return
+    yield* executeOrchestration(sessionId, document.id).pipe(Effect.forkDaemon)
+  })
+
 /** Resolve a session only when it has an active pull request. */
 const sessionWithPr = (sessionId: string) =>
   resolveSession(sessionId).pipe(
@@ -1741,13 +1783,19 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Agent.run": ({ sessionId, chatId, text, images, reasoning }) =>
     Stream.unwrap(
       Effect.map(AgentRunner, (runner) =>
-        runner.prompt(
-          sessionId,
-          chatId,
-          text,
-          images ?? [],
-          reasoning
-        )
+        runner
+          .prompt(sessionId, chatId, text, images ?? [], reasoning)
+          // After the turn settles, dispatch any workers an in-turn plan
+          // amendment requeued — no approval gate. Emits nothing to the stream.
+          .pipe(
+            Stream.concat(
+              Stream.drain(
+                Stream.fromEffect(
+                  dispatchPendingOrchestration(sessionId, chatId)
+                )
+              )
+            )
+          )
       )
     ),
   "Agent.decideGate": ({ sessionId, chatId, gateId, decision }) =>
@@ -1942,6 +1990,8 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Config.setNotifications": (notifications) => ConfigService.setNotifications(notifications),
   "Config.setPlanAutoRun": ({ planAutoRun }) => ConfigService.setPlanAutoRun(planAutoRun),
   "Config.setAdhdMode": ({ adhdMode }) => ConfigService.setAdhdMode(adhdMode),
+  "Config.setOrchestratorEnabled": ({ orchestratorEnabled }) =>
+    ConfigService.setOrchestratorEnabled(orchestratorEnabled),
   "Config.setFontScale": ({ fontScale }) => ConfigService.setFontScale(fontScale),
   "Config.setDefaultCli": ({ cli }) => ConfigService.setDefaultCli(cli),
   "Config.setOrchestrator": (orchestrator) => ConfigService.setOrchestrator(orchestrator),

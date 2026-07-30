@@ -768,6 +768,20 @@ export const WorkspaceConfig = Schema.Struct({
    */
   adhdMode: Schema.optional(Schema.Boolean),
   /**
+   * Whether a session's orchestrator chat runs the agentic orchestrator flow.
+   * Absent means ON (see `ORCHESTRATOR_ENABLED_DEFAULT`).
+   *
+   * On by default: the orchestrator is the point of the app — a natural planner
+   * that acts on quick work itself, hands large work to worker agents, and never
+   * re-gates an approved plan. Turned OFF, the orchestrator role is not used at
+   * all: the orchestrator chat behaves like any plain chat on the session's own
+   * harness (its own persona, its own mode/model chips, no forced plan turn), so
+   * an operator who wants manual control leans on the source harness directly as
+   * they did before the orchestrator existed. Read per turn, so flipping it
+   * applies to the next message of an already-running session.
+   */
+  orchestratorEnabled: Schema.optional(Schema.Boolean),
+  /**
    * Multiplier applied to conversation + code text size. Absent means 1
    * (`FONT_SCALE_DEFAULT`) — the unscaled default.
    *
@@ -864,6 +878,12 @@ export const PLAN_AUTO_RUN_DEFAULT = true
 
 /** ADHD response shaping is opt-in — it rewrites the voice of every session. */
 export const ADHD_MODE_DEFAULT = false
+
+/**
+ * The agentic orchestrator flow is on by default — it is the product. Turning it
+ * off drops sessions back to driving the source harness directly.
+ */
+export const ORCHESTRATOR_ENABLED_DEFAULT = true
 
 /** Conversation + code text is unscaled (1×) unless the operator picks a size. */
 export const FONT_SCALE_DEFAULT = 1

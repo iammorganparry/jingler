@@ -139,6 +139,9 @@ export function Composer({
   onSetHarness,
   mode = "accept-edits",
   onSetMode,
+  showJinglerToggle = false,
+  jinglerMode = false,
+  onToggleJinglerMode,
   reasoningEffort,
   thinkingEnabled,
   onSetReasoning,
@@ -188,6 +191,22 @@ export function Composer({
   /** Current HITL mode (shown in the mode chip; Shift+Tab cycles it). */
   mode?: PermissionMode
   onSetMode?: (mode: PermissionMode) => void
+  /**
+   * Show the "Jingler mode" toggle in the control row. Set for the orchestrator
+   * chat only — the toggle governs the agentic orchestrator flow, which is a
+   * property of that chat.
+   */
+  showJinglerToggle?: boolean
+  /**
+   * Whether Jingler mode is ON. When on (and the toggle is shown), the model and
+   * mode chips are hidden — the orchestrator is always automatic and its model
+   * lives in Settings, so a per-turn mode/model toggle is cognitive load with
+   * nothing valid to pick. Off, the chips return and the operator drives the
+   * source harness directly.
+   */
+  jinglerMode?: boolean
+  /** Flip Jingler mode (persisted globally in config). */
+  onToggleJinglerMode?: (enabled: boolean) => void
   /** Per-session thinking strength; absent preserves the harness default. */
   reasoningEffort?: ReasoningEffort
   thinkingEnabled?: boolean
@@ -219,6 +238,10 @@ export function Composer({
     ...modeOptionsFor(cli),
     ...(allowPlan ? [PLAN_OPTION] : [])
   ]
+  // Jingler mode owns the model + mode chips: when it is on there is nothing
+  // valid to pick (the orchestrator is always automatic on its Settings model),
+  // so they are hidden and the toggle stands in their place.
+  const hideModeControls = showJinglerToggle && jinglerMode
   const accent = modeAccent[mode]
   // The chip's value and its bar count are the same fact; deriving it once keeps
   // the glyph from drifting out of step with the label beside it.
@@ -617,7 +640,28 @@ export function Composer({
               </DropdownMenuContent>
             </DropdownMenuPortal>
           </DropdownMenuRoot>
-          {modelValue.length > 0 && (
+          {showJinglerToggle && (
+            <button
+              type="button"
+              onClick={() => onToggleJinglerMode?.(!jinglerMode)}
+              aria-pressed={jinglerMode}
+              title={
+                jinglerMode
+                  ? "Jingler mode on — the orchestrator plans and hands off automatically. Click to drive the harness directly."
+                  : "Jingler mode off — you're driving the harness directly. Click to let the orchestrator plan and hand off."
+              }
+              className={cn(
+                "inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[11.5px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]",
+                jinglerMode
+                  ? "bg-brand/15 text-brand hover:bg-brand/20"
+                  : "text-muted-foreground hover:text-text"
+              )}
+            >
+              <Sparkles size={13} className="flex-none" />
+              Jingler
+            </button>
+          )}
+          {!hideModeControls && modelValue.length > 0 && (
           <ChipMenu
             value={modelValue}
             groups={modelGroups}
@@ -642,6 +686,7 @@ export function Composer({
             className={roomy ? "max-w-[190px]" : "max-w-[112px]"}
           />
           )}
+          {!hideModeControls && (
           <ChipMenu
             value={mode}
             options={modeOptions}
@@ -651,6 +696,7 @@ export function Composer({
             // permanent toolbar space; cap long modes inside narrow panes.
             className={cn("max-w-[104px]", accent.chip)}
           />
+          )}
           <ChipMenu
             value={reasoningChoice}
             options={reasoningOptionsFor(cli)}
