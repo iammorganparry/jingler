@@ -1,14 +1,15 @@
 import type { McpServer, McpTransport } from "@jingler/core"
+import type { RemoteMcpServer } from "./adapter.js"
 
 /**
- * The write-side of MCP config: given the resolved OpenConnector server
- * (`SessionSpec.openConnector`, a remote `ParsedMcpServer`), render it into each
- * harness's OWN launch vocabulary so every agent loads the same shared server, plus
- * the small parsing utilities the rest of the OpenConnector code shares.
+ * The write-side of MCP config: given one normalized remote attachment from
+ * `SessionSpec.remoteMcpServers`, render it into each harness's OWN launch
+ * vocabulary, plus the parsing utilities the rest of the OpenConnector code
+ * shares.
  *
- * (Jingler used to READ each harness's own MCP config here too; that's gone —
- * OpenConnector is now the single source of truth, so only the injection side and
- * the shared `ParsedMcpServer` split remain.)
+ * (Jingler used to READ each harness's own MCP config here too; that's gone.
+ * OpenConnector still uses the `ParsedMcpServer` split while AgentRunner reduces
+ * every launch source to the normalized remote shape.)
  *
  * SECURITY — the `ParsedMcpServer` split. A remote server carries a bearer in its
  * headers, and two halves need different things:
@@ -37,6 +38,18 @@ export interface ParsedMcpServer {
   readonly launch: McpLaunch
 }
 
+/** Drop the renderer-safe half after a remote entry reaches the main-only run boundary. */
+export const remoteMcpServer = (
+  entry: ParsedMcpServer | null | undefined
+): RemoteMcpServer | null =>
+  entry?.launch.url === undefined
+    ? null
+    : {
+        name: entry.server.name,
+        url: entry.launch.url,
+        headers: entry.launch.headers
+      }
+
 export const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v)
 
@@ -55,47 +68,97 @@ export const normalizeEndpoint = (endpoint: string): string => endpoint.replace(
 
 // ── Unified-MCP injection (write side) ───────────────────────────────────────
 //
-// Render the resolved OpenConnector server into each harness's launch vocabulary.
-// Claude takes it via the SDK `mcpServers` option (see `claude-adapter.ts`); the
-// two below are the codex + opencode halves. Both are pure so the wiring is
-// unit-tested without spawning a harness.
+// Render normalized remote servers into each harness's launch vocabulary.
+// Claude takes the complete collection via the SDK `mcpServers` option (see
+// `claude-adapter.ts`); the two below are the Codex + opencode equivalents.
+// Both are pure so the wiring is unit-tested without spawning a harness.
+
+/** Preserve input order and the first occurrence of any duplicated server name. */
+const uniqueRemoteMcpServers = (
+  entries: ReadonlyArray<RemoteMcpServer> | null | undefined
+): ReadonlyArray<RemoteMcpServer> => {
+  const names = new Set<string>()
+  return (entries ?? []).filter((entry) => {
+    if (names.has(entry.name)) return false
+    names.add(entry.name)
+    return true
+  })
+}
 
 /**
- * Codex `-c` config overrides that register the server as a remote MCP for the
- * app-server spawn: `["-c", 'mcp_servers.<name>.url="…"', "-c", …]`. Empty when
- * absent or not a remote (http) entry — codex only takes a URL here. Values are
- * JSON-encoded, which is a valid TOML basic string (same `"`/`\` escapes).
+ * Codex `-c` config overrides that register each server as a remote MCP for the
+ * app-server spawn: `["-c", 'mcp_servers.<name>.url="…"', "-c", …]`. Empty
+ * when absent. Values are JSON-encoded, which is a valid TOML basic string
+ * (same `"`/`\` escapes).
  */
 export const codexMcpOverrides = (
-  entry: ParsedMcpServer | null | undefined
+  entries: ReadonlyArray<RemoteMcpServer> | null | undefined
 ): ReadonlyArray<string> => {
-  if (!entry || entry.launch.url === undefined) return []
-  const name = entry.server.name
-  const out = [`mcp_servers.${name}.url=${JSON.stringify(entry.launch.url)}`]
-  for (const [key, value] of Object.entries(entry.launch.headers)) {
-    out.push(`mcp_servers.${name}.http_headers.${key}=${JSON.stringify(value)}`)
+  const overrides: string[] = []
+  const secretEnvironmentNames = new Set<string>()
+  for (const entry of uniqueRemoteMcpServers(entries)) {
+    overrides.push(`mcp_servers.${entry.name}.url=${JSON.stringify(entry.url)}`)
+    for (const [key, value] of Object.entries(entry.headers)) {
+      const environmentName = entry.headerEnvironment?.[key]
+      if (environmentName !== undefined) secretEnvironmentNames.add(environmentName)
+      overrides.push(
+        environmentName === undefined
+          ? `mcp_servers.${entry.name}.http_headers.${key}=${JSON.stringify(value)}`
+          : `mcp_servers.${entry.name}.env_http_headers.${key}=${JSON.stringify(environmentName)}`
+      )
+    }
   }
-  return out
+  for (const environmentName of secretEnvironmentNames) {
+    overrides.push(
+      `shell_environment_policy.filters.${environmentName}=${JSON.stringify("exclude")}`
+    )
+  }
+  return overrides
 }
 
 /**
- * The opencode `mcp` config fragment to merge into `OPENCODE_CONFIG_CONTENT`:
- * `{ mcp: { <name>: { type: "remote", url, enabled, headers? } } }`. Empty when
- * absent or not a remote entry, so spreading it is a no-op.
+ * Secret environment variables referenced by `codexMcpOverrides`. The
+ * environment exists only for this app-server process and keeps bearer values
+ * out of command-line arguments.
  */
-export const opencodeMcpConfig = (
-  entry: ParsedMcpServer | null | undefined
-): Record<string, unknown> => {
-  if (!entry || entry.launch.url === undefined) return {}
-  const hasHeaders = Object.keys(entry.launch.headers).length > 0
-  return {
-    mcp: {
-      [entry.server.name]: {
-        type: "remote",
-        url: entry.launch.url,
-        enabled: true,
-        ...(hasHeaders ? { headers: entry.launch.headers } : {})
-      }
-    }
+export const codexMcpEnvironment = (
+  entries: ReadonlyArray<RemoteMcpServer> | null | undefined
+): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    uniqueRemoteMcpServers(entries).flatMap((entry) =>
+      Object.entries(entry.headerEnvironment ?? {}).flatMap(
+        ([header, environmentName]) => {
+          const value = entry.headers[header]
+          return value === undefined ? [] : [[environmentName, value] as const]
+        }
+      )
+    )
+  )
+
+export interface OpencodeMcpEntry {
+  readonly name: string
+  readonly config: {
+    readonly type: "remote"
+    readonly url: string
+    readonly enabled: true
+    readonly headers?: Readonly<Record<string, string>>
   }
 }
+
+/**
+ * OpenCode remote MCP registrations for its authenticated, process-local API.
+ * They are added after startup so bearer values never enter the child process's
+ * inheritable `OPENCODE_CONFIG_CONTENT` environment.
+ */
+export const opencodeMcpEntries = (
+  entries: ReadonlyArray<RemoteMcpServer> | null | undefined
+): ReadonlyArray<OpencodeMcpEntry> =>
+  uniqueRemoteMcpServers(entries).map((entry) => ({
+    name: entry.name,
+    config: {
+      type: "remote",
+      url: entry.url,
+      enabled: true,
+      ...(Object.keys(entry.headers).length > 0 ? { headers: entry.headers } : {})
+    }
+  }))

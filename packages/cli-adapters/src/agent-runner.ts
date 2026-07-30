@@ -67,6 +67,7 @@ import type {
   OrchestrationRoute,
   PermissionDecision,
   PermissionRequest,
+  RemoteMcpServer,
   SessionSpec,
   SteerTurn,
   StopBackgroundTask
@@ -79,8 +80,8 @@ import { ModelsService } from "./models.js"
 import { healedWorktreePath } from "./cli-project-dir.js"
 import { ensureWorktreeLinked } from "./git.js"
 import { OpenConnectorService } from "./open-connector.js"
-import { BrowserControlPort } from "./browser-control-port.js"
-import { buildBrowserControlMcp } from "./browser-control-mcp.js"
+import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
+import { remoteMcpServer } from "./mcp-config.js"
 import { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
@@ -285,12 +286,33 @@ type PromptEnv =
   | ContextManager
   | ConfigService
   | OpenConnectorService
-  | BrowserControlPort
+  | BrowserControlMcpService
   | SecretStore
   | CommandExecutor.CommandExecutor
   | FileSystem.FileSystem
   | Path.Path
   | AppPaths
+
+/**
+ * Compose main-only launch attachments in stable priority order.
+ *
+ * The operator-configured connector is first and therefore wins any name
+ * collision with an internal attachment. Keeping the first occurrence also
+ * makes malformed duplicate inputs deterministic for every adapter.
+ */
+export const composeRemoteMcpServers = (
+  operatorConfigured: RemoteMcpServer | null,
+  internal: RemoteMcpServer | null
+): ReadonlyArray<RemoteMcpServer> => {
+  const names = new Set<string>()
+  const attachments: RemoteMcpServer[] = []
+  for (const entry of [operatorConfigured, internal]) {
+    if (entry === null || names.has(entry.name)) continue
+    names.add(entry.name)
+    attachments.push(entry)
+  }
+  return attachments
+}
 
 /**
  * Orchestrates a prompt against the selected harness. `prompt` returns a
@@ -1135,10 +1157,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const resolvedReasoning =
             reasoning === undefined ? providerReasoning : reasoning
 
-          // Resolve the unified OpenConnector server once, here, where the full
-          // service context is available — the adapters run in `R = never` async
-          // code and cannot reach a service. Best-effort: a config/secret read
-          // failure yields null (no server) rather than failing the whole turn.
+          // Resolve every remote MCP source once, here, where the full service
+          // context is available — adapters run in `R = never` async code and
+          // cannot reach services. Best-effort: a configured connector read
+          // failure yields null rather than failing the whole turn.
           // Accessor (not a captured instance) so this stays in the METHOD's
           // requirement channel (`PromptEnv`) rather than becoming a build-time
           // dependency of `AgentRunner.Default` — the latter is a singleton whose
@@ -1147,15 +1169,17 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             Effect.orElseSucceed(() => null)
           )
 
-          // Claude only: an in-process MCP server that hands the agent Jingler's
-          // OWN embedded browser to QA a preview URL in — the one the operator is
-          // watching — instead of a headless Chrome it would otherwise spawn via
-          // the browser-use CLI. An ACCESSOR (`yield* BrowserControlPort`), like
-          // OpenConnector above, so it stays in `PromptEnv` and never becomes a
-          // build-time dependency of the `AgentRunner` singleton (`R = never`).
-          // The other harnesses need an out-of-process MCP and aren't wired yet.
-          const browserMcp =
-            cli === "claude" ? buildBrowserControlMcp(yield* BrowserControlPort) : null
+          // The app-scoped service exposes one native Preview view, so browser
+          // control is leased exclusively for this run. The scoped lease revokes
+          // its bearer when the run stream completes; a concurrent run continues
+          // normally without the internal browser attachment.
+          const browserAttachment = yield* (
+            yield* BrowserControlMcpService
+          ).acquire(`${sessionId}:${chatId}`)
+          const remoteMcpServers = composeRemoteMcpServers(
+            remoteMcpServer(openConnectorServer),
+            browserAttachment
+          )
 
           const spec: SessionSpec = {
             cli,
@@ -1209,8 +1233,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             // mode). After approval it works in auto mode with full write access,
             // so it can implement quick fixes and open PRs directly.
             ...(orchestrating && mode === "plan" ? { readOnly: true } : {}),
-            ...(openConnectorServer ? { openConnector: openConnectorServer } : {}),
-            ...(browserMcp ? { browserMcp } : {})
+            remoteMcpServers
           }
 
           // Clear the PERSISTED id too, so a crash between here and the harness
@@ -1486,7 +1509,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               if (
                 current === null ||
                 current.producingChatId !== chatId ||
-                !["approved", "executing", "needs-verification"].includes(current.status)
+                !["approved", "executing", "needs-verification", "done"].includes(current.status)
               ) return false
               const parsed = parsePlanHtml(amendmentHtml)
               if (!parsed.valid) return false

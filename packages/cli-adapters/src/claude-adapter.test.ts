@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { PermissionMode, Question, QuestionAnswer } from "@jingler/core"
 import type { Attachment } from "@jingler/core"
 import {
+  claudeMcpServers,
   makeLiveInput,
   editStats,
   formatQuestionAnswer,
@@ -27,6 +28,49 @@ import type { SessionSpec } from "./adapter.js"
 
 // Build a minimal SDK message; the mapper only reads the fields it needs.
 const msg = (m: unknown): SDKMessage => m as SDKMessage
+
+describe("claudeMcpServers", () => {
+  it("translates every normalized remote attachment into an HTTP SDK entry", () => {
+    expect(
+      claudeMcpServers([
+        {
+          name: "operator-tools",
+          url: "https://connector.example/mcp",
+          headers: { Authorization: "Bearer connector-secret" }
+        },
+        {
+          name: "jingler-browser",
+          url: "http://127.0.0.1:32123/mcp",
+          headers: { Authorization: "Bearer preview-secret" }
+        }
+      ])
+    ).toStrictEqual({
+      "operator-tools": {
+        type: "http",
+        url: "https://connector.example/mcp",
+        headers: { Authorization: "Bearer connector-secret" }
+      },
+      "jingler-browser": {
+        type: "http",
+        url: "http://127.0.0.1:32123/mcp",
+        headers: { Authorization: "Bearer preview-secret" }
+      }
+    })
+  })
+
+  it("omits an empty collection and deterministically keeps the first duplicate", () => {
+    expect(claudeMcpServers(undefined)).toBeUndefined()
+    expect(claudeMcpServers([])).toBeUndefined()
+    expect(
+      claudeMcpServers([
+        { name: "same", url: "https://first.example/mcp", headers: {} },
+        { name: "same", url: "https://second.example/mcp", headers: {} }
+      ])
+    ).toStrictEqual({
+      same: { type: "http", url: "https://first.example/mcp", headers: {} }
+    })
+  })
+})
 
 describe("mapClaudeReasoning", () => {
   it("preserves native default and maps every explicit strength", () => {

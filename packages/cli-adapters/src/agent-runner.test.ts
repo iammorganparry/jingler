@@ -5,12 +5,17 @@ import { CliExecError, findApprovedPlan, STOPPED_NOTE } from "@jingler/core"
 import { Deferred, Effect, Fiber, Layer, Ref, Stream, TestClock, TestContext } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliAdapter, makeScriptedCliAdapter, scriptedPlan } from "./adapter.js"
-import type { CliAdapterShape, PermissionDecision } from "./adapter.js"
+import type {
+  CliAdapterShape,
+  PermissionDecision,
+  SessionSpec
+} from "./adapter.js"
 import { ConfigService } from "./config.js"
 import { InMemorySecretStoreLive } from "./secret-store.js"
 import { OpenConnectorService } from "./open-connector.js"
 import {
   AgentRunner,
+  composeRemoteMcpServers,
   isContextOverflowFailure,
   planEvidenceFromText
 } from "./agent-runner.js"
@@ -22,21 +27,22 @@ import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore } from "./plan-store.js"
 import { reserveSessionRun } from "./run-coordinator.js"
 import { withTempRoot } from "./test-support.js"
-import { BrowserControlPort } from "./browser-control-port.js"
+import {
+  BrowserControlMcpService,
+  type BrowserControlMcpAttachment
+} from "./browser-control-mcp-service.js"
 
-/** A no-op browser-control port. `promptSetup` builds a Claude MCP wrapper
- *  around it, so it must be provided, but these tests never invoke the tools. */
-const BrowserControlPortTest = Layer.succeed(
-  BrowserControlPort,
-  BrowserControlPort.of({
-    navigate: async () => {},
-    screenshot: async () => ({ pngBase64: "" }),
-    click: async () => {},
-    type: async () => {},
-    readText: async () => ({ text: "" }),
-    evaluate: async () => ({ result: "" }),
-    waitForSelector: async () => {}
-  })
+const PREVIEW_MCP: BrowserControlMcpAttachment = {
+  name: "jingler-browser",
+  url: "http://127.0.0.1:32123/mcp",
+  headers: { Authorization: "Bearer preview-secret" },
+  headerEnvironment: { Authorization: "JINGLER_BROWSER_MCP_AUTHORIZATION" }
+}
+
+/** Main-only Preview attachment normally owned by the app-scoped listener. */
+const BrowserControlMcpServiceTest = Layer.succeed(
+  BrowserControlMcpService,
+  BrowserControlMcpService.of({ acquire: () => Effect.succeed(PREVIEW_MCP) })
 )
 
 /**
@@ -91,7 +97,7 @@ const runPrompt = (mode: PermissionMode, decision: GateDecision) => {
   const base = Layer.mergeAll(
     AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
     ConfigService.Default,
     SessionStore.Default,
@@ -166,6 +172,75 @@ describe("planEvidenceFromText", () => {
   })
 })
 
+describe("AgentRunner remote MCP attachments", () => {
+  it("supplies configured and Preview HTTP entries without persisting their bearers", async () => {
+    const captured: SessionSpec[] = []
+    const recordingAdapter = Layer.succeed(
+      CliAdapter,
+      CliAdapter.of({
+        run: (_sessionId, spec, ctx) =>
+          Effect.sync(() => captured.push(spec)).pipe(
+            Effect.zipRight(ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }))
+          ),
+        stop: () => Effect.void
+      })
+    )
+    const base = Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlMcpServiceTest,
+      InMemorySecretStoreLive,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      PlanStore.Default,
+      recordingAdapter,
+      DiscoveryService.Default,
+      ContextManager.Default,
+      temp.layer
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* OpenConnectorService.set(
+          {
+            endpoint: "https://connector.example",
+            enabled: true,
+            serverName: "operator-tools"
+          },
+          "connector-secret"
+        )
+        const runner = yield* AgentRunner
+        yield* runner.prompt(SESSION, SESSION, "use both servers").pipe(Stream.runDrain)
+      }).pipe(Effect.provide(base))
+    )
+
+    expect(captured).toHaveLength(1)
+    expect(captured[0]!.remoteMcpServers).toStrictEqual([
+      {
+        name: "operator-tools",
+        url: "https://connector.example/mcp",
+        headers: { Authorization: "Bearer connector-secret" }
+      },
+      PREVIEW_MCP
+    ])
+    const persistedSession = readFileSync(join(temp.root, "sessions.json"), "utf8")
+    expect(persistedSession).not.toContain("connector-secret")
+    expect(persistedSession).not.toContain("preview-secret")
+    expect(persistedSession).not.toContain("remoteMcpServers")
+  })
+
+  it("keeps the operator-configured attachment on a duplicate name", () => {
+    const operator = {
+      name: "jingler-browser",
+      url: "https://operator.example/mcp",
+      headers: { Authorization: "Bearer operator" }
+    }
+    expect(composeRemoteMcpServers(operator, PREVIEW_MCP)).toStrictEqual([operator])
+  })
+})
+
 describe("AgentRunner HITL gating", () => {
   it("accept-edits: applies edits without a gate, but pauses for a command", async () => {
     const { events } = await runPrompt("accept-edits", "allow")
@@ -231,7 +306,7 @@ describe("AgentRunner HITL gating", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -353,7 +428,7 @@ describe("AgentRunner sub-agents", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -425,7 +500,7 @@ describe("AgentRunner image attachments", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -462,7 +537,7 @@ describe("AgentRunner AskUserQuestion", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -518,7 +593,7 @@ describe("AgentRunner ids", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -560,7 +635,7 @@ describe("AgentRunner allowlist", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -604,7 +679,7 @@ describe("AgentRunner plan mode", () => {
     Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1077,7 +1152,7 @@ describe("AgentRunner model", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1148,7 +1223,7 @@ describe("AgentRunner plan library", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1186,7 +1261,7 @@ describe("AgentRunner plan library", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1228,7 +1303,7 @@ describe("AgentRunner plan library", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1262,7 +1337,7 @@ describe("AgentRunner plan library", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1340,7 +1415,7 @@ describe("AgentRunner resume across restarts", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1452,7 +1527,7 @@ describe("AgentRunner plan progress across turns", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -1584,7 +1659,7 @@ describe("AgentRunner failures", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       ContextManager.Default,
@@ -1714,7 +1789,7 @@ describe("AgentRunner stop", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
@@ -1773,7 +1848,7 @@ describe("AgentRunner stop", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
         OpenConnectorService.Default,
-        BrowserControlPortTest,
+        BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
@@ -1830,7 +1905,7 @@ describe("AgentRunner stop", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
         OpenConnectorService.Default,
-        BrowserControlPortTest,
+        BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
@@ -1881,7 +1956,7 @@ describe("AgentRunner stop", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
         OpenConnectorService.Default,
-        BrowserControlPortTest,
+        BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
@@ -1936,7 +2011,7 @@ describe("AgentRunner stop", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
         OpenConnectorService.Default,
-        BrowserControlPortTest,
+        BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
@@ -1996,7 +2071,7 @@ describe("AgentRunner stop", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
         OpenConnectorService.Default,
-        BrowserControlPortTest,
+        BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
@@ -2076,7 +2151,7 @@ describe("AgentRunner stop", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
@@ -2147,7 +2222,7 @@ describe("AgentRunner first-event watchdog", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
@@ -2199,7 +2274,7 @@ describe("AgentRunner first-event watchdog", () => {
       const base = Layer.mergeAll(
         AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
         ConfigService.Default,
         SessionStore.Default,
@@ -2250,7 +2325,7 @@ describe("AgentRunner live tool output", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       SessionStore.Default,
@@ -2302,7 +2377,7 @@ describe("AgentRunner usage accrual", () => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
-    BrowserControlPortTest,
+    BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
       ConfigService.Default,
       ContextManager.Default,
