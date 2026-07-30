@@ -53,7 +53,7 @@ export interface PreviewDockViewProps {
 
 interface BrowserNavigation {
   readonly url: string
-  readonly source: "operator" | "agent"
+  readonly source: "operator" | "native"
 }
 
 export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
@@ -62,19 +62,23 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
     source: "operator"
   })
   const { url } = navigation
-  // Agent browser tools navigate the native view in main, outside this
-  // component's normal address-bar flow. Mirror that authoritative URL into the
-  // visible chrome whenever main reveals the driven browser. The source marker
-  // prevents BrowserBody from treating that state sync as a second navigation.
-  useEffect(
-    () =>
-      window.jingler.onPreviewReveal((revealedUrl) => {
-        if (revealedUrl.length > 0) {
-          setNavigation({ url: revealedUrl, source: "agent" })
-        }
-      }),
-    []
-  )
+  // Main owns the native WebContents URL. Agent reveals update immediately with
+  // the requested/current URL; committed navigation events then correct it for
+  // redirects, clicks, and History API changes. Native updates are state sync,
+  // not navigation intents, so BrowserBody must not issue another RPC for them.
+  useEffect(() => {
+    const syncNativeUrl = (nativeUrl: string) => {
+      if (nativeUrl.length > 0) {
+        setNavigation({ url: nativeUrl, source: "native" })
+      }
+    }
+    const stopReveal = window.jingler.onPreviewReveal(syncNativeUrl)
+    const stopUrlChanged = window.jingler.onPreviewUrlChanged(syncNativeUrl)
+    return () => {
+      stopReveal()
+      stopUrlChanged()
+    }
+  }, [])
   const browsing = dock.activeId === BROWSER_TAB_ID
   // The native view is only wanted when the dock is open AND the Browser tab is
   // the one on screen. Both halves matter: hiding the dock and switching tabs
@@ -171,7 +175,7 @@ function BrowserBody({
   useEffect(() => {
     if (!nativeWanted || loadedUrl.current === null || loadedUrl.current === url) return
     loadedUrl.current = url
-    if (navigation.source === "agent") return
+    if (navigation.source === "native") return
     void rpc.browserPreviewNavigate(url).catch(() => {})
   }, [nativeWanted, navigation, url])
 

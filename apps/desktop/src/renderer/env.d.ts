@@ -39,6 +39,11 @@ interface JinglerBridge {
    * Fires on every BrowserControl op. Returns an unsubscribe fn.
    */
   readonly onPreviewReveal: (cb: (url: string) => void) => () => void
+  /**
+   * Subscribe to committed main-frame URL changes from the embedded browser.
+   * Returns an unsubscribe fn.
+   */
+  readonly onPreviewUrlChanged: (cb: (url: string) => void) => () => void
 }
 
 interface Window {

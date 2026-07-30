@@ -9,9 +9,10 @@ const RPC_CHANNEL = "jingler/rpc"
 const AUTH_COMPLETE_CHANNEL = "jingler/auth-complete"
 const NOTIFICATION_ACTIVATED_CHANNEL = "jingler/notification-activated"
 const BOOT_THEME_CHANNEL = "jingler/boot-theme"
-// Must match PREVIEW_REVEAL_CHANNEL in main/preview-view.ts (kept as a literal
+// Must match the preview channels in main/preview-view.ts (kept as literals
 // here so the preload doesn't import the main bundle).
 const PREVIEW_REVEAL_CHANNEL = "jingler/preview/reveal"
+const PREVIEW_URL_CHANNEL = "jingler/preview/url"
 
 /**
  * The active theme's `:root` block, fetched SYNCHRONOUSLY at preload time.
@@ -87,5 +88,14 @@ contextBridge.exposeInMainWorld("jingler", {
     const listener = (_event: Electron.IpcRendererEvent, url: string) => cb(url)
     ipcRenderer.on(PREVIEW_REVEAL_CHANNEL, listener)
     return () => ipcRenderer.removeListener(PREVIEW_REVEAL_CHANNEL, listener)
+  },
+  /**
+   * Subscribe to committed main-frame URL changes from the embedded browser.
+   * Unlike a reveal, this only synchronizes chrome and never changes dock focus.
+   */
+  onPreviewUrlChanged: (cb: (url: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, url: string) => cb(url)
+    ipcRenderer.on(PREVIEW_URL_CHANNEL, listener)
+    return () => ipcRenderer.removeListener(PREVIEW_URL_CHANNEL, listener)
   }
 })

@@ -15,29 +15,17 @@ const failed = (cause: unknown) => ({
 })
 
 /**
- * A standard MCP server with the temporary structural fields expected by the
- * Claude SDK's in-process transport. Keeping that compatibility here lets the
- * existing Claude adapter consume the server while registration and callers
- * depend only on the provider-neutral MCP SDK.
- */
-class BrowserControlMcpServer extends McpServer {
-  readonly type: "sdk" = "sdk"
-  readonly name = BROWSER_MCP_NAME
-  readonly instance: McpServer = this
-}
-
-/**
- * Build the in-process browser-control MCP server for an agent run.
+ * Build the browser-control MCP server used by the loopback HTTP service.
  *
  * Every tool drives Jingler's OWN embedded browser (the Preview dock's
  * `WebContentsView`) via the `BrowserControlPort`, so QA happens in the browser
  * the operator is watching rather than a headless Chrome the agent spawned. The
- * server runs in-process in the main process next to `PreviewViewService`, so
- * there is no socket, port or token to guard — the capability never leaves the
- * process.
+ * server itself runs in the Electron main process next to `PreviewViewService`;
+ * external harnesses reach it through the authenticated, loopback-only
+ * Streamable HTTP listener in `browser-control-mcp-service.ts`.
  */
 export const buildBrowserControlMcp = (port: BrowserControlPortShape) => {
-  const server = new BrowserControlMcpServer({
+  const server = new McpServer({
     name: BROWSER_MCP_NAME,
     version: "1.0.0"
   })

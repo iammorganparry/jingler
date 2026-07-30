@@ -40,9 +40,20 @@ const closeServer = (server: Server): Promise<void> =>
 test("Codex drives the native Preview browser through jingler-browser", async ({ launchApp }) => {
   const requests: string[] = []
   const targetServer = createServer((request, response) => {
-    requests.push(request.url ?? "")
+    const path = request.url ?? ""
+    requests.push(path)
+    if (path === "/browser-mcp-parity") {
+      response.writeHead(302, { Location: "/browser-mcp-final" })
+      response.end()
+      return
+    }
     response.writeHead(200, { "Content-Type": "text/html" })
-    response.end("<!doctype html><title>Browser MCP parity</title><h1>Native Preview reached</h1>")
+    response.end(
+      path === "/browser-mcp-final"
+        ? "<!doctype html><title>Browser MCP parity</title><h1>Native Preview reached</h1>" +
+            '<script>setTimeout(() => history.replaceState({}, "", "/browser-mcp-history"), 2000)</script>'
+        : "<!doctype html><title>Browser MCP parity</title><h1>Initial Preview</h1>"
+    )
   })
   await new Promise<void>((resolve, reject) => {
     targetServer.once("error", reject)
@@ -93,13 +104,20 @@ test("Codex drives the native Preview browser through jingler-browser", async ({
       )
 
     await expect(window.getByRole("button", { name: "Hide preview" })).toBeVisible()
-    await expect(previewUrl).toHaveValue(targetUrl)
+    await expect(previewUrl).toHaveValue(
+      `http://127.0.0.1:${address.port}/browser-mcp-final`
+    )
+    await expect(previewUrl).toHaveValue(
+      `http://127.0.0.1:${address.port}/browser-mcp-history`,
+      { timeout: 10_000 }
+    )
     await expect
       .poll(
         () => requests.filter((path) => path === "/browser-mcp-parity").length,
         { timeout: 10_000 }
       )
       .toBe(1)
+    expect(requests.filter((path) => path === "/browser-mcp-final")).toHaveLength(1)
   } finally {
     await closeServer(targetServer)
   }
