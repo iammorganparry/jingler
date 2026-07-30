@@ -6,7 +6,7 @@ import {
   readdirSync,
   writeFileSync
 } from "node:fs"
-import { basename, join } from "node:path"
+import { basename, dirname, join } from "node:path"
 import { FileSystem, Path } from "@effect/platform"
 import { planStageSemanticFingerprint } from "@jingler/core"
 import { Chunk, Effect, Either, Layer, Stream } from "effect"
@@ -76,6 +76,37 @@ describe("PlanStore canonical document", () => {
     expect(document.projection.stages[0]?.id).toBe("01")
     expect(document.projection.stages[0]?.acceptance[0]?.id).toBe("01.1")
     expect(planFileName("ignored")).toBe("current-plan")
+  })
+
+  it("isolates same-basename repositories and deletes only the requested plans", async () => {
+    const firstPath = "/tmp/one/widget"
+    const secondPath = "/tmp/two/widget"
+    await run(
+      Effect.gen(function* () {
+        yield* PlanStore.promoteDocument(firstPath, {
+          sessionId: "s-one",
+          producingChatId: "c-one",
+          id: "plan-one",
+          source: SOURCE,
+          author: "agent"
+        })
+        yield* PlanStore.promoteDocument(secondPath, {
+          sessionId: "s-two",
+          producingChatId: "c-two",
+          id: "plan-two",
+          source: SOURCE,
+          author: "agent"
+        })
+      })
+    )
+
+    const firstFiles = await run(PlanStore.list(firstPath))
+    const secondFiles = await run(PlanStore.list(secondPath))
+    expect(dirname(firstFiles[0]!)).not.toBe(dirname(secondFiles[0]!))
+
+    await run(PlanStore.removeAll(firstPath))
+    expect(await run(PlanStore.list(firstPath))).toStrictEqual([])
+    expect(await run(PlanStore.list(secondPath))).toHaveLength(1)
   })
 
   it("reconcile:true applies an agent amendment — ids/evidence kept, new stage queued", async () => {
@@ -299,7 +330,7 @@ describe("PlanStore canonical document", () => {
 
     expect(results.filter(Either.isRight)).toHaveLength(1)
     expect(results.filter(Either.isLeft)).toHaveLength(1)
-    const dir = join(temp.root, ".jingler", "terminal")
+    const dir = dirname((await run(PlanStore.list(WT)))[0]!)
     expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toEqual([])
   })
 
@@ -605,7 +636,11 @@ describe("PlanStore canonical document", () => {
     expect(first?.source).toContain("Legacy prose with implementation detail.")
     expect(first?.projection.annotations[0]?.body).toBe("Preserve this operator note.")
     expect(second).toStrictEqual(first)
-    expect(existsSync(join(dir, "current-plan.html"))).toBe(true)
+    expect(
+      (await run(PlanStore.list(WT))).map((file) => basename(file))
+    ).toContain(
+      "current-plan.html"
+    )
   })
 
   it("imports legacy arrows and line-leading module prose without failing the read", async () => {
@@ -640,7 +675,11 @@ describe("PlanStore canonical document", () => {
       revision: 3
     })
     expect(imported?.projection.stages[0]?.title).toBe("Rename a -> b")
-    expect(existsSync(join(dir, "current-plan.html"))).toBe(true)
+    expect(
+      (await run(PlanStore.list(WT))).map((file) => basename(file))
+    ).toContain(
+      "current-plan.html"
+    )
   })
 
   it("returns a typed persistence error instead of dying when the target is unwritable", async () => {
@@ -658,7 +697,7 @@ describe("PlanStore canonical document", () => {
 
   it("propagates mechanical progress persistence failures", async () => {
     const first = await run(promote(ORCHESTRATED_SOURCE))
-    const dir = join(temp.root, ".jingler", "terminal")
+    const dir = dirname((await run(PlanStore.list(WT)))[0]!)
     chmodSync(dir, 0o500)
     try {
       const result = await run(

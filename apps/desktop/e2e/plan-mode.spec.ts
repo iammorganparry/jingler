@@ -1,11 +1,12 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
-import { basename, join } from "node:path"
+import { join } from "node:path"
 import { DEFAULT_PLAN_TEMPLATE_HTML } from "@jingler/core"
 import type { Page } from "@playwright/test"
 import {
   appShell,
   DEFAULT_CLAUDE_MODEL,
   expect,
+  planDirectory,
   type LaunchedApp,
   type SeedSession,
   test
@@ -34,13 +35,7 @@ const session = (
 // Plans are HTML documents now (rendered in the Tiptap "Notion-doc" editor), so
 // the canonical file is `current-plan.html`, not the old `current-plan.mdx`.
 const currentPlanPath = (launched: LaunchedApp): string =>
-  join(
-    launched.home,
-    "jingler",
-    ".jingler",
-    basename(launched.repoPath),
-    "current-plan.html"
-  )
+  join(planDirectory(launched.home, launched.repoPath), "current-plan.html")
 
 const revisionOf = (file: string): number =>
   Number(/^revision:\s*(\d+)$/m.exec(readFileSync(file, "utf8"))?.[1] ?? 0)
@@ -479,6 +474,8 @@ test("the Plan Review tab is always present and can seed a draft to author", asy
   await expect(appShell(launched.window)).toBeVisible()
 
   // Present with NO plan proposed yet (previously gated on a plan existing).
+  const chatContainer = await launched.window.getByTestId("composer").boundingBox()
+  expect(chatContainer).not.toBeNull()
   const tab = launched.window.getByRole("button", { name: "Plan Review" }).first()
   await expect(tab).toBeVisible()
   await tab.click()
@@ -490,6 +487,11 @@ test("the Plan Review tab is always present and can seed a draft to author", asy
   await expect(launched.window.getByLabel("Plan document")).toBeVisible({
     timeout: 20_000
   })
+  const planContainer = await launched.window
+    .getByTestId("plan-review-container")
+    .boundingBox()
+  expect(planContainer).not.toBeNull()
+  expect(planContainer!.width).toBeCloseTo(chatContainer!.width, 0)
   await expect
     .poll(() => readFileSync(currentPlanPath(launched), "utf8"))
     .toContain('status: "draft"')

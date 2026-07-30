@@ -220,19 +220,26 @@ export function PullRequestView({
           </p>
         </div>
         {connected ? (
-          <div className="flex w-full max-w-sm flex-col items-center gap-3">
-            <AsyncButton
-              size="md"
-              icon={<GitPullRequest size={14} />}
-              pendingLabel="Opening…"
-              successLabel="Opened"
-              disabled={busy}
-              onClick={() => onCreatePr?.()}
-            >
-              Create pull request
-            </AsyncButton>
-            {createError && <Callout tone="red">{createError}</Callout>}
-          </div>
+          onCreatePr ? (
+            <div className="flex w-full max-w-sm flex-col items-center gap-3">
+              <AsyncButton
+                size="md"
+                icon={<GitPullRequest size={14} />}
+                pendingLabel="Opening…"
+                successLabel="Opened"
+                disabled={busy}
+                onClick={() => onCreatePr()}
+              >
+                Create pull request
+              </AsyncButton>
+              {createError && <Callout tone="red">{createError}</Callout>}
+            </div>
+          ) : (
+            <Callout tone="blue">
+              Direct sessions work on their selected branch, so Jingler cannot
+              open a pull request from that branch to itself.
+            </Callout>
+          )
         ) : (
           <div className="flex w-full max-w-sm flex-col gap-3">
             <Callout tone="blue">Connect GitHub to create and review pull requests.</Callout>

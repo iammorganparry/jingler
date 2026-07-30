@@ -101,6 +101,8 @@ export interface SessionPaneProps {
    * would drag the RPC client into the component library. Absent in stories.
    */
   renderChatTabs?: (session: Session) => ReactNode
+  /** Rename the session from the tab-row title. */
+  onRenameSession?: (id: string, title: string) => void
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>
   /** What each session's agent is doing right now, keyed by id (live). */
@@ -351,8 +353,13 @@ function SessionPaneBody(props: SessionPaneProps) {
             : undefined
         }
         // The title comes from the session rather than from the caller, so the
-        // conversation tab follows a rename the moment it lands.
+        // pane identity follows a rename the moment it lands.
         sessionTitle={active.title || UNTITLED_SESSION}
+        onRenameTitle={
+          props.onRenameSession
+            ? (title) => props.onRenameSession?.(active.id, title)
+            : undefined
+        }
         // The chat pills share the tab row, behind a divider. Built by the
         // renderer (RPCs + live activity), threaded in as an opaque node.
         chatSlot={props.renderChatTabs?.(active)}

@@ -7,7 +7,7 @@ import type { SeedSession } from "./fixtures.js"
  * The number that motivated this: across the six largest transcripts on a real
  * install, `Image` parts were 80% of all bytes (98MB of 123MB) and `Text` was
  * 1.5%. A transcript's weight is not its conversation, it is a handful of base64
- * screenshots — and `Sessions.transcript` handed every one of them to the
+ * screenshots — and `Sessions.transcriptPage` handed every one of them to the
  * renderer on open, where the conversation actor then held them for as long as
  * it stayed resident.
  *

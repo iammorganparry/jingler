@@ -1,7 +1,17 @@
 import { execFileSync } from "node:child_process"
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { createHash } from "node:crypto"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync
+} from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join, resolve } from "node:path"
 import { expect, test as base } from "@playwright/test"
 import type { ElectronApplication, Page } from "@playwright/test"
 import { _electron as electron } from "playwright"
@@ -31,6 +41,29 @@ export const DEFAULT_CLAUDE_MODEL = CLAUDE_MODELS[0]!.label
 export const ALT_CLAUDE_MODEL = CLAUDE_MODELS.slice(1).find((m) =>
   m.id.startsWith("sonnet")
 )!.label
+
+/** Match PlanStore's collision-proof directory for one physical checkout. */
+export const planDirectory = (
+  home: string,
+  worktreePath: string
+): string => {
+  let canonical: string
+  try {
+    canonical = realpathSync(worktreePath)
+  } catch {
+    canonical = resolve(worktreePath)
+  }
+  const suffix = createHash("sha256")
+    .update(canonical)
+    .digest("hex")
+    .slice(0, 12)
+  return join(
+    home,
+    "jingler",
+    ".jingler",
+    `${basename(canonical)}-${suffix}`
+  )
+}
 
 /**
  * Put the sidebar's Status filter on `archived` (or `all`) so archived sessions
@@ -149,6 +182,8 @@ export interface SeedSession {
   readonly archived?: boolean
   readonly archiveReason?: "merged" | "closed"
   readonly archivedAt?: string
+  readonly persistent?: boolean
+  readonly workspaceMode?: "worktree" | "direct"
 }
 
 export interface LaunchOptions {

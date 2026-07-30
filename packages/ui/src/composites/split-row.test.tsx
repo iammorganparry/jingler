@@ -127,6 +127,27 @@ describe("SplitRow", () => {
     expect(onSeparateAll).toHaveBeenCalledWith(group.id)
   })
 
+  it("persists a member from the split context menu", async () => {
+    const onSetPersistent = vi.fn()
+    const group = twoPane()
+    render(
+      <SplitRow
+        group={group}
+        sessions={SESSIONS}
+        onSetPersistent={onSetPersistent}
+      />
+    )
+
+    fireEvent.contextMenu(screen.getByTestId(`split-row-${group.id}`))
+    await userEvent.hover(
+      screen.getByRole("menuitem", { name: "Persist session" })
+    )
+    await userEvent.click(
+      await screen.findByRole("menuitem", { name: "Refactor auth" })
+    )
+    expect(onSetPersistent).toHaveBeenCalledWith("a", true)
+  })
+
   it("marks the focused segment only while the group is the one on screen", () => {
     const group = twoPane()
     const { rerender } = render(

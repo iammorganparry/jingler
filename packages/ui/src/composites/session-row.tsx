@@ -4,8 +4,8 @@ import { motion } from "motion/react"
 import { SPRING } from "../lib/motion.js"
 import { SESSION_DND_MIME } from "../app/split-layout.js"
 import type { SessionPrStatus, Session, SessionActivity } from "@jingler/core"
-import { activityLabel, displayStatusOf } from "@jingler/core"
-import { Archive, ArchiveRestore, GitMerge, type LucideIcon, Trash2 } from "lucide-react"
+import { activityLabel, displayStatusOf, persistentOf } from "@jingler/core"
+import { Archive, ArchiveRestore, GitMerge, Pin, type LucideIcon, Trash2 } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { PrStatusGlyph } from "./pr-glyph.js"
@@ -23,6 +23,7 @@ export function SessionRow({
   active = false,
   onSelect,
   onRename,
+  onSetPersistent,
   onArchive,
   onRestore,
   onDelete,
@@ -50,6 +51,8 @@ export function SessionRow({
   onSelect?: (id: string) => void
   /** Manual rename (double-click the title) — pins the auto-generated name. */
   onRename?: (id: string, title: string) => void
+  /** Promote an active ordinary row into the persistent tray. */
+  onSetPersistent?: (id: string, persistent: boolean) => void
   /** Archive an active session (collapses into the Archived group; undoable). */
   onArchive?: (id: string) => void
   /** Restore an archived session back to active. */
@@ -79,6 +82,15 @@ export function SessionRow({
   // Quick actions — archive/restore + delete — surfaced on hover and via a
   // right-click context menu. The action set depends on whether it's archived.
   const actions: ContextMenuItem[] = [
+    ...(!session.archived && !persistentOf(session) && onSetPersistent
+      ? [
+          {
+            label: "Persist",
+            icon: Pin,
+            onSelect: () => onSetPersistent(session.id, true)
+          }
+        ]
+      : []),
     ...(session.archived
       ? onRestore
         ? [{ label: "Restore", icon: ArchiveRestore, onSelect: () => onRestore(session.id) }]

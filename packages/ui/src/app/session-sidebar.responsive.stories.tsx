@@ -25,7 +25,13 @@ const session = (over: Partial<Session> & Pick<Session, "id" | "title">): Sessio
 })
 
 const SESSIONS: ReadonlyArray<Session> = [
-  session({ id: "s1", title: "Refactor auth flow", repo: "jingler", diff: { added: 42, removed: 8 } }),
+  session({
+    id: "s1",
+    title: "Refactor auth flow",
+    repo: "jingler",
+    persistent: true,
+    diff: { added: 42, removed: 8 }
+  }),
   session({ id: "s2", title: "Fix token refresh", repo: "jingler", prNumber: 47 }),
   session({ id: "s3", title: "Watch CI on #204", repo: "gtm-grid", prNumber: 204 }),
   session({ id: "s4", title: "Type-check watcher", repo: "gtm-grid" }),
@@ -91,9 +97,10 @@ export const DockedVsRail: Story = {
         <strong className="text-text-bright">Look for:</strong> the full sidebar at 1400 and 1100,
         the 52px rail at 900 and 820. In rail mode each session is two initials plus a status dot,
         and the active one carries a blue ring. Rest on one cell for ~150ms: a card opens to its
-        right with the title, repo/branch, live status, diff and PR — one hover, one session. The
-        content behind must NOT reflow, and the card must flip rather than run off the bottom of
-        the frame. The top button (and ⌘B) puts the full sidebar back.
+        right with the title, repo/branch, live status, diff and PR — one hover, one session.
+        Persistent sessions are ordered first, above the separator. The content behind must NOT
+        reflow, and the card must flip rather than run off the bottom of the frame. The top button
+        (and ⌘B) puts the full sidebar back.
       </LookFor>
       <div className="flex items-start gap-5 overflow-auto p-6">
         <Shell width={1400} label="docked" />

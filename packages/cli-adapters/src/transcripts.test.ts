@@ -81,7 +81,10 @@ describe("TranscriptStore", () => {
     )
 
     expect(result.escaped).toBe(false)
-    expect(result.entries).toStrictEqual(["..%2Fconfig.json"])
+    expect(result.entries.sort()).toStrictEqual([
+      "..%2Fconfig.json",
+      "..%2Fconfig.json.index"
+    ])
   })
 
   it("adopts a legacy session transcript into the synthesized first chat once", async () => {
@@ -141,7 +144,7 @@ describe("TranscriptStore", () => {
     // A leftover `.tmp` means the rename never happened — and a direct overwrite
     // is what leaves a 0-byte transcript when the dev app restarts mid-write.
     expect(entries.filter((e) => e.endsWith(".tmp"))).toStrictEqual([])
-    expect(entries).toStrictEqual(["s1.json"])
+    expect(entries.sort()).toStrictEqual(["s1.json", "s1.json.index"])
     expect(raw.length).toBeGreaterThan(0)
   })
 
@@ -184,7 +187,12 @@ describe("TranscriptStore", () => {
       )
     )
 
-    expect(calls).toStrictEqual(["write s1.json.tmp", "rename s1.json.tmp -> s1.json"])
+    expect(calls).toStrictEqual([
+      "write s1.json.tmp",
+      "rename s1.json.tmp -> s1.json",
+      "write s1.json.index.tmp",
+      "rename s1.json.index.tmp -> s1.json.index"
+    ])
     // Stated as its own assertion because it is the whole invariant: the live
     // transcript is never the target of a truncating write.
     expect(calls).not.toContain("write s1.json")
@@ -237,6 +245,7 @@ describe("TranscriptStore", () => {
       )
       expect(page.messages.map((m) => m.id)).toStrictEqual(["u7", "u8", "u9"])
       expect(page.hasMore).toBe(true)
+      expect(page.cursor).toBe("v1:7")
     })
 
     it("returns the whole transcript with hasMore false when it fits in one window", async () => {
@@ -250,33 +259,37 @@ describe("TranscriptStore", () => {
       expect(page.hasMore).toBe(false)
     })
 
-    it("pages the window immediately before a cursor", async () => {
+    it("pages the window immediately before an opaque cursor", async () => {
       const page = await run(
         Effect.gen(function* () {
           yield* seed("s1")
-          // The renderer holds u7..u9 and asks for what's before u7.
-          return yield* TranscriptStore.listPage("s1", { before: "u7", limit: 3 })
+          const newest = yield* TranscriptStore.listPage("s1", { limit: 3 })
+          return yield* TranscriptStore.listPage("s1", {
+            before: newest.cursor,
+            limit: 3
+          })
         })
       )
       expect(page.messages.map((m) => m.id)).toStrictEqual(["u4", "u5", "u6"])
       expect(page.hasMore).toBe(true)
+      expect(page.cursor).toBe("v1:4")
     })
 
     it("reaches the start and clears hasMore on the final page", async () => {
       const page = await run(
         Effect.gen(function* () {
           yield* seed("s1")
-          return yield* TranscriptStore.listPage("s1", { before: "u2", limit: 5 })
+          return yield* TranscriptStore.listPage("s1", {
+            before: "v1:2",
+            limit: 5
+          })
         })
       )
       expect(page.messages.map((m) => m.id)).toStrictEqual(["u0", "u1"])
       expect(page.hasMore).toBe(false)
     })
 
-    it("yields an empty window for a cursor that no longer exists", async () => {
-      // A transcript edited underneath the renderer: the anchor id is gone. Empty
-      // + hasMore:false is deliberate — silently restarting from the tail would
-      // duplicate the messages the renderer already holds.
+    it("yields an empty window for an invalid opaque cursor", async () => {
       const page = await run(
         Effect.gen(function* () {
           yield* seed("s1")
@@ -285,6 +298,45 @@ describe("TranscriptStore", () => {
       )
       expect(page.messages).toStrictEqual([])
       expect(page.hasMore).toBe(false)
+    })
+
+    it("reaches every message when legacy ids are duplicated", async () => {
+      const ids = await run(
+        Effect.gen(function* () {
+          const duplicateTurns = Array.from({ length: 8 }, (_, index) =>
+            userMessage(
+              index === 1 || index === 6 ? "duplicate" : `u${index}`,
+              `turn ${index}`,
+              `2026-07-11T10:00:0${index}.000Z`
+            )
+          )
+          yield* Effect.forEach(
+            duplicateTurns,
+            (message) => TranscriptStore.append("duplicate-chat", message),
+            { discard: true }
+          )
+          const newest = yield* TranscriptStore.listPage("duplicate-chat", {
+            limit: 3
+          })
+          const middle = yield* TranscriptStore.listPage("duplicate-chat", {
+            before: newest.cursor,
+            limit: 3
+          })
+          const oldest = yield* TranscriptStore.listPage("duplicate-chat", {
+            before: middle.cursor,
+            limit: 3
+          })
+          return [...oldest.messages, ...middle.messages, ...newest.messages].map(
+            (message) => message.parts[0]
+          )
+        })
+      )
+      expect(ids).toStrictEqual(
+        Array.from({ length: 8 }, (_, index) => ({
+          _tag: "Text",
+          text: `turn ${index}`
+        }))
+      )
     })
   })
 })

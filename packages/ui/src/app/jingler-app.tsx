@@ -298,6 +298,11 @@ export interface JinglerAppProps {
   onCreateSession?: (input: CreateSessionInput) => Promise<Session>
   /** Manually rename a session (double-click its sidebar title) — pins the name. */
   onRenameSession?: (id: string, title: string) => void
+  /** Persist or unpersist a session and return its updated record upstream. */
+  onSetSessionPersistent?: (
+    id: string,
+    persistent: boolean
+  ) => Promise<void> | void
   /** Archive an active session from the sidebar quick-actions (undoable). */
   onArchiveSession?: (id: string) => void
   /** Restore an archived session from the sidebar quick-actions. */
@@ -418,6 +423,7 @@ export function JinglerApp({
   loadBranches = noBranches,
   onCreateSession,
   onRenameSession,
+  onSetSessionPersistent,
   onArchiveSession,
   onRestoreSession,
   onDeleteSession,
@@ -932,6 +938,7 @@ export function JinglerApp({
         onResizePane={(index, delta) => group && split.resizePane(group.id, index, delta)}
         slotBySession={paneBySession}
         onRenameSession={onRenameSession}
+        onSetSessionPersistent={onSetSessionPersistent}
         onArchiveSession={onArchiveSession}
         onRestoreSession={onRestoreSession}
         onDeleteSession={onDeleteSession}

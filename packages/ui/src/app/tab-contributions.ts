@@ -24,6 +24,7 @@
  * without mounting anything.
  */
 import type { DiffStat, Session } from "@jingler/core"
+import { workspaceModeOf } from "@jingler/core"
 import type { ReactNode } from "react"
 import type { LucideIcon } from "lucide-react"
 import {
@@ -322,7 +323,9 @@ export const builtinTabContributions = (
       id: BUILTIN_TAB.pr,
       ...meta.pr,
       when: ({ session }) =>
-        session.prNumber != null || session.worktreePath != null,
+        session.prNumber != null ||
+        (session.worktreePath != null &&
+          workspaceModeOf(session) === "worktree"),
       badge: ({ session }) =>
         session.prNumber != null
           ? { kind: "count", text: `#${session.prNumber}` }

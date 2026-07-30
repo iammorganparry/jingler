@@ -207,6 +207,8 @@ export const rpc = {
     run((c) => c.Sessions.rename({ sessionId, title })),
   sessionsSetStatus: (sessionId: string, status: SettledSessionStatus): Promise<Session> =>
     run((c) => c.Sessions.setStatus({ sessionId, status })),
+  sessionsSetPersistent: (sessionId: string, persistent: boolean): Promise<Session> =>
+    run((c) => c.Sessions.setPersistent({ sessionId, persistent })),
   sessionsDelete: (sessionId: string): Promise<void> =>
     run((c) => c.Sessions.delete({ sessionId })),
   sessionsCreateChat: (sessionId: string): Promise<Session> =>
@@ -217,24 +219,34 @@ export const rpc = {
     run((c) => c.Sessions.renameChat({ sessionId, chatId, title })),
   sessionsCloseChat: (sessionId: string, chatId: string): Promise<Session> =>
     run((c) => c.Sessions.closeChat({ sessionId, chatId })),
-  /**
-   * A chat's transcript. Image attachments arrive with EMPTY `data` — fetch the
-   * bytes with `sessionsAttachment` when a thumbnail actually mounts.
-   */
-  sessionsTranscript: (sessionId: string, chatId: string): Promise<ReadonlyArray<Message>> =>
-    run((c) => c.Sessions.transcript({ sessionId, chatId })),
+  sessionsSetOrchestratorEnabled: (
+    sessionId: string,
+    chatId: string,
+    orchestratorEnabled: boolean
+  ): Promise<Session> =>
+    run((c) =>
+      c.Sessions.setOrchestratorEnabled({
+        sessionId,
+        chatId,
+        orchestratorEnabled
+      })
+    ),
   /**
    * A newest-anchored window of the transcript. Omit `before` for the newest
-   * page; pass the oldest held message's id to page further back. `hasMore`
+   * page; pass the previous page's opaque cursor to page further back. `hasMore`
    * gates the "Load earlier" affordance. Images arrive with EMPTY `data`, as
-   * with `sessionsTranscript`.
+   * attachment bytes are loaded lazily.
    */
   sessionsTranscriptPage: (
     sessionId: string,
     chatId: string,
     before: string | undefined,
     limit: number
-  ): Promise<{ messages: ReadonlyArray<Message>; hasMore: boolean }> =>
+  ): Promise<{
+    messages: ReadonlyArray<Message>
+    hasMore: boolean
+    cursor?: string
+  }> =>
     run((c) => c.Sessions.transcriptPage({ sessionId, chatId, before, limit })),
   /** One image attachment's base64, or null when the id is unknown. */
   sessionsAttachment: (chatId: string, attachmentId: string): Promise<string | null> =>

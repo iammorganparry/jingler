@@ -198,6 +198,42 @@ describe("WorkspaceService", () => {
     expect(stillUntracked.startsWith("??")).toBe(true)
   })
 
+  it("diff() never mutates the developer's staged index", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "staged-index"))
+    writeFileSync(join(repoPath, "README.md"), "staged developer edit\n")
+    execFileSync("git", ["add", "README.md"], { cwd: repoPath })
+    writeFileSync(join(repoPath, "agent-new.ts"), "export const added = true\n")
+    const statusBefore = execFileSync("git", ["status", "--porcelain=v1"], {
+      cwd: repoPath,
+      encoding: "utf-8"
+    })
+    const cachedBefore = execFileSync("git", ["diff", "--cached", "--binary"], {
+      cwd: repoPath,
+      encoding: "utf-8"
+    })
+
+    const exit = await runExit(
+      WorkspaceService.diff(repoPath).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value).toContain("agent-new.ts")
+    expect(
+      execFileSync("git", ["status", "--porcelain=v1"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      })
+    ).toBe(statusBefore)
+    expect(
+      execFileSync("git", ["diff", "--cached", "--binary"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      })
+    ).toBe(cachedBefore)
+  })
+
   it("diff() is empty for a clean worktree", async () => {
     const repoPath = initGitRepo(join(repos.dir, "clean"))
     const exit = await runExit(

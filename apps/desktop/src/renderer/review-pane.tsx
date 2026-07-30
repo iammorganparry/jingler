@@ -5,6 +5,7 @@
  */
 import { useCallback } from "react"
 import type { Session } from "@jingler/core"
+import { workspaceModeOf } from "@jingler/core"
 import { CodeReviewView } from "@jingler/ui"
 import { useReview } from "./use-review.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
@@ -62,8 +63,16 @@ export function ReviewPane({
       onRemoveDraft={review.removeDraft}
       onFinishReview={review.finishReview}
       onConnectGithub={onConnectGithub}
-      onRevertLines={review.revertLines}
-      onRevertFile={review.revertFile}
+      onRevertLines={
+        workspaceModeOf(session) === "worktree"
+          ? review.revertLines
+          : undefined
+      }
+      onRevertFile={
+        workspaceModeOf(session) === "worktree"
+          ? review.revertFile
+          : undefined
+      }
       review={adversarial.review}
       onSendFindingToAgent={adversarial.sendFindingToAgent}
       sentFindingIds={adversarial.sentFindingIds}

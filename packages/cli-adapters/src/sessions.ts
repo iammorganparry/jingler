@@ -10,9 +10,17 @@ import type {
   ReasoningEffort,
   ReasoningSetting,
   Session,
-  SettledSessionStatus
+  SettledSessionStatus,
+  WorkspaceMode
 } from "@jingler/core"
-import { GhError, GitError, SessionNotFoundError, supportsPlanMode, UNTITLED_SESSION } from "@jingler/core"
+import {
+  GhError,
+  GitError,
+  SessionNotFoundError,
+  supportsPlanMode,
+  UNTITLED_SESSION,
+  workspaceModeOf
+} from "@jingler/core"
 import { Session as SessionSchema } from "@jingler/core"
 import { basename } from "node:path"
 import { FileSystem, Path } from "@effect/platform"
@@ -225,9 +233,10 @@ const nextOpId = (): number => ++opSeq
 
 /**
  * The session store, persisted to `~/jingler/sessions.json`. Starts empty — real
- * sessions are created via `create`, which forks an isolated git worktree
- * (`GitService`) before recording the session. Reads are best-effort: a missing
- * or malformed file yields an empty list so the app still boots.
+ * sessions are created via `create`, which either forks an isolated git
+ * worktree or records a guarded direct checkout before saving the session.
+ * Reads are best-effort: a missing or malformed file yields an empty list so
+ * the app still boots.
  */
 export class SessionStore extends Effect.Service<SessionStore>()(
   "@jingler/SessionStore",
@@ -257,6 +266,14 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const atomically = <A, E, R>(
         effect: Effect.Effect<A, E, R>
       ): Effect.Effect<A, E, R> => lock.withPermits(1)(effect)
+      const repositoryLocks = new Map<string, Effect.Semaphore>()
+      const repositoryLock = (identity: string): Effect.Semaphore => {
+        const existing = repositoryLocks.get(identity)
+        if (existing !== undefined) return existing
+        const created = Effect.unsafeMakeSemaphore(1)
+        repositoryLocks.set(identity, created)
+        return created
+      }
 
       const readAll = (): Effect.Effect<ReadonlyArray<Session>, never, PersistEnv> =>
         Effect.gen(function* () {
@@ -389,6 +406,114 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             const seed = yield* Effect.sync(() => Date.now() + nextOpId() * 7919)
             slug = freeCreativeName(usedSlugs, seed, `${taskSlug(title)}-${stamp}`)
           }
+          const id = `s_${slug}`
+          const chat = initialChat(id, now, {
+            role: options.chatRole,
+            mode: options.defaultMode,
+            model: options.defaultModel
+          })
+          const providerKey = reasoningKey(input.cli)
+          const makeSession = (
+            workspace: { path: string; branch: string; repoPath: string },
+            workspaceMode: WorkspaceMode
+          ): Session => ({
+            id,
+            repo: input.repoName,
+            branch: workspace.branch,
+            title,
+            autoTitle: explicit.length === 0,
+            status: "idle",
+            cli: input.cli,
+            diff: { added: 0, removed: 0 },
+            prNumber: null,
+            costUsd: 0,
+            tokens: 0,
+            updatedAt: now,
+            chats: [chat],
+            activeChatId: chat.id,
+            worktreePath: workspace.path,
+            workspaceMode,
+            repoPath: workspace.repoPath,
+            baseBranch: input.baseBranch,
+            ...(providerKey !== null && options.defaultReasoning
+              ? {
+                  reasoning: {
+                    [providerKey]: options.defaultReasoning
+                  }
+                }
+              : {})
+          })
+
+          if (input.useWorktree === false) {
+            const identity = yield* GitService.repositoryIdentity(input.repoPath)
+            const reservation = makeSession(
+              {
+                path: identity.repoPath,
+                branch: input.baseBranch,
+                repoPath: identity.repoPath
+              },
+              "direct"
+            )
+            // Serialize only creations that target this physical repository.
+            // The process-wide sessions.json lock remains limited to its actual
+            // read-modify-write; checkout hooks can take seconds and must not
+            // stall unrelated session usage/status/chat persistence.
+            return yield* repositoryLock(identity.commonDir).withPermits(1)(
+              Effect.gen(function* () {
+                const current = yield* readAll()
+                const directIdentities = yield* Effect.forEach(
+                  current.filter(
+                    (session) =>
+                      workspaceModeOf(session) === "direct" &&
+                      session.repoPath !== undefined
+                  ),
+                  (session) =>
+                    GitService.repositoryIdentity(session.repoPath!).pipe(
+                      Effect.map((candidate) => candidate.commonDir),
+                      // A missing legacy checkout cannot race this live one.
+                      Effect.orElseSucceed(() => session.repoPath!)
+                    )
+                )
+                if (directIdentities.includes(identity.commonDir)) {
+                  return yield* Effect.fail(
+                    new GitError({
+                      message:
+                        "A direct session already uses this repository. Delete it or create this session with an isolated worktree."
+                    })
+                  )
+                }
+                // Persist the recoverable reservation BEFORE changing the
+                // developer's checkout. A failed write leaves Git untouched; a
+                // process crash after the switch still leaves a visible session
+                // record whose branch guard explains how to recover.
+                yield* atomically(
+                  Effect.gen(function* () {
+                    const latest = yield* readAll()
+                    yield* writeAll([reservation, ...latest])
+                  })
+                )
+                const branch = yield* GitService.switchBranch(
+                  identity.repoPath,
+                  input.baseBranch
+                ).pipe(
+                  Effect.tapError(() =>
+                    atomically(
+                      Effect.gen(function* () {
+                        const latest = yield* readAll()
+                        yield* writeAll(
+                          latest.filter((session) => session.id !== reservation.id)
+                        )
+                      })
+                    ).pipe(Effect.ignore)
+                  )
+                )
+                return branch === reservation.branch
+                  ? reservation
+                  : { ...reservation, branch }
+              })
+            )
+          }
+
           // Refuse if a live session already owns this path — the same guard
           // `createFromPr` and `createFromIssue` carry, and for the same reason:
           // `createWorktree` reclaims whatever is at the target path with an
@@ -419,39 +544,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                   slug,
                   baseBranch: input.baseBranch
                 })
-          const id = `s_${slug}`
-          const chat = initialChat(id, now, {
-            role: options.chatRole,
-            mode: options.defaultMode,
-            model: options.defaultModel
-          })
-          const providerKey = reasoningKey(input.cli)
-          const session: Session = {
-            id,
-            repo: input.repoName,
-            branch: worktree.branch,
-            title,
-            autoTitle: explicit.length === 0,
-            status: "idle",
-            cli: input.cli,
-            diff: { added: 0, removed: 0 },
-            prNumber: null,
-            costUsd: 0,
-            tokens: 0,
-            updatedAt: now,
-            chats: [chat],
-            activeChatId: chat.id,
-            worktreePath: worktree.path,
-            repoPath: worktree.repoPath,
-            baseBranch: input.baseBranch,
-            ...(providerKey !== null && options.defaultReasoning
-              ? {
-                  reasoning: {
-                    [providerKey]: options.defaultReasoning
-                  }
-                }
-              : {})
-          }
+          const session = makeSession(worktree, "worktree")
           // `existing` was read above (for the friendly-name collision check).
           // Re-read INSIDE the lock rather than reusing the list read before
           // the worktree fork: that read is now seconds stale, and appending to
@@ -558,6 +651,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             chats: [chat],
             activeChatId: chat.id,
             worktreePath: worktree.path,
+            workspaceMode: "worktree",
             repoPath: worktree.repoPath,
             baseBranch: input.pr.baseRefName,
             ...(providerKey !== null && opts.defaultReasoning
@@ -664,6 +758,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             chats: [chat],
             activeChatId: chat.id,
             worktreePath: worktree.path,
+            workspaceMode: "worktree",
             repoPath: worktree.repoPath,
             baseBranch: input.baseBranch,
             ...(providerKey !== null && options.defaultReasoning
@@ -723,6 +818,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               createdAt: now,
               updatedAt: now,
               ...(source?.role === undefined ? {} : { role: source.role }),
+              ...(source?.orchestratorEnabled === undefined
+                ? {}
+                : { orchestratorEnabled: source.orchestratorEnabled }),
               ...(source?.mode === undefined ? {} : { mode: source.mode }),
               ...(source?.model === undefined ? {} : { model: source.model }),
               ...(source?.allowlist === undefined ? {} : { allowlist: source.allowlist })
@@ -775,6 +873,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               createdAt: now,
               updatedAt: now,
               ...(closed?.role === undefined ? {} : { role: closed.role }),
+              ...(closed?.orchestratorEnabled === undefined
+                ? {}
+                : { orchestratorEnabled: closed.orchestratorEnabled }),
               ...(closed?.mode === undefined ? {} : { mode: closed.mode }),
               ...(closed?.model === undefined ? {} : { model: closed.model }),
               ...(closed?.allowlist === undefined ? {} : { allowlist: closed.allowlist })
@@ -806,6 +907,28 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               chat.id === chatId ? { ...chat, mode } : chat
             )
           }
+        })
+
+      /** Persist one orchestrator chat's Jingler-mode choice. */
+      const setOrchestratorEnabled = (
+        id: string,
+        chatId: string,
+        orchestratorEnabled: boolean
+      ) =>
+        Effect.gen(function* () {
+          const session = yield* get(id)
+          if (!session.chats.some((chat) => chat.id === chatId)) {
+            return yield* Effect.fail(
+              new GitError({
+                message: `Chat "${chatId}" does not exist in session "${id}".`
+              })
+            )
+          }
+          yield* updateChat(id, chatId, (chat) => ({
+            ...chat,
+            orchestratorEnabled
+          }))
+          return yield* get(id)
         })
 
       /** Persist one chat's harness model. */
@@ -1019,6 +1142,32 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const setAutoCompact = (id: string, autoCompact: boolean | null) =>
         update(id, (s) => ({ ...s, autoCompact: autoCompact ?? undefined }))
 
+      /** Persist and return a session's lifecycle-retention choice atomically. */
+      const setPersistent = (
+        id: string,
+        persistent: boolean
+      ): Effect.Effect<
+        Session,
+        GitError | SessionNotFoundError,
+        PersistEnv
+      > =>
+        atomically(
+          Effect.gen(function* () {
+            const all = yield* readAll()
+            const current = all.find((session) => session.id === id)
+            if (current === undefined) {
+              return yield* Effect.fail(
+                new SessionNotFoundError({ sessionId: id })
+              )
+            }
+            const updated: Session = { ...current, persistent }
+            yield* writeAll(
+              all.map((session) => (session.id === id ? updated : session))
+            )
+            return updated
+          })
+        )
+
       /** Persist an auto-generated title (leaves `autoTitle` untouched). */
       const setTitle = (id: string, title: string) => update(id, (s) => ({ ...s, title }))
 
@@ -1130,8 +1279,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         }))
 
       /**
-       * Permanently delete a session: remove its worktree (best-effort) and drop
-       * it from the store. Irreversible — the UI gates this behind a confirm.
+       * Permanently delete a session: remove an owned worktree (best-effort) and
+       * drop it from the store. A direct checkout is never removed or unregistered.
+       * Irreversible — the UI gates this behind a confirm.
        */
       const remove = (
         id: string
@@ -1143,7 +1293,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         Effect.gen(function* () {
           const target = (yield* readAll()).find((s) => s.id === id)
           if (!target) return
-          if (target.worktreePath) {
+          if (
+            target.worktreePath &&
+            workspaceModeOf(target) === "worktree"
+          ) {
             const fs = yield* FileSystem.FileSystem
             const worktreeExists = yield* fs
               .exists(target.worktreePath)
@@ -1185,6 +1338,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         renameChat,
         closeChat,
         setMode,
+        setOrchestratorEnabled,
         setModel,
         setReasoning,
         setReasoningEffort,
@@ -1195,6 +1349,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setContextTokens,
         setChatContextTokens,
         setAutoCompact,
+        setPersistent,
         setTitle,
         setTitleAndBranch,
         renameTitle,

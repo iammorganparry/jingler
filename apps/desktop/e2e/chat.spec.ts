@@ -379,6 +379,41 @@ test("a worktree session without a PR shows a Changes tab with the Code Review v
   await expect(window.getByText("an uncommitted edit")).toBeVisible({ timeout: 20_000 })
 })
 
+test("the session title renames without navigating and view tabs stay in the right controls", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: seededSessions
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  const title = window.getByTestId("conversation-tab")
+  const changes = window.getByRole("button", { name: "Changes" }).first()
+  await changes.click()
+  await expect(changes).toHaveAttribute("aria-current", "page")
+
+  await title.click()
+  await expect(changes).toHaveAttribute("aria-current", "page")
+
+  await title.dblclick()
+  const input = window.getByRole("textbox", { name: "Session title" })
+  await input.fill("Renamed from title")
+  await input.press("Enter")
+  await expect(title).toContainText("Renamed from title")
+  await expect(changes).toHaveAttribute("aria-current", "page")
+
+  const rowBox = await window.getByTestId("session-tab-bar").boundingBox()
+  const controlsBox = await window.getByTestId("session-tab-actions").boundingBox()
+  expect(rowBox).not.toBeNull()
+  expect(controlsBox).not.toBeNull()
+  expect(controlsBox!.x).toBeGreaterThan(rowBox!.x + rowBox!.width / 2)
+
+  await window.getByRole("button", { name: "Conversation" }).click()
+  await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
+})
+
 test("a linked PR shows the sidebar badge and the Pull Request / Code Review tabs", async ({
   launchApp
 }) => {

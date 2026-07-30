@@ -9,6 +9,7 @@ import {
   CreateSessionInput,
   GhStatus,
   GithubConfig,
+  persistentOf,
   Repo,
   Session,
   newSessionCli,
@@ -16,6 +17,7 @@ import {
   startableClis,
   supportsPlanMode,
   supportsSteer,
+  workspaceModeOf,
   WorkspaceConfig
 } from "./domain.js"
 
@@ -236,15 +238,19 @@ describe("Session", () => {
     activeChatId: "c_s_fix-login_abc_1"
   }
 
-  it("decodes a session without the optional worktree fields", () => {
+  it("decodes a legacy session as non-persistent and worktree-backed", () => {
     const decoded = Schema.decodeUnknownSync(Session)(base)
     expect(chatRoleOf(decoded.chats[0]!)).toBe("direct")
+    expect(persistentOf(decoded)).toBe(false)
+    expect(workspaceModeOf(decoded)).toBe("worktree")
   })
 
-  it("round-trips the optional worktreePath / baseBranch / mode / model when present", () => {
+  it("round-trips the optional workspace and persistence fields when present", () => {
     const withWorktree: Session = {
       ...base,
       worktreePath: "/Users/me/jingler/worktrees/trigify-app/fix-login",
+      workspaceMode: "direct",
+      persistent: true,
       baseBranch: "main",
       chats: [{ ...base.chats[0]!, mode: "auto", model: "opus" }]
     }
@@ -382,7 +388,7 @@ describe("Repo", () => {
 })
 
 describe("CreateSessionInput", () => {
-  it("decodes a valid create request", () => {
+  it("decodes a legacy create request with worktree creation defaulting on", () => {
     const result = decode(CreateSessionInput, {
       repoPath: "/Users/me/repos/trigify-app",
       repoName: "trigify-app",
@@ -391,6 +397,19 @@ describe("CreateSessionInput", () => {
       baseBranch: "main"
     })
     expect(Either.isRight(result)).toBe(true)
+    if (Either.isRight(result)) expect(result.right.useWorktree ?? true).toBe(true)
+  })
+
+  it("decodes an explicit direct-checkout request", () => {
+    const result = decode(CreateSessionInput, {
+      repoPath: "/Users/me/repos/trigify-app",
+      repoName: "trigify-app",
+      cli: "codex",
+      baseBranch: "feature/direct",
+      useWorktree: false
+    })
+    expect(Either.isRight(result)).toBe(true)
+    if (Either.isRight(result)) expect(result.right.useWorktree).toBe(false)
   })
 
   it("rejects an invalid cli kind", () => {

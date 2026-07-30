@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
 
@@ -101,6 +101,66 @@ test("creating a blank session stages a detached worktree for agent naming", asy
     encoding: "utf-8"
   }).trim()
   expect(liveBranch).toBe("HEAD")
+})
+
+test("creating without a worktree uses the selected repository checkout", async ({
+  launchApp
+}) => {
+  const { window, home, repoPath } = await launchApp({
+    configured: true,
+    withRepo: true
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await window.getByTestId("new-session").click()
+  const worktree = window.getByRole("switch", { name: "Use isolated worktree" })
+  await expect(worktree).toBeChecked()
+
+  // OPEN always restores the safe default, even after an abandoned direct-mode
+  // draft. The second opening is the one we submit.
+  await worktree.click()
+  await expect(worktree).not.toBeChecked()
+  await window.getByRole("button", { name: "Cancel" }).click()
+  await window.getByTestId("new-session").click()
+  await expect(worktree).toBeChecked()
+
+  await worktree.click()
+  await expect(
+    window.getByText(
+      "The agent shares this repository checkout and works directly on the selected branch."
+    )
+  ).toBeVisible()
+  await window
+    .getByPlaceholder("Leave blank for agent naming")
+    .fill("Work in the checkout")
+  await window.getByRole("button", { name: "Create" }).click()
+
+  await expect(sessionRow(window, "Work in the checkout")).toBeVisible()
+  const persisted = JSON.parse(
+    readFileSync(join(home, "jingler", "sessions.json"), "utf-8")
+  )
+  expect(persisted).toHaveLength(1)
+  expect(persisted[0]).toMatchObject({
+    title: "Work in the checkout",
+    branch: "main",
+    baseBranch: "main",
+    workspaceMode: "direct"
+  })
+  expect(persisted[0].worktreePath).toBe(persisted[0].repoPath)
+  expect(statSync(persisted[0].worktreePath).ino).toBe(statSync(repoPath).ino)
+
+  const registrations = execFileSync("git", ["worktree", "list", "--porcelain"], {
+    cwd: repoPath,
+    encoding: "utf-8"
+  })
+    .split("\n")
+    .filter((line) => line.startsWith("worktree "))
+  expect(registrations).toEqual([`worktree ${realpathSync(repoPath)}`])
+  const branches = execFileSync("git", ["branch", "--format=%(refname:short)"], {
+    cwd: repoPath,
+    encoding: "utf-8"
+  })
+  expect(branches).not.toContain("jingler/")
 })
 
 test("a new session inherits the preferred orchestrator harness, model, and chat role", async ({
