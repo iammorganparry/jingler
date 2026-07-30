@@ -1,11 +1,12 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
-import { basename, join } from "node:path"
+import { join } from "node:path"
 import { DEFAULT_PLAN_TEMPLATE_HTML } from "@jingler/core"
 import type { Page } from "@playwright/test"
 import {
   appShell,
   DEFAULT_CLAUDE_MODEL,
   expect,
+  planDirectory,
   type LaunchedApp,
   type SeedSession,
   test
@@ -34,13 +35,7 @@ const session = (
 // Plans are HTML documents now (rendered in the Tiptap "Notion-doc" editor), so
 // the canonical file is `current-plan.html`, not the old `current-plan.mdx`.
 const currentPlanPath = (launched: LaunchedApp): string =>
-  join(
-    launched.home,
-    "jingler",
-    ".jingler",
-    basename(launched.repoPath),
-    "current-plan.html"
-  )
+  join(planDirectory(launched.home, launched.repoPath), "current-plan.html")
 
 const revisionOf = (file: string): number =>
   Number(/^revision:\s*(\d+)$/m.exec(readFileSync(file, "utf8"))?.[1] ?? 0)

@@ -266,6 +266,14 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const atomically = <A, E, R>(
         effect: Effect.Effect<A, E, R>
       ): Effect.Effect<A, E, R> => lock.withPermits(1)(effect)
+      const repositoryLocks = new Map<string, Effect.Semaphore>()
+      const repositoryLock = (identity: string): Effect.Semaphore => {
+        const existing = repositoryLocks.get(identity)
+        if (existing !== undefined) return existing
+        const created = Effect.unsafeMakeSemaphore(1)
+        repositoryLocks.set(identity, created)
+        return created
+      }
 
       const readAll = (): Effect.Effect<ReadonlyArray<Session>, never, PersistEnv> =>
         Effect.gen(function* () {
@@ -437,20 +445,36 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           })
 
           if (input.useWorktree === false) {
-            // A direct session shares the developer's primary checkout, so the
-            // duplicate check, branch switch, and record write are one critical
-            // section. Two concurrent creates must not switch the same repo
-            // underneath each other before either record becomes visible.
-            return yield* atomically(
+            const identity = yield* GitService.repositoryIdentity(input.repoPath)
+            const reservation = makeSession(
+              {
+                path: identity.repoPath,
+                branch: input.baseBranch,
+                repoPath: identity.repoPath
+              },
+              "direct"
+            )
+            // Serialize only creations that target this physical repository.
+            // The process-wide sessions.json lock remains limited to its actual
+            // read-modify-write; checkout hooks can take seconds and must not
+            // stall unrelated session usage/status/chat persistence.
+            return yield* repositoryLock(identity.commonDir).withPermits(1)(
               Effect.gen(function* () {
                 const current = yield* readAll()
-                if (
-                  current.some(
+                const directIdentities = yield* Effect.forEach(
+                  current.filter(
                     (session) =>
                       workspaceModeOf(session) === "direct" &&
-                      session.repoPath === input.repoPath
-                  )
-                ) {
+                      session.repoPath !== undefined
+                  ),
+                  (session) =>
+                    GitService.repositoryIdentity(session.repoPath!).pipe(
+                      Effect.map((candidate) => candidate.commonDir),
+                      // A missing legacy checkout cannot race this live one.
+                      Effect.orElseSucceed(() => session.repoPath!)
+                    )
+                )
+                if (directIdentities.includes(identity.commonDir)) {
                   return yield* Effect.fail(
                     new GitError({
                       message:
@@ -458,16 +482,34 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                     })
                   )
                 }
+                // Persist the recoverable reservation BEFORE changing the
+                // developer's checkout. A failed write leaves Git untouched; a
+                // process crash after the switch still leaves a visible session
+                // record whose branch guard explains how to recover.
+                yield* atomically(
+                  Effect.gen(function* () {
+                    const latest = yield* readAll()
+                    yield* writeAll([reservation, ...latest])
+                  })
+                )
                 const branch = yield* GitService.switchBranch(
-                  input.repoPath,
+                  identity.repoPath,
                   input.baseBranch
+                ).pipe(
+                  Effect.tapError(() =>
+                    atomically(
+                      Effect.gen(function* () {
+                        const latest = yield* readAll()
+                        yield* writeAll(
+                          latest.filter((session) => session.id !== reservation.id)
+                        )
+                      })
+                    ).pipe(Effect.ignore)
+                  )
                 )
-                const session = makeSession(
-                  { path: input.repoPath, branch, repoPath: input.repoPath },
-                  "direct"
-                )
-                yield* writeAll([session, ...current])
-                return session
+                return branch === reservation.branch
+                  ? reservation
+                  : { ...reservation, branch }
               })
             )
           }
@@ -874,6 +916,14 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         orchestratorEnabled: boolean
       ) =>
         Effect.gen(function* () {
+          const session = yield* get(id)
+          if (!session.chats.some((chat) => chat.id === chatId)) {
+            return yield* Effect.fail(
+              new GitError({
+                message: `Chat "${chatId}" does not exist in session "${id}".`
+              })
+            )
+          }
           yield* updateChat(id, chatId, (chat) => ({
             ...chat,
             orchestratorEnabled

@@ -1,8 +1,14 @@
 import { existsSync, readFileSync } from "node:fs"
-import { basename, join } from "node:path"
-import { appShell, expect, sessionRow, test } from "./fixtures.js"
+import { join } from "node:path"
+import {
+  appShell,
+  expect,
+  planDirectory,
+  sessionRow,
+  test
+} from "./fixtures.js"
 
-test("Jingler mode uses the animated brand treatment and the Jingler mark", async ({
+test("Jingler mode uses the static brand treatment and the animated Jingler mark", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -12,6 +18,7 @@ test("Jingler mode uses the animated brand treatment and the Jingler mark", asyn
       orchestrator: { cli: "codex", model: "gpt-5.6-sol" }
     }
   })
+  await window.emulateMedia({ reducedMotion: "no-preference" })
   await expect(appShell(window)).toBeVisible()
 
   await window.getByTestId("new-session").click()
@@ -38,9 +45,9 @@ test("Jingler mode uses the animated brand treatment and the Jingler mark", asyn
       glowAnimation: glowStyle.animationName
     }
   })
-  expect(activeTreatment.animation).toContain("sb-jingler-border-rotate")
+  expect(activeTreatment.animation).toBe("none")
   expect(activeTreatment.background).toContain("conic-gradient")
-  expect(activeTreatment.glowAnimation).toContain("sb-jingler-border-rotate")
+  expect(activeTreatment.glowAnimation).toBe("none")
 
   const toggleTreatment = await toggle.evaluate((element) => {
     const buttonStyle = getComputedStyle(element)
@@ -137,10 +144,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   )
   const worktreePath = sessions[0].worktreePath as string
   const planFile = join(
-    home,
-    "jingler",
-    ".jingler",
-    basename(worktreePath),
+    planDirectory(home, worktreePath),
     "current-plan.html"
   )
 
@@ -233,10 +237,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   const checkpoints = JSON.parse(
     readFileSync(
       join(
-        home,
-        "jingler",
-        ".jingler",
-        basename(worktreePath),
+        planDirectory(home, worktreePath),
         "orchestration-checkpoints.json"
       ),
       "utf8"
@@ -273,12 +274,7 @@ test("a stopped worker stays interrupted across restart and retries from its che
     readFileSync(join(first.home, "jingler", "sessions.json"), "utf8")
   )
   const worktreePath = sessions[0].worktreePath as string
-  const planDir = join(
-    first.home,
-    "jingler",
-    ".jingler",
-    basename(worktreePath)
-  )
+  const planDir = planDirectory(first.home, worktreePath)
   const checkpointFile = join(
     planDir,
     "orchestration-checkpoints.json"

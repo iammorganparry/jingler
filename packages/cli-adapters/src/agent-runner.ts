@@ -827,7 +827,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
      * entries, since the code that clears them sits after the `Deferred.await`
      * we'd have just killed.
      */
-    const stop = (sessionId: string, requestedChatId?: string) =>
+    const stop = (
+      sessionId: string,
+      requestedChatId?: string,
+      awaitTeardown = false
+    ) =>
       Effect.gen(function* () {
         const chatId = requestedChatId ?? sessionId
         // A stopped agent must not stay parked: gates deny, questions answer empty.
@@ -874,9 +878,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             if (running === undefined) return
             const current = (yield* Ref.get(fibers)).get(chatId)
             if (current?.token !== running.token) return
-            yield* Fiber.interrupt(running.fiber).pipe(
-              Effect.timeout(INTERRUPT_GRACE),
-              Effect.ignore
+            const interrupt = Fiber.interrupt(running.fiber).pipe(Effect.asVoid)
+            yield* (
+              awaitTeardown
+                ? interrupt
+                : interrupt.pipe(
+                    Effect.timeout(INTERRUPT_GRACE),
+                    Effect.ignore
+                  )
             )
           })
         )
@@ -1896,14 +1905,44 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             yield* emit({ _tag: "ContextCompacted", digest, tokensBefore: compactedFrom })
           }
 
-          const run = adapter.run(chatId, spec, {
+          const adapterRun = adapter.run(chatId, spec, {
             emit,
             canUseTool,
             askQuestion,
             proposePlan,
             registerBackgroundStop,
             registerTurnSteer
-          }).pipe(
+          })
+          const guardedRun =
+            session !== null && workspaceModeOf(session) === "direct"
+              ? Effect.raceFirst(
+                  adapterRun,
+                  Effect.forever(
+                    Effect.sleep("250 millis").pipe(
+                      Effect.zipRight(
+                        Effect.gen(function* () {
+                          const liveBranch = yield* branchAt(worktreePath)
+                          if (liveBranch === session.branch) return
+                          const actual =
+                            liveBranch === null
+                              ? "detached HEAD"
+                              : `branch "${liveBranch}"`
+                          return yield* Effect.fail(
+                            new CliExecError({
+                              kind: session.cli,
+                              message:
+                                `This direct session was stopped because its repository ` +
+                                `moved from branch "${session.branch}" to ${actual}. Switch ` +
+                                `the repository back to "${session.branch}" before continuing.`
+                            })
+                          )
+                        })
+                      )
+                    )
+                  )
+                )
+              : adapterRun
+          const run = guardedRun.pipe(
             // An operator stop arrives as an interruption. Record it as the turn's
             // terminal event so the message settles (and the transcript says why)
             // rather than being left mid-stream forever. Finalizers run

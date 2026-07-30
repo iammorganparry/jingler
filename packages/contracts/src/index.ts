@@ -338,26 +338,7 @@ export class JinglerRpcs extends RpcGroup.make(
   }),
 
   /**
-   * Load a chat's persisted conversation transcript.
-   *
-   * Image attachments come back with their `data` EMPTY — see
-   * `Sessions.attachment`. Measured across the six largest transcripts on a real
-   * install, `Image` parts were 80% of all bytes (98MB of 123MB) and `Text` was
-   * 1.5%: the weight of a transcript is not its conversation, it is a handful of
-   * base64 screenshots. Shipping those on load is what made opening a session
-   * cost hundreds of megabytes in the renderer.
-   *
-   * The metadata (`id`, `name`, `mediaType`) still rides along, so a thumbnail
-   * knows what it is before it knows what it looks like.
-   */
-  Rpc.make("Sessions.transcript", {
-    success: Schema.Array(Message),
-    payload: { sessionId: Schema.String, chatId: Schema.String }
-  }),
-
-  /**
-   * A newest-anchored WINDOW of the transcript — the lazy-loading counterpart to
-   * `Sessions.transcript`, which returned the whole array.
+   * A newest-anchored window of the transcript.
    *
    * A session opens with only its tail, then pages older turns in when the
    * operator asks ("Load earlier"). Holding a 46MB transcript whole as a parsed
@@ -365,21 +346,21 @@ export class JinglerRpcs extends RpcGroup.make(
    * residency cap allows several — so a real install's footprint became a
    * high-water mark of the largest transcripts ever opened.
    *
-   * `before` is the id of the oldest message the renderer already holds; the
-   * reply is the `limit` messages immediately before it (omit `before` for the
-   * newest page). `hasMore` gates the affordance: false once the window reaches
-   * the start. Image `data` is stripped exactly as in `Sessions.transcript`.
+   * `before` is the opaque cursor returned by the previous page. `hasMore`
+   * gates the affordance and `cursor` identifies the next older window. Image
+   * data is stripped; thumbnails fetch it through `Sessions.attachment`.
    */
   Rpc.make("Sessions.transcriptPage", {
     success: Schema.Struct({
       messages: Schema.Array(Message),
-      hasMore: Schema.Boolean
+      hasMore: Schema.Boolean,
+      cursor: Schema.optional(Schema.String)
     }),
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,
       before: Schema.optional(Schema.String),
-      limit: Schema.Number
+      limit: Schema.Int.pipe(Schema.between(1, 500))
     }
   }),
 

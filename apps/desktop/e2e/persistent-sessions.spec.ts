@@ -1,5 +1,10 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync, realpathSync } from "node:fs"
+import {
+  existsSync,
+  readFileSync,
+  realpathSync,
+  statSync
+} from "node:fs"
 import { join } from "node:path"
 import {
   appShell,
@@ -198,10 +203,10 @@ test("a direct session completes a turn and deletion preserves its checkout", as
     title: "Direct checkout proof",
     branch: "main",
     baseBranch: "main",
-    repoPath,
-    worktreePath: repoPath,
     workspaceMode: "direct"
   })
+  expect(created.worktreePath).toBe(created.repoPath)
+  expect(statSync(created.worktreePath).ino).toBe(statSync(repoPath).ino)
   expect(gitLines(repoPath, ["worktree", "list", "--porcelain"]).filter(
     (line) => line.startsWith("worktree ")
   )).toEqual([`worktree ${realpathSync(repoPath)}`])

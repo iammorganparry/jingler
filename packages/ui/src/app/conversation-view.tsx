@@ -1,4 +1,4 @@
-import { type RefObject, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { type RefObject, useCallback, useLayoutEffect, useRef, useState } from "react"
 import type {
   Attachment,
   CliKind,
@@ -334,21 +334,42 @@ export function ConversationView({
     [busy, archived, onStop]
   )
 
-  // Stable per-message virtualizer keys — the identity a row keeps when older
-  // pages are PREPENDED (the index would shift under every "Load earlier", so an
-  // index-based key would drop every measured height and jump the scroll). A
-  // duplicate id (from an older transcript recorded before ids were seeded per
-  // session) still can't collide: the second occurrence is disambiguated by its
-  // count, which is stable as long as the dupes don't reorder — and prepend only
-  // adds distinct older messages ahead of them.
-  const itemKeys = useMemo(() => {
-    const seen = new Map<string, number>()
-    return messages.map((m) => {
-      const n = seen.get(m.id) ?? 0
-      seen.set(m.id, n + 1)
-      return n === 0 ? m.id : `${m.id}#${n}`
-    })
-  }, [messages])
+  // Stable opaque row identities. Streaming replaces the last message on every
+  // token, but not its position, so equal-length updates reuse this array in
+  // O(1). Loading history allocates only the prepended prefix and preserves the
+  // existing suffix keys — including legacy rows with duplicate message ids.
+  const itemKeyState = useRef<{
+    messages: ReadonlyArray<Message>
+    keys: ReadonlyArray<string>
+    next: number
+  }>({ messages: [], keys: [], next: 0 })
+  const previousKeys = itemKeyState.current
+  if (previousKeys.messages !== messages) {
+    const allocate = (count: number): ReadonlyArray<string> =>
+      Array.from(
+        { length: count },
+        () => `transcript-row-${previousKeys.next++}`
+      )
+    let keys = previousKeys.keys
+    if (messages.length !== previousKeys.messages.length) {
+      const added = messages.length - previousKeys.messages.length
+      if (
+        added > 0 &&
+        messages[added] === previousKeys.messages[0]
+      ) {
+        keys = [...allocate(added), ...previousKeys.keys]
+      } else if (
+        added > 0 &&
+        messages[0] === previousKeys.messages[0]
+      ) {
+        keys = [...previousKeys.keys, ...allocate(added)]
+      } else {
+        keys = allocate(messages.length)
+      }
+    }
+    itemKeyState.current = { messages, keys, next: previousKeys.next }
+  }
+  const itemKeys = itemKeyState.current.keys
 
   // Virtualize the transcript so large sessions stay fast. Heights are dynamic
   // (markdown, tool cards, diffs) so we measure each turn as it renders/grows.

@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs"
 import { basename, join } from "node:path"
 import { Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -248,8 +254,8 @@ describe("SessionStore", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     expect(exit.value.workspaceMode).toBe("direct")
-    expect(exit.value.worktreePath).toBe(repoPath)
-    expect(exit.value.repoPath).toBe(repoPath)
+    expect(exit.value.worktreePath).toBe(exit.value.repoPath)
+    expect(statSync(exit.value.worktreePath!).ino).toBe(statSync(repoPath).ino)
     expect(exit.value.branch).toBe("feature/direct")
     expect(
       execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
@@ -283,6 +289,60 @@ describe("SessionStore", () => {
     expect(second._tag).toBe("Failure")
     expect(failureOf(second)?.message).toMatch(/direct session already uses this repository/i)
     expect(failureOf(second)?.message).toMatch(/isolated worktree/i)
+  })
+
+  it("rejects a direct-session alias for the same physical repository", async () => {
+    const aliasPath = join(repos.dir, "trigify-alias")
+    symlinkSync(repoPath, aliasPath, "dir")
+    const first = await runExit(
+      SessionStore.create(
+        input({ title: "Canonical direct", useWorktree: false })
+      ).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    const second = await runExit(
+      SessionStore.create(
+        input({
+          repoPath: aliasPath,
+          title: "Aliased direct",
+          useWorktree: false
+        })
+      ).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(first._tag).toBe("Success")
+    expect(second._tag).toBe("Failure")
+    expect(failureOf(second)?.message).toMatch(
+      /direct session already uses this repository/i
+    )
+  })
+
+  it("removes a direct reservation when switching the selected branch fails", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const result = yield* SessionStore.create(
+          input({
+            title: "Missing branch",
+            baseBranch: "does-not-exist",
+            useWorktree: false
+          })
+        ).pipe(Effect.either)
+        return { result, sessions: yield* SessionStore.list() }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.result._tag).toBe("Left")
+    expect(exit.value.sessions).toStrictEqual([])
+    expect(
+      execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe("main")
   })
 
   it("setPersistent atomically persists and returns the updated session", async () => {
@@ -665,6 +725,25 @@ describe("SessionStore", () => {
     )
     expect(first?.orchestratorEnabled).toBeUndefined()
     expect(second?.orchestratorEnabled).toBe(false)
+  })
+
+  it("rejects Jingler mode updates for a chat that does not exist", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(
+          input({ title: "Missing chat" })
+        )
+        return yield* SessionStore.setOrchestratorEnabled(
+          created.id,
+          "missing-chat",
+          true
+        )
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Failure")
+    expect(failureOf(exit)?.message).toMatch(/does not exist/i)
   })
 
   it("does not turn an invalid runtime mode into ask", async () => {

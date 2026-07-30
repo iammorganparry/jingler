@@ -18,6 +18,13 @@ export interface CreateWorktreeInput {
   readonly baseBranch: string
 }
 
+export interface RepositoryIdentity {
+  /** Canonical primary checkout path used as the direct session cwd. */
+  readonly repoPath: string
+  /** Canonical Git common directory shared by every alias/worktree of the repo. */
+  readonly commonDir: string
+}
+
 type GitEnv =
   | AppPaths
   | FileSystem.FileSystem
@@ -341,6 +348,47 @@ export class GitService extends Effect.Service<GitService>()(
         runGit(repoPath, ["switch", branch]).pipe(Effect.as(branch))
 
       /**
+       * Resolve aliases to one physical repository identity.
+       *
+       * `realPath` collapses symlinks, `..`, and filesystem case aliases while
+       * Git's common directory collapses linked-worktree paths back to the same
+       * repository. Direct-session exclusion is keyed by `commonDir`, not by
+       * whichever spelling a caller happened to choose.
+       */
+      const repositoryIdentity = (
+        repoPath: string
+      ): Effect.Effect<
+        RepositoryIdentity,
+        GitError,
+        FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor
+      > =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const path = yield* Path.Path
+          const canonicalRepo = yield* fs.realPath(repoPath).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GitError({
+                  message: `Could not resolve repository path ${repoPath}`,
+                  cause
+                })
+            )
+          )
+          const reported = yield* runGit(canonicalRepo, [
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ])
+          const commonPath = path.isAbsolute(reported)
+            ? reported
+            : path.resolve(canonicalRepo, reported)
+          const commonDir = yield* fs.realPath(commonPath).pipe(
+            Effect.orElseSucceed(() => path.resolve(commonPath))
+          )
+          return { repoPath: canonicalRepo, commonDir }
+        })
+
+      /**
        * Keep commits made on a detached session reachable before its worktree is
        * removed. A detached HEAD already contained by any local or remote ref is
        * safe; otherwise create a collision-safe `jingler/<slug>` branch at HEAD.
@@ -522,6 +570,7 @@ export class GitService extends Effect.Service<GitService>()(
         createWorktree,
         createDetachedWorktree,
         switchBranch,
+        repositoryIdentity,
         branchAt,
         createTaskBranch,
         preserveDetachedHead,

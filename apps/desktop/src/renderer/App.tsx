@@ -378,6 +378,9 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   // Delete is destructive (removes the worktree) — confirm first. Holds the
   // session pending confirmation; the ConfirmDialog fires `deleteSession`.
   const [pendingDelete, setPendingDelete] = useState<Session | null>(null)
+  const [sessionMutationError, setSessionMutationError] = useState<string | null>(
+    null
+  )
   const renameSession = (sessionId: string, title: string) => {
     void rpc.sessionsRename(sessionId, title).then((session) => send({ type: "SESSION_UPDATED", session }))
   }
@@ -385,8 +388,17 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     sessionId: string,
     persistent: boolean
   ): Promise<void> => {
-    const session = await rpc.sessionsSetPersistent(sessionId, persistent)
-    send({ type: "SESSION_UPDATED", session })
+    setSessionMutationError(null)
+    try {
+      const session = await rpc.sessionsSetPersistent(sessionId, persistent)
+      send({ type: "SESSION_UPDATED", session })
+    } catch (error) {
+      setSessionMutationError(
+        error instanceof Error
+          ? error.message
+          : "Could not update the persistent session."
+      )
+    }
   }
   const deleteSession = async (sessionId: string) => {
     const chatIds = sessions
@@ -689,7 +701,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
 
   return (
     <>
-    <JinglerApp
+      <JinglerApp
       clis={clis}
       tabContributions={pluginTabs}
       paneContributions={pluginPanes}
@@ -822,8 +834,24 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       onToggleBrowser={browserDock.toggle}
       renderBrowserDock={(session) => <PreviewDockView session={session} dock={browserDock} />}
       version={__APP_VERSION__}
-    />
-    <ConfirmDialog
+      />
+      {sessionMutationError !== null && (
+        <div
+          role="alert"
+          className="fixed bottom-4 right-4 z-[100] flex max-w-sm items-start gap-3 rounded-lg border border-red/50 bg-sunken px-4 py-3 text-[12px] text-red shadow-2xl"
+        >
+          <span className="min-w-0 flex-1">{sessionMutationError}</span>
+          <button
+            type="button"
+            aria-label="Dismiss persistence error"
+            onClick={() => setSessionMutationError(null)}
+            className="flex-none rounded px-1 text-red outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            ×
+          </button>
+        </div>
+      )}
+      <ConfirmDialog
       open={pendingDelete !== null}
       onOpenChange={(open) => !open && setPendingDelete(null)}
       title="Delete session?"
@@ -839,7 +867,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       onConfirm={() => {
         if (pendingDelete) void deleteSession(pendingDelete.id)
       }}
-    />
+      />
     </>
   )
 }

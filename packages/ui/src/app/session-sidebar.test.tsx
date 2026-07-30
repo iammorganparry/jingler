@@ -306,6 +306,9 @@ describe("SessionSidebar persistent tray", () => {
     )
 
     expect(screen.getByTestId("persistent-session-tile-kept")).toBeDefined()
+    expect(
+      screen.getByTestId("persistent-session-tray").className
+    ).toContain("overflow-y-auto")
     expect(screen.queryByTestId("session-row-kept")).toBeNull()
     expect(screen.getByTestId("session-row-ordinary")).toBeDefined()
     expect(screen.queryByTestId("persistent-session-add")).toBeNull()

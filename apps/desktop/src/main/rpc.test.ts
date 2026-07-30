@@ -344,6 +344,7 @@ describe("RPC handlers", () => {
     const service = OrchestrationService.make({
       execute: () => Effect.die("watch must not execute workers"),
       stopWorker: () => Effect.void,
+      stopSession: () => Effect.void,
       isPlanRunning: () => Effect.succeed(false),
       activityFeedCount: () => Effect.succeed(0),
       watch: (sessionId, planId, chatId) => {
@@ -486,7 +487,7 @@ describe("RPC handlers", () => {
     })
   })
 
-  describe("Sessions.transcript — attachment stripping", () => {
+  describe("Sessions.transcriptPage — attachment stripping", () => {
     /**
      * A transcript's images are 80% of its bytes (98MB of 123MB, measured across
      * the six largest on a real install) and its text is 1.5%. Handing those to
@@ -557,6 +558,66 @@ describe("RPC handlers", () => {
           )
         )
       ).resolves.toBeUndefined()
+    })
+
+    it("refuses destructive revert actions for a direct session", async () => {
+      const now = "2026-07-30T10:00:00.000Z"
+      mkdirSync(root, { recursive: true })
+      writeFileSync(
+        join(root, "sessions.json"),
+        JSON.stringify([
+          {
+            id: "direct-session",
+            repo: "widget",
+            branch: "main",
+            baseBranch: "main",
+            title: "Production checkout",
+            status: "idle",
+            cli: "claude",
+            diff: { added: 0, removed: 0 },
+            prNumber: null,
+            costUsd: 0,
+            tokens: 0,
+            updatedAt: now,
+            worktreePath: dir,
+            repoPath: dir,
+            workspaceMode: "direct",
+            chats: [
+              {
+                id: "direct-chat",
+                title: null,
+                createdAt: now,
+                updatedAt: now
+              }
+            ],
+            activeChatId: "direct-chat"
+          }
+        ])
+      )
+      const ws = Layer.mergeAll(
+        base,
+        SessionStore.Default,
+        WorkspaceService.Default
+      )
+
+      await expect(
+        Effect.runPromise(
+          workspaceRevertFile({
+            sessionId: "direct-session",
+            path: "developer-edit.ts"
+          }).pipe(Effect.provide(ws))
+        )
+      ).rejects.toThrow(/disabled for direct sessions/i)
+      await expect(
+        Effect.runPromise(
+          workspaceRevertLines({
+            sessionId: "direct-session",
+            path: "developer-edit.ts",
+            startLine: 1,
+            endLine: 2
+          }).pipe(Effect.provide(ws))
+        )
+      ).rejects.toThrow(/disabled for direct sessions/i)
     })
   })
 

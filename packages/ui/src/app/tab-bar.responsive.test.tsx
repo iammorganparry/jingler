@@ -76,6 +76,10 @@ describe("TabBar at width", () => {
     fireEvent.doubleClick(screen.getByTestId("conversation-tab"))
     const input = screen.getByRole("textbox", { name: "Session title" })
     fireEvent.change(input, { target: { value: "Renamed session" } })
+    // Selecting a word with a double-click must not bubble back to the title
+    // shell and restart editing with the original value.
+    fireEvent.doubleClick(input)
+    expect(input).toHaveProperty("value", "Renamed session")
     fireEvent.blur(input)
     expect(onRenameTitle).toHaveBeenCalledWith("Renamed session")
   })

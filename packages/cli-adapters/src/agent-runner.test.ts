@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { basename, join } from "node:path"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import type { GateDecision, Message, PermissionMode, Plan, Session, StreamEvent } from "@jingler/core"
 import { CliExecError, findApprovedPlan, STOPPED_NOTE } from "@jingler/core"
 import { Deferred, Effect, Fiber, Layer, Ref, Stream, TestClock, TestContext } from "effect"
@@ -1238,7 +1238,7 @@ describe("AgentRunner plan library", () => {
       ConfigService.Default,
       temp.layer
     )
-    await Effect.runPromise(
+    const files = await Effect.runPromise(
       Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.setMode(SESSION, "plan")
@@ -1248,11 +1248,12 @@ describe("AgentRunner plan library", () => {
           ),
           Stream.runDrain
         )
+        return yield* PlanStore.list(WT)
       }).pipe(Effect.provide(base))
     )
     // One stable canonical file is namespaced by worktree under the plan library.
-    const file = join(temp.root, ".jingler", basename(WT), "current-plan.html")
-    expect(existsSync(file)).toBe(true)
+    expect(files).toHaveLength(1)
+    const file = files[0]!
     expect(readFileSync(file, "utf8")).toContain("Refactor auth flow")
   })
 
@@ -1691,6 +1692,76 @@ describe("AgentRunner failures", () => {
       _tag: "Failed",
       message:
         'This direct session is pinned to branch "main", but the repository checkout is now on branch "feature/other". Switch the repository back to "main" before continuing.'
+    })
+  })
+
+  it("stops a running direct turn as soon as its checkout changes branch", async () => {
+    const repoPath = initGitRepo(join(temp.root, "live-direct-repo"), {
+      branches: ["feature/other"]
+    })
+    const now = "2026-07-20T00:00:00.000Z"
+    writeFileSync(
+      join(temp.root, "sessions.json"),
+      JSON.stringify([
+        {
+          id: SESSION,
+          repo: "live-direct-repo",
+          branch: "main",
+          title: "Live direct",
+          status: "idle",
+          cli: "claude",
+          diff: { added: 0, removed: 0 },
+          prNumber: null,
+          costUsd: 0,
+          tokens: 0,
+          updatedAt: now,
+          worktreePath: repoPath,
+          repoPath,
+          workspaceMode: "direct",
+          chats: [chatForSession(now)],
+          activeChatId: SESSION
+        }
+      ])
+    )
+    const switchingAdapter = Layer.succeed(
+      CliAdapter,
+      CliAdapter.of({
+        run: () =>
+          Effect.sync(() => {
+            execFileSync("git", ["switch", "feature/other"], { cwd: repoPath })
+          }).pipe(Effect.zipRight(Effect.never)),
+        stop: () => Effect.void
+      })
+    )
+    const base = Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlMcpServiceTest,
+      InMemorySecretStoreLive,
+      ConfigService.Default,
+      ContextManager.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      PlanStore.Default,
+      switchingAdapter,
+      noHarnesses,
+      temp.layer
+    )
+
+    const events = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        return yield* runner
+          .prompt(SESSION, SESSION, "continue")
+          .pipe(Stream.runCollect)
+      }).pipe(Effect.provide(base))
+    )
+
+    expect(Array.from(events)).toContainEqual({
+      _tag: "Failed",
+      message:
+        'This direct session was stopped because its repository moved from branch "main" to branch "feature/other". Switch the repository back to "main" before continuing.'
     })
   })
 

@@ -199,7 +199,12 @@ test("history written during a run is still there after a restart", async ({ lau
   const turnsOnDisk = (): number => {
     let total = 0
     for (const name of readdirSync(transcriptsDir)) {
-      if (name !== "s_run.json" && !name.startsWith("c_s_run_")) continue
+      if (
+        !name.endsWith(".json") ||
+        (name !== "s_run.json" && !name.startsWith("c_s_run_"))
+      ) {
+        continue
+      }
       const raw = readFileSync(join(transcriptsDir, name), "utf8")
       if (raw.trim() === "") continue
       total += (JSON.parse(raw) as ReadonlyArray<unknown>).length

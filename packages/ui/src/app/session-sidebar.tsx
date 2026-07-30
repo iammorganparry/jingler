@@ -295,6 +295,7 @@ function SidebarBody({
       onClosePane={onClosePane}
       onSeparateAll={onSeparateAll}
       onSplitWith={onSplitWith}
+      onSetPersistent={onSetPersistent}
       splitCandidates={sessions.filter(
         (c) => !c.archived && !split.panes.some((p) => p.sessionId === c.id)
       )}
@@ -441,7 +442,7 @@ function SidebarBody({
           status/repo filters, and never duplicated in those groups. */}
       <div
         data-testid="persistent-session-tray"
-        className="grid flex-none grid-cols-3 gap-1.5 px-3 pb-2"
+        className="grid max-h-64 flex-none grid-cols-3 gap-1.5 overflow-y-auto px-3 pb-2"
       >
         {persistentSessions.length > 0 ? (
           persistentSessions.map((session) => (

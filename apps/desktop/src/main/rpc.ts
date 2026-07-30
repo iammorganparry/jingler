@@ -71,7 +71,8 @@ import {
   reviewModelFor,
   resolveOrchestratorPreference,
   PluginError,
-  SessionNotFoundError
+  SessionNotFoundError,
+  workspaceModeOf
 } from "@jingler/core"
 import type {
   BrowserBounds,
@@ -975,6 +976,14 @@ export const workspaceRevertFile = (input: { sessionId: string; path: string }) 
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId)
     if (!session?.worktreePath) return
+    if (workspaceModeOf(session) === "direct") {
+      return yield* Effect.fail(
+        new GitError({
+          message:
+            "Revert is disabled for direct sessions because this checkout may contain unrelated developer edits."
+        })
+      )
+    }
     yield* WorkspaceService.revertFile(session.worktreePath, input.path)
   })
 
@@ -991,6 +1000,14 @@ export const workspaceRevertLines = (input: {
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId)
     if (!session?.worktreePath) return
+    if (workspaceModeOf(session) === "direct") {
+      return yield* Effect.fail(
+        new GitError({
+          message:
+            "Revert is disabled for direct sessions because this checkout may contain unrelated developer edits."
+        })
+      )
+    }
     yield* WorkspaceService.revertRange(
       session.worktreePath,
       input.path,
@@ -1801,6 +1818,15 @@ const HandlersLayer = JinglerRpcs.toLayer({
       const session = yield* SessionStore.get(sessionId).pipe(
         Effect.orElseSucceed(() => null)
       )
+      const runner = yield* AgentRunner
+      const orchestration = yield* OrchestrationService
+      for (const chat of session?.chats ?? []) {
+        // Deletion is stronger than an ordinary Stop click: do not remove the
+        // transcript/state until the harness finalizers have actually finished.
+        yield* runner.stop(sessionId, chat.id, true)
+      }
+      yield* orchestration.stopSession(sessionId)
+      yield* BackgroundTaskStore.clear(sessionId)
       yield* SessionStore.remove(sessionId)
       for (const chat of session?.chats ?? []) {
         yield* TranscriptStore.remove(chat.id)
@@ -1870,15 +1896,6 @@ const HandlersLayer = JinglerRpcs.toLayer({
         Effect.fail(new GitError({ message: "Session not found", cause }))
       )
     ),
-  "Sessions.transcript": ({ sessionId, chatId }) =>
-    Effect.gen(function* () {
-      const session = yield* SessionStore.get(sessionId)
-      if (!session.chats.some((chat) => chat.id === chatId)) return []
-      if (chatId === `c_${session.id}_1`) {
-        yield* TranscriptStore.adoptLegacy(sessionId, chatId)
-      }
-      return withoutAttachmentData(yield* TranscriptStore.list(chatId))
-    }).pipe(Effect.orElseSucceed(() => [])),
   // The windowed read the renderer opens sessions with — only the tail loads,
   // older turns page in on demand. Same attachment-stripping as the whole read.
   "Sessions.transcriptPage": ({ sessionId, chatId, before, limit }) =>
@@ -1891,10 +1908,19 @@ const HandlersLayer = JinglerRpcs.toLayer({
         yield* TranscriptStore.adoptLegacy(sessionId, chatId)
       }
       const page = yield* TranscriptStore.listPage(chatId, { before, limit })
-      return { messages: withoutAttachmentData(page.messages), hasMore: page.hasMore }
-    }).pipe(Effect.orElseSucceed(() => ({ messages: [], hasMore: false }))),
+      return {
+        messages: withoutAttachmentData(page.messages),
+        hasMore: page.hasMore,
+        ...(page.cursor === undefined ? {} : { cursor: page.cursor })
+      }
+    }).pipe(
+      Effect.orElseSucceed(() => ({
+        messages: [],
+        hasMore: false
+      }))
+    ),
   /**
-   * The bytes `Sessions.transcript` left out, one attachment at a time.
+   * The bytes `Sessions.transcriptPage` left out, one attachment at a time.
    *
    * Reads the whole transcript to find one image, which sounds wasteful and is
    * the right trade: the read happens in MAIN, where a 46MB parse is a

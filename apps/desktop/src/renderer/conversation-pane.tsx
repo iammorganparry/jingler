@@ -332,7 +332,7 @@ export function ConversationPane({
   // effective selection so a finished (auto-removed) sub-agent falls back to Main
   // without an effect — its tab and view disappear together.
   /**
-   * Fetch one transcript image's bytes. `Sessions.transcript` leaves them out —
+   * Fetch one transcript image's bytes. `Sessions.transcriptPage` leaves them out —
    * they are 80% of a transcript's weight — so a thumbnail asks for them when it
    * mounts, which in a virtualized list means the few on screen.
    *

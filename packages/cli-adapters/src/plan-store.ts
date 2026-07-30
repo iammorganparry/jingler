@@ -25,6 +25,7 @@ import {
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Schema, Stream } from "effect"
+import { createHash } from "node:crypto"
 import type { OrchestrationCheckpoint } from "./orchestration-service.js"
 import { AppPaths } from "./app-paths.js"
 import { legacyPlanToHtml, parsePlanHtml } from "./plan-html.js"
@@ -153,16 +154,60 @@ export class PlanStore extends Effect.Service<PlanStore>()(
     sync: () => {
       const lock = Effect.unsafeMakeSemaphore(1)
 
-      const dirFor = (worktreePath: string): Effect.Effect<string, never, Path.Path | AppPaths> =>
+      const namespacedDirFor = (
+        worktreePath: string
+      ): Effect.Effect<string, never, FileSystem.FileSystem | Path.Path | AppPaths> =>
         Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
           const path = yield* Path.Path
           const paths = yield* AppPaths
-          return path.join(paths.plansDir, path.basename(worktreePath))
+          const canonical = yield* fs.realPath(worktreePath).pipe(
+            Effect.orElseSucceed(() => path.resolve(worktreePath))
+          )
+          const suffix = createHash("sha256")
+            .update(canonical)
+            .digest("hex")
+            .slice(0, 12)
+          return path.join(
+            paths.plansDir,
+            `${path.basename(canonical)}-${suffix}`
+          )
+        })
+
+      /**
+       * Resolve a collision-proof plan directory and lazily adopt the legacy
+       * basename-only directory. Two direct repositories named `widget` now
+       * receive different hashes even though their display names match.
+       */
+      const dirFor = (
+        worktreePath: string
+      ): Effect.Effect<
+        string,
+        never,
+        FileSystem.FileSystem | Path.Path | AppPaths
+      > =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const path = yield* Path.Path
+          const paths = yield* AppPaths
+          const destination = yield* namespacedDirFor(worktreePath)
+          const legacy = path.join(
+            paths.plansDir,
+            path.basename(worktreePath)
+          )
+          const [destinationExists, legacyExists] = yield* Effect.all([
+            fs.exists(destination).pipe(Effect.orElseSucceed(() => false)),
+            fs.exists(legacy).pipe(Effect.orElseSucceed(() => false))
+          ])
+          if (!destinationExists && legacyExists) {
+            yield* fs.rename(legacy, destination).pipe(Effect.ignore)
+          }
+          return destination
         })
 
       const currentFileFor = (
         worktreePath: string
-      ): Effect.Effect<string, never, Path.Path | AppPaths> =>
+      ): Effect.Effect<string, never, FileSystem.FileSystem | Path.Path | AppPaths> =>
         Effect.gen(function* () {
           const path = yield* Path.Path
           return path.join(yield* dirFor(worktreePath), "current-plan.html")
@@ -170,7 +215,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
 
       const checkpointFileFor = (
         worktreePath: string
-      ): Effect.Effect<string, never, Path.Path | AppPaths> =>
+      ): Effect.Effect<string, never, FileSystem.FileSystem | Path.Path | AppPaths> =>
         Effect.gen(function* () {
           const path = yield* Path.Path
           return path.join(
@@ -182,7 +227,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       const fileFor = (
         worktreePath: string,
         _plan?: Plan
-      ): Effect.Effect<string, never, Path.Path | AppPaths> => currentFileFor(worktreePath)
+      ): Effect.Effect<
+        string,
+        never,
+        FileSystem.FileSystem | Path.Path | AppPaths
+      > => currentFileFor(worktreePath)
 
       const atomicWrite = (
         worktreePath: string,
@@ -1062,7 +1111,13 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       const removeAll = (worktreePath: string): Effect.Effect<void, never, PlanStoreEnv> =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
-          yield* fs.remove(yield* dirFor(worktreePath), { recursive: true }).pipe(Effect.ignore)
+          // Never adopt-and-delete a basename-only legacy directory here: for
+          // same-named repositories that directory may belong to the other
+          // session. Normal reads migrate it; deletion removes only the
+          // collision-proof directory proven to belong to this checkout.
+          yield* fs
+            .remove(yield* namespacedDirFor(worktreePath), { recursive: true })
+            .pipe(Effect.ignore)
         })
 
       return {

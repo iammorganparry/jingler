@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
 
@@ -144,10 +144,10 @@ test("creating without a worktree uses the selected repository checkout", async 
     title: "Work in the checkout",
     branch: "main",
     baseBranch: "main",
-    worktreePath: repoPath,
-    repoPath,
     workspaceMode: "direct"
   })
+  expect(persisted[0].worktreePath).toBe(persisted[0].repoPath)
+  expect(statSync(persisted[0].worktreePath).ino).toBe(statSync(repoPath).ino)
 
   const registrations = execFileSync("git", ["worktree", "list", "--porcelain"], {
     cwd: repoPath,

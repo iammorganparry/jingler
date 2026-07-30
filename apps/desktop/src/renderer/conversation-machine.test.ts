@@ -66,10 +66,6 @@ const h = vi.hoisted(() => ({
 
 vi.mock("./rpc-client.js", () => ({
   rpc: {
-    sessionsTranscript: async () => {
-      await h.transcriptGate
-      return h.transcript
-    },
     sessionsTranscriptPage: async (
       _sessionId: string,
       _chatId: string,
@@ -78,14 +74,19 @@ vi.mock("./rpc-client.js", () => ({
     ) => {
       await h.transcriptGate
       h.transcriptPageCalls.push({ before, limit })
-      // Mirror the real store's windowing so tests can drive "Load earlier":
-      // a window ends at `before` (exclusive) or the tail, and reports whether
-      // older turns remain.
+      // Mirror the real store's opaque positional cursor.
       const all = h.transcript
-      const end = before === undefined ? all.length : all.findIndex((m) => m.id === before)
-      if (end === -1) return { messages: [], hasMore: false }
+      const match = before === undefined ? null : /^v1:(\d+)$/.exec(before)
+      if (before !== undefined && match === null) {
+        return { messages: [], hasMore: false }
+      }
+      const end = match === null ? all.length : Number(match[1])
       const start = Math.max(0, end - limit)
-      return { messages: all.slice(start, end), hasMore: start > 0 }
+      return {
+        messages: all.slice(start, end),
+        hasMore: start > 0,
+        ...(start > 0 ? { cursor: `v1:${start}` } : {})
+      }
     },
     planCurrent: async () => h.currentPlan,
     skillsList: async () => {
@@ -312,7 +313,7 @@ describe("conversationMachine — lazy history", () => {
     actor.stop()
   })
 
-  it("prepends an older page on LOAD_OLDER, cursored on the oldest held id", async () => {
+  it("prepends an older page on LOAD_OLDER using the opaque store cursor", async () => {
     h.transcript = makeTurns(500)
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
@@ -324,7 +325,10 @@ describe("conversationMachine — lazy history", () => {
     expect(ctx.messages).toHaveLength(400)
     expect(ctx.messages[0]!.id).toBe("u100")
     expect(ctx.hasMoreHistory).toBe(true)
-    expect(h.transcriptPageCalls.at(-1)).toStrictEqual({ before: "u300", limit: 200 })
+    expect(h.transcriptPageCalls.at(-1)).toStrictEqual({
+      before: "v1:300",
+      limit: 200
+    })
     actor.stop()
   })
 
@@ -1432,6 +1436,47 @@ describe("conversationMachine — PlanUpdated across turns", () => {
     expect(messages[1]!.id).toBe("a_shared_plan_3")
     expect(latestPlan(messages)?.steps[0]?.status).toBe("done")
     expect(actor.getSnapshot().context.sharedPlanChatId).toBe("c_other")
+    actor.stop()
+  })
+
+  it("replaces the synthetic plan when paging reaches its original message", async () => {
+    const original = applyStreamEvent(
+      assistantMessage("a_original_plan", "2026-07-25T00:00:00.000Z"),
+      { _tag: "PlanProposed", plan: planFixture("proposed") }
+    )
+    h.transcript = [
+      original,
+      ...Array.from({ length: 299 }, (_, index) =>
+        userMessage(
+          `u_${index}`,
+          `turn ${index}`,
+          "2026-07-25T00:00:00.000Z"
+        )
+      )
+    ]
+    h.currentPlan = documentFixture("done", "c_other", 4)
+
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    expect(
+      actor.getSnapshot().context.messages.filter((message) =>
+        message.id.startsWith("a_shared_plan_")
+      )
+    ).toHaveLength(1)
+
+    actor.send({ type: "LOAD_OLDER" })
+    await waitFor(actor, (snapshot) => snapshot.context.messages.length === 300)
+
+    const messages = actor.getSnapshot().context.messages
+    expect(
+      messages.filter((message) => message.id.startsWith("a_shared_plan_"))
+    ).toHaveLength(0)
+    expect(
+      messages.flatMap((message) => message.parts).filter(
+        (part) => part._tag === "Plan" && part.plan.id === "plan_1"
+      )
+    ).toHaveLength(1)
+    expect(latestPlan(messages)?.steps[0]?.status).toBe("done")
     actor.stop()
   })
 

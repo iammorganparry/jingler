@@ -327,6 +327,7 @@ export function TabBar({
                 aria-label="Session title"
                 value={titleDraft}
                 onChange={(event) => setTitleDraft(event.target.value)}
+                onDoubleClick={(event) => event.stopPropagation()}
                 onBlur={commitTitle}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
