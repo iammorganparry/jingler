@@ -1,11 +1,11 @@
-import { fencedHtmlPlan } from "./plan-parse.js"
+import { fencedHtmlPlan, stripHtmlPlanBlocks } from "./plan-parse.js"
 
 /**
  * Pull an orchestrator amendment out of an auto-mode reply.
  *
  * Once its first plan is approved, the orchestrator no longer plans through a
  * gate — it works in auto mode. To change the plan it re-issues the COMPLETE
- * updated plan as one four-backtick ` ````html plan ` block (the same grammar it
+ * updated plan as one four-backtick ` ````html ` block (the same grammar it
  * drafted the first plan in). Jingler applies that block as an amendment
  * (`reconcilePlanAmendment` keeps stable ids and durable evidence, requeues
  * changed and new stages) and dispatches the affected workers — no approval.
@@ -25,12 +25,9 @@ export const parseOrchestratorAmendment = (text: string): string | null => {
 }
 
 /**
- * Remove the amendment's ` ````html plan ` block from the reply the operator
+ * Remove the amendment's ` ````html ` block from the reply the operator
  * sees. The block is machinery — once applied, the plan card carries the change,
  * so the raw HTML fence would only be noise in the transcript.
  */
 export const stripOrchestratorAmendment = (text: string): string =>
-  text
-    .replace(/^[ \t]*`{3,}html[ \t]+plan[ \t]*\r?\n[\s\S]*?\r?\n[ \t]*`{3,}[ \t]*$/im, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
+  stripHtmlPlanBlocks(text)

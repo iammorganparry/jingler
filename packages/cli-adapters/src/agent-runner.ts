@@ -59,6 +59,7 @@ import {
 import { buildGate, makeApprovals, verdict } from "./approvals.js"
 import { runLifetime } from "./run-lifetime.js"
 import { planNote } from "./plan-prompt.js"
+import { stripHtmlPlanBlocks } from "./plan-parse.js"
 import { questionNote } from "./question-prompt.js"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
@@ -556,9 +557,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             : [
                 `Revise canonical PRD revision ${canonical.document.revision}.`,
                 "Treat the full HTML below, including human edits and annotations, as the source of truth.",
-                "Return a complete replacement four-backtick fenced ````html plan document.",
+                "Return a complete replacement four-backtick fenced HTML document. Open it with exactly ````html.",
                 "",
-                "````html plan",
+                "````html",
                 routedSource?.trim() ?? canonical.document.source.trim(),
                 "````"
               ].join("\n")
@@ -1129,7 +1130,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             ? [
                 "You are this session's orchestrator.",
                 planApproved
-                  ? "A plan is already approved and running. Fold each new request into it: finish quick work yourself with your native tools. For larger work, amend the plan by re-issuing the COMPLETE updated plan as one four-backtick ````html plan block (keep every stage and acceptance id stable so evidence survives) — Jingler applies it and dispatches the affected workers automatically, with no approval. Do not draft a fresh plan or open a new approval."
+                  ? "A plan is already approved and running. Fold each new request into it: finish quick work yourself with your native tools. For larger work, amend the plan by re-issuing the COMPLETE updated plan as one four-backtick fenced HTML block opened with exactly ````html (keep every stage and acceptance id stable so evidence survives) — Jingler applies it and dispatches the affected workers automatically, with no approval. Do not draft a fresh plan or open a new approval."
                   : "For substantial implementation work, inspect the repository and return a complete plan whose independent dependency groups are assigned to worker agents. Anything quick or immediately achievable, just do yourself.",
                 "",
                 "Available worker routes:",
@@ -1492,7 +1493,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             }).pipe(Effect.provide(env), Effect.ignore)
 
           // Once its first plan is approved, the orchestrator runs in auto mode
-          // and amends the plan by re-issuing the WHOLE plan as a ````html plan
+          // and amends the plan by re-issuing the WHOLE plan as a ````html
           // block. Apply it as a reconciled amendment — stable stage/acceptance
           // ids and durable worker evidence are carried across, changed and new
           // stages are requeued — and keep it in the executing lane so no new
@@ -1594,7 +1595,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 yield* recordPlanEvidence(settledText)
                 // An approved-plan orchestrator turn may carry a plan amendment.
                 // Apply it (reconciled, no re-approval) and, if it landed, scrub
-                // the raw ````html plan block from the reply the operator reads.
+                // the raw ````html block from the reply the operator reads.
                 if (yield* applyOrchestratorAmendment(settledText)) {
                   next = {
                     ...next,
@@ -1749,46 +1750,81 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                       )
                     }
                   : plan
+              let canonicalPlan = proposedPlan
+              let revisingCanonicalPlan = false
+              if (worktreePath.length > 0) {
+                const current = yield* PlanStore.readDocument(
+                  worktreePath,
+                  sessionId,
+                  chatId
+                ).pipe(Effect.provide(env))
+                const basePlanId =
+                  current !== null &&
+                  current.producingChatId === chatId &&
+                  current.status !== "done" &&
+                  current.status !== "rejected"
+                    ? current.id
+                    : undefined
+                const promotion = yield* PlanStore.promote(
+                  sessionId,
+                  worktreePath,
+                  chatId,
+                  proposedPlan,
+                  basePlanId
+                ).pipe(
+                  Effect.provide(env),
+                  Effect.either
+                )
+                if (promotion._tag === "Left") {
+                  yield* emit({
+                    _tag: "Failed",
+                    message: promotion.left.message
+                  })
+                  return yield* Effect.interrupt
+                }
+                // PlanStore owns validation, sanitization, legacy fallback,
+                // and amendment reconciliation. Publish exactly its projection
+                // so transcript and Plan Review share one identity and source.
+                canonicalPlan = promotion.right.plan
+                revisingCanonicalPlan = basePlanId === canonicalPlan.id
+              }
               // Announced only after the exact canonical proposal is durably
               // persisted. A rejected promotion emits a terminal failure instead
               // of presenting an unapprovable draft that differs from PlanStore.
               return yield* approvals.awaitPlan(
                 sessionId,
                 chatId,
-                proposedPlan.id,
+                canonicalPlan.id,
                 Effect.gen(function* () {
-                  if (worktreePath.length > 0 && plan.structured !== false) {
-                    const current = yield* PlanStore.readDocument(
-                      worktreePath,
-                      sessionId,
-                      chatId
-                    ).pipe(Effect.provide(env))
-                    const basePlanId =
-                      current !== null &&
-                      current.producingChatId === chatId &&
-                      current.status !== "done" &&
-                      current.status !== "rejected"
-                        ? current.id
-                        : undefined
-                    const promotion = yield* PlanStore.promote(
-                      sessionId,
-                      worktreePath,
-                      chatId,
-                      proposedPlan,
-                      basePlanId
-                    ).pipe(
-                      Effect.provide(env),
-                      Effect.either
-                    )
-                    if (promotion._tag === "Left") {
-                      yield* emit({
-                        _tag: "Failed",
-                        message: promotion.left.message
-                      })
-                      return yield* Effect.interrupt
-                    }
-                  }
-                  yield* emit({ _tag: "PlanProposed", plan: proposedPlan })
+                  // Claude streams plan text before ExitPlanMode asks us to
+                  // promote it. Once the canonical Plan card owns that document,
+                  // remove the protocol block from the transcript while keeping
+                  // any surrounding progress prose.
+                  yield* turnMutation.withPermits(1)(
+                    Effect.gen(function* () {
+                      const current = yield* Ref.get(acc)
+                      const next = {
+                        ...current,
+                        parts: current.parts.flatMap(
+                          (part): ReadonlyArray<ContentPart> => {
+                            if (part._tag !== "Text") return [part]
+                            const text = stripHtmlPlanBlocks(part.text)
+                            return text.length === 0 ? [] : [{ ...part, text }]
+                          }
+                        )
+                      }
+                      yield* Ref.set(acc, next)
+                      yield* TranscriptStore.patchLast(chatId, () => next).pipe(
+                        Effect.provide(env),
+                        Effect.ignore
+                      )
+                    })
+                  )
+                  yield* emit(
+                    revisingCanonicalPlan
+                      ? { _tag: "PlanUpdated", plan: canonicalPlan }
+                      : { _tag: "PlanProposed", plan: canonicalPlan }
+                  )
                 })
               )
             })

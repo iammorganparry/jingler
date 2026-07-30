@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  fencedHtmlPlan,
   hasPlanBlock,
   parseFlow,
   parsePlan,
@@ -251,7 +252,7 @@ describe("hasPlanBlock", () => {
 
   it("keeps nested code fences inside a four-backtick HTML plan", () => {
     const raw = [
-      "````html plan",
+      "````html",
       "<h1>PRD: Nested sample</h1>",
       "<h2>Context</h2><p>Keep examples intact.</p>",
       '<section data-stage="s1" data-title="Build parser">',
@@ -269,6 +270,44 @@ describe("hasPlanBlock", () => {
     expect(plan.steps[0]?.guards.map((guard) => guard.text)).toStrictEqual([
       "The full stage survives."
     ])
+  })
+
+  it("accepts the canonical html fence and the legacy html plan fence", () => {
+    const html = [
+      "<h1>PRD: Canonical HTML</h1>",
+      '<section data-stage="01" data-title="Parse it">',
+      "<h3>Intent</h3><p>Render the plan.</p>",
+      '<div data-acceptance="01.1" data-status="pending">The stage renders.</div>',
+      "</section>"
+    ].join("\n")
+
+    for (const opening of ["````html", "````html plan"]) {
+      const raw = `${opening}\n${html}\n\`\`\`\``
+      expect(hasPlanBlock(raw)).toBe(true)
+      expect(parsePlan(raw, `plan_${opening.length}`).structured).toBe(true)
+    }
+  })
+
+  it("uses the newest complete HTML plan after a reformat attempt", () => {
+    const invalid = [
+      "````html",
+      "<h1>PRD: Incomplete</h1>",
+      "<p>No stage yet.</p>",
+      "````"
+    ].join("\n")
+    const valid = [
+      "````html",
+      "<h1>PRD: Corrected</h1>",
+      '<section data-stage="01" data-title="Correct">',
+      "<h3>Intent</h3><p>Use the corrected submission.</p>",
+      '<div data-acceptance="01.1" data-status="pending">The correction wins.</div>',
+      "</section>",
+      "````"
+    ].join("\n")
+    const raw = `${invalid}\n\nReformatted:\n\n${valid}`
+
+    expect(fencedHtmlPlan(raw)).toContain("PRD: Corrected")
+    expect(parsePlan(raw, "plan_corrected").summary).toBe("Corrected")
   })
 })
 
@@ -294,7 +333,8 @@ describe("parsePlan — the unstructured fallback", () => {
 
 describe("planModeInstructions", () => {
   it("documents safe PRD HTML and forbids execution", () => {
-    expect(planModeInstructions()).toContain("````html plan")
+    expect(planModeInstructions()).toContain("````html")
+    expect(planModeInstructions()).not.toContain("````html plan")
     expect(planModeInstructions()).toContain("data-acceptance")
     expect(planModeInstructions()).toMatch(/ExitPlanMode/)
     expect(planModeInstructions().toLowerCase()).toContain("do not edit")

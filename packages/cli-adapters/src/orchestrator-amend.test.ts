@@ -3,13 +3,14 @@ import { parseOrchestratorAmendment, stripOrchestratorAmendment } from "./orches
 
 /**
  * The orchestrator amends its approved plan by re-issuing the whole plan as a
- * ` ````html plan ` block in an auto-mode reply. These cover the "is this an
+ * ` ````html ` block in an auto-mode reply. These cover the "is this an
  * amendment?" decision — a plan block with a stage is one; prose, or a block
  * with no stage, is not — and that the block is scrubbed from what the operator
  * reads.
  */
 
-const planBlock = (body: string) => `\`\`\`\`html plan\n${body}\n\`\`\`\``
+const planBlock = (body: string, legacy = false) =>
+  `\`\`\`\`html${legacy ? " plan" : ""}\n${body}\n\`\`\`\``
 
 const twoStages = planBlock(
   '<h1>PRD: x</h1><section data-stage="01" data-title="A"><div data-acceptance="01.1" data-status="pending">a</div></section>'
@@ -20,6 +21,16 @@ describe("parseOrchestratorAmendment", () => {
     const html = parseOrchestratorAmendment(`Folding that in.\n\n${twoStages}`)
     expect(html).not.toBeNull()
     expect(html).toContain('data-stage="01"')
+  })
+
+  it("continues to accept a legacy html plan amendment", () => {
+    const html = parseOrchestratorAmendment(
+      planBlock(
+        '<h1>PRD: legacy</h1><section data-stage="01" data-title="A"><div data-acceptance="01.1" data-status="pending">a</div></section>',
+        true
+      )
+    )
+    expect(html).toContain("PRD: legacy")
   })
 
   it("returns null for an ordinary reply with no plan block", () => {

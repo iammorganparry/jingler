@@ -489,7 +489,7 @@ export function ConversationPane({
             "I've drafted the plan below. Treat it as the starting point:",
             "review it, fill in the gaps, and propose a complete plan.",
             "",
-            "````html plan",
+            "````html",
             source.trim(),
             "````"
           ].join("\n")
