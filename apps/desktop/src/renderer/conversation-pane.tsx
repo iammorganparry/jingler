@@ -6,7 +6,7 @@
  * the Plan tab does NOT unmount the agent stream (which would abort a parked plan).
  */
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { Session } from "@jingler/core"
 import { agentChildren, agentPath, clampFontScale } from "@jingler/core"
 import {
@@ -110,7 +110,24 @@ export function ConversationPane({
    * handing off is to escape this chat's setup. Null when they've never set one,
    * which means "leave the new chat on whatever it starts with".
    */
+  const queryClient = useQueryClient()
   const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
+  // The agentic orchestrator flow ("Jingler mode"). Global config, default ON —
+  // the toggle lives on the orchestrator composer. Off, the orchestrator chat
+  // runs as a plain chat on the source harness (see agent-runner's `orchestrating`).
+  const jinglerMode = providersQuery.data?.orchestratorEnabled ?? true
+  const toggleJinglerMode = (enabled: boolean) => {
+    // Optimistic: paint the toggle immediately, then persist. The RPC returns the
+    // whole config, so the cache is refreshed from the source of truth on resolve.
+    queryClient.setQueryData(
+      ["config"],
+      providersQuery.data ? { ...providersQuery.data, orchestratorEnabled: enabled } : undefined
+    )
+    void rpc
+      .configSetOrchestratorEnabled(enabled)
+      .then((config) => queryClient.setQueryData(["config"], config))
+      .catch(() => queryClient.invalidateQueries({ queryKey: ["config"] }))
+  }
   // Conversation text-size multiplier, scoped to the transcript wrapper below via
   // a `--sb-font-scale` CSS var. Set HERE rather than on document.documentElement
   // on purpose: the shared `.sb-md` calc() rules must only scale inside the
@@ -566,6 +583,9 @@ export function ConversationPane({
           // transcript is on screen — only the focused pane still has to be checked.
           autoFocusComposer={paneFocused}
           focusKey={activeChat.id}
+          orchestrator={activeChat.role === "orchestrator"}
+          jinglerMode={jinglerMode}
+          onToggleJinglerMode={toggleJinglerMode}
           archived={
             session.archived
               ? {

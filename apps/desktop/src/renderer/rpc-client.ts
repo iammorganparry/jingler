@@ -436,6 +436,9 @@ export const rpc = {
   /** Persist ADHD mode; resolves with the whole updated config. */
   configSetAdhdMode: (adhdMode: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setAdhdMode({ adhdMode })),
+  /** Persist Jingler mode (the agentic orchestrator flow); resolves with the whole config. */
+  configSetOrchestratorEnabled: (orchestratorEnabled: boolean): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setOrchestratorEnabled({ orchestratorEnabled })),
   /** Persist the conversation + code text-size multiplier. */
   configSetFontScale: (fontScale: number): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setFontScale({ fontScale })),

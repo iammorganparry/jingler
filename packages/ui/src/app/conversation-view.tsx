@@ -206,6 +206,15 @@ export interface ConversationViewProps {
   autoFocusComposer?: boolean
   /** Identity of "the one on screen" — the session id. */
   focusKey?: string
+  /**
+   * This is the session's orchestrator chat — surface the "Jingler mode" toggle
+   * in the composer.
+   */
+  orchestrator?: boolean
+  /** Whether Jingler mode is on (hides the model/mode chips when it is). */
+  jinglerMode?: boolean
+  /** Flip Jingler mode (persisted globally in config). */
+  onToggleJinglerMode?: (enabled: boolean) => void
 }
 
 /** Count added/removed lines in a unified diff, ignoring the file headers. */
@@ -266,6 +275,9 @@ export function ConversationView({
   onDraftAttachmentsChange,
   autoFocusComposer,
   focusKey,
+  orchestrator = false,
+  jinglerMode = true,
+  onToggleJinglerMode,
   archived,
   initialDraft
 }: ConversationViewProps) {
@@ -540,6 +552,9 @@ export function ConversationView({
                 onSetHarness={onSetHarness}
                 mode={mode}
                 onSetMode={onSetMode}
+                showJinglerToggle={orchestrator}
+                jinglerMode={jinglerMode}
+                onToggleJinglerMode={onToggleJinglerMode}
                 reasoningEffort={reasoningEffort}
                 thinkingEnabled={thinkingEnabled}
                 onSetReasoning={onSetReasoning}

@@ -28,6 +28,7 @@ import {
   findApprovedPlan,
   isBackgroundTaskEvent,
   isSubagentEvent,
+  ORCHESTRATOR_ENABLED_DEFAULT,
   parsePlanHtml,
   planDocumentToPlan,
   PLAN_AUTO_RUN_DEFAULT,
@@ -46,6 +47,8 @@ import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
+import { orchestratorNote } from "./orchestrator-prompt.js"
+import { parseOrchestratorAmendment, stripOrchestratorAmendment } from "./orchestrator-amend.js"
 import { modeOnApproval, modeToRestore } from "./exec-mode.js"
 import { isTerminal, routeOf } from "./turn-events.js"
 import {
@@ -905,17 +908,23 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
 
           const sessionMode =
             (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? "accept-edits"
-          const orchestrating = chat.role === "orchestrator"
           const allow = new Set<string>([
             ...(yield* approvals.allowlistFor(chatId)),
             ...(chat.allowlist ?? [])
           ])
           const sessionCli = session.cli
           const workspaceConfig = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
+          // Read per turn: the operator can turn the orchestrator flow off in
+          // Settings mid-session, and the very next turn must obey. When it is
+          // off, an orchestrator chat is treated as a plain chat on the session's
+          // own harness — no orchestrator persona, no forced plan turn, its own
+          // mode/model chips — so the operator drives the source harness directly.
+          const orchestratorEnabled =
+            workspaceConfig?.orchestratorEnabled ?? ORCHESTRATOR_ENABLED_DEFAULT
+          const orchestrating = chat.role === "orchestrator" && orchestratorEnabled
           const discoveredClis = yield* DiscoveryService.list().pipe(
             Effect.orElseSucceed(() => [])
           )
-          const mode: PermissionMode = orchestrating ? "plan" : sessionMode
           // Read once per turn: plan mode's commands run unattended unless the
           // operator switched that off in Settings.
           const planAutoRun = workspaceConfig?.planAutoRun ?? PLAN_AUTO_RUN_DEFAULT
@@ -987,6 +996,34 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             worktreePath.length > 0
               ? yield* PlanStore.list(worktreePath).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>))
               : []
+          // Whether this orchestrator already has an approved canonical plan.
+          // "Approved" is every post-gate status — once the operator approves,
+          // the plan moves through executing → needs-verification → done and
+          // never returns to the approval gate. Read from the canonical document,
+          // the single source of truth (a non-orchestrator turn skips the read).
+          const canonicalPlan =
+            orchestrating && worktreePath.length > 0
+              ? yield* PlanStore.readDocument(worktreePath, sessionId, chatId).pipe(
+                  Effect.orElseSucceed(() => null)
+                )
+              : null
+          const planApproved =
+            canonicalPlan !== null &&
+            (canonicalPlan.status === "approved" ||
+              canonicalPlan.status === "executing" ||
+              canonicalPlan.status === "needs-verification" ||
+              canonicalPlan.status === "done")
+          // The orchestrator is READ-ONLY in plan mode only while drafting its
+          // FIRST plan — no approved plan yet. Once a plan is approved it runs in
+          // AUTO mode with its native tools (edit, git/gh, open PRs, invoke
+          // skills), so it can finish quick work in place and amend + hand off
+          // large work without ever re-entering the approval gate. A
+          // non-orchestrator chat keeps the operator's own session mode.
+          const mode: PermissionMode = orchestrating
+            ? planApproved
+              ? "auto"
+              : "plan"
+            : sessionMode
           yield* ContextManager.bindContext(chatId, sessionId)
           /**
            * Consume a ready digest, if the context manager has one waiting.
@@ -1032,7 +1069,15 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // pointer. There is no system-prompt hook that every harness shares, and
           // a setting the operator can flip mid-session has to apply to the NEXT
           // turn — which a session-start injection could not do.
-          const adhd = adhdMode ? adhdNote(cli) : null
+          // The orchestrator gets its own persona, not the ADHD note: one
+          // string for every harness (so it reads the same on Opus and Codex)
+          // and always on, since being an orchestrator is a role, not an
+          // operator-toggled setting. Plain chats keep the ADHD note as before.
+          const adhd = orchestrating
+            ? orchestratorNote()
+            : adhdMode
+              ? adhdNote(cli)
+              : null
           // Not optional, and not a setting: an agent that asks in prose is an
           // agent whose question never reaches the operator. Claude has the
           // `AskUserQuestion` tool the adapter intercepts, Codex has the fenced
@@ -1060,11 +1105,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           )
           const promptText = orchestrating
             ? [
-                "You are this session's orchestrator and canonical planner.",
-                "For implementation work, inspect the repository read-only and return a complete",
-                "plan whose independent dependency groups are assigned to worker agents.",
-                "During execution, reconcile new user requests into the existing canonical plan;",
-                "preserve stable stage and acceptance ids so completed evidence is not lost.",
+                "You are this session's orchestrator.",
+                planApproved
+                  ? "A plan is already approved and running. Fold each new request into it: finish quick work yourself with your native tools. For larger work, amend the plan by re-issuing the COMPLETE updated plan as one four-backtick ````html plan block (keep every stage and acceptance id stable so evidence survives) — Jingler applies it and dispatches the affected workers automatically, with no approval. Do not draft a fresh plan or open a new approval."
+                  : "For substantial implementation work, inspect the repository and return a complete plan whose independent dependency groups are assigned to worker agents. Anything quick or immediately achievable, just do yourself.",
                 "",
                 "Available worker routes:",
                 ...orchestrationRoutes.flatMap((provider) =>
@@ -1161,7 +1205,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             // over the spec, so a null id alone would silently resume anyway.
             resumeId: digest === null ? chat.resumeId ?? null : null,
             ...(digest === null ? {} : { fresh: true }),
-            ...(orchestrating ? { readOnly: true } : {}),
+            // Read-only ONLY while the orchestrator drafts its first plan (plan
+            // mode). After approval it works in auto mode with full write access,
+            // so it can implement quick fixes and open PRs directly.
+            ...(orchestrating && mode === "plan" ? { readOnly: true } : {}),
             ...(openConnectorServer ? { openConnector: openConnectorServer } : {}),
             ...(browserMcp ? { browserMcp } : {})
           }
@@ -1421,6 +1468,55 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               }).pipe(Effect.ignore)
             }).pipe(Effect.provide(env), Effect.ignore)
 
+          // Once its first plan is approved, the orchestrator runs in auto mode
+          // and amends the plan by re-issuing the WHOLE plan as a ````html plan
+          // block. Apply it as a reconciled amendment — stable stage/acceptance
+          // ids and durable worker evidence are carried across, changed and new
+          // stages are requeued — and keep it in the executing lane so no new
+          // approval gate opens. Main dispatches the requeued workers after the
+          // turn (see `dispatchPendingOrchestration`). Returns whether an
+          // amendment actually landed, so the caller can scrub the raw block from
+          // the visible reply.
+          const applyOrchestratorAmendment = (text: string): Effect.Effect<boolean> =>
+            Effect.gen(function* () {
+              if (!orchestrating || !planApproved || worktreePath.length === 0) return false
+              const amendmentHtml = parseOrchestratorAmendment(text)
+              if (amendmentHtml === null) return false
+              const current = yield* PlanStore.readDocument(worktreePath, sessionId, chatId)
+              if (
+                current === null ||
+                current.producingChatId !== chatId ||
+                !["approved", "executing", "needs-verification"].includes(current.status)
+              ) return false
+              const parsed = parsePlanHtml(amendmentHtml)
+              if (!parsed.valid) return false
+              // Normalize the amendment's assignments to the operator's router,
+              // exactly as a first-plan proposal does — reconciliation then keeps
+              // unchanged stages' prior assignees and requeues only real changes.
+              const routed =
+                workerRouting !== null
+                  ? applyWorkerRoutingToPlanHtml(
+                      parsed.html,
+                      parsed.projection.stages,
+                      workerRouting
+                    )
+                  : parsed.html
+              const updated = yield* PlanStore.updateDocument(worktreePath, {
+                planId: current.id,
+                baseRevision: current.revision,
+                source: routed,
+                author: "agent",
+                reconcile: true,
+                status: "executing"
+              }).pipe(Effect.either)
+              if (updated._tag === "Left") return false
+              yield* out.offer({
+                _tag: "PlanUpdated",
+                plan: planDocumentToPlan(updated.right)
+              })
+              return true
+            }).pipe(Effect.provide(env))
+
           // Fold each event into the assistant message + persist, then surface it.
           // Native steering enters from an RPC fiber, so serialize it with the
           // adapter's event producer. A turn/completed notification arriving in
@@ -1473,6 +1569,19 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   .map((part) => part.text)
                   .join("\n")
                 yield* recordPlanEvidence(settledText)
+                // An approved-plan orchestrator turn may carry a plan amendment.
+                // Apply it (reconciled, no re-approval) and, if it landed, scrub
+                // the raw ````html plan block from the reply the operator reads.
+                if (yield* applyOrchestratorAmendment(settledText)) {
+                  next = {
+                    ...next,
+                    parts: next.parts.flatMap((part): ReadonlyArray<ContentPart> => {
+                      if (part._tag !== "Text") return [part]
+                      const stripped = stripOrchestratorAmendment(part.text)
+                      return stripped.length === 0 ? [] : [{ ...part, text: stripped }]
+                    })
+                  }
+                }
               }
               if (
                 (event._tag === "Done" || event._tag === "Failed") &&
