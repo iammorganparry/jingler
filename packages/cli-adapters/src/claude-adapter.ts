@@ -37,6 +37,7 @@ import {
   PLAN_HTML_REFORMAT,
   planModeInstructions
 } from "./plan-parse.js"
+import { createPlanDraftStream } from "./plan-draft-stream.js"
 import { turnContinuation } from "./turn-continuation.js"
 
 /**
@@ -1110,6 +1111,9 @@ export const runClaude = (
         // tool with `{}`. Keep the main agent's visible reply as the transport
         // fallback; sub-agent text is never eligible to become the root plan.
         let planReplyText = ""
+        const planDraft = createPlanDraftStream(
+          () => `plan_${sessionId}_${planCount + 1}`
+        )
         // Whether we've already bounced a fence-less plan back for a reformat on
         // this run. Exactly one retry: a model that still won't comply degrades to
         // the raw fallback instead of ping-ponging forever.
@@ -1146,6 +1150,7 @@ export const runClaude = (
               planCount += 1
               const decision = await runP(ctx.proposePlan(plan))
               planReplyText = ""
+              planDraft.reset()
               planReformatAsked = false
               return {
                 behavior: "deny",
@@ -1199,6 +1204,8 @@ export const runClaude = (
             if (plan === null && !planReformatAsked) {
               planReformatAsked = true
               planReplyText = ""
+              const clear = planDraft.clear()
+              if (clear !== null) await runP(ctx.emit(clear))
               return { behavior: "deny", message: PLAN_REFORMAT }
             }
             planCount += 1
@@ -1217,6 +1224,7 @@ export const runClaude = (
               // proposal followed by Revise must not make an empty retry reuse
               // the previously reviewed document.
               planReplyText = ""
+              planDraft.reset()
               planReformatAsked = false
             })
             if (decision._tag === "Approve") {
@@ -1469,13 +1477,17 @@ export const runClaude = (
              * feeds `tools`/`bgState`, never the child or the input channel, so
              * nothing below depends on it having run late.
              */
-            const events = streamEventsFor(msg, tools, bgState)
+            let events = streamEventsFor(msg, tools, bgState)
             if (nativePlanActive) {
+              const drafts: Array<StreamEvent> = []
               for (const event of events) {
                 if (event._tag === "Assistant" && event.agentId === undefined) {
                   planReplyText += event.text
+                  const draft = planDraft.append(event.text)
+                  if (draft !== null) drafts.push(draft)
                 }
               }
+              if (drafts.length > 0) events = [...events, ...drafts]
             }
             // Keep the live sub-agent set current before anything reads it. Both
             // edges come from the mapper: `SubagentStarted` off the `Task` tool_use,
@@ -1534,7 +1546,19 @@ export const runClaude = (
                     )?.block
                   await runP(ctx.proposePlan(replyPlan, submittedBlock))
                   planReplyText = ""
+                  planDraft.reset()
                 }
+              }
+              // A terminal, non-plan reply must not leave an incomplete draft
+              // visible. Place the clear immediately before Done/Failed so the
+              // transcript fallback and terminal lifecycle stay ordered.
+              const clearDraft = planDraft.clear()
+              if (clearDraft !== null) {
+                events = events.flatMap((event) =>
+                  event._tag === "Done" || event._tag === "Failed"
+                    ? [clearDraft, event]
+                    : [event]
+                )
               }
               // The turn is ending: ask the harness how full the window actually
               // is, and emit that BEFORE the `Done` it belongs to. Ordering is

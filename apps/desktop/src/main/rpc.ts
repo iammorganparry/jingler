@@ -61,10 +61,13 @@ import { dirname, resolve } from "node:path"
 import {
   ConfigError,
   ConnectorError,
+  activePlanParticipants,
   GhError,
   GitError,
+  parsePlanThreadReply,
   PlanConflictError,
   PlanPersistenceError,
+  planThreadRelayPrompt,
   planStageSemanticFingerprint,
   resolveFindings,
   ReviewError,
@@ -88,7 +91,10 @@ import type {
   IssueAutomations,
   IssueSummary,
   Message,
+  PlanCommentMessageDeliveryState,
   PlanDocument,
+  PlanMentionDelivery,
+  PlanParticipant,
   PluginCatalog,
   PrMergeMethod,
   ProviderConfig,
@@ -321,7 +327,463 @@ export const planUsesOrchestration = (
   document: PlanDocument
 ): boolean =>
   session.chats.find((chat) => chat.id === document.producingChatId)?.role ===
-  "orchestrator"
+    "orchestrator"
+
+const planMutationConflict = (
+  message: string
+): PlanConflictError =>
+  new PlanConflictError({
+    message,
+    latestRevision: 0,
+    latest: null
+  })
+
+/** `Plan.watch` handler, shared with the RPC integration test. */
+export const planWatch = (sessionId: string) =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId).pipe(
+        Effect.orElseSucceed(() => null)
+      )
+      if (session === null || !session.worktreePath) return Stream.empty
+      const store = yield* PlanStore
+      return store.watch(
+        session.worktreePath,
+        session.id,
+        session.activeChatId
+      )
+    })
+  )
+
+/** `Plan.appendMessage` handler, exported for the CAS/RPC integration test. */
+export const planAppendMessage = (input: {
+  readonly sessionId: string
+  readonly planId: string
+  readonly baseRevision: number
+  readonly annotationId: string
+  readonly body: string
+  readonly authorKind: "user" | "agent"
+  readonly authorId: string
+  readonly mentionedParticipantIds: ReadonlyArray<string>
+  readonly deliveryState: PlanCommentMessageDeliveryState
+}) =>
+  SessionStore.get(input.sessionId).pipe(
+    Effect.flatMap((session) =>
+      session.worktreePath == null
+        ? Effect.fail(planMutationConflict("This session has no plan worktree."))
+        : PlanStore.appendAnnotationMessage(session.worktreePath, input)
+    ),
+    Effect.catchTag("SessionNotFoundError", () =>
+      Effect.fail(planMutationConflict("The plan session no longer exists."))
+    )
+  )
+
+/** `Plan.updateMessageDelivery` handler. */
+export const planUpdateMessageDelivery = (input: {
+  readonly sessionId: string
+  readonly planId: string
+  readonly baseRevision: number
+  readonly annotationId: string
+  readonly messageId: string
+  readonly deliveryState: PlanCommentMessageDeliveryState
+  readonly author: "user" | "agent"
+}) =>
+  SessionStore.get(input.sessionId).pipe(
+    Effect.flatMap((session) =>
+      session.worktreePath == null
+        ? Effect.fail(planMutationConflict("This session has no plan worktree."))
+        : PlanStore.updateAnnotationMessageDelivery(session.worktreePath, input)
+    ),
+    Effect.catchTag("SessionNotFoundError", () =>
+      Effect.fail(planMutationConflict("The plan session no longer exists."))
+    )
+  )
+
+/** `Plan.setThreadResolved` handler. */
+export const planSetThreadResolved = (input: {
+  readonly sessionId: string
+  readonly planId: string
+  readonly baseRevision: number
+  readonly annotationId: string
+  readonly resolved: boolean
+  readonly author: "user" | "agent"
+}) =>
+  SessionStore.get(input.sessionId).pipe(
+    Effect.flatMap((session) =>
+      session.worktreePath == null
+        ? Effect.fail(planMutationConflict("This session has no plan worktree."))
+        : PlanStore.setAnnotationResolved(session.worktreePath, input)
+    ),
+    Effect.catchTag("SessionNotFoundError", () =>
+      Effect.fail(planMutationConflict("The plan session no longer exists."))
+    )
+  )
+
+/** Provider-neutral, de-duplicated snapshot for the plan mention picker. */
+export const planParticipants = (sessionId: string, planId: string) =>
+  Effect.gen(function* () {
+    const runner = yield* AgentRunner
+    const orchestration = yield* OrchestrationService
+    const [mainParticipants, workerParticipants] = yield* Effect.all([
+      runner.planParticipants(sessionId, planId),
+      orchestration.planParticipants(sessionId, planId)
+    ])
+    return activePlanParticipants([mainParticipants, workerParticipants])
+  })
+
+const routePlanParticipant = (
+  target: PlanParticipant,
+  input: {
+    readonly sessionId: string
+    readonly planId: string
+    readonly text: string
+  }
+) =>
+  Effect.gen(function* () {
+    const ownedByWorker =
+      target.role === "worker" ||
+      target.ownerRoutingId?.startsWith("worker:") === true
+    return ownedByWorker
+      ? yield* OrchestrationService.steerPlanParticipant({
+          ...input,
+          routingId: target.routingId
+        })
+      : yield* Effect.flatMap(AgentRunner, (runner) =>
+          runner.steerPlanParticipant({
+            ...input,
+            routingId: target.routingId
+          })
+        )
+  })
+
+interface PlanDispatchRouting<R> {
+  readonly participants: (
+    sessionId: string,
+    planId: string
+  ) => Effect.Effect<ReadonlyArray<PlanParticipant>, never, R>
+  readonly route: (
+    target: PlanParticipant,
+    input: {
+      readonly sessionId: string
+      readonly planId: string
+      readonly text: string
+    }
+  ) => Effect.Effect<
+    | { readonly status: "delivered"; readonly reply: string | null }
+    | { readonly status: "unavailable" | "failed"; readonly detail: string },
+    never,
+    R
+  >
+}
+
+type LivePlanDispatchRequirements =
+  | AgentRunner
+  | AppPaths
+  | FileSystem.FileSystem
+  | OrchestrationService
+  | Path.Path
+  | PlanStore
+  | SessionStore
+
+const livePlanDispatchRouting: PlanDispatchRouting<LivePlanDispatchRequirements> = {
+  participants: planParticipants,
+  route: routePlanParticipant
+}
+
+interface PlanDispatchMessageInput {
+  readonly sessionId: string
+  readonly planId: string
+  readonly baseRevision: number
+  readonly annotationId: string
+  readonly body: string
+  readonly authorId: string
+  readonly mentionedParticipantIds: ReadonlyArray<string>
+}
+
+/**
+ * Persist first, then route. All later writes use the revision returned by the
+ * previous CAS mutation, so replies, delivery state, and visible unavailable
+ * notices remain ordered in one annotation thread.
+ */
+const routePlanMessageWithRouting = <R>(
+  input: PlanDispatchMessageInput,
+  routing: PlanDispatchRouting<R>,
+  initial?: {
+    readonly document: PlanDocument
+    readonly messageId: string
+  }
+) =>
+  Effect.gen(function* () {
+    let document: PlanDocument
+    if (initial === undefined) {
+      document = yield* planAppendMessage({
+        ...input,
+        authorKind: "user",
+        mentionedParticipantIds: [...new Set(input.mentionedParticipantIds)],
+        deliveryState: "pending"
+      })
+    } else {
+      document = initial.document
+    }
+    const lastMessageId = (): string | null =>
+      document.projection.annotations
+        .find((annotation) => annotation.id === input.annotationId)
+        ?.messages.at(-1)?.id ?? null
+    const initialMessageId = initial?.messageId ?? lastMessageId()
+    if (initialMessageId === null) {
+      return yield* Effect.fail(
+        planMutationConflict(
+          `Annotation "${input.annotationId}" did not retain its appended message.`
+        )
+      )
+    }
+
+    const appendAgentMessage = (
+      body: string,
+      authorId: string,
+      mentionedParticipantIds: ReadonlyArray<string>,
+      deliveryState: PlanCommentMessageDeliveryState
+    ) =>
+      Effect.gen(function* () {
+        document = yield* planAppendMessage({
+          sessionId: input.sessionId,
+          planId: input.planId,
+          baseRevision: document.revision,
+          annotationId: input.annotationId,
+          body,
+          authorKind: "agent",
+          authorId,
+          mentionedParticipantIds,
+          deliveryState
+        })
+        const messageId = lastMessageId()
+        if (messageId === null) {
+          return yield* Effect.fail(
+            planMutationConflict(
+              `Annotation "${input.annotationId}" did not retain its agent reply.`
+            )
+          )
+        }
+        return messageId
+      })
+
+    const deliveries: Array<PlanMentionDelivery> = []
+    const queue: Array<{
+      readonly messageId: string
+      readonly body: string
+      readonly mentionedParticipantIds: ReadonlyArray<string>
+      readonly depth: number
+    }> = [
+      {
+        messageId: initialMessageId,
+        body: input.body,
+        mentionedParticipantIds: [...new Set(input.mentionedParticipantIds)],
+        depth: 0
+      }
+    ]
+
+    while (queue.length > 0) {
+      const current = queue.shift()!
+      let failed = false
+      for (const participantId of current.mentionedParticipantIds) {
+        if (current.depth >= 8) {
+          failed = true
+          const detail =
+            "The agent-to-agent relay limit was reached. Retry or reroute this message manually."
+          deliveries.push({
+            participantId,
+            status: "failed",
+            detail,
+            retryable: true
+          })
+          yield* appendAgentMessage(
+            `Could not continue to ${participantId}: ${detail}`,
+            "jingler:dispatcher",
+            [],
+            "sent"
+          )
+          continue
+        }
+
+        const available = yield* routing.participants(
+          input.sessionId,
+          input.planId
+        )
+        const target = available.find(
+          (participant) => participant.routingId === participantId
+        )
+        if (target === undefined) {
+          failed = true
+          const detail =
+            `Participant "${participantId}" became unavailable before delivery. ` +
+            "Refresh the participant list, then retry or reroute this message."
+          deliveries.push({
+            participantId,
+            status: "unavailable",
+            detail,
+            retryable: true
+          })
+          yield* appendAgentMessage(
+            detail,
+            "jingler:dispatcher",
+            [],
+            "sent"
+          )
+          continue
+        }
+
+        const routed = yield* routing.route(target, {
+          sessionId: input.sessionId,
+          planId: input.planId,
+          text: planThreadRelayPrompt({
+            annotationId: input.annotationId,
+            target,
+            body: current.body,
+            availableParticipants: available
+          })
+        })
+        if (routed.status !== "delivered") {
+          failed = true
+          deliveries.push({
+            participantId,
+            status: routed.status,
+            detail: routed.detail,
+            retryable: true
+          })
+          yield* appendAgentMessage(
+            routed.detail,
+            "jingler:dispatcher",
+            [],
+            "sent"
+          )
+          continue
+        }
+
+        deliveries.push({
+          participantId,
+          status: "delivered",
+          detail: null,
+          retryable: false
+        })
+        if (routed.reply !== null) {
+          const reply = parsePlanThreadReply(routed.reply)
+          const replyMessageId = yield* appendAgentMessage(
+            reply.body,
+            target.routingId,
+            reply.mentionedParticipantIds,
+            reply.mentionedParticipantIds.length > 0 ? "pending" : "sent"
+          )
+          if (reply.mentionedParticipantIds.length > 0) {
+            queue.push({
+              messageId: replyMessageId,
+              body: reply.body,
+              mentionedParticipantIds: reply.mentionedParticipantIds,
+              depth: current.depth + 1
+            })
+          }
+        }
+      }
+
+      document = yield* planUpdateMessageDelivery({
+        sessionId: input.sessionId,
+        planId: input.planId,
+        baseRevision: document.revision,
+        annotationId: input.annotationId,
+        messageId: current.messageId,
+        deliveryState: failed ? "failed" : "sent",
+        author: "agent"
+      })
+    }
+
+    return {
+      document,
+      messageId: initialMessageId,
+      deliveries
+    }
+  })
+
+export const planDispatchMessageWithRouting = <R>(
+  input: PlanDispatchMessageInput,
+  routing: PlanDispatchRouting<R>
+) => routePlanMessageWithRouting(input, routing)
+
+export const planDispatchMessage = (input: PlanDispatchMessageInput) =>
+  planDispatchMessageWithRouting(input, livePlanDispatchRouting)
+
+interface PlanDispatchExistingMessageInput {
+  readonly sessionId: string
+  readonly planId: string
+  readonly baseRevision: number
+  readonly annotationId: string
+  readonly messageId: string
+}
+
+/** Route a pending message created by the in-document selection composer. */
+export const planDispatchExistingMessageWithRouting = <R>(
+  input: PlanDispatchExistingMessageInput,
+  routing: PlanDispatchRouting<R>
+) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(input.sessionId).pipe(
+      Effect.catchAll(() =>
+        Effect.fail(planMutationConflict("The plan session no longer exists."))
+      )
+    )
+    if (session.worktreePath == null) {
+      return yield* Effect.fail(
+        planMutationConflict("This session has no plan worktree.")
+      )
+    }
+    const store = yield* PlanStore
+    const document = yield* store.readDocument(
+      session.worktreePath,
+      session.id,
+      session.activeChatId
+    )
+    if (
+      document === null ||
+      document.id !== input.planId ||
+      document.revision !== input.baseRevision
+    ) {
+      return yield* Effect.fail(
+        planMutationConflict(
+          "The canonical plan changed before the comment could be delivered."
+        )
+      )
+    }
+    const message = document.projection.annotations
+      .find((annotation) => annotation.id === input.annotationId)
+      ?.messages.find((candidate) => candidate.id === input.messageId)
+    if (
+      message === undefined ||
+      message.authorKind !== "user" ||
+      (message.deliveryState !== "pending" &&
+        message.deliveryState !== "failed")
+    ) {
+      return yield* Effect.fail(
+        planMutationConflict(
+          `Retryable comment message "${input.messageId}" is no longer available.`
+        )
+      )
+    }
+    return yield* routePlanMessageWithRouting(
+      {
+        sessionId: input.sessionId,
+        planId: input.planId,
+        baseRevision: input.baseRevision,
+        annotationId: input.annotationId,
+        body: message.body,
+        authorId: message.authorId,
+        mentionedParticipantIds: message.mentionedParticipantIds
+      },
+      routing,
+      { document, messageId: message.id }
+    )
+  })
+
+export const planDispatchExistingMessage = (
+  input: PlanDispatchExistingMessageInput
+) => planDispatchExistingMessageWithRouting(input, livePlanDispatchRouting)
 
 export const mergeCanonicalOrchestrationCheckpoints = (
   document: PlanDocument,
@@ -2240,15 +2702,7 @@ const HandlersLayer = JinglerRpcs.toLayer({
             )
       )
     ),
-  "Plan.watch": ({ sessionId }) =>
-    Stream.unwrap(
-      Effect.gen(function* () {
-        const session = yield* SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
-        if (session === null || !session.worktreePath) return Stream.empty
-        const store = yield* PlanStore
-        return store.watch(session.worktreePath, session.id, session.activeChatId)
-      })
-    ),
+  "Plan.watch": ({ sessionId }) => planWatch(sessionId),
   "Plan.updateDocument": ({ sessionId, planId, baseRevision, source, author }) =>
     SessionStore.get(sessionId).pipe(
       Effect.map((session) => session.worktreePath),
@@ -2278,6 +2732,14 @@ const HandlersLayer = JinglerRpcs.toLayer({
         )
       )
     ),
+  "Plan.appendMessage": (input) => planAppendMessage(input),
+  "Plan.participants": ({ sessionId, planId }) =>
+    planParticipants(sessionId, planId),
+  "Plan.dispatchMessage": (input) => planDispatchMessage(input),
+  "Plan.dispatchExistingMessage": (input) => planDispatchExistingMessage(input),
+  "Plan.updateMessageDelivery": (input) =>
+    planUpdateMessageDelivery(input),
+  "Plan.setThreadResolved": (input) => planSetThreadResolved(input),
   "Review.run": ({ sessionId, force }) => reviewRun(sessionId, force),
   // Unwrapped from the service like `Terminal.attach` — the reviewer outlives any
   // one watcher, so the stream attaches to it rather than starting it.

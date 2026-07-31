@@ -36,6 +36,7 @@ export interface PlanCommentInput {
   readonly from: number
   readonly to: number
   readonly body: string
+  readonly mentionedParticipantIds?: ReadonlyArray<string>
 }
 
 export interface PlanCommentRange {
@@ -155,18 +156,30 @@ export const removePlanComment = (editor: Editor, annotationId: string): boolean
  * decoration extension derives its highlight from the stored anchor. Returns
  * the generated annotation id.
  */
-export const applyPlanComment = (editor: Editor, { from, to, body }: PlanCommentInput): string => {
+export const applyPlanComment = (
+  editor: Editor,
+  { from, to, body, mentionedParticipantIds = [] }: PlanCommentInput
+): string => {
   const { doc } = editor.state
   const textStart = doc.textBetween(0, from, "\n", "\n").length
   const textEnd = doc.textBetween(0, to, "\n", "\n").length
   const fullText = doc.textBetween(0, doc.content.size, "\n", "\n")
   const anchor = buildPlanAnchor(fullText, textStart, textEnd)
   const id = nextAnnotationId(editor)
+  const createdAt = new Date().toISOString()
 
   // Land the annotation as a sibling right after the block the selection ends
   // in, so it stays inside a stage rather than splitting a paragraph.
   const $to = doc.resolve(to)
   const insertAt = $to.after($to.depth)
+  let stageId: string | null = null
+  for (let depth = $to.depth; depth > 0; depth--) {
+    const ancestor = $to.node(depth)
+    if (ancestor.type.name === "planStage") {
+      stageId = typeof ancestor.attrs.id === "string" ? ancestor.attrs.id : null
+      break
+    }
+  }
 
   editor
     .chain()
@@ -176,13 +189,25 @@ export const applyPlanComment = (editor: Editor, { from, to, body }: PlanComment
       type: "planAnnotation",
       attrs: {
         id,
+        stageId,
         author: "user",
         status: "open",
         quote: anchor.quote,
         prefix: anchor.prefix,
-        suffix: anchor.suffix
-      },
-      content: body.length > 0 ? [{ type: "text", text: body }] : []
+        suffix: anchor.suffix,
+        createdAt,
+        messages: [
+          {
+            id: `message-${id}-1`,
+            body,
+            authorKind: "user",
+            authorId: "user",
+            createdAt,
+            mentionedParticipantIds: [...new Set(mentionedParticipantIds)],
+            deliveryState: mentionedParticipantIds.length > 0 ? "pending" : "sent"
+          }
+        ]
+      }
     })
     .run()
 

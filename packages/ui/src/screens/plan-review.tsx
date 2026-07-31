@@ -1,8 +1,20 @@
-import type { ExecutionMode, Plan, PlanDocument } from "@jingler/core"
+import {
+  parsePlanHtml,
+  type ExecutionMode,
+  type PlanCommentMessage,
+  type Plan,
+  type PlanDocument,
+  type PlanDraft,
+  type PlanParticipant
+} from "@jingler/core"
 import { ClipboardList } from "lucide-react"
 import { Button } from "../components/button.js"
 import { Markdown } from "../components/markdown.js"
-import { atLeast, useWidthTier } from "../hooks/width-tier.js"
+import {
+  atLeast,
+  useWidthTier,
+  WidthTierProvider
+} from "../hooks/width-tier.js"
 import { cn } from "../lib/cn.js"
 import {
   PlanEditor,
@@ -17,10 +29,12 @@ import {
  * those render as a simple read-only document rather than resurrecting the
  * legacy multi-pane review workspace.
  */
-export function PlanReview(props: {
+export interface PlanReviewProps {
   /** Legacy transcript projection; never rendered as a review workspace. */
   plan: Plan | null
   document?: PlanDocument | null
+  /** Live-only sanitized source; never an editable or approvable revision. */
+  streamingDraft?: PlanDraft | null
   draft?: string
   remote?: PlanDocument | null
   syncState?: PlanEditorSyncState
@@ -48,7 +62,31 @@ export function PlanReview(props: {
   onAcceptRemote?: () => void
   onStopWorker?: (agentId: string) => void
   onRetryWorker?: (agentId: string) => void
-}) {
+  participants?: ReadonlyArray<PlanParticipant>
+  onReplyThread?: (
+    annotationId: string,
+    body: string,
+    mentionedParticipantIds: ReadonlyArray<string>
+  ) => Promise<void> | void
+  onRetryThread?: (
+    annotationId: string,
+    message: PlanCommentMessage
+  ) => Promise<void> | void
+  onSetThreadResolved?: (
+    annotationId: string,
+    resolved: boolean
+  ) => Promise<void> | void
+}
+
+export function PlanReview(props: PlanReviewProps) {
+  return (
+    <WidthTierProvider className="flex-col">
+      <PlanReviewBody {...props} />
+    </WidthTierProvider>
+  )
+}
+
+function PlanReviewBody(props: PlanReviewProps) {
   // Match the conversation transcript/composer column exactly. The plan used to
   // span the whole pane, which made prose line lengths jump when switching tabs
   // and made the same document feel unrelated to the chat that produced it.
@@ -56,6 +94,7 @@ export function PlanReview(props: {
   const {
     plan,
     document,
+    streamingDraft,
     draft,
     remote,
     syncState = "clean",
@@ -73,11 +112,31 @@ export function PlanReview(props: {
     onAcceptRemote,
     onStopWorker,
     onRetryWorker,
+    participants,
+    onReplyThread,
+    onRetryThread,
+    onSetThreadResolved,
     selectedStepId,
     onSelectStep
   } = props
 
-  if (!document && plan) {
+  const promotedPlan =
+    plan?.structured === true ? parsePlanHtml(plan.raw) : null
+  const promotingSource =
+    document == null && promotedPlan?.valid === true
+      ? promotedPlan.html
+      : null
+  const transientSource = streamingDraft?.source ?? promotingSource
+  const transientState =
+    streamingDraft !== null && streamingDraft !== undefined
+      ? streamingDraft.phase === "complete"
+        ? "validating"
+        : "composing"
+      : promotingSource !== null
+        ? "promoting"
+        : undefined
+
+  if (!document && plan && promotingSource === null && transientSource === null) {
     return (
       <div className={cn("min-h-0 min-w-0 flex-1 overflow-auto bg-editor", gutter)}>
         <article
@@ -90,7 +149,7 @@ export function PlanReview(props: {
     )
   }
 
-  if (!document) {
+  if (!document && transientSource === null) {
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-editor text-center">
         <ClipboardList className="size-8 text-line-strong" />
@@ -113,11 +172,12 @@ export function PlanReview(props: {
     <div className={cn("flex min-h-0 min-w-0 flex-1 bg-editor", gutter)}>
       <div
         data-testid="plan-review-container"
-        className="mx-auto flex min-h-0 w-full max-w-[760px] flex-1"
+        className="mx-auto flex min-h-0 w-full max-w-[980px] flex-1"
       >
         <PlanEditor
-          document={document}
-          draft={draft ?? document.source}
+          document={document ?? null}
+          draft={transientSource ?? draft ?? document?.source ?? ""}
+          transientState={transientState}
           remote={remote}
           state={syncState}
           error={syncError}
@@ -133,6 +193,10 @@ export function PlanReview(props: {
           onAcceptRemote={onAcceptRemote}
           onStopWorker={onStopWorker}
           onRetryWorker={onRetryWorker}
+          participants={participants}
+          onReplyThread={onReplyThread}
+          onRetryThread={onRetryThread}
+          onSetThreadResolved={onSetThreadResolved}
           targetStageId={selectedStepId}
           onTargetStageConsumed={
             selectedStepId ? () => onSelectStep?.(selectedStepId) : undefined

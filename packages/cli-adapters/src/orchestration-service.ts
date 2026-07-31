@@ -5,6 +5,7 @@ import {
 import type {
   CliExecError,
   CliKind,
+  PlanParticipant,
   PlanExecutionDiagnostic,
   PlanPrdStage,
   PlanStageAssignment,
@@ -14,6 +15,11 @@ import type {
   WorkerIdentity,
   WorkerLifecycleStatus,
   WorkerState
+} from "@jingler/core"
+import {
+  activePlanParticipants,
+  subagentParticipantRoutingId,
+  workerParticipantRoutingId
 } from "@jingler/core"
 import {
   Cause,
@@ -29,7 +35,12 @@ import {
   Stream
 } from "effect"
 import { createActor, createMachine } from "xstate"
-import type { AgentContext, SessionSpec } from "./adapter.js"
+import type {
+  AgentContext,
+  PlanParticipantSteerResult,
+  SessionSpec,
+  SteerTurn
+} from "./adapter.js"
 import { CliAdapter } from "./adapter.js"
 import { classifyProviderFailure } from "./provider-failure.js"
 import { releaseSessionRun, reserveSessionRun } from "./run-coordinator.js"
@@ -357,6 +368,20 @@ interface ParsedStageEvidence {
   readonly verificationErrors: ReadonlyArray<string>
 }
 
+interface WorkerReplyWaiter {
+  readonly firstChunk: Deferred.Deferred<void>
+  readonly chunks: Ref.Ref<ReadonlyArray<string>>
+}
+
+interface LiveWorkerRoute {
+  readonly worker: WorkerIdentity
+  readonly participant: PlanParticipant
+  readonly ownerId: string
+  readonly steer: Ref.Ref<SteerTurn | null>
+  readonly replyWaiter: Ref.Ref<WorkerReplyWaiter | null>
+  readonly subagents: Ref.Ref<Map<string, PlanParticipant>>
+}
+
 const evidenceFrom = (
   output: string,
   stage: OrchestrationStage,
@@ -574,6 +599,9 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
         new Map<string, Deferred.Deferred<void>>()
       )
       const activePlans = yield* Ref.make(new Set<string>())
+      const liveWorkerRoutes = yield* Ref.make(
+        new Map<string, LiveWorkerRoute>()
+      )
       const activityFeeds = yield* Ref.make(
         new Map<string, WorkerActivityFeed>()
       )
@@ -909,6 +937,26 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
           yield* Ref.update(workerSettled, (workers) =>
             new Map(workers).set(ownerId, settled)
           )
+          const worker = workerIdentityFor(input, group, attempt)
+          const workerRoutingId = workerParticipantRoutingId(
+            input.planId,
+            group.agentId,
+            attempt
+          )
+          const workerRoute: LiveWorkerRoute = {
+            worker,
+            participant: {
+              routingId: workerRoutingId,
+              displayName: group.agentId,
+              role: "worker",
+              lifecycle: "running",
+              ownerRoutingId: null
+            },
+            ownerId,
+            steer: yield* Ref.make<SteerTurn | null>(null),
+            replyWaiter: yield* Ref.make<WorkerReplyWaiter | null>(null),
+            subagents: yield* Ref.make(new Map<string, PlanParticipant>())
+          }
           return yield* Effect.gen(function* () {
             const holder = {}
             const machine = createActor(orchestrationWorkerMachine).start()
@@ -917,7 +965,6 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
             const allEvidence: Array<OrchestrationEvidence> = []
             let message: string | null = null
 
-          const worker = workerIdentityFor(input, group, attempt)
           const workerUpdate = (
             status: OrchestrationWorkerStatus,
             nextMessage: string | null
@@ -1005,6 +1052,9 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
 
           machine.send({ type: "START" })
           const runningStatus = workerStatusFrom(machine.getSnapshot().value)
+          yield* Ref.update(liveWorkerRoutes, (routes) =>
+            new Map(routes).set(workerRoutingId, workerRoute)
+          )
           yield* notifyWorker(
             input.callbacks,
             worker,
@@ -1090,6 +1140,32 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
 
               const emit = (event: StreamEvent): Effect.Effect<void> =>
                 Effect.gen(function* () {
+                  if (event._tag === "SubagentStarted") {
+                    const routingId = subagentParticipantRoutingId(
+                      workerRoutingId,
+                      event.id
+                    )
+                    yield* Ref.update(workerRoute.subagents, (subagents) =>
+                      new Map(subagents).set(routingId, {
+                        routingId,
+                        displayName: event.name,
+                        role: "subagent",
+                        lifecycle: "running",
+                        ownerRoutingId: workerRoutingId
+                      })
+                    )
+                  }
+                  if (event._tag === "SubagentEnded") {
+                    const routingId = subagentParticipantRoutingId(
+                      workerRoutingId,
+                      event.id
+                    )
+                    yield* Ref.update(workerRoute.subagents, (subagents) => {
+                      const next = new Map(subagents)
+                      next.delete(routingId)
+                      return next
+                    })
+                  }
                   if (event._tag === "Started") {
                     resumeId = event.sessionId
                     const persisted = yield* saveCheckpoint(
@@ -1103,6 +1179,14 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                   }
                   if (event._tag === "Assistant") {
                     yield* Ref.update(assistant, (chunks) => [...chunks, event.text])
+                    const waiter = yield* Ref.get(workerRoute.replyWaiter)
+                    if (waiter !== null) {
+                      yield* Ref.update(waiter.chunks, (chunks) => [
+                        ...chunks,
+                        event.text
+                      ])
+                      yield* Deferred.succeed(waiter.firstChunk, undefined)
+                    }
                   }
                   if (event._tag === "Failed") yield* Ref.set(emittedFailure, event.message)
                   yield* publishActivity({
@@ -1133,7 +1217,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                     Effect.zipRight(Effect.interrupt)
                   ),
                 registerBackgroundStop: () => Effect.void,
-                registerTurnSteer: () => Effect.void
+                registerTurnSteer: (steer) => Ref.set(workerRoute.steer, steer)
               }
 
               const adapterFiber = yield* Effect.fork(
@@ -1144,12 +1228,20 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
               )
               const adapterExit = yield* Fiber.await(adapterFiber).pipe(
                 Effect.ensuring(
-                  Ref.update(liveAdapterFibers, (fibers) => {
-                    if (fibers.get(ownerId) !== adapterFiber) return fibers
-                    const next = new Map(fibers)
-                    next.delete(ownerId)
-                    return next
-                  })
+                  Effect.all([
+                    Ref.set(workerRoute.steer, null),
+                    Ref.set(workerRoute.replyWaiter, null),
+                    Ref.set(
+                      workerRoute.subagents,
+                      new Map<string, PlanParticipant>()
+                    ),
+                    Ref.update(liveAdapterFibers, (fibers) => {
+                      if (fibers.get(ownerId) !== adapterFiber) return fibers
+                      const next = new Map(fibers)
+                      next.delete(ownerId)
+                      return next
+                    })
+                  ], { discard: true })
                 )
               )
               const stopped = (yield* Ref.get(cancelled)).has(ownerId)
@@ -1360,6 +1452,12 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                   next.delete(ownerId)
                   return next
                 })
+                yield* Ref.update(liveWorkerRoutes, (routes) => {
+                  if (routes.get(workerRoutingId) !== workerRoute) return routes
+                  const next = new Map(routes)
+                  next.delete(workerRoutingId)
+                  return next
+                })
                 yield* Ref.update(workerSettled, (workers) => {
                   const next = new Map(workers)
                   next.delete(ownerId)
@@ -1519,6 +1617,114 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
         })
       }
 
+      /**
+       * Snapshot only routes that still belong to live worker attempts. Nested
+       * harness agents are projected beside their owning worker and disappear
+       * as soon as their lifecycle end event (or owner teardown) arrives.
+       */
+      const planParticipants = (
+        sessionId: string,
+        planId: string
+      ): Effect.Effect<ReadonlyArray<PlanParticipant>> =>
+        Effect.gen(function* () {
+          const participants: Array<PlanParticipant> = []
+          for (const route of (yield* Ref.get(liveWorkerRoutes)).values()) {
+            if (
+              route.worker.sessionId !== sessionId ||
+              route.worker.planId !== planId
+            ) continue
+            participants.push(route.participant)
+            participants.push(...(yield* Ref.get(route.subagents)).values())
+          }
+          return activePlanParticipants([participants])
+        })
+
+      /**
+       * Steer one exact worker-attempt or nested-agent route and collect the
+       * first response burst. A missing exact id is never redirected to the
+       * worker's latest attempt.
+       */
+      const steerPlanParticipant = (request: {
+        readonly sessionId: string
+        readonly planId: string
+        readonly routingId: string
+        readonly text: string
+      }): Effect.Effect<PlanParticipantSteerResult> =>
+        Effect.gen(function* () {
+          let selected: LiveWorkerRoute | null = null
+          for (const route of (yield* Ref.get(liveWorkerRoutes)).values()) {
+            if (
+              route.worker.sessionId !== request.sessionId ||
+              route.worker.planId !== request.planId
+            ) continue
+            if (route.participant.routingId === request.routingId) {
+              selected = route
+              break
+            }
+            if ((yield* Ref.get(route.subagents)).has(request.routingId)) {
+              selected = route
+              break
+            }
+          }
+          if (selected === null) {
+            return {
+              status: "unavailable",
+              detail:
+                `Participant "${request.routingId}" is no longer active. ` +
+                "Refresh the participant list before retrying or rerouting."
+            }
+          }
+          const handler = yield* Ref.get(selected.steer)
+          if (handler === null) {
+            return {
+              status: "failed",
+              detail:
+                `Participant "${request.routingId}" is active but its steering ` +
+                "channel is temporarily unavailable. Retry this message."
+            }
+          }
+
+          const waiter: WorkerReplyWaiter = {
+            firstChunk: yield* Deferred.make<void>(),
+            chunks: yield* Ref.make<ReadonlyArray<string>>([])
+          }
+          yield* Ref.set(selected.replyWaiter, waiter)
+          return yield* Effect.gen(function* () {
+            const outcome = yield* Effect.tryPromise(() =>
+              handler(request.text, [])
+            ).pipe(Effect.either)
+            if (outcome._tag === "Left") {
+              return {
+                status: "failed",
+                detail: `Delivery to "${request.routingId}" failed. Retry this message.`
+              } satisfies PlanParticipantSteerResult
+            }
+            if (outcome.right !== "accepted") {
+              return {
+                status: "failed",
+                detail:
+                  `Delivery to "${request.routingId}" was deferred. ` +
+                  "Retry when its current operation completes."
+              } satisfies PlanParticipantSteerResult
+            }
+            const observed = yield* Deferred.await(waiter.firstChunk).pipe(
+              Effect.timeoutOption("2 seconds")
+            )
+            if (Option.isSome(observed)) yield* Effect.sleep("40 millis")
+            const reply = (yield* Ref.get(waiter.chunks)).join("").trim()
+            return {
+              status: "delivered",
+              reply: reply.length === 0 ? null : reply
+            } satisfies PlanParticipantSteerResult
+          }).pipe(
+            Effect.ensuring(
+              Ref.update(selected.replyWaiter, (current) =>
+                current === waiter ? null : current
+              )
+            )
+          )
+        })
+
       /** Stop and await every orchestration worker owned by one session. */
       const stopSession = (sessionId: string): Effect.Effect<void> =>
         Effect.gen(function* () {
@@ -1561,6 +1767,8 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
         stopWorker,
         stopSession,
         isPlanRunning,
+        planParticipants,
+        steerPlanParticipant,
         watch,
         activityFeedCount
       }

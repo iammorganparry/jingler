@@ -36,6 +36,19 @@ describe("routeOf", () => {
     expect(routeOf({ _tag: "ToolDelta", id: "t1", output: "…" })).toBe("stream-only")
   })
 
+  it("keeps volatile plan drafts OUT of the transcript", () => {
+    expect(
+      routeOf({
+        _tag: "PlanDraft",
+        draft: {
+          id: "plan-1",
+          source: "<h1>PRD: Live</h1>",
+          phase: "composing"
+        }
+      })
+    ).toBe("stream-only")
+  })
+
   it("sends background-task events to the registry, not the turn", () => {
     // They outlive the turn; persisting one would pin a still-running task to a
     // finished message.

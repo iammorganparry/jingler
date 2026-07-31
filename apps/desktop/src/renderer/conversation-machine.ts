@@ -19,6 +19,7 @@ import type {
   PlanAnnotationAnchor,
   PlanApprovalResult,
   PlanComment,
+  PlanDraft,
   ProviderModels,
   QuestionAnswer,
   ReasoningSetting,
@@ -164,6 +165,12 @@ export interface ConversationContext {
   readonly sharedPlanChatId: string | null
   /** Canonical plan projected over every transcript page as it is loaded. */
   readonly sharedPlan: Plan | null
+  /** Volatile sanitized plan source for the current planning turn. */
+  readonly planDraft: PlanDraft | null
+  /** Prevents a reformat retry from reopening a split the operator closed. */
+  readonly planDraftPresentationRequested: boolean
+  /** One-shot signal consumed by the responsive session pane. */
+  readonly planDraftPresentationNonce: number
   /** Tokens currently occupying the main agent's context window. */
   readonly tokens: number
   /** Epoch ms the current run started, or null when idle — drives the elapsed timer. */
@@ -663,6 +670,8 @@ export const conversationMachine = setup({
         reviewer: keepReviewer(context.reviewer),
         resumePlanId: null,
         resumePlanRevision: null,
+        planDraft: null,
+        planDraftPresentationRequested: false,
         // Context occupancy belongs to the resumed harness conversation, not to
         // one run. Keep the last reading visible until Usage replaces it.
         runStartedAt: Date.now(),
@@ -688,6 +697,8 @@ export const conversationMachine = setup({
       return {
         resumePlanId: event.planId,
         resumePlanRevision: event.revision ?? null,
+        planDraft: null,
+        planDraftPresentationRequested: false,
         planActionError: null,
         pendingText: "",
         pendingImages: [],
@@ -848,6 +859,8 @@ export const conversationMachine = setup({
         reviewer: keepReviewer(context.reviewer),
         resumePlanId: null,
         resumePlanRevision: null,
+        planDraft: null,
+        planDraftPresentationRequested: false,
         runStartedAt: Date.now(),
         lastOutcome: null,
         messages: [
@@ -888,11 +901,22 @@ export const conversationMachine = setup({
           messages: patchLast(context.messages, (last) => applyStreamEvent(last, e))
         }
       }
+      if (e._tag === "PlanDraft") {
+        if (e.draft.phase === "cleared") return { planDraft: null }
+        const first = !context.planDraftPresentationRequested
+        return {
+          planDraft: e.draft,
+          planDraftPresentationRequested: true,
+          planDraftPresentationNonce:
+            context.planDraftPresentationNonce + (first ? 1 : 0)
+        }
+      }
       if (e._tag === "PlanProposed") {
         return {
           messages: patchLast(context.messages, (last) => applyStreamEvent(last, e)),
           sharedPlanChatId: context.chatId,
-          sharedPlan: e.plan
+          sharedPlan: e.plan,
+          planDraft: null
         }
       }
       // A `PlanUpdated` addresses a plan by id, and that plan part lives in the
@@ -907,7 +931,8 @@ export const conversationMachine = setup({
               ? applyStreamEvent(m, e)
               : m
           ),
-          sharedPlan: e.plan
+          sharedPlan: e.plan,
+          planDraft: null
         }
       }
       const messages = patchLast(context.messages, (last) => applyStreamEvent(last, e))
@@ -930,11 +955,18 @@ export const conversationMachine = setup({
           subagents: settled,
           tokens: context.tokens > 0 ? context.tokens : e.tokens,
           runStartedAt: null,
-          lastOutcome: "done" as const
+          lastOutcome: "done" as const,
+          planDraft: null
         }
       }
       if (e._tag === "Failed") {
-        return { messages, subagents: settled, runStartedAt: null, lastOutcome: "failed" as const }
+        return {
+          messages,
+          subagents: settled,
+          runStartedAt: null,
+          lastOutcome: "failed" as const,
+          planDraft: null
+        }
       }
       // The harness reports its actual model on init — reflect it in the chip.
       return e._tag === "Started" && e.model ? { messages, model: e.model } : { messages }
@@ -1370,6 +1402,7 @@ export const conversationMachine = setup({
         applyStreamEvent(last, { _tag: "Failed", message: STOPPED_NOTE })
       ),
       runStartedAt: null,
+      planDraft: null,
       // The OPERATOR stopped this run. Recording it as `failed` would notify
       // them that their own deliberate action went wrong.
       lastOutcome: null
@@ -1472,6 +1505,9 @@ export const conversationMachine = setup({
       planActionError: null,
       sharedPlanChatId: null,
       sharedPlan: null,
+      planDraft: null,
+      planDraftPresentationRequested: false,
+      planDraftPresentationNonce: 0,
       // Rehydrate the last measured working set immediately. ContextManager owns
       // the trigger/phase snapshot, but the view reads this live field for the
       // meter's numerator; starting at zero hid the whole component after every

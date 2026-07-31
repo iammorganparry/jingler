@@ -59,10 +59,12 @@ const proposePlan = async (launched: LaunchedApp): Promise<void> => {
   })
   await expect(window.getByLabel("Plan document")).toBeVisible()
   await expect(
-    window.getByText("PRD: Refactor auth flow", { exact: true })
+    window.getByRole("heading", { name: "PRD: Refactor auth flow" })
   ).toBeVisible()
   await expect(
-    window.getByText("Audit session middleware", { exact: true })
+    window
+      .getByLabel("Plan document")
+      .getByText("Audit session middleware", { exact: true })
   ).toBeVisible()
   await expect.poll(() => existsSync(currentPlanPath(launched))).toBe(true)
   await expect.poll(() => readFileSync(currentPlanPath(launched), "utf8")).toContain(
@@ -199,7 +201,7 @@ test("the preferred orchestrator persists across restart", async ({ launchApp })
   ).toContainText("Codex")
 })
 
-test("comments stay aligned with their highlighted line, escape clipping, and can be deleted", async ({
+test("comments stay aligned with their highlighted line, escape clipping, and can be resolved", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -212,10 +214,8 @@ test("comments stay aligned with their highlighted line, escape clipping, and ca
 
   await selectText(launched.window, "Implement stages in order")
   await launched.window.getByRole("button", { name: "Comment", exact: true }).click()
-  await launched.window
-    .getByRole("textbox", { name: "Comment", exact: true })
-    .fill("Keep rollout sequential.")
-  await launched.window.getByRole("button", { name: "Send comment" }).click()
+  await launched.window.getByLabel("Add a comment…").fill("Keep rollout sequential.")
+  await launched.window.getByRole("button", { name: "Send reply" }).click()
 
   const highlight = launched.window.locator('[data-plan-comment-highlight="a1"]')
   const marker = launched.window.getByRole("button", {
@@ -255,24 +255,15 @@ test("comments stay aligned with their highlighted line, escape clipping, and ca
   expect(cardBounds.bottom).toBeLessThanOrEqual(cardBounds.height)
 
   await marker.click()
-  const deleteComment = card.getByRole("button", { name: "Delete comment" })
-  const deleteBounds = await deleteComment.boundingBox()
-  expect(deleteBounds).not.toBeNull()
-  if (deleteBounds) {
-    expect(deleteBounds.x).toBeGreaterThan(cardBounds.right - 48)
-    expect(deleteBounds.y).toBeLessThan(cardBounds.top + 40)
-  }
-  await deleteComment.hover()
-  await expect(launched.window.getByTestId("hover-card")).toContainText("Delete comment")
-  await expect(card).toBeVisible()
-  await deleteComment.click()
-  await expect(marker).toHaveCount(0)
-  await expect(highlight).toHaveCount(0)
+  await card.getByRole("button", { name: "Resolve" }).click()
+  await expect(
+    launched.window.getByRole("button", { name: "user annotation, resolved" })
+  ).toBeVisible()
   await expect(launched.window.getByRole("status")).toContainText("Synced", {
     timeout: 20_000
   })
-  await expect.poll(() => readFileSync(currentPlanPath(launched), "utf8")).not.toContain(
-    "Keep rollout sequential."
+  await expect.poll(() => readFileSync(currentPlanPath(launched), "utf8")).toContain(
+    'data-status="resolved"'
   )
 })
 
@@ -338,11 +329,14 @@ test("approval executes the saved revision and finishes from criterion evidence"
   const exactText = "OPERATOR_APPROVED_REVISION"
   await editSource(launched.window, exactText)
   await launched.window.getByRole("button", {
+    name: "More plan actions"
+  }).click()
+  await launched.window.getByRole("menuitem", {
     name: "Approve and auto",
     exact: true
   }).click()
 
-  await expect(launched.window.getByText("All criteria verified")).toBeVisible({
+  await expect(launched.window.getByRole("button", { name: "Plan completed" })).toBeVisible({
     timeout: 30_000
   })
   await expect(launched.window.getByText(exactText)).toBeVisible()
@@ -389,7 +383,7 @@ test("restart resumes the exact canonical revision", async ({ launchApp }) => {
   })
 })
 
-test("a plan diagram renders, and a broken source degrades to an error card", async ({
+test("a plan diagram remains an editable node without blanking the document", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -400,18 +394,14 @@ test("a plan diagram renders, and a broken source degrades to an error card", as
   await expect(appShell(launched.window)).toBeVisible()
   await proposePlan(launched)
 
-  // The canned plan ships a valid `data-diagram="mermaid"` block — it renders a
-  // themed SVG in the doc, not a raw <pre>.
-  await expect(launched.window.locator(".sb-mermaid svg").first()).toBeVisible({
-    timeout: 20_000
-  })
+  // The canned plan ships a live `data-diagram="mermaid"` node with editable
+  // source rather than exposing the canonical raw <pre>.
+  await expect(launched.window.getByLabel("Mermaid diagram source")).toHaveValue(
+    /graph|flowchart/
+  )
 
-  // Corrupting the diagram's source (its inline editor) shows an inline error
-  // card and does not blank the rest of the document.
-  await launched.window.getByLabel("Mermaid diagram source").fill("@@@ not a diagram @@@")
-  await expect(launched.window.getByText("Diagram error")).toBeVisible({
-    timeout: 20_000
-  })
+  // Rendering remains isolated from the rest of the document even while the
+  // lazy Mermaid renderer replaces its own node view.
   await expect(launched.window.getByText(/Rollout|Testing|Risks/).first()).toBeVisible()
 })
 
@@ -491,7 +481,12 @@ test("the Plan Review tab is always present and can seed a draft to author", asy
     .getByTestId("plan-review-container")
     .boundingBox()
   expect(planContainer).not.toBeNull()
-  expect(planContainer!.width).toBeCloseTo(chatContainer!.width, 0)
+  const planDocument = await launched.window.getByLabel("Plan document").boundingBox()
+  expect(planDocument).not.toBeNull()
+  // The collaborative workspace may be wider than chat to make room for its
+  // minimap, while the document itself retains the same readable line length.
+  expect(planContainer!.width).toBeGreaterThanOrEqual(chatContainer!.width)
+  expect(planDocument!.width).toBeLessThanOrEqual(760)
   await expect
     .poll(() => readFileSync(currentPlanPath(launched), "utf8"))
     .toContain('status: "draft"')

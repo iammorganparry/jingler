@@ -1,4 +1,8 @@
-import type { PlanDocument, WorkerActivity } from "@jingler/core"
+import type {
+  PlanDocument,
+  PlanParticipant,
+  WorkerActivity
+} from "@jingler/core"
 import { useMachine } from "@xstate/react"
 import { useEffect, useMemo } from "react"
 import {
@@ -21,9 +25,13 @@ const subscribe = (
     onFailure
   )
 
+const loadParticipants = (scope: OrchestrationAgentsScope) =>
+  rpc.planParticipants(scope.sessionId, scope.planId)
+
 export interface OrchestrationAgentsState {
   readonly planId: string | null
   readonly agents: ReadonlyArray<OrchestrationAgent>
+  readonly participants: ReadonlyArray<PlanParticipant>
 }
 
 /**
@@ -48,7 +56,7 @@ export function useOrchestrationAgents(
     [sessionId, chatId, planId, producingChatId]
   )
   const [snapshot, send] = useMachine(orchestrationAgentsMachine, {
-    input: { scope, subscribe }
+    input: { scope, subscribe, loadParticipants }
   })
 
   useEffect(() => {
@@ -64,6 +72,7 @@ export function useOrchestrationAgents(
 
   return {
     planId: scope?.planId ?? null,
-    agents: current ? snapshot.context.agents : []
+    agents: current ? snapshot.context.agents : [],
+    participants: current ? snapshot.context.participants : []
   }
 }

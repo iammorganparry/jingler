@@ -280,7 +280,7 @@ describe("Claude plan submission", () => {
   })
 
   it("uses the streamed inline PRD when ExitPlanMode has an empty payload", async () => {
-    const { ctx, proposed } = harness()
+    const { ctx, events, proposed } = harness()
 
     await Effect.runPromise(runClaude("session-1", spec, ctx, new Map()))
 
@@ -291,7 +291,29 @@ describe("Claude plan submission", () => {
     })
     expect(proposed[0]?.steps.map((step) => step.id)).toEqual(["01"])
     expect(proposed[0]?.raw).toContain("<h1>PRD: Buffered plan</h1>")
+    expect(events).toContainEqual({
+      _tag: "PlanDraft",
+      draft: {
+        id: "plan_session-1_1",
+        source: expect.stringContaining("<h1>PRD: Buffered plan</h1>"),
+        phase: "complete"
+      }
+    })
     expect(exitDecision).toMatchObject({ behavior: "deny" })
+  })
+
+  it("leaves ordinary assistant HTML in the transcript without opening a draft", async () => {
+    visibleReply = "Here is HTML:\n\n````html\n<h1>Example only</h1>\n````"
+    callExitPlanMode = false
+    const { ctx, events } = harness()
+
+    await Effect.runPromise(runClaude("session-example", spec, ctx, new Map()))
+
+    expect(events.some((event) => event._tag === "PlanDraft")).toBe(false)
+    expect(events).toContainEqual({
+      _tag: "Assistant",
+      text: visibleReply
+    })
   })
 
   it("normalizes repeated worker ids before proposing a streamed orchestrator PRD", async () => {

@@ -50,4 +50,21 @@ describe("resolvePlanAnnotations", () => {
       '<aside data-annotation="a1" data-status="resolved" data-author="user">Comment.</aside>'
     )
   })
+
+  it("marks pending user messages sent while leaving agent delivery untouched", () => {
+    const source = `<aside data-annotation="a1" data-status="open">
+<div data-comment-message="m1" data-author-kind="user" data-delivery-state="pending">Question.</div>
+<div data-comment-message="m2" data-author-kind="agent" data-delivery-state="failed">Retrying.</div>
+</aside>`
+
+    const resolved = resolvePlanAnnotations(source, new Set(["a1"]))
+
+    expect(resolved).toContain(
+      'data-comment-message="m1" data-author-kind="user" data-delivery-state="sent"'
+    )
+    expect(resolved).toContain(
+      'data-comment-message="m2" data-author-kind="agent" data-delivery-state="failed"'
+    )
+    expect(resolved).toContain('data-annotation="a1" data-status="resolved"')
+  })
 })

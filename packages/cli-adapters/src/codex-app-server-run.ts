@@ -3,6 +3,7 @@ import { CliExecError, resumePlanPrompt } from "@jingler/core"
 import { Effect, Runtime } from "effect"
 import type { AgentContext, SessionSpec } from "./adapter.js"
 import {
+  agentMessageDelta,
   codexAppServerMessageToStreamEvents,
   completedAgentReply,
   completedTurn,
@@ -24,6 +25,7 @@ import { stageCodexInput, toCodexAppServerInput } from "./codex-input.js"
 import { codexMcpEnvironment, codexMcpOverrides } from "./mcp-config.js"
 import { requireWorktree } from "./cwd.js"
 import { hasPlanBlock, parsePlan, PLAN_HTML_REFORMAT } from "./plan-parse.js"
+import { createPlanDraftStream } from "./plan-draft-stream.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
 import { harnessEnv, hasSubscriptionAuth } from "./subscription.js"
 import { worktreeEnv } from "./worktree-env.js"
@@ -547,6 +549,10 @@ export const runCodexAppServer = (
           let questionRound = 0
           let planRound = 0
           let planReformatAsked = false
+          let planning = spec.mode === "plan"
+          const planDraft = createPlanDraftStream(
+            () => `plan_${sessionId}_${planRound + 1}`
+          )
           for (;;) {
             const state = makeCodexAppServerEventState()
             let followUp: string | null = null
@@ -586,6 +592,14 @@ export const runCodexAppServer = (
                 continue
               }
 
+              if (planning) {
+                const delta = agentMessageDelta(message)
+                if (delta !== null) {
+                  const draft = planDraft.append(delta)
+                  if (draft !== null) await runP(ctx.emit(draft))
+                }
+              }
+
               const reply = followUp === null ? completedAgentReply(message) : null
               const asked =
                 reply !== null && questionRound < MAX_QUESTION_ROUNDS
@@ -608,7 +622,7 @@ export const runCodexAppServer = (
 
               const proposed =
                 reply !== null &&
-                spec.mode === "plan" &&
+                planning &&
                 planRound < MAX_PLAN_ROUNDS &&
                 hasPlanBlock(reply)
                   ? reply
@@ -622,13 +636,17 @@ export const runCodexAppServer = (
                 )
                 if (plan.structured === false && !planReformatAsked) {
                   planReformatAsked = true
+                  const clear = planDraft.clear()
+                  if (clear !== null) await runP(ctx.emit(clear))
                   followUp = PLAN_HTML_REFORMAT
                   continue
                 }
                 const decision = await runP(ctx.proposePlan(plan))
+                planDraft.reset()
                 if (decision._tag === "Revise") {
                   followUp = decision.feedback
                 } else if (decision._tag === "Approve") {
+                  planning = false
                   activePolicy = policy(
                     decision.mode,
                     spec.readOnly ?? false,
@@ -685,6 +703,8 @@ export const runCodexAppServer = (
               )
             }
             if (terminal.status === "failed") {
+              const clear = planDraft.clear()
+              if (clear !== null) await runP(ctx.emit(clear))
               await runP(
                 ctx.emit({
                   _tag: "Failed",
@@ -694,6 +714,8 @@ export const runCodexAppServer = (
               break
             }
             if (followUp === null) {
+              const clear = planDraft.clear()
+              if (clear !== null) await runP(ctx.emit(clear))
               await runP(
                 ctx.emit({
                   _tag: "Done",

@@ -1,4 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
+import {
+  appendPlanCommentMessageHtml,
+  updatePlanAnnotationStatusHtml,
+  type PlanParticipant
+} from "@jingler/core"
 import { useState } from "react"
 import { PlanDocEditor } from "./plan-doc-editor.js"
 
@@ -33,7 +38,10 @@ const PLAN_HTML = `<h1>PRD: Ship the plan doc editor</h1>
 <ol><li>Write parseHTML/renderHTML for each node.</li><li>Add a React node view.</li></ol>
 <div data-acceptance="01.1" data-status="passed" data-evidence="round-trip test is green">Nodes round-trip the data-attribute format.</div>
 <div data-acceptance="01.2" data-status="pending">The insert toolbar adds every widget.</div>
-<aside data-annotation="a1" data-stage="01" data-author="user" data-status="open" data-created-at="2026-07-29T10:00:00.000Z">Make sure the status pill cycles pending → passed → failed → waived on click.</aside>
+<aside data-annotation="a1" data-stage="01" data-author="user" data-status="open" data-created-at="2026-07-29T10:00:00.000Z">
+<div data-comment-message="m1" data-author-kind="user" data-author-id="operator" data-created-at="2026-07-29T10:00:00.000Z" data-mentioned-participant-ids='["worker:story:editor:1"]' data-delivery-state="sent">Make sure the status pill cycles pending → passed → failed → waived on click.</div>
+<div data-comment-message="m2" data-author-kind="agent" data-author-id="worker:story:editor:1" data-created-at="2026-07-29T10:01:00.000Z" data-mentioned-participant-ids="[]" data-delivery-state="sent">Confirmed in the round-trip tests.</div>
+</aside>
 </section>
 <h2>Flow</h2>
 <div data-diagram="mermaid"><pre>graph TD; Edit--&gt;Serialize--&gt;Sanitize--&gt;Validate</pre></div>`
@@ -42,12 +50,56 @@ const meta: Meta = { title: "Plan/Plan Doc Editor" }
 export default meta
 type Story = StoryObj
 
+const participants: ReadonlyArray<PlanParticipant> = [
+  {
+    routingId: "orchestrator:story",
+    displayName: "Jingler",
+    role: "orchestrator",
+    lifecycle: "parked",
+    ownerRoutingId: null
+  },
+  {
+    routingId: "worker:story:editor:1",
+    displayName: "worker-editor",
+    role: "worker",
+    lifecycle: "running",
+    ownerRoutingId: null
+  }
+]
+
 function Playground() {
   const [html, setHtml] = useState(PLAN_HTML)
   return (
     <div className="grid h-[680px] w-full grid-cols-[1fr_360px] gap-3 bg-editor p-4">
       <div className="min-h-0 overflow-hidden rounded-xl border border-line bg-canvas">
-        <PlanDocEditor value={html} onChange={setHtml} className="h-full" />
+        <PlanDocEditor
+          value={html}
+          onChange={setHtml}
+          className="h-full"
+          commentControls={{
+            participants,
+            onReply: (annotationId, body, mentionedParticipantIds) =>
+              setHtml((source) =>
+                appendPlanCommentMessageHtml(source, annotationId, {
+                  id: `story-${Date.now()}`,
+                  body,
+                  authorKind: "user",
+                  authorId: "operator",
+                  createdAt: new Date().toISOString(),
+                  mentionedParticipantIds: [...mentionedParticipantIds],
+                  deliveryState: "sent"
+                }) ?? source
+              ),
+            onSetResolved: (annotationId, resolved) =>
+              setHtml((source) =>
+                updatePlanAnnotationStatusHtml(
+                  source,
+                  annotationId,
+                  resolved ? "resolved" : "open"
+                ) ?? source
+              )
+          }}
+        />
       </div>
       <pre className="min-h-0 overflow-auto rounded-xl border border-line bg-sunken p-3 font-mono text-[10.5px] leading-[1.5] text-dim">
         {html}

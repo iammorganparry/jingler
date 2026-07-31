@@ -151,6 +151,7 @@ describe("plan doc HTML round-trip", () => {
     expect(html).toContain('data-quote="quick"')
     expect(html).toContain('data-author="user"')
     expect(html).toContain('data-status="open"')
+    expect(html).toContain('data-comment-message="message-a1-1"')
     // The visible highlight is derived chrome, not a second persisted source of
     // truth. It is present in the editor DOM but absent from serialized HTML.
     expect(html).not.toContain("<mark>")
@@ -168,7 +169,34 @@ describe("plan doc HTML round-trip", () => {
     expect(annotation?.body).toBe("Needs detail.")
     expect(annotation?.author).toBe("user")
     expect(annotation?.status).toBe("open")
+    expect(annotation?.stageId).toBe("01")
     expect(annotation?.anchor?.quote).toBe("quick")
+  })
+
+  it("preserves an ordered multi-message thread and its delivery metadata", () => {
+    const threaded = FIXTURE.replace(
+      '<aside data-annotation="a1" data-stage="01" data-author="user" data-status="open" data-created-at="2026-07-29T10:00:00.000Z">Cycle the status pill on click.</aside>',
+      `<aside data-annotation="a1" data-stage="01" data-author="user" data-status="open" data-created-at="2026-07-29T10:00:00.000Z">
+<div data-comment-message="m1" data-author-kind="user" data-author-id="operator" data-created-at="2026-07-29T10:00:00.000Z" data-mentioned-participant-ids='["worker-ui"]' data-delivery-state="sent">Please check this.</div>
+<div data-comment-message="m2" data-author-kind="agent" data-author-id="worker-ui" data-created-at="2026-07-29T10:01:00.000Z" data-mentioned-participant-ids="[]" data-delivery-state="sent">Checked and retained.</div>
+</aside>`
+    )
+    const result = parsePlanHtml(roundTripHtml(threaded))
+    expect(result.valid).toBe(true)
+    if (!result.valid) return
+    expect(result.projection.annotations[0]?.messages).toEqual([
+      expect.objectContaining({
+        id: "m1",
+        body: "Please check this.",
+        mentionedParticipantIds: ["worker-ui"],
+        deliveryState: "sent"
+      }),
+      expect.objectContaining({
+        id: "m2",
+        body: "Checked and retained.",
+        authorKind: "agent"
+      })
+    ])
   })
 
   it("re-resolves a comment after surrounding edits and removes only that annotation", () => {

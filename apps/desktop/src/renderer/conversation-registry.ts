@@ -112,7 +112,11 @@ const recomputeSession = (sessionId: string, preferred?: ConversationSnapshot): 
   setSessionActivity(sessionId, activities[0] ?? null)
   setPlanPresent(
     sessionId,
-    sessionSnapshots.some((snapshot) => latestPlan(snapshot.context.messages) !== null)
+    sessionSnapshots.some(
+      (snapshot) =>
+        snapshot.context.planDraft !== null ||
+        latestPlan(snapshot.context.messages) !== null
+    )
   )
   const diffSnapshot = preferred ?? sessionSnapshots[sessionSnapshots.length - 1]
   if (diffSnapshot === undefined) clearSessionDiff(sessionId)

@@ -255,6 +255,15 @@ export const completedAgentReply = (message: JsonRpcMessage): string | null => {
   return stringAt(item, "text")
 }
 
+/** A provider-native incremental assistant delta, before item completion. */
+export const agentMessageDelta = (message: JsonRpcMessage): string | null => {
+  if (message.method !== "item/agentMessage/delta") return null
+  const params = recordAt(message, "params")
+  if (params === null) return null
+  const delta = stringAt(params, "delta")
+  return delta === null || delta.length === 0 ? null : delta
+}
+
 export const completedTurn = (
   message: JsonRpcMessage,
   threadId: string

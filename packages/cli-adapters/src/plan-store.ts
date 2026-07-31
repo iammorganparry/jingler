@@ -1,6 +1,7 @@
 import type {
   Plan,
   PlanAcceptanceStatus,
+  PlanCommentMessageDeliveryState,
   PlanDocument,
   PlanDocumentAuthor,
   PlanDocumentStatus,
@@ -10,6 +11,7 @@ import type {
 } from "@jingler/core"
 import {
   appendPlanAnnotationHtml,
+  appendPlanCommentMessageHtml,
   DEFAULT_PLAN_TEMPLATE_HTML,
   planDocumentToPlan,
   PlanConflictError,
@@ -20,6 +22,8 @@ import {
   resolvePlanWorkerAnnotationHtml,
   SessionPlanArtifact as SessionPlanArtifactSchema,
   updatePlanCriterionHtml,
+  updatePlanAnnotationStatusHtml,
+  updatePlanCommentMessageDeliveryHtml,
   updatePlanStageExecutionHtml,
   upsertPlanWorkerAnnotationHtml
 } from "@jingler/core"
@@ -643,7 +647,8 @@ export class PlanStore extends Effect.Service<PlanStore>()(
                 stageId: input.stageId,
                 body: message,
                 status: "open",
-                createdAt: new Date().toISOString()
+                createdAt: new Date().toISOString(),
+                authorId: input.agentId
               })
             }
           }
@@ -875,6 +880,9 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           readonly stageId: string | null
           readonly body: string
           readonly author: PlanDocumentAuthor
+          readonly authorId?: string
+          readonly mentionedParticipantIds?: ReadonlyArray<string>
+          readonly deliveryState?: PlanCommentMessageDeliveryState
           readonly anchor?: {
             readonly quote: string
             readonly prefix: string
@@ -897,9 +905,157 @@ export class PlanStore extends Effect.Service<PlanStore>()(
             stageId: input.stageId,
             body: input.body,
             author: input.author,
+            authorId: input.authorId,
+            mentionedParticipantIds: input.mentionedParticipantIds,
+            deliveryState: input.deliveryState,
             createdAt: new Date().toISOString(),
             ...(input.anchor ? { anchor: input.anchor } : {})
           })
+          return yield* updateDocument(worktreePath, {
+            planId: input.planId,
+            baseRevision: input.baseRevision,
+            source,
+            author: input.author,
+            semantic: false
+          })
+        })
+
+      const annotationMutationError = (
+        annotationId: string,
+        detail: string
+      ): PlanValidationError =>
+        new PlanValidationError({
+          message: `Plan annotation "${annotationId}" ${detail}.`,
+          diagnostics: [
+            {
+              code: "invalid-component",
+              message: `Plan annotation "${annotationId}" ${detail}.`,
+              line: 1
+            }
+          ]
+        })
+
+      /** Compare-and-swap append of one ordered entry to an existing thread. */
+      const appendAnnotationMessage = (
+        worktreePath: string,
+        input: {
+          readonly planId: string
+          readonly baseRevision: number
+          readonly annotationId: string
+          readonly body: string
+          readonly authorKind: PlanDocumentAuthor
+          readonly authorId: string
+          readonly mentionedParticipantIds: ReadonlyArray<string>
+          readonly deliveryState: PlanCommentMessageDeliveryState
+        }
+      ) =>
+        Effect.gen(function* () {
+          const current = yield* readCanonical(worktreePath)
+          if (current === null) {
+            return yield* new PlanConflictError({
+              message: "The canonical plan no longer exists.",
+              latestRevision: 0,
+              latest: null
+            })
+          }
+          const source = appendPlanCommentMessageHtml(
+            current.source,
+            input.annotationId,
+            {
+              id: `message-${crypto.randomUUID()}`,
+              body: input.body,
+              authorKind: input.authorKind,
+              authorId: input.authorId,
+              createdAt: new Date().toISOString(),
+              mentionedParticipantIds: [...new Set(input.mentionedParticipantIds)],
+              deliveryState: input.deliveryState
+            }
+          )
+          if (source === null) {
+            return yield* annotationMutationError(
+              input.annotationId,
+              "was not found or could not accept the message"
+            )
+          }
+          return yield* updateDocument(worktreePath, {
+            planId: input.planId,
+            baseRevision: input.baseRevision,
+            source,
+            author: input.authorKind,
+            semantic: false
+          })
+        })
+
+      /** Compare-and-swap delivery-state update for one message in a thread. */
+      const updateAnnotationMessageDelivery = (
+        worktreePath: string,
+        input: {
+          readonly planId: string
+          readonly baseRevision: number
+          readonly annotationId: string
+          readonly messageId: string
+          readonly deliveryState: PlanCommentMessageDeliveryState
+          readonly author: PlanDocumentAuthor
+        }
+      ) =>
+        Effect.gen(function* () {
+          const current = yield* readCanonical(worktreePath)
+          if (current === null) {
+            return yield* new PlanConflictError({
+              message: "The canonical plan no longer exists.",
+              latestRevision: 0,
+              latest: null
+            })
+          }
+          const source = updatePlanCommentMessageDeliveryHtml(
+            current.source,
+            input.annotationId,
+            input.messageId,
+            input.deliveryState
+          )
+          if (source === null) {
+            return yield* annotationMutationError(
+              input.annotationId,
+              `does not contain message "${input.messageId}"`
+            )
+          }
+          return yield* updateDocument(worktreePath, {
+            planId: input.planId,
+            baseRevision: input.baseRevision,
+            source,
+            author: input.author,
+            semantic: false
+          })
+        })
+
+      /** Compare-and-swap resolution or reopening of one durable thread. */
+      const setAnnotationResolved = (
+        worktreePath: string,
+        input: {
+          readonly planId: string
+          readonly baseRevision: number
+          readonly annotationId: string
+          readonly resolved: boolean
+          readonly author: PlanDocumentAuthor
+        }
+      ) =>
+        Effect.gen(function* () {
+          const current = yield* readCanonical(worktreePath)
+          if (current === null) {
+            return yield* new PlanConflictError({
+              message: "The canonical plan no longer exists.",
+              latestRevision: 0,
+              latest: null
+            })
+          }
+          const source = updatePlanAnnotationStatusHtml(
+            current.source,
+            input.annotationId,
+            input.resolved ? "resolved" : "open"
+          )
+          if (source === null) {
+            return yield* annotationMutationError(input.annotationId, "was not found")
+          }
           return yield* updateDocument(worktreePath, {
             planId: input.planId,
             baseRevision: input.baseRevision,
@@ -1066,10 +1222,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
        *
        * Modelled on `ThemeService.watch` — watch the DIRECTORY (so the first
        * write, which creates `current-plan.html`, is seen without a restart),
-       * debounce editors' multi-save bursts, re-read through the same lock as
-       * `readDocument`, and end silently if the OS watcher dies rather than take
-       * the app down with it. `null` reads (plan deleted / mid-write garbage)
-       * are filtered so subscribers only ever see a valid document.
+       * debounce editors' multi-save bursts and re-read through the same lock as
+       * `readDocument`. A low-frequency poll is merged in because some mounted
+       * filesystems end their native watcher silently; compare-and-swap writes
+       * must still reach a live `Plan.watch` subscriber. `null` reads (plan
+       * deleted / mid-write garbage) are filtered.
        *
        * **Consume with `Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(...)))`,
        * never the generated accessor** — an `Effect<Stream<…>>` type-checks where
@@ -1093,9 +1250,19 @@ export class PlanStore extends Effect.Service<PlanStore>()(
               sessionId,
               producingChatId
             )
-            return fs.watch(dir).pipe(
+            const filesystemChanges = fs.watch(dir).pipe(
               Stream.debounce(WATCH_DEBOUNCE_MS),
-              Stream.mapEffect(() => readDocument(worktreePath, sessionId, producingChatId)),
+              Stream.mapEffect(() =>
+                readDocument(worktreePath, sessionId, producingChatId)
+              ),
+              Stream.catchAll(() => Stream.empty)
+            )
+            const pollingChanges = Stream.tick("200 millis").pipe(
+              Stream.mapEffect(() =>
+                readDocument(worktreePath, sessionId, producingChatId)
+              )
+            )
+            return Stream.merge(filesystemChanges, pollingChanges).pipe(
               Stream.filter((document): document is PlanDocument => document !== null),
               Stream.filter(
                 (document) =>
@@ -1103,7 +1270,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
                   document.revision !== baseline.revision ||
                   document.source !== baseline.source
               ),
-              Stream.catchAll(() => Stream.empty)
+              Stream.changesWith(
+                (previous, current) =>
+                  previous.revision === current.revision &&
+                  previous.source === current.source
+              )
             )
           })
         )
@@ -1138,6 +1309,9 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         writeOrchestrationCheckpoint,
         setCriterionStatus,
         addAnnotation,
+        appendAnnotationMessage,
+        updateAnnotationMessageDelivery,
+        setAnnotationResolved,
         readArtifact,
         promote,
         rehomeArtifact,

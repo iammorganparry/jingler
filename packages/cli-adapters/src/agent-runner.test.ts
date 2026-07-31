@@ -724,6 +724,158 @@ describe("AgentRunner plan mode", () => {
     writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session]))
   }
 
+  it("projects the parked orchestrator and relays to an active nested agent on the same run", async () => {
+    const proposed = await Effect.runPromise(Deferred.make<string>())
+    const steerTexts: Array<string> = []
+    const adapter: CliAdapterShape = {
+      run: (_chatId, _spec, context) =>
+        Effect.gen(function* () {
+          if (context.registerTurnSteer !== undefined) {
+            yield* context.registerTurnSteer(async (text) => {
+              steerTexts.push(text)
+              setTimeout(() => {
+                void Effect.runPromise(
+                  context.emit({
+                    _tag: "Assistant",
+                    text: "The nested planner reviewed the concern."
+                  })
+                )
+              }, 0)
+              return "accepted"
+            })
+          }
+          yield* context.emit({
+            _tag: "SubagentStarted",
+            id: "planner-child",
+            name: "Explore",
+            description: "Inspect the plan",
+            parentId: null
+          })
+          const plan = scriptedPlan(SESSION, 1)
+          yield* context.proposePlan(plan)
+          yield* context.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        }),
+      stop: () => Effect.void
+    }
+    const testLayer = Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlMcpServiceTest,
+      InMemorySecretStoreLive,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      PlanStore.Default,
+      Layer.succeed(CliAdapter, CliAdapter.of(adapter)),
+      DiscoveryService.Default,
+      ContextManager.Default,
+      temp.layer
+    )
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "plan")
+        const run = yield* runner
+          .prompt(SESSION, SESSION, "Create a plan.")
+          .pipe(
+            Stream.tap((event) =>
+              event._tag === "PlanProposed"
+                ? Deferred.succeed(proposed, event.plan.id)
+                : Effect.void
+            ),
+            Stream.runDrain,
+            Effect.fork
+          )
+        const planId = yield* Deferred.await(proposed)
+        const participants = yield* runner.planParticipants(SESSION, planId)
+        const nested = participants.find(
+          (participant) => participant.role === "subagent"
+        )!
+        const routed = yield* runner.steerPlanParticipant({
+          sessionId: SESSION,
+          planId,
+          routingId: nested.routingId,
+          text: "Relay this concern to the nested planner."
+        })
+        yield* runner.approvePlan(SESSION, planId)
+        yield* Fiber.join(run)
+        const stale = yield* runner.steerPlanParticipant({
+          sessionId: SESSION,
+          planId,
+          routingId: nested.routingId,
+          text: "Try the stale route."
+        })
+        return { participants, routed, stale }
+      }).pipe(Effect.provide(testLayer), Effect.timeout("10 seconds"))
+    )
+
+    expect(result.participants.map((participant) => participant.role)).toEqual([
+      "orchestrator",
+      "subagent"
+    ])
+    expect(steerTexts).toEqual(["Relay this concern to the nested planner."])
+    expect(result.routed).toEqual({
+      status: "delivered",
+      reply: "The nested planner reviewed the concern."
+    })
+    expect(result.stale.status).toBe("unavailable")
+  })
+
+  it("drives the Electron collaboration fixture through the scripted active plan agent", async () => {
+    const proposed = await Effect.runPromise(Deferred.make<string>())
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "plan")
+        const run = yield* runner
+          .prompt(
+            SESSION,
+            SESSION,
+            "[[plan]] [[stream-plan]] [[active-plan-agent]] refactor auth"
+          )
+          .pipe(
+            Stream.tap((event) =>
+              event._tag === "PlanProposed"
+                ? Deferred.succeed(proposed, event.plan.id)
+                : Effect.void
+            ),
+            Stream.runDrain,
+            Effect.fork
+          )
+        const planId = yield* Deferred.await(proposed)
+        const participants = yield* runner.planParticipants(SESSION, planId)
+        const nested = participants.find(
+          (participant) => participant.role === "subagent"
+        )!
+        const routed = yield* runner.steerPlanParticipant({
+          sessionId: SESSION,
+          planId,
+          routingId: nested.routingId,
+          text: "Relay this message to the active nested agent and return its response."
+        })
+        yield* runner.approvePlan(SESSION, planId)
+        yield* Fiber.join(run)
+        return { participants, routed }
+      }).pipe(Effect.provide(base()), Effect.timeout("10 seconds"))
+    )
+
+    expect(result.participants).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          displayName: "Explore",
+          role: "subagent",
+          lifecycle: "running"
+        })
+      ])
+    )
+    expect(result.routed).toEqual({
+      status: "delivered",
+      reply: "Explore confirms the anchored rollout guidance is safe to keep."
+    })
+  })
+
   it("proposes a plan, records a step comment, and executes on approval", async () => {
     const program = Effect.gen(function* () {
       const runner = yield* AgentRunner

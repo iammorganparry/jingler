@@ -105,6 +105,16 @@ const PLAN_TEXT = [
   "```"
 ].join("\n")
 
+const HTML_PLAN_TEXT = [
+  "````html",
+  "<h1>PRD: Stream the plan</h1>",
+  '<section data-stage="01" data-title="Draft">',
+  "<h3>Intent</h3><p>Show work as it is composed.</p>",
+  '<div data-acceptance="01.1" data-status="pending">Draft is visible.</div>',
+  "</section>",
+  "````"
+].join("\n")
+
 const QUESTION_TEXT = [
   "```question",
   JSON.stringify({
@@ -179,6 +189,23 @@ beforeEach(() => {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("the Codex plan loop", () => {
+  it("publishes the completed SDK message through the progressive draft contract", async () => {
+    sdk.state.script = [[agentMessage(HTML_PLAN_TEXT), turnDone]]
+    const { ctx, emitted, proposed } = harness([PlanDecision.Reject()])
+
+    await Effect.runPromise(runCodex("s-draft", spec(), ctx, new Map()))
+
+    expect(proposed).toHaveLength(1)
+    expect(emitted).toContainEqual({
+      _tag: "PlanDraft",
+      draft: {
+        id: "plan_s-draft_1",
+        source: expect.stringContaining("<h1>PRD: Stream the plan</h1>"),
+        phase: "complete"
+      }
+    })
+  })
+
   it("replaces a resumed thread whose local rollout no longer exists", async () => {
     sdk.state.failures = [
       new Error(

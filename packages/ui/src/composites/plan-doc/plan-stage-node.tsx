@@ -40,6 +40,7 @@ function StageView({ node }: NodeViewProps) {
   return (
     <NodeViewWrapper
       data-plan-stage-id={id}
+      data-plan-stage-title={title}
       className="my-4 overflow-hidden rounded-md border border-line"
     >
       <button

@@ -37,13 +37,39 @@ export const PlanAnnotationAnchor = Schema.Struct({
 })
 export type PlanAnnotationAnchor = Schema.Schema.Type<typeof PlanAnnotationAnchor>
 
+export const PlanCommentMessageDeliveryState = Schema.Literal("pending", "sent", "failed")
+export type PlanCommentMessageDeliveryState = Schema.Schema.Type<
+  typeof PlanCommentMessageDeliveryState
+>
+
+/**
+ * One durable entry in a plan annotation thread. `authorId` is deliberately
+ * separate from `authorKind`: a worker and the coordinating agent are both
+ * agents, but remain addressable participants for replies and mentions.
+ */
+export const PlanCommentMessage = Schema.Struct({
+  id: Schema.String,
+  body: Schema.String,
+  authorKind: Schema.Literal("user", "agent"),
+  authorId: Schema.String,
+  createdAt: Schema.String,
+  mentionedParticipantIds: Schema.Array(Schema.String),
+  deliveryState: PlanCommentMessageDeliveryState
+})
+export type PlanCommentMessage = Schema.Schema.Type<typeof PlanCommentMessage>
+
 export const PlanAnnotation = Schema.Struct({
   id: Schema.String,
   stageId: Schema.NullOr(Schema.String),
+  /**
+   * Compatibility summary of the thread's first message. New code should use
+   * `messages`; keeping these fields avoids breaking legacy plan-card clients.
+   */
   body: Schema.String,
   author: Schema.Literal("user", "agent"),
-  status: Schema.Literal("open", "resolved"),
   createdAt: Schema.String,
+  messages: Schema.Array(PlanCommentMessage),
+  status: Schema.Literal("open", "resolved"),
   /** Present when the comment is anchored to a highlighted span (vs. a whole stage). */
   anchor: Schema.optional(PlanAnnotationAnchor)
 })
@@ -273,14 +299,17 @@ export const planDocumentToPlan = (document: PlanDocument): Plan => {
           )
       }
     }),
-    comments: document.projection.annotations.map((annotation) => ({
-      id: annotation.id,
-      stepId: annotation.stageId ?? "",
-      body: annotation.body,
-      author: annotation.author,
-      createdAt: annotation.createdAt,
-      routed: annotation.status === "resolved"
-    })),
+    comments: document.projection.annotations.map((annotation) => {
+      const message = annotation.messages.at(-1)
+      return {
+        id: annotation.id,
+        stepId: annotation.stageId ?? "",
+        body: message?.body ?? annotation.body,
+        author: message?.authorKind ?? annotation.author,
+        createdAt: message?.createdAt ?? annotation.createdAt,
+        routed: annotation.status === "resolved"
+      }
+    }),
     status,
     structured: true,
     raw: document.source

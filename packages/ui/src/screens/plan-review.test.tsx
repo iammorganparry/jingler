@@ -77,6 +77,51 @@ const legacyPlan: Plan = {
 afterEach(cleanup)
 
 describe("PlanReview", () => {
+  it("keeps a streamed plan read-only and promotes it on the same editor instance", async () => {
+    const canonicalPlan: Plan = {
+      ...legacyPlan,
+      id: "plan-stream",
+      raw: source,
+      summary: "Editor-only plan"
+    }
+    const view = render(
+      <PlanReview
+        plan={null}
+        streamingDraft={{
+          id: "plan-stream",
+          source,
+          phase: "composing"
+        }}
+      />
+    )
+
+    const editor = await screen.findByLabelText("Plan document")
+    expect(editor.getAttribute("contenteditable")).toBe("false")
+    expect(screen.getByRole("status").textContent).toContain("Composing")
+    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: /Revise/ })).toBeNull()
+
+    view.rerender(<PlanReview plan={canonicalPlan} />)
+    expect(screen.getByLabelText("Plan document")).toBe(editor)
+    expect(screen.getByRole("status").textContent).toContain("Loading revision")
+
+    view.rerender(
+      <PlanReview
+        plan={canonicalPlan}
+        document={{
+          ...document,
+          id: "plan-stream",
+          source: source.replace("Editor-only plan", "Canonical editor plan")
+        }}
+      />
+    )
+    expect(screen.getByLabelText("Plan document")).toBe(editor)
+    expect(screen.getByRole("status").textContent).toContain("Synced")
+    expect(screen.getByText("PRD: Canonical editor plan")).toBeTruthy()
+    expect(screen.getByText("revision 2")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy()
+  })
+
   it("scrolls a progress-dock deep link to its stable stage id", async () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView
@@ -92,8 +137,8 @@ describe("PlanReview", () => {
 
     expect(await screen.findByText("Build")).toBeTruthy()
     expect(scrollIntoView).toHaveBeenCalledWith({
-      behavior: "smooth",
-      block: "center"
+      behavior: "auto",
+      block: "start"
     })
     expect(onSelectStep).toHaveBeenCalledWith("01")
   })

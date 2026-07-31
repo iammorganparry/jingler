@@ -2,12 +2,18 @@ import { sanitizePlanHtml } from "@jingler/core"
 import type { Editor } from "@tiptap/core"
 import { EditorContent, useEditor } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
-import { Bold, Code, Italic, MessageSquarePlus, Send } from "lucide-react"
+import { Bold, Code, Italic, MessageSquarePlus } from "lucide-react"
 import type { ComponentType, MouseEvent as ReactMouseEvent } from "react"
 import { useEffect, useRef, useState } from "react"
 import { HoverCard } from "../../components/hover-card.js"
 import { cn } from "../../lib/cn.js"
 import { applyPlanComment } from "./plan-doc-comment.js"
+import {
+  PlanCommentComposer,
+  type PlanCommentThreadControls,
+  PlanCommentThreadControlsProvider,
+  usePlanCommentThreadControls
+} from "./plan-comment-thread.js"
 import { planDocExtensions } from "./plan-doc-extensions.js"
 import {
   type PlanWorkerControls,
@@ -40,23 +46,40 @@ export function PlanDocEditor({
   editable = true,
   className,
   workerControls,
+  commentControls,
   targetStageId,
-  onTargetStageConsumed
+  onTargetStageConsumed,
+  targetBlockId,
+  onTargetBlockConsumed,
+  onOutlineChange,
+  onViewportChange
 }: {
   value: string
   onChange?: (html: string) => void
   editable?: boolean
   className?: string
   workerControls?: PlanWorkerControls
+  commentControls?: PlanCommentThreadControls
   /** Stable stage id to reveal after the Plan view opens from the progress dock. */
   targetStageId?: string | null
   /** Retire the one-shot target once its stage is on screen. */
   onTargetStageConsumed?: () => void
+  /** Minimap navigation target (`title`, `heading:N`, or `stage:<id>`). */
+  targetBlockId?: string | null
+  onTargetBlockConsumed?: () => void
+  onOutlineChange?: (outline: ReadonlyArray<PlanDocOutlineEntry>) => void
+  onViewportChange?: (viewport: PlanDocViewport) => void
 }) {
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
   const onTargetStageConsumedRef = useRef(onTargetStageConsumed)
   onTargetStageConsumedRef.current = onTargetStageConsumed
+  const onTargetBlockConsumedRef = useRef(onTargetBlockConsumed)
+  onTargetBlockConsumedRef.current = onTargetBlockConsumed
+  const onOutlineChangeRef = useRef(onOutlineChange)
+  onOutlineChangeRef.current = onOutlineChange
+  const onViewportChangeRef = useRef(onViewportChange)
+  onViewportChangeRef.current = onViewportChange
 
   const editor = useEditor({
     editable,
@@ -89,7 +112,7 @@ export function PlanDocEditor({
         editor.view.dom.querySelectorAll<HTMLElement>("[data-plan-stage-id]")
       ).find((element) => element.dataset.planStageId === targetStageId)
       if (!target) return false
-      target.scrollIntoView({ behavior: "smooth", block: "center" })
+      target.scrollIntoView({ behavior: "auto", block: "start" })
       target.querySelector<HTMLButtonElement>("button")?.focus({
         preventScroll: true
       })
@@ -101,20 +124,126 @@ export function PlanDocEditor({
     return () => window.clearTimeout(retry)
   }, [editor, targetStageId, value])
 
+  useEffect(() => {
+    if (!editor || !targetBlockId) return
+    const target = targetBlockId === "title"
+      ? editor.view.dom.querySelector<HTMLElement>("h1")
+      : targetBlockId.startsWith("heading:")
+        ? Array.from(editor.view.dom.querySelectorAll<HTMLElement>("h2"))[
+            Number(targetBlockId.slice("heading:".length))
+          ] ?? null
+        : targetBlockId.startsWith("stage:")
+          ? Array.from(
+              editor.view.dom.querySelectorAll<HTMLElement>("[data-plan-stage-id]")
+            ).find(
+              (element) =>
+                element.dataset.planStageId === targetBlockId.slice("stage:".length)
+            ) ?? null
+          : null
+    if (target === null) return
+    target.scrollIntoView({ behavior: "auto", block: "start" })
+    target.focus({ preventScroll: true })
+    onTargetBlockConsumedRef.current?.()
+  }, [editor, targetBlockId, value])
+
+  useEffect(() => {
+    if (!editor) return
+    const scrollElement = editor.view.dom.parentElement
+    if (scrollElement === null) return
+
+    let frame = 0
+    const update = () => {
+      window.cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(() => {
+        const elements = Array.from(
+          editor.view.dom.querySelectorAll<HTMLElement>(
+            "h1, h2, [data-plan-stage-id]"
+          )
+        )
+        let headingIndex = 0
+        const outline = elements.map((element) => {
+          const stageId = element.dataset.planStageId
+          const id =
+            stageId !== undefined
+              ? `stage:${stageId}`
+              : element.tagName === "H1"
+                ? "title"
+                : `heading:${headingIndex++}`
+          element.dataset.planMinimapId = id
+          if (!element.hasAttribute("tabindex")) element.tabIndex = -1
+          return {
+            id,
+            title:
+              stageId !== undefined
+                ? element.getAttribute("data-plan-stage-title") ??
+                  element.querySelector("h3")?.textContent ??
+                  stageId
+                : element.textContent?.trim() ?? id,
+            kind:
+              stageId !== undefined
+                ? "stage"
+                : element.tagName === "H1"
+                  ? "title"
+                  : "section"
+          } satisfies PlanDocOutlineEntry
+        })
+        onOutlineChangeRef.current?.(outline)
+
+        const viewportRect = scrollElement.getBoundingClientRect()
+        const active = [...elements]
+          .reverse()
+          .find((element) => element.getBoundingClientRect().top <= viewportRect.top + 96)
+        const scrollable = Math.max(1, scrollElement.scrollHeight - scrollElement.clientHeight)
+        onViewportChangeRef.current?.({
+          activeId: active?.dataset.planMinimapId ?? outline[0]?.id ?? null,
+          start: Math.max(0, Math.min(1, scrollElement.scrollTop / scrollable)),
+          size: Math.max(
+            0,
+            Math.min(1, scrollElement.clientHeight / Math.max(1, scrollElement.scrollHeight))
+          )
+        })
+      })
+    }
+    update()
+    editor.on("transaction", update)
+    scrollElement.addEventListener("scroll", update, { passive: true })
+    window.addEventListener("resize", update)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      editor.off("transaction", update)
+      scrollElement.removeEventListener("scroll", update)
+      window.removeEventListener("resize", update)
+    }
+  }, [editor, value])
+
   return (
-    <PlanWorkerControlsProvider controls={workerControls}>
-      <div className={cn("flex min-h-0 flex-col", className)}>
-        {editable && editor && <CommentBubbleMenu editor={editor} />}
-        <EditorContent
-          editor={editor}
-          className={cn(
-            "min-h-0 flex-1 overflow-y-auto text-[13px] leading-[1.65] text-text-body [&_.ProseMirror]:outline-none",
-            !editable && "opacity-95"
-          )}
-        />
-      </div>
-    </PlanWorkerControlsProvider>
+    <PlanCommentThreadControlsProvider controls={commentControls}>
+      <PlanWorkerControlsProvider controls={workerControls}>
+        <div className={cn("flex min-h-0 flex-col", className)}>
+          {editable && editor && <CommentBubbleMenu editor={editor} />}
+          <EditorContent
+            editor={editor}
+            className={cn(
+              "min-h-0 flex-1 overflow-y-auto text-[13px] leading-[1.65] text-text-body [&_.ProseMirror]:outline-none",
+              !editable && "opacity-95"
+            )}
+          />
+        </div>
+      </PlanWorkerControlsProvider>
+    </PlanCommentThreadControlsProvider>
   )
+}
+
+export interface PlanDocOutlineEntry {
+  readonly id: string
+  readonly title: string
+  readonly kind: "title" | "section" | "stage"
+}
+
+export interface PlanDocViewport {
+  readonly activeId: string | null
+  readonly start: number
+  readonly size: number
 }
 
 /**
@@ -130,33 +259,34 @@ export function PlanDocEditor({
  */
 function CommentBubbleMenu({ editor }: { editor: Editor }) {
   const [composing, setComposing] = useState(false)
-  const [draft, setDraft] = useState("")
   const range = useRef<{ from: number; to: number } | null>(null)
   const composingRef = useRef(false)
   composingRef.current = composing
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (composing) inputRef.current?.focus()
-  }, [composing])
+  const { participants } = usePlanCommentThreadControls()
 
   const startComment = () => {
     const { from, to } = editor.state.selection
     range.current = { from, to }
-    setDraft("")
     setComposing(true)
   }
 
   const cancel = () => {
     setComposing(false)
-    setDraft("")
     range.current = null
   }
 
-  const submit = () => {
+  const submit = (
+    body: string,
+    mentionedParticipantIds: ReadonlyArray<string>
+  ) => {
     const captured = range.current
     if (captured && captured.from !== captured.to) {
-      applyPlanComment(editor, { from: captured.from, to: captured.to, body: draft.trim() })
+      applyPlanComment(editor, {
+        from: captured.from,
+        to: captured.to,
+        body,
+        mentionedParticipantIds
+      })
     }
     cancel()
   }
@@ -171,31 +301,15 @@ function CommentBubbleMenu({ editor }: { editor: Editor }) {
     >
       <div className="flex items-center gap-1 rounded-[10px] border border-line bg-panel p-1 shadow-lg">
         {composing ? (
-          <form
-            className="flex items-center gap-1"
-            onSubmit={(event) => {
-              event.preventDefault()
-              submit()
-            }}
-          >
-            <input
-              ref={inputRef}
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") cancel()
-              }}
+          <div className="w-80 p-1">
+            <PlanCommentComposer
+              participants={participants}
               placeholder="Add a comment…"
-              aria-label="Comment"
-              className="h-10 w-56 rounded-md border border-line bg-editor px-2 text-[12px] text-text-body outline-none placeholder:text-dim focus-visible:ring-2 focus-visible:ring-ring"
+              autoFocus
+              onSubmit={submit}
+              onCancel={cancel}
             />
-            <CommentIconButton
-              label="Send comment"
-              icon={Send}
-              type="submit"
-              className="bg-brand text-white hover:bg-brand-hover"
-            />
-          </form>
+          </div>
         ) : (
           <>
             <CommentIconButton

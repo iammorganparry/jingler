@@ -224,6 +224,57 @@ describe("plugin tab contributions", () => {
 })
 
 describe("mount groups", () => {
+  it("opens the first streamed draft beside a roomy conversation", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        planSessions={new Set(["a"])}
+        renderConversation={(_session, view, ctx) => (
+          <div>
+            <button onClick={ctx.onPlanDraftAvailable}>stream draft</button>
+            <span data-testid="plan-presentation">{view}</span>
+          </div>
+        )}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "stream draft" }))
+    expect(screen.getByTestId("plan-presentation").textContent).toBe("split")
+  })
+
+  it("opens streamed Plan Review full-width when the pane is too narrow", async () => {
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({
+        x: 0,
+        y: 0,
+        top: 0,
+        right: 600,
+        bottom: 800,
+        left: 0,
+        width: 600,
+        height: 800,
+        toJSON: () => ({})
+      })
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        planSessions={new Set(["a"])}
+        renderConversation={(_session, view, ctx) => (
+          <div>
+            <button onClick={ctx.onPlanDraftAvailable}>stream draft</button>
+            <span data-testid="plan-presentation">{view}</span>
+          </div>
+        )}
+      />
+    )
+
+    await screen.findByRole("button", { name: "stream draft" })
+    fireEvent.click(screen.getByRole("button", { name: "stream draft" }))
+    expect(screen.getByTestId("plan-presentation").textContent).toBe("plan")
+    rect.mockRestore()
+  })
+
   it("keeps ONE conversation mount across the Conversation/Plan switch", () => {
     // The rule the old hardcoded `activeTab === "conversation" || "plan"` branch
     // encoded: switching to Plan Review must not unmount — and so abort — a

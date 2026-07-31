@@ -1,6 +1,13 @@
 import { Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
-import { WorkerActivity } from "./orchestration.js"
+import {
+  activePlanParticipants,
+  parsePlanThreadReply,
+  PlanMentionDelivery,
+  PlanParticipant,
+  planThreadRelayPrompt,
+  WorkerActivity
+} from "./orchestration.js"
 
 const decode = Schema.decodeUnknownEither(WorkerActivity)
 
@@ -135,5 +142,71 @@ describe("WorkerActivity rejection", () => {
         })
       )
     ).toBe(true)
+  })
+})
+
+describe("plan-thread participants", () => {
+  const orchestrator = {
+    routingId: "orchestrator:chat-1",
+    displayName: "Orchestrator",
+    role: "orchestrator",
+    lifecycle: "parked",
+    ownerRoutingId: null
+  } as const
+  const workerParticipant = {
+    routingId: "worker:plan-1:worker-core:2",
+    displayName: "worker-core",
+    role: "worker",
+    lifecycle: "running",
+    ownerRoutingId: null
+  } as const
+
+  it("decodes provider-neutral participants and per-target delivery outcomes", () => {
+    expect(
+      Either.isRight(Schema.decodeUnknownEither(PlanParticipant)(orchestrator))
+    ).toBe(true)
+    expect(
+      Either.isRight(
+        Schema.decodeUnknownEither(PlanMentionDelivery)({
+          participantId: workerParticipant.routingId,
+          status: "unavailable",
+          detail: "The worker settled before delivery.",
+          retryable: true
+        })
+      )
+    ).toBe(true)
+  })
+
+  it("keeps active identities once and preserves deterministic source order", () => {
+    expect(
+      activePlanParticipants([
+        [orchestrator, workerParticipant],
+        [orchestrator, workerParticipant]
+      ])
+    ).toEqual([orchestrator, workerParticipant])
+  })
+
+  it("extracts agent-to-agent mentions and gives nested agents relay context", () => {
+    const parsed = parsePlanThreadReply(
+      `Please ask the worker.\n[[mention:${workerParticipant.routingId}]]\n[[mention:${workerParticipant.routingId}]]`
+    )
+    expect(parsed).toEqual({
+      body: "Please ask the worker.",
+      mentionedParticipantIds: [workerParticipant.routingId]
+    })
+    expect(
+      planThreadRelayPrompt({
+        annotationId: "annotation-1",
+        target: {
+          routingId: "subagent:orchestrator:chat-1:task-1",
+          displayName: "Explore",
+          role: "subagent",
+          lifecycle: "running",
+          ownerRoutingId: orchestrator.routingId
+        },
+        body: "Check the parser.",
+        availableParticipants: [orchestrator, workerParticipant]
+      })
+    ).toContain("Relay this message to the active nested agent")
   })
 })

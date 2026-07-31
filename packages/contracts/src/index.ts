@@ -36,7 +36,10 @@ import {
   PermissionMode,
   PlanAnnotationAnchor,
   PlanApprovalResult,
+  PlanCommentMessageDeliveryState,
   PlanDocument,
+  PlanMentionDelivery,
+  PlanParticipant,
   PlanTemplateConfig,
   PrFileChange,
   McpInjectionTarget,
@@ -1038,6 +1041,120 @@ export class JinglerRpcs extends RpcGroup.make(
       planId: Schema.String,
       baseRevision: Schema.Number,
       source: Schema.String,
+      author: Schema.Literal("user", "agent")
+    }
+  }),
+
+  /** Append one ordered user or agent entry to an existing annotation thread. */
+  Rpc.make("Plan.appendMessage", {
+    success: PlanDocument,
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError
+    ),
+    payload: {
+      sessionId: Schema.String,
+      planId: Schema.String,
+      baseRevision: Schema.Number,
+      annotationId: Schema.String,
+      body: Schema.String,
+      authorKind: Schema.Literal("user", "agent"),
+      authorId: Schema.String,
+      mentionedParticipantIds: Schema.Array(Schema.String),
+      deliveryState: PlanCommentMessageDeliveryState
+    }
+  }),
+
+  /** List only participants whose exact live route can still own a plan reply. */
+  Rpc.make("Plan.participants", {
+    success: Schema.Array(PlanParticipant),
+    payload: {
+      sessionId: Schema.String,
+      planId: Schema.String
+    }
+  }),
+
+  /**
+   * Persist a pending user entry, route all mentions, append replies to the same
+   * thread, and return each target's observable delivery result.
+   */
+  Rpc.make("Plan.dispatchMessage", {
+    success: Schema.Struct({
+      document: PlanDocument,
+      messageId: Schema.String,
+      deliveries: Schema.Array(PlanMentionDelivery)
+    }),
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError
+    ),
+    payload: {
+      sessionId: Schema.String,
+      planId: Schema.String,
+      baseRevision: Schema.Number,
+      annotationId: Schema.String,
+      body: Schema.String,
+      authorId: Schema.String,
+      mentionedParticipantIds: Schema.Array(Schema.String)
+    }
+  }),
+
+  /** Route the already-persisted first message from an in-document thread. */
+  Rpc.make("Plan.dispatchExistingMessage", {
+    success: Schema.Struct({
+      document: PlanDocument,
+      messageId: Schema.String,
+      deliveries: Schema.Array(PlanMentionDelivery)
+    }),
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError
+    ),
+    payload: {
+      sessionId: Schema.String,
+      planId: Schema.String,
+      baseRevision: Schema.Number,
+      annotationId: Schema.String,
+      messageId: Schema.String
+    }
+  }),
+
+  /** Update delivery state for one message without replacing the thread. */
+  Rpc.make("Plan.updateMessageDelivery", {
+    success: PlanDocument,
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError
+    ),
+    payload: {
+      sessionId: Schema.String,
+      planId: Schema.String,
+      baseRevision: Schema.Number,
+      annotationId: Schema.String,
+      messageId: Schema.String,
+      deliveryState: PlanCommentMessageDeliveryState,
+      author: Schema.Literal("user", "agent")
+    }
+  }),
+
+  /** Resolve or reopen one annotation thread under the canonical revision guard. */
+  Rpc.make("Plan.setThreadResolved", {
+    success: PlanDocument,
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError
+    ),
+    payload: {
+      sessionId: Schema.String,
+      planId: Schema.String,
+      baseRevision: Schema.Number,
+      annotationId: Schema.String,
+      resolved: Schema.Boolean,
       author: Schema.Literal("user", "agent")
     }
   }),

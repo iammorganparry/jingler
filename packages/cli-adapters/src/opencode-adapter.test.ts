@@ -15,6 +15,7 @@ import {
   toolTarget,
   totalTokens
 } from "./opencode-adapter.js"
+import { createPlanDraftStream } from "./plan-draft-stream.js"
 
 /**
  * opencode's live path needs a real server + credentials, so we test the PURE
@@ -240,6 +241,54 @@ describe("createOpencodeMapper — plan-turn text suppression", () => {
     planning = false
     expect(m.apply(part({ id: "prt_2", messageID: "msg_b", type: "text", text: "done" }))).toStrictEqual([
       { _tag: "Assistant", text: "done" }
+    ])
+  })
+
+  it("converts cumulative suppressed plan parts into progressive draft snapshots", () => {
+    const draft = createPlanDraftStream(() => "plan-opencode-1")
+    const m = createOpencodeMapper(
+      () => SESSION,
+      () => true,
+      (delta) => draft.append(delta)
+    )
+
+    expect(
+      m.apply(
+        part({
+          id: "prt_plan",
+          messageID: "msg_plan",
+          type: "text",
+          text: "````html\n<h1>PRD: Live"
+        })
+      )
+    ).toEqual([
+      {
+        _tag: "PlanDraft",
+        draft: {
+          id: "plan-opencode-1",
+          source: "<h1>PRD: Live</h1>",
+          phase: "composing"
+        }
+      }
+    ])
+    expect(
+      m.apply(
+        part({
+          id: "prt_plan",
+          messageID: "msg_plan",
+          type: "text",
+          text: "````html\n<h1>PRD: Live</h1><p>More</p>"
+        })
+      )
+    ).toEqual([
+      {
+        _tag: "PlanDraft",
+        draft: {
+          id: "plan-opencode-1",
+          source: "<h1>PRD: Live</h1><p>More</p>",
+          phase: "composing"
+        }
+      }
     ])
   })
 

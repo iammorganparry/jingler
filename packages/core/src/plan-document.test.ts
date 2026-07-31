@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import { DEFAULT_PLAN_TEMPLATE_HTML } from "./plan-html.js"
 import {
   PlanAcceptance,
+  PlanCommentMessage,
   PlanDocument,
   PlanPrdStage,
   PlanTemplateConfig,
@@ -36,6 +37,33 @@ describe("plan document schemas", () => {
       evidence: null
     })
     expect(Either.isLeft(decoded)).toBe(true)
+  })
+
+  it("decodes durable comment messages with identity, mentions, and delivery", () => {
+    const decoded = Schema.decodeUnknownEither(PlanCommentMessage)({
+      id: "message-1",
+      body: "Please check the retry behavior.",
+      authorKind: "user",
+      authorId: "operator-1",
+      createdAt: "2026-07-31T10:00:00.000Z",
+      mentionedParticipantIds: ["worker-runtime"],
+      deliveryState: "pending"
+    })
+
+    expect(Either.isRight(decoded)).toBe(true)
+    expect(
+      Either.isLeft(
+        Schema.decodeUnknownEither(PlanCommentMessage)({
+          id: "message-2",
+          body: "Unknown state",
+          authorKind: "agent",
+          authorId: "orchestrator",
+          createdAt: "2026-07-31T10:01:00.000Z",
+          mentionedParticipantIds: [],
+          deliveryState: "maybe"
+        })
+      )
+    ).toBe(true)
   })
 
   it("decodes typed execution metadata while keeping legacy stages compatible", () => {
