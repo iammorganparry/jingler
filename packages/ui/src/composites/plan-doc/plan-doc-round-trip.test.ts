@@ -105,6 +105,9 @@ describe("plan doc HTML round-trip", () => {
 
     // Annotation id survives on the <aside data-annotation>.
     expect(projection.annotations.map((a) => a.id)).toContain("a1")
+    expect(projection.annotations.find((a) => a.id === "a1")?.messages[0]?.deliveryState).toBe(
+      "sent"
+    )
 
     // The mermaid diagram survives as a <div data-diagram="mermaid">.
     expect(html).toContain('data-diagram="mermaid"')
@@ -171,13 +174,14 @@ describe("plan doc HTML round-trip", () => {
     expect(annotation?.status).toBe("open")
     expect(annotation?.stageId).toBe("01")
     expect(annotation?.anchor?.quote).toBe("quick")
+    expect(annotation?.messages[0]?.deliveryState).toBe("sent")
   })
 
   it("preserves an ordered multi-message thread and its delivery metadata", () => {
     const threaded = FIXTURE.replace(
       '<aside data-annotation="a1" data-stage="01" data-author="user" data-status="open" data-created-at="2026-07-29T10:00:00.000Z">Cycle the status pill on click.</aside>',
       `<aside data-annotation="a1" data-stage="01" data-author="user" data-status="open" data-created-at="2026-07-29T10:00:00.000Z">
-<div data-comment-message="m1" data-author-kind="user" data-author-id="operator" data-created-at="2026-07-29T10:00:00.000Z" data-mentioned-participant-ids='["worker-ui"]' data-delivery-state="sent">Please check this.</div>
+<div data-comment-message="m1" data-author-kind="user" data-author-id="operator" data-created-at="2026-07-29T10:00:00.000Z" data-mentioned-participant-ids='["worker-ui"]' data-delivery-state="sent" data-mention-deliveries='[{"participantId":"worker-ui","status":"delivered","dispatchId":"m1:worker-ui","detail":null,"retryable":false}]'>Please check this.</div>
 <div data-comment-message="m2" data-author-kind="agent" data-author-id="worker-ui" data-created-at="2026-07-29T10:01:00.000Z" data-mentioned-participant-ids="[]" data-delivery-state="sent">Checked and retained.</div>
 </aside>`
     )
@@ -189,7 +193,16 @@ describe("plan doc HTML round-trip", () => {
         id: "m1",
         body: "Please check this.",
         mentionedParticipantIds: ["worker-ui"],
-        deliveryState: "sent"
+        deliveryState: "sent",
+        mentionDeliveries: [
+          {
+            participantId: "worker-ui",
+            status: "delivered",
+            dispatchId: "m1:worker-ui",
+            detail: null,
+            retryable: false
+          }
+        ]
       }),
       expect.objectContaining({
         id: "m2",

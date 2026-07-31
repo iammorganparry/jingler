@@ -95,6 +95,13 @@ import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore } from "./plan-store.js"
 import { resolvePlanAnnotations } from "./plan-html.js"
+import {
+  appendSteeredReply,
+  collectSteeredReply,
+  invokeSteer,
+  makeSteeredReplyWaiter,
+  type SteeredReplyWaiter
+} from "./steered-reply.js"
 import type { RunHolder } from "./run-coordinator.js"
 import {
   anySessionRunActive,
@@ -257,12 +264,10 @@ interface ActiveRun {
   >
   readonly subagents: () => Effect.Effect<ReadonlyArray<PlanParticipant>>
   readonly clearReplyWaiter: (waiter: RunReplyWaiter) => Effect.Effect<void>
+  readonly replyGate: Effect.Semaphore
 }
 
-interface RunReplyWaiter {
-  readonly firstChunk: Deferred.Deferred<void>
-  readonly chunks: Ref.Ref<ReadonlyArray<string>>
-}
+type RunReplyWaiter = SteeredReplyWaiter
 
 /** Windows separators → POSIX, so path comparison has one shape to reason about. */
 const normalizePath = (p: string): string => p.replace(/\\/g, "/")
@@ -593,34 +598,32 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               "Refresh the participant list before retrying or rerouting."
           } satisfies PlanParticipantSteerResult
         }
-        const steered = yield* addressable.run.steer(request.text, [], true)
-        if (steered.status !== "accepted") {
-          return {
-            status: "failed",
-            detail:
-              `Participant "${request.routingId}" could not receive the message ` +
-              `(${steered.status}). Retry this message.`
-          } satisfies PlanParticipantSteerResult
-        }
-        const waiter = steered.replyWaiter
-        if (waiter === null) {
-          return {
-            status: "delivered",
-            reply: null
-          } satisfies PlanParticipantSteerResult
-        }
-        return yield* Effect.gen(function* () {
-          const observed = yield* Deferred.await(waiter.firstChunk).pipe(
-            Effect.timeoutOption("2 seconds")
-          )
-          if (Option.isSome(observed)) yield* Effect.sleep("40 millis")
-          const reply = (yield* Ref.get(waiter.chunks)).join("").trim()
-          return {
-            status: "delivered",
-            reply: reply.length === 0 ? null : reply
-          } satisfies PlanParticipantSteerResult
-        }).pipe(
-          Effect.ensuring(addressable.run.clearReplyWaiter(waiter))
+        return yield* addressable.run.replyGate.withPermits(1)(
+          Effect.gen(function* () {
+            const steered = yield* addressable.run.steer(request.text, [], true)
+            if (steered.status !== "accepted") {
+              return {
+                status: "failed",
+                detail:
+                  `Participant "${request.routingId}" could not receive the message ` +
+                  `(${steered.status}). Retry this message.`
+              } satisfies PlanParticipantSteerResult
+            }
+            const waiter = steered.replyWaiter
+            if (waiter === null) {
+              return {
+                status: "delivered",
+                reply: null
+              } satisfies PlanParticipantSteerResult
+            }
+            return yield* collectSteeredReply(waiter).pipe(
+              Effect.map((reply) => ({
+                status: "delivered" as const,
+                reply
+              })),
+              Effect.ensuring(addressable.run.clearReplyWaiter(waiter))
+            )
+          })
         )
       })
 
@@ -1460,6 +1463,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           yield* TranscriptStore.append(chatId, yield* Ref.get(acc))
           const turnSteer = yield* Ref.make<SteerTurn | null>(null)
           const steeredReply = yield* Ref.make<RunReplyWaiter | null>(null)
+          const replyGate = yield* Effect.makeSemaphore(1)
           const activeSubagents = yield* Ref.make(
             new Map<string, PlanParticipant>()
           )
@@ -1769,11 +1773,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               if (event._tag === "Assistant") {
                 const waiter = yield* Ref.get(steeredReply)
                 if (waiter !== null) {
-                  yield* Ref.update(waiter.chunks, (chunks) => [
-                    ...chunks,
-                    event.text
-                  ])
-                  yield* Deferred.succeed(waiter.firstChunk, undefined)
+                  yield* appendSteeredReply(waiter, event.text)
                 }
               }
               // Where this event belongs, and why, lives in `turn-events.ts`.
@@ -2097,17 +2097,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 return { status: cli === "codex" ? "deferred" : "unsupported" } as const
               }
               const replyWaiter: RunReplyWaiter | null = captureReply
-                ? {
-                    firstChunk: yield* Deferred.make<void>(),
-                    chunks: yield* Ref.make<ReadonlyArray<string>>([])
-                  }
+                ? yield* makeSteeredReplyWaiter
                 : null
               if (replyWaiter !== null) {
                 yield* Ref.set(steeredReply, replyWaiter)
               }
-              const outcome = yield* Effect.tryPromise(() => handler(text, images)).pipe(
-                Effect.orElseSucceed(() => "deferred" as const)
-              )
+              const steered = yield* invokeSteer(handler, text, images)
+              const outcome = steered === "accepted" ? "accepted" : "deferred"
               if (outcome !== "accepted") {
                 if (replyWaiter !== null) yield* Ref.set(steeredReply, null)
                 return { status: outcome } as const
@@ -2142,7 +2138,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               clearReplyWaiter: (waiter) =>
                 Ref.update(steeredReply, (current) =>
                   current === waiter ? null : current
-                )
+                ),
+              replyGate
             })
           )
 

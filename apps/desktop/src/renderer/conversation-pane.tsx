@@ -34,6 +34,10 @@ import { clearDraft, getDraft, seedDraftOnce, setDraft, useDraft } from "./draft
 import { useConversation } from "./use-conversation.js"
 import { useOrchestrationAgents } from "./use-orchestration-agents.js"
 import { usePlanDocument } from "./use-plan-document.js"
+import {
+  runWithDirectPlanThreadDispatch,
+  shouldRecoverPendingPlanMessage
+} from "./plan-thread-dispatch.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
 import {
   clampedPlanSplitRatio,
@@ -126,6 +130,10 @@ export function ConversationPane({
     canonicalPlan.document
   )
   const initialThreadDispatches = useRef(new Set<string>())
+  // A direct reply RPC persists its pending message before it finishes routing.
+  // Plan.watch can publish that intermediate revision, so tell the recovery
+  // effect which thread already has a dispatcher. Threads accept one pending
+  // reply at a time, making the annotation id the correct local lease key.
   useEffect(() => {
     const document = canonicalPlan.document
     if (document === null) return
@@ -134,13 +142,13 @@ export function ConversationPane({
         annotation.messages.map((message) => ({ annotation, message }))
       )
       .find(
-        ({ message }) =>
-          message.authorKind === "user" &&
-          message.deliveryState === "pending" &&
-          message.mentionedParticipantIds.length > 0 &&
-          !initialThreadDispatches.current.has(
-            `${document.id}:${message.id}`
-          )
+        ({ annotation, message }) =>
+          shouldRecoverPendingPlanMessage({
+            planId: document.id,
+            annotationId: annotation.id,
+            message,
+            recoveredMessageDispatches: initialThreadDispatches.current
+          })
       )
     if (pending === undefined) return
     const key = `${document.id}:${pending.message.id}`
@@ -610,14 +618,18 @@ export function ConversationPane({
       onReplyThread={async (annotationId, body, mentionedParticipantIds) => {
         const document = canonicalPlan.document
         if (document === null) return
-        await convo.dispatchPlanMessage({
-          planId: document.id,
-          baseRevision: document.revision,
+        await runWithDirectPlanThreadDispatch(
+          document.id,
           annotationId,
-          body,
-          authorId: "operator",
-          mentionedParticipantIds
-        })
+          () => convo.dispatchPlanMessage({
+            planId: document.id,
+            baseRevision: document.revision,
+            annotationId,
+            body,
+            authorId: "operator",
+            mentionedParticipantIds
+          })
+        )
       }}
       onRetryThread={async (annotationId, message) => {
         const document = canonicalPlan.document

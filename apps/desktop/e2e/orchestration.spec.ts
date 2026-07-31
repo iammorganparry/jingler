@@ -202,7 +202,9 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   await expect(workerReleaseTab).toBeVisible()
 
   await window.getByRole("button", { name: "Plan Review" }).first().click()
-  await expect(window.getByText(/requested audit amendment/)).toBeVisible()
+  await expect(
+    window.getByText(/requested audit amendment/).first()
+  ).toBeVisible()
   await expect
     .poll(
       () =>
@@ -215,13 +217,30 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
     )
     .toBe(8)
 
-  await window.getByRole("button", { name: "More plan actions" }).click()
-  await window
-    .getByRole("menuitem", { name: "Use remote revision" })
-    .click()
-  await expect(window.getByRole("button", { name: "Plan completed" })).toBeVisible({
-    timeout: 30_000
+  await expect
+    .poll(() => readFileSync(planFile, "utf8"), { timeout: 30_000 })
+    .toContain('status: "done"')
+
+  // Plan.watch normally applies the completed canonical revision directly. If
+  // an editor save races that revision, the same valid result is presented as
+  // a conflict instead; accept the remote canonical revision in that case.
+  const completedStatus = window.getByText("done", { exact: true }).first()
+  const morePlanActions = window.getByRole("button", {
+    name: "More plan actions",
   })
+  await expect
+    .poll(
+      async () =>
+        (await completedStatus.isVisible()) ||
+        (await morePlanActions.isVisible()),
+      { timeout: 30_000 }
+    )
+    .toBe(true)
+  if (await morePlanActions.isVisible()) {
+    await morePlanActions.click()
+    await window.getByRole("menuitem", { name: "Use remote revision" }).click()
+  }
+  await expect(completedStatus).toBeVisible()
 
   const persisted = readFileSync(planFile, "utf8")
   expect(persisted).toContain('status: "done"')

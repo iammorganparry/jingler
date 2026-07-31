@@ -1,5 +1,6 @@
 import {
   planLegacyCommentMessageId,
+  type PlanCommentMentionDelivery,
   type PlanCommentMessage
 } from "@jingler/core"
 import { mergeAttributes, Node, type NodeViewProps } from "@tiptap/core"
@@ -224,6 +225,36 @@ const mentionedParticipantIdsFrom = (element: Element): ReadonlyArray<string> =>
   }
 }
 
+const mentionDeliveriesFrom = (
+  element: Element
+): ReadonlyArray<PlanCommentMentionDelivery> | undefined => {
+  const raw = element.getAttribute("data-mention-deliveries")
+  if (!raw) return undefined
+  try {
+    const decoded: unknown = JSON.parse(
+      raw.startsWith("[") ? raw : decodeURIComponent(raw)
+    )
+    if (!Array.isArray(decoded)) return undefined
+    return decoded.filter((delivery): delivery is PlanCommentMentionDelivery => {
+      if (typeof delivery !== "object" || delivery === null) return false
+      const candidate = delivery as Partial<PlanCommentMentionDelivery>
+      return (
+        typeof candidate.participantId === "string" &&
+        typeof candidate.dispatchId === "string" &&
+        (candidate.status === "pending" ||
+          candidate.status === "dispatching" ||
+          candidate.status === "delivered" ||
+          candidate.status === "unavailable" ||
+          candidate.status === "failed") &&
+        (candidate.detail === null || typeof candidate.detail === "string") &&
+        typeof candidate.retryable === "boolean"
+      )
+    })
+  } catch {
+    return undefined
+  }
+}
+
 const planCommentMessagesFrom = (value: unknown): ReadonlyArray<PlanCommentMessage> => {
   if (!Array.isArray(value)) return []
   return value.filter((message): message is PlanCommentMessage => {
@@ -249,6 +280,7 @@ const messagesFromElement = (element: HTMLElement): ReadonlyArray<PlanCommentMes
     return nested.map((child) => {
       const authorKind = child.getAttribute("data-author-kind") === "agent" ? "agent" : "user"
       const delivery = child.getAttribute("data-delivery-state") ?? "sent"
+      const mentionDeliveries = mentionDeliveriesFrom(child)
       return {
         id: child.getAttribute("data-comment-message") ?? "",
         body: child.textContent ?? "",
@@ -258,14 +290,14 @@ const messagesFromElement = (element: HTMLElement): ReadonlyArray<PlanCommentMes
         mentionedParticipantIds: mentionedParticipantIdsFrom(child),
         deliveryState: deliveryStates.has(delivery)
           ? (delivery as PlanCommentMessage["deliveryState"])
-          : "sent"
+          : "sent",
+        ...(mentionDeliveries === undefined ? {} : { mentionDeliveries })
       }
     })
   }
 
   const annotationId = element.getAttribute("data-annotation") ?? ""
   const authorKind = element.getAttribute("data-author") === "agent" ? "agent" : "user"
-  const status = element.getAttribute("data-status") === "resolved" ? "resolved" : "open"
   return [
     {
       id: planLegacyCommentMessageId(annotationId),
@@ -274,7 +306,7 @@ const messagesFromElement = (element: HTMLElement): ReadonlyArray<PlanCommentMes
       authorId: element.getAttribute("data-author-id") ?? authorKind,
       createdAt: element.getAttribute("data-created-at") ?? "",
       mentionedParticipantIds: [],
-      deliveryState: authorKind === "agent" || status === "resolved" ? "sent" : "pending"
+      deliveryState: "sent"
     }
   ]
 }
@@ -353,7 +385,14 @@ export const PlanAnnotationNode = Node.create({
           "data-mentioned-participant-ids": JSON.stringify(
             message.mentionedParticipantIds
           ),
-          "data-delivery-state": message.deliveryState
+          "data-delivery-state": message.deliveryState,
+          ...(message.mentionDeliveries === undefined
+            ? {}
+            : {
+                "data-mention-deliveries": JSON.stringify(
+                  message.mentionDeliveries
+                )
+              })
         },
         message.body
       ])

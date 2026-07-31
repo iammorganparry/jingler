@@ -14,7 +14,8 @@ import {
   orchestrationAgentsMachine,
   type OrchestrationAgentsScope,
   WORKER_STREAM_RECONNECT_BASE_MS,
-  WORKER_STREAM_RECONNECT_MAX_MS
+  WORKER_STREAM_RECONNECT_MAX_MS,
+  PLAN_PARTICIPANT_REFRESH_MS
 } from "./orchestration-agents-machine.js"
 
 const scope = (
@@ -192,6 +193,47 @@ describe("orchestrationAgentsMachine", () => {
       }
     ])
     actor.stop()
+  })
+
+  it("refreshes main-run participant lifecycle and retries a failed snapshot", async () => {
+    vi.useFakeTimers()
+    try {
+      const harness = makeHarness()
+      const orchestrator: PlanParticipant = {
+        routingId: "orchestrator:chat-1",
+        displayName: "Orchestrator",
+        role: "orchestrator",
+        lifecycle: "parked",
+        ownerRoutingId: null
+      }
+      const subagent: PlanParticipant = {
+        routingId: "subagent:orchestrator:chat-1:explore",
+        displayName: "Explore",
+        role: "subagent",
+        lifecycle: "running",
+        ownerRoutingId: orchestrator.routingId
+      }
+      const load = vi.fn()
+        .mockRejectedValueOnce(new Error("temporary RPC failure"))
+        .mockResolvedValueOnce([orchestrator, subagent])
+        .mockResolvedValue([orchestrator])
+      const actor = start(scope(), harness.subscribe, load)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(actor.getSnapshot().context.participants).toEqual([])
+
+      await vi.advanceTimersByTimeAsync(PLAN_PARTICIPANT_REFRESH_MS)
+      expect(actor.getSnapshot().context.participants).toEqual([
+        orchestrator,
+        subagent
+      ])
+
+      await vi.advanceTimersByTimeAsync(PLAN_PARTICIPANT_REFRESH_MS)
+      expect(actor.getSnapshot().context.participants).toEqual([orchestrator])
+      expect(load).toHaveBeenCalledTimes(3)
+      actor.stop()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("keeps parallel worker attempts, lifecycle, harnesses, and messages independent", async () => {

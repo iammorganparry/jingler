@@ -67,6 +67,7 @@ import {
   parsePlanThreadReply,
   PlanConflictError,
   PlanPersistenceError,
+  PlanValidationError,
   planThreadRelayPrompt,
   planStageSemanticFingerprint,
   resolveFindings,
@@ -91,6 +92,7 @@ import type {
   IssueAutomations,
   IssueSummary,
   Message,
+  PlanCommentMentionDelivery,
   PlanCommentMessageDeliveryState,
   PlanDocument,
   PlanMentionDelivery,
@@ -399,6 +401,27 @@ export const planUpdateMessageDelivery = (input: {
     )
   )
 
+const planUpdateMentionDeliveries = (input: {
+  readonly sessionId: string
+  readonly planId: string
+  readonly baseRevision: number
+  readonly annotationId: string
+  readonly messageId: string
+  readonly deliveries: ReadonlyArray<PlanCommentMentionDelivery>
+  readonly deliveryState: PlanCommentMessageDeliveryState
+  readonly author: "user" | "agent"
+}) =>
+  SessionStore.get(input.sessionId).pipe(
+    Effect.flatMap((session) =>
+      session.worktreePath == null
+        ? Effect.fail(planMutationConflict("This session has no plan worktree."))
+        : PlanStore.updateAnnotationMentionDeliveries(session.worktreePath, input)
+    ),
+    Effect.catchTag("SessionNotFoundError", () =>
+      Effect.fail(planMutationConflict("The plan session no longer exists."))
+    )
+  )
+
 /** `Plan.setThreadResolved` handler. */
 export const planSetThreadResolved = (input: {
   readonly sessionId: string
@@ -485,6 +508,13 @@ type LivePlanDispatchRequirements =
   | PlanStore
   | SessionStore
 
+type PlanMutationRequirements =
+  | AppPaths
+  | FileSystem.FileSystem
+  | Path.Path
+  | PlanStore
+  | SessionStore
+
 const livePlanDispatchRouting: PlanDispatchRouting<LivePlanDispatchRequirements> = {
   participants: planParticipants,
   route: routePlanParticipant
@@ -500,10 +530,38 @@ interface PlanDispatchMessageInput {
   readonly mentionedParticipantIds: ReadonlyArray<string>
 }
 
+const PLAN_RELAY_DEPTH_LIMIT = 8
+const PLAN_RELAY_DELIVERY_BUDGET = 32
+
+const aggregateMessageDeliveryState = (
+  deliveries: ReadonlyArray<PlanCommentMentionDelivery>
+): PlanCommentMessageDeliveryState => {
+  if (deliveries.length === 0 || deliveries.every((item) => item.status === "delivered")) {
+    return "sent"
+  }
+  return deliveries.some(
+    (item) => item.status === "failed" || item.status === "unavailable"
+  )
+    ? "failed"
+    : "pending"
+}
+
+const initialMentionDeliveries = (
+  messageId: string,
+  participantIds: ReadonlyArray<string>
+): ReadonlyArray<PlanCommentMentionDelivery> =>
+  [...new Set(participantIds)].map((participantId) => ({
+    participantId,
+    status: "pending",
+    dispatchId: `${messageId}:${participantId}`,
+    detail: null,
+    retryable: false
+  }))
+
 /**
- * Persist first, then route. All later writes use the revision returned by the
- * previous CAS mutation, so replies, delivery state, and visible unavailable
- * notices remain ordered in one annotation thread.
+ * Durable outbox routing. Each target is claimed before its external side
+ * effect, and every post-route mutation rebases on a newer canonical revision
+ * instead of asking the caller to repeat an already accepted instruction.
  */
 const routePlanMessageWithRouting = <R>(
   input: PlanDispatchMessageInput,
@@ -520,7 +578,7 @@ const routePlanMessageWithRouting = <R>(
         ...input,
         authorKind: "user",
         mentionedParticipantIds: [...new Set(input.mentionedParticipantIds)],
-        deliveryState: "pending"
+        deliveryState: input.mentionedParticipantIds.length > 0 ? "pending" : "sent"
       })
     } else {
       document = initial.document
@@ -538,6 +596,32 @@ const routePlanMessageWithRouting = <R>(
       )
     }
 
+    const rebaseMutation = (
+      mutate: (
+        baseRevision: number
+      ) => Effect.Effect<
+        PlanDocument,
+        PlanConflictError | PlanValidationError | PlanPersistenceError,
+        PlanMutationRequirements
+      >
+    ) =>
+      Effect.gen(function* () {
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const result = yield* Effect.either(mutate(document.revision))
+          if (result._tag === "Right") {
+            document = result.right
+            return result.right
+          }
+          if (result.left?._tag !== "PlanConflictError" || result.left.latest === null) {
+            return yield* Effect.fail(result.left)
+          }
+          document = result.left.latest
+        }
+        return yield* Effect.fail(
+          planMutationConflict("The plan kept changing while recording comment delivery.")
+        )
+      })
+
     const appendAgentMessage = (
       body: string,
       authorId: string,
@@ -545,17 +629,17 @@ const routePlanMessageWithRouting = <R>(
       deliveryState: PlanCommentMessageDeliveryState
     ) =>
       Effect.gen(function* () {
-        document = yield* planAppendMessage({
+        document = yield* rebaseMutation((baseRevision) => planAppendMessage({
           sessionId: input.sessionId,
           planId: input.planId,
-          baseRevision: document.revision,
+          baseRevision,
           annotationId: input.annotationId,
           body,
           authorKind: "agent",
           authorId,
           mentionedParticipantIds,
           deliveryState
-        })
+        }))
         const messageId = lastMessageId()
         if (messageId === null) {
           return yield* Effect.fail(
@@ -567,29 +651,79 @@ const routePlanMessageWithRouting = <R>(
         return messageId
       })
 
+    const persistDeliveries = (
+      messageId: string,
+      deliveriesForMessage: ReadonlyArray<PlanCommentMentionDelivery>
+    ) =>
+      rebaseMutation((baseRevision) =>
+        planUpdateMentionDeliveries({
+          sessionId: input.sessionId,
+          planId: input.planId,
+          baseRevision,
+          annotationId: input.annotationId,
+          messageId,
+          deliveries: deliveriesForMessage,
+          deliveryState: aggregateMessageDeliveryState(deliveriesForMessage),
+          author: "agent"
+        })
+      )
+
     const deliveries: Array<PlanMentionDelivery> = []
     const queue: Array<{
       readonly messageId: string
       readonly body: string
       readonly mentionedParticipantIds: ReadonlyArray<string>
       readonly depth: number
+      readonly sourceParticipantId: string
+      deliveries: Array<PlanCommentMentionDelivery>
     }> = [
       {
         messageId: initialMessageId,
         body: input.body,
         mentionedParticipantIds: [...new Set(input.mentionedParticipantIds)],
-        depth: 0
+        depth: 0,
+        sourceParticipantId: `user:${input.authorId}`,
+        deliveries: []
       }
     ]
 
-    while (queue.length > 0) {
-      const current = queue.shift()!
-      let failed = false
-      for (const participantId of current.mentionedParticipantIds) {
-        if (current.depth >= 8) {
-          failed = true
+    let queueIndex = 0
+    let deliveryCount = 0
+    const visitedEdges = new Set<string>()
+    while (queueIndex < queue.length) {
+      const current = queue[queueIndex++]!
+      const persistedMessage = document.projection.annotations
+        .find((annotation) => annotation.id === input.annotationId)
+        ?.messages.find((message) => message.id === current.messageId)
+      current.deliveries = persistedMessage?.mentionDeliveries
+        ? [...persistedMessage.mentionDeliveries]
+        : [...initialMentionDeliveries(current.messageId, current.mentionedParticipantIds)]
+      if (persistedMessage?.mentionDeliveries === undefined) {
+        yield* persistDeliveries(current.messageId, current.deliveries)
+      }
+
+      for (const delivery of current.deliveries) {
+        const participantId = delivery.participantId
+        if (
+          delivery.status === "delivered" ||
+          delivery.status === "dispatching" ||
+          (delivery.status === "unavailable" && !delivery.retryable)
+        ) {
+          continue
+        }
+        const edge = `${current.sourceParticipantId}->${participantId}`
+        if (
+          current.depth >= PLAN_RELAY_DEPTH_LIMIT ||
+          deliveryCount >= PLAN_RELAY_DELIVERY_BUDGET ||
+          visitedEdges.has(edge)
+        ) {
           const detail =
-            "The agent-to-agent relay limit was reached. Retry or reroute this message manually."
+            "The agent-to-agent relay safety limit was reached. Retry or reroute this message manually."
+          Object.assign(delivery, {
+            status: "failed" as const,
+            detail,
+            retryable: true
+          })
           deliveries.push({
             participantId,
             status: "failed",
@@ -602,8 +736,19 @@ const routePlanMessageWithRouting = <R>(
             [],
             "sent"
           )
+          yield* persistDeliveries(current.messageId, current.deliveries)
           continue
         }
+
+        visitedEdges.add(edge)
+        deliveryCount += 1
+
+        Object.assign(delivery, {
+          status: "dispatching" as const,
+          detail: null,
+          retryable: false
+        })
+        yield* persistDeliveries(current.messageId, current.deliveries)
 
         const available = yield* routing.participants(
           input.sessionId,
@@ -613,15 +758,19 @@ const routePlanMessageWithRouting = <R>(
           (participant) => participant.routingId === participantId
         )
         if (target === undefined) {
-          failed = true
           const detail =
             `Participant "${participantId}" became unavailable before delivery. ` +
             "Refresh the participant list, then retry or reroute this message."
+          Object.assign(delivery, {
+            status: "unavailable" as const,
+            detail,
+            retryable: false
+          })
           deliveries.push({
             participantId,
             status: "unavailable",
             detail,
-            retryable: true
+            retryable: false
           })
           yield* appendAgentMessage(
             detail,
@@ -629,21 +778,28 @@ const routePlanMessageWithRouting = <R>(
             [],
             "sent"
           )
+          yield* persistDeliveries(current.messageId, current.deliveries)
           continue
         }
 
         const routed = yield* routing.route(target, {
           sessionId: input.sessionId,
           planId: input.planId,
-          text: planThreadRelayPrompt({
-            annotationId: input.annotationId,
-            target,
-            body: current.body,
-            availableParticipants: available
-          })
+          text:
+            `Dispatch ID: ${delivery.dispatchId}. Do not process this dispatch twice.\n\n` +
+            planThreadRelayPrompt({
+              annotationId: input.annotationId,
+              target,
+              body: current.body,
+              availableParticipants: available
+            })
         })
         if (routed.status !== "delivered") {
-          failed = true
+          Object.assign(delivery, {
+            status: routed.status,
+            detail: routed.detail,
+            retryable: true
+          })
           deliveries.push({
             participantId,
             status: routed.status,
@@ -656,9 +812,15 @@ const routePlanMessageWithRouting = <R>(
             [],
             "sent"
           )
+          yield* persistDeliveries(current.messageId, current.deliveries)
           continue
         }
 
+        Object.assign(delivery, {
+          status: "delivered" as const,
+          detail: null,
+          retryable: false
+        })
         deliveries.push({
           participantId,
           status: "delivered",
@@ -678,21 +840,14 @@ const routePlanMessageWithRouting = <R>(
               messageId: replyMessageId,
               body: reply.body,
               mentionedParticipantIds: reply.mentionedParticipantIds,
-              depth: current.depth + 1
+              depth: current.depth + 1,
+              sourceParticipantId: target.routingId,
+              deliveries: []
             })
           }
         }
+        yield* persistDeliveries(current.messageId, current.deliveries)
       }
-
-      document = yield* planUpdateMessageDelivery({
-        sessionId: input.sessionId,
-        planId: input.planId,
-        baseRevision: document.revision,
-        annotationId: input.annotationId,
-        messageId: current.messageId,
-        deliveryState: failed ? "failed" : "sent",
-        author: "agent"
-      })
     }
 
     return {
@@ -756,13 +911,26 @@ export const planDispatchExistingMessageWithRouting = <R>(
       ?.messages.find((candidate) => candidate.id === input.messageId)
     if (
       message === undefined ||
-      message.authorKind !== "user" ||
       (message.deliveryState !== "pending" &&
         message.deliveryState !== "failed")
     ) {
       return yield* Effect.fail(
         planMutationConflict(
           `Retryable comment message "${input.messageId}" is no longer available.`
+        )
+      )
+    }
+    if (
+      message.mentionDeliveries !== undefined &&
+      !message.mentionDeliveries.some(
+        (delivery) =>
+          delivery.status === "pending" ||
+          (delivery.status === "failed" && delivery.retryable)
+      )
+    ) {
+      return yield* Effect.fail(
+        planMutationConflict(
+          `Comment message "${input.messageId}" has no retryable targets. Mention a current participant in a new reply to reroute it.`
         )
       )
     }

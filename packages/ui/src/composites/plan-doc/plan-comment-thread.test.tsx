@@ -68,6 +68,33 @@ describe("PlanCommentComposer", () => {
       ["worker:plan-1:ui:1"]
     )
   })
+
+  it("does not submit a routing target after its visible mention is removed", () => {
+    const onSubmit = vi.fn()
+    render(
+      <PlanCommentComposer participants={participants} onSubmit={onSubmit} />
+    )
+    const input = screen.getByLabelText("Reply to this thread…")
+    fireEvent.change(input, { target: { value: "Ask @work" } })
+    fireEvent.click(screen.getByText("worker-ui"))
+    fireEvent.change(input, { target: { value: "No agent needed" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send reply" }))
+
+    expect(onSubmit).toHaveBeenCalledWith("No agent needed", [])
+  })
+
+  it("preserves the draft when submission reports a failure", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(false)
+    render(
+      <PlanCommentComposer participants={participants} onSubmit={onSubmit} />
+    )
+    const input = screen.getByLabelText("Reply to this thread…")
+    fireEvent.change(input, { target: { value: "Please keep this draft" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send reply" }))
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect((input as HTMLTextAreaElement).value).toBe("Please keep this draft")
+  })
 })
 
 describe("PlanCommentThread", () => {
@@ -106,5 +133,20 @@ describe("PlanCommentThread", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: "Reopen" }))
     expect(onSetResolved).toHaveBeenCalledWith("a1", false)
+  })
+
+  it("keeps a failed reply in the composer and shows the error", async () => {
+    const onReply = vi.fn().mockRejectedValue(new Error("Revision changed"))
+    render(
+      <PlanCommentThreadControlsProvider controls={{ participants, onReply }}>
+        <PlanCommentThread annotationId="a1" status="open" messages={messages} />
+      </PlanCommentThreadControlsProvider>
+    )
+    const input = screen.getByLabelText("Reply to this thread…")
+    fireEvent.change(input, { target: { value: "Do not erase me" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send reply" }))
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Revision changed")
+    expect((input as HTMLTextAreaElement).value).toBe("Do not erase me")
   })
 })

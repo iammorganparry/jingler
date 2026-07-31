@@ -3,11 +3,13 @@ import { sanitizePlanHtml, type StreamEvent } from "@jingler/core"
 const OPENING = /^[\t ]*`{4}(?!`)html(?:[\t ]+plan)?[\t ]*\r?\n/im
 const CLOSING = /^[\t ]*`{4}(?!`)[\t ]*(?=\r?$)/m
 const PLAN_TITLE = /^<h1>\s*(?:PRD|Plan)\s*:/i
+const RAW_PLAN_TITLE = /^[\t \r\n]*<h1>\s*(?:PRD|Plan)\s*:/i
+export const PLAN_DRAFT_MIN_INTERVAL_MS = 50
 
 export interface PlanDraftStream {
-  /** Append a provider-native text delta and return a changed cumulative draft. */
+  /** Append a delta and return a cadence-coalesced cumulative draft when due. */
   readonly append: (delta: string) => StreamEvent | null
-  /** Replace the provider-native cumulative message and return a changed draft. */
+  /** Replace the cumulative message and return a coalesced draft when due. */
   readonly update: (message: string) => StreamEvent | null
   /** Hide the current draft and discard its transport buffer. */
   readonly clear: () => StreamEvent | null
@@ -48,13 +50,40 @@ export const extractPlanDraft = (message: string): ExtractedDraft | null => {
  * cumulative `PlanDraft` events.
  */
 export const createPlanDraftStream = (
-  planId: () => string
+  planId: () => string,
+  options: {
+    readonly minIntervalMs?: number
+    readonly now?: () => number
+  } = {}
 ): PlanDraftStream => {
   let message = ""
   let visible = false
   let lastSnapshot = ""
+  let lastProcessedAt = Number.NEGATIVE_INFINITY
+  const minIntervalMs = options.minIntervalMs ?? PLAN_DRAFT_MIN_INTERVAL_MS
+  const now = options.now ?? Date.now
+
+  const hasCandidate = (): boolean => {
+    const opening = OPENING.exec(message)
+    return (
+      opening !== null &&
+      RAW_PLAN_TITLE.test(message.slice(opening.index + opening[0].length))
+    )
+  }
+
+  // The closing fence must terminate the transport, so inspecting a small tail
+  // avoids rescanning the accumulated plan merely to bypass throttling for the
+  // final canonical-ready snapshot.
+  const hasClosingFence = (): boolean => CLOSING.test(message.slice(-64))
 
   const snapshot = (): StreamEvent | null => {
+    const timestamp = now()
+    const complete = hasClosingFence()
+    if (!complete) {
+      if (lastSnapshot === "" && !hasCandidate()) return null
+      if (timestamp - lastProcessedAt < minIntervalMs) return null
+    }
+    lastProcessedAt = timestamp
     const extracted = extractPlanDraft(message)
     if (extracted === null) return null
     const phase = extracted.complete ? "complete" : "composing"
@@ -72,6 +101,7 @@ export const createPlanDraftStream = (
     message = ""
     visible = false
     lastSnapshot = ""
+    lastProcessedAt = Number.NEGATIVE_INFINITY
   }
 
   return {

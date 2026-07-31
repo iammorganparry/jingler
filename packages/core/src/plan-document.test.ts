@@ -47,7 +47,16 @@ describe("plan document schemas", () => {
       authorId: "operator-1",
       createdAt: "2026-07-31T10:00:00.000Z",
       mentionedParticipantIds: ["worker-runtime"],
-      deliveryState: "pending"
+      deliveryState: "pending",
+      mentionDeliveries: [
+        {
+          participantId: "worker-runtime",
+          status: "dispatching",
+          dispatchId: "message-1:worker-runtime",
+          detail: null,
+          retryable: false
+        }
+      ]
     })
 
     expect(Either.isRight(decoded)).toBe(true)

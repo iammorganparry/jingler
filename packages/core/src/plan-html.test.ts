@@ -8,6 +8,7 @@ import {
   sanitizePlanHtml,
   updatePlanAnnotationStatusHtml,
   updatePlanCommentMessageDeliveryHtml,
+  updatePlanCommentMentionDeliveriesHtml,
   updatePlanCriterionHtml
 } from "./plan-html.js"
 
@@ -57,7 +58,7 @@ describe("parsePlanHtml", () => {
         authorId: "user",
         createdAt: "1970-01-01T00:00:00.000Z",
         mentionedParticipantIds: [],
-        deliveryState: "pending"
+        deliveryState: "sent"
       }
     ])
   })
@@ -119,6 +120,20 @@ describe("parsePlanHtml", () => {
         deliveryState: "sent"
       })
     ])
+  })
+
+  it("defaults only open user messages with an actual mention to pending", () => {
+    const source = DOC.replace(
+      "Which revision?",
+      `<div data-comment-message="plain" data-author-kind="user">Plain note.</div>
+<div data-comment-message="targeted" data-author-kind="user" data-mentioned-participant-ids="[&quot;worker-a&quot;]">Targeted note.</div>`
+    )
+    const parsed = parsePlanHtml(source)
+    expect(parsed.valid).toBe(true)
+    if (!parsed.valid) return
+    expect(
+      parsed.projection.annotations[0]?.messages.map((message) => message.deliveryState)
+    ).toEqual(["sent", "pending"])
   })
 
   it("reports diagnostics for a doc with no title / no stage", () => {
@@ -292,7 +307,7 @@ describe("html source rewriters", () => {
       id: "c2:message:1",
       body: 'tighten <this> & "that"',
       authorKind: "user",
-      deliveryState: "pending"
+      deliveryState: "sent"
     })
     expect(ann.anchor?.quote).toBe("survives")
   })
@@ -332,6 +347,47 @@ describe("html source rewriters", () => {
       authorId: "planner",
       mentionedParticipantIds: ["operator"],
       deliveryState: "sent"
+    })
+  })
+
+  it("round-trips per-target delivery details containing quotes", () => {
+    const appended = appendPlanCommentMessageHtml(DOC, "a1", {
+      id: "reply-outbox",
+      body: "Coordinate this.",
+      authorKind: "user",
+      authorId: "operator",
+      createdAt: "2026-07-31T09:00:00.000Z",
+      mentionedParticipantIds: ["worker-a"],
+      deliveryState: "pending"
+    })!
+    const updated = updatePlanCommentMentionDeliveriesHtml(
+      appended,
+      "a1",
+      "reply-outbox",
+      [
+        {
+          participantId: "worker-a",
+          status: "unavailable",
+          dispatchId: "reply-outbox:worker-a",
+          detail: 'Participant "worker-a" stopped.',
+          retryable: true
+        }
+      ],
+      "failed"
+    )!
+    const parsed = parsePlanHtml(updated)
+    expect(parsed.valid).toBe(true)
+    if (!parsed.valid) return
+    expect(parsed.projection.annotations[0]?.messages[1]).toMatchObject({
+      deliveryState: "failed",
+      mentionDeliveries: [
+        {
+          participantId: "worker-a",
+          status: "unavailable",
+          detail: 'Participant "worker-a" stopped.',
+          retryable: true
+        }
+      ]
     })
   })
 })

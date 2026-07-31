@@ -823,6 +823,86 @@ describe("AgentRunner plan mode", () => {
     expect(result.stale.status).toBe("unavailable")
   })
 
+  it("serializes concurrent plan-thread steers and collects complete replies", async () => {
+    const proposed = await Effect.runPromise(Deferred.make<string>())
+    const steerTexts: Array<string> = []
+    const adapter: CliAdapterShape = {
+      run: (_chatId, _spec, context) =>
+        Effect.gen(function* () {
+          yield* context.registerTurnSteer?.(async (text) => {
+            steerTexts.push(text)
+            setTimeout(() => {
+              Effect.runFork(context.emit({ _tag: "Assistant", text: `${text}:a` }))
+            }, 10)
+            setTimeout(() => {
+              Effect.runFork(context.emit({ _tag: "Assistant", text: ":b" }))
+            }, 100)
+            return "accepted"
+          }) ?? Effect.void
+          const plan = scriptedPlan(SESSION, 1)
+          yield* context.proposePlan(plan)
+          yield* context.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        }),
+      stop: () => Effect.void
+    }
+    const testLayer = Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlMcpServiceTest,
+      InMemorySecretStoreLive,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      PlanStore.Default,
+      Layer.succeed(CliAdapter, CliAdapter.of(adapter)),
+      DiscoveryService.Default,
+      ContextManager.Default,
+      temp.layer
+    )
+
+    const replies = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "plan")
+        const run = yield* runner.prompt(SESSION, SESSION, "Create a plan.").pipe(
+          Stream.tap((event) =>
+            event._tag === "PlanProposed"
+              ? Deferred.succeed(proposed, event.plan.id)
+              : Effect.void
+          ),
+          Stream.runDrain,
+          Effect.fork
+        )
+        const planId = yield* Deferred.await(proposed)
+        const participant = (yield* runner.planParticipants(SESSION, planId))[0]!
+        const first = yield* runner.steerPlanParticipant({
+          sessionId: SESSION,
+          planId,
+          routingId: participant.routingId,
+          text: "first"
+        }).pipe(Effect.fork)
+        yield* Effect.sleep("20 millis")
+        const second = yield* runner.steerPlanParticipant({
+          sessionId: SESSION,
+          planId,
+          routingId: participant.routingId,
+          text: "second"
+        }).pipe(Effect.fork)
+        const result = [yield* Fiber.join(first), yield* Fiber.join(second)]
+        yield* runner.approvePlan(SESSION, planId)
+        yield* Fiber.join(run)
+        return result
+      }).pipe(Effect.provide(testLayer), Effect.timeout("10 seconds"))
+    )
+
+    expect(steerTexts).toEqual(["first", "second"])
+    expect(replies).toEqual([
+      { status: "delivered", reply: "first:a:b" },
+      { status: "delivered", reply: "second:a:b" }
+    ])
+  })
+
   it("drives the Electron collaboration fixture through the scripted active plan agent", async () => {
     const proposed = await Effect.runPromise(Deferred.make<string>())
     const result = await Effect.runPromise(

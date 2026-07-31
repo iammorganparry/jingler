@@ -44,6 +44,13 @@ import type {
 import { CliAdapter } from "./adapter.js"
 import { classifyProviderFailure } from "./provider-failure.js"
 import { releaseSessionRun, reserveSessionRun } from "./run-coordinator.js"
+import {
+  appendSteeredReply,
+  collectSteeredReply,
+  invokeSteer,
+  makeSteeredReplyWaiter,
+  type SteeredReplyWaiter
+} from "./steered-reply.js"
 
 export const MAX_ORCHESTRATION_CONCURRENCY = 4
 
@@ -368,10 +375,7 @@ interface ParsedStageEvidence {
   readonly verificationErrors: ReadonlyArray<string>
 }
 
-interface WorkerReplyWaiter {
-  readonly firstChunk: Deferred.Deferred<void>
-  readonly chunks: Ref.Ref<ReadonlyArray<string>>
-}
+type WorkerReplyWaiter = SteeredReplyWaiter
 
 interface LiveWorkerRoute {
   readonly worker: WorkerIdentity
@@ -379,6 +383,7 @@ interface LiveWorkerRoute {
   readonly ownerId: string
   readonly steer: Ref.Ref<SteerTurn | null>
   readonly replyWaiter: Ref.Ref<WorkerReplyWaiter | null>
+  readonly replyGate: Effect.Semaphore
   readonly subagents: Ref.Ref<Map<string, PlanParticipant>>
 }
 
@@ -955,6 +960,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
             ownerId,
             steer: yield* Ref.make<SteerTurn | null>(null),
             replyWaiter: yield* Ref.make<WorkerReplyWaiter | null>(null),
+            replyGate: yield* Effect.makeSemaphore(1),
             subagents: yield* Ref.make(new Map<string, PlanParticipant>())
           }
           return yield* Effect.gen(function* () {
@@ -1181,11 +1187,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                     yield* Ref.update(assistant, (chunks) => [...chunks, event.text])
                     const waiter = yield* Ref.get(workerRoute.replyWaiter)
                     if (waiter !== null) {
-                      yield* Ref.update(waiter.chunks, (chunks) => [
-                        ...chunks,
-                        event.text
-                      ])
-                      yield* Deferred.succeed(waiter.firstChunk, undefined)
+                      yield* appendSteeredReply(waiter, event.text)
                     }
                   }
                   if (event._tag === "Failed") yield* Ref.set(emittedFailure, event.message)
@@ -1684,45 +1686,46 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
             }
           }
 
-          const waiter: WorkerReplyWaiter = {
-            firstChunk: yield* Deferred.make<void>(),
-            chunks: yield* Ref.make<ReadonlyArray<string>>([])
-          }
-          yield* Ref.set(selected.replyWaiter, waiter)
-          return yield* Effect.gen(function* () {
-            const outcome = yield* Effect.tryPromise(() =>
-              handler(request.text, [])
-            ).pipe(Effect.either)
-            if (outcome._tag === "Left") {
+          return yield* selected.replyGate.withPermits(1)(Effect.gen(function* () {
+            const waiter = yield* makeSteeredReplyWaiter
+            yield* Ref.set(selected.replyWaiter, waiter)
+            return yield* Effect.gen(function* () {
+              const outcome = yield* invokeSteer(handler, request.text, [])
+              if (outcome === "failed") {
+                return {
+                  status: "failed",
+                  detail: `Delivery to "${request.routingId}" failed. Retry this message.`
+                } satisfies PlanParticipantSteerResult
+              }
+              if (outcome === "timed-out") {
+                return {
+                  status: "failed",
+                  detail:
+                    `Delivery to "${request.routingId}" timed out. ` +
+                    "Retry when its steering channel is responsive."
+                } satisfies PlanParticipantSteerResult
+              }
+              if (outcome !== "accepted") {
+                return {
+                  status: "failed",
+                  detail:
+                    `Delivery to "${request.routingId}" was deferred. ` +
+                    "Retry when its current operation completes."
+                } satisfies PlanParticipantSteerResult
+              }
+              const reply = yield* collectSteeredReply(waiter)
               return {
-                status: "failed",
-                detail: `Delivery to "${request.routingId}" failed. Retry this message.`
+                status: "delivered",
+                reply
               } satisfies PlanParticipantSteerResult
-            }
-            if (outcome.right !== "accepted") {
-              return {
-                status: "failed",
-                detail:
-                  `Delivery to "${request.routingId}" was deferred. ` +
-                  "Retry when its current operation completes."
-              } satisfies PlanParticipantSteerResult
-            }
-            const observed = yield* Deferred.await(waiter.firstChunk).pipe(
-              Effect.timeoutOption("2 seconds")
-            )
-            if (Option.isSome(observed)) yield* Effect.sleep("40 millis")
-            const reply = (yield* Ref.get(waiter.chunks)).join("").trim()
-            return {
-              status: "delivered",
-              reply: reply.length === 0 ? null : reply
-            } satisfies PlanParticipantSteerResult
-          }).pipe(
-            Effect.ensuring(
-              Ref.update(selected.replyWaiter, (current) =>
-                current === waiter ? null : current
+            }).pipe(
+              Effect.ensuring(
+                Ref.update(selected.replyWaiter, (current) =>
+                  current === waiter ? null : current
+                )
               )
             )
-          )
+          }))
         })
 
       /** Stop and await every orchestration worker owned by one session. */

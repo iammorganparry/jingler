@@ -338,10 +338,27 @@ describe("PlanStore canonical document", () => {
           deliveryState: "sent",
           author: "agent"
         })
-        const resolved = yield* PlanStore.setAnnotationResolved(WT, {
+        const withOutbox = yield* PlanStore.updateAnnotationMentionDeliveries(WT, {
           planId: first.id,
           baseRevision: sent.revision,
           annotationId: sent.projection.annotations[0]!.id,
+          messageId: reply.id,
+          deliveries: [
+            {
+              participantId: "operator",
+              status: "delivered",
+              dispatchId: `${reply.id}:operator`,
+              detail: null,
+              retryable: false
+            }
+          ],
+          deliveryState: "sent",
+          author: "agent"
+        })
+        const resolved = yield* PlanStore.setAnnotationResolved(WT, {
+          planId: first.id,
+          baseRevision: withOutbox.revision,
+          annotationId: withOutbox.projection.annotations[0]!.id,
           resolved: true,
           author: "user"
         })
@@ -364,7 +381,7 @@ describe("PlanStore canonical document", () => {
             deliveryState: "pending"
           })
         )
-        return { thread, replied, sent, resolved, reopened, stale }
+        return { thread, replied, sent, withOutbox, resolved, reopened, stale }
       })
     )
 
@@ -372,7 +389,7 @@ describe("PlanStore canonical document", () => {
       expect.objectContaining({
         body: "Please ask worker-a.",
         authorKind: "user",
-        deliveryState: "pending"
+        deliveryState: "sent"
       }),
       expect.objectContaining({
         body: "I checked the persistence path.",
@@ -383,6 +400,11 @@ describe("PlanStore canonical document", () => {
       })
     ])
     expect(result.sent.projection.annotations[0]?.messages[1]?.deliveryState).toBe("sent")
+    expect(
+      result.withOutbox.projection.annotations[0]?.messages[1]?.mentionDeliveries
+    ).toEqual([
+      expect.objectContaining({ participantId: "operator", status: "delivered" })
+    ])
     expect(result.resolved.projection.annotations[0]?.status).toBe("resolved")
     expect(result.reopened.projection.annotations[0]?.status).toBe("open")
     expect(Either.isLeft(result.stale)).toBe(true)

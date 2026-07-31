@@ -42,6 +42,29 @@ export type PlanCommentMessageDeliveryState = Schema.Schema.Type<
   typeof PlanCommentMessageDeliveryState
 >
 
+export const PlanCommentMentionDeliveryStatus = Schema.Literal(
+  "pending",
+  "dispatching",
+  "delivered",
+  "unavailable",
+  "failed"
+)
+export type PlanCommentMentionDeliveryStatus = Schema.Schema.Type<
+  typeof PlanCommentMentionDeliveryStatus
+>
+
+/** Durable per-recipient outbox state for one mentioned participant. */
+export const PlanCommentMentionDelivery = Schema.Struct({
+  participantId: Schema.String,
+  status: PlanCommentMentionDeliveryStatus,
+  dispatchId: Schema.String,
+  detail: Schema.NullOr(Schema.String),
+  retryable: Schema.Boolean
+})
+export type PlanCommentMentionDelivery = Schema.Schema.Type<
+  typeof PlanCommentMentionDelivery
+>
+
 /**
  * One durable entry in a plan annotation thread. `authorId` is deliberately
  * separate from `authorKind`: a worker and the coordinating agent are both
@@ -54,7 +77,9 @@ export const PlanCommentMessage = Schema.Struct({
   authorId: Schema.String,
   createdAt: Schema.String,
   mentionedParticipantIds: Schema.Array(Schema.String),
-  deliveryState: PlanCommentMessageDeliveryState
+  deliveryState: PlanCommentMessageDeliveryState,
+  /** Optional only for backward compatibility with plans written before the outbox. */
+  mentionDeliveries: Schema.optional(Schema.Array(PlanCommentMentionDelivery))
 })
 export type PlanCommentMessage = Schema.Schema.Type<typeof PlanCommentMessage>
 

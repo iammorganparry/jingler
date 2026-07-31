@@ -2,6 +2,7 @@ import type {
   Plan,
   PlanAcceptanceStatus,
   PlanCommentMessageDeliveryState,
+  PlanCommentMentionDelivery,
   PlanDocument,
   PlanDocumentAuthor,
   PlanDocumentStatus,
@@ -24,6 +25,7 @@ import {
   updatePlanCriterionHtml,
   updatePlanAnnotationStatusHtml,
   updatePlanCommentMessageDeliveryHtml,
+  updatePlanCommentMentionDeliveriesHtml,
   updatePlanStageExecutionHtml,
   upsertPlanWorkerAnnotationHtml
 } from "@jingler/core"
@@ -1028,6 +1030,49 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           })
         })
 
+      const updateAnnotationMentionDeliveries = (
+        worktreePath: string,
+        input: {
+          readonly planId: string
+          readonly baseRevision: number
+          readonly annotationId: string
+          readonly messageId: string
+          readonly deliveries: ReadonlyArray<PlanCommentMentionDelivery>
+          readonly deliveryState: PlanCommentMessageDeliveryState
+          readonly author: PlanDocumentAuthor
+        }
+      ) =>
+        Effect.gen(function* () {
+          const current = yield* readCanonical(worktreePath)
+          if (current === null) {
+            return yield* new PlanConflictError({
+              message: "The canonical plan no longer exists.",
+              latestRevision: 0,
+              latest: null
+            })
+          }
+          const source = updatePlanCommentMentionDeliveriesHtml(
+            current.source,
+            input.annotationId,
+            input.messageId,
+            input.deliveries,
+            input.deliveryState
+          )
+          if (source === null) {
+            return yield* annotationMutationError(
+              input.annotationId,
+              `does not contain message "${input.messageId}"`
+            )
+          }
+          return yield* updateDocument(worktreePath, {
+            planId: input.planId,
+            baseRevision: input.baseRevision,
+            source,
+            author: input.author,
+            semantic: false
+          })
+        })
+
       /** Compare-and-swap resolution or reopening of one durable thread. */
       const setAnnotationResolved = (
         worktreePath: string,
@@ -1311,6 +1356,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         addAnnotation,
         appendAnnotationMessage,
         updateAnnotationMessageDelivery,
+        updateAnnotationMentionDeliveries,
         setAnnotationResolved,
         readArtifact,
         promote,

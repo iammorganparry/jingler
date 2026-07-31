@@ -12,7 +12,7 @@ import {
   subagentParticipantRoutingId,
   workerParticipantRoutingId
 } from "@jingler/core"
-import { assign, fromCallback, fromPromise, setup } from "xstate"
+import { assign, fromCallback, setup } from "xstate"
 
 /** The exact server-side worker feed this machine currently owns. */
 export interface OrchestrationAgentsScope {
@@ -63,11 +63,17 @@ export type OrchestrationAgentsEvent =
       readonly scope: OrchestrationAgentsScope | null
     }
   | { readonly type: "ACTIVITY"; readonly activity: WorkerActivity }
+  | {
+      readonly type: "PARTICIPANTS_REFRESHED"
+      readonly participants: ReadonlyArray<PlanParticipant>
+    }
+  | { readonly type: "PARTICIPANTS_REFRESH_FAILED"; readonly error: unknown }
   | { readonly type: "STREAM_FAILED"; readonly error: unknown }
 
 export const MAX_WORKER_STREAM_RECONNECTS = 5
 export const WORKER_STREAM_RECONNECT_BASE_MS = 250
 export const WORKER_STREAM_RECONNECT_MAX_MS = 4000
+export const PLAN_PARTICIPANT_REFRESH_MS = 1000
 
 const sameScope = (
   left: OrchestrationAgentsScope | null,
@@ -365,15 +371,37 @@ export const orchestrationAgentsMachine = setup({
         (error) => sendBack({ type: "STREAM_FAILED", error })
       )
     ),
-    loadParticipants: fromPromise<
-      ReadonlyArray<PlanParticipant>,
+    watchParticipants: fromCallback<
+      OrchestrationAgentsEvent,
       {
         readonly scope: OrchestrationAgentsScope
         readonly load: OrchestrationAgentsInput["loadParticipants"]
       }
-    >(({ input }) =>
-      input.load === undefined ? Promise.resolve([]) : input.load(input.scope)
-    )
+    >(({ sendBack, input }) => {
+      const load = input.load
+      if (load === undefined) return () => undefined
+      let cancelled = false
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const refresh = () => {
+        load(input.scope).then(
+          (participants) => {
+            if (cancelled) return
+            sendBack({ type: "PARTICIPANTS_REFRESHED", participants })
+          },
+          (error) => {
+            if (cancelled) return
+            sendBack({ type: "PARTICIPANTS_REFRESH_FAILED", error })
+          }
+        ).finally(() => {
+          if (!cancelled) timer = setTimeout(refresh, PLAN_PARTICIPANT_REFRESH_MS)
+        })
+      }
+      refresh()
+      return () => {
+        cancelled = true
+        if (timer !== null) clearTimeout(timer)
+      }
+    })
   },
   guards: {
     hasScope: ({ context }) => context.scope !== null,
@@ -420,7 +448,24 @@ export const orchestrationAgentsMachine = setup({
           participant.role !== "worker" &&
           participant.ownerRoutingId?.startsWith("worker:") !== true
       )
-    }))
+    })),
+    replaceMainParticipants: assign(({ context, event }) => {
+      if (event.type !== "PARTICIPANTS_REFRESHED") return {}
+      return {
+        participants: activePlanParticipants([
+          context.participants.filter(
+            (participant) =>
+              participant.role === "worker" ||
+              participant.ownerRoutingId?.startsWith("worker:") === true
+          ),
+          event.participants.filter(
+            (participant) =>
+              participant.role !== "worker" &&
+              participant.ownerRoutingId?.startsWith("worker:") !== true
+          )
+        ])
+      }
+    })
   },
   delays: {
     reconnectDelay: ({ context }) =>
@@ -466,23 +511,11 @@ export const orchestrationAgentsMachine = setup({
           })
         },
         {
-          src: "loadParticipants",
+          src: "watchParticipants",
           input: ({ context }) => ({
             scope: context.scope!,
             load: context.loadParticipants
-          }),
-          onDone: {
-            actions: assign(({ context, event }) => ({
-              participants: activePlanParticipants([
-                context.participants,
-                event.output.filter(
-                  (participant) =>
-                    participant.role !== "worker" &&
-                    participant.ownerRoutingId?.startsWith("worker:") !== true
-                )
-              ])
-            }))
-          }
+          })
         }
       ],
       on: {
@@ -493,7 +526,9 @@ export const orchestrationAgentsMachine = setup({
         STREAM_FAILED: {
           target: "reconnecting",
           actions: "noteStreamFailure"
-        }
+        },
+        PARTICIPANTS_REFRESHED: { actions: "replaceMainParticipants" },
+        PARTICIPANTS_REFRESH_FAILED: {}
       }
     },
     reconnecting: {

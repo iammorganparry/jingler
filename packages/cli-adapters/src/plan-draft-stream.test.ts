@@ -56,7 +56,7 @@ describe("extractPlanDraft", () => {
 
 describe("createPlanDraftStream", () => {
   it("emits changed cumulative snapshots for deltas and marks the closed fence complete", () => {
-    const stream = createPlanDraftStream(() => "plan-1")
+    const stream = createPlanDraftStream(() => "plan-1", { minIntervalMs: 0 })
     expect(stream.append("````html\n")).toBeNull()
     expect(stream.append("<h1>PRD: Live")).toEqual({
       _tag: "PlanDraft",
@@ -81,6 +81,33 @@ describe("createPlanDraftStream", () => {
         source: "<h1>PRD: Live</h1><p>More</p>",
         phase: "complete"
       }
+    })
+  })
+
+  it("coalesces rapid token deltas and always emits the completed document", () => {
+    let now = 0
+    const stream = createPlanDraftStream(() => "plan-throttled", {
+      now: () => now
+    })
+    // biome-ignore lint/security/noSecrets: Static plan-protocol test fixture.
+    expect(stream.append("````html\n<h1>PRD: Live")).toMatchObject({
+      _tag: "PlanDraft"
+    })
+
+    for (const token of ["</h1>", "<p>", "one ", "two ", "three", "</p>"]) {
+      expect(stream.append(token)).toBeNull()
+    }
+
+    now = 50
+    expect(stream.append("<p>next</p>")).toMatchObject({
+      _tag: "PlanDraft",
+      draft: { source: expect.stringContaining("<p>next</p>") }
+    })
+
+    // Completion bypasses the cadence so the final source cannot be stranded.
+    expect(stream.append("\n````")).toMatchObject({
+      _tag: "PlanDraft",
+      draft: { phase: "complete" }
     })
   })
 

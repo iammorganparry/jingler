@@ -79,6 +79,13 @@ const mentionMatch = (value: string): { readonly start: number; readonly query: 
   }
 }
 
+const containsMentionToken = (value: string, token: string): boolean => {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return new RegExp(
+    `(?:^|\\s)${escaped}(?=$|\\s|[.,!?;:()\\[\\]{}])`
+  ).test(value)
+}
+
 export function PlanCommentComposer({
   participants,
   placeholder = "Reply to this thread…",
@@ -94,11 +101,13 @@ export function PlanCommentComposer({
   onSubmit: (
     body: string,
     mentionedParticipantIds: ReadonlyArray<string>
-  ) => Promise<void> | void
+  ) => Promise<boolean | void> | boolean | void
   onCancel?: () => void
 }) {
   const [value, setValue] = useState("")
-  const [mentioned, setMentioned] = useState<ReadonlyArray<string>>([])
+  const [mentioned, setMentioned] = useState<
+    ReadonlyArray<{ readonly routingId: string; readonly token: string }>
+  >([])
   const [activeIndex, setActiveIndex] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const match = mentionMatch(value)
@@ -112,13 +121,14 @@ export function PlanCommentComposer({
 
   const choose = (participant: PlanParticipant) => {
     if (match === null) return
+    const token = `@${participant.displayName}`
     setValue(
-      `${value.slice(0, match.start)}@${participant.displayName} ${value.slice(match.start + match.query.length + 1)}`
+      `${value.slice(0, match.start)}${token} ${value.slice(match.start + match.query.length + 1)}`
     )
     setMentioned((current) =>
-      current.includes(participant.routingId)
+      current.some(({ routingId }) => routingId === participant.routingId)
         ? current
-        : [...current, participant.routingId]
+        : [...current, { routingId: participant.routingId, token }]
     )
     setActiveIndex(0)
   }
@@ -129,7 +139,11 @@ export function PlanCommentComposer({
     if (body.length === 0 || submitting || disabled) return
     setSubmitting(true)
     try {
-      await onSubmit(body, mentioned)
+      const succeeded = await onSubmit(
+        body,
+        mentioned.map(({ routingId }) => routingId)
+      )
+      if (succeeded === false) return
       setValue("")
       setMentioned([])
     } finally {
@@ -205,7 +219,11 @@ export function PlanCommentComposer({
           aria-label={placeholder}
           placeholder={placeholder}
           onChange={(event) => {
-            setValue(event.target.value)
+            const next = event.target.value
+            setValue(next)
+            setMentioned((current) =>
+              current.filter(({ token }) => containsMentionToken(next, token))
+            )
             setActiveIndex(0)
           }}
           onKeyDown={onKeyDown}
@@ -292,15 +310,20 @@ export function PlanCommentThread({
     (message) => message.deliveryState === "pending"
   )
 
-  const run = async (key: string, action: () => Promise<void> | void) => {
+  const run = async (
+    key: string,
+    action: () => Promise<void> | void
+  ): Promise<boolean> => {
     setBusyAction(key)
     setActionError(null)
     try {
       await action()
+      return true
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "The thread could not be updated."
       )
+      return false
     } finally {
       setBusyAction(null)
     }

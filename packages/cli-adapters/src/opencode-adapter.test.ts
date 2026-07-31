@@ -245,7 +245,9 @@ describe("createOpencodeMapper — plan-turn text suppression", () => {
   })
 
   it("converts cumulative suppressed plan parts into progressive draft snapshots", () => {
-    const draft = createPlanDraftStream(() => "plan-opencode-1")
+    const draft = createPlanDraftStream(() => "plan-opencode-1", {
+      minIntervalMs: 0
+    })
     const m = createOpencodeMapper(
       () => SESSION,
       () => true,
