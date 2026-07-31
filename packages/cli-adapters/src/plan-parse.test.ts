@@ -401,24 +401,21 @@ describe("hasPlanBlock", () => {
     expect(parsePlan(raw, "plan_corrected").summary).toBe("Corrected")
   })
 
-  it("normalizes repeated worker ids before accepting orchestrator plan HTML", () => {
+  it("compiles assignment-free orchestrator HTML before accepting it", () => {
     const raw = [
       "````html",
       "<h1>PRD: Signals pricing</h1>",
       '<section data-stage="05" data-title="Pricing" data-complexity="high">',
-      '<div data-assignment data-agent-id="worker-pricing" data-cli="codex" data-model="gpt-5" data-reason="Pricing work." data-status="queued"></div>',
       '<ul data-files><li>src/pricing.ts</li></ul>',
       '<div data-acceptance="05.1" data-status="pending">Pricing works.</div>',
       "</section>",
       '<section data-stage="06" data-title="Packaging" data-complexity="high">',
-      '<div data-assignment data-agent-id="worker-pricing" data-cli="codex" data-model="gpt-5" data-reason="Packaging work." data-status="queued"></div>',
       '<ul data-files><li>src/packaging.ts</li></ul>',
       '<div data-acceptance="06.1" data-status="pending">Packaging works.</div>',
       "</section>",
       "````"
     ].join("\n")
 
-    expect(parsePlan(raw, "plan_unrouted").structured).toBe(false)
     const plan = parsePlan(raw, "plan_routed", ROUTING)
     expect(plan.structured).toBe(true)
     expect(plan.summary).toBe("Signals pricing")
@@ -428,7 +425,7 @@ describe("hasPlanBlock", () => {
     expect(parsed.valid).toBe(true)
     expect(
       parsed.projection?.stages.map((stage) => stage.assignment?.agentId)
-    ).toStrictEqual(["worker-pricing", "worker-pricing-2"])
+    ).toStrictEqual(["agent-01", "agent-02"])
   })
 })
 

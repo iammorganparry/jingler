@@ -19,6 +19,7 @@ const worker = {
   stageIds: ["01", "02"],
   harness: "codex",
   model: "gpt-5.6-sol",
+  reasoning: { enabled: true, effort: "xhigh" },
   attempt: 1
 }
 
@@ -73,6 +74,20 @@ describe("WorkerActivity decoding", () => {
     })
 
     expect(Either.isRight(result)).toBe(true)
+  })
+
+  it("keeps legacy worker activity without a reasoning route provider-default", () => {
+    const { reasoning: _reasoning, ...legacyWorker } = worker
+    expect(
+      Either.isRight(
+        decode({
+          _tag: "State",
+          worker: legacyWorker,
+          status: "running",
+          message: null
+        })
+      )
+    ).toBe(true)
   })
 })
 

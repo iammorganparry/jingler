@@ -97,6 +97,7 @@ import type {
   PlanDocument,
   PlanMentionDelivery,
   PlanParticipant,
+  PlanStageAssignment,
   PluginCatalog,
   PrMergeMethod,
   ProviderConfig,
@@ -112,7 +113,8 @@ import type {
 import type {
   OrchestrationCheckpoint,
   OrchestrationExecutionReport,
-  OrchestrationStageStatus
+  OrchestrationStageStatus,
+  SessionSpec
 } from "@jingler/cli-adapters"
 import { JinglerRpcs } from "@jingler/contracts"
 import { AppPaths } from "@jingler/cli-adapters"
@@ -1018,6 +1020,9 @@ export const restoredOrchestrationSnapshot = (
           stageIds: group.stages.map((stage) => stage.id),
           harness: group.assignment.cli,
           model: group.assignment.model,
+          ...(group.assignment.reasoning === undefined
+            ? {}
+            : { reasoning: group.assignment.reasoning }),
           attempt: checkpoint.attempt
         },
         status: checkpoint.state,
@@ -1035,6 +1040,31 @@ export const restoredOrchestrationSnapshot = (
     workers
   }
 }
+
+/**
+ * Apply a compiled assignment's complete execution route to a worker launch.
+ * An absent reasoning setting deliberately omits both fields so the harness
+ * retains its provider/model default.
+ */
+export const workerSessionSpecForAssignment = (
+  assignment: PlanStageAssignment,
+  base: Omit<
+    SessionSpec,
+    "cli" | "model" | "thinkingEnabled" | "reasoningEffort"
+  >
+): SessionSpec => ({
+  ...base,
+  cli: assignment.cli,
+  model: assignment.model,
+  ...(assignment.reasoning === undefined
+    ? {}
+    : {
+        thinkingEnabled: assignment.reasoning.enabled,
+        ...(assignment.reasoning.effort === undefined
+          ? {}
+          : { reasoningEffort: assignment.reasoning.effort })
+      })
+})
 
 export const orchestrationStagesCompleted = (
   document: PlanDocument | null
@@ -1158,18 +1188,17 @@ export const executeOrchestration = (
         checkpoints: currentCheckpoints,
         maxConcurrency: 4,
         ...(agentIds === undefined ? {} : { agentIds }),
-        makeSessionSpec: ({ group, prompt, resumeId }) => ({
-          cli: group.assignment.cli,
-          repo: session.repo,
-          branch: session.branch,
-          cwd: worktreePath,
-          prompt,
-          images: [],
-          binPath: binByCli.get(group.assignment.cli) ?? null,
-          mode: "auto",
-          model: group.assignment.model,
-          resumeId
-        }),
+        makeSessionSpec: ({ group, prompt, resumeId }) =>
+          workerSessionSpecForAssignment(group.assignment, {
+            repo: session.repo,
+            branch: session.branch,
+            cwd: worktreePath,
+            prompt,
+            images: [],
+            binPath: binByCli.get(group.assignment.cli) ?? null,
+            mode: "auto",
+            resumeId
+          }),
         refreshStage: (_agentId, stageId) =>
           store
             .readDocument(worktreePath, session.id, session.activeChatId)
@@ -1332,42 +1361,50 @@ export const watchOrchestrationWorkers = (
  * — with no approval gate. This is the auto-dispatch half of "amend in place":
  * the runner applies the amendment to the canonical document (reconciled, kept
  * in the executing lane), and this fires only when that document is an
- * approved/executing orchestration plan, not already running, with at least one
- * queued assigned stage — precisely the state an in-turn amendment leaves. A
- * plain answer queues nothing, so nothing dispatches. `executeOrchestration`
- * merges checkpoints, so already-completed stages are skipped and only the
- * requeued/new workers run.
+ * approved/executing orchestration plan with at least one queued assigned stage
+ * — precisely the state an in-turn amendment leaves. When existing workers are
+ * still settling, a detached scheduler waits and re-reads the canonical plan;
+ * this lets a newly-added independent component start as soon as the active run
+ * releases the plan. A plain answer queues nothing, so nothing dispatches.
+ * `executeOrchestration` merges checkpoints, so already-completed stages are
+ * skipped and only the requeued/new workers run.
  */
 const dispatchPendingOrchestration = (sessionId: string, chatId: string) =>
   Effect.gen(function* () {
-    const session = yield* SessionStore.get(sessionId).pipe(
-      Effect.orElseSucceed(() => null)
-    )
-    if (session?.worktreePath == null) return
-    const chat = session.chats.find((candidate) => candidate.id === chatId)
-    if (chat?.role !== "orchestrator") return
-    const document = yield* PlanStore.readDocument(
-      session.worktreePath,
-      session.id,
-      chatId
-    )
-    if (
-      document === null ||
-      !planUsesOrchestration(session, document) ||
-      !["approved", "executing", "needs-verification"].includes(document.status)
-    ) {
+    while (true) {
+      const session = yield* SessionStore.get(sessionId).pipe(
+        Effect.orElseSucceed(() => null)
+      )
+      if (session?.worktreePath == null) return
+      const chat = session.chats.find((candidate) => candidate.id === chatId)
+      if (chat?.role !== "orchestrator") return
+      const document = yield* PlanStore.readDocument(
+        session.worktreePath,
+        session.id,
+        chatId
+      )
+      if (
+        document === null ||
+        !planUsesOrchestration(session, document) ||
+        !["approved", "executing", "needs-verification"].includes(document.status)
+      ) {
+        return
+      }
+      const hasQueuedWork = document.projection.stages.some(
+        (stage) =>
+          stage.assignment !== null &&
+          stage.assignment !== undefined &&
+          stage.executionStatus === "queued"
+      )
+      if (!hasQueuedWork) return
+      if (yield* OrchestrationService.isPlanRunning(sessionId, document.id)) {
+        yield* Effect.sleep("100 millis")
+        continue
+      }
+      yield* executeOrchestration(sessionId, document.id)
       return
     }
-    const hasQueuedWork = document.projection.stages.some(
-      (stage) =>
-        stage.assignment !== null &&
-        stage.assignment !== undefined &&
-        stage.executionStatus === "queued"
-    )
-    if (!hasQueuedWork) return
-    if (yield* OrchestrationService.isPlanRunning(sessionId, document.id)) return
-    yield* executeOrchestration(sessionId, document.id).pipe(Effect.forkDaemon)
-  })
+  }).pipe(Effect.forkDaemon, Effect.asVoid)
 
 /** Resolve a session only when it has an active pull request. */
 const sessionWithPr = (sessionId: string) =>
@@ -2575,21 +2612,32 @@ const HandlersLayer = JinglerRpcs.toLayer({
   // renderer subscribes to normalized events, harness-agnostic.
   "Agent.run": ({ sessionId, chatId, text, images, reasoning }) =>
     Stream.unwrap(
-      Effect.map(AgentRunner, (runner) =>
-        runner
+      Effect.map(AgentRunner, (runner) => {
+        let amendmentApplied = false
+        return runner
           .prompt(sessionId, chatId, text, images ?? [], reasoning)
-          // After the turn settles, dispatch any workers an in-turn plan
-          // amendment requeued — no approval gate. Emits nothing to the stream.
           .pipe(
+            Stream.tap((event) =>
+              Effect.sync(() => {
+                if (event._tag === "PlanUpdated") amendmentApplied = true
+              })
+            ),
+            // `PlanUpdated` is the observable applied-amendment tag. Only that
+            // outcome can have requeued work; not-present, invalid, and conflict
+            // turns must not probe or dispatch orchestration after settling.
             Stream.concat(
               Stream.drain(
                 Stream.fromEffect(
-                  dispatchPendingOrchestration(sessionId, chatId)
+                  Effect.suspend(() =>
+                    amendmentApplied
+                      ? dispatchPendingOrchestration(sessionId, chatId)
+                      : Effect.void
+                  )
                 )
               )
             )
           )
-      )
+      })
     ),
   "Agent.decideGate": ({ sessionId, chatId, gateId, decision }) =>
     Effect.flatMap(AgentRunner, (runner) =>

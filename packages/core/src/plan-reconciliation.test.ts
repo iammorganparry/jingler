@@ -29,10 +29,10 @@ const assignment = (
   `<div data-assignment data-agent-id="${agentId}" data-cli="codex" data-model="gpt-5" data-reason="Stable component owner." data-status="${status}"></div><ul data-files></ul>`
 
 describe("reconcilePlanAmendment", () => {
-  it("resets evidence for a changed running stage and preserves its existing assignee", () => {
+  it("requeues changed work while preserving its assignee and unchanged criterion evidence", () => {
     const previous = documentFrom(`<h1>PRD: Amend safely</h1>
 <section data-stage="01" data-title="Worker stage" data-complexity="high">
-${assignment("worker-a", "running")}
+${assignment("worker-a", "completed")}
 <p>Original implementation detail.</p>
 <div data-acceptance="01.1" data-status="passed" data-evidence="unit test green">The stable behavior works.</div>
 </section>`)
@@ -50,13 +50,13 @@ ${assignment("worker-b", "queued")}
     if (!result.valid) return
     const stage = result.projection.stages[0]!
     expect(stage.assignment?.agentId).toBe("worker-a")
-    expect(stage.executionStatus).toBe("running")
+    expect(stage.executionStatus).toBe("queued")
     expect(stage.acceptance).toEqual([
       {
         id: "01.1",
         text: "The stable behavior works.",
-        status: "pending",
-        evidence: null
+        status: "passed",
+        evidence: "unit test green"
       },
       {
         id: "01.2",
@@ -146,7 +146,7 @@ ${assignment("worker-a", "queued")}
 </section>`)
     const replacement = `<h1>PRD: Reroute work</h1>
 <section data-stage="01" data-title="Worker stage" data-complexity="high">
-<div data-assignment data-agent-id="replacement" data-cli="claude" data-model="opus" data-reason="Updated high-complexity route." data-status="queued"></div>
+<div data-assignment data-agent-id="replacement" data-cli="claude" data-model="opus" data-thinking-enabled="true" data-reasoning-effort="max" data-reason="Updated high-complexity route." data-status="queued"></div>
 <div data-acceptance="01.1" data-status="pending">The work completes.</div>
 </section>`
 
@@ -157,8 +157,34 @@ ${assignment("worker-a", "queued")}
     expect(result.projection.stages[0]?.assignment).toMatchObject({
       agentId: "worker-a",
       cli: "claude",
-      model: "opus"
+      model: "opus",
+      reasoning: { enabled: true, effort: "max" }
     })
+    expect(result.source).toContain('data-thinking-enabled="true"')
+    expect(result.source).toContain('data-reasoning-effort="max"')
+  })
+
+  it("preserves a running worker's complete reasoning route", () => {
+    const previous = documentFrom(`<h1>PRD: Keep the live route</h1>
+<section data-stage="01" data-title="Worker stage" data-complexity="high">
+<div data-assignment data-agent-id="worker-a" data-cli="codex" data-model="gpt-5" data-thinking-enabled="true" data-reasoning-effort="high" data-reason="Live route." data-status="running"></div><ul data-files></ul>
+<div data-acceptance="01.1" data-status="pending">The work completes.</div>
+</section>`)
+    const replacement = `<h1>PRD: Keep the live route</h1>
+<section data-stage="01" data-title="Worker stage" data-complexity="high">
+<div data-assignment data-agent-id="replacement" data-cli="codex" data-model="gpt-5" data-thinking-enabled="true" data-reasoning-effort="low" data-reason="Proposed route." data-status="queued"></div><ul data-files></ul>
+<div data-acceptance="01.1" data-status="pending">The work completes.</div>
+</section>`
+
+    const result = reconcilePlanAmendment(previous, replacement)
+
+    expect(result.valid).toBe(true)
+    if (!result.valid) return
+    expect(result.projection.stages[0]?.assignment).toMatchObject({
+      agentId: "worker-a",
+      reasoning: { enabled: true, effort: "high" }
+    })
+    expect(result.source).toContain('data-reasoning-effort="high"')
   })
 
   it("preserves prior user comments and unresolved worker annotations", () => {

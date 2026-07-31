@@ -5,7 +5,12 @@ import type { SessionPromptData } from "@opencode-ai/sdk/v2/client"
 import { Effect, Runtime } from "effect"
 import type { AgentContext, PermissionRequest, SessionSpec } from "./adapter.js"
 import { capOutput } from "./output-cap.js"
-import { hasPlanBlock, parsePlan, PLAN_HTML_REFORMAT } from "./plan-parse.js"
+import {
+  fencedHtmlPlanSubmission,
+  hasPlanBlock,
+  parsePlan,
+  PLAN_HTML_REFORMAT
+} from "./plan-parse.js"
 import { createPlanDraftStream } from "./plan-draft-stream.js"
 import { stopChild, trackChild } from "./child-registry.js"
 import { requireWorktree } from "./cwd.js"
@@ -865,13 +870,18 @@ const driveOpencode = async (
         // runner folds a failed run into a `Failed` the transcript shows.
         if (result.error !== undefined) throw new Error(promptError(result.error))
 
-        if (planning) {
+        const reply = assistantText(result.data?.parts)
+        const autoOrchestrationPlan =
+          !planning &&
+          spec.orchestrationRoutes !== undefined &&
+          spec.orchestrationPlanApproved !== true &&
+          hasPlanBlock(reply)
+        if (planning || autoOrchestrationPlan) {
           // The mapper held this turn's prose back, so the reply has to be read
           // off the response rather than the stream. `parts` is the whole final
           // message — which is what `parsePlan` wants anyway: it reads the
           // ```flow and ```<lang> step <NN> blocks below the fence too, exactly
           // as it does for Claude's ExitPlanMode payload.
-          const reply = assistantText(result.data?.parts)
           if (hasPlanBlock(reply) && planRound < MAX_PLAN_ROUNDS) {
             planRound += 1
             const plan = parsePlan(
@@ -887,7 +897,17 @@ const driveOpencode = async (
               turnPrompt = followUp
               continue
             }
-            const decision = await runP(ctx.proposePlan(plan))
+            const decision = await runP(
+              ctx.proposePlan(
+                plan,
+                autoOrchestrationPlan
+                  ? fencedHtmlPlanSubmission(
+                      reply,
+                      spec.workerRouting
+                    )?.block
+                  : undefined
+              )
+            )
             planDraft.reset()
             if (decision._tag === "Revise") followUp = decision.feedback
             else if (decision._tag === "Approve") {
@@ -899,7 +919,7 @@ const driveOpencode = async (
             }
             // Reject: `followUp` stays null and the turn ends, which is what
             // rejection means.
-          } else if (reply.length > 0) {
+          } else if (planning && reply.length > 0) {
             // No plan (or the round cap is spent), so the held-back prose is all
             // the operator gets — replay it rather than returning silence.
             const clear = planDraft.clear()

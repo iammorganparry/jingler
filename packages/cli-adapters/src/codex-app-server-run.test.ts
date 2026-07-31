@@ -863,4 +863,61 @@ describe("runCodexAppServer", () => {
     )
     expect(emitted.some((event) => event._tag === "Assistant")).toBe(true)
   })
+
+  it("accepts an orchestrator plan from auto mode without narrowing native tools", async () => {
+    const plan = [
+      "```plan",
+      "summary: Delegate focused work",
+      "01 Implement the component",
+      "  intent: Isolate the implementation.",
+      "  approach: implement and verify",
+      "  files: M src/component.ts +12 -2",
+      "```"
+    ].join("\n")
+    server.state.messages = [
+      {
+        method: "item/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: { type: "agentMessage", id: "m1", text: plan }
+        }
+      },
+      {
+        method: "turn/completed",
+        params: {
+          threadId: "thread-1",
+          turn: { id: "turn-1", status: "completed", error: null }
+        }
+      }
+    ]
+    const { ctx, proposed } = harness(PlanDecision.Delegate())
+
+    await Effect.runPromise(
+      runCodexAppServer(
+        "s-auto-orchestrator",
+        spec({
+          mode: "auto",
+          orchestrationRoutes: [
+            { cli: "codex", models: [{ id: "gpt-5.6-sol", label: "Sol" }] }
+          ]
+        }),
+        ctx,
+        new Map()
+      )
+    )
+
+    expect(proposed).toHaveLength(1)
+    expect(
+      server.state.requests.find((request) => request.method === "thread/start")
+    ).toMatchObject({
+      params: {
+        sandbox: "danger-full-access",
+        approvalPolicy: "never"
+      }
+    })
+    expect(
+      server.state.requests.filter((request) => request.method === "turn/start")
+    ).toHaveLength(1)
+  })
 })

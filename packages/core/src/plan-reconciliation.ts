@@ -93,6 +93,29 @@ const ensureAssignmentElement = (stage: HTMLElement): HTMLElement => {
   return stage.querySelector("[data-assignment]")!
 }
 
+const writeReasoningRoute = (
+  element: HTMLElement,
+  assignment: PlanStageAssignment
+): void => {
+  if (assignment.reasoning === undefined) {
+    element.removeAttribute("data-thinking-enabled")
+    element.removeAttribute("data-reasoning-effort")
+    return
+  }
+  element.setAttribute(
+    "data-thinking-enabled",
+    String(assignment.reasoning.enabled)
+  )
+  if (assignment.reasoning.effort === undefined) {
+    element.removeAttribute("data-reasoning-effort")
+  } else {
+    element.setAttribute(
+      "data-reasoning-effort",
+      assignment.reasoning.effort
+    )
+  }
+}
+
 const writeStageRouting = (
   stageElement: HTMLElement,
   assignment: PlanStageAssignment | null,
@@ -108,6 +131,7 @@ const writeStageRouting = (
   element.setAttribute("data-agent-id", assignment.agentId)
   element.setAttribute("data-cli", assignment.cli)
   element.setAttribute("data-model", assignment.model)
+  writeReasoningRoute(element, assignment)
   element.setAttribute("data-reason", assignment.reason)
   element.setAttribute("data-status", status)
 }
@@ -334,17 +358,19 @@ export const reconcilePlanAmendment = (
     previousStages,
     replacementStages
   )
+  const previousCriteria = criteriaById(previous.projection.stages)
+  const replacementCriteria = criteriaById(replacement.projection.stages)
   const changedCriterionIds = new Set(
-    changedStageIds.flatMap(
-      (stageId) =>
-        replacementStages.get(stageId)?.acceptance.map((criterion) => criterion.id) ??
-        []
-    )
+    [...replacementCriteria.entries()]
+      .filter(([criterionId, criterion]) =>
+        previousCriteria.get(criterionId)?.text !== criterion.text
+      )
+      .map(([criterionId]) => criterionId)
   )
   reconcileCriteria(
     replacementRoot,
-    criteriaById(previous.projection.stages),
-    criteriaById(replacement.projection.stages),
+    previousCriteria,
+    replacementCriteria,
     changedCriterionIds
   )
   if (options.preserveAnnotations !== false) {

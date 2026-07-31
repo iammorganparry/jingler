@@ -96,7 +96,7 @@ process.stdin.on("data", (chunk) => {
 }
 
 describe("Codex plan model catalogue", () => {
-  it("advertises and selects a configured worker model discovered on a later page", async () => {
+  it("selects a configured worker model without asking the planner to route it", async () => {
     const fake = fakePaginatedCodex()
     try {
       const models = await fetchCodexModels(fake.executable)
@@ -136,8 +136,8 @@ describe("Codex plan model catalogue", () => {
         routes,
         routing ?? undefined
       )
-      expect(plannerPrompt).toContain(`  - codex/${LATER_PAGE_MODEL}`)
-      expect(plannerPrompt).toContain(`low: codex/${LATER_PAGE_MODEL}`)
+      expect(plannerPrompt).not.toContain(`codex/${LATER_PAGE_MODEL}`)
+      expect(plannerPrompt).toContain("Do NOT add data-assignment")
     } finally {
       fake.cleanup()
     }

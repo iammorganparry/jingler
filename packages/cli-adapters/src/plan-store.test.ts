@@ -8,7 +8,11 @@ import {
 } from "node:fs"
 import { basename, dirname, join } from "node:path"
 import { FileSystem, Path } from "@effect/platform"
-import { planStageSemanticFingerprint } from "@jingler/core"
+import {
+  compileOrchestrationPlanHtml,
+  planStageSemanticFingerprint,
+  type WorkerRoutingConfig
+} from "@jingler/core"
 import { Chunk, Effect, Either, Fiber, Layer, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { scriptedPlan } from "./adapter.js"
@@ -46,6 +50,13 @@ const ORCHESTRATED_SOURCE = `<h1>PRD: Orchestrated change</h1>
 <div data-assignment data-agent-id="worker-a" data-cli="codex" data-model="gpt-5.6-sol" data-reason="High complexity implementation." data-status="running"></div>
 <div data-acceptance="01.1" data-status="pending">The change is verified.</div>
 </section>`
+
+const WORKER_ROUTING: WorkerRoutingConfig = {
+  default: { cli: "codex", model: "gpt-5.6-sol" },
+  low: { cli: "codex", model: "gpt-5.6-sol" },
+  medium: { cli: "codex", model: "gpt-5.6-sol" },
+  high: { cli: "codex", model: "gpt-5.6-sol" }
+}
 
 const promote = (source = SOURCE) =>
   PlanStore.promoteDocument(WT, {
@@ -121,20 +132,31 @@ describe("PlanStore canonical document", () => {
     const initial = await run(promote(base))
     expect(initial.projection.stages[0]?.executionStatus).toBe("completed")
 
-    // The orchestrator re-issues the whole plan adding stage 02 (its own file, so
-    // it is a distinct parallel worker), stage 01 verbatim.
-    const amendment = `${base}
+    // The orchestrator re-issues semantics only. The compiler preserves stage
+    // 01's worker and allocates stage 02 because it owns an independent file.
+    const amendment = `<h1>PRD: Amend</h1>
+<section data-stage="01" data-title="First" data-depends-on="" data-complexity="high">
+<h3>Intent</h3><p>First.</p>
+<ul data-files><li>a.ts</li></ul>
+<div data-acceptance="01.1" data-status="pending">The first is done.</div>
+</section>
 <section data-stage="02" data-title="Second" data-depends-on="" data-complexity="high">
 <h3>Intent</h3><p>Second.</p>
 <ul data-files><li>b.ts</li></ul>
-<div data-assignment data-agent-id="worker-b" data-cli="codex" data-model="gpt-5.6-sol" data-reason="impl" data-status="queued"></div>
 <div data-acceptance="02.1" data-status="pending">The second is done.</div>
 </section>`
+    const compiled = compileOrchestrationPlanHtml(
+      amendment,
+      WORKER_ROUTING,
+      { previousStages: initial.projection.stages }
+    )
+    expect(compiled.valid).toBe(true)
+    if (!compiled.valid) return
     const amended = await run(
       PlanStore.updateDocument(WT, {
         planId: "plan-1",
         baseRevision: initial.revision,
-        source: amendment,
+        source: compiled.html,
         author: "agent",
         reconcile: true,
         status: "executing"
@@ -147,12 +169,13 @@ describe("PlanStore canonical document", () => {
     // Unchanged completed stage keeps its execution state AND its evidence.
     expect(stage1?.id).toBe("01")
     expect(stage1?.executionStatus).toBe("completed")
+    expect(stage1?.assignment?.agentId).toBe("worker-a")
     expect(stage1?.acceptance[0]?.status).toBe("passed")
     expect(stage1?.acceptance[0]?.evidence).toContain("abc123")
     // The newly added stage is queued for its worker — ready to dispatch.
     expect(stage2?.id).toBe("02")
     expect(stage2?.executionStatus).toBe("queued")
-    expect(stage2?.assignment?.agentId).toBe("worker-b")
+    expect(stage2?.assignment?.agentId).toBe("agent-01")
   })
 
   it("watch emits the freshly-read document on an external write", async () => {

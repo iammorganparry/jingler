@@ -18,6 +18,7 @@ import {
   AgentRunner,
   composeRemoteMcpServers,
   isContextOverflowFailure,
+  orchestratorAmendmentOutcomeText,
   planEvidenceFromText
 } from "./agent-runner.js"
 import { ContextManager } from "./context-manager.js"
@@ -171,6 +172,43 @@ describe("planEvidenceFromText", () => {
         evidence: "Typecheck reports TS2322."
       }
     ])
+  })
+})
+
+describe("orchestrator amendment outcomes", () => {
+  it("returns revisioned diagnostics for invalid and conflicting amendments", () => {
+    expect(
+      orchestratorAmendmentOutcomeText({
+        status: "invalid",
+        currentRevision: 7,
+        diagnostics: ["missing-acceptance: Stage 02 needs a criterion."]
+      })
+    ).toContain(
+      "Jingler amendment outcome: invalid. Current canonical revision: 7."
+    )
+    expect(
+      orchestratorAmendmentOutcomeText({
+        status: "conflict",
+        currentRevision: 8,
+        diagnostics: ["The canonical plan changed."]
+      })
+    ).toContain(
+      "Jingler amendment outcome: conflict. Current canonical revision: 8."
+    )
+    expect(
+      orchestratorAmendmentOutcomeText({
+        status: "applied",
+        currentRevision: 9,
+        diagnostics: []
+      })
+    ).toBeNull()
+    expect(
+      orchestratorAmendmentOutcomeText({
+        status: "not-present",
+        currentRevision: 9,
+        diagnostics: []
+      })
+    ).toBeNull()
   })
 })
 
@@ -1523,7 +1561,10 @@ describe("AgentRunner plan library", () => {
   const WT = "/tmp/jingler/worktrees/jingler/mysession"
 
   /** Seed a session that owns a worktree (so the runner writes/points at plans). */
-  const seedSessionWithWorktree = (mode: PermissionMode) => {
+  const seedSessionWithWorktree = (
+    mode: PermissionMode,
+    role: Session["chats"][number]["role"] = "direct"
+  ) => {
     const session: Session = {
       id: SESSION,
       repo: "acme/widget",
@@ -1537,7 +1578,9 @@ describe("AgentRunner plan library", () => {
       tokens: 0,
       updatedAt: "2026-07-11T10:00:00.000Z",
       worktreePath: WT,
-      chats: [chatForSession("2026-07-11T10:00:00.000Z", { mode })],
+      chats: [
+        chatForSession("2026-07-11T10:00:00.000Z", { mode, role })
+      ],
       activeChatId: SESSION,
       mode
     }
@@ -1546,13 +1589,21 @@ describe("AgentRunner plan library", () => {
   }
 
   /** An adapter that records the prompt it was handed, then completes. */
-  const recordingAdapter = (out: { prompt: string | null }): Layer.Layer<CliAdapter> =>
+  const recordingAdapter = (out: {
+    prompt: string | null
+    specs?: Array<SessionSpec>
+    reply?: string
+  }): Layer.Layer<CliAdapter> =>
     Layer.succeed(
       CliAdapter,
       CliAdapter.of({
         run: (_sessionId, spec, ctx) =>
           Effect.gen(function* () {
             out.prompt = spec.prompt
+            out.specs?.push(spec)
+            if (out.reply !== undefined) {
+              yield* ctx.emit({ _tag: "Assistant", text: out.reply })
+            }
             yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
           }) as ReturnType<CliAdapterShape["run"]>,
         stop: () => Effect.void
@@ -1575,6 +1626,138 @@ describe("AgentRunner plan library", () => {
       ContextManager.Default,
       temp.layer
     )
+
+  it("keeps orchestrator turns in full auto before and after plan approval", async () => {
+    seedSessionWithWorktree("plan", "orchestrator")
+    const captured: { prompt: string | null; specs: Array<SessionSpec> } = {
+      prompt: null,
+      specs: []
+    }
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner
+          .prompt(SESSION, SESSION, "Fix the bounded issue directly.")
+          .pipe(Stream.runDrain)
+        yield* PlanStore.promoteDocument(WT, {
+          sessionId: SESSION,
+          producingChatId: SESSION,
+          id: "approved-plan",
+          status: "executing",
+          author: "agent",
+          source: `<h1>PRD: Existing delegation</h1>
+<section data-stage="01" data-title="Existing" data-complexity="medium">
+<div data-assignment data-agent-id="worker-a" data-cli="claude" data-model="opus" data-reason="Existing work." data-status="completed"></div>
+<ul data-files><li>src/existing.ts</li></ul>
+<div data-acceptance="01.1" data-status="passed" data-evidence="verified">Existing work is verified.</div>
+</section>`
+        })
+        yield* runner
+          .prompt(SESSION, SESSION, "Integrate and report the result.")
+          .pipe(Stream.runDrain)
+      }).pipe(Effect.provide(baseWithAdapter(recordingAdapter(captured))))
+    )
+
+    expect(captured.specs).toHaveLength(2)
+    for (const spec of captured.specs) {
+      expect(spec.mode).toBe("auto")
+      expect(spec.readOnly).toBeUndefined()
+      expect(spec.orchestrationRoutes).toBeDefined()
+    }
+    expect(captured.specs[0]?.orchestrationPlanApproved).toBe(false)
+    expect(captured.specs[1]?.orchestrationPlanApproved).toBe(true)
+    expect(captured.specs[0]?.prompt).toContain("full native tools")
+    expect(captured.specs[0]?.prompt).toContain("Plan grammar")
+    expect(captured.specs[1]?.prompt).toContain("without another approval gate")
+  })
+
+  it("executes and verifies bounded orchestrator work directly without proposing a plan", async () => {
+    seedSessionWithWorktree("plan", "orchestrator")
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        const events = yield* runner
+          .prompt(
+            SESSION,
+            SESSION,
+            "Add and verify the one bounded rate-limit change."
+          )
+          .pipe(Stream.runCollect)
+        return {
+          events,
+          document: yield* PlanStore.readDocument(WT)
+        }
+      }).pipe(
+        Effect.provide(baseWithAdapter(makeScriptedCliAdapter(0)))
+      )
+    )
+
+    const emitted = Array.from(result.events)
+    expect(emitted.some((event) => event._tag === "PlanProposed")).toBe(false)
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        _tag: "ToolStart",
+        name: "Edit",
+        target: "src/routes/billing.ts"
+      })
+    )
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        _tag: "ToolEnd",
+        id: "bash-1",
+        status: "success",
+        meta: "1 passed"
+      })
+    )
+    expect(result.document).toBeNull()
+  })
+
+  it("persists a tagged invalid amendment with diagnostics and the current revision", async () => {
+    seedSessionWithWorktree("auto", "orchestrator")
+    const captured = {
+      prompt: null,
+      reply: `I could not complete this amendment.
+\`\`\`\`html
+<h1>PRD: Invalid amendment</h1>
+<section data-stage="02" data-title="Missing acceptance" data-complexity="medium">
+<ul data-files><li>src/new.ts</li></ul>
+</section>
+\`\`\`\``
+    }
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* PlanStore.promoteDocument(WT, {
+          sessionId: SESSION,
+          producingChatId: SESSION,
+          id: "approved-plan",
+          status: "executing",
+          author: "agent",
+          source: `<h1>PRD: Existing delegation</h1>
+<section data-stage="01" data-title="Existing" data-complexity="medium">
+<div data-assignment data-agent-id="worker-a" data-cli="claude" data-model="opus" data-reason="Existing work." data-status="completed"></div>
+<ul data-files><li>src/existing.ts</li></ul>
+<div data-acceptance="01.1" data-status="passed" data-evidence="verified">Existing work is verified.</div>
+</section>`
+        })
+        const before = yield* PlanStore.readDocument(WT, SESSION, SESSION)
+        const runner = yield* AgentRunner
+        yield* runner
+          .prompt(SESSION, SESSION, "Add the new delegated stage.")
+          .pipe(Stream.runDrain)
+        const messages = yield* TranscriptStore.list(SESSION)
+        const feedback = messages
+          .at(-1)
+          ?.parts.filter((part) => part._tag === "Text")
+          .map((part) => part.text)
+          .join("\n")
+        expect(feedback).toContain("Jingler amendment outcome: invalid.")
+        expect(feedback).toContain(
+          `Current canonical revision: ${before?.revision}.`
+        )
+        expect(feedback).toContain("missing-acceptance")
+      }).pipe(Effect.provide(baseWithAdapter(recordingAdapter(captured))))
+    )
+  })
 
   it("writes a proposed plan into the session's plan library (~/jingler/.jingler/<worktree>/)", async () => {
     seedSessionWithWorktree("plan")

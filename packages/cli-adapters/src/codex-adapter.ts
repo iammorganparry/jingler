@@ -578,7 +578,11 @@ export const runCodexSdk = (
             // `hasPlanBlock` demands the exact ` ```plan ` info string, so a
             // model merely *discussing* planning doesn't trip this.
             const proposed =
-              reply !== null && planning && planRound < MAX_PLAN_ROUNDS &&
+              reply !== null &&
+              (planning ||
+                (spec.orchestrationRoutes !== undefined &&
+                  spec.orchestrationPlanApproved !== true)) &&
+              planRound < MAX_PLAN_ROUNDS &&
               hasPlanBlock(reply)
                 ? reply
                 : null

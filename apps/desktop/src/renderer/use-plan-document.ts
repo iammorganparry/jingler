@@ -127,6 +127,10 @@ export function usePlanDocument(sessionId: string) {
     acceptRemote,
     startDraft,
     synced: snapshot.matches("clean"),
-    canApprove: snapshot.matches("clean") && snapshot.context.document !== null
+    // Approval is only valid once the editor's visible draft is exactly the
+    // canonical source returned by a completed save (or remote revision).
+    canApprove:
+      snapshot.matches("clean") &&
+      snapshot.context.document?.source === snapshot.context.draft
   }
 }

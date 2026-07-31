@@ -189,6 +189,75 @@ beforeEach(() => {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("the Codex plan loop", () => {
+  it("keeps auto tools available while accepting a deliberate orchestrator plan", async () => {
+    sdk.state.script = [
+      [
+        { type: "thread.started", thread_id: "t-auto" },
+        agentMessage(HTML_PLAN_TEXT),
+        turnDone
+      ]
+    ]
+    const { ctx, emitted, proposed } = harness([PlanDecision.Delegate()])
+
+    await Effect.runPromise(
+      runCodex(
+        "s-auto-orchestrator",
+        spec({
+          mode: "auto",
+          orchestrationRoutes: [
+            { cli: "codex", models: [{ id: "gpt-5.6-sol", label: "Sol" }] }
+          ]
+        }),
+        ctx,
+        new Map()
+      )
+    )
+
+    expect(proposed).toHaveLength(1)
+    expect(sdk.state.runs).toHaveLength(1)
+    expect(sdk.state.runs[0]?.sandboxMode).toBe("danger-full-access")
+    expect(
+      emitted.some(
+        (event) =>
+          event._tag === "Assistant" && event.text.includes("PRD: Stream the plan")
+      )
+    ).toBe(false)
+  })
+
+  it("leaves an approved-plan amendment in the reply channel without reopening approval", async () => {
+    sdk.state.script = [
+      [
+        { type: "thread.started", thread_id: "t-approved" },
+        agentMessage(HTML_PLAN_TEXT),
+        turnDone
+      ]
+    ]
+    const { ctx, emitted, proposed } = harness([])
+
+    await Effect.runPromise(
+      runCodex(
+        "s-approved-orchestrator",
+        spec({
+          mode: "auto",
+          orchestrationPlanApproved: true,
+          orchestrationRoutes: [
+            { cli: "codex", models: [{ id: "gpt-5.6-sol", label: "Sol" }] }
+          ]
+        }),
+        ctx,
+        new Map()
+      )
+    )
+
+    expect(proposed).toHaveLength(0)
+    expect(
+      emitted.some(
+        (event) =>
+          event._tag === "Assistant" && event.text.includes("PRD: Stream the plan")
+      )
+    ).toBe(true)
+  })
+
   it("publishes the completed SDK message through the progressive draft contract", async () => {
     sdk.state.script = [[agentMessage(HTML_PLAN_TEXT), turnDone]]
     const { ctx, emitted, proposed } = harness([PlanDecision.Reject()])

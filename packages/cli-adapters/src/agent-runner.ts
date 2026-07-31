@@ -21,17 +21,16 @@ import type {
 } from "@jingler/core"
 import {
   ADHD_MODE_DEFAULT,
-  applyWorkerRoutingToPlanHtml,
   applyStreamEvent,
   assistantMessage,
   buildPlanExecutionGraph,
   CliExecError,
+  compileOrchestrationPlanHtml,
   defaultModel,
   findApprovedPlan,
   isBackgroundTaskEvent,
   isSubagentEvent,
   ORCHESTRATOR_ENABLED_DEFAULT,
-  parsePlanHtml,
   planDocumentToPlan,
   orchestratorParticipantRoutingId,
   PLAN_AUTO_RUN_DEFAULT,
@@ -53,7 +52,7 @@ import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
 import { orchestratorNote } from "./orchestrator-prompt.js"
-import { parseOrchestratorAmendment, stripOrchestratorAmendment } from "./orchestrator-amend.js"
+import { stripOrchestratorAmendment } from "./orchestrator-amend.js"
 import { modeOnApproval, modeToRestore } from "./exec-mode.js"
 import { isTerminal, routeOf } from "./turn-events.js"
 import {
@@ -64,7 +63,10 @@ import {
 import { buildGate, makeApprovals, verdict } from "./approvals.js"
 import { runLifetime } from "./run-lifetime.js"
 import { planNote } from "./plan-prompt.js"
-import { stripHtmlPlanBlock } from "./plan-parse.js"
+import {
+  completeHtmlPlanSubmissions,
+  stripHtmlPlanBlock
+} from "./plan-parse.js"
 import { questionNote } from "./question-prompt.js"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
@@ -266,6 +268,64 @@ interface ActiveRun {
   readonly clearReplyWaiter: (waiter: RunReplyWaiter) => Effect.Effect<void>
   readonly replyGate: Effect.Semaphore
 }
+
+/** Result of inspecting and applying one approved-plan orchestrator reply. */
+export type OrchestratorAmendmentOutcome =
+  | {
+      readonly status: "applied"
+      readonly currentRevision: number
+      readonly diagnostics: readonly []
+    }
+  | {
+      readonly status: "not-present"
+      readonly currentRevision: number | null
+      readonly diagnostics: readonly []
+    }
+  | {
+      readonly status: "invalid" | "conflict"
+      readonly currentRevision: number | null
+      readonly diagnostics: ReadonlyArray<string>
+    }
+
+/** Durable feedback shown after an amendment could not become canonical. */
+export const orchestratorAmendmentOutcomeText = (
+  outcome: OrchestratorAmendmentOutcome
+): string | null =>
+  outcome.status === "invalid" || outcome.status === "conflict"
+    ? [
+        `Jingler amendment outcome: ${outcome.status}.`,
+        `Current canonical revision: ${outcome.currentRevision ?? "unavailable"}.`,
+        ...outcome.diagnostics
+      ].join(" ")
+    : null
+
+const amendmentNotPresent = (
+  currentRevision: number | null
+): OrchestratorAmendmentOutcome => ({
+  status: "not-present",
+  currentRevision,
+  diagnostics: []
+})
+
+const amendmentFailure = (
+  status: "invalid" | "conflict",
+  currentRevision: number | null,
+  diagnostics: ReadonlyArray<string>
+): OrchestratorAmendmentOutcome => ({
+  status,
+  currentRevision,
+  diagnostics
+})
+
+const amendmentApplied = (
+  currentRevision: number
+): OrchestratorAmendmentOutcome => ({
+  status: "applied",
+  currentRevision,
+  diagnostics: []
+})
+
+const PLAN_HTML_SUBMISSION_OPENING = /(?:^|\n)````html[ \t]*(?:\r?\n|$)/i
 
 type RunReplyWaiter = SteeredReplyWaiter
 
@@ -1213,16 +1273,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               canonicalPlan.status === "executing" ||
               canonicalPlan.status === "needs-verification" ||
               canonicalPlan.status === "done")
-          // The orchestrator is READ-ONLY in plan mode only while drafting its
-          // FIRST plan — no approved plan yet. Once a plan is approved it runs in
-          // AUTO mode with its native tools (edit, git/gh, open PRs, invoke
-          // skills), so it can finish quick work in place and amend + hand off
-          // large work without ever re-entering the approval gate. A
-          // non-orchestrator chat keeps the operator's own session mode.
+          // The orchestrator always runs in AUTO with its native tools. It can
+          // therefore complete bounded work before any plan exists, deliberately
+          // enter/submit a plan only when delegation adds value, and retain edit,
+          // command, skill, git/GitHub, steering, and communication capabilities
+          // after approval. Planning is a chosen handoff, not a blanket
+          // read-only boundary. A non-orchestrator chat keeps the operator's mode.
           const mode: PermissionMode = orchestrating
-            ? planApproved
-              ? "auto"
-              : "plan"
+            ? "auto"
             : sessionMode
           yield* ContextManager.bindContext(chatId, sessionId)
           /**
@@ -1306,23 +1364,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             ? [
                 "You are this session's orchestrator.",
                 planApproved
-                  ? "A plan is already approved and running. Fold each new request into it: finish quick work yourself with your native tools. For larger work, amend the plan by re-issuing the COMPLETE updated plan as one four-backtick fenced HTML block opened with exactly ````html (keep every stage and acceptance id stable so evidence survives) — Jingler applies it and dispatches the affected workers automatically, with no approval. Do not draft a fresh plan or open a new approval."
-                  : "For substantial implementation work, inspect the repository and return a complete plan whose independent dependency groups are assigned to worker agents. Anything quick or immediately achievable, just do yourself.",
-                "",
-                "Available worker routes:",
-                ...orchestrationRoutes.flatMap((provider) =>
-                  provider.models.map((model) => `- ${provider.cli}/${model.id}`)
-                ),
-                ...(workerRouting === null
-                  ? []
-                  : [
-                      "",
-                      "Configured worker router:",
-                      `- low: ${workerRouting.low.cli}/${workerRouting.low.model}`,
-                      `- medium: ${workerRouting.medium.cli}/${workerRouting.medium.model}`,
-                      `- high: ${workerRouting.high.cli}/${workerRouting.high.model}`,
-                      `- default: ${workerRouting.default.cli}/${workerRouting.default.model}`
-                    ]),
+                  ? "A plan is already approved. Apply the standing direct/delegation policy. When a request changes delegated work, amend the COMPLETE semantic plan as one four-backtick HTML block opened with exactly ````html; keep stage and acceptance ids stable and omit assignments/routes. Jingler returns an applied, invalid, or conflict outcome with the current revision and dispatches valid changed work automatically, without another approval gate."
+                  : "Start with your full native tools. If the standing signals favor delegation, inspect the repository and deliberately enter your native plan mode when available; otherwise return the COMPLETE semantic plan as one four-backtick HTML block opened with exactly ````html. Declare complexity, dependencies, files, and acceptance criteria, but no assignments or routes. The first delegated plan has one approval gate; bounded direct work has none.",
+                "Plan grammar (only when delegating or amending): use <section data-stage=\"...\" data-title=\"...\" data-complexity=\"low|medium|high\" data-depends-on=\"...\">, one <ul data-files> of repository-relative <li> paths, and pending <div data-acceptance=\"...\" data-status=\"pending\"> criteria. Never emit data-assignment elements, agent ids, harnesses, models, or routes.",
                 "",
                 text
               ].join("\n")
@@ -1383,7 +1427,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                     workspaceConfig?.planTemplate?.source ?? DEFAULT_PLAN_TEMPLATE_HTML
                 }
               : {}),
-            ...(orchestrating ? { orchestrationRoutes } : {}),
+            ...(orchestrating
+              ? { orchestrationRoutes, orchestrationPlanApproved: planApproved }
+              : {}),
             ...(orchestrating && workerRouting !== null
               ? { workerRouting }
               : {}),
@@ -1406,10 +1452,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             // over the spec, so a null id alone would silently resume anyway.
             resumeId: digest === null ? chat.resumeId ?? null : null,
             ...(digest === null ? {} : { fresh: true }),
-            // Read-only ONLY while the orchestrator drafts its first plan (plan
-            // mode). After approval it works in auto mode with full write access,
-            // so it can implement quick fixes and open PRs directly.
-            ...(orchestrating && mode === "plan" ? { readOnly: true } : {}),
             remoteMcpServers
           }
 
@@ -1673,53 +1715,84 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               }).pipe(Effect.ignore)
             }).pipe(Effect.provide(env), Effect.ignore)
 
-          // Once its first plan is approved, the orchestrator runs in auto mode
-          // and amends the plan by re-issuing the WHOLE plan as a ````html
-          // block. Apply it as a reconciled amendment — stable stage/acceptance
-          // ids and durable worker evidence are carried across, changed and new
-          // stages are requeued — and keep it in the executing lane so no new
-          // approval gate opens. Main dispatches the requeued workers after the
-          // turn (see `dispatchPendingOrchestration`). Returns whether an
-          // amendment actually landed, so the caller can scrub the raw block from
-          // the visible reply.
-          const applyOrchestratorAmendment = (text: string): Effect.Effect<boolean> =>
+          // Approved-plan replies have four explicit outcomes. Applied updates
+          // emit PlanUpdated and requeue changed work; not-present is an ordinary
+          // direct/coordination reply; invalid and conflict retain diagnostics in
+          // the transcript so the orchestrator can repair them on its next turn.
+          const applyOrchestratorAmendment = (
+            text: string
+          ): Effect.Effect<OrchestratorAmendmentOutcome> =>
             Effect.gen(function* () {
-              if (!orchestrating || !planApproved || worktreePath.length === 0) return false
-              const amendmentHtml = parseOrchestratorAmendment(text)
-              if (amendmentHtml === null) return false
+              const knownRevision = canonicalPlan?.revision ?? null
+              if (!orchestrating || !planApproved || worktreePath.length === 0) {
+                return amendmentNotPresent(knownRevision)
+              }
+              const submission = completeHtmlPlanSubmissions(text)[0]
+              if (submission === undefined) {
+                if (PLAN_HTML_SUBMISSION_OPENING.test(text)) {
+                  return amendmentFailure("invalid", knownRevision, [
+                    "The amendment HTML block is incomplete or malformed."
+                  ])
+                }
+                return amendmentNotPresent(knownRevision)
+              }
               const current = yield* PlanStore.readDocument(worktreePath, sessionId, chatId)
               if (
                 current === null ||
                 current.producingChatId !== chatId ||
                 !["approved", "executing", "needs-verification", "done"].includes(current.status)
-              ) return false
-              const parsed = parsePlanHtml(amendmentHtml)
-              if (!parsed.valid) return false
-              // Normalize the amendment's assignments to the operator's router,
-              // exactly as a first-plan proposal does — reconciliation then keeps
-              // unchanged stages' prior assignees and requeues only real changes.
-              const routed =
-                workerRouting !== null
-                  ? applyWorkerRoutingToPlanHtml(
-                      parsed.html,
-                      parsed.projection.stages,
-                      workerRouting
-                    )
-                  : parsed.html
+              ) {
+                return amendmentFailure(
+                  "conflict",
+                  current?.revision ?? knownRevision,
+                  [
+                    "The canonical approved plan is no longer available to this orchestrator turn."
+                  ]
+                )
+              }
+              if (workerRouting === null) {
+                return amendmentFailure("invalid", current.revision, [
+                  "No valid worker routing configuration is available."
+                ])
+              }
+              const compiled = compileOrchestrationPlanHtml(
+                submission.body,
+                workerRouting,
+                { previousStages: current.projection.stages }
+              )
+              if (!compiled.valid) {
+                return amendmentFailure(
+                  "invalid",
+                  current.revision,
+                  compiled.diagnostics.map(
+                    (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`
+                  )
+                )
+              }
               const updated = yield* PlanStore.updateDocument(worktreePath, {
                 planId: current.id,
                 baseRevision: current.revision,
-                source: routed,
+                source: compiled.html,
                 author: "agent",
                 reconcile: true,
                 status: "executing"
               }).pipe(Effect.either)
-              if (updated._tag === "Left") return false
+              if (updated._tag === "Left") {
+                return updated.left._tag === "PlanConflictError"
+                  ? amendmentFailure(
+                      "conflict",
+                      updated.left.latestRevision,
+                      [updated.left.message]
+                    )
+                  : amendmentFailure("invalid", current.revision, [
+                      updated.left.message
+                    ])
+              }
               yield* out.offer({
                 _tag: "PlanUpdated",
                 plan: planDocumentToPlan(updated.right)
               })
-              return true
+              return amendmentApplied(updated.right.revision)
             }).pipe(Effect.provide(env))
 
           // Fold each event into the assistant message + persist, then surface it.
@@ -1810,7 +1883,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 // An approved-plan orchestrator turn may carry a plan amendment.
                 // Apply it (reconciled, no re-approval) and, if it landed, scrub
                 // the raw ````html block from the reply the operator reads.
-                if (yield* applyOrchestratorAmendment(settledText)) {
+                const amendmentOutcome = yield* applyOrchestratorAmendment(
+                  settledText
+                )
+                if (amendmentOutcome.status === "applied") {
                   next = {
                     ...next,
                     parts: next.parts.flatMap((part): ReadonlyArray<ContentPart> => {
@@ -1818,6 +1894,20 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                       const stripped = stripOrchestratorAmendment(part.text)
                       return stripped.length === 0 ? [] : [{ ...part, text: stripped }]
                     })
+                  }
+                } else {
+                  const feedback = orchestratorAmendmentOutcomeText(
+                    amendmentOutcome
+                  )
+                  if (feedback !== null) {
+                    const feedbackPart: ContentPart = {
+                      _tag: "Text",
+                      text: feedback
+                    }
+                    next = {
+                      ...next,
+                      parts: [...next.parts, feedbackPart]
+                    }
                   }
                 }
               }
@@ -1952,24 +2042,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             submittedBlock?: string
           ): Effect.Effect<PlanDecision> =>
             Effect.gen(function* () {
-              const parsedForRouting =
-                orchestrating && workerRouting !== null
-                  ? parsePlanHtml(plan.raw)
-                  : null
-              const proposedPlan =
-                parsedForRouting?.valid === true && workerRouting !== null
-                  ? {
-                      ...plan,
-                      raw: applyWorkerRoutingToPlanHtml(
-                        parsedForRouting.html,
-                        parsedForRouting.projection.stages,
-                        workerRouting
-                      )
-                    }
-                  : plan
-              let canonicalPlan = proposedPlan
-              let revisingCanonicalPlan = false
               let basePlanId: string | undefined
+              let currentPlanId: string | undefined
+              let previousStages: ReadonlyArray<PlanPrdStage> = []
               if (worktreePath.length > 0) {
                 const current = yield* PlanStore.readDocument(
                   worktreePath,
@@ -1983,17 +2058,31 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   current.status !== "rejected"
                     ? current.id
                     : undefined
-                const approvalPlanId =
-                  basePlanId ??
-                  (current?.id === proposedPlan.id
-                    ? randomUUID()
-                    : proposedPlan.id)
-                canonicalPlan = {
-                  ...proposedPlan,
-                  id: approvalPlanId
+                currentPlanId = current?.id
+                if (basePlanId !== undefined && current !== null) {
+                  previousStages = current.projection.stages
                 }
-                revisingCanonicalPlan = basePlanId !== undefined
               }
+              const compiled =
+                orchestrating && workerRouting !== null
+                  ? compileOrchestrationPlanHtml(plan.raw, workerRouting, {
+                      previousStages
+                    })
+                  : null
+              const proposedPlan =
+                compiled?.valid === true
+                  ? { ...plan, raw: compiled.html }
+                  : plan
+              const approvalPlanId =
+                basePlanId ??
+                (currentPlanId === proposedPlan.id
+                  ? randomUUID()
+                  : proposedPlan.id)
+              let canonicalPlan = {
+                ...proposedPlan,
+                id: approvalPlanId
+              }
+              const revisingCanonicalPlan = basePlanId !== undefined
               // Register the approval waiter BEFORE PlanStore makes the proposal
               // visible to file watchers. The announce effect then promotes and
               // publishes the exact canonical projection while the gate is live.

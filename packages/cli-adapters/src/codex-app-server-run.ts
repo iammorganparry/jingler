@@ -622,7 +622,9 @@ export const runCodexAppServer = (
 
               const proposed =
                 reply !== null &&
-                planning &&
+                (planning ||
+                  (spec.orchestrationRoutes !== undefined &&
+                    spec.orchestrationPlanApproved !== true)) &&
                 planRound < MAX_PLAN_ROUNDS &&
                 hasPlanBlock(reply)
                   ? reply

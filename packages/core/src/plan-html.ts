@@ -14,6 +14,8 @@ import type {
   PlanStageComplexity,
   PlanStageExecutionStatus
 } from "./plan-document.js"
+import { workerReasoningSettingIssue } from "./plan-document.js"
+import type { ReasoningEffort, ReasoningSetting } from "./domain.js"
 import {
   buildPlanExecutionGraph,
   type PlanExecutionDiagnosticCode
@@ -38,7 +40,9 @@ import {
  *   <section data-stage="01" data-title="..." data-depends-on="00"
  *            data-complexity="high">                  a stage
  *     <div data-assignment data-agent-id="worker-a" data-cli="codex"
- *          data-model="gpt-5" data-reason="..." data-status="queued"></div>
+ *          data-model="gpt-5" data-thinking-enabled="true"
+ *          data-reasoning-effort="high" data-reason="..."
+ *          data-status="queued"></div>
  *     <div data-acceptance="01.1" data-status="pending" data-evidence="...">...</div>
  *     <aside data-annotation="a1" data-stage="01" data-author="user"
  *            data-status="open" data-quote="..." data-prefix="..." data-suffix="...">
@@ -109,7 +113,8 @@ const ALLOWED_ATTRS = new Set([
   "data-mentioned-participant-ids", "data-delivery-state", "data-mention-deliveries",
   "data-quote", "data-prefix", "data-suffix", "data-diagram",
   "data-depends-on", "data-complexity", "data-assignment", "data-agent-id",
-  "data-cli", "data-model", "data-reason", "data-execution-status",
+  "data-cli", "data-model", "data-thinking-enabled", "data-reasoning-effort",
+  "data-reason", "data-execution-status",
   // Per-stage file linkage: <ul data-files><li data-change data-added data-removed>path</li></ul>.
   "data-files", "data-change", "data-added", "data-removed",
   "colspan", "rowspan"
@@ -219,6 +224,14 @@ const mentionDeliveriesFrom = (
   }
 }
 const COMPLEXITIES: ReadonlyArray<PlanStageComplexity> = ["low", "medium", "high"]
+const REASONING_EFFORTS: ReadonlyArray<ReasoningEffort> = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max"
+]
 const EXECUTION_STATUSES: ReadonlyArray<PlanStageExecutionStatus> = [
   "queued",
   "running",
@@ -227,6 +240,51 @@ const EXECUTION_STATUSES: ReadonlyArray<PlanStageExecutionStatus> = [
   "interrupted",
   "completed"
 ]
+
+const assignmentReasoningFrom = (
+  element: HTMLElement,
+  cli: PlanStageAssignment["cli"] | undefined
+): {
+  readonly reasoning: ReasoningSetting | undefined
+  readonly issue: string | null
+} => {
+  const rawEnabled = element.getAttribute("data-thinking-enabled")
+  const rawEffort = element.getAttribute("data-reasoning-effort")
+  if (rawEnabled === undefined && rawEffort === undefined) {
+    return { reasoning: undefined, issue: null }
+  }
+  if (rawEnabled === undefined) {
+    return {
+      reasoning: undefined,
+      issue: "data-thinking-enabled is required when reasoning metadata is present"
+    }
+  }
+  if (rawEnabled !== "true" && rawEnabled !== "false") {
+    return {
+      reasoning: undefined,
+      issue: "data-thinking-enabled must be true or false"
+    }
+  }
+  const effort = REASONING_EFFORTS.find(
+    (candidate) => candidate === rawEffort
+  )
+  if (rawEffort !== undefined && effort === undefined) {
+    return {
+      reasoning: undefined,
+      issue: `unsupported reasoning effort "${rawEffort}"`
+    }
+  }
+  const reasoning: ReasoningSetting = {
+    enabled: rawEnabled === "true",
+    ...(effort === undefined ? {} : { effort })
+  }
+  return {
+    reasoning,
+    issue:
+      cli === undefined ? null : workerReasoningSettingIssue(cli, reasoning)
+  }
+}
+
 const dependenciesFrom = (el: HTMLElement): ReadonlyArray<string> => [
   ...new Set(
     (el.getAttribute("data-depends-on") ?? "")
@@ -469,6 +527,10 @@ export const parsePlanHtml = (
       const cli = CLI_KINDS.find((candidate) => candidate === rawCli)
       const model = assignmentElement.getAttribute("data-model") ?? ""
       const reason = assignmentElement.getAttribute("data-reason") ?? ""
+      const { reasoning, issue: reasoningIssue } = assignmentReasoningFrom(
+        assignmentElement,
+        cli
+      )
       const rawExecutionStatus = assignmentElement.getAttribute("data-status") ?? "queued"
       const parsedExecutionStatus = EXECUTION_STATUSES.find(
         (candidate) => candidate === rawExecutionStatus
@@ -485,14 +547,24 @@ export const parsePlanHtml = (
         agentId.trim().length === 0 ||
         cli === undefined ||
         model.trim().length === 0 ||
-        reason.trim().length === 0
+        reason.trim().length === 0 ||
+        reasoningIssue !== null
       ) {
         diagnostics.push({
           code: "invalid-assignment",
-          message: `Stage "${id}" assignment needs data-agent-id, a supported data-cli, data-model, and data-reason.`
+          message:
+            reasoningIssue === null
+              ? `Stage "${id}" assignment needs data-agent-id, a supported data-cli, data-model, and data-reason.`
+              : `Stage "${id}" assignment has invalid reasoning metadata: ${reasoningIssue}.`
         })
       } else {
-        assignment = { agentId, cli, model, reason }
+        assignment = {
+          agentId,
+          cli,
+          model,
+          reason,
+          ...(reasoning === undefined ? {} : { reasoning })
+        }
       }
     } else {
       const rawExecutionStatus = el.getAttribute("data-execution-status")

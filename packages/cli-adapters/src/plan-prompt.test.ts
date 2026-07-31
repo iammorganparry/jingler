@@ -111,7 +111,7 @@ describe("planNote", () => {
     expect(planModeInstructions()).toContain("ExitPlanMode")
   })
 
-  it("gives Claude Haiku and reply-channel models the same orchestrator procedure", () => {
+  it("asks every planning harness for semantics while reserving assignments for the compiler", () => {
     const routing = {
       default: { cli: "claude" as const, model: "opus" },
       low: { cli: "claude" as const, model: "haiku" },
@@ -123,15 +123,11 @@ describe("planNote", () => {
 
     for (const instruction of [
       "data-complexity",
-      "data-assignment",
-      "data-agent-id",
       "data-depends-on",
-      "declared files overlap",
-      "claude/haiku",
-      "codex/gpt-5.6-sol",
-      "low: claude/haiku",
-      "medium: codex/gpt-5.6-sol",
-      "operator settings are authoritative",
+      "<ul data-files>",
+      "Do NOT add data-assignment",
+      "deterministically compiles dependency/file components",
+      "preserves stable worker identities across amendments",
       "workers own mechanical progress and PLAN_RESULT evidence"
     ]) {
       expect(claude).toContain(instruction)
@@ -141,6 +137,9 @@ describe("planNote", () => {
       expect(prompt).toContain("planning harness never implements")
       expect(prompt).not.toContain("implementation may continue in this same")
       expect(prompt).not.toContain("prompted again, with write access")
+      expect(prompt).not.toContain("data-agent-id=")
+      expect(prompt).not.toContain("claude/haiku")
+      expect(prompt).not.toContain("codex/gpt-5.6-sol")
     }
   })
 })

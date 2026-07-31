@@ -61,6 +61,8 @@ export interface SessionSpec {
    * model cannot silently downgrade the plan procedure.
    */
   readonly orchestrationRoutes?: ReadonlyArray<OrchestrationRoute>
+  /** True after this orchestrator has crossed its one plan-approval gate. */
+  readonly orchestrationPlanApproved?: boolean
   /** Effective concrete worker routes by component complexity. */
   readonly workerRouting?: WorkerRoutingConfig
   /** Whether provider thinking is enabled; absent leaves its default untouched. */
@@ -313,7 +315,8 @@ const refreshFlow: NonNullable<Plan["steps"][number]["graph"]> = {
  */
 const scriptedPlanHtml = (
   summary: string,
-  holdWorker = false
+  holdWorker = false,
+  includeAuditStage = false
 ): string => `<h1>PRD: ${summary}</h1>
 <h2>Context</h2>
 <p>Move session token handling into a dedicated TokenStore, add a guarded 401-retry refresh path, update the tests, and open a PR.</p>
@@ -382,6 +385,16 @@ ${holdWorker ? "<p>[[worker-hold]] Wait for an explicit stop before completing t
 <ul data-files><li>CHANGELOG.md</li></ul>
 <div data-acceptance="s_06.1" data-status="pending">A PR is opened against main.</div>
 </section>
+${
+  includeAuditStage
+    ? `<section data-stage="s_07" data-title="Add independent audit coverage" data-depends-on="" data-complexity="low">
+<h3>Intent</h3>
+<p>Add the requested audit amendment as an independent verification component.</p>
+<ul data-files><li>src/auth/audit.test.ts</li></ul>
+<div data-acceptance="s_07.1" data-status="pending">Independent audit coverage completes with recorded evidence.</div>
+</section>`
+    : ""
+}
 <h2>Testing</h2>
 <p>Each stage records acceptance evidence before the plan can be marked done.</p>
 <h2>Rollout</h2>
@@ -769,7 +782,7 @@ export const scriptedRun =
         yield* pause
         yield* emit({
           _tag: "Assistant",
-          text: `Folding that in.\n\n\`\`\`\`html\n${scriptedPlanHtml("Refactor auth flow (revised)")}\n\`\`\`\``
+          text: `Folding that in.\n\n\`\`\`\`html\n${scriptedPlanHtml("Refactor auth flow (revised)", false, true)}\n\`\`\`\``
         })
         yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
         return

@@ -65,6 +65,7 @@ import {
   sessionDiff,
   skillsList,
   watchOrchestrationWorkers,
+  workerSessionSpecForAssignment,
   workspaceRevertFile,
   withoutAttachmentData,
   workspaceRevertLines
@@ -847,7 +848,8 @@ describe("RPC handlers", () => {
               agentId: "worker-auth",
               cli: "claude",
               model: "opus",
-              reason: "Test route"
+              reason: "Test route",
+              reasoning: { enabled: true, effort: "max" }
             },
             executionStatus: "running"
           },
@@ -898,7 +900,11 @@ describe("RPC handlers", () => {
       mode: "replace",
       workers: [
         {
-          worker: { agentId: "worker-auth", harness: "claude" },
+          worker: {
+            agentId: "worker-auth",
+            harness: "claude",
+            reasoning: { enabled: true, effort: "max" }
+          },
           status: "interrupted"
         },
         {
@@ -907,6 +913,63 @@ describe("RPC handlers", () => {
         }
       ]
     })
+  })
+
+  it("launches workers with the exact reasoning route from their compiled assignment", () => {
+    const base = {
+      repo: "widget",
+      branch: "feature",
+      cwd: "/worktree",
+      prompt: "Execute stage 01",
+      images: [],
+      binPath: "/bin/codex",
+      mode: "auto" as const,
+      resumeId: null
+    }
+    const explicit = workerSessionSpecForAssignment(
+      {
+        agentId: "worker-core",
+        cli: "codex",
+        model: "gpt-5.6-sol",
+        reason: "High complexity.",
+        reasoning: { enabled: true, effort: "xhigh" }
+      },
+      base
+    )
+    const disabled = workerSessionSpecForAssignment(
+      {
+        agentId: "worker-core",
+        cli: "claude",
+        model: "opus",
+        reason: "Mechanical work.",
+        reasoning: { enabled: false }
+      },
+      { ...base, binPath: "/bin/claude" }
+    )
+    const providerDefault = workerSessionSpecForAssignment(
+      {
+        agentId: "worker-core",
+        cli: "codex",
+        model: "gpt-5.6-sol",
+        reason: "Use provider defaults."
+      },
+      base
+    )
+
+    expect(explicit).toMatchObject({
+      cli: "codex",
+      model: "gpt-5.6-sol",
+      thinkingEnabled: true,
+      reasoningEffort: "xhigh"
+    })
+    expect(disabled).toMatchObject({
+      cli: "claude",
+      model: "opus",
+      thinkingEnabled: false
+    })
+    expect(disabled).not.toHaveProperty("reasoningEffort")
+    expect(providerDefault).not.toHaveProperty("thinkingEnabled")
+    expect(providerDefault).not.toHaveProperty("reasoningEffort")
   })
 
   it("watches the requested worker scope without starting execution", async () => {

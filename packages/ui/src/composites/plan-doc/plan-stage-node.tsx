@@ -149,10 +149,28 @@ const STATUS_TONE: Readonly<Record<string, string>> = {
  * A provider-neutral assignment is a first-class, atom-like block so Tiptap
  * preserves it exactly while exposing readable orchestration metadata.
  */
+export const planAssignmentReasoningLabel = (
+  thinkingEnabled: string | null,
+  reasoningEffort: string | null
+): string =>
+  thinkingEnabled === null
+    ? "Reasoning: provider default"
+    : thinkingEnabled === "false"
+      ? "Reasoning: off"
+      : reasoningEffort === null
+        ? "Reasoning: on · provider default effort"
+        : `Reasoning: ${reasoningEffort}`
+
 function AssignmentView({ node }: NodeViewProps) {
   const agentId = (node.attrs.agentId as string) || "Unassigned"
   const cli = (node.attrs.cli as string) || "unknown harness"
   const model = (node.attrs.model as string) || "unknown model"
+  const thinkingEnabled = node.attrs.thinkingEnabled as string | null
+  const reasoningEffort = (node.attrs.reasoningEffort as string) || null
+  const reasoning = planAssignmentReasoningLabel(
+    thinkingEnabled,
+    reasoningEffort
+  )
   const reason = (node.attrs.reason as string) || "No routing reason provided."
   const status = (node.attrs.status as string) || "queued"
   const controls = usePlanWorkerControls()
@@ -173,6 +191,7 @@ function AssignmentView({ node }: NodeViewProps) {
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <strong className="text-text-bright">{agentId}</strong>
           <span className="text-text-body">{cli} · {model}</span>
+          <span className="text-text-body">{reasoning}</span>
           <span className={cn("uppercase", STATUS_TONE[status] ?? "text-muted")}>{status}</span>
         </span>
         <span className="mt-0.5 block text-muted">{reason}</span>
@@ -235,6 +254,22 @@ export const PlanAssignmentNode = Node.create({
         default: "",
         parseHTML: (el) => el.getAttribute("data-model") ?? "",
         renderHTML: (attrs) => ({ "data-model": attrs.model })
+      },
+      thinkingEnabled: {
+        default: null,
+        parseHTML: (el) => el.getAttribute("data-thinking-enabled"),
+        renderHTML: (attrs) =>
+          attrs.thinkingEnabled === null
+            ? {}
+            : { "data-thinking-enabled": attrs.thinkingEnabled }
+      },
+      reasoningEffort: {
+        default: "",
+        parseHTML: (el) => el.getAttribute("data-reasoning-effort") ?? "",
+        renderHTML: (attrs) =>
+          attrs.reasoningEffort === ""
+            ? {}
+            : { "data-reasoning-effort": attrs.reasoningEffort }
       },
       reason: {
         default: "",

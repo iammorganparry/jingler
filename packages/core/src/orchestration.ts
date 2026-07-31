@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { CliKind } from "./cli.js"
 import { StreamEvent } from "./conversation.js"
+import { ReasoningSetting } from "./domain.js"
 
 /**
  * Provider-neutral worker lifecycle shared by orchestration, RPC, and renderer
@@ -34,6 +35,8 @@ export const WorkerIdentity = Schema.Struct({
   stageIds: Schema.Array(IdentityString),
   harness: CliKind,
   model: IdentityString,
+  /** Absent means the worker is using the provider/model default. */
+  reasoning: Schema.optional(ReasoningSetting),
   attempt: Schema.Int.pipe(Schema.nonNegative())
 })
 export type WorkerIdentity = Schema.Schema.Type<typeof WorkerIdentity>

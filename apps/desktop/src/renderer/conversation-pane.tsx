@@ -7,7 +7,7 @@
  */
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import type { Session } from "@jingler/core"
+import type { ReasoningSetting, Session } from "@jingler/core"
 import { agentChildren, agentPath, clampFontScale } from "@jingler/core"
 import {
   AgentTabBar,
@@ -47,6 +47,17 @@ import {
 
 const workerTabId = (planId: string, agentId: string): string =>
   `worker:${planId.length}:${planId}${agentId}`
+
+const workerReasoningLabel = (
+  reasoning: ReasoningSetting | undefined
+): string =>
+  reasoning === undefined
+    ? "provider default reasoning"
+    : reasoning.enabled === false
+      ? "thinking off"
+      : reasoning.effort === undefined
+        ? "thinking on · provider default effort"
+        : `${reasoning.effort} reasoning`
 
 const PLAN_SPLIT_RATIO_KEY = "sb.split.plan.ratio"
 
@@ -510,7 +521,7 @@ export function ConversationPane({
           ({ id, agent }): AgentTabItem => ({
             id,
             name: agent.id,
-            description: `${agent.harness} · ${agent.model} · ${agent.stageIds.length} ${
+            description: `${agent.harness} · ${agent.model} · ${workerReasoningLabel(agent.reasoning)} · ${agent.stageIds.length} ${
               agent.stageIds.length === 1 ? "stage" : "stages"
             } · attempt ${agent.attempt}`,
             status: agent.status,
