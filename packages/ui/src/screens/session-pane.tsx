@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useState } from "react"
 import type { DiffStat, Session, SessionActivity, SessionDisplayStatus } from "@jingler/core"
 import { activityLabel, displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
 import { displayStatusLabel } from "../tokens.js"
@@ -42,6 +42,8 @@ export interface ConversationPaneCtx {
    * progress dock deep-links; the inline plan card calls it bare).
    */
   onOpenPlanReview: (stepId?: string) => void
+  /** Present the first renderable streamed draft using this pane's width. */
+  onPlanDraftAvailable?: () => void
   /** The stage Plan Review should open at, until the one-shot target is consumed. */
   planStepId?: string | null
   /** Plan Review's selection moved — retires a spent `planStepId`. */
@@ -189,6 +191,14 @@ function SessionPaneBody(props: SessionPaneProps) {
   // survived a re-key would snap to an unrelated same-numbered step.
   const [target, setTarget] = useState<{ sessionId: string; stepId: string } | null>(null)
   const [split, setSplit] = useState(false)
+  const roomy = atLeast(useWidthTier(), "wide")
+  const presentPlanDraft = useCallback(() => {
+    // One state change per branch: on a roomy conversation the existing tab
+    // stays put and gains the split; on a narrow pane Plan Review becomes the
+    // full-width tab because a 360px plan column would crush the transcript.
+    if (roomy) setSplit(true)
+    else setTab(BUILTIN_TAB.plan)
+  }, [roomy])
 
   // An outside request to switch tabs (the command palette). The nonce is the
   // trigger, not the id — see `selectTabRequest`'s docblock. No validation here:
@@ -251,6 +261,7 @@ function SessionPaneBody(props: SessionPaneProps) {
             // its selection.
             if (!ctx.splitOpen) ctx.onSelectTab(BUILTIN_TAB.plan)
           },
+          onPlanDraftAvailable: presentPlanDraft,
           planStepId: planStepTarget,
           onPlanStepSelected: () => setTarget(null),
           // "Is this the pane the operator is looking at?" — a group of one has
@@ -311,7 +322,6 @@ function SessionPaneBody(props: SessionPaneProps) {
   // selector, say) and that becomes "rendered fewer hooks than expected". The
   // same rule is spelled out in `issue-view.tsx` and `pull-request-view.tsx`;
   // it applies here too — and `useHookAtTopLevel` now enforces it.
-  const roomy = atLeast(useWidthTier(), "wide")
   const splitAvailable =
     activeTab === BUILTIN_TAB.conversation &&
     // The plan tab is now always present; only offer the split once there is an

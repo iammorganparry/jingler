@@ -1,12 +1,16 @@
 import {
+  activePlanParticipants,
   applyStreamEvent,
   assistantMessage,
   settleStreaming,
   type Message,
+  type PlanParticipant,
   type WorkerActivity,
   type WorkerIdentity,
   type WorkerLifecycleStatus,
-  type WorkerState
+  type WorkerState,
+  subagentParticipantRoutingId,
+  workerParticipantRoutingId
 } from "@jingler/core"
 import { assign, fromCallback, setup } from "xstate"
 
@@ -42,10 +46,14 @@ export interface OrchestrationAgentsInput {
     listener: (activity: WorkerActivity) => void,
     onFailure: (error: unknown) => void
   ) => () => void
+  readonly loadParticipants?: (
+    scope: OrchestrationAgentsScope
+  ) => Promise<ReadonlyArray<PlanParticipant>>
 }
 
 export interface OrchestrationAgentsContext extends OrchestrationAgentsInput {
   readonly agents: ReadonlyArray<OrchestrationAgent>
+  readonly participants: ReadonlyArray<PlanParticipant>
   readonly reconnectAttempt: number
 }
 
@@ -55,11 +63,17 @@ export type OrchestrationAgentsEvent =
       readonly scope: OrchestrationAgentsScope | null
     }
   | { readonly type: "ACTIVITY"; readonly activity: WorkerActivity }
+  | {
+      readonly type: "PARTICIPANTS_REFRESHED"
+      readonly participants: ReadonlyArray<PlanParticipant>
+    }
+  | { readonly type: "PARTICIPANTS_REFRESH_FAILED"; readonly error: unknown }
   | { readonly type: "STREAM_FAILED"; readonly error: unknown }
 
 export const MAX_WORKER_STREAM_RECONNECTS = 5
 export const WORKER_STREAM_RECONNECT_BASE_MS = 250
 export const WORKER_STREAM_RECONNECT_MAX_MS = 4000
+export const PLAN_PARTICIPANT_REFRESH_MS = 1000
 
 const sameScope = (
   left: OrchestrationAgentsScope | null,
@@ -213,6 +227,162 @@ const foldActivity = (
   return applyHarnessEvent(context.agents, activity)
 }
 
+const workerRouteFor = (worker: WorkerIdentity): string =>
+  workerParticipantRoutingId(
+    worker.planId,
+    worker.agentId,
+    worker.attempt
+  )
+
+const withoutWorkerTree = (
+  participants: ReadonlyArray<PlanParticipant>,
+  workerRoutingId: string
+): ReadonlyArray<PlanParticipant> =>
+  participants.filter(
+    (participant) =>
+      participant.routingId !== workerRoutingId &&
+      participant.ownerRoutingId !== workerRoutingId
+  )
+
+const workerParticipant = (worker: WorkerIdentity): PlanParticipant => ({
+  routingId: workerRouteFor(worker),
+  displayName: worker.agentId,
+  role: "worker",
+  lifecycle: "running",
+  ownerRoutingId: null
+})
+
+const foldParticipants = (
+  participants: ReadonlyArray<PlanParticipant>,
+  activity: WorkerActivity
+): ReadonlyArray<PlanParticipant> => {
+  if (activity._tag === "Reset") {
+    let next =
+      activity.mode === "replace"
+        ? participants.filter(
+            (participant) =>
+              participant.role !== "worker" &&
+              participant.ownerRoutingId?.startsWith("worker:") !== true
+          )
+        : participants
+    for (const state of activity.workers) {
+      const route = workerRouteFor(state.worker)
+      next = withoutWorkerTree(next, route)
+      if (state.status === "running") {
+        next = [...next, workerParticipant(state.worker)]
+      }
+    }
+    return activePlanParticipants([next])
+  }
+
+  const workerRoute = workerRouteFor(activity.worker)
+  if (activity._tag === "State") {
+    const next = withoutWorkerTree(participants, workerRoute)
+    return activePlanParticipants([
+      activity.status === "running"
+        ? [...next, workerParticipant(activity.worker)]
+        : next
+    ])
+  }
+
+  if (activity.event._tag === "SubagentStarted") {
+    const routingId = subagentParticipantRoutingId(
+      workerRoute,
+      activity.event.id
+    )
+    return activePlanParticipants([
+      participants,
+      [
+        {
+          routingId,
+          displayName: activity.event.name,
+          role: "subagent",
+          lifecycle: "running",
+          ownerRoutingId: workerRoute
+        }
+      ]
+    ])
+  }
+  if (activity.event._tag === "SubagentEnded") {
+    const routingId = subagentParticipantRoutingId(
+      workerRoute,
+      activity.event.id
+    )
+    return participants.filter(
+      (participant) => participant.routingId !== routingId
+    )
+  }
+  return participants
+}
+
+const reconcileWorkerParticipants = (
+  participants: ReadonlyArray<PlanParticipant>,
+  agents: ReadonlyArray<OrchestrationAgent>,
+  planId: string
+): ReadonlyArray<PlanParticipant> => {
+  const liveWorkers = agents
+    .filter((agent) => agent.status === "running")
+    .map((agent) => ({
+      routingId: workerParticipantRoutingId(
+        planId,
+        agent.id,
+        agent.attempt
+      ),
+      displayName: agent.id,
+      role: "worker",
+      lifecycle: "running",
+      ownerRoutingId: null
+    }) satisfies PlanParticipant)
+  const liveWorkerIds = new Set(
+    liveWorkers.map((participant) => participant.routingId)
+  )
+  return activePlanParticipants([
+    participants.filter(
+      (participant) =>
+        participant.role !== "worker" &&
+        participant.ownerRoutingId?.startsWith("worker:") !== true
+    ),
+    liveWorkers,
+    participants.filter(
+      (participant) =>
+        participant.ownerRoutingId?.startsWith("worker:") === true &&
+        liveWorkerIds.has(participant.ownerRoutingId)
+    )
+  ])
+}
+
+const sameParticipants = (
+  left: ReadonlyArray<PlanParticipant>,
+  right: ReadonlyArray<PlanParticipant>
+): boolean =>
+  left.length === right.length &&
+  left.every((participant, index) => {
+    const other = right[index]
+    return other !== undefined &&
+      participant.routingId === other.routingId &&
+      participant.displayName === other.displayName &&
+      participant.role === other.role &&
+      participant.lifecycle === other.lifecycle &&
+      participant.ownerRoutingId === other.ownerRoutingId
+  })
+
+const mergeMainParticipants = (
+  current: ReadonlyArray<PlanParticipant>,
+  refreshed: ReadonlyArray<PlanParticipant>
+): ReadonlyArray<PlanParticipant> =>
+  activePlanParticipants([
+    current.filter(
+      (participant) =>
+        participant.role === "worker" ||
+        participant.ownerRoutingId?.startsWith("worker:") === true
+    ),
+    refreshed.filter(
+      (participant) =>
+        participant.role !== "worker" &&
+        participant.ownerRoutingId?.startsWith("worker:") !== true
+    )
+  ])
+
 export const orchestrationAgentsMachine = setup({
   types: {
     input: {} as OrchestrationAgentsInput,
@@ -232,7 +402,38 @@ export const orchestrationAgentsMachine = setup({
         (activity) => sendBack({ type: "ACTIVITY", activity }),
         (error) => sendBack({ type: "STREAM_FAILED", error })
       )
-    )
+    ),
+    watchParticipants: fromCallback<
+      OrchestrationAgentsEvent,
+      {
+        readonly scope: OrchestrationAgentsScope
+        readonly load: OrchestrationAgentsInput["loadParticipants"]
+      }
+    >(({ sendBack, input }) => {
+      const load = input.load
+      if (load === undefined) return () => undefined
+      let cancelled = false
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const refresh = () => {
+        load(input.scope).then(
+          (participants) => {
+            if (cancelled) return
+            sendBack({ type: "PARTICIPANTS_REFRESHED", participants })
+          },
+          (error) => {
+            if (cancelled) return
+            sendBack({ type: "PARTICIPANTS_REFRESH_FAILED", error })
+          }
+        ).finally(() => {
+          if (!cancelled) timer = setTimeout(refresh, PLAN_PARTICIPANT_REFRESH_MS)
+        })
+      }
+      refresh()
+      return () => {
+        cancelled = true
+        if (timer !== null) clearTimeout(timer)
+      }
+    })
   },
   guards: {
     hasScope: ({ context }) => context.scope !== null,
@@ -240,29 +441,61 @@ export const orchestrationAgentsMachine = setup({
       event.type === "SCOPE_CHANGED" && sameScope(context.scope, event.scope),
     receivedInScope: ({ context, event }) =>
       event.type === "ACTIVITY" && activityInScope(event.activity, context.scope),
+    participantsChanged: ({ context, event }) =>
+      event.type === "PARTICIPANTS_REFRESHED" &&
+      !sameParticipants(
+        context.participants,
+        mergeMainParticipants(context.participants, event.participants)
+      ),
     canReconnect: ({ context }) =>
       context.reconnectAttempt < MAX_WORKER_STREAM_RECONNECTS
   },
   actions: {
     replaceScope: assign(({ event }) =>
       event.type === "SCOPE_CHANGED"
-        ? { scope: event.scope, agents: [], reconnectAttempt: 0 }
-        : {}
-    ),
-    foldActivity: assign(({ context, event }) =>
-      event.type === "ACTIVITY"
         ? {
-            agents: foldActivity(context, event.activity),
+            scope: event.scope,
+            agents: [],
+            participants: [],
             reconnectAttempt: 0
           }
         : {}
     ),
+    foldActivity: assign(({ context, event }) => {
+      if (event.type !== "ACTIVITY") return {}
+      const agents = foldActivity(context, event.activity)
+      return {
+        agents,
+        participants: reconcileWorkerParticipants(
+          foldParticipants(context.participants, event.activity),
+          agents,
+          event.activity._tag === "Reset"
+            ? event.activity.planId
+            : event.activity.worker.planId
+        ),
+        reconnectAttempt: 0
+      }
+    }),
     noteStreamFailure: assign(({ context }) => ({
       reconnectAttempt: context.reconnectAttempt + 1
     })),
     settleDisconnected: assign(({ context }) => ({
-      agents: context.agents.map(settleDisconnectedAgent)
-    }))
+      agents: context.agents.map(settleDisconnectedAgent),
+      participants: context.participants.filter(
+        (participant) =>
+          participant.role !== "worker" &&
+          participant.ownerRoutingId?.startsWith("worker:") !== true
+      )
+    })),
+    replaceMainParticipants: assign(({ context, event }) => {
+      if (event.type !== "PARTICIPANTS_REFRESHED") return {}
+      return {
+        participants: mergeMainParticipants(
+          context.participants,
+          event.participants
+        )
+      }
+    })
   },
   delays: {
     reconnectDelay: ({ context }) =>
@@ -275,7 +508,12 @@ export const orchestrationAgentsMachine = setup({
 }).createMachine({
   id: "orchestrationAgents",
   initial: "routing",
-  context: ({ input }) => ({ ...input, agents: [], reconnectAttempt: 0 }),
+  context: ({ input }) => ({
+    ...input,
+    agents: [],
+    participants: [],
+    reconnectAttempt: 0
+  }),
   on: {
     SCOPE_CHANGED: [
       { guard: "sameRequestedScope" },
@@ -294,13 +532,22 @@ export const orchestrationAgentsMachine = setup({
     },
     idle: {},
     watching: {
-      invoke: {
-        src: "watchWorkers",
-        input: ({ context }) => ({
-          scope: context.scope!,
-          subscribe: context.subscribe
-        })
-      },
+      invoke: [
+        {
+          src: "watchWorkers",
+          input: ({ context }) => ({
+            scope: context.scope!,
+            subscribe: context.subscribe
+          })
+        },
+        {
+          src: "watchParticipants",
+          input: ({ context }) => ({
+            scope: context.scope!,
+            load: context.loadParticipants
+          })
+        }
+      ],
       on: {
         ACTIVITY: {
           guard: "receivedInScope",
@@ -309,7 +556,12 @@ export const orchestrationAgentsMachine = setup({
         STREAM_FAILED: {
           target: "reconnecting",
           actions: "noteStreamFailure"
-        }
+        },
+        PARTICIPANTS_REFRESHED: {
+          guard: "participantsChanged",
+          actions: "replaceMainParticipants"
+        },
+        PARTICIPANTS_REFRESH_FAILED: {}
       }
     },
     reconnecting: {

@@ -5,7 +5,7 @@
  * lives here — above the Conversation ↔ Plan Review view switch — so switching to
  * the Plan tab does NOT unmount the agent stream (which would abort a parked plan).
  */
-import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react"
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type { Session } from "@jingler/core"
 import { agentChildren, agentPath, clampFontScale } from "@jingler/core"
@@ -21,7 +21,7 @@ import {
   MAIN_AGENT,
   PlanReview,
   ResizeHandle,
-  useResizableWidth
+  useContainerWidth
 } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
 import { publishSessionUpdate } from "./session-updates.js"
@@ -34,15 +34,36 @@ import { clearDraft, getDraft, seedDraftOnce, setDraft, useDraft } from "./draft
 import { useConversation } from "./use-conversation.js"
 import { useOrchestrationAgents } from "./use-orchestration-agents.js"
 import { usePlanDocument } from "./use-plan-document.js"
+import {
+  runWithDirectPlanThreadDispatch,
+  shouldRecoverPendingPlanMessage
+} from "./plan-thread-dispatch.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
+import {
+  clampedPlanSplitRatio,
+  PLAN_SPLIT_HANDLE_WIDTH,
+  resizedPlanSplitRatio
+} from "./plan-split-ratio.js"
 
 const workerTabId = (planId: string, agentId: string): string =>
   `worker:${planId.length}:${planId}${agentId}`
+
+const PLAN_SPLIT_RATIO_KEY = "sb.split.plan.ratio"
+
+const initialPlanSplitRatio = (): number => {
+  try {
+    const stored = Number(localStorage.getItem(PLAN_SPLIT_RATIO_KEY))
+    return Number.isFinite(stored) && stored > 0 && stored < 1 ? stored : 0.5
+  } catch {
+    return 0.5
+  }
+}
 
 export function ConversationPane({
   session,
   view = "conversation",
   onOpenPlanReview,
+  onPlanDraftAvailable,
   planStepId,
   onPlanStepSelected,
   onRestore,
@@ -64,6 +85,8 @@ export function ConversationPane({
    * with a stage id from the composer progress dock (a deep link).
    */
   onOpenPlanReview?: (stepId?: string) => void
+  /** Auto-present the first renderable plan draft at the host's responsive width. */
+  onPlanDraftAvailable?: () => void
   /** The stage Plan Review should open at (a pending deep link from the dock). */
   planStepId?: string | null
   /** Plan Review's selection moved — lets the host retire a spent deep link. */
@@ -90,12 +113,75 @@ export function ConversationPane({
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
   const convo = useConversation(session, activeChat.id)
+  const handledPlanDraftPresentation = useRef(0)
+  useEffect(() => {
+    if (
+      convo.planDraftPresentationNonce === 0 ||
+      convo.planDraftPresentationNonce <= handledPlanDraftPresentation.current
+    ) {
+      return
+    }
+    handledPlanDraftPresentation.current = convo.planDraftPresentationNonce
+    onPlanDraftAvailable?.()
+  }, [convo.planDraftPresentationNonce, onPlanDraftAvailable])
   const canonicalPlan = usePlanDocument(session.id)
   const orchestration = useOrchestrationAgents(
     session.id,
     activeChat.id,
     canonicalPlan.document
   )
+  const initialThreadDispatches = useRef(new Set<string>())
+  // A direct reply RPC persists its pending message before it finishes routing.
+  // Plan.watch can publish that intermediate revision, so tell the recovery
+  // effect which thread already has a dispatcher. Threads accept one pending
+  // reply at a time, making the annotation id the correct local lease key.
+  useEffect(() => {
+    const document = canonicalPlan.document
+    if (document === null) return
+    const pending = document.projection.annotations
+      .flatMap((annotation) =>
+        annotation.messages.map((message) => ({ annotation, message }))
+      )
+      .find(
+        ({ annotation, message }) =>
+          shouldRecoverPendingPlanMessage({
+            planId: document.id,
+            annotationId: annotation.id,
+            message,
+            recoveredMessageDispatches: initialThreadDispatches.current
+          })
+      )
+    if (pending === undefined) return
+    const key = `${document.id}:${pending.message.id}`
+    initialThreadDispatches.current.add(key)
+    void rpc
+      .planDispatchExistingMessage({
+        sessionId: session.id,
+        planId: document.id,
+        baseRevision: document.revision,
+        annotationId: pending.annotation.id,
+        messageId: pending.message.id
+      })
+      .catch(async () => {
+        initialThreadDispatches.current.delete(key)
+        const latest = await rpc.planCurrent(session.id).catch(() => null)
+        const stillPending = latest?.projection.annotations
+          .find((annotation) => annotation.id === pending.annotation.id)
+          ?.messages.find((message) => message.id === pending.message.id)
+        if (latest === null || stillPending?.deliveryState !== "pending") return
+        await rpc
+          .planUpdateMessageDelivery({
+            sessionId: session.id,
+            planId: latest.id,
+            baseRevision: latest.revision,
+            annotationId: pending.annotation.id,
+            messageId: pending.message.id,
+            deliveryState: "failed",
+            author: "user"
+          })
+          .catch(() => {})
+      })
+  }, [canonicalPlan.document, session.id])
 
   // Everything the transcript needs to turn a path into a link. `convo.files` is
   // the worktree's tracked-file list, already fetched for the composer's `@`
@@ -106,9 +192,33 @@ export function ConversationPane({
     [onOpenAsset, session.id]
   )
 
-  // Declared unconditionally (hook order) — the plan column only reads it in the
-  // `split` view, but the `plan` view returns early above.
-  const planSplit = useResizableWidth({ storageKey: "sb.split.plan", initial: 520, min: 360, max: 900 })
+  // A ratio, not a fixed plan width: the first split is truly equal within the
+  // available conversation row and remains equal on different window sizes.
+  // The operator's raw ratio stays persisted even if a temporarily narrower
+  // pane has to clamp it to preserve a 360px floor on both columns.
+  const [planSplitRowRef, planSplitRowWidth] = useContainerWidth()
+  const [planSplitRatio, setPlanSplitRatio] = useState(initialPlanSplitRatio)
+  const effectivePlanSplitRatio = clampedPlanSplitRatio(
+    planSplitRatio,
+    planSplitRowWidth
+  )
+  const adjustPlanSplit = useCallback(
+    (deltaX: number) => {
+      if (planSplitRowWidth <= 0) return
+      const next = resizedPlanSplitRatio(
+        effectivePlanSplitRatio,
+        planSplitRowWidth,
+        deltaX
+      )
+      setPlanSplitRatio(next)
+      try {
+        localStorage.setItem(PLAN_SPLIT_RATIO_KEY, String(next))
+      } catch {
+        /* A private/quota-limited renderer still keeps the in-memory ratio. */
+      }
+    },
+    [effectivePlanSplitRatio, planSplitRowWidth]
+  )
 
   // Background tasks. Gated on the HARNESS's capability, read from discovery —
   // only Claude reports a live task set and accepts a per-task stop, so the dock
@@ -457,6 +567,7 @@ export function ConversationPane({
     <PlanReview
       plan={convo.plan}
       document={canonicalPlan.document}
+      streamingDraft={convo.planDraft}
       draft={canonicalPlan.draft}
       remote={canonicalPlan.remote}
       syncState={canonicalPlan.state}
@@ -504,6 +615,46 @@ export function ConversationPane({
       onRetryWorker={(agentId) => {
         if (planId) void rpc.agentRetryWorker(session.id, planId, agentId)
       }}
+      participants={orchestration.participants}
+      onReplyThread={async (annotationId, body, mentionedParticipantIds) => {
+        const document = canonicalPlan.document
+        if (document === null) return
+        await runWithDirectPlanThreadDispatch(
+          document.id,
+          annotationId,
+          () => convo.dispatchPlanMessage({
+            planId: document.id,
+            baseRevision: document.revision,
+            annotationId,
+            body,
+            authorId: "operator",
+            mentionedParticipantIds
+          })
+        )
+      }}
+      onRetryThread={async (annotationId, message) => {
+        const document = canonicalPlan.document
+        if (document === null) return
+        await rpc.planDispatchExistingMessage({
+          sessionId: session.id,
+          planId: document.id,
+          baseRevision: document.revision,
+          annotationId,
+          messageId: message.id
+        })
+      }}
+      onSetThreadResolved={async (annotationId, resolved) => {
+        const document = canonicalPlan.document
+        if (document === null) return
+        await rpc.planSetThreadResolved({
+          sessionId: session.id,
+          planId: document.id,
+          baseRevision: document.revision,
+          annotationId,
+          resolved,
+          author: "user"
+        })
+      }}
     />
   )
 
@@ -539,7 +690,7 @@ export function ConversationPane({
         `whitespace-nowrap`) pushes this row past the viewport instead of letting
         the strip's own `overflow-x-auto` take over. The inner column already had
         it; this outer row did not, so the constraint stopped one level short. */}
-    <div className="flex min-h-0 min-w-0 flex-1" style={{ "--sb-font-scale": fontScale } as CSSProperties}>
+    <div ref={planSplitRowRef} className="flex min-h-0 min-w-0 flex-1" style={{ "--sb-font-scale": fontScale } as CSSProperties}>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {barAgents.length > 0 && (
         <AgentTabBar
@@ -722,9 +873,12 @@ export function ConversationPane({
       */}
       {view === "split" && (
         <>
-          <ResizeHandle aria-label="Resize plan" onResize={(dx) => planSplit.adjust(-dx)} />
+          <ResizeHandle aria-label="Resize plan" onResize={adjustPlanSplit} />
           <div
-            style={{ width: planSplit.width }}
+            data-testid="plan-split-column"
+            style={{
+              width: `calc(${effectivePlanSplitRatio * 100}% - ${effectivePlanSplitRatio * PLAN_SPLIT_HANDLE_WIDTH}px)`
+            }}
             className="flex min-h-0 flex-none flex-col overflow-hidden border-l border-hairline"
           >
             {planReview}

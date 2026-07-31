@@ -12,6 +12,7 @@ import type { AgentContext, SessionSpec } from "./adapter.js"
 import { capOutput } from "./output-cap.js"
 import { codexFileChangeStats } from "./codex-file-change.js"
 import { hasPlanBlock, parsePlan, PLAN_HTML_REFORMAT } from "./plan-parse.js"
+import { createPlanDraftStream } from "./plan-draft-stream.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
 import { requireWorktree } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
@@ -494,6 +495,10 @@ export const runCodexSdk = (
         let questionRound = 0
         let planRound = 0
         let planReformatAsked = false
+        let planning = spec.mode === "plan"
+        const planDraft = createPlanDraftStream(
+          () => `plan_${sessionId}_${planRound + 1}`
+        )
         let recoveredMissingRollout = false
         for (;;) {
           let followUp: string | null = null
@@ -545,6 +550,10 @@ export const runCodexSdk = (
             // interception, and a reply that has already been acted on must not
             // be re-read by the next channel down.
             const reply = followUp === null ? agentReply(event) : null
+            if (reply !== null && planning) {
+              const draft = planDraft.update(reply)
+              if (draft !== null) await runP(ctx.emit(draft))
+            }
 
             const asked =
               reply !== null && questionRound < MAX_QUESTION_ROUNDS
@@ -569,7 +578,7 @@ export const runCodexSdk = (
             // `hasPlanBlock` demands the exact ` ```plan ` info string, so a
             // model merely *discussing* planning doesn't trip this.
             const proposed =
-              reply !== null && spec.mode === "plan" && planRound < MAX_PLAN_ROUNDS &&
+              reply !== null && planning && planRound < MAX_PLAN_ROUNDS &&
               hasPlanBlock(reply)
                 ? reply
                 : null
@@ -587,12 +596,16 @@ export const runCodexSdk = (
               )
               if (plan.structured === false && !planReformatAsked) {
                 planReformatAsked = true
+                const clear = planDraft.clear()
+                if (clear !== null) await runP(ctx.emit(clear))
                 followUp = PLAN_HTML_REFORMAT
                 continue
               }
               const decision = await runP(ctx.proposePlan(plan))
+              planDraft.reset()
               if (decision._tag === "Revise") followUp = decision.feedback
               else if (decision._tag === "Approve") {
+                planning = false
                 // Codex fixes its sandbox when the thread OPENS, so widening it
                 // for execution means re-opening the same thread id under the
                 // restored exec mode. Same id ⇒ the planning conversation is
@@ -641,6 +654,10 @@ export const runCodexSdk = (
               context,
               settle
             )) {
+              if (terminal._tag === "Done") {
+                const clear = planDraft.clear()
+                if (clear !== null) await runP(ctx.emit(clear))
+              }
               await runP(ctx.emit(terminal))
             }
           }

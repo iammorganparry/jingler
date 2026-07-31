@@ -1,16 +1,19 @@
-import { mergeAttributes, Node } from "@tiptap/core"
 import {
-  NodeViewContent,
-  type NodeViewProps,
+  planLegacyCommentMessageId,
+  type PlanCommentMentionDelivery,
+  type PlanCommentMessage
+} from "@jingler/core"
+import { mergeAttributes, Node, type NodeViewProps } from "@tiptap/core"
+import {
   NodeViewWrapper,
   ReactNodeViewRenderer
 } from "@tiptap/react"
-import { MessageSquareText, Trash2 } from "lucide-react"
+import { MessageSquareText } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { HoverCard } from "../../components/hover-card.js"
 import { cn } from "../../lib/cn.js"
-import { removePlanComment, resolvePlanCommentRange } from "./plan-doc-comment.js"
+import { resolvePlanCommentRange } from "./plan-doc-comment.js"
+import { PlanCommentThread } from "./plan-comment-thread.js"
 
 /**
  * `<aside data-annotation="a1" data-stage="01" data-author="user" …>body</aside>`
@@ -50,6 +53,7 @@ function AnnotationView({ editor, node }: NodeViewProps) {
   const quote = typeof node.attrs.quote === "string" ? node.attrs.quote : ""
   const prefix = typeof node.attrs.prefix === "string" ? node.attrs.prefix : ""
   const suffix = typeof node.attrs.suffix === "string" ? node.attrs.suffix : ""
+  const messages = planCommentMessagesFrom(node.attrs.messages)
 
   const [open, setOpen] = useState(false)
   const [pinned, setPinned] = useState(false)
@@ -140,7 +144,7 @@ function AnnotationView({ editor, node }: NodeViewProps) {
   }
 
   const cardTop =
-    position === null ? 8 : Math.max(8, Math.min(position.top, window.innerHeight - 176))
+    position === null ? 8 : Math.max(8, Math.min(position.top, window.innerHeight - 260))
   const marker =
     position === null
       ? null
@@ -177,38 +181,23 @@ function AnnotationView({ editor, node }: NodeViewProps) {
               onMouseEnter={showCard}
               onMouseLeave={scheduleClose}
               className={cn(
-                "fixed z-50 w-64 origin-top-right overflow-y-auto rounded-xl border border-line bg-panel p-3 shadow-lg transition-[opacity,filter,transform] duration-150 ease-out",
+                "fixed z-50 w-[min(22rem,calc(100vw-1rem))] origin-top-right overflow-hidden rounded-xl border border-line bg-panel shadow-lg transition-[opacity,filter,transform] duration-150 ease-out",
                 open
                   ? "translate-y-0 opacity-100 blur-0"
                   : "pointer-events-none -translate-y-1 opacity-0 blur-[4px]"
               )}
               style={{
-                left: Math.max(8, position.left - 264),
+                left: Math.max(8, position.left - Math.min(352, window.innerWidth - 16)),
                 top: cardTop,
                 maxHeight: window.innerHeight - cardTop - 8
               }}
               data-plan-comment-card={annotationId}
             >
-              <div
-                className="flex select-none items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-purple"
-                contentEditable={false}
-              >
-                <MessageSquareText className="size-3.5" />
-                {author} annotation · {status}
-                <HoverCard content="Delete comment" side="top" delayMs={250}>
-                  <button
-                    type="button"
-                    aria-label="Delete comment"
-                    onClick={() => removePlanComment(editor, annotationId)}
-                    className="relative ml-auto flex size-7 items-center justify-center rounded-md text-red outline-none transition-[background-color,scale] duration-150 ease-out after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 hover:bg-red/10 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
-                </HoverCard>
-              </div>
-              <p className="mt-2 text-pretty text-[12px] leading-relaxed text-text-body">
-                {node.textContent}
-              </p>
+              <PlanCommentThread
+                annotationId={annotationId}
+                status={status}
+                messages={messages}
+              />
             </div>
           </>,
           document.body
@@ -216,18 +205,116 @@ function AnnotationView({ editor, node }: NodeViewProps) {
 
   return (
     <NodeViewWrapper className="h-0 overflow-visible">
-      {/* ProseMirror requires its content hole to remain beneath the NodeView
-          wrapper. The interactive/readable card is the portalled mirror above. */}
-      <NodeViewContent className="hidden" />
       {marker}
     </NodeViewWrapper>
   )
 }
 
+const deliveryStates = new Set(["pending", "sent", "failed"])
+
+const mentionedParticipantIdsFrom = (element: Element): ReadonlyArray<string> => {
+  const encoded = element.getAttribute("data-mentioned-participant-ids")
+  if (encoded === null) return []
+  try {
+    const decoded: unknown = JSON.parse(encoded)
+    return Array.isArray(decoded)
+      ? decoded.filter((value): value is string => typeof value === "string")
+      : []
+  } catch {
+    return []
+  }
+}
+
+const mentionDeliveriesFrom = (
+  element: Element
+): ReadonlyArray<PlanCommentMentionDelivery> | undefined => {
+  const raw = element.getAttribute("data-mention-deliveries")
+  if (!raw) return undefined
+  try {
+    const decoded: unknown = JSON.parse(
+      raw.startsWith("[") ? raw : decodeURIComponent(raw)
+    )
+    if (!Array.isArray(decoded)) return undefined
+    return decoded.filter((delivery): delivery is PlanCommentMentionDelivery => {
+      if (typeof delivery !== "object" || delivery === null) return false
+      const candidate = delivery as Partial<PlanCommentMentionDelivery>
+      return (
+        typeof candidate.participantId === "string" &&
+        typeof candidate.dispatchId === "string" &&
+        (candidate.status === "pending" ||
+          candidate.status === "dispatching" ||
+          candidate.status === "delivered" ||
+          candidate.status === "unavailable" ||
+          candidate.status === "failed") &&
+        (candidate.detail === null || typeof candidate.detail === "string") &&
+        typeof candidate.retryable === "boolean"
+      )
+    })
+  } catch {
+    return undefined
+  }
+}
+
+const planCommentMessagesFrom = (value: unknown): ReadonlyArray<PlanCommentMessage> => {
+  if (!Array.isArray(value)) return []
+  return value.filter((message): message is PlanCommentMessage => {
+    if (typeof message !== "object" || message === null) return false
+    const candidate = message as Partial<PlanCommentMessage>
+    return (
+      typeof candidate.id === "string" &&
+      typeof candidate.body === "string" &&
+      (candidate.authorKind === "user" || candidate.authorKind === "agent") &&
+      typeof candidate.authorId === "string" &&
+      typeof candidate.createdAt === "string" &&
+      Array.isArray(candidate.mentionedParticipantIds) &&
+      deliveryStates.has(candidate.deliveryState ?? "")
+    )
+  })
+}
+
+const messagesFromElement = (element: HTMLElement): ReadonlyArray<PlanCommentMessage> => {
+  const nested = Array.from(element.children).filter((child) =>
+    child.hasAttribute("data-comment-message")
+  )
+  if (nested.length > 0) {
+    return nested.map((child) => {
+      const authorKind = child.getAttribute("data-author-kind") === "agent" ? "agent" : "user"
+      const delivery = child.getAttribute("data-delivery-state") ?? "sent"
+      const mentionDeliveries = mentionDeliveriesFrom(child)
+      return {
+        id: child.getAttribute("data-comment-message") ?? "",
+        body: child.textContent ?? "",
+        authorKind,
+        authorId: child.getAttribute("data-author-id") ?? authorKind,
+        createdAt: child.getAttribute("data-created-at") ?? "",
+        mentionedParticipantIds: mentionedParticipantIdsFrom(child),
+        deliveryState: deliveryStates.has(delivery)
+          ? (delivery as PlanCommentMessage["deliveryState"])
+          : "sent",
+        ...(mentionDeliveries === undefined ? {} : { mentionDeliveries })
+      }
+    })
+  }
+
+  const annotationId = element.getAttribute("data-annotation") ?? ""
+  const authorKind = element.getAttribute("data-author") === "agent" ? "agent" : "user"
+  return [
+    {
+      id: planLegacyCommentMessageId(annotationId),
+      body: element.textContent ?? "",
+      authorKind,
+      authorId: element.getAttribute("data-author-id") ?? authorKind,
+      createdAt: element.getAttribute("data-created-at") ?? "",
+      mentionedParticipantIds: [],
+      deliveryState: "sent"
+    }
+  ]
+}
+
 export const PlanAnnotationNode = Node.create({
   name: "planAnnotation",
   group: "block",
-  content: "inline*",
+  atom: true,
 
   addAttributes() {
     return {
@@ -270,6 +357,11 @@ export const PlanAnnotationNode = Node.create({
         default: null,
         parseHTML: (el) => el.getAttribute("data-created-at"),
         renderHTML: (attrs) => (attrs.createdAt ? { "data-created-at": attrs.createdAt } : {})
+      },
+      messages: {
+        default: [],
+        parseHTML: (element) => messagesFromElement(element as HTMLElement),
+        renderHTML: () => ({})
       }
     }
   },
@@ -278,8 +370,33 @@ export const PlanAnnotationNode = Node.create({
     return [{ tag: "aside[data-annotation]" }]
   },
 
-  renderHTML({ HTMLAttributes }) {
-    return ["aside", mergeAttributes(HTMLAttributes), 0]
+  renderHTML({ node, HTMLAttributes }) {
+    const messages = planCommentMessagesFrom(node.attrs.messages)
+    return [
+      "aside",
+      mergeAttributes(HTMLAttributes),
+      ...messages.map((message) => [
+        "div",
+        {
+          "data-comment-message": message.id,
+          "data-author-kind": message.authorKind,
+          "data-author-id": message.authorId,
+          "data-created-at": message.createdAt,
+          "data-mentioned-participant-ids": JSON.stringify(
+            message.mentionedParticipantIds
+          ),
+          "data-delivery-state": message.deliveryState,
+          ...(message.mentionDeliveries === undefined
+            ? {}
+            : {
+                "data-mention-deliveries": JSON.stringify(
+                  message.mentionDeliveries
+                )
+              })
+        },
+        message.body
+      ])
+    ]
   },
 
   addNodeView() {

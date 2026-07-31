@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest"
 import {
   appendPlanAnnotationHtml,
+  appendPlanCommentMessageHtml,
   DEFAULT_PLAN_TEMPLATE_HTML,
+  planLegacyCommentMessageId,
   parsePlanHtml,
   sanitizePlanHtml,
+  updatePlanAnnotationStatusHtml,
+  updatePlanCommentMessageDeliveryHtml,
+  updatePlanCommentMentionDeliveriesHtml,
   updatePlanCriterionHtml
 } from "./plan-html.js"
 
@@ -45,6 +50,90 @@ describe("parsePlanHtml", () => {
     expect(p.stages[0]!.acceptance[0]).toMatchObject({ id: "01.1", status: "pending" })
     expect(p.annotations[0]).toMatchObject({ id: "a1", stageId: "01" })
     expect(p.annotations[0]!.anchor?.quote).toBe("revision")
+    expect(p.annotations[0]!.messages).toEqual([
+      {
+        id: planLegacyCommentMessageId("a1"),
+        body: "Which revision?",
+        authorKind: "user",
+        authorId: "user",
+        createdAt: "1970-01-01T00:00:00.000Z",
+        mentionedParticipantIds: [],
+        deliveryState: "sent"
+      }
+    ])
+  })
+
+  it("decodes legacy body-only annotations as stable one-message threads", () => {
+    const source = DOC.replace(
+      'data-status="open" data-quote="revision"',
+      'data-status="resolved" data-created-at="2026-07-30T09:00:00.000Z" data-quote="revision" data-prefix="a " data-suffix=" value"'
+    )
+    const first = parsePlanHtml(source)
+    const second = parsePlanHtml(first.html)
+
+    expect(first.valid).toBe(true)
+    expect(second.valid).toBe(true)
+    if (!first.valid || !second.valid) return
+    expect(second.projection.annotations[0]).toMatchObject({
+      id: "a1",
+      stageId: "01",
+      author: "user",
+      createdAt: "2026-07-30T09:00:00.000Z",
+      status: "resolved",
+      anchor: { quote: "revision", prefix: "a ", suffix: " value" },
+      messages: [
+        {
+          id: "a1:message:1",
+          body: "Which revision?",
+          authorKind: "user",
+          authorId: "user",
+          createdAt: "2026-07-30T09:00:00.000Z",
+          deliveryState: "sent"
+        }
+      ]
+    })
+  })
+
+  it("parses ordered user and agent messages with mentions and delivery state", () => {
+    const source = DOC.replace(
+      "Which revision?",
+      `<div data-comment-message="m-user" data-author-kind="user" data-author-id="operator-7" data-created-at="2026-07-30T10:00:00.000Z" data-mentioned-participant-ids="[&quot;worker-a&quot;]" data-delivery-state="sent">Please confirm.</div>
+<div data-comment-message="m-agent" data-author-kind="agent" data-author-id="worker-a" data-created-at="2026-07-30T10:01:00.000Z" data-mentioned-participant-ids="[&quot;operator-7&quot;]" data-delivery-state="sent">Confirmed.</div>`
+    )
+    const result = parsePlanHtml(source)
+
+    expect(result.valid).toBe(true)
+    if (!result.valid) return
+    expect(result.projection.annotations[0]?.messages).toEqual([
+      expect.objectContaining({
+        id: "m-user",
+        authorKind: "user",
+        authorId: "operator-7",
+        mentionedParticipantIds: ["worker-a"],
+        deliveryState: "sent"
+      }),
+      expect.objectContaining({
+        id: "m-agent",
+        authorKind: "agent",
+        authorId: "worker-a",
+        mentionedParticipantIds: ["operator-7"],
+        deliveryState: "sent"
+      })
+    ])
+  })
+
+  it("defaults only open user messages with an actual mention to pending", () => {
+    const source = DOC.replace(
+      "Which revision?",
+      `<div data-comment-message="plain" data-author-kind="user">Plain note.</div>
+<div data-comment-message="targeted" data-author-kind="user" data-mentioned-participant-ids="[&quot;worker-a&quot;]">Targeted note.</div>`
+    )
+    const parsed = parsePlanHtml(source)
+    expect(parsed.valid).toBe(true)
+    if (!parsed.valid) return
+    expect(
+      parsed.projection.annotations[0]?.messages.map((message) => message.deliveryState)
+    ).toEqual(["sent", "pending"])
   })
 
   it("reports diagnostics for a doc with no title / no stage", () => {
@@ -179,6 +268,18 @@ describe("sanitizePlanHtml", () => {
     expect(out).toContain('data-cli="codex"')
     expect(out).toContain('data-status="passed"')
   })
+
+  it("preserves only the safe nested comment-message attributes", () => {
+    const out = sanitizePlanHtml(
+      '<aside data-annotation="a1"><div data-comment-message="m1" data-author-kind="agent" data-author-id="worker-a" data-created-at="2026-07-31T00:00:00.000Z" data-mentioned-participant-ids="[&quot;operator&quot;]" data-delivery-state="sent" onclick="evil()">Safe reply.</div></aside>'
+    )
+
+    expect(out).toContain('data-comment-message="m1"')
+    expect(out).toContain('data-author-id="worker-a"')
+    expect(out).toContain('data-mentioned-participant-ids="[&quot;operator&quot;]"')
+    expect(out).toContain('data-delivery-state="sent"')
+    expect(out).not.toContain("onclick")
+  })
 })
 
 describe("html source rewriters", () => {
@@ -202,6 +303,91 @@ describe("html source rewriters", () => {
     const ann = parsePlanHtml(next).projection!.annotations.find((a) => a.id === "c2")!
     expect(ann.stageId).toBe("01")
     expect(ann.body).toBe('tighten <this> & "that"')
+    expect(ann.messages[0]).toMatchObject({
+      id: "c2:message:1",
+      body: 'tighten <this> & "that"',
+      authorKind: "user",
+      deliveryState: "sent"
+    })
     expect(ann.anchor?.quote).toBe("survives")
+  })
+
+  it("appends messages, updates delivery, and resolves or reopens a thread", () => {
+    const appended = appendPlanCommentMessageHtml(DOC, "a1", {
+      id: "reply-1",
+      body: "Revision 7 is current.",
+      authorKind: "agent",
+      authorId: "planner",
+      createdAt: "2026-07-31T09:00:00.000Z",
+      mentionedParticipantIds: ["operator"],
+      deliveryState: "pending"
+    })
+    expect(appended).not.toBeNull()
+    const sent = updatePlanCommentMessageDeliveryHtml(
+      appended!,
+      "a1",
+      "reply-1",
+      "sent"
+    )
+    const resolved = updatePlanAnnotationStatusHtml(sent!, "a1", "resolved")
+    const reopened = updatePlanAnnotationStatusHtml(resolved!, "a1", "open")
+    const parsed = parsePlanHtml(reopened!)
+
+    expect(parsed.valid).toBe(true)
+    if (!parsed.valid) return
+    const thread = parsed.projection.annotations[0]!
+    expect(thread.status).toBe("open")
+    expect(thread.messages.map((message) => message.id)).toEqual([
+      "a1:message:1",
+      "reply-1"
+    ])
+    expect(thread.messages[1]).toMatchObject({
+      body: "Revision 7 is current.",
+      authorKind: "agent",
+      authorId: "planner",
+      mentionedParticipantIds: ["operator"],
+      deliveryState: "sent"
+    })
+  })
+
+  it("round-trips per-target delivery details containing quotes", () => {
+    const appended = appendPlanCommentMessageHtml(DOC, "a1", {
+      id: "reply-outbox",
+      body: "Coordinate this.",
+      authorKind: "user",
+      authorId: "operator",
+      createdAt: "2026-07-31T09:00:00.000Z",
+      mentionedParticipantIds: ["worker-a"],
+      deliveryState: "pending"
+    })!
+    const updated = updatePlanCommentMentionDeliveriesHtml(
+      appended,
+      "a1",
+      "reply-outbox",
+      [
+        {
+          participantId: "worker-a",
+          status: "unavailable",
+          dispatchId: "reply-outbox:worker-a",
+          detail: 'Participant "worker-a" stopped.',
+          retryable: true
+        }
+      ],
+      "failed"
+    )!
+    const parsed = parsePlanHtml(updated)
+    expect(parsed.valid).toBe(true)
+    if (!parsed.valid) return
+    expect(parsed.projection.annotations[0]?.messages[1]).toMatchObject({
+      deliveryState: "failed",
+      mentionDeliveries: [
+        {
+          participantId: "worker-a",
+          status: "unavailable",
+          detail: 'Participant "worker-a" stopped.',
+          retryable: true
+        }
+      ]
+    })
   })
 })

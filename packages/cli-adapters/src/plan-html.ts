@@ -1,5 +1,10 @@
 import type { Plan } from "@jingler/core"
-import { parsePlanHtml, planDocumentToPlan } from "@jingler/core"
+import {
+  parsePlanHtml,
+  planDocumentToPlan,
+  planLegacyCommentMessageId,
+  routePlanAnnotationHtml
+} from "@jingler/core"
 
 export {
   DEFAULT_PLAN_TEMPLATE_HTML,
@@ -17,11 +22,6 @@ const text = (value: string): string =>
 
 const statusAttr = (s: "ok" | "warn" | "open" | "under-review"): string =>
   s === "ok" ? "passed" : s === "warn" ? "failed" : s === "under-review" ? "waived" : "pending"
-
-const CANONICAL_ANNOTATION_TAG = /<aside\b[^>]*>/g
-const ANNOTATION_ID_ATTR = /\bdata-annotation=(["'])([^"']+)\1/
-const ANNOTATION_STATUS_ATTR = /\bdata-status=(["'])[^"']*\1/
-const TAG_END = />$/
 
 /** Convert the former structured `Plan` projection into canonical plan HTML. */
 export const legacyPlanToHtml = (plan: Plan): string => {
@@ -68,10 +68,10 @@ export const legacyPlanToHtml = (plan: Plan): string => {
     })
     .join("\n")
   const annotations = plan.comments
-    .map(
-      (c) =>
-        `<aside data-annotation="${attr(c.id)}"${c.stepId.length === 0 ? "" : ` data-stage="${attr(c.stepId)}"`} data-author="${c.author}" data-status="${c.routed ? "resolved" : "open"}" data-created-at="${attr(c.createdAt)}">${text(c.body)}</aside>`
-    )
+    .map((c) => {
+      const deliveryState = c.author === "agent" || c.routed ? "sent" : "pending"
+      return `<aside data-annotation="${attr(c.id)}"${c.stepId.length === 0 ? "" : ` data-stage="${attr(c.stepId)}"`} data-author="${c.author}" data-author-id="${c.author}" data-status="${c.routed ? "resolved" : "open"}" data-created-at="${attr(c.createdAt)}"><div data-comment-message="${attr(planLegacyCommentMessageId(c.id))}" data-author-kind="${c.author}" data-author-id="${c.author}" data-created-at="${attr(c.createdAt)}" data-mentioned-participant-ids="[]" data-delivery-state="${deliveryState}">${text(c.body)}</div></aside>`
+    })
     .join("\n")
   const design =
     plan.raw.trim().length > 0 ? `<p>${text(plan.raw.trim())}</p>` : "<p>See the stages below.</p>"
@@ -106,20 +106,16 @@ export const planFromHtml = (source: string, id: string): Plan | null => {
 }
 
 /**
- * Mark only the routed canonical annotations resolved. Attribute order is not
- * significant in HTML, so inspect each `<aside>` tag rather than matching one
- * serializer's exact layout.
+ * Mark only the routed canonical annotations resolved and their pending user
+ * messages sent. Non-aside elements with similarly named data are untouched.
  */
 export const resolvePlanAnnotations = (
   source: string,
   annotationIds: ReadonlySet<string>
-): string =>
-  source.replace(CANONICAL_ANNOTATION_TAG, (tag) => {
-    const idMatch = ANNOTATION_ID_ATTR.exec(tag)
-    const id = idMatch?.[2]
-    if (id === undefined || !annotationIds.has(id)) return tag
-    if (ANNOTATION_STATUS_ATTR.test(tag)) {
-      return tag.replace(ANNOTATION_STATUS_ATTR, 'data-status="resolved"')
-    }
-    return tag.replace(TAG_END, ' data-status="resolved">')
-  })
+): string => {
+  let next = source
+  for (const annotationId of annotationIds) {
+    next = routePlanAnnotationHtml(next, annotationId) ?? next
+  }
+  return next
+}

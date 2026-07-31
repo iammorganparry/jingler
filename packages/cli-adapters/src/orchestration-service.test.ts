@@ -178,6 +178,141 @@ describe("orchestration graph", () => {
 })
 
 describe("OrchestrationService", () => {
+  it("projects live worker and nested-agent routes, steers the owner, and rejects stale ids", async () => {
+    const ready = await Effect.runPromise(Deferred.make<void>())
+    const release = await Effect.runPromise(Deferred.make<void>())
+    const steers: Array<string> = []
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) =>
+        Effect.gen(function* () {
+          if (context.registerTurnSteer !== undefined) {
+            yield* context.registerTurnSteer(async (text) => {
+              steers.push(text)
+              await Effect.runPromise(
+                context.emit({
+                  _tag: "Assistant",
+                  text: "Nested agent checked the parser."
+                })
+              )
+              return "accepted"
+            })
+          }
+          yield* context.emit({
+            _tag: "SubagentStarted",
+            id: "task-parser",
+            name: "Explore",
+            description: "Inspect the parser",
+            parentId: null
+          })
+          yield* Deferred.succeed(ready, undefined)
+          yield* Deferred.await(release)
+          yield* passCurrentStage(spec, context)
+        }),
+      stop: () => Effect.void
+    }
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* OrchestrationService
+        const execution = yield* service
+          .execute(input([stage("01", "agent-a")]))
+          .pipe(Effect.fork)
+        yield* Deferred.await(ready)
+        const participants = yield* service.planParticipants(
+          "session-1",
+          "plan-1"
+        )
+        const nested = participants.find(
+          (participant) => participant.role === "subagent"
+        )!
+        const routed = yield* service.steerPlanParticipant({
+          sessionId: "session-1",
+          planId: "plan-1",
+          routingId: nested.routingId,
+          text: "Relay this to the nested parser agent."
+        })
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(execution)
+        const stale = yield* service.steerPlanParticipant({
+          sessionId: "session-1",
+          planId: "plan-1",
+          routingId: nested.routingId,
+          text: "Try again."
+        })
+        return { participants, routed, stale }
+      }).pipe(Effect.provide(layerFor(adapter)))
+    )
+
+    expect(result.participants.map((participant) => participant.role)).toEqual([
+      "worker",
+      "subagent"
+    ])
+    expect(new Set(result.participants.map((participant) => participant.routingId)).size).toBe(2)
+    expect(steers).toEqual(["Relay this to the nested parser agent."])
+    expect(result.routed).toEqual({
+      status: "delivered",
+      reply: "Nested agent checked the parser."
+    })
+    expect(result.stale.status).toBe("unavailable")
+  })
+
+  it("serializes concurrent reply-bearing steers and keeps each streamed reply intact", async () => {
+    const ready = await Effect.runPromise(Deferred.make<void>())
+    const release = await Effect.runPromise(Deferred.make<void>())
+    const steers: Array<string> = []
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) =>
+        Effect.gen(function* () {
+          yield* context.registerTurnSteer?.(async (text) => {
+            steers.push(text)
+            setTimeout(() => {
+              Effect.runFork(context.emit({ _tag: "Assistant", text: `${text}:a` }))
+            }, 10)
+            setTimeout(() => {
+              Effect.runFork(context.emit({ _tag: "Assistant", text: ":b" }))
+            }, 100)
+            return "accepted"
+          }) ?? Effect.void
+          yield* Deferred.succeed(ready, undefined)
+          yield* Deferred.await(release)
+          yield* passCurrentStage(spec, context)
+        }),
+      stop: () => Effect.void
+    }
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* OrchestrationService
+        const execution = yield* service.execute(input([stage("01", "agent-a")])).pipe(Effect.fork)
+        yield* Deferred.await(ready)
+        const participant = (yield* service.planParticipants("session-1", "plan-1"))[0]!
+        const first = yield* service.steerPlanParticipant({
+          sessionId: "session-1",
+          planId: "plan-1",
+          routingId: participant.routingId,
+          text: "first"
+        }).pipe(Effect.fork)
+        yield* Effect.sleep("20 millis")
+        const second = yield* service.steerPlanParticipant({
+          sessionId: "session-1",
+          planId: "plan-1",
+          routingId: participant.routingId,
+          text: "second"
+        }).pipe(Effect.fork)
+        const replies = [yield* Fiber.join(first), yield* Fiber.join(second)]
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(execution)
+        return replies
+      }).pipe(Effect.provide(layerFor(adapter)), Effect.timeout("10 seconds"))
+    )
+
+    expect(steers).toEqual(["first", "second"])
+    expect(result).toEqual([
+      { status: "delivered", reply: "first:a:b" },
+      { status: "delivered", reply: "second:a:b" }
+    ])
+  })
+
   it("runs independent workers concurrently under distinct reservation owners", async () => {
     let active = 0
     let maximum = 0

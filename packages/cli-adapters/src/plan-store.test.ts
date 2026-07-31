@@ -9,7 +9,7 @@ import {
 import { basename, dirname, join } from "node:path"
 import { FileSystem, Path } from "@effect/platform"
 import { planStageSemanticFingerprint } from "@jingler/core"
-import { Chunk, Effect, Either, Layer, Stream } from "effect"
+import { Chunk, Effect, Either, Fiber, Layer, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { scriptedPlan } from "./adapter.js"
 import { AppPaths } from "./app-paths.js"
@@ -306,6 +306,206 @@ describe("PlanStore canonical document", () => {
     expect(document.source.indexOf("data-annotation")).toBeLessThan(
       document.source.indexOf("</section>")
     )
+  })
+
+  it("revision-guards appending, delivery updates, and thread resolution", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote()
+        const thread = yield* PlanStore.addAnnotation(WT, {
+          planId: first.id,
+          baseRevision: first.revision,
+          stageId: "01",
+          body: "Please ask worker-a.",
+          author: "user"
+        })
+        const replied = yield* PlanStore.appendAnnotationMessage(WT, {
+          planId: first.id,
+          baseRevision: thread.revision,
+          annotationId: thread.projection.annotations[0]!.id,
+          body: "I checked the persistence path.",
+          authorKind: "agent",
+          authorId: "worker-a",
+          mentionedParticipantIds: ["operator", "operator"],
+          deliveryState: "pending"
+        })
+        const reply = replied.projection.annotations[0]!.messages[1]!
+        const sent = yield* PlanStore.updateAnnotationMessageDelivery(WT, {
+          planId: first.id,
+          baseRevision: replied.revision,
+          annotationId: replied.projection.annotations[0]!.id,
+          messageId: reply.id,
+          deliveryState: "sent",
+          author: "agent"
+        })
+        const withOutbox = yield* PlanStore.updateAnnotationMentionDeliveries(WT, {
+          planId: first.id,
+          baseRevision: sent.revision,
+          annotationId: sent.projection.annotations[0]!.id,
+          messageId: reply.id,
+          deliveries: [
+            {
+              participantId: "operator",
+              status: "delivered",
+              dispatchId: `${reply.id}:operator`,
+              detail: null,
+              retryable: false
+            }
+          ],
+          deliveryState: "sent",
+          author: "agent"
+        })
+        const resolved = yield* PlanStore.setAnnotationResolved(WT, {
+          planId: first.id,
+          baseRevision: withOutbox.revision,
+          annotationId: withOutbox.projection.annotations[0]!.id,
+          resolved: true,
+          author: "user"
+        })
+        const reopened = yield* PlanStore.setAnnotationResolved(WT, {
+          planId: first.id,
+          baseRevision: resolved.revision,
+          annotationId: resolved.projection.annotations[0]!.id,
+          resolved: false,
+          author: "user"
+        })
+        const stale = yield* Effect.either(
+          PlanStore.appendAnnotationMessage(WT, {
+            planId: first.id,
+            baseRevision: thread.revision,
+            annotationId: thread.projection.annotations[0]!.id,
+            body: "Stale reply.",
+            authorKind: "user",
+            authorId: "operator",
+            mentionedParticipantIds: [],
+            deliveryState: "pending"
+          })
+        )
+        return { thread, replied, sent, withOutbox, resolved, reopened, stale }
+      })
+    )
+
+    expect(result.replied.projection.annotations[0]?.messages).toEqual([
+      expect.objectContaining({
+        body: "Please ask worker-a.",
+        authorKind: "user",
+        deliveryState: "sent"
+      }),
+      expect.objectContaining({
+        body: "I checked the persistence path.",
+        authorKind: "agent",
+        authorId: "worker-a",
+        mentionedParticipantIds: ["operator"],
+        deliveryState: "pending"
+      })
+    ])
+    expect(result.sent.projection.annotations[0]?.messages[1]?.deliveryState).toBe("sent")
+    expect(
+      result.withOutbox.projection.annotations[0]?.messages[1]?.mentionDeliveries
+    ).toEqual([
+      expect.objectContaining({ participantId: "operator", status: "delivered" })
+    ])
+    expect(result.resolved.projection.annotations[0]?.status).toBe("resolved")
+    expect(result.reopened.projection.annotations[0]?.status).toBe("open")
+    expect(Either.isLeft(result.stale)).toBe(true)
+    if (Either.isLeft(result.stale)) {
+      expect(result.stale.left).toMatchObject({
+        _tag: "PlanConflictError",
+        latestRevision: result.reopened.revision,
+        latest: result.reopened
+      })
+    }
+  })
+
+  it("publishes a revision-guarded thread append through PlanStore.watch", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote()
+        const thread = yield* PlanStore.addAnnotation(WT, {
+          planId: first.id,
+          baseRevision: first.revision,
+          stageId: "01",
+          body: "Initial question.",
+          author: "user"
+        })
+        const watchedFiber = yield* Stream.unwrap(
+          Effect.map(PlanStore, (store) => store.watch(WT, "s1", "c1"))
+        ).pipe(Stream.take(1), Stream.runCollect, Effect.fork)
+        yield* Effect.sleep("25 millis")
+        const appended = yield* PlanStore.appendAnnotationMessage(WT, {
+          planId: first.id,
+          baseRevision: thread.revision,
+          annotationId: thread.projection.annotations[0]!.id,
+          body: "Durable reply.",
+          authorKind: "agent",
+          authorId: "planner",
+          mentionedParticipantIds: ["operator"],
+          deliveryState: "sent"
+        })
+        const watched = Chunk.toReadonlyArray(yield* Fiber.join(watchedFiber))[0]
+        return { appended, watched }
+      })
+    )
+
+    expect(result.watched?.revision).toBe(result.appended.revision)
+    expect(result.watched?.projection.annotations[0]?.messages[1]).toMatchObject({
+      body: "Durable reply.",
+      authorId: "planner",
+      deliveryState: "sent"
+    })
+  }, 15_000)
+
+  it("retains replies when a worker updates its stable evidence annotation", async () => {
+    const document = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(ORCHESTRATED_SOURCE)
+        const blocked = yield* PlanStore.setStageExecutionStatus(WT, {
+          planId: first.id,
+          stageId: "01",
+          agentId: "worker-a",
+          status: "blocked",
+          message: "Waiting for the first fixture."
+        })
+        const annotation = blocked!.projection.annotations[0]!
+        const replied = yield* PlanStore.appendAnnotationMessage(WT, {
+          planId: first.id,
+          baseRevision: blocked!.revision,
+          annotationId: annotation.id,
+          body: "Use fixture beta.",
+          authorKind: "user",
+          authorId: "operator",
+          mentionedParticipantIds: ["worker-a"],
+          deliveryState: "sent"
+        })
+        return yield* PlanStore.setStageExecutionStatus(WT, {
+          planId: first.id,
+          stageId: "01",
+          agentId: "worker-a",
+          status: "failed",
+          message: "Fixture beta exposed a checksum mismatch."
+        }).pipe(
+          Effect.map((updated) => ({ replied, updated }))
+        )
+      })
+    )
+
+    expect(document.updated?.projection.annotations[0]).toMatchObject({
+      id: document.replied.projection.annotations[0]?.id,
+      status: "open",
+      messages: [
+        {
+          body: "Fixture beta exposed a checksum mismatch.",
+          authorKind: "agent",
+          authorId: "worker-a"
+        },
+        {
+          body: "Use fixture beta.",
+          authorKind: "user",
+          authorId: "operator",
+          mentionedParticipantIds: ["worker-a"]
+        }
+      ]
+    })
   })
 
   it("serializes concurrent writers so one wins and one receives a conflict", async () => {

@@ -1,5 +1,6 @@
 import type {
   CliKind,
+  PlanParticipant,
   StreamEvent,
   WorkerActivity,
   WorkerIdentity,
@@ -13,7 +14,8 @@ import {
   orchestrationAgentsMachine,
   type OrchestrationAgentsScope,
   WORKER_STREAM_RECONNECT_BASE_MS,
-  WORKER_STREAM_RECONNECT_MAX_MS
+  WORKER_STREAM_RECONNECT_MAX_MS,
+  PLAN_PARTICIPANT_REFRESH_MS
 } from "./orchestration-agents-machine.js"
 
 const scope = (
@@ -118,13 +120,144 @@ const makeHarness = () => {
 
 const start = (
   watchedScope: OrchestrationAgentsScope | null,
-  subscribe: ReturnType<typeof makeHarness>["subscribe"]
+  subscribe: ReturnType<typeof makeHarness>["subscribe"],
+  loadParticipants?: (
+    scope: OrchestrationAgentsScope
+  ) => Promise<ReadonlyArray<PlanParticipant>>
 ) =>
   createActor(orchestrationAgentsMachine, {
-    input: { scope: watchedScope, subscribe }
+    input: { scope: watchedScope, subscribe, loadParticipants }
   }).start()
 
 describe("orchestrationAgentsMachine", () => {
+  it("ignores unchanged participant refreshes so the plan editor stays mounted", async () => {
+    const harness = makeHarness()
+    const participant: PlanParticipant = {
+      routingId: "orchestrator:chat-1",
+      displayName: "Orchestrator",
+      role: "orchestrator",
+      lifecycle: "parked",
+      ownerRoutingId: null
+    }
+    const actor = start(scope(), harness.subscribe, async () => [participant])
+    await waitFor(
+      actor,
+      (snapshot) => snapshot.context.participants.length === 1
+    )
+    const before = actor.getSnapshot()
+
+    actor.send({ type: "PARTICIPANTS_REFRESHED", participants: [participant] })
+
+    expect(actor.getSnapshot()).toBe(before)
+    actor.stop()
+  })
+
+  it("merges the orchestrator with only live workers and nested agents", async () => {
+    const harness = makeHarness()
+    const actor = start(
+      scope(),
+      harness.subscribe,
+      async () => [
+        {
+          routingId: "orchestrator:chat-1",
+          displayName: "Orchestrator",
+          role: "orchestrator",
+          lifecycle: "parked",
+          ownerRoutingId: null
+        },
+        {
+          routingId: "orchestrator:chat-1",
+          displayName: "Duplicate",
+          role: "orchestrator",
+          lifecycle: "parked",
+          ownerRoutingId: null
+        }
+      ]
+    )
+    await waitFor(
+      actor,
+      (snapshot) => snapshot.context.participants.length === 1
+    )
+    const emit = harness.subscriptions[0]!.listener
+    const agent = worker("agent-a", "codex")
+    emit(lifecycle(agent, "running"))
+    emit(
+      harnessEvent(agent, {
+        _tag: "SubagentStarted",
+        id: "task-1",
+        name: "Explore",
+        description: "Inspect routing",
+        parentId: null
+      })
+    )
+
+    expect(
+      actor
+        .getSnapshot()
+        .context.participants.map((participant) => participant.role)
+    ).toEqual(["orchestrator", "worker", "subagent"])
+
+    emit(
+      harnessEvent(agent, {
+        _tag: "SubagentEnded",
+        id: "task-1",
+        status: "done"
+      })
+    )
+    emit(lifecycle(agent, "completed"))
+    expect(actor.getSnapshot().context.participants).toEqual([
+      {
+        routingId: "orchestrator:chat-1",
+        displayName: "Orchestrator",
+        role: "orchestrator",
+        lifecycle: "parked",
+        ownerRoutingId: null
+      }
+    ])
+    actor.stop()
+  })
+
+  it("refreshes main-run participant lifecycle and retries a failed snapshot", async () => {
+    vi.useFakeTimers()
+    try {
+      const harness = makeHarness()
+      const orchestrator: PlanParticipant = {
+        routingId: "orchestrator:chat-1",
+        displayName: "Orchestrator",
+        role: "orchestrator",
+        lifecycle: "parked",
+        ownerRoutingId: null
+      }
+      const subagent: PlanParticipant = {
+        routingId: "subagent:orchestrator:chat-1:explore",
+        displayName: "Explore",
+        role: "subagent",
+        lifecycle: "running",
+        ownerRoutingId: orchestrator.routingId
+      }
+      const load = vi.fn()
+        .mockRejectedValueOnce(new Error("temporary RPC failure"))
+        .mockResolvedValueOnce([orchestrator, subagent])
+        .mockResolvedValue([orchestrator])
+      const actor = start(scope(), harness.subscribe, load)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(actor.getSnapshot().context.participants).toEqual([])
+
+      await vi.advanceTimersByTimeAsync(PLAN_PARTICIPANT_REFRESH_MS)
+      expect(actor.getSnapshot().context.participants).toEqual([
+        orchestrator,
+        subagent
+      ])
+
+      await vi.advanceTimersByTimeAsync(PLAN_PARTICIPANT_REFRESH_MS)
+      expect(actor.getSnapshot().context.participants).toEqual([orchestrator])
+      expect(load).toHaveBeenCalledTimes(3)
+      actor.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("keeps parallel worker attempts, lifecycle, harnesses, and messages independent", async () => {
     const harness = makeHarness()
     const actor = start(scope(), harness.subscribe)
@@ -168,11 +301,27 @@ describe("orchestrationAgentsMachine", () => {
     expect(textOf(afterRetry[0]!)).toBe("alpha retry")
     expect(afterRetry[1]).toBe(beforeRetry[1])
     expect(textOf(afterRetry[1]!)).toBe("bravo")
+    expect(
+      actor
+        .getSnapshot()
+        .context.participants.filter(
+          (participant) => participant.role === "worker"
+        )
+        .map((participant) => participant.routingId)
+    ).toEqual(["worker:plan-1:agent-a:2"])
 
     // A late callback from the settled first attempt cannot roll the retry back.
     emit(harnessEvent(agentA, { _tag: "Assistant", text: " stale" }))
     emit(lifecycle(agentA, "failed", "old attempt failed late"))
     expect(actor.getSnapshot().context.agents[0]).toStrictEqual(afterRetry[0])
+    expect(
+      actor
+        .getSnapshot()
+        .context.participants.filter(
+          (participant) => participant.role === "worker"
+        )
+        .map((participant) => participant.routingId)
+    ).toEqual(["worker:plan-1:agent-a:2"])
     actor.stop()
   })
 

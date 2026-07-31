@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  agentMessageDelta,
   codexAppServerMessageToStreamEvents,
   completedAgentReply,
   completedTurn,
@@ -207,6 +208,12 @@ describe("codex app-server event mapping", () => {
     expect(codexAppServerMessageToStreamEvents(completed, "t1", state)).toStrictEqual([
       { _tag: "Assistant", text: "hello" }
     ])
+    expect(
+      agentMessageDelta({
+        method: "item/agentMessage/delta",
+        params: { itemId: "m1", delta: "hello" }
+      })
+    ).toBe("hello")
     expect(completedAgentReply(completed)).toBe("hello")
   })
 

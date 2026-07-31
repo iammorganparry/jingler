@@ -21,6 +21,9 @@ import type {
   PermissionMode,
   Plan,
   PlanAnnotationAnchor,
+  PlanDocument,
+  PlanDraft,
+  PlanMentionDelivery,
   QuestionAnswer,
   QuestionRequest,
   ReasoningSetting,
@@ -33,6 +36,7 @@ import type {
 import { latestPlan, pendingPlan, pendingQuestion } from "@jingler/core"
 import type { QueuedMessage } from "./conversation-machine.js"
 import { getConversationActor } from "./conversation-registry.js"
+import { rpc } from "./rpc-client.js"
 
 export interface Conversation {
   readonly messages: ReadonlyArray<Message>
@@ -91,6 +95,10 @@ export interface Conversation {
   readonly answerQuestion: (requestId: string, answers: ReadonlyArray<QuestionAnswer>) => void
   /** The latest open plan (proposed / revising), for the Plan Review tab, or null. */
   readonly plan: Plan | null
+  /** Sanitized, cumulative plan source that has not been promoted yet. */
+  readonly planDraft: PlanDraft | null
+  /** Changes once per planning turn when its first renderable draft arrives. */
+  readonly planDraftPresentationNonce: number
   /** A rejected exact-revision approval, shown in the Plan workspace. */
   readonly planActionError: string | null
   readonly commentPlanStep: (
@@ -99,6 +107,18 @@ export interface Conversation {
     body: string,
     anchor?: PlanAnnotationAnchor
   ) => void
+  readonly dispatchPlanMessage: (input: {
+    readonly planId: string
+    readonly baseRevision: number
+    readonly annotationId: string
+    readonly body: string
+    readonly authorId: string
+    readonly mentionedParticipantIds: ReadonlyArray<string>
+  }) => Promise<{
+    readonly document: PlanDocument
+    readonly messageId: string
+    readonly deliveries: ReadonlyArray<PlanMentionDelivery>
+  }>
   readonly revisePlan: (planId: string) => void
   readonly approvePlan: (
     planId: string,
@@ -146,7 +166,8 @@ export function useConversation(
   const {
     messages, mode, reasoning, skills, files, cli, model, catalog, patch, queued, steeringId,
     subagents, tokens, hasMoreHistory, loadingHistory,
-    runStartedAt, reviewer, reviewPhase, reviewStartedAt
+    runStartedAt, reviewer, reviewPhase, reviewStartedAt,
+    planDraft, planDraftPresentationNonce
   } = state.context
 
   const paused = useMemo(() => {
@@ -199,9 +220,13 @@ export function useConversation(
     editQueued: (id, text) => send({ type: "EDIT_QUEUED", id, text }),
     question,
     plan,
+    planDraft,
+    planDraftPresentationNonce,
     planActionError: state.context.planActionError,
     commentPlanStep: (planId, stepId, body, anchor) =>
       send({ type: "COMMENT_PLAN_STEP", planId, stepId, body, ...(anchor ? { anchor } : {}) }),
+    dispatchPlanMessage: (input) =>
+      rpc.planDispatchMessage({ sessionId: session.id, ...input }),
     revisePlan: (planId) => send({ type: "REVISE_PLAN", planId }),
     approvePlan: (planId, executionMode, revision) =>
       send({ type: "APPROVE_PLAN", planId, executionMode, revision }),

@@ -163,8 +163,9 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
       'data-agent-id="worker-release" data-cli="codex" data-model="gpt-5.6-terra"'
     )
 
+  await window.getByRole("button", { name: "More plan actions" }).click()
   await window
-    .getByRole("button", { name: "Approve and auto", exact: true })
+    .getByRole("menuitem", { name: "Approve and auto", exact: true })
     .click()
   await expect
     .poll(
@@ -201,7 +202,9 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   await expect(workerReleaseTab).toBeVisible()
 
   await window.getByRole("button", { name: "Plan Review" }).first().click()
-  await expect(window.getByText(/requested audit amendment/)).toBeVisible()
+  await expect(
+    window.getByText(/requested audit amendment/).first()
+  ).toBeVisible()
   await expect
     .poll(
       () =>
@@ -214,11 +217,30 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
     )
     .toBe(8)
 
-  await expect(window.getByRole("button", { name: "Use remote" })).toBeVisible()
-  await window.getByRole("button", { name: "Use remote" }).click()
-  await expect(window.getByText("All criteria verified")).toBeVisible({
-    timeout: 30_000
+  await expect
+    .poll(() => readFileSync(planFile, "utf8"), { timeout: 30_000 })
+    .toContain('status: "done"')
+
+  // Plan.watch normally applies the completed canonical revision directly. If
+  // an editor save races that revision, the same valid result is presented as
+  // a conflict instead; accept the remote canonical revision in that case.
+  const completedStatus = window.getByText("done", { exact: true }).first()
+  const morePlanActions = window.getByRole("button", {
+    name: "More plan actions",
   })
+  await expect
+    .poll(
+      async () =>
+        (await completedStatus.isVisible()) ||
+        (await morePlanActions.isVisible()),
+      { timeout: 30_000 }
+    )
+    .toBe(true)
+  if (await morePlanActions.isVisible()) {
+    await morePlanActions.click()
+    await window.getByRole("menuitem", { name: "Use remote revision" }).click()
+  }
+  await expect(completedStatus).toBeVisible()
 
   const persisted = readFileSync(planFile, "utf8")
   expect(persisted).toContain('status: "done"')
@@ -285,8 +307,9 @@ test("a stopped worker stays interrupted across restart and retries from its che
   )
   await composer.press("Enter")
   await first.window.getByRole("button", { name: "Plan Review" }).first().click()
+  await first.window.getByRole("button", { name: "More plan actions" }).click()
   await first.window
-    .getByRole("button", { name: "Approve and auto", exact: true })
+    .getByRole("menuitem", { name: "Approve and auto", exact: true })
     .click()
   await expect(
     first.window.getByRole("button", {
@@ -329,9 +352,7 @@ test("a stopped worker stays interrupted across restart and retries from its che
     first.window.getByTestId("plan-progress-stage-s_06")
   ).toContainText("worker-release · opus")
   await first.window.getByTestId("plan-progress-stage-s_06").click()
-  await expect(
-    first.window.locator('[data-plan-stage-id="s_06"] button').first()
-  ).toBeFocused()
+  await expect(first.window.getByLabel("Plan document")).toBeVisible()
 
   await first.window.getByTestId("active-chat-tab").first().click()
   await first.window
@@ -403,21 +424,20 @@ test("a stopped worker stays interrupted across restart and retries from its che
       name: "Retry worker worker-release"
     })
   ).toBeVisible()
+  await expect(reopened.window.getByRole("status")).toContainText("Synced")
 
   await reopened.window
     .getByRole("button", { name: "Retry worker worker-release" })
     .click()
   await expect
-    .poll(() => checkpoints().find((worker) => worker.agentId === "worker-release"))
+    .poll(() => checkpoints().find((worker) => worker.agentId === "worker-release"), {
+      timeout: 30_000
+    })
     .toMatchObject({
       state: "completed",
       resumeId: expect.any(String)
     })
-  await expect(
-    reopened.window.getByRole("button", { name: "Use remote" })
-  ).toBeVisible()
-  await reopened.window.getByRole("button", { name: "Use remote" }).click()
-  await expect(reopened.window.getByText("All criteria verified")).toBeVisible({
+  await expect(reopened.window.getByRole("button", { name: "Plan completed" })).toBeVisible({
     timeout: 30_000
   })
 })

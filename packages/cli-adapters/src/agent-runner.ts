@@ -11,6 +11,7 @@ import type {
   Plan,
   PlanApprovalResult,
   PlanComment,
+  PlanParticipant,
   PlanPrdStage,
   QuestionAnswer,
   QuestionRequest,
@@ -32,7 +33,9 @@ import {
   ORCHESTRATOR_ENABLED_DEFAULT,
   parsePlanHtml,
   planDocumentToPlan,
+  orchestratorParticipantRoutingId,
   PLAN_AUTO_RUN_DEFAULT,
+  subagentParticipantRoutingId,
   resumePlanPrompt,
   setQuestionAnswers,
   settleStreaming,
@@ -72,6 +75,7 @@ import type {
   PermissionRequest,
   RemoteMcpServer,
   SessionSpec,
+  PlanParticipantSteerResult,
   SteerTurn,
   StopBackgroundTask
 } from "./adapter.js"
@@ -91,6 +95,13 @@ import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore } from "./plan-store.js"
 import { resolvePlanAnnotations } from "./plan-html.js"
+import {
+  appendSteeredReply,
+  collectSteeredReply,
+  invokeSteer,
+  makeSteeredReplyWaiter,
+  type SteeredReplyWaiter
+} from "./steered-reply.js"
 import type { RunHolder } from "./run-coordinator.js"
 import {
   anySessionRunActive,
@@ -240,12 +251,23 @@ interface ActiveRun {
   readonly markPlanExecution: (planId: string) => Effect.Effect<void>
   readonly steer: (
     text: string,
-    images: ReadonlyArray<Attachment>
+    images: ReadonlyArray<Attachment>,
+    captureReply?: boolean
   ) => Effect.Effect<
-    | { readonly status: "accepted"; readonly user: Message; readonly assistant: Message }
+    | {
+        readonly status: "accepted"
+        readonly user: Message
+        readonly assistant: Message
+        readonly replyWaiter: RunReplyWaiter | null
+      }
     | { readonly status: "deferred" | "unsupported" }
   >
+  readonly subagents: () => Effect.Effect<ReadonlyArray<PlanParticipant>>
+  readonly clearReplyWaiter: (waiter: RunReplyWaiter) => Effect.Effect<void>
+  readonly replyGate: Effect.Semaphore
 }
+
+type RunReplyWaiter = SteeredReplyWaiter
 
 /** Windows separators → POSIX, so path comparison has one shape to reason about. */
 const normalizePath = (p: string): string => p.replace(/\\/g, "/")
@@ -489,6 +511,120 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         return document?.id === planId
           ? { document, worktreePath: session.worktreePath }
           : null
+      })
+
+    /**
+     * Locate the live main-agent run that owns this plan. Pending plans use the
+     * approval registry; executing plans fall back to the canonical producing
+     * chat so orchestrator amendments remain addressable.
+     */
+    const addressablePlanRun = (sessionId: string, planId: string) =>
+      Effect.gen(function* () {
+        const pending = yield* pendingPlanRun(sessionId, planId)
+        if (pending.run !== undefined) {
+          return {
+            chatId: pending.pending!.chatId,
+            run: pending.run,
+            lifecycle: "parked"
+          } as const
+        }
+        const canonical = yield* canonicalPlan(sessionId, planId)
+        if (canonical === null) return null
+        const run = (yield* Ref.get(active)).get(
+          canonical.document.producingChatId
+        )
+        return run === undefined
+          ? null
+          : {
+              chatId: canonical.document.producingChatId,
+              run,
+              lifecycle: "running"
+            } as const
+      })
+
+    const planParticipants = (
+      sessionId: string,
+      planId: string
+    ) =>
+      Effect.gen(function* () {
+        const addressable = yield* addressablePlanRun(sessionId, planId)
+        if (addressable === null) return []
+        const orchestrator = {
+          routingId: orchestratorParticipantRoutingId(addressable.chatId),
+          displayName: "Orchestrator",
+          role: "orchestrator",
+          lifecycle: addressable.lifecycle,
+          ownerRoutingId: null
+        } satisfies PlanParticipant
+        return [
+          orchestrator,
+          ...(yield* addressable.run.subagents())
+        ]
+      })
+
+    const steerPlanParticipant = (request: {
+      readonly sessionId: string
+      readonly planId: string
+      readonly routingId: string
+      readonly text: string
+    }) =>
+      Effect.gen(function* () {
+        const addressable = yield* addressablePlanRun(
+          request.sessionId,
+          request.planId
+        )
+        if (addressable === null) {
+          return {
+            status: "unavailable",
+            detail:
+              `Participant "${request.routingId}" is no longer active. ` +
+              "Refresh the participant list before retrying or rerouting."
+          } satisfies PlanParticipantSteerResult
+        }
+        const orchestratorId = orchestratorParticipantRoutingId(
+          addressable.chatId
+        )
+        const currentSubagents = yield* addressable.run.subagents()
+        if (
+          request.routingId !== orchestratorId &&
+          !currentSubagents.some(
+            (participant) => participant.routingId === request.routingId
+          )
+        ) {
+          return {
+            status: "unavailable",
+            detail:
+              `Participant "${request.routingId}" is no longer active. ` +
+              "Refresh the participant list before retrying or rerouting."
+          } satisfies PlanParticipantSteerResult
+        }
+        return yield* addressable.run.replyGate.withPermits(1)(
+          Effect.gen(function* () {
+            const steered = yield* addressable.run.steer(request.text, [], true)
+            if (steered.status !== "accepted") {
+              return {
+                status: "failed",
+                detail:
+                  `Participant "${request.routingId}" could not receive the message ` +
+                  `(${steered.status}). Retry this message.`
+              } satisfies PlanParticipantSteerResult
+            }
+            const waiter = steered.replyWaiter
+            if (waiter === null) {
+              return {
+                status: "delivered",
+                reply: null
+              } satisfies PlanParticipantSteerResult
+            }
+            return yield* collectSteeredReply(waiter).pipe(
+              Effect.map((reply) => ({
+                status: "delivered" as const,
+                reply
+              })),
+              Effect.ensuring(addressable.run.clearReplyWaiter(waiter))
+            )
+          })
+        )
       })
 
     /** Thread a comment onto a plan step (persisted + streamed); doesn't resume the agent. */
@@ -1326,6 +1462,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const acc = yield* Ref.make(assistantMessage(`a_${chatId}_${an}`, now))
           yield* TranscriptStore.append(chatId, yield* Ref.get(acc))
           const turnSteer = yield* Ref.make<SteerTurn | null>(null)
+          const steeredReply = yield* Ref.make<RunReplyWaiter | null>(null)
+          const replyGate = yield* Effect.makeSemaphore(1)
+          const activeSubagents = yield* Ref.make(
+            new Map<string, PlanParticipant>()
+          )
           const turnMutation = yield* Effect.makeSemaphore(1)
           const executingPlanId = yield* Ref.make<string | null>(planExecutionId ?? null)
 
@@ -1602,6 +1743,39 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // vanished is a different failure from one that emitted nothing.
               yield* Ref.update(eventCount, (n) => n + 1)
               yield* Ref.set(lastEvent, event._tag)
+              if (event._tag === "SubagentStarted") {
+                const ownerRoutingId = orchestratorParticipantRoutingId(chatId)
+                const routingId = subagentParticipantRoutingId(
+                  ownerRoutingId,
+                  event.id
+                )
+                yield* Ref.update(activeSubagents, (subagents) =>
+                  new Map(subagents).set(routingId, {
+                    routingId,
+                    displayName: event.name,
+                    role: "subagent",
+                    lifecycle: "running",
+                    ownerRoutingId
+                  })
+                )
+              }
+              if (event._tag === "SubagentEnded") {
+                const routingId = subagentParticipantRoutingId(
+                  orchestratorParticipantRoutingId(chatId),
+                  event.id
+                )
+                yield* Ref.update(activeSubagents, (subagents) => {
+                  const next = new Map(subagents)
+                  next.delete(routingId)
+                  return next
+                })
+              }
+              if (event._tag === "Assistant") {
+                const waiter = yield* Ref.get(steeredReply)
+                if (waiter !== null) {
+                  yield* appendSteeredReply(waiter, event.text)
+                }
+              }
               // Where this event belongs, and why, lives in `turn-events.ts`.
               const route = routeOf(event)
               if (route === "background-task") {
@@ -1894,9 +2068,15 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // torn down when the run ends so out-of-band calls become no-ops.
           const steer = (
             text: string,
-            images: ReadonlyArray<Attachment>
+            images: ReadonlyArray<Attachment>,
+            captureReply = false
           ): Effect.Effect<
-            | { readonly status: "accepted"; readonly user: Message; readonly assistant: Message }
+            | {
+                readonly status: "accepted"
+                readonly user: Message
+                readonly assistant: Message
+                readonly replyWaiter: RunReplyWaiter | null
+              }
             | { readonly status: "deferred" | "unsupported" }
           > =>
             turnMutation.withPermits(1)(Effect.gen(function* () {
@@ -1916,10 +2096,18 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 // unaffected — it marks its steers `auto`, which forbids the stop.
                 return { status: cli === "codex" ? "deferred" : "unsupported" } as const
               }
-              const outcome = yield* Effect.tryPromise(() => handler(text, images)).pipe(
-                Effect.orElseSucceed(() => "deferred" as const)
-              )
-              if (outcome !== "accepted") return { status: outcome } as const
+              const replyWaiter: RunReplyWaiter | null = captureReply
+                ? yield* makeSteeredReplyWaiter
+                : null
+              if (replyWaiter !== null) {
+                yield* Ref.set(steeredReply, replyWaiter)
+              }
+              const steered = yield* invokeSteer(handler, text, images)
+              const outcome = steered === "accepted" ? "accepted" : "deferred"
+              if (outcome !== "accepted") {
+                if (replyWaiter !== null) yield* Ref.set(steeredReply, null)
+                return { status: outcome } as const
+              }
 
               const at = yield* Effect.sync(() => new Date().toISOString())
               const settled = settleStreaming(yield* Ref.get(acc))
@@ -1929,7 +2117,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               yield* TranscriptStore.patchLast(chatId, () => settled).pipe(Effect.ignore)
               yield* TranscriptStore.append(chatId, user)
               yield* TranscriptStore.append(chatId, assistant)
-              return { status: "accepted", user, assistant } as const
+              return {
+                status: "accepted",
+                user,
+                assistant,
+                replyWaiter
+              } as const
             })).pipe(Effect.provide(env))
 
           yield* Ref.update(active, (m) =>
@@ -1937,7 +2130,16 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               readPlan,
               applyPlan,
               markPlanExecution: (planId) => Ref.set(executingPlanId, planId),
-              steer
+              steer,
+              subagents: () =>
+                Ref.get(activeSubagents).pipe(
+                  Effect.map((subagents) => [...subagents.values()])
+                ),
+              clearReplyWaiter: (waiter) =>
+                Ref.update(steeredReply, (current) =>
+                  current === waiter ? null : current
+                ),
+              replyGate
             })
           )
 
@@ -2313,7 +2515,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         if (!session?.chats.some((chat) => chat.id === chatId)) {
           return { status: "unsupported" } as const
         }
-        return yield* run.steer(text, images)
+        const result = yield* run.steer(text, images)
+        return result.status === "accepted"
+          ? {
+              status: result.status,
+              user: result.user,
+              assistant: result.assistant
+            } as const
+          : result
       })
 
     /**
@@ -2352,6 +2561,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       answerQuestion,
       setMode,
       steer,
+      planParticipants,
+      steerPlanParticipant,
       stop,
       commentPlanStep,
       revisePlan,

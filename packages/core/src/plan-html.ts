@@ -4,6 +4,9 @@ import type {
   PlanAcceptance,
   PlanAcceptanceStatus,
   PlanAnnotation,
+  PlanCommentMessage,
+  PlanCommentMessageDeliveryState,
+  PlanCommentMentionDelivery,
   PlanPrd,
   PlanPrdSection,
   PlanPrdStage,
@@ -38,7 +41,12 @@ import {
  *          data-model="gpt-5" data-reason="..." data-status="queued"></div>
  *     <div data-acceptance="01.1" data-status="pending" data-evidence="...">...</div>
  *     <aside data-annotation="a1" data-stage="01" data-author="user"
- *            data-status="open" data-quote="..." data-prefix="..." data-suffix="...">...</aside>
+ *            data-status="open" data-quote="..." data-prefix="..." data-suffix="...">
+ *       <div data-comment-message="m1" data-author-kind="user"
+ *            data-author-id="operator" data-created-at="..."
+ *            data-mentioned-participant-ids='["worker-a"]'
+ *            data-delivery-state="pending">...</div>
+ *     </aside>
  *
  * ## Safety
  *
@@ -60,6 +68,7 @@ export interface PlanHtmlDiagnostic {
     | "invalid-complexity"
     | "invalid-assignment"
     | "invalid-execution-status"
+    | "invalid-comment-message"
     | "running-stage-removed"
     | PlanExecutionDiagnosticCode
   readonly message: string
@@ -96,6 +105,8 @@ const DROP_SUBTREE = new Set([
 const ALLOWED_ATTRS = new Set([
   "data-stage", "data-title", "data-acceptance", "data-status", "data-evidence",
   "data-annotation", "data-author", "data-created-at",
+  "data-comment-message", "data-author-kind", "data-author-id",
+  "data-mentioned-participant-ids", "data-delivery-state", "data-mention-deliveries",
   "data-quote", "data-prefix", "data-suffix", "data-diagram",
   "data-depends-on", "data-complexity", "data-assignment", "data-agent-id",
   "data-cli", "data-model", "data-reason", "data-execution-status",
@@ -144,6 +155,69 @@ export const sanitizePlanHtml = (html: string): string => {
 }
 
 const STATUSES: ReadonlyArray<PlanAcceptanceStatus> = ["pending", "passed", "failed", "waived"]
+const MESSAGE_DELIVERY_STATES: ReadonlyArray<PlanCommentMessageDeliveryState> = [
+  "pending",
+  "sent",
+  "failed"
+]
+
+const MENTION_DELIVERY_STATUSES = [
+  "pending",
+  "dispatching",
+  "delivered",
+  "unavailable",
+  "failed"
+] as const
+
+const mentionDeliveryStatusFrom = (
+  value: unknown
+): PlanCommentMentionDelivery["status"] | undefined =>
+  MENTION_DELIVERY_STATUSES.find((status) => status === value)
+
+const mentionDeliveriesFrom = (
+  el: HTMLElement,
+  diagnostics: Array<PlanHtmlDiagnostic>,
+  messageId: string
+): ReadonlyArray<PlanCommentMentionDelivery> | undefined => {
+  const raw = el.getAttribute("data-mention-deliveries")
+  if (raw === undefined || raw.length === 0) return undefined
+  try {
+    const parsed: unknown = JSON.parse(raw.startsWith("[") ? raw : decodeURIComponent(raw))
+    if (!Array.isArray(parsed)) throw new Error("deliveries must be an array")
+    const deliveries = parsed.map((value) => {
+      if (typeof value !== "object" || value === null) throw new Error("invalid delivery")
+      if (!("participantId" in value) || !("dispatchId" in value) || !("status" in value)) {
+        throw new Error("invalid delivery")
+      }
+      const status = mentionDeliveryStatusFrom(value.status)
+      if (
+        typeof value.participantId !== "string" ||
+        typeof value.dispatchId !== "string" ||
+        status === undefined ||
+        !("detail" in value) ||
+        (value.detail !== null && typeof value.detail !== "string") ||
+        !("retryable" in value) ||
+        typeof value.retryable !== "boolean"
+      ) {
+        throw new Error("invalid delivery")
+      }
+      return {
+        participantId: value.participantId,
+        status,
+        dispatchId: value.dispatchId,
+        detail: value.detail,
+        retryable: value.retryable
+      } satisfies PlanCommentMentionDelivery
+    })
+    return deliveries
+  } catch {
+    diagnostics.push({
+      code: "invalid-comment-message",
+      message: `Comment message "${messageId}" has invalid mention deliveries.`
+    })
+    return undefined
+  }
+}
 const COMPLEXITIES: ReadonlyArray<PlanStageComplexity> = ["low", "medium", "high"]
 const EXECUTION_STATUSES: ReadonlyArray<PlanStageExecutionStatus> = [
   "queued",
@@ -174,15 +248,124 @@ const acceptanceFrom = (el: HTMLElement): PlanAcceptance | { readonly invalid: t
   }
 }
 
-const annotationFrom = (el: HTMLElement): PlanAnnotation => {
+export const planLegacyCommentMessageId = (annotationId: string): string =>
+  `${annotationId}:message:1`
+
+const mentionedParticipantIdsFrom = (
+  el: HTMLElement,
+  diagnostics: Array<PlanHtmlDiagnostic>,
+  messageId: string
+): ReadonlyArray<string> => {
+  const raw = el.getAttribute("data-mentioned-participant-ids")
+  if (raw === undefined || raw.length === 0) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (
+      !Array.isArray(parsed) ||
+      parsed.some((participantId) => typeof participantId !== "string")
+    ) {
+      throw new Error("mentions must be a string array")
+    }
+    return [...new Set(parsed)]
+  } catch {
+    diagnostics.push({
+      code: "invalid-comment-message",
+      message: `Comment message "${messageId}" has invalid mentioned participant ids.`
+    })
+    return []
+  }
+}
+
+const messageFrom = (
+  el: HTMLElement,
+  diagnostics: Array<PlanHtmlDiagnostic>,
+  fallback: {
+    readonly id: string
+    readonly authorKind: "user" | "agent"
+    readonly createdAt: string
+    readonly deliveryState: PlanCommentMessageDeliveryState
+    readonly pendingWhenMentioned: boolean
+  }
+): PlanCommentMessage => {
+  const id = el.getAttribute("data-comment-message") ?? fallback.id
+  const rawAuthorKind =
+    el.getAttribute("data-author-kind") ?? el.getAttribute("data-author")
+  const authorKind =
+    rawAuthorKind === "agent"
+      ? "agent"
+      : rawAuthorKind === "user"
+        ? "user"
+        : fallback.authorKind
+  const mentionedParticipantIds = mentionedParticipantIdsFrom(el, diagnostics, id)
+  const rawDeliveryState =
+    el.getAttribute("data-delivery-state") ??
+    (fallback.pendingWhenMentioned && mentionedParticipantIds.length > 0
+      ? "pending"
+      : fallback.deliveryState)
+  const deliveryState = MESSAGE_DELIVERY_STATES.find(
+    (candidate) => candidate === rawDeliveryState
+  )
+  if (id.length === 0 || deliveryState === undefined) {
+    diagnostics.push({
+      code: "invalid-comment-message",
+      message:
+        id.length === 0
+          ? "Every comment message needs a stable data-comment-message id."
+          : `Comment message "${id}" has invalid delivery state "${rawDeliveryState}".`
+    })
+  }
+  const mentionDeliveries = mentionDeliveriesFrom(el, diagnostics, id)
+  return {
+    id,
+    body: el.text.trim(),
+    authorKind,
+    authorId: el.getAttribute("data-author-id") ?? authorKind,
+    createdAt: el.getAttribute("data-created-at") ?? fallback.createdAt,
+    mentionedParticipantIds,
+    deliveryState: deliveryState ?? fallback.deliveryState,
+    ...(mentionDeliveries === undefined ? {} : { mentionDeliveries })
+  }
+}
+
+const annotationFrom = (
+  el: HTMLElement,
+  diagnostics: Array<PlanHtmlDiagnostic> = []
+): PlanAnnotation => {
+  const id = el.getAttribute("data-annotation") ?? ""
+  const author = el.getAttribute("data-author") === "agent" ? "agent" : "user"
+  const status = el.getAttribute("data-status") === "resolved" ? "resolved" : "open"
+  const createdAt = el.getAttribute("data-created-at") ?? new Date(0).toISOString()
+  const messageElements = el.querySelectorAll("[data-comment-message]")
+  const messages =
+    messageElements.length > 0
+      ? messageElements.map((message) =>
+          messageFrom(message, diagnostics, {
+            id: "",
+            authorKind: author,
+            createdAt,
+            deliveryState: "sent",
+            pendingWhenMentioned: author === "user" && status === "open"
+          })
+        )
+      : [
+          messageFrom(el, diagnostics, {
+            id: planLegacyCommentMessageId(id),
+            authorKind: author,
+            createdAt,
+            deliveryState: "sent",
+            pendingWhenMentioned: author === "user" && status === "open"
+          })
+        ]
+  const firstMessage = messages[0]!
   const quote = el.getAttribute("data-quote")
   return {
-    id: el.getAttribute("data-annotation") ?? "",
+    id,
     stageId: el.getAttribute("data-stage") || null,
-    body: el.text.trim(),
-    author: el.getAttribute("data-author") === "agent" ? "agent" : "user",
-    status: el.getAttribute("data-status") === "resolved" ? "resolved" : "open",
-    createdAt: el.getAttribute("data-created-at") ?? new Date(0).toISOString(),
+    body: firstMessage.body,
+    author: firstMessage.authorKind,
+    createdAt: firstMessage.createdAt,
+    messages,
+    status,
     ...(quote
       ? {
           anchor: {
@@ -229,7 +412,9 @@ export const parsePlanHtml = (
   const annotations: Array<PlanAnnotation> = []
   for (const el of root.querySelectorAll("[data-annotation]")) {
     claim(el.getAttribute("data-annotation") ?? "")
-    annotations.push(annotationFrom(el))
+    const annotation = annotationFrom(el, diagnostics)
+    for (const message of annotation.messages) claim(message.id)
+    annotations.push(annotation)
   }
 
   const stages: Array<PlanPrdStage> = []
@@ -389,6 +574,29 @@ const escapeAttr = (value: string): string =>
 const escapeText = (value: string): string =>
   value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
 
+const commentMessageHtml = (message: PlanCommentMessage): string => {
+  const deliveryAttr =
+    message.mentionDeliveries === undefined
+      ? ""
+      : ` data-mention-deliveries="${encodeURIComponent(JSON.stringify(message.mentionDeliveries))}"`
+  return `<div data-comment-message="${escapeAttr(message.id)}" data-author-kind="${message.authorKind}" data-author-id="${escapeAttr(message.authorId)}" data-created-at="${escapeAttr(message.createdAt)}" data-mentioned-participant-ids="${escapeAttr(JSON.stringify(message.mentionedParticipantIds))}" data-delivery-state="${message.deliveryState}"${deliveryAttr}>${escapeText(message.body)}</div>`
+}
+
+const annotationElement = (root: HTMLElement, annotationId: string): HTMLElement | null =>
+  root
+    .querySelectorAll("aside[data-annotation]")
+    .find((candidate) => candidate.getAttribute("data-annotation") === annotationId) ?? null
+
+/** Materialize a legacy body-only annotation as canonical nested message markup. */
+const materializeCommentMessages = (annotation: HTMLElement): ReadonlyArray<HTMLElement> => {
+  const existing = annotation.querySelectorAll("[data-comment-message]")
+  if (existing.length > 0) return existing
+  const legacy = annotationFrom(annotation).messages[0]
+  if (legacy === undefined) return []
+  annotation.set_content(commentMessageHtml(legacy))
+  return annotation.querySelectorAll("[data-comment-message]")
+}
+
 /**
  * Set an acceptance criterion's status/evidence in place. Used server-side to
  * mark a criterion passed from execution evidence, without a full editor.
@@ -440,6 +648,7 @@ export const upsertPlanWorkerAnnotationHtml = (
     readonly body: string
     readonly status: "open" | "resolved"
     readonly createdAt: string
+    readonly authorId?: string
   }
 ): string | null => {
   const root = parse(html)
@@ -447,10 +656,40 @@ export const upsertPlanWorkerAnnotationHtml = (
     `section[data-stage="${annotation.stageId}"]`
   )
   if (stage === null) return null
-  root.querySelector(`[data-annotation="${annotation.id}"]`)?.remove()
+  const existing = annotationElement(root, annotation.id)
+  const message: PlanCommentMessage = {
+    id: planLegacyCommentMessageId(annotation.id),
+    body: annotation.body,
+    authorKind: "agent",
+    authorId: annotation.authorId ?? "agent",
+    createdAt: annotation.createdAt,
+    mentionedParticipantIds: [],
+    deliveryState: "sent"
+  }
+  if (existing !== null) {
+    const messages = materializeCommentMessages(existing)
+    const workerMessage = messages.find(
+      (candidate) =>
+        candidate.getAttribute("data-comment-message") === message.id
+    )
+    if (workerMessage === undefined) {
+      existing.insertAdjacentHTML("afterbegin", commentMessageHtml(message))
+    } else {
+      workerMessage.set_content(escapeText(annotation.body))
+      workerMessage.setAttribute("data-author-kind", "agent")
+      workerMessage.setAttribute("data-author-id", message.authorId)
+      workerMessage.setAttribute("data-mentioned-participant-ids", "[]")
+      workerMessage.setAttribute("data-delivery-state", "sent")
+    }
+    existing.setAttribute("data-stage", annotation.stageId)
+    existing.setAttribute("data-author", "agent")
+    existing.setAttribute("data-author-id", message.authorId)
+    existing.setAttribute("data-status", annotation.status)
+    return root.toString()
+  }
   stage.insertAdjacentHTML(
     "beforeend",
-    `<aside data-annotation="${escapeAttr(annotation.id)}" data-stage="${escapeAttr(annotation.stageId)}" data-author="agent" data-status="${annotation.status}" data-created-at="${escapeAttr(annotation.createdAt)}">${escapeText(annotation.body)}</aside>`
+    `<aside data-annotation="${escapeAttr(annotation.id)}" data-stage="${escapeAttr(annotation.stageId)}" data-author="agent" data-author-id="${escapeAttr(message.authorId)}" data-status="${annotation.status}" data-created-at="${escapeAttr(annotation.createdAt)}">${commentMessageHtml(message)}</aside>`
   )
   return root.toString()
 }
@@ -475,7 +714,11 @@ export const appendPlanAnnotationHtml = (
     readonly stageId: string | null
     readonly body: string
     readonly author: "user" | "agent"
+    readonly authorId?: string
     readonly createdAt: string
+    readonly messageId?: string
+    readonly mentionedParticipantIds?: ReadonlyArray<string>
+    readonly deliveryState?: PlanCommentMessageDeliveryState
     readonly anchor?: { readonly quote: string; readonly prefix: string; readonly suffix: string }
   }
 ): string => {
@@ -485,7 +728,18 @@ export const appendPlanAnnotationHtml = (
       : ` data-quote="${escapeAttr(annotation.anchor.quote)}" data-prefix="${escapeAttr(annotation.anchor.prefix)}" data-suffix="${escapeAttr(annotation.anchor.suffix)}"`
   const stageAttr =
     annotation.stageId === null ? "" : ` data-stage="${escapeAttr(annotation.stageId)}"`
-  const aside = `<aside data-annotation="${escapeAttr(annotation.id)}"${stageAttr} data-author="${annotation.author}" data-status="open" data-created-at="${escapeAttr(annotation.createdAt)}"${anchorAttrs}>${escapeText(annotation.body)}</aside>`
+  const message: PlanCommentMessage = {
+    id: annotation.messageId ?? planLegacyCommentMessageId(annotation.id),
+    body: annotation.body,
+    authorKind: annotation.author,
+    authorId: annotation.authorId ?? annotation.author,
+    createdAt: annotation.createdAt,
+    mentionedParticipantIds: [...(annotation.mentionedParticipantIds ?? [])],
+    deliveryState:
+      annotation.deliveryState ??
+      (annotation.mentionedParticipantIds?.length ? "pending" : "sent")
+  }
+  const aside = `<aside data-annotation="${escapeAttr(annotation.id)}"${stageAttr} data-author="${annotation.author}" data-author-id="${escapeAttr(message.authorId)}" data-status="open" data-created-at="${escapeAttr(annotation.createdAt)}"${anchorAttrs}>${commentMessageHtml(message)}</aside>`
   const root = parse(html)
   const stage =
     annotation.stageId === null
@@ -496,6 +750,106 @@ export const appendPlanAnnotationHtml = (
     return root.toString()
   }
   root.insertAdjacentHTML("beforeend", aside)
+  return root.toString()
+}
+
+/** Append one ordered message to an existing annotation thread. */
+export const appendPlanCommentMessageHtml = (
+  html: string,
+  annotationId: string,
+  message: PlanCommentMessage
+): string | null => {
+  const root = parse(html)
+  const annotation = annotationElement(root, annotationId)
+  if (annotation === null) return null
+  materializeCommentMessages(annotation)
+  if (
+    root
+      .querySelectorAll("[data-comment-message]")
+      .some((candidate) => candidate.getAttribute("data-comment-message") === message.id)
+  ) {
+    return null
+  }
+  annotation.insertAdjacentHTML("beforeend", commentMessageHtml(message))
+  return root.toString()
+}
+
+/** Update one message's delivery state, materializing legacy markup if needed. */
+export const updatePlanCommentMessageDeliveryHtml = (
+  html: string,
+  annotationId: string,
+  messageId: string,
+  deliveryState: PlanCommentMessageDeliveryState
+): string | null => {
+  const root = parse(html)
+  const annotation = annotationElement(root, annotationId)
+  if (annotation === null) return null
+  const messages = materializeCommentMessages(annotation)
+  const message = messages.find(
+    (candidate) => candidate.getAttribute("data-comment-message") === messageId
+  )
+  if (message === undefined) return null
+  message.setAttribute("data-delivery-state", deliveryState)
+  return root.toString()
+}
+
+/** Replace the durable per-recipient outbox state for one comment message. */
+export const updatePlanCommentMentionDeliveriesHtml = (
+  html: string,
+  annotationId: string,
+  messageId: string,
+  deliveries: ReadonlyArray<PlanCommentMentionDelivery>,
+  deliveryState: PlanCommentMessageDeliveryState
+): string | null => {
+  const root = parse(html)
+  const annotation = annotationElement(root, annotationId)
+  if (annotation === null) return null
+  const message = materializeCommentMessages(annotation).find(
+    (candidate) => candidate.getAttribute("data-comment-message") === messageId
+  )
+  if (message === undefined) return null
+  message.setAttribute(
+    "data-mention-deliveries",
+    encodeURIComponent(JSON.stringify(deliveries))
+  )
+  message.setAttribute("data-delivery-state", deliveryState)
+  return root.toString()
+}
+
+/** Resolve or reopen a durable annotation thread without touching its messages. */
+export const updatePlanAnnotationStatusHtml = (
+  html: string,
+  annotationId: string,
+  status: "open" | "resolved"
+): string | null => {
+  const root = parse(html)
+  const annotation = annotationElement(root, annotationId)
+  if (annotation === null) return null
+  materializeCommentMessages(annotation)
+  annotation.setAttribute("data-status", status)
+  return root.toString()
+}
+
+/**
+ * Route a thread to the agent: resolve it and mark only pending user messages
+ * sent. Legacy body-only annotations keep their original markup.
+ */
+export const routePlanAnnotationHtml = (
+  html: string,
+  annotationId: string
+): string | null => {
+  const root = parse(html)
+  const annotation = annotationElement(root, annotationId)
+  if (annotation === null) return null
+  annotation.setAttribute("data-status", "resolved")
+  for (const message of annotation.querySelectorAll("[data-comment-message]")) {
+    if (
+      message.getAttribute("data-author-kind") === "user" &&
+      message.getAttribute("data-delivery-state") === "pending"
+    ) {
+      message.setAttribute("data-delivery-state", "sent")
+    }
+  }
   return root.toString()
 }
 

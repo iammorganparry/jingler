@@ -186,6 +186,56 @@ ${assignment("worker-a", "queued")}
       ])
     )
   })
+
+  it("merges new agent replies into prior threads without overwriting operator edits", () => {
+    const previous = documentFrom(`<h1>PRD: Preserve threaded notes</h1>
+<section data-stage="01" data-title="Worker stage" data-complexity="medium">
+${assignment("worker-a", "completed")}
+<div data-acceptance="01.1" data-status="passed" data-evidence="worker proof">The work completes.</div>
+<aside data-annotation="thread-1" data-stage="01" data-author="user" data-author-id="operator" data-status="open" data-created-at="2026-07-31T08:00:00.000Z">
+<div data-comment-message="message-user" data-author-kind="user" data-author-id="operator" data-created-at="2026-07-31T08:00:00.000Z" data-mentioned-participant-ids="[&quot;worker-a&quot;]" data-delivery-state="sent">Keep the operator's edited requirement.</div>
+</aside>
+</section>`)
+    const replacement = `<h1>PRD: Preserve threaded notes</h1>
+<section data-stage="01" data-title="Worker stage" data-complexity="medium">
+${assignment("replacement-worker", "queued")}
+<div data-acceptance="01.1" data-status="pending">The work completes.</div>
+<aside data-annotation="thread-1" data-stage="01" data-author="user" data-status="resolved">
+<div data-comment-message="message-user" data-author-kind="user" data-author-id="operator" data-created-at="2026-07-31T08:00:00.000Z" data-mentioned-participant-ids="[]" data-delivery-state="sent">Agent's stale copy of the user message.</div>
+<div data-comment-message="message-agent" data-author-kind="agent" data-author-id="worker-a" data-created-at="2026-07-31T08:01:00.000Z" data-mentioned-participant-ids="[&quot;operator&quot;]" data-delivery-state="sent">I retained it.</div>
+</aside>
+</section>`
+
+    const result = reconcilePlanAmendment(previous, replacement)
+
+    expect(result.valid).toBe(true)
+    if (!result.valid) return
+    expect(result.projection.stages[0]).toMatchObject({
+      assignment: { agentId: "worker-a" },
+      executionStatus: "completed",
+      acceptance: [
+        { id: "01.1", status: "passed", evidence: "worker proof" }
+      ]
+    })
+    expect(result.projection.annotations[0]).toMatchObject({
+      id: "thread-1",
+      status: "open",
+      messages: [
+        {
+          id: "message-user",
+          body: "Keep the operator's edited requirement.",
+          mentionedParticipantIds: ["worker-a"]
+        },
+        {
+          id: "message-agent",
+          body: "I retained it.",
+          authorKind: "agent",
+          authorId: "worker-a",
+          mentionedParticipantIds: ["operator"]
+        }
+      ]
+    })
+  })
 })
 
 describe("planStageSemanticFingerprint", () => {

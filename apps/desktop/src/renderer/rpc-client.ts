@@ -49,7 +49,10 @@ import type {
   ProviderModels,
   PermissionMode,
   PlanApprovalResult,
+  PlanCommentMessageDeliveryState,
   PlanDocument,
+  PlanMentionDelivery,
+  PlanParticipant,
   PlanTemplateConfig,
   PrFileChange,
   PrMergeMethod,
@@ -760,6 +763,53 @@ export const rpc = {
     source: string
     author: "user" | "agent"
   }): Promise<PlanDocument> => run((c) => c.Plan.updateDocument(input)),
+  planParticipants: (
+    sessionId: string,
+    planId: string
+  ): Promise<ReadonlyArray<PlanParticipant>> =>
+    run((c) => c.Plan.participants({ sessionId, planId })),
+  planDispatchMessage: (input: {
+    sessionId: string
+    planId: string
+    baseRevision: number
+    annotationId: string
+    body: string
+    authorId: string
+    mentionedParticipantIds: ReadonlyArray<string>
+  }): Promise<{
+    readonly document: PlanDocument
+    readonly messageId: string
+    readonly deliveries: ReadonlyArray<PlanMentionDelivery>
+  }> => run((c) => c.Plan.dispatchMessage(input)),
+  planDispatchExistingMessage: (input: {
+    sessionId: string
+    planId: string
+    baseRevision: number
+    annotationId: string
+    messageId: string
+  }): Promise<{
+    readonly document: PlanDocument
+    readonly messageId: string
+    readonly deliveries: ReadonlyArray<PlanMentionDelivery>
+  }> => run((c) => c.Plan.dispatchExistingMessage(input)),
+  planUpdateMessageDelivery: (input: {
+    sessionId: string
+    planId: string
+    baseRevision: number
+    annotationId: string
+    messageId: string
+    deliveryState: PlanCommentMessageDeliveryState
+    author: "user" | "agent"
+  }): Promise<PlanDocument> =>
+    run((c) => c.Plan.updateMessageDelivery(input)),
+  planSetThreadResolved: (input: {
+    sessionId: string
+    planId: string
+    baseRevision: number
+    annotationId: string
+    resolved: boolean
+    author: "user" | "agent"
+  }): Promise<PlanDocument> => run((c) => c.Plan.setThreadResolved(input)),
   planWatch: (
     sessionId: string,
     onDocument: (document: PlanDocument) => void

@@ -599,6 +599,17 @@ export type BackgroundTask = Schema.Schema.Type<typeof BackgroundTask>
  */
 const AgentId = Schema.optional(Schema.String)
 
+/** A volatile, sanitized plan document that exists only while an agent drafts. */
+export const PlanDraft = Schema.Struct({
+  /** Stable for one proposal attempt; canonical promotion may retain or replace it. */
+  id: Schema.String,
+  /** Cumulative sanitized HTML. Never a canonical revision and never persisted. */
+  source: Schema.String,
+  /** `complete` means the transport fence closed, not that the plan was validated. */
+  phase: Schema.Literal("composing", "complete", "cleared")
+})
+export type PlanDraft = Schema.Schema.Type<typeof PlanDraft>
+
 export const StreamEvent = Schema.Union(
   Schema.TaggedStruct("Started", {
     sessionId: Schema.String,
@@ -646,6 +657,11 @@ export const StreamEvent = Schema.Union(
   }),
   Schema.TaggedStruct("GateRequested", { gate: ApprovalGate }),
   Schema.TaggedStruct("QuestionRequested", { request: QuestionRequest }),
+  /**
+   * Live-only plan composition. The runner routes this straight to subscribers:
+   * `PlanProposed` remains the only event that may create a canonical revision.
+   */
+  Schema.TaggedStruct("PlanDraft", { draft: PlanDraft }),
   /** The agent proposed a plan (ExitPlanMode) — appends a new interactive Plan part. */
   Schema.TaggedStruct("PlanProposed", { plan: Plan }),
   /** A runner-authoritative update to an existing plan (comment/routed/status sync). */
@@ -982,6 +998,10 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
       }
       return { ...msg, parts: [...parts, part] }
     }),
+
+    // Volatile plan drafts are conversation-level renderer state. They are
+    // intentionally absent from the persisted assistant message.
+    Match.tag("PlanDraft", () => msg),
 
     Match.tag("PlanProposed", (e) => {
       // If this turn already holds a plan, the new one is a REVISION — mark which

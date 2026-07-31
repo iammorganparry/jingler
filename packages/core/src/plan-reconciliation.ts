@@ -11,7 +11,8 @@ import {
   type PlanHtmlDiagnostic,
   type PlanHtmlResult,
   parsePlanHtml,
-  sanitizePlanHtml
+  sanitizePlanHtml,
+  updatePlanAnnotationStatusHtml
 } from "./plan-html.js"
 
 export type PlanAmendmentReconciliation =
@@ -196,6 +197,15 @@ const reconcileAnnotations = (
   replacementRoot: HTMLElement,
   replacementStageElements: ReadonlyMap<string, HTMLElement>
 ): void => {
+  const canonicalAnnotation = (annotation: HTMLElement): HTMLElement | null => {
+    const id = annotation.getAttribute("data-annotation") ?? ""
+    const status =
+      annotation.getAttribute("data-status") === "resolved" ? "resolved" : "open"
+    const canonical =
+      updatePlanAnnotationStatusHtml(annotation.toString(), id, status) ??
+      annotation.toString()
+    return parse(canonical).querySelector("[data-annotation]")
+  }
   const replacementAnnotations = new Map(
     replacementRoot
       .querySelectorAll("[data-annotation]")
@@ -211,9 +221,23 @@ const reconcileAnnotations = (
       previousAnnotation.getAttribute("data-annotation") ?? ""
     if (annotationId.length === 0) continue
     const existing = replacementAnnotations.get(annotationId)
-    const clone = parse(previousAnnotation.toString()).firstChild
-    if (clone === undefined) continue
+    const clone = canonicalAnnotation(previousAnnotation)
+    if (clone === null) continue
     if (existing !== undefined) {
+      const replacement = canonicalAnnotation(existing)
+      const messageIds = new Set(
+        clone
+          .querySelectorAll("[data-comment-message]")
+          .map((message) => message.getAttribute("data-comment-message") ?? "")
+      )
+      for (const message of replacement?.querySelectorAll(
+        "[data-comment-message]"
+      ) ?? []) {
+        const messageId = message.getAttribute("data-comment-message") ?? ""
+        if (messageId.length === 0 || messageIds.has(messageId)) continue
+        clone.insertAdjacentHTML("beforeend", message.toString())
+        messageIds.add(messageId)
+      }
       existing.replaceWith(clone)
       continue
     }

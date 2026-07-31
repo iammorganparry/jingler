@@ -219,6 +219,17 @@ export type SteerTurn = (
   images: ReadonlyArray<Attachment>
 ) => Promise<TurnSteerResult>
 
+/**
+ * Provider-neutral result of steering an addressable plan participant.
+ * `unavailable` is reserved for a stale routing identity; `failed` means the
+ * same identity may be retried because its live control channel was temporarily
+ * absent or rejected the steer.
+ */
+export type PlanParticipantSteerResult =
+  | { readonly status: "delivered"; readonly reply: string | null }
+  | { readonly status: "unavailable"; readonly detail: string }
+  | { readonly status: "failed"; readonly detail: string }
+
 export interface AgentContext {
   readonly emit: (event: StreamEvent) => Effect.Effect<void>
   readonly canUseTool: CanUseTool
@@ -411,6 +422,7 @@ export const scriptedPlan = (
  *
  * Markers in the prompt drive the interactive flows: `[[ask]]` → AskUserQuestion,
  * `[[plan]]` → propose a plan and honour the approve/revise decision.
+ * `[[stream-plan]]` adds cumulative live-only snapshots before that promotion.
  */
 export const scriptedRun =
   (delayMs: number): CliAdapterShape["run"] =>
@@ -768,8 +780,78 @@ export const scriptedRun =
       if (spec.prompt.includes("[[plan]]") || spec.mode === "plan") {
         yield* emit({ _tag: "Thinking", text: "Mapping out the work before touching anything.", seconds: 3, done: true })
         yield* pause
+        const exposesPlanAgent = spec.prompt.includes("[[active-plan-agent]]")
+        const planAgentId = `plan_agent_${sessionId}`
+        let pendingPlanThreadRelay: string | null = null
+        if (exposesPlanAgent) {
+          yield* emit({
+            _tag: "SubagentStarted",
+            id: planAgentId,
+            name: "Explore",
+            description: "Review the streamed plan with the operator",
+            parentId: null
+          })
+          if (registerTurnSteer !== undefined) {
+            yield* registerTurnSteer((text) => {
+              pendingPlanThreadRelay = text
+              return Promise.resolve("accepted" as const)
+            })
+            yield* Effect.fork(
+              Effect.forever(
+                Effect.sleep("25 millis").pipe(
+                  Effect.zipRight(
+                    Effect.gen(function* () {
+                      const relay = pendingPlanThreadRelay
+                      if (relay === null) return
+                      pendingPlanThreadRelay = null
+                      yield* emit({
+                        _tag: "Assistant",
+                        text: relay.includes("Relay this message to the active nested agent")
+                          ? "Explore confirms the anchored rollout guidance is safe to keep."
+                          : "The orchestrator has reviewed the plan comment."
+                      })
+                    })
+                  )
+                )
+              )
+            )
+          }
+        }
         let rev = spec.prompt.includes("[[amendment]]") ? 2 : 1
         while (true) {
+          if (spec.prompt.includes("[[stream-plan]]")) {
+            const source = scriptedPlan(
+              sessionId,
+              rev,
+              spec.prompt.includes("[[worker-hold]]")
+            ).raw
+            const h1End = source.indexOf("</h1>") + "</h1>".length
+            const contextEnd =
+              source.indexOf("</p>", source.indexOf("<h2>Context</h2>")) +
+              "</p>".length
+            const firstStageEnd =
+              source.indexOf("</section>") + "</section>".length
+            const boundaries = [
+              h1End,
+              contextEnd,
+              firstStageEnd,
+              source.length
+            ]
+            for (const [index, end] of boundaries.entries()) {
+              yield* emit({
+                _tag: "PlanDraft",
+                draft: {
+                  id: `plan_${sessionId}_${rev}`,
+                  source: source.slice(0, end),
+                  phase:
+                    index === boundaries.length - 1
+                      ? "complete"
+                      : "composing"
+                }
+              })
+              yield* pause
+            }
+          }
           const decision = yield* proposePlan(
             scriptedPlan(
               sessionId,
@@ -837,6 +919,10 @@ export const scriptedRun =
           yield* emit({ _tag: "Assistant", text: "Good call — revising the plan to guard the refresh loop." })
           yield* pause
           rev += 1
+        }
+        if (exposesPlanAgent) {
+          yield* emit({ _tag: "SubagentEnded", id: planAgentId, status: "done" })
+          if (registerTurnSteer !== undefined) yield* registerTurnSteer(null)
         }
         yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
         return

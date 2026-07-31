@@ -23,6 +23,7 @@ import type { AgentContext, CliAdapterShape, SessionSpec } from "@jingler/cli-ad
 import type {
   Attachment,
   PlanDocument,
+  PlanParticipant,
   Session,
   StreamEvent,
   WorkerActivity
@@ -31,7 +32,7 @@ import { GitError } from "@jingler/core"
 import { appPathsFor, fakeCommandExecutor } from "@jingler/cli-adapters/test-support"
 import { NodeContext } from "@effect/platform-node"
 import type { CommandExecutor } from "@effect/platform"
-import { Effect, Layer, Logger, Stream } from "effect"
+import { Chunk, Effect, Either, Fiber, Layer, Logger, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { DialogService } from "./dialog.js"
 import {
@@ -46,7 +47,13 @@ import {
   mergeCanonicalOrchestrationCheckpoints,
   newSessionOrchestrator,
   orchestrationStagesCompleted,
+  planAppendMessage,
+  planDispatchExistingMessageWithRouting,
+  planDispatchMessageWithRouting,
+  planSetThreadResolved,
+  planUpdateMessageDelivery,
   planUsesOrchestration,
+  planWatch,
   reviewGet,
   reviewMarkRouted,
   reviewReconcile,
@@ -190,6 +197,577 @@ describe("RPC handlers", () => {
         { ...document, producingChatId: "direct-chat" }
       )
     ).toBe(false)
+  })
+
+  it("routes revision-guarded thread mutations through the session plan worktree", async () => {
+    const now = "2026-07-31T09:00:00.000Z"
+    const worktreePath = join(dir, "worktree")
+    mkdirSync(worktreePath, { recursive: true })
+    mkdirSync(root, { recursive: true })
+    writeFileSync(
+      join(root, "sessions.json"),
+      JSON.stringify([
+        {
+          id: "session-plan-thread",
+          repo: "widget",
+          branch: "jingler/widget",
+          title: "Widget",
+          status: "idle",
+          cli: "codex",
+          diff: { added: 0, removed: 0 },
+          prNumber: null,
+          costUsd: 0,
+          tokens: 0,
+          updatedAt: now,
+          worktreePath,
+          chats: [
+            {
+              id: "chat-plan-thread",
+              title: null,
+              createdAt: now,
+              updatedAt: now
+            }
+          ],
+          activeChatId: "chat-plan-thread"
+        }
+      ])
+    )
+    const services = Layer.mergeAll(
+      SessionStore.Default,
+      PlanStore.Default
+    ).pipe(Layer.provideMerge(base))
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const plan = yield* PlanStore.promoteDocument(worktreePath, {
+          sessionId: "session-plan-thread",
+          producingChatId: "chat-plan-thread",
+          id: "plan-thread",
+          source: `<h1>PRD: Thread RPC</h1>
+<section data-stage="01" data-title="Persist">
+<div data-acceptance="01.1" data-status="pending">It persists.</div>
+</section>`,
+          author: "agent"
+        })
+        const withThread = yield* PlanStore.addAnnotation(worktreePath, {
+          planId: plan.id,
+          baseRevision: plan.revision,
+          stageId: "01",
+          body: "Can you verify this?",
+          author: "user"
+        })
+        const annotationId = withThread.projection.annotations[0]!.id
+        const watchedFiber = yield* planWatch("session-plan-thread").pipe(
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.fork
+        )
+        yield* Effect.sleep("25 millis")
+        const appended = yield* planAppendMessage({
+          sessionId: "session-plan-thread",
+          planId: plan.id,
+          baseRevision: withThread.revision,
+          annotationId,
+          body: "Verified.",
+          authorKind: "agent",
+          authorId: "worker-storage",
+          mentionedParticipantIds: ["operator"],
+          deliveryState: "pending"
+        })
+        const watched = Chunk.toReadonlyArray(yield* Fiber.join(watchedFiber))[0]
+        const messageId = appended.projection.annotations[0]!.messages[1]!.id
+        const delivered = yield* planUpdateMessageDelivery({
+          sessionId: "session-plan-thread",
+          planId: plan.id,
+          baseRevision: appended.revision,
+          annotationId,
+          messageId,
+          deliveryState: "sent",
+          author: "agent"
+        })
+        const resolved = yield* planSetThreadResolved({
+          sessionId: "session-plan-thread",
+          planId: plan.id,
+          baseRevision: delivered.revision,
+          annotationId,
+          resolved: true,
+          author: "user"
+        })
+        const stale = yield* Effect.either(
+          planSetThreadResolved({
+            sessionId: "session-plan-thread",
+            planId: plan.id,
+            baseRevision: appended.revision,
+            annotationId,
+            resolved: false,
+            author: "user"
+          })
+        )
+        return { appended, delivered, resolved, stale, watched }
+      }).pipe(Effect.provide(services))
+    )
+
+    expect(result.appended.projection.annotations[0]?.messages[1]).toMatchObject({
+      body: "Verified.",
+      authorKind: "agent",
+      authorId: "worker-storage",
+      mentionedParticipantIds: ["operator"],
+      deliveryState: "pending"
+    })
+    expect(result.delivered.projection.annotations[0]?.messages[1]?.deliveryState).toBe("sent")
+    expect(result.resolved.projection.annotations[0]?.status).toBe("resolved")
+    expect(result.watched?.revision).toBe(result.appended.revision)
+    expect(result.watched?.projection.annotations[0]?.messages[1]?.body).toBe(
+      "Verified."
+    )
+    expect(Either.isLeft(result.stale)).toBe(true)
+    if (Either.isLeft(result.stale)) {
+      expect(result.stale.left).toMatchObject({
+        _tag: "PlanConflictError",
+        latestRevision: result.resolved.revision
+      })
+    }
+  })
+
+  it("persists mention delivery, same-thread replies, relays, and stale-target notices", async () => {
+    const now = "2026-07-31T09:30:00.000Z"
+    const worktreePath = join(dir, "mention-worktree")
+    mkdirSync(worktreePath, { recursive: true })
+    mkdirSync(root, { recursive: true })
+    writeFileSync(
+      join(root, "sessions.json"),
+      JSON.stringify([
+        {
+          id: "session-mentions",
+          repo: "widget",
+          branch: "jingler/widget",
+          title: "Widget",
+          status: "idle",
+          cli: "codex",
+          diff: { added: 0, removed: 0 },
+          prNumber: null,
+          costUsd: 0,
+          tokens: 0,
+          updatedAt: now,
+          worktreePath,
+          chats: [
+            {
+              id: "chat-mentions",
+              title: null,
+              createdAt: now,
+              updatedAt: now
+            }
+          ],
+          activeChatId: "chat-mentions"
+        }
+      ])
+    )
+    const orchestrator = {
+      routingId: "orchestrator:chat-mentions",
+      displayName: "Orchestrator",
+      role: "orchestrator",
+      lifecycle: "parked",
+      ownerRoutingId: null
+    } as const
+    const worker = {
+      routingId: "worker:plan-mentions:worker-core:1",
+      displayName: "worker-core",
+      role: "worker",
+      lifecycle: "running",
+      ownerRoutingId: null
+    } as const
+    const prompts: Array<string> = []
+    const routing = {
+      participants: () => Effect.succeed([orchestrator, worker]),
+      route: (
+        target: PlanParticipant,
+        request: {
+          readonly sessionId: string
+          readonly planId: string
+          readonly text: string
+        }
+      ) =>
+        Effect.sync(() => {
+          prompts.push(request.text)
+          return target.role === "orchestrator"
+            ? {
+                status: "delivered" as const,
+                reply:
+                  `I will ask the implementation worker. ` +
+                  `[[mention:${worker.routingId}]]`
+              }
+            : {
+                status: "delivered" as const,
+                reply: "The worker verified the parser."
+              }
+        })
+    }
+    const services = Layer.mergeAll(
+      SessionStore.Default,
+      PlanStore.Default
+    ).pipe(Layer.provideMerge(base))
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const plan = yield* PlanStore.promoteDocument(worktreePath, {
+          sessionId: "session-mentions",
+          producingChatId: "chat-mentions",
+          id: "plan-mentions",
+          source: `<h1>PRD: Mentions</h1>
+<section data-stage="01" data-title="Route">
+<div data-acceptance="01.1" data-status="pending">It routes.</div>
+</section>`,
+          author: "agent"
+        })
+        const withThread = yield* PlanStore.addAnnotation(worktreePath, {
+          planId: plan.id,
+          baseRevision: plan.revision,
+          stageId: "01",
+          body: "Initial note.",
+          author: "user"
+        })
+        const annotationId = withThread.projection.annotations[0]!.id
+        const routed = yield* planDispatchMessageWithRouting(
+          {
+            sessionId: "session-mentions",
+            planId: plan.id,
+            baseRevision: withThread.revision,
+            annotationId,
+            body: "Please coordinate this check.",
+            authorId: "operator",
+            mentionedParticipantIds: [orchestrator.routingId]
+          },
+          routing
+        )
+        const unavailable = yield* planDispatchMessageWithRouting(
+          {
+            sessionId: "session-mentions",
+            planId: plan.id,
+            baseRevision: routed.document.revision,
+            annotationId,
+            body: "Try the old worker.",
+            authorId: "operator",
+            mentionedParticipantIds: ["worker:plan-mentions:worker-core:0"]
+          },
+          {
+            participants: () => Effect.succeed([]),
+            route: () =>
+              Effect.succeed({
+                status: "failed" as const,
+                detail: "This route must not be called."
+              })
+          }
+        )
+        let staleRetryRoutes = 0
+        const unavailableRetry = yield* Effect.either(
+          planDispatchExistingMessageWithRouting(
+            {
+              sessionId: "session-mentions",
+              planId: plan.id,
+              baseRevision: unavailable.document.revision,
+              annotationId,
+              messageId: unavailable.messageId
+            },
+            {
+              participants: () => Effect.succeed([]),
+              route: () =>
+                Effect.sync(() => {
+                  staleRetryRoutes += 1
+                  return { status: "delivered" as const, reply: null }
+                })
+            }
+          )
+        )
+        const pendingThread = yield* PlanStore.addAnnotation(worktreePath, {
+          planId: plan.id,
+          baseRevision: unavailable.document.revision,
+          stageId: "01",
+          body: "Route this selection comment once.",
+          author: "user",
+          authorId: "operator",
+          mentionedParticipantIds: [orchestrator.routingId],
+          deliveryState: "pending"
+        })
+        const pendingAnnotation = pendingThread.projection.annotations.at(-1)!
+        const existing = yield* planDispatchExistingMessageWithRouting(
+          {
+            sessionId: "session-mentions",
+            planId: plan.id,
+            baseRevision: pendingThread.revision,
+            annotationId: pendingAnnotation.id,
+            messageId: pendingAnnotation.messages[0]!.id
+          },
+          routing
+        )
+        const partialCalls: Array<string> = []
+        const partial = yield* planDispatchMessageWithRouting(
+          {
+            sessionId: "session-mentions",
+            planId: plan.id,
+            baseRevision: existing.document.revision,
+            annotationId,
+            body: "Notify both participants.",
+            authorId: "operator",
+            mentionedParticipantIds: [orchestrator.routingId, worker.routingId]
+          },
+          {
+            participants: () => Effect.succeed([orchestrator, worker]),
+            route: (target) =>
+              Effect.sync(() => {
+                partialCalls.push(target.routingId)
+                return target.routingId === orchestrator.routingId
+                  ? { status: "delivered" as const, reply: null }
+                  : { status: "failed" as const, detail: "Worker is busy." }
+              })
+          }
+        )
+        const retryCalls: Array<string> = []
+        const retried = yield* planDispatchExistingMessageWithRouting(
+          {
+            sessionId: "session-mentions",
+            planId: plan.id,
+            baseRevision: partial.document.revision,
+            annotationId,
+            messageId: partial.messageId
+          },
+          {
+            participants: () => Effect.succeed([orchestrator, worker]),
+            route: (target) =>
+              Effect.sync(() => {
+                retryCalls.push(target.routingId)
+                return { status: "delivered" as const, reply: null }
+              })
+          }
+        )
+
+        let externalAccepted = false
+        const raced = yield* planDispatchMessageWithRouting(
+          {
+            sessionId: "session-mentions",
+            planId: plan.id,
+            baseRevision: retried.document.revision,
+            annotationId,
+            body: "Persist after a concurrent edit.",
+            authorId: "operator",
+            mentionedParticipantIds: [orchestrator.routingId]
+          },
+          {
+            participants: () => Effect.succeed([orchestrator]),
+            route: () =>
+              Effect.gen(function* () {
+                externalAccepted = true
+                const latest = yield* PlanStore.readDocument(
+                  worktreePath,
+                  "session-mentions",
+                  "chat-mentions"
+                )
+                yield* PlanStore.addAnnotation(worktreePath, {
+                  planId: plan.id,
+                  baseRevision: latest!.revision,
+                  stageId: "01",
+                  body: "Concurrent editor mutation.",
+                  author: "user"
+                })
+                return { status: "delivered" as const, reply: "Accepted once." }
+              }).pipe(Effect.orDie)
+          }
+        )
+
+        const agentRelay = yield* PlanStore.appendAnnotationMessage(worktreePath, {
+          planId: plan.id,
+          baseRevision: raced.document.revision,
+          annotationId,
+          body: "Agent relay retry.",
+          authorKind: "agent",
+          authorId: orchestrator.routingId,
+          mentionedParticipantIds: [worker.routingId],
+          deliveryState: "failed"
+        })
+        const agentRelayMessage = agentRelay.projection.annotations[0]!.messages.at(-1)!
+        const retriedAgentRelay = yield* planDispatchExistingMessageWithRouting(
+          {
+            sessionId: "session-mentions",
+            planId: plan.id,
+            baseRevision: agentRelay.revision,
+            annotationId,
+            messageId: agentRelayMessage.id
+          },
+          {
+            participants: () => Effect.succeed([worker]),
+            route: () => Effect.succeed({ status: "delivered" as const, reply: null })
+          }
+        )
+
+        const relayA = {
+          ...orchestrator,
+          routingId: "subagent:a",
+          displayName: "A",
+          role: "subagent" as const
+        }
+        const relayB = {
+          ...orchestrator,
+          routingId: "subagent:b",
+          displayName: "B",
+          role: "subagent" as const
+        }
+        const cycleCalls: Array<string> = []
+        const cycle = yield* planDispatchMessageWithRouting(
+          {
+            sessionId: "session-mentions",
+            planId: plan.id,
+            baseRevision: retriedAgentRelay.document.revision,
+            annotationId,
+            body: "Start bounded relay.",
+            authorId: "operator",
+            mentionedParticipantIds: [relayA.routingId]
+          },
+          {
+            participants: () => Effect.succeed([relayA, relayB]),
+            route: (target) =>
+              Effect.sync(() => {
+                cycleCalls.push(target.routingId)
+                const next = target.routingId === relayA.routingId ? relayB : relayA
+                return {
+                  status: "delivered" as const,
+                  reply: `Continuing. [[mention:${next.routingId}]]`
+                }
+              })
+          }
+        )
+        const budgetParticipants: ReadonlyArray<PlanParticipant> = Array.from(
+          { length: 34 },
+          (_, index) => ({
+            routingId: `subagent:budget-${index}`,
+            displayName: `Budget ${index}`,
+            role: "subagent",
+            lifecycle: "running",
+            ownerRoutingId: null
+          })
+        )
+        const budgetCalls: Array<string> = []
+        const budgeted = yield* planDispatchMessageWithRouting(
+          {
+            sessionId: "session-mentions",
+            planId: plan.id,
+            baseRevision: cycle.document.revision,
+            annotationId,
+            body: "Exercise the global delivery budget.",
+            authorId: "operator",
+            mentionedParticipantIds: budgetParticipants.map(
+              (participant) => participant.routingId
+            )
+          },
+          {
+            participants: () => Effect.succeed(budgetParticipants),
+            route: (target) =>
+              Effect.sync(() => {
+                budgetCalls.push(target.routingId)
+                return { status: "delivered" as const, reply: null }
+              })
+          }
+        )
+        return {
+          routed,
+          unavailable,
+          unavailableRetry,
+          staleRetryRoutes,
+          existing,
+          partial,
+          partialCalls,
+          retried,
+          retryCalls,
+          raced,
+          externalAccepted,
+          retriedAgentRelay,
+          cycle,
+          cycleCalls,
+          budgeted,
+          budgetCalls
+        }
+      }).pipe(Effect.provide(services))
+    )
+
+    const routedMessages =
+      result.routed.document.projection.annotations[0]!.messages
+    expect(routedMessages.slice(1)).toMatchObject([
+      {
+        body: "Please coordinate this check.",
+        authorKind: "user",
+        deliveryState: "sent"
+      },
+      {
+        body: "I will ask the implementation worker.",
+        authorId: orchestrator.routingId,
+        mentionedParticipantIds: [worker.routingId],
+        deliveryState: "sent"
+      },
+      {
+        body: "The worker verified the parser.",
+        authorId: worker.routingId,
+        deliveryState: "sent"
+      }
+    ])
+    expect(result.routed.deliveries.map((delivery) => delivery.status)).toEqual([
+      "delivered",
+      "delivered"
+    ])
+    expect(prompts).toHaveLength(4)
+
+    const unavailableMessages =
+      result.unavailable.document.projection.annotations[0]!.messages
+    expect(unavailableMessages.at(-2)).toMatchObject({
+      body: "Try the old worker.",
+      deliveryState: "failed"
+    })
+    expect(unavailableMessages.at(-1)).toMatchObject({
+      authorId: "jingler:dispatcher",
+      body: expect.stringContaining("became unavailable")
+    })
+    expect(result.unavailable.deliveries[0]).toMatchObject({
+      status: "unavailable",
+      retryable: false
+    })
+    expect(result.unavailableRetry._tag).toBe("Left")
+    expect(result.staleRetryRoutes).toBe(0)
+    const existingMessages =
+      result.existing.document.projection.annotations.at(-1)!.messages
+    expect(existingMessages.map((message) => message.body)).toEqual([
+      "Route this selection comment once.",
+      "I will ask the implementation worker.",
+      "The worker verified the parser."
+    ])
+    expect(existingMessages[0]?.deliveryState).toBe("sent")
+    expect(result.partialCalls).toEqual([orchestrator.routingId, worker.routingId])
+    expect(result.retryCalls).toEqual([worker.routingId])
+    expect(
+      result.retried.document.projection.annotations[0]?.messages.find(
+        (message) => message.id === result.partial.messageId
+      )?.mentionDeliveries
+    ).toMatchObject([
+      { participantId: orchestrator.routingId, status: "delivered" },
+      { participantId: worker.routingId, status: "delivered" }
+    ])
+    expect(result.externalAccepted).toBe(true)
+    expect(
+      result.raced.document.projection.annotations.some(
+        (annotation) => annotation.body === "Concurrent editor mutation."
+      )
+    ).toBe(true)
+    expect(
+      result.raced.document.projection.annotations[0]?.messages.some(
+        (message) => message.body === "Accepted once."
+      )
+    ).toBe(true)
+    expect(result.retriedAgentRelay.deliveries).toMatchObject([
+      { participantId: worker.routingId, status: "delivered" }
+    ])
+    expect(result.cycleCalls).toEqual(["subagent:a", "subagent:b", "subagent:a"])
+    expect(
+      result.cycle.document.projection.annotations[0]?.messages.at(-1)?.body
+    ).toContain("relay safety limit")
+    expect(result.budgetCalls).toHaveLength(32)
+    expect(
+      result.budgeted.deliveries.filter((delivery) => delivery.status === "failed")
+    ).toHaveLength(2)
   })
 
   it("restores canonical completion across a checkpoint crash window", () => {
@@ -346,6 +924,12 @@ describe("RPC handlers", () => {
       stopWorker: () => Effect.void,
       stopSession: () => Effect.void,
       isPlanRunning: () => Effect.succeed(false),
+      planParticipants: () => Effect.succeed([]),
+      steerPlanParticipant: () =>
+        Effect.succeed({
+          status: "unavailable",
+          detail: "No live participant."
+        }),
       activityFeedCount: () => Effect.succeed(0),
       watch: (sessionId, planId, chatId) => {
         calls.push([sessionId, planId, chatId])

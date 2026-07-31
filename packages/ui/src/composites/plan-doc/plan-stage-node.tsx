@@ -40,6 +40,7 @@ function StageView({ node }: NodeViewProps) {
   return (
     <NodeViewWrapper
       data-plan-stage-id={id}
+      data-plan-stage-title={title}
       className="my-4 overflow-hidden rounded-md border border-line"
     >
       <button
@@ -257,6 +258,15 @@ export const PlanAssignmentNode = Node.create({
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer(AssignmentView)
+    return ReactNodeViewRenderer(AssignmentView, {
+      // Selection/decorations emit frequent equivalent node objects. This
+      // atom does not consume decorations, so only rerender when its persisted
+      // assignment attributes actually change.
+      update: ({ oldNode, newNode, updateProps }) => {
+        if (oldNode.type !== newNode.type) return false
+        if (!oldNode.eq(newNode)) updateProps()
+        return true
+      }
+    })
   }
 })

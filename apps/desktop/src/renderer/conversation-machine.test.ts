@@ -1304,6 +1304,122 @@ describe("conversationMachine — persisted status", () => {
   })
 })
 
+describe("conversationMachine — volatile plan drafts", () => {
+  const proposedPlan = {
+    id: "plan_live_1",
+    summary: "Live plan",
+    structured: true,
+    graph: null,
+    comments: [],
+    status: "proposed",
+    raw: "<h1>PRD: Live plan</h1>",
+    steps: []
+  } as unknown as Plan
+
+  it("tracks cumulative source without touching the transcript and promotes atomically", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "plan it" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    emit({
+      _tag: "PlanDraft",
+      draft: {
+        id: "plan_live_1",
+        source: "<h1>PRD: Live</h1>",
+        phase: "composing"
+      }
+    })
+    expect(actor.getSnapshot().context.planDraft?.source).toContain("PRD: Live")
+    expect(actor.getSnapshot().context.planDraftPresentationNonce).toBe(1)
+    expect(latestPlan(actor.getSnapshot().context.messages)).toBeNull()
+
+    emit({
+      _tag: "PlanDraft",
+      draft: {
+        id: "plan_live_1",
+        source: "<h1>PRD: Live plan</h1><p>More</p>",
+        phase: "complete"
+      }
+    })
+    expect(actor.getSnapshot().context.planDraftPresentationNonce).toBe(1)
+
+    emit({ _tag: "PlanProposed", plan: proposedPlan })
+    const promoted = actor.getSnapshot().context
+    expect(promoted.planDraft).toBeNull()
+    expect(latestPlan(promoted.messages)?.raw).toBe(
+      "<h1>PRD: Live plan</h1>"
+    )
+    actor.stop()
+  })
+
+  it("does not request presentation again after a reformat clear in the same turn", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "plan it" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    emit({
+      _tag: "PlanDraft",
+      draft: {
+        id: "plan_live_1",
+        source: "<h1>PRD: First</h1>",
+        phase: "composing"
+      }
+    })
+    emit({
+      _tag: "PlanDraft",
+      draft: { id: "plan_live_1", source: "", phase: "cleared" }
+    })
+    emit({
+      _tag: "PlanDraft",
+      draft: {
+        id: "plan_live_1",
+        source: "<h1>PRD: Reformatted</h1>",
+        phase: "composing"
+      }
+    })
+
+    expect(actor.getSnapshot().context.planDraftPresentationNonce).toBe(1)
+    expect(actor.getSnapshot().context.planDraft?.source).toContain(
+      "Reformatted"
+    )
+    actor.stop()
+  })
+
+  it("clears a volatile draft on failure and operator cancellation", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "plan it" })
+    await waitFor(actor, (s) => s.matches("running"))
+    emit({
+      _tag: "PlanDraft",
+      draft: {
+        id: "plan_live_1",
+        source: "<h1>PRD: Partial</h1>",
+        phase: "composing"
+      }
+    })
+    emit({ _tag: "Failed", message: "Malformed plan." })
+    expect(actor.getSnapshot().context.planDraft).toBeNull()
+
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "try again" })
+    await waitFor(actor, (s) => s.matches("running"))
+    emit({
+      _tag: "PlanDraft",
+      draft: {
+        id: "plan_live_2",
+        source: "<h1>PRD: Partial again</h1>",
+        phase: "composing"
+      }
+    })
+    actor.send({ type: "STOP" })
+    expect(actor.getSnapshot().context.planDraft).toBeNull()
+    actor.stop()
+  })
+})
+
 describe("conversationMachine — PlanUpdated across turns", () => {
   /** A minimal one-step plan; only the id/status/steps matter to the fold. */
   const planFixture = (stepStatus: "proposed" | "done"): Plan =>

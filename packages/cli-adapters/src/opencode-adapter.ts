@@ -6,6 +6,7 @@ import { Effect, Runtime } from "effect"
 import type { AgentContext, PermissionRequest, SessionSpec } from "./adapter.js"
 import { capOutput } from "./output-cap.js"
 import { hasPlanBlock, parsePlan, PLAN_HTML_REFORMAT } from "./plan-parse.js"
+import { createPlanDraftStream } from "./plan-draft-stream.js"
 import { stopChild, trackChild } from "./child-registry.js"
 import { requireWorktree } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
@@ -431,7 +432,8 @@ export const createOpencodeMapper = (
    * `Assistant` event when the turn produced no plan block, so a model that
    * ignored the protocol still reaches the operator instead of returning silence.
    */
-  suppressText: () => boolean = () => false
+  suppressText: () => boolean = () => false,
+  onSuppressedMainText?: (delta: string) => StreamEvent | null
 ): OpencodeMapper => {
   /** partID → characters already emitted, so we only ever send the suffix. */
   const emitted = new Map<string, number>()
@@ -493,9 +495,14 @@ export const createOpencodeMapper = (
         // `synthetic` parts are opencode's own scaffolding (e.g. injected
         // context), not the model talking — showing them would confuse.
         if (part.synthetic === true || part.ignored === true) return []
-        if (suppressText()) return []
         const text = suffix(part.id, part.text)
-        return text.length === 0 ? [] : [{ _tag: "Assistant", text, ...forAgent }]
+        if (text.length === 0) return []
+        if (suppressText()) {
+          const draft =
+            agentId === undefined ? onSuppressedMainText?.(text) ?? null : null
+          return draft === null ? [] : [draft]
+        }
+        return [{ _tag: "Assistant", text, ...forAgent }]
       }
 
       case "reasoning": {
@@ -762,9 +769,15 @@ const driveOpencode = async (
     // flips exactly once, when the operator approves — which is why it is a
     // mutable flag rather than `spec.mode === "plan"` read at each use.
     let planning = spec.mode === "plan"
+    let planRound = 0
+    let planReformatAsked = false
+    const planDraft = createPlanDraftStream(
+      () => `plan_${sessionId}_${planRound + 1}`
+    )
     const mapper = createOpencodeMapper(
       () => opencodeSessionId,
-      () => planning
+      () => planning,
+      (delta) => planDraft.append(delta)
     )
 
     // Subscribe BEFORE prompting: the permission bus is how the agent asks to
@@ -836,8 +849,6 @@ const driveOpencode = async (
       // opencode has no `ExitPlanMode` to hand a decision back through, exactly
       // as Codex has none — so both harnesses land on the same shape.
       let turnPrompt = spec.prompt
-      let planRound = 0
-      let planReformatAsked = false
       for (;;) {
         let followUp: string | null = null
         const result = await client.session.prompt({
@@ -870,11 +881,14 @@ const driveOpencode = async (
             )
             if (plan.structured === false && !planReformatAsked) {
               planReformatAsked = true
+              const clear = planDraft.clear()
+              if (clear !== null) await runP(ctx.emit(clear))
               followUp = PLAN_HTML_REFORMAT
               turnPrompt = followUp
               continue
             }
             const decision = await runP(ctx.proposePlan(plan))
+            planDraft.reset()
             if (decision._tag === "Revise") followUp = decision.feedback
             else if (decision._tag === "Approve") {
               // The restriction lifts here and nowhere else. `spec.readOnly`
@@ -888,6 +902,8 @@ const driveOpencode = async (
           } else if (reply.length > 0) {
             // No plan (or the round cap is spent), so the held-back prose is all
             // the operator gets — replay it rather than returning silence.
+            const clear = planDraft.clear()
+            if (clear !== null) await runP(ctx.emit(clear))
             await runP(ctx.emit({ _tag: "Assistant", text: reply }))
           }
         }
