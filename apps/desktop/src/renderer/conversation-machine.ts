@@ -68,6 +68,40 @@ const isExecutionMode = (mode: PermissionMode): mode is ExecutionMode =>
   mode !== "plan"
 
 /**
+ * Mirror `SessionStore.setHarness` while its RPC is in flight.
+ *
+ * The conversation actor outlives the mounted chat. If its local session stays
+ * on the old harness, revisiting the tab sends that stale record back through
+ * `SESSION_UPDATED` and snaps the model chip to the old global default. Keeping
+ * the complete session mirror current closes that window; the RPC response is
+ * still published as the authoritative record once disk persistence completes.
+ */
+const withHarness = (
+  session: Session,
+  chatId: string,
+  cli: CliKind,
+  model: string,
+  switched: boolean
+): Session => ({
+  ...session,
+  cli,
+  model,
+  ...(switched ? { resumeId: undefined } : {}),
+  chats: (session.chats ?? []).map((chat) =>
+    switched
+      ? {
+          ...chat,
+          model: chat.id === chatId ? model : undefined,
+          resumeId: undefined,
+          mode: chat.mode === "plan" && !supportsPlanMode(cli) ? "ask" : chat.mode
+        }
+      : chat.id === chatId
+        ? { ...chat, model }
+        : chat
+  )
+})
+
+/**
  * Tools that can change which worktree paths exist even when their provider
  * cannot calculate a diff. Codex file-change events have historically emitted
  * a successful `Edit` with `diff: null`, so the diff alone is not a reliable
@@ -1269,13 +1303,20 @@ export const conversationMachine = setup({
     persistHarness: assign(({ context, event, self }) => {
       if (event.type !== "SET_HARNESS") return {}
       const switched = event.cli !== context.cli
+      const session = withHarness(
+        context.session,
+        context.chatId,
+        event.cli,
+        event.model,
+        switched
+      )
       void rpc.agentSetHarness(
         context.session.id,
         context.chatId,
         event.cli,
         event.model
-      )
-      if (!switched) return { model: event.model }
+      ).then(publishSessionUpdate).catch(() => {})
+      if (!switched) return { model: event.model, session }
 
       void rpc
         .skillsList(context.session.id)
@@ -1291,7 +1332,7 @@ export const conversationMachine = setup({
         cli: event.cli,
         model: event.model,
         // Mirror main's write so the UI doesn't lie until the next load.
-        session: { ...context.session, cli: event.cli, resumeId: undefined },
+        session,
         mode,
         reasoning,
         executionMode: isExecutionMode(mode) ? mode : context.executionMode,

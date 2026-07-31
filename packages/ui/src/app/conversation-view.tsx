@@ -217,7 +217,7 @@ export interface ConversationViewProps {
    * in the composer.
    */
   orchestrator?: boolean
-  /** Whether Jingler mode is on (hides the model/mode chips when it is). */
+  /** Whether Jingler mode is on (hides permission mode, but keeps its model editable). */
   jinglerMode?: boolean
   /** Whether the active chat's Jingler-mode update is in flight. */
   jinglerModePending?: boolean

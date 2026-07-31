@@ -490,7 +490,7 @@ export const rpc = {
       if (fiber) runtime.runFork(Fiber.interrupt(fiber))
     }
   },
-  agentSetHarness: (sessionId: string, chatId: string, cli: CliKind, model: string): Promise<void> =>
+  agentSetHarness: (sessionId: string, chatId: string, cli: CliKind, model: string): Promise<Session> =>
     run((c) => c.Agent.setHarness({ sessionId, chatId, cli, model })),
   agentStop: (sessionId: string, chatId: string): Promise<void> =>
     run((c) => c.Agent.stop({ sessionId, chatId })),

@@ -552,6 +552,8 @@ export class JinglerRpcs extends RpcGroup.make(
    * Claude) so the new harness starts a fresh thread.
    */
   Rpc.make("Agent.setHarness", {
+    success: Session,
+    error: Schema.Union(GitError, SessionNotFoundError),
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,

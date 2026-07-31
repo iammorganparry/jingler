@@ -2789,7 +2789,9 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Agent.retryWorker": ({ sessionId, planId, agentId }) =>
     executeOrchestration(sessionId, planId, [agentId]).pipe(Effect.asVoid),
   "Agent.setHarness": ({ sessionId, chatId, cli, model }) =>
-    SessionStore.setHarness(sessionId, chatId, cli, model).pipe(Effect.ignore),
+    SessionStore.setHarness(sessionId, chatId, cli, model).pipe(
+      Effect.andThen(SessionStore.get(sessionId))
+    ),
   "Agent.stop": ({ sessionId, chatId }) =>
     Effect.flatMap(AgentRunner, (runner) => runner.stop(sessionId, chatId)),
   // Not `AgentRunner.stop` scoped smaller: that halts the whole turn. A

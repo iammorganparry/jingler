@@ -77,10 +77,9 @@ describe("Composer model chip", () => {
 })
 
 /**
- * Jingler mode owns the model + mode chips. On the orchestrator composer a
- * toggle stands in for them; when it is on there is nothing valid to pick (the
- * orchestrator is automatic on its Settings model), so both chips disappear.
- * Off — or on a plain chat, where the toggle never renders — the chips return.
+ * Jingler mode owns the permission mode, but the active orchestrator model is a
+ * per-chat choice: an existing plan can continue on a different planner without
+ * rebuilding the session. Plain chats keep both controls as before.
  */
 describe("Composer Jingler toggle", () => {
   const jinglerButton = () =>
@@ -88,7 +87,8 @@ describe("Composer Jingler toggle", () => {
   const chip = (text: string) =>
     screen.getAllByRole("button").find((b) => b.textContent?.includes(text))
 
-  it("hides the model and mode chips when Jingler mode is on", () => {
+  it("keeps the orchestrator model selectable while hiding its permission mode", () => {
+    const onSetHarness = vi.fn()
     render(
       <Composer
         cli="claude"
@@ -97,11 +97,16 @@ describe("Composer Jingler toggle", () => {
         allowPlan
         showJinglerToggle
         jinglerMode
+        onSetHarness={onSetHarness}
       />
     )
     expect(jinglerButton()).toBeDefined()
-    expect(chip("opus")).toBeUndefined()
+    expect(chip("opus")).toBeDefined()
     expect(chip("accept edits")).toBeUndefined()
+
+    fireEvent.pointerDown(chip("opus")!, { button: 0, ctrlKey: false })
+    fireEvent.click(screen.getByRole("menuitem", { name: "sonnet" }))
+    expect(onSetHarness).toHaveBeenCalledWith("claude", "sonnet")
   })
 
   it("shows both chips (and the toggle) when Jingler mode is off", () => {

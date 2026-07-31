@@ -193,7 +193,16 @@ const session = {
   worktreePath: "/tmp/wt",
   mode: "accept-edits",
   model: null,
-  status: "idle"
+  status: "idle",
+  activeChatId: "s1",
+  chats: [{
+    id: "s1",
+    title: "Chat 1",
+    createdAt: "2026-07-25T00:00:00.000Z",
+    updatedAt: "2026-07-25T00:00:00.000Z",
+    mode: "accept-edits",
+    model: null
+  }]
 } as unknown as Session
 
 const emit = (event: StreamEvent) => h.streamCb?.(event)
@@ -971,6 +980,7 @@ describe("conversationMachine — image attachments", () => {
       const { context } = actor.getSnapshot()
       expect(context.model).toBe("haiku")
       expect(context.cli).toBe("claude")
+      expect(context.session.chats[0]?.model).toBe("haiku")
       expect(h.setHarnessCalls).toStrictEqual([{ sessionId: "s1", cli: "claude", model: "haiku" }])
       // Same harness → same skills; refetching would be pointless work.
       expect(h.skillsListCalls).toBe(skillsBefore)
@@ -994,6 +1004,11 @@ describe("conversationMachine — image attachments", () => {
       actor.send({ type: "SET_HARNESS", cli: "codex", model: "gpt-5.6-sol" })
 
       expect(actor.getSnapshot().context.cli).toBe("codex")
+      expect(actor.getSnapshot().context.session).toMatchObject({
+        cli: "codex",
+        model: "gpt-5.6-sol",
+        chats: [{ id: "s1", model: "gpt-5.6-sol" }]
+      })
       expect(h.setHarnessCalls).toStrictEqual([
         { sessionId: "s1", cli: "codex", model: "gpt-5.6-sol" }
       ])
