@@ -13,6 +13,7 @@ let present: Record<string, true> = {}
 const listeners = new Set<() => void>()
 const EMPTY: ReadonlySet<string> = new Set()
 let snapshot: ReadonlySet<string> = EMPTY
+const autoPresented = new Set<string>()
 
 const recompute = () => {
   snapshot = new Set(Object.keys(present))
@@ -30,6 +31,26 @@ export const setPlanPresent = (id: string, value: boolean): void => {
   }
   recompute()
   for (const listener of listeners) listener()
+}
+
+/**
+ * Claim the one automatic Plan Review presentation allowed for a session.
+ *
+ * Plan-draft presentation nonces are deliberately per turn, because each turn
+ * can stream a fresh draft. The UI policy is broader: once a session has shown
+ * its first plan, later amendments must respect an operator who closed the
+ * split. Keeping that latch beside session-level plan presence also makes it
+ * survive pane remounts and chat switches.
+ */
+export const claimPlanAutoPresentation = (id: string): boolean => {
+  if (autoPresented.has(id)) return false
+  autoPresented.add(id)
+  return true
+}
+
+/** Forget presentation history when the session itself is permanently deleted. */
+export const clearPlanAutoPresentation = (id: string): void => {
+  autoPresented.delete(id)
 }
 
 const subscribe = (listener: () => void): (() => void) => {

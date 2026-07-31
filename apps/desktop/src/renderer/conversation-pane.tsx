@@ -44,6 +44,7 @@ import {
   PLAN_SPLIT_HANDLE_WIDTH,
   resizedPlanSplitRatio
 } from "./plan-split-ratio.js"
+import { claimPlanAutoPresentation } from "./plan-presence.js"
 
 const workerTabId = (planId: string, agentId: string): string =>
   `worker:${planId.length}:${planId}${agentId}`
@@ -133,8 +134,13 @@ export function ConversationPane({
       return
     }
     handledPlanDraftPresentation.current = convo.planDraftPresentationNonce
-    onPlanDraftAvailable?.()
-  }, [convo.planDraftPresentationNonce, onPlanDraftAvailable])
+    if (
+      onPlanDraftAvailable !== undefined &&
+      claimPlanAutoPresentation(session.id)
+    ) {
+      onPlanDraftAvailable()
+    }
+  }, [convo.planDraftPresentationNonce, onPlanDraftAvailable, session.id])
   const canonicalPlan = usePlanDocument(session.id)
   const orchestration = useOrchestrationAgents(
     session.id,
