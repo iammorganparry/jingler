@@ -329,6 +329,13 @@ export class JinglerRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
+  /** Restore a previously closed chat and make it active. */
+  Rpc.make("Sessions.reopenChat", {
+    success: Session,
+    error: GitError,
+    payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
   /** Toggle Jingler orchestration for one chat without affecting its siblings. */
   Rpc.make("Sessions.setOrchestratorEnabled", {
     success: Session,

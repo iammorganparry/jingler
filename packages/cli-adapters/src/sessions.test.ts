@@ -421,6 +421,49 @@ describe("SessionStore", () => {
     expect(exit.value.replaced.chats[0]!.role).toBe("orchestrator")
   })
 
+  it("persists closed chats and reopens them with their original identity and settings", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Recover chat" }), {
+          chatRole: "orchestrator",
+          defaultMode: "auto",
+          defaultModel: "opus"
+        })
+        const originalId = created.activeChatId
+        yield* SessionStore.renameChat(created.id, originalId, "Main workspace")
+        yield* SessionStore.createChat(created.id)
+        const closed = yield* SessionStore.closeChat(created.id, originalId)
+        const reopened = yield* SessionStore.reopenChat(created.id, originalId)
+        return { originalId, closed, reopened }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.closed.chats.some((chat) => chat.id === exit.value.originalId)).toBe(false)
+    expect(exit.value.closed.closedChats).toStrictEqual([
+      expect.objectContaining({
+        id: exit.value.originalId,
+        title: "Main workspace",
+        role: "orchestrator",
+        mode: "auto",
+        model: "opus"
+      })
+    ])
+    expect(exit.value.reopened.activeChatId).toBe(exit.value.originalId)
+    expect(exit.value.reopened.closedChats).toStrictEqual([])
+    expect(exit.value.reopened.chats.at(-1)).toEqual(
+      expect.objectContaining({
+        id: exit.value.originalId,
+        title: "Main workspace",
+        role: "orchestrator",
+        mode: "auto",
+        model: "opus"
+      })
+    )
+  })
+
   it("stamps provider mode, model, and reasoning defaults when supplied", async () => {
     const withDefaults = await runExit(
       SessionStore.create(input(), {

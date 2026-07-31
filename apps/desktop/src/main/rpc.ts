@@ -2501,7 +2501,8 @@ const HandlersLayer = JinglerRpcs.toLayer({
       )
       const runner = yield* AgentRunner
       const orchestration = yield* OrchestrationService
-      for (const chat of session?.chats ?? []) {
+      const chats = [...(session?.chats ?? []), ...(session?.closedChats ?? [])]
+      for (const chat of chats) {
         // Deletion is stronger than an ordinary Stop click: do not remove the
         // transcript/state until the harness finalizers have actually finished.
         yield* runner.stop(sessionId, chat.id, true)
@@ -2509,7 +2510,7 @@ const HandlersLayer = JinglerRpcs.toLayer({
       yield* orchestration.stopSession(sessionId)
       yield* BackgroundTaskStore.clear(sessionId)
       yield* SessionStore.remove(sessionId)
-      for (const chat of session?.chats ?? []) {
+      for (const chat of chats) {
         yield* TranscriptStore.remove(chat.id)
         yield* ContextManager.forget(chat.id)
       }
@@ -2561,7 +2562,6 @@ const HandlersLayer = JinglerRpcs.toLayer({
       yield* BackgroundTaskStore.clearChat(sessionId, chatId)
       yield* runner.forgetChat(chatId)
       const updated = yield* SessionStore.closeChat(sessionId, chatId)
-      yield* TranscriptStore.remove(chatId)
       yield* ContextManager.forget(chatId)
       if (session.worktreePath) {
         yield* PlanStore.rehomeArtifact(
@@ -2573,6 +2573,12 @@ const HandlersLayer = JinglerRpcs.toLayer({
       }
       return updated
     }).pipe(
+      Effect.catchTag("SessionNotFoundError", (cause) =>
+        Effect.fail(new GitError({ message: "Session not found", cause }))
+      )
+    ),
+  "Sessions.reopenChat": ({ sessionId, chatId }) =>
+    SessionStore.reopenChat(sessionId, chatId).pipe(
       Effect.catchTag("SessionNotFoundError", (cause) =>
         Effect.fail(new GitError({ message: "Session not found", cause }))
       )

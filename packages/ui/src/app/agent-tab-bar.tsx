@@ -1,5 +1,6 @@
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { useState } from "react"
-import { ChevronRight, MessagesSquare, Plus, X } from "lucide-react"
+import { ChevronRight, History, MessagesSquare, Plus, RotateCcw, X } from "lucide-react"
 import type { SubagentStatus, WorkerLifecycleStatus } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier, type WidthTier } from "../hooks/width-tier.js"
@@ -45,11 +46,13 @@ export interface ChatTabItem {
 
 export interface ChatTabBarProps {
   chats: ReadonlyArray<ChatTabItem>
+  closedChats?: ReadonlyArray<ChatTabItem>
   activeChatId: string
   onSelectChat: (id: string) => void
   onCreateChat: () => void
   onRenameChat: (id: string, title: string) => void
   onCloseChat: (id: string) => void
+  onReopenChat?: (id: string) => void
 }
 
 export interface AgentTabBarProps {
@@ -266,11 +269,13 @@ const CHAT_WIDTH: Record<WidthTier, string | null> = {
  */
 export function ChatTabBar({
   chats,
+  closedChats = [],
   activeChatId,
   onSelectChat,
   onCreateChat,
   onRenameChat,
-  onCloseChat
+  onCloseChat,
+  onReopenChat
 }: ChatTabBarProps) {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
@@ -365,6 +370,40 @@ export function ChatTabBar({
       >
         <Plus className="size-3.5" />
       </button>
+      {closedChats.length > 0 && onReopenChat !== undefined && (
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              type="button"
+              aria-label="Closed chats"
+              title="Closed chats"
+              className="flex flex-none items-center rounded-md px-1.5 py-1.5 text-dim outline-none transition-colors hover:bg-panel hover:text-text"
+            >
+              <History className="size-3.5" />
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              align="end"
+              sideOffset={6}
+              collisionPadding={8}
+              className="z-50 flex min-w-[200px] max-w-[calc(100vw-1rem)] flex-col gap-0.5 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl"
+            >
+              {closedChats.map((chat) => (
+                <DropdownMenu.Item
+                  key={chat.id}
+                  aria-label={`Reopen ${chat.title}`}
+                  onSelect={() => onReopenChat(chat.id)}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-[7px] text-[12.5px] text-text-body outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
+                >
+                  <RotateCcw className="size-3.5 flex-none text-dim" />
+                  <span className="truncate">{chat.title}</span>
+                </DropdownMenu.Item>
+              ))}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      )}
     </>
   )
 }

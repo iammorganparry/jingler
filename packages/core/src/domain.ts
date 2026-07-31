@@ -321,6 +321,8 @@ export const Session = Schema.Struct({
   updatedAt: Schema.String,
   /** Ordered conversations sharing this session's worktree and review state. */
   chats: Schema.Array(Chat),
+  /** Recoverable conversations removed from the visible tab row, newest first. */
+  closedChats: Schema.optional(Schema.Array(Chat)),
   /** The chat restored when the session is next opened. */
   activeChatId: Schema.String,
   /** Absolute path to the checkout this session works in. */

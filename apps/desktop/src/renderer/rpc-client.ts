@@ -222,6 +222,8 @@ export const rpc = {
     run((c) => c.Sessions.renameChat({ sessionId, chatId, title })),
   sessionsCloseChat: (sessionId: string, chatId: string): Promise<Session> =>
     run((c) => c.Sessions.closeChat({ sessionId, chatId })),
+  sessionsReopenChat: (sessionId: string, chatId: string): Promise<Session> =>
+    run((c) => c.Sessions.reopenChat({ sessionId, chatId })),
   sessionsSetOrchestratorEnabled: (
     sessionId: string,
     chatId: string,

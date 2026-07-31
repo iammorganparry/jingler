@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   AgentTabBar,
+  ChatTabBar,
   MAIN_AGENT,
   type AgentTabItem,
   type VisibleAgentStatus
@@ -28,6 +29,49 @@ const callbacks = () => ({
   onNavigate: vi.fn(),
   onStop: vi.fn(),
   onClose: vi.fn()
+})
+
+describe("ChatTabBar closed chats", () => {
+  const chatCallbacks = () => ({
+    onSelectChat: vi.fn(),
+    onCreateChat: vi.fn(),
+    onRenameChat: vi.fn(),
+    onCloseChat: vi.fn(),
+    onReopenChat: vi.fn()
+  })
+
+  it("hides the recovery control when no chats are closed", () => {
+    render(
+      <ChatTabBar
+        chats={[{ id: "chat-1", title: "Chat 1" }]}
+        closedChats={[]}
+        activeChatId="chat-1"
+        {...chatCallbacks()}
+      />
+    )
+
+    expect(screen.queryByRole("button", { name: "Closed chats" })).toBeNull()
+  })
+
+  it("reopens a selected chat from the closed-chat menu", () => {
+    const handlers = chatCallbacks()
+    render(
+      <ChatTabBar
+        chats={[{ id: "chat-2", title: "Review migrations" }]}
+        closedChats={[{ id: "chat-1", title: "Main workspace" }]}
+        activeChatId="chat-2"
+        {...handlers}
+      />
+    )
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Closed chats" }), {
+      button: 0,
+      ctrlKey: false
+    })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reopen Main workspace" }))
+
+    expect(handlers.onReopenChat).toHaveBeenCalledWith("chat-1")
+  })
 })
 
 describe("AgentTabBar worker lifecycles", () => {
