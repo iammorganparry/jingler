@@ -80,9 +80,52 @@ test("Jingler mode keeps the composer neutral and animates the Jingler mark", as
   await expect(surface).toHaveAttribute("data-jingler-mode", "false")
 })
 
-const WORKER_AUTH_TAB = /^worker-auth /
-const WORKER_RELEASE_TAB = /^worker-release /
+const WORKER_AUTH_TAB = /^agent-01 /
+const WORKER_RELEASE_TAB = /^agent-02 /
+const AUDIT_WORKER_TAB = /^agent-03 /
+const AUDIT_WORKER_ROUTE = /codex · gpt-5\.6-terra · xhigh reasoning/
+const REQUESTED_AUDIT_TEXT = /requested audit amendment/
+const AUDIT_EVIDENCE =
+  /data-acceptance="s_07\.1"[^>]*data-status="passed"[^>]*data-evidence="Scripted worker completed/
 const WORKER_STAGE_THOUGHT = "Executing the assigned stage and its verification."
+
+test("an orchestrator completes bounded work directly with its auto tools", async ({
+  launchApp
+}) => {
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: {
+      orchestrator: { cli: "codex", model: "gpt-5.6-sol" }
+    }
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.getByTestId("new-session").click()
+  await window
+    .getByPlaceholder("Leave blank for agent naming")
+    .fill("Bounded direct orchestration")
+  await window.getByRole("button", { name: "Create" }).click()
+  await expect(sessionRow(window, "Bounded direct orchestration")).toBeVisible()
+
+  const sessions = JSON.parse(
+    readFileSync(join(home, "jingler", "sessions.json"), "utf8")
+  )
+  const worktreePath = sessions[0].worktreePath as string
+  const planFile = join(
+    planDirectory(home, worktreePath),
+    "current-plan.html"
+  )
+
+  const composer = window.getByPlaceholder("Message Codex…")
+  await composer.fill("Add and verify the one bounded rate-limit change.")
+  await composer.press("Enter")
+
+  await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })
+  await expect(window.getByText("Approval needed · run a command")).toHaveCount(0)
+  await expect(window.getByRole("button", { name: "Plan Review" })).toHaveCount(0)
+  expect(existsSync(planFile)).toBe(false)
+})
 
 test("a new orchestrator session runs parallel workers and reconciles a mid-run amendment", async ({
   launchApp
@@ -110,6 +153,11 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   await expect(lowWorkerModel).toHaveText("GPT-5.6 Sol")
   await lowWorkerModel.click()
   await window.getByRole("option", { name: "GPT-5.6 Terra" }).click()
+  const lowWorkerReasoning = window.getByRole("combobox", {
+    name: "Low complexity worker reasoning"
+  })
+  await lowWorkerReasoning.click()
+  await window.getByRole("option", { name: "xhigh" }).click()
   await expect
     .poll(
       () =>
@@ -119,7 +167,11 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
     )
     .toMatchObject({
       default: { cli: "claude", model: "opus" },
-      low: { cli: "codex", model: "gpt-5.6-terra" },
+      low: {
+        cli: "codex",
+        model: "gpt-5.6-terra",
+        reasoning: { enabled: true, effort: "xhigh" }
+      },
       medium: { cli: "claude", model: "opus" },
       high: { cli: "claude", model: "opus" }
     })
@@ -149,18 +201,24 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
       () => (existsSync(planFile) ? readFileSync(planFile, "utf8") : ""),
       { timeout: 20_000 }
     )
-    .toContain('data-agent-id="worker-auth"')
+    .toContain('data-agent-id="agent-01"')
 
   await window.getByRole("button", { name: "Plan Review" }).first().click()
   await expect(window.locator('[data-plan-assignment-card="true"]')).toHaveCount(8)
-  await expect(window.getByText("worker-auth").first()).toBeVisible()
+  await expect(window.getByText("agent-01").first()).toBeVisible()
   await expect(window.getByText("claude · opus").first()).toBeVisible()
-  await expect(window.getByText("worker-release").first()).toBeVisible()
+  await expect(window.getByText("agent-02").first()).toBeVisible()
   await expect(window.getByText("codex · gpt-5.6-terra").first()).toBeVisible()
+  const releaseAssignment = window
+    .locator('[data-plan-assignment-card="true"]')
+    .filter({ hasText: "agent-02" })
+    .first()
+  await expect(releaseAssignment).toContainText("Reasoning: xhigh")
+  await expect(releaseAssignment).toContainText("queued")
   await expect
     .poll(() => readFileSync(planFile, "utf8"))
     .toContain(
-      'data-agent-id="worker-release" data-cli="codex" data-model="gpt-5.6-terra"'
+      'data-agent-id="agent-02" data-cli="codex" data-model="gpt-5.6-terra" data-thinking-enabled="true" data-reasoning-effort="xhigh"'
     )
 
   await window.getByRole("button", { name: "More plan actions" }).click()
@@ -196,14 +254,33 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   await expect
     .poll(() => readFileSync(planFile, "utf8"), { timeout: 20_000 })
     .toContain("requested audit amendment")
+  await expect
+    .poll(() => readFileSync(planFile, "utf8"), { timeout: 20_000 })
+    .toContain(
+      'data-agent-id="agent-03" data-cli="codex" data-model="gpt-5.6-terra" data-thinking-enabled="true" data-reasoning-effort="xhigh"'
+    )
   // Worker tabs belong to the canonical plan, not to the orchestrator's latest
   // turn. Amending that same plan must not sweep either transcript away.
   await expect(workerAuthTab).toBeVisible()
   await expect(workerReleaseTab).toBeVisible()
+  const auditWorkerTab = window
+    .locator("[data-agent-status]")
+    .getByRole("button", { name: AUDIT_WORKER_TAB })
+  await expect(auditWorkerTab).toBeVisible()
+  await expect(auditWorkerTab).toHaveAttribute(
+    "title",
+    AUDIT_WORKER_ROUTE
+  )
 
   await window.getByRole("button", { name: "Plan Review" }).first().click()
+  const auditAssignment = window
+    .locator('[data-plan-assignment-card="true"]')
+    .filter({ hasText: "agent-03" })
+    .first()
+  await expect(auditAssignment).toContainText("codex · gpt-5.6-terra")
+  await expect(auditAssignment).toContainText("Reasoning: xhigh")
   await expect(
-    window.getByText(/requested audit amendment/).first()
+    window.getByText(REQUESTED_AUDIT_TEXT).first()
   ).toBeVisible()
   await expect
     .poll(
@@ -215,7 +292,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
         ).length,
       { timeout: 30_000 }
     )
-    .toBe(8)
+    .toBe(9)
 
   await expect
     .poll(() => readFileSync(planFile, "utf8"), { timeout: 30_000 })
@@ -245,10 +322,14 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   const persisted = readFileSync(planFile, "utf8")
   expect(persisted).toContain('status: "done"')
   expect(persisted).toContain(
-    'data-agent-id="worker-release" data-cli="codex" data-model="gpt-5.6-terra"'
+    'data-agent-id="agent-02" data-cli="codex" data-model="gpt-5.6-terra" data-thinking-enabled="true" data-reasoning-effort="xhigh"'
+  )
+  expect(persisted).toContain(
+    'data-agent-id="agent-03" data-cli="codex" data-model="gpt-5.6-terra" data-thinking-enabled="true" data-reasoning-effort="xhigh"'
   )
   expect(persisted).toContain("requested audit amendment")
   expect(persisted).toContain('data-evidence="Scripted worker completed')
+  expect(persisted).toMatch(AUDIT_EVIDENCE)
   const checkpoints = JSON.parse(
     readFileSync(
       join(
@@ -258,12 +339,15 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
       "utf8"
     )
   )
-  expect(checkpoints.workers).toHaveLength(2)
+  expect(checkpoints.workers).toHaveLength(3)
   expect(
     checkpoints.workers.every(
       (worker: { state: string }) => worker.state === "completed"
     )
   ).toBe(true)
+  expect(checkpoints.workers).toContainEqual(
+    expect.objectContaining({ agentId: "agent-03", state: "completed" })
+  )
 })
 
 test("a stopped worker stays interrupted across restart and retries from its checkpoint", async ({
@@ -313,7 +397,7 @@ test("a stopped worker stays interrupted across restart and retries from its che
     .click()
   await expect(
     first.window.getByRole("button", {
-      name: "Stop worker worker-release"
+      name: "Stop worker agent-02"
     })
   ).toBeVisible({ timeout: 20_000 })
 
@@ -350,30 +434,30 @@ test("a stopped worker stays interrupted across restart and retries from its che
   ).toContainText("In progress")
   await expect(
     first.window.getByTestId("plan-progress-stage-s_06")
-  ).toContainText("worker-release · opus")
+  ).toContainText("agent-02 · opus")
   await first.window.getByTestId("plan-progress-stage-s_06").click()
   await expect(first.window.getByLabel("Plan document")).toBeVisible()
 
   await first.window.getByTestId("active-chat-tab").first().click()
   await first.window
-    .getByRole("button", { name: "Stop worker-release", exact: true })
+    .getByRole("button", { name: "Stop agent-02", exact: true })
     .click()
   await expect(workerReleaseTab).toBeVisible()
   await expect(workerAuthTab).toBeVisible()
   await expect(
     first.window.getByRole("button", {
-      name: "Close worker-release",
+      name: "Close agent-02",
       exact: true
     })
   ).toHaveCount(0)
   await expect
-    .poll(() => checkpoints().find((worker) => worker.agentId === "worker-release"))
+    .poll(() => checkpoints().find((worker) => worker.agentId === "agent-02"))
     .toMatchObject({
       state: "interrupted",
       resumeId: expect.any(String)
     })
   await expect
-    .poll(() => checkpoints().find((worker) => worker.agentId === "worker-auth"))
+    .poll(() => checkpoints().find((worker) => worker.agentId === "agent-01"))
     .toMatchObject({ state: "completed" })
 
   // Stopping release must not retract or disturb its completed sibling. Assert
@@ -421,16 +505,16 @@ test("a stopped worker stays interrupted across restart and retries from its che
     .click()
   await expect(
     reopened.window.getByRole("button", {
-      name: "Retry worker worker-release"
+      name: "Retry worker agent-02"
     })
   ).toBeVisible()
   await expect(reopened.window.getByRole("status")).toContainText("Synced")
 
   await reopened.window
-    .getByRole("button", { name: "Retry worker worker-release" })
+    .getByRole("button", { name: "Retry worker agent-02" })
     .click()
   await expect
-    .poll(() => checkpoints().find((worker) => worker.agentId === "worker-release"), {
+    .poll(() => checkpoints().find((worker) => worker.agentId === "agent-02"), {
       timeout: 30_000
     })
     .toMatchObject({

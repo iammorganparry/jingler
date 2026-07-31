@@ -10,6 +10,7 @@ import "./index.css"
 import "./plugin-runtime.js"
 import { App } from "./App.js"
 import { queryClient } from "./query-client.js"
+import { installPlanDocumentFlushHandler } from "./plan-document-registry.js"
 
 /**
  * Paint the operator's theme before React exists.
@@ -33,6 +34,8 @@ if (bootThemeCss) {
   style.textContent = bootThemeCss
   document.head.appendChild(style)
 }
+
+installPlanDocumentFlushHandler()
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

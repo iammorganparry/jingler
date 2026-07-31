@@ -4,6 +4,7 @@ import type {
   ModelOption,
   OrchestratorPreference,
   ProvidersConfig,
+  ReasoningEffort,
   WorkerModelRoute,
   WorkerRoutingConfig
 } from "@jingler/core"
@@ -11,14 +12,17 @@ import {
   DEFAULT_PLAN_TEMPLATE_HTML,
   defaultModel,
   parsePlanHtml,
+  providerReasoningCapabilitiesFor,
   resolveOrchestratorPreference,
   resolveWorkerRoutingConfig,
-  supportsPlanMode
+  supportsPlanMode,
+  workerReasoningSettingIssue
 } from "@jingler/core"
 import { RotateCcw, Save } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { Button } from "../components/button.js"
 import { PROVIDER_LABEL, ProviderIcon } from "../components/provider-icon.js"
+import { reasoningEffortsFor } from "../lib/reasoning-options.js"
 import {
   Select,
   SelectContent,
@@ -65,6 +69,65 @@ const ROUTING_BUCKETS = [
     description: "Architecture, risky changes, and difficult debugging."
   }
 ] as const
+
+type WorkerReasoningChoice =
+  | "provider-default"
+  | "off"
+  | "on"
+  | ReasoningEffort
+
+const workerReasoningChoice = (
+  route: WorkerModelRoute
+): WorkerReasoningChoice =>
+  route.reasoning === undefined
+    ? "provider-default"
+    : route.reasoning.enabled === false
+      ? "off"
+      : (route.reasoning.effort ?? "on")
+
+export const workerReasoningOptionsFor = (
+  cli: CliKind
+): ReadonlyArray<{ readonly value: WorkerReasoningChoice; readonly label: string }> => {
+  const capabilities = providerReasoningCapabilitiesFor(cli)
+  if (!capabilities.explicitToggle) {
+    return [{ value: "provider-default", label: "Provider default" }]
+  }
+  return [
+    { value: "provider-default", label: "Provider default" },
+    { value: "off", label: "Thinking off" },
+    { value: "on", label: "Thinking on · provider default effort" },
+    ...reasoningEffortsFor(cli).map((effort) => ({
+      value: effort,
+      label: effort
+    }))
+  ]
+}
+
+const routeWithReasoning = (
+  route: WorkerModelRoute,
+  choice: WorkerReasoningChoice
+): WorkerModelRoute =>
+  choice === "provider-default"
+    ? { cli: route.cli, model: route.model }
+    : {
+        cli: route.cli,
+        model: route.model,
+        reasoning:
+          choice === "off"
+            ? { enabled: false }
+            : choice === "on"
+              ? { enabled: true }
+              : { enabled: true, effort: choice }
+      }
+
+const workerRoutesEqual = (
+  left: WorkerModelRoute,
+  right: WorkerModelRoute
+): boolean =>
+  left.cli === right.cli &&
+  left.model === right.model &&
+  left.reasoning?.enabled === right.reasoning?.enabled &&
+  left.reasoning?.effort === right.reasoning?.effort
 
 function WorkerRoutingSettings({
   clis,
@@ -130,8 +193,7 @@ function WorkerRoutingSettings({
       ? []
       : ROUTING_BUCKETS.filter(
           ({ key }) =>
-            routing[key].cli !== effective[key].cli ||
-            routing[key].model !== effective[key].model
+            !workerRoutesEqual(routing[key], effective[key])
         )
 
   return (
@@ -153,7 +215,7 @@ function WorkerRoutingSettings({
             catalog.find((provider) => provider.cli === route.cli)?.models ?? []
           return (
             <div
-              className="grid gap-3 p-3 md:grid-cols-[minmax(150px,1fr)_minmax(160px,1fr)_minmax(190px,1.2fr)] md:items-center"
+              className="grid gap-3 p-3 md:grid-cols-[minmax(150px,1fr)_minmax(140px,0.9fr)_minmax(170px,1.1fr)_minmax(150px,0.9fr)] md:items-center"
               key={key}
             >
               <div>
@@ -170,10 +232,17 @@ function WorkerRoutingSettings({
                   const cli = value as CliKind
                   const first =
                     catalog.find((provider) => provider.cli === cli)?.models[0]
-                  saveRoute(key, {
+                  const next = {
                     cli,
                     model: first?.id ?? defaultModel(cli)
-                  })
+                  } satisfies WorkerModelRoute
+                  saveRoute(
+                    key,
+                    workerReasoningSettingIssue(cli, route.reasoning) === null &&
+                      route.reasoning !== undefined
+                      ? { ...next, reasoning: route.reasoning }
+                      : next
+                  )
                 }}
               >
                 <SelectTrigger aria-label={`${label} worker harness`}>
@@ -190,7 +259,7 @@ function WorkerRoutingSettings({
               <Select
                 value={route.model}
                 onValueChange={(model) =>
-                  saveRoute(key, { cli: route.cli, model })
+                  saveRoute(key, { ...route, model })
                 }
               >
                 <SelectTrigger aria-label={`${label} worker model`}>
@@ -203,6 +272,26 @@ function WorkerRoutingSettings({
                   ).map((model) => (
                     <SelectItem key={model.id} value={model.id}>
                       {model.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={workerReasoningChoice(route)}
+                onValueChange={(choice) =>
+                  saveRoute(
+                    key,
+                    routeWithReasoning(route, choice as WorkerReasoningChoice)
+                  )
+                }
+              >
+                <SelectTrigger aria-label={`${label} worker reasoning`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {workerReasoningOptionsFor(route.cli).map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
                     </SelectItem>
                   ))}
                 </SelectContent>

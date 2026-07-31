@@ -3,6 +3,7 @@ import { parsePlanHtml, type WorkerRoutingConfig } from "@jingler/core"
 import {
   fencedHtmlPlan,
   hasPlanBlock,
+  hasOrchestratorPlanSubmission,
   parseFlow,
   parsePlan,
   parseStepCode,
@@ -401,24 +402,21 @@ describe("hasPlanBlock", () => {
     expect(parsePlan(raw, "plan_corrected").summary).toBe("Corrected")
   })
 
-  it("normalizes repeated worker ids before accepting orchestrator plan HTML", () => {
+  it("compiles assignment-free orchestrator HTML before accepting it", () => {
     const raw = [
       "````html",
       "<h1>PRD: Signals pricing</h1>",
       '<section data-stage="05" data-title="Pricing" data-complexity="high">',
-      '<div data-assignment data-agent-id="worker-pricing" data-cli="codex" data-model="gpt-5" data-reason="Pricing work." data-status="queued"></div>',
       '<ul data-files><li>src/pricing.ts</li></ul>',
       '<div data-acceptance="05.1" data-status="pending">Pricing works.</div>',
       "</section>",
       '<section data-stage="06" data-title="Packaging" data-complexity="high">',
-      '<div data-assignment data-agent-id="worker-pricing" data-cli="codex" data-model="gpt-5" data-reason="Packaging work." data-status="queued"></div>',
       '<ul data-files><li>src/packaging.ts</li></ul>',
       '<div data-acceptance="06.1" data-status="pending">Packaging works.</div>',
       "</section>",
       "````"
     ].join("\n")
 
-    expect(parsePlan(raw, "plan_unrouted").structured).toBe(false)
     const plan = parsePlan(raw, "plan_routed", ROUTING)
     expect(plan.structured).toBe(true)
     expect(plan.summary).toBe("Signals pricing")
@@ -428,7 +426,39 @@ describe("hasPlanBlock", () => {
     expect(parsed.valid).toBe(true)
     expect(
       parsed.projection?.stages.map((stage) => stage.assignment?.agentId)
-    ).toStrictEqual(["worker-pricing", "worker-pricing-2"])
+    ).toStrictEqual(["agent-01", "agent-02"])
+  })
+})
+
+describe("hasOrchestratorPlanSubmission", () => {
+  const plan = [
+    "<!-- jingler:submit-plan -->",
+    "````html",
+    "<h1>PRD: Ship</h1>",
+    '<section data-stage="01" data-title="Ship"><div data-acceptance="01.1" data-status="pending">works</div></section>',
+    "````"
+  ].join("\n")
+
+  it("recognises a deliberately marked structured submission", () => {
+    expect(hasOrchestratorPlanSubmission(plan)).toBe(true)
+  })
+
+  it("does not infer submission intent from an unmarked plan fence", () => {
+    expect(hasOrchestratorPlanSubmission(plan.replace("<!-- jingler:submit-plan -->\n", ""))).toBe(
+      false
+    )
+  })
+
+  it("recognises a marked but structurally malformed plan for reformatting", () => {
+    expect(
+      hasOrchestratorPlanSubmission(
+        "<!-- jingler:submit-plan -->\n````html\n<h1>Incomplete</h1>\n````"
+      )
+    ).toBe(true)
+  })
+
+  it("does not treat a quoted marker and plan as a submission", () => {
+    expect(hasOrchestratorPlanSubmission(`Here is the format to quote:\n\n${plan}`)).toBe(false)
   })
 })
 

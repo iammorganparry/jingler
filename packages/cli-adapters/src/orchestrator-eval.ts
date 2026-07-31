@@ -1,7 +1,6 @@
 import type {
   CliKind,
-  PlanPrdStage,
-  StreamEvent
+  PlanPrdStage
 } from "@jingler/core"
 import {
   buildPlanExecutionGraph,
@@ -22,14 +21,34 @@ export interface OrchestratorEvalObservation {
   readonly source: string | null
   readonly availableRoutes: ReadonlyArray<OrchestrationRoute>
   readonly delegated: boolean
-  readonly eventsAfterDelegation: ReadonlyArray<StreamEvent>
+  readonly task?: {
+    readonly boundedSingleOutcome: boolean
+    readonly independentComponents?: number
+    readonly specialistBenefit?: boolean
+    readonly verificationHeavy?: boolean
+    readonly changesApprovedPlan?: boolean
+  }
+  readonly directCompleted?: boolean
+  readonly directVerified?: boolean
+  readonly postHandoff?: {
+    readonly monitored: boolean
+    readonly workersSettled: boolean
+    readonly steeringNeeded?: boolean
+    readonly steered?: boolean
+    readonly failedWorkerIds?: ReadonlyArray<string>
+    readonly retriedWorkerIds?: ReadonlyArray<string>
+    readonly integrated: boolean
+    readonly finalReported: boolean
+  }
   readonly previousSource?: string
   readonly expectedAmendment?: string
 }
 
 export interface OrchestratorEvalAssertion {
   readonly id:
-    | "plan-only"
+    | "direct-when-bounded"
+    | "delegate-when-beneficial"
+    | "post-handoff-ownership"
     | "canonical-html"
     | "assignments"
     | "dependency-ownership"
@@ -75,9 +94,6 @@ const assignmentRoute = (stage: PlanPrdStage): string | null => {
   const assignment = stage.assignment
   return assignment == null ? null : `${assignment.cli}/${assignment.model}`
 }
-
-const mutationAfterHandoff = (event: StreamEvent): boolean =>
-  event._tag === "ToolStart" || event._tag === "ToolEnd" || event._tag === "ToolDelta"
 
 const previousStableIds = (
   source: string | undefined
@@ -148,22 +164,70 @@ export const evaluateOrchestratorProcedure = (
   const amendmentPresent =
     observation.expectedAmendment === undefined ||
     observation.source?.includes(observation.expectedAmendment) === true
+  const independentComponents =
+    observation.task?.independentComponents ?? graph?.groups.length ?? 0
+  const delegationBeneficial =
+    independentComponents > 1 ||
+    observation.task?.specialistBenefit === true ||
+    observation.task?.verificationHeavy === true ||
+    observation.task?.changesApprovedPlan === true
+  const directPreferred =
+    observation.task?.boundedSingleOutcome === true && !delegationBeneficial
+  const failedWorkerIds = observation.postHandoff?.failedWorkerIds ?? []
+  const retriedWorkerIds = new Set(
+    observation.postHandoff?.retriedWorkerIds ?? []
+  )
+  const unretriedFailures = failedWorkerIds.filter(
+    (workerId) => !retriedWorkerIds.has(workerId)
+  )
+  const postHandoffOwned =
+    observation.postHandoff?.monitored === true &&
+    observation.postHandoff.workersSettled &&
+    (observation.postHandoff.steeringNeeded !== true ||
+      observation.postHandoff.steered === true) &&
+    unretriedFailures.length === 0 &&
+    observation.postHandoff.integrated &&
+    observation.postHandoff.finalReported
 
   const assertions: ReadonlyArray<OrchestratorEvalAssertion> = [
     {
-      id: "plan-only",
+      id: "direct-when-bounded",
       passed:
-        observation.delegated &&
-        !observation.eventsAfterDelegation.some(mutationAfterHandoff),
+        !directPreferred ||
+        (!observation.delegated &&
+          observation.directCompleted === true &&
+          observation.directVerified === true),
+      evidence: directPreferred
+        ? observation.delegated
+          ? "bounded single-outcome work was delegated despite coordination overhead"
+          : `direct completion=${observation.directCompleted === true}, verification=${observation.directVerified === true}`
+        : "task does not require the bounded-direct preference"
+    },
+    {
+      id: "delegate-when-beneficial",
+      passed: !delegationBeneficial || observation.delegated,
+      evidence: delegationBeneficial
+        ? observation.delegated
+          ? `${independentComponents} independent components; beneficial delegation selected`
+          : "focused delegation was skipped despite parallelism, specialist, verification, or amendment signals"
+        : "no concrete delegation benefit detected"
+    },
+    {
+      id: "post-handoff-ownership",
+      passed: !observation.delegated || postHandoffOwned,
       evidence: observation.delegated
-        ? `${observation.eventsAfterDelegation.filter(mutationAfterHandoff).length} mutating events after Delegate`
-        : "planner never reached Jingler's Delegate handoff"
+        ? postHandoffOwned
+          ? "workers monitored and settled; steering/retries handled; result integrated and reported"
+          : `monitoring/integration incomplete; unretried failures: ${unretriedFailures.join(", ") || "none"}`
+        : "no handoff occurred"
     },
     {
       id: "canonical-html",
-      passed: parsed?.valid === true,
+      passed: !observation.delegated || parsed?.valid === true,
       evidence:
-        parsed === null
+        !observation.delegated
+          ? "direct execution needs no canonical worker plan"
+          : parsed === null
           ? "no plan was proposed"
           : parsed.valid
             ? `${parsed.projection.stages.length} canonical stages parsed`
@@ -171,15 +235,20 @@ export const evaluateOrchestratorProcedure = (
     },
     {
       id: "assignments",
-      passed: stages.length > 0 && unassigned.length === 0 && graph?.valid === true,
+      passed:
+        !observation.delegated ||
+        (stages.length > 0 && unassigned.length === 0 && graph?.valid === true),
       evidence:
-        unassigned.length === 0
+        !observation.delegated
+          ? "direct execution needs no worker assignments"
+          : unassigned.length === 0
           ? `${stages.length} stages carry validated assignments`
           : `unassigned stages: ${unassigned.map((stage) => stage.id).join(", ")}`
     },
     {
       id: "dependency-ownership",
       passed:
+        !observation.delegated ||
         graph?.diagnostics.every(
           (diagnostic) =>
             diagnostic.code !== "assignment-conflict" &&
@@ -188,7 +257,9 @@ export const evaluateOrchestratorProcedure = (
             diagnostic.code !== "self-dependency"
         ) === true,
       evidence:
-        graph === null
+        !observation.delegated
+          ? "direct execution has no worker dependency graph"
+          : graph === null
           ? "no dependency graph"
           : graph.diagnostics.length === 0
             ? `${graph.groups.length} dependency-safe worker groups`
@@ -196,17 +267,25 @@ export const evaluateOrchestratorProcedure = (
     },
     {
       id: "available-routes",
-      passed: stages.length > 0 && unavailable.length === 0,
+      passed:
+        !observation.delegated ||
+        (stages.length > 0 && unavailable.length === 0),
       evidence:
-        unavailable.length === 0
+        !observation.delegated
+          ? "direct execution has no worker route"
+          : unavailable.length === 0
           ? "every assignment uses the supplied live route catalogue"
           : `unavailable routes: ${[...new Set(unavailable)].join(", ")}`
     },
     {
       id: "progress-ownership",
-      passed: stages.length > 0 && plannerOwnedProgress.length === 0,
+      passed:
+        !observation.delegated ||
+        (stages.length > 0 && plannerOwnedProgress.length === 0),
       evidence:
-        plannerOwnedProgress.length === 0
+        !observation.delegated
+          ? "direct executor owns its own verification"
+          : plannerOwnedProgress.length === 0
           ? "planner left worker status queued and criteria pending without evidence"
           : `planner claimed worker progress: ${plannerOwnedProgress.join(", ")}`
     },

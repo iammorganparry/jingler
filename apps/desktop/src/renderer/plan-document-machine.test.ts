@@ -59,6 +59,161 @@ const start = (
   }).start()
 
 describe("planDocumentMachine", () => {
+  it("persists only the latest draft after one second of editor inactivity", async () => {
+    vi.useFakeTimers()
+    const save = vi.fn(async ({ source: nextSource }) => ({
+      ...document(2, "Latest complete draft"),
+      source: nextSource
+    }))
+    const actor = start(save)
+
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      await waitFor(actor, (snapshot) => snapshot.matches("clean"))
+
+      actor.send({ type: "EDIT", source: source("First partial draft") })
+      await vi.advanceTimersByTimeAsync(400)
+      actor.send({ type: "EDIT", source: source("Second partial draft") })
+      await vi.advanceTimersByTimeAsync(400)
+      actor.send({ type: "EDIT", source: source("Latest complete draft") })
+
+      await vi.advanceTimersByTimeAsync(999)
+      expect(save).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(save).toHaveBeenCalledOnce()
+      expect(save).toHaveBeenCalledWith({
+        document: document(),
+        source: source("Latest complete draft")
+      })
+    } finally {
+      actor.stop()
+      vi.useRealTimers()
+    }
+  })
+
+  it("restarts the trailing debounce while the editor remains active", async () => {
+    vi.useFakeTimers()
+    const save = vi.fn(async ({ source: nextSource }) => ({
+      ...document(2, "Third edit"),
+      source: nextSource
+    }))
+    const actor = start(save)
+
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      await waitFor(actor, (snapshot) => snapshot.matches("clean"))
+
+      actor.send({ type: "EDIT", source: source("First edit") })
+      await vi.advanceTimersByTimeAsync(750)
+      expect(save).not.toHaveBeenCalled()
+      actor.send({ type: "EDIT", source: source("Second edit") })
+      await vi.advanceTimersByTimeAsync(750)
+      expect(save).not.toHaveBeenCalled()
+
+      actor.send({ type: "EDIT", source: source("Third edit") })
+
+      await vi.advanceTimersByTimeAsync(999)
+      expect(save).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(save).toHaveBeenCalledOnce()
+      expect(save).toHaveBeenLastCalledWith({
+        document: document(),
+        source: source("Third edit")
+      })
+    } finally {
+      actor.stop()
+      vi.useRealTimers()
+    }
+  })
+
+  it("flushes the current draft immediately without leaving its debounce behind", async () => {
+    vi.useFakeTimers()
+    const save = vi.fn(async ({ source: nextSource }) => ({
+      ...document(2, "Saved now"),
+      source: nextSource
+    }))
+    const actor = start(save)
+
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      await waitFor(actor, (snapshot) => snapshot.matches("clean"))
+
+      actor.send({ type: "EDIT", source: source("Saved now") })
+      actor.send({ type: "SAVE_NOW" })
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(save).toHaveBeenCalledOnce()
+      expect(save).toHaveBeenCalledWith({
+        document: document(),
+        source: source("Saved now")
+      })
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(save).toHaveBeenCalledOnce()
+    } finally {
+      actor.stop()
+      vi.useRealTimers()
+    }
+  })
+
+  it("debounces a newer edit after the current save finishes", async () => {
+    vi.useFakeTimers()
+    const gate = deferred<PlanDocument>()
+    let saveNumber = 0
+    const save = vi.fn(async ({ source: nextSource }) => {
+      saveNumber += 1
+      if (saveNumber === 1) return gate.promise
+      return { ...document(3, "Second edit"), source: nextSource }
+    })
+    const actor = start(save)
+
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      await waitFor(actor, (snapshot) => snapshot.matches("clean"))
+
+      actor.send({ type: "EDIT", source: source("First edit") })
+      actor.send({ type: "SAVE_NOW" })
+      await waitFor(actor, (snapshot) => snapshot.matches("saving"))
+      actor.send({ type: "EDIT", source: source("Second edit") })
+      gate.resolve(document(2, "First edit"))
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(actor.getSnapshot().matches("editing")).toBe(true)
+      await vi.advanceTimersByTimeAsync(999)
+      expect(save).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(save).toHaveBeenCalledTimes(2)
+      expect(save).toHaveBeenLastCalledWith({
+        document: document(2, "First edit"),
+        source: source("Second edit")
+      })
+    } finally {
+      actor.stop()
+      vi.useRealTimers()
+    }
+  })
+
+  it("cancels a pending autosave when a remote revision wins", async () => {
+    vi.useFakeTimers()
+    const save = vi.fn(async () => document(2))
+    const actor = start(save)
+
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      await waitFor(actor, (snapshot) => snapshot.matches("clean"))
+
+      actor.send({ type: "EDIT", source: source("Local draft") })
+      actor.send({ type: "REMOTE", document: document(2, "Remote") })
+      expect(actor.getSnapshot().matches("conflict")).toBe(true)
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(save).not.toHaveBeenCalled()
+
+    } finally {
+      actor.stop()
+      vi.useRealTimers()
+    }
+  })
+
   it("loads the canonical document into a clean editor", async () => {
     const actor = start(async () => document(2))
     await waitFor(actor, (snapshot) => snapshot.matches("clean"))

@@ -33,6 +33,7 @@ export interface OrchestrationAgent {
   readonly stageIds: ReadonlyArray<string>
   readonly harness: WorkerIdentity["harness"]
   readonly model: string
+  readonly reasoning: WorkerIdentity["reasoning"]
   readonly attempt: number
   readonly status: WorkerLifecycleStatus
   readonly statusMessage: string | null
@@ -132,6 +133,7 @@ const freshAgent = (state: WorkerState): OrchestrationAgent => ({
   stageIds: state.worker.stageIds,
   harness: state.worker.harness,
   model: state.worker.model,
+  reasoning: state.worker.reasoning,
   attempt: state.worker.attempt,
   status: state.status,
   statusMessage: state.message,
@@ -168,6 +170,7 @@ const applyState = (
     stageIds: state.worker.stageIds,
     harness: state.worker.harness,
     model: state.worker.model,
+    reasoning: state.worker.reasoning,
     attempt: state.worker.attempt,
     status: state.status,
     statusMessage: state.message,
@@ -207,6 +210,7 @@ const applyHarnessEvent = (
     stageIds: activity.worker.stageIds,
     harness: activity.worker.harness,
     model: activity.worker.model,
+    reasoning: activity.worker.reasoning,
     attempt: activity.worker.attempt,
     message: applyStreamEvent(base.message, activity.event)
   })

@@ -6,11 +6,9 @@ import {
   type PlanDocument,
   type PlanParticipant
 } from "@jingler/core"
-import { AlertTriangle, Check, Cloud, RefreshCw, WifiOff } from "lucide-react"
+import { AlertTriangle } from "lucide-react"
 import { useMemo, useState } from "react"
-import { Pill } from "../components/pill.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
-import { cn } from "../lib/cn.js"
 import {
   PlanDocEditor,
   type PlanDocOutlineEntry,
@@ -31,18 +29,6 @@ export type PlanEditorTransientState =
   | "composing"
   | "validating"
   | "promoting"
-
-const SYNC: Record<
-  PlanEditorSyncState,
-  { readonly label: string; readonly className: string; readonly icon: typeof Cloud }
-> = {
-  loading: { label: "Loading", className: "text-muted-foreground", icon: RefreshCw },
-  clean: { label: "Synced", className: "text-green", icon: Check },
-  editing: { label: "Editing", className: "text-yellow", icon: Cloud },
-  saving: { label: "Saving", className: "text-blue", icon: RefreshCw },
-  conflict: { label: "Conflict", className: "text-red", icon: AlertTriangle },
-  error: { label: "Save failed", className: "text-red", icon: WifiOff }
-}
 
 /**
  * The plan workspace body: one Notion-style Tiptap document. The whole plan —
@@ -113,16 +99,6 @@ export function PlanEditor({
   targetStageId?: string | null
   onTargetStageConsumed?: () => void
 }) {
-  const transient =
-    transientState === "composing"
-      ? { label: "Composing", className: "text-blue", icon: RefreshCw }
-      : transientState === "validating"
-        ? { label: "Validating", className: "text-blue", icon: RefreshCw }
-        : transientState === "promoting"
-          ? { label: "Loading revision", className: "text-blue", icon: RefreshCw }
-          : null
-  const sync = transient ?? SYNC[state]
-  const SyncIcon = sync.icon
   const [outline, setOutline] = useState<ReadonlyArray<PlanDocOutlineEntry>>([])
   const [viewport, setViewport] = useState<PlanDocViewport>({
     activeId: null,
@@ -166,49 +142,6 @@ export function PlanEditor({
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="pointer-events-none absolute right-3 top-3 z-20 flex items-center gap-2 rounded-lg border border-line bg-panel/90 px-2 py-1.5 shadow-sm backdrop-blur">
-        <Pill
-          tone={
-            transientState !== undefined
-              ? "blue"
-              : _document?.status === "done" || _document?.status === "approved"
-              ? "green"
-              : _document?.status === "needs-verification"
-                ? "yellow"
-                : "blue"
-          }
-          pulse={
-            transientState === "composing" ||
-            transientState === "validating" ||
-            _document?.status === "executing"
-          }
-        >
-          {transientState ?? _document?.status.replace("-", " ")}
-        </Pill>
-        {_document !== null && transientState === undefined && (
-          <span className="font-mono text-[10px] text-muted-foreground">
-            revision {_document.revision}
-          </span>
-        )}
-        <span
-          role="status"
-          aria-live="polite"
-          className={cn(
-            "flex items-center gap-1.5 text-[10.5px] font-medium",
-            sync.className
-          )}
-        >
-          <SyncIcon
-            className={cn(
-              "size-3.5",
-              (transientState !== undefined || state === "saving") &&
-                "animate-spin"
-            )}
-          />
-          {sync.label}
-        </span>
-      </div>
-
       {transientState === undefined && state === "conflict" && remote ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex flex-wrap items-center gap-2 border-b border-red/30 bg-red/5 px-4 py-3">
@@ -305,6 +238,7 @@ export function PlanEditor({
       )}
       <PlanFloatingActions
         status={_document?.status}
+        revision={_document?.revision}
         syncState={state}
         transientState={transientState}
         canApprove={canApprove}

@@ -42,8 +42,15 @@ import { PreviewDockView } from "./preview-dock-view.js"
 import { usePreviewDock } from "./use-preview-dock.js"
 import { useSessionActivities } from "./session-activity.js"
 import { useSessionDiffs } from "./diff-presence.js"
-import { usePlanSessions } from "./plan-presence.js"
+import {
+  clearPlanAutoPresentation,
+  usePlanSessions
+} from "./plan-presence.js"
 import { disposeConversationActor } from "./conversation-registry.js"
+import {
+  flushPlanDocument,
+  stopPlanDocument
+} from "./plan-document-registry.js"
 import { clearDraft } from "./draft-store.js"
 import { clearViewedPaths } from "./viewed-store.js"
 import { onSessionUpdate } from "./session-updates.js"
@@ -404,10 +411,13 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     const chatIds = sessions
       .find((session) => session.id === sessionId)
       ?.chats.map((chat) => chat.id) ?? []
+    await flushPlanDocument(sessionId).catch(() => {})
     await rpc.sessionsDelete(sessionId)
     // Stop the persistent conversation actor for a deleted session (it's kept
     // running across session switches, so it won't be torn down by unmount).
     disposeConversationActor(sessionId)
+    clearPlanAutoPresentation(sessionId)
+    stopPlanDocument(sessionId)
     // Same reasoning for the composer draft — it outlives the pane by design, so
     // nothing else would ever collect it (and it's persisted).
     for (const chatId of chatIds) clearDraft(chatId)

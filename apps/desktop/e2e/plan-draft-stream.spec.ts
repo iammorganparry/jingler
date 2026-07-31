@@ -10,7 +10,6 @@ import {
 
 const composerPlaceholder = /Message .+…/
 const transientStatus = /Composing|Validating/
-const planRevision = /^revision \d+$/
 
 const session = (
   id: string
@@ -80,6 +79,87 @@ test("a streamed plan opens beside chat, stays read-only, and promotes in place"
   await expect(
     window.locator('[data-stream-editor="same-instance"]')
   ).toBeVisible()
-  await expect(window.getByText(planRevision, { exact: true })).toBeVisible()
   await expect(window.getByTestId("plan-floating-actions")).toBeVisible()
+})
+
+test("later plan drafts respect a split the operator closed", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session("s_plan_split_preference")
+  })
+  const { window } = launched
+  await expect(appShell(window)).toBeVisible()
+  const planFile = join(
+    planDirectory(launched.home, launched.repoPath),
+    "current-plan.html"
+  )
+  const composer = window.getByPlaceholder(composerPlaceholder)
+
+  await composer.fill("[[plan]] [[stream-plan]] refactor auth")
+  await composer.press("Enter")
+  await expect(window.getByTestId("plan-split-column")).toBeVisible()
+  await expect.poll(() => existsSync(planFile), { timeout: 20_000 }).toBe(true)
+
+  await window
+    .getByRole("button", { name: "Split plan beside conversation" })
+    .click()
+  await expect(window.getByTestId("plan-split-column")).toHaveCount(0)
+
+  // A new chat owns a fresh conversation actor and therefore emits its own
+  // first-draft nonce. Auto-presentation is session-scoped, so that new actor
+  // must not override the split preference established above.
+  await window.getByRole("button", { name: "New chat" }).click()
+  const nextComposer = window.getByPlaceholder(composerPlaceholder)
+  await nextComposer.fill("[[plan]] [[stream-plan]] revise auth")
+  await nextComposer.press("Enter")
+  await expect(
+    window.getByRole("group", { name: "Plan approval options" })
+  ).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByTestId("plan-split-column")).toHaveCount(0)
+
+  await window
+    .getByRole("button", { name: "Split plan beside conversation" })
+    .click()
+  await expect(window.getByTestId("plan-split-column")).toBeVisible()
+})
+
+test("a closed plan split stays closed after an app restart", async ({
+  launchApp
+}) => {
+  const first = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session("s_restarted_plan_split_preference")
+  })
+  await expect(appShell(first.window)).toBeVisible()
+  const composer = first.window.getByPlaceholder(composerPlaceholder)
+
+  await composer.fill("[[plan]] [[stream-plan]] refactor auth")
+  await composer.press("Enter")
+  await expect(first.window.getByTestId("plan-split-column")).toBeVisible()
+  await first.window
+    .getByRole("button", { name: "Split plan beside conversation" })
+    .click()
+  await expect(first.window.getByTestId("plan-split-column")).toHaveCount(0)
+  await first.app.close()
+
+  const reopened = await launchApp({
+    home: first.home,
+    reposDir: first.reposDir,
+    userDataDir: first.userDataDir,
+    configured: true,
+    withRepo: true
+  })
+  await expect(appShell(reopened.window)).toBeVisible()
+  const nextComposer = reopened.window.getByPlaceholder(composerPlaceholder)
+  await nextComposer.fill("[[plan]] [[stream-plan]] revise auth")
+  await nextComposer.press("Enter")
+
+  await expect(
+    reopened.window.getByRole("group", { name: "Plan approval options" })
+  ).toBeVisible({ timeout: 20_000 })
+  await expect(reopened.window.getByTestId("plan-split-column")).toHaveCount(0)
 })

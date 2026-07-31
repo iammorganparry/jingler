@@ -28,17 +28,18 @@ import type {
   StreamEvent,
   WorkerActivity
 } from "@jingler/core"
-import { GitError } from "@jingler/core"
+import { GitError, planStageSemanticFingerprint } from "@jingler/core"
 import { appPathsFor, fakeCommandExecutor } from "@jingler/cli-adapters/test-support"
 import { NodeContext } from "@effect/platform-node"
 import type { CommandExecutor } from "@effect/platform"
-import { Chunk, Effect, Either, Fiber, Layer, Logger, Stream } from "effect"
+import { Chunk, Deferred, Effect, Either, Fiber, Layer, Logger, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { DialogService } from "./dialog.js"
 import {
   chooseReposDir,
   configGet,
   createTerminal,
+  executeOrchestration,
   githubDetectPr,
   githubSubmitReview,
   githubPr,
@@ -65,6 +66,7 @@ import {
   sessionDiff,
   skillsList,
   watchOrchestrationWorkers,
+  workerSessionSpecForAssignment,
   workspaceRevertFile,
   withoutAttachmentData,
   workspaceRevertLines
@@ -847,7 +849,8 @@ describe("RPC handlers", () => {
               agentId: "worker-auth",
               cli: "claude",
               model: "opus",
-              reason: "Test route"
+              reason: "Test route",
+              reasoning: { enabled: true, effort: "max" }
             },
             executionStatus: "running"
           },
@@ -898,7 +901,11 @@ describe("RPC handlers", () => {
       mode: "replace",
       workers: [
         {
-          worker: { agentId: "worker-auth", harness: "claude" },
+          worker: {
+            agentId: "worker-auth",
+            harness: "claude",
+            reasoning: { enabled: true, effort: "max" }
+          },
           status: "interrupted"
         },
         {
@@ -907,6 +914,226 @@ describe("RPC handlers", () => {
         }
       ]
     })
+  })
+
+  it("launches workers with the exact reasoning route from their compiled assignment", () => {
+    const base = {
+      repo: "widget",
+      branch: "feature",
+      cwd: "/worktree",
+      prompt: "Execute stage 01",
+      images: [],
+      binPath: "/bin/codex",
+      mode: "auto" as const,
+      resumeId: null
+    }
+    const explicit = workerSessionSpecForAssignment(
+      {
+        agentId: "worker-core",
+        cli: "codex",
+        model: "gpt-5.6-sol",
+        reason: "High complexity.",
+        reasoning: { enabled: true, effort: "xhigh" }
+      },
+      base
+    )
+    const disabled = workerSessionSpecForAssignment(
+      {
+        agentId: "worker-core",
+        cli: "claude",
+        model: "opus",
+        reason: "Mechanical work.",
+        reasoning: { enabled: false }
+      },
+      { ...base, binPath: "/bin/claude" }
+    )
+    const providerDefault = workerSessionSpecForAssignment(
+      {
+        agentId: "worker-core",
+        cli: "codex",
+        model: "gpt-5.6-sol",
+        reason: "Use provider defaults."
+      },
+      base
+    )
+
+    expect(explicit).toMatchObject({
+      cli: "codex",
+      model: "gpt-5.6-sol",
+      thinkingEnabled: true,
+      reasoningEffort: "xhigh"
+    })
+    expect(disabled).toMatchObject({
+      cli: "claude",
+      model: "opus",
+      thinkingEnabled: false
+    })
+    expect(disabled).not.toHaveProperty("reasoningEffort")
+    expect(providerDefault).not.toHaveProperty("thinkingEnabled")
+    expect(providerDefault).not.toHaveProperty("reasoningEffort")
+  })
+
+  it("drains work queued by a mid-run amendment without polling or duplicate execution", async () => {
+    const now = "2026-07-31T12:00:00.000Z"
+    const sessionId = "session-amendment-drain"
+    const chatId = "chat-amendment-drain"
+    const planId = "plan-amendment-drain"
+    const worktreePath = join(dir, "amendment-worktree")
+    mkdirSync(worktreePath, { recursive: true })
+    mkdirSync(root, { recursive: true })
+    writeFileSync(
+      join(root, "sessions.json"),
+      JSON.stringify([
+        {
+          id: sessionId,
+          repo: "widget",
+          branch: "jingler/widget",
+          title: "Widget",
+          status: "idle",
+          cli: "codex",
+          diff: { added: 0, removed: 0 },
+          prNumber: null,
+          costUsd: 0,
+          tokens: 0,
+          updatedAt: now,
+          worktreePath,
+          chats: [
+            {
+              id: chatId,
+              title: null,
+              role: "orchestrator",
+              createdAt: now,
+              updatedAt: now
+            }
+          ],
+          activeChatId: chatId
+        }
+      ])
+    )
+
+    const stageHtml = (id: string, agentId: string, file: string) => `
+<section data-stage="${id}" data-title="Stage ${id}" data-depends-on="" data-complexity="medium" data-execution-status="queued">
+<h3>Intent</h3><p>Execute stage ${id}.</p>
+<h3>Approach</h3><ol><li>Implement it.</li></ol>
+<ul data-files><li>${file}</li></ul>
+<div data-assignment="${agentId}" data-agent-id="${agentId}" data-cli="codex" data-model="gpt-5.6-terra" data-reason="Medium complexity." data-status="queued"></div>
+<div data-acceptance="${id}.1" data-status="pending">Stage ${id} is verified.</div>
+</section>`
+    const source = (includeAmendment: boolean) =>
+      `<h1>PRD: Amendment drain</h1>${stageHtml("01", "agent-01", "src/one.ts")}${
+        includeAmendment
+          ? stageHtml("02", "agent-02", "src/two.ts")
+          : ""
+      }`
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const firstStarted = yield* Deferred.make<void>()
+        const releaseFirst = yield* Deferred.make<void>()
+        const executed: Array<ReadonlyArray<string>> = []
+        let calls = 0
+        const orchestration = OrchestrationService.make({
+          execute: (input) =>
+            Effect.gen(function* () {
+              calls += 1
+              if (calls === 1) {
+                yield* Deferred.succeed(firstStarted, undefined)
+                yield* Deferred.await(releaseFirst)
+              }
+              const completed = new Set(
+                (input.checkpoints ?? []).flatMap(
+                  (checkpoint) => checkpoint.completedStageIds
+                )
+              )
+              const pending = input.stages.filter(
+                (stage) => !completed.has(stage.id)
+              )
+              executed.push(pending.map((stage) => stage.id))
+              for (const stage of pending) {
+                yield* input.callbacks?.onStageState?.({
+                  sessionId: input.sessionId,
+                  planId: input.planId,
+                  agentId: stage.assignment!.agentId,
+                  stageId: stage.id,
+                  status: "completed",
+                  message: null,
+                  stageFingerprint: planStageSemanticFingerprint(stage)
+                }) ?? Effect.void
+              }
+              return {
+                planId: input.planId,
+                planRevision: input.planRevision,
+                workers: pending.map((stage) => ({
+                  agentId: stage.assignment!.agentId,
+                  ownerId: `owner-${stage.id}`,
+                  status: "completed" as const,
+                  completedStageIds: [stage.id],
+                  resumeId: null,
+                  message: null,
+                  evidence: [],
+                  attempt: 1
+                }))
+              }
+            }),
+          stopWorker: () => Effect.void,
+          stopSession: () => Effect.void,
+          isPlanRunning: () => Effect.succeed(false),
+          planParticipants: () => Effect.succeed([]),
+          steerPlanParticipant: () =>
+            Effect.succeed({
+              status: "unavailable" as const,
+              detail: "No live participant."
+            }),
+          watch: () => Stream.empty,
+          activityFeedCount: () => Effect.succeed(0)
+        })
+        const discovery = DiscoveryService.make({
+          list: () => Effect.succeed([])
+        })
+        const services = Layer.mergeAll(
+          SessionStore.Default,
+          PlanStore.Default,
+          Layer.succeed(OrchestrationService, orchestration),
+          Layer.succeed(DiscoveryService, discovery),
+          fakeCommandExecutor(() => ({ exitCode: 0, stdout: "" }))
+        ).pipe(Layer.provideMerge(base))
+
+        return yield* Effect.gen(function* () {
+          const initial = yield* PlanStore.promoteDocument(worktreePath, {
+            sessionId,
+            producingChatId: chatId,
+            id: planId,
+            source: source(false),
+            status: "executing",
+            author: "agent"
+          })
+          const execution = yield* executeOrchestration(sessionId, planId).pipe(
+            Effect.fork
+          )
+          yield* Deferred.await(firstStarted)
+          yield* PlanStore.updateDocument(worktreePath, {
+            planId,
+            baseRevision: initial.revision,
+            source: source(true),
+            author: "agent",
+            reconcile: true
+          })
+          yield* Deferred.succeed(releaseFirst, undefined)
+          yield* Fiber.join(execution)
+          const document = yield* PlanStore.readDocument(
+            worktreePath,
+            sessionId,
+            chatId
+          )
+          return { calls, executed, document }
+        }).pipe(Effect.provide(services))
+      })
+    )
+
+    expect(result.calls).toBe(2)
+    expect(result.executed).toEqual([["01"], ["02"]])
+    expect(result.document?.projection.stages.map((stage) => stage.executionStatus))
+      .toEqual(["completed", "completed"])
   })
 
   it("watches the requested worker scope without starting execution", async () => {

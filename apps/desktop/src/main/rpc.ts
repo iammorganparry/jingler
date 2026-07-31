@@ -97,6 +97,7 @@ import type {
   PlanDocument,
   PlanMentionDelivery,
   PlanParticipant,
+  PlanStageAssignment,
   PluginCatalog,
   PrMergeMethod,
   ProviderConfig,
@@ -112,7 +113,8 @@ import type {
 import type {
   OrchestrationCheckpoint,
   OrchestrationExecutionReport,
-  OrchestrationStageStatus
+  OrchestrationStageStatus,
+  SessionSpec
 } from "@jingler/cli-adapters"
 import { JinglerRpcs } from "@jingler/contracts"
 import { AppPaths } from "@jingler/cli-adapters"
@@ -1018,6 +1020,9 @@ export const restoredOrchestrationSnapshot = (
           stageIds: group.stages.map((stage) => stage.id),
           harness: group.assignment.cli,
           model: group.assignment.model,
+          ...(group.assignment.reasoning === undefined
+            ? {}
+            : { reasoning: group.assignment.reasoning }),
           attempt: checkpoint.attempt
         },
         status: checkpoint.state,
@@ -1036,12 +1041,50 @@ export const restoredOrchestrationSnapshot = (
   }
 }
 
+/**
+ * Apply a compiled assignment's complete execution route to a worker launch.
+ * An absent reasoning setting deliberately omits both fields so the harness
+ * retains its provider/model default.
+ */
+export const workerSessionSpecForAssignment = (
+  assignment: PlanStageAssignment,
+  base: Omit<
+    SessionSpec,
+    "cli" | "model" | "thinkingEnabled" | "reasoningEffort"
+  >
+): SessionSpec => ({
+  ...base,
+  cli: assignment.cli,
+  model: assignment.model,
+  ...(assignment.reasoning === undefined
+    ? {}
+    : {
+        thinkingEnabled: assignment.reasoning.enabled,
+        ...(assignment.reasoning.effort === undefined
+          ? {}
+          : { reasoningEffort: assignment.reasoning.effort })
+      })
+})
+
 export const orchestrationStagesCompleted = (
   document: PlanDocument | null
 ): boolean =>
   document !== null &&
   document.projection.stages.every(
     (stage) => stage.executionStatus === "completed"
+  )
+
+const queuedOrchestrationFingerprints = (
+  document: PlanDocument
+): ReadonlySet<string> =>
+  new Set(
+    document.projection.stages.flatMap((stage) =>
+      stage.assignment !== null &&
+      stage.assignment !== undefined &&
+      stage.executionStatus === "queued"
+        ? [`${stage.id}\u0000${planStageSemanticFingerprint(stage)}`]
+        : []
+    )
   )
 
 const canonicalPlanForSession = (session: Session, planId: string) =>
@@ -1126,13 +1169,6 @@ export const executeOrchestration = (
     )
     if (session?.worktreePath == null) return null
     const worktreePath = session.worktreePath
-    const document = yield* PlanStore.readDocument(
-      worktreePath,
-      session.id,
-      session.activeChatId
-    )
-    if (document === null || document.id !== planId) return null
-
     const clis = yield* DiscoveryService.list().pipe(
       Effect.orElseSucceed(() => [])
     )
@@ -1142,14 +1178,21 @@ export const executeOrchestration = (
     const persistence = yield* Effect.context<
       FileSystem.FileSystem | Path.Path | AppPaths
     >()
-    const checkpoints = yield* store
-      .readOrchestrationCheckpoints(worktreePath, planId)
-      .pipe(Effect.provide(persistence))
-    const currentCheckpoints =
-      mergeCanonicalOrchestrationCheckpoints(document, checkpoints)
+    let latestReport: OrchestrationExecutionReport | null = null
+    while (true) {
+      const document = yield* store
+        .readDocument(worktreePath, session.id, session.activeChatId)
+        .pipe(Effect.provide(persistence))
+      if (document === null || document.id !== planId) return latestReport
+      const queuedBefore = queuedOrchestrationFingerprints(document)
+      const checkpoints = yield* store
+        .readOrchestrationCheckpoints(worktreePath, planId)
+        .pipe(Effect.provide(persistence))
+      const currentCheckpoints =
+        mergeCanonicalOrchestrationCheckpoints(document, checkpoints)
 
-    const report = yield* service
-      .execute({
+      const report = yield* service
+        .execute({
         sessionId,
         planId,
         producingChatId: document.producingChatId,
@@ -1158,18 +1201,17 @@ export const executeOrchestration = (
         checkpoints: currentCheckpoints,
         maxConcurrency: 4,
         ...(agentIds === undefined ? {} : { agentIds }),
-        makeSessionSpec: ({ group, prompt, resumeId }) => ({
-          cli: group.assignment.cli,
-          repo: session.repo,
-          branch: session.branch,
-          cwd: worktreePath,
-          prompt,
-          images: [],
-          binPath: binByCli.get(group.assignment.cli) ?? null,
-          mode: "auto",
-          model: group.assignment.model,
-          resumeId
-        }),
+        makeSessionSpec: ({ group, prompt, resumeId }) =>
+          workerSessionSpecForAssignment(group.assignment, {
+            repo: session.repo,
+            branch: session.branch,
+            cwd: worktreePath,
+            prompt,
+            images: [],
+            binPath: binByCli.get(group.assignment.cli) ?? null,
+            mode: "auto",
+            resumeId
+          }),
         refreshStage: (_agentId, stageId) =>
           store
             .readDocument(worktreePath, session.id, session.activeChatId)
@@ -1229,43 +1271,54 @@ export const executeOrchestration = (
                 Effect.mapError(orchestrationPersistenceError)
               )
         }
-      })
-      .pipe(Effect.either)
+        })
+        .pipe(Effect.either)
 
-    if (report._tag === "Left") {
-      if (report.left._tag === "OrchestrationAlreadyRunningError") {
-        yield* Effect.logWarning(report.left.message)
-        return null
-      }
-      yield* recordOrchestrationFailure(
-        sessionId,
-        planId,
-        report.left.message
-      ).pipe(
-        Effect.catchAllCause((cause) =>
-          Effect.logError(
-            `Could not persist orchestration failure for ${planId}: ${String(cause)}`
+      if (report._tag === "Left") {
+        if (report.left._tag === "OrchestrationAlreadyRunningError") {
+          yield* Effect.logWarning(report.left.message)
+          return latestReport
+        }
+        yield* recordOrchestrationFailure(
+          sessionId,
+          planId,
+          report.left.message
+        ).pipe(
+          Effect.catchAllCause((cause) =>
+            Effect.logError(
+              `Could not persist orchestration failure for ${planId}: ${String(cause)}`
+            )
           )
         )
-      )
-      yield* Effect.logError(
-        `Could not execute orchestration ${planId}: ${report.left.message}`
-      )
-      return null
-    }
+        yield* Effect.logError(
+          `Could not execute orchestration ${planId}: ${report.left.message}`
+        )
+        return latestReport
+      }
+      latestReport = report.right
 
-    const latest = yield* store
-      .readDocument(worktreePath, session.id, session.activeChatId)
-      .pipe(Effect.provide(persistence))
-    yield* store
-      .settleOrchestration(worktreePath, {
-        planId,
-        workersCompleted:
-          latest?.id === planId &&
-          orchestrationStagesCompleted(latest)
-      })
-      .pipe(Effect.provide(persistence))
-    return report.right
+      const latest = yield* store
+        .readDocument(worktreePath, session.id, session.activeChatId)
+        .pipe(Effect.provide(persistence))
+      const queuedAfter =
+        latest?.id === planId
+          ? queuedOrchestrationFingerprints(latest)
+          : new Set<string>()
+      const amendmentQueuedWork =
+        agentIds === undefined &&
+        [...queuedAfter].some((fingerprint) => !queuedBefore.has(fingerprint))
+      if (amendmentQueuedWork) continue
+
+      yield* store
+        .settleOrchestration(worktreePath, {
+          planId,
+          workersCompleted:
+            latest?.id === planId &&
+            orchestrationStagesCompleted(latest)
+        })
+        .pipe(Effect.provide(persistence))
+      return latestReport
+    }
   }).pipe(
     Effect.catchAllCause((cause) =>
       recordOrchestrationFailure(sessionId, planId, String(cause)).pipe(
@@ -1332,11 +1385,14 @@ export const watchOrchestrationWorkers = (
  * — with no approval gate. This is the auto-dispatch half of "amend in place":
  * the runner applies the amendment to the canonical document (reconciled, kept
  * in the executing lane), and this fires only when that document is an
- * approved/executing orchestration plan, not already running, with at least one
- * queued assigned stage — precisely the state an in-turn amendment leaves. A
- * plain answer queues nothing, so nothing dispatches. `executeOrchestration`
- * merges checkpoints, so already-completed stages are skipped and only the
- * requeued/new workers run.
+ * approved/executing orchestration plan with at least one queued assigned stage
+ * — precisely the state an in-turn amendment leaves. When existing workers are
+ * still settling, that owning execution re-reads the canonical plan after its
+ * worker lifecycle settles and drains newly queued work. A competing dispatch
+ * loses the service's atomic plan claim and exits immediately; there is no
+ * detached polling scheduler. A plain answer queues nothing, so nothing
+ * dispatches. `executeOrchestration` merges checkpoints, so already-completed
+ * stages are skipped and only the requeued/new workers run.
  */
 const dispatchPendingOrchestration = (sessionId: string, chatId: string) =>
   Effect.gen(function* () {
@@ -1354,20 +1410,15 @@ const dispatchPendingOrchestration = (sessionId: string, chatId: string) =>
     if (
       document === null ||
       !planUsesOrchestration(session, document) ||
-      !["approved", "executing", "needs-verification"].includes(document.status)
+      !["approved", "executing", "needs-verification"].includes(document.status) ||
+      queuedOrchestrationFingerprints(document).size === 0
     ) {
       return
     }
-    const hasQueuedWork = document.projection.stages.some(
-      (stage) =>
-        stage.assignment !== null &&
-        stage.assignment !== undefined &&
-        stage.executionStatus === "queued"
+    yield* executeOrchestration(sessionId, document.id).pipe(
+      Effect.forkDaemon
     )
-    if (!hasQueuedWork) return
-    if (yield* OrchestrationService.isPlanRunning(sessionId, document.id)) return
-    yield* executeOrchestration(sessionId, document.id).pipe(Effect.forkDaemon)
-  })
+  }).pipe(Effect.asVoid)
 
 /** Resolve a session only when it has an active pull request. */
 const sessionWithPr = (sessionId: string) =>
@@ -2575,21 +2626,32 @@ const HandlersLayer = JinglerRpcs.toLayer({
   // renderer subscribes to normalized events, harness-agnostic.
   "Agent.run": ({ sessionId, chatId, text, images, reasoning }) =>
     Stream.unwrap(
-      Effect.map(AgentRunner, (runner) =>
-        runner
+      Effect.map(AgentRunner, (runner) => {
+        let amendmentApplied = false
+        return runner
           .prompt(sessionId, chatId, text, images ?? [], reasoning)
-          // After the turn settles, dispatch any workers an in-turn plan
-          // amendment requeued — no approval gate. Emits nothing to the stream.
           .pipe(
+            Stream.tap((event) =>
+              Effect.sync(() => {
+                if (event._tag === "PlanUpdated") amendmentApplied = true
+              })
+            ),
+            // `PlanUpdated` is the observable applied-amendment tag. Only that
+            // outcome can have requeued work; not-present, invalid, and conflict
+            // turns must not probe or dispatch orchestration after settling.
             Stream.concat(
               Stream.drain(
                 Stream.fromEffect(
-                  dispatchPendingOrchestration(sessionId, chatId)
+                  Effect.suspend(() =>
+                    amendmentApplied
+                      ? dispatchPendingOrchestration(sessionId, chatId)
+                      : Effect.void
+                  )
                 )
               )
             )
           )
-      )
+      })
     ),
   "Agent.decideGate": ({ sessionId, chatId, gateId, decision }) =>
     Effect.flatMap(AgentRunner, (runner) =>

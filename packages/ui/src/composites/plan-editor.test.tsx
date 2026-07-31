@@ -3,6 +3,7 @@ import type { PlanDocument } from "@jingler/core"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { PlanEditor } from "./plan-editor.js"
+import { planAssignmentReasoningLabel } from "./plan-doc/plan-stage-node.js"
 
 const source = `<h1>PRD: Interactive plan</h1>
 <h2>Context</h2>
@@ -62,8 +63,23 @@ describe("PlanEditor", () => {
     expect(screen.getByText("PRD: Interactive plan")).toBeTruthy()
     expect(screen.getByText("Typing is persisted.")).toBeTruthy()
     expect(screen.getByRole("status").textContent).toContain("Synced")
-    expect(screen.getByTestId("plan-floating-actions").className).toContain("bottom-4")
-    expect(screen.getByTestId("plan-floating-actions").className).toContain("absolute")
+    const dock = screen.getByTestId("plan-floating-actions")
+    expect(dock.className).toContain("bottom-4")
+    expect(dock.className).toContain("absolute")
+    expect(within(dock).getByText("proposed")).toBeTruthy()
+    expect(within(dock).getByText("revision 3")).toBeTruthy()
+    expect(within(dock).getByRole("status").textContent).toContain("Synced")
+    expect(screen.getAllByRole("status")).toHaveLength(1)
+  })
+
+  it("labels explicit and provider-default assignment reasoning", () => {
+    expect(planAssignmentReasoningLabel("true", "high")).toBe(
+      "Reasoning: high"
+    )
+    expect(planAssignmentReasoningLabel("false", null)).toBe("Reasoning: off")
+    expect(planAssignmentReasoningLabel(null, null)).toBe(
+      "Reasoning: provider default"
+    )
   })
 
   it("shows the conflict banner with both revisions when state is conflict", () => {

@@ -11,7 +11,7 @@ import type {
   PlanStepCode
 } from "@jingler/core"
 import {
-  applyWorkerRoutingToPlanHtml,
+  compileOrchestrationPlanHtml,
   DEFAULT_PLAN_TEMPLATE_HTML,
   PLAN_EVIDENCE_INSTRUCTIONS,
   type WorkerRoutingConfig
@@ -84,7 +84,7 @@ export const planInstructions = (
   channel: PlanChannel,
   template: string = DEFAULT_PLAN_TEMPLATE_HTML,
   orchestration?: ReadonlyArray<OrchestrationRoute>,
-  workerRouting?: WorkerRoutingConfig
+  _workerRouting?: WorkerRoutingConfig
 ): string =>
   `${OPENING[channel]} Jingler renders the HTML as an interactive PRD in a Notion-style editor.
 
@@ -97,41 +97,15 @@ ${orchestration === undefined
   : `ORCHESTRATOR PROCEDURE — the planning harness never implements an approved plan.
 Jingler hands approved stages to provider-neutral worker agents.
 - Every executable stage MUST declare data-complexity="low|medium|high".
-- Every executable stage MUST contain exactly one data-assignment child with
-  data-agent-id, data-cli, data-model, data-reason, and data-status="queued".
 - Use data-depends-on="stage-id ..." for dependencies.
-- Stages connected by any dependency path MUST share one agent id, harness, and model.
 - Every stage MUST include <ul data-files>. List each repository-relative path it may
   edit, normalized without "." or ".."; use an empty <ul data-files></ul> only when
   the stage cannot edit repository files. Undeclared stages are serialized together.
-- Stages whose declared files overlap MUST share one agent id, harness, and model even
-  when they have no dependency edge. Give only dependency- and file-independent
-  components distinct agent ids so they can run in parallel.
 - Use stable stage and acceptance ids across amendments. Do not mark criteria passed or
   add evidence: workers own mechanical progress and PLAN_RESULT evidence.
-- Assign only these installed routes:
-${orchestration
-  .flatMap((provider) =>
-    provider.models.map((model) => `  - ${provider.cli}/${model.id}`)
-  )
-  .join("\n")}
-${workerRouting === undefined
-  ? ""
-  : `
-- Route each dependency/file component by its strongest stage complexity:
-  - low: ${workerRouting.low.cli}/${workerRouting.low.model}
-  - medium: ${workerRouting.medium.cli}/${workerRouting.medium.model}
-  - high: ${workerRouting.high.cli}/${workerRouting.high.model}
-  - default fallback: ${workerRouting.default.cli}/${workerRouting.default.model}
-- These operator settings are authoritative. Jingler normalizes assignments to them
-  before approval, so explain the routed choice in data-reason rather than substituting
-  another model.
-`}
-
-Assignment child example:
-<div data-assignment="worker-api" data-agent-id="worker-api" data-cli="codex"
-data-model="gpt-5.6-sol" data-reason="High-complexity implementation"
-data-status="queued"></div>
+- Do NOT add data-assignment elements, agent ids, harnesses, models, reasoning, or
+  execution statuses. Jingler deterministically compiles dependency/file components,
+  preserves stable worker identities across amendments, and applies operator routing.
 
 `}
 Return one four-backtick fenced HTML block containing the COMPLETE PRD as HTML.
@@ -212,6 +186,16 @@ export interface HtmlPlanSubmission {
 }
 
 /**
+ * Explicit reply-channel handoff used when an orchestrator deliberately chooses
+ * delegation without entering a provider-native plan mode. A plan fence alone
+ * is content and may legitimately appear in an explanation or review.
+ */
+export const ORCHESTRATOR_PLAN_SUBMISSION_MARKER =
+  "<!-- jingler:submit-plan -->"
+
+export const ORCHESTRATOR_PLAN_HTML_REFORMAT = `${PLAN_HTML_REFORMAT} Start the reply with exactly ${ORCHESTRATOR_PLAN_SUBMISSION_MARKER} on its own line to resubmit it.`
+
+/**
  * Find every complete, structurally valid HTML plan submission.
  *
  * `html` is the canonical CommonMark info string. `html plan` remains accepted
@@ -223,7 +207,7 @@ export interface HtmlPlanSubmission {
  * outer block makes the returned ranges disjoint and prevents a nested
  * triple-backtick HTML example from becoming a top-level candidate.
  */
-const completeHtmlPlanSubmissions = (
+export const completeHtmlPlanSubmissions = (
   raw: string
 ): ReadonlyArray<HtmlPlanSubmission> => {
   const found: Array<HtmlPlanSubmission> = []
@@ -256,21 +240,16 @@ const htmlPlanSubmissions = (
 ): ReadonlyArray<HtmlPlanSubmission> =>
   completeHtmlPlanSubmissions(raw).filter(({ body }) => parsePlanHtml(body).valid)
 
-const routedHtmlPlanSubmission = (
+const compiledHtmlPlanSubmission = (
   raw: string,
   workerRouting: WorkerRoutingConfig
 ): { readonly submission: HtmlPlanSubmission; readonly html: string } | null => {
   for (const submission of completeHtmlPlanSubmissions(raw)) {
-    const structural = parsePlanHtml(submission.body, {
-      validateExecutionGraph: false
-    })
-    if (!structural.valid) continue
-    const html = applyWorkerRoutingToPlanHtml(
-      structural.html,
-      structural.projection.stages,
+    const compiled = compileOrchestrationPlanHtml(
+      submission.body,
       workerRouting
     )
-    if (parsePlanHtml(html).valid) return { submission, html }
+    if (compiled.valid) return { submission, html: compiled.html }
   }
   return null
 }
@@ -286,7 +265,28 @@ export const fencedHtmlPlanSubmission = (
 ): HtmlPlanSubmission | null =>
   workerRouting === undefined
     ? htmlPlanSubmissions(raw)[0] ?? null
-    : routedHtmlPlanSubmission(raw, workerRouting)?.submission ?? null
+    : compiledHtmlPlanSubmission(raw, workerRouting)?.submission ?? null
+
+export const orchestratorPlanSubmission = (
+  raw: string
+): HtmlPlanSubmission | null => {
+  const markerEnd = raw.indexOf(ORCHESTRATOR_PLAN_SUBMISSION_MARKER)
+  if (markerEnd < 0 || raw.slice(0, markerEnd).trim().length > 0) return null
+  // Intent and validity are separate concerns. A complete canonical transport
+  // with the explicit marker is a deliberate submission even when its HTML is
+  // malformed; the adapter must intercept that reply so it can request the one
+  // bounded reformat retry instead of leaking it into ordinary chat.
+  const submission = completeHtmlPlanSubmissions(raw)[0] ?? null
+  if (submission === null) return null
+  const between = raw.slice(
+    markerEnd + ORCHESTRATOR_PLAN_SUBMISSION_MARKER.length,
+    submission.start
+  )
+  return between.trim().length === 0 ? submission : null
+}
+
+export const hasOrchestratorPlanSubmission = (raw: string): boolean =>
+  orchestratorPlanSubmission(raw) !== null
 
 export const fencedHtmlPlan = (raw: string): string | null =>
   fencedHtmlPlanSubmission(raw)?.body ?? null
@@ -636,9 +636,9 @@ export const parsePlan = (
   workerRouting?: WorkerRoutingConfig
 ): Plan => {
   if (workerRouting !== undefined) {
-    const routed = routedHtmlPlanSubmission(raw, workerRouting)
-    if (routed !== null) {
-      const plan = planFromHtml(routed.html, id)
+    const compiled = compiledHtmlPlanSubmission(raw, workerRouting)
+    if (compiled !== null) {
+      const plan = planFromHtml(compiled.html, id)
       if (plan !== null) return plan
     }
   }

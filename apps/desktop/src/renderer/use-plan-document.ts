@@ -1,8 +1,8 @@
 import type { PlanDocument } from "@jingler/core"
 import type { PlanEditorSyncState } from "@jingler/ui"
-import { useMachine } from "@xstate/react"
-import { useCallback } from "react"
-import { planDocumentMachine } from "./plan-document-machine.js"
+import { useSelector } from "@xstate/react"
+import { useCallback, useMemo } from "react"
+import { getPlanDocumentActor } from "./plan-document-registry.js"
 import { rpc } from "./rpc-client.js"
 
 const listeners = new Map<string, Set<(document: PlanDocument) => void>>()
@@ -42,8 +42,8 @@ const subscribe = (
 }
 
 export function usePlanDocument(sessionId: string) {
-  const [snapshot, send] = useMachine(planDocumentMachine, {
-    input: {
+  const actor = useMemo(
+    () => getPlanDocumentActor(sessionId, {
       sessionId,
       load: () => rpc.planCurrent(sessionId),
       save: async ({ document, source }) => {
@@ -81,8 +81,10 @@ export function usePlanDocument(sessionId: string) {
       subscribe: (listener) => {
         return subscribe(sessionId, listener)
       }
-    }
-  })
+    }),
+    [sessionId]
+  )
+  const snapshot = useSelector(actor, (state) => state)
 
   // Create a blank draft from the template so the operator can start authoring a
   // plan for the agent before any run has proposed one. The created document
@@ -93,11 +95,11 @@ export function usePlanDocument(sessionId: string) {
       .then((document) => publish(sessionId, document))
       .catch(() => {})
   }, [sessionId])
-  const edit = useCallback((source: string) => send({ type: "EDIT", source }), [send])
-  const save = useCallback(() => send({ type: "SAVE_NOW" }), [send])
-  const retry = useCallback(() => send({ type: "RETRY" }), [send])
-  const keepLocal = useCallback(() => send({ type: "KEEP_LOCAL" }), [send])
-  const acceptRemote = useCallback(() => send({ type: "ACCEPT_REMOTE" }), [send])
+  const edit = useCallback((source: string) => actor.send({ type: "EDIT", source }), [actor])
+  const save = useCallback(() => actor.send({ type: "SAVE_NOW" }), [actor])
+  const retry = useCallback(() => actor.send({ type: "RETRY" }), [actor])
+  const keepLocal = useCallback(() => actor.send({ type: "KEEP_LOCAL" }), [actor])
+  const acceptRemote = useCallback(() => actor.send({ type: "ACCEPT_REMOTE" }), [actor])
   // Acceptance status + annotations are now edited in-document via the Tiptap
   // node views (they serialize to HTML through `edit`), so there is no separate
   // criterion/annotate helper here anymore.
@@ -127,6 +129,10 @@ export function usePlanDocument(sessionId: string) {
     acceptRemote,
     startDraft,
     synced: snapshot.matches("clean"),
-    canApprove: snapshot.matches("clean") && snapshot.context.document !== null
+    // Approval is only valid once the editor's visible draft is exactly the
+    // canonical source returned by a completed save (or remote revision).
+    canApprove:
+      snapshot.matches("clean") &&
+      snapshot.context.document?.source === snapshot.context.draft
   }
 }

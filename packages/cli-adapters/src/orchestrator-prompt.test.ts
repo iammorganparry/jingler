@@ -20,11 +20,35 @@ describe("orchestratorNote", () => {
     for (const note of notes) expect(note).toBe(notes[0])
   })
 
-  it("directs the agent to act directly on quick work and hand large work to workers", () => {
+  it("uses concrete direct and delegation signals instead of a size shortcut", () => {
     const note = orchestratorNote().toLowerCase()
-    expect(note).toContain("just do it")
-    expect(note).toContain("worker")
-    expect(note).toMatch(/hand/)
+    expect(note).toContain("one bounded outcome")
+    expect(note).toContain("delegation should earn its overhead")
+    expect(note).toContain("independent components")
+    expect(note).toContain("specialist")
+    expect(note).toContain("verification-heavy")
+    expect(note).toContain("changes an approved plan")
+    expect(note).not.toContain("quick or")
+    expect(note).not.toContain("larger or")
+  })
+
+  it("retains native capabilities and makes the orchestrator own delegated outcomes", () => {
+    const note = orchestratorNote().toLowerCase()
+    for (const capability of [
+      "editing",
+      "commands",
+      "skills",
+      "git/github",
+      "participant steering",
+      "communication"
+    ]) {
+      expect(note).toContain(capability)
+    }
+    expect(note).toContain("handoff transfers execution, not responsibility")
+    expect(note).toContain("monitor worker")
+    expect(note).toContain("retry only failed/changed components")
+    expect(note).toContain("integrate the result")
+    expect(note).toContain("report the final outcome yourself")
   })
 
   it("forbids re-requesting plan approval after the first plan", () => {

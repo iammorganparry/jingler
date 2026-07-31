@@ -13,6 +13,8 @@ const BOOT_THEME_CHANNEL = "jingler/boot-theme"
 // here so the preload doesn't import the main bundle).
 const PREVIEW_REVEAL_CHANNEL = "jingler/preview/reveal"
 const PREVIEW_URL_CHANNEL = "jingler/preview/url"
+const PLAN_FLUSH_REQUEST_CHANNEL = "jingler/plan-flush-request"
+const PLAN_FLUSH_COMPLETE_CHANNEL = "jingler/plan-flush-complete"
 
 /**
  * The active theme's `:root` block, fetched SYNCHRONOUSLY at preload time.
@@ -97,5 +99,11 @@ contextBridge.exposeInMainWorld("jingler", {
     const listener = (_event: Electron.IpcRendererEvent, url: string) => cb(url)
     ipcRenderer.on(PREVIEW_URL_CHANNEL, listener)
     return () => ipcRenderer.removeListener(PREVIEW_URL_CHANNEL, listener)
-  }
+  },
+  onPlanFlushRequested: (cb: () => void) => {
+    const listener = () => cb()
+    ipcRenderer.on(PLAN_FLUSH_REQUEST_CHANNEL, listener)
+    return () => ipcRenderer.removeListener(PLAN_FLUSH_REQUEST_CHANNEL, listener)
+  },
+  planFlushComplete: () => ipcRenderer.send(PLAN_FLUSH_COMPLETE_CHANNEL)
 })

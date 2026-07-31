@@ -2,6 +2,7 @@ import { Schema } from "effect"
 import { parse } from "node-html-parser"
 import { CliKind } from "./cli.js"
 import type { Plan } from "./conversation.js"
+import type { ReasoningEffort, ReasoningSetting } from "./domain.js"
 
 /**
  * Jingler's plan document is a deliberately small HTML dialect.
@@ -115,11 +116,82 @@ export type PlanStageComplexity = Schema.Schema.Type<typeof PlanStageComplexity>
 export const PlanWorkerCli = CliKind
 export type PlanWorkerCli = Schema.Schema.Type<typeof PlanWorkerCli>
 
+// Kept structurally identical to the shared session setting without importing
+// its runtime schema: `domain.ts` owns WorkspaceConfig and therefore already
+// imports this module for WorkerRoutingConfig.
+const WorkerReasoningSetting: Schema.Schema<ReasoningSetting> = Schema.Struct({
+  enabled: Schema.Boolean,
+  effort: Schema.optional(
+    Schema.Literal("minimal", "low", "medium", "high", "xhigh", "max")
+  )
+})
+
+export interface ProviderReasoningCapabilities {
+  /** Whether the harness accepts an explicit on/off thinking setting. */
+  readonly explicitToggle: boolean
+  /** Provider-native effort values in display order. */
+  readonly efforts: ReadonlyArray<ReasoningEffort>
+}
+
+const CODEX_REASONING_CAPABILITIES: ProviderReasoningCapabilities = {
+  explicitToggle: true,
+  efforts: ["minimal", "low", "medium", "high", "xhigh"]
+}
+
+/**
+ * Provider reasoning capabilities shared by config validation and every UI that
+ * offers reasoning controls. Undefined uses the Codex-compatible default that
+ * session controls historically show before a harness is selected.
+ */
+export const providerReasoningCapabilitiesFor = (
+  cli: PlanWorkerCli | undefined
+): ProviderReasoningCapabilities => {
+  switch (cli) {
+    case "claude":
+      return {
+        explicitToggle: true,
+        efforts: ["low", "medium", "high", "xhigh", "max"]
+      }
+    case "cursor":
+      return { explicitToggle: false, efforts: [] }
+    case "codex":
+    case "opencode":
+    case undefined:
+      return CODEX_REASONING_CAPABILITIES
+  }
+}
+
+/** Explain why an explicit reasoning setting cannot be sent to a harness. */
+export const workerReasoningSettingIssue = (
+  cli: PlanWorkerCli,
+  reasoning: ReasoningSetting | undefined
+): string | null => {
+  if (reasoning === undefined) return null
+  if (!reasoning.enabled && reasoning.effort !== undefined) {
+    return "disabled thinking cannot also select a reasoning effort"
+  }
+  const capabilities = providerReasoningCapabilitiesFor(cli)
+  if (!capabilities.explicitToggle) {
+    return "Cursor does not support an explicit reasoning setting"
+  }
+  if (reasoning.effort === undefined) return null
+  return capabilities.efforts.includes(reasoning.effort)
+    ? null
+    : `${cli} does not support reasoning effort "${reasoning.effort}"`
+}
+
 /** One concrete provider/model target selected by the worker router. */
 export const WorkerModelRoute = Schema.Struct({
   cli: PlanWorkerCli,
-  model: Schema.String
-})
+  model: Schema.String,
+  /** Absent means use the selected provider/model's own reasoning default. */
+  reasoning: Schema.optional(WorkerReasoningSetting)
+}).pipe(
+  Schema.filter(
+    (route) =>
+      workerReasoningSettingIssue(route.cli, route.reasoning) ?? true
+  )
+)
 export type WorkerModelRoute = Schema.Schema.Type<typeof WorkerModelRoute>
 
 /**
@@ -140,8 +212,15 @@ export const PlanStageAssignment = Schema.Struct({
   agentId: Schema.String,
   cli: PlanWorkerCli,
   model: Schema.String,
-  reason: Schema.String
-})
+  reason: Schema.String,
+  /** Absent on legacy plans and interpreted as the provider/model default. */
+  reasoning: Schema.optional(WorkerReasoningSetting)
+}).pipe(
+  Schema.filter(
+    (assignment) =>
+      workerReasoningSettingIssue(assignment.cli, assignment.reasoning) ?? true
+  )
+)
 export type PlanStageAssignment = Schema.Schema.Type<typeof PlanStageAssignment>
 
 /** Durable state written by the orchestration service as a worker progresses. */

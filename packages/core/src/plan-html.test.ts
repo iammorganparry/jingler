@@ -47,6 +47,7 @@ describe("parsePlanHtml", () => {
       },
       executionStatus: "running"
     })
+    expect(p.stages[0]?.assignment?.reasoning).toBeUndefined()
     expect(p.stages[0]!.acceptance[0]).toMatchObject({ id: "01.1", status: "pending" })
     expect(p.annotations[0]).toMatchObject({ id: "a1", stageId: "01" })
     expect(p.annotations[0]!.anchor?.quote).toBe("revision")
@@ -200,6 +201,49 @@ describe("parsePlanHtml", () => {
     )
   })
 
+  it("round-trips a provider-compatible reasoning setting", () => {
+    const source = DOC.replace(
+      'data-model="gpt-5"',
+      'data-model="gpt-5" data-thinking-enabled="true" data-reasoning-effort="high"'
+    )
+    const first = parsePlanHtml(source)
+
+    expect(first.valid).toBe(true)
+    if (!first.valid) return
+    expect(first.projection.stages[0]?.assignment?.reasoning).toStrictEqual({
+      enabled: true,
+      effort: "high"
+    })
+    expect(first.html).toContain('data-thinking-enabled="true"')
+    expect(first.html).toContain('data-reasoning-effort="high"')
+
+    const second = parsePlanHtml(first.html)
+    expect(second.valid).toBe(true)
+    if (!second.valid) return
+    expect(second.projection.stages[0]?.assignment?.reasoning).toStrictEqual({
+      enabled: true,
+      effort: "high"
+    })
+  })
+
+  it.each([
+    ["a malformed toggle", 'data-thinking-enabled="sometimes"'],
+    ["an effort without a toggle", 'data-reasoning-effort="high"'],
+    ["a Claude-only effort on Codex", 'data-thinking-enabled="true" data-reasoning-effort="max"'],
+    ["an effort while disabled", 'data-thinking-enabled="false" data-reasoning-effort="high"']
+  ])("rejects %s", (_name, metadata) => {
+    const result = parsePlanHtml(
+      DOC.replace('data-model="gpt-5"', `data-model="gpt-5" ${metadata}`)
+    )
+
+    expect(result.valid).toBe(false)
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "invalid-assignment" })
+      ])
+    )
+  })
+
   it("can project structurally valid stages before worker-routing validation", () => {
     const source = `<h1>PRD: Route independent work</h1>
 <section data-stage="05" data-title="Pricing" data-complexity="high">
@@ -260,12 +304,14 @@ describe("sanitizePlanHtml", () => {
   })
 
   it("preserves plan data-attributes", () => {
-    const out = sanitizePlanHtml('<section data-stage="01" data-title="x" data-depends-on="00" data-complexity="high"><div data-assignment data-agent-id="worker-a" data-cli="codex" data-model="gpt-5" data-reason="Best fit" data-status="queued"></div><div data-acceptance="01.1" data-status="passed">c</div></section>')
+    const out = sanitizePlanHtml('<section data-stage="01" data-title="x" data-depends-on="00" data-complexity="high"><div data-assignment data-agent-id="worker-a" data-cli="codex" data-model="gpt-5" data-thinking-enabled="true" data-reasoning-effort="high" data-reason="Best fit" data-status="queued"></div><div data-acceptance="01.1" data-status="passed">c</div></section>')
     expect(out).toContain('data-stage="01"')
     expect(out).toContain('data-depends-on="00"')
     expect(out).toContain('data-complexity="high"')
     expect(out).toContain('data-agent-id="worker-a"')
     expect(out).toContain('data-cli="codex"')
+    expect(out).toContain('data-thinking-enabled="true"')
+    expect(out).toContain('data-reasoning-effort="high"')
     expect(out).toContain('data-status="passed"')
   })
 

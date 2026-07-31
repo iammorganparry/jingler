@@ -1,6 +1,8 @@
 import type { PlanDocument } from "@jingler/core"
 import { assign, fromCallback, fromPromise, setup } from "xstate"
 
+export const PLAN_DOCUMENT_SAVE_DEBOUNCE_MS = 1_000
+
 export interface PlanDocumentInput {
   readonly sessionId: string
   readonly load: () => Promise<PlanDocument | null>
@@ -76,6 +78,9 @@ export const planDocumentMachine = setup({
       if (input.subscribe === undefined) return () => {}
       return input.subscribe((document) => sendBack({ type: "REMOTE", document }))
     })
+  },
+  delays: {
+    planDocumentSaveDebounce: PLAN_DOCUMENT_SAVE_DEBOUNCE_MS
   },
   guards: {
     hasDocument: ({ context }) => context.document !== null,
@@ -190,7 +195,11 @@ export const planDocumentMachine = setup({
     },
     editing: {
       after: {
-        350: { target: "saving", guard: "hasDocument", actions: "beginSave" }
+        planDocumentSaveDebounce: {
+          target: "saving",
+          guard: "hasDocument",
+          actions: "beginSave"
+        }
       },
       on: {
         EDIT: { target: "editing", reenter: true, actions: "edit" },

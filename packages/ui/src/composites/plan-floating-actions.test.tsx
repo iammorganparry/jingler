@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import type { PlanDocumentStatus } from "@jingler/core"
 import { PlanFloatingActions } from "./plan-floating-actions.js"
@@ -38,6 +38,20 @@ describe("PlanFloatingActions", () => {
     expect(
       screen.getByRole("button", { name: "Composing plan" }).hasAttribute("disabled")
     ).toBe(true)
+    expect(screen.getByTestId("plan-status-summary").textContent).toContain("composing")
+  })
+
+  it("combines plan status, revision, sync state, and actions in one dock", () => {
+    render(
+      <PlanFloatingActions status="proposed" revision={7} syncState="clean" />
+    )
+
+    const dock = screen.getByTestId("plan-floating-actions")
+    expect(dock.contains(screen.getByTestId("plan-status-summary"))).toBe(true)
+    expect(dock.textContent).toContain("proposed")
+    expect(dock.textContent).toContain("revision 7")
+    expect(dock.textContent).toContain("Synced")
+    expect(within(dock).getByRole("button", { name: "Approve" })).toBeTruthy()
   })
 
   for (const [transientState, label] of [

@@ -128,6 +128,11 @@ test("streaming plan collaboration survives promotion and reload", async ({
   const floatingActions = window.getByTestId("plan-floating-actions")
   await expect(minimap).toBeVisible()
   await expect(floatingActions).toBeVisible()
+  const statusSummary = floatingActions.getByTestId("plan-status-summary")
+  await expect(statusSummary).toContainText("proposed")
+  await expect(statusSummary.getByText(planRevision, { exact: true })).toBeVisible()
+  await expect(statusSummary).toContainText("Synced")
+  await expect(window.getByTestId("plan-status-summary")).toHaveCount(1)
   const reviewBox = await review.boundingBox()
   const actionsBox = await floatingActions.boundingBox()
   expect(reviewBox).not.toBeNull()
@@ -143,10 +148,9 @@ test("streaming plan collaboration survives promotion and reload", async ({
   ).toBeLessThan(24)
 
   await minimap.getByRole("button", { name: openPrStage }).click()
-  await expect(minimap.getByRole("button", { name: openPrStage })).toHaveAttribute(
-    "aria-current",
-    "location"
-  )
+  await expect(
+    window.locator('[data-plan-stage-id="s_06"]').first()
+  ).toBeInViewport()
 
   // Create an anchored thread and mention the active scripted child agent. The
   // dispatch goes through the real Plan RPC, relays through its owning run, and
@@ -242,6 +246,12 @@ test("narrow streamed plans use full-width review chrome", async ({ launchApp })
   await expect(window.getByLabel("Plan document")).toBeVisible()
   await expect(window.getByTestId("composer")).toHaveCount(0)
   await expect(window.getByRole("navigation", { name: "Plan minimap" })).toHaveCount(0)
-  await expect(window.getByTestId("plan-floating-actions")).toBeVisible()
+  const controls = window.getByTestId("plan-floating-actions")
+  await expect(controls).toBeVisible()
+  await expect(controls.getByTestId("plan-status-summary")).toBeVisible()
+  await expect(controls.getByRole("status")).toContainText(
+    /Composing|Validating|Loading revision|Synced/
+  )
+  await expect(window.getByTestId("plan-status-summary")).toHaveCount(1)
   await expect(window.getByLabel("Resize plan")).toHaveCount(0)
 })

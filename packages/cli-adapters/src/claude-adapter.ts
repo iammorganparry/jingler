@@ -1128,6 +1128,13 @@ export const runClaude = (
             toolName === "EnterPlanMode" &&
             spec.orchestrationRoutes !== undefined
           ) {
+            if (spec.orchestrationPlanApproved === true) {
+              return {
+                behavior: "deny",
+                message:
+                  "The plan is already approved. Return the complete semantic amendment in your reply without entering plan mode; Jingler applies valid changes without another approval gate."
+              }
+            }
             nativePlanActive = true
             return { behavior: "allow", updatedInput: input }
           }
@@ -1138,7 +1145,8 @@ export const runClaude = (
           if (
             toolName === "Write" &&
             nativePlanActive &&
-            spec.orchestrationRoutes !== undefined
+            spec.orchestrationRoutes !== undefined &&
+            spec.orchestrationPlanApproved !== true
           ) {
             const content = strOf(input.content)?.trim() ?? ""
             const planId = `plan_${sessionId}_${planCount + 1}`
@@ -1180,6 +1188,16 @@ export const runClaude = (
           // Plan mode: the SDK routes ExitPlanMode approval here. Turn the plan
           // into a structured, reviewable Plan and honour the operator's verdict.
           if (toolName === "ExitPlanMode") {
+            if (
+              spec.orchestrationRoutes !== undefined &&
+              spec.orchestrationPlanApproved === true
+            ) {
+              return {
+                behavior: "deny",
+                message:
+                  "The plan is already approved. Return the complete semantic amendment in your reply; Jingler applies valid changes without another approval gate."
+              }
+            }
             const payload = strOf(input.plan)?.trim() ?? ""
             const planId = `plan_${sessionId}_${planCount + 1}`
             const payloadPlan =
@@ -1349,7 +1367,7 @@ export const runClaude = (
             model: spec.model ?? undefined,
             permissionMode: mapPermissionMode(spec.mode),
             ...mapClaudeReasoning(spec.reasoningEffort, spec.thinkingEnabled),
-            ...(spec.mode === "plan"
+            ...(spec.mode === "plan" || spec.orchestrationRoutes !== undefined
               ? {
                   planModeInstructions: planModeInstructions(
                     spec.planTemplate,
@@ -1529,6 +1547,7 @@ export const runClaude = (
               if (
                 nativePlanActive &&
                 spec.orchestrationRoutes !== undefined &&
+                spec.orchestrationPlanApproved !== true &&
                 planCount === 0 &&
                 events.some((event) => event._tag === "Done")
               ) {

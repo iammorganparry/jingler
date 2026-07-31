@@ -1,10 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { DEFAULT_PLAN_TEMPLATE_HTML } from "@jingler/core"
+import {
+  DEFAULT_PLAN_TEMPLATE_HTML,
+  type WorkerRoutingConfig
+} from "@jingler/core"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import {
   PlanSettings,
   resolveEffectiveOrchestrator,
-  validatePlanTemplate
+  validatePlanTemplate,
+  workerReasoningOptionsFor
 } from "./plan-settings.js"
 
 afterEach(cleanup)
@@ -13,6 +17,20 @@ beforeAll(() => {
 })
 
 describe("PlanSettings", () => {
+  it("offers only provider-default reasoning when explicit settings are unsupported", () => {
+    expect(workerReasoningOptionsFor("cursor")).toStrictEqual([
+      { value: "provider-default", label: "Provider default" }
+    ])
+    expect(workerReasoningOptionsFor("claude")).toContainEqual({
+      value: "max",
+      label: "max"
+    })
+    expect(workerReasoningOptionsFor("codex")).not.toContainEqual({
+      value: "max",
+      label: "max"
+    })
+  })
+
   it("previews and saves a valid custom PRD structure", async () => {
     const onSave = vi.fn()
     render(<PlanSettings source={DEFAULT_PLAN_TEMPLATE_HTML} onSave={onSave} />)
@@ -118,6 +136,146 @@ describe("PlanSettings", () => {
       medium: { cli: "claude", model: "opus" },
       high: { cli: "claude", model: "opus" }
     })
+  })
+
+  it("persists a distinct provider-compatible reasoning choice for every route bucket", async () => {
+    const onSaveWorkerRouting = vi.fn()
+    let routing: WorkerRoutingConfig = {
+      default: { cli: "claude" as const, model: "opus" },
+      low: { cli: "claude" as const, model: "opus" },
+      medium: { cli: "claude" as const, model: "opus" },
+      high: { cli: "claude" as const, model: "opus" }
+    }
+    const props = () => ({
+      source: DEFAULT_PLAN_TEMPLATE_HTML,
+      clis: [
+        {
+          kind: "claude" as const,
+          label: "Claude Code",
+          binPath: "/bin/claude",
+          version: "1",
+          available: true
+        }
+      ],
+      loadModels: async () => [{ id: "opus", label: "Opus" }],
+      workerRouting: routing,
+      onSaveWorkerRouting: (next: WorkerRoutingConfig) => {
+        routing = next
+        onSaveWorkerRouting(next)
+      }
+    })
+    const rendered = render(<PlanSettings {...props()} />)
+    const selectReasoning = async (label: string, option: string) => {
+      fireEvent.click(
+        await screen.findByRole("combobox", { name: `${label} worker reasoning` })
+      )
+      fireEvent.click(await screen.findByRole("option", { name: option }))
+      rendered.rerender(<PlanSettings {...props()} />)
+    }
+
+    await selectReasoning("Default", "Thinking on · provider default effort")
+    await selectReasoning("Low complexity", "low")
+    await selectReasoning("Medium complexity", "high")
+    await selectReasoning("High complexity", "max")
+
+    expect(onSaveWorkerRouting).toHaveBeenLastCalledWith({
+      default: {
+        cli: "claude",
+        model: "opus",
+        reasoning: { enabled: true }
+      },
+      low: {
+        cli: "claude",
+        model: "opus",
+        reasoning: { enabled: true, effort: "low" }
+      },
+      medium: {
+        cli: "claude",
+        model: "opus",
+        reasoning: { enabled: true, effort: "high" }
+      },
+      high: {
+        cli: "claude",
+        model: "opus",
+        reasoning: { enabled: true, effort: "max" }
+      }
+    })
+  })
+
+  it("offers only provider-compatible efforts and flags an incompatible saved value", async () => {
+    render(
+      <PlanSettings
+        source={DEFAULT_PLAN_TEMPLATE_HTML}
+        clis={[
+          {
+            kind: "claude",
+            label: "Claude Code",
+            binPath: "/bin/claude",
+            version: "1",
+            available: true
+          },
+          {
+            kind: "codex",
+            label: "Codex",
+            binPath: "/bin/codex",
+            version: "1",
+            available: true
+          }
+        ]}
+        loadModels={async (cli) => [
+          cli === "claude"
+            ? { id: "opus", label: "Opus" }
+            : { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" }
+        ]}
+        workerRouting={{
+          default: { cli: "claude", model: "opus" },
+          low: {
+            cli: "codex",
+            model: "gpt-5.6-sol",
+            reasoning: { enabled: true, effort: "max" }
+          },
+          medium: { cli: "claude", model: "opus" },
+          high: { cli: "claude", model: "opus" }
+        }}
+      />
+    )
+
+    expect(
+      await screen.findByText(
+        "Unavailable saved routes are using the configured default: Low complexity."
+      )
+    ).toBeTruthy()
+    cleanup()
+    render(
+      <PlanSettings
+        source={DEFAULT_PLAN_TEMPLATE_HTML}
+        clis={[
+          {
+            kind: "codex",
+            label: "Codex",
+            binPath: "/bin/codex",
+            version: "1",
+            available: true
+          }
+        ]}
+        loadModels={async () => [
+          { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" }
+        ]}
+        workerRouting={{
+          default: { cli: "codex", model: "gpt-5.6-sol" },
+          low: { cli: "codex", model: "gpt-5.6-sol" },
+          medium: { cli: "codex", model: "gpt-5.6-sol" },
+          high: { cli: "codex", model: "gpt-5.6-sol" }
+        }}
+      />
+    )
+    fireEvent.click(
+      await screen.findByRole("combobox", {
+        name: "Low complexity worker reasoning"
+      })
+    )
+    expect(screen.queryByRole("option", { name: "max" })).toBeNull()
+    expect(screen.getByRole("option", { name: "minimal" })).toBeTruthy()
   })
 
   it("resolves an unavailable preference to the first installed planning provider", () => {

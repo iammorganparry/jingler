@@ -3,6 +3,7 @@ import { Effect } from "effect"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentContext, PlanDecision as PlanDecisionType, SessionSpec } from "./adapter.js"
 import { PlanDecision } from "./adapter.js"
+import { ORCHESTRATOR_PLAN_SUBMISSION_MARKER } from "./plan-parse.js"
 
 /**
  * The Codex plan loop, which is the one part of `runCodex` that cannot be
@@ -189,6 +190,131 @@ beforeEach(() => {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("the Codex plan loop", () => {
+  it("keeps auto tools available while accepting a deliberate orchestrator plan", async () => {
+    sdk.state.script = [
+      [
+        { type: "thread.started", thread_id: "t-auto" },
+        agentMessage(`${ORCHESTRATOR_PLAN_SUBMISSION_MARKER}\n${HTML_PLAN_TEXT}`),
+        turnDone
+      ]
+    ]
+    const { ctx, emitted, proposed } = harness([PlanDecision.Delegate()])
+
+    await Effect.runPromise(
+      runCodex(
+        "s-auto-orchestrator",
+        spec({
+          mode: "auto",
+          orchestrationRoutes: [
+            { cli: "codex", models: [{ id: "gpt-5.6-sol", label: "Sol" }] }
+          ]
+        }),
+        ctx,
+        new Map()
+      )
+    )
+
+    expect(proposed).toHaveLength(1)
+    expect(sdk.state.runs).toHaveLength(1)
+    expect(sdk.state.runs[0]?.sandboxMode).toBe("danger-full-access")
+    expect(
+      emitted.some(
+        (event) =>
+          event._tag === "Assistant" && event.text.includes("PRD: Stream the plan")
+      )
+    ).toBe(false)
+  })
+
+  it("keeps an unmarked plan-looking auto-mode answer in the ordinary reply channel", async () => {
+    sdk.state.script = [[agentMessage(HTML_PLAN_TEXT), turnDone]]
+    const { ctx, emitted, proposed } = harness([])
+
+    await Effect.runPromise(
+      runCodex(
+        "s-auto-plan-example",
+        spec({
+          mode: "auto",
+          orchestrationRoutes: [
+            { cli: "codex", models: [{ id: "gpt-5.6-sol", label: "Sol" }] }
+          ]
+        }),
+        ctx,
+        new Map()
+      )
+    )
+
+    expect(proposed).toHaveLength(0)
+    expect(emitted).toContainEqual({ _tag: "Assistant", text: HTML_PLAN_TEXT })
+  })
+
+  it("asks a marked malformed auto-mode submission to reformat with the marker", async () => {
+    const malformed = [
+      ORCHESTRATOR_PLAN_SUBMISSION_MARKER,
+      "````html",
+      "<h1>PRD: Incomplete</h1>",
+      "````"
+    ].join("\n")
+    const corrected = `${ORCHESTRATOR_PLAN_SUBMISSION_MARKER}\n${HTML_PLAN_TEXT}`
+    sdk.state.script = [
+      [agentMessage(malformed), turnDone],
+      [agentMessage(corrected), turnDone]
+    ]
+    const { ctx, proposed } = harness([PlanDecision.Reject()])
+
+    await Effect.runPromise(
+      runCodex(
+        "s-auto-plan-reformat",
+        spec({
+          mode: "auto",
+          orchestrationRoutes: [
+            { cli: "codex", models: [{ id: "gpt-5.6-sol", label: "Sol" }] }
+          ]
+        }),
+        ctx,
+        new Map()
+      )
+    )
+
+    expect(sdk.state.runs).toHaveLength(2)
+    expect(sdk.state.runs[1]?.prompt).toContain(ORCHESTRATOR_PLAN_SUBMISSION_MARKER)
+    expect(proposed).toHaveLength(1)
+    expect(proposed[0]?.structured).toBe(true)
+  })
+
+  it("leaves an approved-plan amendment in the reply channel without reopening approval", async () => {
+    sdk.state.script = [
+      [
+        { type: "thread.started", thread_id: "t-approved" },
+        agentMessage(HTML_PLAN_TEXT),
+        turnDone
+      ]
+    ]
+    const { ctx, emitted, proposed } = harness([])
+
+    await Effect.runPromise(
+      runCodex(
+        "s-approved-orchestrator",
+        spec({
+          mode: "auto",
+          orchestrationPlanApproved: true,
+          orchestrationRoutes: [
+            { cli: "codex", models: [{ id: "gpt-5.6-sol", label: "Sol" }] }
+          ]
+        }),
+        ctx,
+        new Map()
+      )
+    )
+
+    expect(proposed).toHaveLength(0)
+    expect(
+      emitted.some(
+        (event) =>
+          event._tag === "Assistant" && event.text.includes("PRD: Stream the plan")
+      )
+    ).toBe(true)
+  })
+
   it("publishes the completed SDK message through the progressive draft contract", async () => {
     sdk.state.script = [[agentMessage(HTML_PLAN_TEXT), turnDone]]
     const { ctx, emitted, proposed } = harness([PlanDecision.Reject()])

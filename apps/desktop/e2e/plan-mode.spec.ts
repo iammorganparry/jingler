@@ -283,7 +283,7 @@ test("live edits and conflicts preserve both drafts", async ({
   await expect.poll(() => readFileSync(file, "utf8")).toContain("OPERATOR_MARKER")
 
   // Start a local edit and keep it pending, then land a higher-revision external
-  // write before the ~350ms autosave — the machine must surface a conflict that
+  // write before the 1-second autosave — the machine must surface a conflict that
   // preserves BOTH the local draft and the remote revision, not clobber one.
   const anchor = launched.window.getByText("Implement stages in order").first()
   await anchor.click()
@@ -412,7 +412,7 @@ test("a plan diagram renders, and a broken source degrades to an error card", as
   await expect(launched.window.getByText(/Rollout|Testing|Risks/).first()).toBeVisible()
 })
 
-test("inline (WYSIWYG) editing the document persists to the canonical source", async ({
+test("a burst of inline edits makes exactly one canonical revision", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -426,12 +426,77 @@ test("inline (WYSIWYG) editing the document persists to the canonical source", a
   const file = currentPlanPath(launched)
   const startRevision = revisionOf(file)
 
-  await editSource(launched.window, "INLINE_EDIT_MARKER")
+  const anchor = launched.window.getByText("Implement stages in order").first()
+  await anchor.click()
+  await launched.window.keyboard.press("End")
+  await launched.window.keyboard.type(" INLINE_EDIT_MARKER")
+  await expect(launched.window.getByRole("status")).toContainText("Editing")
 
+  // This is deliberately shorter than the 1-second trailing debounce. Every
+  // character already reached Tiptap, so the canonical revision must remain
+  // untouched until the editor becomes idle.
+  await launched.window.waitForTimeout(750)
+  expect(revisionOf(file)).toBe(startRevision)
+
+  await expect(launched.window.getByRole("status")).toContainText("Synced", {
+    timeout: 20_000
+  })
+
+  expect(readFileSync(file, "utf8")).toContain("INLINE_EDIT_MARKER")
+  expect(revisionOf(file)).toBe(startRevision + 1)
+})
+
+test("view switches and app close flush edits inside the debounce window", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session()
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await proposePlan(launched)
+  const file = currentPlanPath(launched)
+  const startRevision = revisionOf(file)
+  const marker = "SURVIVES_VIEW_SWITCH"
+
+  const anchor = launched.window.getByText("Implement stages in order").first()
+  await anchor.click()
+  await launched.window.keyboard.press("End")
+  await launched.window.keyboard.type(` ${marker}`)
+  await expect(launched.window.getByRole("status")).toContainText("Editing")
+
+  // Changes is outside the Conversation/Plan mount group, so this tears down
+  // the Plan Review view before its one-second debounce expires.
+  await launched.window.getByRole("button", { name: "Changes" }).click()
   await expect
-    .poll(() => readFileSync(file, "utf8"))
-    .toContain("INLINE_EDIT_MARKER")
-  expect(revisionOf(file)).toBeGreaterThan(startRevision)
+    .poll(() => readFileSync(file, "utf8"), { timeout: 20_000 })
+    .toContain(marker)
+  expect(revisionOf(file)).toBe(startRevision + 1)
+
+  await launched.window.getByRole("button", { name: "Plan Review" }).click()
+  await expect(launched.window.getByText(new RegExp(marker))).toBeVisible()
+
+  const closeMarker = "SURVIVES_APP_CLOSE"
+  const editedAnchor = launched.window.getByText(new RegExp(marker)).first()
+  await editedAnchor.click()
+  await launched.window.keyboard.press("End")
+  await launched.window.keyboard.type(` ${closeMarker}`)
+  await expect(launched.window.getByRole("status")).toContainText("Editing")
+  await launched.app.close()
+
+  const reopened = await launchApp({
+    home: launched.home,
+    reposDir: launched.reposDir,
+    userDataDir: launched.userDataDir,
+    configured: true,
+    withRepo: true
+  })
+  await expect(appShell(reopened.window)).toBeVisible()
+  await reopened.window
+    .getByRole("button", { name: "Plan Review", exact: true })
+    .click()
+  await expect(reopened.window.getByText(new RegExp(closeMarker))).toBeVisible()
 })
 
 test("an external write to the plan file live-updates the open editor (Plan.watch)", async ({

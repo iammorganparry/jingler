@@ -1,11 +1,16 @@
+import { Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
-import type {
-  PlanPrdStage,
-  WorkerRoutingConfig
+import {
+  type PlanPrdStage,
+  providerReasoningCapabilitiesFor,
+  WorkerRoutingConfig,
+  workerReasoningSettingIssue
 } from "./plan-document.js"
+import { WorkspaceConfig } from "./domain.js"
 import {
   applyWorkerRoutingToPlanHtml,
   buildPlanExecutionGraph,
+  compileOrchestrationPlanHtml,
   resolveWorkerRoutingConfig,
   workerRoutingMismatch
 } from "./plan-execution.js"
@@ -195,9 +200,82 @@ describe("buildPlanExecutionGraph", () => {
       })
     ])
   })
+
+  it.each([
+    {
+      name: "dependency",
+      second: { dependencies: ["01"] }
+    },
+    {
+      name: "file overlap",
+      second: {
+        markdown: "<ul data-files><li>src/shared.ts</li></ul>"
+      }
+    }
+  ])("rejects conflicting reasoning across a $name component", ({ second }) => {
+    const first = stage("01", {
+      markdown: "<ul data-files><li>src/shared.ts</li></ul>",
+      assignment: {
+        agentId: "agent-shared",
+        cli: "codex",
+        model: "gpt-5",
+        reason: "Shared route.",
+        reasoning: { enabled: true, effort: "low" }
+      }
+    })
+    const result = buildPlanExecutionGraph([
+      first,
+      stage("02", {
+        ...second,
+        assignment: {
+          agentId: "agent-shared",
+          cli: "codex",
+          model: "gpt-5",
+          reason: "Shared route with conflicting strength.",
+          reasoning: { enabled: true, effort: "high" }
+        }
+      })
+    ])
+
+    expect(result.valid).toBe(false)
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "assignment-conflict"
+        })
+      ])
+    )
+  })
 })
 
 describe("worker routing", () => {
+  it("uses one provider capability contract for effort options and validation", () => {
+    expect(providerReasoningCapabilitiesFor("claude")).toStrictEqual({
+      explicitToggle: true,
+      efforts: ["low", "medium", "high", "xhigh", "max"]
+    })
+    expect(providerReasoningCapabilitiesFor("codex")).toStrictEqual({
+      explicitToggle: true,
+      efforts: ["minimal", "low", "medium", "high", "xhigh"]
+    })
+    expect(providerReasoningCapabilitiesFor("opencode")).toStrictEqual(
+      providerReasoningCapabilitiesFor("codex")
+    )
+    expect(providerReasoningCapabilitiesFor("cursor")).toStrictEqual({
+      explicitToggle: false,
+      efforts: []
+    })
+    expect(
+      workerReasoningSettingIssue("claude", { enabled: true, effort: "max" })
+    ).toBeNull()
+    expect(
+      workerReasoningSettingIssue("codex", { enabled: true, effort: "max" })
+    ).toBe('codex does not support reasoning effort "max"')
+    expect(workerReasoningSettingIssue("cursor", { enabled: false })).toBe(
+      "Cursor does not support an explicit reasoning setting"
+    )
+  })
+
   const laterPageCodexModel = "gpt-5.6-terra"
   const catalog = [
     {
@@ -214,6 +292,24 @@ describe("worker routing", () => {
     low: { cli: "claude", model: "haiku" },
     medium: { cli: "codex", model: "gpt-5.6-sol" },
     high: { cli: "claude", model: "opus" }
+  }
+  const reasoningConfigured: WorkerRoutingConfig = {
+    default: { cli: "codex", model: "gpt-5.6-sol" },
+    low: {
+      cli: "claude",
+      model: "haiku",
+      reasoning: { enabled: true, effort: "low" }
+    },
+    medium: {
+      cli: "codex",
+      model: "gpt-5.6-sol",
+      reasoning: { enabled: true, effort: "medium" }
+    },
+    high: {
+      cli: "claude",
+      model: "opus",
+      reasoning: { enabled: true, effort: "high" }
+    }
   }
 
   it("uses a capability-first default and falls unavailable buckets back to it", () => {
@@ -234,15 +330,55 @@ describe("worker routing", () => {
     ).toEqual({ cli: "claude", model: "opus" })
   })
 
+  it("decodes legacy routes as provider-default reasoning", () => {
+    const decoded = Schema.decodeUnknownEither(WorkerRoutingConfig)(configured)
+
+    expect(Either.isRight(decoded)).toBe(true)
+    if (!Either.isRight(decoded)) return
+    expect(resolveWorkerRoutingConfig(decoded.right, catalog)).toStrictEqual(
+      configured
+    )
+    expect(decoded.right.medium.reasoning).toBeUndefined()
+  })
+
+  it("round-trips reasoning settings through workspace configuration", () => {
+    const persisted = JSON.parse(
+      JSON.stringify({
+        reposDir: null,
+        createdAt: "2026-07-31T12:00:00.000Z",
+        workerRouting: reasoningConfigured
+      })
+    )
+    const decoded = Schema.decodeUnknownEither(WorkspaceConfig)(persisted)
+
+    expect(Either.isRight(decoded)).toBe(true)
+    if (!Either.isRight(decoded)) return
+    expect(decoded.right.workerRouting).toStrictEqual(reasoningConfigured)
+  })
+
+  it.each([
+    ["Claude minimal", { cli: "claude", model: "opus", reasoning: { enabled: true, effort: "minimal" } }],
+    ["Codex max", { cli: "codex", model: "gpt-5.6-sol", reasoning: { enabled: true, effort: "max" } }],
+    ["Cursor explicit reasoning", { cli: "cursor", model: "auto", reasoning: { enabled: true, effort: "low" } }],
+    ["disabled with an effort", { cli: "codex", model: "gpt-5.6-sol", reasoning: { enabled: false, effort: "high" } }]
+  ])("rejects provider-incompatible %s routes", (_name, route) => {
+    expect(Either.isLeft(Schema.decodeUnknownEither(WorkerRoutingConfig)({
+      default: configured.default,
+      low: route,
+      medium: configured.medium,
+      high: configured.high
+    }))).toBe(true)
+  })
+
   it("normalizes each dependency/file component to its strongest complexity route", () => {
     const source = `<h1>PRD: Route work</h1>
 <section data-stage="01" data-title="Inspect" data-complexity="low">
-<div data-assignment data-agent-id="worker-auth" data-cli="codex" data-model="gpt-5.6-sol" data-reason="Planner choice" data-status="queued"></div>
+<div data-assignment data-agent-id="worker-auth" data-cli="codex" data-model="gpt-5.6-sol" data-thinking-enabled="true" data-reasoning-effort="high" data-reason="Planner choice" data-status="queued"></div>
 <ul data-files><li>src/auth.ts</li></ul>
 <div data-acceptance="01.1" data-status="pending">The path is understood.</div>
 </section>
 <section data-stage="02" data-title="Implement" data-depends-on="01" data-complexity="high">
-<div data-assignment data-agent-id="worker-auth" data-cli="codex" data-model="gpt-5.6-sol" data-reason="Planner choice" data-status="queued"></div>
+<div data-assignment data-agent-id="worker-auth" data-cli="codex" data-model="gpt-5.6-sol" data-thinking-enabled="true" data-reasoning-effort="high" data-reason="Planner choice" data-status="queued"></div>
 <ul data-files></ul>
 <div data-acceptance="02.1" data-status="pending">The change works.</div>
 </section>
@@ -271,8 +407,100 @@ describe("worker routing", () => {
       { agentId: "agent-02", cli: "codex", model: "gpt-5.6-sol" }
     ])
     expect(
+      normalized.projection.stages.every(
+        (item) => item.assignment?.reasoning === undefined
+      )
+    ).toBe(true)
+    expect(normalized.html).not.toContain("data-thinking-enabled")
+    expect(normalized.html).not.toContain("data-reasoning-effort")
+    expect(
       workerRoutingMismatch(normalized.projection.stages, configured)
     ).toBeNull()
+  })
+
+  it("compiles assignment-free plan semantics into one routed worker per component", () => {
+    const source = `<h1>PRD: Compile workers</h1>
+<section data-stage="01" data-title="Inspect" data-complexity="low">
+<ul data-files><li>src/shared.ts</li></ul>
+<div data-acceptance="01.1" data-status="pending">Inspection is complete.</div>
+</section>
+<section data-stage="02" data-title="Implement" data-depends-on="01" data-complexity="high">
+<ul data-files></ul>
+<div data-acceptance="02.1" data-status="pending">Implementation works.</div>
+</section>
+<section data-stage="03" data-title="Document" data-complexity="low">
+<ul data-files><li>docs/change.md</li></ul>
+<div data-acceptance="03.1" data-status="pending">Documentation is accurate.</div>
+</section>`
+
+    const compiled = compileOrchestrationPlanHtml(
+      source,
+      reasoningConfigured
+    )
+
+    expect(compiled.valid).toBe(true)
+    if (!compiled.valid) return
+    expect(compiled.graph.valid).toBe(true)
+    expect(
+      compiled.projection.stages.map((item) => item.assignment)
+    ).toMatchObject([
+      {
+        agentId: "agent-01",
+        cli: "claude",
+        model: "opus",
+        reasoning: { enabled: true, effort: "high" }
+      },
+      {
+        agentId: "agent-01",
+        cli: "claude",
+        model: "opus",
+        reasoning: { enabled: true, effort: "high" }
+      },
+      {
+        agentId: "agent-02",
+        cli: "claude",
+        model: "haiku",
+        reasoning: { enabled: true, effort: "low" }
+      }
+    ])
+  })
+
+  it("preserves an existing component identity and allocates a new independent worker", () => {
+    const original = compileOrchestrationPlanHtml(
+      `<h1>PRD: Stable workers</h1>
+<section data-stage="01" data-title="Existing" data-complexity="medium">
+<ul data-files><li>src/existing.ts</li></ul>
+<div data-acceptance="01.1" data-status="pending">Existing work succeeds.</div>
+</section>`,
+      configured
+    )
+    expect(original.valid).toBe(true)
+    if (!original.valid) return
+
+    const amendment = compileOrchestrationPlanHtml(
+      `<h1>PRD: Stable workers</h1>
+<section data-stage="01" data-title="Existing" data-complexity="medium">
+<ul data-files><li>src/existing.ts</li></ul>
+<div data-acceptance="01.1" data-status="pending">Existing work succeeds.</div>
+</section>
+<section data-stage="02" data-title="Independent" data-complexity="high">
+<ul data-files><li>src/independent.ts</li></ul>
+<div data-acceptance="02.1" data-status="pending">Independent work succeeds.</div>
+</section>
+<section data-stage="03" data-title="Dependent" data-depends-on="01" data-complexity="low">
+<ul data-files><li>src/dependent.ts</li></ul>
+<div data-acceptance="03.1" data-status="pending">Dependent work succeeds.</div>
+</section>`,
+      configured,
+      { previousStages: original.projection.stages }
+    )
+
+    expect(amendment.valid).toBe(true)
+    if (!amendment.valid) return
+    expect(
+      amendment.projection.stages.map((item) => item.assignment?.agentId)
+    ).toStrictEqual(["agent-01", "agent-02", "agent-01"])
+    expect(amendment.projection.stages[1]?.executionStatus).toBe("queued")
   })
 
   it("preserves the exact configured Codex model id in canonical HTML", () => {
@@ -308,5 +536,55 @@ describe("worker routing", () => {
       cli: "codex",
       model: laterPageCodexModel
     })
+  })
+
+  it("applies every complexity bucket's complete reasoning route", () => {
+    const source = `<h1>PRD: Preserve reasoning routes</h1>
+<section data-stage="01" data-title="Low" data-complexity="low"><ul data-files></ul><div data-acceptance="01.1" data-status="pending">Low works.</div></section>
+<section data-stage="02" data-title="Medium" data-complexity="medium"><ul data-files></ul><div data-acceptance="02.1" data-status="pending">Medium works.</div></section>
+<section data-stage="03" data-title="High" data-complexity="high"><ul data-files></ul><div data-acceptance="03.1" data-status="pending">High works.</div></section>`
+    const parsed = parsePlanHtml(source)
+    expect(parsed.valid).toBe(true)
+    if (!parsed.valid) return
+
+    const routed = parsePlanHtml(
+      applyWorkerRoutingToPlanHtml(
+        parsed.html,
+        parsed.projection.stages,
+        reasoningConfigured
+      )
+    )
+
+    expect(routed.valid).toBe(true)
+    if (!routed.valid) return
+    expect(
+      routed.projection.stages.map((item) => item.assignment?.reasoning)
+    ).toStrictEqual([
+      { enabled: true, effort: "low" },
+      { enabled: true, effort: "medium" },
+      { enabled: true, effort: "high" }
+    ])
+    expect(routed.html.match(/data-thinking-enabled="true"/g)).toHaveLength(3)
+    expect(workerRoutingMismatch(routed.projection.stages, reasoningConfigured))
+      .toBeNull()
+
+    const medium = routed.projection.stages[1]
+    const mediumAssignment = medium?.assignment
+    if (medium === undefined || mediumAssignment === null || mediumAssignment === undefined) {
+      return
+    }
+    const mismatched = routed.projection.stages.map((item) =>
+      item.id === medium.id
+        ? {
+            ...item,
+            assignment: {
+              ...mediumAssignment,
+              reasoning: reasoningConfigured.high.reasoning
+            }
+          }
+        : item
+    )
+    expect(workerRoutingMismatch(mismatched, reasoningConfigured)?.stageIds)
+      .toContain("02")
   })
 })

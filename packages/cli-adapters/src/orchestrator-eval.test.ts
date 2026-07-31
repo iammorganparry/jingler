@@ -1,4 +1,3 @@
-import type { StreamEvent } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import {
   evaluateOrchestratorProcedure,
@@ -45,6 +44,17 @@ const source = (amendment = ""): string => `<h1>PRD: Eval fixture</h1>
 <div data-acceptance="docs.1" data-status="pending">Docs are accurate.</div>
 </section>`
 
+const ownedHandoff = {
+  monitored: true,
+  workersSettled: true,
+  steeringNeeded: true,
+  steered: true,
+  failedWorkerIds: ["worker-api"],
+  retriedWorkerIds: ["worker-api"],
+  integrated: true,
+  finalReported: true
+}
+
 describe("orchestrator procedure eval route expansion", () => {
   it("covers every selectable model, including Claude Haiku", () => {
     expect(expandOrchestratorEvalRoutes(routes)).toEqual([
@@ -69,7 +79,7 @@ describe.each(expandOrchestratorEvalRoutes(routes))(
         source: source(),
         availableRoutes: routes,
         delegated: true,
-        eventsAfterDelegation: []
+        postHandoff: ownedHandoff
       })
 
       expect(report.passed).toBe(true)
@@ -84,7 +94,11 @@ describe.each(expandOrchestratorEvalRoutes(routes))(
         expectedAmendment: "immutable audit record",
         availableRoutes: routes,
         delegated: true,
-        eventsAfterDelegation: []
+        task: {
+          boundedSingleOutcome: false,
+          changesApprovedPlan: true
+        },
+        postHandoff: ownedHandoff
       })
 
       expect(report.passed).toBe(true)
@@ -95,11 +109,80 @@ describe.each(expandOrchestratorEvalRoutes(routes))(
   }
 )
 
+describe("orchestrator direct/delegation decision eval", () => {
+  it("passes bounded single-outcome work only when it is completed and verified directly", () => {
+    const report = evaluateOrchestratorProcedure({
+      route: { cli: "codex", model: "gpt-5.6-sol" },
+      source: null,
+      availableRoutes: routes,
+      delegated: false,
+      task: {
+        boundedSingleOutcome: true,
+        independentComponents: 1
+      },
+      directCompleted: true,
+      directVerified: true
+    })
+
+    expect(report.passed).toBe(true)
+    expect(
+      report.assertions.find(
+        (assertion) => assertion.id === "direct-when-bounded"
+      )
+    ).toMatchObject({ passed: true })
+  })
+
+  it("fails unnecessary delegation of bounded work", () => {
+    const report = evaluateOrchestratorProcedure({
+      route: { cli: "claude", model: "haiku" },
+      source: source(),
+      availableRoutes: routes,
+      delegated: true,
+      task: {
+        boundedSingleOutcome: true,
+        independentComponents: 1
+      },
+      postHandoff: ownedHandoff
+    })
+
+    expect(report.passed).toBe(false)
+    expect(
+      report.assertions.find(
+        (assertion) => assertion.id === "direct-when-bounded"
+      )
+    ).toMatchObject({
+      passed: false,
+      evidence: expect.stringContaining("coordination overhead")
+    })
+  })
+
+  it.each([
+    ["parallel components", { independentComponents: 2 }],
+    ["specialist benefit", { independentComponents: 1, specialistBenefit: true }],
+    ["heavy verification", { independentComponents: 1, verificationHeavy: true }],
+    ["approved-plan change", { independentComponents: 1, changesApprovedPlan: true }]
+  ])("fails to delegate %s", (_label, signal) => {
+    const report = evaluateOrchestratorProcedure({
+      route: { cli: "opencode", model: "opencode/big-pickle" },
+      source: null,
+      availableRoutes: routes,
+      delegated: false,
+      task: {
+        boundedSingleOutcome: false,
+        ...signal
+      }
+    })
+
+    expect(
+      report.assertions.find(
+        (assertion) => assertion.id === "delegate-when-beneficial"
+      )
+    ).toMatchObject({ passed: false })
+  })
+})
+
 describe("orchestrator procedure eval failures", () => {
-  it("fails a planner that implements after Delegate or claims worker evidence", () => {
-    const postHandoff: ReadonlyArray<StreamEvent> = [
-      { _tag: "ToolStart", id: "edit-1", name: "Edit", target: "src/api.ts" }
-    ]
+  it("fails claimed worker evidence and abandoned post-handoff ownership", () => {
     const broken = source()
       .replace('data-status="queued"', 'data-status="completed"')
       .replace('data-status="pending"', 'data-status="passed" data-evidence="trust me"')
@@ -109,7 +192,14 @@ describe("orchestrator procedure eval failures", () => {
       source: broken,
       availableRoutes: routes,
       delegated: true,
-      eventsAfterDelegation: postHandoff
+      postHandoff: {
+        monitored: false,
+        workersSettled: false,
+        failedWorkerIds: ["worker-api"],
+        retriedWorkerIds: [],
+        integrated: false,
+        finalReported: false
+      }
     })
 
     expect(report.passed).toBe(false)
@@ -117,7 +207,12 @@ describe("orchestrator procedure eval failures", () => {
       report.assertions
         .filter((assertion) => !assertion.passed)
         .map((assertion) => assertion.id)
-    ).toEqual(expect.arrayContaining(["plan-only", "progress-ownership"]))
+    ).toEqual(
+      expect.arrayContaining([
+        "post-handoff-ownership",
+        "progress-ownership"
+      ])
+    )
   })
 
   it("fails unavailable assignments and dependency ownership conflicts", () => {
@@ -132,7 +227,7 @@ describe("orchestrator procedure eval failures", () => {
       source: broken,
       availableRoutes: routes,
       delegated: true,
-      eventsAfterDelegation: []
+      postHandoff: ownedHandoff
     })
 
     expect(report.passed).toBe(false)
@@ -161,7 +256,7 @@ describe("orchestrator procedure eval failures", () => {
       expectedAmendment: "immutable audit record",
       availableRoutes: routes,
       delegated: true,
-      eventsAfterDelegation: []
+      postHandoff: ownedHandoff
     })
 
     expect(

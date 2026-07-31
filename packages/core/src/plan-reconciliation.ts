@@ -7,6 +7,7 @@ import type {
   PlanStageAssignment,
   PlanStageExecutionStatus
 } from "./plan-document.js"
+import { writePlanAssignmentReasoningAttributes } from "./plan-assignment-html.js"
 import {
   type PlanHtmlDiagnostic,
   type PlanHtmlResult,
@@ -108,6 +109,7 @@ const writeStageRouting = (
   element.setAttribute("data-agent-id", assignment.agentId)
   element.setAttribute("data-cli", assignment.cli)
   element.setAttribute("data-model", assignment.model)
+  writePlanAssignmentReasoningAttributes(element, assignment.reasoning)
   element.setAttribute("data-reason", assignment.reason)
   element.setAttribute("data-status", status)
 }
@@ -334,6 +336,8 @@ export const reconcilePlanAmendment = (
     previousStages,
     replacementStages
   )
+  const previousCriteria = criteriaById(previous.projection.stages)
+  const replacementCriteria = criteriaById(replacement.projection.stages)
   const changedCriterionIds = new Set(
     changedStageIds.flatMap(
       (stageId) =>
@@ -343,8 +347,8 @@ export const reconcilePlanAmendment = (
   )
   reconcileCriteria(
     replacementRoot,
-    criteriaById(previous.projection.stages),
-    criteriaById(replacement.projection.stages),
+    previousCriteria,
+    replacementCriteria,
     changedCriterionIds
   )
   if (options.preserveAnnotations !== false) {

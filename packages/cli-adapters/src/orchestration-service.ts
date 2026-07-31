@@ -587,6 +587,9 @@ const workerIdentityFor = (
   stageIds: group.stages.map((stage) => stage.id),
   harness: group.assignment.cli,
   model: group.assignment.model,
+  ...(group.assignment.reasoning === undefined
+    ? {}
+    : { reasoning: group.assignment.reasoning }),
   attempt
 })
 

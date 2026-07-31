@@ -1,11 +1,16 @@
-import { parse } from "node-html-parser"
+import { type HTMLElement, parse } from "node-html-parser"
 import type {
+  PlanPrd,
   PlanPrdStage,
   PlanStageAssignment,
   PlanStageComplexity,
   WorkerModelRoute,
   WorkerRoutingConfig
 } from "./plan-document.js"
+import { workerReasoningSettingIssue } from "./plan-document.js"
+import type { ReasoningSetting } from "./domain.js"
+import { writePlanAssignmentReasoningAttributes } from "./plan-assignment-html.js"
+import { type PlanHtmlDiagnostic, parsePlanHtml } from "./plan-html.js"
 
 export type PlanExecutionDiagnosticCode =
   | "duplicate-stage"
@@ -47,6 +52,27 @@ export interface PlanExecutionGraphOptions {
 export interface WorkerRouteCatalogEntry {
   readonly cli: WorkerModelRoute["cli"]
   readonly models: ReadonlyArray<{ readonly id: string }>
+}
+
+export type OrchestrationPlanCompilation =
+  | {
+      readonly valid: true
+      readonly html: string
+      readonly projection: PlanPrd
+      readonly graph: PlanExecutionGraph
+      readonly diagnostics: readonly []
+    }
+  | {
+      readonly valid: false
+      readonly html: string
+      readonly projection: null
+      readonly graph: PlanExecutionGraph | null
+      readonly diagnostics: ReadonlyArray<PlanHtmlDiagnostic>
+    }
+
+export interface OrchestrationPlanCompilerOptions {
+  /** The last canonical plan projection, used only as a stable identity source. */
+  readonly previousStages?: ReadonlyArray<PlanPrdStage>
 }
 
 const COMPLEXITY_WEIGHT: Record<PlanStageComplexity, number> = {
@@ -114,14 +140,28 @@ const declaredFiles = (
   return { declared: true, files: [...files], invalid }
 }
 
+const reasoningRoute = (reasoning: ReasoningSetting | undefined): string =>
+  reasoning === undefined
+    ? "provider-default"
+    : `${reasoning.enabled ? "enabled" : "disabled"}\u0000${reasoning.effort ?? "provider-default"}`
+
 const assignmentRoute = (assignment: PlanStageAssignment): string =>
-  `${assignment.agentId}\u0000${assignment.cli}\u0000${assignment.model}`
+  `${assignment.agentId}\u0000${assignment.cli}\u0000${assignment.model}\u0000${reasoningRoute(assignment.reasoning)}`
+
+const workerRoutesEqual = (
+  left: WorkerModelRoute,
+  right: WorkerModelRoute
+): boolean =>
+  left.cli === right.cli &&
+  left.model === right.model &&
+  reasoningRoute(left.reasoning) === reasoningRoute(right.reasoning)
 
 const routeAvailable = (
   route: WorkerModelRoute | undefined,
   catalog: ReadonlyArray<WorkerRouteCatalogEntry>
 ): route is WorkerModelRoute =>
   route !== undefined &&
+  workerReasoningSettingIssue(route.cli, route.reasoning) === null &&
   catalog.some(
     (provider) =>
       provider.cli === route.cli &&
@@ -165,6 +205,124 @@ const stagesWithoutAssignments = (
 ): ReadonlyArray<PlanPrdStage> =>
   stages.map((stage) => ({ ...stage, assignment: null }))
 
+const nextAgentId = (
+  reservedAgentIds: ReadonlySet<string>,
+  usedAgentIds: ReadonlySet<string>
+): string => {
+  let ordinal = 1
+  while (true) {
+    const candidate = `agent-${String(ordinal).padStart(2, "0")}`
+    if (!(reservedAgentIds.has(candidate) || usedAgentIds.has(candidate))) {
+      return candidate
+    }
+    ordinal += 1
+  }
+}
+
+interface AgentIdAllocation {
+  readonly group: PlanExecutionGroup
+  readonly index: number
+  readonly identityByStageId: ReadonlyMap<string, PlanPrdStage>
+  readonly reservedAgentIds: ReadonlySet<string>
+  readonly usedAgentIds: ReadonlySet<string>
+  readonly reserveHistoricalIds: boolean
+}
+
+const allocateAgentId = ({
+  group,
+  index,
+  identityByStageId,
+  reservedAgentIds,
+  usedAgentIds,
+  reserveHistoricalIds
+}: AgentIdAllocation): string => {
+  const preferredAgentId = group.stageIds
+    .map((stageId) => identityByStageId.get(stageId)?.assignment?.agentId)
+    .find((agentId): agentId is string => agentId !== undefined)
+  if (preferredAgentId !== undefined && !usedAgentIds.has(preferredAgentId)) {
+    return preferredAgentId
+  }
+  if (reserveHistoricalIds) {
+    return nextAgentId(reservedAgentIds, usedAgentIds)
+  }
+  const baseAgentId =
+    preferredAgentId ?? `agent-${String(index + 1).padStart(2, "0")}`
+  let agentId = baseAgentId
+  let suffix = 2
+  while (usedAgentIds.has(agentId)) {
+    agentId = `${baseAgentId}-${suffix}`
+    suffix += 1
+  }
+  return agentId
+}
+
+interface WorkerRoutingWriteOptions {
+  readonly identityStages: ReadonlyArray<PlanPrdStage>
+  readonly reserveHistoricalIds: boolean
+}
+
+const writeWorkerRouting = (
+  html: string,
+  stages: ReadonlyArray<PlanPrdStage>,
+  routing: WorkerRoutingConfig,
+  options: WorkerRoutingWriteOptions
+): string => {
+  const graph = buildPlanExecutionGraph(stagesWithoutAssignments(stages))
+  const root = parse(html)
+  const stageElements = new Map(
+    root
+      .querySelectorAll("section[data-stage]")
+      .map((element) => [element.getAttribute("data-stage") ?? "", element])
+  )
+  const identityByStageId = new Map(
+    options.identityStages.map((stage) => [stage.id, stage])
+  )
+  const reservedAgentIds = new Set(
+    options.identityStages.flatMap((stage) =>
+      stage.assignment === null || stage.assignment === undefined
+        ? []
+        : [stage.assignment.agentId]
+    )
+  )
+  const usedAgentIds = new Set<string>()
+
+  for (const [index, group] of graph.groups.entries()) {
+    const agentId = allocateAgentId({
+      group,
+      index,
+      identityByStageId,
+      reservedAgentIds,
+      usedAgentIds,
+      reserveHistoricalIds: options.reserveHistoricalIds
+    })
+    usedAgentIds.add(agentId)
+    const route = routing[group.complexity] ?? routing.default
+    const reason =
+      `Worker router selected ${route.cli}/${route.model} for this ` +
+      `${group.complexity}-complexity dependency/file component.`
+
+    for (const stageId of group.stageIds) {
+      const stage = stageElements.get(stageId)
+      if (stage === undefined) continue
+      stage.removeAttribute("data-execution-status")
+      let assignment = stage.querySelector("[data-assignment]")
+      if (assignment === null) {
+        stage.insertAdjacentHTML("afterbegin", "<div data-assignment></div>")
+        assignment = stage.querySelector("[data-assignment]")
+      }
+      if (assignment === null) continue
+      assignment.setAttribute("data-assignment", "")
+      assignment.setAttribute("data-agent-id", agentId)
+      assignment.setAttribute("data-cli", route.cli)
+      assignment.setAttribute("data-model", route.model)
+      writePlanAssignmentReasoningAttributes(assignment, route.reasoning)
+      assignment.setAttribute("data-reason", reason)
+      assignment.setAttribute("data-status", "queued")
+    }
+  }
+  return root.toString()
+}
+
 /**
  * Rewrite planner-authored assignments to the operator's concrete complexity
  * routes before the document becomes canonical. Logical agent ids remain
@@ -176,51 +334,99 @@ export const applyWorkerRoutingToPlanHtml = (
   stages: ReadonlyArray<PlanPrdStage>,
   routing: WorkerRoutingConfig
 ): string => {
-  const graph = buildPlanExecutionGraph(stagesWithoutAssignments(stages))
-  const root = parse(html)
-  const stageElements = new Map(
-    root
-      .querySelectorAll("section[data-stage]")
-      .map((element) => [element.getAttribute("data-stage") ?? "", element])
-  )
-  const stageById = new Map(stages.map((stage) => [stage.id, stage]))
-  const usedAgentIds = new Set<string>()
+  return writeWorkerRouting(html, stages, routing, {
+    identityStages: stages,
+    reserveHistoricalIds: false
+  })
+}
 
-  for (const [index, group] of graph.groups.entries()) {
-    const preferredAgentId = group.stageIds
-      .map((stageId) => stageById.get(stageId)?.assignment?.agentId)
-      .find((agentId): agentId is string => agentId !== undefined)
-    const baseAgentId =
-      preferredAgentId ?? `agent-${String(index + 1).padStart(2, "0")}`
-    let agentId = baseAgentId
-    let suffix = 2
-    while (usedAgentIds.has(agentId)) {
-      agentId = `${baseAgentId}-${suffix}`
-      suffix += 1
-    }
-    usedAgentIds.add(agentId)
-    const route = routing[group.complexity] ?? routing.default
-    const reason =
-      `Worker router selected ${route.cli}/${route.model} for this ` +
-      `${group.complexity}-complexity dependency/file component.`
-
-    for (const stageId of group.stageIds) {
-      const stage = stageElements.get(stageId)
-      if (stage === undefined) continue
-      let assignment = stage.querySelector("[data-assignment]")
-      if (assignment === null) {
-        stage.insertAdjacentHTML("afterbegin", "<div data-assignment></div>")
-        assignment = stage.querySelector("[data-assignment]")
-      }
-      if (assignment === null) continue
-      assignment.setAttribute("data-agent-id", agentId)
-      assignment.setAttribute("data-cli", route.cli)
-      assignment.setAttribute("data-model", route.model)
-      assignment.setAttribute("data-reason", reason)
-      assignment.setAttribute("data-status", "queued")
-    }
+const orchestrationSemanticsHtml = (source: string): string => {
+  const root = parse(source)
+  for (const assignment of root.querySelectorAll("[data-assignment]")) {
+    assignment.remove()
+  }
+  for (const stage of root.querySelectorAll("section[data-stage]")) {
+    stage.removeAttribute("data-execution-status")
+  }
+  for (const criterion of root.querySelectorAll("[data-acceptance]")) {
+    criterion.setAttribute("data-status", "pending")
+    criterion.removeAttribute("data-evidence")
   }
   return root.toString()
+}
+
+const invalidCompilation = (
+  html: string,
+  diagnostics: ReadonlyArray<PlanHtmlDiagnostic>,
+  graph: PlanExecutionGraph | null = null
+): Extract<OrchestrationPlanCompilation, { readonly valid: false }> => ({
+  valid: false,
+  html,
+  projection: null,
+  graph,
+  diagnostics
+})
+
+const htmlDiagnostics = (
+  graph: PlanExecutionGraph
+): ReadonlyArray<PlanHtmlDiagnostic> =>
+  graph.diagnostics.map((diagnostic) => ({
+    code: diagnostic.code,
+    message: diagnostic.message
+  }))
+
+/**
+ * Compile planner-authored plan semantics into the canonical executable form.
+ *
+ * Operational assignment markup is deliberately discarded: the planner owns
+ * stages, dependencies, files, complexity, and acceptance criteria, while this
+ * compiler owns stable worker identities and concrete execution routes.
+ */
+export const compileOrchestrationPlanHtml = (
+  source: string,
+  routing: WorkerRoutingConfig,
+  options: OrchestrationPlanCompilerOptions = {}
+): OrchestrationPlanCompilation => {
+  const semantic = parsePlanHtml(orchestrationSemanticsHtml(source), {
+    validateExecutionGraph: false
+  })
+  if (!semantic.valid) {
+    return invalidCompilation(semantic.html, semantic.diagnostics)
+  }
+  const semanticGraph = buildPlanExecutionGraph(semantic.projection.stages)
+  if (!semanticGraph.valid) {
+    return invalidCompilation(
+      semantic.html,
+      htmlDiagnostics(semanticGraph),
+      semanticGraph
+    )
+  }
+  const html = writeWorkerRouting(
+    semantic.html,
+    semantic.projection.stages,
+    routing,
+    {
+      identityStages: options.previousStages ?? [],
+      reserveHistoricalIds: true
+    }
+  )
+  const compiled = parsePlanHtml(html)
+  if (!compiled.valid) {
+    return invalidCompilation(compiled.html, compiled.diagnostics)
+  }
+  const graph = buildPlanExecutionGraph(compiled.projection.stages, {
+    requireAssignments: true
+  })
+  if (!graph.valid) {
+    return invalidCompilation(compiled.html, htmlDiagnostics(graph), graph)
+  }
+  return {
+    valid: true,
+    html: compiled.html,
+    projection: compiled.projection,
+    graph,
+    diagnostics: []
+  }
 }
 
 /** Return the first canonical component that disagrees with the active router. */
@@ -233,8 +439,7 @@ export const workerRoutingMismatch = (
     const expected = routing[group.complexity] ?? routing.default
     return (
       group.assignment !== null &&
-      (group.assignment.cli !== expected.cli ||
-        group.assignment.model !== expected.model)
+      !workerRoutesEqual(group.assignment, expected)
     )
   }) ?? null
 }

@@ -34,6 +34,7 @@ const worker = (
     readonly attempt?: number
     readonly planId?: string
     readonly chatId?: string
+    readonly reasoning?: WorkerIdentity["reasoning"]
   } = {}
 ): WorkerIdentity => ({
   sessionId: "session-1",
@@ -43,6 +44,9 @@ const worker = (
   stageIds: [agentId === "agent-a" ? "01" : "02"],
   harness,
   model: harness === "claude" ? "opus" : "gpt-5.6-sol",
+  ...(overrides.reasoning === undefined
+    ? {}
+    : { reasoning: overrides.reasoning }),
   attempt: overrides.attempt ?? 1
 })
 
@@ -264,7 +268,9 @@ describe("orchestrationAgentsMachine", () => {
     await waitFor(actor, (snapshot) => snapshot.matches("watching"))
     const emit = harness.subscriptions[0]!.listener
     const agentA = worker("agent-a", "claude")
-    const agentB = worker("agent-b", "codex")
+    const agentB = worker("agent-b", "codex", {
+      reasoning: { enabled: true, effort: "xhigh" }
+    })
 
     emit(reset([state(agentA, "queued"), state(agentB, "queued")]))
     emit(lifecycle(agentA, "running"))
@@ -287,6 +293,10 @@ describe("orchestrationAgentsMachine", () => {
       { id: "agent-a", status: "completed", harness: "claude", attempt: 1 },
       { id: "agent-b", status: "failed", harness: "codex", attempt: 1 }
     ])
+    expect(beforeRetry.find(({ id }) => id === "agent-b")?.reasoning).toEqual({
+      enabled: true,
+      effort: "xhigh"
+    })
     expect(textOf(beforeRetry[0]!)).toBe("alpha")
     expect(textOf(beforeRetry[1]!)).toBe("bravo")
     expect(beforeRetry.every((agent) => !agent.message.streaming)).toBe(true)

@@ -24,7 +24,13 @@ import {
 import { stageCodexInput, toCodexAppServerInput } from "./codex-input.js"
 import { codexMcpEnvironment, codexMcpOverrides } from "./mcp-config.js"
 import { requireWorktree } from "./cwd.js"
-import { hasPlanBlock, parsePlan, PLAN_HTML_REFORMAT } from "./plan-parse.js"
+import {
+  hasOrchestratorPlanSubmission,
+  hasPlanBlock,
+  ORCHESTRATOR_PLAN_HTML_REFORMAT,
+  parsePlan,
+  PLAN_HTML_REFORMAT
+} from "./plan-parse.js"
 import { createPlanDraftStream } from "./plan-draft-stream.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
 import { harnessEnv, hasSubscriptionAuth } from "./subscription.js"
@@ -622,9 +628,12 @@ export const runCodexAppServer = (
 
               const proposed =
                 reply !== null &&
-                planning &&
+                (planning ||
+                  (spec.orchestrationRoutes !== undefined &&
+                    spec.orchestrationPlanApproved !== true &&
+                    hasOrchestratorPlanSubmission(reply))) &&
                 planRound < MAX_PLAN_ROUNDS &&
-                hasPlanBlock(reply)
+                (planning ? hasPlanBlock(reply) : true)
                   ? reply
                   : null
               if (proposed !== null) {
@@ -638,7 +647,9 @@ export const runCodexAppServer = (
                   planReformatAsked = true
                   const clear = planDraft.clear()
                   if (clear !== null) await runP(ctx.emit(clear))
-                  followUp = PLAN_HTML_REFORMAT
+                  followUp = planning
+                    ? PLAN_HTML_REFORMAT
+                    : ORCHESTRATOR_PLAN_HTML_REFORMAT
                   continue
                 }
                 const decision = await runP(ctx.proposePlan(plan))

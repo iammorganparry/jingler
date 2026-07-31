@@ -57,6 +57,7 @@ let exitInput: Record<string, unknown> = {}
 let exitDecision: unknown = null
 let callExitPlanMode = true
 let callEnterPlanMode = false
+let enterDecision: unknown = null
 let writeInput: Record<string, unknown> | null = null
 let writeDecision: unknown = null
 let disallowedTools: ReadonlyArray<string> = []
@@ -134,7 +135,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
       })()
       yield textDelta(visibleReply)
       if (callEnterPlanMode) {
-        await options.canUseTool(
+        enterDecision = await options.canUseTool(
           "EnterPlanMode",
           {},
           { toolUseID: "enter-plan-1" }
@@ -216,6 +217,7 @@ beforeEach(() => {
   exitDecision = null
   callExitPlanMode = true
   callEnterPlanMode = false
+  enterDecision = null
   writeInput = null
   writeDecision = null
   disallowedTools = []
@@ -247,6 +249,36 @@ describe("Claude plan submission", () => {
     expect(proposed).toHaveLength(1)
     expect(proposed[0]?.summary).toBe("Auto native plan")
     expect(writeDecision).toMatchObject({ behavior: "deny" })
+  })
+
+  it("refuses to reopen native plan mode after the orchestrator plan is approved", async () => {
+    visibleReply = "Coordinating the approved work."
+    callEnterPlanMode = true
+    const { ctx, proposed } = harness()
+
+    await Effect.runPromise(
+      runClaude(
+        "session-approved",
+        {
+          ...spec,
+          mode: "auto",
+          readOnly: undefined,
+          orchestrationPlanApproved: true
+        },
+        ctx,
+        new Map()
+      )
+    )
+
+    expect(proposed).toHaveLength(0)
+    expect(enterDecision).toMatchObject({
+      behavior: "deny",
+      message: expect.stringContaining("without another approval gate")
+    })
+    expect(exitDecision).toMatchObject({
+      behavior: "deny",
+      message: expect.stringContaining("without another approval gate")
+    })
   })
 
   it("captures a structured native plan-file Write without allowing the filesystem edit", async () => {
@@ -316,7 +348,7 @@ describe("Claude plan submission", () => {
     })
   })
 
-  it("normalizes repeated worker ids before proposing a streamed orchestrator PRD", async () => {
+  it("discards planner worker ids before proposing a compiled orchestrator PRD", async () => {
     visibleReply = repeatedAgentPlanHtml
     const { ctx, proposed } = harness()
 
@@ -339,7 +371,7 @@ describe("Claude plan submission", () => {
     expect(parsed.valid).toBe(true)
     expect(
       parsed.projection?.stages.map((stage) => stage.assignment?.agentId)
-    ).toStrictEqual(["worker-pricing", "worker-pricing-2"])
+    ).toStrictEqual(["agent-01", "agent-02"])
   })
 
   it("prefers a valid explicit payload over buffered assistant text", async () => {

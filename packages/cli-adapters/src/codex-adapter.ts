@@ -11,7 +11,13 @@ import { Effect, Runtime } from "effect"
 import type { AgentContext, SessionSpec } from "./adapter.js"
 import { capOutput } from "./output-cap.js"
 import { codexFileChangeStats } from "./codex-file-change.js"
-import { hasPlanBlock, parsePlan, PLAN_HTML_REFORMAT } from "./plan-parse.js"
+import {
+  hasOrchestratorPlanSubmission,
+  hasPlanBlock,
+  ORCHESTRATOR_PLAN_HTML_REFORMAT,
+  parsePlan,
+  PLAN_HTML_REFORMAT
+} from "./plan-parse.js"
 import { createPlanDraftStream } from "./plan-draft-stream.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
 import { requireWorktree } from "./cwd.js"
@@ -575,11 +581,17 @@ export const runCodexSdk = (
               followUp = formatQuestionAnswers(asked.questions, answers)
               continue
             }
-            // `hasPlanBlock` demands the exact ` ```plan ` info string, so a
-            // model merely *discussing* planning doesn't trip this.
+            // Native plan mode is itself an intent signal. Auto orchestration
+            // instead requires the explicit submission marker; a valid fence
+            // may otherwise just be an explanation, review, or quotation.
             const proposed =
-              reply !== null && planning && planRound < MAX_PLAN_ROUNDS &&
-              hasPlanBlock(reply)
+              reply !== null &&
+              (planning ||
+                (spec.orchestrationRoutes !== undefined &&
+                  spec.orchestrationPlanApproved !== true &&
+                  hasOrchestratorPlanSubmission(reply))) &&
+              planRound < MAX_PLAN_ROUNDS &&
+              (planning ? hasPlanBlock(reply) : true)
                 ? reply
                 : null
             if (proposed !== null) {
@@ -598,7 +610,9 @@ export const runCodexSdk = (
                 planReformatAsked = true
                 const clear = planDraft.clear()
                 if (clear !== null) await runP(ctx.emit(clear))
-                followUp = PLAN_HTML_REFORMAT
+                followUp = planning
+                  ? PLAN_HTML_REFORMAT
+                  : ORCHESTRATOR_PLAN_HTML_REFORMAT
                 continue
               }
               const decision = await runP(ctx.proposePlan(plan))

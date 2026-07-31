@@ -10,16 +10,19 @@ import {
   AlertTriangle,
   Check,
   CheckCircle2,
+  Cloud,
   Ellipsis,
   LoaderCircle,
   Play,
   RefreshCw,
   Save,
   Send,
+  WifiOff,
   Zap
 } from "lucide-react"
 import type { ComponentType } from "react"
 import { Button } from "../components/button.js"
+import { Pill } from "../components/pill.js"
 import { cn } from "../lib/cn.js"
 import type {
   PlanEditorSyncState,
@@ -32,6 +35,29 @@ interface Action {
   readonly onRun?: () => void
   readonly disabled?: boolean
 }
+
+const SYNC: Record<
+  PlanEditorSyncState,
+  { readonly label: string; readonly className: string; readonly icon: typeof Cloud }
+> = {
+  loading: { label: "Loading", className: "text-muted-foreground", icon: RefreshCw },
+  clean: { label: "Synced", className: "text-green", icon: Check },
+  editing: { label: "Editing", className: "text-yellow", icon: Cloud },
+  saving: { label: "Saving", className: "text-blue", icon: RefreshCw },
+  conflict: { label: "Conflict", className: "text-red", icon: AlertTriangle },
+  error: { label: "Save failed", className: "text-red", icon: WifiOff }
+}
+
+const transientSync = (state: PlanEditorTransientState) => ({
+  label:
+    state === "composing"
+      ? "Composing"
+      : state === "validating"
+        ? "Validating"
+        : "Loading revision",
+  className: "text-blue",
+  icon: RefreshCw
+})
 
 const primaryAction = (input: {
   readonly status?: PlanDocumentStatus
@@ -106,6 +132,7 @@ const primaryAction = (input: {
 
 export function PlanFloatingActions({
   status,
+  revision,
   syncState,
   transientState,
   canApprove = true,
@@ -120,6 +147,7 @@ export function PlanFloatingActions({
   onAcceptRemote
 }: {
   status?: PlanDocumentStatus
+  revision?: number
   syncState: PlanEditorSyncState
   transientState?: PlanEditorTransientState
   canApprove?: boolean
@@ -146,7 +174,8 @@ export function PlanFloatingActions({
     onRetry,
     onKeepLocal
   })
-  if (primary === null) return null
+  const sync = transientState === undefined ? SYNC[syncState] : transientSync(transientState)
+  const SyncIcon = sync.icon
 
   const secondary: ReadonlyArray<Action> = [
     ...(status === "proposed" || status === "revising"
@@ -167,7 +196,7 @@ export function PlanFloatingActions({
       ? [{ label: "Use remote revision", icon: RefreshCw, onRun: onAcceptRemote }]
       : [])
   ]
-  const PrimaryIcon = primary.icon
+  const PrimaryIcon = primary?.icon
 
   return (
     <div
@@ -178,24 +207,77 @@ export function PlanFloatingActions({
           : "Plan actions"
       }
       data-testid="plan-floating-actions"
-      className="absolute bottom-4 left-1/2 z-30 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-1 rounded-xl border border-line bg-sunken/95 p-1.5 shadow-lg backdrop-blur"
+      className="absolute bottom-4 left-1/2 z-30 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-1.5 rounded-xl border border-line bg-sunken/95 p-1.5 shadow-lg backdrop-blur"
     >
-      <Button
-        size="sm"
-        aria-label={primary.label}
-        disabled={primary.disabled}
-        onClick={primary.onRun}
-        className={cn(compact && "px-2")}
+      <div
+        data-testid="plan-status-summary"
+        className="pointer-events-none flex min-w-0 items-center gap-2 px-1"
       >
-        <PrimaryIcon
+        {(status !== undefined || transientState !== undefined) && (
+          <Pill
+            tone={
+              transientState !== undefined
+                ? "blue"
+                : status === "done" || status === "approved"
+                  ? "green"
+                  : status === "needs-verification"
+                    ? "yellow"
+                    : "blue"
+            }
+            pulse={
+              transientState === "composing" ||
+              transientState === "validating" ||
+              status === "executing"
+            }
+          >
+            {transientState ?? status?.replace("-", " ")}
+          </Pill>
+        )}
+        {revision !== undefined && transientState === undefined && !compact && (
+          <span className="whitespace-nowrap font-mono text-[10px] text-muted-foreground">
+            revision {revision}
+          </span>
+        )}
+        <span
+          role="status"
+          aria-live="polite"
           className={cn(
-            "size-3.5",
-            (status === "executing" || transientState !== undefined) && "animate-spin"
+            "flex items-center gap-1.5 whitespace-nowrap text-[10.5px] font-medium",
+            sync.className
           )}
-        />
-        {!compact && primary.label}
-      </Button>
-      {secondary.length > 0 && (
+        >
+          <SyncIcon
+            className={cn(
+              "size-3.5",
+              (transientState !== undefined || syncState === "saving") && "animate-spin"
+            )}
+          />
+          {sync.label}
+        </span>
+      </div>
+      {primary !== null && (
+        <>
+          <span aria-hidden="true" className="h-5 w-px flex-none bg-line" />
+          <Button
+            size="sm"
+            aria-label={primary.label}
+            disabled={primary.disabled}
+            onClick={primary.onRun}
+            className={cn(compact && "px-2")}
+          >
+            {PrimaryIcon !== undefined && (
+              <PrimaryIcon
+                className={cn(
+                  "size-3.5",
+                  (status === "executing" || transientState !== undefined) && "animate-spin"
+                )}
+              />
+            )}
+            {!compact && primary.label}
+          </Button>
+        </>
+      )}
+      {primary !== null && secondary.length > 0 && (
         <DropdownMenuRoot>
           <DropdownMenuTrigger asChild>
             <button
