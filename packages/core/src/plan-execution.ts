@@ -9,6 +9,7 @@ import type {
 } from "./plan-document.js"
 import { workerReasoningSettingIssue } from "./plan-document.js"
 import type { ReasoningSetting } from "./domain.js"
+import { writePlanAssignmentReasoningAttributes } from "./plan-assignment-html.js"
 import { type PlanHtmlDiagnostic, parsePlanHtml } from "./plan-html.js"
 
 export type PlanExecutionDiagnosticCode =
@@ -154,23 +155,6 @@ const workerRoutesEqual = (
   left.cli === right.cli &&
   left.model === right.model &&
   reasoningRoute(left.reasoning) === reasoningRoute(right.reasoning)
-
-const writeReasoningRoute = (
-  element: HTMLElement,
-  reasoning: ReasoningSetting | undefined
-): void => {
-  if (reasoning === undefined) {
-    element.removeAttribute("data-thinking-enabled")
-    element.removeAttribute("data-reasoning-effort")
-    return
-  }
-  element.setAttribute("data-thinking-enabled", String(reasoning.enabled))
-  if (reasoning.effort === undefined) {
-    element.removeAttribute("data-reasoning-effort")
-  } else {
-    element.setAttribute("data-reasoning-effort", reasoning.effort)
-  }
-}
 
 const routeAvailable = (
   route: WorkerModelRoute | undefined,
@@ -331,7 +315,7 @@ const writeWorkerRouting = (
       assignment.setAttribute("data-agent-id", agentId)
       assignment.setAttribute("data-cli", route.cli)
       assignment.setAttribute("data-model", route.model)
-      writeReasoningRoute(assignment, route.reasoning)
+      writePlanAssignmentReasoningAttributes(assignment, route.reasoning)
       assignment.setAttribute("data-reason", reason)
       assignment.setAttribute("data-status", "queued")
     }

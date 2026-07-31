@@ -186,6 +186,16 @@ export interface HtmlPlanSubmission {
 }
 
 /**
+ * Explicit reply-channel handoff used when an orchestrator deliberately chooses
+ * delegation without entering a provider-native plan mode. A plan fence alone
+ * is content and may legitimately appear in an explanation or review.
+ */
+export const ORCHESTRATOR_PLAN_SUBMISSION_MARKER =
+  "<!-- jingler:submit-plan -->"
+
+export const ORCHESTRATOR_PLAN_HTML_REFORMAT = `${PLAN_HTML_REFORMAT} Start the reply with exactly ${ORCHESTRATOR_PLAN_SUBMISSION_MARKER} on its own line to resubmit it.`
+
+/**
  * Find every complete, structurally valid HTML plan submission.
  *
  * `html` is the canonical CommonMark info string. `html plan` remains accepted
@@ -256,6 +266,27 @@ export const fencedHtmlPlanSubmission = (
   workerRouting === undefined
     ? htmlPlanSubmissions(raw)[0] ?? null
     : compiledHtmlPlanSubmission(raw, workerRouting)?.submission ?? null
+
+export const orchestratorPlanSubmission = (
+  raw: string
+): HtmlPlanSubmission | null => {
+  const markerEnd = raw.indexOf(ORCHESTRATOR_PLAN_SUBMISSION_MARKER)
+  if (markerEnd < 0 || raw.slice(0, markerEnd).trim().length > 0) return null
+  // Intent and validity are separate concerns. A complete canonical transport
+  // with the explicit marker is a deliberate submission even when its HTML is
+  // malformed; the adapter must intercept that reply so it can request the one
+  // bounded reformat retry instead of leaking it into ordinary chat.
+  const submission = completeHtmlPlanSubmissions(raw)[0] ?? null
+  if (submission === null) return null
+  const between = raw.slice(
+    markerEnd + ORCHESTRATOR_PLAN_SUBMISSION_MARKER.length,
+    submission.start
+  )
+  return between.trim().length === 0 ? submission : null
+}
+
+export const hasOrchestratorPlanSubmission = (raw: string): boolean =>
+  orchestratorPlanSubmission(raw) !== null
 
 export const fencedHtmlPlan = (raw: string): string | null =>
   fencedHtmlPlanSubmission(raw)?.body ?? null

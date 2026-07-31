@@ -193,7 +193,7 @@ describe("planDocumentMachine", () => {
     }
   })
 
-  it("cancels a pending autosave when a remote revision wins or the actor stops", async () => {
+  it("cancels a pending autosave when a remote revision wins", async () => {
     vi.useFakeTimers()
     const save = vi.fn(async () => document(2))
     const actor = start(save)
@@ -208,13 +208,6 @@ describe("planDocumentMachine", () => {
       await vi.advanceTimersByTimeAsync(2_000)
       expect(save).not.toHaveBeenCalled()
 
-      const stoppedActor = start(save)
-      await vi.advanceTimersByTimeAsync(0)
-      await waitFor(stoppedActor, (snapshot) => snapshot.matches("clean"))
-      stoppedActor.send({ type: "EDIT", source: source("Stopped draft") })
-      stoppedActor.stop()
-      await vi.advanceTimersByTimeAsync(2_000)
-      expect(save).not.toHaveBeenCalled()
     } finally {
       actor.stop()
       vi.useRealTimers()

@@ -3,6 +3,7 @@ import { parsePlanHtml, type WorkerRoutingConfig } from "@jingler/core"
 import {
   fencedHtmlPlan,
   hasPlanBlock,
+  hasOrchestratorPlanSubmission,
   parseFlow,
   parsePlan,
   parseStepCode,
@@ -426,6 +427,38 @@ describe("hasPlanBlock", () => {
     expect(
       parsed.projection?.stages.map((stage) => stage.assignment?.agentId)
     ).toStrictEqual(["agent-01", "agent-02"])
+  })
+})
+
+describe("hasOrchestratorPlanSubmission", () => {
+  const plan = [
+    "<!-- jingler:submit-plan -->",
+    "````html",
+    "<h1>PRD: Ship</h1>",
+    '<section data-stage="01" data-title="Ship"><div data-acceptance="01.1" data-status="pending">works</div></section>',
+    "````"
+  ].join("\n")
+
+  it("recognises a deliberately marked structured submission", () => {
+    expect(hasOrchestratorPlanSubmission(plan)).toBe(true)
+  })
+
+  it("does not infer submission intent from an unmarked plan fence", () => {
+    expect(hasOrchestratorPlanSubmission(plan.replace("<!-- jingler:submit-plan -->\n", ""))).toBe(
+      false
+    )
+  })
+
+  it("recognises a marked but structurally malformed plan for reformatting", () => {
+    expect(
+      hasOrchestratorPlanSubmission(
+        "<!-- jingler:submit-plan -->\n````html\n<h1>Incomplete</h1>\n````"
+      )
+    ).toBe(true)
+  })
+
+  it("does not treat a quoted marker and plan as a submission", () => {
+    expect(hasOrchestratorPlanSubmission(`Here is the format to quote:\n\n${plan}`)).toBe(false)
   })
 })
 

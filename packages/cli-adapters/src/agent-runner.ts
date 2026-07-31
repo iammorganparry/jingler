@@ -65,6 +65,7 @@ import { runLifetime } from "./run-lifetime.js"
 import { planNote } from "./plan-prompt.js"
 import {
   completeHtmlPlanSubmissions,
+  ORCHESTRATOR_PLAN_SUBMISSION_MARKER,
   stripHtmlPlanBlock
 } from "./plan-parse.js"
 import { questionNote } from "./question-prompt.js"
@@ -1273,15 +1274,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               canonicalPlan.status === "executing" ||
               canonicalPlan.status === "needs-verification" ||
               canonicalPlan.status === "done")
-          // The orchestrator always runs in AUTO with its native tools. It can
-          // therefore complete bounded work before any plan exists, deliberately
-          // enter/submit a plan only when delegation adds value, and retain edit,
-          // command, skill, git/GitHub, steering, and communication capabilities
-          // after approval. Planning is a chosen handoff, not a blanket
-          // read-only boundary. A non-orchestrator chat keeps the operator's mode.
-          const mode: PermissionMode = orchestrating
-            ? "auto"
-            : sessionMode
+          // Orchestration is a coordination role, not a permission escalation.
+          // The orchestrator can still complete bounded work directly, but only
+          // with the edit/command authority the operator selected for this chat.
+          // Plan approval restores an execution mode through `setMode`, so this
+          // does not force later orchestrator turns back through another gate.
+          const mode: PermissionMode = sessionMode
           yield* ContextManager.bindContext(chatId, sessionId)
           /**
            * Consume a ready digest, if the context manager has one waiting.
@@ -1365,7 +1363,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 "You are this session's orchestrator.",
                 planApproved
                   ? "A plan is already approved. Apply the standing direct/delegation policy. When a request changes delegated work, amend the COMPLETE semantic plan as one four-backtick HTML block opened with exactly ````html; keep stage and acceptance ids stable and omit assignments/routes. Jingler returns an applied, invalid, or conflict outcome with the current revision and dispatches valid changed work automatically, without another approval gate."
-                  : "Start with your full native tools. If the standing signals favor delegation, inspect the repository and deliberately enter your native plan mode when available; otherwise return the COMPLETE semantic plan as one four-backtick HTML block opened with exactly ````html. Declare complexity, dependencies, files, and acceptance criteria, but no assignments or routes. The first delegated plan has one approval gate; bounded direct work has none.",
+                  : `Start with your full native tools. If the standing signals favor delegation, inspect the repository and deliberately enter your native plan mode when available; otherwise submit by starting the reply with exactly ${ORCHESTRATOR_PLAN_SUBMISSION_MARKER} on its own line, immediately followed by the COMPLETE semantic plan as one four-backtick HTML block opened with exactly \`\`\`\`html. Use this marker only to deliberately submit a plan for delegation, never when explaining, reviewing, or quoting one. Declare complexity, dependencies, files, and acceptance criteria, but no assignments or routes. The first delegated plan has one approval gate; bounded direct work has none.`,
                 "Plan grammar (only when delegating or amending): use <section data-stage=\"...\" data-title=\"...\" data-complexity=\"low|medium|high\" data-depends-on=\"...\">, one <ul data-files> of repository-relative <li> paths, and pending <div data-acceptance=\"...\" data-status=\"pending\"> criteria. Never emit data-assignment elements, agent ids, harnesses, models, or routes.",
                 "",
                 text
@@ -1452,6 +1450,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             // over the spec, so a null id alone would silently resume anyway.
             resumeId: digest === null ? chat.resumeId ?? null : null,
             ...(digest === null ? {} : { fresh: true }),
+            // Plan mode is an operator-selected read-only boundary. Enforce it
+            // at the adapter as well as in the prompt/tool gate: Codex has no
+            // per-tool callback, and unknown Claude tools otherwise fail open.
+            ...(orchestrating && mode === "plan" ? { readOnly: true } : {}),
             remoteMcpServers
           }
 
@@ -1717,8 +1719,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
 
           // Approved-plan replies have four explicit outcomes. Applied updates
           // emit PlanUpdated and requeue changed work; not-present is an ordinary
-          // direct/coordination reply; invalid and conflict retain diagnostics in
-          // the transcript so the orchestrator can repair them on its next turn.
+          // direct/coordination reply; invalid and conflict surface diagnostics
+          // live and retain them in the transcript for the next repair turn.
           const applyOrchestratorAmendment = (
             text: string
           ): Effect.Effect<OrchestratorAmendmentOutcome> =>
@@ -1727,7 +1729,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               if (!orchestrating || !planApproved || worktreePath.length === 0) {
                 return amendmentNotPresent(knownRevision)
               }
-              const submission = completeHtmlPlanSubmissions(text)[0]
+              const submissions = completeHtmlPlanSubmissions(text)
+              if (submissions.length > 1) {
+                return amendmentFailure("invalid", knownRevision, [
+                  "The amendment reply contains multiple complete HTML plan blocks. Return exactly one canonical amendment block."
+                ])
+              }
+              const submission = submissions[0]
               if (submission === undefined) {
                 if (PLAN_HTML_SUBMISSION_OPENING.test(text)) {
                   return amendmentFailure("invalid", knownRevision, [
@@ -1874,6 +1882,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 }).pipe(Effect.provide(env), Effect.ignore)
               }
               let next = applyStreamEvent(yield* Ref.get(acc), event)
+              let liveAmendmentFeedback: string | null = null
               if (event._tag === "Done") {
                 const settledText = next.parts
                   .filter((part) => part._tag === "Text")
@@ -1900,6 +1909,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                     amendmentOutcome
                   )
                   if (feedback !== null) {
+                    liveAmendmentFeedback = feedback
                     const feedbackPart: ContentPart = {
                       _tag: "Text",
                       text: feedback
@@ -1952,6 +1962,15 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               if (event._tag === "Done") {
                 yield* ContextManager.settle(chatId).pipe(Effect.ignore)
                 yield* finalizePlanVerification()
+              }
+              // Amendment diagnostics are part of the canonical assistant
+              // message, so live consumers must receive the same appended text
+              // before the terminal event makes them stop reading the stream.
+              if (liveAmendmentFeedback !== null) {
+                yield* out.offer({
+                  _tag: "Assistant",
+                  text: liveAmendmentFeedback
+                })
               }
               yield* out.offer(event)
               // After the tool card lands, reconcile plan progress off a successful edit.

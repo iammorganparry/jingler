@@ -8,7 +8,9 @@ import {
 
 const documentFrom = (source: string): PlanDocument => {
   const parsed = parsePlanHtml(source)
-  if (!parsed.valid) throw new Error("Test plan must be valid")
+  if (!parsed.valid) {
+    throw new Error(`Test plan must be valid: ${JSON.stringify(parsed.diagnostics)}`)
+  }
   return {
     id: "plan-1",
     sessionId: "session-1",
@@ -28,8 +30,31 @@ const assignment = (
 ): string =>
   `<div data-assignment data-agent-id="${agentId}" data-cli="codex" data-model="gpt-5" data-reason="Stable component owner." data-status="${status}"></div><ul data-files></ul>`
 
+const STAGE_01_MEDIUM_COMPLEXITY =
+  /(<section data-stage="01"[^>]*data-complexity=")medium/
+
+const semanticStageChanges: ReadonlyArray<
+  readonly [string, (source: string) => string]
+> = [
+  ["intent", (source) => source.replace("Original intent.", "Revised intent.")],
+  [
+    "declared files",
+    (source) => source.replace("src/original.ts", "src/revised.ts")
+  ],
+  [
+    "dependencies",
+    (source) =>
+      source.replace('data-depends-on="10"', 'data-depends-on="20"')
+  ],
+  [
+    "complexity",
+    (source) =>
+      source.replace(STAGE_01_MEDIUM_COMPLEXITY, "$1high")
+  ]
+]
+
 describe("reconcilePlanAmendment", () => {
-  it("requeues changed work while preserving its assignee and unchanged criterion evidence", () => {
+  it("requeues changed work and invalidates evidence collected for its prior semantics", () => {
     const previous = documentFrom(`<h1>PRD: Amend safely</h1>
 <section data-stage="01" data-title="Worker stage" data-complexity="high">
 ${assignment("worker-a", "completed")}
@@ -55,8 +80,8 @@ ${assignment("worker-b", "queued")}
       {
         id: "01.1",
         text: "The stable behavior works.",
-        status: "passed",
-        evidence: "unit test green"
+        status: "pending",
+        evidence: null
       },
       {
         id: "01.2",
@@ -113,6 +138,51 @@ ${assignment("replacement-owner-2", "queued")}
     })
     expect(result.changedStageIds).toEqual(["01"])
   })
+
+  it.each(semanticStageChanges)(
+    "invalidates same-text evidence when a stage changes its %s",
+    (_change, amend) => {
+      const source = `<h1>PRD: Invalidate changed-stage evidence</h1>
+<section data-stage="10" data-title="First prerequisite" data-complexity="medium">
+<div data-assignment data-agent-id="worker-a" data-cli="codex" data-model="gpt-5" data-reason="Stable component owner." data-status="completed"></div>
+<ul data-files><li>src/shared.ts</li></ul>
+<div data-acceptance="10.1" data-status="passed" data-evidence="prerequisite proof">The first prerequisite works.</div>
+</section>
+<section data-stage="20" data-title="Second prerequisite" data-complexity="medium">
+<div data-assignment data-agent-id="worker-a" data-cli="codex" data-model="gpt-5" data-reason="Stable component owner." data-status="completed"></div>
+<ul data-files><li>src/shared.ts</li></ul>
+<div data-acceptance="20.1" data-status="passed" data-evidence="other proof">The second prerequisite works.</div>
+</section>
+<section data-stage="01" data-title="Changed stage" data-depends-on="10" data-complexity="medium">
+<div data-assignment data-agent-id="worker-a" data-cli="codex" data-model="gpt-5" data-reason="Stable component owner." data-status="completed"></div>
+<h3>Intent</h3><p>Original intent.</p>
+<ul data-files><li>src/shared.ts</li><li>src/original.ts</li></ul>
+<p>Implement the behavior.</p>
+<div data-acceptance="01.1" data-status="passed" data-evidence="old proof">The behavior works.</div>
+</section>`
+      const previous = documentFrom(source)
+      const result = reconcilePlanAmendment(previous, amend(source))
+
+      expect(result.valid).toBe(true)
+      if (!result.valid) return
+      expect(result.changedStageIds).toEqual(["01"])
+      expect(result.projection.stages.find((stage) => stage.id === "01")).toMatchObject({
+        executionStatus: "queued",
+        acceptance: [
+          {
+            id: "01.1",
+            text: "The behavior works.",
+            status: "pending",
+            evidence: null
+          }
+        ]
+      })
+      expect(result.projection.stages.find((stage) => stage.id === "10")).toMatchObject({
+        executionStatus: "completed",
+        acceptance: [{ status: "passed", evidence: "prerequisite proof" }]
+      })
+    }
+  )
 
   it("rejects removing a stage while its worker is running", () => {
     const previous = documentFrom(`<h1>PRD: Keep live ownership</h1>

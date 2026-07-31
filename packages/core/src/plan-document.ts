@@ -126,20 +126,40 @@ const WorkerReasoningSetting: Schema.Schema<ReasoningSetting> = Schema.Struct({
   )
 })
 
-const CLAUDE_REASONING_EFFORTS: ReadonlyArray<ReasoningEffort> = [
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max"
-]
-const CODEX_REASONING_EFFORTS: ReadonlyArray<ReasoningEffort> = [
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh"
-]
+export interface ProviderReasoningCapabilities {
+  /** Whether the harness accepts an explicit on/off thinking setting. */
+  readonly explicitToggle: boolean
+  /** Provider-native effort values in display order. */
+  readonly efforts: ReadonlyArray<ReasoningEffort>
+}
+
+const CODEX_REASONING_CAPABILITIES: ProviderReasoningCapabilities = {
+  explicitToggle: true,
+  efforts: ["minimal", "low", "medium", "high", "xhigh"]
+}
+
+/**
+ * Provider reasoning capabilities shared by config validation and every UI that
+ * offers reasoning controls. Undefined uses the Codex-compatible default that
+ * session controls historically show before a harness is selected.
+ */
+export const providerReasoningCapabilitiesFor = (
+  cli: PlanWorkerCli | undefined
+): ProviderReasoningCapabilities => {
+  switch (cli) {
+    case "claude":
+      return {
+        explicitToggle: true,
+        efforts: ["low", "medium", "high", "xhigh", "max"]
+      }
+    case "cursor":
+      return { explicitToggle: false, efforts: [] }
+    case "codex":
+    case "opencode":
+    case undefined:
+      return CODEX_REASONING_CAPABILITIES
+  }
+}
 
 /** Explain why an explicit reasoning setting cannot be sent to a harness. */
 export const workerReasoningSettingIssue = (
@@ -150,13 +170,12 @@ export const workerReasoningSettingIssue = (
   if (!reasoning.enabled && reasoning.effort !== undefined) {
     return "disabled thinking cannot also select a reasoning effort"
   }
-  if (cli === "cursor") {
+  const capabilities = providerReasoningCapabilitiesFor(cli)
+  if (!capabilities.explicitToggle) {
     return "Cursor does not support an explicit reasoning setting"
   }
   if (reasoning.effort === undefined) return null
-  const supported =
-    cli === "claude" ? CLAUDE_REASONING_EFFORTS : CODEX_REASONING_EFFORTS
-  return supported.includes(reasoning.effort)
+  return capabilities.efforts.includes(reasoning.effort)
     ? null
     : `${cli} does not support reasoning effort "${reasoning.effort}"`
 }

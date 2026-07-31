@@ -32,10 +32,7 @@ import type { ActivityPhase, Session, SessionActivity } from "@jingler/core"
 import { activityOf, latestPlan } from "@jingler/core"
 import { conversationMachine } from "./conversation-machine.js"
 import { setSessionActivity } from "./session-activity.js"
-import {
-  clearPlanAutoPresentation,
-  setPlanPresent
-} from "./plan-presence.js"
+import { setPlanPresent } from "./plan-presence.js"
 import { clearSessionDiff, diffCounts, setSessionDiff } from "./diff-presence.js"
 import { isSessionVisible } from "./active-session.js"
 import type { ActorCandidate } from "./actor-eviction.js"
@@ -317,7 +314,6 @@ export const disposeConversationActor = (sessionId: string): void => {
   }
   delete chatActivities[sessionId]
   sharedPlanBodies.delete(sessionId)
-  clearPlanAutoPresentation(sessionId)
   setSessionActivity(sessionId, null)
   setPlanPresent(sessionId, false)
   clearSessionDiff(sessionId)

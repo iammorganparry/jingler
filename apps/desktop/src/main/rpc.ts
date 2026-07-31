@@ -1074,6 +1074,19 @@ export const orchestrationStagesCompleted = (
     (stage) => stage.executionStatus === "completed"
   )
 
+const queuedOrchestrationFingerprints = (
+  document: PlanDocument
+): ReadonlySet<string> =>
+  new Set(
+    document.projection.stages.flatMap((stage) =>
+      stage.assignment !== null &&
+      stage.assignment !== undefined &&
+      stage.executionStatus === "queued"
+        ? [`${stage.id}\u0000${planStageSemanticFingerprint(stage)}`]
+        : []
+    )
+  )
+
 const canonicalPlanForSession = (session: Session, planId: string) =>
   session.worktreePath === null || session.worktreePath === undefined
     ? Effect.succeed(null)
@@ -1156,13 +1169,6 @@ export const executeOrchestration = (
     )
     if (session?.worktreePath == null) return null
     const worktreePath = session.worktreePath
-    const document = yield* PlanStore.readDocument(
-      worktreePath,
-      session.id,
-      session.activeChatId
-    )
-    if (document === null || document.id !== planId) return null
-
     const clis = yield* DiscoveryService.list().pipe(
       Effect.orElseSucceed(() => [])
     )
@@ -1172,14 +1178,21 @@ export const executeOrchestration = (
     const persistence = yield* Effect.context<
       FileSystem.FileSystem | Path.Path | AppPaths
     >()
-    const checkpoints = yield* store
-      .readOrchestrationCheckpoints(worktreePath, planId)
-      .pipe(Effect.provide(persistence))
-    const currentCheckpoints =
-      mergeCanonicalOrchestrationCheckpoints(document, checkpoints)
+    let latestReport: OrchestrationExecutionReport | null = null
+    while (true) {
+      const document = yield* store
+        .readDocument(worktreePath, session.id, session.activeChatId)
+        .pipe(Effect.provide(persistence))
+      if (document === null || document.id !== planId) return latestReport
+      const queuedBefore = queuedOrchestrationFingerprints(document)
+      const checkpoints = yield* store
+        .readOrchestrationCheckpoints(worktreePath, planId)
+        .pipe(Effect.provide(persistence))
+      const currentCheckpoints =
+        mergeCanonicalOrchestrationCheckpoints(document, checkpoints)
 
-    const report = yield* service
-      .execute({
+      const report = yield* service
+        .execute({
         sessionId,
         planId,
         producingChatId: document.producingChatId,
@@ -1258,43 +1271,54 @@ export const executeOrchestration = (
                 Effect.mapError(orchestrationPersistenceError)
               )
         }
-      })
-      .pipe(Effect.either)
+        })
+        .pipe(Effect.either)
 
-    if (report._tag === "Left") {
-      if (report.left._tag === "OrchestrationAlreadyRunningError") {
-        yield* Effect.logWarning(report.left.message)
-        return null
-      }
-      yield* recordOrchestrationFailure(
-        sessionId,
-        planId,
-        report.left.message
-      ).pipe(
-        Effect.catchAllCause((cause) =>
-          Effect.logError(
-            `Could not persist orchestration failure for ${planId}: ${String(cause)}`
+      if (report._tag === "Left") {
+        if (report.left._tag === "OrchestrationAlreadyRunningError") {
+          yield* Effect.logWarning(report.left.message)
+          return latestReport
+        }
+        yield* recordOrchestrationFailure(
+          sessionId,
+          planId,
+          report.left.message
+        ).pipe(
+          Effect.catchAllCause((cause) =>
+            Effect.logError(
+              `Could not persist orchestration failure for ${planId}: ${String(cause)}`
+            )
           )
         )
-      )
-      yield* Effect.logError(
-        `Could not execute orchestration ${planId}: ${report.left.message}`
-      )
-      return null
-    }
+        yield* Effect.logError(
+          `Could not execute orchestration ${planId}: ${report.left.message}`
+        )
+        return latestReport
+      }
+      latestReport = report.right
 
-    const latest = yield* store
-      .readDocument(worktreePath, session.id, session.activeChatId)
-      .pipe(Effect.provide(persistence))
-    yield* store
-      .settleOrchestration(worktreePath, {
-        planId,
-        workersCompleted:
-          latest?.id === planId &&
-          orchestrationStagesCompleted(latest)
-      })
-      .pipe(Effect.provide(persistence))
-    return report.right
+      const latest = yield* store
+        .readDocument(worktreePath, session.id, session.activeChatId)
+        .pipe(Effect.provide(persistence))
+      const queuedAfter =
+        latest?.id === planId
+          ? queuedOrchestrationFingerprints(latest)
+          : new Set<string>()
+      const amendmentQueuedWork =
+        agentIds === undefined &&
+        [...queuedAfter].some((fingerprint) => !queuedBefore.has(fingerprint))
+      if (amendmentQueuedWork) continue
+
+      yield* store
+        .settleOrchestration(worktreePath, {
+          planId,
+          workersCompleted:
+            latest?.id === planId &&
+            orchestrationStagesCompleted(latest)
+        })
+        .pipe(Effect.provide(persistence))
+      return latestReport
+    }
   }).pipe(
     Effect.catchAllCause((cause) =>
       recordOrchestrationFailure(sessionId, planId, String(cause)).pipe(
@@ -1363,48 +1387,38 @@ export const watchOrchestrationWorkers = (
  * in the executing lane), and this fires only when that document is an
  * approved/executing orchestration plan with at least one queued assigned stage
  * — precisely the state an in-turn amendment leaves. When existing workers are
- * still settling, a detached scheduler waits and re-reads the canonical plan;
- * this lets a newly-added independent component start as soon as the active run
- * releases the plan. A plain answer queues nothing, so nothing dispatches.
- * `executeOrchestration` merges checkpoints, so already-completed stages are
- * skipped and only the requeued/new workers run.
+ * still settling, that owning execution re-reads the canonical plan after its
+ * worker lifecycle settles and drains newly queued work. A competing dispatch
+ * loses the service's atomic plan claim and exits immediately; there is no
+ * detached polling scheduler. A plain answer queues nothing, so nothing
+ * dispatches. `executeOrchestration` merges checkpoints, so already-completed
+ * stages are skipped and only the requeued/new workers run.
  */
 const dispatchPendingOrchestration = (sessionId: string, chatId: string) =>
   Effect.gen(function* () {
-    while (true) {
-      const session = yield* SessionStore.get(sessionId).pipe(
-        Effect.orElseSucceed(() => null)
-      )
-      if (session?.worktreePath == null) return
-      const chat = session.chats.find((candidate) => candidate.id === chatId)
-      if (chat?.role !== "orchestrator") return
-      const document = yield* PlanStore.readDocument(
-        session.worktreePath,
-        session.id,
-        chatId
-      )
-      if (
-        document === null ||
-        !planUsesOrchestration(session, document) ||
-        !["approved", "executing", "needs-verification"].includes(document.status)
-      ) {
-        return
-      }
-      const hasQueuedWork = document.projection.stages.some(
-        (stage) =>
-          stage.assignment !== null &&
-          stage.assignment !== undefined &&
-          stage.executionStatus === "queued"
-      )
-      if (!hasQueuedWork) return
-      if (yield* OrchestrationService.isPlanRunning(sessionId, document.id)) {
-        yield* Effect.sleep("100 millis")
-        continue
-      }
-      yield* executeOrchestration(sessionId, document.id)
+    const session = yield* SessionStore.get(sessionId).pipe(
+      Effect.orElseSucceed(() => null)
+    )
+    if (session?.worktreePath == null) return
+    const chat = session.chats.find((candidate) => candidate.id === chatId)
+    if (chat?.role !== "orchestrator") return
+    const document = yield* PlanStore.readDocument(
+      session.worktreePath,
+      session.id,
+      chatId
+    )
+    if (
+      document === null ||
+      !planUsesOrchestration(session, document) ||
+      !["approved", "executing", "needs-verification"].includes(document.status) ||
+      queuedOrchestrationFingerprints(document).size === 0
+    ) {
       return
     }
-  }).pipe(Effect.forkDaemon, Effect.asVoid)
+    yield* executeOrchestration(sessionId, document.id).pipe(
+      Effect.forkDaemon
+    )
+  }).pipe(Effect.asVoid)
 
 /** Resolve a session only when it has an active pull request. */
 const sessionWithPr = (sessionId: string) =>

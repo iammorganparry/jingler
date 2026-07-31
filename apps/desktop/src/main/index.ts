@@ -42,6 +42,11 @@ import { initAutoUpdater } from "./updater.js"
 
 /** The single renderer window (kept so deep-link callbacks can reach + focus it). */
 let mainWindow: BrowserWindow | null = null
+let quitPending = false
+let readyToQuit = false
+
+const PLAN_FLUSH_REQUEST_CHANNEL = "jingler/plan-flush-request"
+const PLAN_FLUSH_COMPLETE_CHANNEL = "jingler/plan-flush-complete"
 
 /**
  * Development builds keep a redacted Codex lifecycle trace so an intermittent
@@ -270,6 +275,40 @@ if (!gotPrimaryLock) {
       }
     })
     mainWindow = window
+    let allowClose = false
+    let flushInFlight = false
+
+    const flushPlansBeforeClose = (): void => {
+      if (flushInFlight) return
+      flushInFlight = true
+      const finish = (): void => {
+        clearTimeout(timeout)
+        ipcMain.removeListener(PLAN_FLUSH_COMPLETE_CHANNEL, completed)
+        allowClose = true
+        if (quitPending) {
+          readyToQuit = true
+          app.quit()
+        } else {
+          window.close()
+        }
+      }
+      const completed = (event: Electron.IpcMainEvent): void => {
+        if (event.sender !== window.webContents) return
+        finish()
+      }
+      // A broken renderer must not make the application impossible to close.
+      // Normal saves complete well inside this guard; the renderer reports only
+      // after every live plan actor has settled.
+      const timeout = setTimeout(finish, 5_000)
+      ipcMain.on(PLAN_FLUSH_COMPLETE_CHANNEL, completed)
+      window.webContents.send(PLAN_FLUSH_REQUEST_CHANNEL)
+    }
+
+    window.on("close", (event) => {
+      if (allowClose) return
+      event.preventDefault()
+      flushPlansBeforeClose()
+    })
 
     /**
      * The renderer window is a one-way door: nothing gets to navigate it, and
@@ -404,7 +443,13 @@ if (!gotPrimaryLock) {
     if (process.platform !== "darwin") app.quit()
   })
 
-  app.on("before-quit", () => {
+  app.on("before-quit", (event) => {
+    if (!readyToQuit && mainWindow !== null) {
+      event.preventDefault()
+      quitPending = true
+      mainWindow.close()
+      return
+    }
     // The extension host is a utilityProcess; Electron reaps it with the app,
     // but killing it explicitly means a plugin mid-`exec` gets torn down in the
     // same pass as the PTYs below rather than racing the app's own exit.

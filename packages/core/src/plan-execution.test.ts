@@ -1,9 +1,11 @@
 import { Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
-import type {
-  PlanPrdStage
+import {
+  type PlanPrdStage,
+  providerReasoningCapabilitiesFor,
+  WorkerRoutingConfig,
+  workerReasoningSettingIssue
 } from "./plan-document.js"
-import { WorkerRoutingConfig } from "./plan-document.js"
 import { WorkspaceConfig } from "./domain.js"
 import {
   applyWorkerRoutingToPlanHtml,
@@ -247,6 +249,33 @@ describe("buildPlanExecutionGraph", () => {
 })
 
 describe("worker routing", () => {
+  it("uses one provider capability contract for effort options and validation", () => {
+    expect(providerReasoningCapabilitiesFor("claude")).toStrictEqual({
+      explicitToggle: true,
+      efforts: ["low", "medium", "high", "xhigh", "max"]
+    })
+    expect(providerReasoningCapabilitiesFor("codex")).toStrictEqual({
+      explicitToggle: true,
+      efforts: ["minimal", "low", "medium", "high", "xhigh"]
+    })
+    expect(providerReasoningCapabilitiesFor("opencode")).toStrictEqual(
+      providerReasoningCapabilitiesFor("codex")
+    )
+    expect(providerReasoningCapabilitiesFor("cursor")).toStrictEqual({
+      explicitToggle: false,
+      efforts: []
+    })
+    expect(
+      workerReasoningSettingIssue("claude", { enabled: true, effort: "max" })
+    ).toBeNull()
+    expect(
+      workerReasoningSettingIssue("codex", { enabled: true, effort: "max" })
+    ).toBe('codex does not support reasoning effort "max"')
+    expect(workerReasoningSettingIssue("cursor", { enabled: false })).toBe(
+      "Cursor does not support an explicit reasoning setting"
+    )
+  })
+
   const laterPageCodexModel = "gpt-5.6-terra"
   const catalog = [
     {

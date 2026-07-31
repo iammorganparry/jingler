@@ -3,6 +3,7 @@ import { Effect, Fiber } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentContext, PlanDecision as PlanDecisionType, SessionSpec } from "./adapter.js"
 import { PlanDecision } from "./adapter.js"
+import { ORCHESTRATOR_PLAN_SUBMISSION_MARKER } from "./plan-parse.js"
 import type { StartCodexAppServerOptions } from "./codex-app-server-client.js"
 
 const server = vi.hoisted(() => {
@@ -866,13 +867,14 @@ describe("runCodexAppServer", () => {
 
   it("accepts an orchestrator plan from auto mode without narrowing native tools", async () => {
     const plan = [
-      "```plan",
-      "summary: Delegate focused work",
-      "01 Implement the component",
-      "  intent: Isolate the implementation.",
-      "  approach: implement and verify",
-      "  files: M src/component.ts +12 -2",
-      "```"
+      ORCHESTRATOR_PLAN_SUBMISSION_MARKER,
+      "````html",
+      "<h1>PRD: Delegate focused work</h1>",
+      '<section data-stage="01" data-title="Implement" data-complexity="low">',
+      '<ul data-files><li>src/component.ts</li></ul>',
+      '<div data-acceptance="01.1" data-status="pending">The component works.</div>',
+      "</section>",
+      "````"
     ].join("\n")
     server.state.messages = [
       {
@@ -919,5 +921,52 @@ describe("runCodexAppServer", () => {
     expect(
       server.state.requests.filter((request) => request.method === "turn/start")
     ).toHaveLength(1)
+  })
+
+  it("emits an unmarked plan-looking auto-mode answer without proposing it", async () => {
+    const reply = [
+      "Here is the plan format you asked me to review:",
+      "````html",
+      "<h1>PRD: Example</h1>",
+      '<section data-stage="01" data-title="Example">',
+      '<div data-acceptance="01.1" data-status="pending">Example only.</div>',
+      "</section>",
+      "````"
+    ].join("\n")
+    server.state.messages = [
+      {
+        method: "item/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: { type: "agentMessage", id: "m1", text: reply }
+        }
+      },
+      {
+        method: "turn/completed",
+        params: {
+          threadId: "thread-1",
+          turn: { id: "turn-1", status: "completed", error: null }
+        }
+      }
+    ]
+    const { ctx, emitted, proposed } = harness()
+
+    await Effect.runPromise(
+      runCodexAppServer(
+        "s-auto-plan-example",
+        spec({
+          mode: "auto",
+          orchestrationRoutes: [
+            { cli: "codex", models: [{ id: "gpt-5.6-sol", label: "Sol" }] }
+          ]
+        }),
+        ctx,
+        new Map()
+      )
+    )
+
+    expect(proposed).toHaveLength(0)
+    expect(emitted).toContainEqual({ _tag: "Assistant", text: reply })
   })
 })

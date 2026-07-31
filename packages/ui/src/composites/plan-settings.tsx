@@ -12,6 +12,7 @@ import {
   DEFAULT_PLAN_TEMPLATE_HTML,
   defaultModel,
   parsePlanHtml,
+  providerReasoningCapabilitiesFor,
   resolveOrchestratorPreference,
   resolveWorkerRoutingConfig,
   supportsPlanMode,
@@ -84,17 +85,23 @@ const workerReasoningChoice = (
       ? "off"
       : (route.reasoning.effort ?? "on")
 
-const workerReasoningOptionsFor = (
+export const workerReasoningOptionsFor = (
   cli: CliKind
-): ReadonlyArray<{ readonly value: WorkerReasoningChoice; readonly label: string }> => [
-  { value: "provider-default", label: "Provider default" },
-  { value: "off", label: "Thinking off" },
-  { value: "on", label: "Thinking on · provider default effort" },
-  ...reasoningEffortsFor(cli).map((effort) => ({
-    value: effort,
-    label: effort
-  }))
-]
+): ReadonlyArray<{ readonly value: WorkerReasoningChoice; readonly label: string }> => {
+  const capabilities = providerReasoningCapabilitiesFor(cli)
+  if (!capabilities.explicitToggle) {
+    return [{ value: "provider-default", label: "Provider default" }]
+  }
+  return [
+    { value: "provider-default", label: "Provider default" },
+    { value: "off", label: "Thinking off" },
+    { value: "on", label: "Thinking on · provider default effort" },
+    ...reasoningEffortsFor(cli).map((effort) => ({
+      value: effort,
+      label: effort
+    }))
+  ]
+}
 
 const routeWithReasoning = (
   route: WorkerModelRoute,

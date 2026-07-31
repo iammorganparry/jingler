@@ -15,6 +15,24 @@ const EMPTY: ReadonlySet<string> = new Set()
 let snapshot: ReadonlySet<string> = EMPTY
 const autoPresented = new Set<string>()
 
+export const planAutoPresentationStorageKey = (id: string): string =>
+  `sb.plan.auto-presented.${id}`
+
+const wasAutoPresented = (id: string): boolean => {
+  if (autoPresented.has(id)) return true
+  try {
+    if (localStorage.getItem(planAutoPresentationStorageKey(id)) !== "true") {
+      return false
+    }
+    autoPresented.add(id)
+    return true
+  } catch {
+    // Storage can be unavailable in private/quota-limited renderers. The
+    // process-local latch still preserves the policy for the current run.
+    return false
+  }
+}
+
 const recompute = () => {
   snapshot = new Set(Object.keys(present))
 }
@@ -43,14 +61,24 @@ export const setPlanPresent = (id: string, value: boolean): void => {
  * survive pane remounts and chat switches.
  */
 export const claimPlanAutoPresentation = (id: string): boolean => {
-  if (autoPresented.has(id)) return false
+  if (wasAutoPresented(id)) return false
   autoPresented.add(id)
+  try {
+    localStorage.setItem(planAutoPresentationStorageKey(id), "true")
+  } catch {
+    // The in-memory claim above is still authoritative for this renderer run.
+  }
   return true
 }
 
 /** Forget presentation history when the session itself is permanently deleted. */
 export const clearPlanAutoPresentation = (id: string): void => {
   autoPresented.delete(id)
+  try {
+    localStorage.removeItem(planAutoPresentationStorageKey(id))
+  } catch {
+    // There is no persisted state to clean up when storage is unavailable.
+  }
 }
 
 const subscribe = (listener: () => void): (() => void) => {

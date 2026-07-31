@@ -44,6 +44,10 @@ interface JinglerBridge {
    * Returns an unsubscribe fn.
    */
   readonly onPreviewUrlChanged: (cb: (url: string) => void) => () => void
+  /** Main is waiting to close the window until dirty plan drafts are saved. */
+  readonly onPlanFlushRequested: (cb: () => void) => () => void
+  /** Complete the close handshake after every live plan actor settles. */
+  readonly planFlushComplete: () => void
 }
 
 interface Window {

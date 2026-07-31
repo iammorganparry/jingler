@@ -7,7 +7,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import {
   PlanSettings,
   resolveEffectiveOrchestrator,
-  validatePlanTemplate
+  validatePlanTemplate,
+  workerReasoningOptionsFor
 } from "./plan-settings.js"
 
 afterEach(cleanup)
@@ -16,6 +17,20 @@ beforeAll(() => {
 })
 
 describe("PlanSettings", () => {
+  it("offers only provider-default reasoning when explicit settings are unsupported", () => {
+    expect(workerReasoningOptionsFor("cursor")).toStrictEqual([
+      { value: "provider-default", label: "Provider default" }
+    ])
+    expect(workerReasoningOptionsFor("claude")).toContainEqual({
+      value: "max",
+      label: "max"
+    })
+    expect(workerReasoningOptionsFor("codex")).not.toContainEqual({
+      value: "max",
+      label: "max"
+    })
+  })
+
   it("previews and saves a valid custom PRD structure", async () => {
     const onSave = vi.fn()
     render(<PlanSettings source={DEFAULT_PLAN_TEMPLATE_HTML} onSave={onSave} />)

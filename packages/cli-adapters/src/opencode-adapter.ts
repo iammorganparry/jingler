@@ -7,7 +7,9 @@ import type { AgentContext, PermissionRequest, SessionSpec } from "./adapter.js"
 import { capOutput } from "./output-cap.js"
 import {
   fencedHtmlPlanSubmission,
+  hasOrchestratorPlanSubmission,
   hasPlanBlock,
+  ORCHESTRATOR_PLAN_HTML_REFORMAT,
   parsePlan,
   PLAN_HTML_REFORMAT
 } from "./plan-parse.js"
@@ -875,7 +877,7 @@ const driveOpencode = async (
           !planning &&
           spec.orchestrationRoutes !== undefined &&
           spec.orchestrationPlanApproved !== true &&
-          hasPlanBlock(reply)
+          hasOrchestratorPlanSubmission(reply)
         if (planning || autoOrchestrationPlan) {
           // The mapper held this turn's prose back, so the reply has to be read
           // off the response rather than the stream. `parts` is the whole final
@@ -893,7 +895,9 @@ const driveOpencode = async (
               planReformatAsked = true
               const clear = planDraft.clear()
               if (clear !== null) await runP(ctx.emit(clear))
-              followUp = PLAN_HTML_REFORMAT
+              followUp = planning
+                ? PLAN_HTML_REFORMAT
+                : ORCHESTRATOR_PLAN_HTML_REFORMAT
               turnPrompt = followUp
               continue
             }
