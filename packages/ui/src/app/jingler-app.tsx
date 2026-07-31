@@ -172,7 +172,7 @@ export interface JinglerAppProps {
   /** Whether plan mode runs its read-only commands unattended; absent means on. */
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => Promise<void> | void
-  /** Whether every agent turn is shaped for an ADHD reader; absent means off. */
+  /** Whether final completion summaries are shaped for an ADHD reader. */
   adhdMode?: boolean | null
   onSaveAdhdMode?: (adhdMode: boolean) => Promise<void> | void
   /** Multiplier for conversation + code text size; absent means 1×. */

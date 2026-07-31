@@ -1,5 +1,10 @@
 import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
-import type { Plan, StreamEvent } from "@jingler/core"
+import {
+  parsePlanHtml,
+  type Plan,
+  type StreamEvent,
+  type WorkerRoutingConfig
+} from "@jingler/core"
 import { Effect } from "effect"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentContext, SessionSpec } from "./adapter.js"
@@ -23,6 +28,29 @@ const planHtml = (title: string): string => [
   "</section>",
   "````"
 ].join("\n")
+
+const repeatedAgentPlanHtml = [
+  "````html",
+  "<h1>PRD: Routed streamed plan</h1>",
+  '<section data-stage="05" data-title="Pricing" data-complexity="high">',
+  '<div data-assignment data-agent-id="worker-pricing" data-cli="codex" data-model="gpt-5" data-reason="Pricing work." data-status="queued"></div>',
+  '<ul data-files><li>src/pricing.ts</li></ul>',
+  '<div data-acceptance="05.1" data-status="pending">Pricing works.</div>',
+  "</section>",
+  '<section data-stage="06" data-title="Packaging" data-complexity="high">',
+  '<div data-assignment data-agent-id="worker-pricing" data-cli="codex" data-model="gpt-5" data-reason="Packaging work." data-status="queued"></div>',
+  '<ul data-files><li>src/packaging.ts</li></ul>',
+  '<div data-acceptance="06.1" data-status="pending">Packaging works.</div>',
+  "</section>",
+  "````"
+].join("\n")
+
+const workerRouting: WorkerRoutingConfig = {
+  default: { cli: "codex", model: "gpt-5" },
+  low: { cli: "codex", model: "gpt-5" },
+  medium: { cli: "codex", model: "gpt-5" },
+  high: { cli: "claude", model: "opus" }
+}
 
 let visibleReply = ""
 let exitInput: Record<string, unknown> = {}
@@ -264,6 +292,32 @@ describe("Claude plan submission", () => {
     expect(proposed[0]?.steps.map((step) => step.id)).toEqual(["01"])
     expect(proposed[0]?.raw).toContain("<h1>PRD: Buffered plan</h1>")
     expect(exitDecision).toMatchObject({ behavior: "deny" })
+  })
+
+  it("normalizes repeated worker ids before proposing a streamed orchestrator PRD", async () => {
+    visibleReply = repeatedAgentPlanHtml
+    const { ctx, proposed } = harness()
+
+    await Effect.runPromise(
+      runClaude(
+        "session-routed-stream",
+        { ...spec, workerRouting },
+        ctx,
+        new Map()
+      )
+    )
+
+    expect(proposed).toHaveLength(1)
+    expect(proposed[0]).toMatchObject({
+      summary: "Routed streamed plan",
+      structured: true
+    })
+    expect(proposed[0]?.raw).not.toContain("````")
+    const parsed = parsePlanHtml(proposed[0]?.raw ?? "")
+    expect(parsed.valid).toBe(true)
+    expect(
+      parsed.projection?.stages.map((stage) => stage.assignment?.agentId)
+    ).toStrictEqual(["worker-pricing", "worker-pricing-2"])
   })
 
   it("prefers a valid explicit payload over buffered assistant text", async () => {

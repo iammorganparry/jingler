@@ -1129,14 +1129,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // different plan-related prefixes with one name is a trap.
           const planPointer = savedPlans.length > 0 ? planPointerNote(worktreePath, savedPlans) : null
           const primer = digest === null ? null : renderPrimer(digest, tail)
-          // ADHD mode rides in the same per-turn prefix as the primer and the plan
-          // pointer. There is no system-prompt hook that every harness shares, and
-          // a setting the operator can flip mid-session has to apply to the NEXT
-          // turn — which a session-start injection could not do.
+          // ADHD mode rides in the same per-turn prefix as the primer and plan
+          // pointer so a Settings change applies immediately. Its own scope makes
+          // the format dormant during work and active only for the final summary.
           // The orchestrator gets its own persona, not the ADHD note: one
           // string for every harness (so it reads the same on Opus and Codex)
           // and always on, since being an orchestrator is a role, not an
-          // operator-toggled setting. Plain chats keep the ADHD note as before.
+          // operator-toggled setting. Plain chats keep the scoped ADHD note.
           const adhd = orchestrating
             ? orchestratorNote()
             : adhdMode

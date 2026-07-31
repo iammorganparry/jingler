@@ -111,6 +111,28 @@ describe("parsePlanHtml", () => {
     )
   })
 
+  it("can project structurally valid stages before worker-routing validation", () => {
+    const source = `<h1>PRD: Route independent work</h1>
+<section data-stage="05" data-title="Pricing" data-complexity="high">
+<div data-assignment data-agent-id="worker-pricing" data-cli="codex" data-model="gpt-5" data-reason="Pricing work." data-status="queued"></div>
+<ul data-files><li>src/pricing.ts</li></ul>
+<div data-acceptance="05.1" data-status="pending">Pricing works.</div>
+</section>
+<section data-stage="06" data-title="Packaging" data-complexity="high">
+<div data-assignment data-agent-id="worker-pricing" data-cli="codex" data-model="gpt-5" data-reason="Packaging work." data-status="queued"></div>
+<ul data-files><li>src/packaging.ts</li></ul>
+<div data-acceptance="06.1" data-status="pending">Packaging works.</div>
+</section>`
+
+    expect(parsePlanHtml(source).valid).toBe(false)
+    const structural = parsePlanHtml(source, { validateExecutionGraph: false })
+    expect(structural.valid).toBe(true)
+    expect(structural.projection?.stages.map((stage) => stage.id)).toStrictEqual([
+      "05",
+      "06"
+    ])
+  })
+
   it("rejects malformed complexity, assignment, and execution state metadata", () => {
     const result = parsePlanHtml(`<h1>T</h1>
 <section data-stage="01" data-title="x" data-complexity="enormous">

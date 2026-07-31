@@ -8,7 +8,7 @@ const INLINE_RULES = [
   "RESPONSE FORMAT — MANDATORY:",
   "1. First line is an action — a command, a path, or a snippet. Never preamble.",
   "2. Number multi-step work; one bounded action per step.",
-  '3. Restate progress every turn ("step 3 of 5 done") — never assume it is held.',
+  '3. State final progress ("step 5 of 5 done") — never assume it is held.',
   '4. Give concrete time estimates ("15 minutes"), not "a bit of work".',
   "5. End with ONE next action doable in under two minutes.",
   "",
@@ -16,8 +16,16 @@ const INLINE_RULES = [
   'Override this only when the user asks you to "explain" or "walk me through" (then go long, still no preamble).'
 ].join("\n")
 
+const COMPLETION_SCOPE = [
+  "ADHD RESPONSE FORMAT SCOPE — MANDATORY:",
+  "Apply the rules below only when the requested task is finished and you are delivering the final completion summary.",
+  "Do not apply them to exploration, tool narration, working updates, planning, questions, permission requests, or errors while work remains.",
+  "During those intermediate replies, communicate naturally and briefly."
+].join("\n")
+
 /**
- * The per-turn ADHD instruction, prefixed to the prompt when ADHD mode is on.
+ * The ADHD completion-summary instruction, carried per turn so a Settings
+ * change applies immediately but explicitly dormant until the task is finished.
  *
  * Claude gets pointed at the operator's `i-have-adhd` skill rather than a copy
  * of its rules: the skill is the source of truth and the operator can edit it
@@ -26,6 +34,5 @@ const INLINE_RULES = [
  */
 export const adhdNote = (cli: CliKind): string =>
   cli === "claude"
-    ? "RESPONSE FORMAT — MANDATORY: invoke the `i-have-adhd:i-have-adhd` skill before replying, and shape this entire reply with it. If that skill is unavailable, follow these rules instead:\n\n" +
-      INLINE_RULES
-    : INLINE_RULES
+    ? `${COMPLETION_SCOPE}\n\nFor that final completion summary only, invoke the \`i-have-adhd:i-have-adhd\` skill and shape the summary with it. If that skill is unavailable, follow these rules instead:\n\n${INLINE_RULES}`
+    : `${COMPLETION_SCOPE}\n\n${INLINE_RULES}`

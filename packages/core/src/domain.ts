@@ -785,14 +785,13 @@ export const WorkspaceConfig = Schema.Struct({
    */
   planAutoRun: Schema.optional(Schema.Boolean),
   /**
-   * Whether every agent turn is asked to shape its reply for an ADHD reader —
-   * lead with the action, number the steps, restate progress, end with one next
-   * action. Absent means OFF (see `ADHD_MODE_DEFAULT`).
+   * Whether a finished task's final summary is shaped for an ADHD reader —
+   * lead with the action, number the steps, state final progress, end with one
+   * next action. Absent means OFF (see `ADHD_MODE_DEFAULT`).
    *
-   * Off by default because it changes the voice of every session, which is a
-   * preference and not a safety property. It is injected per turn as a prompt
-   * prefix (the same channel as the compaction primer), so it applies to every
-   * harness rather than only the one with a matching skill installed.
+   * Off by default because output shaping is a preference and not a safety
+   * property. It is injected per turn as a prompt prefix (the same channel as
+   * the compaction primer), but explicitly applies only when the task is done.
    */
   adhdMode: Schema.optional(Schema.Boolean),
   /**

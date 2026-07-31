@@ -1141,7 +1141,7 @@ export const runClaude = (
             const plan =
               content.length === 0
                 ? null
-                : parsePlan(content, planId)
+                : parsePlan(content, planId, spec.workerRouting)
             if (plan?.structured === true) {
               planCount += 1
               const decision = await runP(ctx.proposePlan(plan))
@@ -1180,11 +1180,11 @@ export const runClaude = (
             const payloadPlan =
               payload.length === 0
                 ? null
-                : parsePlan(payload, planId)
+                : parsePlan(payload, planId, spec.workerRouting)
             const replyPlan =
               planReplyText.length === 0
                 ? null
-                : parsePlan(planReplyText, planId)
+                : parsePlan(planReplyText, planId, spec.workerRouting)
             const structuredPayload =
               payloadPlan?.structured === true ? payloadPlan : null
             const structuredReply =
@@ -1202,10 +1202,13 @@ export const runClaude = (
               return { behavior: "deny", message: PLAN_REFORMAT }
             }
             planCount += 1
-            const proposedPlan = plan ?? parsePlan(raw, planId)
+            const proposedPlan = plan ?? parsePlan(raw, planId, spec.workerRouting)
             const submittedBlock =
               structuredPayload === null && structuredReply !== null
-                ? fencedHtmlPlanSubmission(planReplyText)?.block
+                ? fencedHtmlPlanSubmission(
+                    planReplyText,
+                    spec.workerRouting
+                  )?.block
                 : undefined
             const decision = await runP(
               ctx.proposePlan(proposedPlan, submittedBlock)
@@ -1521,11 +1524,14 @@ export const runClaude = (
                 const replyPlan =
                   planReplyText.length === 0
                     ? null
-                    : parsePlan(planReplyText, planId)
+                    : parsePlan(planReplyText, planId, spec.workerRouting)
                 if (replyPlan?.structured === true) {
                   planCount += 1
                   const submittedBlock =
-                    fencedHtmlPlanSubmission(planReplyText)?.block
+                    fencedHtmlPlanSubmission(
+                      planReplyText,
+                      spec.workerRouting
+                    )?.block
                   await runP(ctx.proposePlan(replyPlan, submittedBlock))
                   planReplyText = ""
                 }

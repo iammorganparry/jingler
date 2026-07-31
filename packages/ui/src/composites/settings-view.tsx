@@ -514,7 +514,7 @@ export interface SettingsViewProps {
   /** Whether plan mode runs commands unattended; absent means on. */
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => void | Promise<void>
-  /** Whether every agent turn is shaped for an ADHD reader; absent means off. */
+  /** Whether final completion summaries are shaped for an ADHD reader. */
   adhdMode?: boolean | null
   onSaveAdhdMode?: (adhdMode: boolean) => void | Promise<void>
   /** Multiplier for conversation + code text size; absent means 1×. */
@@ -1490,7 +1490,7 @@ function GeneralSection({
         <div className="divide-y divide-hairline">
           <ToggleRow
             label="ADHD mode"
-            description="Every reply leads with the action, numbers multi-step work, restates progress, and ends with one next step. No preamble, no recaps."
+            description="Only final completion summaries lead with the action, number multi-step work, state progress, and end with one next step. Working updates, planning, and questions stay natural."
             checked={adhdDraft}
             onChange={(next) => {
               setAdhdDraft(next)

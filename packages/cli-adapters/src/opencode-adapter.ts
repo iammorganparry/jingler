@@ -863,7 +863,11 @@ const driveOpencode = async (
           const reply = assistantText(result.data?.parts)
           if (hasPlanBlock(reply) && planRound < MAX_PLAN_ROUNDS) {
             planRound += 1
-            const plan = parsePlan(reply, `plan_${sessionId}_${planRound}`)
+            const plan = parsePlan(
+              reply,
+              `plan_${sessionId}_${planRound}`,
+              spec.workerRouting
+            )
             if (plan.structured === false && !planReformatAsked) {
               planReformatAsked = true
               followUp = PLAN_HTML_REFORMAT

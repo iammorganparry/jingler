@@ -580,7 +580,11 @@ export const runCodexSdk = (
               // that sit below it, exactly as it does for Claude's ExitPlanMode
               // payload. So this is deliberately not emitted as Assistant text —
               // the Plan card renders it, and doing both would double it up.
-              const plan = parsePlan(proposed, `plan_${sessionId}_${planRound}`)
+              const plan = parsePlan(
+                proposed,
+                `plan_${sessionId}_${planRound}`,
+                spec.workerRouting
+              )
               if (plan.structured === false && !planReformatAsked) {
                 planReformatAsked = true
                 followUp = PLAN_HTML_REFORMAT

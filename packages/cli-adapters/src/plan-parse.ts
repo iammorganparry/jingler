@@ -11,6 +11,7 @@ import type {
   PlanStepCode
 } from "@jingler/core"
 import {
+  applyWorkerRoutingToPlanHtml,
   DEFAULT_PLAN_TEMPLATE_HTML,
   PLAN_EVIDENCE_INSTRUCTIONS,
   type WorkerRoutingConfig
@@ -222,7 +223,9 @@ export interface HtmlPlanSubmission {
  * outer block makes the returned ranges disjoint and prevents a nested
  * triple-backtick HTML example from becoming a top-level candidate.
  */
-const htmlPlanSubmissions = (raw: string): ReadonlyArray<HtmlPlanSubmission> => {
+const completeHtmlPlanSubmissions = (
+  raw: string
+): ReadonlyArray<HtmlPlanSubmission> => {
   const found: Array<HtmlPlanSubmission> = []
   const openings = /^[ \t]*`{4}(?!`)html(?:[ \t]+plan)?[ \t]*\r?\n/gim
   const closings = /^[ \t]*`{4}(?!`)[ \t]*(?=\r?$)/gm
@@ -238,16 +241,38 @@ const htmlPlanSubmissions = (raw: string): ReadonlyArray<HtmlPlanSubmission> => 
     const end = closing.index + closing[0].length
     const body = raw.slice(bodyStart, closing.index).replace(/\s+$/, "")
     cursor = end
-    if (parsePlanHtml(body).valid) {
-      found.push({
-        body,
-        block: raw.slice(opening.index, end),
-        start: opening.index,
-        end
-      })
-    }
+    found.push({
+      body,
+      block: raw.slice(opening.index, end),
+      start: opening.index,
+      end
+    })
   }
   return found
+}
+
+const htmlPlanSubmissions = (
+  raw: string
+): ReadonlyArray<HtmlPlanSubmission> =>
+  completeHtmlPlanSubmissions(raw).filter(({ body }) => parsePlanHtml(body).valid)
+
+const routedHtmlPlanSubmission = (
+  raw: string,
+  workerRouting: WorkerRoutingConfig
+): { readonly submission: HtmlPlanSubmission; readonly html: string } | null => {
+  for (const submission of completeHtmlPlanSubmissions(raw)) {
+    const structural = parsePlanHtml(submission.body, {
+      validateExecutionGraph: false
+    })
+    if (!structural.valid) continue
+    const html = applyWorkerRoutingToPlanHtml(
+      structural.html,
+      structural.projection.stages,
+      workerRouting
+    )
+    if (parsePlanHtml(html).valid) return { submission, html }
+  }
+  return null
 }
 
 /**
@@ -256,8 +281,12 @@ const htmlPlanSubmissions = (raw: string): ReadonlyArray<HtmlPlanSubmission> => 
  * attempts are filtered before selection, so a corrected retry still wins.
  */
 export const fencedHtmlPlanSubmission = (
-  raw: string
-): HtmlPlanSubmission | null => htmlPlanSubmissions(raw)[0] ?? null
+  raw: string,
+  workerRouting?: WorkerRoutingConfig
+): HtmlPlanSubmission | null =>
+  workerRouting === undefined
+    ? htmlPlanSubmissions(raw)[0] ?? null
+    : routedHtmlPlanSubmission(raw, workerRouting)?.submission ?? null
 
 export const fencedHtmlPlan = (raw: string): string | null =>
   fencedHtmlPlanSubmission(raw)?.body ?? null
@@ -601,7 +630,18 @@ export const parseStepCode = (raw: string): Map<string, PlanStepCode> => {
  * Parse a raw `ExitPlanMode` plan into a structured `Plan`. Falls back to a
  * single step wrapping the markdown when there's no parseable ` ```plan ` block.
  */
-export const parsePlan = (raw: string, id: string): Plan => {
+export const parsePlan = (
+  raw: string,
+  id: string,
+  workerRouting?: WorkerRoutingConfig
+): Plan => {
+  if (workerRouting !== undefined) {
+    const routed = routedHtmlPlanSubmission(raw, workerRouting)
+    if (routed !== null) {
+      const plan = planFromHtml(routed.html, id)
+      if (plan !== null) return plan
+    }
+  }
   const html = fencedHtmlPlan(raw)
   if (html !== null) {
     const plan = planFromHtml(html, id)

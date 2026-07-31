@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { parsePlanHtml, type WorkerRoutingConfig } from "@jingler/core"
 import {
   fencedHtmlPlan,
   hasPlanBlock,
@@ -57,6 +58,13 @@ summary: Refactor auth flow
 \`\`\`
 
 Here's the human-readable version: I'll refactor the auth flow…`
+
+const ROUTING: WorkerRoutingConfig = {
+  default: { cli: "codex", model: "gpt-5" },
+  low: { cli: "codex", model: "gpt-5" },
+  medium: { cli: "codex", model: "gpt-5" },
+  high: { cli: "claude", model: "opus" }
+}
 
 describe("parsePlan — structured block", () => {
   const plan = parsePlan(STRUCTURED, "plan_1")
@@ -391,6 +399,36 @@ describe("hasPlanBlock", () => {
 
     expect(fencedHtmlPlan(raw)).toContain("PRD: Corrected")
     expect(parsePlan(raw, "plan_corrected").summary).toBe("Corrected")
+  })
+
+  it("normalizes repeated worker ids before accepting orchestrator plan HTML", () => {
+    const raw = [
+      "````html",
+      "<h1>PRD: Signals pricing</h1>",
+      '<section data-stage="05" data-title="Pricing" data-complexity="high">',
+      '<div data-assignment data-agent-id="worker-pricing" data-cli="codex" data-model="gpt-5" data-reason="Pricing work." data-status="queued"></div>',
+      '<ul data-files><li>src/pricing.ts</li></ul>',
+      '<div data-acceptance="05.1" data-status="pending">Pricing works.</div>',
+      "</section>",
+      '<section data-stage="06" data-title="Packaging" data-complexity="high">',
+      '<div data-assignment data-agent-id="worker-pricing" data-cli="codex" data-model="gpt-5" data-reason="Packaging work." data-status="queued"></div>',
+      '<ul data-files><li>src/packaging.ts</li></ul>',
+      '<div data-acceptance="06.1" data-status="pending">Packaging works.</div>',
+      "</section>",
+      "````"
+    ].join("\n")
+
+    expect(parsePlan(raw, "plan_unrouted").structured).toBe(false)
+    const plan = parsePlan(raw, "plan_routed", ROUTING)
+    expect(plan.structured).toBe(true)
+    expect(plan.summary).toBe("Signals pricing")
+    expect(plan.raw).not.toContain("````")
+
+    const parsed = parsePlanHtml(plan.raw)
+    expect(parsed.valid).toBe(true)
+    expect(
+      parsed.projection?.stages.map((stage) => stage.assignment?.agentId)
+    ).toStrictEqual(["worker-pricing", "worker-pricing-2"])
   })
 })
 

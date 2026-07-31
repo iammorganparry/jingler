@@ -48,7 +48,7 @@ export interface TurnNotes {
   readonly primer?: string | null
   /** Where the worktree's saved plan lives. */
   readonly planPointer?: string | null
-  /** ADHD output-shaping, when the operator has it on. */
+  /** ADHD final-summary shaping, when the operator has it on. */
   readonly adhd?: string | null
   /** How to ask the operator a question so it actually reaches them. */
   readonly ask?: string | null

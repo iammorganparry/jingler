@@ -176,8 +176,8 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   const notificationsConfig = configQuery.data?.notifications ?? null
   // Absent means on — plan mode's commands are read-only.
   const planAutoRun = configQuery.data?.planAutoRun ?? true
-  // Absent means off — ADHD mode rewrites the voice of every session, so it is
-  // opt-in rather than a default the operator has to discover and undo.
+  // Absent means off — ADHD mode shapes completion summaries, so it remains an
+  // opt-in preference rather than a default the operator has to undo.
   const adhdMode = configQuery.data?.adhdMode ?? false
   // Absent or malformed collapses to 1× (FONT_SCALE_DEFAULT). This value only
   // feeds the Settings control's active preset — the transcript reads the var

@@ -140,7 +140,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       /** Whether plan mode runs its (read-only) commands without asking. */
       const setPlanAutoRun = (planAutoRun: boolean) => patch({ planAutoRun })
 
-      /** Whether every agent turn is asked to shape its reply for an ADHD reader. */
+      /** Whether final completion summaries are shaped for an ADHD reader. */
       const setAdhdMode = (adhdMode: boolean) => patch({ adhdMode })
 
       /** Whether the agentic orchestrator flow is on (the "Jingler mode" toggle). */

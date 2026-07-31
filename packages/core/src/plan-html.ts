@@ -203,7 +203,10 @@ const slug = (value: string): string =>
  * returned html is the sanitized source that callers must persist (never the
  * raw input).
  */
-export const parsePlanHtml = (source: string): PlanHtmlResult => {
+export const parsePlanHtml = (
+  source: string,
+  options: { readonly validateExecutionGraph?: boolean } = {}
+): PlanHtmlResult => {
   const html = sanitizePlanHtml(source)
   const diagnostics: Array<PlanHtmlDiagnostic> = []
   const root = parse(html)
@@ -337,8 +340,10 @@ export const parsePlanHtml = (source: string): PlanHtmlResult => {
   if (stages.length === 0) {
     diagnostics.push({ code: "missing-stage", message: "A plan must contain at least one stage." })
   }
-  for (const diagnostic of buildPlanExecutionGraph(stages).diagnostics) {
-    diagnostics.push({ code: diagnostic.code, message: diagnostic.message })
+  if (options.validateExecutionGraph !== false) {
+    for (const diagnostic of buildPlanExecutionGraph(stages).diagnostics) {
+      diagnostics.push({ code: diagnostic.code, message: diagnostic.message })
+    }
   }
 
   // Prose sections: each top-level <h2> and the flow until the next <h2>/stage.

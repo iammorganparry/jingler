@@ -615,7 +615,11 @@ export const runCodexAppServer = (
                   : null
               if (proposed !== null) {
                 planRound += 1
-                const plan = parsePlan(proposed, `plan_${sessionId}_${planRound}`)
+                const plan = parsePlan(
+                  proposed,
+                  `plan_${sessionId}_${planRound}`,
+                  spec.workerRouting
+                )
                 if (plan.structured === false && !planReformatAsked) {
                   planReformatAsked = true
                   followUp = PLAN_HTML_REFORMAT
