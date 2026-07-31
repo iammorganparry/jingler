@@ -31,6 +31,7 @@ describe("PlanMinimap", () => {
     expect(screen.getByLabelText("2 open comments")).toBeTruthy()
     expect(screen.getByTestId("plan-minimap-viewport").getAttribute("style"))
       .toContain("top: 25%")
+    expect(screen.getByRole("list").className).toContain("overflow-y-auto")
     fireEvent.click(screen.getByRole("button", { name: /Build threads/ }))
     expect(onSelect).toHaveBeenCalledWith("stage:01")
   })

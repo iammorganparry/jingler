@@ -127,4 +127,36 @@ describe("createPlanDraftStream", () => {
     })
     expect(stream.clear()).toBeNull()
   })
+
+  it("clears a visible draft when a cumulative provider rewrite removes the plan", () => {
+    const stream = createPlanDraftStream(() => "plan-rewritten")
+    expect(
+      // biome-ignore lint/security/noSecrets: Static plan-protocol test fixture.
+      stream.update("````html\n<h1>PRD: Superseded</h1>")
+    ).toMatchObject({
+      _tag: "PlanDraft",
+      draft: { phase: "composing" }
+    })
+
+    expect(stream.update("I need to reconsider the approach.")).toEqual({
+      _tag: "PlanDraft",
+      draft: {
+        id: "plan-rewritten",
+        source: "",
+        phase: "cleared"
+      }
+    })
+    expect(stream.update("Still reconsidering.")).toBeNull()
+
+    expect(
+      // biome-ignore lint/security/noSecrets: Static plan-protocol test fixture.
+      stream.update("````html\n<h1>PRD: Replacement</h1>")
+    ).toMatchObject({
+      _tag: "PlanDraft",
+      draft: {
+        source: "<h1>PRD: Replacement</h1>",
+        phase: "composing"
+      }
+    })
+  })
 })

@@ -111,6 +111,16 @@ export const createPlanDraftStream = (
     },
     update: (next) => {
       message = next
+      if (visible && !hasCandidate()) {
+        const id = planId()
+        visible = false
+        lastSnapshot = ""
+        lastProcessedAt = Number.NEGATIVE_INFINITY
+        return {
+          _tag: "PlanDraft",
+          draft: { id, source: "", phase: "cleared" }
+        }
+      }
       return snapshot()
     },
     clear: () => {

@@ -88,6 +88,14 @@ export const PlanDiagramNode = Node.create({
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer(DiagramView)
+    return ReactNodeViewRenderer(DiagramView, {
+      // Mermaid rendering is asynchronous. Ignore decoration-only editor
+      // transactions so an equivalent atom is not remounted mid-render.
+      update: ({ oldNode, newNode, updateProps }) => {
+        if (oldNode.type !== newNode.type) return false
+        if (!oldNode.eq(newNode)) updateProps()
+        return true
+      }
+    })
   }
 })

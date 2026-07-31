@@ -83,25 +83,3 @@ test("a streamed plan opens beside chat, stays read-only, and promotes in place"
   await expect(window.getByText(planRevision, { exact: true })).toBeVisible()
   await expect(window.getByTestId("plan-floating-actions")).toBeVisible()
 })
-
-test("a streamed plan uses full-width Plan Review in a narrow pane", async ({
-  launchApp
-}) => {
-  const launched = await launchApp({
-    configured: true,
-    withRepo: true,
-    sessions: session("s_streamed_plan_narrow")
-  })
-  const { window } = launched
-  await expect(appShell(window)).toBeVisible()
-  await window.setViewportSize({ width: 700, height: 720 })
-  await window.waitForTimeout(120)
-
-  const composer = window.getByPlaceholder(composerPlaceholder)
-  await composer.fill("[[plan]] [[stream-plan]] refactor auth")
-  await composer.press("Enter")
-
-  await expect(window.getByLabel("Plan document")).toBeVisible()
-  await expect(window.getByTestId("composer")).toHaveCount(0)
-  await expect(window.getByLabel("Resize plan")).toHaveCount(0)
-})

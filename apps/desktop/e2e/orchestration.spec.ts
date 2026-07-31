@@ -428,7 +428,7 @@ test("a stopped worker stays interrupted across restart and retries from its che
 
   await reopened.window
     .getByRole("button", { name: "Retry worker worker-release" })
-    .dispatchEvent("click")
+    .click()
   await expect
     .poll(() => checkpoints().find((worker) => worker.agentId === "worker-release"), {
       timeout: 30_000

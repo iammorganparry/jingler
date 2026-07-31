@@ -1045,27 +1045,6 @@ export class JinglerRpcs extends RpcGroup.make(
     }
   }),
 
-  /** Append one ordered user or agent entry to an existing annotation thread. */
-  Rpc.make("Plan.appendMessage", {
-    success: PlanDocument,
-    error: Schema.Union(
-      PlanConflictError,
-      PlanValidationError,
-      PlanPersistenceError
-    ),
-    payload: {
-      sessionId: Schema.String,
-      planId: Schema.String,
-      baseRevision: Schema.Number,
-      annotationId: Schema.String,
-      body: Schema.String,
-      authorKind: Schema.Literal("user", "agent"),
-      authorId: Schema.String,
-      mentionedParticipantIds: Schema.Array(Schema.String),
-      deliveryState: PlanCommentMessageDeliveryState
-    }
-  }),
-
   /** List only participants whose exact live route can still own a plan reply. */
   Rpc.make("Plan.participants", {
     success: Schema.Array(PlanParticipant),

@@ -357,7 +357,7 @@ export const planWatch = (sessionId: string) =>
     })
   )
 
-/** `Plan.appendMessage` handler, exported for the CAS/RPC integration test. */
+/** Internal ordered append used by dispatch/relay flows and their CAS tests. */
 export const planAppendMessage = (input: {
   readonly sessionId: string
   readonly planId: string
@@ -2900,7 +2900,6 @@ const HandlersLayer = JinglerRpcs.toLayer({
         )
       )
     ),
-  "Plan.appendMessage": (input) => planAppendMessage(input),
   "Plan.participants": ({ sessionId, planId }) =>
     planParticipants(sessionId, planId),
   "Plan.dispatchMessage": (input) => planDispatchMessage(input),

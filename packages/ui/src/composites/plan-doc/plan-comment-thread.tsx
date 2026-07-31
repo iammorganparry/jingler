@@ -12,15 +12,20 @@ import {
   createContext,
   type FormEvent,
   type KeyboardEvent,
+  useCallback,
   useContext,
-  useMemo,
+  useRef,
   useState
 } from "react"
+import { useMachine } from "@xstate/react"
 import { Button } from "../../components/button.js"
 import { cn } from "../../lib/cn.js"
+import { planCommentComposerMachine } from "./plan-comment-composer-machine.js"
 
 export interface PlanCommentThreadControls {
   readonly participants: ReadonlyArray<PlanParticipant>
+  /** Thread mutations wait until the containing plan revision is persisted. */
+  readonly disabled?: boolean
   readonly onReply?: (
     annotationId: string,
     body: string,
@@ -70,6 +75,27 @@ const lifecycleLabel: Record<PlanParticipant["lifecycle"], string> = {
   running: "Active"
 }
 
+const participantContextLabel = (
+  participant: PlanParticipant,
+  participants: ReadonlyArray<PlanParticipant>
+): string => {
+  const base = `${roleLabel[participant.role]} · ${lifecycleLabel[participant.lifecycle]}`
+  if (participant.role !== "subagent" || participant.ownerRoutingId === null) {
+    return base
+  }
+  const owner = participants.find(
+    ({ routingId }) => routingId === participant.ownerRoutingId
+  )
+  const ownerName = owner?.displayName ?? participant.ownerRoutingId
+  const ownerAttempt = participant.ownerRoutingId.startsWith("worker:")
+    ? `attempt ${participant.ownerRoutingId.split(":").at(-1)}`
+    : participant.ownerRoutingId.slice("orchestrator:".length)
+  const subagentIdentity = participant.routingId.slice(
+    `subagent:${participant.ownerRoutingId}:`.length
+  )
+  return `${base} · ${ownerName} · ${ownerAttempt} · ${subagentIdentity}`
+}
+
 const mentionMatch = (value: string): { readonly start: number; readonly query: string } | null => {
   const match = /(?:^|\s)@([^\s@]*)$/.exec(value)
   if (match === null) return null
@@ -77,13 +103,6 @@ const mentionMatch = (value: string): { readonly start: number; readonly query: 
     start: value.length - match[1]!.length - 1,
     query: match[1]!.toLocaleLowerCase()
   }
-}
-
-const containsMentionToken = (value: string, token: string): boolean => {
-  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  return new RegExp(
-    `(?:^|\\s)${escaped}(?=$|\\s|[.,!?;:()\\[\\]{}])`
-  ).test(value)
 }
 
 export function PlanCommentComposer({
@@ -104,57 +123,43 @@ export function PlanCommentComposer({
   ) => Promise<boolean | void> | boolean | void
   onCancel?: () => void
 }) {
-  const [value, setValue] = useState("")
-  const [mentioned, setMentioned] = useState<
-    ReadonlyArray<{ readonly routingId: string; readonly token: string }>
-  >([])
-  const [activeIndex, setActiveIndex] = useState(0)
-  const [submitting, setSubmitting] = useState(false)
+  const onSubmitRef = useRef(onSubmit)
+  onSubmitRef.current = onSubmit
+  const getOnSubmit = useCallback(() => onSubmitRef.current, [])
+  const [state, send] = useMachine(planCommentComposerMachine, {
+    input: { getOnSubmit }
+  })
+  const { value, activeIndex } = state.context
+  const submitting = state.matches("submitting")
   const match = mentionMatch(value)
-  const suggestions = useMemo(() => {
+  const suggestions = (() => {
     if (match === null) return []
     return participants.filter((participant) => {
       const searchable = `${participant.displayName} ${roleLabel[participant.role]} ${lifecycleLabel[participant.lifecycle]}`.toLocaleLowerCase()
       return searchable.includes(match.query)
     })
-  }, [match?.query, participants])
+  })()
 
   const choose = (participant: PlanParticipant) => {
     if (match === null) return
     const token = `@${participant.displayName}`
-    setValue(
-      `${value.slice(0, match.start)}${token} ${value.slice(match.start + match.query.length + 1)}`
-    )
-    setMentioned((current) =>
-      current.some(({ routingId }) => routingId === participant.routingId)
-        ? current
-        : [...current, { routingId: participant.routingId, token }]
-    )
-    setActiveIndex(0)
+    send({
+      type: "choose",
+      value: `${value.slice(0, match.start)}${token} ${value.slice(match.start + match.query.length + 1)}`,
+      mention: { routingId: participant.routingId, token }
+    })
   }
 
-  const submit = async (event: FormEvent) => {
+  const submit = (event: FormEvent) => {
     event.preventDefault()
-    const body = value.trim()
-    if (body.length === 0 || submitting || disabled) return
-    setSubmitting(true)
-    try {
-      const succeeded = await onSubmit(
-        body,
-        mentioned.map(({ routingId }) => routingId)
-      )
-      if (succeeded === false) return
-      setValue("")
-      setMentioned([])
-    } finally {
-      setSubmitting(false)
-    }
+    if (disabled) return
+    send({ type: "submit" })
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape") {
       if (match !== null) {
-        setValue(value.slice(0, match.start))
+        send({ type: "change", value: value.slice(0, match.start) })
         event.preventDefault()
       } else {
         onCancel?.()
@@ -163,10 +168,13 @@ export function PlanCommentComposer({
     }
     if (suggestions.length === 0) return
     if (event.key === "ArrowDown") {
-      setActiveIndex((index) => (index + 1) % suggestions.length)
+      send({ type: "move", index: (activeIndex + 1) % suggestions.length })
       event.preventDefault()
     } else if (event.key === "ArrowUp") {
-      setActiveIndex((index) => (index - 1 + suggestions.length) % suggestions.length)
+      send({
+        type: "move",
+        index: (activeIndex - 1 + suggestions.length) % suggestions.length
+      })
       event.preventDefault()
     } else if (event.key === "Enter" && !event.shiftKey) {
       choose(suggestions[activeIndex] ?? suggestions[0]!)
@@ -203,7 +211,7 @@ export function PlanCommentComposer({
                   {participant.displayName}
                 </span>
                 <span className="block text-[10px] text-muted-foreground">
-                  {roleLabel[participant.role]} · {lifecycleLabel[participant.lifecycle]}
+                  {participantContextLabel(participant, participants)}
                 </span>
               </span>
             </button>
@@ -219,12 +227,7 @@ export function PlanCommentComposer({
           aria-label={placeholder}
           placeholder={placeholder}
           onChange={(event) => {
-            const next = event.target.value
-            setValue(next)
-            setMentioned((current) =>
-              current.filter(({ token }) => containsMentionToken(next, token))
-            )
-            setActiveIndex(0)
+            send({ type: "change", value: event.target.value })
           }}
           onKeyDown={onKeyDown}
           className="min-h-12 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-1 text-[11.5px] leading-relaxed text-text-body outline-none placeholder:text-dim disabled:opacity-60"
@@ -233,7 +236,7 @@ export function PlanCommentComposer({
           type="submit"
           aria-label="Send reply"
           disabled={disabled || submitting || value.trim().length === 0}
-          className="flex size-8 flex-none items-center justify-center rounded-md bg-brand text-white outline-none transition-[background-color,opacity,scale] hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] disabled:opacity-40"
+          className="flex size-8 flex-none items-center justify-center rounded-md bg-brand text-primary-foreground outline-none transition-[background-color,opacity,scale] hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] disabled:opacity-40"
         >
           {submitting ? (
             <RefreshCw className="size-3.5 animate-spin" />
@@ -344,6 +347,7 @@ export function PlanCommentThread({
           disabled={
             busyAction !== null ||
             threadPending ||
+            controls.disabled === true ||
             controls.onSetResolved === undefined
           }
           onClick={() =>
@@ -398,7 +402,7 @@ export function PlanCommentThread({
                   controls.onRetry !== undefined && (
                     <button
                       type="button"
-                      disabled={busyAction !== null}
+                      disabled={busyAction !== null || controls.disabled === true}
                       onClick={() =>
                         void run(`retry:${message.id}`, () =>
                           controls.onRetry?.(annotationId, message)
@@ -430,6 +434,7 @@ export function PlanCommentThread({
             participants={controls.participants}
             disabled={
               busyAction !== null ||
+              controls.disabled === true ||
               controls.onReply === undefined ||
               threadPending
             }

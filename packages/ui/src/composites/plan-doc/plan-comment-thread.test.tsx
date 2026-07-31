@@ -22,6 +22,27 @@ const participants: ReadonlyArray<PlanParticipant> = [
     role: "worker",
     lifecycle: "running",
     ownerRoutingId: null
+  },
+  {
+    routingId: "worker:plan-1:api:2",
+    displayName: "worker-api",
+    role: "worker",
+    lifecycle: "running",
+    ownerRoutingId: null
+  },
+  {
+    routingId: "subagent:worker:plan-1:ui:1:explore-a",
+    displayName: "Explore",
+    role: "subagent",
+    lifecycle: "running",
+    ownerRoutingId: "worker:plan-1:ui:1"
+  },
+  {
+    routingId: "subagent:worker:plan-1:api:2:explore-b",
+    displayName: "Explore",
+    role: "subagent",
+    lifecycle: "running",
+    ownerRoutingId: "worker:plan-1:api:2"
   }
 ]
 
@@ -59,7 +80,7 @@ describe("PlanCommentComposer", () => {
 
     const menu = screen.getByRole("listbox", { name: "Mention an agent" })
     expect(within(menu).getByText("Orchestrator · Parked")).toBeTruthy()
-    expect(within(menu).getByText("Worker · Active")).toBeTruthy()
+    expect(within(menu).getAllByText("Worker · Active")).toHaveLength(2)
     fireEvent.click(within(menu).getByText("worker-ui"))
     fireEvent.click(screen.getByRole("button", { name: "Send reply" }))
 
@@ -83,6 +104,23 @@ describe("PlanCommentComposer", () => {
     expect(onSubmit).toHaveBeenCalledWith("No agent needed", [])
   })
 
+  it("distinguishes same-named subagents by owner, attempt, and route identity", () => {
+    render(
+      <PlanCommentComposer participants={participants} onSubmit={vi.fn()} />
+    )
+    fireEvent.change(screen.getByLabelText("Reply to this thread…"), {
+      target: { value: "Ask @Explore" }
+    })
+
+    const menu = screen.getByRole("listbox", { name: "Mention an agent" })
+    expect(
+      within(menu).getByText("Sub-agent · Active · worker-ui · attempt 1 · explore-a")
+    ).toBeTruthy()
+    expect(
+      within(menu).getByText("Sub-agent · Active · worker-api · attempt 2 · explore-b")
+    ).toBeTruthy()
+  })
+
   it("preserves the draft when submission reports a failure", async () => {
     const onSubmit = vi.fn().mockResolvedValue(false)
     render(
@@ -98,6 +136,25 @@ describe("PlanCommentComposer", () => {
 })
 
 describe("PlanCommentThread", () => {
+  it("waits for the containing plan revision before mutating a new thread", () => {
+    const onSetResolved = vi.fn()
+    const view = (disabled: boolean) => (
+      <PlanCommentThreadControlsProvider
+        controls={{ participants, disabled, onSetResolved }}
+      >
+        <PlanCommentThread annotationId="a1" status="open" messages={messages} />
+      </PlanCommentThreadControlsProvider>
+    )
+    const { rerender } = render(view(true))
+    const resolve = screen.getByRole("button", { name: "Resolve" })
+
+    expect((resolve as HTMLButtonElement).disabled).toBe(true)
+    rerender(view(false))
+    fireEvent.click(resolve)
+
+    expect(onSetResolved).toHaveBeenCalledWith("a1", true)
+  })
+
   it("keeps ordered replies together and exposes retry and resolve", async () => {
     const onRetry = vi.fn()
     const onSetResolved = vi.fn()

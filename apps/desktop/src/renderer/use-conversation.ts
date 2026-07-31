@@ -24,7 +24,6 @@ import type {
   PlanDocument,
   PlanDraft,
   PlanMentionDelivery,
-  PlanParticipant,
   QuestionAnswer,
   QuestionRequest,
   ReasoningSetting,
@@ -108,9 +107,6 @@ export interface Conversation {
     body: string,
     anchor?: PlanAnnotationAnchor
   ) => void
-  readonly planParticipants: (
-    planId: string
-  ) => Promise<ReadonlyArray<PlanParticipant>>
   readonly dispatchPlanMessage: (input: {
     readonly planId: string
     readonly baseRevision: number
@@ -229,8 +225,6 @@ export function useConversation(
     planActionError: state.context.planActionError,
     commentPlanStep: (planId, stepId, body, anchor) =>
       send({ type: "COMMENT_PLAN_STEP", planId, stepId, body, ...(anchor ? { anchor } : {}) }),
-    planParticipants: (planId) =>
-      rpc.planParticipants(session.id, planId),
     dispatchPlanMessage: (input) =>
       rpc.planDispatchMessage({ sessionId: session.id, ...input }),
     revisePlan: (planId) => send({ type: "REVISE_PLAN", planId }),

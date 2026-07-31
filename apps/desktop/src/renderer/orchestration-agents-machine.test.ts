@@ -130,6 +130,28 @@ const start = (
   }).start()
 
 describe("orchestrationAgentsMachine", () => {
+  it("ignores unchanged participant refreshes so the plan editor stays mounted", async () => {
+    const harness = makeHarness()
+    const participant: PlanParticipant = {
+      routingId: "orchestrator:chat-1",
+      displayName: "Orchestrator",
+      role: "orchestrator",
+      lifecycle: "parked",
+      ownerRoutingId: null
+    }
+    const actor = start(scope(), harness.subscribe, async () => [participant])
+    await waitFor(
+      actor,
+      (snapshot) => snapshot.context.participants.length === 1
+    )
+    const before = actor.getSnapshot()
+
+    actor.send({ type: "PARTICIPANTS_REFRESHED", participants: [participant] })
+
+    expect(actor.getSnapshot()).toBe(before)
+    actor.stop()
+  })
+
   it("merges the orchestrator with only live workers and nested agents", async () => {
     const harness = makeHarness()
     const actor = start(

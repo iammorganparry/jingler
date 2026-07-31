@@ -351,6 +351,38 @@ const reconcileWorkerParticipants = (
   ])
 }
 
+const sameParticipants = (
+  left: ReadonlyArray<PlanParticipant>,
+  right: ReadonlyArray<PlanParticipant>
+): boolean =>
+  left.length === right.length &&
+  left.every((participant, index) => {
+    const other = right[index]
+    return other !== undefined &&
+      participant.routingId === other.routingId &&
+      participant.displayName === other.displayName &&
+      participant.role === other.role &&
+      participant.lifecycle === other.lifecycle &&
+      participant.ownerRoutingId === other.ownerRoutingId
+  })
+
+const mergeMainParticipants = (
+  current: ReadonlyArray<PlanParticipant>,
+  refreshed: ReadonlyArray<PlanParticipant>
+): ReadonlyArray<PlanParticipant> =>
+  activePlanParticipants([
+    current.filter(
+      (participant) =>
+        participant.role === "worker" ||
+        participant.ownerRoutingId?.startsWith("worker:") === true
+    ),
+    refreshed.filter(
+      (participant) =>
+        participant.role !== "worker" &&
+        participant.ownerRoutingId?.startsWith("worker:") !== true
+    )
+  ])
+
 export const orchestrationAgentsMachine = setup({
   types: {
     input: {} as OrchestrationAgentsInput,
@@ -409,6 +441,12 @@ export const orchestrationAgentsMachine = setup({
       event.type === "SCOPE_CHANGED" && sameScope(context.scope, event.scope),
     receivedInScope: ({ context, event }) =>
       event.type === "ACTIVITY" && activityInScope(event.activity, context.scope),
+    participantsChanged: ({ context, event }) =>
+      event.type === "PARTICIPANTS_REFRESHED" &&
+      !sameParticipants(
+        context.participants,
+        mergeMainParticipants(context.participants, event.participants)
+      ),
     canReconnect: ({ context }) =>
       context.reconnectAttempt < MAX_WORKER_STREAM_RECONNECTS
   },
@@ -452,18 +490,10 @@ export const orchestrationAgentsMachine = setup({
     replaceMainParticipants: assign(({ context, event }) => {
       if (event.type !== "PARTICIPANTS_REFRESHED") return {}
       return {
-        participants: activePlanParticipants([
-          context.participants.filter(
-            (participant) =>
-              participant.role === "worker" ||
-              participant.ownerRoutingId?.startsWith("worker:") === true
-          ),
-          event.participants.filter(
-            (participant) =>
-              participant.role !== "worker" &&
-              participant.ownerRoutingId?.startsWith("worker:") !== true
-          )
-        ])
+        participants: mergeMainParticipants(
+          context.participants,
+          event.participants
+        )
       }
     })
   },
@@ -527,7 +557,10 @@ export const orchestrationAgentsMachine = setup({
           target: "reconnecting",
           actions: "noteStreamFailure"
         },
-        PARTICIPANTS_REFRESHED: { actions: "replaceMainParticipants" },
+        PARTICIPANTS_REFRESHED: {
+          guard: "participantsChanged",
+          actions: "replaceMainParticipants"
+        },
         PARTICIPANTS_REFRESH_FAILED: {}
       }
     },

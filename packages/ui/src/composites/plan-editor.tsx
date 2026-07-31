@@ -236,6 +236,7 @@ export function PlanEditor({
                 }}
                 commentControls={{
                   participants,
+                  disabled: true,
                   onReply: onReplyThread,
                   onRetry: onRetryThread,
                   onSetResolved: onSetThreadResolved
@@ -282,6 +283,7 @@ export function PlanEditor({
                   transientState === undefined
                     ? {
                         participants,
+                        disabled: state !== "clean",
                         onReply: onReplyThread,
                         onRetry: onRetryThread,
                         onSetResolved: onSetThreadResolved

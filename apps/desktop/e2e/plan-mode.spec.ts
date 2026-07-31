@@ -383,7 +383,7 @@ test("restart resumes the exact canonical revision", async ({ launchApp }) => {
   })
 })
 
-test("a plan diagram remains an editable node without blanking the document", async ({
+test("a plan diagram renders, and a broken source degrades to an error card", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -399,9 +399,16 @@ test("a plan diagram remains an editable node without blanking the document", as
   await expect(launched.window.getByLabel("Mermaid diagram source")).toHaveValue(
     /graph|flowchart/
   )
+  await expect(launched.window.locator(".sb-mermaid svg").first()).toBeVisible({
+    timeout: 20_000
+  })
 
-  // Rendering remains isolated from the rest of the document even while the
-  // lazy Mermaid renderer replaces its own node view.
+  // Invalid source is contained inside the diagram node and leaves the rest of
+  // the plan usable.
+  await launched.window.getByLabel("Mermaid diagram source").fill("@@@ not a diagram @@@")
+  await expect(launched.window.getByText("Diagram error")).toBeVisible({
+    timeout: 20_000
+  })
   await expect(launched.window.getByText(/Rollout|Testing|Risks/).first()).toBeVisible()
 })
 

@@ -40,6 +40,7 @@ type PlanStoreEnv = FileSystem.FileSystem | Path.Path | AppPaths
 
 /** Editors save a file two or three times within a few ms; collapse the burst. */
 const WATCH_DEBOUNCE_MS = 150
+const WATCH_FALLBACK_POLL_INTERVAL = "2 seconds"
 
 interface PlanEnvelope {
   readonly id: string
@@ -1299,15 +1300,18 @@ export class PlanStore extends Effect.Service<PlanStore>()(
               Stream.debounce(WATCH_DEBOUNCE_MS),
               Stream.mapEffect(() =>
                 readDocument(worktreePath, sessionId, producingChatId)
-              ),
-              Stream.catchAll(() => Stream.empty)
+              )
             )
-            const pollingChanges = Stream.tick("200 millis").pipe(
+            const pollingChanges = Stream.tick(WATCH_FALLBACK_POLL_INTERVAL).pipe(
               Stream.mapEffect(() =>
                 readDocument(worktreePath, sessionId, producingChatId)
               )
             )
-            return Stream.merge(filesystemChanges, pollingChanges).pipe(
+            const changes = filesystemChanges.pipe(
+              Stream.concat(pollingChanges),
+              Stream.catchAll(() => pollingChanges)
+            )
+            return changes.pipe(
               Stream.filter((document): document is PlanDocument => document !== null),
               Stream.filter(
                 (document) =>

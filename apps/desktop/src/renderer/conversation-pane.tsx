@@ -41,6 +41,7 @@ import {
 import { useBackgroundTasks } from "./use-background-tasks.js"
 import {
   clampedPlanSplitRatio,
+  PLAN_SPLIT_HANDLE_WIDTH,
   resizedPlanSplitRatio
 } from "./plan-split-ratio.js"
 
@@ -875,7 +876,9 @@ export function ConversationPane({
           <ResizeHandle aria-label="Resize plan" onResize={adjustPlanSplit} />
           <div
             data-testid="plan-split-column"
-            style={{ width: `${effectivePlanSplitRatio * 100}%` }}
+            style={{
+              width: `calc(${effectivePlanSplitRatio * 100}% - ${effectivePlanSplitRatio * PLAN_SPLIT_HANDLE_WIDTH}px)`
+            }}
             className="flex min-h-0 flex-none flex-col overflow-hidden border-l border-hairline"
           >
             {planReview}

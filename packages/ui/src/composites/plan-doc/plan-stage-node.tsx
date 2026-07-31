@@ -258,6 +258,15 @@ export const PlanAssignmentNode = Node.create({
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer(AssignmentView)
+    return ReactNodeViewRenderer(AssignmentView, {
+      // Selection/decorations emit frequent equivalent node objects. This
+      // atom does not consume decorations, so only rerender when its persisted
+      // assignment attributes actually change.
+      update: ({ oldNode, newNode, updateProps }) => {
+        if (oldNode.type !== newNode.type) return false
+        if (!oldNode.eq(newNode)) updateProps()
+        return true
+      }
+    })
   }
 })

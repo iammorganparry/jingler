@@ -49,7 +49,7 @@ export function PlanMinimap({
     <nav
       aria-label="Plan minimap"
       className={cn(
-        "relative w-44 flex-none overflow-hidden border-l border-hairline bg-panel/70 px-2 py-4",
+        "relative flex min-h-0 w-44 flex-none flex-col overflow-hidden border-l border-hairline bg-panel/70 px-2 py-4",
         className
       )}
     >
@@ -62,7 +62,7 @@ export function PlanMinimap({
       <p className="relative z-10 mb-2 px-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-dim">
         On this plan
       </p>
-      <ol className="relative z-10 flex flex-col gap-0.5">
+      <ol className="relative z-10 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
         {items.map((item) => {
           const active = activeId === item.id
           return (

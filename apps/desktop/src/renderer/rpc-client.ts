@@ -763,17 +763,6 @@ export const rpc = {
     source: string
     author: "user" | "agent"
   }): Promise<PlanDocument> => run((c) => c.Plan.updateDocument(input)),
-  planAppendMessage: (input: {
-    sessionId: string
-    planId: string
-    baseRevision: number
-    annotationId: string
-    body: string
-    authorKind: "user" | "agent"
-    authorId: string
-    mentionedParticipantIds: ReadonlyArray<string>
-    deliveryState: PlanCommentMessageDeliveryState
-  }): Promise<PlanDocument> => run((c) => c.Plan.appendMessage(input)),
   planParticipants: (
     sessionId: string,
     planId: string

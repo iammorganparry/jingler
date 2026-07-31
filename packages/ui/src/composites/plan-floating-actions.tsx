@@ -47,7 +47,16 @@ const primaryAction = (input: {
   readonly onKeepLocal?: () => void
 }): Action | null => {
   if (input.transientState !== undefined) {
-    return { label: "Composing plan", icon: LoaderCircle, disabled: true }
+    const transientLabel: Record<PlanEditorTransientState, string> = {
+      composing: "Composing plan",
+      validating: "Validating plan",
+      promoting: "Loading revision"
+    }
+    return {
+      label: transientLabel[input.transientState],
+      icon: LoaderCircle,
+      disabled: true
+    }
   }
   if (input.syncState === "error") {
     return { label: "Retry save", icon: RefreshCw, onRun: input.onRetry }

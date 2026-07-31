@@ -1,10 +1,10 @@
-import { sanitizePlanHtml } from "@jingler/core"
+import { type PlanCommentMessage, sanitizePlanHtml } from "@jingler/core"
 import type { Editor } from "@tiptap/core"
 import { EditorContent, useEditor } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
 import { Bold, Code, Italic, MessageSquarePlus } from "lucide-react"
 import type { ComponentType, MouseEvent as ReactMouseEvent } from "react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { HoverCard } from "../../components/hover-card.js"
 import { cn } from "../../lib/cn.js"
 import { applyPlanComment } from "./plan-doc-comment.js"
@@ -80,10 +80,81 @@ export function PlanDocEditor({
   onOutlineChangeRef.current = onOutlineChange
   const onViewportChangeRef = useRef(onViewportChange)
   onViewportChangeRef.current = onViewportChange
+  const workerControlsRef = useRef(workerControls)
+  workerControlsRef.current = workerControls
+  const commentControlsRef = useRef(commentControls)
+  commentControlsRef.current = commentControls
+  const extensions = useMemo(planDocExtensions, [])
+  const canStopWorker = workerControls?.stop !== undefined
+  const canRetryWorker = workerControls?.retry !== undefined
+  const stableWorkerControls = useMemo<PlanWorkerControls>(
+    () => ({
+      ...(!canStopWorker
+        ? {}
+        : {
+            stop: (agentId: string) =>
+              workerControlsRef.current?.stop?.(agentId)
+          }),
+      ...(!canRetryWorker
+        ? {}
+        : {
+            retry: (agentId: string) =>
+              workerControlsRef.current?.retry?.(agentId)
+          })
+    }),
+    [canStopWorker, canRetryWorker]
+  )
+  const canReply = commentControls?.onReply !== undefined
+  const canRetryReply = commentControls?.onRetry !== undefined
+  const canSetResolved = commentControls?.onSetResolved !== undefined
+  const stableCommentControls = useMemo<PlanCommentThreadControls>(
+    () => ({
+      participants: commentControls?.participants ?? [],
+      disabled: commentControls?.disabled,
+      ...(!canReply
+        ? {}
+        : {
+            onReply: (
+              annotationId: string,
+              body: string,
+              mentionedParticipantIds: ReadonlyArray<string>
+            ) =>
+              commentControlsRef.current?.onReply?.(
+                annotationId,
+                body,
+                mentionedParticipantIds
+              )
+          }),
+      ...(!canRetryReply
+        ? {}
+        : {
+            onRetry: (annotationId: string, message: PlanCommentMessage) =>
+              commentControlsRef.current?.onRetry?.(annotationId, message)
+          }),
+      ...(!canSetResolved
+        ? {}
+        : {
+            onSetResolved: (annotationId: string, resolved: boolean) =>
+              commentControlsRef.current?.onSetResolved?.(
+                annotationId,
+                resolved
+              )
+          })
+    }),
+    [
+      commentControls?.participants,
+      commentControls?.disabled,
+      canReply,
+      canRetryReply,
+      canSetResolved
+    ]
+  )
 
   const editor = useEditor({
     editable,
-    extensions: planDocExtensions(),
+    // Extension instances own node-view factories. Recreating them on every
+    // outline/viewport render makes Tiptap rebuild every atom node view.
+    extensions,
     content: value,
     editorProps: {
       attributes: {
@@ -143,6 +214,13 @@ export function PlanDocEditor({
     if (target === null) return
     target.scrollIntoView({ behavior: "auto", block: "start" })
     target.focus({ preventScroll: true })
+    const scrollElement = editor.view.dom.parentElement
+    if (scrollElement !== null) {
+      onViewportChangeRef.current?.({
+        activeId: targetBlockId,
+        ...planDocViewportFractions(scrollElement)
+      })
+    }
     onTargetBlockConsumedRef.current?.()
   }, [editor, targetBlockId, value])
 
@@ -152,73 +230,77 @@ export function PlanDocEditor({
     if (scrollElement === null) return
 
     let frame = 0
-    const update = () => {
+    let rebuildOutline = true
+    let elements: ReadonlyArray<HTMLElement> = []
+    let outline: ReadonlyArray<PlanDocOutlineEntry> = []
+    const update = (outlineChanged = false) => {
+      rebuildOutline ||= outlineChanged
       window.cancelAnimationFrame(frame)
       frame = window.requestAnimationFrame(() => {
-        const elements = Array.from(
-          editor.view.dom.querySelectorAll<HTMLElement>(
-            "h1, h2, [data-plan-stage-id]"
+        if (rebuildOutline) {
+          elements = Array.from(
+            editor.view.dom.querySelectorAll<HTMLElement>(
+              "h1, h2, [data-plan-stage-id]"
+            )
           )
-        )
-        let headingIndex = 0
-        const outline = elements.map((element) => {
-          const stageId = element.dataset.planStageId
-          const id =
-            stageId !== undefined
-              ? `stage:${stageId}`
-              : element.tagName === "H1"
-                ? "title"
-                : `heading:${headingIndex++}`
-          element.dataset.planMinimapId = id
-          if (!element.hasAttribute("tabindex")) element.tabIndex = -1
-          return {
-            id,
-            title:
+          let headingIndex = 0
+          outline = elements.map((element) => {
+            const stageId = element.dataset.planStageId
+            const id =
               stageId !== undefined
-                ? element.getAttribute("data-plan-stage-title") ??
-                  element.querySelector("h3")?.textContent ??
-                  stageId
-                : element.textContent?.trim() ?? id,
-            kind:
-              stageId !== undefined
-                ? "stage"
+                ? `stage:${stageId}`
                 : element.tagName === "H1"
                   ? "title"
-                  : "section"
-          } satisfies PlanDocOutlineEntry
-        })
-        onOutlineChangeRef.current?.(outline)
+                  : `heading:${headingIndex++}`
+            element.dataset.planMinimapId = id
+            if (!element.hasAttribute("tabindex")) element.tabIndex = -1
+            return {
+              id,
+              title:
+                stageId !== undefined
+                  ? element.getAttribute("data-plan-stage-title") ??
+                    element.querySelector("h3")?.textContent ??
+                    stageId
+                  : element.textContent?.trim() ?? id,
+              kind:
+                stageId !== undefined
+                  ? "stage"
+                  : element.tagName === "H1"
+                    ? "title"
+                    : "section"
+            } satisfies PlanDocOutlineEntry
+          })
+          rebuildOutline = false
+          onOutlineChangeRef.current?.(outline)
+        }
 
         const viewportRect = scrollElement.getBoundingClientRect()
         const active = [...elements]
           .reverse()
           .find((element) => element.getBoundingClientRect().top <= viewportRect.top + 96)
-        const scrollable = Math.max(1, scrollElement.scrollHeight - scrollElement.clientHeight)
         onViewportChangeRef.current?.({
           activeId: active?.dataset.planMinimapId ?? outline[0]?.id ?? null,
-          start: Math.max(0, Math.min(1, scrollElement.scrollTop / scrollable)),
-          size: Math.max(
-            0,
-            Math.min(1, scrollElement.clientHeight / Math.max(1, scrollElement.scrollHeight))
-          )
+          ...planDocViewportFractions(scrollElement)
         })
       })
     }
     update()
-    editor.on("transaction", update)
-    scrollElement.addEventListener("scroll", update, { passive: true })
-    window.addEventListener("resize", update)
+    const updateOutline = () => update(true)
+    const updateViewport = () => update()
+    editor.on("transaction", updateOutline)
+    scrollElement.addEventListener("scroll", updateViewport, { passive: true })
+    window.addEventListener("resize", updateViewport)
     return () => {
       window.cancelAnimationFrame(frame)
-      editor.off("transaction", update)
-      scrollElement.removeEventListener("scroll", update)
-      window.removeEventListener("resize", update)
+      editor.off("transaction", updateOutline)
+      scrollElement.removeEventListener("scroll", updateViewport)
+      window.removeEventListener("resize", updateViewport)
     }
   }, [editor, value])
 
   return (
-    <PlanCommentThreadControlsProvider controls={commentControls}>
-      <PlanWorkerControlsProvider controls={workerControls}>
+    <PlanCommentThreadControlsProvider controls={stableCommentControls}>
+      <PlanWorkerControlsProvider controls={stableWorkerControls}>
         <div className={cn("flex min-h-0 flex-col", className)}>
           {editable && editor && <CommentBubbleMenu editor={editor} />}
           <EditorContent
@@ -246,6 +328,19 @@ export interface PlanDocViewport {
   readonly size: number
 }
 
+export const planDocViewportFractions = ({
+  scrollTop,
+  clientHeight,
+  scrollHeight
+}: {
+  readonly scrollTop: number
+  readonly clientHeight: number
+  readonly scrollHeight: number
+}): Pick<PlanDocViewport, "start" | "size"> => ({
+  start: Math.max(0, Math.min(1, scrollTop / Math.max(1, scrollHeight))),
+  size: Math.max(0, Math.min(1, clientHeight / Math.max(1, scrollHeight)))
+})
+
 /**
  * The selection bubble menu: inline formatting (Bold/Italic/Code) plus a
  * primary **Comment** action that opens an inline composer. Submitting the
@@ -263,6 +358,10 @@ function CommentBubbleMenu({ editor }: { editor: Editor }) {
   const composingRef = useRef(false)
   composingRef.current = composing
   const { participants } = usePlanCommentThreadControls()
+  const shouldShow = useCallback(({ editor: current }: { editor: Editor }) => {
+    const { from, to } = current.state.selection
+    return composingRef.current || (current.isEditable && from < to)
+  }, [])
 
   const startComment = () => {
     const { from, to } = editor.state.selection
@@ -294,10 +393,7 @@ function CommentBubbleMenu({ editor }: { editor: Editor }) {
   return (
     <BubbleMenu
       editor={editor}
-      shouldShow={({ editor }) => {
-        const { from, to } = editor.state.selection
-        return composingRef.current || (editor.isEditable && from < to)
-      }}
+      shouldShow={shouldShow}
     >
       <div className="flex items-center gap-1 rounded-[10px] border border-line bg-panel p-1 shadow-lg">
         {composing ? (

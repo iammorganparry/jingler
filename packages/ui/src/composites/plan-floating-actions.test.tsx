@@ -39,4 +39,19 @@ describe("PlanFloatingActions", () => {
       screen.getByRole("button", { name: "Composing plan" }).hasAttribute("disabled")
     ).toBe(true)
   })
+
+  for (const [transientState, label] of [
+    ["validating", "Validating plan"],
+    ["promoting", "Loading revision"]
+  ] as const) {
+    it(`labels ${transientState} with its actual phase`, () => {
+      render(
+        <PlanFloatingActions
+          transientState={transientState}
+          syncState="clean"
+        />
+      )
+      expect(screen.getByRole("button", { name: label })).toBeTruthy()
+    })
+  }
 })
