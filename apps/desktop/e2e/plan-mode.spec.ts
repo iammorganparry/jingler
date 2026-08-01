@@ -446,6 +446,49 @@ test("a burst of inline edits makes exactly one canonical revision", async ({
   expect(revisionOf(file)).toBe(startRevision + 1)
 })
 
+test("autosave echoes preserve the live caret and highlighted plan text", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session()
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await proposePlan(launched)
+
+  const editor = launched.window.getByLabel("Plan document")
+  const anchor = launched.window.getByText("Implement stages in order").first()
+  await anchor.click()
+  await launched.window.keyboard.press("End")
+  await launched.window.keyboard.type(" CARET_STABLE_A")
+  await expect(launched.window.getByRole("status")).toContainText("Synced", {
+    timeout: 20_000
+  })
+
+  await expect(editor).toBeFocused()
+  await launched.window.keyboard.type("_B")
+  await expect(
+    launched.window.getByText(/CARET_STABLE_A_B/).first()
+  ).toBeVisible()
+  await expect(launched.window.getByRole("status")).toContainText("Synced", {
+    timeout: 20_000
+  })
+  await expect.poll(() => readFileSync(currentPlanPath(launched), "utf8")).toContain(
+    "CARET_STABLE_A_B"
+  )
+
+  await selectText(launched.window, "CARET_STABLE_A_B")
+  await expect
+    .poll(() =>
+      launched.window.evaluate(() => window.getSelection()?.toString() ?? "")
+    )
+    .toBe("CARET_STABLE_A_B")
+  await expect(
+    launched.window.getByRole("button", { name: "Comment", exact: true })
+  ).toBeVisible()
+})
+
 test("view switches and app close flush edits inside the debounce window", async ({
   launchApp
 }) => {

@@ -3,6 +3,7 @@ import type { PlanDocument } from "@jingler/core"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { PlanEditor } from "./plan-editor.js"
+import { PlanDocEditor } from "./plan-doc/plan-doc-editor.js"
 import { planAssignmentReasoningLabel } from "./plan-doc/plan-stage-node.js"
 
 const source = `<h1>PRD: Interactive plan</h1>
@@ -41,6 +42,23 @@ const document: PlanDocument = {
 afterEach(cleanup)
 
 describe("PlanEditor", () => {
+  it("defers an external document replacement until a focused editor blurs", async () => {
+    const first = "<h1>Focused plan</h1><p>Keep the live caret.</p>"
+    const remote = "<h1>Remote plan</h1><p>Apply after editing.</p>"
+    const rendered = render(<PlanDocEditor value={first} />)
+    const editor = screen.getByLabelText("Plan document")
+
+    editor.focus()
+    expect(globalThis.document.activeElement).toBe(editor)
+    rendered.rerender(<PlanDocEditor value={remote} />)
+
+    expect(screen.getByText("Keep the live caret.")).toBeTruthy()
+    expect(screen.queryByText("Apply after editing.")).toBeNull()
+
+    fireEvent.blur(editor)
+    await waitFor(() => expect(screen.getByText("Apply after editing.")).toBeTruthy())
+  })
+
   it("renders transient source without revision or plan actions", () => {
     render(
       <PlanEditor

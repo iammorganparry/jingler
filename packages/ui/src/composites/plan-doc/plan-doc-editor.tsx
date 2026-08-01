@@ -1,5 +1,5 @@
 import { type PlanCommentMessage, sanitizePlanHtml } from "@jingler/core"
-import type { Editor } from "@tiptap/core"
+import type { Editor, EditorEvents } from "@tiptap/core"
 import { EditorContent, useEditor } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
 import { Bold, Code, Italic, MessageSquarePlus } from "lucide-react"
@@ -84,6 +84,10 @@ export function PlanDocEditor({
   workerControlsRef.current = workerControls
   const commentControlsRef = useRef(commentControls)
   commentControlsRef.current = commentControls
+  // A save echo or remote revision may arrive while ProseMirror owns a live
+  // caret/selection. Replacing the whole document at that moment resets both,
+  // so hold the newest external value until the editor blurs.
+  const pendingExternalValueRef = useRef<string | null>(null)
   const extensions = useMemo(planDocExtensions, [])
   const canStopWorker = workerControls?.stop !== undefined
   const canRetryWorker = workerControls?.retry !== undefined
@@ -162,14 +166,31 @@ export function PlanDocEditor({
         "aria-label": "Plan document"
       }
     },
-    onUpdate: ({ editor }) => onChangeRef.current?.(sanitizePlanHtml(editor.getHTML()))
+    onUpdate: ({ editor }) => onChangeRef.current?.(sanitizePlanHtml(editor.getHTML())),
+    onBlur: ({ editor }) => {
+      const pending = pendingExternalValueRef.current
+      pendingExternalValueRef.current = null
+      if (
+        pending !== null &&
+        sanitizePlanHtml(pending) !== sanitizePlanHtml(editor.getHTML())
+      ) {
+        editor.commands.setContent(pending, { emitUpdate: false })
+      }
+    }
   })
 
   useEffect(() => {
     if (!editor) return
-    if (sanitizePlanHtml(value) !== sanitizePlanHtml(editor.getHTML())) {
-      editor.commands.setContent(value, { emitUpdate: false })
+    if (sanitizePlanHtml(value) === sanitizePlanHtml(editor.getHTML())) {
+      pendingExternalValueRef.current = null
+      return
     }
+    if (editor.isFocused) {
+      pendingExternalValueRef.current = value
+      return
+    }
+    pendingExternalValueRef.current = null
+    editor.commands.setContent(value, { emitUpdate: false })
   }, [editor, value])
 
   useEffect(() => {
@@ -233,6 +254,7 @@ export function PlanDocEditor({
     let rebuildOutline = true
     let elements: ReadonlyArray<HTMLElement> = []
     let outline: ReadonlyArray<PlanDocOutlineEntry> = []
+    let viewport: PlanDocViewport | null = null
     const update = (outlineChanged = false) => {
       rebuildOutline ||= outlineChanged
       window.cancelAnimationFrame(frame)
@@ -244,7 +266,7 @@ export function PlanDocEditor({
             )
           )
           let headingIndex = 0
-          outline = elements.map((element) => {
+          const nextOutline = elements.map((element) => {
             const stageId = element.dataset.planStageId
             const id =
               stageId !== undefined
@@ -271,21 +293,35 @@ export function PlanDocEditor({
             } satisfies PlanDocOutlineEntry
           })
           rebuildOutline = false
-          onOutlineChangeRef.current?.(outline)
+          if (!samePlanOutline(outline, nextOutline)) {
+            outline = nextOutline
+            onOutlineChangeRef.current?.(outline)
+          } else {
+            outline = nextOutline
+          }
         }
 
         const viewportRect = scrollElement.getBoundingClientRect()
         const active = [...elements]
           .reverse()
           .find((element) => element.getBoundingClientRect().top <= viewportRect.top + 96)
-        onViewportChangeRef.current?.({
+        const nextViewport = {
           activeId: active?.dataset.planMinimapId ?? outline[0]?.id ?? null,
           ...planDocViewportFractions(scrollElement)
-        })
+        }
+        if (!samePlanViewport(viewport, nextViewport)) {
+          viewport = nextViewport
+          onViewportChangeRef.current?.(nextViewport)
+        }
       })
     }
     update()
-    const updateOutline = () => update(true)
+    const updateOutline = ({ transaction }: EditorEvents["transaction"]) => {
+      // Selection-only transactions are extremely frequent while highlighting
+      // text and cannot alter the minimap. Rebuilding it here caused a parent
+      // render on every pointer move, making the selection visibly jump.
+      if (transaction.docChanged) update(true)
+    }
     const updateViewport = () => update()
     editor.on("transaction", updateOutline)
     scrollElement.addEventListener("scroll", updateViewport, { passive: true })
@@ -296,7 +332,7 @@ export function PlanDocEditor({
       scrollElement.removeEventListener("scroll", updateViewport)
       window.removeEventListener("resize", updateViewport)
     }
-  }, [editor, value])
+  }, [editor])
 
   return (
     <PlanCommentThreadControlsProvider controls={stableCommentControls}>
@@ -327,6 +363,27 @@ export interface PlanDocViewport {
   readonly start: number
   readonly size: number
 }
+
+const samePlanOutline = (
+  left: ReadonlyArray<PlanDocOutlineEntry>,
+  right: ReadonlyArray<PlanDocOutlineEntry>
+): boolean =>
+  left.length === right.length &&
+  left.every(
+    (entry, index) =>
+      entry.id === right[index]?.id &&
+      entry.title === right[index]?.title &&
+      entry.kind === right[index]?.kind
+  )
+
+const samePlanViewport = (
+  left: PlanDocViewport | null,
+  right: PlanDocViewport
+): boolean =>
+  left !== null &&
+  left.activeId === right.activeId &&
+  left.start === right.start &&
+  left.size === right.size
 
 export const planDocViewportFractions = ({
   scrollTop,
