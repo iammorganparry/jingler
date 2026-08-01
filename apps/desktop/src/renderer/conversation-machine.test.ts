@@ -57,6 +57,8 @@ const h = vi.hoisted(() => ({
   transcriptPageCalls: [] as Array<{ before: string | undefined; limit: number }>,
   currentPlan: null as PlanDocument | null,
   setHarnessCalls: [] as Array<{ sessionId: string; cli: string; model: string }>,
+  planCommentCalls: [] as Array<{ planId: string; stepId: string; body: string }>,
+  planReviseCalls: [] as Array<string>,
   reasoningCalls: [] as Array<unknown>,
   catalog: [
     { cli: "claude", label: "Claude Code", models: [{ id: "opus", label: "opus" }] },
@@ -153,8 +155,17 @@ vi.mock("./rpc-client.js", () => ({
     ) => {
       h.setHarnessCalls.push({ sessionId, cli, model })
     },
-    agentCommentPlanStep: async () => {},
-    agentRevisePlan: async () => {},
+    agentCommentPlanStep: async (
+      _sessionId: string,
+      planId: string,
+      stepId: string,
+      body: string
+    ) => {
+      h.planCommentCalls.push({ planId, stepId, body })
+    },
+    agentRevisePlan: async (_sessionId: string, planId: string) => {
+      h.planReviseCalls.push(planId)
+    },
     agentApprovePlan: async () =>
       h.approvalRefused
         ? {
@@ -240,6 +251,8 @@ beforeEach(() => {
   h.transcript = []
   h.transcriptPageCalls.length = 0
   h.currentPlan = null
+  h.planCommentCalls.length = 0
+  h.planReviseCalls.length = 0
   h.reviewCb = null
   h.reasoningCalls.length = 0
   h.resumeCalls.length = 0
@@ -1330,6 +1343,55 @@ describe("conversationMachine — volatile plan drafts", () => {
     raw: "<h1>PRD: Live plan</h1>",
     steps: []
   } as unknown as Plan
+
+  it("routes a composer message into the parked plan as revision feedback", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    actor.send({ type: "SEND", text: "plan it" })
+    await waitFor(actor, (snapshot) => snapshot.matches("running"))
+    emit({ _tag: "PlanProposed", plan: proposedPlan })
+
+    actor.send({ type: "SEND", text: "Use durable objects for concurrency." })
+
+    expect(actor.getSnapshot().context.queued).toStrictEqual([])
+    expect(actor.getSnapshot().context.sharedPlan).toMatchObject({
+      id: proposedPlan.id,
+      status: "revising",
+      comments: [{ body: "Use durable objects for concurrency.", routed: true }]
+    })
+    await vi.waitFor(() => {
+      expect(h.planCommentCalls).toStrictEqual([{
+        planId: proposedPlan.id,
+        stepId: "",
+        body: "Use durable objects for concurrency."
+      }])
+      expect(h.planReviseCalls).toStrictEqual([proposedPlan.id])
+    })
+    expect(h.steerCalls).toStrictEqual([])
+    actor.stop()
+  })
+
+  it("makes Send now route an already-queued message into the parked plan", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    actor.send({ type: "SEND", text: "plan it" })
+    await waitFor(actor, (snapshot) => snapshot.matches("running"))
+
+    // The message landed a beat before PlanProposed, so it took the ordinary
+    // queue path. Once the plan appears, its existing Send now affordance must
+    // still become a revision action rather than a permanently deferred steer.
+    actor.send({ type: "SEND", text: "Research the newest MCP transport." })
+    const id = queuedId(actor, 0)
+    emit({ _tag: "PlanProposed", plan: proposedPlan })
+    actor.send({ type: "SEND_NOW", id })
+
+    expect(actor.getSnapshot().context.queued).toStrictEqual([])
+    await vi.waitFor(() => {
+      expect(h.planReviseCalls).toStrictEqual([proposedPlan.id])
+    })
+    expect(h.steerCalls).toStrictEqual([])
+    actor.stop()
+  })
 
   it("tracks cumulative source without touching the transcript and promotes atomically", async () => {
     const actor = start()

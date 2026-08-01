@@ -32,18 +32,49 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
 /**
  * Park a run so the composer is in its queueing form.
  *
- * `[[plan]]` proposes a plan and waits for approval: the agent is BUSY rather
- * than paused at a gate, so the composer stays live and there is no timing race
- * to win before typing.
+ * `[[queue-hold]]` keeps the scripted turn BUSY until the app closes, so these
+ * queue-only specs do not borrow plan approval now that plan messages are routed
+ * directly back to the planner as revision feedback.
  */
 const parkABusyRun = async (window: import("@playwright/test").Page): Promise<void> => {
   const composer = window.getByPlaceholder("Message Claude…")
-  await composer.fill("[[plan]] refactor auth to a TokenStore")
+  await composer.fill("[[queue-hold]] exercise queue actions")
   await composer.press("Enter")
-  await expect(window.getByRole("button", { name: "Approve", exact: true }).first()).toBeVisible({
+  await expect(window.getByText("Holding the active turn for queue actions.")).toBeVisible({
     timeout: 15_000
   })
 }
+
+test("Send now turns queued plan feedback into a real revision", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: seededSessions
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  const composer = window.getByPlaceholder("Message Claude…")
+  await composer.fill("[[plan]] [[stream-plan]] refactor auth to a TokenStore")
+  await composer.press("Enter")
+
+  // Queue during the live draft, before a canonical plan exists. This recreates
+  // the exact row from the reported bug rather than relying on a synthetic seed.
+  await expect(window.getByTestId("plan-split-column")).toBeVisible({ timeout: 15_000 })
+  const busyComposer = window.getByPlaceholder("Queue a message while the agent works…")
+  await busyComposer.fill("Use durable objects for concurrency.")
+  await busyComposer.press("Enter")
+  await expect(window.getByText("Queued", { exact: true })).toBeVisible()
+
+  await expect(window.getByRole("button", { name: "Approve", exact: true }).first()).toBeVisible({
+    timeout: 15_000
+  })
+  await window.getByRole("button", { name: "Send now" }).click()
+
+  await expect(window.getByText("Queued", { exact: true })).toHaveCount(0)
+  await expect(window.getByText("Refactor auth flow (revised)", { exact: true })).toBeVisible({
+    timeout: 20_000
+  })
+})
 
 test("a queued message can be rewritten before it is ever sent", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })

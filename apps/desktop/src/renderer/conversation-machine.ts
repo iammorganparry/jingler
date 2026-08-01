@@ -584,6 +584,44 @@ const gateStatusFor = (decision: GateDecision) =>
 
 const stamp = () => Date.now().toString(36)
 
+type PlanFeedback = {
+  readonly plan: Plan
+  readonly text: string
+  readonly queuedId: string | null
+}
+
+/**
+ * Turn an ordinary composer send into feedback while a proposed plan is parked.
+ *
+ * A parked plan still owns the live run, but it has no Codex steer handle: the
+ * old generic queue path therefore reported `deferred` forever when the operator
+ * clicked Send now. Plan feedback already has a durable route — a global plan
+ * comment followed by `revisePlan` — so use that instead of pretending the held
+ * run is an ordinary streaming turn.
+ */
+const planFeedbackFor = (
+  context: ConversationContext,
+  event: ConversationEvent
+): PlanFeedback | null => {
+  const plan = context.sharedPlan
+  if (plan === null || plan.status !== "proposed") return null
+
+  if (event.type === "SEND") {
+    const text = event.text.trim()
+    // Plan annotations cannot carry images. Preserve attachment-bearing sends in
+    // the ordinary queue instead of silently discarding their visual context.
+    if (text.length === 0 || (event.images?.length ?? 0) > 0) return null
+    return { plan, text, queuedId: null }
+  }
+
+  if (event.type !== "SEND_NOW" || context.steeringId !== null) return null
+  const queued = context.queued.find((item) => item.id === event.id)
+  if (queued === undefined || queued.text.trim().length === 0 || queued.images.length > 0) {
+    return null
+  }
+  return { plan, text: queued.text.trim(), queuedId: queued.id }
+}
+
 /**
  * Hand a queued message to the live turn, and report back as `STEER_RESULT`.
  *
@@ -680,6 +718,8 @@ export const conversationMachine = setup({
       if (!supportsSteer(context.cli)) return false
       return context.resumePlanId === null
     },
+    canRoutePlanFeedback: ({ context, event }) =>
+      planFeedbackFor(context, event) !== null,
     /** Older turns remain, and no page is already in flight. */
     canLoadOlder: ({ context }) =>
       context.hasMoreHistory &&
@@ -801,6 +841,52 @@ export const conversationMachine = setup({
       const rest = context.queued.filter((queued) => queued.id !== event.id)
       beginSteer(context, self, picked, false)
       return { queued: [picked, ...rest], steeringId: picked.id }
+    }),
+    routePlanFeedback: assign(({ context, event }) => {
+      const feedback = planFeedbackFor(context, event)
+      if (feedback === null) return {}
+
+      void rpc
+        .agentCommentPlanStep(
+          context.session.id,
+          feedback.plan.id,
+          "",
+          feedback.text
+        )
+        .then(() => rpc.agentRevisePlan(context.session.id, feedback.plan.id))
+        .catch(() => {})
+
+      const comment: PlanComment = {
+        id: `pc_local_${stamp()}`,
+        stepId: "",
+        body: feedback.text,
+        author: "user",
+        createdAt: new Date().toISOString(),
+        // This path routes the comment immediately rather than leaving it open in
+        // Plan Review, so the optimistic projection should say the same thing.
+        routed: true
+      }
+      return {
+        queued:
+          feedback.queuedId === null
+            ? context.queued
+            : context.queued.filter((item) => item.id !== feedback.queuedId),
+        messages: context.messages.map((message) =>
+          setPlanStatus(
+            addPlanComment(message, feedback.plan.id, comment),
+            feedback.plan.id,
+            "revising"
+          )
+        ),
+        sharedPlan:
+          context.sharedPlan?.id === feedback.plan.id
+            ? {
+                ...context.sharedPlan,
+                status: "revising" as const,
+                comments: [...context.sharedPlan.comments, comment]
+              }
+            : context.sharedPlan
+      }
     }),
     /**
      * Hand the HEAD of the queue to the live turn at a tool boundary — the
@@ -1553,7 +1639,7 @@ export const conversationMachine = setup({
       // the trigger/phase snapshot, but the view reads this live field for the
       // meter's numerator; starting at zero hid the whole component after every
       // app restart until Codex happened to emit another Usage event.
-      tokens: chat.contextTokens ?? 0,
+      tokens: chat.contextTokens ?? input.session.contextTokens ?? 0,
       runStartedAt: null,
       lastOutcome: null,
       persistedStatus: input.session.status,
@@ -1586,7 +1672,10 @@ export const conversationMachine = setup({
         // before the transcript lands — and a dropped one is invisible: the box
         // clears and the operator believes they sent it. Hold it and run it the
         // moment the load settles, exactly as a send during a run is held.
-        SEND: { actions: "enqueue" },
+        SEND: [
+          { guard: "canRoutePlanFeedback", actions: "routePlanFeedback" },
+          { actions: "enqueue" }
+        ],
         // Whatever is held here is ON SCREEN as a queued row (a hand-off lands one
         // in a chat that is still loading), so its row actions have to work — an
         // edit or a remove dropped in this window would leave the row claiming the
@@ -1705,16 +1794,20 @@ export const conversationMachine = setup({
         FILES_UPDATED: { actions: "applyLiveFiles" },
         // Sent mid-run: queued, then flushed into this turn at the next tool
         // boundary where the harness can take it (see `canAutoFlush`).
-        SEND: { actions: "enqueue" },
+        SEND: [
+          { guard: "canRoutePlanFeedback", actions: "routePlanFeedback" },
+          { actions: "enqueue" }
+        ],
         UNQUEUE: { actions: "removeQueued" },
         EDIT_QUEUED: { actions: "editQueued" },
         // "Send now": interrupt the current turn and run the picked message next,
         // so the operator can steer mid-stream. Promote it to the head, then go
         // through `stopping` so the halt has landed before the next turn starts;
         // refreshingDiff dequeues it (the rest of the queue follows).
-        SEND_NOW: {
-          actions: "promoteAndSteer"
-        },
+        SEND_NOW: [
+          { guard: "canRoutePlanFeedback", actions: "routePlanFeedback" },
+          { actions: "promoteAndSteer" }
+        ],
         STEER_RESULT: [
           {
             // Only the OPERATOR's "send now" is allowed to escalate to a stop:
