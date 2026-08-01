@@ -33,7 +33,7 @@ import {
 } from "./plan-parse.js"
 import { createPlanDraftStream } from "./plan-draft-stream.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
-import { harnessEnv, hasSubscriptionAuth } from "./subscription.js"
+import { githubTokenForAgents, harnessEnv, hasSubscriptionAuth } from "./subscription.js"
 import { worktreeEnv } from "./worktree-env.js"
 
 const MAX_QUESTION_ROUNDS = 4
@@ -432,7 +432,12 @@ export const runCodexAppServer = (
       try: async () => {
         const cwd = requireWorktree(spec.cwd, `session ${sessionId}`)
         const env = {
-          ...harnessEnv("codex", worktreeEnv(process.env, cwd), hasSubscriptionAuth("codex")),
+          ...harnessEnv(
+            "codex",
+            worktreeEnv(process.env, cwd),
+            hasSubscriptionAuth("codex"),
+            githubTokenForAgents()
+          ),
           ...codexMcpEnvironment(spec.remoteMcpServers)
         }
         diagnostics = createCodexAppServerDiagnostics(process.env.JINGLER_CODEX_DIAGNOSTICS_DIR, {

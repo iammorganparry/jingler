@@ -22,7 +22,7 @@ import { createPlanDraftStream } from "./plan-draft-stream.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
 import { requireWorktree } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
-import { harnessEnv, hasSubscriptionAuth } from "./subscription.js"
+import { githubTokenForAgents, harnessEnv, hasSubscriptionAuth } from "./subscription.js"
 import { readCodexContextUsage } from "./codex-app-server.js"
 import type { CodexContextUsage } from "./codex-app-server.js"
 import { stageCodexInput } from "./codex-input.js"
@@ -443,7 +443,8 @@ export const runCodexSdk = (
           env: harnessEnv(
             "codex",
             worktreeEnv(process.env, spec.cwd ?? undefined),
-            hasSubscriptionAuth("codex")
+            hasSubscriptionAuth("codex"),
+            githubTokenForAgents()
           )
         })
         const staged = await stageCodexInput(spec.prompt, spec.images)

@@ -57,15 +57,56 @@ export type BillingPath =
 export const harnessEnv = (
   cli: CliKind,
   env: Record<string, string | undefined>,
-  hasSubscription: boolean
+  hasSubscription: boolean,
+  githubToken?: string | null
 ): Record<string, string> => {
   const drop = new Set(hasSubscription ? (METERED_ENV_KEYS[cli] ?? []) : [])
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined || drop.has(k)) continue
+    // An empty GH_TOKEN/GITHUB_TOKEN is never a usable credential, and gh/git
+    // treat the env var as authoritative WHEN PRESENT — an empty one shadows the
+    // real token and yields a 401. Drop the footgun rather than pass it through.
+    if ((k === "GH_TOKEN" || k === "GITHUB_TOKEN") && v.trim() === "") continue
     out[k] = v
   }
+  // Hand a sandboxed agent a working GitHub token via gh's native env auth (the
+  // mechanism CI uses — not a reimplementation): the agent can't reach the
+  // Keychain where gh/osxkeychain keep the token, so `gh`/`git push` inside its
+  // turn would 401. Never override a real token the operator already exported.
+  if (githubToken && !out.GH_TOKEN && !out.GITHUB_TOKEN) {
+    out.GH_TOKEN = githubToken
+  }
   return out
+}
+
+/**
+ * The operator's GitHub token, resolved from the `gh` CLI in THIS (main)
+ * process — the one place the macOS Keychain is reachable.
+ *
+ * Agents run sandboxed and cannot read the Keychain (nor, for Claude, the
+ * denylisted `~/.config/gh`), so `gh auth status` / `git push` inside an agent
+ * turn reports "invalid tokens" and 401s even though the operator is signed in.
+ * We resolve the token here and inject it via `GH_TOKEN` (see `harnessEnv`).
+ *
+ * Memoised because `gh auth token` spawns a process and hits the Keychain on
+ * every call. Cleared by `resetSubscriptionCache`, so a `gh auth login` in a
+ * terminal is picked up without restarting Jingler. Returns null when gh is
+ * absent or signed out — then nothing is injected and the child is unchanged.
+ */
+let ghTokenCache: string | null | undefined
+export const githubTokenForAgents = (): string | null => {
+  if (ghTokenCache !== undefined) return ghTokenCache
+  try {
+    const out = execFileSync("gh", ["auth", "token", "-h", "github.com"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim()
+    ghTokenCache = out.length > 0 ? out : null
+  } catch {
+    ghTokenCache = null
+  }
+  return ghTokenCache
 }
 
 /**
@@ -189,4 +230,5 @@ export const subscriptionProbeFailed = (cli: CliKind): boolean => indeterminate.
 export const resetSubscriptionCache = (): void => {
   cache.clear()
   indeterminate.clear()
+  ghTokenCache = undefined
 }

@@ -26,7 +26,7 @@ import type {
 import { startTeeStream, type TeeStream } from "./bash-tee.js"
 import { escapingPath } from "./confinement.js"
 import { unattendedSandbox } from "./sandbox.js"
-import { harnessEnv, hasSubscriptionAuth } from "./subscription.js"
+import { githubTokenForAgents, harnessEnv, hasSubscriptionAuth } from "./subscription.js"
 import { requireWorktree } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
 import { capOutput } from "./output-cap.js"
@@ -1357,7 +1357,8 @@ export const runClaude = (
             env: harnessEnv(
               "claude",
               worktreeEnv(process.env, spec.cwd ?? undefined),
-              hasSubscriptionAuth("claude")
+              hasSubscriptionAuth("claude"),
+              githubTokenForAgents()
             ),
             // An unattended agent gets the OS-level credential denylist as well
             // as the file-tool check below — the latter cannot see a shell, and

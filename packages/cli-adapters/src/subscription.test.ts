@@ -40,6 +40,33 @@ describe("harnessEnv", () => {
   it("drops undefined values rather than passing them through", () => {
     expect(harnessEnv("claude", { A: undefined, B: "b" }, false)).toStrictEqual({ B: "b" })
   })
+
+  it("injects GH_TOKEN so a sandboxed agent can reach GitHub", () => {
+    // The agent can't read the Keychain where gh keeps its token; without this
+    // an autonomous `gh`/`git push` 401s even though the operator is signed in.
+    const out = harnessEnv("codex", { PATH: "/usr/bin" }, false, "ghp_abc")
+    expect(out.GH_TOKEN).toBe("ghp_abc")
+  })
+
+  it("does not inject when no token could be resolved", () => {
+    expect(harnessEnv("codex", { PATH: "/usr/bin" }, false, null).GH_TOKEN).toBeUndefined()
+  })
+
+  it("never overrides a real token the operator already exported", () => {
+    const out = harnessEnv("codex", { GH_TOKEN: "ghp_real" }, false, "ghp_resolved")
+    expect(out.GH_TOKEN).toBe("ghp_real")
+    const viaGithub = harnessEnv("codex", { GITHUB_TOKEN: "ghp_real" }, false, "ghp_resolved")
+    expect(viaGithub.GH_TOKEN).toBeUndefined()
+    expect(viaGithub.GITHUB_TOKEN).toBe("ghp_real")
+  })
+
+  it("drops an empty GH_TOKEN/GITHUB_TOKEN footgun, then injects the real one", () => {
+    // An empty env token shadows the Keychain and 401s; it must not survive, and
+    // the resolved token should fill the gap it leaves.
+    const out = harnessEnv("codex", { GITHUB_TOKEN: "", PATH: "/usr/bin" }, false, "ghp_resolved")
+    expect(out.GITHUB_TOKEN).toBeUndefined()
+    expect(out.GH_TOKEN).toBe("ghp_resolved")
+  })
 })
 
 describe("billingPath", () => {
