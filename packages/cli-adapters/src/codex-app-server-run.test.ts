@@ -777,6 +777,36 @@ describe("runCodexAppServer", () => {
     ])
   })
 
+  it("uses on-request approval in a sandboxed mode so escalations forward to the operator", async () => {
+    // accept-edits keeps the workspace-write sandbox on; `approvalPolicy: "never"`
+    // would let a command needing escalation (network, the Keychain, outside cwd)
+    // fail silently. `on-request` makes Codex ask, and `handleServerRequest` relays
+    // that to the approval gate — the fix for `gh` failing in orchestrated turns.
+    server.state.messages = [
+      {
+        method: "turn/completed",
+        params: {
+          threadId: "thread-1",
+          turn: { id: "turn-1", status: "completed", error: null }
+        }
+      }
+    ]
+    const { ctx } = harness()
+
+    await Effect.runPromise(
+      runCodexAppServer("s1", spec({ mode: "accept-edits" }), ctx, new Map())
+    )
+
+    expect(
+      server.state.requests.find((request) => request.method === "turn/start")
+    ).toMatchObject({
+      params: {
+        approvalPolicy: "on-request",
+        sandboxPolicy: { type: "workspaceWrite" }
+      }
+    })
+  })
+
   it("answers a native request-user-input request without starting another turn", async () => {
     server.state.messages = [
       {

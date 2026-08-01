@@ -96,12 +96,14 @@ describe("RPC handlers", () => {
   const fakeDialog = (chosen: string | null) =>
     Layer.succeed(DialogService, { chooseDirectory: () => Effect.succeed(chosen) })
 
-  it("keeps a new session direct when no planning route exists", () => {
+  it("keeps a new session direct, defaulting to auto where the harness supports it", () => {
     expect(sessionCreationDefaults("codex", null, null)).toMatchObject({
       cli: "codex",
       options: {
         chatRole: "direct",
-        defaultMode: undefined,
+        // No configured default → `auto` (codex supports it): unsandboxed, keychain
+        // reachable, so `gh`/`git` work as they do in a direct CLI.
+        defaultMode: "auto",
         defaultModel: undefined
       }
     })

@@ -38,6 +38,7 @@ import {
   applyStreamEvent,
   applySubagentEvent,
   assistantMessage,
+  defaultModeFor,
   defaultModel,
   nextReviewPhase,
   planDocumentToPlan,
@@ -1249,7 +1250,7 @@ export const conversationMachine = setup({
         event.session.cli === "opencode"
           ? event.session.reasoning?.[event.session.cli]
           : undefined
-      const persistedMode = chat.mode ?? "accept-edits"
+      const persistedMode = chat.mode ?? defaultModeFor(event.session.cli)
       // Plan/Gigaplan are TRANSIENT client overlays the backend never persists
       // (see `agent-runner.setMode`: plan is held in memory, only the exec mode
       // reaches `session.mode`). A `SESSION_UPDATED` therefore always carries a
@@ -1610,7 +1611,7 @@ export const conversationMachine = setup({
       session: input.session,
       chatId: chat.id,
       messages: [],
-      mode: chat.mode ?? "accept-edits",
+      mode: chat.mode ?? defaultModeFor(input.session.cli),
       executionMode:
         chat.mode && isExecutionMode(chat.mode)
           ? chat.mode
