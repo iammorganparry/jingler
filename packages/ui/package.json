@@ -33,6 +33,7 @@
     "@radix-ui/react-tooltip": "^1.2.12",
     "@tanstack/react-virtual": "^3.14.5",
     "@tiptap/core": "^3.29.2",
+    "@tiptap/extension-list-item": "^3.29.2",
     "@tiptap/pm": "^3.29.2",
     "@tiptap/react": "^3.29.2",
     "@tiptap/starter-kit": "^3.29.2",

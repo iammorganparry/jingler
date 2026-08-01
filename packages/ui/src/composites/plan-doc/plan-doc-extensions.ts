@@ -6,6 +6,7 @@ import { PlanAnnotationNode } from "./plan-annotation-node.js"
 import { PlanDiagramNode } from "./plan-diagram-node.js"
 import { PlanCommentDecorations } from "./plan-doc-comment.js"
 import { PlanSlashCommand } from "./plan-doc-slash.js"
+import { PlanListItemNode } from "./plan-file-node.js"
 import { PlanAssignmentNode, PlanStageNode } from "./plan-stage-node.js"
 
 const PlanFileOwnershipMetadata = Extension.create({
@@ -21,35 +22,6 @@ const PlanFileOwnershipMetadata = Extension.create({
               element.hasAttribute("data-files") ? "" : null,
             renderHTML: (attributes) =>
               attributes.planFiles === null ? {} : { "data-files": "" }
-          }
-        }
-      },
-      {
-        types: ["listItem"],
-        attributes: {
-          planFileChange: {
-            default: null,
-            parseHTML: (element) => element.getAttribute("data-change"),
-            renderHTML: (attributes) =>
-              typeof attributes.planFileChange === "string"
-                ? { "data-change": attributes.planFileChange }
-                : {}
-          },
-          planFileAdded: {
-            default: null,
-            parseHTML: (element) => element.getAttribute("data-added"),
-            renderHTML: (attributes) =>
-              typeof attributes.planFileAdded === "string"
-                ? { "data-added": attributes.planFileAdded }
-                : {}
-          },
-          planFileRemoved: {
-            default: null,
-            parseHTML: (element) => element.getAttribute("data-removed"),
-            renderHTML: (attributes) =>
-              typeof attributes.planFileRemoved === "string"
-                ? { "data-removed": attributes.planFileRemoved }
-                : {}
           }
         }
       }
@@ -76,8 +48,9 @@ const PlanFileOwnershipMetadata = Extension.create({
  * exact schema without pulling in the suggestion/React popup machinery.
  */
 export const planDocExtensions = ({ slash = true }: { slash?: boolean } = {}): Extensions => [
-  StarterKit,
+  StarterKit.configure({ listItem: false }),
   PlanFileOwnershipMetadata,
+  PlanListItemNode,
   PlanStageNode,
   PlanAssignmentNode,
   PlanAcceptanceNode,

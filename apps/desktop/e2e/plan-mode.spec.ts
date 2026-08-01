@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { DEFAULT_PLAN_TEMPLATE_HTML } from "@jingler/core"
 import type { Page } from "@playwright/test"
@@ -36,6 +37,20 @@ const session = (
 // the canonical file is `current-plan.html`, not the old `current-plan.mdx`.
 const currentPlanPath = (launched: LaunchedApp): string =>
   join(planDirectory(launched.home, launched.repoPath), "current-plan.html")
+
+const seedPlanAsset = ({ repoPath }: { repoPath: string }): void => {
+  mkdirSync(join(repoPath, "src", "auth"), { recursive: true })
+  writeFileSync(
+    join(repoPath, "src", "auth", "token-store.ts"),
+    "export const tokenStoreSeed = true\n"
+  )
+  execFileSync("git", ["add", "src/auth/token-store.ts"], { cwd: repoPath })
+  execFileSync(
+    "git",
+    ["commit", "-m", "seed plan asset", "--no-gpg-sign"],
+    { cwd: repoPath }
+  )
+}
 
 const revisionOf = (file: string): number =>
   Number(/^revision:\s*(\d+)$/m.exec(readFileSync(file, "utf8"))?.[1] ?? 0)
@@ -487,6 +502,31 @@ test("autosave echoes preserve the live caret and highlighted plan text", async 
   await expect(
     launched.window.getByRole("button", { name: "Comment", exact: true })
   ).toBeVisible()
+})
+
+test("plan file evidence opens the changed asset", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: seedPlanAsset,
+    sessions: session()
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await proposePlan(launched)
+
+  const file = launched.window.getByRole("button", {
+    name: "Open src/auth/token-store.ts (+40 −0)"
+  })
+  await expect(file).toBeVisible()
+  await file.click()
+
+  await expect(launched.window.getByRole("button", { name: "Hide preview" })).toBeVisible()
+  await expect(
+    launched.window.getByRole("button", { name: "token-store.ts", exact: true })
+  ).toBeVisible()
+  await expect(launched.window.getByText("tokenStoreSeed")).toBeVisible({
+    timeout: 15_000
+  })
 })
 
 test("view switches and app close flush edits inside the debounce window", async ({

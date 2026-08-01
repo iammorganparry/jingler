@@ -40,8 +40,10 @@ export interface PlanReviewProps {
   syncState?: PlanEditorSyncState
   syncError?: string | null
   canApprove?: boolean
-  /** @deprecated Legacy step-review input retained for caller compatibility. */
+  /** Live worktree patch used for compact per-file evidence in the plan. */
   patch?: string
+  knownFiles?: ReadonlySet<string>
+  onOpenFile?: (path: string) => void
   /** One-shot stable stage id requested by the composer progress dock. */
   selectedStepId?: string | null
   /** @deprecated Split panes render the same responsive document editor. */
@@ -117,7 +119,10 @@ function PlanReviewBody(props: PlanReviewProps) {
     onRetryThread,
     onSetThreadResolved,
     selectedStepId,
-    onSelectStep
+    onSelectStep,
+    patch,
+    knownFiles,
+    onOpenFile
   } = props
 
   const promotedPlan =
@@ -201,6 +206,9 @@ function PlanReviewBody(props: PlanReviewProps) {
           onTargetStageConsumed={
             selectedStepId ? () => onSelectStep?.(selectedStepId) : undefined
           }
+          patch={patch}
+          knownFiles={knownFiles}
+          onOpenFile={onOpenFile}
         />
       </div>
     </div>

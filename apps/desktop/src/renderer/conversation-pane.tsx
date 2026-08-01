@@ -592,6 +592,8 @@ export function ConversationPane({
       canApprove={canonicalPlan.canApprove}
       compact={view === "split"}
       patch={convo.patch}
+      knownFiles={knownFiles}
+      onOpenFile={openAsset}
       selectedStepId={planStepId}
       onSelectStep={onPlanStepSelected}
       onApprove={(executionMode) =>

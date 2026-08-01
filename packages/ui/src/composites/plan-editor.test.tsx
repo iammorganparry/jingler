@@ -42,6 +42,36 @@ const document: PlanDocument = {
 afterEach(cleanup)
 
 describe("PlanEditor", () => {
+  it("renders plan files as live diff links", async () => {
+    const onOpenFile = vi.fn()
+    const withFile = source.replace(
+      '<div data-acceptance="01.1"',
+      '<ul data-files><li>src/editor.ts</li></ul><div data-acceptance="01.1"'
+    )
+    const patch = `diff --git a/src/editor.ts b/src/editor.ts
+--- a/src/editor.ts
++++ b/src/editor.ts
+@@ -1 +1,2 @@
+ old
++new`
+    render(
+      <PlanEditor
+        document={{ ...document, source: withFile }}
+        draft={withFile}
+        state="clean"
+        patch={patch}
+        knownFiles={new Set(["src/editor.ts"])}
+        onOpenFile={onOpenFile}
+      />
+    )
+
+    const link = await screen.findByRole("button", {
+      name: "Open src/editor.ts (+1 −0)"
+    })
+    fireEvent.click(link)
+    expect(onOpenFile).toHaveBeenCalledWith("src/editor.ts")
+  })
+
   it("defers an external document replacement until a focused editor blurs", async () => {
     const first = "<h1>Focused plan</h1><p>Keep the live caret.</p>"
     const remote = "<h1>Remote plan</h1><p>Apply after editing.</p>"

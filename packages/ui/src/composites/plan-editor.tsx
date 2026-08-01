@@ -8,11 +8,13 @@ import {
 } from "@jingler/core"
 import { AlertTriangle } from "lucide-react"
 import { useMemo, useState } from "react"
+import { parseUnifiedDiff } from "../diff/parse.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import {
   PlanDocEditor,
   type PlanDocOutlineEntry,
-  type PlanDocViewport
+  type PlanDocViewport,
+  type PlanFileEvidence
 } from "./plan-doc/plan-doc-editor.js"
 import { PlanFloatingActions } from "./plan-floating-actions.js"
 import { PlanMinimap, type PlanMinimapItem } from "./plan-minimap.js"
@@ -61,7 +63,10 @@ export function PlanEditor({
   onRetryThread,
   onSetThreadResolved,
   targetStageId,
-  onTargetStageConsumed
+  onTargetStageConsumed,
+  patch = "",
+  knownFiles,
+  onOpenFile
 }: {
   document: PlanDocument | null
   draft: string
@@ -98,6 +103,9 @@ export function PlanEditor({
   ) => Promise<void> | void
   targetStageId?: string | null
   onTargetStageConsumed?: () => void
+  patch?: string
+  knownFiles?: ReadonlySet<string>
+  onOpenFile?: (path: string) => void
 }) {
   const [outline, setOutline] = useState<ReadonlyArray<PlanDocOutlineEntry>>([])
   const [viewport, setViewport] = useState<PlanDocViewport>({
@@ -109,6 +117,29 @@ export function PlanEditor({
   const widthTier = useWidthTier()
   const showMinimap = atLeast(widthTier, "wide")
   const parsed = useMemo(() => parsePlanHtml(draft), [draft])
+  const fileEvidence = useMemo<ReadonlyMap<string, PlanFileEvidence>>(
+    () =>
+      new Map(
+        parseUnifiedDiff(patch)
+          .filter((row) => row.kind === "file")
+          .map((row) => [
+            row.path,
+            {
+              change:
+                row.status === "added"
+                  ? "A"
+                  : row.status === "deleted"
+                    ? "D"
+                    : row.status === "renamed"
+                      ? "R"
+                      : "M",
+              added: row.additions,
+              removed: row.deletions
+            }
+          ])
+      ),
+    [patch]
+  )
   const projection: PlanPrd | null =
     parsed.valid ? parsed.projection : _document?.projection ?? null
   const minimapItems = useMemo<ReadonlyArray<PlanMinimapItem>>(
@@ -204,6 +235,9 @@ export function PlanEditor({
                 onTargetBlockConsumed={() => setTargetBlockId(null)}
                 onOutlineChange={setOutline}
                 onViewportChange={setViewport}
+                fileEvidence={fileEvidence}
+                knownFiles={knownFiles}
+                onOpenFile={onOpenFile}
                 workerControls={
                   transientState === undefined
                     ? {
