@@ -1,20 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 import type { AdversarialReview, PrFileChange, PrReviewThread, ReviewFinding } from "@jingler/core"
-import { MessageSquare, PanelLeft, PanelRight, Sparkles, Undo2 } from "lucide-react"
+import {
+  Maximize2,
+  Minimize2,
+  PanelLeft,
+  PanelRight
+} from "lucide-react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
-import { DiffStat } from "../components/diff-stat.js"
-import { FileIcon } from "../components/file-icon.js"
 import { SegmentedControl } from "../components/segmented-control.js"
 import { ResizeHandle, useResizableWidth } from "../components/resizable.js"
 import { cn } from "../lib/cn.js"
 import { usePaneWidth } from "../hooks/width-tier.js"
 import { feedbackCounts } from "../lib/review-feedback.js"
-import { ReviewDiff } from "./review-diff.js"
-import { DeferredSection } from "./deferred-section.js"
-import { ReviewFileRow } from "./review-file-row.js"
+import { ReviewFileRail } from "./review-file-rail.js"
+import { ReviewFileSection } from "./review-file-section.js"
 import { ReviewFindingRow, rankFindings } from "./review-findings.js"
 import { ReviewTray, type ReviewDraft } from "./review-tray.js"
+import { filterReviewFiles } from "./review-file-filter.js"
+import { useCodeReviewView } from "./use-code-review-view.js"
 
 /** Which diff the Code Review is showing — the PR, or the worktree's own changes. */
 export type ReviewSource = "pr" | "local"
@@ -110,6 +114,7 @@ export function CodeReviewView({
   onDeslopFile
 }: CodeReviewViewProps) {
   const isLocal = source === "local"
+  const controls = useCodeReviewView()
 
   // Findings are shown against the PR they were argued about. On the local
   // (uncommitted) diff they'd be anchored to the wrong thing entirely.
@@ -126,19 +131,28 @@ export function CodeReviewView({
     [allFiles, activeReview, drafts, reviewThreads]
   )
 
-  const [feedbackOnly, setFeedbackOnly] = useState(false)
-
   /**
-   * The file list, narrowed to files carrying feedback when the filter is on.
+   * Search, type, and feedback filters apply to the file rail and stacked diff
+   * together. A control can never claim a file is hidden while its code remains
+   * in the middle pane.
    *
    * Filtered ONCE, here, and everything downstream reads `files`: the list, the
    * +/− and viewed totals, and the stacked diff scroller. Filtering only the
    * list would leave the scroller showing files the list denies exist.
    */
   const files = useMemo(
-    () => (feedbackOnly ? allFiles.filter((f) => feedback.byPath.has(f.path)) : allFiles),
-    [allFiles, feedbackOnly, feedback]
+    () =>
+      filterReviewFiles(allFiles, {
+        query: controls.query,
+        kind: controls.kind,
+        feedbackPaths: controls.feedbackOnly ? new Set(feedback.byPath.keys()) : undefined
+      }),
+    [allFiles, controls.query, controls.kind, controls.feedbackOnly, feedback]
   )
+  const filtersActive =
+    controls.query.trim().length > 0 ||
+    controls.kind !== "all" ||
+    controls.feedbackOnly
 
   // Turning the filter on while a now-hidden file is active would leave the
   // list with no selection and the scroll-spy chasing a section that no longer
@@ -153,8 +167,8 @@ export function CodeReviewView({
   // resolved while it's on, the view empties and the only way back is a control
   // that now looks inert. Force it off the moment there's nothing to filter to.
   useEffect(() => {
-    if (feedbackOnly && !feedback.any) setFeedbackOnly(false)
-  }, [feedbackOnly, feedback.any])
+    if (controls.feedbackOnly && !feedback.any) controls.clearFeedback()
+  }, [controls.feedbackOnly, controls.clearFeedback, feedback.any])
 
   const added = files.reduce((sum, f) => sum + f.additions, 0)
   const removed = files.reduce((sum, f) => sum + f.deletions, 0)
@@ -220,7 +234,6 @@ export function CodeReviewView({
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const sectionRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const rafRef = useRef<number | null>(null)
-  const [sheet, setSheet] = useState<"files" | "tray" | null>(null)
   // Cancel any pending scroll-spy frame when the tab unmounts.
   useEffect(() => () => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
@@ -271,9 +284,9 @@ export function CodeReviewView({
         container.scrollTo({ top: container.scrollTop + offset })
       }
       onSelectFile(path)
-      setSheet(null)
+      if (!controls.docked) controls.toggleSheet("files")
     },
-    [onSelectFile]
+    [onSelectFile, controls.docked, controls.toggleSheet]
   )
 
   // Persisted, drag-resizable widths for the two side panels.
@@ -291,20 +304,15 @@ export function CodeReviewView({
   // which is not a narrower view of the diff so much as no view of it.
   const { width: paneWidth } = usePaneWidth()
   const availableDiffWidth = paneWidth - fileList.width - tray.width - 2
-  const [roomy, setRoomy] = useState(
-    () => paneWidth === 0 || availableDiffWidth >= MIN_READABLE_DIFF_WIDTH
-  )
+  const roomy = controls.docked
   // Undock as soon as the diff becomes unreadable, but require 40px of breathing
   // room before re-docking. Without this hysteresis, resizing the window around
   // the boundary can alternate layouts on every pixel.
   useEffect(() => {
     if (paneWidth === 0) return
-    setRoomy((docked) =>
-      docked
-        ? availableDiffWidth >= MIN_READABLE_DIFF_WIDTH
-        : availableDiffWidth >= REDOCK_DIFF_WIDTH
-    )
-  }, [availableDiffWidth, paneWidth])
+    if (roomy && availableDiffWidth < MIN_READABLE_DIFF_WIDTH) controls.undock()
+    if (!roomy && availableDiffWidth >= REDOCK_DIFF_WIDTH) controls.dock()
+  }, [availableDiffWidth, controls.dock, controls.undock, paneWidth, roomy])
   const maxFileListWidth =
     paneWidth === 0
       ? 440
@@ -313,11 +321,8 @@ export function CodeReviewView({
     paneWidth === 0
       ? 480
       : paneWidth - fileList.width - MIN_READABLE_DIFF_WIDTH - 2
-  // Widening the pane re-docks both rails; a sheet left open across that change
-  // would sit on top of the column it just turned back into.
-  useEffect(() => {
-    if (roomy) setSheet(null)
-  }, [roomy])
+  const compactActions = paneWidth > 0 && paneWidth < 720
+  const sheetWidth = Math.min(300, Math.max(220, paneWidth > 0 ? paneWidth - 16 : 300))
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -332,17 +337,32 @@ export function CodeReviewView({
           ]}
         />
         <div className="min-w-[8px] flex-1" />
-        {!roomy && (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          aria-pressed={controls.focused}
+          aria-label={controls.focused ? "Exit review focus" : "Focus diff"}
+          title={controls.focused ? "Restore review panels" : "Show only the diff"}
+          onClick={controls.toggleFocus}
+          className={cn("min-h-10", compactActions && "size-10 p-0")}
+        >
+          {controls.focused ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          <span className={cn(compactActions && "sr-only")}>
+            {controls.focused ? "Exit focus" : "Focus"}
+          </span>
+        </Button>
+        {!roomy && !controls.focused && (
           <>
             <button
               type="button"
               aria-label="Changed files"
-              aria-pressed={sheet === "files"}
+              aria-pressed={controls.sheet === "files"}
               title="Changed files"
-              onClick={() => setSheet((s) => (s === "files" ? null : "files"))}
+              onClick={() => controls.toggleSheet("files")}
               className={cn(
-                "flex size-6 flex-none items-center justify-center rounded transition-colors hover:bg-hairline",
-                sheet === "files" ? "text-blue" : "text-dim hover:text-text-bright"
+                "flex size-10 flex-none items-center justify-center rounded-lg transition-[background-color,color,scale] duration-150 ease-out hover:bg-hairline active:scale-[0.96]",
+                controls.sheet === "files" ? "text-blue" : "text-dim hover:text-text-bright"
               )}
             >
               <PanelLeft size={15} />
@@ -350,12 +370,12 @@ export function CodeReviewView({
             <button
               type="button"
               aria-label="Review drafts"
-              aria-pressed={sheet === "tray"}
+              aria-pressed={controls.sheet === "tray"}
               title="Review drafts"
-              onClick={() => setSheet((s) => (s === "tray" ? null : "tray"))}
+              onClick={() => controls.toggleSheet("tray")}
               className={cn(
-                "flex size-6 flex-none items-center justify-center rounded transition-colors hover:bg-hairline",
-                sheet === "tray" ? "text-blue" : "text-dim hover:text-text-bright"
+                "flex size-10 flex-none items-center justify-center rounded-lg transition-[background-color,color,scale] duration-150 ease-out hover:bg-hairline active:scale-[0.96]",
+                controls.sheet === "tray" ? "text-blue" : "text-dim hover:text-text-bright"
               )}
             >
               <PanelRight size={15} />
@@ -393,72 +413,46 @@ export function CodeReviewView({
       <div className="relative flex min-h-0 min-w-0 flex-1">
         {/* File list — a resizable column when there's room, a left-hand sheet
             when there isn't. Same subtree either way: only its box changes. */}
-        <div
-          style={{ width: roomy ? fileList.width : 264 }}
-          className={cn(
-            "flex flex-col border-r border-hairline bg-panel",
-            roomy ? "flex-none" : "absolute inset-y-0 left-0 z-30 shadow-2xl",
-            !roomy && sheet !== "files" && "hidden"
-          )}
-        >
-          <div className="flex h-[42px] flex-none items-center gap-2 border-b border-hairline px-[14px]">
-            <span className="flex-1 text-[12px] font-semibold text-text-bright">Changed files</span>
-            {/* Only offer the filter when it would do something. Rendering it
-                permanently would put a dead control in the header of the common
-                case — a clean diff with nothing to say about it. */}
-            {feedback.any && (
-              <button
-                type="button"
-                aria-pressed={feedbackOnly}
-                title={feedbackOnly ? "Show all files" : "Show only files with feedback"}
-                onClick={() => setFeedbackOnly((on) => !on)}
-                className={cn(
-                  "flex items-center gap-[3px] rounded-[4px] border px-[5px] py-[2px] transition-colors",
-                  feedbackOnly
-                    ? "border-blue/40 bg-blue/[0.14] text-blue"
-                    : "border-transparent text-dim hover:border-line hover:text-text"
-                )}
-              >
-                <MessageSquare size={11} strokeWidth={2.25} />
-                <span className="font-mono text-[9.5px] tabular-nums leading-none">
-                  {feedback.byPath.size}
-                </span>
-              </button>
-            )}
-            <span className="font-mono text-[10px] text-muted-foreground">{files.length}</span>
-          </div>
-          <div className="flex flex-1 flex-col gap-px overflow-auto p-2">
-            {files.map((file) => (
-              <ReviewFileRow
-                key={file.path}
-                file={file}
-                active={file.path === activePath}
-                feedback={feedback.byPath.get(file.path) ?? 0}
-                onSelect={() => scrollToFile(file.path)}
-                onToggleViewed={(v) => onToggleViewed(file.path, v)}
+        {!controls.focused && (
+          <>
+            <div
+              data-testid="review-file-rail"
+              style={{ width: roomy ? fileList.width : sheetWidth }}
+              className={cn(
+                "flex max-w-full flex-col border-r border-hairline bg-panel",
+                roomy ? "flex-none" : "absolute inset-y-0 left-0 z-30 shadow-2xl",
+                !roomy && controls.sheet !== "files" && "hidden"
+              )}
+            >
+              <ReviewFileRail
+                files={files}
+                totalFiles={allFiles.length}
+                activePath={activePath}
+                feedback={feedback.byPath}
+                feedbackAny={feedback.any}
+                added={added}
+                removed={removed}
+                viewed={viewed}
+                controls={controls}
+                onSelectFile={scrollToFile}
+                onToggleViewed={onToggleViewed}
               />
-            ))}
-          </div>
-          <div className="flex h-11 flex-none items-center gap-1.5 border-t border-hairline px-[14px] font-mono text-[10.5px] text-dim">
-            <DiffStat added={added} removed={removed} className="text-[10.5px]" />
-            <div className="flex-1" />
-            <span>
-              {viewed} / {files.length} viewed
-            </span>
-          </div>
-        </div>
+            </div>
 
-        {roomy && (
-          <ResizeHandle
-            onResize={(dx) => fileList.adjust(dx, maxFileListWidth)}
-            aria-label="Resize file list"
-          />
+            {roomy && (
+              <ResizeHandle
+                onResize={(dx) => fileList.adjust(dx, maxFileListWidth)}
+                aria-label="Resize file list"
+              />
+            )}
+          </>
         )}
 
         {/* Diff center — one continuous scroll through every changed file. Each
             file gets a sticky header; scrolling tracks the current file in the
             list, and clicking a file jumps here. */}
         <div
+          data-testid="review-diff-center"
           ref={scrollRef}
           onScroll={handleScroll}
           className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor"
@@ -485,134 +479,71 @@ export function CodeReviewView({
           )}
 
           {files.length === 0 ? (
-            <div className="flex flex-1 items-center justify-center text-[13px] text-dim">
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center text-[13px] text-dim">
               {/* The filter hiding everything is a different state from an empty
                   diff, and says so — otherwise a filtered view reads as "your
                   changes vanished". */}
-              {feedbackOnly ? "No files with feedback." : "No changes to review."}
+              <span>{filtersActive ? "No files match these filters." : "No changes to review."}</span>
+              {filtersActive && (
+                <Button variant="secondary" size="sm" onClick={controls.clearFilters}>
+                  Clear filters
+                </Button>
+              )}
             </div>
           ) : (
             files.map((file) => (
               <div key={file.path} ref={setSectionRef(file.path)} className="flex flex-col">
-                <div className="sticky top-0 z-10 flex h-[42px] flex-none items-center gap-2.5 border-b border-hairline bg-panel px-4">
-                  <FileIcon path={file.path} size={13} />
-                  <span className="truncate font-mono text-[12.5px] text-text-bright">
-                    {file.path}
-                  </span>
-                  <DiffStat
-                    added={file.additions}
-                    removed={file.deletions}
-                    className="flex-none text-[10.5px]"
-                  />
-                  <div className="min-w-[8px] flex-1" />
-                  {onDeslopFile && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="gap-1.5"
-                      title="Deslop — hand this file to the agent for a DRY / cleanup pass"
-                      onClick={() => onDeslopFile(file.path)}
-                    >
-                      <Sparkles size={13} />
-                      Deslop
-                    </Button>
-                  )}
-                  {isLocal
-                    ? onRevertFile && (
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          className="gap-1.5"
-                          onClick={() => onRevertFile(file.path)}
-                        >
-                          <Undo2 size={13} />
-                          Revert file
-                        </Button>
-                      )
-                    : (
-                      <button
-                        type="button"
-                        onClick={() => onToggleViewed(file.path, !file.viewed)}
-                        className="flex items-center gap-1.5 text-[11.5px] text-text"
-                      >
-                        <span
-                          className={
-                            file.viewed
-                              ? "flex size-[15px] items-center justify-center rounded-[3px] border border-green/60 text-green"
-                              : "size-[15px] rounded-[3px] border border-line"
-                          }
-                        >
-                          {file.viewed && "✓"}
-                        </span>
-                        Viewed
-                      </button>
-                    )}
-                </div>
-                {/* This file's findings, worst-first, directly above its diff —
-                    each carrying its own line reference. */}
-                {(byFile.get(file.path)?.length ?? 0) > 0 && (
-                  <div className="flex flex-col gap-2 border-b border-hairline bg-panel/40 px-4 py-3">
-                    {byFile.get(file.path)!.map((finding) => (
-                      <ReviewFindingRow
-                        key={finding.id}
-                        finding={finding}
-                        sent={sentFindingIds?.has(finding.id) ?? false}
-                        canRoute={routeTargetSession !== null}
-                        review={activeReview}
-                        onSendToAgent={onSendFindingToAgent}
-                      />
-                    ))}
-                  </div>
-                )}
-                {/* Mounted only near the viewport. Every line of every file
-                    used to be live at once — half a million React fibers on a
-                    real branch — which is what made this pane cost gigabytes
-                    and made resizing it re-render the lot. The active file is
-                    pinned so a half-written inline comment survives scrolling. */}
-                <DeferredSection
+                <ReviewFileSection
+                  file={file}
+                  diff={diffByPath.get(file.path) ?? ""}
                   estimatedHeight={heightByPath.get(file.path) ?? 0}
-                  pinned={file.path === activePath}
-                >
-                  <ReviewDiff
-                    path={file.path}
-                    diff={diffByPath.get(file.path) ?? ""}
-                    scroll={false}
-                    connected={connected}
-                    routeTargetSession={routeTargetSession}
-                    onAddDraft={(d) =>
-                      onAddDraft({
-                        path: d.path,
-                        line: d.startLine,
-                        endLine: d.endLine > d.startLine ? d.endLine : null,
-                        body: d.body,
-                        routeToAgent: d.routeToAgent
-                      })
-                    }
-                    onRevert={isLocal ? onRevertLines : undefined}
-                  />
-                </DeferredSection>
+                  active={file.path === activePath}
+                  connected={connected}
+                  routeTargetSession={routeTargetSession}
+                  local={isLocal}
+                  compactActions={compactActions}
+                  collapseViewed={controls.collapseViewed}
+                  findings={byFile.get(file.path) ?? []}
+                  review={activeReview}
+                  sentFindingIds={sentFindingIds}
+                  onAddDraft={onAddDraft}
+                  onToggleViewed={onToggleViewed}
+                  onRevertLines={onRevertLines}
+                  onRevertFile={onRevertFile}
+                  onDeslopFile={onDeslopFile}
+                  onSendFindingToAgent={onSendFindingToAgent}
+                />
               </div>
             ))
           )}
         </div>
 
-        {/* Review tray (resizable) — drag left edge; moving right shrinks it. */}
-        {roomy && (
-          <ResizeHandle
-            onResize={(dx) => tray.adjust(-dx, maxTrayWidth)}
-            aria-label="Resize review panel"
-          />
+        {!controls.focused && (
+          <>
+            {/* Review tray (resizable) — drag left edge; moving right shrinks it. */}
+            {roomy && (
+              <ResizeHandle
+                onResize={(dx) => tray.adjust(-dx, maxTrayWidth)}
+                aria-label="Resize review panel"
+              />
+            )}
+            <div
+              data-testid="review-tray"
+              style={{ width: roomy ? tray.width : sheetWidth }}
+              className={cn(
+                "flex max-w-full border-l border-hairline",
+                roomy ? "flex-none" : "absolute inset-y-0 right-0 z-30 shadow-2xl",
+                !roomy && controls.sheet !== "tray" && "hidden"
+              )}
+            >
+              <ReviewTray
+                drafts={drafts}
+                onRemoveDraft={onRemoveDraft}
+                onFinishReview={onFinishReview}
+              />
+            </div>
+          </>
         )}
-        <div
-          style={{ width: roomy ? tray.width : 300 }}
-          className={cn(
-            "flex border-l border-hairline",
-            roomy ? "flex-none" : "absolute inset-y-0 right-0 z-30 shadow-2xl",
-            !roomy && sheet !== "tray" && "hidden"
-          )}
-        >
-          <ReviewTray drafts={drafts} onRemoveDraft={onRemoveDraft} onFinishReview={onFinishReview} />
-        </div>
       </div>
     </div>
   )

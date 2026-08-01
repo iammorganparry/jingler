@@ -1,22 +1,22 @@
-import { FileCode2, FileJson, FileText, FileType } from "lucide-react"
+import { getIcon } from "material-file-icons"
 import { cn } from "../lib/cn.js"
 
-/** Extension → icon + One Dark accent colour, so file references read at a glance. */
-const ICONS: Record<string, { Icon: typeof FileCode2; color: string }> = {
-  ts: { Icon: FileType, color: "text-cyan" },
-  tsx: { Icon: FileType, color: "text-cyan" },
-  js: { Icon: FileCode2, color: "text-yellow" },
-  jsx: { Icon: FileCode2, color: "text-yellow" },
-  mjs: { Icon: FileCode2, color: "text-yellow" },
-  json: { Icon: FileJson, color: "text-yellow" },
-  md: { Icon: FileText, color: "text-blue" },
-  css: { Icon: FileCode2, color: "text-purple" },
-  html: { Icon: FileCode2, color: "text-orange" }
+const iconUrls = new Map<string, string>()
+
+const materialIconUrl = (path: string): { name: string; url: string } => {
+  const filename = path.split("/").pop() ?? path
+  const icon = getIcon(filename)
+  const cached = iconUrls.get(icon.name)
+  if (cached !== undefined) return { name: icon.name, url: cached }
+  // Render the package's static SVG as a passive image resource. This keeps the
+  // Material Icon Theme artwork intact without inserting third-party markup into
+  // the document with `dangerouslySetInnerHTML`.
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(icon.svg)}`
+  iconUrls.set(icon.name, url)
+  return { name: icon.name, url }
 }
 
-const DEFAULT = { Icon: FileText, color: "text-dim" } as const
-
-/** A small file-type glyph derived from a path's extension. */
+/** A Material Icon Theme glyph selected from the file's full name and extension. */
 export function FileIcon({
   path,
   size = 13,
@@ -26,7 +26,17 @@ export function FileIcon({
   size?: number
   className?: string
 }) {
-  const ext = path?.split(".").pop()?.toLowerCase() ?? ""
-  const { Icon, color } = ICONS[ext] ?? DEFAULT
-  return <Icon size={size} className={cn("shrink-0", color, className)} aria-hidden />
+  const icon = materialIconUrl(path ?? "")
+  return (
+    <img
+      src={icon.url}
+      alt=""
+      aria-hidden
+      data-material-file-icon={icon.name}
+      width={size}
+      height={size}
+      draggable={false}
+      className={cn("shrink-0 select-none", className)}
+    />
+  )
 }

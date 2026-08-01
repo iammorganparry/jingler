@@ -416,6 +416,9 @@ const browserMcpTarget = (input) => {
 }
 const browserMcpRequest = async (id, method, params, protocolVersion) => {
   const url = configOverride("mcp_servers.jingler-browser.url")
+  const duplicateToolApproval = configOverride(
+    "features.tool_call_mcp_elicitation"
+  )
   const authorizationEnvironment = configOverride(
     "mcp_servers.jingler-browser.env_http_headers.Authorization"
   )
@@ -425,6 +428,9 @@ const browserMcpRequest = async (id, method, params, protocolVersion) => {
       : undefined
   if (typeof url !== "string" || url.length === 0) {
     throw new Error("Codex launch is missing the jingler-browser URL override")
+  }
+  if (duplicateToolApproval !== false) {
+    throw new Error("Codex launch still enables duplicate MCP tool approvals")
   }
   if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
     throw new Error("Codex launch is missing the jingler-browser Authorization environment")
@@ -484,8 +490,18 @@ const navigateBrowserMcp = async (targetUrl) => {
   }
   record("browser-mcp:tools/call:navigate")
 }
-const completeBrowserMcpTurn = async (targetUrl) => {
+const assertAutoTurnPolicy = (params) => {
+  if (params?.approvalPolicy !== "never") {
+    throw new Error("Codex Auto turn is missing approvalPolicy=never")
+  }
+  if (params?.sandboxPolicy?.type !== "dangerFullAccess") {
+    throw new Error("Codex Auto turn is missing dangerFullAccess")
+  }
+  record("permissions:auto")
+}
+const completeBrowserMcpTurn = async (targetUrl, params) => {
   try {
+    assertAutoTurnPolicy(params)
     await navigateBrowserMcp(targetUrl)
     send({
       method: "item/completed",
@@ -576,7 +592,7 @@ process.stdin.on("data", (chunk) => {
         )
         const browserTarget = browserMcpTarget(input)
         if (browserTarget !== null) {
-          void completeBrowserMcpTurn(browserTarget)
+          void completeBrowserMcpTurn(browserTarget, msg.params)
           index = buffer.indexOf("\\n")
           continue
         }

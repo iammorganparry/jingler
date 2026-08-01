@@ -33,7 +33,9 @@ import {
   AssetUnsupported,
   AssetView,
   BROWSER_TAB_ID,
+  DiffView,
   PreviewDock,
+  parseUnifiedDiffForPath,
   type PreviewTab
 } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
@@ -233,10 +235,32 @@ function AssetTab({
     refetchOnWindowFocus: true,
     retry: false
   })
+  const diffQuery = useQuery({
+    queryKey: ["asset-diff", asset?.sessionId],
+    queryFn: () => rpc.sessionsDiff(asset?.sessionId ?? ""),
+    enabled: active && dockVisible && asset !== undefined,
+    refetchOnWindowFocus: true,
+    retry: false
+  })
+  const diffRows = useMemo(
+    () =>
+      asset !== undefined && diffQuery.data
+        ? parseUnifiedDiffForPath(diffQuery.data, asset.path)
+        : [],
+    [asset, diffQuery.data]
+  )
+  const hasTextDiff = diffRows.some((row) => row.kind === "line")
 
   if (!asset) return <AssetError message="This tab's file is no longer open." />
-  if (query.isPending) return <AssetLoading />
+  if (query.isPending || diffQuery.isPending) return <AssetLoading />
   if (query.isError) return <AssetFailure error={query.error} asset={asset} />
+
+  // Changed text files open on their worktree patch. This is the same virtualized,
+  // syntax-highlighted engine as the Changes rail, filtered to the linked file.
+  // Binary or clean assets retain their native file preview below.
+  if (hasTextDiff) {
+    return <DiffView rows={diffRows} className="h-full" />
+  }
 
   const body = <AssetView payload={query.data} onReveal={() => void reveal(asset)} />
   // A PDF is not rendered by React at all — `AssetView` draws a hole and

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { ALT_CLAUDE_MODEL, appShell, DEFAULT_CLAUDE_MODEL, expect, sessionRow, showSessions, test } from "./fixtures.js"
@@ -362,6 +363,15 @@ test("a worktree session without a PR shows a Changes tab with the Code Review v
     sessions: seededSessions,
     seed: ({ repoPath }) => {
       writeFileSync(join(repoPath, "README.md"), "# e2e repo\nan uncommitted edit\n")
+      mkdirSync(join(repoPath, "src"), { recursive: true })
+      writeFileSync(
+        join(repoPath, "src", "auth.test.ts"),
+        "export const authReviewTest = true\n"
+      )
+      writeFileSync(join(repoPath, "config.json"), '{"review": true}\n')
+      execFileSync("git", ["add", "-N", "src/auth.test.ts", "config.json"], {
+        cwd: repoPath
+      })
     }
   })
   await expect(appShell(window)).toBeVisible()
@@ -377,6 +387,36 @@ test("a worktree session without a PR shows a Changes tab with the Code Review v
   await changesTab.click()
   await expectFileRail(window)
   await expect(window.getByText("an uncommitted edit")).toBeVisible({ timeout: 20_000 })
+
+  const rail = window.getByTestId("review-file-rail")
+  const search = rail.getByRole("searchbox", { name: "Search changed files" })
+  await search.fill("auth")
+  await expect(rail.getByTitle("src/auth.test.ts")).toBeVisible()
+  await expect(rail.getByTitle("README.md")).toHaveCount(0)
+
+  await search.clear()
+  await rail.getByRole("combobox", { name: "Filter changed files by type" }).click()
+  await window.getByRole("option", { name: "JSON" }).click()
+  await expect(rail.getByTitle("config.json")).toBeVisible()
+  await expect(rail.getByTitle("src/auth.test.ts")).toHaveCount(0)
+
+  await rail.getByRole("button", { name: "Mark viewed" }).click()
+  await expect(window.getByRole("button", { name: "Viewed · code collapsed" })).toBeVisible()
+
+  await window.getByRole("button", { name: "Focus diff" }).click()
+  await expect(window.getByTestId("review-file-rail")).toHaveCount(0)
+  await expect(window.getByTestId("review-tray")).toHaveCount(0)
+  await expect(window.getByTestId("review-diff-center")).toBeVisible()
+  await window.getByRole("button", { name: "Exit review focus" }).click()
+
+  await window.setViewportSize({ width: 520, height: 720 })
+  const filesButton = window.getByRole("button", { name: "Changed files" })
+  await expect(filesButton).toBeVisible()
+  await filesButton.click()
+  const railBox = await window.getByTestId("review-file-rail").boundingBox()
+  expect(railBox).not.toBeNull()
+  expect(railBox!.x).toBeGreaterThanOrEqual(0)
+  expect(railBox!.width).toBeLessThanOrEqual(520)
 })
 
 test("the session title renames without navigating and the active chat replaces the Conversation tab", async ({

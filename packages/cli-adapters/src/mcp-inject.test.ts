@@ -31,6 +31,7 @@ const PREVIEW_BROWSER: RemoteMcpServer = {
 describe("codexMcpOverrides", () => {
   it("renders independent URL and HTTP-header overrides for every server in order", () => {
     expect(codexMcpOverrides([OPEN_CONNECTOR, PREVIEW_BROWSER])).toEqual([
+      "features.tool_call_mcp_elicitation=false",
       'mcp_servers.open-connector.url="https://connector.example/mcp"',
       'mcp_servers.open-connector.http_headers.Authorization="Bearer connector-token"',
       'mcp_servers.open-connector.http_headers.X-Connector-Scope="workspace"',
@@ -40,19 +41,21 @@ describe("codexMcpOverrides", () => {
     ])
   })
 
-  it("is empty for an absent or empty collection", () => {
-    expect(codexMcpOverrides(null)).toEqual([])
-    expect(codexMcpOverrides(undefined)).toEqual([])
-    expect(codexMcpOverrides([])).toEqual([])
+  it("disables duplicate tool approvals even when connectors come from Codex config", () => {
+    expect(codexMcpOverrides(null)).toEqual(["features.tool_call_mcp_elicitation=false"])
+    expect(codexMcpOverrides(undefined)).toEqual(["features.tool_call_mcp_elicitation=false"])
+    expect(codexMcpOverrides([])).toEqual(["features.tool_call_mcp_elicitation=false"])
   })
 
   it("keeps either available server independently", () => {
     expect(codexMcpOverrides([PREVIEW_BROWSER])).toEqual([
+      "features.tool_call_mcp_elicitation=false",
       'mcp_servers.jingler-browser.url="http://127.0.0.1:32123/mcp"',
       'mcp_servers.jingler-browser.env_http_headers.Authorization="JINGLER_BROWSER_MCP_AUTHORIZATION"',
       'shell_environment_policy.filters.JINGLER_BROWSER_MCP_AUTHORIZATION="exclude"'
     ])
     expect(codexMcpOverrides([OPEN_CONNECTOR])).toEqual([
+      "features.tool_call_mcp_elicitation=false",
       'mcp_servers.open-connector.url="https://connector.example/mcp"',
       'mcp_servers.open-connector.http_headers.Authorization="Bearer connector-token"',
       'mcp_servers.open-connector.http_headers.X-Connector-Scope="workspace"'
@@ -70,6 +73,7 @@ describe("codexMcpOverrides", () => {
         }
       ])
     ).toEqual([
+      "features.tool_call_mcp_elicitation=false",
       'mcp_servers.open-connector.url="https://connector.example/mcp"',
       'mcp_servers.open-connector.http_headers.Authorization="Bearer connector-token"',
       'mcp_servers.open-connector.http_headers.X-Connector-Scope="workspace"'

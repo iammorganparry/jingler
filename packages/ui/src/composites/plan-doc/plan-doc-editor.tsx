@@ -113,7 +113,7 @@ export function PlanDocEditor({
             <EditorContent
               editor={controller.editor}
               className={cn(
-                "min-h-0 flex-1 overflow-y-auto text-[13px] leading-[1.65] text-text-body [&_.ProseMirror]:outline-none [&_[data-files]]:my-2.5 [&_[data-files]]:pl-0 [&_[data-files]>li]:list-none",
+                "min-h-0 flex-1 overflow-y-auto text-[13px] leading-[1.65] text-text-body [&_.ProseMirror]:outline-none [&_[data-files]]:my-2.5 [&_[data-files]]:flex [&_[data-files]]:flex-wrap [&_[data-files]]:items-center [&_[data-files]]:gap-1.5 [&_[data-files]]:pl-0 [&_[data-files]>li]:list-none",
                 !editable && "opacity-95"
               )}
             />

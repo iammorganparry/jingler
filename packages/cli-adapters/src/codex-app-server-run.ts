@@ -88,7 +88,10 @@ const policy = (
   mode: PermissionMode,
   readOnly: boolean,
   unattended: boolean
-): { readonly sandbox: string; readonly approvalPolicy: string } =>
+): {
+  readonly sandbox: "read-only" | "workspace-write" | "danger-full-access"
+  readonly approvalPolicy: "never"
+} =>
   readOnly || mode === "plan"
     ? { sandbox: "read-only", approvalPolicy: "never" }
     : mode === "auto" && !unattended
@@ -96,6 +99,37 @@ const policy = (
       : mode === "ask"
         ? { sandbox: "read-only", approvalPolicy: "never" }
         : { sandbox: "workspace-write", approvalPolicy: "never" }
+
+const turnPolicy = (
+  active: ReturnType<typeof policy>,
+  cwd: string
+): {
+  readonly approvalPolicy: "never"
+  readonly sandboxPolicy:
+    | { readonly type: "dangerFullAccess" }
+    | { readonly type: "readOnly"; readonly networkAccess: false }
+    | {
+        readonly type: "workspaceWrite"
+        readonly writableRoots: readonly [string]
+        readonly networkAccess: false
+        readonly excludeTmpdirEnvVar: false
+        readonly excludeSlashTmp: false
+      }
+} => ({
+  approvalPolicy: active.approvalPolicy,
+  sandboxPolicy:
+    active.sandbox === "danger-full-access"
+      ? { type: "dangerFullAccess" }
+      : active.sandbox === "read-only"
+        ? { type: "readOnly", networkAccess: false }
+        : {
+            type: "workspaceWrite",
+            writableRoots: [cwd],
+            networkAccess: false,
+            excludeTmpdirEnvVar: false,
+            excludeSlashTmp: false
+          }
+})
 
 const threadIdFromResponse = (response: unknown): string | null => {
   if (!isRecord(response)) return null
@@ -567,6 +601,12 @@ export const runCodexAppServer = (
               threadId: activeThreadId,
               input: turnInput,
               cwd,
+              // Thread resume can rejoin an already-running Codex thread whose
+              // sticky settings predate the current Jingler mode. Pin the
+              // effective policy on every turn so Auto always restores host Git
+              // metadata and network access, including the first execution turn
+              // immediately after plan approval.
+              ...turnPolicy(activePolicy, cwd),
               ...(spec.model ? { model: spec.model } : {}),
               ...(mapCodexAppServerReasoning(spec.reasoningEffort, spec.thinkingEnabled)
                 ? {

@@ -181,14 +181,16 @@ test("opens worktree assets from the transcript in the Preview dock", async ({ l
   await window.getByTitle("docs/spec.md", { exact: true }).click()
   await expect(window.getByRole("heading", { name: "The Spec" })).toBeVisible()
 
-  // ── An UNCOMMITTED file is still openable ───────────────────────────────
+  // ── An UNCOMMITTED file opens as a file-scoped diff ─────────────────────
   // The headline case: a file the agent wrote this turn is untracked, so a
   // tracked-only file list would leave it inert — exactly the file the operator
-  // came to read.
+  // came to read. Because it changed, the asset viewer uses the shared diff
+  // engine instead of presenting the working copy as if it were committed.
   await window.getByTitle("Open notes.md").click()
-  await expect(window.getByRole("heading", { name: "Fresh Notes" })).toBeVisible({
+  await expect(window.getByText("# Fresh Notes", { exact: true })).toBeVisible({
     timeout: 15_000
   })
+  await expect(window.getByText("+3", { exact: true })).toBeVisible()
 
   // …but .gitignore is still honoured, so build spew never becomes a link.
   await expect(window.getByTitle("Open ignored.md")).toHaveCount(0)
