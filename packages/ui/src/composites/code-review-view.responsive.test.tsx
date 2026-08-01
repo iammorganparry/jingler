@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
 import { CodeReviewView } from "./code-review-view.js"
 
@@ -11,7 +11,10 @@ const file = {
   viewed: false
 }
 
-const reviewAt = (width: number) => (
+const reviewAt = (
+  width: number,
+  props: Partial<React.ComponentProps<typeof CodeReviewView>> = {}
+) => (
   <WidthTierValue width={width}>
     <CodeReviewView
       files={[file]}
@@ -29,11 +32,15 @@ const reviewAt = (width: number) => (
       onAddDraft={() => {}}
       onRemoveDraft={() => {}}
       onFinishReview={() => {}}
+      {...props}
     />
   </WidthTierValue>
 )
 
-const renderAt = (width: number) => render(reviewAt(width))
+const renderAt = (
+  width: number,
+  props: Partial<React.ComponentProps<typeof CodeReviewView>> = {}
+) => render(reviewAt(width, props))
 
 beforeEach(() => localStorage.clear())
 afterEach(cleanup)
@@ -82,5 +89,44 @@ describe("CodeReviewView responsive rails", () => {
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "Changed files" })).toBeNull()
     )
+  })
+
+  it("searches the rail and the continuous diff together", () => {
+    const config = { ...file, path: "config.json" }
+    renderAt(1_240, {
+      files: [file, config],
+      fileDiffs: [
+        { path: file.path, diff: "" },
+        { path: config.path, diff: "" }
+      ]
+    })
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search changed files" }), {
+      target: { value: "config" }
+    })
+
+    expect(screen.queryByText("session.ts")).toBeNull()
+    expect(screen.getAllByText("config.json").length).toBeGreaterThan(0)
+  })
+
+  it("collapses viewed code and restores it from the collapsed row", () => {
+    const onToggleViewed = vi.fn()
+    renderAt(1_240, {
+      files: [{ ...file, viewed: true }],
+      onToggleViewed
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Viewed · code collapsed" }))
+    expect(onToggleViewed).toHaveBeenCalledWith(file.path, false)
+  })
+
+  it("focus mode leaves only the middle diff pane", () => {
+    renderAt(1_240)
+
+    fireEvent.click(screen.getByRole("button", { name: "Focus diff" }))
+    expect(screen.queryByTestId("review-file-rail")).toBeNull()
+    expect(screen.queryByTestId("review-tray")).toBeNull()
+    expect(screen.getByTestId("review-diff-center")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Exit review focus" })).toBeTruthy()
   })
 })
