@@ -110,14 +110,26 @@ Jingler hands approved stages to provider-neutral worker agents.
 `}
 Return one four-backtick fenced HTML block containing the COMPLETE PRD as HTML.
 ${PLAN_HTML_FENCE_RULE}
+Treat the plan as an operational visual aid, not an essay:
+- Keep prose terse: one sentence of context, short labels, and compact bullets. Prefer a
+  small Mermaid flow only when it clarifies dependencies or branching better than text.
+- Every stage is one self-contained, independently reviewable deliverable. It must be
+  deterministic from the repository state left by its declared dependencies and safe to
+  repeat. Never create vague discovery, coordination, or "continue implementation" stages.
+- Name the concrete output, exact repository-relative files, bounded implementation actions,
+  and observable verification. A stage is complete only when its deliverable and tests can be
+  reviewed together; acceptance criteria are assertions, not aspirations.
+- When the operator changes scope, revise this canonical HTML with stable ids instead of
+  restating the plan in chat. Keep chat for a required decision, a blocker, or the final result.
+
 Use ordinary HTML for prose (h1 title, h2 sections, p, ul/ol/li, strong/em, code, pre,
 blockquote, table). Carry structure on data-attributes — never <script>, <style>, event
 handlers, inline styles, or JavaScript:
 
 - Title: <h1>PRD: ...</h1>
 - Section: <h2>Context</h2> then prose.
-- Stage: <section data-stage="01" data-title="..."> with an <h3>Intent</h3>, an
-  <h3>Approach</h3>, and at least one acceptance criterion inside it.
+- Stage: <section data-stage="01" data-title="..."> with a one-sentence <h3>Intent</h3>,
+  a bounded <h3>Approach</h3>, exact <ul data-files>, and acceptance criteria inside it.
 - Acceptance: <div data-acceptance="01.1" data-status="pending">observable assertion</div>
   (status is one of pending | passed | failed | waived).
 - Flow diagram: <div data-diagram="mermaid"><pre>graph TD; A--&gt;B</pre></div>
