@@ -1,9 +1,11 @@
 /**
  * Renderer hook backing the Pull Request tab. react-query owns the PR read
  * (`useQuery`) and the GitHub writes (`useMutation`, invalidating the read).
- * Anything handed to the agent — "Create pull request", routed review feedback —
- * goes through the session's persistent conversation actor (a normal turn), so
- * the work + any approval gates/questions surface in the Conversation tab.
+ * "Create pull request" and every other `gh` write go through the MAIN-process
+ * `GhService` (`rpc.github*`), where the binary can reach the macOS keychain —
+ * NOT a sandboxed agent turn, which can't read `~/.config/gh` and 401s.
+ * Routed review feedback still goes to the agent (a normal conversation turn),
+ * so its work + any approval gates/questions surface in the Conversation tab.
  * Keeps `@jingler/ui`'s `PullRequestView` presentational.
  */
 import { useCallback, useState } from "react"
@@ -19,16 +21,6 @@ const reviewPrompt = (kind: ReviewSubmitKind, body: string): string => {
     kind === "request-changes" ? "requested changes" : kind === "approve" ? "approved" : "commented"
   return `A reviewer ${verb} on this pull request:\n\n${body}\n\nPlease address this feedback.`
 }
-
-/**
- * Instruction handed to the session's agent when the user clicks "Create pull
- * request" — the agent (which owns the worktree) commits, pushes, then opens
- * the PR, rather than the app shelling out to `gh` directly.
- */
-const createPrPrompt = (base: string): string =>
-  `Commit any outstanding changes in this worktree with a clear message, push the branch, ` +
-  `then open a pull request against \`${base}\` using \`gh pr create\` (fill in a concise ` +
-  `title and description summarising the changes).`
 
 export const prKey = (sessionId: string, prNumber: number | null) =>
   ["github", "pr", sessionId, prNumber] as const
@@ -100,14 +92,26 @@ export function usePullRequest(
     [session]
   )
 
-  // "Create pull request" hands the agent an instruction to commit outstanding
-  // work and open the PR. It dispatches the turn and resolves right away — the
-  // agent then works in the Conversation tab, and the PR read auto-detects +
-  // links the PR once it's opened.
+  // "Create pull request" opens the PR through the MAIN-process `GhService`
+  // (`gh pr create --fill`, run with keychain access), NOT a sandboxed agent
+  // turn. gh pushes the branch and fills the title/body from its commits; we
+  // link the returned number and re-read so the tab flips to the live PR.
   const createPr = useCallback(async () => {
     setCreateError(null)
-    routeToAgent(createPrPrompt(session.baseBranch ?? "main"))
-  }, [routeToAgent, session.baseBranch])
+    try {
+      const n = await rpc.githubCreatePr({
+        sessionId: session.id,
+        title: "",
+        body: "",
+        base: session.baseBranch ?? "main",
+        draft: false
+      })
+      onPrLinked?.(session.id, n)
+      await qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+    } catch (e) {
+      setCreateError((e as { message?: string }).message ?? "Failed to create pull request")
+    }
+  }, [session.id, session.baseBranch, session.prNumber, onPrLinked, qc])
 
   const reviewMutation = useMutation({
     mutationFn: (input: { body: string; kind: ReviewSubmitKind }) =>

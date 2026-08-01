@@ -977,13 +977,17 @@ export class GhService extends Effect.Service<GhService>()(
         input: { title: string; body: string; base: string; draft: boolean }
       ): Effect.Effect<number, GhError, CommandExecutor.CommandExecutor> =>
         Effect.gen(function* () {
+          // Empty title AND body means "let gh fill both from the branch's
+          // commits" (`--fill`) — the caller is the one-click "Create pull
+          // request" button, which has no title/body form. `gh pr create` also
+          // pushes the branch itself, so auth, push and PR text all stay inside
+          // the binary. Run here in the MAIN process it can reach the macOS
+          // keychain; a sandboxed agent turn shelling out to `gh` cannot.
+          const autofill = input.title.trim() === "" && input.body.trim() === ""
           const args = [
             "pr",
             "create",
-            "--title",
-            input.title,
-            "--body",
-            input.body,
+            ...(autofill ? ["--fill"] : ["--title", input.title, "--body", input.body]),
             "--base",
             input.base,
             ...(input.draft ? ["--draft"] : [])
