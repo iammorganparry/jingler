@@ -26,6 +26,7 @@ import {
   buildPlanExecutionGraph,
   CliExecError,
   compileOrchestrationPlanHtml,
+  defaultModeFor,
   defaultModel,
   findApprovedPlan,
   isBackgroundTaskEvent,
@@ -1138,7 +1139,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           yield* TranscriptStore.adoptLegacy(sessionId, chatId)
 
           const sessionMode =
-            (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? "accept-edits"
+            (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? defaultModeFor(session.cli)
           const allow = new Set<string>([
             ...(yield* approvals.allowlistFor(chatId)),
             ...(chat.allowlist ?? [])

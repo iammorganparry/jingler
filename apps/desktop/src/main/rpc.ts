@@ -62,6 +62,7 @@ import {
   ConfigError,
   ConnectorError,
   activePlanParticipants,
+  defaultModeFor,
   GhError,
   GitError,
   parsePlanThreadReply,
@@ -317,7 +318,7 @@ export const sessionCreationDefaults = (
       // delegated behind the plan gate. Persisting the chat itself in read-only
       // plan mode made the direct branch pause on its first edit, so fresh
       // orchestrators start with their full tool authority.
-      defaultMode: orchestrator ? "auto" as const : provider?.defaultMode,
+      defaultMode: orchestrator ? "auto" as const : defaultModeFor(cli, provider?.defaultMode),
       defaultModel: orchestrator?.preference.model ?? provider?.defaultModel,
       defaultReasoning: providerReasoning(provider)
     }
