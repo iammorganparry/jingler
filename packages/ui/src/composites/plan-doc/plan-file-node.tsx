@@ -5,8 +5,7 @@ import {
   NodeViewWrapper,
   ReactNodeViewRenderer
 } from "@tiptap/react"
-import { FileCode2 } from "lucide-react"
-import { DiffStat } from "../../components/diff-stat.js"
+import { FileChip } from "../../components/file-chip.js"
 import { usePlanFileControls } from "./plan-file-controls.js"
 
 const numericAttribute = (value: unknown): number =>
@@ -41,35 +40,20 @@ function PlanListItemView({ node, editor, getPos }: NodeViewProps) {
       controls.knownFiles.has(path) ||
       live !== undefined ||
       diff)
-  const label = `Open ${path}${diff ? ` (+${added} −${removed})` : ""}`
-
   return (
     <NodeViewWrapper
       as="li"
-      className="my-1 flex min-w-0 items-center gap-1.5 rounded-md border border-line bg-surface px-2 py-1 font-mono text-[10.5px]"
+      className="my-1 min-w-0 list-none"
       data-plan-file-path={path}
     >
-      <NodeViewContent className="min-w-0 flex-1 [&>p]:m-0" />
-      {openable ? (
-        <button
-          type="button"
-          contentEditable={false}
-          aria-label={label}
-          title={`${label} in asset viewer`}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => controls.open?.(path)}
-          className="flex shrink-0 items-center gap-1 rounded-sm px-1 text-muted outline-none transition-colors hover:bg-line/30 hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <FileCode2 className="size-3" />
-          {diff && <DiffStat added={added} removed={removed} />}
-        </button>
-      ) : (
-        diff && (
-          <span contentEditable={false} className="shrink-0 text-muted">
-            <DiffStat added={added} removed={removed} />
-          </span>
-        )
-      )}
+      <FileChip
+        path={path}
+        added={added}
+        removed={removed}
+        onOpen={openable ? controls.open : undefined}
+      >
+        <NodeViewContent className="min-w-0 flex-1 [&>p]:m-0" />
+      </FileChip>
     </NodeViewWrapper>
   )
 }

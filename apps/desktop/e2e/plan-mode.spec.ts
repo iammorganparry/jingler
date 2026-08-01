@@ -50,6 +50,10 @@ const seedPlanAsset = ({ repoPath }: { repoPath: string }): void => {
     ["commit", "-m", "seed plan asset", "--no-gpg-sign"],
     { cwd: repoPath }
   )
+  writeFileSync(
+    join(repoPath, "src", "auth", "token-store.ts"),
+    "export const tokenStoreSeed = true\nexport const tokenStoreChanged = true\n"
+  )
 }
 
 const revisionOf = (file: string): number =>
@@ -504,7 +508,7 @@ test("autosave echoes preserve the live caret and highlighted plan text", async 
   ).toBeVisible()
 })
 
-test("plan file evidence opens the changed asset", async ({ launchApp }) => {
+test("plan file chip opens the changed asset in the diff engine", async ({ launchApp }) => {
   const launched = await launchApp({
     configured: true,
     withRepo: true,
@@ -515,7 +519,7 @@ test("plan file evidence opens the changed asset", async ({ launchApp }) => {
   await proposePlan(launched)
 
   const file = launched.window.getByRole("button", {
-    name: "Open src/auth/token-store.ts (+40 −0)"
+    name: "Open src/auth/token-store.ts (+1 −0)"
   })
   await expect(file).toBeVisible()
   await file.click()
@@ -524,9 +528,12 @@ test("plan file evidence opens the changed asset", async ({ launchApp }) => {
   await expect(
     launched.window.getByRole("button", { name: "token-store.ts", exact: true })
   ).toBeVisible()
-  await expect(launched.window.getByText("tokenStoreSeed")).toBeVisible({
+  await expect(launched.window.getByText("tokenStoreChanged = true")).toBeVisible({
     timeout: 15_000
   })
+  await expect(
+    launched.window.getByText("+1", { exact: true }).last()
+  ).toBeVisible()
 })
 
 test("view switches and app close flush edits inside the debounce window", async ({
