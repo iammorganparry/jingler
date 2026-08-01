@@ -43,7 +43,7 @@ function PlanListItemView({ node, editor, getPos }: NodeViewProps) {
   return (
     <NodeViewWrapper
       as="li"
-      className="my-1 min-w-0 list-none"
+      className="min-w-0 max-w-full list-none"
       data-plan-file-path={path}
     >
       <FileChip
@@ -52,7 +52,7 @@ function PlanListItemView({ node, editor, getPos }: NodeViewProps) {
         removed={removed}
         onOpen={openable ? controls.open : undefined}
       >
-        <NodeViewContent className="min-w-0 flex-1 [&>p]:m-0" />
+        <NodeViewContent className="min-w-0 text-center [&>p]:m-0" />
       </FileChip>
     </NodeViewWrapper>
   )

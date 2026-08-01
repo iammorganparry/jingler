@@ -18,6 +18,8 @@ describe("FileChip", () => {
     expect(chip).toHaveTextContent("src/auth/token-store.ts")
     expect(chip).toHaveTextContent("+8")
     expect(chip).toHaveTextContent("−3")
+    expect(chip).toHaveClass("inline-flex", "min-h-8", "max-w-full")
+    expect(screen.getByText("src/auth/token-store.ts")).toHaveClass("text-center")
     expect(chip.querySelector("[data-material-file-icon='typescript']")).not.toBeNull()
 
     fireEvent.click(chip)

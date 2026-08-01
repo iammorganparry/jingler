@@ -30,7 +30,7 @@ export function FileChip({
   const content = (
     <>
       <FileIcon path={path} size={16} />
-      <span className="min-w-0 flex-1 truncate text-left">
+      <span className="min-w-0 truncate text-center">
         {children ?? path}
       </span>
       {changed && (
@@ -43,7 +43,7 @@ export function FileChip({
     </>
   )
   const classes = cn(
-    "flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg bg-surface px-3 font-mono text-[11px] text-text-bright shadow-[inset_0_0_0_1px_var(--sb-line)]",
+    "inline-flex min-h-8 max-w-full min-w-0 items-center justify-center gap-1.5 rounded-md bg-surface px-2.5 font-mono text-[10.5px] text-text-bright shadow-[inset_0_0_0_1px_var(--sb-line)]",
     className
   )
 

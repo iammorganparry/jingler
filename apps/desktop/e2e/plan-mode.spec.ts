@@ -518,6 +518,19 @@ test("plan file chip opens the changed asset in the diff engine", async ({ launc
   await expect(appShell(launched.window)).toBeVisible()
   await proposePlan(launched)
 
+  const refreshFile = launched.window.getByRole("button", {
+    name: "Open src/auth/refresh.ts (+18 −0)"
+  })
+  const retryFile = launched.window.getByRole("button", {
+    name: "Open src/auth/retry.ts (+15 −0)"
+  })
+  const [refreshBox, retryBox] = await Promise.all([
+    refreshFile.boundingBox(),
+    retryFile.boundingBox()
+  ])
+  expect(refreshBox?.height).toBeLessThanOrEqual(32)
+  expect(Math.abs((refreshBox?.y ?? 0) - (retryBox?.y ?? 0))).toBeLessThan(2)
+
   const file = launched.window.getByRole("button", {
     name: "Open src/auth/token-store.ts (+1 −0)"
   })
