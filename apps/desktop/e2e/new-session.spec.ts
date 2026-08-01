@@ -188,6 +188,7 @@ test("a new session inherits the preferred orchestrator harness, model, and chat
     chats: [
       {
         role: "orchestrator",
+        mode: "auto",
         model: "gpt-5.6-sol"
       }
     ]

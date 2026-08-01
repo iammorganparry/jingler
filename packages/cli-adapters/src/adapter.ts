@@ -801,7 +801,10 @@ export const scriptedRun =
 
       // A `[[plan]]` marker drives plan mode: propose a plan, then execute on
       // approval or re-propose a revised one on revise (one cycle max, for tests).
-      if (spec.prompt.includes("[[plan]]") || spec.mode === "plan") {
+      if (
+        spec.prompt.includes("[[plan]]") ||
+        (spec.mode === "plan" && spec.orchestrationRoutes === undefined)
+      ) {
         yield* emit({ _tag: "Thinking", text: "Mapping out the work before touching anything.", seconds: 3, done: true })
         yield* pause
         const exposesPlanAgent = spec.prompt.includes("[[active-plan-agent]]")

@@ -225,7 +225,10 @@ test("an orchestrator completes bounded work directly with its auto tools", asyn
 
   await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })
   await expect(window.getByText("Approval needed · run a command")).toHaveCount(0)
-  await expect(window.getByRole("button", { name: "Plan Review" })).toHaveCount(0)
+  // Plan Review is a persistent workspace tab now; direct work must not create
+  // a plan card or approval gate inside the conversation.
+  await expect(window.getByRole("button", { name: "Open Plan Review" })).toHaveCount(0)
+  await expect(window.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0)
   expect(existsSync(planFile)).toBe(false)
 })
 

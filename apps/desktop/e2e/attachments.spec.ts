@@ -76,7 +76,7 @@ test("attaching an image shows a thumbnail and persists it on the sent turn", as
   await expect(window.getByRole("img", { name: "login.png" })).toBeVisible()
 })
 
-test("a message sent while the agent is busy is queued, then processed", async ({ launchApp }) => {
+test("a message sent against a proposed plan revises it immediately", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
   await expect(appShell(window)).toBeVisible()
 
@@ -96,13 +96,18 @@ test("a message sent while the agent is busy is queued, then processed", async (
   const busyComposer = window.getByPlaceholder("Queue a message while the agent works…")
   await expect(busyComposer).toBeVisible()
 
-  // Queueing lives on ↵ while the button is Stop — the placeholder advertises it.
+  // A proposed plan has a durable feedback route. Enter sends the note straight
+  // to that route instead of leaving a generic queue item that can never steer
+  // the parked planning turn.
   await busyComposer.fill("and then open a PR")
   await busyComposer.press("Enter")
-  await expect(window.getByText("Queued", { exact: true })).toBeVisible()
-  await expect(window.getByText("and then open a PR")).toBeVisible()
+  await expect(window.getByText("Queued", { exact: true })).toHaveCount(0)
+  await expect(window.getByText("Refactor auth flow (revised)", { exact: true })).toBeVisible({
+    timeout: 20_000
+  })
+  await expect(window.getByText("Open PR #482", { exact: true })).toBeVisible()
 
-  // Approving the plan lets the run finish → the queued turn is dispatched (chip clears).
+  // The revised plan remains approvable through the ordinary plan gate.
   await window.getByRole("button", { name: "Approve", exact: true }).first().click()
-  await expect(window.getByText("Queued", { exact: true })).toHaveCount(0, { timeout: 25_000 })
+  await expect(window.getByText("Steps 2, 3 and 5 are done.")).toBeVisible({ timeout: 25_000 })
 })

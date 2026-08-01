@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { PlanEditor } from "./plan-editor.js"
 import { PlanDocEditor } from "./plan-doc/plan-doc-editor.js"
 import { planAssignmentReasoningLabel } from "./plan-doc/plan-stage-node.js"
+import { normalizePlanEditorHtml } from "./plan-doc/use-plan-doc-controller.js"
 
 const source = `<h1>PRD: Interactive plan</h1>
 <h2>Context</h2>
@@ -42,6 +43,16 @@ const document: PlanDocument = {
 afterEach(cleanup)
 
 describe("PlanEditor", () => {
+  it("normalizes equivalent empty data attributes before plan edits leave Tiptap", () => {
+    expect(
+      normalizePlanEditorHtml(
+        '<section data-stage="01" data-depends-on=""><div data-assignment=""></div><ul data-files=""><li>src/a.ts</li></ul></section>'
+      )
+    ).toContain(
+      '<section data-stage="01" data-depends-on><div data-assignment></div><ul data-files><li>src/a.ts</li></ul></section>'
+    )
+  })
+
   it("renders plan files as live diff links", async () => {
     const onOpenFile = vi.fn()
     const withFile = source.replace(

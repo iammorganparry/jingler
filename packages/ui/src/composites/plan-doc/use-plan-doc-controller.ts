@@ -26,7 +26,7 @@ const syncExternalValue = (
   pending: React.MutableRefObject<string | null>
 ): void => {
   if (editor === null) return
-  if (sanitizePlanHtml(value) === sanitizePlanHtml(editor.getHTML())) {
+  if (normalizePlanEditorHtml(value) === normalizePlanEditorHtml(editor.getHTML())) {
     pending.current = null
   } else if (editor.isFocused) {
     pending.current = value
@@ -35,6 +35,15 @@ const syncExternalValue = (
     editor.commands.setContent(value, { emitUpdate: false })
   }
 }
+
+/**
+ * Tiptap serialises an empty data attribute as `data-x=""`; the canonical HTML
+ * writer emits the equivalent valueless form `data-x`. Treating those bytes as
+ * different creates a phantom edit as soon as any real editor transaction runs,
+ * which can then conflict with an incoming worker revision.
+ */
+export const normalizePlanEditorHtml = (html: string): string =>
+  sanitizePlanHtml(html).replace(/\s(data-[\w-]+)=""/g, " $1")
 
 export const usePlanDocController = ({
   value,
@@ -45,6 +54,8 @@ export const usePlanDocController = ({
 }: PlanDocControllerInput): PlanDocController => {
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  const valueRef = useRef(value)
+  valueRef.current = value
   const workerControlsRef = useRef(workerControls)
   workerControlsRef.current = workerControls
   const commentControlsRef = useRef(commentControls)
@@ -62,14 +73,18 @@ export const usePlanDocController = ({
         "aria-label": "Plan document"
       }
     },
-    onUpdate: ({ editor: activeEditor }) =>
-      onChangeRef.current?.(sanitizePlanHtml(activeEditor.getHTML())),
+    onUpdate: ({ editor: activeEditor }) => {
+      const source = normalizePlanEditorHtml(activeEditor.getHTML())
+      if (source !== normalizePlanEditorHtml(valueRef.current)) {
+        onChangeRef.current?.(source)
+      }
+    },
     onBlur: ({ editor: activeEditor }) => {
       const pending = pendingExternalValueRef.current
       pendingExternalValueRef.current = null
       if (
         pending !== null &&
-        sanitizePlanHtml(pending) !== sanitizePlanHtml(activeEditor.getHTML())
+        normalizePlanEditorHtml(pending) !== normalizePlanEditorHtml(activeEditor.getHTML())
       ) {
         activeEditor.commands.setContent(pending, { emitUpdate: false })
       }

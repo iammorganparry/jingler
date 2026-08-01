@@ -313,7 +313,11 @@ export const sessionCreationDefaults = (
     cli,
     options: {
       chatRole: orchestrator === null ? "direct" as const : "orchestrator" as const,
-      defaultMode: orchestrator ? "plan" as const : provider?.defaultMode,
+      // Jingler decides per turn whether bounded work is executed directly or
+      // delegated behind the plan gate. Persisting the chat itself in read-only
+      // plan mode made the direct branch pause on its first edit, so fresh
+      // orchestrators start with their full tool authority.
+      defaultMode: orchestrator ? "auto" as const : provider?.defaultMode,
       defaultModel: orchestrator?.preference.model ?? provider?.defaultModel,
       defaultReasoning: providerReasoning(provider)
     }

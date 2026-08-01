@@ -107,6 +107,21 @@ describe("RPC handlers", () => {
     })
   })
 
+  it("gives a new orchestrator the auto tools required for bounded direct work", () => {
+    const resolution = {
+      preference: { cli: "codex" as const, model: "gpt-5.6-sol" },
+      isFallback: false
+    }
+    expect(sessionCreationDefaults("claude", null, resolution)).toMatchObject({
+      cli: "codex",
+      options: {
+        chatRole: "orchestrator",
+        defaultMode: "auto",
+        defaultModel: "gpt-5.6-sol"
+      }
+    })
+  })
+
   it("Sessions.setPersistent returns and persists the updated session", async () => {
     const now = "2026-07-30T10:00:00.000Z"
     mkdirSync(root, { recursive: true })
