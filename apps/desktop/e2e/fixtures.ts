@@ -490,8 +490,18 @@ const navigateBrowserMcp = async (targetUrl) => {
   }
   record("browser-mcp:tools/call:navigate")
 }
-const completeBrowserMcpTurn = async (targetUrl) => {
+const assertAutoTurnPolicy = (params) => {
+  if (params?.approvalPolicy !== "never") {
+    throw new Error("Codex Auto turn is missing approvalPolicy=never")
+  }
+  if (params?.sandboxPolicy?.type !== "dangerFullAccess") {
+    throw new Error("Codex Auto turn is missing dangerFullAccess")
+  }
+  record("permissions:auto")
+}
+const completeBrowserMcpTurn = async (targetUrl, params) => {
   try {
+    assertAutoTurnPolicy(params)
     await navigateBrowserMcp(targetUrl)
     send({
       method: "item/completed",
@@ -582,7 +592,7 @@ process.stdin.on("data", (chunk) => {
         )
         const browserTarget = browserMcpTarget(input)
         if (browserTarget !== null) {
-          void completeBrowserMcpTurn(browserTarget)
+          void completeBrowserMcpTurn(browserTarget, msg.params)
           index = buffer.indexOf("\\n")
           continue
         }

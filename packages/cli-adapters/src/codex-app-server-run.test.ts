@@ -751,11 +751,29 @@ describe("runCodexAppServer", () => {
     ]
     const { ctx } = harness()
 
-    await Effect.runPromise(runCodexAppServer("s1", spec({ resumeId: "thread-1" }), ctx, new Map()))
+    await Effect.runPromise(
+      runCodexAppServer(
+        "s1",
+        spec({ resumeId: "thread-1", mode: "auto" }),
+        ctx,
+        new Map()
+      )
+    )
 
     expect(server.state.requests.map((request) => request.method).slice(0, 2)).toStrictEqual([
       "thread/resume",
       "turn/start"
+    ])
+    expect(
+      server.state.requests.find((request) => request.method === "turn/start")
+    ).toMatchObject({
+      params: {
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "dangerFullAccess" }
+      }
+    })
+    expect(server.state.launches[0]?.configOverrides).toStrictEqual([
+      "features.tool_call_mcp_elicitation=false"
     ])
   })
 
@@ -860,9 +878,20 @@ describe("runCodexAppServer", () => {
         })
       })
     )
-    expect(server.state.requests.filter((request) => request.method === "turn/start")).toHaveLength(
-      2
-    )
+    expect(
+      server.state.requests
+        .filter((request) => request.method === "turn/start")
+        .map((request) => request.params)
+    ).toMatchObject([
+      {
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "readOnly", networkAccess: false }
+      },
+      {
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "dangerFullAccess" }
+      }
+    ])
     expect(emitted.some((event) => event._tag === "Assistant")).toBe(true)
   })
 
@@ -921,7 +950,14 @@ describe("runCodexAppServer", () => {
     })
     expect(
       server.state.requests.filter((request) => request.method === "turn/start")
-    ).toHaveLength(1)
+    ).toMatchObject([
+      {
+        params: {
+          approvalPolicy: "never",
+          sandboxPolicy: { type: "dangerFullAccess" }
+        }
+      }
+    ])
   })
 
   it("emits an unmarked plan-looking auto-mode answer without proposing it", async () => {

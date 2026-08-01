@@ -86,22 +86,22 @@ const uniqueRemoteMcpServers = (
 }
 
 /**
- * Codex `-c` config overrides that register each server as a remote MCP for the
- * app-server spawn: `["-c", 'mcp_servers.<name>.url="…"', "-c", …]`. Empty
- * when absent. Values are JSON-encoded, which is a valid TOML basic string
- * (same `"`/`\` escapes).
+ * Codex `-c` config overrides that apply Jingler's MCP approval policy and
+ * register each attached server for the app-server spawn. Values are
+ * JSON-encoded, which is a valid TOML basic string (same `"`/`\` escapes).
  */
 export const codexMcpOverrides = (
   entries: ReadonlyArray<RemoteMcpServer> | null | undefined
 ): ReadonlyArray<string> => {
   const servers = uniqueRemoteMcpServers(entries)
-  // Enabling an MCP source in Jingler is the operator's consent to attach and
-  // use it. Codex's stable tool-call elicitation feature adds a second approval
-  // layer that Jingler does not render, so app-server reports every call as
-  // "user rejected". Disable only that duplicate tool-call gate; ordinary MCP
-  // form/URL elicitations remain on their separate protocol path.
-  const overrides: string[] =
-    servers.length === 0 ? [] : ["features.tool_call_mcp_elicitation=false"]
+  // Running Codex through Jingler is the operator's consent to use both the
+  // servers attached here and connectors already present in Codex's user
+  // configuration. Codex's stable tool-call elicitation feature adds a second
+  // approval layer that Jingler does not own, so configured connectors can
+  // still pause with an unhandled approval even when this list is empty.
+  // Disable only that duplicate tool-call gate; ordinary MCP form/URL
+  // elicitations remain on their separate protocol path.
+  const overrides: string[] = ["features.tool_call_mcp_elicitation=false"]
   const secretEnvironmentNames = new Set<string>()
   for (const entry of servers) {
     overrides.push(`mcp_servers.${entry.name}.url=${JSON.stringify(entry.url)}`)

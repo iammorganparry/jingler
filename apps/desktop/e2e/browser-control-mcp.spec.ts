@@ -98,6 +98,7 @@ test("Codex drives the native Preview browser through jingler-browser", async ({
       .poll(() => codexCalls(), { timeout: 10_000 })
       .toEqual(
         expect.arrayContaining([
+          "permissions:auto",
           "browser-mcp:initialize",
           "browser-mcp:tools/call:navigate"
         ])

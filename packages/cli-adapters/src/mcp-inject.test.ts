@@ -41,10 +41,10 @@ describe("codexMcpOverrides", () => {
     ])
   })
 
-  it("is empty for an absent or empty collection", () => {
-    expect(codexMcpOverrides(null)).toEqual([])
-    expect(codexMcpOverrides(undefined)).toEqual([])
-    expect(codexMcpOverrides([])).toEqual([])
+  it("disables duplicate tool approvals even when connectors come from Codex config", () => {
+    expect(codexMcpOverrides(null)).toEqual(["features.tool_call_mcp_elicitation=false"])
+    expect(codexMcpOverrides(undefined)).toEqual(["features.tool_call_mcp_elicitation=false"])
+    expect(codexMcpOverrides([])).toEqual(["features.tool_call_mcp_elicitation=false"])
   })
 
   it("keeps either available server independently", () => {
