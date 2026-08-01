@@ -416,6 +416,9 @@ const browserMcpTarget = (input) => {
 }
 const browserMcpRequest = async (id, method, params, protocolVersion) => {
   const url = configOverride("mcp_servers.jingler-browser.url")
+  const duplicateToolApproval = configOverride(
+    "features.tool_call_mcp_elicitation"
+  )
   const authorizationEnvironment = configOverride(
     "mcp_servers.jingler-browser.env_http_headers.Authorization"
   )
@@ -425,6 +428,9 @@ const browserMcpRequest = async (id, method, params, protocolVersion) => {
       : undefined
   if (typeof url !== "string" || url.length === 0) {
     throw new Error("Codex launch is missing the jingler-browser URL override")
+  }
+  if (duplicateToolApproval !== false) {
+    throw new Error("Codex launch still enables duplicate MCP tool approvals")
   }
   if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
     throw new Error("Codex launch is missing the jingler-browser Authorization environment")

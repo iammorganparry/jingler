@@ -1627,7 +1627,7 @@ describe("AgentRunner plan library", () => {
       temp.layer
     )
 
-  it("keeps plan-mode orchestrator turns read-only before and after plan approval", async () => {
+  it("keeps plan mode transient so approval can restore the orchestrator's execution policy", async () => {
     seedSessionWithWorktree("plan", "orchestrator")
     const captured: { prompt: string | null; specs: Array<SessionSpec> } = {
       prompt: null,
@@ -1661,7 +1661,10 @@ describe("AgentRunner plan library", () => {
     expect(captured.specs).toHaveLength(2)
     for (const spec of captured.specs) {
       expect(spec.mode).toBe("plan")
-      expect(spec.readOnly).toBe(true)
+      // `mode: plan` is the read-only boundary. A permanent `readOnly` flag
+      // would survive the in-turn approval and strand Codex in its read-only
+      // sandbox instead of restoring Auto.
+      expect(spec.readOnly).toBeUndefined()
       expect(spec.orchestrationRoutes).toBeDefined()
     }
     expect(captured.specs[0]?.orchestrationPlanApproved).toBe(false)
