@@ -1,10 +1,18 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { GateDecision, Message, PermissionMode, Plan, Session, StreamEvent } from "@jingler/core"
+import type {
+  GateDecision,
+  MemoryGrantResponse,
+  Message,
+  PermissionMode,
+  Plan,
+  Session,
+  StreamEvent
+} from "@jingler/core"
 import { CliExecError, findApprovedPlan, STOPPED_NOTE } from "@jingler/core"
 import { Deferred, Effect, Fiber, Layer, Ref, Stream, TestClock, TestContext } from "effect"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { CliAdapter, makeScriptedCliAdapter, scriptedPlan } from "./adapter.js"
 import type {
   CliAdapterShape,
@@ -12,7 +20,11 @@ import type {
   SessionSpec
 } from "./adapter.js"
 import { ConfigService } from "./config.js"
-import { InMemorySecretStoreLive } from "./secret-store.js"
+import {
+  InMemorySecretStoreLive,
+  makeInMemorySecretStore,
+  SecretStore
+} from "./secret-store.js"
 import { OpenConnectorService } from "./open-connector.js"
 import {
   AgentRunner,
@@ -81,7 +93,10 @@ beforeEach(() => {
     }])
   )
 })
-afterEach(() => temp.cleanup())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  temp.cleanup()
+})
 
 const SESSION = "s_test"
 const chatForSession = (
@@ -110,7 +125,6 @@ const runPrompt = (mode: PermissionMode, decision: GateDecision) => {
     makeScriptedCliAdapter(0),
     DiscoveryService.Default,
     ContextManager.Default,
-    ConfigService.Default,
     temp.layer
   )
   const program = Effect.gen(function* () {
@@ -271,13 +285,274 @@ describe("AgentRunner remote MCP attachments", () => {
     expect(persistedSession).not.toContain("remoteMcpServers")
   })
 
-  it("keeps the operator-configured attachment on a duplicate name", () => {
+  it("keeps a Jingler-owned attachment when an operator connector claims its name", () => {
+    const memory = {
+      name: "jingler-memory",
+      url: "https://memory.jingler.test/api/mcp",
+      headers: { Authorization: "Bearer memory" }
+    }
     const operator = {
-      name: "jingler-browser",
+      name: "jingler-memory",
       url: "https://operator.example/mcp",
       headers: { Authorization: "Bearer operator" }
     }
-    expect(composeRemoteMcpServers(operator, PREVIEW_MCP)).toStrictEqual([operator])
+    expect(composeRemoteMcpServers(memory, operator)).toStrictEqual([memory])
+  })
+})
+
+describe("AgentRunner team memory", () => {
+  const memoryGrant = (): MemoryGrantResponse => ({
+    grant: "memory-grant-value",
+    claims: {
+      version: 1,
+      issuer: "jingler",
+      audience: "jingler-memory",
+      subject: "user-1",
+      organizationId: "org-team",
+      privileges: ["read", "propose"],
+      issuedAt: 1_785_600_000,
+      expiresAt: 4_102_444_800,
+      grantId: "grant-runner"
+    }
+  })
+
+  const installMemoryFetch = (requests: Request[]): void => {
+    const fetchImplementation: typeof fetch = async (input, init) => {
+      const request = new Request(input, init)
+      requests.push(request)
+      if (request.url.endsWith("/api/memory/grant")) {
+        return Response.json(memoryGrant())
+      }
+      if (request.url.endsWith("/api/mcp")) {
+        return Response.json({
+          jsonrpc: "2.0",
+          id: "discover",
+          result: { resultType: "complete" }
+        })
+      }
+      return Response.json({ accepted: true }, { status: 202 })
+    }
+    vi.stubGlobal("fetch", fetchImplementation)
+  }
+
+  const signedInSecrets = Layer.effect(
+    SecretStore,
+    makeInMemorySecretStore("jingler-user-token")
+  )
+
+  it("injects memory instructions and enqueues one source only after Done", async () => {
+    const requests: Request[] = []
+    installMemoryFetch(requests)
+    const captured: SessionSpec[] = []
+    const recordingAdapter = Layer.succeed(
+      CliAdapter,
+      CliAdapter.of({
+        run: (_sessionId, spec, ctx) =>
+          Effect.sync(() => captured.push(spec)).pipe(
+            Effect.zipRight(
+              ctx.emit({
+                _tag: "ToolStart",
+                id: "memory-search",
+                name: "mcp__jingler-memory__memory_search",
+                target: null
+              })
+            ),
+            Effect.zipRight(ctx.emit({ _tag: "Assistant", text: "Use api_key=private-value" })),
+            Effect.zipRight(ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }))
+          ),
+        stop: () => Effect.void
+      })
+    )
+    const base = Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlMcpServiceTest,
+      signedInSecrets,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      PlanStore.Default,
+      recordingAdapter,
+      DiscoveryService.Default,
+      ContextManager.Default,
+      temp.layer
+    )
+
+    const transcript = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* ConfigService.setMemory({ enabled: true, organizationId: "org-team" })
+        const runner = yield* AgentRunner
+        yield* runner.prompt(SESSION, SESSION, "Authorization: Bearer private-user-value").pipe(
+          Stream.runDrain
+        )
+        return yield* TranscriptStore.list(SESSION)
+      }).pipe(Effect.provide(base))
+    )
+
+    expect(captured[0]?.remoteMcpServers?.map((server) => server.name)).toStrictEqual([
+      "jingler-memory",
+      "jingler-browser"
+    ])
+    expect(captured[0]?.prompt).toContain("memory_navigation")
+    expect(captured[0]?.prompt).toContain("memory_workflow_status")
+    await vi.waitFor(() => {
+      expect(requests.filter((request) => request.url.endsWith("/api/memory/sources"))).toHaveLength(1)
+    })
+    const sourceRequests = requests.filter((request) => request.url.endsWith("/api/memory/sources"))
+    const sourceBody = JSON.stringify(await sourceRequests[0]!.json())
+    expect(sourceBody).not.toContain("private-user-value")
+    expect(sourceBody).not.toContain("private-value")
+    expect(sourceBody).toContain('"searches":1')
+    expect(JSON.stringify(transcript)).not.toContain("memory-grant-value")
+    expect(JSON.stringify(transcript)).not.toContain("jingler-user-token")
+    expect(readFileSync(join(temp.root, "sessions.json"), "utf8")).not.toContain(
+      "memory-grant-value"
+    )
+  })
+
+  it("does not hold the terminal event open while fail-open capture is pending", async () => {
+    let sourceStarted = (): void => undefined
+    const sourceRequestStarted = new Promise<void>((resolve) => {
+      sourceStarted = resolve
+    })
+    let releaseSource = (): void => undefined
+    const sourceResponse = new Promise<Response>((resolve) => {
+      releaseSource = () => resolve(Response.json({ accepted: true }, { status: 202 }))
+    })
+    const fetchImplementation: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith("/api/memory/grant")) return Response.json(memoryGrant())
+      if (url.endsWith("/api/mcp")) {
+        return Response.json({
+          jsonrpc: "2.0",
+          id: "discover",
+          result: { resultType: "complete" }
+        })
+      }
+      sourceStarted()
+      return sourceResponse
+    }
+    vi.stubGlobal("fetch", fetchImplementation)
+    const adapter = Layer.succeed(
+      CliAdapter,
+      CliAdapter.of({
+        run: (_sessionId, _spec, ctx) =>
+          ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }),
+        stop: () => Effect.void
+      })
+    )
+    const base = Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlMcpServiceTest,
+      signedInSecrets,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      PlanStore.Default,
+      adapter,
+      DiscoveryService.Default,
+      ContextManager.Default,
+      temp.layer
+    )
+
+    const run = Effect.runPromise(
+      Effect.gen(function* () {
+        yield* ConfigService.setMemory({ enabled: true, organizationId: "org-team" })
+        const runner = yield* AgentRunner
+        yield* runner.prompt(SESSION, SESSION, "settle without waiting").pipe(Stream.runDrain)
+        // Keep the test runtime alive until the detached capture has reached the
+        // deliberately unresolved HTTP request. The terminal stream has already
+        // completed, so it cannot be waiting for that response.
+        yield* Effect.promise(() => sourceRequestStarted)
+      }).pipe(Effect.provide(base))
+    )
+
+    await expect(run).resolves.toBeUndefined()
+    releaseSource()
+  })
+
+  it("publishes no source for a failed turn", async () => {
+    const requests: Request[] = []
+    installMemoryFetch(requests)
+    const failedAdapter = Layer.succeed(
+      CliAdapter,
+      CliAdapter.of({
+        run: (_sessionId, _spec, ctx) =>
+          ctx.emit({ _tag: "Failed", message: "provider failed" }),
+        stop: () => Effect.void
+      })
+    )
+    const base = Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlMcpServiceTest,
+      signedInSecrets,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      PlanStore.Default,
+      failedAdapter,
+      DiscoveryService.Default,
+      ContextManager.Default,
+      temp.layer
+    )
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* ConfigService.setMemory({ enabled: true, organizationId: "org-team" })
+        const runner = yield* AgentRunner
+        yield* runner.prompt(SESSION, SESSION, "fail").pipe(Stream.runDrain)
+      }).pipe(Effect.provide(base))
+    )
+    expect(requests.some((request) => request.url.endsWith("/api/memory/sources"))).toBe(false)
+  })
+
+  it("publishes no source when the operator cancels an unsettled turn", async () => {
+    const requests: Request[] = []
+    installMemoryFetch(requests)
+    let announceStarted = (): void => undefined
+    const started = new Promise<void>((resolve) => {
+      announceStarted = resolve
+    })
+    const pendingAdapter = Layer.succeed(
+      CliAdapter,
+      CliAdapter.of({
+        run: () => Effect.sync(announceStarted).pipe(Effect.zipRight(Effect.never)),
+        stop: () => Effect.void
+      })
+    )
+    const base = Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlMcpServiceTest,
+      signedInSecrets,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      PlanStore.Default,
+      pendingAdapter,
+      DiscoveryService.Default,
+      ContextManager.Default,
+      temp.layer
+    )
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* ConfigService.setMemory({ enabled: true, organizationId: "org-team" })
+        const runner = yield* AgentRunner
+        const consumer = yield* runner.prompt(SESSION, SESSION, "cancel").pipe(
+          Stream.runDrain,
+          Effect.fork
+        )
+        yield* Effect.promise(() => started)
+        yield* runner.stop(SESSION, SESSION)
+        yield* Fiber.await(consumer)
+      }).pipe(Effect.provide(base))
+    )
+    expect(requests.some((request) => request.url.endsWith("/api/memory/sources"))).toBe(false)
   })
 })
 

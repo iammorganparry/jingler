@@ -22,6 +22,12 @@ import type {
 import { clampFontScale, DEFAULT_THEME_ID, workspaceModeOf } from "@jingler/core"
 import {
   ConfirmDialog,
+  MemoryAnalytics,
+  MemoryBrowser,
+  MemoryDashboard,
+  MemoryInspector,
+  MemoryMap,
+  MemoryReview,
   LoadingScreen,
   LoginScreen,
   SetupScreen,
@@ -30,6 +36,16 @@ import {
   useSplashHold,
   useThemeCatalog
 } from "@jingler/ui"
+import type { MemorySubview } from "@jingler/ui"
+import {
+  BarChart3,
+  BookOpen,
+  Download,
+  Inbox,
+  LayoutDashboard,
+  Map as MapIcon,
+  Search
+} from "lucide-react"
 import { appMachine } from "./app-machine.js"
 import { authMachine } from "./auth-machine.js"
 import { ConversationPane } from "./conversation-pane.js"
@@ -73,6 +89,7 @@ import {
   usePluginTabs
 } from "./plugin-registry.js"
 import { usePlugins } from "./use-plugins.js"
+import { useMemory } from "./use-memory.js"
 
 const GH_UNKNOWN: GhStatus = {
   available: false,
@@ -87,6 +104,71 @@ const ARCHIVE_POLL_MS = 60_000
 
 /** How long a fetched PR state stays fresh before the sweep will re-fetch it. */
 const PR_STATE_STALE_MS = 5 * 60_000
+
+const MEMORY_TABS: ReadonlyArray<{
+  readonly id: MemorySubview
+  readonly label: string
+  readonly icon: typeof LayoutDashboard
+}> = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "map", label: "Map", icon: MapIcon },
+  { id: "wiki", label: "Wiki", icon: BookOpen },
+  { id: "reviews", label: "Reviews", icon: Inbox },
+  { id: "analytics", label: "Analytics", icon: BarChart3 }
+]
+
+function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
+  const { context } = memory
+  const selectedReview = context.reviews.find((review) => review.id === context.selectedReviewId)
+  const reviewCount = selectedReview?.pages.length ?? 0
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col bg-editor" data-testid="memory-workspace">
+      <header className="flex flex-none flex-wrap items-center gap-2 border-b border-hairline bg-panel px-3 py-2">
+        <strong className="mr-2 text-[12px] text-text-bright">Memory</strong>
+        <select
+          aria-label="Memory organization"
+          value={context.organizationId ?? ""}
+          onChange={(event) => memory.changeOrganization(event.currentTarget.value)}
+          className="max-w-48 rounded-md border border-line bg-sunken px-2 py-1.5 text-[10.5px] text-text outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {context.access?.organizations.map((organization) => (
+            <option key={organization.id} value={organization.id}>{organization.name}</option>
+          ))}
+        </select>
+        <label className="flex min-w-40 flex-1 items-center gap-2 rounded-md border border-line bg-sunken px-2.5 py-1.5 focus-within:ring-2 focus-within:ring-ring">
+          <Search size={13} className="text-muted-foreground" />
+          <span className="sr-only">Search all memory</span>
+          <input
+            value={context.searchQuery}
+            onChange={(event) => {
+              memory.setQuery(event.currentTarget.value)
+              if (context.view !== "wiki") memory.navigate({ view: "wiki" })
+            }}
+            placeholder="Search memory"
+            className="min-w-0 flex-1 bg-transparent text-[10.5px] text-text outline-none placeholder:text-dim"
+          />
+        </label>
+        <select aria-label="Memory time range" value={context.range} onChange={(event) => memory.changeRange(event.currentTarget.value)} className="rounded-md border border-line bg-sunken px-2 py-1.5 text-[10.5px] text-text outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <option value="7d">7 days</option><option value="30d">30 days</option><option value="90d">90 days</option><option value="all">All time</option>
+        </select>
+        <button type="button" disabled={memory.exporting} onClick={context.exported ? memory.downloadExport : memory.requestExport} className="flex items-center gap-1.5 rounded-md border border-line bg-sunken px-2.5 py-1.5 text-[10.5px] text-text outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"><Download size={12} /> {context.exported ? "Download" : memory.exporting ? "Preparing…" : "Export"}</button>
+      </header>
+      <nav className="flex flex-none items-center gap-1 border-b border-hairline bg-panel px-3 py-1.5" aria-label="Memory views">
+        {MEMORY_TABS.map(({ id, label, icon: Icon }) => (
+          <button type="button" key={id} aria-current={context.view === id ? "page" : undefined} onClick={() => memory.navigate({ view: id })} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[10.5px] text-muted-foreground outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring aria-[current=page]:bg-surface aria-[current=page]:text-text-bright"><Icon size={12} /> {label}{id === "reviews" && context.reviews.filter((review) => review.status === "open").length > 0 ? ` (${context.reviews.filter((review) => review.status === "open").length})` : ""}</button>
+        ))}
+      </nav>
+      {context.view === "dashboard" && <MemoryDashboard summary={context.summary} loading={memory.loading} error={context.error} onNavigate={memory.navigate} onRetry={memory.retry} />}
+      {context.view === "map" && <MemoryMap graph={context.graph} positions={memory.positions} filters={context.filters} viewport={context.viewport} selectedNodeId={context.selectedNodeId} selectedEdgeId={context.selectedEdgeId} loading={memory.loading} onSelectNode={memory.selectNode} onSelectEdge={memory.selectEdge} onExpandNode={memory.expandNode} onViewportChange={memory.setViewport} onFiltersChange={memory.setFilters} />}
+      {context.view === "wiki" && <MemoryBrowser query={context.searchQuery} results={context.searchResults} page={context.page} loading={memory.loading} filter={context.filters.healthOnly ? "health findings" : context.filters.freshness} onQueryChange={memory.setQuery} onOpenPage={memory.openPage} onBack={memory.backFromPage} />}
+      {context.view === "reviews" && <MemoryReview reviews={context.reviews} canReview={memory.canReview} selectedId={context.selectedReviewId} result={context.reviewResult} busy={memory.reviewing} onSelect={memory.selectReview} onReview={memory.decideReview} />}
+      {context.view === "analytics" && <MemoryAnalytics summary={context.summary} />}
+      {(context.selectedNodeId || context.selectedEdgeId) && (
+        <MemoryInspector node={memory.selectedNode} evidence={context.evidence} page={context.page} loading={memory.loading} pendingProposalCount={reviewCount} onBack={memory.closeInspector} onOpenPage={memory.openPage} onExpandNeighborhood={memory.expandNode} />
+      )}
+    </div>
+  )
+}
 
 /**
  * Thin view over `appMachine` (which drives the first-run/loading/session flow).
@@ -107,6 +189,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   const pluginPanes = usePluginPanes()
   const pluginCommands = usePluginCommands()
   const plugins = usePlugins()
+  const memory = useMemory()
 
   // The conversation machine persists a session's settled status by itself, with
   // no route back here. Fold those records into the list, or the sidebar keeps
@@ -721,6 +804,13 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       onVisibleSessionsChange={onVisibleSessionsChange}
       sessions={sessions}
       user={user}
+      memory={{
+        eligible: memory.eligible,
+        active: memory.active,
+        content: <MemoryWorkspace memory={memory} />,
+        onOpen: memory.open,
+        onClose: memory.close
+      }}
       onSignOut={onSignOut}
       repos={repos}
       starredRepos={starredRepos}

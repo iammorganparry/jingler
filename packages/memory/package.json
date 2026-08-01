@@ -1,0 +1,21 @@
+{
+  "name": "@jingler/memory",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic Markdown contracts and validation for Jingler memory.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "effect": "^3.21.4"
+  },
+  "devDependencies": {
+    "@jingler/tsconfig": "workspace:*"
+  }
+}

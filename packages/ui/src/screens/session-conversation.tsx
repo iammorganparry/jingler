@@ -120,6 +120,11 @@ export interface SessionConversationProps {
    * conversation) while the sidebar stays visible. `onOpenSettings` toggles it.
    */
   settingsView?: ReactNode
+  /** Organization-scoped Memory takeover; credentials remain outside this tree. */
+  memoryView?: ReactNode
+  memoryEligible?: boolean
+  memoryActive?: boolean
+  onOpenMemory?: () => void
   /** Whether GitHub is connected (drives the sidebar cog's status dot). */
   ghConnected?: boolean
   /** Repo names (sidebar group keys) that are starred — pinned to the top. */
@@ -217,10 +222,15 @@ export function SessionConversation(props: SessionConversationProps) {
         collapsedRepoNames={props.collapsedRepoNames}
         onToggleCollapsed={props.onToggleCollapsed}
         version={props.version}
+        memoryEligible={props.memoryEligible}
+        memoryActive={props.memoryActive}
+        onOpenMemory={props.onOpenMemory}
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-editor">
-        {props.settingsView ? (
+        {props.memoryView ? (
+          props.memoryView
+        ) : props.settingsView ? (
           props.settingsView
         ) : props.showEmpty ? (
           <EmptyConversation

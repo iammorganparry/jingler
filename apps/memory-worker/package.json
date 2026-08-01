@@ -1,0 +1,24 @@
+{
+  "name": "@jingler/memory-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Organization-isolated Cloudflare memory vault, graph, analytics, and search service.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@jingler/core": "workspace:*",
+    "@jingler/memory": "workspace:*",
+    "effect": "^3.21.4"
+  },
+  "devDependencies": {
+    "@jingler/tsconfig": "workspace:*",
+    "vitest": "^3.2.6"
+  }
+}

@@ -338,6 +338,14 @@ export interface JinglerAppProps {
   onRunPluginCommand?: (pluginId: string, commandId: string) => void
   /** App version (from `__APP_VERSION__`), shown in the sidebar footer. */
   version?: string
+  /** First-class paid-team Memory destination, rendered as a sidebar takeover. */
+  memory?: {
+    readonly eligible: boolean
+    readonly active: boolean
+    readonly content: ReactNode
+    readonly onOpen: () => void
+    readonly onClose: () => void
+  }
 }
 
 const noBranches = async (): Promise<ReadonlyArray<string>> => []
@@ -431,7 +439,8 @@ export function JinglerApp({
   onCreateSessionFromPr,
   loadIssues,
   onCreateSessionFromIssue,
-  version
+  version,
+  memory
 }: JinglerAppProps) {
   // The split replaces what used to be a single `selected` useState. The focused
   // pane's session IS the old "selected" — every existing call site below still
@@ -440,6 +449,13 @@ export function JinglerApp({
   const split = useSplitLayout(sessions, activeSessionId ?? sessions[0]?.id ?? null)
   const selected = split.activeSessionId
   const setSelected = split.selectSession
+  const selectSession = useCallback(
+    (id: string) => {
+      memory?.onClose()
+      setSelected(id)
+    },
+    [memory, setSelected]
+  )
   const group = split.group
   const [newOpen, setNewOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
@@ -581,7 +597,7 @@ export function JinglerApp({
    */
   const addNextSessionAsPane = useCallback((): boolean => {
     if (!group || group.panes.length >= MAX_PANES) return false
-    const next = sessions.find((s) => !s.archived && !split.visibleSessionIds.has(s.id))
+    const next = sessions.find((s) => !(s.archived || split.visibleSessionIds.has(s.id)))
     if (!next) return false
     splitActiveWith(next.id, group.panes.length)
     return true
@@ -910,7 +926,7 @@ export function JinglerApp({
         sessions={sessions}
         clis={clis}
         activeSessionId={selected}
-        onSelectSession={setSelected}
+        onSelectSession={selectSession}
         group={group}
         splitGroups={split.workspace.groups}
         activeGroupId={split.workspace.activeGroupId}
@@ -954,7 +970,25 @@ export function JinglerApp({
         user={user}
         onSignOut={onSignOut}
         onOpenUsage={onLoadUsage ? openUsage : undefined}
-        onOpenSettings={onSaveProvider ? () => setSettingsOpen(true) : undefined}
+        onOpenSettings={
+          onSaveProvider
+            ? () => {
+                memory?.onClose()
+                setSettingsOpen(true)
+              }
+            : undefined
+        }
+        memoryEligible={memory?.eligible}
+        memoryActive={memory?.active}
+        onOpenMemory={
+          memory
+            ? () => {
+                setSettingsOpen(false)
+                memory.onOpen()
+              }
+            : undefined
+        }
+        memoryView={memory?.active ? memory.content : undefined}
         settingsView={
           settingsOpen && onSaveProvider ? (
             <SettingsView

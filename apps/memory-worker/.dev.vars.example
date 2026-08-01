@@ -1,0 +1,7 @@
+# Wrangler local-only values. Copy to .dev.vars; never commit the real file.
+MEMORY_SERVICE_SECRET=dev-memory-worker-secret-change-me
+MEMORY_SERVICE_SECRET_PREVIOUS=
+
+# Optional comma-separated operational policy.
+MEMORY_LINT_ORGANIZATIONS=org-local
+MEMORY_AUTO_PUBLISH_FIXES=

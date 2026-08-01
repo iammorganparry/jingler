@@ -80,6 +80,27 @@ describe("WorkspaceConfig", () => {
     ).toStrictEqual(configured.orchestrator)
   })
 
+  it("round-trips renderer-safe memory selection while legacy configs keep it absent", () => {
+    const legacy = Schema.decodeUnknownSync(WorkspaceConfig)({
+      reposDir: "/repos",
+      createdAt: "2026-07-11T10:00:00.000Z"
+    })
+    expect(legacy.memory).toBeUndefined()
+    const configured: WorkspaceConfig = {
+      ...legacy,
+      memory: { enabled: true, organizationId: "org-team" }
+    }
+    const roundTripped = Schema.decodeUnknownSync(WorkspaceConfig)(
+      Schema.encodeSync(WorkspaceConfig)(configured)
+    )
+    expect(roundTripped.memory).toStrictEqual({
+      enabled: true,
+      organizationId: "org-team"
+    })
+    expect(JSON.stringify(roundTripped)).not.toContain("bearer")
+    expect(JSON.stringify(roundTripped)).not.toContain("grant")
+  })
+
 })
 
 describe("GithubConfig", () => {
