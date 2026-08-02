@@ -33,22 +33,12 @@ export const getPlanDocumentActor = (
 export const flushPlanDocumentActor = (_actor: PlanDocumentActor): Promise<void> =>
   Promise.resolve()
 
-export const flushPlanDocument = async (sessionId: string): Promise<void> => {
-  const actor = actors.get(sessionId)
-  if (actor !== undefined) await flushPlanDocumentActor(actor)
-}
+// A flush is a no-op (the plan is read-only), so both wrappers just resolve. They
+// exist so the close handshake and per-session callers don't special-case plans;
+// if a real draft ever needs persisting, thread the failure handling in here.
+export const flushPlanDocument = (_sessionId: string): Promise<void> => Promise.resolve()
 
-export const flushAllPlanDocuments = async (): Promise<void> => {
-  const results = await Promise.allSettled(
-    [...actors.values()].map(flushPlanDocumentActor)
-  )
-  const failures = results.flatMap((result) =>
-    result.status === "rejected" ? [result.reason] : []
-  )
-  if (failures.length > 0) {
-    throw new AggregateError(failures, "One or more plan drafts could not be saved.")
-  }
-}
+export const flushAllPlanDocuments = (): Promise<void> => Promise.resolve()
 
 /** Stop a session actor only after its session has been permanently removed. */
 export const stopPlanDocument = (sessionId: string): void => {
