@@ -1,6 +1,7 @@
 import {
   parsePlanHtml,
   type ExecutionMode,
+  type PlanAnnotationAnchor,
   type PlanCommentMessage,
   type Plan,
   type PlanDocument,
@@ -8,8 +9,10 @@ import {
   type PlanParticipant
 } from "@jingler/core"
 import { ClipboardList } from "lucide-react"
+import { type ReactNode, useState } from "react"
 import { Button } from "../components/button.js"
 import { Markdown } from "../components/markdown.js"
+import { PlanCommentLayer } from "../composites/plan-doc/plan-comment-layer.js"
 import {
   atLeast,
   useWidthTier,
@@ -36,7 +39,6 @@ export interface PlanReviewProps {
   /** Live-only sanitized source; never an editable or approvable revision. */
   streamingDraft?: PlanDraft | null
   draft?: string
-  remote?: PlanDocument | null
   syncState?: PlanEditorSyncState
   syncError?: string | null
   canApprove?: boolean
@@ -57,13 +59,14 @@ export interface PlanReviewProps {
   onComment?: (stepId: string, body: string) => void
   onStartDraft?: () => void
   onSendToAgent?: () => void
-  onEditDocument?: (source: string) => void
-  onSaveDocument?: () => void
   onRetryDocument?: () => void
-  onKeepLocal?: () => void
-  onAcceptRemote?: () => void
   onStopWorker?: (agentId: string) => void
   onRetryWorker?: (agentId: string) => void
+  /**
+   * Comment-layer seams (a later stage owns rendering). The plan document is
+   * read-only now; these are carried through so the comment layer can consume
+   * them without re-plumbing the pane, but nothing here dispatches them yet.
+   */
   participants?: ReadonlyArray<PlanParticipant>
   onReplyThread?: (
     annotationId: string,
@@ -78,6 +81,14 @@ export interface PlanReviewProps {
     annotationId: string,
     resolved: boolean
   ) => Promise<void> | void
+  /** Create a new comment on a step (stageId) or a highlighted span (anchor). */
+  onAddComment?: (
+    target: { stageId?: string; anchor?: PlanAnnotationAnchor },
+    body: string,
+    mentionedParticipantIds: ReadonlyArray<string>
+  ) => Promise<void> | void
+  /** Seam for the page-navigation shell rendered around the document body. */
+  pageNav?: ReactNode
 }
 
 export function PlanReview(props: PlanReviewProps) {
@@ -98,7 +109,6 @@ function PlanReviewBody(props: PlanReviewProps) {
     document,
     streamingDraft,
     draft,
-    remote,
     syncState = "clean",
     syncError,
     canApprove = true,
@@ -107,23 +117,23 @@ function PlanReviewBody(props: PlanReviewProps) {
     onRevise,
     onStartDraft,
     onSendToAgent,
-    onEditDocument,
-    onSaveDocument,
     onRetryDocument,
-    onKeepLocal,
-    onAcceptRemote,
     onStopWorker,
     onRetryWorker,
-    participants,
-    onReplyThread,
-    onRetryThread,
-    onSetThreadResolved,
     selectedStepId,
     onSelectStep,
     patch,
     knownFiles,
-    onOpenFile
+    onOpenFile,
+    participants,
+    onReplyThread,
+    onRetryThread,
+    onSetThreadResolved,
+    onAddComment,
+    pageNav
   } = props
+
+  const [container, setContainer] = useState<HTMLElement | null>(null)
 
   const promotedPlan =
     plan?.structured === true ? parsePlanHtml(plan.raw) : null
@@ -173,6 +183,22 @@ function PlanReviewBody(props: PlanReviewProps) {
     )
   }
 
+  const commentLayer =
+    document != null ? (
+      <PlanCommentLayer
+        annotations={document.projection.annotations}
+        participants={participants ?? []}
+        containerRef={container}
+        onAddComment={onAddComment ?? (() => {})}
+        onReply={onReplyThread ?? (() => {})}
+        onSetResolved={onSetThreadResolved ?? (() => {})}
+        onRetry={onRetryThread}
+        // The read-only document machine only ever reports loading | clean |
+        // error, so comments are disabled whenever it isn't cleanly loaded.
+        disabled={syncState !== "clean"}
+      />
+    ) : null
+
   return (
     <div className={cn("flex min-h-0 min-w-0 flex-1 bg-editor", gutter)}>
       <div
@@ -181,9 +207,8 @@ function PlanReviewBody(props: PlanReviewProps) {
       >
         <PlanEditor
           document={document ?? null}
-          draft={transientSource ?? draft ?? document?.source ?? ""}
+          source={transientSource ?? draft ?? document?.source ?? ""}
           transientState={transientState}
-          remote={remote}
           state={syncState}
           error={syncError}
           canApprove={canApprove}
@@ -191,17 +216,9 @@ function PlanReviewBody(props: PlanReviewProps) {
           onResume={onResume}
           onRevise={onRevise}
           onSendToAgent={onSendToAgent}
-          onEdit={onEditDocument}
-          onSave={onSaveDocument}
           onRetry={onRetryDocument}
-          onKeepLocal={onKeepLocal}
-          onAcceptRemote={onAcceptRemote}
           onStopWorker={onStopWorker}
           onRetryWorker={onRetryWorker}
-          participants={participants}
-          onReplyThread={onReplyThread}
-          onRetryThread={onRetryThread}
-          onSetThreadResolved={onSetThreadResolved}
           targetStageId={selectedStepId}
           onTargetStageConsumed={
             selectedStepId ? () => onSelectStep?.(selectedStepId) : undefined
@@ -209,6 +226,9 @@ function PlanReviewBody(props: PlanReviewProps) {
           patch={patch}
           knownFiles={knownFiles}
           onOpenFile={onOpenFile}
+          commentLayer={commentLayer}
+          onContainerRef={setContainer}
+          pageNav={pageNav}
         />
       </div>
     </div>

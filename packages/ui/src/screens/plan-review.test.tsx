@@ -77,7 +77,7 @@ const legacyPlan: Plan = {
 afterEach(cleanup)
 
 describe("PlanReview", () => {
-  it("keeps a streamed plan read-only and promotes it on the same editor instance", async () => {
+  it("keeps a streamed plan read-only, then shows the step outline once canonical", async () => {
     const canonicalPlan: Plan = {
       ...legacyPlan,
       id: "plan-stream",
@@ -95,34 +95,25 @@ describe("PlanReview", () => {
       />
     )
 
+    // While composing, the raw sanitized document renders read-only and the
+    // single loader is the disabled "Composing plan" button.
     const editor = await screen.findByLabelText("Plan document")
-    expect(editor.getAttribute("contenteditable")).toBe("false")
-    expect(screen.getByRole("status").textContent).toContain("Composing")
-    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull()
-    expect(screen.queryByRole("button", { name: /Revise/ })).toBeNull()
+    expect(editor.getAttribute("contenteditable")).not.toBe("true")
+    expect(screen.getByRole("button", { name: "Composing plan" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull()
 
-    view.rerender(<PlanReview plan={canonicalPlan} />)
-    expect(screen.getByLabelText("Plan document")).toBe(editor)
-    expect(screen.getByRole("status").textContent).toContain("Loading revision")
-
+    // Once canonical, the Main page presents the digestible step outline and an
+    // Approve action — with no sync/revision indicator (the plan is read-only).
     view.rerender(
-      <PlanReview
-        plan={canonicalPlan}
-        document={{
-          ...document,
-          id: "plan-stream",
-          source: source.replace("Editor-only plan", "Canonical editor plan")
-        }}
-      />
+      <PlanReview plan={canonicalPlan} document={{ ...document, id: "plan-stream" }} />
     )
-    expect(screen.getByLabelText("Plan document")).toBe(editor)
-    expect(screen.getByRole("status").textContent).toContain("Synced")
-    expect(screen.getByText("PRD: Canonical editor plan")).toBeTruthy()
-    expect(screen.getByText("revision 2")).toBeTruthy()
+    expect(screen.queryByLabelText("Plan document")).toBeNull()
+    expect(screen.getByText("Build")).toBeTruthy()
+    expect(screen.queryByText("revision 2")).toBeNull()
     expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy()
   })
 
-  it("scrolls a progress-dock deep link to its stable stage id", async () => {
+  it("lands a progress-dock deep link on its step in the Main outline", async () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView
     const onSelectStep = vi.fn()
@@ -136,20 +127,32 @@ describe("PlanReview", () => {
     )
 
     expect(await screen.findByText("Build")).toBeTruthy()
-    expect(scrollIntoView).toHaveBeenCalledWith({
-      behavior: "auto",
-      block: "start"
-    })
     expect(onSelectStep).toHaveBeenCalledWith("01")
+    expect(scrollIntoView).toHaveBeenCalled()
   })
 
-  it("renders only the canonical Notion-style editor when a document exists", () => {
+  it("renders the step outline when a canonical document exists", () => {
     render(<PlanReview plan={legacyPlan} document={document} />)
 
-    expect(screen.getByLabelText("Plan document")).toBeTruthy()
-    expect(screen.getByText("PRD: Editor-only plan")).toBeTruthy()
+    expect(screen.getByText("Build")).toBeTruthy()
+    expect(screen.getByText("Legacy rails are absent.")).toBeTruthy()
     expect(screen.queryByLabelText("Resize step list")).toBeNull()
     expect(screen.queryByLabelText("Resize changes")).toBeNull()
+  })
+
+  it("switches between the Main, Architecture and Workflow pages", async () => {
+    render(<PlanReview plan={null} document={document} />)
+
+    // Main page: the step outline.
+    expect(screen.getByText("Build")).toBeTruthy()
+
+    // Architecture page: the fixture has no prose/diagrams, so its empty state.
+    fireEvent.click(screen.getByRole("tab", { name: "Architecture" }))
+    expect(await screen.findByText(/No architecture notes yet/)).toBeTruthy()
+
+    // Back to Main.
+    fireEvent.click(screen.getByRole("tab", { name: "Main" }))
+    expect(screen.getByText("Build")).toBeTruthy()
   })
 
   it("renders an older plan as its original Markdown without the legacy workspace", () => {
@@ -167,67 +170,5 @@ describe("PlanReview", () => {
     expect(screen.queryByText(/No plan yet/)).toBeNull()
     expect(screen.queryByLabelText("Resize step list")).toBeNull()
     expect(screen.queryByLabelText("Resize changes")).toBeNull()
-  })
-
-  it("shows worker identity and isolates stop/retry controls to that worker", async () => {
-    const onStopWorker = vi.fn()
-    const onRetryWorker = vi.fn()
-    const workerSource = source.replace(
-      '<section data-stage="01" data-title="Build">',
-      `<section data-stage="01" data-title="Build" data-depends-on="" data-complexity="high">
-<div data-assignment data-agent-id="worker-a" data-cli="codex" data-model="gpt-5.6-sol" data-reason="High complexity route." data-status="running"></div>`
-    )
-    const workerDocument: PlanDocument = {
-      ...document,
-      source: workerSource,
-      projection: {
-        ...document.projection,
-        stages: document.projection.stages.map((stage) => ({
-          ...stage,
-          dependencies: [],
-          complexity: "high" as const,
-          assignment: {
-            agentId: "worker-a",
-            cli: "codex" as const,
-            model: "gpt-5.6-sol",
-            reason: "High complexity route."
-          },
-          executionStatus: "running" as const
-        }))
-      }
-    }
-
-    const view = render(
-      <PlanReview
-        plan={null}
-        document={workerDocument}
-        onStopWorker={onStopWorker}
-        onRetryWorker={onRetryWorker}
-      />
-    )
-    expect(await screen.findByText("codex · gpt-5.6-sol")).toBeTruthy()
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Stop worker worker-a" })
-    )
-    expect(onStopWorker).toHaveBeenCalledWith("worker-a")
-
-    view.rerender(
-      <PlanReview
-        plan={null}
-        document={{
-          ...workerDocument,
-          source: workerSource.replace(
-            'data-status="running"',
-            'data-status="blocked"'
-          )
-        }}
-        onStopWorker={onStopWorker}
-        onRetryWorker={onRetryWorker}
-      />
-    )
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Retry worker worker-a" })
-    )
-    expect(onRetryWorker).toHaveBeenCalledWith("worker-a")
   })
 })
