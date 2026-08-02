@@ -1,7 +1,7 @@
 import "@xyflow/react/dist/style.css"
 import { useMemo, useState } from "react"
 import type { PlanGraph, PlanNode, PlanNodeKind } from "@jingler/core"
-import Dagre from "@dagrejs/dagre"
+import { layoutDagre } from "./flow-layout.js"
 import {
   Background,
   BackgroundVariant,
@@ -72,21 +72,14 @@ const nodeTypes = { planNode: FlowNode }
 
 /** Lay the graph out top-down with dagre; returns react-flow nodes + edges. */
 const layout = (graph: PlanGraph, selectedStepId: string | null | undefined) => {
-  const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}))
-  g.setGraph({ rankdir: "TB", nodesep: 48, ranksep: 64, marginx: 16, marginy: 16 })
-  for (const n of graph.nodes) g.setNode(n.id, { width: NODE_W, height: NODE_H })
-  for (const e of graph.edges) g.setEdge(e.from, e.to)
-  Dagre.layout(g)
+  const positions = layoutDagre(graph.nodes, graph.edges, { nodeWidth: NODE_W, nodeHeight: NODE_H })
 
-  const nodes: Array<Node<NodeData>> = graph.nodes.map((node) => {
-    const pos = g.node(node.id)
-    return {
-      id: node.id,
-      type: "planNode",
-      position: { x: (pos?.x ?? 0) - NODE_W / 2, y: (pos?.y ?? 0) - NODE_H / 2 },
-      data: { node, selected: node.stepId != null && node.stepId === selectedStepId }
-    }
-  })
+  const nodes: Array<Node<NodeData>> = graph.nodes.map((node) => ({
+    id: node.id,
+    type: "planNode",
+    position: positions.get(node.id) ?? { x: 0, y: 0 },
+    data: { node, selected: node.stepId != null && node.stepId === selectedStepId }
+  }))
 
   const edges = graph.edges.map((e) => ({
     id: e.id,

@@ -46,38 +46,6 @@ export function usePlanDocument(sessionId: string) {
     () => getPlanDocumentActor(sessionId, {
       sessionId,
       load: () => rpc.planCurrent(sessionId),
-      save: async ({ document, source }) => {
-        let saved: PlanDocument
-        try {
-          saved = await rpc.planUpdateDocument({
-            sessionId,
-            planId: document.id,
-            baseRevision: document.revision,
-            source,
-            author: "user"
-          })
-        } catch (error) {
-          // Effect RPC preserves the typed failure in most transports, but
-          // Electron can surface only the squashed Error. Re-read once so a
-          // compare-and-swap refusal never degrades into a generic save error
-          // or lets the next poll silently replace the operator's local draft.
-          const latest = await rpc.planCurrent(sessionId).catch(() => null)
-          if (
-            latest !== null &&
-            (latest.id !== document.id || latest.revision !== document.revision)
-          ) {
-            throw {
-              message: "The canonical plan changed while this draft was being edited.",
-              latest
-            }
-          }
-          throw error
-        }
-        // Let this machine consume its save result before peers receive the
-        // broadcast; otherwise its own revision looks like a remote collision.
-        setTimeout(() => publish(sessionId, saved), 0)
-        return saved
-      },
       subscribe: (listener) => {
         return subscribe(sessionId, listener)
       }
@@ -95,44 +63,27 @@ export function usePlanDocument(sessionId: string) {
       .then((document) => publish(sessionId, document))
       .catch(() => {})
   }, [sessionId])
-  const edit = useCallback((source: string) => actor.send({ type: "EDIT", source }), [actor])
-  const save = useCallback(() => actor.send({ type: "SAVE_NOW" }), [actor])
+  // Reload after a load failure; the plan is read-only, so there is no save to
+  // retry — only the initial `Plan.current` fetch.
   const retry = useCallback(() => actor.send({ type: "RETRY" }), [actor])
-  const keepLocal = useCallback(() => actor.send({ type: "KEEP_LOCAL" }), [actor])
-  const acceptRemote = useCallback(() => actor.send({ type: "ACCEPT_REMOTE" }), [actor])
-  // Acceptance status + annotations are now edited in-document via the Tiptap
-  // node views (they serialize to HTML through `edit`), so there is no separate
-  // criterion/annotate helper here anymore.
-  const state: PlanEditorSyncState =
-    snapshot.matches("loading")
-      ? "loading"
-      : snapshot.matches("editing")
-        ? "editing"
-        : snapshot.matches("saving")
-          ? "saving"
-          : snapshot.matches("conflict")
-            ? "conflict"
-            : snapshot.matches("error")
-              ? "error"
-              : "clean"
+
+  // The plan document is read-only. Its only remaining sync states are the
+  // initial load, the loaded/`clean` steady state (kept in step with remote
+  // revisions), and a load error.
+  const state: PlanEditorSyncState = snapshot.matches("loading")
+    ? "loading"
+    : snapshot.matches("error")
+      ? "error"
+      : "clean"
 
   return {
     document: snapshot.context.document,
     draft: snapshot.context.draft,
-    remote: snapshot.context.remote,
     error: snapshot.context.error,
     state,
-    edit,
-    save,
     retry,
-    keepLocal,
-    acceptRemote,
     startDraft,
     synced: snapshot.matches("clean"),
-    // Approval is only valid once the editor's visible draft is exactly the
-    // canonical source returned by a completed save (or remote revision).
-    canApprove:
-      snapshot.matches("clean") &&
-      snapshot.context.document?.source === snapshot.context.draft
+    canApprove: snapshot.matches("clean") && snapshot.context.document !== null
   }
 }

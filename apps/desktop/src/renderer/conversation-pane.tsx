@@ -586,7 +586,6 @@ export function ConversationPane({
       document={canonicalPlan.document}
       streamingDraft={convo.planDraft}
       draft={canonicalPlan.draft}
-      remote={canonicalPlan.remote}
       syncState={canonicalPlan.state}
       syncError={canonicalPlan.error ?? convo.planActionError}
       canApprove={canonicalPlan.canApprove}
@@ -605,6 +604,9 @@ export function ConversationPane({
       }
       onRevise={() => planId && convo.revisePlan(planId)}
       onComment={(stepId, body) => planId && convo.commentPlanStep(planId, stepId, body)}
+      onAddComment={(target, body) => {
+        if (planId) convo.commentPlanStep(planId, target.stageId ?? "", body, target.anchor)
+      }}
       onStartDraft={canonicalPlan.startDraft}
       onSendToAgent={() => {
         // Hand the user-authored draft to the agent as a plan-mode turn: switch
@@ -623,11 +625,7 @@ export function ConversationPane({
           ].join("\n")
         )
       }}
-      onEditDocument={canonicalPlan.edit}
-      onSaveDocument={canonicalPlan.save}
       onRetryDocument={canonicalPlan.retry}
-      onKeepLocal={canonicalPlan.keepLocal}
-      onAcceptRemote={canonicalPlan.acceptRemote}
       onStopWorker={(agentId) => {
         if (planId) void rpc.agentStopWorker(session.id, planId, agentId)
       }}

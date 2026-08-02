@@ -107,10 +107,10 @@ export function ReviewFileRail({
             }
             onClick={controls.toggleCollapseViewed}
             className={cn(
-              "flex size-10 flex-none items-center justify-center rounded-lg shadow-[inset_0_0_0_1px_var(--sb-line)] transition-[background-color,color,scale] duration-150 ease-out active:scale-[0.96]",
+              "flex size-10 flex-none items-center justify-center rounded-md border bg-sunken transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.96]",
               controls.collapseViewed
-                ? "bg-blue/[0.12] text-blue"
-                : "bg-sunken text-dim hover:text-text"
+                ? "border-blue/40 bg-blue/[0.12] text-blue"
+                : "border-line text-dim hover:border-line-strong hover:text-text"
             )}
           >
             <EyeOff size={14} />
@@ -127,10 +127,10 @@ export function ReviewFileRail({
             }
             onClick={controls.toggleFeedback}
             className={cn(
-              "flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-2 text-[11px] shadow-[inset_0_0_0_1px_var(--sb-line)] transition-[background-color,color,scale] duration-150 ease-out active:scale-[0.96]",
+              "flex min-h-10 items-center justify-center gap-1.5 rounded-md border bg-sunken px-2.5 text-[11px] transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.96]",
               controls.feedbackOnly
-                ? "bg-blue/[0.14] text-blue"
-                : "bg-sunken text-dim hover:text-text"
+                ? "border-blue/40 bg-blue/[0.14] text-blue"
+                : "border-line text-dim hover:border-line-strong hover:text-text"
             )}
           >
             <MessageSquare size={12} strokeWidth={2.25} />

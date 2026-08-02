@@ -22,9 +22,9 @@ describe("PlanFloatingActions", () => {
     })
   }
 
-  it("gives conflict resolution the primary slot and leaves remote in overflow", () => {
-    render(<PlanFloatingActions status="proposed" syncState="conflict" />)
-    expect(screen.getByRole("button", { name: "Keep local and save" })).toBeTruthy()
+  it("offers the extra approval options behind the split-button dropdown", () => {
+    render(<PlanFloatingActions status="proposed" syncState="clean" />)
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "More plan actions" })).toBeTruthy()
   })
 
@@ -41,7 +41,7 @@ describe("PlanFloatingActions", () => {
     expect(screen.getByTestId("plan-status-summary").textContent).toContain("composing")
   })
 
-  it("combines plan status, revision, sync state, and actions in one dock", () => {
+  it("shows the plan status and actions without a sync/revision indicator", () => {
     render(
       <PlanFloatingActions status="proposed" revision={7} syncState="clean" />
     )
@@ -49,8 +49,9 @@ describe("PlanFloatingActions", () => {
     const dock = screen.getByTestId("plan-floating-actions")
     expect(dock.contains(screen.getByTestId("plan-status-summary"))).toBe(true)
     expect(dock.textContent).toContain("proposed")
-    expect(dock.textContent).toContain("revision 7")
-    expect(dock.textContent).toContain("Synced")
+    // The plan is agent-controlled and read-only: no sync state, no revision.
+    expect(dock.textContent).not.toContain("revision 7")
+    expect(dock.textContent).not.toContain("Synced")
     expect(within(dock).getByRole("button", { name: "Approve" })).toBeTruthy()
   })
 
