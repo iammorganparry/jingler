@@ -10,9 +10,9 @@ import {
 } from "./fixtures.js"
 
 const composerPlaceholder = /Message .+…/
-const openPrStage = /Open PR #482/
-const transientStatus = /Composing|Validating/
-const planRevision = /^revision \d+$/
+// The read-only bar shows the live phase as a status pill (lower-case); the
+// sync/revision indicators were removed with the in-place editor.
+const transientStatus = /composing|validating/
 
 const session = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [
   {
@@ -70,7 +70,9 @@ test("streaming plan collaboration survives promotion and reload", async ({
   const planColumn = window.getByTestId("plan-split-column")
   await expect(planColumn).toBeVisible()
   await expect(window.getByTestId("composer")).toBeVisible()
-  await expect(window.getByRole("status")).toContainText(transientStatus)
+  await expect(window.getByTestId("plan-status-summary")).toContainText(
+    transientStatus
+  )
   await expect(
     window.getByText("PRD: Refactor auth flow", { exact: true })
   ).toBeVisible()
@@ -93,16 +95,17 @@ test("streaming plan collaboration survives promotion and reload", async ({
   const resizedRatio = await columnRatio(planColumn)
   expect(resizedRatio).toBeGreaterThan(initialRatio + 0.04)
 
-  await expect(
-    window.getByText("Audit session middleware", { exact: true })
-  ).toBeVisible()
-  await expect(window.getByRole("status")).toContainText("Synced", {
-    timeout: 20_000
-  })
+  // Composing streams the agent's HTML into the read-only document.
+  await expect(window.getByText(/Move session token handling/)).toBeVisible()
+
+  // Promotion swaps in the validated canonical revision — the Main step outline.
   await expect.poll(() => existsSync(planFile), { timeout: 20_000 }).toBe(true)
   await expect
     .poll(() => readFileSync(planFile, "utf8"))
     .toContain('data-stage="s_06"')
+  await expect(
+    window.getByText("Audit session middleware", { exact: true })
+  ).toBeVisible({ timeout: 20_000 })
   expect(await columnRatio(planColumn)).toBeCloseTo(resizedRatio, 2)
 
   // Reopening the split restores the same saved ratio.
@@ -116,22 +119,18 @@ test("streaming plan collaboration survives promotion and reload", async ({
     await columnRatio(window.getByTestId("plan-split-column"))
   ).toBeCloseTo(resizedRatio, 2)
 
-  // Full-width Plan Review exposes minimap navigation and the bottom-centred
-  // action surface rather than reserving a fixed toolbar row at the top.
+  // Full-width Plan Review presents the read-only outline with the
+  // bottom-centred action surface rather than a fixed toolbar row at the top.
   await splitToggle.click()
   await window
     .getByTestId("view-tab-controls")
     .getByRole("button", { name: "Plan Review", exact: true })
     .click()
-  const minimap = window.getByRole("navigation", { name: "Plan minimap" })
   const review = window.getByTestId("plan-review-container")
   const floatingActions = window.getByTestId("plan-floating-actions")
-  await expect(minimap).toBeVisible()
   await expect(floatingActions).toBeVisible()
   const statusSummary = floatingActions.getByTestId("plan-status-summary")
   await expect(statusSummary).toContainText("proposed")
-  await expect(statusSummary.getByText(planRevision, { exact: true })).toBeVisible()
-  await expect(statusSummary).toContainText("Synced")
   await expect(window.getByTestId("plan-status-summary")).toHaveCount(1)
   const reviewBox = await review.boundingBox()
   const actionsBox = await floatingActions.boundingBox()
@@ -147,22 +146,10 @@ test("streaming plan collaboration survives promotion and reload", async ({
     )
   ).toBeLessThan(24)
 
-  await minimap.getByRole("button", { name: openPrStage }).click()
-  await expect(
-    window.locator('[data-plan-stage-id="s_06"]').first()
-  ).toBeInViewport()
-
-  // Create an anchored thread and mention the active scripted child agent. The
-  // dispatch goes through the real Plan RPC, relays through its owning run, and
-  // appends the returned agent response to this same durable thread.
-  const editor = window.getByLabel("Plan document")
-  await editor
-    .getByText(
-      "Implement stages in order and keep the canonical revision recoverable.",
-      { exact: true }
-    )
-    .selectText()
-  await window.getByRole("button", { name: "Comment" }).click()
+  // Comment on a step and mention the active scripted child agent. The dispatch
+  // goes through the real Plan RPC, relays through its owning run, and appends
+  // the returned agent response to this same durable thread.
+  await window.getByRole("button", { name: "Comment on this step" }).first().click()
   const comment = window.getByLabel("Add a comment…")
   await comment.fill("Please confirm @")
   const mentions = window.getByRole("listbox", { name: "Mention an agent" })
@@ -171,7 +158,7 @@ test("streaming plan collaboration survives promotion and reload", async ({
   await mentions.getByText("Explore", { exact: true }).click()
   await window.getByRole("button", { name: "Send reply" }).click()
 
-  const marker = window.getByRole("button", { name: "user annotation, open" })
+  const marker = window.getByRole("button", { name: "Comment thread" })
   await expect(marker).toBeVisible({ timeout: 10_000 })
   await marker.click()
   const thread = window.locator("[data-plan-comment-thread]")
@@ -183,9 +170,9 @@ test("streaming plan collaboration survives promotion and reload", async ({
   ).toBeVisible({ timeout: 10_000 })
   await expect(thread.getByText("Sent").first()).toBeVisible()
   await thread.getByRole("button", { name: "Resolve" }).click()
-  await expect(
-    window.getByRole("button", { name: "user annotation, resolved" })
-  ).toBeVisible({ timeout: 10_000 })
+  await expect(thread.getByText("Thread resolved")).toBeVisible({
+    timeout: 10_000
+  })
 
   // Restart the actual Electron app against the same persisted home. Both the
   // promoted canonical plan and its resolved conversation must round-trip.
@@ -199,22 +186,12 @@ test("streaming plan collaboration survives promotion and reload", async ({
   })
   await expect(appShell(reopened.window)).toBeVisible()
   await reopened.window.getByRole("button", { name: "Plan Review" }).first().click()
-  await expect(reopened.window.getByLabel("Plan document")).toBeVisible()
   await expect(
-    reopened.window.getByRole("heading", { name: "PRD: Refactor auth flow" })
+    reopened.window.getByText("Audit session middleware", { exact: true })
   ).toBeVisible()
-  await expect(
-    reopened.window.getByText(planRevision, { exact: true })
-  ).toBeVisible()
-  await reopened.window
-    .getByText(
-      "Implement stages in order and keep the canonical revision recoverable.",
-      { exact: true }
-    )
-    .scrollIntoViewIfNeeded()
 
   const persistedMarker = reopened.window.getByRole("button", {
-    name: "user annotation, resolved"
+    name: "Comment thread"
   })
   await expect(persistedMarker).toBeVisible()
   await persistedMarker.click()
@@ -248,10 +225,9 @@ test("narrow streamed plans use full-width review chrome", async ({ launchApp })
   await expect(window.getByRole("navigation", { name: "Plan minimap" })).toHaveCount(0)
   const controls = window.getByTestId("plan-floating-actions")
   await expect(controls).toBeVisible()
-  await expect(controls.getByTestId("plan-status-summary")).toBeVisible()
-  await expect(controls.getByRole("status")).toContainText(
-    /Composing|Validating|Loading revision|Synced/
-  )
+  const statusSummary = controls.getByTestId("plan-status-summary")
+  await expect(statusSummary).toBeVisible()
+  await expect(statusSummary).toContainText(/composing|validating|proposed/)
   await expect(window.getByTestId("plan-status-summary")).toHaveCount(1)
   await expect(window.getByLabel("Resize plan")).toHaveCount(0)
 })

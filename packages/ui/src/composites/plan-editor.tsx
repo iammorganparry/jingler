@@ -2,22 +2,22 @@ import {
   parsePlanHtml,
   type PlanPrd,
   type ExecutionMode,
-  type PlanCommentMessage,
-  type PlanDocument,
-  type PlanParticipant
+  type PlanDocument
 } from "@jingler/core"
-import { AlertTriangle } from "lucide-react"
-import { useMemo, useState } from "react"
+import type { ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { parseUnifiedDiff } from "../diff/parse.js"
+import { SegmentedControl } from "../components/segmented-control.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import {
-  PlanDocEditor,
-  type PlanDocOutlineEntry,
-  type PlanDocViewport,
+  PlanDocView,
   type PlanFileEvidence
-} from "./plan-doc/plan-doc-editor.js"
+} from "./plan-doc/plan-doc-view.js"
+import { PlanFileControlsProvider } from "./plan-doc/plan-file-controls.js"
+import { PlanArchitecture } from "./plan-architecture.js"
 import { PlanFloatingActions } from "./plan-floating-actions.js"
-import { PlanMinimap, type PlanMinimapItem } from "./plan-minimap.js"
+import { PlanStepOutline } from "./plan-steps/plan-step-outline.js"
+import { PlanWorkflow } from "./plan-workflow.js"
 
 export type PlanEditorSyncState =
   | "loading"
@@ -32,47 +32,21 @@ export type PlanEditorTransientState =
   | "validating"
   | "promoting"
 
-/**
- * The plan workspace body: one Notion-style Tiptap document. The whole plan —
- * prose, stages, acceptance criteria, annotations, flow diagrams — is edited in
- * place; edits serialize to sanitized HTML and flow out through `onEdit`, which
- * the sync machine debounces and compare-and-swaps. A remote revision arriving
- * mid-edit surfaces the conflict banner (local editable vs remote read-only).
- */
-export function PlanEditor({
-  document: _document,
-  draft,
-  transientState,
-  remote,
-  state,
-  error,
-  canApprove = true,
-  onApprove,
-  onResume,
-  onRevise,
-  onSendToAgent,
-  onEdit,
-  onSave,
-  onRetry,
-  onKeepLocal,
-  onAcceptRemote,
-  onStopWorker,
-  onRetryWorker,
-  participants = [],
-  onReplyThread,
-  onRetryThread,
-  onSetThreadResolved,
-  targetStageId,
-  onTargetStageConsumed,
-  patch = "",
-  knownFiles,
-  onOpenFile
-}: {
+/** The three plan surfaces the operator can switch between. */
+export type PlanPage = "main" | "architecture" | "workflow"
+
+const PLAN_PAGES: ReadonlyArray<{ value: PlanPage; label: string }> = [
+  { value: "main", label: "Main" },
+  { value: "architecture", label: "Architecture" },
+  { value: "workflow", label: "Workflow" }
+]
+
+export interface PlanEditorProps {
   document: PlanDocument | null
-  draft: string
+  /** The sanitized plan source HTML to render read-only. */
+  source: string
   /** A read-only source that has not yet joined the canonical revision stream. */
   transientState?: PlanEditorTransientState
-  remote?: PlanDocument | null
   state: PlanEditorSyncState
   error?: string | null
   canApprove?: boolean
@@ -80,43 +54,76 @@ export function PlanEditor({
   onResume?: () => void
   onRevise?: () => void
   onSendToAgent?: () => void
-  onEdit?: (source: string) => void
-  onSave?: () => void
+  /** Reload the document after a load failure. */
   onRetry?: () => void
-  onKeepLocal?: () => void
-  onAcceptRemote?: () => void
   onStopWorker?: (agentId: string) => void
   onRetryWorker?: (agentId: string) => void
-  participants?: ReadonlyArray<PlanParticipant>
-  onReplyThread?: (
-    annotationId: string,
-    body: string,
-    mentionedParticipantIds: ReadonlyArray<string>
-  ) => Promise<void> | void
-  onRetryThread?: (
-    annotationId: string,
-    message: PlanCommentMessage
-  ) => Promise<void> | void
-  onSetThreadResolved?: (
-    annotationId: string,
-    resolved: boolean
-  ) => Promise<void> | void
+  /** One-shot stable stage id requested by the composer progress dock. */
   targetStageId?: string | null
   onTargetStageConsumed?: () => void
   patch?: string
   knownFiles?: ReadonlySet<string>
   onOpenFile?: (path: string) => void
-}) {
-  const [outline, setOutline] = useState<ReadonlyArray<PlanDocOutlineEntry>>([])
-  const [viewport, setViewport] = useState<PlanDocViewport>({
-    activeId: null,
-    start: 0,
-    size: 1
-  })
-  const [targetBlockId, setTargetBlockId] = useState<string | null>(null)
+  /**
+   * The comment overlay (built by the screen from the plan's annotations). It is
+   * rendered above the Main step outline and positions itself off the outline's
+   * scroll container, handed back through `onContainerRef`.
+   */
+  commentLayer?: ReactNode
+  /** Receives the live scroll element of the Main page so the comment layer can anchor to it. */
+  onContainerRef?: (el: HTMLElement | null) => void
+  /** Extra chrome rendered under the page switcher (currently unused seam). */
+  pageNav?: ReactNode
+}
+
+/**
+ * The plan workspace body. The agent's canonical plan is presented across three
+ * pages, switched with a segmented control:
+ *
+ * - **Main** — a step-based outline (`PlanStepOutline`): one digestible card per
+ *   stage with its changes, tasks and tests. While the plan is still streaming
+ *   (or its HTML hasn't parsed to a projection yet) this falls back to the raw
+ *   read-only document (`PlanDocView`) so composing plans still render live.
+ * - **Architecture** — prose sections + flow diagrams (`PlanArchitecture`).
+ * - **Workflow** — the dependency DAG on a react-flow canvas (`PlanWorkflow`);
+ *   selecting a node jumps to Main with that step highlighted.
+ *
+ * The operator approves / resumes / revises through `PlanFloatingActions`; they
+ * no longer edit the prose in place. Comments overlay the Main page.
+ */
+export function PlanEditor({
+  document: doc,
+  source,
+  transientState,
+  state,
+  error,
+  canApprove = true,
+  onApprove,
+  onResume,
+  onRevise,
+  onSendToAgent,
+  onRetry,
+  onStopWorker,
+  onRetryWorker,
+  targetStageId,
+  onTargetStageConsumed,
+  patch = "",
+  knownFiles,
+  onOpenFile,
+  commentLayer,
+  onContainerRef,
+  pageNav
+}: PlanEditorProps) {
+  const [page, setPage] = useState<PlanPage>("main")
+  const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
   const widthTier = useWidthTier()
-  const showMinimap = atLeast(widthTier, "wide")
-  const parsed = useMemo(() => parsePlanHtml(draft), [draft])
+  const streaming = transientState !== undefined
+  const parsed = useMemo(() => parsePlanHtml(source), [source])
+  const projection: PlanPrd | null =
+    parsed.valid ? parsed.projection : doc?.projection ?? null
+  const showOutline = !streaming && projection !== null
+
   const fileEvidence = useMemo<ReadonlyMap<string, PlanFileEvidence>>(
     () =>
       new Map(
@@ -140,139 +147,107 @@ export function PlanEditor({
       ),
     [patch]
   )
-  const projection: PlanPrd | null =
-    parsed.valid ? parsed.projection : _document?.projection ?? null
-  const minimapItems = useMemo<ReadonlyArray<PlanMinimapItem>>(
-    () =>
-      outline.map((entry) => {
-        const stageId = entry.kind === "stage" ? entry.id.slice("stage:".length) : null
-        const stage =
-          stageId === null
-            ? undefined
-            : projection?.stages.find((candidate) => candidate.id === stageId)
-        const openComments =
-          (entry.kind === "section"
-            ? 0
-            : projection?.annotations.filter(
-            (annotation) =>
-              annotation.status === "open" &&
-              (stageId === null
-                ? annotation.stageId === null
-                : annotation.stageId === stageId)
-              ).length) ?? 0
-        return {
-          ...entry,
-          openComments,
-          ...(stage?.executionStatus
-            ? { executionStatus: stage.executionStatus }
-            : {})
-        }
-      }),
-    [outline, projection]
+
+  // A stage requested by the composer progress dock lands on Main, selected.
+  // Defer until the step outline is actually showing — while a plan is still
+  // streaming there's no card to select or scroll to, so consuming the target
+  // there would silently drop the deep link. It re-fires once the outline mounts.
+  useEffect(() => {
+    if (targetStageId == null || !showOutline) return
+    setPage("main")
+    setSelectedStepId(targetStageId)
+    onTargetStageConsumed?.()
+  }, [targetStageId, showOutline, onTargetStageConsumed])
+
+  // Scroll the selected card into view when it changes (e.g. from a Workflow node click).
+  useEffect(() => {
+    if (page !== "main" || selectedStepId == null) return
+    const el = bodyRef.current?.querySelector(`[data-step-id="${selectedStepId}"]`)
+    el?.scrollIntoView({ block: "center", behavior: "smooth" })
+  }, [page, selectedStepId, showOutline])
+
+  const setContainer = useCallback(
+    (node: HTMLDivElement | null) => {
+      bodyRef.current = node
+      onContainerRef?.(node)
+    },
+    [onContainerRef]
   )
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-      {transientState === undefined && state === "conflict" && remote ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex flex-wrap items-center gap-2 border-b border-red/30 bg-red/5 px-4 py-3">
-            <AlertTriangle className="size-4 text-red" />
-            <p className="min-w-0 flex-1 text-[11.5px] text-text-body">
-              Revision {remote.revision} arrived while this draft had local edits. Both versions are preserved.
-            </p>
-            <span className="text-[10px] text-muted-foreground">
-              Choose a resolution from the floating actions below.
-            </span>
-          </div>
-          <div className="grid min-h-0 flex-1 divide-x divide-line lg:grid-cols-2">
-            <section className="flex min-h-0 flex-col overflow-auto">
-              <p className="sticky top-0 z-10 border-b border-line bg-panel px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-yellow">
-                Local draft
-              </p>
-              <PlanDocEditor
-                value={draft}
-                onChange={onEdit}
-                targetStageId={targetStageId}
-                onTargetStageConsumed={onTargetStageConsumed}
-                workerControls={{
-                  stop: onStopWorker,
-                  retry: onRetryWorker
-                }}
-                commentControls={{
-                  participants,
-                  disabled: true,
-                  onReply: onReplyThread,
-                  onRetry: onRetryThread,
-                  onSetResolved: onSetThreadResolved
-                }}
-              />
-            </section>
-            <section className="flex min-h-0 flex-col overflow-auto">
-              <p className="sticky top-0 z-10 border-b border-line bg-panel px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-blue">
-                Remote revision {remote.revision}
-              </p>
-              <PlanDocEditor value={remote.source} editable={false} />
-            </section>
-          </div>
+      {transientState === undefined && state === "error" && error && (
+        <div role="alert" className="flex-none border-b border-red/30 bg-red/5 px-4 py-2 text-[11px] text-red">
+          {error}
         </div>
-      ) : (
-        <>
-          {transientState === undefined && state === "error" && error && (
-            <div role="alert" className="flex-none border-b border-red/30 bg-red/5 px-4 py-2 text-[11px] text-red">
-              {error}
-            </div>
-          )}
-          <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-editor">
-            <div className="min-h-0 min-w-0 flex-1 pb-14">
-              <PlanDocEditor
+      )}
+      <div className="flex flex-none items-center gap-2 border-b border-hairline bg-panel/40 px-3 py-2">
+        <SegmentedControl<PlanPage> items={PLAN_PAGES} value={page} onChange={setPage} />
+      </div>
+      {pageNav}
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-editor">
+        {page === "main" && (
+          <div ref={setContainer} className="relative min-h-0 min-w-0 flex-1 overflow-auto pb-14">
+            {showOutline ? (
+              <PlanFileControlsProvider
+                evidence={fileEvidence}
+                knownFiles={knownFiles}
+                open={onOpenFile}
+              >
+                <div className="mx-auto w-full max-w-[760px]">
+                  <PlanStepOutline
+                    prd={projection}
+                    selectedStepId={selectedStepId}
+                    onSelectStep={setSelectedStepId}
+                  />
+                </div>
+              </PlanFileControlsProvider>
+            ) : (
+              <PlanDocView
                 className="mx-auto h-full w-full max-w-[760px]"
-                value={draft}
-                editable={transientState === undefined}
-                onChange={transientState === undefined ? onEdit : undefined}
-                targetStageId={targetStageId}
-                onTargetStageConsumed={onTargetStageConsumed}
-                targetBlockId={targetBlockId}
-                onTargetBlockConsumed={() => setTargetBlockId(null)}
-                onOutlineChange={setOutline}
-                onViewportChange={setViewport}
+                source={source}
                 fileEvidence={fileEvidence}
                 knownFiles={knownFiles}
                 onOpenFile={onOpenFile}
                 workerControls={
-                  transientState === undefined
-                    ? {
-                        stop: onStopWorker,
-                        retry: onRetryWorker
-                      }
-                    : undefined
+                  streaming ? undefined : { stop: onStopWorker, retry: onRetryWorker }
                 }
-                commentControls={
-                  transientState === undefined
-                    ? {
-                        participants,
-                        disabled: state !== "clean",
-                        onReply: onReplyThread,
-                        onRetry: onRetryThread,
-                        onSetResolved: onSetThreadResolved
-                      }
-                    : undefined
-                }
-              />
-            </div>
-            {showMinimap && (
-              <PlanMinimap
-                items={minimapItems}
-                activeId={viewport.activeId}
-                viewport={viewport}
-                onSelect={setTargetBlockId}
               />
             )}
+            {!streaming && commentLayer}
           </div>
-        </>
-      )}
+        )}
+        {page === "architecture" && (
+          <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-14">
+            {projection ? (
+              <PlanArchitecture prd={projection} className="mx-auto w-full max-w-[760px]" />
+            ) : (
+              <EmptyPage>No architecture notes yet.</EmptyPage>
+            )}
+          </div>
+        )}
+        {page === "workflow" && (
+          <div className="min-h-0 min-w-0 flex-1">
+            {projection ? (
+              <PlanWorkflow
+                prd={projection}
+                selectedStageId={selectedStepId}
+                onSelectStage={(stageId) => {
+                  setSelectedStepId(stageId)
+                  setPage("main")
+                }}
+                onStopWorker={onStopWorker}
+                onRetryWorker={onRetryWorker}
+              />
+            ) : (
+              <EmptyPage>No workflow yet.</EmptyPage>
+            )}
+          </div>
+        )}
+      </div>
       <PlanFloatingActions
-        status={_document?.status}
-        revision={_document?.revision}
+        status={doc?.status}
+        revision={doc?.revision}
         syncState={state}
         transientState={transientState}
         canApprove={canApprove}
@@ -281,11 +256,16 @@ export function PlanEditor({
         onResume={onResume}
         onRevise={onRevise}
         onSendToAgent={onSendToAgent}
-        onSave={onSave}
         onRetry={onRetry}
-        onKeepLocal={onKeepLocal}
-        onAcceptRemote={onAcceptRemote}
       />
+    </div>
+  )
+}
+
+function EmptyPage({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center px-4 text-center text-[13px] text-dim">
+      {children}
     </div>
   )
 }

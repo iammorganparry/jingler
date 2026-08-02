@@ -1,6 +1,7 @@
 import type { PrFileChange } from "@jingler/core"
-import { Check, MessageSquare } from "lucide-react"
+import { MessageSquare } from "lucide-react"
 import { cn } from "../lib/cn.js"
+import { Checkbox } from "../components/checkbox.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { FileIcon } from "../components/file-icon.js"
 
@@ -65,19 +66,18 @@ export function ReviewFileRow({
           </span>
         )}
       </button>
-      <button
-        type="button"
-        aria-label={file.viewed ? "Mark not viewed" : "Mark viewed"}
-        onClick={() => onToggleViewed(!file.viewed)}
-        className={cn(
-          "flex size-10 flex-none items-center justify-center rounded-md border transition-[border-color,color,scale] duration-150 ease-out active:scale-[0.96]",
-          file.viewed
-            ? "border-green/60 text-green"
-            : "border-line text-transparent hover:border-line-strong"
-        )}
-      >
-        {file.viewed && <Check size={11} />}
-      </button>
+      {/* The box stays at the shadcn default size (16px), but an invisible
+          ::after overlay extends the actual tap target to ~32px so the small
+          visual doesn't shrink the hit area on this min-h-10 row. */}
+      <div className="flex flex-none items-center self-stretch pl-1.5 pr-2.5">
+        <Checkbox
+          tone="success"
+          checked={file.viewed}
+          onCheckedChange={(next) => onToggleViewed(next)}
+          aria-label={file.viewed ? "Mark not viewed" : "Mark viewed"}
+          className="relative after:absolute after:-inset-2 after:content-['']"
+        />
+      </div>
     </div>
   )
 }

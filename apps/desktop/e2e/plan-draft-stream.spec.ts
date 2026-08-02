@@ -9,7 +9,9 @@ import {
 } from "./fixtures.js"
 
 const composerPlaceholder = /Message .+…/
-const transientStatus = /Composing|Validating/
+// The read-only bar shows the live phase as a status pill (lower-case) rather
+// than the removed sync indicator.
+const transientStatus = /composing|validating/
 
 const session = (
   id: string
@@ -56,29 +58,23 @@ test("a streamed plan opens beside chat, stays read-only, and promotes in place"
   await expect(window.getByTestId("composer")).toBeVisible()
   await expect(window.getByLabel("Resize plan")).toBeVisible()
   await expect(window.getByLabel("Plan document")).toBeVisible()
-  await expect(window.getByRole("status")).toContainText(transientStatus)
+  await expect(window.getByTestId("plan-status-summary")).toContainText(
+    transientStatus
+  )
   expect(existsSync(planFile)).toBe(false)
   await expect(window.getByLabel("Plan approval options")).toHaveCount(0)
 
-  const editor = window.getByLabel("Plan document")
-  await editor.evaluate((element) => {
-    element.setAttribute("data-stream-editor", "same-instance")
-  })
-  await expect(
-    window.getByText("Audit session middleware", { exact: true })
-  ).toBeVisible()
+  // Composing streams the agent's HTML into the read-only document.
+  await expect(window.getByText(/Move session token handling/)).toBeVisible()
 
-  // Promotion swaps the validated canonical source into that same Tiptap
-  // instance: no blank frame/remount, then the revision becomes approvable.
-  await expect(window.getByRole("status")).toContainText("Synced", {
-    timeout: 20_000
-  })
+  // Promotion swaps in the validated canonical revision: the Main step outline
+  // takes over (with the stage titles) and the revision becomes approvable.
   await expect
     .poll(() => existsSync(planFile), { timeout: 20_000 })
     .toBe(true)
   await expect(
-    window.locator('[data-stream-editor="same-instance"]')
-  ).toBeVisible()
+    window.getByText("Audit session middleware", { exact: true })
+  ).toBeVisible({ timeout: 20_000 })
   await expect(window.getByTestId("plan-floating-actions")).toBeVisible()
 })
 
@@ -116,7 +112,7 @@ test("later plan drafts respect a split the operator closed", async ({
   await nextComposer.fill("[[plan]] [[stream-plan]] revise auth")
   await nextComposer.press("Enter")
   await expect(
-    window.getByRole("group", { name: "Plan approval options" })
+    window.getByRole("toolbar", { name: "Plan approval options" })
   ).toBeVisible({ timeout: 20_000 })
   await expect(window.getByTestId("plan-split-column")).toHaveCount(0)
 
@@ -159,7 +155,7 @@ test("a closed plan split stays closed after an app restart", async ({
   await nextComposer.press("Enter")
 
   await expect(
-    reopened.window.getByRole("group", { name: "Plan approval options" })
+    reopened.window.getByRole("toolbar", { name: "Plan approval options" })
   ).toBeVisible({ timeout: 20_000 })
   await expect(reopened.window.getByTestId("plan-split-column")).toHaveCount(0)
 })

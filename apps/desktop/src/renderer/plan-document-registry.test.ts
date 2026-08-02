@@ -1,6 +1,6 @@
 import type { PlanDocument } from "@jingler/core"
 import { waitFor } from "xstate"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import {
   flushPlanDocumentActor,
   getPlanDocumentActor,
@@ -20,78 +20,38 @@ const document = (sessionId: string, revision = 1, label = "Initial"): PlanDocum
   updatedBy: revision === 1 ? "agent" : "user"
 })
 
-const deferred = <A>() => {
-  let resolve!: (value: A) => void
-  const promise = new Promise<A>((yes) => {
-    resolve = yes
-  })
-  return { promise, resolve }
-}
-
 const sessions = new Set<string>()
 afterEach(() => {
   for (const sessionId of sessions) stopPlanDocument(sessionId)
   sessions.clear()
-  vi.useRealTimers()
 })
 
 describe("plan document registry", () => {
-  it("keeps a pending debounced save alive across view remounts", async () => {
-    vi.useFakeTimers()
+  it("keeps the loaded document alive across view remounts", async () => {
     const sessionId = "registry-remount"
     sessions.add(sessionId)
-    const save = vi.fn(async ({ source: nextSource }: { source: string }) => ({
-      ...document(sessionId, 2, "Edited"),
-      source: nextSource
-    }))
     const input = {
       sessionId,
-      load: async () => document(sessionId),
-      save
+      load: async () => document(sessionId)
     }
     const firstView = getPlanDocumentActor(sessionId, input)
-    await vi.advanceTimersByTimeAsync(0)
     await waitFor(firstView, (snapshot) => snapshot.matches("clean"))
 
-    firstView.send({ type: "EDIT", source: source("Edited") })
     const remountedView = getPlanDocumentActor(sessionId, input)
-
     expect(remountedView).toBe(firstView)
-    expect(remountedView.getSnapshot().context.draft).toBe(source("Edited"))
-    await vi.advanceTimersByTimeAsync(1_000)
-    expect(save).toHaveBeenCalledOnce()
+    expect(remountedView.getSnapshot().context.document?.revision).toBe(1)
   })
 
-  it("flushes the newest draft typed while an earlier save is in flight", async () => {
+  it("resolves a flush immediately for the read-only plan", async () => {
     const sessionId = "registry-flush"
     sessions.add(sessionId)
-    const firstSave = deferred<PlanDocument>()
-    let calls = 0
-    const save = vi.fn(async ({ source: nextSource }: { source: string }) => {
-      calls += 1
-      return calls === 1
-        ? firstSave.promise
-        : { ...document(sessionId, 3, "Second"), source: nextSource }
-    })
     const actor = getPlanDocumentActor(sessionId, {
       sessionId,
-      load: async () => document(sessionId),
-      save
+      load: async () => document(sessionId)
     })
     await waitFor(actor, (snapshot) => snapshot.matches("clean"))
 
-    actor.send({ type: "EDIT", source: source("First") })
-    const flushed = flushPlanDocumentActor(actor)
-    await waitFor(actor, (snapshot) => snapshot.matches("saving"))
-    actor.send({ type: "EDIT", source: source("Second") })
-    firstSave.resolve(document(sessionId, 2, "First"))
-    await flushed
-
-    expect(save).toHaveBeenCalledTimes(2)
-    expect(save).toHaveBeenLastCalledWith({
-      document: document(sessionId, 2, "First"),
-      source: source("Second")
-    })
+    await expect(flushPlanDocumentActor(actor)).resolves.toBeUndefined()
     expect(actor.getSnapshot().matches("clean")).toBe(true)
   })
 })

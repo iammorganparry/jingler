@@ -1,17 +1,17 @@
-import { createActor, type ActorRefFrom, type SnapshotFrom } from "xstate"
+import { createActor, type ActorRefFrom } from "xstate"
 import {
   planDocumentMachine,
   type PlanDocumentInput
 } from "./plan-document-machine.js"
 
 export type PlanDocumentActor = ActorRefFrom<typeof planDocumentMachine>
-type PlanDocumentSnapshot = SnapshotFrom<typeof planDocumentMachine>
 
 const actors = new Map<string, PlanDocumentActor>()
 
 /**
- * Plan editors are session resources, not view resources. Keeping their actors
- * here lets a pending debounce or save survive tab changes and pane remounts.
+ * Plan documents are session resources, not view resources. Keeping their actors
+ * here lets the loaded document and its `Plan.watch` subscription survive tab
+ * changes and pane remounts.
  */
 export const getPlanDocumentActor = (
   sessionId: string,
@@ -25,67 +25,20 @@ export const getPlanDocumentActor = (
   return actor
 }
 
-const dirty = (snapshot: PlanDocumentSnapshot): boolean =>
-  snapshot.context.document !== null &&
-  snapshot.context.draft !== snapshot.context.document.source
+/**
+ * The plan is read-only: there is no local draft to persist, so a flush is a
+ * no-op. The handshake is retained so the main-process close contract still gets
+ * its acknowledgement, and so callers do not have to special-case plans.
+ */
+export const flushPlanDocumentActor = (_actor: PlanDocumentActor): Promise<void> =>
+  Promise.resolve()
 
-/** Persist the newest draft, including one typed while an earlier save is in flight. */
-export const flushPlanDocumentActor = (
-  actor: PlanDocumentActor
-): Promise<void> =>
-  new Promise((resolve, reject) => {
-    let settled = false
-    let retried = false
-    let subscription: { unsubscribe: () => void } | null = null
-    const finish = (error?: unknown) => {
-      if (settled) return
-      settled = true
-      subscription?.unsubscribe()
-      if (error === undefined) resolve()
-      else reject(error)
-    }
-    const inspect = (snapshot: PlanDocumentSnapshot) => {
-      if (snapshot.matches("clean") && !dirty(snapshot)) {
-        finish()
-        return
-      }
-      if (snapshot.matches("editing")) {
-        actor.send({ type: "SAVE_NOW" })
-        return
-      }
-      if (snapshot.matches("error")) {
-        if (!retried && dirty(snapshot)) {
-          retried = true
-          actor.send({ type: "RETRY" })
-          return
-        }
-        finish(new Error(snapshot.context.error ?? "Plan draft could not be saved."))
-        return
-      }
-      if (snapshot.matches("conflict")) {
-        finish(new Error("Plan draft has an unresolved remote conflict."))
-      }
-    }
-    subscription = actor.subscribe(inspect)
-    inspect(actor.getSnapshot())
-  })
+// A flush is a no-op (the plan is read-only), so both wrappers just resolve. They
+// exist so the close handshake and per-session callers don't special-case plans;
+// if a real draft ever needs persisting, thread the failure handling in here.
+export const flushPlanDocument = (_sessionId: string): Promise<void> => Promise.resolve()
 
-export const flushPlanDocument = async (sessionId: string): Promise<void> => {
-  const actor = actors.get(sessionId)
-  if (actor !== undefined) await flushPlanDocumentActor(actor)
-}
-
-export const flushAllPlanDocuments = async (): Promise<void> => {
-  const results = await Promise.allSettled(
-    [...actors.values()].map(flushPlanDocumentActor)
-  )
-  const failures = results.flatMap((result) =>
-    result.status === "rejected" ? [result.reason] : []
-  )
-  if (failures.length > 0) {
-    throw new AggregateError(failures, "One or more plan drafts could not be saved.")
-  }
-}
+export const flushAllPlanDocuments = (): Promise<void> => Promise.resolve()
 
 /** Stop a session actor only after its session has been permanently removed. */
 export const stopPlanDocument = (sessionId: string): void => {

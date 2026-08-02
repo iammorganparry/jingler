@@ -14,8 +14,12 @@ export interface FileChipProps {
 }
 
 /**
- * A dense file link with Material file identity and live worktree diff evidence.
- * It fills its container by default so long plan paths get one stable hit target.
+ * A thin, inline file link with Material file identity and diff evidence.
+ *
+ * It hugs its content (path + diff), left-aligned, so a run of them reads as a
+ * row of chips rather than a stack of full-width buttons. The diff comes from
+ * live worktree evidence while there is uncommitted work and from the plan's
+ * recorded counts once that work is committed — so `+/−` stays visible either way.
  */
 export function FileChip({
   path,
@@ -29,21 +33,19 @@ export function FileChip({
   const label = `Open ${path}${changed ? ` (+${added} −${removed})` : ""}`
   const content = (
     <>
-      <FileIcon path={path} size={16} />
-      <span className="min-w-0 truncate text-center">
-        {children ?? path}
-      </span>
+      <FileIcon path={path} size={13} />
+      <span className="min-w-0 truncate">{children ?? path}</span>
       {changed && (
         <DiffStat
           added={added}
           removed={removed}
-          className="flex-none text-[10.5px]"
+          className="ml-0.5 flex-none text-[10px]"
         />
       )}
     </>
   )
   const classes = cn(
-    "inline-flex min-h-8 max-w-full min-w-0 items-center justify-center gap-1.5 rounded-md bg-surface px-2.5 font-mono text-[10.5px] text-text-bright shadow-[inset_0_0_0_1px_var(--sb-line)]",
+    "inline-flex h-[22px] max-w-full min-w-0 items-center gap-1.5 rounded-[5px] border border-line/70 bg-surface/40 px-1.5 font-mono text-[10.5px] leading-none text-text-bright align-middle",
     className
   )
 
@@ -56,7 +58,7 @@ export function FileChip({
       onClick={() => onOpen(path)}
       className={cn(
         classes,
-        "outline-none transition-[background-color,box-shadow,scale] duration-150 ease-out hover:bg-line/40 hover:shadow-[inset_0_0_0_1px_var(--sb-line-strong)] focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]"
+        "outline-none transition-[background-color,border-color,scale] duration-150 ease-out hover:border-line-strong hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97]"
       )}
     >
       {content}

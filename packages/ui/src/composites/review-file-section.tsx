@@ -1,5 +1,5 @@
 import type { AdversarialReview, PrFileChange, ReviewFinding } from "@jingler/core"
-import { EyeOff, Sparkles, Undo2 } from "lucide-react"
+import { BrushCleaning, EyeOff, Undo2 } from "lucide-react"
 import { Button } from "../components/button.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { FileIcon } from "../components/file-icon.js"
@@ -72,13 +72,13 @@ export function ReviewFileSection({
         {onDeslopFile && (
           <Button
             variant="secondary"
-            size="sm"
-            className={cn("min-h-10 gap-1.5", compactActions && "size-10 p-0")}
+            size="icon"
+            className="size-10"
             title="Deslop — hand this file to the agent for a DRY / cleanup pass"
             onClick={() => onDeslopFile(file.path)}
           >
-            <Sparkles size={13} />
-            <span className={cn(compactActions && "sr-only")}>Deslop</span>
+            <BrushCleaning size={15} />
+            <span className="sr-only">Deslop</span>
           </Button>
         )}
         {local && onRevertFile && (
