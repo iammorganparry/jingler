@@ -72,3 +72,28 @@ export function flattenFiles(files: ReadonlyArray<DiffFile>): DiffRow[] {
 export function parseUnifiedDiff(patch: string): DiffRow[] {
   return flattenFiles(parseDiff(patch))
 }
+
+const comparablePath = (path: string): string =>
+  path.replaceAll("\\", "/").replace(/^\.\//, "")
+
+/** Keep one file header and its hunks/lines from an already-flattened patch. */
+export function diffRowsForPath(
+  rows: ReadonlyArray<DiffRow>,
+  path: string
+): ReadonlyArray<DiffRow> {
+  const wanted = comparablePath(path)
+  const start = rows.findIndex(
+    (row) => row.kind === "file" && comparablePath(row.path) === wanted
+  )
+  if (start < 0) return []
+  const next = rows.findIndex((row, index) => index > start && row.kind === "file")
+  return rows.slice(start, next < 0 ? undefined : next)
+}
+
+/** Parse a unified patch and return only the rows belonging to `path`. */
+export function parseUnifiedDiffForPath(
+  patch: string,
+  path: string
+): ReadonlyArray<DiffRow> {
+  return diffRowsForPath(parseUnifiedDiff(patch), path)
+}

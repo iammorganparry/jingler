@@ -885,7 +885,33 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               session.activeChatId === chatId
                 ? chats[Math.min(index, chats.length - 1)]!.id
                 : session.activeChatId
-            return { ...session, chats, activeChatId, updatedAt: now }
+            return {
+              ...session,
+              chats,
+              closedChats: [
+                closed!,
+                ...(session.closedChats ?? []).filter((chat) => chat.id !== chatId)
+              ],
+              activeChatId,
+              updatedAt: now
+            }
+          })
+          return yield* get(sessionId)
+        })
+
+      const reopenChat = (sessionId: string, chatId: string) =>
+        Effect.gen(function* () {
+          const now = new Date().toISOString()
+          yield* update(sessionId, (session) => {
+            const reopened = (session.closedChats ?? []).find((chat) => chat.id === chatId)
+            if (reopened === undefined) return session
+            return {
+              ...session,
+              chats: [...session.chats, reopened],
+              closedChats: (session.closedChats ?? []).filter((chat) => chat.id !== chatId),
+              activeChatId: reopened.id,
+              updatedAt: now
+            }
           })
           return yield* get(sessionId)
         })
@@ -1337,6 +1363,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         selectChat,
         renameChat,
         closeChat,
+        reopenChat,
         setMode,
         setOrchestratorEnabled,
         setModel,

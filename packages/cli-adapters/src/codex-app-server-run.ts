@@ -84,18 +84,63 @@ export const mapCodexAppServerReasoning = (
   return effort
 }
 
+/** Codex's `approval_policy` values (`~/.codex/config.toml`). */
+type CodexApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never"
+
 const policy = (
   mode: PermissionMode,
   readOnly: boolean,
   unattended: boolean
-): { readonly sandbox: string; readonly approvalPolicy: string } =>
+): {
+  readonly sandbox: "read-only" | "workspace-write" | "danger-full-access"
+  readonly approvalPolicy: CodexApprovalPolicy
+} =>
+  // `auto` (full autonomy) is `danger-full-access` with `never` — no sandbox, no
+  // asks, keychain reachable, so `gh`/`git` just work as they do in a direct CLI.
+  // The sandboxed modes use `on-request`, NOT `never`: with `never` Codex silently
+  // runs inside the sandbox and a command needing escalation (network, the macOS
+  // Keychain, anything outside cwd — e.g. `gh`) just fails. `on-request` makes
+  // Codex ASK to run it escalated; `handleServerRequest` relays that ask to the
+  // operator through the shared approval gate, and on approval Codex runs it
+  // outside the sandbox. That is the forwarding path — no token plumbing needed.
   readOnly || mode === "plan"
     ? { sandbox: "read-only", approvalPolicy: "never" }
     : mode === "auto" && !unattended
       ? { sandbox: "danger-full-access", approvalPolicy: "never" }
       : mode === "ask"
-        ? { sandbox: "read-only", approvalPolicy: "never" }
-        : { sandbox: "workspace-write", approvalPolicy: "never" }
+        ? { sandbox: "read-only", approvalPolicy: "on-request" }
+        : { sandbox: "workspace-write", approvalPolicy: "on-request" }
+
+const turnPolicy = (
+  active: ReturnType<typeof policy>,
+  cwd: string
+): {
+  readonly approvalPolicy: CodexApprovalPolicy
+  readonly sandboxPolicy:
+    | { readonly type: "dangerFullAccess" }
+    | { readonly type: "readOnly"; readonly networkAccess: false }
+    | {
+        readonly type: "workspaceWrite"
+        readonly writableRoots: readonly [string]
+        readonly networkAccess: false
+        readonly excludeTmpdirEnvVar: false
+        readonly excludeSlashTmp: false
+      }
+} => ({
+  approvalPolicy: active.approvalPolicy,
+  sandboxPolicy:
+    active.sandbox === "danger-full-access"
+      ? { type: "dangerFullAccess" }
+      : active.sandbox === "read-only"
+        ? { type: "readOnly", networkAccess: false }
+        : {
+            type: "workspaceWrite",
+            writableRoots: [cwd],
+            networkAccess: false,
+            excludeTmpdirEnvVar: false,
+            excludeSlashTmp: false
+          }
+})
 
 const threadIdFromResponse = (response: unknown): string | null => {
   if (!isRecord(response)) return null
@@ -567,6 +612,12 @@ export const runCodexAppServer = (
               threadId: activeThreadId,
               input: turnInput,
               cwd,
+              // Thread resume can rejoin an already-running Codex thread whose
+              // sticky settings predate the current Jingler mode. Pin the
+              // effective policy on every turn so Auto always restores host Git
+              // metadata and network access, including the first execution turn
+              // immediately after plan approval.
+              ...turnPolicy(activePolicy, cwd),
               ...(spec.model ? { model: spec.model } : {}),
               ...(mapCodexAppServerReasoning(spec.reasoningEffort, spec.thinkingEnabled)
                 ? {

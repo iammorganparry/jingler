@@ -928,24 +928,24 @@ export const routePlanAnnotationHtml = (
 /** The blank plan a user starts from, and the shape the agent is shown. */
 export const DEFAULT_PLAN_TEMPLATE_HTML = `<h1>PRD: [short outcome]</h1>
 <h2>Context</h2>
-<p>[Why this work matters and who needs it.]</p>
+<p>[One sentence: problem, user, and desired outcome.]</p>
 <h2>Goals</h2>
-<ul><li>[Outcome this plan must achieve.]</li></ul>
+<ul><li>[Observable outcome.]</li></ul>
 <h2>Non-goals</h2>
-<ul><li>[Boundary that keeps this plan focused.]</li></ul>
+<ul><li>[Explicit scope boundary.]</li></ul>
 <h2>Technical design</h2>
-<p>[Describe the architecture and data flow.]</p>
+<p>[Only the decisions and data flow needed to execute the stages.]</p>
 <section data-stage="01" data-title="[First independently verifiable stage]" data-depends-on="" data-complexity="medium">
 <h3>Intent</h3>
-<p>[Why this stage exists.]</p>
+<p>[One concrete, reviewable deliverable.]</p>
 <h3>Approach</h3>
-<ol><li>[Bounded implementation action.]</li></ol>
+<ol><li>[Deterministic implementation action and output.]</li><li>[Exact verification that leaves the stage reviewable.]</li></ol>
 <ul data-files><li>[Repository-relative file this stage may edit, or leave this list empty.]</li></ul>
-<div data-acceptance="01.1" data-status="pending">[Observable assertion that proves this stage succeeded.]</div>
+<div data-acceptance="01.1" data-status="pending">[Repeatable observable assertion that proves the deliverable.]</div>
 </section>
 <h2>Testing</h2>
-<p>[Unit, integration, and end-to-end coverage.]</p>
+<p>[Exact commands or checks not already named by a stage.]</p>
 <h2>Risks</h2>
-<ul><li>[Risk and mitigation.]</li></ul>
+<ul><li>[Only a material risk and its mitigation.]</li></ul>
 <h2>Rollout</h2>
-<p>[How the change is introduced and, if necessary, reversed.]</p>`
+<p>[Release and rollback action, or "No special rollout."]</p>`

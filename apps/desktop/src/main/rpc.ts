@@ -63,6 +63,7 @@ import {
   ConfigError,
   ConnectorError,
   activePlanParticipants,
+  defaultModeFor,
   GhError,
   GitError,
   parsePlanThreadReply,
@@ -641,7 +642,11 @@ export const sessionCreationDefaults = (
     cli,
     options: {
       chatRole: orchestrator === null ? "direct" as const : "orchestrator" as const,
-      defaultMode: orchestrator ? "plan" as const : provider?.defaultMode,
+      // Jingler decides per turn whether bounded work is executed directly or
+      // delegated behind the plan gate. Persisting the chat itself in read-only
+      // plan mode made the direct branch pause on its first edit, so fresh
+      // orchestrators start with their full tool authority.
+      defaultMode: orchestrator ? "auto" as const : defaultModeFor(cli, provider?.defaultMode),
       defaultModel: orchestrator?.preference.model ?? provider?.defaultModel,
       defaultReasoning: providerReasoning(provider)
     }
@@ -2829,7 +2834,8 @@ const HandlersLayer = JinglerRpcs.toLayer({
       )
       const runner = yield* AgentRunner
       const orchestration = yield* OrchestrationService
-      for (const chat of session?.chats ?? []) {
+      const chats = [...(session?.chats ?? []), ...(session?.closedChats ?? [])]
+      for (const chat of chats) {
         // Deletion is stronger than an ordinary Stop click: do not remove the
         // transcript/state until the harness finalizers have actually finished.
         yield* runner.stop(sessionId, chat.id, true)
@@ -2837,7 +2843,7 @@ const HandlersLayer = JinglerRpcs.toLayer({
       yield* orchestration.stopSession(sessionId)
       yield* BackgroundTaskStore.clear(sessionId)
       yield* SessionStore.remove(sessionId)
-      for (const chat of session?.chats ?? []) {
+      for (const chat of chats) {
         yield* TranscriptStore.remove(chat.id)
         yield* ContextManager.forget(chat.id)
       }
@@ -2889,7 +2895,6 @@ const HandlersLayer = JinglerRpcs.toLayer({
       yield* BackgroundTaskStore.clearChat(sessionId, chatId)
       yield* runner.forgetChat(chatId)
       const updated = yield* SessionStore.closeChat(sessionId, chatId)
-      yield* TranscriptStore.remove(chatId)
       yield* ContextManager.forget(chatId)
       if (session.worktreePath) {
         yield* PlanStore.rehomeArtifact(
@@ -2901,6 +2906,12 @@ const HandlersLayer = JinglerRpcs.toLayer({
       }
       return updated
     }).pipe(
+      Effect.catchTag("SessionNotFoundError", (cause) =>
+        Effect.fail(new GitError({ message: "Session not found", cause }))
+      )
+    ),
+  "Sessions.reopenChat": ({ sessionId, chatId }) =>
+    SessionStore.reopenChat(sessionId, chatId).pipe(
       Effect.catchTag("SessionNotFoundError", (cause) =>
         Effect.fail(new GitError({ message: "Session not found", cause }))
       )
@@ -3111,7 +3122,9 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Agent.retryWorker": ({ sessionId, planId, agentId }) =>
     executeOrchestration(sessionId, planId, [agentId]).pipe(Effect.asVoid),
   "Agent.setHarness": ({ sessionId, chatId, cli, model }) =>
-    SessionStore.setHarness(sessionId, chatId, cli, model).pipe(Effect.ignore),
+    SessionStore.setHarness(sessionId, chatId, cli, model).pipe(
+      Effect.andThen(SessionStore.get(sessionId))
+    ),
   "Agent.stop": ({ sessionId, chatId }) =>
     Effect.flatMap(AgentRunner, (runner) => runner.stop(sessionId, chatId)),
   // Not `AgentRunner.stop` scoped smaller: that halts the whole turn. A

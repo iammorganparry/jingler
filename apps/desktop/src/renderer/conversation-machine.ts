@@ -38,6 +38,7 @@ import {
   applyStreamEvent,
   applySubagentEvent,
   assistantMessage,
+  defaultModeFor,
   defaultModel,
   nextReviewPhase,
   planDocumentToPlan,
@@ -66,6 +67,40 @@ import { publishSessionUpdate } from "./session-updates.js"
 
 const isExecutionMode = (mode: PermissionMode): mode is ExecutionMode =>
   mode !== "plan"
+
+/**
+ * Mirror `SessionStore.setHarness` while its RPC is in flight.
+ *
+ * The conversation actor outlives the mounted chat. If its local session stays
+ * on the old harness, revisiting the tab sends that stale record back through
+ * `SESSION_UPDATED` and snaps the model chip to the old global default. Keeping
+ * the complete session mirror current closes that window; the RPC response is
+ * still published as the authoritative record once disk persistence completes.
+ */
+const withHarness = (
+  session: Session,
+  chatId: string,
+  cli: CliKind,
+  model: string,
+  switched: boolean
+): Session => ({
+  ...session,
+  cli,
+  model,
+  ...(switched ? { resumeId: undefined } : {}),
+  chats: (session.chats ?? []).map((chat) =>
+    switched
+      ? {
+          ...chat,
+          model: chat.id === chatId ? model : undefined,
+          resumeId: undefined,
+          mode: chat.mode === "plan" && !supportsPlanMode(cli) ? "ask" : chat.mode
+        }
+      : chat.id === chatId
+        ? { ...chat, model }
+        : chat
+  )
+})
 
 /**
  * Tools that can change which worktree paths exist even when their provider
@@ -550,6 +585,44 @@ const gateStatusFor = (decision: GateDecision) =>
 
 const stamp = () => Date.now().toString(36)
 
+type PlanFeedback = {
+  readonly plan: Plan
+  readonly text: string
+  readonly queuedId: string | null
+}
+
+/**
+ * Turn an ordinary composer send into feedback while a proposed plan is parked.
+ *
+ * A parked plan still owns the live run, but it has no Codex steer handle: the
+ * old generic queue path therefore reported `deferred` forever when the operator
+ * clicked Send now. Plan feedback already has a durable route — a global plan
+ * comment followed by `revisePlan` — so use that instead of pretending the held
+ * run is an ordinary streaming turn.
+ */
+const planFeedbackFor = (
+  context: ConversationContext,
+  event: ConversationEvent
+): PlanFeedback | null => {
+  const plan = context.sharedPlan
+  if (plan === null || plan.status !== "proposed") return null
+
+  if (event.type === "SEND") {
+    const text = event.text.trim()
+    // Plan annotations cannot carry images. Preserve attachment-bearing sends in
+    // the ordinary queue instead of silently discarding their visual context.
+    if (text.length === 0 || (event.images?.length ?? 0) > 0) return null
+    return { plan, text, queuedId: null }
+  }
+
+  if (event.type !== "SEND_NOW" || context.steeringId !== null) return null
+  const queued = context.queued.find((item) => item.id === event.id)
+  if (queued === undefined || queued.text.trim().length === 0 || queued.images.length > 0) {
+    return null
+  }
+  return { plan, text: queued.text.trim(), queuedId: queued.id }
+}
+
 /**
  * Hand a queued message to the live turn, and report back as `STEER_RESULT`.
  *
@@ -646,6 +719,8 @@ export const conversationMachine = setup({
       if (!supportsSteer(context.cli)) return false
       return context.resumePlanId === null
     },
+    canRoutePlanFeedback: ({ context, event }) =>
+      planFeedbackFor(context, event) !== null,
     /** Older turns remain, and no page is already in flight. */
     canLoadOlder: ({ context }) =>
       context.hasMoreHistory &&
@@ -767,6 +842,52 @@ export const conversationMachine = setup({
       const rest = context.queued.filter((queued) => queued.id !== event.id)
       beginSteer(context, self, picked, false)
       return { queued: [picked, ...rest], steeringId: picked.id }
+    }),
+    routePlanFeedback: assign(({ context, event }) => {
+      const feedback = planFeedbackFor(context, event)
+      if (feedback === null) return {}
+
+      void rpc
+        .agentCommentPlanStep(
+          context.session.id,
+          feedback.plan.id,
+          "",
+          feedback.text
+        )
+        .then(() => rpc.agentRevisePlan(context.session.id, feedback.plan.id))
+        .catch(() => {})
+
+      const comment: PlanComment = {
+        id: `pc_local_${stamp()}`,
+        stepId: "",
+        body: feedback.text,
+        author: "user",
+        createdAt: new Date().toISOString(),
+        // This path routes the comment immediately rather than leaving it open in
+        // Plan Review, so the optimistic projection should say the same thing.
+        routed: true
+      }
+      return {
+        queued:
+          feedback.queuedId === null
+            ? context.queued
+            : context.queued.filter((item) => item.id !== feedback.queuedId),
+        messages: context.messages.map((message) =>
+          setPlanStatus(
+            addPlanComment(message, feedback.plan.id, comment),
+            feedback.plan.id,
+            "revising"
+          )
+        ),
+        sharedPlan:
+          context.sharedPlan?.id === feedback.plan.id
+            ? {
+                ...context.sharedPlan,
+                status: "revising" as const,
+                comments: [...context.sharedPlan.comments, comment]
+              }
+            : context.sharedPlan
+      }
     }),
     /**
      * Hand the HEAD of the queue to the live turn at a tool boundary — the
@@ -1129,7 +1250,7 @@ export const conversationMachine = setup({
         event.session.cli === "opencode"
           ? event.session.reasoning?.[event.session.cli]
           : undefined
-      const persistedMode = chat.mode ?? "accept-edits"
+      const persistedMode = chat.mode ?? defaultModeFor(event.session.cli)
       // Plan/Gigaplan are TRANSIENT client overlays the backend never persists
       // (see `agent-runner.setMode`: plan is held in memory, only the exec mode
       // reaches `session.mode`). A `SESSION_UPDATED` therefore always carries a
@@ -1269,13 +1390,20 @@ export const conversationMachine = setup({
     persistHarness: assign(({ context, event, self }) => {
       if (event.type !== "SET_HARNESS") return {}
       const switched = event.cli !== context.cli
+      const session = withHarness(
+        context.session,
+        context.chatId,
+        event.cli,
+        event.model,
+        switched
+      )
       void rpc.agentSetHarness(
         context.session.id,
         context.chatId,
         event.cli,
         event.model
-      )
-      if (!switched) return { model: event.model }
+      ).then(publishSessionUpdate).catch(() => {})
+      if (!switched) return { model: event.model, session }
 
       void rpc
         .skillsList(context.session.id)
@@ -1291,7 +1419,7 @@ export const conversationMachine = setup({
         cli: event.cli,
         model: event.model,
         // Mirror main's write so the UI doesn't lie until the next load.
-        session: { ...context.session, cli: event.cli, resumeId: undefined },
+        session,
         mode,
         reasoning,
         executionMode: isExecutionMode(mode) ? mode : context.executionMode,
@@ -1483,7 +1611,7 @@ export const conversationMachine = setup({
       session: input.session,
       chatId: chat.id,
       messages: [],
-      mode: chat.mode ?? "accept-edits",
+      mode: chat.mode ?? defaultModeFor(input.session.cli),
       executionMode:
         chat.mode && isExecutionMode(chat.mode)
           ? chat.mode
@@ -1512,7 +1640,7 @@ export const conversationMachine = setup({
       // the trigger/phase snapshot, but the view reads this live field for the
       // meter's numerator; starting at zero hid the whole component after every
       // app restart until Codex happened to emit another Usage event.
-      tokens: chat.contextTokens ?? 0,
+      tokens: chat.contextTokens ?? input.session.contextTokens ?? 0,
       runStartedAt: null,
       lastOutcome: null,
       persistedStatus: input.session.status,
@@ -1545,7 +1673,10 @@ export const conversationMachine = setup({
         // before the transcript lands — and a dropped one is invisible: the box
         // clears and the operator believes they sent it. Hold it and run it the
         // moment the load settles, exactly as a send during a run is held.
-        SEND: { actions: "enqueue" },
+        SEND: [
+          { guard: "canRoutePlanFeedback", actions: "routePlanFeedback" },
+          { actions: "enqueue" }
+        ],
         // Whatever is held here is ON SCREEN as a queued row (a hand-off lands one
         // in a chat that is still loading), so its row actions have to work — an
         // edit or a remove dropped in this window would leave the row claiming the
@@ -1664,16 +1795,20 @@ export const conversationMachine = setup({
         FILES_UPDATED: { actions: "applyLiveFiles" },
         // Sent mid-run: queued, then flushed into this turn at the next tool
         // boundary where the harness can take it (see `canAutoFlush`).
-        SEND: { actions: "enqueue" },
+        SEND: [
+          { guard: "canRoutePlanFeedback", actions: "routePlanFeedback" },
+          { actions: "enqueue" }
+        ],
         UNQUEUE: { actions: "removeQueued" },
         EDIT_QUEUED: { actions: "editQueued" },
         // "Send now": interrupt the current turn and run the picked message next,
         // so the operator can steer mid-stream. Promote it to the head, then go
         // through `stopping` so the halt has landed before the next turn starts;
         // refreshingDiff dequeues it (the rest of the queue follows).
-        SEND_NOW: {
-          actions: "promoteAndSteer"
-        },
+        SEND_NOW: [
+          { guard: "canRoutePlanFeedback", actions: "routePlanFeedback" },
+          { actions: "promoteAndSteer" }
+        ],
         STEER_RESULT: [
           {
             // Only the OPERATOR's "send now" is allowed to escalate to a stop:

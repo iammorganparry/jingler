@@ -1,10 +1,9 @@
-import { type PlanCommentMessage, sanitizePlanHtml } from "@jingler/core"
 import type { Editor } from "@tiptap/core"
-import { EditorContent, useEditor } from "@tiptap/react"
+import { EditorContent } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
 import { Bold, Code, Italic, MessageSquarePlus } from "lucide-react"
 import type { ComponentType, MouseEvent as ReactMouseEvent } from "react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { HoverCard } from "../../components/hover-card.js"
 import { cn } from "../../lib/cn.js"
 import { applyPlanComment } from "./plan-doc-comment.js"
@@ -14,11 +13,20 @@ import {
   PlanCommentThreadControlsProvider,
   usePlanCommentThreadControls
 } from "./plan-comment-thread.js"
-import { planDocExtensions } from "./plan-doc-extensions.js"
+import {
+  type PlanFileEvidence,
+  PlanFileControlsProvider
+} from "./plan-file-controls.js"
 import {
   type PlanWorkerControls,
   PlanWorkerControlsProvider
 } from "./plan-worker-controls.js"
+import { usePlanDocController } from "./use-plan-doc-controller.js"
+import {
+  type PlanDocOutlineEntry,
+  type PlanDocViewport,
+  usePlanDocSurface
+} from "./use-plan-doc-surface.js"
 
 /**
  * Full-document WYSIWYG editor for an HTML plan, rendered as a Notion-like doc.
@@ -28,17 +36,11 @@ import {
  * menu for inline formatting and anchored comments (see below). The editor
  * therefore renders as just the document.
  *
- * The editor is created once; `onChange` is read through a ref so its latest
- * closure fires without tearing down and recreating the ProseMirror instance
- * (which would drop selection and focus on each parent render). On every edit
- * the HTML is serialized and re-run through `sanitizePlanHtml` as
- * defense-in-depth before it leaves the component — the persisted string is
- * always the safe subset, never raw editor output.
- *
- * An external `value` change (a remote revision, a conflict resolution) is
- * pushed in with `emitUpdate: false` so syncing down never loops back as a fake
- * edit; the guard compares sanitized forms so cosmetic serializer differences
- * don't trigger a needless reset that would drop the cursor.
+ * Editor lifecycle and external-value reconciliation live in
+ * `usePlanDocController`; minimap and navigation side effects live in
+ * `usePlanDocSurface`. Structural plan widgets are Tiptap node views, so this
+ * component remains a declarative composition layer and parent renders do not
+ * replace the active ProseMirror selection.
  */
 export function PlanDocEditor({
   value,
@@ -52,7 +54,10 @@ export function PlanDocEditor({
   targetBlockId,
   onTargetBlockConsumed,
   onOutlineChange,
-  onViewportChange
+  onViewportChange,
+  fileEvidence,
+  knownFiles,
+  onOpenFile
 }: {
   value: string
   onChange?: (html: string) => void
@@ -69,277 +74,62 @@ export function PlanDocEditor({
   onTargetBlockConsumed?: () => void
   onOutlineChange?: (outline: ReadonlyArray<PlanDocOutlineEntry>) => void
   onViewportChange?: (viewport: PlanDocViewport) => void
+  /** Live worktree diff stats keyed by repository-relative path. */
+  fileEvidence?: ReadonlyMap<string, PlanFileEvidence>
+  /** Worktree paths that the asset viewer can currently open. */
+  knownFiles?: ReadonlySet<string>
+  onOpenFile?: (path: string) => void
 }) {
-  const onChangeRef = useRef(onChange)
-  onChangeRef.current = onChange
-  const onTargetStageConsumedRef = useRef(onTargetStageConsumed)
-  onTargetStageConsumedRef.current = onTargetStageConsumed
-  const onTargetBlockConsumedRef = useRef(onTargetBlockConsumed)
-  onTargetBlockConsumedRef.current = onTargetBlockConsumed
-  const onOutlineChangeRef = useRef(onOutlineChange)
-  onOutlineChangeRef.current = onOutlineChange
-  const onViewportChangeRef = useRef(onViewportChange)
-  onViewportChangeRef.current = onViewportChange
-  const workerControlsRef = useRef(workerControls)
-  workerControlsRef.current = workerControls
-  const commentControlsRef = useRef(commentControls)
-  commentControlsRef.current = commentControls
-  const extensions = useMemo(planDocExtensions, [])
-  const canStopWorker = workerControls?.stop !== undefined
-  const canRetryWorker = workerControls?.retry !== undefined
-  const stableWorkerControls = useMemo<PlanWorkerControls>(
-    () => ({
-      ...(!canStopWorker
-        ? {}
-        : {
-            stop: (agentId: string) =>
-              workerControlsRef.current?.stop?.(agentId)
-          }),
-      ...(!canRetryWorker
-        ? {}
-        : {
-            retry: (agentId: string) =>
-              workerControlsRef.current?.retry?.(agentId)
-          })
-    }),
-    [canStopWorker, canRetryWorker]
-  )
-  const canReply = commentControls?.onReply !== undefined
-  const canRetryReply = commentControls?.onRetry !== undefined
-  const canSetResolved = commentControls?.onSetResolved !== undefined
-  const stableCommentControls = useMemo<PlanCommentThreadControls>(
-    () => ({
-      participants: commentControls?.participants ?? [],
-      disabled: commentControls?.disabled,
-      ...(!canReply
-        ? {}
-        : {
-            onReply: (
-              annotationId: string,
-              body: string,
-              mentionedParticipantIds: ReadonlyArray<string>
-            ) =>
-              commentControlsRef.current?.onReply?.(
-                annotationId,
-                body,
-                mentionedParticipantIds
-              )
-          }),
-      ...(!canRetryReply
-        ? {}
-        : {
-            onRetry: (annotationId: string, message: PlanCommentMessage) =>
-              commentControlsRef.current?.onRetry?.(annotationId, message)
-          }),
-      ...(!canSetResolved
-        ? {}
-        : {
-            onSetResolved: (annotationId: string, resolved: boolean) =>
-              commentControlsRef.current?.onSetResolved?.(
-                annotationId,
-                resolved
-              )
-          })
-    }),
-    [
-      commentControls?.participants,
-      commentControls?.disabled,
-      canReply,
-      canRetryReply,
-      canSetResolved
-    ]
-  )
-
-  const editor = useEditor({
+  const controller = usePlanDocController({
+    value,
     editable,
-    // Extension instances own node-view factories. Recreating them on every
-    // outline/viewport render makes Tiptap rebuild every atom node view.
-    extensions,
-    content: value,
-    editorProps: {
-      attributes: {
-        class: "sb-md min-h-[8rem] px-4 py-3 outline-none",
-        "aria-label": "Plan document"
-      }
-    },
-    onUpdate: ({ editor }) => onChangeRef.current?.(sanitizePlanHtml(editor.getHTML()))
+    onChange,
+    workerControls,
+    commentControls
+  })
+  usePlanDocSurface({
+    editor: controller.editor,
+    value,
+    targetStageId,
+    targetBlockId,
+    onTargetStageConsumed,
+    onTargetBlockConsumed,
+    onOutlineChange,
+    onViewportChange
   })
 
-  useEffect(() => {
-    if (!editor) return
-    if (sanitizePlanHtml(value) !== sanitizePlanHtml(editor.getHTML())) {
-      editor.commands.setContent(value, { emitUpdate: false })
-    }
-  }, [editor, value])
-
-  useEffect(() => {
-    editor?.setEditable(editable)
-  }, [editor, editable])
-
-  useEffect(() => {
-    if (!editor || !targetStageId) return
-    const reveal = () => {
-      const target = Array.from(
-        editor.view.dom.querySelectorAll<HTMLElement>("[data-plan-stage-id]")
-      ).find((element) => element.dataset.planStageId === targetStageId)
-      if (!target) return false
-      target.scrollIntoView({ behavior: "auto", block: "start" })
-      target.querySelector<HTMLButtonElement>("button")?.focus({
-        preventScroll: true
-      })
-      onTargetStageConsumedRef.current?.()
-      return true
-    }
-    if (reveal()) return
-    const retry = window.setTimeout(reveal, 0)
-    return () => window.clearTimeout(retry)
-  }, [editor, targetStageId, value])
-
-  useEffect(() => {
-    if (!editor || !targetBlockId) return
-    const target = targetBlockId === "title"
-      ? editor.view.dom.querySelector<HTMLElement>("h1")
-      : targetBlockId.startsWith("heading:")
-        ? Array.from(editor.view.dom.querySelectorAll<HTMLElement>("h2"))[
-            Number(targetBlockId.slice("heading:".length))
-          ] ?? null
-        : targetBlockId.startsWith("stage:")
-          ? Array.from(
-              editor.view.dom.querySelectorAll<HTMLElement>("[data-plan-stage-id]")
-            ).find(
-              (element) =>
-                element.dataset.planStageId === targetBlockId.slice("stage:".length)
-            ) ?? null
-          : null
-    if (target === null) return
-    target.scrollIntoView({ behavior: "auto", block: "start" })
-    target.focus({ preventScroll: true })
-    const scrollElement = editor.view.dom.parentElement
-    if (scrollElement !== null) {
-      onViewportChangeRef.current?.({
-        activeId: targetBlockId,
-        ...planDocViewportFractions(scrollElement)
-      })
-    }
-    onTargetBlockConsumedRef.current?.()
-  }, [editor, targetBlockId, value])
-
-  useEffect(() => {
-    if (!editor) return
-    const scrollElement = editor.view.dom.parentElement
-    if (scrollElement === null) return
-
-    let frame = 0
-    let rebuildOutline = true
-    let elements: ReadonlyArray<HTMLElement> = []
-    let outline: ReadonlyArray<PlanDocOutlineEntry> = []
-    const update = (outlineChanged = false) => {
-      rebuildOutline ||= outlineChanged
-      window.cancelAnimationFrame(frame)
-      frame = window.requestAnimationFrame(() => {
-        if (rebuildOutline) {
-          elements = Array.from(
-            editor.view.dom.querySelectorAll<HTMLElement>(
-              "h1, h2, [data-plan-stage-id]"
-            )
-          )
-          let headingIndex = 0
-          outline = elements.map((element) => {
-            const stageId = element.dataset.planStageId
-            const id =
-              stageId !== undefined
-                ? `stage:${stageId}`
-                : element.tagName === "H1"
-                  ? "title"
-                  : `heading:${headingIndex++}`
-            element.dataset.planMinimapId = id
-            if (!element.hasAttribute("tabindex")) element.tabIndex = -1
-            return {
-              id,
-              title:
-                stageId !== undefined
-                  ? element.getAttribute("data-plan-stage-title") ??
-                    element.querySelector("h3")?.textContent ??
-                    stageId
-                  : element.textContent?.trim() ?? id,
-              kind:
-                stageId !== undefined
-                  ? "stage"
-                  : element.tagName === "H1"
-                    ? "title"
-                    : "section"
-            } satisfies PlanDocOutlineEntry
-          })
-          rebuildOutline = false
-          onOutlineChangeRef.current?.(outline)
-        }
-
-        const viewportRect = scrollElement.getBoundingClientRect()
-        const active = [...elements]
-          .reverse()
-          .find((element) => element.getBoundingClientRect().top <= viewportRect.top + 96)
-        onViewportChangeRef.current?.({
-          activeId: active?.dataset.planMinimapId ?? outline[0]?.id ?? null,
-          ...planDocViewportFractions(scrollElement)
-        })
-      })
-    }
-    update()
-    const updateOutline = () => update(true)
-    const updateViewport = () => update()
-    editor.on("transaction", updateOutline)
-    scrollElement.addEventListener("scroll", updateViewport, { passive: true })
-    window.addEventListener("resize", updateViewport)
-    return () => {
-      window.cancelAnimationFrame(frame)
-      editor.off("transaction", updateOutline)
-      scrollElement.removeEventListener("scroll", updateViewport)
-      window.removeEventListener("resize", updateViewport)
-    }
-  }, [editor, value])
-
   return (
-    <PlanCommentThreadControlsProvider controls={stableCommentControls}>
-      <PlanWorkerControlsProvider controls={stableWorkerControls}>
-        <div className={cn("flex min-h-0 flex-col", className)}>
-          {editable && editor && <CommentBubbleMenu editor={editor} />}
-          <EditorContent
-            editor={editor}
-            className={cn(
-              "min-h-0 flex-1 overflow-y-auto text-[13px] leading-[1.65] text-text-body [&_.ProseMirror]:outline-none",
-              !editable && "opacity-95"
+    <PlanCommentThreadControlsProvider controls={controller.commentControls}>
+      <PlanWorkerControlsProvider controls={controller.workerControls}>
+        <PlanFileControlsProvider
+          evidence={fileEvidence}
+          knownFiles={knownFiles}
+          open={onOpenFile}
+        >
+          <div className={cn("flex min-h-0 flex-col", className)}>
+            {editable && controller.editor && (
+              <CommentBubbleMenu editor={controller.editor} />
             )}
-          />
-        </div>
+            <EditorContent
+              editor={controller.editor}
+              className={cn(
+                "min-h-0 flex-1 overflow-y-auto text-[13px] leading-[1.65] text-text-body [&_.ProseMirror]:outline-none [&_[data-files]]:my-2.5 [&_[data-files]]:flex [&_[data-files]]:flex-wrap [&_[data-files]]:items-center [&_[data-files]]:gap-1.5 [&_[data-files]]:pl-0 [&_[data-files]>li]:list-none",
+                !editable && "opacity-95"
+              )}
+            />
+          </div>
+        </PlanFileControlsProvider>
       </PlanWorkerControlsProvider>
     </PlanCommentThreadControlsProvider>
   )
 }
 
-export interface PlanDocOutlineEntry {
-  readonly id: string
-  readonly title: string
-  readonly kind: "title" | "section" | "stage"
-}
-
-export interface PlanDocViewport {
-  readonly activeId: string | null
-  readonly start: number
-  readonly size: number
-}
-
-export const planDocViewportFractions = ({
-  scrollTop,
-  clientHeight,
-  scrollHeight
-}: {
-  readonly scrollTop: number
-  readonly clientHeight: number
-  readonly scrollHeight: number
-}): Pick<PlanDocViewport, "start" | "size"> => ({
-  start: Math.max(0, Math.min(1, scrollTop / Math.max(1, scrollHeight))),
-  size: Math.max(0, Math.min(1, clientHeight / Math.max(1, scrollHeight)))
-})
+export {
+  planDocViewportFractions,
+  type PlanDocOutlineEntry,
+  type PlanDocViewport
+} from "./use-plan-doc-surface.js"
+export type { PlanFileEvidence } from "./plan-file-controls.js"
 
 /**
  * The selection bubble menu: inline formatting (Bold/Italic/Code) plus a

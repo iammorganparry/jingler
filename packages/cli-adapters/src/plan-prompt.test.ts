@@ -142,6 +142,16 @@ describe("planNote", () => {
       expect(prompt).not.toContain("codex/gpt-5.6-sol")
     }
   })
+
+  it("asks for concise, deterministic deliverables instead of plan prose", () => {
+    for (const prompt of [planModeInstructions(), planNote("codex")]) {
+      expect(prompt).toContain("operational visual aid, not an essay")
+      expect(prompt).toContain("one self-contained, independently reviewable deliverable")
+      expect(prompt).toContain("deterministic from the repository state")
+      expect(prompt).toContain("exact repository-relative files")
+      expect(prompt).toContain("revise this canonical HTML")
+    }
+  })
 })
 
 describe("the reply-channel grammar agrees with the real parser", () => {

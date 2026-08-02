@@ -26,6 +26,7 @@ import {
   buildPlanExecutionGraph,
   CliExecError,
   compileOrchestrationPlanHtml,
+  defaultModeFor,
   defaultModel,
   findApprovedPlan,
   isBackgroundTaskEvent,
@@ -1143,7 +1144,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           yield* TranscriptStore.adoptLegacy(sessionId, chatId)
 
           const sessionMode =
-            (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? "accept-edits"
+            (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? defaultModeFor(session.cli)
           const allow = new Set<string>([
             ...(yield* approvals.allowlistFor(chatId)),
             ...(chat.allowlist ?? [])
@@ -1464,10 +1465,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             // over the spec, so a null id alone would silently resume anyway.
             resumeId: digest === null ? chat.resumeId ?? null : null,
             ...(digest === null ? {} : { fresh: true }),
-            // Plan mode is an operator-selected read-only boundary. Enforce it
-            // at the adapter as well as in the prompt/tool gate: Codex has no
-            // per-tool callback, and unknown Claude tools otherwise fail open.
-            ...(orchestrating && mode === "plan" ? { readOnly: true } : {}),
+            // `mode: plan` is the transient read-only boundary. Do not also set
+            // the permanent `readOnly` role flag: Codex resumes this SAME spec
+            // after approval, and a permanent flag would keep its sandbox
+            // read-only instead of restoring the orchestrator's Auto policy.
+            // Each adapter enforces plan mode in its own native vocabulary.
             remoteMcpServers
           }
 

@@ -436,6 +436,8 @@ export const scriptedPlan = (
  * Markers in the prompt drive the interactive flows: `[[ask]]` → AskUserQuestion,
  * `[[plan]]` → propose a plan and honour the approve/revise decision.
  * `[[stream-plan]]` adds cumulative live-only snapshots before that promotion.
+ * `[[queue-hold]]` parks a test turn so queue affordances can be exercised
+ * without borrowing the plan-approval lifecycle.
  */
 export const scriptedRun =
   (delayMs: number): CliAdapterShape["run"] =>
@@ -480,6 +482,15 @@ export const scriptedRun =
 
       yield* emit({ _tag: "Started", sessionId })
       yield* pause
+
+      // A deterministic busy window for queue E2E. Plan approval used to stand
+      // in for this, but messages sent against a proposed plan are now revision
+      // feedback by design and must never be treated as an ordinary work queue.
+      if (spec.prompt.includes("[[queue-hold]]")) {
+        yield* emit({ _tag: "Assistant", text: "Holding the active turn for queue actions." })
+        yield* Effect.never
+        return
+      }
 
       // Provider-neutral worker turns are launched by OrchestrationService, not
       // by the session's planning harness. Keep this branch visibly paced so
@@ -790,7 +801,10 @@ export const scriptedRun =
 
       // A `[[plan]]` marker drives plan mode: propose a plan, then execute on
       // approval or re-propose a revised one on revise (one cycle max, for tests).
-      if (spec.prompt.includes("[[plan]]") || spec.mode === "plan") {
+      if (
+        spec.prompt.includes("[[plan]]") ||
+        (spec.mode === "plan" && spec.orchestrationRoutes === undefined)
+      ) {
         yield* emit({ _tag: "Thinking", text: "Mapping out the work before touching anything.", seconds: 3, done: true })
         yield* pause
         const exposesPlanAgent = spec.prompt.includes("[[active-plan-agent]]")

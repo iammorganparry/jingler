@@ -96,13 +96,30 @@ describe("RPC handlers", () => {
   const fakeDialog = (chosen: string | null) =>
     Layer.succeed(DialogService, { chooseDirectory: () => Effect.succeed(chosen) })
 
-  it("keeps a new session direct when no planning route exists", () => {
+  it("keeps a new session direct, defaulting to auto where the harness supports it", () => {
     expect(sessionCreationDefaults("codex", null, null)).toMatchObject({
       cli: "codex",
       options: {
         chatRole: "direct",
-        defaultMode: undefined,
+        // No configured default → `auto` (codex supports it): unsandboxed, keychain
+        // reachable, so `gh`/`git` work as they do in a direct CLI.
+        defaultMode: "auto",
         defaultModel: undefined
+      }
+    })
+  })
+
+  it("gives a new orchestrator the auto tools required for bounded direct work", () => {
+    const resolution = {
+      preference: { cli: "codex" as const, model: "gpt-5.6-sol" },
+      isFallback: false
+    }
+    expect(sessionCreationDefaults("claude", null, resolution)).toMatchObject({
+      cli: "codex",
+      options: {
+        chatRole: "orchestrator",
+        defaultMode: "auto",
+        defaultModel: "gpt-5.6-sol"
       }
     })
   })

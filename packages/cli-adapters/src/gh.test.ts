@@ -752,6 +752,23 @@ describe("GhService pull-request writes", () => {
     expect(exit._tag === "Success" && exit.value).toBe(512)
   })
 
+  it("prCreate uses --fill (not --title/--body) when title and body are empty", async () => {
+    const calls: Array<ReadonlyArray<string>> = []
+    await providePr(
+      GhService.prCreate("/wt", { title: "", body: "", base: "main", draft: false }),
+      (cmd, args) => {
+        if (cmd === "gh" && args[1] === "create") {
+          calls.push(args)
+          return { stdout: "https://github.com/acme/x/pull/7" }
+        }
+        return undefined
+      }
+    )
+    expect(calls[0]).toContain("--fill")
+    expect(calls[0]).not.toContain("--title")
+    expect(calls[0]).not.toContain("--body")
+  })
+
   it("prComment / prReview fail with GhError on a non-zero exit", async () => {
     const comment = await providePr(GhService.prComment("/wt", 482, "hi"), () => ({
       exitCode: 1,

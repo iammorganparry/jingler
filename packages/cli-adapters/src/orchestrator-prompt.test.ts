@@ -57,6 +57,13 @@ describe("orchestratorNote", () => {
     expect(note).toContain("never")
   })
 
+  it("uses the canonical plan for progress instead of narrating it", () => {
+    const note = orchestratorNote().toLowerCase()
+    expect(note).toContain("canonical plan as the progress interface")
+    expect(note).toContain("update the plan instead of repeating it in chat")
+    expect(note).toContain("required decision or blocker")
+  })
+
   it("carries no progress-counter phrasing and names no skill", () => {
     const note = orchestratorNote()
     // No "step X of Y" scaffolding — the exact scripting we are removing.

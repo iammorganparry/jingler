@@ -46,6 +46,10 @@ export function SessionChatTabs({
       publishSessionUpdate(updated)
     }).catch(() => {})
   }
+  const reopenChat = (chatId: string) => {
+    onSelectConversation()
+    void rpc.sessionsReopenChat(session.id, chatId).then(publishSessionUpdate)
+  }
 
   return (
     <ChatTabBar
@@ -54,11 +58,16 @@ export function SessionChatTabs({
         title: chat.title ?? `Chat ${index + 1}`,
         running: chatActivities[chat.id] !== undefined
       }))}
+      closedChats={(session.closedChats ?? []).map((chat, index) => ({
+        id: chat.id,
+        title: chat.title ?? `Closed chat ${index + 1}`
+      }))}
       activeChatId={activeChat.id}
       onSelectChat={selectChat}
       onCreateChat={createChat}
       onRenameChat={renameChat}
       onCloseChat={closeChat}
+      onReopenChat={reopenChat}
     />
   )
 }

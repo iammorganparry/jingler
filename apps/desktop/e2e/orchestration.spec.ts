@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
   appShell,
+  DEFAULT_CLAUDE_MODEL,
   expect,
   planDirectory,
   sessionRow,
@@ -80,6 +81,107 @@ test("Jingler mode keeps the composer neutral and animates the Jingler mark", as
   await expect(surface).toHaveAttribute("data-jingler-mode", "false")
 })
 
+test("an existing Jingler plan can change its orchestrator model across restart", async ({
+  launchApp
+}) => {
+  const first = await launchApp({
+    configured: true,
+    withRepo: true
+  })
+  await expect(appShell(first.window)).toBeVisible()
+
+  await first.window.getByTestId("new-session").click()
+  await first.window
+    .getByPlaceholder("Leave blank for agent naming")
+    .fill("Switchable orchestrator")
+  await first.window.getByRole("button", { name: "Create" }).click()
+  await expect(sessionRow(first.window, "Switchable orchestrator")).toBeVisible()
+
+  const sessionsFile = join(first.home, "jingler", "sessions.json")
+  const session = JSON.parse(readFileSync(sessionsFile, "utf8"))[0] as {
+    id: string
+    activeChatId: string
+    worktreePath: string
+  }
+  const originalChatId = session.activeChatId
+  const planFile = join(
+    planDirectory(first.home, session.worktreePath),
+    "current-plan.html"
+  )
+  const composer = first.window.getByPlaceholder("Message Claude…")
+  await composer.fill("[[plan]] refactor auth to a TokenStore")
+  await composer.press("Enter")
+  await expect
+    .poll(
+      () => (existsSync(planFile) ? readFileSync(planFile, "utf8") : ""),
+      { timeout: 20_000 }
+    )
+    .toContain("jinglerPlan: 1")
+
+  const currentModel = first.window.getByRole("button", {
+    name: DEFAULT_CLAUDE_MODEL,
+    exact: true
+  })
+  await expect(currentModel).toBeVisible()
+  await currentModel.click()
+  await first.window
+    .getByRole("menuitem", { name: "GPT-5.6 Sol", exact: true })
+    .click()
+  await expect(
+    first.window.getByRole("button", {
+      name: "GPT-5.6 Sol",
+      exact: true
+    })
+  ).toBeVisible()
+  await expect
+    .poll(() => {
+      const stored = JSON.parse(readFileSync(sessionsFile, "utf8")) as ReadonlyArray<{
+        id: string
+        cli: string
+        activeChatId: string
+        chats: ReadonlyArray<{ id: string; model?: string }>
+      }>
+      const target = stored.find((candidate) => candidate.id === session.id)
+      const original = target?.chats.find((chat) => chat.id === originalChatId)
+      return `${target?.cli}:${original?.model}`
+    })
+    .toBe("codex:gpt-5.6-sol")
+
+  // Regression: switching tabs used to re-send App's stale Claude session into
+  // the resident conversation actor, overwriting its freshly selected Codex
+  // model even though sessions.json already contained Sol.
+  await first.window.getByRole("button", { name: "New chat" }).click()
+  await first.window
+    .getByTestId(`chat-tab-${originalChatId}`)
+    .locator("button")
+    .first()
+    .click()
+  await expect(
+    first.window.getByRole("button", {
+      name: "GPT-5.6 Sol",
+      exact: true
+    })
+  ).toBeVisible()
+  await first.app.close()
+
+  const second = await launchApp({
+    home: first.home,
+    reposDir: first.reposDir,
+    configured: true,
+    withRepo: true
+  })
+  await sessionRow(second.window, "Switchable orchestrator").click()
+  await expect(
+    second.window.getByRole("button", {
+      name: "GPT-5.6 Sol",
+      exact: true
+    })
+  ).toBeVisible()
+  await expect(
+    second.window.getByRole("button", { name: "Jingler", exact: true })
+  ).toHaveAttribute("aria-pressed", "true")
+})
+
 const WORKER_AUTH_TAB = /^agent-01 /
 const WORKER_RELEASE_TAB = /^agent-02 /
 const AUDIT_WORKER_TAB = /^agent-03 /
@@ -123,7 +225,10 @@ test("an orchestrator completes bounded work directly with its auto tools", asyn
 
   await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })
   await expect(window.getByText("Approval needed · run a command")).toHaveCount(0)
-  await expect(window.getByRole("button", { name: "Plan Review" })).toHaveCount(0)
+  // Plan Review is a persistent workspace tab now; direct work must not create
+  // a plan card or approval gate inside the conversation.
+  await expect(window.getByRole("button", { name: "Open Plan Review" })).toHaveCount(0)
+  await expect(window.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0)
   expect(existsSync(planFile)).toBe(false)
 })
 

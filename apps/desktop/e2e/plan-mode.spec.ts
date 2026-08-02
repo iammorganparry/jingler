@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { DEFAULT_PLAN_TEMPLATE_HTML } from "@jingler/core"
 import type { Page } from "@playwright/test"
@@ -36,6 +37,24 @@ const session = (
 // the canonical file is `current-plan.html`, not the old `current-plan.mdx`.
 const currentPlanPath = (launched: LaunchedApp): string =>
   join(planDirectory(launched.home, launched.repoPath), "current-plan.html")
+
+const seedPlanAsset = ({ repoPath }: { repoPath: string }): void => {
+  mkdirSync(join(repoPath, "src", "auth"), { recursive: true })
+  writeFileSync(
+    join(repoPath, "src", "auth", "token-store.ts"),
+    "export const tokenStoreSeed = true\n"
+  )
+  execFileSync("git", ["add", "src/auth/token-store.ts"], { cwd: repoPath })
+  execFileSync(
+    "git",
+    ["commit", "-m", "seed plan asset", "--no-gpg-sign"],
+    { cwd: repoPath }
+  )
+  writeFileSync(
+    join(repoPath, "src", "auth", "token-store.ts"),
+    "export const tokenStoreSeed = true\nexport const tokenStoreChanged = true\n"
+  )
+}
 
 const revisionOf = (file: string): number =>
   Number(/^revision:\s*(\d+)$/m.exec(readFileSync(file, "utf8"))?.[1] ?? 0)
@@ -444,6 +463,90 @@ test("a burst of inline edits makes exactly one canonical revision", async ({
 
   expect(readFileSync(file, "utf8")).toContain("INLINE_EDIT_MARKER")
   expect(revisionOf(file)).toBe(startRevision + 1)
+})
+
+test("autosave echoes preserve the live caret and highlighted plan text", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session()
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await proposePlan(launched)
+
+  const editor = launched.window.getByLabel("Plan document")
+  const anchor = launched.window.getByText("Implement stages in order").first()
+  await anchor.click()
+  await launched.window.keyboard.press("End")
+  await launched.window.keyboard.type(" CARET_STABLE_A")
+  await expect(launched.window.getByRole("status")).toContainText("Synced", {
+    timeout: 20_000
+  })
+
+  await expect(editor).toBeFocused()
+  await launched.window.keyboard.type("_B")
+  await expect(
+    launched.window.getByText(/CARET_STABLE_A_B/).first()
+  ).toBeVisible()
+  await expect(launched.window.getByRole("status")).toContainText("Synced", {
+    timeout: 20_000
+  })
+  await expect.poll(() => readFileSync(currentPlanPath(launched), "utf8")).toContain(
+    "CARET_STABLE_A_B"
+  )
+
+  await selectText(launched.window, "CARET_STABLE_A_B")
+  await expect
+    .poll(() =>
+      launched.window.evaluate(() => window.getSelection()?.toString() ?? "")
+    )
+    .toBe("CARET_STABLE_A_B")
+  await expect(
+    launched.window.getByRole("button", { name: "Comment", exact: true })
+  ).toBeVisible()
+})
+
+test("plan file chip opens the changed asset in the diff engine", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: seedPlanAsset,
+    sessions: session()
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await proposePlan(launched)
+
+  const refreshFile = launched.window.getByRole("button", {
+    name: "Open src/auth/refresh.ts (+18 −0)"
+  })
+  const retryFile = launched.window.getByRole("button", {
+    name: "Open src/auth/retry.ts (+15 −0)"
+  })
+  const [refreshBox, retryBox] = await Promise.all([
+    refreshFile.boundingBox(),
+    retryFile.boundingBox()
+  ])
+  expect(refreshBox?.height).toBeLessThanOrEqual(32)
+  expect(Math.abs((refreshBox?.y ?? 0) - (retryBox?.y ?? 0))).toBeLessThan(2)
+
+  const file = launched.window.getByRole("button", {
+    name: "Open src/auth/token-store.ts (+1 −0)"
+  })
+  await expect(file).toBeVisible()
+  await file.click()
+
+  await expect(launched.window.getByRole("button", { name: "Hide preview" })).toBeVisible()
+  await expect(
+    launched.window.getByRole("button", { name: "token-store.ts", exact: true })
+  ).toBeVisible()
+  await expect(launched.window.getByText("tokenStoreChanged = true")).toBeVisible({
+    timeout: 15_000
+  })
+  await expect(
+    launched.window.getByText("+1", { exact: true }).last()
+  ).toBeVisible()
 })
 
 test("view switches and app close flush edits inside the debounce window", async ({

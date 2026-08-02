@@ -8,6 +8,7 @@ import type {
   ReasoningSetting,
   Skill
 } from "@jingler/core"
+import { supportsPlanMode } from "@jingler/core"
 import {
   Content as DropdownMenuContent,
   Item as DropdownMenuItem,
@@ -200,11 +201,9 @@ export function Composer({
    */
   showJinglerToggle?: boolean
   /**
-   * Whether Jingler mode is ON. When on (and the toggle is shown), the model and
-   * mode chips are hidden — the orchestrator is always automatic and its model
-   * lives in Settings, so a per-turn mode/model toggle is cognitive load with
-   * nothing valid to pick. Off, the chips return and the operator drives the
-   * source harness directly.
+   * Whether Jingler mode is ON. When on (and the toggle is shown), the
+   * permission-mode chip is hidden because the orchestrator chooses plan/auto
+   * mechanically. Its planning-capable model chip remains editable per chat.
    */
   jinglerMode?: boolean
   /** Disable the toggle while the active chat's setting is being persisted. */
@@ -242,10 +241,9 @@ export function Composer({
     ...modeOptionsFor(cli),
     ...(allowPlan ? [PLAN_OPTION] : [])
   ]
-  // Jingler mode owns the model + mode chips: when it is on there is nothing
-  // valid to pick (the orchestrator is always automatic on its Settings model),
-  // so they are hidden and the toggle stands in their place.
-  const hideModeControls = showJinglerToggle && jinglerMode
+  // Jingler owns permission mode mechanically (plan before approval, auto
+  // afterwards), but its model remains a live per-chat choice.
+  const hidePermissionMode = showJinglerToggle && jinglerMode
   const accent = modeAccent[mode]
   // The chip's value and its bar count are the same fact; deriving it once keeps
   // the glyph from drifting out of step with the label beside it.
@@ -262,13 +260,20 @@ export function Composer({
   // across harnesses (`gpt-5` is offered by both codex and cursor), and the
   // provider has to survive the round trip so selecting a model can switch
   // harness in one go.
+  const modelCatalog = useMemo(
+    () =>
+      showJinglerToggle && jinglerMode
+        ? catalog.filter((provider) => supportsPlanMode(provider.cli))
+        : catalog,
+    [catalog, jinglerMode, showJinglerToggle]
+  )
   const modelGroups = useMemo(
     () =>
-      catalog.map((p) => ({
+      modelCatalog.map((p) => ({
         label: p.label,
         options: p.models.map((m) => ({ value: `${p.cli}:${m.id}`, label: m.label }))
       })),
-    [catalog]
+    [modelCatalog]
   )
   // Prefer the exact harness+model pair; if the session's model isn't in the
   // catalogue (stale id, or discovery replaced the list), fall back to the first
@@ -276,7 +281,7 @@ export function Composer({
   // Last resort is the bare model id — the catalogue arrives a beat after mount,
   // and the chip must read "opus" in the meantime, never blank or "claude:opus".
   const exact = modelGroups.flatMap((g) => g.options).find((o) => o.value === `${cli}:${model}`)
-  const harnessDefault = catalog.find((p) => p.cli === cli)?.models[0]
+  const harnessDefault = modelCatalog.find((p) => p.cli === cli)?.models[0]
   const modelValue =
     exact?.value ?? (harnessDefault ? `${cli}:${harnessDefault.id}` : (model ?? ""))
   // Follows the harness — the prompt used to be hardwired to "Message Claude…",
@@ -500,7 +505,7 @@ export function Composer({
           "flex flex-col gap-[11px] rounded-xl border bg-sunken px-[13px] py-2.5 transition-colors",
           // Jingler mode is already legible from its animated toggle. Keep its
           // composer neutral; direct harness modes retain their nightlight accent.
-          hideModeControls && !dragging
+          hidePermissionMode && !dragging
             ? "border-line shadow-none"
             : [accent.border, accent.bg, accent.glow],
           paused && "opacity-70",
@@ -670,7 +675,7 @@ export function Composer({
               <span className="jingler-mode-toggle__label">Jingler</span>
             </button>
           )}
-          {!hideModeControls && modelValue.length > 0 && (
+          {modelValue.length > 0 && (
           <ChipMenu
             value={modelValue}
             groups={modelGroups}
@@ -695,7 +700,7 @@ export function Composer({
             className={roomy ? "max-w-[190px]" : "max-w-[112px]"}
           />
           )}
-          {!hideModeControls && (
+          {!hidePermissionMode && (
           <ChipMenu
             value={mode}
             options={modeOptions}

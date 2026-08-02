@@ -221,6 +221,34 @@ export const supportsSteer = (cli: CliKind): boolean =>
   cli === "claude" || cli === "codex"
 
 /**
+ * Whether a harness can run in fully-autonomous `auto` mode — no sandbox, no
+ * per-action gate.
+ *
+ * `auto` is the default a fresh session lands in when the harness supports it,
+ * because that is how the operator drives the CLI directly (unsandboxed, keychain
+ * reachable, `gh`/`git push` "just work"). A harness that does NOT support it
+ * falls back to `accept-edits`, where the sandbox stays on and any action needing
+ * escalation is FORWARDED to the operator through the approval gate. Every harness
+ * Jingler ships today supports `auto`; the predicate exists so a future harness
+ * that cannot can opt out in one place.
+ */
+export const supportsAutoMode = (cli: CliKind): boolean =>
+  cli === "claude" || cli === "codex" || cli === "cursor" || cli === "opencode"
+
+/**
+ * The mode a fresh session should start in: the operator's configured default
+ * when they set one in settings, else `auto` where the harness supports it, else
+ * `accept-edits` (sandbox on, permissions forwarded). The single source of truth
+ * for "what does a new session default to", so creation and the runtime fallback
+ * cannot drift.
+ */
+export const defaultModeFor = (
+  cli: CliKind,
+  configuredDefault?: PermissionMode
+): PermissionMode =>
+  configuredDefault ?? (supportsAutoMode(cli) ? "auto" : "accept-edits")
+
+/**
  * Automations for a session linked to a GitHub issue (design I2 toggles).
  * Defined before `Session` so it can be referenced inline below.
  */
@@ -321,6 +349,8 @@ export const Session = Schema.Struct({
   updatedAt: Schema.String,
   /** Ordered conversations sharing this session's worktree and review state. */
   chats: Schema.Array(Chat),
+  /** Recoverable conversations removed from the visible tab row, newest first. */
+  closedChats: Schema.optional(Schema.Array(Chat)),
   /** The chat restored when the session is next opened. */
   activeChatId: Schema.String,
   /** Absolute path to the checkout this session works in. */

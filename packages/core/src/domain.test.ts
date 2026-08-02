@@ -7,6 +7,7 @@ import {
   type CliInfo,
   type CliKind,
   CreateSessionInput,
+  defaultModeFor,
   GhStatus,
   GithubConfig,
   persistentOf,
@@ -15,6 +16,7 @@ import {
   newSessionCli,
   resolveOrchestratorPreference,
   startableClis,
+  supportsAutoMode,
   supportsPlanMode,
   supportsSteer,
   workspaceModeOf,
@@ -513,6 +515,31 @@ describe("supportsSteer", () => {
 
   it("classifies every CliKind, so a new harness cannot be forgotten", () => {
     for (const cli of CLI_KINDS) expect(typeof supportsSteer(cli)).toBe("boolean")
+  })
+})
+
+describe("supportsAutoMode", () => {
+  it("is true for every harness Jingler ships today", () => {
+    // All four map `auto` to a fully-autonomous run; the predicate exists so a
+    // future harness that cannot can opt out in one place.
+    for (const cli of CLI_KINDS) expect(supportsAutoMode(cli)).toBe(true)
+  })
+
+  it("classifies every CliKind, so a new harness cannot be forgotten", () => {
+    for (const cli of CLI_KINDS) expect(typeof supportsAutoMode(cli)).toBe("boolean")
+  })
+})
+
+describe("defaultModeFor", () => {
+  it("defaults to auto where the harness supports it", () => {
+    expect(defaultModeFor("codex")).toBe("auto")
+    expect(defaultModeFor("claude")).toBe("auto")
+  })
+
+  it("honours the operator's configured default over the auto fallback", () => {
+    // "default to auto UNLESS the user changes it in settings."
+    expect(defaultModeFor("codex", "accept-edits")).toBe("accept-edits")
+    expect(defaultModeFor("codex", "ask")).toBe("ask")
   })
 })
 

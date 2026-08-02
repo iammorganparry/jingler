@@ -296,6 +296,8 @@ export const rpc = {
     run((c) => c.Sessions.renameChat({ sessionId, chatId, title })),
   sessionsCloseChat: (sessionId: string, chatId: string): Promise<Session> =>
     run((c) => c.Sessions.closeChat({ sessionId, chatId })),
+  sessionsReopenChat: (sessionId: string, chatId: string): Promise<Session> =>
+    run((c) => c.Sessions.reopenChat({ sessionId, chatId })),
   sessionsSetOrchestratorEnabled: (
     sessionId: string,
     chatId: string,
@@ -562,7 +564,7 @@ export const rpc = {
       if (fiber) runtime.runFork(Fiber.interrupt(fiber))
     }
   },
-  agentSetHarness: (sessionId: string, chatId: string, cli: CliKind, model: string): Promise<void> =>
+  agentSetHarness: (sessionId: string, chatId: string, cli: CliKind, model: string): Promise<Session> =>
     run((c) => c.Agent.setHarness({ sessionId, chatId, cli, model })),
   agentStop: (sessionId: string, chatId: string): Promise<void> =>
     run((c) => c.Agent.stop({ sessionId, chatId })),
