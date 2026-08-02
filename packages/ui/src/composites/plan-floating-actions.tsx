@@ -7,14 +7,12 @@ import {
   Trigger as DropdownMenuTrigger
 } from "@radix-ui/react-dropdown-menu"
 import {
-  AlertTriangle,
   Check,
   CheckCircle2,
   ChevronDown,
   LoaderCircle,
   Play,
   RefreshCw,
-  Save,
   Send,
   Zap
 } from "lucide-react"

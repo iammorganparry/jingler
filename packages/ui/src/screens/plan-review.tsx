@@ -193,7 +193,9 @@ function PlanReviewBody(props: PlanReviewProps) {
         onReply={onReplyThread ?? (() => {})}
         onSetResolved={onSetThreadResolved ?? (() => {})}
         onRetry={onRetryThread}
-        disabled={syncState === "saving" || syncState === "conflict"}
+        // The read-only document machine only ever reports loading | clean |
+        // error, so comments are disabled whenever it isn't cleanly loaded.
+        disabled={syncState !== "clean"}
       />
     ) : null
 

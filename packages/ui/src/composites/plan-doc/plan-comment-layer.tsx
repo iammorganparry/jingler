@@ -65,11 +65,31 @@ interface Affordance {
 }
 type Composer =
   | { readonly kind: "stage"; readonly stageId: string; readonly top: number; readonly left: number }
-  | { readonly kind: "anchor"; readonly anchor: PlanAnnotationAnchor; readonly top: number; readonly left: number }
+  | {
+      readonly kind: "anchor"
+      readonly anchor: PlanAnnotationAnchor
+      readonly stageId?: string
+      readonly top: number
+      readonly left: number
+    }
 interface SelectionPrompt {
   readonly anchor: PlanAnnotationAnchor
+  readonly stageId?: string
   readonly top: number
   readonly left: number
+}
+
+const cssEscape = (value: string): string =>
+  typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(value) : value
+
+/** The `[data-stage]` element for a stage id within the rendered container. */
+const stageSection = (container: HTMLElement, stageId: string): HTMLElement | null =>
+  container.querySelector<HTMLElement>(`[data-stage="${cssEscape(stageId)}"]`)
+
+/** The stage id of the `[data-stage]` element enclosing a DOM node, if any. */
+const enclosingStageId = (node: Node): string | undefined => {
+  const element = node.nodeType === 1 ? (node as Element) : node.parentElement
+  return element?.closest("[data-stage]")?.getAttribute("data-stage") ?? undefined
 }
 
 export function PlanCommentLayer({
@@ -110,8 +130,11 @@ export function PlanCommentLayer({
     const nextPins: Array<Pin> = []
     annotations.forEach((annotation, index) => {
       let orphan = false
-      // Unanchored / orphaned pins stack at the top of the content.
+      // Placement preference: anchored span > enclosing stage > a top stack for
+      // whole-doc / unlocatable comments.
       let pinTop = 8 + index * 30
+      const stageEl = annotation.stageId != null ? stageSection(container, annotation.stageId) : null
+      if (stageEl !== null) pinTop = toTop(stageEl.getBoundingClientRect().top) + 6
       if (annotation.anchor !== undefined) {
         const range = domRangeFromAnchor(container, annotation.anchor)
         const clientRects = range === null ? [] : Array.from(range.getClientRects())
@@ -159,11 +182,23 @@ export function PlanCommentLayer({
 
   useEffect(() => {
     recompute()
-    // Content-space positions are scroll-invariant, so recompute only when the
-    // annotations or the container SIZE change — not on every scroll frame.
+    const container = containerRef
     window.addEventListener("resize", recompute)
-    return () => window.removeEventListener("resize", recompute)
-  }, [recompute])
+    // Content-space positions are scroll-invariant, but content can still reflow
+    // WITHOUT a scroll or window resize — a mermaid diagram renders async, an
+    // image loads, a card expands. Observe the container and its content box so
+    // the overlays re-place themselves whenever the laid-out content changes size.
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => recompute())
+    if (observer !== null && container !== null) {
+      observer.observe(container)
+      if (container.firstElementChild !== null) observer.observe(container.firstElementChild)
+    }
+    return () => {
+      window.removeEventListener("resize", recompute)
+      observer?.disconnect()
+    }
+  }, [recompute, containerRef])
 
   useEffect(() => {
     const container = containerRef
@@ -189,6 +224,7 @@ export function PlanCommentLayer({
       const rect = range.getBoundingClientRect()
       setSelection({
         anchor,
+        stageId: enclosingStageId(range.commonAncestorContainer),
         top: rect.bottom - base.top + container.scrollTop + 4,
         left: rect.left - base.left + container.scrollLeft
       })
@@ -210,7 +246,11 @@ export function PlanCommentLayer({
     async (body: string, mentions: ReadonlyArray<string>) => {
       if (composer === null) return
       await onAddComment(
-        composer.kind === "stage" ? { stageId: composer.stageId } : { anchor: composer.anchor },
+        composer.kind === "stage"
+          ? { stageId: composer.stageId }
+          : // Record the enclosing stage alongside the span anchor, so a
+            // selection comment isn't demoted to a global (stepId "") comment.
+            { stageId: composer.stageId, anchor: composer.anchor },
         body,
         mentions
       )
@@ -280,7 +320,13 @@ export function PlanCommentLayer({
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
             setOpenThreadId(null)
-            setComposer({ kind: "anchor", anchor: selection.anchor, top: selection.top, left: selection.left })
+            setComposer({
+              kind: "anchor",
+              anchor: selection.anchor,
+              stageId: selection.stageId,
+              top: selection.top,
+              left: selection.left
+            })
             setSelection(null)
           }}
           className="pointer-events-auto absolute z-20 inline-flex items-center gap-1 rounded-md border border-line bg-sunken px-2 py-1 text-[10.5px] text-text-bright shadow-lg outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"

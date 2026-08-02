@@ -114,7 +114,13 @@ export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
   // live +/- while there's uncommitted work — falling back to declared counts.
   const fileControls = usePlanFileControls()
   const exec = EXECUTION_META[step.executionStatus]
-  const select = () => onSelect?.(step.id)
+  const select = () => {
+    // A drag that ends inside the card fires a click too; ignore it so
+    // selecting text to comment doesn't also select-and-scroll the card.
+    const selection = typeof window === "undefined" ? null : window.getSelection()
+    if (selection !== null && !selection.isCollapsed) return
+    onSelect?.(step.id)
+  }
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: an outer <button> can't wrap the card's own interactive descendants; role+keyboard handler keep it accessible

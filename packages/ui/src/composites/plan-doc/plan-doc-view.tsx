@@ -1,13 +1,5 @@
-import { type PlanPrd, sanitizePlanHtml } from "@jingler/core"
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState
-} from "react"
+import { sanitizePlanHtml } from "@jingler/core"
+import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { MermaidDiagram } from "../../components/mermaid-diagram.js"
 import { cn } from "../../lib/cn.js"
@@ -21,31 +13,6 @@ import {
   PlanWorkerControlsProvider
 } from "./plan-worker-controls.js"
 
-export interface PlanDocOutlineEntry {
-  readonly id: string
-  readonly title: string
-  readonly kind: "title" | "section" | "stage"
-}
-
-export interface PlanDocViewport {
-  readonly activeId: string | null
-  readonly start: number
-  readonly size: number
-}
-
-export const planDocViewportFractions = ({
-  scrollTop,
-  clientHeight,
-  scrollHeight
-}: {
-  readonly scrollTop: number
-  readonly clientHeight: number
-  readonly scrollHeight: number
-}): Pick<PlanDocViewport, "start" | "size"> => ({
-  start: Math.max(0, Math.min(1, scrollTop / Math.max(1, scrollHeight))),
-  size: Math.max(0, Math.min(1, clientHeight / Math.max(1, scrollHeight)))
-})
-
 export type { PlanFileEvidence } from "./plan-file-controls.js"
 
 /**
@@ -53,36 +20,22 @@ export type { PlanFileEvidence } from "./plan-file-controls.js"
  *
  * The whole plan — prose, stages, acceptance criteria, annotations, flow
  * diagrams — is the agent's canonical HTML. The operator no longer edits it in
- * place (their only future mutation is commenting, layered on top separately);
- * this component therefore sanitizes the source once and paints it into a styled
- * container via `dangerouslySetInnerHTML`, with token-driven styling targeting
- * the plan dialect's `data-*` selectors.
+ * place (their only mutation is commenting, layered on top separately); this
+ * component sanitizes the source once and paints it into a styled container via
+ * `dangerouslySetInnerHTML`, with token-driven styling targeting the plan
+ * dialect's `data-*` selectors.
  *
- * Two things need real React rather than static HTML, so they are post-processed
- * after the sanitized markup lands:
- *  - **Mermaid diagrams** (`<div data-diagram="mermaid"><pre>…</pre></div>`) are
- *    replaced by a live `MermaidDiagram` portal (mermaid render is async).
- *  - **The outline / scroll-spy surface** for `PlanMinimap` is derived from the
- *    rendered DOM headings and stage sections (ids `title`, `heading:N`,
- *    `stage:<id>` — the same scheme the minimap navigates by).
+ * Mermaid diagrams (`<div data-diagram="mermaid"><pre>…</pre></div>`) are the one
+ * thing that needs real React: each is replaced by a live `MermaidDiagram` portal
+ * (mermaid render is async) after the sanitized markup lands.
  *
- * `commentLayer` is the seam the comment layer (a later stage) plugs into; it is
- * rendered as an overlay above the document and is otherwise inert here.
+ * `commentLayer` is the seam the comment layer plugs into; it renders as an
+ * overlay above the document and is otherwise inert here.
  */
 export interface PlanDocViewProps {
   /** Canonical plan source HTML; sanitized on every render. */
   readonly source: string
-  /** Parsed projection, used only to backfill stage titles in the outline. */
-  readonly projection?: PlanPrd | null
   readonly className?: string
-  /** One-shot stage id to reveal (e.g. from the progress dock). */
-  readonly targetStageId?: string | null
-  readonly onTargetStageConsumed?: () => void
-  /** Minimap navigation target (`title`, `heading:N`, or `stage:<id>`). */
-  readonly targetBlockId?: string | null
-  readonly onTargetBlockConsumed?: () => void
-  readonly onOutlineChange?: (outline: ReadonlyArray<PlanDocOutlineEntry>) => void
-  readonly onViewportChange?: (viewport: PlanDocViewport) => void
   /** Live worktree diff stats keyed by repository-relative path. */
   readonly fileEvidence?: ReadonlyMap<string, PlanFileEvidence>
   /** Worktree paths the asset viewer can currently open. */
@@ -100,86 +53,9 @@ interface DiagramPortal {
   readonly source: string
 }
 
-const sameOutline = (
-  left: ReadonlyArray<PlanDocOutlineEntry>,
-  right: ReadonlyArray<PlanDocOutlineEntry>
-): boolean =>
-  left.length === right.length &&
-  left.every(
-    (entry, index) =>
-      entry.id === right[index]?.id &&
-      entry.title === right[index]?.title &&
-      entry.kind === right[index]?.kind
-  )
-
-const sameViewport = (
-  left: PlanDocViewport | null,
-  right: PlanDocViewport
-): boolean =>
-  left !== null &&
-  left.activeId === right.activeId &&
-  left.start === right.start &&
-  left.size === right.size
-
-const buildOutline = (
-  root: HTMLElement,
-  projection: PlanPrd | null | undefined
-): {
-  readonly elements: ReadonlyArray<HTMLElement>
-  readonly outline: ReadonlyArray<PlanDocOutlineEntry>
-} => {
-  const elements = Array.from(
-    root.querySelectorAll<HTMLElement>("h1, h2, section[data-stage]")
-  )
-  let headingIndex = 0
-  const outline = elements.map((element) => {
-    const stageId =
-      element.tagName === "SECTION" ? element.getAttribute("data-stage") : null
-    const id =
-      stageId !== null
-        ? `stage:${stageId}`
-        : element.tagName === "H1"
-          ? "title"
-          : `heading:${headingIndex++}`
-    element.dataset.planMinimapId = id
-    if (!element.hasAttribute("tabindex")) element.tabIndex = -1
-    const title =
-      stageId !== null
-        ? element.getAttribute("data-title") ??
-          projection?.stages.find((stage) => stage.id === stageId)?.title ??
-          element.querySelector("h3")?.textContent?.trim() ??
-          stageId
-        : element.textContent?.trim() ?? id
-    const kind =
-      stageId !== null ? "stage" : element.tagName === "H1" ? "title" : "section"
-    return { id, title, kind } satisfies PlanDocOutlineEntry
-  })
-  return { elements, outline }
-}
-
-const blockTarget = (root: HTMLElement, targetBlockId: string): HTMLElement | null =>
-  targetBlockId === "title"
-    ? root.querySelector<HTMLElement>("h1")
-    : targetBlockId.startsWith("heading:")
-      ? Array.from(root.querySelectorAll<HTMLElement>("h2"))[
-          Number(targetBlockId.slice("heading:".length))
-        ] ?? null
-      : targetBlockId.startsWith("stage:")
-        ? root.querySelector<HTMLElement>(
-            `section[data-stage="${CSS.escape(targetBlockId.slice("stage:".length))}"]`
-          )
-        : null
-
 export function PlanDocView({
   source,
-  projection,
   className,
-  targetStageId,
-  onTargetStageConsumed,
-  targetBlockId,
-  onTargetBlockConsumed,
-  onOutlineChange,
-  onViewportChange,
   fileEvidence,
   knownFiles,
   onOpenFile,
@@ -190,42 +66,12 @@ export function PlanDocView({
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [diagrams, setDiagrams] = useState<ReadonlyArray<DiagramPortal>>([])
 
-  // Latest callbacks/inputs, read from the scroll handler and navigation effect
-  // without re-subscribing listeners when only a callback identity changes.
-  const surface = useRef({
-    projection,
-    onOutlineChange,
-    onViewportChange
-  })
-  surface.current = { projection, onOutlineChange, onViewportChange }
-
-  const elementsRef = useRef<ReadonlyArray<HTMLElement>>([])
-  const outlineRef = useRef<ReadonlyArray<PlanDocOutlineEntry>>([])
-  const viewportRef = useRef<PlanDocViewport | null>(null)
-
-  const publishViewport = useCallback((): void => {
-    const scroll = scrollRef.current
-    if (scroll === null) return
-    const top = scroll.getBoundingClientRect().top
-    const active = [...elementsRef.current]
-      .reverse()
-      .find((element) => element.getBoundingClientRect().top <= top + 96)
-    const next: PlanDocViewport = {
-      activeId: active?.dataset.planMinimapId ?? outlineRef.current[0]?.id ?? null,
-      ...planDocViewportFractions(scroll)
-    }
-    if (sameViewport(viewportRef.current, next)) return
-    viewportRef.current = next
-    surface.current.onViewportChange?.(next)
-  }, [])
-
-  // Rebuild the outline and the mermaid portals whenever the sanitized markup
-  // changes. `dangerouslySetInnerHTML` only rewrites the DOM when `html` itself
-  // changes, so the hosts we carve out here survive unrelated re-renders.
+  // Carve each mermaid block out of the sanitized markup and host a live portal
+  // in its place. `dangerouslySetInnerHTML` only rewrites the DOM when `html`
+  // itself changes, so the hosts we carve out here survive unrelated re-renders.
   useLayoutEffect(() => {
     const root = scrollRef.current
     if (root === null) return
-
     const portals: Array<DiagramPortal> = []
     root.querySelectorAll<HTMLElement>('[data-diagram="mermaid"]').forEach((element, index) => {
       const diagramSource = (element.querySelector("pre") ?? element).textContent?.trim() ?? ""
@@ -233,61 +79,7 @@ export function PlanDocView({
       portals.push({ key: `diagram-${index}`, host: element, source: diagramSource })
     })
     setDiagrams(portals)
-
-    const { elements, outline } = buildOutline(root, surface.current.projection)
-    elementsRef.current = elements
-    if (!sameOutline(outlineRef.current, outline)) {
-      surface.current.onOutlineChange?.(outline)
-    }
-    outlineRef.current = outline
-    viewportRef.current = null
-    publishViewport()
-  }, [html, publishViewport])
-
-  // Viewport scroll-spy: recompute the active outline entry as the reader
-  // scrolls or the pane resizes.
-  useEffect(() => {
-    const scroll = scrollRef.current
-    if (scroll === null) return
-    scroll.addEventListener("scroll", publishViewport, { passive: true })
-    window.addEventListener("resize", publishViewport)
-    return () => {
-      scroll.removeEventListener("scroll", publishViewport)
-      window.removeEventListener("resize", publishViewport)
-    }
-  }, [publishViewport])
-
-  // One-shot navigation from the minimap (`targetBlockId`) or the progress dock
-  // (`targetStageId`). Retired via the matching `onConsumed` once on screen.
-  useEffect(() => {
-    const root = scrollRef.current
-    if (root === null) return
-    if (targetStageId) {
-      const stage = root.querySelector<HTMLElement>(
-        `section[data-stage="${CSS.escape(targetStageId)}"]`
-      )
-      if (stage !== null) {
-        stage.scrollIntoView({ behavior: "auto", block: "start" })
-        stage.querySelector<HTMLElement>("button")?.focus({ preventScroll: true })
-        onTargetStageConsumed?.()
-      }
-      return
-    }
-    if (!targetBlockId) return
-    const target = blockTarget(root, targetBlockId)
-    if (target === null) return
-    target.scrollIntoView({ behavior: "auto", block: "start" })
-    target.focus({ preventScroll: true })
-    publishViewport()
-    onTargetBlockConsumed?.()
-  }, [
-    html,
-    targetStageId,
-    targetBlockId,
-    onTargetStageConsumed,
-    onTargetBlockConsumed,
-    publishViewport
-  ])
+  }, [html])
 
   const fileControls: PlanFileControls = {
     evidence: fileEvidence,

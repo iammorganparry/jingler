@@ -149,12 +149,15 @@ export function PlanEditor({
   )
 
   // A stage requested by the composer progress dock lands on Main, selected.
+  // Defer until the step outline is actually showing — while a plan is still
+  // streaming there's no card to select or scroll to, so consuming the target
+  // there would silently drop the deep link. It re-fires once the outline mounts.
   useEffect(() => {
-    if (targetStageId == null) return
+    if (targetStageId == null || !showOutline) return
     setPage("main")
     setSelectedStepId(targetStageId)
     onTargetStageConsumed?.()
-  }, [targetStageId, onTargetStageConsumed])
+  }, [targetStageId, showOutline, onTargetStageConsumed])
 
   // Scroll the selected card into view when it changes (e.g. from a Workflow node click).
   useEffect(() => {
@@ -203,7 +206,6 @@ export function PlanEditor({
               <PlanDocView
                 className="mx-auto h-full w-full max-w-[760px]"
                 source={source}
-                projection={projection}
                 fileEvidence={fileEvidence}
                 knownFiles={knownFiles}
                 onOpenFile={onOpenFile}

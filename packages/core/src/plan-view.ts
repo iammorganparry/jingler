@@ -126,8 +126,13 @@ const toStepView = (stage: PlanPrdStage): PlanStepView => ({
  * Dependency-topological stage order. `buildPlanExecutionGraph` groups stages by
  * connected component then orders each component topologically (source order as
  * the tie-breaker); flattening the groups yields a single valid topological
- * ordering over every stage. Any stage the graph dropped (e.g. a duplicate id)
- * is appended in source order so no stage is silently lost.
+ * ordering over every stage. Any stage the graph didn't place (e.g. an isolated
+ * one) is appended in source order.
+ *
+ * Stages are keyed by `id`, which must be unique — the graph, react-flow node
+ * ids and step keys all require it — so a duplicate id necessarily collapses to
+ * a single stage (the last occurrence, per Map semantics) rather than being kept
+ * twice. Duplicate ids are invalid input, not a supported case.
  */
 const orderedStages = (prd: PlanPrd): Array<PlanPrdStage> => {
   const stageById = new Map(prd.stages.map((stage) => [stage.id, stage]))

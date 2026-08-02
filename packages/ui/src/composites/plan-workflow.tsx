@@ -164,14 +164,14 @@ function WorkflowNode({ data }: NodeProps<Node<NodeData>>) {
 const nodeTypes = { workflowNode: WorkflowNode }
 
 /** Lay the dependency graph out top-down; returns react-flow nodes + edges. */
-const layout = (graph: PlanWorkflowGraph, selectedStageId: string | null | undefined) => {
+const layout = (graph: PlanWorkflowGraph) => {
   const positions = layoutDagre(graph.nodes, graph.edges, { nodeWidth: NODE_W, nodeHeight: NODE_H })
 
   const nodes: Array<Node<NodeData>> = graph.nodes.map((node) => ({
     id: node.id,
     type: "workflowNode",
     position: positions.get(node.id) ?? { x: 0, y: 0 },
-    data: { node, selected: node.stageId === selectedStageId }
+    data: { node, selected: false }
   }))
 
   const edges = graph.edges.map((e) => ({
@@ -214,15 +214,21 @@ export function PlanWorkflow({
   className?: string
 }) {
   const graph = useMemo(() => stagesToGraph(prd), [prd])
-  const laidOut = useMemo(() => layout(graph, selectedStageId), [graph, selectedStageId])
-  // Inject the worker handlers separately so changing them doesn't re-run dagre.
+  // Dagre runs once per graph. Selection and the worker handlers are injected in
+  // a separate, cheap pass so highlighting or re-wiring a node never re-lays-out.
+  const laidOut = useMemo(() => layout(graph), [graph])
   const nodes = useMemo(
     () =>
       laidOut.nodes.map((n) => ({
         ...n,
-        data: { ...n.data, onStop: onStopWorker, onRetry: onRetryWorker }
+        data: {
+          ...n.data,
+          selected: n.data.node.stageId === selectedStageId,
+          onStop: onStopWorker,
+          onRetry: onRetryWorker
+        }
       })),
-    [laidOut, onStopWorker, onRetryWorker]
+    [laidOut, selectedStageId, onStopWorker, onRetryWorker]
   )
   const edges = laidOut.edges
 

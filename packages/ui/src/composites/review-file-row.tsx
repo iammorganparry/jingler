@@ -66,14 +66,16 @@ export function ReviewFileRow({
           </span>
         )}
       </button>
-      {/* Padded wrapper keeps a comfortable hit target on a min-h-10 row while
-          the box itself stays at the shadcn default size. */}
+      {/* The box stays at the shadcn default size (16px), but an invisible
+          ::after overlay extends the actual tap target to ~32px so the small
+          visual doesn't shrink the hit area on this min-h-10 row. */}
       <div className="flex flex-none items-center self-stretch pl-1.5 pr-2.5">
         <Checkbox
           tone="success"
           checked={file.viewed}
           onCheckedChange={(next) => onToggleViewed(next)}
           aria-label={file.viewed ? "Mark not viewed" : "Mark viewed"}
+          className="relative after:absolute after:-inset-2 after:content-['']"
         />
       </div>
     </div>
