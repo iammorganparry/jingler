@@ -21,6 +21,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "JINGLER_DB_TESTS=1 vitest run --config vitest.integration.config.ts",
+    "skill:memory": "tsx scripts/generate-memory-skill.ts",
+    "skill:memory:check": "tsx scripts/generate-memory-skill.ts --check",
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {

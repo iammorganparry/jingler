@@ -228,6 +228,26 @@ const tools: ReadonlyArray<ToolDefinition> = [
     ))
 ]
 
+/**
+ * Serialisable view of the MCP tool surface — name, one-line description,
+ * privilege, and the already-computed JSON Schema for arguments. This is the
+ * single source of truth for the distributable `jingler-team-memory` skill's tool
+ * catalog: `apps/server/scripts/generate-memory-skill.ts` reads it to regenerate
+ * the skill's references/tools.md, so the skill never drifts from the server. Add
+ * or change a tool above and the generator (and its CI `--check`) picks it up.
+ */
+export const memoryMcpToolManifest: ReadonlyArray<{
+  readonly name: MemoryMcpToolName
+  readonly description: string
+  readonly privilege: MemoryPrivilege
+  readonly inputSchema: ToolDefinition["inputSchema"]
+}> = tools.map(({ name, description, privilege, inputSchema }) => ({
+  name,
+  description,
+  privilege,
+  inputSchema
+}))
+
 const StringRecord = Schema.Record({ key: Schema.String, value: Schema.Unknown })
 const isStringRecord = Schema.is(StringRecord)
 const JsonRpcRequest = Schema.Struct({
