@@ -35,3 +35,7 @@ release/
 # Anchored at the repo root, so a legitimate nested fixture dir
 # (`packages/*/data/`) is still tracked.
 /data/
+
+# Next.js build output
+.next/
+next-env.d.ts
