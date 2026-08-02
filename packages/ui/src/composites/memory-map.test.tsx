@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { MemoryInspector } from "./memory-inspector.js"
-import { MemoryMap } from "./memory-map.js"
+import { MemoryMap, memoryLabelFont } from "./memory-map.js"
 import type { MemoryGraphView } from "@jingler/contracts"
 
 beforeAll(() => {
@@ -75,5 +75,23 @@ describe("MemoryMap", () => {
     expect(screen.getByRole("heading", { name: "wikilink" })).toBeDefined()
     expect(screen.getByText("[[b|Beta]]")).toBeDefined()
     expect(screen.getByText(NO_INFERRED_EDGES)).toBeDefined()
+  })
+
+  it("builds a valid canvas font string, resolving the mono family or falling back", () => {
+    expect(memoryLabelFont('"Berkeley Mono", monospace')).toBe('11px "Berkeley Mono", monospace')
+    // A `var(...)` token is invalid in ctx.font; an unresolved value falls back.
+    expect(memoryLabelFont("")).toBe("11px monospace")
+    expect(memoryLabelFont("   ")).toBe("11px monospace")
+  })
+
+  it("degrades to the synchronized lists when WebGL is unavailable", () => {
+    // The beforeAll mock makes `getContext` return null, so the WebGL probe
+    // fails and the three.js layer is never imported — the accessible fallback
+    // and the synchronized node/relationship lists carry the whole experience.
+    render(<MemoryMap graph={graph} positions={[{ id: "page:a", x: 10, y: 20 }, { id: "page:b", x: 50, y: 50 }]} filters={{ query: "", topic: null, relationship: null, freshness: null, healthOnly: false, showIsolated: true }} viewport={{ x: 0, y: 0, zoom: 1 }} selectedNodeId={null} selectedEdgeId={null} onSelectNode={() => {}} onSelectEdge={() => {}} onExpandNode={() => {}} onViewportChange={() => {}} onFiltersChange={() => {}} />)
+    const surface = screen.getByTestId("memory-map-canvas")
+    expect(surface.getAttribute("data-viewport")).toBe("0,0,1")
+    expect(screen.getByText(/3D view unavailable/)).toBeDefined()
+    expect(screen.getByTestId("memory-node-page:a")).toBeDefined()
   })
 })

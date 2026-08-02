@@ -15,8 +15,12 @@ import {
   ZoomIn,
   ZoomOut
 } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { MemoryMapList } from "./memory-map-list.js"
+
+// The WebGL layer pulls in three.js; lazy-load it so it never enters a
+// non-WebGL environment (jsdom under Vitest) and never bloats first paint.
+const MemoryMap3D = lazy(() => import("./memory-map-3d.js"))
 
 export interface MemoryNodePosition {
   readonly id: string
@@ -56,6 +60,17 @@ export interface MemoryMapProps {
 
 const unhealthy = (node: MemoryGraphNode): boolean =>
   node.health.orphan || node.health.brokenLinks > 0 || node.health.contradictions > 0
+
+/**
+ * Build a valid `ctx.font` string from the resolved `--sb-font-mono` family.
+ * A CSS `var(...)` reference is invalid in the canvas font shorthand, so the
+ * concrete family must be interpolated; when it can't be resolved (jsdom, or a
+ * theme without the token) fall back to the generic `monospace` keyword.
+ */
+export const memoryLabelFont = (monoFamily: string): string => {
+  const family = monoFamily.trim()
+  return family === "" ? "11px monospace" : `11px ${family}`
+}
 
 const relationshipFrom = (value: string): MemoryGraphEdgeKind | null => {
   switch (value) {
@@ -98,8 +113,10 @@ export function MemoryMap({
   onViewportChange,
   onFiltersChange
 }: MemoryMapProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [canvasSize, setCanvasSize] = useState({ width: 1, height: 1 })
+  const frameRef = useRef<HTMLDivElement>(null)
+  const [frameSize, setFrameSize] = useState({ width: 1, height: 1 })
+  const [webglAvailable, setWebglAvailable] = useState(false)
+  const [reducedMotion, setReducedMotion] = useState(false)
   const positionById = useMemo(() => new Map(positions.map((position) => [position.id, position])), [positions])
   const nodes = useMemo(() => {
     if (graph === null) return []
@@ -144,81 +161,46 @@ export function MemoryMap({
     const maxY = Math.max(...ys)
     const width = Math.max(1, maxX - minX)
     const height = Math.max(1, maxY - minY)
-    const zoom = Math.min(3, Math.max(0.3, Math.min(canvasSize.width / width, canvasSize.height / height) * 0.8))
+    const zoom = Math.min(3, Math.max(0.3, Math.min(frameSize.width / width, frameSize.height / height) * 0.8))
     onViewportChange({ x: -(minX + maxX) / 2, y: -(minY + maxY) / 2, zoom })
   }
   const pan = (x: number, y: number) =>
     onViewportChange({ ...viewport, x: viewport.x + x / viewport.zoom, y: viewport.y + y / viewport.zoom })
 
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (canvas === null) return
+    const frame = frameRef.current
+    if (frame === null) return
     const resize = () => {
-      const rect = canvas.getBoundingClientRect()
-      setCanvasSize({ width: Math.max(1, rect.width), height: Math.max(1, rect.height) })
+      const rect = frame.getBoundingClientRect()
+      setFrameSize({ width: Math.max(1, rect.width), height: Math.max(1, rect.height) })
     }
     resize()
     const observer = new ResizeObserver(resize)
-    observer.observe(canvas)
+    observer.observe(frame)
     return () => observer.disconnect()
   }, [])
 
+  // Only mount the WebGL layer where a GL context can actually be created. Under
+  // jsdom (Vitest) this stays false, so three.js is never imported and the
+  // synchronized lists remain the tested surface.
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (canvas === null) return
-    const ratio = window.devicePixelRatio || 1
-    canvas.width = Math.floor(canvasSize.width * ratio)
-    canvas.height = Math.floor(canvasSize.height * ratio)
-    const context = canvas.getContext("2d")
-    if (context === null) return
-    context.setTransform(ratio, 0, 0, ratio, 0, 0)
-    context.clearRect(0, 0, canvasSize.width, canvasSize.height)
-    const tokens = getComputedStyle(canvas)
-    const line = tokens.getPropertyValue("--sb-line-strong")
-    const text = tokens.getPropertyValue("--sb-text")
-    const blue = tokens.getPropertyValue("--sb-blue")
-    const cyan = tokens.getPropertyValue("--sb-cyan")
-    const yellow = tokens.getPropertyValue("--sb-yellow")
-    const red = tokens.getPropertyValue("--sb-red")
-    const transform = (value: number, offset: number, extent: number) =>
-      extent / 2 + (value + offset) * viewport.zoom
-
-    context.lineWidth = 1
-    for (const edge of edges) {
-      const source = positionById.get(edge.sourceId)
-      const target = positionById.get(edge.targetId)
-      if (!(source && target)) continue
-      context.strokeStyle = edge.id === selectedEdgeId ? blue : line
-      context.lineWidth = edge.id === selectedEdgeId ? 2.5 : 1
-      context.beginPath()
-      context.moveTo(transform(source.x, viewport.x, canvasSize.width), transform(source.y, viewport.y, canvasSize.height))
-      context.lineTo(transform(target.x, viewport.x, canvasSize.width), transform(target.y, viewport.y, canvasSize.height))
-      context.stroke()
+    try {
+      const probe = document.createElement("canvas")
+      const gl = probe.getContext("webgl2") ?? probe.getContext("webgl")
+      setWebglAvailable(gl !== null)
+    } catch {
+      setWebglAvailable(false)
     }
+  }, [])
 
-    for (const node of nodes) {
-      const position = positionById.get(node.id)
-      if (!position) continue
-      const degree = node.degree.incoming + node.degree.outgoing
-      const radius = Math.min(18, 6 + Math.sqrt(degree) * 2)
-      const x = transform(position.x, viewport.x, canvasSize.width)
-      const y = transform(position.y, viewport.y, canvasSize.height)
-      context.fillStyle = unhealthy(node) ? (node.health.contradictions > 0 ? red : yellow) : node.kind === "page" ? blue : cyan
-      context.beginPath()
-      context.arc(x, y, radius, 0, Math.PI * 2)
-      context.fill()
-      if (node.id === selectedNodeId) {
-        context.strokeStyle = text
-        context.lineWidth = 3
-        context.stroke()
-      }
-      if (viewport.zoom >= 0.75) {
-        context.fillStyle = text
-        context.font = "11px var(--sb-font-mono)"
-        context.fillText(node.title.slice(0, 28), x + radius + 4, y + 4)
-      }
-    }
-  }, [canvasSize, edges, nodes, positionById, selectedEdgeId, selectedNodeId, viewport])
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)")
+    const apply = () => setReducedMotion(query.matches)
+    apply()
+    query.addEventListener("change", apply)
+    return () => query.removeEventListener("change", apply)
+  }, [])
 
   if (graph === null) {
     return <div className="flex flex-1 items-center justify-center text-[12px] text-muted-foreground">{loading ? "Loading bounded graph…" : "No graph data."}</div>
@@ -226,15 +208,40 @@ export function MemoryMap({
 
   return (
     <section className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_300px]" aria-label="Memory map">
-      <div className="relative min-h-0 overflow-hidden border-r border-hairline bg-sunken">
-        <canvas
-          ref={canvasRef}
-          className="size-full"
+      <div ref={frameRef} className="relative min-h-0 overflow-hidden border-r border-hairline bg-sunken">
+        <div
           role="img"
-          aria-label="Visual memory graph. Use the synchronized node and relationship lists to explore with a keyboard or screen reader."
+          aria-label="Interactive 3D memory graph. Use the synchronized node and relationship lists to explore with a keyboard or screen reader."
           data-testid="memory-map-canvas"
           data-viewport={`${viewport.x},${viewport.y},${viewport.zoom}`}
-        />
+          className="absolute inset-0"
+        >
+          {webglAvailable ? (
+            <Suspense
+              fallback={
+                <div className="flex size-full items-center justify-center text-[11px] text-muted-foreground">
+                  Rendering 3D graph…
+                </div>
+              }
+            >
+              <MemoryMap3D
+                nodes={nodes}
+                edges={edges}
+                selectedNodeId={selectedNodeId}
+                selectedEdgeId={selectedEdgeId}
+                viewport={viewport}
+                reducedMotion={reducedMotion}
+                onSelectNode={onSelectNode}
+                onSelectEdge={onSelectEdge}
+                onExpandNode={onExpandNode}
+              />
+            </Suspense>
+          ) : (
+            <div className="flex size-full items-center justify-center px-6 text-center text-[11px] text-muted-foreground">
+              3D view unavailable here — explore the graph with the synchronized node and relationship lists.
+            </div>
+          )}
+        </div>
         <div className="absolute left-3 top-3 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1.5 rounded-lg border border-line bg-panel/95 p-1.5 shadow-sm">
           <label className="flex items-center gap-1.5 rounded-md bg-sunken px-2 py-1.5 text-[10.5px] text-muted-foreground">
             <Filter size={12} />
