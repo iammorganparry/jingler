@@ -145,4 +145,50 @@ describe("vault dashboard analytics", () => {
       }
     })
   })
+
+  it("windows time-scoped series by the selected range relative to asOf", () => {
+    const asOf = "2026-08-01T00:00:00.000Z"
+    const input: VaultAnalyticsInput = {
+      pages,
+      sourceCount: 2,
+      revisions: [
+        { id: "r-old", pageId: "alpha", createdAt: "2026-01-01T00:00:00.000Z" },
+        { id: "r-90", pageId: "alpha", createdAt: "2026-05-20T00:00:00.000Z" },
+        { id: "r-30", pageId: "beta", createdAt: "2026-07-10T00:00:00.000Z" },
+        { id: "r-7", pageId: "gamma", createdAt: "2026-07-28T00:00:00.000Z" }
+      ],
+      proposals: [
+        { id: "p-old", createdAt: "2026-01-15T00:00:00.000Z", status: "accepted" },
+        { id: "p-7", createdAt: "2026-07-29T00:00:00.000Z", status: "open" }
+      ],
+      events: [],
+      heads: [],
+      retrievals: [
+        { id: "m-old", occurredAt: "2026-02-01T00:00:00.000Z", queryHash: "h1", resultCount: 1, durationMs: 5 },
+        { id: "m-7", occurredAt: "2026-07-30T00:00:00.000Z", queryHash: "h2", resultCount: 3, durationMs: 9 }
+      ]
+    }
+
+    const all = buildVaultDashboardSummary(input, asOf, "all")
+    const ninety = buildVaultDashboardSummary(input, asOf, "90d")
+    const thirty = buildVaultDashboardSummary(input, asOf, "30d")
+    const seven = buildVaultDashboardSummary(input, asOf, "7d")
+
+    // "all" is unwindowed and identical to the default (no range) call.
+    expect(all).toEqual(buildVaultDashboardSummary(input, asOf))
+    expect(all.growth.revisions).toBe(4)
+    expect(all.retrieval.searches).toBe(2)
+    expect(all.reviewThroughput.proposed).toBe(2)
+
+    // Each narrower window drops the older events; current-state stays constant.
+    expect(ninety.growth.revisions).toBe(3)
+    expect(thirty.growth.revisions).toBe(2)
+    expect(seven.growth.revisions).toBe(1)
+    expect(seven.retrieval.searches).toBe(1)
+    expect(seven.reviewThroughput.proposed).toBe(1)
+    // Snapshot metrics (current pages) are never windowed.
+    expect(seven.growth.acceptedPages).toBe(all.growth.acceptedPages)
+    expect(seven.citationCoverage).toEqual(all.citationCoverage)
+    expect(seven.connectivity).toEqual(all.connectivity)
+  })
 })

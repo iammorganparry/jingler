@@ -126,6 +126,7 @@ import {
   MemoryGraphView as MemoryGraphViewSchema,
   MemoryPageDetail as MemoryPageDetailSchema,
   MemoryReviewResult as MemoryReviewResultSchema,
+  MemorySuggestionsView as MemorySuggestionsViewSchema,
   MemoryUiError
 } from "@jingler/contracts"
 import { AppPaths } from "@jingler/cli-adapters"
@@ -230,6 +231,29 @@ const MemoryBackendReviewResult = Schema.Struct({
   )
 })
 
+const MemoryBackendSuggestions = Schema.Struct({
+  version: Schema.Literal(1),
+  vectorSource: Schema.Literal("turbopuffer", "lexical"),
+  suggestions: Schema.Array(
+    Schema.Struct({
+      sourceId: Schema.String,
+      targetId: Schema.String,
+      method: Schema.Literal("lexical", "embedding"),
+      score: Schema.Number,
+      evidence: Schema.Struct({
+        method: Schema.Literal("lexical", "embedding"),
+        cosine: Schema.Number,
+        sharedTerms: Schema.optional(Schema.Array(Schema.String)),
+        sharedTags: Schema.optional(Schema.Array(Schema.String)),
+        sharedSources: Schema.optional(Schema.Array(Schema.String)),
+        sharedSchemas: Schema.optional(Schema.Array(Schema.String)),
+        model: Schema.optional(Schema.String),
+        neighborRank: Schema.optional(Schema.Number)
+      })
+    })
+  )
+})
+
 const MemoryBackendExport = Schema.Struct({
   format: Schema.Literal("jingler-obsidian-vault"),
   version: Schema.Literal(1),
@@ -280,8 +304,8 @@ const memoryAccess = () =>
     )
   )
 
-const memoryDashboard = (organizationId: string) =>
-  memoryTool(organizationId, "memory_dashboard", {}).pipe(
+const memoryDashboard = (organizationId: string, range: string) =>
+  memoryTool(organizationId, "memory_dashboard", { range }).pipe(
     Effect.flatMap((value) =>
       decodeMemory(MemoryDashboardSummarySchema, value, "Memory dashboard response was invalid")
     )
@@ -330,6 +354,21 @@ const memorySearch = (organizationId: string, query: string, limit: number) =>
     )
   )
 
+/**
+ * Inbound linkers of a page. buildMemoryGraph emits, for every wikilink A→X, BOTH
+ * {src:page:A,tgt:page:X,kind:"wikilink"} and mirror {src:page:X,tgt:page:A,kind:"backlink"}.
+ * Only forward wikilink edges whose target is this page name an inbound linker (their sourceId).
+ * A "backlink" edge landing on this page mirrors one of THIS page's own outbound wikilinks,
+ * so its sourceId is a page we link TO — including it would list outbound targets as backlinks.
+ */
+export const deriveMemoryBacklinks = (
+  edges: ReadonlyArray<{ readonly sourceId: string; readonly targetId: string; readonly kind: string }>,
+  pageId: string
+): ReadonlyArray<string> =>
+  edges
+    .filter((edge) => edge.targetId === `page:${pageId}` && edge.kind === "wikilink")
+    .map((edge) => edge.sourceId)
+
 const memoryPage = (organizationId: string, pageId: string) =>
   Effect.all(
     {
@@ -346,14 +385,7 @@ const memoryPage = (organizationId: string, pageId: string) =>
   ).pipe(
     Effect.flatMap(({ page, neighborhood }) => {
       const node = neighborhood?.nodes.find((candidate) => candidate.pageId === pageId)
-      const backlinks =
-        neighborhood?.edges
-          .filter(
-            (edge) =>
-              edge.targetId === `page:${pageId}` &&
-              (edge.kind === "backlink" || edge.kind === "wikilink")
-          )
-          .map((edge) => edge.sourceId) ?? []
+      const backlinks = deriveMemoryBacklinks(neighborhood?.edges ?? [], pageId)
       return decodeMemory(
         MemoryPageDetailSchema,
         {
@@ -449,7 +481,7 @@ const memoryRpcRequest = (input: {
     case "access":
       return memoryAccess()
     case "dashboard":
-      return memoryDashboard(organizationId)
+      return memoryDashboard(organizationId, input.range ?? "all")
     case "graph":
       return memoryGraph(organizationId, input.limit ?? 250)
     case "neighborhood":
@@ -472,6 +504,56 @@ const memoryRpcRequest = (input: {
       return memoryExport(organizationId)
   }
 }
+
+/**
+ * `Memory.suggestions` handler — advisory relatedness only. A NEW, separate path
+ * from `memoryRpcRequest`: it fetches suggestions through the hosted grant (which
+ * stays in the main process), optionally scopes them to a page, and maps ids to
+ * best-effort titles. It never touches the accepted graph or an edge endpoint.
+ */
+const memorySuggestions = (
+  organizationId: string,
+  pageId: string | undefined,
+  limit: number
+) =>
+  Effect.flatMap(MemoryService, (service) =>
+    service.suggestions({ organizationId, limit: Math.min(50, Math.max(1, limit)) }).pipe(
+      Effect.flatMap((value) =>
+        value === null
+          ? Effect.fail(memoryUiFailure("Team memory is unavailable or unauthorized"))
+          : Effect.succeed(value)
+      )
+    )
+  ).pipe(
+    Effect.flatMap((value) =>
+      decodeMemory(MemoryBackendSuggestions, value, "Memory suggestions response was invalid")
+    ),
+    Effect.flatMap((view) => {
+      const scoped =
+        pageId === undefined || pageId === ""
+          ? view.suggestions
+          : view.suggestions.filter(
+              (link) => link.sourceId === pageId || link.targetId === pageId
+            )
+      return decodeMemory(
+        MemorySuggestionsViewSchema,
+        {
+          version: 1,
+          vectorSource: view.vectorSource,
+          suggestions: scoped.map((link) => ({
+            sourceId: link.sourceId,
+            targetId: link.targetId,
+            method: link.method,
+            score: link.score,
+            sourceTitle: link.sourceId,
+            targetTitle: link.targetId,
+            evidence: link.evidence
+          }))
+        },
+        "Memory suggestions view was invalid"
+      )
+    })
+  )
 
 /**
  * `Setup.chooseReposDir` handler. Opens the native picker; a cancelled dialog (or
@@ -3180,6 +3262,8 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Config.setContext": (context) => ConfigService.setContext(context),
   "Config.setMemory": (memory) => ConfigService.setMemory(memory),
   "Memory.request": memoryRpcRequest,
+  "Memory.suggestions": ({ organizationId, pageId, limit }) =>
+    memorySuggestions(organizationId, pageId, limit ?? 5),
   // Returns the updated session so the renderer can patch its cache without a
   // refetch, matching every other session mutation.
   "Sessions.setAutoCompact": ({ id, autoCompact }) =>

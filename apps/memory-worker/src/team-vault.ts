@@ -7,23 +7,27 @@ import {
   MemoryProposal as MemoryProposalSchema,
   MemorySource as MemorySourceSchema,
   assertMemoryValid,
+  buildMemoryGraph,
   canonicalJson,
   parseMemoryMarkdown,
   parseMemoryPage,
   serializeMemoryMarkdown,
+  SUGGESTION_POLICY_DEFAULT,
   type MemoryAuditEvent,
   type MemoryPage,
   type MemoryProposal,
-  type MemorySource
+  type MemorySource,
+  type SuggestedLink,
+  type SuggestionPolicy
 } from "@jingler/memory"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import {
   buildVaultDashboardSummary,
   type RetrievalMetric,
   type SessionRetrievalMetric,
   type VaultDashboardSummary
 } from "./analytics.js"
-import type { R2BucketLike, SqlStorageLike } from "./env.js"
+import type { DurableObjectStorageLike, R2BucketLike, SqlStorageLike } from "./env.js"
 import {
   buildBoundedGraphView,
   buildGraphNeighborhood,
@@ -50,6 +54,16 @@ import {
   type SearchProjection,
   type VaultSearchResponse
 } from "./search.js"
+import { combineSuggestions } from "./suggestions.js"
+import type { TurbopufferNeighbor, TurbopufferVectorLayer } from "./turbopuffer.js"
+
+export interface VaultSuggestionsResponse {
+  readonly version: 1
+  readonly policy: SuggestionPolicy
+  /** Where the embedding half of the suggestions came from, if anywhere. */
+  readonly vectorSource: "turbopuffer" | "lexical"
+  readonly suggestions: ReadonlyArray<SuggestedLink>
+}
 
 export interface VaultPageHead {
   readonly pageId: string
@@ -75,19 +89,27 @@ export interface VaultSnapshot {
 }
 
 export interface VaultStateStorage {
-  initialize(): Promise<void>
-  load(): Promise<VaultSnapshot>
+  initialize(): Effect.Effect<void, MemoryVaultError>
+  load(): Effect.Effect<VaultSnapshot, MemoryVaultError>
   commit(
     expectedVersion: number,
     next: VaultSnapshot,
     projection: SearchProjection,
     pages: ReadonlyArray<MemoryPage>
-  ): Promise<boolean>
-  loadProjectedPages(pageIds?: ReadonlyArray<string>): Promise<ReadonlyArray<MemoryPage> | undefined>
-  loadNavigation(): Promise<Pick<SearchProjection, "indexMarkdown" | "logMarkdown"> | undefined>
-  searchPageIds(query: string, limit: number): Promise<ReadonlyArray<string> | undefined>
-  recordRetrieval(metric: RetrievalMetric): Promise<void>
-  listRetrievals(): Promise<ReadonlyArray<RetrievalMetric>>
+  ): Effect.Effect<boolean, MemoryVaultError>
+  loadProjectedPages(
+    pageIds?: ReadonlyArray<string>
+  ): Effect.Effect<ReadonlyArray<MemoryPage> | undefined, MemoryVaultError>
+  loadNavigation(): Effect.Effect<
+    Pick<SearchProjection, "indexMarkdown" | "logMarkdown"> | undefined,
+    MemoryVaultError
+  >
+  searchPageIds(
+    query: string,
+    limit: number
+  ): Effect.Effect<ReadonlyArray<string> | undefined, MemoryVaultError>
+  recordRetrieval(metric: RetrievalMetric): Effect.Effect<void, MemoryVaultError>
+  listRetrievals(): Effect.Effect<ReadonlyArray<RetrievalMetric>, MemoryVaultError>
 }
 
 export interface IngestAcceptedPageInput {
@@ -183,21 +205,17 @@ export interface VaultExport {
   readonly files: ReadonlyArray<VaultExportFile>
 }
 
-export class MemoryVaultError extends Error {
-  override readonly name = "MemoryVaultError"
-
-  constructor(
-    readonly code:
-      | "not_found"
-      | "conflict"
-      | "invalid"
-      | "storage_conflict",
-    message: string,
-    readonly status: 400 | 404 | 409 = 400
-  ) {
-    super(message)
-  }
-}
+/**
+ * The vault's typed failure. A `Schema.TaggedError` (not a bare `Error`) so it
+ * composes as an Effect error channel and still crosses the DO fetch boundary as
+ * a real `Error` instance — `errorResponse` matches it by `instanceof` and reads
+ * `code`/`status`, exactly as before. `status` defaults to 400 when omitted.
+ */
+export class MemoryVaultError extends Schema.TaggedError<MemoryVaultError>()("MemoryVaultError", {
+  code: Schema.Literal("not_found", "conflict", "invalid", "storage_conflict"),
+  message: Schema.String,
+  status: Schema.optionalWith(Schema.Literal(400, 404, 409), { default: () => 400 as const })
+}) {}
 
 const StoredRevisionRecordSchema = Schema.Struct({
   id: Schema.String,
@@ -321,59 +339,69 @@ export class InMemoryVaultState implements VaultStateStorage {
   private navigation: Pick<SearchProjection, "indexMarkdown" | "logMarkdown"> | undefined
   private retrievals = new Map<string, RetrievalMetric>()
 
-  async initialize(): Promise<void> {}
-
-  async load(): Promise<VaultSnapshot> {
-    return decodeSnapshot(JSON.parse(snapshotJson(this.snapshot)))
+  initialize(): Effect.Effect<void> {
+    return Effect.void
   }
 
-  async commit(
+  load(): Effect.Effect<VaultSnapshot> {
+    return Effect.sync(() => decodeSnapshot(JSON.parse(snapshotJson(this.snapshot))))
+  }
+
+  commit(
     expectedVersion: number,
     next: VaultSnapshot,
     projection: SearchProjection,
     pages: ReadonlyArray<MemoryPage>
-  ): Promise<boolean> {
-    if (this.snapshot.version !== expectedVersion) return false
-    this.snapshot = decodeSnapshot(JSON.parse(snapshotJson(next)))
-    this.indexedRows = projection.rows
-    this.projectedPages = new Map(pages.map((page) => [page.id, serializeMemoryMarkdown(page)]))
-    this.navigation = {
-      indexMarkdown: projection.indexMarkdown,
-      logMarkdown: projection.logMarkdown
-    }
-    return true
-  }
-
-  async loadProjectedPages(pageIds?: ReadonlyArray<string>): Promise<ReadonlyArray<MemoryPage>> {
-    const ids = pageIds ?? [...this.projectedPages.keys()]
-    return ids.flatMap((pageId) => {
-      const markdown = this.projectedPages.get(pageId)
-      return markdown === undefined ? [] : [parseMemoryMarkdown(markdown)]
+  ): Effect.Effect<boolean> {
+    return Effect.sync(() => {
+      if (this.snapshot.version !== expectedVersion) return false
+      this.snapshot = decodeSnapshot(JSON.parse(snapshotJson(next)))
+      this.indexedRows = projection.rows
+      this.projectedPages = new Map(pages.map((page) => [page.id, serializeMemoryMarkdown(page)]))
+      this.navigation = {
+        indexMarkdown: projection.indexMarkdown,
+        logMarkdown: projection.logMarkdown
+      }
+      return true
     })
   }
 
-  async loadNavigation(): Promise<Pick<SearchProjection, "indexMarkdown" | "logMarkdown"> | undefined> {
-    return this.navigation
+  loadProjectedPages(pageIds?: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<MemoryPage>> {
+    return Effect.sync(() => {
+      const ids = pageIds ?? [...this.projectedPages.keys()]
+      return ids.flatMap((pageId) => {
+        const markdown = this.projectedPages.get(pageId)
+        return markdown === undefined ? [] : [parseMemoryMarkdown(markdown)]
+      })
+    })
   }
 
-  async recordRetrieval(metric: RetrievalMetric): Promise<void> {
-    this.retrievals.set(metric.id, metric)
+  loadNavigation(): Effect.Effect<Pick<SearchProjection, "indexMarkdown" | "logMarkdown"> | undefined> {
+    return Effect.sync(() => this.navigation)
   }
 
-  async listRetrievals(): Promise<ReadonlyArray<RetrievalMetric>> {
-    return [...this.retrievals.values()]
+  recordRetrieval(metric: RetrievalMetric): Effect.Effect<void> {
+    return Effect.sync(() => {
+      this.retrievals.set(metric.id, metric)
+    })
   }
 
-  async searchPageIds(query: string, limit: number): Promise<ReadonlyArray<string>> {
-    const normalized = query.toLocaleLowerCase("en-US")
-    return this.indexedRows
-      .filter((row) =>
-        [row.path, row.title, row.body, row.aliases, row.tags].some((value) =>
-          value.toLocaleLowerCase("en-US").includes(normalized)
+  listRetrievals(): Effect.Effect<ReadonlyArray<RetrievalMetric>> {
+    return Effect.sync(() => [...this.retrievals.values()])
+  }
+
+  searchPageIds(query: string, limit: number): Effect.Effect<ReadonlyArray<string>> {
+    return Effect.sync(() => {
+      const normalized = query.toLocaleLowerCase("en-US")
+      return this.indexedRows
+        .filter((row) =>
+          [row.path, row.title, row.body, row.aliases, row.tags].some((value) =>
+            value.toLocaleLowerCase("en-US").includes(normalized)
+          )
         )
-      )
-      .slice(0, limit)
-      .map((row) => row.pageId)
+        .slice(0, limit)
+        .map((row) => row.pageId)
+    })
   }
 }
 
@@ -395,45 +423,70 @@ interface NavigationRow {
   readonly log_markdown: string
 }
 
-export class SqliteVaultState implements VaultStateStorage {
-  constructor(private readonly sql: SqlStorageLike) {}
+/**
+ * Thrown inside {@link SqliteVaultState.commit}'s `transactionSync` closure when the
+ * optimistic version check misses. `transactionSync` rolls back only on throw, so a
+ * stale version — a normal, expected outcome — is signalled by throwing this marker
+ * and translating it back into `false` outside the transaction. Any OTHER throw rolls
+ * back and propagates as a real failure.
+ */
+const STALE_VAULT_VERSION: unique symbol = Symbol("SqliteVaultState.staleVersion")
 
-  async initialize(): Promise<void> {
-    this.sql.exec(
-      "CREATE TABLE IF NOT EXISTS vault_state (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), version INTEGER NOT NULL, state_json TEXT NOT NULL)"
-    )
-    this.sql.exec(
-      // biome-ignore lint/security/noSecrets: this is a static FTS5 schema, not a credential.
-      "CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(page_id UNINDEXED, path, title, body, aliases, tags, tokenize='unicode61')"
-    )
-    this.sql.exec(
-      "CREATE TABLE IF NOT EXISTS memory_pages (page_id TEXT PRIMARY KEY, page_markdown TEXT NOT NULL)"
-    )
-    this.sql.exec(
-      "CREATE TABLE IF NOT EXISTS memory_navigation (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), index_markdown TEXT NOT NULL, log_markdown TEXT NOT NULL)"
-    )
-    this.sql.exec(
-      "CREATE TABLE IF NOT EXISTS memory_retrievals (id TEXT PRIMARY KEY, occurred_at TEXT NOT NULL, query_hash TEXT NOT NULL, result_count INTEGER NOT NULL, duration_ms REAL NOT NULL)"
-    )
-    this.sql.exec(
-      "INSERT OR IGNORE INTO vault_state(singleton, version, state_json) VALUES (1, 0, ?)",
-      snapshotJson(emptySnapshot())
-    )
+export class SqliteVaultState implements VaultStateStorage {
+  private readonly sql: SqlStorageLike
+
+  constructor(private readonly storage: DurableObjectStorageLike) {
+    this.sql = storage.sql
   }
 
-  async load(): Promise<VaultSnapshot> {
-    const row = this.sql
-      .exec<StateRow>("SELECT version, state_json FROM vault_state WHERE singleton = 1")
-      .toArray()[0]
-    if (row === undefined) throw new MemoryVaultError("not_found", "vault state was not initialized", 404)
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(row.state_json)
-    } catch (error) {
-      throw new MemoryVaultError("invalid", `invalid persisted vault state: ${String(error)}`)
-    }
-    const snapshot = decodeSnapshot(parsed)
-    return snapshot.version === row.version ? snapshot : { ...snapshot, version: row.version }
+  initialize(): Effect.Effect<void> {
+    return Effect.sync(() => {
+      this.sql.exec(
+        "CREATE TABLE IF NOT EXISTS vault_state (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), version INTEGER NOT NULL, state_json TEXT NOT NULL)"
+      )
+      this.sql.exec(
+        // biome-ignore lint/security/noSecrets: this is a static FTS5 schema, not a credential.
+        "CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(page_id UNINDEXED, path, title, body, aliases, tags, tokenize='unicode61')"
+      )
+      this.sql.exec(
+        "CREATE TABLE IF NOT EXISTS memory_pages (page_id TEXT PRIMARY KEY, page_markdown TEXT NOT NULL)"
+      )
+      this.sql.exec(
+        "CREATE TABLE IF NOT EXISTS memory_navigation (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), index_markdown TEXT NOT NULL, log_markdown TEXT NOT NULL)"
+      )
+      this.sql.exec(
+        "CREATE TABLE IF NOT EXISTS memory_retrievals (id TEXT PRIMARY KEY, occurred_at TEXT NOT NULL, query_hash TEXT NOT NULL, result_count INTEGER NOT NULL, duration_ms REAL NOT NULL)"
+      )
+      this.sql.exec(
+        "INSERT OR IGNORE INTO vault_state(singleton, version, state_json) VALUES (1, 0, ?)",
+        snapshotJson(emptySnapshot())
+      )
+    })
+  }
+
+  load(): Effect.Effect<VaultSnapshot, MemoryVaultError> {
+    return Effect.suspend(() => {
+      const row = this.sql
+        .exec<StateRow>("SELECT version, state_json FROM vault_state WHERE singleton = 1")
+        .toArray()[0]
+      if (row === undefined) {
+        return Effect.fail(
+          new MemoryVaultError({ code: "not_found", message: "vault state was not initialized", status: 404 })
+        )
+      }
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(row.state_json)
+      } catch (error) {
+        return Effect.fail(
+          new MemoryVaultError({ code: "invalid", message: `invalid persisted vault state: ${String(error)}` })
+        )
+      }
+      const snapshot = decodeSnapshot(parsed)
+      return Effect.succeed(
+        snapshot.version === row.version ? snapshot : { ...snapshot, version: row.version }
+      )
+    })
   }
 
   private replaceProjection(
@@ -467,108 +520,127 @@ export class SqliteVaultState implements VaultStateStorage {
     )
   }
 
-  async commit(
+  commit(
     expectedVersion: number,
     next: VaultSnapshot,
     projection: SearchProjection,
     pages: ReadonlyArray<MemoryPage>
-  ): Promise<boolean> {
-    this.sql.exec("BEGIN IMMEDIATE")
-    try {
-      const result = this.sql.exec(
-        "UPDATE vault_state SET version = ?, state_json = ? WHERE singleton = 1 AND version = ?",
-        next.version,
-        snapshotJson(next),
-        expectedVersion
-      )
-      if (result.rowsWritten !== 1) {
-        this.sql.exec("ROLLBACK")
-        return false
+  ): Effect.Effect<boolean> {
+    // Durable-Object SQLite forbids explicit BEGIN/COMMIT/ROLLBACK via `sql.exec`,
+    // so the atomic unit is bracketed by `transactionSync`: a synchronous closure
+    // that commits on return and rolls back on throw. It stays inside ONE
+    // `Effect.sync` thunk so the fiber never yields mid-commit — atomicity is
+    // preserved exactly as the manual-transaction version had it.
+    return Effect.sync(() => {
+      try {
+        this.storage.transactionSync(() => {
+          const result = this.sql.exec(
+            "UPDATE vault_state SET version = ?, state_json = ? WHERE singleton = 1 AND version = ?",
+            next.version,
+            snapshotJson(next),
+            expectedVersion
+          )
+          // Optimistic-lock miss: throw the marker so `transactionSync` rolls the
+          // whole unit back, then translate it into `false` below.
+          if (result.rowsWritten !== 1) throw STALE_VAULT_VERSION
+          this.replaceProjection(projection, pages)
+        })
+        return true
+      } catch (error) {
+        if (error === STALE_VAULT_VERSION) return false
+        throw error
       }
-      this.replaceProjection(projection, pages)
-      this.sql.exec("COMMIT")
-      return true
-    } catch (error) {
-      this.sql.exec("ROLLBACK")
-      throw error
-    }
+    })
   }
 
-  async loadProjectedPages(pageIds?: ReadonlyArray<string>): Promise<ReadonlyArray<MemoryPage> | undefined> {
-    const rows = pageIds === undefined
-      ? this.sql.exec<ProjectedPageRow>("SELECT page_markdown FROM memory_pages ORDER BY page_id").toArray()
-      : pageIds.flatMap((pageId) =>
-          this.sql
-            .exec<ProjectedPageRow>("SELECT page_markdown FROM memory_pages WHERE page_id = ?", pageId)
-            .toArray()
+  loadProjectedPages(
+    pageIds?: ReadonlyArray<string>
+  ): Effect.Effect<ReadonlyArray<MemoryPage> | undefined, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const rows = pageIds === undefined
+        ? this.sql.exec<ProjectedPageRow>("SELECT page_markdown FROM memory_pages ORDER BY page_id").toArray()
+        : pageIds.flatMap((pageId) =>
+            this.sql
+              .exec<ProjectedPageRow>("SELECT page_markdown FROM memory_pages WHERE page_id = ?", pageId)
+              .toArray()
+          )
+      if (rows.length === 0) {
+        const state = yield* this.load()
+        if (state.heads.length > 0) return undefined
+      }
+      return rows.map((row) => parseMemoryMarkdown(row.page_markdown))
+    })
+  }
+
+  loadNavigation(): Effect.Effect<Pick<SearchProjection, "indexMarkdown" | "logMarkdown"> | undefined> {
+    return Effect.sync(() => {
+      const row = this.sql
+        .exec<NavigationRow>(
+          "SELECT index_markdown, log_markdown FROM memory_navigation WHERE singleton = 1"
         )
-    if (rows.length === 0) {
-      const state = await this.load()
-      if (state.heads.length > 0) return undefined
-    }
-    return rows.map((row) => parseMemoryMarkdown(row.page_markdown))
+        .toArray()[0]
+      return row === undefined
+        ? undefined
+        : { indexMarkdown: row.index_markdown, logMarkdown: row.log_markdown }
+    })
   }
 
-  async loadNavigation(): Promise<Pick<SearchProjection, "indexMarkdown" | "logMarkdown"> | undefined> {
-    const row = this.sql
-      .exec<NavigationRow>(
-        "SELECT index_markdown, log_markdown FROM memory_navigation WHERE singleton = 1"
+  recordRetrieval(metric: RetrievalMetric): Effect.Effect<void> {
+    return Effect.sync(() => {
+      this.sql.exec(
+        "INSERT OR IGNORE INTO memory_retrievals(id, occurred_at, query_hash, result_count, duration_ms) VALUES (?, ?, ?, ?, ?)",
+        metric.id,
+        metric.occurredAt,
+        metric.queryHash,
+        metric.resultCount,
+        metric.durationMs
       )
-      .toArray()[0]
-    return row === undefined
-      ? undefined
-      : { indexMarkdown: row.index_markdown, logMarkdown: row.log_markdown }
+    })
   }
 
-  async recordRetrieval(metric: RetrievalMetric): Promise<void> {
-    this.sql.exec(
-      "INSERT OR IGNORE INTO memory_retrievals(id, occurred_at, query_hash, result_count, duration_ms) VALUES (?, ?, ?, ?, ?)",
-      metric.id,
-      metric.occurredAt,
-      metric.queryHash,
-      metric.resultCount,
-      metric.durationMs
+  listRetrievals(): Effect.Effect<ReadonlyArray<RetrievalMetric>> {
+    return Effect.sync(() =>
+      this.sql
+        .exec<{
+          readonly id: string
+          readonly occurred_at: string
+          readonly query_hash: string
+          readonly result_count: number
+          readonly duration_ms: number
+        }>("SELECT id, occurred_at, query_hash, result_count, duration_ms FROM memory_retrievals ORDER BY occurred_at, id")
+        .toArray()
+        .map((row) => ({
+          id: row.id,
+          occurredAt: row.occurred_at,
+          queryHash: row.query_hash,
+          resultCount: row.result_count,
+          durationMs: row.duration_ms
+        }))
     )
   }
 
-  async listRetrievals(): Promise<ReadonlyArray<RetrievalMetric>> {
-    return this.sql
-      .exec<{
-        readonly id: string
-        readonly occurred_at: string
-        readonly query_hash: string
-        readonly result_count: number
-        readonly duration_ms: number
-      }>("SELECT id, occurred_at, query_hash, result_count, duration_ms FROM memory_retrievals ORDER BY occurred_at, id")
-      .toArray()
-      .map((row) => ({
-        id: row.id,
-        occurredAt: row.occurred_at,
-        queryHash: row.query_hash,
-        resultCount: row.result_count,
-        durationMs: row.duration_ms
-      }))
-  }
-
-  async searchPageIds(query: string, limit: number): Promise<ReadonlyArray<string> | undefined> {
-    const terms = query
-      .normalize("NFKC")
-      .split(SEARCH_WHITESPACE_PATTERN)
-      .map((term) => term.replace(INVALID_SEARCH_TERM_PATTERN, ""))
-      .filter((term) => term.length > 0)
-      .map((term) => `"${term.replace(/"/g, '""')}"`)
-    if (terms.length === 0) return []
-    try {
-      return this.sql
-        .exec<SearchRow>(
-          "SELECT page_id FROM memory_fts WHERE memory_fts MATCH ? ORDER BY rank LIMIT ?",
-          terms.join(" AND "),
-          limit
-        )
-        .toArray()
-        .map((row) => row.page_id)
-    } catch {
-    }
+  searchPageIds(query: string, limit: number): Effect.Effect<ReadonlyArray<string> | undefined> {
+    return Effect.sync(() => {
+      const terms = query
+        .normalize("NFKC")
+        .split(SEARCH_WHITESPACE_PATTERN)
+        .map((term) => term.replace(INVALID_SEARCH_TERM_PATTERN, ""))
+        .filter((term) => term.length > 0)
+        .map((term) => `"${term.replace(/"/g, '""')}"`)
+      if (terms.length === 0) return []
+      try {
+        return this.sql
+          .exec<SearchRow>(
+            "SELECT page_id FROM memory_fts WHERE memory_fts MATCH ? ORDER BY rank LIMIT ?",
+            terms.join(" AND "),
+            limit
+          )
+          .toArray()
+          .map((row) => row.page_id)
+      } catch {
+        return undefined
+      }
+    })
   }
 }
 
@@ -615,7 +687,7 @@ const revisionForHead = (
 ): StoredRevisionRecord => {
   const revision = snapshot.revisions.find((candidate) => candidate.id === head.revisionId)
   if (revision === undefined) {
-    throw new MemoryVaultError("invalid", `head ${head.pageId} has no revision ${head.revisionId}`)
+    throw new MemoryVaultError({ code: "invalid", message: `head ${head.pageId} has no revision ${head.revisionId}` })
   }
   return revision
 }
@@ -646,81 +718,95 @@ const revisionCreatedEvent = (revision: StoredRevisionRecord): MemoryAuditEvent 
 })
 
 export class TeamVault {
-  private mutationTail: Promise<void> = Promise.resolve()
+  /**
+   * Serializes every mutation. A permit-1 semaphore preserves the previous
+   * promise-chain mutex semantics EXACTLY — FIFO mutual exclusion, and the
+   * permit is released on success, failure, or interruption.
+   */
+  private readonly mutex = Effect.unsafeMakeSemaphore(1)
 
   private constructor(
     readonly organizationId: string,
     private readonly state: VaultStateStorage,
-    private readonly objects: MemoryR2Store
+    private readonly objects: MemoryR2Store,
+    /**
+     * Optional advisory vector sidecar. Present only when the Worker env carries a
+     * turbopuffer key; absent means relatedness suggestions degrade to lexical.
+     * Never consulted by search, the graph, or any export hash.
+     */
+    private readonly vectorLayer?: TurbopufferVectorLayer
   ) {}
 
-  static async create(
+  static create(
     organizationId: string,
     state: VaultStateStorage,
-    bucket: R2BucketLike
-  ): Promise<TeamVault> {
-    await state.initialize()
-    return new TeamVault(organizationId, state, new MemoryR2Store(organizationId, bucket))
-  }
-
-  private async serialized<Result>(operation: () => Promise<Result>): Promise<Result> {
-    const previous = this.mutationTail
-    let release = (): void => {}
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
+    bucket: R2BucketLike,
+    vectorLayer?: TurbopufferVectorLayer
+  ): Effect.Effect<TeamVault, MemoryVaultError> {
+    return Effect.gen(function* () {
+      yield* state.initialize()
+      return new TeamVault(
+        organizationId,
+        state,
+        new MemoryR2Store(organizationId, bucket),
+        vectorLayer
+      )
     })
-    this.mutationTail = previous.then(() => gate)
-    await previous
-    try {
-      return await operation()
-    } finally {
-      release()
-    }
   }
 
-  private async loadPages(
+  private serialized<A, E>(operation: Effect.Effect<A, E>): Effect.Effect<A, E> {
+    return this.mutex.withPermits(1)(operation)
+  }
+
+  private loadPages(
     snapshot: VaultSnapshot,
     pageIds?: ReadonlyArray<string>
-  ): Promise<Array<MemoryPage>> {
-    const projected = await this.state.loadProjectedPages(pageIds)
-    if (projected !== undefined) return [...projected]
-    const requested = pageIds === undefined ? undefined : new Set(pageIds)
-    const heads = [...snapshot.heads]
-      .filter((head) => requested === undefined || requested.has(head.pageId))
-      .sort((left, right) => compareText(left.pageId, right.pageId))
-    const pages: Array<MemoryPage> = []
-    const concurrency = 16
-    for (let offset = 0; offset < heads.length; offset += concurrency) {
-      pages.push(
-        ...(await Promise.all(
-          heads.slice(offset, offset + concurrency).map(async (head) =>
-            parseMemoryPage(head.path, await this.objects.readMarkdown(head.markdownKey))
+  ): Effect.Effect<Array<MemoryPage>, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const projected = yield* this.state.loadProjectedPages(pageIds)
+      if (projected !== undefined) return [...projected]
+      return yield* Effect.promise(async () => {
+        const requested = pageIds === undefined ? undefined : new Set(pageIds)
+        const heads = [...snapshot.heads]
+          .filter((head) => requested === undefined || requested.has(head.pageId))
+          .sort((left, right) => compareText(left.pageId, right.pageId))
+        const pages: Array<MemoryPage> = []
+        const concurrency = 16
+        for (let offset = 0; offset < heads.length; offset += concurrency) {
+          pages.push(
+            ...(await Promise.all(
+              heads.slice(offset, offset + concurrency).map(async (head) =>
+                parseMemoryPage(head.path, await this.objects.readMarkdown(head.markdownKey))
+              )
+            ))
           )
-        ))
-      )
-    }
-    return pages
+        }
+        return pages
+      })
+    })
   }
 
   private sources(snapshot: VaultSnapshot): ReadonlyArray<MemorySource> {
     return snapshot.sources.map((record) => record.source)
   }
 
-  private async persist(
+  private persist(
     current: VaultSnapshot,
     changes: Omit<VaultSnapshot, "version">,
     pages: ReadonlyArray<MemoryPage>
-  ): Promise<VaultSnapshot> {
-    const next: VaultSnapshot = { ...changes, version: current.version + 1 }
-    const projection = buildSearchProjection(pages, acceptedLog(next))
-    if (!(await this.state.commit(current.version, next, projection, pages))) {
-      throw new MemoryVaultError("storage_conflict", "vault state changed concurrently", 409)
-    }
-    await this.objects.putHistorySnapshot(next.version, canonicalJson(historyFor(next)))
-    return next
+  ): Effect.Effect<VaultSnapshot, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const next: VaultSnapshot = { ...changes, version: current.version + 1 }
+      const projection = buildSearchProjection(pages, acceptedLog(next))
+      if (!(yield* this.state.commit(current.version, next, projection, pages))) {
+        return yield* new MemoryVaultError({ code: "storage_conflict", message: "vault state changed concurrently", status: 409 })
+      }
+      yield* Effect.promise(() => this.objects.putHistorySnapshot(next.version, canonicalJson(historyFor(next))))
+      return next
+    })
   }
 
-  async ingestSource(
+  ingestSource(
     source: MemorySource,
     content: string,
     retrieval: MemoryRetrievalSummaryType = {
@@ -730,9 +816,9 @@ export class TeamVault {
       graphReads: 0,
       proposals: 0
     }
-  ): Promise<StoredSourceRecord> {
-    return this.serialized(async () => {
-      const current = await this.state.load()
+  ): Effect.Effect<StoredSourceRecord, MemoryVaultError> {
+    return this.serialized(Effect.gen(this, function* () {
+      const current = yield* this.state.load()
       const existing = current.sources.find((record) => record.source.id === source.id)
       const metric: SessionRetrievalMetric = {
         id: `session-retrieval:${source.id}`,
@@ -740,9 +826,10 @@ export class TeamVault {
         ...retrieval
       }
       if (existing !== undefined) {
-        if ((await this.objects.readSourceContent(existing)) === content) {
+        if ((yield* Effect.promise(() => this.objects.readSourceContent(existing))) === content) {
           if (!current.sessionRetrievals.some((candidate) => candidate.id === metric.id)) {
-            await this.persist(
+            const pages = yield* this.loadPages(current)
+            yield* this.persist(
               current,
               {
                 ...current,
@@ -751,16 +838,16 @@ export class TeamVault {
                   metric
                 ])
               },
-              await this.loadPages(current)
+              pages
             )
           }
           return existing
         }
-        throw new MemoryVaultError("conflict", `source id ${source.id} already exists`, 409)
+        return yield* new MemoryVaultError({ code: "conflict", message: `source id ${source.id} already exists`, status: 409 })
       }
-      const stored = await this.objects.putSource(source, content)
-      const pages = await this.loadPages(current)
-      await this.persist(
+      const stored = yield* Effect.promise(() => this.objects.putSource(source, content))
+      const pages = yield* this.loadPages(current)
+      yield* this.persist(
         current,
         {
           ...current,
@@ -770,45 +857,45 @@ export class TeamVault {
         pages
       )
       return stored
-    })
+    }))
   }
 
-  async ingestAcceptedPage(input: IngestAcceptedPageInput): Promise<AcceptedPageResponse> {
-    return this.serialized(async () => {
-      const current = await this.state.load()
+  ingestAcceptedPage(input: IngestAcceptedPageInput): Effect.Effect<AcceptedPageResponse, MemoryVaultError> {
+    return this.serialized(Effect.gen(this, function* () {
+      const current = yield* this.state.load()
       const duplicateRevision = current.revisions.find((revision) => revision.id === input.revisionId)
       if (duplicateRevision !== undefined) {
         const head = current.heads.find((candidate) => candidate.revisionId === duplicateRevision.id)
         if (head === undefined) {
-          throw new MemoryVaultError("conflict", `revision id ${input.revisionId} already exists`, 409)
+          return yield* new MemoryVaultError({ code: "conflict", message: `revision id ${input.revisionId} already exists`, status: 409 })
         }
-        const markdown = await this.objects.readMarkdown(duplicateRevision.markdownKey)
+        const markdown = yield* Effect.promise(() => this.objects.readMarkdown(duplicateRevision.markdownKey))
         if (serializeMemoryMarkdown(parseMemoryPage(head.path, markdown)) !== serializeMemoryMarkdown(parseMemoryPage(head.path, input.markdown))) {
-          throw new MemoryVaultError("conflict", `revision id ${input.revisionId} already exists`, 409)
+          return yield* new MemoryVaultError({ code: "conflict", message: `revision id ${input.revisionId} already exists`, status: 409 })
         }
-        return this.acceptedPageResponse(current, head)
+        return yield* this.acceptedPageResponse(current, head)
       }
       const candidate = parseMemoryMarkdown(input.markdown)
       if (candidate.revision !== 1) {
-        throw new MemoryVaultError("invalid", "an initial accepted page must have revision 1")
+        return yield* new MemoryVaultError({ code: "invalid", message: "an initial accepted page must have revision 1" })
       }
       if (current.heads.some((head) => head.pageId === candidate.id)) {
-        throw new MemoryVaultError("conflict", `page ${candidate.id} already exists; create a proposal`, 409)
+        return yield* new MemoryVaultError({ code: "conflict", message: `page ${candidate.id} already exists; create a proposal`, status: 409 })
       }
-      const existingPages = await this.loadPages(current)
+      const existingPages = yield* this.loadPages(current)
       assertMemoryValid(
         { pages: [...existingPages, candidate], sources: this.sources(current) },
         { requireCitations: true }
       )
       const canonicalMarkdown = serializeMemoryMarkdown(candidate)
-      const stored = await this.objects.putAcceptedRevision(canonicalMarkdown, {
+      const stored = yield* Effect.promise(() => this.objects.putAcceptedRevision(canonicalMarkdown, {
         id: input.revisionId,
         pageId: candidate.id,
         revision: 1,
         authorId: input.actorId,
         createdAt: input.createdAt,
         acceptedAt: input.createdAt
-      })
+      }))
       const head: VaultPageHead = {
         pageId: candidate.id,
         path: candidate.path,
@@ -825,7 +912,7 @@ export class TeamVault {
         pageCreatedEvent(candidate.id, stored.id, input.actorId, input.createdAt),
         revisionCreatedEvent(stored)
       ])
-      const next = await this.persist(
+      const next = yield* this.persist(
         current,
         {
           ...current,
@@ -835,34 +922,30 @@ export class TeamVault {
         },
         pages
       )
-      return this.acceptedPageResponse(next, head)
-    })
+      return yield* this.acceptedPageResponse(next, head)
+    }))
   }
 
-  async createProposal(input: CreateProposalInput): Promise<MemoryProposal> {
-    return this.serialized(async () => {
-      const current = await this.state.load()
+  createProposal(input: CreateProposalInput): Effect.Effect<MemoryProposal, MemoryVaultError> {
+    return this.serialized(Effect.gen(this, function* () {
+      const current = yield* this.state.load()
       const proposal: MemoryProposal = { ...input, status: "open" }
       const decoded = Schema.decodeUnknownSync(MemoryProposalSchema)(proposal)
       const existing = current.proposals.find((candidate) => candidate.id === input.id)
       if (existing !== undefined) {
         if (canonicalJson(existing) === canonicalJson(decoded)) return existing
-        throw new MemoryVaultError("conflict", `proposal id ${input.id} already exists`, 409)
+        return yield* new MemoryVaultError({ code: "conflict", message: `proposal id ${input.id} already exists`, status: 409 })
       }
       const head = current.heads.find((candidate) => candidate.pageId === input.pageId)
-      if (head === undefined) throw new MemoryVaultError("not_found", `page ${input.pageId} was not found`, 404)
+      if (head === undefined) return yield* new MemoryVaultError({ code: "not_found", message: `page ${input.pageId} was not found`, status: 404 })
       if (head.revisionId !== input.baseRevisionId) {
-        throw new MemoryVaultError(
-          "conflict",
-          `proposal base ${input.baseRevisionId} is stale; current head is ${head.revisionId}`,
-          409
-        )
+        return yield* new MemoryVaultError({ code: "conflict", message: `proposal base ${input.baseRevisionId} is stale; current head is ${head.revisionId}`, status: 409 })
       }
       const parsed = parseMemoryPage(head.path, input.markdown)
       if (parsed.id !== input.pageId || parsed.revision !== head.revision + 1) {
-        throw new MemoryVaultError("invalid", "proposal identity or revision number is invalid")
+        return yield* new MemoryVaultError({ code: "invalid", message: "proposal identity or revision number is invalid" })
       }
-      const pages = await this.loadPages(current)
+      const pages = yield* this.loadPages(current)
       assertMemoryValid(
         {
           pages: pages.map((page) => (page.id === parsed.id ? parsed : page)),
@@ -879,7 +962,7 @@ export class TeamVault {
         proposalId: input.id,
         details: { baseRevisionId: input.baseRevisionId }
       }
-      await this.persist(
+      yield* this.persist(
         current,
         {
           ...current,
@@ -889,21 +972,21 @@ export class TeamVault {
         pages
       )
       return decoded
-    })
+    }))
   }
 
-  async createProposalSet(input: CreateProposalSetInput): Promise<VaultProposalSet> {
-    return this.serialized(async () => {
-      const current = await this.state.load()
-      const pages = await this.loadPages(current)
+  createProposalSet(input: CreateProposalSetInput): Effect.Effect<VaultProposalSet, MemoryVaultError> {
+    return this.serialized(Effect.gen(this, function* () {
+      const current = yield* this.state.load()
+      const pages = yield* this.loadPages(current)
       const prepared = prepareProposalSet(input, pages, current.heads, this.sources(current))
       const existing = current.proposalSets.find((candidate) => candidate.id === input.id)
       if (existing !== undefined) {
         if (proposalSetMatches(existing, current.proposals, prepared)) return existing
-        throw new MemoryVaultError("conflict", `proposal set id ${input.id} already exists`, 409)
+        return yield* new MemoryVaultError({ code: "conflict", message: `proposal set id ${input.id} already exists`, status: 409 })
       }
       if (current.proposals.some((proposal) => prepared.set.proposalIds.includes(proposal.id))) {
-        throw new MemoryVaultError("conflict", `proposal ids for set ${input.id} already exist`, 409)
+        return yield* new MemoryVaultError({ code: "conflict", message: `proposal ids for set ${input.id} already exist`, status: 409 })
       }
       const events = prepared.proposals.map(
         (proposal): MemoryAuditEvent => ({
@@ -921,7 +1004,7 @@ export class TeamVault {
           }
         })
       )
-      await this.persist(
+      yield* this.persist(
         current,
         {
           ...current,
@@ -932,24 +1015,24 @@ export class TeamVault {
         pages
       )
       return prepared.set
-    })
+    }))
   }
 
-  async approveProposalSet(
+  approveProposalSet(
     proposalSetId: string,
     reviewerId: string,
     acceptedAt: string
-  ): Promise<ProposalSetApprovalResult> {
-    return this.serialized(async () => {
-      const current = await this.state.load()
+  ): Effect.Effect<ProposalSetApprovalResult, MemoryVaultError> {
+    return this.serialized(Effect.gen(this, function* () {
+      const current = yield* this.state.load()
       const proposalSet = current.proposalSets.find((candidate) => candidate.id === proposalSetId)
       if (proposalSet === undefined) {
-        throw new MemoryVaultError("not_found", `proposal set ${proposalSetId} was not found`, 404)
+        return yield* new MemoryVaultError({ code: "not_found", message: `proposal set ${proposalSetId} was not found`, status: 404 })
       }
       const setProposals = proposalSet.proposalIds.map((proposalId) => {
         const proposal = current.proposals.find((candidate) => candidate.id === proposalId)
         if (proposal === undefined) {
-          throw new MemoryVaultError("invalid", `proposal set ${proposalSetId} is incomplete`)
+          throw new MemoryVaultError({ code: "invalid", message: `proposal set ${proposalSetId} is incomplete` })
         }
         return proposal
       })
@@ -962,7 +1045,7 @@ export class TeamVault {
               (candidate) => candidate.id === `revision:${proposal.id}`
             )
             if (revision === undefined) {
-              throw new MemoryVaultError("invalid", `accepted proposal ${proposal.id} has no revision`)
+              throw new MemoryVaultError({ code: "invalid", message: `accepted proposal ${proposal.id} has no revision` })
             }
             return {
               proposalId: proposal.id,
@@ -992,7 +1075,8 @@ export class TeamVault {
       })
       if (proposalSet.status !== "open" || conflicts.length > 0) {
         if (proposalSet.status === "open") {
-          await this.persist(
+          const supersededPages = yield* this.loadPages(current)
+          yield* this.persist(
             current,
             {
               ...current,
@@ -1005,13 +1089,13 @@ export class TeamVault {
                 candidate.id === proposalSetId ? { ...candidate, status: "superseded" } : candidate
               )
             },
-            await this.loadPages(current)
+            supersededPages
           )
         }
         return { status: "conflict", proposalSetId, conflicts }
       }
 
-      const pages = await this.loadPages(current)
+      const pages = yield* this.loadPages(current)
       const prepared = prepareProposalSet(
         {
           id: proposalSet.id,
@@ -1038,13 +1122,13 @@ export class TeamVault {
         const head = heads.get(proposal.pageId)
         const candidate = candidateById.get(proposal.pageId)
         if (candidate === undefined) {
-          throw new MemoryVaultError("invalid", `proposal page ${proposal.pageId} disappeared`)
+          return yield* new MemoryVaultError({ code: "invalid", message: `proposal page ${proposal.pageId} disappeared` })
         }
         if (head === undefined && proposal.baseRevisionId !== NEW_PAGE_BASE_REVISION_ID) {
-          throw new MemoryVaultError("invalid", `proposal page ${proposal.pageId} lost its accepted head`)
+          return yield* new MemoryVaultError({ code: "invalid", message: `proposal page ${proposal.pageId} lost its accepted head` })
         }
         storedRevisions.push(
-          await this.objects.putAcceptedRevision(serializeMemoryMarkdown(candidate), {
+          yield* Effect.promise(() => this.objects.putAcceptedRevision(serializeMemoryMarkdown(candidate), {
             id: `revision:${proposal.id}`,
             pageId: proposal.pageId,
             revision: candidate.revision,
@@ -1053,14 +1137,14 @@ export class TeamVault {
             createdAt: proposal.createdAt,
             acceptedAt,
             publicationId: proposalSet.id
-          })
+          }))
         )
       }
-      await this.objects.putPublicationCommit({
+      yield* Effect.promise(() => this.objects.putPublicationCommit({
         id: proposalSet.id,
         revisionIds: storedRevisions.map((revision) => revision.id),
         acceptedAt
-      })
+      }))
 
       const storedByPage = new Map(storedRevisions.map((revision) => [revision.pageId, revision]))
       const updatedHeads = current.heads
@@ -1115,7 +1199,7 @@ export class TeamVault {
           }
         }
       })
-      await this.persist(
+      yield* this.persist(
         current,
         {
           ...current,
@@ -1150,19 +1234,19 @@ export class TeamVault {
           revision: revision.revision
         }))
       }
-    })
+    }))
   }
 
-  async rejectProposalSet(
+  rejectProposalSet(
     proposalSetId: string,
     reviewerId: string,
     rejectedAt: string
-  ): Promise<VaultProposalSet> {
-    return this.serialized(async () => {
-      const current = await this.state.load()
+  ): Effect.Effect<VaultProposalSet, MemoryVaultError> {
+    return this.serialized(Effect.gen(this, function* () {
+      const current = yield* this.state.load()
       const proposalSet = current.proposalSets.find((candidate) => candidate.id === proposalSetId)
       if (proposalSet === undefined) {
-        throw new MemoryVaultError("not_found", `proposal set ${proposalSetId} was not found`, 404)
+        return yield* new MemoryVaultError({ code: "not_found", message: `proposal set ${proposalSetId} was not found`, status: 404 })
       }
       if (proposalSet.status !== "open") return proposalSet
       const rejected: VaultProposalSet = { ...proposalSet, status: "rejected" }
@@ -1179,7 +1263,8 @@ export class TeamVault {
             details: { baseRevisionId: proposal.baseRevisionId, proposalSetId }
           })
         )
-      await this.persist(
+      const rejectedPages = yield* this.loadPages(current)
+      yield* this.persist(
         current,
         {
           ...current,
@@ -1193,22 +1278,22 @@ export class TeamVault {
           ),
           events: uniqueById([...current.events, ...events])
         },
-        await this.loadPages(current)
+        rejectedPages
       )
       return rejected
-    })
+    }))
   }
 
-  async approveProposal(proposalId: string, reviewerId: string, acceptedAt: string): Promise<ApprovalResult> {
-    return this.serialized(async () => {
-      const current = await this.state.load()
+  approveProposal(proposalId: string, reviewerId: string, acceptedAt: string): Effect.Effect<ApprovalResult, MemoryVaultError> {
+    return this.serialized(Effect.gen(this, function* () {
+      const current = yield* this.state.load()
       const proposal = current.proposals.find((candidate) => candidate.id === proposalId)
-      if (proposal === undefined) throw new MemoryVaultError("not_found", `proposal ${proposalId} was not found`, 404)
+      if (proposal === undefined) return yield* new MemoryVaultError({ code: "not_found", message: `proposal ${proposalId} was not found`, status: 404 })
       const head = current.heads.find((candidate) => candidate.pageId === proposal.pageId)
-      if (head === undefined) throw new MemoryVaultError("not_found", `page ${proposal.pageId} was not found`, 404)
+      if (head === undefined) return yield* new MemoryVaultError({ code: "not_found", message: `page ${proposal.pageId} was not found`, status: 404 })
       if (proposal.status === "accepted") {
         const revision = current.revisions.find((candidate) => candidate.id === `revision:${proposal.id}`)
-        if (revision === undefined) throw new MemoryVaultError("invalid", "accepted proposal revision is missing")
+        if (revision === undefined) return yield* new MemoryVaultError({ code: "invalid", message: "accepted proposal revision is missing" })
         return {
           status: "accepted",
           proposalId,
@@ -1224,7 +1309,8 @@ export class TeamVault {
             : candidate
         )
         if (canonicalJson(proposals) !== canonicalJson(current.proposals)) {
-          await this.persist(current, { ...current, proposals }, await this.loadPages(current))
+          const supersededPages = yield* this.loadPages(current)
+          yield* this.persist(current, { ...current, proposals }, supersededPages)
         }
         return {
           status: "conflict",
@@ -1234,10 +1320,10 @@ export class TeamVault {
           currentHeadRevisionId: head.revisionId
         }
       }
-      const pages = await this.loadPages(current)
+      const pages = yield* this.loadPages(current)
       const candidate = parseMemoryPage(head.path, proposal.markdown)
       if (candidate.id !== proposal.pageId || candidate.revision !== head.revision + 1) {
-        throw new MemoryVaultError("invalid", "proposal identity or revision number is invalid")
+        return yield* new MemoryVaultError({ code: "invalid", message: "proposal identity or revision number is invalid" })
       }
       const acceptedPages = pages.map((page) => (page.id === candidate.id ? candidate : page))
       assertMemoryValid(
@@ -1245,7 +1331,7 @@ export class TeamVault {
         { requireCitations: true }
       )
       const revisionId = `revision:${proposal.id}`
-      const stored = await this.objects.putAcceptedRevision(serializeMemoryMarkdown(candidate), {
+      const stored = yield* Effect.promise(() => this.objects.putAcceptedRevision(serializeMemoryMarkdown(candidate), {
         id: revisionId,
         pageId: candidate.id,
         revision: candidate.revision,
@@ -1253,7 +1339,7 @@ export class TeamVault {
         authorId: proposal.proposedBy,
         createdAt: proposal.createdAt,
         acceptedAt
-      })
+      }))
       const nextHead: VaultPageHead = {
         pageId: candidate.id,
         path: candidate.path,
@@ -1275,7 +1361,7 @@ export class TeamVault {
         revisionId: stored.id,
         details: { baseRevisionId: proposal.baseRevisionId }
       }
-      await this.persist(
+      yield* this.persist(
         current,
         {
           ...current,
@@ -1297,14 +1383,14 @@ export class TeamVault {
         revisionId,
         revision: stored.revision
       }
-    })
+    }))
   }
 
-  async rejectProposal(proposalId: string, reviewerId: string, rejectedAt: string): Promise<MemoryProposal> {
-    return this.serialized(async () => {
-      const current = await this.state.load()
+  rejectProposal(proposalId: string, reviewerId: string, rejectedAt: string): Effect.Effect<MemoryProposal, MemoryVaultError> {
+    return this.serialized(Effect.gen(this, function* () {
+      const current = yield* this.state.load()
       const proposal = current.proposals.find((candidate) => candidate.id === proposalId)
-      if (proposal === undefined) throw new MemoryVaultError("not_found", `proposal ${proposalId} was not found`, 404)
+      if (proposal === undefined) return yield* new MemoryVaultError({ code: "not_found", message: `proposal ${proposalId} was not found`, status: 404 })
       if (proposal.status !== "open") return proposal
       const rejected: MemoryProposal = { ...proposal, status: "rejected" }
       const event: MemoryAuditEvent = {
@@ -1316,7 +1402,8 @@ export class TeamVault {
         proposalId: proposal.id,
         details: { baseRevisionId: proposal.baseRevisionId }
       }
-      await this.persist(
+      const rejectedPages = yield* this.loadPages(current)
+      yield* this.persist(
         current,
         {
           ...current,
@@ -1325,159 +1412,181 @@ export class TeamVault {
           ),
           events: uniqueById([...current.events, event])
         },
-        await this.loadPages(current)
+        rejectedPages
       )
       return rejected
+    }))
+  }
+
+  private acceptedPageResponse(
+    snapshot: VaultSnapshot,
+    head: VaultPageHead
+  ): Effect.Effect<AcceptedPageResponse, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const revision = revisionForHead(snapshot, head)
+      const page = parseMemoryPage(head.path, yield* Effect.promise(() => this.objects.readMarkdown(head.markdownKey)))
+      return {
+        page,
+        revision,
+        sourceIds: [
+          ...new Set([
+            ...page.sources.map((source) => source.id),
+            ...page.citations.map((citation) => citation.sourceId)
+          ])
+        ].sort(compareText),
+        citationIds: page.citations.map((citation) => citation.id).sort(compareText)
+      }
     })
   }
 
-  private async acceptedPageResponse(
-    snapshot: VaultSnapshot,
-    head: VaultPageHead
-  ): Promise<AcceptedPageResponse> {
-    const revision = revisionForHead(snapshot, head)
-    const page = parseMemoryPage(head.path, await this.objects.readMarkdown(head.markdownKey))
-    return {
-      page,
-      revision,
-      sourceIds: [
-        ...new Set([
-          ...page.sources.map((source) => source.id),
-          ...page.citations.map((citation) => citation.sourceId)
-        ])
-      ].sort(compareText),
-      citationIds: page.citations.map((citation) => citation.id).sort(compareText)
-    }
+  readPage(pageId: string): Effect.Effect<AcceptedPageResponse, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const snapshot = yield* this.state.load()
+      const head = snapshot.heads.find((candidate) => candidate.pageId === pageId)
+      if (head === undefined) return yield* new MemoryVaultError({ code: "not_found", message: `page ${pageId} was not found`, status: 404 })
+      return yield* this.acceptedPageResponse(snapshot, head)
+    })
   }
 
-  async readPage(pageId: string): Promise<AcceptedPageResponse> {
-    const snapshot = await this.state.load()
-    const head = snapshot.heads.find((candidate) => candidate.pageId === pageId)
-    if (head === undefined) throw new MemoryVaultError("not_found", `page ${pageId} was not found`, 404)
-    return this.acceptedPageResponse(snapshot, head)
-  }
-
-  async listPages(): Promise<ReadonlyArray<VaultPageHead>> {
-    return [...(await this.state.load()).heads].sort((left, right) => compareText(left.path, right.path))
-  }
-
-  async listSources(): Promise<ReadonlyArray<MemorySource>> {
-    return [...this.sources(await this.state.load())].sort((left, right) => compareText(left.id, right.id))
-  }
-
-  async readSource(sourceId: string): Promise<StoredSourceResponse> {
-    const record = (await this.state.load()).sources.find((candidate) => candidate.source.id === sourceId)
-    if (record === undefined) {
-      throw new MemoryVaultError("not_found", `source ${sourceId} was not found`, 404)
-    }
-    return {
-      source: record.source,
-      contentHash: record.contentHash,
-      content: await this.objects.readSourceContent(record)
-    }
-  }
-
-  async getProposal(proposalId: string): Promise<MemoryProposal> {
-    const proposal = (await this.state.load()).proposals.find((candidate) => candidate.id === proposalId)
-    if (proposal === undefined) throw new MemoryVaultError("not_found", `proposal ${proposalId} was not found`, 404)
-    return proposal
-  }
-
-  async getProposalSet(proposalSetId: string): Promise<VaultProposalSet> {
-    const proposalSet = (await this.state.load()).proposalSets.find(
-      (candidate) => candidate.id === proposalSetId
+  listPages(): Effect.Effect<ReadonlyArray<VaultPageHead>, MemoryVaultError> {
+    return Effect.map(this.state.load(), (snapshot) =>
+      [...snapshot.heads].sort((left, right) => compareText(left.path, right.path))
     )
-    if (proposalSet === undefined) {
-      throw new MemoryVaultError("not_found", `proposal set ${proposalSetId} was not found`, 404)
-    }
-    return proposalSet
   }
 
-  async listProposalSets(limit = 50): Promise<ReadonlyArray<VaultProposalSet & {
-    readonly pages: ReadonlyArray<MemoryProposal>
-  }>> {
-    const snapshot = await this.state.load()
-    return [...snapshot.proposalSets]
-      .sort(
-        (left, right) =>
-          compareText(right.createdAt, left.createdAt) || compareText(left.id, right.id)
+  listSources(): Effect.Effect<ReadonlyArray<MemorySource>, MemoryVaultError> {
+    return Effect.map(this.state.load(), (snapshot) =>
+      [...this.sources(snapshot)].sort((left, right) => compareText(left.id, right.id))
+    )
+  }
+
+  readSource(sourceId: string): Effect.Effect<StoredSourceResponse, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const record = (yield* this.state.load()).sources.find((candidate) => candidate.source.id === sourceId)
+      if (record === undefined) {
+        return yield* new MemoryVaultError({ code: "not_found", message: `source ${sourceId} was not found`, status: 404 })
+      }
+      return {
+        source: record.source,
+        contentHash: record.contentHash,
+        content: yield* Effect.promise(() => this.objects.readSourceContent(record))
+      }
+    })
+  }
+
+  getProposal(proposalId: string): Effect.Effect<MemoryProposal, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const proposal = (yield* this.state.load()).proposals.find((candidate) => candidate.id === proposalId)
+      if (proposal === undefined) return yield* new MemoryVaultError({ code: "not_found", message: `proposal ${proposalId} was not found`, status: 404 })
+      return proposal
+    })
+  }
+
+  getProposalSet(proposalSetId: string): Effect.Effect<VaultProposalSet, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const proposalSet = (yield* this.state.load()).proposalSets.find(
+        (candidate) => candidate.id === proposalSetId
       )
-      .slice(0, Math.max(1, Math.min(100, Math.floor(limit))))
-      .map((set) => ({
-        ...set,
-        pages: set.proposalIds.flatMap((proposalId) => {
-          const proposal = snapshot.proposals.find((candidate) => candidate.id === proposalId)
-          return proposal === undefined ? [] : [proposal]
-        })
-      }))
+      if (proposalSet === undefined) {
+        return yield* new MemoryVaultError({ code: "not_found", message: `proposal set ${proposalSetId} was not found`, status: 404 })
+      }
+      return proposalSet
+    })
   }
 
-  async search(query: string, limit = 20, occurredAt = new Date().toISOString()): Promise<VaultSearchResponse> {
-    const startedAt = performance.now()
-    const snapshot = await this.state.load()
-    const candidatePageIds = await this.state.searchPageIds(query, Math.max(limit * 4, 100))
-    const pages = await this.loadPages(snapshot, candidatePageIds)
-    const response = searchAcceptedPages(pages, query, limit)
-    const metric: RetrievalMetric = {
-      id: `retrieval:${crypto.randomUUID()}`,
-      occurredAt,
-      queryHash: await sha256ContentHash(query.normalize("NFKC").toLocaleLowerCase("en-US")),
-      resultCount: response.results.length,
-      durationMs: Math.max(0, Math.round((performance.now() - startedAt) * 1000) / 1000)
-    }
-    await this.objects.putRetrievalMetric(metric.id, canonicalJson(metric))
-    await this.state.recordRetrieval(metric)
-    return response
+  listProposalSets(limit = 50): Effect.Effect<ReadonlyArray<VaultProposalSet & {
+    readonly pages: ReadonlyArray<MemoryProposal>
+  }>, MemoryVaultError> {
+    return Effect.map(this.state.load(), (snapshot) =>
+      [...snapshot.proposalSets]
+        .sort(
+          (left, right) =>
+            compareText(right.createdAt, left.createdAt) || compareText(left.id, right.id)
+        )
+        .slice(0, Math.max(1, Math.min(100, Math.floor(limit))))
+        .map((set) => ({
+          ...set,
+          pages: set.proposalIds.flatMap((proposalId) => {
+            const proposal = snapshot.proposals.find((candidate) => candidate.id === proposalId)
+            return proposal === undefined ? [] : [proposal]
+          })
+        }))
+    )
   }
 
-  async navigation(): Promise<Pick<SearchProjection, "indexMarkdown" | "logMarkdown">> {
-    const stored = await this.state.loadNavigation()
-    if (stored !== undefined) return stored
-    const snapshot = await this.state.load()
-    const projection = buildSearchProjection(await this.loadPages(snapshot), acceptedLog(snapshot))
-    return { indexMarkdown: projection.indexMarkdown, logMarkdown: projection.logMarkdown }
+  search(query: string, limit = 20, occurredAt = new Date().toISOString()): Effect.Effect<VaultSearchResponse, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const startedAt = performance.now()
+      const snapshot = yield* this.state.load()
+      const candidatePageIds = yield* this.state.searchPageIds(query, Math.max(limit * 4, 100))
+      const pages = yield* this.loadPages(snapshot, candidatePageIds)
+      const response = searchAcceptedPages(pages, query, limit)
+      const metric: RetrievalMetric = {
+        id: `retrieval:${crypto.randomUUID()}`,
+        occurredAt,
+        queryHash: yield* Effect.promise(() => sha256ContentHash(query.normalize("NFKC").toLocaleLowerCase("en-US"))),
+        resultCount: response.results.length,
+        durationMs: Math.max(0, Math.round((performance.now() - startedAt) * 1000) / 1000)
+      }
+      yield* Effect.promise(() => this.objects.putRetrievalMetric(metric.id, canonicalJson(metric)))
+      yield* this.state.recordRetrieval(metric)
+      return response
+    })
   }
 
-  async compilerContext(claims: ReadonlyArray<string>): Promise<CompilerVaultContext> {
-    const snapshot = await this.state.load()
-    const candidateIds = new Set<string>()
-    for (const claim of claims.slice(0, 32)) {
-      for (const pageId of (await this.state.searchPageIds(claim, 12)) ?? []) {
-        candidateIds.add(pageId)
+  navigation(): Effect.Effect<Pick<SearchProjection, "indexMarkdown" | "logMarkdown">, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const stored = yield* this.state.loadNavigation()
+      if (stored !== undefined) return stored
+      const snapshot = yield* this.state.load()
+      const projection = buildSearchProjection(yield* this.loadPages(snapshot), acceptedLog(snapshot))
+      return { indexMarkdown: projection.indexMarkdown, logMarkdown: projection.logMarkdown }
+    })
+  }
+
+  compilerContext(claims: ReadonlyArray<string>): Effect.Effect<CompilerVaultContext, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const snapshot = yield* this.state.load()
+      const candidateIds = new Set<string>()
+      for (const claim of claims.slice(0, 32)) {
+        for (const pageId of (yield* this.state.searchPageIds(claim, 12)) ?? []) {
+          candidateIds.add(pageId)
+          if (candidateIds.size >= 48) break
+        }
         if (candidateIds.size >= 48) break
       }
-      if (candidateIds.size >= 48) break
-    }
-    const candidatePages = await this.loadPages(snapshot, [...candidateIds])
-    const projectedPages = (await this.state.loadProjectedPages()) ?? []
-    const schemaPages = projectedPages
-      .filter((page) =>
-        page.tags.includes("schema") || page.metadata.kind === "schema" || page.metadata.schema === true
-      )
-      .slice(0, 8)
-    const heads = new Map(snapshot.heads.map((head) => [head.pageId, head]))
-    const navigation = await this.navigation()
-    return {
-      candidates: candidatePages.flatMap((page) => {
-        const head = heads.get(page.id)
-        return head === undefined ? [] : [{ page, revisionId: head.revisionId }]
-      }),
-      schemaPages,
-      indexMarkdown: navigation.indexMarkdown.slice(0, 32_000)
-    }
+      const candidatePages = yield* this.loadPages(snapshot, [...candidateIds])
+      const projectedPages = (yield* this.state.loadProjectedPages()) ?? []
+      const schemaPages = projectedPages
+        .filter((page) =>
+          page.tags.includes("schema") || page.metadata.kind === "schema" || page.metadata.schema === true
+        )
+        .slice(0, 8)
+      const heads = new Map(snapshot.heads.map((head) => [head.pageId, head]))
+      const navigation = yield* this.navigation()
+      return {
+        candidates: candidatePages.flatMap((page) => {
+          const head = heads.get(page.id)
+          return head === undefined ? [] : [{ page, revisionId: head.revisionId }]
+        }),
+        schemaPages,
+        indexMarkdown: navigation.indexMarkdown.slice(0, 32_000)
+      }
+    })
   }
 
-  async exportVault(): Promise<VaultExport> {
-    const snapshot = await this.state.load()
+  exportVault(): Effect.Effect<VaultExport, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+    const snapshot = yield* this.state.load()
     const heads = [...snapshot.heads].sort((left, right) => compareText(left.path, right.path))
-    const pages = await this.loadPages(snapshot)
+    const pages = yield* this.loadPages(snapshot)
     const navigation = buildSearchProjection(pages, acceptedLog(snapshot))
-    const pageFiles = await Promise.all(
+    const pageFiles = yield* Effect.promise(() => Promise.all(
       heads.map(async (head) => ({
         path: head.path,
         content: await this.objects.readMarkdown(head.markdownKey)
       }))
-    )
+    ))
     return {
       format: "jingler-obsidian-vault",
       version: 1,
@@ -1503,68 +1612,137 @@ export class TeamVault {
         ...pageFiles
       ]
     }
-  }
-
-  async graph(
-    options: { readonly limit?: number; readonly cursor?: number },
-    asOf?: string
-  ): Promise<VaultGraphView> {
-    const snapshot = await this.state.load()
-    const pages = await this.loadPages(snapshot)
-    return buildBoundedGraphView(pages, this.sources(snapshot), options, {
-      acceptedAtByPageId: new Map(snapshot.heads.map((head) => [head.pageId, head.acceptedAt])),
-      ...(asOf === undefined ? {} : { now: asOf })
     })
   }
 
-  async neighborhood(nodeId: string, limit?: number, asOf?: string): Promise<VaultGraphView> {
-    const snapshot = await this.state.load()
-    return buildGraphNeighborhood(
-      await this.loadPages(snapshot),
-      this.sources(snapshot),
-      nodeId,
-      limit,
-      {
+  graph(
+    options: { readonly limit?: number; readonly cursor?: number },
+    asOf?: string
+  ): Effect.Effect<VaultGraphView, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const snapshot = yield* this.state.load()
+      const pages = yield* this.loadPages(snapshot)
+      return buildBoundedGraphView(pages, this.sources(snapshot), options, {
         acceptedAtByPageId: new Map(snapshot.heads.map((head) => [head.pageId, head.acceptedAt])),
         ...(asOf === undefined ? {} : { now: asOf })
+      })
+    })
+  }
+
+  neighborhood(nodeId: string, limit?: number, asOf?: string): Effect.Effect<VaultGraphView, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const snapshot = yield* this.state.load()
+      return buildGraphNeighborhood(
+        yield* this.loadPages(snapshot),
+        this.sources(snapshot),
+        nodeId,
+        limit,
+        {
+          acceptedAtByPageId: new Map(snapshot.heads.map((head) => [head.pageId, head.acceptedAt])),
+          ...(asOf === undefined ? {} : { now: asOf })
+        }
+      )
+    })
+  }
+
+  edgeEvidence(edgeId: string): Effect.Effect<VaultGraphEvidenceResponse, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const snapshot = yield* this.state.load()
+      const evidence = findGraphEdgeEvidence(
+        yield* this.loadPages(snapshot),
+        this.sources(snapshot),
+        edgeId
+      )
+      if (evidence === undefined) return yield* new MemoryVaultError({ code: "not_found", message: `edge ${edgeId} was not found`, status: 404 })
+      return evidence
+    })
+  }
+
+  /**
+   * Advisory "related pages" suggestions — deterministic lexical relatedness,
+   * augmented with turbopuffer nearest-neighbours when a vector layer is
+   * configured. This is strictly separate from the graph/edge endpoints: it
+   * returns hints only, never accepted edges, and touches no reproducible hash.
+   */
+  suggestions(
+    policy: SuggestionPolicy = SUGGESTION_POLICY_DEFAULT
+  ): Effect.Effect<VaultSuggestionsResponse, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const snapshot = yield* this.state.load()
+      const pages = yield* this.loadPages(snapshot)
+      const graph = buildMemoryGraph(pages, this.sources(snapshot))
+      let neighbors: ReadonlyArray<TurbopufferNeighbor> = []
+      let embeddingModel = "none"
+      let vectorSource: "turbopuffer" | "lexical" = "lexical"
+      const layer = this.vectorLayer
+      if (layer !== undefined && pages.length > 0) {
+        // QUERY-ONLY. This read path NEVER embeds accepted snippets or upserts
+        // vectors — namespace reconciliation is owned by the durable
+        // MemoryVectorIngestWorkflow, triggered on accepted publication and swept
+        // by cron. Here we only embed the query snippets and run the ANN query.
+        //
+        // Best-effort: ANY OpenAI or turbopuffer failure (embedder throw, missing
+        // namespace, network error) is caught here and the endpoint degrades to
+        // lexical-only — it MUST NEVER surface as a 500. The R2 store remains the
+        // source of truth; the vector namespace is rebuildable.
+        const vector = yield* Effect.gen(function* () {
+          // Read nearest neighbours over whatever the ingest workflow has already
+          // reconciled into the namespace (an empty/stale namespace just yields no
+          // embedding neighbours; suggestions then degrade to the lexical pass).
+          const found = yield* layer.allRelatedness(pages, Math.max(policy.topK, 1))
+          return {
+            neighbors: found,
+            embeddingModel: layer.embeddingModel,
+            vectorSource: "turbopuffer" as const
+          }
+        }).pipe(
+          Effect.catchAllCause(() =>
+            Effect.succeed({
+              neighbors: [] as ReadonlyArray<TurbopufferNeighbor>,
+              embeddingModel: "none",
+              vectorSource: "lexical" as const
+            })
+          )
+        )
+        neighbors = vector.neighbors
+        embeddingModel = vector.embeddingModel
+        vectorSource = vector.vectorSource
       }
-    )
+      return {
+        version: 1,
+        policy,
+        vectorSource,
+        suggestions: combineSuggestions({ pages, graph, policy, neighbors, embeddingModel })
+      }
+    })
   }
 
-  async edgeEvidence(edgeId: string): Promise<VaultGraphEvidenceResponse> {
-    const snapshot = await this.state.load()
-    const evidence = findGraphEdgeEvidence(
-      await this.loadPages(snapshot),
-      this.sources(snapshot),
-      edgeId
-    )
-    if (evidence === undefined) throw new MemoryVaultError("not_found", `edge ${edgeId} was not found`, 404)
-    return evidence
+  dashboard(asOf: string, range: string = "all"): Effect.Effect<VaultDashboardSummary, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const snapshot = yield* this.state.load()
+      const retrievals = uniqueById([...snapshot.retrievals, ...(yield* this.state.listRetrievals())])
+      return buildVaultDashboardSummary(
+        {
+          pages: yield* this.loadPages(snapshot),
+          sourceCount: snapshot.sources.length,
+          revisions: snapshot.revisions,
+          proposals: snapshot.proposals,
+          events: snapshot.events,
+          heads: snapshot.heads,
+          retrievals,
+          sessionRetrievals: snapshot.sessionRetrievals
+        },
+        asOf,
+        range
+      )
+    })
   }
 
-  async dashboard(asOf: string): Promise<VaultDashboardSummary> {
-    const snapshot = await this.state.load()
-    const retrievals = uniqueById([...snapshot.retrievals, ...(await this.state.listRetrievals())])
-    return buildVaultDashboardSummary(
-      {
-        pages: await this.loadPages(snapshot),
-        sourceCount: snapshot.sources.length,
-        revisions: snapshot.revisions,
-        proposals: snapshot.proposals,
-        events: snapshot.events,
-        heads: snapshot.heads,
-        retrievals,
-        sessionRetrievals: snapshot.sessionRetrievals
-      },
-      asOf
-    )
-  }
-
-  async rebuildFromR2(): Promise<RebuildResult> {
-    return this.serialized(async () => {
-      const current = await this.state.load()
-      const publicationRecords = await this.objects.listPublicationRecords()
-      const storedRevisions = await this.objects.listRevisionRecords()
+  rebuildFromR2(): Effect.Effect<RebuildResult, MemoryVaultError> {
+    return this.serialized(Effect.gen(this, function* () {
+      const current = yield* this.state.load()
+      const publicationRecords = yield* Effect.promise(() => this.objects.listPublicationRecords())
+      const storedRevisions = yield* Effect.promise(() => this.objects.listRevisionRecords())
       const revisionById = new Map(storedRevisions.map((revision) => [revision.id, revision]))
       const completePublications = new Map(
         publicationRecords.flatMap((publication) => {
@@ -1581,15 +1759,15 @@ export class TeamVault {
           return completePublications.get(revision.publicationId)?.has(revision.id) === true
         })
       )
-      const sources = uniqueSourceRecords(await this.objects.listSourceRecords())
-      const history = decodeHistory(await this.objects.readLatestHistorySnapshot())
+      const sources = uniqueSourceRecords(yield* Effect.promise(() => this.objects.listSourceRecords()))
+      const history = decodeHistory(yield* Effect.promise(() => this.objects.readLatestHistorySnapshot()))
       const retrievals = uniqueById([
         ...history.retrievals,
-        ...(await Promise.all(
+        ...(yield* Effect.promise(async () => Promise.all(
           (await this.objects.listRetrievalMetrics()).map(async (value) =>
             Schema.decodeUnknownSync(RetrievalMetricSchema)(JSON.parse(value))
           )
-        ))
+        )))
       ])
       const latestByPage = new Map<string, StoredRevisionRecord>()
       for (const revision of revisions) {
@@ -1602,17 +1780,17 @@ export class TeamVault {
           latestByPage.set(revision.pageId, revision)
         }
       }
-      const pages = await Promise.all(
+      const pages = yield* Effect.promise(() => Promise.all(
         [...latestByPage.values()]
           .sort((left, right) => compareText(left.pageId, right.pageId))
           .map(async (revision) => parseMemoryMarkdown(await this.objects.readMarkdown(revision.markdownKey)))
-      )
+      ))
       assertMemoryValid({ pages, sources: sources.map((record) => record.source) })
       const pageById = new Map(pages.map((page) => [page.id, page]))
       const heads = [...latestByPage.values()]
         .map((revision): VaultPageHead => {
           const page = pageById.get(revision.pageId)
-          if (page === undefined) throw new MemoryVaultError("invalid", `rebuilt page ${revision.pageId} is missing`)
+          if (page === undefined) throw new MemoryVaultError({ code: "invalid", message: `rebuilt page ${revision.pageId} is missing` })
           return {
             pageId: page.id,
             path: page.path,
@@ -1650,7 +1828,7 @@ export class TeamVault {
           (event) => event.type !== "page.created" && event.type !== "revision.created"
         )
       ])
-      await this.persist(
+      yield* this.persist(
         current,
         {
           heads,
@@ -1665,11 +1843,11 @@ export class TeamVault {
         pages
       )
       return { pages: pages.length, revisions: revisions.length, sources: sources.length }
-    })
+    }))
   }
 
   /** Test/support hook for verifying deterministic aggregate inputs without exposing it over HTTP. */
-  async snapshot(): Promise<VaultSnapshot> {
+  snapshot(): Effect.Effect<VaultSnapshot, MemoryVaultError> {
     return this.state.load()
   }
 }

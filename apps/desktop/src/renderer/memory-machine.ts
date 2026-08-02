@@ -7,7 +7,8 @@ import type {
   MemoryPageDetail,
   MemoryReviewItem,
   MemoryReviewResult,
-  MemorySearchResult
+  MemorySearchResult,
+  MemorySuggestionsView
 } from "@jingler/contracts"
 import type {
   MemoryDeepLink,
@@ -31,6 +32,8 @@ export interface MemoryApi {
   reviews(organizationId: string): Promise<ReadonlyArray<MemoryReviewItem>>
   review(organizationId: string, proposalId: string, action: "approve" | "reject"): Promise<MemoryReviewResult>
   export(organizationId: string): Promise<MemoryExport>
+  /** Advisory relatedness suggestions for one page (NON-AUTHORITATIVE). */
+  suggestions(organizationId: string, pageId: string, limit: number): Promise<MemorySuggestionsView>
 }
 
 export const DEFAULT_MEMORY_FILTERS: MemoryMapFilters = {
@@ -73,6 +76,7 @@ interface InitialData {
 interface NodeData {
   readonly graph: MemoryGraphView
   readonly page: MemoryPageDetail | null
+  readonly suggestions: MemorySuggestionsView | null
 }
 
 export interface MemoryContext {
@@ -90,6 +94,7 @@ export interface MemoryContext {
   readonly selectedEdgeId: string | null
   readonly selectedReviewId: string | null
   readonly page: MemoryPageDetail | null
+  readonly suggestions: MemorySuggestionsView | null
   readonly evidence: MemoryEdgeEvidence | null
   readonly reviewResult: MemoryReviewResult | null
   readonly exported: MemoryExport | null
@@ -135,6 +140,7 @@ const initialContext = (): MemoryContext => ({
   selectedEdgeId: null,
   selectedReviewId: null,
   page: null,
+  suggestions: null,
   evidence: null,
   reviewResult: null,
   exported: null,
@@ -198,8 +204,17 @@ export const createMemoryMachine = (api: MemoryApi) =>
         async ({ input }) => {
           const graph = await api.neighborhood(input.organizationId, input.nodeId, 100)
           const node = graph.nodes.find((candidate) => candidate.id === input.nodeId)
-          const page = node?.pageId ? await api.page(input.organizationId, node.pageId) : null
-          return { graph, page }
+          const pageId = node?.pageId
+          const [page, suggestions] = await Promise.all([
+            pageId ? api.page(input.organizationId, pageId) : Promise.resolve(null),
+            // Advisory-only; a failure must never break the authoritative inspector.
+            pageId
+              ? api
+                  .suggestions(input.organizationId, pageId, 5)
+                  .catch(() => null)
+              : Promise.resolve(null)
+          ])
+          return { graph, page, suggestions }
         }
       ),
       loadEvidence: fromPromise<MemoryEdgeEvidence, { organizationId: string; edgeId: string }>(
@@ -237,6 +252,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
           selectedEdgeId: null,
           selectedReviewId: null,
           page: null,
+          suggestions: null,
           evidence: null,
           reviewResult: null,
           exported: null,
@@ -262,11 +278,11 @@ export const createMemoryMachine = (api: MemoryApi) =>
       setViewport: assign(({ event }) => event.type === "MAP.VIEWPORT" ? { viewport: event.viewport } : {}),
       selectNode: assign(({ event }) =>
         event.type === "MAP.SELECT_NODE" || event.type === "MAP.EXPAND"
-          ? { selectedNodeId: event.nodeId, selectedEdgeId: null, evidence: null, page: null }
+          ? { selectedNodeId: event.nodeId, selectedEdgeId: null, evidence: null, page: null, suggestions: null }
           : {}
       ),
-      selectEdge: assign(({ event }) => event.type === "MAP.SELECT_EDGE" ? { selectedEdgeId: event.edgeId, selectedNodeId: null, evidence: null, page: null } : {}),
-      closeInspector: assign(() => ({ selectedNodeId: null, selectedEdgeId: null, evidence: null, page: null })),
+      selectEdge: assign(({ event }) => event.type === "MAP.SELECT_EDGE" ? { selectedEdgeId: event.edgeId, selectedNodeId: null, evidence: null, page: null, suggestions: null } : {}),
+      closeInspector: assign(() => ({ selectedNodeId: null, selectedEdgeId: null, evidence: null, page: null, suggestions: null })),
       preparePage: assign(({ context }): Partial<MemoryContext> => ({ previousView: context.view, view: "wiki", page: null })),
       backFromPage: assign(({ context }) => ({ view: context.previousView, page: null })),
       setSearchQuery: assign(({ event }) => event.type === "SEARCH.QUERY" ? { searchQuery: event.query } : {}),
@@ -344,6 +360,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
               selectedNodeId: null,
               selectedEdgeId: null,
               page: null,
+              suggestions: null,
               evidence: null,
               error: null
             }))
@@ -388,6 +405,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
             actions: assign(({ context, event }) => ({
               graph: mergeGraph(context.graph, event.output.graph),
               page: event.output.page,
+              suggestions: event.output.suggestions,
               error: null
             }))
           },

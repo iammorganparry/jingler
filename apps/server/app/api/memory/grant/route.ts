@@ -25,7 +25,7 @@ export const POST = (request: Request): Promise<Response> => {
       )
       return Option.getOrNull(authorization)
     },
-    issue: (userId, authorization) =>
+    issue: (userId, authorization, purpose) =>
       issueMemoryGrant(
         {
           subject: userId,
@@ -35,7 +35,13 @@ export const POST = (request: Request): Promise<Response> => {
         {
           secret: env.memoryGrantSecret,
           audience: env.memoryGrantAudience,
-          ttlSeconds: env.memoryGrantTtlSeconds
+          // A static MCP attachment header lives for the length of an agent turn;
+          // the short capture/UI TTL would 401 mid-run. Server-authoritative so the
+          // desktop can't inflate it.
+          ttlSeconds:
+            purpose === "attachment"
+              ? env.memoryAttachmentGrantTtlSeconds
+              : env.memoryGrantTtlSeconds
         }
       )
   })

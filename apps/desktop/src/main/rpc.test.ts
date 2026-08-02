@@ -39,6 +39,7 @@ import {
   chooseReposDir,
   configGet,
   createTerminal,
+  deriveMemoryBacklinks,
   executeOrchestration,
   githubDetectPr,
   githubSubmitReview,
@@ -2128,5 +2129,24 @@ describe("RPC handlers", () => {
         expect(stamp).not.toBeNull()
       })
     })
+  })
+})
+
+describe("deriveMemoryBacklinks", () => {
+  /**
+   * buildMemoryGraph mirrors every wikilink into a reverse "backlink" edge. Only
+   * the forward wikilink edges landing on a page are real inbound linkers; the
+   * mirror "backlink" edges landing on it point at pages IT links out to. A
+   * non-mutual fixture (P→X but X→P is only P's own mirror; Y→P but P→Y is only
+   * Y's mirror) proves the filter keeps genuine inbound links and drops mirrors.
+   */
+  it("lists only genuine inbound wikilinkers, not this page's own outbound targets", () => {
+    const edges = [
+      { sourceId: "page:P", targetId: "page:X", kind: "wikilink" },
+      { sourceId: "page:X", targetId: "page:P", kind: "backlink" },
+      { sourceId: "page:Y", targetId: "page:P", kind: "wikilink" },
+      { sourceId: "page:P", targetId: "page:Y", kind: "backlink" }
+    ]
+    expect(deriveMemoryBacklinks(edges, "P")).toEqual(["page:Y"])
   })
 })

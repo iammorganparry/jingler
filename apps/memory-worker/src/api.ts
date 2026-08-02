@@ -1,5 +1,11 @@
 import { MemoryAcceptedPageRequest, MemoryRetrievalSummary } from "@jingler/core"
-import { MemorySource, canonicalJson, stableContentHash } from "@jingler/memory"
+import {
+  MemorySource,
+  SUGGESTION_POLICY_DEFAULT,
+  canonicalJson,
+  stableContentHash,
+  type SuggestionPolicy
+} from "@jingler/memory"
 import { Effect, Either, Match, Schema } from "effect"
 import { DurableObject } from "cloudflare:workers"
 import {
@@ -12,8 +18,8 @@ import {
   workflowBindingIds
 } from "./auth.js"
 import type {
+  DurableObjectStorageLike,
   MemoryWorkerEnv,
-  SqlStorageLike,
   TeamVaultEnv,
   WorkflowBindingLike,
   WorkflowInstanceLike
@@ -25,6 +31,11 @@ import {
   type ApprovalResult,
   type ProposalSetApprovalResult
 } from "./team-vault.js"
+import { createOpenAiEmbedderFromEnv } from "./embeddings.js"
+import {
+  TurbopufferVectorLayer,
+  createTurbopufferClientFromEnv
+} from "./turbopuffer.js"
 
 const NonEmptyString = Schema.String.pipe(Schema.minLength(1))
 
@@ -123,13 +134,13 @@ const decodeRequest = <Decoded, Encoded>(
     Effect.tryPromise({
       try: () => request.text(),
       catch: (error) =>
-        new MemoryVaultError("invalid", `request body must be JSON: ${String(error)}`)
+        new MemoryVaultError({ code: "invalid", message: `request body must be JSON: ${String(error)}` })
     }).pipe(
       Effect.flatMap(Schema.decodeUnknown(Schema.parseJson(schema))),
       Effect.mapError((error) =>
         error instanceof MemoryVaultError
           ? error
-          : new MemoryVaultError("invalid", `request body is invalid: ${String(error)}`)
+          : new MemoryVaultError({ code: "invalid", message: `request body is invalid: ${String(error)}` })
       ),
       Effect.either
     )
@@ -145,7 +156,7 @@ const positiveLimit = (url: URL, key = "limit"): number | undefined => {
   if (raw === null) return
   const value = Number(raw)
   if (!Number.isFinite(value) || value < 1) {
-    throw new MemoryVaultError("invalid", `${key} must be a positive number`)
+    throw new MemoryVaultError({ code: "invalid", message: `${key} must be a positive number` })
   }
   return Math.floor(value)
 }
@@ -155,9 +166,25 @@ const nonNegativeCursor = (url: URL): number | undefined => {
   if (raw === null) return
   const value = Number(raw)
   if (!Number.isInteger(value) || value < 0) {
-    throw new MemoryVaultError("invalid", "cursor must be a non-negative integer")
+    throw new MemoryVaultError({ code: "invalid", message: "cursor must be a non-negative integer" })
   }
   return value
+}
+
+/** Bounded, advisory-only suggestion policy parsed from the query string. */
+const suggestionPolicyFromQuery = (url: URL): SuggestionPolicy => {
+  const minScoreRaw = url.searchParams.get("minScore")
+  const minScore = minScoreRaw === null ? SUGGESTION_POLICY_DEFAULT.minScore : Number(minScoreRaw)
+  if (!Number.isFinite(minScore) || minScore < 0) {
+    throw new MemoryVaultError({ code: "invalid", message: "minScore must be a non-negative number" })
+  }
+  const topK = positiveLimit(url) ?? SUGGESTION_POLICY_DEFAULT.topK
+  return {
+    minScore,
+    topK: Math.min(50, Math.max(1, Math.floor(topK))),
+    directed: url.searchParams.get("directed") === "true",
+    excludeExplicit: url.searchParams.get("excludeExplicit") !== "false"
+  }
 }
 
 const pathSegments = (url: URL): ReadonlyArray<string> =>
@@ -176,23 +203,29 @@ const isRoute = (
   route.length === segments.length &&
   segments.every((segment, index) => route[index] === segment)
 
-const fallbackOnMissing = async <Primary, Fallback>(
-  primary: () => Promise<Primary>,
-  fallback: () => Promise<Fallback>
-): Promise<Primary | Fallback> => {
-  try {
-    return await primary()
-  } catch (error) {
-    if (!(error instanceof MemoryVaultError) || error.code !== "not_found") throw error
-    return fallback()
-  }
-}
+/**
+ * Try the primary vault Effect; if it fails with a `not_found`, fall back to the
+ * second. Preserves the old `fallbackOnMissing` behaviour: only `not_found`
+ * routes to the fallback, every other failure (or defect) propagates unchanged.
+ */
+const fallbackOnMissing = <A, B>(
+  primary: Effect.Effect<A, MemoryVaultError>,
+  fallback: Effect.Effect<B, MemoryVaultError>
+): Effect.Effect<A | B, MemoryVaultError> =>
+  Effect.catchIf(primary, (error) => error.code === "not_found", () => fallback)
 
 const configuredMechanicalFixes = (env: MemoryWorkerEnv): ReadonlyArray<string> =>
   (env.MEMORY_AUTO_PUBLISH_FIXES ?? "")
     .split(",")
     .map((value) => value.trim())
     .filter((value) => value.length > 0)
+
+/** Run the still-Promise-based body decoder as a typed Effect at a vault call site. */
+const decodeBody = <Decoded, Encoded>(
+  request: { text(): Promise<string> },
+  schema: Schema.Schema<Decoded, Encoded>
+): Effect.Effect<Decoded, MemoryVaultError> =>
+  Effect.tryPromise({ try: () => decodeRequest(request, schema), catch: (error) => error as MemoryVaultError })
 
 const runRequest = (operation: () => Promise<Response>): Promise<Response> =>
   Effect.runPromise(
@@ -204,176 +237,195 @@ const runRequest = (operation: () => Promise<Response>): Promise<Response> =>
 const notFoundResponse = (): Response =>
   jsonResponse({ error: "not found", code: "not_found" }, 404)
 
-const dispatchPageRequest = async (
+const dispatchPageRequest = (
   request: Request,
   route: ReadonlyArray<string>,
   vault: TeamVault
-): Promise<Response> => {
-  if (isRoute(request, route, "GET", "pages")) {
-    return jsonResponse({ pages: await vault.listPages() })
-  }
-  if (isRoute(request, route, "POST", "pages")) {
-    return jsonResponse(
-      await vault.ingestAcceptedPage(await decodeRequest(request, MemoryAcceptedPageRequest)),
-      201
-    )
-  }
-  if (isRoute(request, route, "GET", "pages", route[1] ?? "")) {
-    return jsonResponse(await vault.readPage(route[1] ?? ""))
-  }
-  return notFoundResponse()
-}
-
-const dispatchSourceRequest = async (
-  request: Request,
-  route: ReadonlyArray<string>,
-  vault: TeamVault
-): Promise<Response> => {
-  if (isRoute(request, route, "POST", "sources")) {
-    const body = await decodeRequest(request, SourceRequest)
-    return jsonResponse(await vault.ingestSource(body.source, body.content, body.retrieval), 201)
-  }
-  if (isRoute(request, route, "GET", "sources")) {
-    return jsonResponse({ sources: await vault.listSources() })
-  }
-  if (isRoute(request, route, "GET", "sources", route[1] ?? "")) {
-    return jsonResponse(await vault.readSource(route[1] ?? ""))
-  }
-  return notFoundResponse()
-}
-
-const dispatchProposalSetRequest = async (
-  request: Request,
-  route: ReadonlyArray<string>,
-  vault: TeamVault
-): Promise<Response> => {
-  if (isRoute(request, route, "POST", "proposal-sets")) {
-    return jsonResponse(await vault.createProposalSet(await decodeRequest(request, ProposalSetRequest)), 201)
-  }
-  if (isRoute(request, route, "GET", "proposal-sets", route[1] ?? "")) {
-    return jsonResponse(await vault.getProposalSet(route[1] ?? ""))
-  }
-  if (isRoute(request, route, "POST", "proposal-sets", route[1] ?? "", "approve")) {
-    const body = await decodeRequest(request, ApprovalRequest)
-    const result = await vault.approveProposalSet(
-      route[1] ?? "",
-      body.reviewerId,
-      body.acceptedAt
-    )
-    return jsonResponse(result, result.status === "accepted" ? 200 : 409)
-  }
-  if (isRoute(request, route, "POST", "proposal-sets", route[1] ?? "", "reject")) {
-    const body = await decodeRequest(request, RejectionRequest)
-    return jsonResponse(
-      await vault.rejectProposalSet(route[1] ?? "", body.reviewerId, body.rejectedAt)
-    )
-  }
-  return notFoundResponse()
-}
-
-const dispatchProposalRequest = async (
-  request: Request,
-  route: ReadonlyArray<string>,
-  vault: TeamVault
-): Promise<Response> => {
-  if (isRoute(request, route, "POST", "proposals")) {
-    return jsonResponse(await vault.createProposal(await decodeRequest(request, ProposalRequest)), 201)
-  }
-  if (isRoute(request, route, "GET", "proposals", route[1] ?? "")) {
-    return jsonResponse(await vault.getProposal(route[1] ?? ""))
-  }
-  if (isRoute(request, route, "POST", "proposals", route[1] ?? "", "approve")) {
-    const body = await decodeRequest(request, ApprovalRequest)
-    const proposalId = route[1] ?? ""
-    const result: ApprovalResult | ProposalSetApprovalResult = await fallbackOnMissing(
-      () => vault.approveProposal(proposalId, body.reviewerId, body.acceptedAt),
-      () => vault.approveProposalSet(proposalId, body.reviewerId, body.acceptedAt)
-    )
-    return jsonResponse(result, result.status === "accepted" ? 200 : 409)
-  }
-  if (isRoute(request, route, "POST", "proposals", route[1] ?? "", "reject")) {
-    const body = await decodeRequest(request, RejectionRequest)
-    const proposalId = route[1] ?? ""
-    return jsonResponse(
-      await fallbackOnMissing(
-        () => vault.rejectProposal(proposalId, body.reviewerId, body.rejectedAt),
-        () => vault.rejectProposalSet(proposalId, body.reviewerId, body.rejectedAt)
+): Effect.Effect<Response, MemoryVaultError> =>
+  Effect.gen(function* () {
+    if (isRoute(request, route, "GET", "pages")) {
+      return jsonResponse({ pages: yield* vault.listPages() })
+    }
+    if (isRoute(request, route, "POST", "pages")) {
+      return jsonResponse(
+        yield* vault.ingestAcceptedPage(yield* decodeBody(request, MemoryAcceptedPageRequest)),
+        201
       )
-    )
-  }
-  return notFoundResponse()
-}
+    }
+    if (isRoute(request, route, "GET", "pages", route[1] ?? "")) {
+      return jsonResponse(yield* vault.readPage(route[1] ?? ""))
+    }
+    return notFoundResponse()
+  })
 
-const dispatchVaultQuery = async (
+const dispatchSourceRequest = (
   request: Request,
   route: ReadonlyArray<string>,
-  url: URL,
   vault: TeamVault
-): Promise<Response> => {
-  if (isRoute(request, route, "GET", "workflows", route[1] ?? "")) {
-    return jsonResponse(await vault.getProposal(route[1] ?? ""))
-  }
-  if (isRoute(request, route, "GET", "search")) {
-    const query = url.searchParams.get("q") ?? ""
-    const occurredAt = url.searchParams.get("occurredAt") ?? new Date().toISOString()
-    return jsonResponse(await vault.search(query, positiveLimit(url), occurredAt))
-  }
-  if (isRoute(request, route, "GET", "navigation")) {
-    return jsonResponse(await vault.navigation())
-  }
-  if (isRoute(request, route, "POST", "compiler-context")) {
-    const body = await decodeRequest(request, Schema.Struct({ claims: Schema.Array(NonEmptyString) }))
-    return jsonResponse(await vault.compilerContext(body.claims))
-  }
-  if (isRoute(request, route, "GET", "export")) {
-    return jsonResponse(await vault.exportVault())
-  }
-  if (isRoute(request, route, "GET", "analytics")) {
-    return jsonResponse(await vault.dashboard(url.searchParams.get("asOf") ?? new Date().toISOString()))
-  }
-  if (isRoute(request, route, "GET", "reviews")) {
-    return jsonResponse({ reviews: await vault.listProposalSets(positiveLimit(url) ?? 50) })
-  }
-  if (isRoute(request, route, "POST", "rebuild")) {
-    return jsonResponse(await vault.rebuildFromR2())
-  }
-  return dispatchGraphQuery(request, route, url, vault)
-}
+): Effect.Effect<Response, MemoryVaultError> =>
+  Effect.gen(function* () {
+    if (isRoute(request, route, "POST", "sources")) {
+      const body = yield* decodeBody(request, SourceRequest)
+      return jsonResponse(yield* vault.ingestSource(body.source, body.content, body.retrieval), 201)
+    }
+    if (isRoute(request, route, "GET", "sources")) {
+      return jsonResponse({ sources: yield* vault.listSources() })
+    }
+    if (isRoute(request, route, "GET", "sources", route[1] ?? "")) {
+      return jsonResponse(yield* vault.readSource(route[1] ?? ""))
+    }
+    return notFoundResponse()
+  })
 
-const dispatchGraphQuery = async (
+const dispatchProposalSetRequest = (
   request: Request,
   route: ReadonlyArray<string>,
-  url: URL,
   vault: TeamVault
-): Promise<Response> => {
-  if (isRoute(request, route, "GET", "graph")) {
-    return jsonResponse(
-      await vault.graph(
-        { limit: positiveLimit(url), cursor: nonNegativeCursor(url) },
-        url.searchParams.get("asOf") ?? undefined
-      )
-    )
-  }
-  if (isRoute(request, route, "GET", "neighborhood", route[1] ?? "")) {
-    return jsonResponse(
-      await vault.neighborhood(
+): Effect.Effect<Response, MemoryVaultError> =>
+  Effect.gen(function* () {
+    if (isRoute(request, route, "POST", "proposal-sets")) {
+      return jsonResponse(yield* vault.createProposalSet(yield* decodeBody(request, ProposalSetRequest)), 201)
+    }
+    if (isRoute(request, route, "GET", "proposal-sets", route[1] ?? "")) {
+      return jsonResponse(yield* vault.getProposalSet(route[1] ?? ""))
+    }
+    if (isRoute(request, route, "POST", "proposal-sets", route[1] ?? "", "approve")) {
+      const body = yield* decodeBody(request, ApprovalRequest)
+      const result = yield* vault.approveProposalSet(
         route[1] ?? "",
-        positiveLimit(url),
-        url.searchParams.get("asOf") ?? undefined
+        body.reviewerId,
+        body.acceptedAt
       )
-    )
-  }
-  if (isRoute(request, route, "GET", "edges", route[1] ?? "", "evidence")) {
-    return jsonResponse(await vault.edgeEvidence(route[1] ?? ""))
-  }
-  return notFoundResponse()
-}
+      return jsonResponse(result, result.status === "accepted" ? 200 : 409)
+    }
+    if (isRoute(request, route, "POST", "proposal-sets", route[1] ?? "", "reject")) {
+      const body = yield* decodeBody(request, RejectionRequest)
+      return jsonResponse(
+        yield* vault.rejectProposalSet(route[1] ?? "", body.reviewerId, body.rejectedAt)
+      )
+    }
+    return notFoundResponse()
+  })
 
-const dispatchVaultRequest = (request: Request, vault: TeamVault): Promise<Response> => {
+const dispatchProposalRequest = (
+  request: Request,
+  route: ReadonlyArray<string>,
+  vault: TeamVault
+): Effect.Effect<Response, MemoryVaultError> =>
+  Effect.gen(function* () {
+    if (isRoute(request, route, "POST", "proposals")) {
+      return jsonResponse(yield* vault.createProposal(yield* decodeBody(request, ProposalRequest)), 201)
+    }
+    if (isRoute(request, route, "GET", "proposals", route[1] ?? "")) {
+      return jsonResponse(yield* vault.getProposal(route[1] ?? ""))
+    }
+    if (isRoute(request, route, "POST", "proposals", route[1] ?? "", "approve")) {
+      const body = yield* decodeBody(request, ApprovalRequest)
+      const proposalId = route[1] ?? ""
+      const result: ApprovalResult | ProposalSetApprovalResult = yield* fallbackOnMissing(
+        vault.approveProposal(proposalId, body.reviewerId, body.acceptedAt),
+        vault.approveProposalSet(proposalId, body.reviewerId, body.acceptedAt)
+      )
+      return jsonResponse(result, result.status === "accepted" ? 200 : 409)
+    }
+    if (isRoute(request, route, "POST", "proposals", route[1] ?? "", "reject")) {
+      const body = yield* decodeBody(request, RejectionRequest)
+      const proposalId = route[1] ?? ""
+      return jsonResponse(
+        yield* fallbackOnMissing(
+          vault.rejectProposal(proposalId, body.reviewerId, body.rejectedAt),
+          vault.rejectProposalSet(proposalId, body.reviewerId, body.rejectedAt)
+        )
+      )
+    }
+    return notFoundResponse()
+  })
+
+const dispatchVaultQuery = (
+  request: Request,
+  route: ReadonlyArray<string>,
+  url: URL,
+  vault: TeamVault
+): Effect.Effect<Response, MemoryVaultError> =>
+  Effect.gen(function* () {
+    if (isRoute(request, route, "GET", "workflows", route[1] ?? "")) {
+      return jsonResponse(yield* vault.getProposal(route[1] ?? ""))
+    }
+    if (isRoute(request, route, "GET", "search")) {
+      const query = url.searchParams.get("q") ?? ""
+      const occurredAt = url.searchParams.get("occurredAt") ?? new Date().toISOString()
+      return jsonResponse(yield* vault.search(query, positiveLimit(url), occurredAt))
+    }
+    if (isRoute(request, route, "GET", "navigation")) {
+      return jsonResponse(yield* vault.navigation())
+    }
+    if (isRoute(request, route, "POST", "compiler-context")) {
+      const body = yield* decodeBody(request, Schema.Struct({ claims: Schema.Array(NonEmptyString) }))
+      return jsonResponse(yield* vault.compilerContext(body.claims))
+    }
+    if (isRoute(request, route, "GET", "export")) {
+      return jsonResponse(yield* vault.exportVault())
+    }
+    if (isRoute(request, route, "GET", "analytics")) {
+      return jsonResponse(
+        yield* vault.dashboard(
+          url.searchParams.get("asOf") ?? new Date().toISOString(),
+          url.searchParams.get("range") ?? "all"
+        )
+      )
+    }
+    if (isRoute(request, route, "GET", "reviews")) {
+      return jsonResponse({ reviews: yield* vault.listProposalSets(positiveLimit(url) ?? 50) })
+    }
+    if (isRoute(request, route, "POST", "rebuild")) {
+      return jsonResponse(yield* vault.rebuildFromR2())
+    }
+    // Advisory relatedness — deliberately BEFORE the graph dispatcher and kept apart
+    // from it: this returns suggestions, never accepted edges.
+    if (isRoute(request, route, "GET", "suggestions")) {
+      return jsonResponse(yield* vault.suggestions(suggestionPolicyFromQuery(url)))
+    }
+    return yield* dispatchGraphQuery(request, route, url, vault)
+  })
+
+const dispatchGraphQuery = (
+  request: Request,
+  route: ReadonlyArray<string>,
+  url: URL,
+  vault: TeamVault
+): Effect.Effect<Response, MemoryVaultError> =>
+  Effect.gen(function* () {
+    if (isRoute(request, route, "GET", "graph")) {
+      return jsonResponse(
+        yield* vault.graph(
+          { limit: positiveLimit(url), cursor: nonNegativeCursor(url) },
+          url.searchParams.get("asOf") ?? undefined
+        )
+      )
+    }
+    if (isRoute(request, route, "GET", "neighborhood", route[1] ?? "")) {
+      return jsonResponse(
+        yield* vault.neighborhood(
+          route[1] ?? "",
+          positiveLimit(url),
+          url.searchParams.get("asOf") ?? undefined
+        )
+      )
+    }
+    if (isRoute(request, route, "GET", "edges", route[1] ?? "", "evidence")) {
+      return jsonResponse(yield* vault.edgeEvidence(route[1] ?? ""))
+    }
+    return notFoundResponse()
+  })
+
+const dispatchVaultRequest = (
+  request: Request,
+  vault: TeamVault
+): Effect.Effect<Response, MemoryVaultError> => {
   const url = new URL(request.url)
   const segments = pathSegments(url)
   if (segments[0] !== "internal" || segments[1] !== "memory") {
-    return Promise.resolve(notFoundResponse())
+    return Effect.succeed(notFoundResponse())
   }
   const route = segments.slice(2)
   return Match.value(route[0]).pipe(
@@ -385,8 +437,19 @@ const dispatchVaultRequest = (request: Request, vault: TeamVault): Promise<Respo
   )
 }
 
+/**
+ * Run the vault dispatch Effect at the DO fetch boundary. Both a typed
+ * `MemoryVaultError` (error channel) and any defect (an unexpected throw from a
+ * query-string validator, an R2 rejection, or a corrupt-state guard) are routed
+ * through `errorResponse`, exactly like the previous try/catch did.
+ */
 export const handleTeamVaultRequest = (request: Request, vault: TeamVault): Promise<Response> =>
-  runRequest(() => dispatchVaultRequest(request, vault))
+  Effect.runPromise(
+    dispatchVaultRequest(request, vault).pipe(
+      Effect.catchAll((error) => Effect.succeed(errorResponse(error))),
+      Effect.catchAllDefect((defect) => Effect.succeed(errorResponse(defect)))
+    )
+  )
 
 export const createOrReuseWorkflow = async <Params>(
   binding: WorkflowBindingLike<Params>,
@@ -428,10 +491,10 @@ const startCompilerWorkflow = async (
 ): Promise<Response> => {
   const body = await decodeRequest(request, CompilerWorkflowRequest)
   if (!body.workflowId.startsWith("compiler-")) {
-    throw new MemoryVaultError("invalid", "compiler workflow ids must start with compiler-")
+    throw new MemoryVaultError({ code: "invalid", message: "compiler workflow ids must start with compiler-" })
   }
   if (env.MEMORY_COMPILER === undefined) {
-    throw new MemoryVaultError("not_found", "compiler workflow binding is unavailable", 404)
+    throw new MemoryVaultError({ code: "not_found", message: "compiler workflow binding is unavailable", status: 404 })
   }
   const bindingId = await workflowBindingId(
     env.MEMORY_SERVICE_SECRET,
@@ -453,10 +516,10 @@ const startLintWorkflow = async (
 ): Promise<Response> => {
   const body = await decodeRequest(request, LintWorkflowRequest)
   if (!body.workflowId.startsWith("lint-")) {
-    throw new MemoryVaultError("invalid", "lint workflow ids must start with lint-")
+    throw new MemoryVaultError({ code: "invalid", message: "lint workflow ids must start with lint-" })
   }
   if (env.MEMORY_LINT === undefined) {
-    throw new MemoryVaultError("not_found", "lint workflow binding is unavailable", 404)
+    throw new MemoryVaultError({ code: "not_found", message: "lint workflow binding is unavailable", status: 404 })
   }
   const bindingId = await workflowBindingId(
     env.MEMORY_SERVICE_SECRET,
@@ -478,7 +541,7 @@ const startWorkflow = (
     Match.when("compiler", () => startCompilerWorkflow(request, env, organizationId)),
     Match.when("lint", () => startLintWorkflow(request, env, organizationId)),
     Match.orElse((kind) => {
-      throw new MemoryVaultError("invalid", `unknown workflow kind ${kind ?? ""}`)
+      throw new MemoryVaultError({ code: "invalid", message: `unknown workflow kind ${kind ?? ""}` })
     })
   )
 }
@@ -508,7 +571,7 @@ const readWorkflow = async (
       : null
     return jsonResponse({ workflowId, state: status.status, result: status.output ?? pendingResult })
   } catch {
-    throw new MemoryVaultError("not_found", `workflow ${workflowId} was not found`, 404)
+    throw new MemoryVaultError({ code: "not_found", message: `workflow ${workflowId} was not found`, status: 404 })
   }
 }
 
@@ -568,6 +631,55 @@ const signalCompilerReview = async (
   }
 }
 
+/**
+ * Whether this vault write advanced the accepted head — a page ingest (201) or an
+ * accepted proposal/proposal-set approval (200). A conflicting approval returns
+ * 409 (not `ok`) and does NOT advance, so it never triggers reconciliation.
+ */
+const isAcceptedPublication = (
+  request: Request,
+  route: ReadonlyArray<string>,
+  response: Response
+): boolean =>
+  response.ok &&
+  (isRoute(request, route, "POST", "pages") ||
+    (route.length === 3 &&
+      (route[0] === "proposals" || route[0] === "proposal-sets") &&
+      route[2] === "approve"))
+
+/**
+ * Best-effort trigger of the durable vector-ingest workflow after an accepted
+ * publication. The instance id is deterministic and org-scoped: it hashes the
+ * publication's response body (a distinct accepted head → a distinct id), so an
+ * idempotent retry of the SAME publication dedupes onto the same instance while a
+ * new publication starts a fresh run. Any failure here is swallowed — publication
+ * is durable, vector reconciliation is advisory, and the cron drift sweep catches
+ * whatever a failed trigger missed.
+ */
+const triggerVectorIngest = async (
+  request: Request,
+  route: ReadonlyArray<string>,
+  response: Response,
+  env: MemoryWorkerEnv,
+  organizationId: string
+): Promise<void> => {
+  if (env.MEMORY_VECTOR_INGEST === undefined || !isAcceptedPublication(request, route, response)) {
+    return
+  }
+  try {
+    const marker = stableContentHash(await response.clone().text())
+    const bindingId = await workflowBindingId(
+      env.MEMORY_SERVICE_SECRET,
+      organizationId,
+      `vector-ingest-${marker}`
+    )
+    await createOrReuseWorkflow(env.MEMORY_VECTOR_INGEST, bindingId, { organizationId })
+  } catch {
+    // Publication already committed; advisory vector ingestion is best-effort and
+    // the scheduled drift sweep reconciles anything this trigger could not start.
+  }
+}
+
 const forwardVaultRequest = async (
   request: Request,
   route: ReadonlyArray<string>,
@@ -585,6 +697,7 @@ const forwardVaultRequest = async (
       : undefined
   const response = await env.MEMORY_VAULTS.get(id).fetch(new Request(request, { headers }))
   await signalCompilerReview(route, response, env, organizationId)
+  await triggerVectorIngest(request, route, response, env, organizationId)
   const startedWorkflowId =
     source === undefined
       ? undefined
@@ -624,13 +737,30 @@ export class TeamVaultObject extends DurableObject<TeamVaultEnv> {
   ) {
     super(state, env)
     this.vaultEnv = env
-    this.vaultState = new SqliteVaultState(state.storage.sql as SqlStorageLike)
+    // The real DO storage exposes both `.sql` and the synchronous `transactionSync`
+    // the vault's commit path needs; cast through `unknown` because our structural
+    // `SqlStorageLike` narrows the binding types Cloudflare's `SqlStorage` accepts.
+    this.vaultState = new SqliteVaultState(
+      state.storage as unknown as DurableObjectStorageLike
+    )
     this.initialized = state.blockConcurrencyWhile(async () => {
       await this.vaultState.initialize()
     })
   }
 
   private readonly vaultEnv: TeamVaultEnv
+
+  /**
+   * Build the advisory vector layer only when BOTH a turbopuffer key and an
+   * OpenAI key are configured; otherwise relatedness degrades to lexical-only.
+   */
+  private vectorLayerFor(organizationId: string): TurbopufferVectorLayer | undefined {
+    const client = createTurbopufferClientFromEnv(this.vaultEnv)
+    const embedder = createOpenAiEmbedderFromEnv(this.vaultEnv)
+    return client === undefined || embedder === undefined
+      ? undefined
+      : new TurbopufferVectorLayer(client, organizationId, embedder)
+  }
 
   override async fetch(request: Request): Promise<Response> {
     try {
@@ -640,10 +770,13 @@ export class TeamVaultObject extends DurableObject<TeamVaultEnv> {
         return errorResponse(new MemoryAuthenticationError("organization scope mismatch", 403))
       }
       this.organizationId = organizationId
-      this.vault ??= TeamVault.create(
-        organizationId,
-        this.vaultState,
-        this.vaultEnv.MEMORY_R2
+      this.vault ??= Effect.runPromise(
+        TeamVault.create(
+          organizationId,
+          this.vaultState,
+          this.vaultEnv.MEMORY_R2,
+          this.vectorLayerFor(organizationId)
+        )
       )
       return await this.vault.then((vault) => handleTeamVaultRequest(request, vault))
     } catch (error) {

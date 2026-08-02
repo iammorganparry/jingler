@@ -1,9 +1,11 @@
 import type {
   MemoryEdgeEvidence,
   MemoryGraphNode,
-  MemoryPageDetail
+  MemoryPageDetail,
+  MemorySuggestion
 } from "@jingler/contracts"
 import { ArrowLeft, BookOpen, ExternalLink, Link2, Quote, ShieldCheck, Users } from "lucide-react"
+import { MemorySuggestionsPanel } from "./memory-suggestions.js"
 
 export interface MemoryInspectorProps {
   node: MemoryGraphNode | null
@@ -11,9 +13,14 @@ export interface MemoryInspectorProps {
   page: MemoryPageDetail | null
   loading?: boolean
   pendingProposalCount?: number
+  /** Advisory relatedness for the inspected page (NON-AUTHORITATIVE). */
+  suggestions?: ReadonlyArray<MemorySuggestion>
+  suggestionsSource?: "turbopuffer" | "lexical"
   onBack: () => void
   onOpenPage: (pageId: string) => void
   onExpandNeighborhood: (nodeId: string) => void
+  /** Promote a suggestion via the existing cited-wikilink proposal flow. */
+  onPromoteSuggestion?: (fromPageId: string, toPageId: string) => void
 }
 
 export function MemoryInspector({
@@ -22,9 +29,12 @@ export function MemoryInspector({
   page,
   loading = false,
   pendingProposalCount = 0,
+  suggestions = [],
+  suggestionsSource = "lexical",
   onBack,
   onOpenPage,
-  onExpandNeighborhood
+  onExpandNeighborhood,
+  onPromoteSuggestion
 }: MemoryInspectorProps) {
   if (node === null && evidence === null) return null
   return (
@@ -71,6 +81,13 @@ export function MemoryInspector({
               <p>Revision {page.revision.revision} · {new Date(page.revision.acceptedAt).toLocaleDateString()} · {page.contributors.join(", ")}</p>
               <p>{page.backlinks.length} backlinks · {page.health.brokenLinks} broken links · {page.health.contradictions} contradictions · {pendingProposalCount} proposals</p>
             </section>
+            <MemorySuggestionsPanel
+              pageId={page.page.id}
+              suggestions={suggestions}
+              vectorSource={suggestionsSource}
+              onOpenPage={onOpenPage}
+              onPromote={(targetPageId) => onPromoteSuggestion?.(page.page.id, targetPageId)}
+            />
             <button type="button" onClick={() => onOpenPage(page.page.id)} className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-blue px-3 py-2 text-[11px] font-semibold text-on-accent outline-none focus-visible:ring-2 focus-visible:ring-ring"><ExternalLink size={13} /> Open page</button>
           </>
         )}

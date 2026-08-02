@@ -357,6 +357,49 @@ export const MemoryExport = Schema.Struct({
 })
 export type MemoryExport = Schema.Schema.Type<typeof MemoryExport>
 
+/**
+ * Advisory "related pages" suggestions.
+ *
+ * DELIBERATELY NOT a graph edge: a suggestion is a hint, never accepted
+ * evidence, and it never appears in the export manifest or any reproducible
+ * hash. Promoting one goes through the ordinary cited-wikilink proposal flow.
+ * Evidence fields are flattened and optional so either method decodes robustly.
+ */
+export const MemorySuggestionMethod = Schema.Literal("lexical", "embedding")
+export type MemorySuggestionMethod = Schema.Schema.Type<typeof MemorySuggestionMethod>
+
+export const MemorySuggestionEvidence = Schema.Struct({
+  method: MemorySuggestionMethod,
+  cosine: Schema.Number,
+  sharedTerms: Schema.optional(Schema.Array(Schema.String)),
+  sharedTags: Schema.optional(Schema.Array(Schema.String)),
+  sharedSources: Schema.optional(Schema.Array(Schema.String)),
+  sharedSchemas: Schema.optional(Schema.Array(Schema.String)),
+  model: Schema.optional(Schema.String),
+  neighborRank: Schema.optional(Schema.Number)
+})
+export type MemorySuggestionEvidence = Schema.Schema.Type<typeof MemorySuggestionEvidence>
+
+export const MemorySuggestion = Schema.Struct({
+  sourceId: Schema.String,
+  targetId: Schema.String,
+  method: MemorySuggestionMethod,
+  score: Schema.Number,
+  /** Best-effort human titles; fall back to ids when the page is not in view. */
+  sourceTitle: Schema.String,
+  targetTitle: Schema.String,
+  evidence: MemorySuggestionEvidence
+})
+export type MemorySuggestion = Schema.Schema.Type<typeof MemorySuggestion>
+
+export const MemorySuggestionsView = Schema.Struct({
+  version: Schema.Literal(1),
+  /** Where the embedding half came from, or "lexical" when vectors are off. */
+  vectorSource: Schema.Literal("turbopuffer", "lexical"),
+  suggestions: Schema.Array(MemorySuggestion)
+})
+export type MemorySuggestionsView = Schema.Schema.Type<typeof MemorySuggestionsView>
+
 export class MemoryUiError extends Schema.TaggedError<MemoryUiError>()("MemoryUiError", {
   message: Schema.String,
   status: Schema.Number
@@ -1125,6 +1168,23 @@ export class JinglerRpcs extends RpcGroup.make(
       pageId: Schema.optional(Schema.String),
       proposalId: Schema.optional(Schema.String),
       action: Schema.optional(Schema.Literal("approve", "reject"))
+    }
+  }),
+
+  /**
+   * Advisory relatedness suggestions for the memory inspector's NON-AUTHORITATIVE
+   * "related pages" panel. Strictly separate from the graph/edge calls in the
+   * `Memory.request` envelope: this returns hints only, never accepted edges, and
+   * never mutates the graph. `pageId` scopes results to suggestions touching one
+   * page. The hosted grant stays in the main process and never reaches the renderer.
+   */
+  Rpc.make("Memory.suggestions", {
+    success: MemorySuggestionsView,
+    error: MemoryUiError,
+    payload: {
+      organizationId: Schema.String,
+      pageId: Schema.optional(Schema.String),
+      limit: Schema.optional(Schema.Number)
     }
   }),
 

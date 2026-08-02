@@ -116,6 +116,47 @@ const compareText = (left: string, right: string): number =>
   left === right ? 0 : left < right ? -1 : 1
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1_000
+
+/**
+ * The dashboard's time-range control. `"all"` (and any unrecognized value) means
+ * unwindowed — every time-scoped series is aggregated over all of history.
+ */
+export type DashboardRange = "7d" | "30d" | "90d" | "all"
+
+const RANGE_DAYS: Readonly<Record<string, number>> = { "7d": 7, "30d": 30, "90d": 90 }
+
+/**
+ * Window only the inherently time-series inputs (revisions, proposals, events,
+ * retrievals, session retrievals) to `[asOf - range, asOf]`. The current-state
+ * inputs (pages, heads, sourceCount) are a snapshot and are never windowed, so
+ * coverage/freshness/health/connectivity always describe the vault as it stands.
+ * `"all"` — or an unparseable range/asOf — returns the input untouched.
+ */
+const windowAnalyticsInput = (
+  input: VaultAnalyticsInput,
+  asOf: string,
+  range: string
+): VaultAnalyticsInput => {
+  const days = RANGE_DAYS[range]
+  if (days === undefined) return input
+  const asOfMs = Date.parse(asOf)
+  if (!Number.isFinite(asOfMs)) return input
+  const cutoff = asOfMs - days * MILLISECONDS_PER_DAY
+  const within = (timestamp: string): boolean => {
+    const value = Date.parse(timestamp)
+    return Number.isFinite(value) && value >= cutoff && value <= asOfMs
+  }
+  return {
+    ...input,
+    revisions: input.revisions.filter((revision) => within(revision.createdAt)),
+    proposals: input.proposals.filter((proposal) => within(proposal.createdAt)),
+    events: input.events.filter((event) => within(event.occurredAt)),
+    retrievals: input.retrievals.filter((metric) => within(metric.occurredAt)),
+    ...(input.sessionRetrievals === undefined
+      ? {}
+      : { sessionRetrievals: input.sessionRetrievals.filter((metric) => within(metric.occurredAt)) })
+  }
+}
 const FRESH_MAX_DAYS = 30
 const AGING_MAX_DAYS = 90
 
@@ -244,9 +285,11 @@ const reviewDurations = (
 }
 
 export const buildVaultDashboardSummary = (
-  input: VaultAnalyticsInput,
-  asOf: string
+  rawInput: VaultAnalyticsInput,
+  asOf: string,
+  range: string = "all"
 ): VaultDashboardSummary => {
+  const input = windowAnalyticsInput(rawInput, asOf, range)
   const citationsByPage = input.pages.map((page) => extractCitationReferences(page.body).length)
   const links = connectivity(input.pages)
   const accepted = input.proposals.filter((proposal) => proposal.status === "accepted").length

@@ -1,9 +1,14 @@
+import { Effect } from "effect"
 import { serializeMemoryMarkdown, type MemoryPage, type MemorySource } from "@jingler/memory"
 import { describe, expect, it } from "vitest"
-import type { SqlStorageCursor, SqlStorageLike } from "./env.js"
+import type { DurableObjectStorageLike, SqlStorageCursor, SqlStorageLike } from "./env.js"
 import { InMemoryR2Bucket, MemoryR2Store } from "./r2-store.js"
 import { buildSearchProjection, searchAcceptedPages } from "./search.js"
 import { InMemoryVaultState, SqliteVaultState, TeamVault } from "./team-vault.js"
+
+// Runs an Effect-returning vault/layer/state method to a Promise at the test boundary.
+const run = Effect.runPromise
+
 
 const source: MemorySource = {
   id: "source-1",
@@ -38,34 +43,80 @@ class EmptySqlCursor<Row> implements SqlStorageCursor<Row> {
   }
 }
 
-class RecordingSqlStorage implements SqlStorageLike {
+// A storage double that records every `exec` query and every `transactionSync`
+// bracket, so tests can prove the commit path brackets its writes in a transaction
+// and never emits a raw BEGIN/COMMIT/ROLLBACK (which real DO SQLite rejects).
+class RecordingSqlStorage implements SqlStorageLike, DurableObjectStorageLike {
   readonly queries: Array<string> = []
+  transactionSyncCalls = 0
+  /** Override to make a specific query fail mid-transaction. */
+  failOn?: (query: string) => boolean
+  /** Override rowsWritten for `UPDATE vault_state` to exercise the stale path. */
+  updateRowsWritten = 1
+
+  get sql(): SqlStorageLike {
+    return this
+  }
+
+  transactionSync<Result>(closure: () => Result): Result {
+    this.transactionSyncCalls += 1
+    return closure()
+  }
 
   exec<Row = Record<string, unknown>>(
     query: string,
     ..._bindings: ReadonlyArray<string | number | null>
   ): SqlStorageCursor<Row> {
     this.queries.push(query)
-    return new EmptySqlCursor<Row>(query.startsWith("UPDATE vault_state") ? 1 : 0)
+    if (this.failOn?.(query)) throw new Error(`exec failed: ${query}`)
+    return new EmptySqlCursor<Row>(
+      query.startsWith("UPDATE vault_state") ? this.updateRowsWritten : 0
+    )
+  }
+}
+
+const RAW_TRANSACTION_STATEMENTS = ["BEGIN", "COMMIT", "ROLLBACK"] as const
+
+const projectedCommit = (sql: RecordingSqlStorage) => {
+  const state = new SqliteVaultState(sql)
+  const projectedPage = page(1, "# Runbook\n\nLexical content. [@runbook-citation]\n")
+  return {
+    state,
+    commit: state.commit(
+      0,
+      {
+        version: 1,
+        heads: [],
+        revisions: [],
+        sources: [],
+        proposals: [],
+        proposalSets: [],
+        events: [],
+        retrievals: [],
+        sessionRetrievals: []
+      },
+      buildSearchProjection([projectedPage], []),
+      [projectedPage]
+    )
   }
 }
 
 describe("TeamVault", () => {
   it("accepts exactly one concurrent proposal and reports the other as a conflict", async () => {
     const bucket = new InMemoryR2Bucket()
-    const vault = await TeamVault.create("org-one", new InMemoryVaultState(), bucket)
-    await vault.ingestSource(source, "Primary runbook evidence")
+    const vault = await run(TeamVault.create("org-one", new InMemoryVaultState(), bucket))
+    await run(vault.ingestSource(source, "Primary runbook evidence"))
     const initial = serializeMemoryMarkdown(page(1, "# Runbook\n\nThe initial procedure is valid. [@runbook-citation]\n"))
-    const first = await vault.ingestAcceptedPage({
+    const first = await run(vault.ingestAcceptedPage({
       revisionId: "revision-1",
       markdown: initial,
       actorId: "author-1",
       createdAt: "2026-07-01T00:00:00.000Z"
-    })
+    }))
     expect(first.revision.id).toBe("revision-1")
 
     await Promise.all([
-      vault.createProposal({
+      run(vault.createProposal({
         id: "proposal-a",
         pageId: "runbook",
         baseRevisionId: "revision-1",
@@ -74,8 +125,8 @@ describe("TeamVault", () => {
         ),
         proposedBy: "author-a",
         createdAt: "2026-07-02T00:00:00.000Z"
-      }),
-      vault.createProposal({
+      })),
+      run(vault.createProposal({
         id: "proposal-b",
         pageId: "runbook",
         baseRevisionId: "revision-1",
@@ -84,23 +135,23 @@ describe("TeamVault", () => {
         ),
         proposedBy: "author-b",
         createdAt: "2026-07-02T00:00:01.000Z"
-      })
+      }))
     ])
 
     const outcomes = await Promise.all([
-      vault.approveProposal("proposal-a", "reviewer", "2026-07-03T00:00:00.000Z"),
-      vault.approveProposal("proposal-b", "reviewer", "2026-07-03T00:00:01.000Z")
+      run(vault.approveProposal("proposal-a", "reviewer", "2026-07-03T00:00:00.000Z")),
+      run(vault.approveProposal("proposal-b", "reviewer", "2026-07-03T00:00:01.000Z"))
     ])
     expect(outcomes.map((outcome) => outcome.status).sort()).toEqual(["accepted", "conflict"])
-    expect((await vault.readPage("runbook")).page.revision).toBe(2)
-    expect((await vault.getProposal("proposal-b")).status).toBe("superseded")
-    expect((await vault.snapshot()).revisions).toHaveLength(2)
+    expect((await run(vault.readPage("runbook"))).page.revision).toBe(2)
+    expect((await run(vault.getProposal("proposal-b"))).status).toBe("superseded")
+    expect((await run(vault.snapshot())).revisions).toHaveLength(2)
   })
 
   it("is idempotent and rebuilds accepted heads and lexical search entirely from R2", async () => {
     const bucket = new InMemoryR2Bucket()
-    const original = await TeamVault.create("org-rebuild", new InMemoryVaultState(), bucket)
-    await original.ingestSource(source, "Primary runbook evidence")
+    const original = await run(TeamVault.create("org-rebuild", new InMemoryVaultState(), bucket))
+    await run(original.ingestSource(source, "Primary runbook evidence"))
     const markdown = serializeMemoryMarkdown(
       page(1, "# Runbook\n\nThe albatross procedure is valid. [@runbook-citation]\n")
     )
@@ -110,14 +161,14 @@ describe("TeamVault", () => {
       actorId: "author",
       createdAt: "2026-07-01T00:00:00.000Z"
     }
-    await original.ingestAcceptedPage(input)
-    await original.ingestAcceptedPage(input)
-    expect((await original.snapshot()).revisions).toHaveLength(1)
+    await run(original.ingestAcceptedPage(input))
+    await run(original.ingestAcceptedPage(input))
+    expect((await run(original.snapshot())).revisions).toHaveLength(1)
 
-    const rebuilt = await TeamVault.create("org-rebuild", new InMemoryVaultState(), bucket)
-    expect(await rebuilt.rebuildFromR2()).toEqual({ pages: 1, revisions: 1, sources: 1 })
-    expect((await rebuilt.readPage("runbook")).revision.id).toBe("revision-rebuild")
-    expect((await rebuilt.search("albatross", 10, "2026-08-01T00:00:00.000Z")).results[0]).toMatchObject({
+    const rebuilt = await run(TeamVault.create("org-rebuild", new InMemoryVaultState(), bucket))
+    expect(await run(rebuilt.rebuildFromR2())).toEqual({ pages: 1, revisions: 1, sources: 1 })
+    expect((await run(rebuilt.readPage("runbook"))).revision.id).toBe("revision-rebuild")
+    expect((await run(rebuilt.search("albatross", 10, "2026-08-01T00:00:00.000Z"))).results[0]).toMatchObject({
       pageId: "runbook",
       revision: 1,
       citationIds: ["runbook-citation"]
@@ -164,9 +215,9 @@ describe("TeamVault", () => {
       }
     }
     expect(deletedRevision).toBe(true)
-    const rebuilt = await TeamVault.create("org-partial", new InMemoryVaultState(), bucket)
-    expect(await rebuilt.rebuildFromR2()).toEqual({ pages: 0, revisions: 0, sources: 0 })
-    expect(await rebuilt.listPages()).toEqual([])
+    const rebuilt = await run(TeamVault.create("org-partial", new InMemoryVaultState(), bucket))
+    expect(await run(rebuilt.rebuildFromR2())).toEqual({ pages: 0, revisions: 0, sources: 0 })
+    expect(await run(rebuilt.listPages())).toEqual([])
   })
 
   it("retrieves index entries, wikilinks, and backlinks without embeddings", () => {
@@ -203,20 +254,20 @@ describe("TeamVault", () => {
   })
 
   it("exports accepted Markdown verbatim in an Obsidian vault layout", async () => {
-    const vault = await TeamVault.create("org-export", new InMemoryVaultState(), new InMemoryR2Bucket())
+    const vault = await run(TeamVault.create("org-export", new InMemoryVaultState(), new InMemoryR2Bucket()))
     const markdown = serializeMemoryMarkdown({
       ...page(1, "# Runbook\n\nContinue with [[Runbook]].\n"),
       citations: [],
       metadata: { citationPolicy: "none" }
     })
-    await vault.ingestAcceptedPage({
+    await run(vault.ingestAcceptedPage({
       revisionId: "revision-export",
       markdown,
       actorId: "author",
       createdAt: "2026-07-01T00:00:00.000Z"
-    })
+    }))
 
-    const exported = await vault.exportVault()
+    const exported = await run(vault.exportVault())
     expect(exported.files.map((file) => file.path)).toEqual(expect.arrayContaining([
       ".obsidian/app.json",
       "_jingler/manifest.json",
@@ -232,9 +283,9 @@ describe("TeamVault", () => {
   it("maintains and queries a rebuildable SQLite FTS5 projection", async () => {
     const sql = new RecordingSqlStorage()
     const state = new SqliteVaultState(sql)
-    await state.initialize()
+    await run(state.initialize())
     const projectedPage = page(1, "# Runbook\n\nLexical content. [@runbook-citation]\n")
-    await state.commit(
+    await run(state.commit(
       0,
       {
         version: 1,
@@ -249,10 +300,42 @@ describe("TeamVault", () => {
       },
       buildSearchProjection([projectedPage], []),
       [projectedPage]
-    )
-    await state.searchPageIds("lexical content", 10)
+    ))
+    await run(state.searchPageIds("lexical content", 10))
     expect(sql.queries.some((query) => query.includes("USING fts5"))).toBe(true)
     expect(sql.queries.some((query) => query.includes("INSERT INTO memory_fts"))).toBe(true)
     expect(sql.queries.some((query) => query.includes("memory_fts MATCH"))).toBe(true)
+    // The commit must bracket its writes in transactionSync and never emit a raw
+    // BEGIN/COMMIT/ROLLBACK — Durable-Object SQLite rejects those at runtime.
+    expect(sql.transactionSyncCalls).toBe(1)
+    expect(
+      sql.queries.some((query) =>
+        RAW_TRANSACTION_STATEMENTS.some((statement) => query.startsWith(statement))
+      )
+    ).toBe(false)
+  })
+
+  it("rolls back and returns false on a stale version without emitting projection writes", async () => {
+    const sql = new RecordingSqlStorage()
+    await run(new SqliteVaultState(sql).initialize())
+    sql.updateRowsWritten = 0 // optimistic-lock miss
+    sql.queries.length = 0
+    const { commit } = projectedCommit(sql)
+    expect(await run(commit)).toBe(false)
+    // The stale marker throws before replaceProjection runs, so the transaction
+    // rolls back: no projection writes escaped, and no raw COMMIT was emitted.
+    expect(sql.transactionSyncCalls).toBe(1)
+    expect(sql.queries.some((query) => query.startsWith("UPDATE vault_state"))).toBe(true)
+    expect(sql.queries.some((query) => query.includes("DELETE FROM memory_fts"))).toBe(false)
+    expect(sql.queries.some((query) => query.includes("INSERT INTO memory_fts"))).toBe(false)
+  })
+
+  it("rolls back and propagates when a write throws mid-commit", async () => {
+    const sql = new RecordingSqlStorage()
+    await run(new SqliteVaultState(sql).initialize())
+    sql.failOn = (query) => query.includes("DELETE FROM memory_fts")
+    const { commit } = projectedCommit(sql)
+    await expect(run(commit)).rejects.toThrow("exec failed")
+    expect(sql.transactionSyncCalls).toBe(1)
   })
 })

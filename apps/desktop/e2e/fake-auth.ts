@@ -299,10 +299,29 @@ const graphFor = (organizationId: string, state: FakeOrganizationMemory) => {
   }
 }
 
-const dashboardFor = (state: FakeOrganizationMemory): MemoryDashboardSummary => {
+/**
+ * Time-scoped fields shrink with a shorter window, exactly as the worker's
+ * `windowAnalyticsInput` clamps the retrieval and daily-growth series to
+ * `[asOf - range, asOf]`. Current-state inputs (accepted pages, sources,
+ * freshness, health, connectivity) are a snapshot and are NEVER windowed — the
+ * dashboard drilldown spec relies on that split, asserting `Searches` moves
+ * with the selector while `Accepted pages` (10000) does not.
+ */
+const RANGE_SEARCHES: Readonly<Record<string, number>> = {
+  "7d": 9,
+  "30d": 32,
+  "90d": 63,
+  all: 90
+}
+const rangeScale = (range: string): number => RANGE_SEARCHES[range] ?? RANGE_SEARCHES.all!
+
+const dashboardFor = (state: FakeOrganizationMemory, range = "all"): MemoryDashboardSummary => {
   const added = Math.max(0, state.pages.size - 2)
   const open = state.proposals.filter((proposal) => proposal.status === "open").length
   const accepted = state.proposals.filter((proposal) => proposal.status === "accepted").length
+  // Derive every windowed retrieval count from the same per-range anchor so the
+  // whole block moves together, the way a real time-scoped aggregation would.
+  const searches = rangeScale(range)
   return {
     version: 1,
     asOf: "2026-08-01T00:00:00.000Z",
@@ -313,19 +332,63 @@ const dashboardFor = (state: FakeOrganizationMemory): MemoryDashboardSummary => 
     reviewThroughput: { proposed: 40 + state.proposals.length, accepted: 30 + accepted, rejected: 5, conflicted: state.secretRejections + 1, open, acceptanceRatio: 0.8333, medianReviewHours: 3.5 },
     connectivity: { pages: 10_000 + added, directedLinks: 22_000 + added, connectedPages: 9_980 + added, averageDegree: 4.4 },
     retrieval: {
-      searches: 90,
-      reads: 54,
-      navigation: 21,
-      graphReads: 17,
-      proposals: 6,
+      searches,
+      reads: Math.round(searches * 0.6),
+      navigation: Math.round(searches * 0.23),
+      graphReads: Math.round(searches * 0.19),
+      proposals: Math.round(searches * 0.07),
       zeroResultSearches: 2,
       zeroResultRatio: 0.0222,
-      resultsReturned: 520,
-      uniqueQueryHashes: 82,
+      resultsReturned: searches * 6,
+      uniqueQueryHashes: Math.round(searches * 0.9),
       medianDurationMs: 8,
       p95DurationMs: 21
     }
   }
+}
+
+/**
+ * Advisory relatedness suggestions in the worker's `MemorySuggestionsView` wire
+ * shape (see `MemoryBackendSuggestions` in the desktop main). DELIBERATELY not a
+ * graph edge: every pair returned here is one the accepted graph does NOT join,
+ * so the inspector's "related pages" panel can only ever be advisory. The fake
+ * stays lexical-only (no turbopuffer), matching a deployment with no vector key.
+ */
+const suggestionsFor = (organizationId: string, state: FakeOrganizationMemory) => {
+  const has = (id: string): boolean => state.pages.has(id)
+  const suggestions: Array<{
+    sourceId: string
+    targetId: string
+    method: "lexical" | "embedding"
+    score: number
+    evidence: {
+      method: "lexical" | "embedding"
+      cosine: number
+      sharedTerms?: ReadonlyArray<string>
+      sharedTags?: ReadonlyArray<string>
+      sharedSources?: ReadonlyArray<string>
+    }
+  }> = []
+  // The learning scenario adds shared-learning/shared-checklist. alpha and
+  // shared-checklist are NOT joined by any accepted edge (alpha→beta,
+  // alpha→shared-learning, shared-learning→shared-checklist are), so this pair
+  // proves a suggestion is distinct from an accepted relationship.
+  if (organizationId === "org-e2e" && has("alpha") && has("shared-checklist")) {
+    suggestions.push({
+      sourceId: "alpha",
+      targetId: "shared-checklist",
+      method: "lexical",
+      score: 0.41,
+      evidence: {
+        method: "lexical",
+        cosine: 0.37,
+        sharedTerms: ["architecture", "accepted", "route"],
+        sharedTags: ["backend"],
+        sharedSources: []
+      }
+    })
+  }
+  return { version: 1 as const, vectorSource: "lexical" as const, suggestions }
 }
 
 const normalizeOptions = (value: string | FakeAuthServerOptions): Required<Omit<FakeAuthServerOptions, "acceptedLearningOrganizationIds">> & { readonly acceptedLearningOrganizationIds: ReadonlyArray<string> } =>
@@ -525,7 +588,10 @@ export const startFakeAuthServer = async (
         let data: unknown
         switch (params.name) {
           case "memory_dashboard":
-            data = dashboardFor(state)
+            data = dashboardFor(state, typeof args.range === "string" ? args.range : "all")
+            break
+          case "memory_suggestions":
+            data = suggestionsFor(organizationId, state)
             break
           case "memory_graph":
           case "memory_graph_neighborhood":

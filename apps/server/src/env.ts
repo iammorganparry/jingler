@@ -50,6 +50,8 @@ export const loadEnv = (environment: Environment = process.env) => {
   memoryGrantSecret: secret(environment, "MEMORY_GRANT_SECRET", "dev-memory-grant-secret-change-me"),
   memoryGrantAudience: optional(environment, "MEMORY_GRANT_AUDIENCE", "jingler-memory-mcp"),
   memoryGrantTtlSeconds: Number(optional(environment, "MEMORY_GRANT_TTL_SECONDS", "300")),
+  // TODO(memory-proxy): remove once agent memory MCP routes through the main-process proxy that mints/refreshes per-request grants
+  memoryAttachmentGrantTtlSeconds: Number(optional(environment, "MEMORY_ATTACHMENT_GRANT_TTL_SECONDS", "3600")),
   /** Private Cloudflare Worker origin and its rotating Next.js service credential. */
   memoryWorkerUrl: optional(environment, "MEMORY_WORKER_URL", "http://localhost:8787"),
   memoryWorkerServiceSecret: secret(

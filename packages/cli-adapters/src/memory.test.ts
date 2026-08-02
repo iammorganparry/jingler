@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import type { CliKind, MemoryGrantResponse } from "@jingler/core"
 import { MEMORY_MCP_PROTOCOL_VERSION } from "@jingler/core"
 import { Effect, Layer } from "effect"
@@ -402,6 +404,49 @@ describe("MemoryService settled-session capture", () => {
     expect(serialized).not.toContain("duration")
     expect(serialized).not.toContain("query")
     expect(serialized).not.toContain("resultBody")
+  })
+
+  it("serializes concurrent enqueues so no queued capture is lost", async () => {
+    // Grant succeeds but every source POST is 503, so nothing is ever removed
+    // from the outbox — both distinct captures must remain queued. Without the
+    // outbox lock, the two concurrent read+write cycles interleave and one
+    // enqueue clobbers the other with a stale single-element snapshot.
+    const fetchImplementation: typeof fetch = async (input) =>
+      String(input).endsWith("/api/memory/grant")
+        ? Response.json(grantResponse("serialize"))
+        : Response.json({ error: "offline" }, { status: 503 })
+    const service = makeMemoryService({
+      fetch: fetchImplementation,
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS
+    })
+    const inputFor = (suffix: string): MemorySessionDigestInput => ({
+      sessionId: `session-${suffix}`,
+      chatId: `chat-${suffix}`,
+      turnId: `turn-${suffix}`,
+      cli: "claude",
+      userText: `Request ${suffix}.`,
+      assistantText: `Done ${suffix}.`,
+      settledAt: "2026-08-01T12:00:00.000Z",
+      retrieval: EMPTY_MEMORY_RETRIEVAL_SUMMARY
+    })
+
+    await Effect.runPromise(
+      withEnabledMemory(
+        Effect.all(
+          [
+            service.captureSettledSession(inputFor("alpha")),
+            service.captureSettledSession(inputFor("beta"))
+          ],
+          { concurrency: "unbounded" }
+        ).pipe(Effect.tap(() => Effect.sleep("40 millis")))
+      ).pipe(Effect.provide(configuredLayer()))
+    )
+
+    const outbox: unknown = JSON.parse(
+      readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
+    )
+    expect(outbox).toHaveLength(2)
   })
 
   it("allows a later retry after a transient capture failure", async () => {

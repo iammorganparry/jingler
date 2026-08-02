@@ -102,13 +102,22 @@ See `.env.example`. Required in production:
 | `RESEND_API_KEY` | Magic-link email. Omit in dev to log links to the console. |
 | `MEMORY_ENABLED` | Paid-team Memory rollout/circuit-breaker. Set `false` to disable grants, MCP, and capture without deleting accepted Markdown. |
 | `MEMORY_GRANT_SECRET` | Dedicated HMAC key for short-lived organization grants. Never reuse the auth or Worker secret. |
-| `MEMORY_GRANT_AUDIENCE` / `MEMORY_GRANT_TTL_SECONDS` | MCP audience and short grant lifetime. |
+| `MEMORY_GRANT_AUDIENCE` / `MEMORY_GRANT_TTL_SECONDS` | MCP audience (`jingler-memory-mcp`) and short desktop-UI grant lifetime (default `300`). |
+| `MEMORY_ATTACHMENT_GRANT_TTL_SECONDS` | Longer lifetime for the agent MCP attachment grant (default `3600`). |
 | `MEMORY_WORKER_URL` | Private Cloudflare Memory Worker origin. |
-| `MEMORY_WORKER_SERVICE_SECRET` | Rotating Next.js-to-Worker credential. |
-| `MEMORY_REQUEST_TIMEOUT_MS` | Bounded private-service timeout. |
+| `MEMORY_WORKER_SERVICE_SECRET` | Rotating Next.js-to-Worker credential; must equal the Worker's `MEMORY_SERVICE_SECRET`. |
+| `MEMORY_REQUEST_TIMEOUT_MS` | Bounded private-service timeout (default `5000`). |
 
 A social provider is only enabled when both its id + secret are set, so dev works
 with magic links alone.
+
+Team Memory is gated twice: `MEMORY_ENABLED` is the global rollout/circuit
+breaker, and on top of it `POST /api/memory/grant` issues a grant only for an
+organization the caller belongs to that has an active paid plan — every other
+organization gets `403` even when the feature is globally enabled. See the
+[shared-memory operations guide](../../docs/shared-memory.md) for the Cloudflare
+Worker bindings, turbopuffer vector layer, monitoring, export, rebuild, and
+credential rotation (including the turbopuffer key).
 
 ## Testing
 

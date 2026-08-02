@@ -110,6 +110,19 @@ export interface MemoryServiceShape {
   readonly uiRequest: (
     input: MemoryUiRequest
   ) => Effect.Effect<unknown | null, never, MemoryServiceEnvironment>
+  /**
+   * Fetch advisory relatedness suggestions. A separate, explicit access path — the
+   * grant is minted and consumed in the main process, so it never reaches the
+   * renderer. Advisory-only: the result is never an accepted graph edge.
+   */
+  readonly suggestions: (
+    input: MemorySuggestionsRequest
+  ) => Effect.Effect<unknown | null, never, MemoryServiceEnvironment>
+}
+
+export interface MemorySuggestionsRequest {
+  readonly organizationId: string
+  readonly limit?: number
 }
 
 export interface MemoryUiAccess {
@@ -141,6 +154,7 @@ interface MemoryRuntime {
   readonly nowSeconds: () => number
   readonly timeoutMs: number
   readonly queuedCaptures: Set<string>
+  readonly outboxLock: Effect.Semaphore
   draining: boolean
 }
 
@@ -289,7 +303,8 @@ const requestJson = <A, I>(
 
 const requestGrant = (
   runtime: MemoryRuntime,
-  selection: SelectedMemory
+  selection: SelectedMemory,
+  purpose?: "attachment"
 ): Effect.Effect<MemoryGrantResponse, MemoryRequestError> =>
   requestJson(
     runtime,
@@ -297,7 +312,10 @@ const requestGrant = (
     {
       method: "POST",
       headers: grantHeaders(selection.token),
-      body: JSON.stringify({ organizationId: selection.organizationId })
+      body: JSON.stringify({
+        organizationId: selection.organizationId,
+        ...(purpose === undefined ? {} : { purpose })
+      })
     },
     MemoryGrantResponseSchema
   ).pipe(
@@ -362,6 +380,10 @@ const callMemoryTool = (
     MemoryMcpToolResponse
   ).pipe(Effect.map((response) => response.result.structuredContent.data))
 
+// TODO(memory-proxy): this bakes a single grant into a static MCP header for the
+// whole turn, which is why the attachment grant needs the longer server-side TTL.
+// Once memory MCP routes through a main-process proxy that mints/refreshes a
+// per-request grant, this static header (and the extended TTL) can go away.
 const attachmentFrom = (
   runtime: MemoryRuntime,
   issued: MemoryGrantResponse,
@@ -386,7 +408,7 @@ const validatedAttachment = (
 ): Effect.Effect<MemoryAttachment | null> =>
   Effect.gen(function* () {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const issued = yield* requestGrant(runtime, selection).pipe(Effect.either)
+      const issued = yield* requestGrant(runtime, selection, "attachment").pipe(Effect.either)
       if (Either.isLeft(issued)) return null
       const discovery = yield* discoverGrant(
         runtime,
@@ -492,20 +514,24 @@ const writeOutbox = (jobs: ReadonlyArray<MemoryCaptureJob>) =>
     yield* fs.rename(temporary, file)
   })
 
-const enqueueCapture = (job: MemoryCaptureJob) =>
-  Effect.gen(function* () {
-    const jobs = yield* readOutbox
-    if (jobs.some((candidate) => candidate.id === job.id)) return false
-    yield* writeOutbox([...jobs, job])
-    return true
-  }).pipe(Effect.orElseSucceed(() => false))
+const enqueueCapture = (runtime: MemoryRuntime, job: MemoryCaptureJob) =>
+  runtime.outboxLock.withPermits(1)(
+    Effect.gen(function* () {
+      const jobs = yield* readOutbox
+      if (jobs.some((candidate) => candidate.id === job.id)) return false
+      yield* writeOutbox([...jobs, job])
+      return true
+    })
+  ).pipe(Effect.orElseSucceed(() => false))
 
 const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
   Effect.gen(function* () {
     if (runtime.draining) return
     runtime.draining = true
-    const jobs = yield* readOutbox
-    const remaining: Array<MemoryCaptureJob> = []
+    // Snapshot under the lock, then send UNLOCKED so a concurrent enqueue is not
+    // blocked for the length of the network round-trips.
+    const jobs = yield* runtime.outboxLock.withPermits(1)(readOutbox)
+    const sent = new Set<string>()
     for (const job of jobs) {
       const selection = { organizationId: job.organizationId, token }
       const captured = yield* requestGrant(runtime, selection).pipe(
@@ -530,9 +556,18 @@ const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
         ),
         Effect.orElseSucceed(() => false)
       )
-      if (!captured) remaining.push(job)
+      if (captured) sent.add(job.id)
     }
-    if (remaining.length !== jobs.length) yield* writeOutbox(remaining)
+    // Re-read under the lock and remove only delivered ids, so captures enqueued
+    // mid-drain are preserved rather than clobbered by a stale snapshot.
+    if (sent.size > 0) {
+      yield* runtime.outboxLock.withPermits(1)(
+        Effect.gen(function* () {
+          const current = yield* readOutbox
+          yield* writeOutbox(current.filter((candidate) => !sent.has(candidate.id)))
+        })
+      )
+    }
   }).pipe(
     Effect.ensuring(Effect.sync(() => { runtime.draining = false })),
     Effect.ignore
@@ -547,6 +582,7 @@ export const makeMemoryService = (
     nowSeconds: options.nowSeconds ?? (() => Math.floor(Date.now() / 1_000)),
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     queuedCaptures: new Set<string>(),
+    outboxLock: Effect.unsafeMakeSemaphore(1),
     draining: false
   }
   const attachment = (cli: CliKind) =>
@@ -570,7 +606,7 @@ export const makeMemoryService = (
                 return true
               })
               if (!claimed) return false
-              const queued = yield* enqueueCapture({
+              const queued = yield* enqueueCapture(runtime, {
                 id,
                 organizationId: selection.organizationId,
                 settledAt: input.settledAt,
@@ -629,7 +665,14 @@ export const makeMemoryService = (
       })
     )
 
-  return { attachment, captureSettledSession, access, uiRequest }
+  const suggestions = (input: MemorySuggestionsRequest) =>
+    uiRequest({
+      organizationId: input.organizationId,
+      name: "memory_suggestions",
+      arguments: input.limit === undefined ? {} : { limit: input.limit }
+    })
+
+  return { attachment, captureSettledSession, access, uiRequest, suggestions }
 }
 
 export class MemoryService extends Effect.Service<MemoryService>()("@jingler/MemoryService", {

@@ -1,3 +1,4 @@
+import { Effect } from "effect"
 import { serializeMemoryMarkdown, type MemoryPage, type MemorySource } from "@jingler/memory"
 import { describe, expect, it } from "vitest"
 import { VAULT_ORGANIZATION_HEADER } from "./auth.js"
@@ -7,11 +8,17 @@ import type {
   DurableObjectNamespaceLike,
   DurableObjectStubLike,
   MemoryWorkerEnv,
+  WorkflowBindingLike,
   WorkflowInstanceLike
 } from "./env.js"
+import type { VectorIngestWorkflowInput } from "./workflows/vector-ingest.js"
 import { InMemoryR2Bucket, organizationPrefix } from "./r2-store.js"
 import { memoryWorkerHealthResponse } from "./index.js"
 import { InMemoryVaultState, TeamVault } from "./team-vault.js"
+
+// Runs an Effect-returning vault/layer/state method to a Promise at the test boundary.
+const run = Effect.runPromise
+
 
 class TestDurableObjectId implements DurableObjectIdLike {
   constructor(readonly name: string) {}
@@ -35,7 +42,7 @@ class TestVaultNamespace implements DurableObjectNamespaceLike {
     if (organizationId === undefined) throw new Error("test Durable Object id has no name")
     let vault = this.vaults.get(organizationId)
     if (vault === undefined) {
-      vault = TeamVault.create(organizationId, new InMemoryVaultState(), this.bucket)
+      vault = run(TeamVault.create(organizationId, new InMemoryVaultState(), this.bucket))
       this.vaults.set(organizationId, vault)
     }
     return {
@@ -454,5 +461,80 @@ describe("memory Worker internal API", () => {
           key.startsWith(organizationPrefix("org-a")) || key.startsWith(organizationPrefix("org-b"))
       )
     ).toBe(true)
+  })
+
+  const ingestSource = (env: MemoryWorkerEnv): Promise<Response> =>
+    handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/sources", {
+        source,
+        content: "A stable cited source for the accepted page."
+      }),
+      env
+    )
+
+  const ingestPage = (env: MemoryWorkerEnv): Promise<Response> =>
+    handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/pages", {
+        revisionId: "org-a-revision-1",
+        markdown: serializeMemoryMarkdown(page("org-a")),
+        actorId: "org-a-author",
+        createdAt: "2026-07-01T00:00:00.000Z"
+      }),
+      env
+    )
+
+  it("triggers a durable vector-ingest run on accepted publication with a deterministic org-scoped id", async () => {
+    const bucket = new InMemoryR2Bucket()
+    const created: Array<{ readonly id: string; readonly params: VectorIngestWorkflowInput }> = []
+    const vectorIngest: WorkflowBindingLike<VectorIngestWorkflowInput> = {
+      create: async ({ id, params }) => {
+        created.push({ id, params })
+        return { id, status: async () => ({ status: "queued" }) }
+      },
+      get: async (id) => ({ id, status: async () => ({ status: "queued" }) })
+    }
+    const env: MemoryWorkerEnv = {
+      MEMORY_R2: bucket,
+      MEMORY_VAULTS: new TestVaultNamespace(bucket),
+      MEMORY_SERVICE_SECRET: "current-secret",
+      MEMORY_VECTOR_INGEST: vectorIngest
+    }
+
+    // A source ingest is NOT a head advance, so it must not trigger ingestion.
+    expect((await ingestSource(env)).status).toBe(201)
+    expect(created).toHaveLength(0)
+
+    // The accepted page advances the head → exactly one ingest run.
+    expect((await ingestPage(env)).status).toBe(201)
+    expect(created).toHaveLength(1)
+    expect(created[0]!.params).toEqual({ organizationId: "org-a" })
+    expect(created[0]!.id).toMatch(/^team-/)
+    expect(created[0]!.id).not.toContain("org-a")
+  })
+
+  it("still publishes when the vector-ingest trigger throws (best-effort)", async () => {
+    const bucket = new InMemoryR2Bucket()
+    const env: MemoryWorkerEnv = {
+      MEMORY_R2: bucket,
+      MEMORY_VAULTS: new TestVaultNamespace(bucket),
+      MEMORY_SERVICE_SECRET: "current-secret",
+      MEMORY_VECTOR_INGEST: {
+        create: async () => {
+          throw new Error("vector-ingest binding unavailable")
+        },
+        get: async () => {
+          throw new Error("vector-ingest instance absent")
+        }
+      }
+    }
+
+    expect((await ingestSource(env)).status).toBe(201)
+    // The head advance commits and returns 201 even though the trigger threw.
+    const accepted = await ingestPage(env)
+    expect(accepted.status).toBe(201)
+    expect(await jsonBody(accepted)).toMatchObject({
+      page: { id: "shared-slug", revision: 1 },
+      revision: { id: "org-a-revision-1" }
+    })
   })
 })

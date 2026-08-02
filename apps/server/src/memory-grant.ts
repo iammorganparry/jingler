@@ -83,8 +83,11 @@ const MemoryGrantHeader = Schema.Struct({
 })
 
 const MemoryGrantRequest = Schema.Struct({
-  organizationId: Schema.String.pipe(Schema.minLength(1))
+  organizationId: Schema.String.pipe(Schema.minLength(1)),
+  purpose: Schema.optional(Schema.Literal("attachment"))
 })
+
+export type MemoryGrantPurpose = "attachment"
 
 export const verifyMemoryGrant = (
   grant: string,
@@ -135,17 +138,20 @@ export interface MemoryGrantHandlerDependencies {
   ) => Promise<OrganizationAuthorization | null>
   readonly issue: (
     userId: string,
-    authorization: OrganizationAuthorization
+    authorization: OrganizationAuthorization,
+    purpose?: MemoryGrantPurpose
   ) => MemoryGrantResponse
 }
 
 const json = (body: unknown, status: number): Response =>
   Response.json(body, { status, headers: { "cache-control": "no-store" } })
 
-const requestedOrganizationId = async (request: Request): Promise<string | null> => {
+const requestedGrant = async (
+  request: Request
+): Promise<{ readonly organizationId: string; readonly purpose?: MemoryGrantPurpose } | null> => {
   try {
     const body = Schema.decodeUnknownSync(MemoryGrantRequest)(await request.json())
-    return body.organizationId
+    return { organizationId: body.organizationId, purpose: body.purpose }
   } catch {
     return null
   }
@@ -157,9 +163,9 @@ export const handleMemoryGrantRequest = async (
 ): Promise<Response> => {
   const userId = await dependencies.getUserId(request.headers)
   if (!userId) return json({ error: "Authentication required" }, 401)
-  const organizationId = await requestedOrganizationId(request)
-  if (!organizationId) return json({ error: "organizationId is required" }, 400)
-  const authorization = await dependencies.authorize(userId, organizationId)
+  const requested = await requestedGrant(request)
+  if (!requested) return json({ error: "organizationId is required" }, 400)
+  const authorization = await dependencies.authorize(userId, requested.organizationId)
   if (!authorization) return json({ error: "Paid organization membership required" }, 403)
-  return json(dependencies.issue(userId, authorization), 200)
+  return json(dependencies.issue(userId, authorization, requested.purpose), 200)
 }

@@ -101,7 +101,8 @@ import {
   type MemoryPageDetail,
   type MemoryReviewItem,
   type MemoryReviewResult,
-  type MemorySearchResult
+  type MemorySearchResult,
+  type MemorySuggestionsView
 } from "@jingler/contracts"
 import { RpcClient } from "@effect/rpc"
 import type { FromClientEncoded, FromServerEncoded } from "@effect/rpc/RpcMessage"
@@ -250,6 +251,19 @@ export const rpc = {
   memoryExport: (organizationId: string): Promise<MemoryExport> =>
     run((c) => c.Memory.request({ organizationId, operation: "export" })).then((value) =>
       decodeMemoryResult(MemoryExportSchema, value)
+    ),
+  /** Advisory relatedness suggestions — NON-AUTHORITATIVE, never accepted edges. */
+  memorySuggestions: (
+    organizationId: string,
+    pageId?: string,
+    limit = 5
+  ): Promise<MemorySuggestionsView> =>
+    run((c) =>
+      c.Memory.suggestions({
+        organizationId,
+        limit,
+        ...(pageId === undefined ? {} : { pageId })
+      })
     ),
   chooseReposDir: (): Promise<WorkspaceConfig | null> =>
     run((c) => c.Setup.chooseReposDir()),

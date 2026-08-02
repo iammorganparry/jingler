@@ -145,7 +145,8 @@ export const MemoryMcpToolName = Schema.Literal(
   "memory_propose",
   "memory_workflow_status",
   "memory_review",
-  "memory_schema_publish"
+  "memory_schema_publish",
+  "memory_suggestions"
 )
 export type MemoryMcpToolName = Schema.Schema.Type<typeof MemoryMcpToolName>
 

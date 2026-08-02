@@ -74,8 +74,12 @@ const tools: ReadonlyArray<ToolDefinition> = [
     name: "memory_dashboard",
     description: "Read the pre-aggregated private team-memory dashboard.",
     privilege: "read"
-  }, EmptyArguments, (_args, claims, requestId) =>
-    getRequest(claims, requestId, "/internal/memory/analytics")),
+  }, Schema.Struct({ range: Schema.optional(Schema.String) }), (args, claims, requestId) =>
+    getRequest(
+      claims,
+      requestId,
+      `/internal/memory/analytics${args.range === undefined ? "" : `?range=${encodeURIComponent(args.range)}`}`
+    )),
   defineTool({
     name: "memory_graph",
     description: "Read a bounded team-memory graph manifest without page bodies.",
@@ -191,6 +195,13 @@ const tools: ReadonlyArray<ToolDefinition> = [
     requestId,
     `/internal/memory/search?q=${encodeURIComponent(args.query)}&limit=${args.limit ?? 20}`
   )),
+  defineTool({
+    name: "memory_suggestions",
+    description:
+      "Read advisory 'related pages' relatedness suggestions. These are hints only, never accepted graph edges.",
+    privilege: "read"
+  }, Schema.Struct({ limit: Schema.optional(limit(50)) }), (args, claims, requestId) =>
+    getRequest(claims, requestId, `/internal/memory/suggestions?limit=${args.limit ?? 5}`)),
   defineTool({
     name: "memory_workflow_status",
     description: "Poll a proposal or publication workflow by its explicit handle.",

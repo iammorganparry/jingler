@@ -21,7 +21,8 @@ const memoryMachine = createMemoryMachine({
   page: rpc.memoryPage,
   reviews: rpc.memoryReviews,
   review: rpc.memoryReview,
-  export: rpc.memoryExport
+  export: rpc.memoryExport,
+  suggestions: rpc.memorySuggestions
 })
 
 const LAYOUT_REQUEST_ID = 1

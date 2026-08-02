@@ -134,7 +134,8 @@ const api: MemoryApi = {
   page: vi.fn(async (_organizationId: string, pageId: string) => page(pageId)),
   reviews: vi.fn(async () => [review]),
   review: vi.fn(reviewFixture),
-  export: vi.fn(async (organizationId: string) => ({ filename: `${organizationId}.zip`, saved: true }))
+  export: vi.fn(async (organizationId: string) => ({ filename: `${organizationId}.zip`, saved: true })),
+  suggestions: vi.fn(async () => ({ version: 1 as const, vectorSource: "lexical" as const, suggestions: [] }))
 }
 
 const startReady = async () => {

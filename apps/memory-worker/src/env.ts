@@ -41,6 +41,13 @@ export interface SqlStorageLike {
 
 export interface DurableObjectStorageLike {
   readonly sql: SqlStorageLike
+  /**
+   * Cloudflare's synchronous, atomic transaction wrapper. `sql.exec` rejects
+   * explicit `BEGIN`/`COMMIT`/`ROLLBACK`, so this is the only way to bracket a
+   * multi-statement write: the closure runs synchronously and auto-rolls-back
+   * if it throws.
+   */
+  transactionSync<Result>(closure: () => Result): Result
 }
 
 export interface DurableObjectIdLike {
@@ -87,10 +94,27 @@ export interface MemoryWorkerEnv {
   readonly MEMORY_SERVICE_SECRET_PREVIOUS?: string
   readonly MEMORY_COMPILER?: WorkflowBindingLike<import("./workflows/compiler.js").CompilerWorkflowInput>
   readonly MEMORY_LINT?: WorkflowBindingLike<import("./workflows/lint.js").ScheduledLintWorkflowInput>
+  readonly MEMORY_VECTOR_INGEST?: WorkflowBindingLike<
+    import("./workflows/vector-ingest.js").VectorIngestWorkflowInput
+  >
   readonly MEMORY_AUTO_PUBLISH_FIXES?: string
   readonly MEMORY_LINT_ORGANIZATIONS?: string
+  /** Advisory vector layer: read ONLY here, never forwarded to the renderer. */
+  readonly TURBOPUFFER_API_KEY?: string
+  readonly TURBOPUFFER_BASE_URL?: string
+  /** Client-side embedding secret; read ONLY here, never forwarded to the renderer. */
+  readonly OPENAI_API_KEY?: string
+  /** Non-secret embedding model id (defaults to `text-embedding-3-small`). */
+  readonly OPENAI_EMBED_MODEL?: string
 }
 
 export interface TeamVaultEnv {
   readonly MEMORY_R2: R2BucketLike
+  /** Advisory vector layer secret; absent means lexical-only suggestions. */
+  readonly TURBOPUFFER_API_KEY?: string
+  readonly TURBOPUFFER_BASE_URL?: string
+  /** Client-side embedding secret; absent means lexical-only suggestions. */
+  readonly OPENAI_API_KEY?: string
+  /** Non-secret embedding model id (defaults to `text-embedding-3-small`). */
+  readonly OPENAI_EMBED_MODEL?: string
 }

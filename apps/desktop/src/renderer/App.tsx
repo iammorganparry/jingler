@@ -177,7 +177,7 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
       {context.view === "reviews" && <MemoryReview reviews={context.reviews} canReview={memory.canReview} selectedId={context.selectedReviewId} result={context.reviewResult} busy={memory.reviewing} onSelect={memory.selectReview} onReview={memory.decideReview} />}
       {context.view === "analytics" && <MemoryAnalytics summary={context.summary} />}
       {(context.selectedNodeId || context.selectedEdgeId) && (
-        <MemoryInspector node={memory.selectedNode} evidence={context.evidence} page={context.page} loading={memory.loading} pendingProposalCount={reviewCount} onBack={memory.closeInspector} onOpenPage={memory.openPage} onExpandNeighborhood={memory.expandNode} />
+        <MemoryInspector node={memory.selectedNode} evidence={context.evidence} page={context.page} loading={memory.loading} pendingProposalCount={reviewCount} suggestions={context.suggestions?.suggestions ?? []} suggestionsSource={context.suggestions?.vectorSource ?? "lexical"} onBack={memory.closeInspector} onOpenPage={memory.openPage} onExpandNeighborhood={memory.expandNode} onPromoteSuggestion={(fromPageId) => memory.openPage(fromPageId)} />
       )}
         </>
       )}
