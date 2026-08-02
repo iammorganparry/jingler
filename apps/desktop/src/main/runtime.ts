@@ -81,7 +81,7 @@ const HarnessLayers = Layer.mergeAll(
 
 // Later `Layer.provide`s satisfy the requirements of earlier ones, so the leaf
 // dependencies (paths, dialog, Node platform) come last.
-const AppLayer = RpcServerLive.pipe(
+const RpcServicesLayer = RpcServerLive.pipe(
   // provideMerge: the RPC handlers consume DiscoveryService AND the main process
   // reaches the same instance to warm the model cache at startup (index.ts).
   Layer.provideMerge(DiscoveryService.Default),
@@ -113,7 +113,10 @@ const AppLayer = RpcServerLive.pipe(
   // process reaches the very same instance at startup, to resolve the boot
   // theme before the window is constructed (see `boot-theme.ts`). That has to
   // happen outside the RPC surface by definition — there is no renderer yet.
-  Layer.provideMerge(ThemeService.Default),
+  Layer.provideMerge(ThemeService.Default)
+)
+
+const AppLayer = RpcServicesLayer.pipe(
   // Merged into one stage purely to stay inside `pipe`'s 20-argument limit;
   // neither depends on the other, so the composition is unchanged.
   Layer.provide(

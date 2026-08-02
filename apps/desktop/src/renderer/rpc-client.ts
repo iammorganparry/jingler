@@ -140,9 +140,9 @@ const runtime = ManagedRuntime.make(ClientProtocolLive)
  */
 const clientScope = Effect.runSync(Scope.make())
 
-const clientPromise = runtime.runPromise(
-  RpcClient.make(JinglerRpcs).pipe(Scope.extend(clientScope))
-)
+const clientEffect = RpcClient.make(JinglerRpcs)
+const scopedClientEffect = Scope.extend(clientEffect, clientScope)
+const clientPromise = runtime.runPromise(scopedClientEffect)
 
 const run = <A>(
   f: (client: Awaited<typeof clientPromise>) => Effect.Effect<A, unknown>
