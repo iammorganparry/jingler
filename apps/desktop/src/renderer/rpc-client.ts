@@ -84,6 +84,7 @@ import type {
 } from "@jingler/core"
 import {
   JinglerRpcs,
+  MemoryAccess as MemoryAccessSchema,
   MemoryDashboardSummary as MemoryDashboardSummarySchema,
   MemoryEdgeEvidence as MemoryEdgeEvidenceSchema,
   MemoryExport as MemoryExportSchema,
@@ -196,7 +197,10 @@ export const rpc = {
     run((c) => c.Discovery.list()),
   configGet: (): Promise<WorkspaceConfig | null> =>
     run((c) => c.Config.get()),
-  memoryAccess: (): Promise<MemoryAccess> => run((c) => c.Memory.access()),
+  memoryAccess: (): Promise<MemoryAccess> =>
+    run((c) => c.Memory.request({ operation: "access" })).then((value) =>
+      decodeMemoryResult(MemoryAccessSchema, value)
+    ),
   memoryConfigure: (memory: MemoryConfig): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setMemory(memory)),
   memoryDashboard: (organizationId: string, range: string): Promise<MemoryDashboardSummary> =>
@@ -244,7 +248,7 @@ export const rpc = {
       decodeMemoryResult(MemoryReviewResultSchema, value)
     ),
   memoryExport: (organizationId: string): Promise<MemoryExport> =>
-    run((c) => c.Memory.export({ organizationId })).then((value) =>
+    run((c) => c.Memory.request({ organizationId, operation: "export" })).then((value) =>
       decodeMemoryResult(MemoryExportSchema, value)
     ),
   chooseReposDir: (): Promise<WorkspaceConfig | null> =>

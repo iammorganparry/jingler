@@ -1096,18 +1096,6 @@ export class JinglerRpcs extends RpcGroup.make(
     payload: MemoryConfig
   }),
 
-  /** Eligibility and role data only. The hosted memory grant never crosses IPC. */
-  Rpc.make("Memory.access", {
-    success: MemoryAccess,
-    error: MemoryUiError
-  }),
-
-  Rpc.make("Memory.export", {
-    success: MemoryExport,
-    error: MemoryUiError,
-    payload: { organizationId: Schema.String }
-  }),
-
   /**
    * One request envelope keeps the already-large Electron RPC group tractable.
    * Renderer wrappers decode every operation into the exported schemas above.
@@ -1116,8 +1104,9 @@ export class JinglerRpcs extends RpcGroup.make(
     success: Schema.Unknown,
     error: MemoryUiError,
     payload: {
-      organizationId: Schema.String,
+      organizationId: Schema.optional(Schema.String),
       operation: Schema.Literal(
+        "access",
         "dashboard",
         "graph",
         "neighborhood",
@@ -1125,7 +1114,8 @@ export class JinglerRpcs extends RpcGroup.make(
         "search",
         "page",
         "reviews",
-        "review"
+        "review",
+        "export"
       ),
       range: Schema.optional(Schema.String),
       limit: Schema.optional(Schema.Number),

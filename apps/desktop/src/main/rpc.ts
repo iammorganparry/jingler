@@ -433,8 +433,8 @@ export const memoryExport = (organizationId: string) =>
   )
 
 const memoryRpcRequest = (input: {
-  readonly organizationId: string
-  readonly operation: "dashboard" | "graph" | "neighborhood" | "edgeEvidence" | "search" | "page" | "reviews" | "review"
+  readonly organizationId?: string
+  readonly operation: "access" | "dashboard" | "graph" | "neighborhood" | "edgeEvidence" | "search" | "page" | "reviews" | "review" | "export"
   readonly range?: string
   readonly limit?: number
   readonly nodeId?: string
@@ -444,27 +444,32 @@ const memoryRpcRequest = (input: {
   readonly proposalId?: string
   readonly action?: "approve" | "reject"
 }) => {
+  const organizationId = input.organizationId ?? ""
   switch (input.operation) {
+    case "access":
+      return memoryAccess()
     case "dashboard":
-      return memoryDashboard(input.organizationId)
+      return memoryDashboard(organizationId)
     case "graph":
-      return memoryGraph(input.organizationId, input.limit ?? 250)
+      return memoryGraph(organizationId, input.limit ?? 250)
     case "neighborhood":
-      return memoryNeighborhood(input.organizationId, input.nodeId ?? "", input.limit ?? 100)
+      return memoryNeighborhood(organizationId, input.nodeId ?? "", input.limit ?? 100)
     case "edgeEvidence":
-      return memoryEvidence(input.organizationId, input.edgeId ?? "")
+      return memoryEvidence(organizationId, input.edgeId ?? "")
     case "search":
-      return memorySearch(input.organizationId, input.query ?? "", input.limit ?? 50)
+      return memorySearch(organizationId, input.query ?? "", input.limit ?? 50)
     case "page":
-      return memoryPage(input.organizationId, input.pageId ?? "")
+      return memoryPage(organizationId, input.pageId ?? "")
     case "reviews":
-      return memoryReviews(input.organizationId)
+      return memoryReviews(organizationId)
     case "review":
       return memoryReview(
-        input.organizationId,
+        organizationId,
         input.proposalId ?? "",
         input.action ?? "reject"
       )
+    case "export":
+      return memoryExport(organizationId)
   }
 }
 
@@ -3174,8 +3179,6 @@ const HandlersLayer = JinglerRpcs.toLayer({
     ),
   "Config.setContext": (context) => ConfigService.setContext(context),
   "Config.setMemory": (memory) => ConfigService.setMemory(memory),
-  "Memory.access": memoryAccess,
-  "Memory.export": ({ organizationId }) => memoryExport(organizationId),
   "Memory.request": memoryRpcRequest,
   // Returns the updated session so the renderer can patch its cache without a
   // refetch, matching every other session mutation.
