@@ -1,8 +1,8 @@
 import { Effect } from "effect"
 import { serializeMemoryMarkdown, type MemoryPage, type MemorySource } from "@jingler/memory"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { DurableObjectStorageLike, SqlStorageCursor, SqlStorageLike } from "./env.js"
-import { InMemoryR2Bucket, MemoryR2Store } from "./r2-store.js"
+import { HISTORY_SNAPSHOT_INTERVAL, InMemoryR2Bucket, MemoryR2Store } from "./r2-store.js"
 import { buildSearchProjection, searchAcceptedPages } from "./search.js"
 import {
   InMemoryVaultState,
@@ -53,6 +53,8 @@ class EmptySqlCursor<Row> implements SqlStorageCursor<Row> {
 // and never emits a raw BEGIN/COMMIT/ROLLBACK (which real DO SQLite rejects).
 class RecordingSqlStorage implements SqlStorageLike, DurableObjectStorageLike {
   readonly queries: Array<string> = []
+  /** Every exec's positional bindings, parallel to {@link queries}. */
+  readonly bindings: Array<ReadonlyArray<string | number | null>> = []
   transactionSyncCalls = 0
   /** Override to make a specific query fail mid-transaction. */
   failOn?: (query: string) => boolean
@@ -70,9 +72,10 @@ class RecordingSqlStorage implements SqlStorageLike, DurableObjectStorageLike {
 
   exec<Row = Record<string, unknown>>(
     query: string,
-    ..._bindings: ReadonlyArray<string | number | null>
+    ...bindings: ReadonlyArray<string | number | null>
   ): SqlStorageCursor<Row> {
     this.queries.push(query)
+    this.bindings.push(bindings)
     if (this.failOn?.(query)) throw new Error(`exec failed: ${query}`)
     return new EmptySqlCursor<Row>(
       query.startsWith("UPDATE vault_state") ? this.updateRowsWritten : 0
@@ -342,6 +345,42 @@ describe("TeamVault", () => {
     const { commit } = projectedCommit(sql)
     await expect(run(commit)).rejects.toThrow("exec failed")
     expect(sql.transactionSyncCalls).toBe(1)
+  })
+
+  it("bounds history persistence: a mutable latest pointer plus checkpoints only every N versions", async () => {
+    const bucket = new InMemoryR2Bucket()
+    const store = new MemoryR2Store("org-history", bucket)
+    const versions = HISTORY_SNAPSHOT_INTERVAL * 2 + 3
+    for (let version = 1; version <= versions; version += 1) {
+      await store.putHistory(version, JSON.stringify({ version }))
+    }
+    // Immutable checkpoints are written only every HISTORY_SNAPSHOT_INTERVAL versions
+    // — NOT one new immutable object per version (the old O(N) behaviour).
+    const snapshotKeys = bucket.keys().filter((key) => key.includes("history/snapshots/"))
+    expect(snapshotKeys).toHaveLength(Math.floor(versions / HISTORY_SNAPSHOT_INTERVAL))
+    expect(snapshotKeys.length).toBeLessThan(versions)
+    // Exactly one mutable latest pointer, overwritten each version.
+    expect(bucket.keys().filter((key) => key.endsWith("history/latest.json"))).toHaveLength(1)
+    // The latest read is bounded: a single GET of the pointer, never a full list.
+    const listSpy = vi.spyOn(bucket, "list")
+    const latest = await store.readLatestHistorySnapshot()
+    expect(listSpy).not.toHaveBeenCalled()
+    expect(JSON.parse(latest ?? "{}")).toEqual({ version: versions })
+    listSpy.mockRestore()
+  })
+
+  it("issues FTS5 prefix terms so partial-word queries match the DO like the substring scorer", async () => {
+    const sql = new RecordingSqlStorage()
+    const state = new SqliteVaultState(sql)
+    await run(state.initialize())
+    sql.queries.length = 0
+    sql.bindings.length = 0
+    await run(state.searchPageIds("ret logic", 25))
+    const matchIndex = sql.queries.findIndex((query) => query.includes("memory_fts MATCH ?"))
+    expect(matchIndex).toBeGreaterThanOrEqual(0)
+    // Each token carries a trailing `*` — the FTS5 prefix form — so 'ret' matches the
+    // token 'retry' rather than requiring an exact-token match ('"ret"' would not).
+    expect(sql.bindings[matchIndex]?.[0]).toBe('"ret"* AND "logic"*')
   })
 
   it("bounds in-memory retrieval metrics to the newest RETRIEVAL_RETENTION rows", async () => {

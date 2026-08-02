@@ -69,10 +69,10 @@ describe("vault dashboard analytics", () => {
       pages,
       sourceCount: 1,
       revisions: [
-        { id: "r1", pageId: "alpha", createdAt: "2026-01-01T00:00:00.000Z" },
-        { id: "r2", pageId: "alpha", createdAt: "2026-07-01T00:00:00.000Z" },
-        { id: "r3", pageId: "beta", createdAt: "2026-07-20T00:00:00.000Z" },
-        { id: "r4", pageId: "gamma", createdAt: "2026-06-01T00:00:00.000Z" }
+        { id: "r1", pageId: "alpha", createdAt: "2026-01-01T00:00:00.000Z", acceptedAt: "2026-01-01T00:00:00.000Z" },
+        { id: "r2", pageId: "alpha", createdAt: "2026-07-01T00:00:00.000Z", acceptedAt: "2026-07-01T00:00:00.000Z" },
+        { id: "r3", pageId: "beta", createdAt: "2026-07-20T00:00:00.000Z", acceptedAt: "2026-07-20T00:00:00.000Z" },
+        { id: "r4", pageId: "gamma", createdAt: "2026-06-01T00:00:00.000Z", acceptedAt: "2026-06-01T00:00:00.000Z" }
       ],
       proposals: [
         { id: "accepted-proposal", createdAt: "2026-07-01T00:00:00.000Z", status: "accepted" },
@@ -152,10 +152,10 @@ describe("vault dashboard analytics", () => {
       pages,
       sourceCount: 2,
       revisions: [
-        { id: "r-old", pageId: "alpha", createdAt: "2026-01-01T00:00:00.000Z" },
-        { id: "r-90", pageId: "alpha", createdAt: "2026-05-20T00:00:00.000Z" },
-        { id: "r-30", pageId: "beta", createdAt: "2026-07-10T00:00:00.000Z" },
-        { id: "r-7", pageId: "gamma", createdAt: "2026-07-28T00:00:00.000Z" }
+        { id: "r-old", pageId: "alpha", createdAt: "2026-01-01T00:00:00.000Z", acceptedAt: "2026-01-01T00:00:00.000Z" },
+        { id: "r-90", pageId: "alpha", createdAt: "2026-05-20T00:00:00.000Z", acceptedAt: "2026-05-20T00:00:00.000Z" },
+        { id: "r-30", pageId: "beta", createdAt: "2026-07-10T00:00:00.000Z", acceptedAt: "2026-07-10T00:00:00.000Z" },
+        { id: "r-7", pageId: "gamma", createdAt: "2026-07-28T00:00:00.000Z", acceptedAt: "2026-07-28T00:00:00.000Z" }
       ],
       proposals: [
         { id: "p-old", createdAt: "2026-01-15T00:00:00.000Z", status: "accepted" },
@@ -190,5 +190,70 @@ describe("vault dashboard analytics", () => {
     expect(seven.growth.acceptedPages).toBe(all.growth.acceptedPages)
     expect(seven.citationCoverage).toEqual(all.citationCoverage)
     expect(seven.connectivity).toEqual(all.connectivity)
+  })
+
+  it("buckets growth by acceptedAt, not createdAt, when they fall on different days", () => {
+    const input: VaultAnalyticsInput = {
+      pages: [],
+      sourceCount: 0,
+      // Drafted 2026-07-01, accepted 2026-07-05: growth must land on the ACCEPTANCE
+      // day, since the documented metric is accepted-event-time.
+      revisions: [
+        { id: "r1", pageId: "alpha", createdAt: "2026-07-01T00:00:00.000Z", acceptedAt: "2026-07-05T00:00:00.000Z" },
+        { id: "r2", pageId: "alpha", createdAt: "2026-07-02T00:00:00.000Z", acceptedAt: "2026-07-05T12:00:00.000Z" }
+      ],
+      proposals: [],
+      events: [],
+      heads: [],
+      retrievals: []
+    }
+    const summary = buildVaultDashboardSummary(input, "2026-08-01T00:00:00.000Z")
+    // A single acceptance-day bucket (07-05), with the page counted new on that day —
+    // NOT split across the two authoring days (07-01 / 07-02).
+    expect(summary.growth.daily).toEqual([{ day: "2026-07-05", pages: 1, revisions: 2 }])
+  })
+
+  it("counts a page linked only via a dependency as connected, not an orphan", () => {
+    const dependant: MemoryPage = {
+      id: "dependant",
+      path: "dependant.md",
+      title: "Dependant",
+      revision: 1,
+      aliases: [],
+      tags: [],
+      sources: [],
+      citations: [],
+      relationships: [{ kind: "dependency", target: "Target" }],
+      body: "# Dependant\n\nNo wikilinks here.\n",
+      metadata: { citationPolicy: "none" }
+    }
+    const target: MemoryPage = {
+      id: "target",
+      path: "target.md",
+      title: "Target",
+      revision: 1,
+      aliases: [],
+      tags: [],
+      sources: [],
+      citations: [],
+      relationships: [],
+      body: "# Target\n\nAlso no wikilinks.\n",
+      metadata: { citationPolicy: "none" }
+    }
+    const input: VaultAnalyticsInput = {
+      pages: [dependant, target],
+      sourceCount: 0,
+      revisions: [],
+      proposals: [],
+      events: [],
+      heads: [],
+      retrievals: []
+    }
+    const summary = buildVaultDashboardSummary(input, "2026-08-01T00:00:00.000Z")
+    // The dependency edge connects BOTH endpoints — neither is an orphan, matching
+    // the graph view's degree-based definition.
+    expect(summary.health.orphanPages).toBe(0)
+    expect(summary.connectivity.connectedPages).toBe(2)
+    expect(summary.connectivity.directedLinks).toBe(1)
   })
 })

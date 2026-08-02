@@ -614,6 +614,17 @@ export const startFakeAuthServer = async (
             data = { query, results, total: results.length }
             break
           }
+          case "memory_export": {
+            data = {
+              format: "jingler-obsidian-vault",
+              version: 1,
+              files: [
+                { path: ".obsidian/app.json", content: "{}" },
+                ...[...state.pages.values()].map((page) => ({ path: page.path, content: page.body }))
+              ]
+            }
+            break
+          }
           case "memory_read": {
             const page = typeof args.pageId === "string" ? state.pages.get(args.pageId) : undefined
             data = page === undefined ? {} : pageResponse(page)

@@ -28,7 +28,12 @@ export interface DialogServiceShape {
    * flags wrong.
    */
   readonly chooseDirectory: (prompt?: ChooseDirectoryPrompt) => Effect.Effect<string | null>
-  readonly saveFile?: (prompt: {
+  /**
+   * Open a save picker; resolves to the chosen absolute path or null when
+   * cancelled. Required (not optional) so the memory export can never silently
+   * no-op against a test double that forgot to provide it.
+   */
+  readonly saveFile: (prompt: {
     readonly title: string
     readonly defaultPath: string
   }) => Effect.Effect<string | null>

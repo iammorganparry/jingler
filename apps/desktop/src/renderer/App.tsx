@@ -27,7 +27,6 @@ import {
   MemoryDashboard,
   MemoryInspector,
   MemoryMap,
-  MemoryReview,
   LoadingScreen,
   LoginScreen,
   SetupScreen,
@@ -41,7 +40,6 @@ import {
   BarChart3,
   BookOpen,
   Download,
-  Inbox,
   LayoutDashboard,
   Map as MapIcon,
   Search
@@ -113,7 +111,6 @@ const MEMORY_TABS: ReadonlyArray<{
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "map", label: "Map", icon: MapIcon },
   { id: "wiki", label: "Wiki", icon: BookOpen },
-  { id: "reviews", label: "Reviews", icon: Inbox },
   { id: "analytics", label: "Analytics", icon: BarChart3 }
 ]
 
@@ -168,13 +165,12 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
         <>
       <nav className="flex flex-none items-center gap-1 border-b border-hairline bg-panel px-3 py-1.5" aria-label="Memory views">
         {MEMORY_TABS.map(({ id, label, icon: Icon }) => (
-          <button type="button" key={id} aria-current={context.view === id ? "page" : undefined} onClick={() => memory.navigate({ view: id })} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[10.5px] text-muted-foreground outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring aria-[current=page]:bg-surface aria-[current=page]:text-text-bright"><Icon size={12} /> {label}{id === "reviews" && context.reviews.filter((review) => review.status === "open").length > 0 ? ` (${context.reviews.filter((review) => review.status === "open").length})` : ""}</button>
+          <button type="button" key={id} aria-current={context.view === id ? "page" : undefined} onClick={() => memory.navigate({ view: id })} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[10.5px] text-muted-foreground outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring aria-[current=page]:bg-surface aria-[current=page]:text-text-bright"><Icon size={12} /> {label}</button>
         ))}
       </nav>
       {context.view === "dashboard" && <MemoryDashboard summary={context.summary} loading={memory.loading} error={context.error} onNavigate={memory.navigate} onRetry={memory.retry} />}
       {context.view === "map" && <MemoryMap graph={context.graph} positions={memory.positions} filters={context.filters} viewport={context.viewport} selectedNodeId={context.selectedNodeId} selectedEdgeId={context.selectedEdgeId} loading={memory.loading} onSelectNode={memory.selectNode} onSelectEdge={memory.selectEdge} onExpandNode={memory.expandNode} onViewportChange={memory.setViewport} onFiltersChange={memory.setFilters} />}
       {context.view === "wiki" && <MemoryBrowser query={context.searchQuery} results={context.searchResults} page={context.page} loading={memory.loading} filter={context.filters.healthOnly ? "health findings" : context.filters.freshness} onQueryChange={memory.setQuery} onOpenPage={memory.openPage} onBack={memory.backFromPage} />}
-      {context.view === "reviews" && <MemoryReview reviews={context.reviews} canReview={memory.canReview} selectedId={context.selectedReviewId} result={context.reviewResult} busy={memory.reviewing} onSelect={memory.selectReview} onReview={memory.decideReview} />}
       {context.view === "analytics" && <MemoryAnalytics summary={context.summary} />}
       {(context.selectedNodeId || context.selectedEdgeId) && (
         <MemoryInspector node={memory.selectedNode} evidence={context.evidence} page={context.page} loading={memory.loading} pendingProposalCount={reviewCount} suggestions={context.suggestions?.suggestions ?? []} suggestionsSource={context.suggestions?.vectorSource ?? "lexical"} onBack={memory.closeInspector} onOpenPage={memory.openPage} onExpandNeighborhood={memory.expandNode} onPromoteSuggestion={(fromPageId) => memory.openPage(fromPageId)} />

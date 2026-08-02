@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import type { CliKind, MemoryGrantResponse } from "@jingler/core"
 import { MEMORY_MCP_PROTOCOL_VERSION } from "@jingler/core"
@@ -332,6 +332,100 @@ describe("MemoryService stateless attachment", () => {
     expect(JSON.stringify(body)).not.toContain("grant.renderer-boundary.signature")
     expect(JSON.stringify(body)).not.toContain("jingler-user-token")
   })
+
+  it("mints one grant per organization and reuses it across parallel UI requests", async () => {
+    const grantedOrgs: string[] = []
+    const toolResponse = (): Response =>
+      Response.json({
+        jsonrpc: "2.0",
+        id: "ui",
+        result: { resultType: "complete", structuredContent: { data: { ok: true } }, content: [] }
+      })
+    const grantForOrg = (organizationId: string): MemoryGrantResponse => {
+      const base = grantResponse(organizationId)
+      return {
+        grant: `grant.${organizationId}.signature`,
+        claims: { ...base.claims, organizationId, grantId: `grant-${organizationId}` }
+      }
+    }
+    const fetchImplementation: typeof fetch = async (input, init) => {
+      const request = requestOf(input, init)
+      if (request.url.endsWith("/api/memory/grant")) {
+        const parsed = (await request.json()) as { organizationId: string }
+        grantedOrgs.push(parsed.organizationId)
+        return Response.json(grantForOrg(parsed.organizationId))
+      }
+      return toolResponse()
+    }
+    const service = makeMemoryService({
+      fetch: fetchImplementation,
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS
+    })
+
+    await Effect.runPromise(
+      withEnabledMemory(
+        Effect.all(
+          [
+            service.uiRequest({ organizationId: ORGANIZATION_ID, name: "memory_dashboard", arguments: {} }),
+            service.uiRequest({ organizationId: ORGANIZATION_ID, name: "memory_graph", arguments: {} }),
+            service.uiRequest({ organizationId: ORGANIZATION_ID, name: "memory_search", arguments: {} }),
+            service.uiRequest({ organizationId: "org-second", name: "memory_dashboard", arguments: {} })
+          ],
+          { concurrency: "unbounded" }
+        )
+      ).pipe(Effect.provide(configuredLayer()))
+    )
+
+    // Three same-org requests share a single minted grant; the second org gets its own.
+    expect(grantedOrgs.filter((org) => org === ORGANIZATION_ID)).toHaveLength(1)
+    expect(grantedOrgs.filter((org) => org === "org-second")).toHaveLength(1)
+  })
+
+  it("re-mints a cached grant once it nears expiry", async () => {
+    let now = NOW_SECONDS
+    let grants = 0
+    const fetchImplementation: typeof fetch = async (input) => {
+      if (String(input).endsWith("/api/memory/grant")) {
+        grants += 1
+        return Response.json(grantResponse(String(grants), NOW_SECONDS + 300))
+      }
+      return Response.json({
+        jsonrpc: "2.0",
+        id: "ui",
+        result: { resultType: "complete", structuredContent: { data: {} }, content: [] }
+      })
+    }
+    const service = makeMemoryService({
+      fetch: fetchImplementation,
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => now
+    })
+
+    await Effect.runPromise(
+      withEnabledMemory(
+        service.uiRequest({ organizationId: ORGANIZATION_ID, name: "memory_dashboard", arguments: {} })
+      ).pipe(Effect.provide(configuredLayer()))
+    )
+    expect(grants).toBe(1)
+
+    // A follow-up while the grant is comfortably valid reuses the cache.
+    await Effect.runPromise(
+      withEnabledMemory(
+        service.uiRequest({ organizationId: ORGANIZATION_ID, name: "memory_graph", arguments: {} })
+      ).pipe(Effect.provide(configuredLayer()))
+    )
+    expect(grants).toBe(1)
+
+    // Advance into the safety margin of expiry; the next request must re-mint.
+    now = NOW_SECONDS + 290
+    await Effect.runPromise(
+      withEnabledMemory(
+        service.uiRequest({ organizationId: ORGANIZATION_ID, name: "memory_search", arguments: {} })
+      ).pipe(Effect.provide(configuredLayer()))
+    )
+    expect(grants).toBe(2)
+  })
 })
 
 describe("MemoryService settled-session capture", () => {
@@ -509,6 +603,110 @@ describe("MemoryService settled-session capture", () => {
       )
     )
     expect(sourceAttempts).toBe(2)
+  })
+
+  it("releases the capture id after a failed enqueue so a later attempt retries", async () => {
+    let sourcePosts = 0
+    const fetchImplementation: typeof fetch = async (input) => {
+      if (String(input).endsWith("/api/memory/grant")) {
+        return Response.json(grantResponse("release"))
+      }
+      sourcePosts += 1
+      return Response.json({ accepted: true }, { status: 202 })
+    }
+    const service = makeMemoryService({
+      fetch: fetchImplementation,
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS
+    })
+    const input: MemorySessionDigestInput = {
+      sessionId: "session-release",
+      chatId: "chat-release",
+      turnId: "turn-release",
+      cli: "claude",
+      userText: "Enqueue must not permanently claim the id on a write failure.",
+      assistantText: "Understood.",
+      settledAt: "2026-08-01T12:00:00.000Z",
+      retrieval: EMPTY_MEMORY_RETRIEVAL_SUMMARY
+    }
+
+    // Force the atomic write to fail: the outbox's temp path is a directory, so
+    // writeFileString to it throws and enqueue reports "failed".
+    const blocker = join(temp.root, "memory-capture-outbox.json.tmp")
+    mkdirSync(temp.root, { recursive: true })
+    mkdirSync(blocker, { recursive: true })
+
+    const first = await Effect.runPromise(
+      withEnabledMemory(
+        service.captureSettledSession(input).pipe(Effect.tap(() => Effect.sleep("20 millis")))
+      ).pipe(Effect.provide(configuredLayer()))
+    )
+    expect(first).toBe(false)
+    // Nothing persisted and nothing delivered on the failed enqueue.
+    expect(existsSync(join(temp.root, "memory-capture-outbox.json"))).toBe(false)
+    expect(sourcePosts).toBe(0)
+
+    // Unblock the write; the same settled turn must be re-attemptable and now
+    // actually deliver (the released claim no longer blocks it).
+    rmSync(blocker, { recursive: true, force: true })
+    const second = await Effect.runPromise(
+      withEnabledMemory(
+        service.captureSettledSession(input).pipe(Effect.tap(() => Effect.sleep("20 millis")))
+      ).pipe(Effect.provide(configuredLayer()))
+    )
+    expect(second).toBe(true)
+    expect(sourcePosts).toBe(1)
+  })
+
+  it("drops a capture whose org membership was revoked instead of retrying forever", async () => {
+    let grants = 0
+    const fetchImplementation: typeof fetch = async (input) => {
+      if (String(input).endsWith("/api/memory/grant")) {
+        grants += 1
+        return Response.json({ error: "forbidden" }, { status: 403 })
+      }
+      if (String(input).endsWith("/api/memory/organizations")) {
+        return Response.json({ organizations: [] })
+      }
+      return Response.json({ accepted: true }, { status: 202 })
+    }
+    const service = makeMemoryService({
+      fetch: fetchImplementation,
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS
+    })
+    const input: MemorySessionDigestInput = {
+      sessionId: "session-403",
+      chatId: "chat-403",
+      turnId: "turn-403",
+      cli: "codex",
+      userText: "Membership was revoked after this settled.",
+      assistantText: "Recorded.",
+      settledAt: "2026-08-01T12:00:00.000Z",
+      retrieval: EMPTY_MEMORY_RETRIEVAL_SUMMARY
+    }
+
+    await Effect.runPromise(
+      withEnabledMemory(
+        service.captureSettledSession(input).pipe(Effect.tap(() => Effect.sleep("30 millis")))
+      ).pipe(Effect.provide(configuredLayer()))
+    )
+
+    // The 403 drain drops the job rather than leaving it to re-attempt forever.
+    const outbox: unknown = JSON.parse(
+      readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
+    )
+    expect(outbox).toHaveLength(0)
+    expect(grants).toBe(1)
+
+    // A second drain finds nothing to do — no further grant round-trips.
+    await Effect.runPromise(
+      withEnabledMemory(service.access()).pipe(
+        Effect.tap(() => Effect.sleep("30 millis")),
+        Effect.provide(configuredLayer())
+      )
+    )
+    expect(grants).toBe(1)
   })
 
   it("redacts credential shapes, bounds content, and counts only known memory tools", () => {

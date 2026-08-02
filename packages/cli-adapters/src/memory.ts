@@ -28,7 +28,23 @@ import { SecretStore } from "./secret-store.js"
 const MEMORY_SERVER_NAME = "jingler-memory"
 const MEMORY_AUTH_ENVIRONMENT = "JINGLER_MEMORY_AUTHORIZATION"
 const DEFAULT_TIMEOUT_MS = 1_500
+// UI reads (dashboard/graph/export/suggestions) hop through the Next.js server,
+// which budgets MEMORY_REQUEST_TIMEOUT_MS (5s) for its own call to the Worker; a
+// cold Durable Object or a large vault can consume most of it. The desktop must
+// therefore wait LONGER than that downstream budget, or every heavier read would
+// abort locally and surface as "Team memory is unavailable". The short
+// DEFAULT_TIMEOUT_MS stays for the fail-open attachment/capture paths, where a
+// slow hop must never block an agent turn.
+const UI_REQUEST_TIMEOUT_MS = 8_000
 const MAX_DIGEST_CHARACTERS = 8_000
+// Reuse a minted grant until it is within this many seconds of expiry, so the
+// clock skew / in-flight-request window still leaves a valid grant. The 401
+// eviction path (below) covers server-side revocation and expiry races.
+const GRANT_REFRESH_MARGIN_SECONDS = 30
+// A capture that keeps failing to deliver is dropped rather than re-attempted on
+// every drain forever — bounded by attempt count and by age.
+const MAX_CAPTURE_ATTEMPTS = 5
+const MAX_CAPTURE_AGE_SECONDS = 7 * 24 * 60 * 60
 const MCP_TOOL_PREFIX_PATTERN = /^mcp__jingler-memory__/
 const LEADING_SLASH_PATTERN = /^\/+/
 const PRIVATE_KEY_PATTERN = /-----BEGIN [^-\r\n]+-----[\s\S]*?-----END [^-\r\n]+-----/g
@@ -146,6 +162,8 @@ export interface MemoryServiceOptions {
   readonly baseUrl?: () => string
   readonly nowSeconds?: () => number
   readonly timeoutMs?: number
+  /** Timeout for interactive UI reads; defaults to UI_REQUEST_TIMEOUT_MS. */
+  readonly uiTimeoutMs?: number
 }
 
 interface MemoryRuntime {
@@ -153,8 +171,13 @@ interface MemoryRuntime {
   readonly baseUrl: () => string
   readonly nowSeconds: () => number
   readonly timeoutMs: number
+  readonly uiTimeoutMs: number
   readonly queuedCaptures: Set<string>
   readonly outboxLock: Effect.Semaphore
+  /** One reusable grant per organization; never leaves the main process. */
+  readonly grantCache: Map<string, MemoryGrantResponse>
+  /** Serializes mint-and-cache so parallel UI requests share one grant. */
+  readonly grantLock: Effect.Semaphore
   draining: boolean
 }
 
@@ -164,6 +187,10 @@ interface MemoryCaptureJob {
   readonly settledAt: string
   readonly content: string
   readonly retrieval: MemoryRetrievalSummary
+  /** Delivery attempts so far; drives the dead-job drop below. */
+  readonly attempts: number
+  /** Unix seconds the job was first enqueued; drives the max-age drop. */
+  readonly firstSeenAt: number
 }
 
 const MemoryCaptureJob = Schema.Struct({
@@ -171,7 +198,11 @@ const MemoryCaptureJob = Schema.Struct({
   organizationId: Schema.String,
   settledAt: Schema.String,
   content: Schema.String,
-  retrieval: MemoryRetrievalSummarySchema
+  retrieval: MemoryRetrievalSummarySchema,
+  // Optional-with-default so outbox files written before this field existed
+  // still decode. Missing firstSeenAt (0) is treated as "unknown" by the drain.
+  attempts: Schema.optionalWith(Schema.Int, { default: () => 0 }),
+  firstSeenAt: Schema.optionalWith(Schema.Int, { default: () => 0 })
 })
 const MemoryCaptureOutbox = Schema.Array(MemoryCaptureJob)
 
@@ -281,13 +312,14 @@ const requestJson = <A, I>(
   runtime: MemoryRuntime,
   path: string,
   init: RequestInit,
-  schema: Schema.Schema<A, I>
+  schema: Schema.Schema<A, I>,
+  timeoutMs: number = runtime.timeoutMs
 ): Effect.Effect<A, MemoryRequestError> =>
   Effect.tryPromise({
     try: async () => {
       const response = await runtime.fetchImplementation(endpoint(runtime.baseUrl(), path), {
         ...init,
-        signal: AbortSignal.timeout(runtime.timeoutMs)
+        signal: AbortSignal.timeout(timeoutMs)
       })
       if (!response.ok) throw new MemoryRequestError({ status: response.status })
       return response.json()
@@ -317,7 +349,10 @@ const requestGrant = (
         ...(purpose === undefined ? {} : { purpose })
       })
     },
-    MemoryGrantResponseSchema
+    MemoryGrantResponseSchema,
+    // A UI grant gates interactive reads, so it gets the longer budget; the
+    // attachment grant is fail-open inside a turn and keeps the short one.
+    purpose === "attachment" ? runtime.timeoutMs : runtime.uiTimeoutMs
   ).pipe(
     Effect.flatMap((parsed) => {
       if (
@@ -327,6 +362,35 @@ const requestGrant = (
         return Effect.fail(new MemoryRequestError({ status: 401 }))
       }
       return Effect.succeed(parsed)
+    })
+  )
+
+/**
+ * Reuse the cached grant for an organization until it nears expiry, minting a
+ * fresh one only when absent or stale. The mint is serialized so the renderer's
+ * burst of parallel UI requests (dashboard/graph/reviews/search) issues a single
+ * grant per org rather than one per operation. The cache is keyed strictly by
+ * organizationId — grants never cross organizations — and stays main-process
+ * only. Callers evict on a failed tool call so revocation self-heals.
+ */
+const cachedGrant = (
+  runtime: MemoryRuntime,
+  selection: SelectedMemory
+): Effect.Effect<MemoryGrantResponse, MemoryRequestError> =>
+  runtime.grantLock.withPermits(1)(
+    Effect.suspend(() => {
+      const cached = runtime.grantCache.get(selection.organizationId)
+      if (
+        cached !== undefined &&
+        cached.claims.expiresAt - GRANT_REFRESH_MARGIN_SECONDS > runtime.nowSeconds()
+      ) {
+        return Effect.succeed(cached)
+      }
+      return requestGrant(runtime, selection).pipe(
+        Effect.tap((issued) =>
+          Effect.sync(() => runtime.grantCache.set(selection.organizationId, issued))
+        )
+      )
     })
   )
 
@@ -377,7 +441,8 @@ const callMemoryTool = (
           }
         }),
     },
-    MemoryMcpToolResponse
+    MemoryMcpToolResponse,
+    runtime.uiTimeoutMs
   ).pipe(Effect.map((response) => response.result.structuredContent.data))
 
 // TODO(memory-proxy): this bakes a single grant into a static MCP header for the
@@ -514,15 +579,20 @@ const writeOutbox = (jobs: ReadonlyArray<MemoryCaptureJob>) =>
     yield* fs.rename(temporary, file)
   })
 
-const enqueueCapture = (runtime: MemoryRuntime, job: MemoryCaptureJob) =>
+type EnqueueOutcome = "stored" | "duplicate" | "failed"
+
+const enqueueCapture = (
+  runtime: MemoryRuntime,
+  job: MemoryCaptureJob
+) =>
   runtime.outboxLock.withPermits(1)(
     Effect.gen(function* () {
       const jobs = yield* readOutbox
-      if (jobs.some((candidate) => candidate.id === job.id)) return false
+      if (jobs.some((candidate) => candidate.id === job.id)) return "duplicate" as const
       yield* writeOutbox([...jobs, job])
-      return true
+      return "stored" as const
     })
-  ).pipe(Effect.orElseSucceed(() => false))
+  ).pipe(Effect.orElseSucceed(() => "failed" as const))
 
 const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
   Effect.gen(function* () {
@@ -531,10 +601,15 @@ const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
     // Snapshot under the lock, then send UNLOCKED so a concurrent enqueue is not
     // blocked for the length of the network round-trips.
     const jobs = yield* runtime.outboxLock.withPermits(1)(readOutbox)
+    const now = runtime.nowSeconds()
+    // Delivered ids to remove, permanently-dead ids to drop, and the bumped
+    // attempt counts for ids that should be retried later.
     const sent = new Set<string>()
+    const dropped = new Set<string>()
+    const retried = new Map<string, number>()
     for (const job of jobs) {
       const selection = { organizationId: job.organizationId, token }
-      const captured = yield* requestGrant(runtime, selection).pipe(
+      const outcome = yield* requestGrant(runtime, selection).pipe(
         Effect.flatMap((issued) =>
           postDigest({
             runtime,
@@ -552,19 +627,49 @@ const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
               settledAt: job.settledAt,
               retrieval: job.retrieval
             }
-          })
+          }).pipe(Effect.map((ok) => (ok ? ("sent" as const) : ("failed" as const))))
         ),
-        Effect.orElseSucceed(() => false)
+        // A 403 on the grant means the user has lost membership of this org —
+        // the job can never succeed, so drop it. Any other transient error is a
+        // retry candidate, bounded by attempts/age below.
+        Effect.catchAll((error) =>
+          Effect.succeed(error.status === 403 ? ("forbidden" as const) : ("failed" as const))
+        )
       )
-      if (captured) sent.add(job.id)
+      if (outcome === "sent") {
+        sent.add(job.id)
+      } else if (outcome === "forbidden") {
+        dropped.add(job.id)
+      } else {
+        const attempts = job.attempts + 1
+        const firstSeenAt = job.firstSeenAt > 0 ? job.firstSeenAt : now
+        if (attempts >= MAX_CAPTURE_ATTEMPTS || now - firstSeenAt > MAX_CAPTURE_AGE_SECONDS) {
+          dropped.add(job.id)
+        } else {
+          retried.set(job.id, attempts)
+        }
+      }
     }
-    // Re-read under the lock and remove only delivered ids, so captures enqueued
-    // mid-drain are preserved rather than clobbered by a stale snapshot.
-    if (sent.size > 0) {
+    // Re-read under the lock so captures enqueued mid-drain are preserved rather
+    // than clobbered by a stale snapshot: remove delivered/dropped ids and bump
+    // the attempt count on ids kept for a later retry.
+    if (sent.size > 0 || dropped.size > 0 || retried.size > 0) {
       yield* runtime.outboxLock.withPermits(1)(
         Effect.gen(function* () {
           const current = yield* readOutbox
-          yield* writeOutbox(current.filter((candidate) => !sent.has(candidate.id)))
+          const next = current
+            .filter((candidate) => !sent.has(candidate.id) && !dropped.has(candidate.id))
+            .map((candidate) => {
+              const attempts = retried.get(candidate.id)
+              return attempts === undefined
+                ? candidate
+                : {
+                    ...candidate,
+                    attempts,
+                    firstSeenAt: candidate.firstSeenAt > 0 ? candidate.firstSeenAt : now
+                  }
+            })
+          yield* writeOutbox(next)
         })
       )
     }
@@ -581,8 +686,11 @@ export const makeMemoryService = (
     baseUrl: options.baseUrl ?? configuredBaseUrl,
     nowSeconds: options.nowSeconds ?? (() => Math.floor(Date.now() / 1_000)),
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    uiTimeoutMs: options.uiTimeoutMs ?? UI_REQUEST_TIMEOUT_MS,
     queuedCaptures: new Set<string>(),
     outboxLock: Effect.unsafeMakeSemaphore(1),
+    grantCache: new Map<string, MemoryGrantResponse>(),
+    grantLock: Effect.unsafeMakeSemaphore(1),
     draining: false
   }
   const attachment = (cli: CliKind) =>
@@ -606,16 +714,25 @@ export const makeMemoryService = (
                 return true
               })
               if (!claimed) return false
-              const queued = yield* enqueueCapture(runtime, {
+              const enqueued = yield* enqueueCapture(runtime, {
                 id,
                 organizationId: selection.organizationId,
                 settledAt: input.settledAt,
                 content: memoryDigestContent(input),
-                retrieval: safeRetrieval(input.retrieval)
+                retrieval: safeRetrieval(input.retrieval),
+                attempts: 0,
+                firstSeenAt: runtime.nowSeconds()
               })
-              if (!queued) return false
+              // A transient write failure persisted nothing, so release the
+              // in-memory claim — otherwise this settled turn could never be
+              // captured again for the lifetime of the process.
+              if (enqueued === "failed") {
+                yield* Effect.sync(() => runtime.queuedCaptures.delete(id))
+                return false
+              }
+              if (enqueued === "duplicate") return false
               yield* drainCaptureOutbox(runtime, selection.token).pipe(Effect.forkDaemon)
-              return queued
+              return true
             })
       )
     )
@@ -632,7 +749,7 @@ export const makeMemoryService = (
               endpoint(runtime.baseUrl(), "/api/memory/organizations"),
               {
                 headers: { authorization: `Bearer ${token}` },
-                signal: AbortSignal.timeout(runtime.timeoutMs)
+                signal: AbortSignal.timeout(runtime.uiTimeoutMs)
               }
             )
             if (!response.ok) return null
@@ -658,8 +775,13 @@ export const makeMemoryService = (
       Effect.flatMap((selection) => {
         if (selection === null) return Effect.succeed(null)
         const requested = { ...selection, organizationId: input.organizationId }
-        return requestGrant(runtime, requested).pipe(
+        return cachedGrant(runtime, requested).pipe(
           Effect.flatMap((issued) => callMemoryTool(runtime, issued, input)),
+          // Evict on any failure so a revoked/expired cached grant is re-minted
+          // on the next request rather than replayed into another 401.
+          Effect.tapError(() =>
+            Effect.sync(() => runtime.grantCache.delete(input.organizationId))
+          ),
           Effect.orElseSucceed(() => null)
         )
       })

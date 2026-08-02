@@ -2,6 +2,7 @@ import { createOrReuseWorkflow, handleMemoryWorkerRequest } from "./api.js"
 import type { MemoryWorkerEnv } from "./env.js"
 import { stableContentHash } from "@jingler/memory"
 import { workflowBindingId } from "./auth.js"
+import { listOrganizationIds } from "./r2-store.js"
 
 export * from "./env.js"
 export * from "./auth.js"
@@ -30,10 +31,33 @@ interface ScheduledControllerLike {
   readonly scheduledTime: number
 }
 
-const scheduledMaintenanceOrganizations = (env: MemoryWorkerEnv): ReadonlyArray<string> =>
-  [...new Set((env.MEMORY_LINT_ORGANIZATIONS ?? "").split(",").map((value) => value.trim()))]
-    .filter((value) => value.length > 0)
+const parseOrganizationList = (value: string | undefined): ReadonlyArray<string> =>
+  [...new Set((value ?? "").split(",").map((entry) => entry.trim()))]
+    .filter((entry) => entry.length > 0)
     .sort()
+
+const scheduledMaintenanceOrganizations = (env: MemoryWorkerEnv): ReadonlyArray<string> =>
+  parseOrganizationList(env.MEMORY_LINT_ORGANIZATIONS)
+
+/**
+ * The org set the daily vector drift sweep reconciles. It is the UNION of every org
+ * with an R2 vault (discovered by listing org prefixes), the lint allow-list, and an
+ * optional explicit `MEMORY_VECTOR_ORGANIZATIONS` override — so an org that never
+ * opted into lint still gets its advisory turbopuffer namespace reconciled after a
+ * missed publication trigger, instead of drifting stale forever.
+ */
+const scheduledVectorOrganizations = async (env: MemoryWorkerEnv): Promise<ReadonlyArray<string>> => {
+  const configured = new Set<string>([
+    ...scheduledMaintenanceOrganizations(env),
+    ...parseOrganizationList(env.MEMORY_VECTOR_ORGANIZATIONS)
+  ])
+  if (env.MEMORY_R2 !== undefined) {
+    for (const organizationId of await listOrganizationIds(env.MEMORY_R2)) {
+      configured.add(organizationId)
+    }
+  }
+  return [...configured].sort()
+}
 
 const sweepScheduledLint = async (
   env: MemoryWorkerEnv,
@@ -98,10 +122,13 @@ export default {
   async scheduled(event: ScheduledControllerLike, env: MemoryWorkerEnv): Promise<void> {
     const asOf = new Date(event.scheduledTime).toISOString()
     const day = asOf.slice(0, 10)
-    const organizations = scheduledMaintenanceOrganizations(env)
+    const [lintOrganizations, vectorOrganizations] = await Promise.all([
+      Promise.resolve(scheduledMaintenanceOrganizations(env)),
+      scheduledVectorOrganizations(env)
+    ])
     await Promise.all([
-      sweepScheduledLint(env, organizations, asOf, day),
-      sweepVectorIngest(env, organizations, day)
+      sweepScheduledLint(env, lintOrganizations, asOf, day),
+      sweepVectorIngest(env, vectorOrganizations, day)
     ])
   }
 }

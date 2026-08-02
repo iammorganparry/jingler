@@ -67,6 +67,44 @@ const encodeSegment = (value: string): string => encodeURIComponent(value)
 export const organizationPrefix = (organizationId: string): string =>
   `organizations/${encodeSegment(organizationId)}/`
 
+/** The single mutable pointer holding the newest vault history (see {@link MemoryR2Store.putHistory}). */
+const HISTORY_LATEST_KEY = "history/latest.json"
+
+/** How often (in versions) a durable immutable history checkpoint is also written. */
+export const HISTORY_SNAPSHOT_INTERVAL = 16
+
+const ORGANIZATIONS_ROOT = "organizations/"
+
+/**
+ * Every organization that currently has a vault in R2, discovered by listing the
+ * `organizations/<id>/` common prefixes. The daily drift sweep uses this so EVERY
+ * org with a vault is reconciled — not only those opted into lint — closing the
+ * gap where a single failed publication trigger would leave a namespace stale
+ * forever. Bounded to one delimited-prefix entry per org, not one per object.
+ */
+export const listOrganizationIds = async (bucket: R2BucketLike): Promise<Array<string>> => {
+  const ids = new Set<string>()
+  let cursor: string | undefined
+  do {
+    const page = await bucket.list({
+      prefix: ORGANIZATIONS_ROOT,
+      delimiter: "/",
+      ...(cursor === undefined ? {} : { cursor })
+    })
+    for (const prefix of page.delimitedPrefixes ?? []) {
+      const encoded = prefix.slice(ORGANIZATIONS_ROOT.length).replace(/\/$/, "")
+      if (encoded.length === 0) continue
+      try {
+        ids.add(decodeURIComponent(encoded))
+      } catch {
+        // A malformed prefix cannot masquerade as another org; skip it.
+      }
+    }
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor !== undefined)
+  return [...ids].sort()
+}
+
 export const sha256ContentHash = async (value: string): Promise<string> => {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("")
@@ -177,6 +215,29 @@ export class MemoryR2Store {
     return normalized
   }
 
+  /**
+   * Persist the vault history for `version`. Writes are O(1), not O(N):
+   *
+   * 1. Always overwrite the single MUTABLE `history/latest.json` pointer — this is
+   *    what {@link readLatestHistorySnapshot} reads with one bounded GET, so the read
+   *    never lists every key.
+   * 2. Only every {@link HISTORY_SNAPSHOT_INTERVAL} versions also write an IMMUTABLE
+   *    checkpoint, so durable history is retained without minting a fresh immutable
+   *    object (and a longer list to scan) on every single mutation — the previous
+   *    behaviour, which grew unbounded and made the latest-read O(N).
+   *
+   * Rebuild correctness is preserved: the mutable latest pointer always holds the
+   * newest history, and the immutable checkpoints are a durable superset.
+   */
+  async putHistory(version: number, value: string): Promise<void> {
+    await this.bucket.put(this.key(HISTORY_LATEST_KEY), value, {
+      httpMetadata: { contentType: "application/json" }
+    })
+    if (version % HISTORY_SNAPSHOT_INTERVAL === 0) {
+      await this.putHistorySnapshot(version, value)
+    }
+  }
+
   async putHistorySnapshot(version: number, value: string): Promise<void> {
     const versionKey = String(version).padStart(16, "0")
     const hash = await sha256ContentHash(value)
@@ -189,9 +250,13 @@ export class MemoryR2Store {
   }
 
   async readLatestHistorySnapshot(): Promise<string | null> {
+    // Bounded: one GET of the mutable latest pointer. Only vaults written before the
+    // pointer existed fall back to listing the immutable checkpoints.
+    const latest = await this.bucket.get(this.key(HISTORY_LATEST_KEY))
+    if (latest !== null) return latest.text()
     const keys = await listAllKeys(this.bucket, this.key("history/snapshots/"))
-    const latest = keys.at(-1)
-    return latest === undefined ? null : readRequired(this.bucket, latest)
+    const newest = keys.at(-1)
+    return newest === undefined ? null : readRequired(this.bucket, newest)
   }
 
   private retrievalDayKey(day: string): string {
@@ -344,15 +409,29 @@ export class InMemoryR2Bucket implements R2BucketLike {
   async list(options?: {
     readonly prefix?: string
     readonly cursor?: string
-  }): Promise<{ readonly objects: ReadonlyArray<{ readonly key: string }>; readonly truncated: boolean }> {
+    readonly delimiter?: string
+  }): Promise<{
+    readonly objects: ReadonlyArray<{ readonly key: string }>
+    readonly truncated: boolean
+    readonly delimitedPrefixes?: ReadonlyArray<string>
+  }> {
     const prefix = options?.prefix ?? ""
-    return {
-      objects: [...this.values.keys()]
-        .filter((key) => key.startsWith(prefix))
-        .sort()
-        .map((key) => ({ key })),
-      truncated: false
+    const matching = [...this.values.keys()].filter((key) => key.startsWith(prefix)).sort()
+    const delimiter = options?.delimiter
+    if (delimiter === undefined) {
+      return { objects: matching.map((key) => ({ key })), truncated: false }
     }
+    // Roll matching keys up to the first delimiter past the prefix, exactly as R2
+    // does: keys with a delimiter become common prefixes, the rest stay objects.
+    const objects: Array<{ readonly key: string }> = []
+    const delimitedPrefixes = new Set<string>()
+    for (const key of matching) {
+      const rest = key.slice(prefix.length)
+      const index = rest.indexOf(delimiter)
+      if (index === -1) objects.push({ key })
+      else delimitedPrefixes.add(`${prefix}${rest.slice(0, index + delimiter.length)}`)
+    }
+    return { objects, truncated: false, delimitedPrefixes: [...delimitedPrefixes].sort() }
   }
 
   keys(): ReadonlyArray<string> {

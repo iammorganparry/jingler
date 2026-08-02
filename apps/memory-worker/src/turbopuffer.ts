@@ -1,4 +1,4 @@
-import { stableContentHash, type MemoryPage } from "@jingler/memory"
+import { compareText, stableContentHash, type MemoryPage } from "@jingler/memory"
 import { Effect } from "effect"
 import { FakeEmbedder, type Embedder } from "./embeddings.js"
 
@@ -104,9 +104,6 @@ const cosineSimilarity = (
   return dot / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm))
 }
 
-const compareText = (left: string, right: string): number =>
-  left === right ? 0 : left < right ? -1 : 1
-
 const round6 = (value: number): number => Math.round(value * 1_000_000) / 1_000_000
 
 /** Content the embedding is keyed on — body only, so metadata edits don't re-embed. */
@@ -118,6 +115,17 @@ const pageContentHash = (page: MemoryPage): string => stableContentHash(page.bod
  * only the embedding and flat retrieval attributes (acceptance 08.6).
  */
 const MAX_EMBED_SNIPPET_CHARS = 1_024
+
+// The read-path relatedness sweep issues one ANN subrequest per queried page.
+// Cloudflare Workers cap outbound subrequests per invocation, so an unbounded
+// fan-out over a large vault would blow that ceiling and silently degrade the
+// ENTIRE suggestions result to lexical. Cap the pages queried per read: small
+// vaults (the common case) are fully covered and unchanged; larger vaults get a
+// bounded subset this read rather than nothing at all.
+// TODO(memory-vectors): precompute nearest-neighbour pairs in the durable
+// MemoryVectorIngestWorkflow and read them here, instead of fanning out ANN
+// queries on the read path — then this cap can go away.
+const MAX_VECTOR_QUERY_PAGES = 64
 
 export const embeddingSnippet = (page: MemoryPage): string => {
   const collapsed = page.body.replace(/\s+/g, " ").trim()
@@ -258,9 +266,21 @@ export class HttpTurbopufferClient implements TurbopufferClient {
     return `${this.baseUrl}/v2/namespaces/${encodeURIComponent(namespace)}${suffix}`
   }
 
+  /**
+   * A write that is not `ok` (401/429/5xx) MUST throw, not be swallowed: otherwise
+   * `syncAcceptedPages` reports embedded/upserted counts for vectors that never
+   * landed. Throwing lets the durable workflow step retry and makes degradation
+   * observable. (`query`/`heads` already tolerate `!ok` by degrading to empty.)
+   */
+  private static async assertWritten(response: Response, operation: string): Promise<void> {
+    if (!response.ok) {
+      throw new Error(`turbopuffer ${operation} failed with status ${response.status}`)
+    }
+  }
+
   async upsert(namespace: string, documents: ReadonlyArray<TurbopufferDocument>): Promise<void> {
     if (documents.length === 0) return
-    await this.fetchImpl(this.url(namespace), {
+    const response = await this.fetchImpl(this.url(namespace), {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({
@@ -277,6 +297,7 @@ export class HttpTurbopufferClient implements TurbopufferClient {
         }))
       })
     })
+    await HttpTurbopufferClient.assertWritten(response, "upsert")
   }
 
   async query(
@@ -310,15 +331,23 @@ export class HttpTurbopufferClient implements TurbopufferClient {
 
   async deleteByIds(namespace: string, ids: ReadonlyArray<string>): Promise<void> {
     if (ids.length === 0) return
-    await this.fetchImpl(this.url(namespace), {
+    const response = await this.fetchImpl(this.url(namespace), {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({ deletes: ids })
     })
+    await HttpTurbopufferClient.assertWritten(response, "deleteByIds")
   }
 
   async deleteNamespace(namespace: string): Promise<void> {
-    await this.fetchImpl(this.url(namespace), { method: "DELETE", headers: this.headers() })
+    const response = await this.fetchImpl(this.url(namespace), {
+      method: "DELETE",
+      headers: this.headers()
+    })
+    // A missing namespace (404) is a no-op success for an idempotent delete; any
+    // other non-ok status is a real failure that must surface.
+    if (response.status === 404) return
+    await HttpTurbopufferClient.assertWritten(response, "deleteNamespace")
   }
 
   async heads(namespace: string): Promise<ReadonlyArray<TurbopufferStoredHead>> {
@@ -490,13 +519,15 @@ export class TurbopufferVectorLayer {
   ): Effect.Effect<ReadonlyArray<TurbopufferNeighbor>> {
     return Effect.gen(this, function* () {
       if (pages.length === 0) return []
-      // Embed every query snippet in one batch, then ANN-query per page.
+      // Bounded fan-out (see MAX_VECTOR_QUERY_PAGES): embed only the capped set of
+      // query snippets in one batch, then ANN-query per page within the cap.
+      const queryPages = pages.slice(0, MAX_VECTOR_QUERY_PAGES)
       const vectors = yield* Effect.promise(() =>
-        this.embedder.embed(pages.map((page) => embeddingSnippet(page)))
+        this.embedder.embed(queryPages.map((page) => embeddingSnippet(page)))
       )
       const neighbors: Array<TurbopufferNeighbor> = []
-      for (let index = 0; index < pages.length; index += 1) {
-        const page = pages[index]!
+      for (let index = 0; index < queryPages.length; index += 1) {
+        const page = queryPages[index]!
         const hits = yield* Effect.promise(() =>
           this.client.query(this.namespace, vectors[index] ?? [], topK + 1)
         )

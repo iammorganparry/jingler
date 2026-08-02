@@ -5,6 +5,7 @@ import {
   normalizeMemoryIdentity,
   stableContentHash
 } from "./graph.js"
+import { compareText } from "./text.js"
 import {
   extractCitationReferences,
   extractMarkdownClaims,
@@ -86,9 +87,6 @@ export class MemoryLintError extends Error {
     )
   }
 }
-
-const compareText = (left: string, right: string): number =>
-  left === right ? 0 : left < right ? -1 : 1
 
 const utf8ByteLength = (value: string): number => {
   let bytes = 0

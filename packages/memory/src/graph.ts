@@ -5,6 +5,7 @@ import {
   extractWikiLinks,
   serializeMemoryMarkdown
 } from "./markdown.js"
+import { compareText } from "./text.js"
 import {
   MemoryRelationship,
   MemorySourceKind,
@@ -221,9 +222,6 @@ export class MemoryGraphError extends Error {
   override readonly name = "MemoryGraphError"
 }
 
-const compareText = (left: string, right: string): number =>
-  left === right ? 0 : left < right ? -1 : 1
-
 const sortedUnique = (values: Iterable<string>): Array<string> =>
   [...new Set(values)].sort(compareText)
 
@@ -384,14 +382,27 @@ const resolvePageRelationship = (
   return matches[0]!
 }
 
+/**
+ * Resolves a wikilink/dependency target to its page. The STRICT builder throws on a
+ * missing or ambiguous target (via {@link resolvePageRelationship}); the TOLERANT
+ * view builder returns `undefined` instead, so the edge is skipped rather than
+ * aborting the whole graph. Sharing one resolver keeps the two builders' edge sets
+ * identical on valid input.
+ */
+type ReferenceResolver = (page: MemoryPage, target: string) => MemoryPage | undefined
+
 const addWikilinkEdges = (
   page: MemoryPage,
-  identities: ReadonlyMap<string, ReadonlyArray<MemoryPage>>,
-  edges: Map<string, MemoryGraphEdge>
+  edges: Map<string, MemoryGraphEdge>,
+  resolve: ReferenceResolver,
+  onUnresolved?: (page: MemoryPage) => void
 ): void => {
   for (const link of extractWikiLinks(page.body)) {
-    const target =
-      link.target === "" ? page : resolvePageRelationship(page, link.target, identities)
+    const target = link.target === "" ? page : resolve(page, link.target)
+    if (target === undefined) {
+      onUnresolved?.(page)
+      continue
+    }
     const forward: MemoryGraphEdge = {
       sourceId: memoryPageNodeId(page.id),
       targetId: memoryPageNodeId(target.id),
@@ -455,14 +466,15 @@ const addCitationEdges = (
 
 const addRelationshipEdges = (
   page: MemoryPage,
-  identities: ReadonlyMap<string, ReadonlyArray<MemoryPage>>,
   nodes: Map<string, MemoryGraphNode>,
-  edges: Map<string, MemoryGraphEdge>
+  edges: Map<string, MemoryGraphEdge>,
+  resolve: ReferenceResolver
 ): void => {
   for (let index = 0; index < page.relationships.length; index += 1) {
     const relationship = page.relationships[index]!
     if (relationship.kind === "dependency") {
-      const target = resolvePageRelationship(page, relationship.target, identities)
+      const target = resolve(page, relationship.target)
+      if (target === undefined) continue
       const edge: MemoryGraphEdge = {
         sourceId: memoryPageNodeId(page.id),
         targetId: memoryPageNodeId(target.id),
@@ -503,11 +515,12 @@ const addRelationshipEdges = (
   }
 }
 
-export const buildMemoryGraph = (
+const assembleMemoryGraph = (
   pages: ReadonlyArray<MemoryPage>,
-  repositorySources: ReadonlyArray<MemorySource> = []
+  repositorySources: ReadonlyArray<MemorySource>,
+  resolve: ReferenceResolver,
+  onUnresolvedWikilink?: (page: MemoryPage) => void
 ): MemoryGraph => {
-  const identities = buildIdentityIndex(pages)
   const sourceList = uniqueSources(pages, repositorySources)
   const sources = new Map(sourceList.map((source) => [source.id, source]))
   const nodes = new Map<string, MemoryGraphNode>()
@@ -534,9 +547,9 @@ export const buildMemoryGraph = (
     })
   }
   for (const page of pages) {
-    addWikilinkEdges(page, identities, edges)
+    addWikilinkEdges(page, edges, resolve, onUnresolvedWikilink)
     addCitationEdges(page, sources, edges)
-    addRelationshipEdges(page, identities, nodes, edges)
+    addRelationshipEdges(page, nodes, edges, resolve)
   }
   return {
     version: 1,
@@ -549,6 +562,47 @@ export const buildMemoryGraph = (
         compareText(canonicalJson(left.evidence), canonicalJson(right.evidence))
     )
   }
+}
+
+export const buildMemoryGraph = (
+  pages: ReadonlyArray<MemoryPage>,
+  repositorySources: ReadonlyArray<MemorySource> = []
+): MemoryGraph => {
+  const identities = buildIdentityIndex(pages)
+  // STRICT resolver: a missing or ambiguous target throws, which is what the
+  // reproducible export hashes rely on (accepted pages are lint-validated, so this
+  // never fires in production; it guards against a corrupt/incomplete page set).
+  return assembleMemoryGraph(pages, repositorySources, (page, target) =>
+    resolvePageRelationship(page, target, identities)
+  )
+}
+
+/**
+ * A TOLERANT graph for the advisory dashboard/graph VIEW surfaces. Identical to
+ * {@link buildMemoryGraph} on valid input, but an unresolvable wikilink/dependency is
+ * SKIPPED rather than thrown — and each unresolved wikilink is tallied per page in
+ * `brokenWikiLinksByPage`. This lets the graph view render a broken-link health
+ * signal (and the dashboard count orphans over the SAME edge set) without the strict
+ * builder's all-or-nothing throw. It is NEVER used for an export hash.
+ */
+export interface MemoryGraphView {
+  readonly graph: MemoryGraph
+  readonly brokenWikiLinksByPage: ReadonlyMap<string, number>
+}
+
+export const buildMemoryGraphView = (
+  pages: ReadonlyArray<MemoryPage>,
+  repositorySources: ReadonlyArray<MemorySource> = []
+): MemoryGraphView => {
+  const identities = buildIdentityIndex(pages)
+  const brokenWikiLinksByPage = new Map<string, number>()
+  const graph = assembleMemoryGraph(
+    pages,
+    repositorySources,
+    (_page, target) => resolveWikiLink(target, identities),
+    (page) => brokenWikiLinksByPage.set(page.id, (brokenWikiLinksByPage.get(page.id) ?? 0) + 1)
+  )
+  return { graph, brokenWikiLinksByPage }
 }
 
 /** Re-derive the graph to prove that no persisted edge lacks accepted page evidence. */

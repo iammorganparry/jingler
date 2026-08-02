@@ -65,8 +65,29 @@ export const loadEnv = (environment: Environment = process.env) => {
 } as const
 }
 
-export const env = loadEnv()
+export type Env = ReturnType<typeof loadEnv>
+
+/**
+ * Lazily resolve the environment. Building the accessor never touches the
+ * environment, so importing this module cannot throw — critical for `next
+ * build`, which imports route modules under NODE_ENV=production purely to read
+ * their config exports. The first property read validates and memoizes; a
+ * missing production secret still throws, now at first use instead of import.
+ */
+export const createEnv = (environment: Environment = process.env): Env => {
+  let resolved: Env | undefined
+  const resolve = (): Env => (resolved ??= loadEnv(environment))
+  return new Proxy({} as Env, {
+    get: (_target, property) => Reflect.get(resolve(), property),
+    has: (_target, property) => Reflect.has(resolve(), property),
+    ownKeys: () => Reflect.ownKeys(resolve()),
+    getOwnPropertyDescriptor: (_target, property) =>
+      Reflect.getOwnPropertyDescriptor(resolve(), property)
+  })
+}
+
+export const env: Env = createEnv()
 
 /** True when a social provider has both id + secret configured (else we skip it). */
-export const hasGithub = Boolean(env.githubClientId && env.githubClientSecret)
-export const hasGoogle = Boolean(env.googleClientId && env.googleClientSecret)
+export const hasGithub = (): boolean => Boolean(env.githubClientId && env.githubClientSecret)
+export const hasGoogle = (): boolean => Boolean(env.googleClientId && env.googleClientSecret)

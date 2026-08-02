@@ -6,11 +6,19 @@ import { handleMemorySourceRequest } from "../../../../src/memory-sources.js"
 
 export const dynamic = "force-dynamic"
 
-const client = createMemoryClient({
-  baseUrl: env.memoryWorkerUrl,
-  serviceSecret: env.memoryWorkerServiceSecret,
-  timeoutMs: env.memoryRequestTimeoutMs
-}, JsonValue)
+// Built lazily on first request so a build-time import (NODE_ENV=production, no
+// secrets) never reads env at module load — see api/mcp/route.ts.
+const makeClient = () =>
+  createMemoryClient(
+    {
+      baseUrl: env.memoryWorkerUrl,
+      serviceSecret: env.memoryWorkerServiceSecret,
+      timeoutMs: env.memoryRequestTimeoutMs
+    },
+    JsonValue
+  )
+let cachedClient: ReturnType<typeof makeClient> | undefined
+const client = (): ReturnType<typeof makeClient> => (cachedClient ??= makeClient())
 
 export const POST = (request: Request): Promise<Response> => {
   if (!env.memoryEnabled) {
@@ -28,6 +36,6 @@ export const POST = (request: Request): Promise<Response> => {
         audience: env.memoryGrantAudience,
         organizationId
       }),
-    client
+    client: client()
   })
 }

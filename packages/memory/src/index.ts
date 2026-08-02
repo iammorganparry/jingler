@@ -1,4 +1,6 @@
 export * from "./model.js"
+export * from "./text.js"
+export * from "./metrics.js"
 export * from "./frontmatter.js"
 export * from "./markdown.js"
 export * from "./graph.js"

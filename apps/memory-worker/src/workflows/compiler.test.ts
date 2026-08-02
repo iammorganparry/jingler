@@ -165,12 +165,16 @@ class FixtureModel implements CompilerModel {
   }
 }
 
+// The default trust model auto-publishes everything; these fixtures exercise the
+// opt-in review gate (MEMORY_REQUIRE_REVIEW), so factual changes still pause for a
+// human accept. The default auto-accept path is covered by its own test below.
 const workflowInput: CompilerWorkflowInput = {
   workflowId: "compiler-fixture",
   organizationId: "org-compiler",
   sourceId: compilerSource.id,
   requestedBy: "agent-1",
-  createdAt: "2026-08-01T10:00:00.000Z"
+  createdAt: "2026-08-01T10:00:00.000Z",
+  requireReview: true
 }
 
 const seedVault = async (bucket = new InMemoryR2Bucket()): Promise<TeamVault> => {
@@ -294,6 +298,19 @@ describe("durable memory compiler workflow", () => {
     expect(proposals.length).toBeLessThanOrEqual(3)
     expect(proposals.every((proposal) => proposal.markdown.includes(compilerSource.id))).toBe(true)
     expect((await run(vault.listPages())).every((head) => head.revision === 1)).toBe(true)
+  })
+
+  it("auto-publishes factual changes by default without waiting for a human review", async () => {
+    const vault = await seedVault()
+    const result = await runCompilerWorkflow(
+      // No requireReview: the default trust model publishes straight to the vault.
+      { ...workflowInput, workflowId: "compiler-auto-accept", requireReview: false },
+      new VaultCompilerRepository(vault),
+      new ImmediateStep()
+    )
+    expect(result.status).toBe("published")
+    // A factual edit moved an accepted head forward — no proposal is left waiting.
+    expect((await run(vault.listPages())).some((head) => head.revision >= 2)).toBe(true)
   })
 
   it("creates a new cited page when the vault is empty", async () => {

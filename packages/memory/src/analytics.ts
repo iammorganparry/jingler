@@ -5,6 +5,7 @@ import {
   type MemoryAuditEvent,
   type MemoryPage
 } from "./model.js"
+import { compareText } from "./text.js"
 
 export const MemoryAnalyticsEventCount = Schema.Struct({
   type: MemoryAuditEventType,
@@ -41,9 +42,6 @@ export type MemoryAnalyticsSummary = Schema.Schema.Type<typeof MemoryAnalyticsSu
 export class MemoryAnalyticsError extends Error {
   override readonly name = "MemoryAnalyticsError"
 }
-
-const compareText = (left: string, right: string): number =>
-  left === right ? 0 : left < right ? -1 : 1
 
 const lastActivityFor = (
   pageId: string,

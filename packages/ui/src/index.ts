@@ -120,7 +120,6 @@ export * from "./composites/memory-inspector.js"
 export * from "./composites/memory-suggestions.js"
 export * from "./composites/memory-analytics.js"
 export * from "./composites/memory-browser.js"
-export * from "./composites/memory-review.js"
 // Three-page plan surfaces: step outline (Main), architecture, workflow DAG
 export * from "./composites/plan-steps/plan-step-outline.js"
 export * from "./composites/plan-steps/plan-step-card.js"

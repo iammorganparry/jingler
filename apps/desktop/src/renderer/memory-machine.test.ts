@@ -213,6 +213,52 @@ describe("memoryMachine", () => {
     expect(api.neighborhood).toHaveBeenLastCalledWith("org-a", "page:org-a:two", 100)
   })
 
+  it("persists an organization change made from the error state through configuring", async () => {
+    let failFirstLoad = true
+    const failing: MemoryApi = {
+      ...api,
+      dashboard: vi.fn(async (organizationId: string) => {
+        if (failFirstLoad) {
+          failFirstLoad = false
+          throw new Error("initial load failed")
+        }
+        return summary(organizationId)
+      }),
+      configure: vi.fn(async (organizationId: string) => ({ ...access, selectedOrganizationId: organizationId }))
+    }
+    const actor = createActor(createMemoryMachine(failing)).start()
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+    actor.send({ type: "OPEN" })
+    await waitFor(actor, (snapshot) => snapshot.matches("failed"))
+    actor.send({ type: "ORGANIZATION.CHANGE", organizationId: "org-b" })
+    // Must route through configuring (persist + refresh access), never straight to loading.
+    expect(actor.getSnapshot().matches("configuring")).toBe(true)
+    await waitFor(actor, (snapshot) => snapshot.matches("ready"))
+    expect(failing.configure).toHaveBeenCalledWith("org-b")
+    expect(actor.getSnapshot().context.organizationId).toBe("org-b")
+  })
+
+  it("runs a search queued while a page is still loading", async () => {
+    const actor = await startReady()
+    ;(api.search as ReturnType<typeof vi.fn>).mockClear()
+    actor.send({ type: "SEARCH.QUERY", query: "deferred" })
+    actor.send({ type: "PAGE.OPEN", pageId: "org-a:one" })
+    // The debounced SEARCH.RUN lands mid-load; it must not be dropped.
+    expect(actor.getSnapshot().matches("pageLoading")).toBe(true)
+    actor.send({ type: "SEARCH.RUN" })
+    await waitFor(actor, (snapshot) => snapshot.matches("ready") && snapshot.context.searchResults.length > 0)
+    expect(api.search).toHaveBeenCalledWith("org-a", "deferred", 50)
+  })
+
+  it("clears the export result once EXPORT.CLEAR fires", async () => {
+    const actor = await startReady()
+    actor.send({ type: "EXPORT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("ready") && snapshot.context.exported !== null)
+    expect(actor.getSnapshot().context.exported?.saved).toBe(true)
+    actor.send({ type: "EXPORT.CLEAR" })
+    expect(actor.getSnapshot().context.exported).toBeNull()
+  })
+
   it("lays out a 10,000-node fixture deterministically without page bodies", () => {
     const nodes: ReadonlyArray<MemoryGraphNode> = Array.from({ length: 10_000 }, (_, index) => ({
       id: `page:${index}`,

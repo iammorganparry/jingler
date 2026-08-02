@@ -2,6 +2,7 @@ import {
   MemoryPage as MemoryPageSchema,
   MemorySource as MemorySourceSchema,
   canonicalJson,
+  compareText,
   findCredentialShapedContent,
   parseMemoryPage,
   serializeMemoryMarkdown,
@@ -36,6 +37,10 @@ export interface CompilerWorkflowInput {
   readonly requestedBy: string
   readonly createdAt: string
   readonly autoPublishFixes?: ReadonlyArray<string>
+  // When true, factual changes wait for a human accept before publishing (safe
+  // mechanical fixes still auto-publish). Defaults to false: agents publish
+  // straight to the shared vault and are audited/reverted after the fact.
+  readonly requireReview?: boolean
 }
 
 export interface CompilerAcceptedPage {
@@ -140,9 +145,6 @@ const normalizedWords = (value: string): ReadonlySet<string> =>
       (word) => word.length > 2
     )
   )
-
-const compareText = (left: string, right: string): number =>
-  left === right ? 0 : left < right ? -1 : 1
 
 export const extractCompilerClaims = (content: string): ReadonlyArray<string> => {
   const claims = content
@@ -397,10 +399,13 @@ export const runCompilerWorkflow = async (
       drafts: generated.drafts
     })
   )
-  const autoPublish = isConfiguredMechanicalFix(
-    generated.changeKind,
-    new Set(input.autoPublishFixes ?? [])
-  ) && isSemanticallyMechanical(generated, context)
+  const autoPublishMechanical =
+    isConfiguredMechanicalFix(generated.changeKind, new Set(input.autoPublishFixes ?? [])) &&
+    isSemanticallyMechanical(generated, context)
+  // Default trust model: everything auto-publishes to the shared vault. Orgs
+  // that set MEMORY_REQUIRE_REVIEW get the human gate back for factual changes
+  // while safe mechanical fixes still publish without waiting.
+  const autoPublish = input.requireReview !== true || autoPublishMechanical
   if (!autoPublish) {
     if (step.waitForEvent !== undefined) {
       const reviewEvent = await step.waitForEvent<CompilerReviewEvent>("06-await-durable-review", {
@@ -420,7 +425,7 @@ export const runCompilerWorkflow = async (
     }
     return compilerResult(input, proposalSet, "pending_review")
   }
-  const approval = await step.do("06-auto-publish-configured-mechanical-fix", () =>
+  const approval = await step.do("06-auto-publish", () =>
     repository.approveProposalSet(proposalSet.id, "system:memory-compiler", input.createdAt)
   )
   return compilerResult(

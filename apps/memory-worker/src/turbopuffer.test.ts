@@ -267,4 +267,26 @@ describe("turbopuffer vector layer", () => {
     expect(createTurbopufferClientFromEnv({ TURBOPUFFER_API_KEY: "" })).toBeUndefined()
     expect(createTurbopufferClientFromEnv({ TURBOPUFFER_API_KEY: "tpuf-test" })).toBeDefined()
   })
+
+  it("throws on a non-ok write so the durable step retries instead of reporting a phantom upsert", async () => {
+    // A 429/5xx on a write must NOT be swallowed: otherwise syncAcceptedPages would
+    // report embedded/upserted counts for vectors that never landed.
+    const failing: typeof fetch = async () =>
+      new Response("rate limited", { status: 429 })
+    const client = new HttpTurbopufferClient({ apiKey: "tpuf-test", fetch: failing })
+    const document: TurbopufferDocument = {
+      id: "page-1",
+      vector: [0.1, 0.2, 0.3, 0.4],
+      attributes: { contentHash: "hash-1", path: "page-1.md", title: "Page 1", revision: 1 }
+    }
+    await expect(client.upsert("ns-1", [document])).rejects.toThrow(/turbopuffer upsert failed with status 429/)
+    await expect(client.deleteByIds("ns-1", ["page-1"])).rejects.toThrow(/turbopuffer deleteByIds failed with status 429/)
+    await expect(client.deleteNamespace("ns-1")).rejects.toThrow(/turbopuffer deleteNamespace failed with status 429/)
+  })
+
+  it("treats a 404 deleteNamespace as an idempotent no-op", async () => {
+    const missing: typeof fetch = async () => new Response(null, { status: 404 })
+    const client = new HttpTurbopufferClient({ apiKey: "tpuf-test", fetch: missing })
+    await expect(client.deleteNamespace("ns-absent")).resolves.toBeUndefined()
+  })
 })

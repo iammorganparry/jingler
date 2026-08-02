@@ -12,7 +12,7 @@ import { checkMemoryHealth } from "./memory-health.js"
 import { handleMemorySourceRequest } from "./memory-sources.js"
 import type { OrganizationAuthorization } from "./db/repositories/organization-repository.js"
 import { isActivePaidOrganizationMetadata } from "./db/repositories/organization-repository.js"
-import { env, loadEnv } from "./env.js"
+import { createEnv, env, loadEnv } from "./env.js"
 import {
   createMemoryClient,
   type JsonValue,
@@ -191,6 +191,27 @@ describe("memory production configuration", () => {
       memoryWorkerServiceSecret: "dev-memory-worker-secret-change-me"
     })
   })
+
+  it("defers the production secret assertion to first read so imports never throw", () => {
+    // Building the accessor over a production environment WITHOUT secrets must
+    // not throw — this mirrors importing env.ts during `next build`.
+    let production: ReturnType<typeof createEnv> | undefined
+    expect(() => {
+      production = createEnv({ NODE_ENV: "production" })
+    }).not.toThrow()
+    // The first read of a required secret still surfaces the misconfiguration.
+    expect(() => production?.memoryGrantSecret).toThrow("BETTER_AUTH_SECRET")
+    // A fully configured production environment resolves and memoizes cleanly.
+    const configured = createEnv({
+      NODE_ENV: "production",
+      BETTER_AUTH_SECRET: "auth-secret",
+      MEMORY_GRANT_SECRET: "grant-secret",
+      MEMORY_WORKER_SERVICE_SECRET: "worker-secret"
+    })
+    expect(configured.authSecret).toBe("auth-secret")
+    expect(configured.memoryGrantSecret).toBe("grant-secret")
+    expect(configured.memoryWorkerServiceSecret).toBe("worker-secret")
+  })
 })
 
 describe("memory grants", () => {
@@ -211,6 +232,21 @@ describe("memory grants", () => {
     expect(isActivePaidOrganizationMetadata('{"subscription":{"plan":"team"}}')).toBe(false)
     expect(isActivePaidOrganizationMetadata("not-json")).toBe(false)
     expect(isActivePaidOrganizationMetadata(null)).toBe(false)
+    // Fail closed: a cancelled `status` must not hide behind an active
+    // `subscriptionStatus` sibling (Schema.Struct silently drops excess props,
+    // so the old union matched the active member and leaked paid access).
+    expect(
+      isActivePaidOrganizationMetadata(
+        '{"plan":"team","status":"cancelled","subscriptionStatus":"active"}'
+      )
+    ).toBe(false)
+    expect(
+      isActivePaidOrganizationMetadata(
+        '{"subscription":{"plan":"team","status":"cancelled","subscriptionStatus":"active"}}'
+      )
+    ).toBe(false)
+    // A plain active paid subscription still resolves to paid.
+    expect(isActivePaidOrganizationMetadata('{"plan":"pro","status":"active"}')).toBe(true)
 
     const makeRequest = (organizationId: string, bearer = "jingler-user-bearer") =>
       new Request("https://jingler.test/api/memory/grant", {
@@ -527,6 +563,63 @@ describe("stateless MCP 2026-07-28", () => {
     expect(requests).toHaveLength(0)
   })
 
+  it("clamps memory_graph_neighborhood limits to the Worker maximum of 100", async () => {
+    const { client, requests } = collectingClient()
+    const grant = issue().grant
+    const dependencies = dependenciesFor(client)
+    // 101 exceeds MAX_NEIGHBORHOOD_LIMIT and must be rejected by the input schema.
+    const rejected = await handleMemoryMcpRequest(
+      requestFor("tools/call", grant, {
+        params: { name: "memory_graph_neighborhood", arguments: { nodeId: "node-1", limit: 101 } }
+      }),
+      dependencies
+    )
+    expect(rejected.status).toBe(200)
+    expect(await rejected.json()).toMatchObject({ error: { code: -32602 } })
+    expect(requests).toHaveLength(0)
+    // 100 is the maximum honoured value and reaches the Worker unchanged.
+    const accepted = await handleMemoryMcpRequest(
+      requestFor("tools/call", grant, {
+        params: { name: "memory_graph_neighborhood", arguments: { nodeId: "node-1", limit: 100 } }
+      }),
+      dependencies
+    )
+    expect(accepted.status).toBe(200)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      path: "/internal/memory/neighborhood/node-1?limit=100"
+    })
+  })
+
+  it("returns a JSON-RPC error, not a raw 500, when a tool request builder throws", async () => {
+    const { client, requests } = collectingClient()
+    // An empty grant subject makes memory_schema_publish's server-side
+    // `Schema.decodeUnknownSync(MemoryAcceptedPageRequest)` throw on the empty
+    // actorId AFTER argument decode — the builder-throw path.
+    const grant = issueMemoryGrant(
+      { subject: "", organizationId: "org-paid", privileges: ["read", "schema"] },
+      grantConfig,
+      100,
+      "grant-empty-subject"
+    ).grant
+    const response = await handleMemoryMcpRequest(
+      requestFor("tools/call", grant, {
+        params: {
+          name: "memory_schema_publish",
+          arguments: { revisionId: "revision-1", markdown: "# body" }
+        }
+      }),
+      dependenciesFor(client)
+    )
+    // A JSON-RPC error envelope at HTTP 200 with x-request-id, never a bare 500.
+    expect(response.status).toBe(200)
+    expect(response.headers.get("x-request-id")).toBe("request-stable")
+    expect(await response.json()).toMatchObject({
+      error: { code: -32603, data: { requestId: "request-stable" } }
+    })
+    expect(requests).toHaveLength(0)
+  })
+
   it("maps schema publication arguments to the Worker accepted-page contract", async () => {
     const { client, requests } = collectingClient()
     const response = await handleMemoryMcpRequest(
@@ -743,7 +836,11 @@ describe("settled-session source ingestion", () => {
         },
         body: JSON.stringify({
           source: { id: "session-digest:stable", kind: "conversation", title: "Settled" },
-          content: "redacted"
+          content: "redacted",
+          // A VALID retrieval summary so schema decode succeeds and the only
+          // remaining 400 is the idempotency-key mismatch (previously omitted,
+          // which made the mismatch assertion pass for the wrong reason).
+          retrieval: { searches: 0, reads: 0, navigation: 0, graphReads: 0, proposals: 0 }
         })
       })
     }
@@ -763,12 +860,15 @@ describe("settled-session source ingestion", () => {
         dependencies
       )).status
     ).toBe(403)
-    expect(
-      (await handleMemorySourceRequest(
-        makeSourceRequest(["propose"], "wrong-key"),
-        dependencies
-      )).status
-    ).toBe(400)
+    const mismatched = await handleMemorySourceRequest(
+      makeSourceRequest(["propose"], "wrong-key"),
+      dependencies
+    )
+    expect(mismatched.status).toBe(400)
+    // Prove the idempotency guard fired, not an incidental schema-decode 400.
+    expect(await mismatched.json()).toMatchObject({
+      error: "Invalid settled-session source digest"
+    })
     expect(requests).toHaveLength(0)
   })
 })

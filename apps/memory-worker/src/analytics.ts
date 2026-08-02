@@ -1,8 +1,10 @@
 import {
-  buildIdentityIndex,
+  AGING_MAX_DAYS,
+  FRESH_MAX_DAYS,
+  buildMemoryGraphView,
+  compareText,
+  contradictionCount,
   extractCitationReferences,
-  extractWikiLinks,
-  resolveWikiLink,
   type MemoryAuditEvent,
   type MemoryPage,
   type MemoryProposalStatus
@@ -13,6 +15,13 @@ export interface VaultAnalyticsRevision {
   readonly id: string
   readonly pageId: string
   readonly createdAt: string
+  /**
+   * When the revision was ACCEPTED (committed to the head). The growth series and
+   * the range window key off this — the documented metric is accepted-event-time,
+   * not authoring time — so a revision drafted one day and accepted the next lands
+   * on the day it actually entered the vault.
+   */
+  readonly acceptedAt: string
 }
 
 export interface VaultAnalyticsProposal {
@@ -112,9 +121,6 @@ export interface VaultDashboardSummary {
   }
 }
 
-const compareText = (left: string, right: string): number =>
-  left === right ? 0 : left < right ? -1 : 1
-
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1_000
 
 /**
@@ -148,7 +154,7 @@ const windowAnalyticsInput = (
   }
   return {
     ...input,
-    revisions: input.revisions.filter((revision) => within(revision.createdAt)),
+    revisions: input.revisions.filter((revision) => within(revision.acceptedAt)),
     proposals: input.proposals.filter((proposal) => within(proposal.createdAt)),
     events: input.events.filter((event) => within(event.occurredAt)),
     retrievals: input.retrievals.filter((metric) => within(metric.occurredAt)),
@@ -157,9 +163,6 @@ const windowAnalyticsInput = (
       : { sessionRetrievals: input.sessionRetrievals.filter((metric) => within(metric.occurredAt)) })
   }
 }
-const FRESH_MAX_DAYS = 30
-const AGING_MAX_DAYS = 90
-
 const rounded = (value: number): number => Math.round(value * 10_000) / 10_000
 
 const ratio = (numerator: number, denominator: number): number =>
@@ -184,12 +187,6 @@ const median = (values: ReadonlyArray<number>): number | null => {
   return ((sorted[middle - 1] ?? upper) + upper) / 2
 }
 
-const contradictionCount = (page: MemoryPage): number => {
-  const value = page.metadata.contradictions
-  if (Array.isArray(value)) return value.length
-  return typeof value === "number" && value > 0 ? Math.floor(value) : 0
-}
-
 const freshnessCounts = (
   pages: ReadonlyArray<MemoryPage>,
   heads: ReadonlyArray<VaultPageHeadActivity>,
@@ -211,19 +208,22 @@ const freshnessCounts = (
 const growthSeries = (
   revisions: ReadonlyArray<VaultAnalyticsRevision>
 ): ReadonlyArray<DailyGrowth> => {
+  // Key every bucket off acceptedAt: growth is an accepted-event-time series, so a
+  // page counts as "new" on the day its first revision was accepted, and each
+  // revision counts on its own acceptance day.
   const pageFirstRevision = new Map<string, VaultAnalyticsRevision>()
-  for (const revision of [...revisions].sort((left, right) => compareText(left.createdAt, right.createdAt))) {
+  for (const revision of [...revisions].sort((left, right) => compareText(left.acceptedAt, right.acceptedAt))) {
     if (!pageFirstRevision.has(revision.pageId)) pageFirstRevision.set(revision.pageId, revision)
   }
   const counts = new Map<string, { pages: number; revisions: number }>()
   for (const revision of revisions) {
-    const day = dayOf(revision.createdAt)
+    const day = dayOf(revision.acceptedAt)
     const current = counts.get(day) ?? { pages: 0, revisions: 0 }
     current.revisions += 1
     counts.set(day, current)
   }
   for (const revision of pageFirstRevision.values()) {
-    const day = dayOf(revision.createdAt)
+    const day = dayOf(revision.acceptedAt)
     const current = counts.get(day) ?? { pages: 0, revisions: 0 }
     current.pages += 1
     counts.set(day, current)
@@ -241,22 +241,24 @@ const connectivity = (
   readonly orphanPages: number
   readonly brokenLinks: number
 } => {
+  // Derive connectivity from the SAME (tolerant) graph edge set the graph view uses,
+  // so the dashboard and the graph agree on orphans: a page linked only via a
+  // dependency, citation, or schema relationship counts as connected here too, not
+  // just via wikilinks. Broken-wikilink counts come from the same pass.
+  const { graph, brokenWikiLinksByPage } = buildMemoryGraphView(pages)
+  const pageNodeIds = new Set(pages.map((page) => `page:${page.id}`))
   const connected = new Set<string>()
-  const identities = buildIdentityIndex(pages)
   let directedLinks = 0
-  let brokenLinks = 0
-  for (const page of pages) {
-    for (const link of extractWikiLinks(page.body)) {
-      const target = link.target === "" ? page : resolveWikiLink(link.target, identities)
-      if (target === undefined) {
-        brokenLinks += 1
-        continue
-      }
+  for (const edge of graph.edges) {
+    if (pageNodeIds.has(edge.sourceId)) connected.add(edge.sourceId)
+    if (pageNodeIds.has(edge.targetId)) connected.add(edge.targetId)
+    // "directedLinks" is forward page→page references (wikilink + dependency);
+    // backlinks are their mirror and citation/schema edges leave the page graph.
+    if ((edge.kind === "wikilink" || edge.kind === "dependency") && pageNodeIds.has(edge.targetId)) {
       directedLinks += 1
-      connected.add(page.id)
-      connected.add(target.id)
     }
   }
+  const brokenLinks = [...brokenWikiLinksByPage.values()].reduce((total, count) => total + count, 0)
   return {
     directedLinks,
     connectedPages: connected.size,

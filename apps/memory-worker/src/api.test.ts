@@ -311,6 +311,62 @@ describe("memory Worker internal API", () => {
     expect([...instances.keys()][0]).toMatch(/^team-/)
   })
 
+  it("maps queued/running compiler runs to their platform state, not pending_review", async () => {
+    const bucket = new InMemoryR2Bucket()
+    let workflowStatus = "queued"
+    const instances = new Map<string, WorkflowInstanceLike>()
+    const compiler = {
+      create: async ({ id }: { readonly id: string }) => {
+        const instance = { id, status: async () => ({ status: workflowStatus }) }
+        instances.set(id, instance)
+        return instance
+      },
+      get: async (id: string) => {
+        const instance = instances.get(id)
+        if (instance === undefined) throw new Error("not found")
+        return instance
+      }
+    }
+    const env: MemoryWorkerEnv = {
+      MEMORY_R2: bucket,
+      MEMORY_VAULTS: new TestVaultNamespace(bucket),
+      MEMORY_SERVICE_SECRET: "current-secret",
+      MEMORY_COMPILER: compiler
+    }
+    const workflowId = "compiler-status-mapping"
+    await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/workflows/compiler", {
+        workflowId,
+        sourceId: "source-a",
+        requestedBy: "member-a",
+        createdAt: "2026-08-01T00:00:00.000Z"
+      }),
+      env
+    )
+    const read = async (): Promise<{ readonly state: string; readonly result: Record<string, unknown> }> =>
+      (await jsonBody(
+        await handleMemoryWorkerRequest(
+          getRequest("org-a", `/internal/memory/workflows/${workflowId}`),
+          env
+        )
+      )) as { readonly state: string; readonly result: Record<string, unknown> }
+
+    // Still queued → no proposal id exists yet, so NOT pending_review.
+    const queued = await read()
+    expect(queued.result.status).toBe("queued")
+    expect(queued.result.proposalId).toBeUndefined()
+
+    // Actively compiling → surfaced as running, still not pending_review.
+    workflowStatus = "running"
+    expect((await read()).result.status).toBe("running")
+
+    // Parked on the review event ("waiting") → proposals persisted, now reviewable.
+    workflowStatus = "waiting"
+    const waiting = await read()
+    expect(waiting.result.status).toBe("pending_review")
+    expect(waiting.result.proposalId).toBe(`proposal:${workflowId}`)
+  })
+
   it("does not report a compiler workflow when instance creation actually failed", async () => {
     const bucket = new InMemoryR2Bucket()
     const env: MemoryWorkerEnv = {

@@ -25,10 +25,10 @@ import {
 } from "./email.js"
 
 const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {}
-if (hasGithub) {
+if (hasGithub()) {
   socialProviders.github = { clientId: env.githubClientId, clientSecret: env.githubClientSecret }
 }
-if (hasGoogle) {
+if (hasGoogle()) {
   socialProviders.google = { clientId: env.googleClientId, clientSecret: env.googleClientSecret }
 }
 

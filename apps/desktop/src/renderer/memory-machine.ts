@@ -50,7 +50,7 @@ export const DEFAULT_MEMORY_VIEWPORT: MemoryViewport = { x: 0, y: 0, zoom: 1 }
 const readLastView = (): MemorySubview => {
   try {
     const value = localStorage.getItem(LAST_VIEW_KEY)
-    return value === "map" || value === "wiki" || value === "reviews" || value === "analytics"
+    return value === "map" || value === "wiki" || value === "analytics"
       ? value
       : "dashboard"
   } catch {
@@ -101,6 +101,12 @@ export interface MemoryContext {
   readonly filters: MemoryMapFilters
   readonly viewport: MemoryViewport
   readonly error: string | null
+  /**
+   * A debounced SEARCH.RUN that fired while the machine was busy (a page/node/edge
+   * load, a review, an export). The busy state can't run the query, so it records
+   * this flag and `ready` consumes it on re-entry — otherwise the query is dropped.
+   */
+  readonly searchPending: boolean
 }
 
 export type MemoryEvent =
@@ -146,7 +152,8 @@ const initialContext = (): MemoryContext => ({
   exported: null,
   filters: DEFAULT_MEMORY_FILTERS,
   viewport: DEFAULT_MEMORY_VIEWPORT,
-  error: null
+  error: null,
+  searchPending: false
 })
 
 const messageOf = (value: unknown): string =>
@@ -258,7 +265,8 @@ export const createMemoryMachine = (api: MemoryApi) =>
           exported: null,
           filters: DEFAULT_MEMORY_FILTERS,
           viewport: DEFAULT_MEMORY_VIEWPORT,
-          error: null
+          error: null,
+          searchPending: false
         }
       }),
       setFailure: assign(({ event }) => ({ error: messageOf("error" in event ? event.error : null) })),
@@ -287,6 +295,8 @@ export const createMemoryMachine = (api: MemoryApi) =>
       backFromPage: assign(({ context }) => ({ view: context.previousView, page: null })),
       setSearchQuery: assign(({ event }) => event.type === "SEARCH.QUERY" ? { searchQuery: event.query } : {}),
       clearSearch: assign(() => ({ searchResults: [] })),
+      markSearchPending: assign(() => ({ searchPending: true })),
+      consumeSearchPending: assign(() => ({ searchPending: false })),
       selectReview: assign(({ event }) => event.type === "REVIEW.SELECT" ? { selectedReviewId: event.proposalId, reviewResult: null } : {}),
       clearExport: assign(() => ({ exported: null }))
     }
@@ -367,9 +377,27 @@ export const createMemoryMachine = (api: MemoryApi) =>
           },
           onError: { target: "failed", actions: "setFailure" }
         },
-        on: { CLOSE: "closed", "ORGANIZATION.CHANGE": { target: "configuring", actions: "clearOrganization" } }
+        on: {
+          CLOSE: "closed",
+          "ORGANIZATION.CHANGE": { target: "configuring", actions: "clearOrganization" },
+          "SEARCH.RUN": { actions: "markSearchPending" }
+        }
       },
       ready: {
+        // Drain a SEARCH.RUN that fired while a sibling load was in flight. The
+        // busy state only recorded the intent; `ready` is where the query can
+        // actually run (or clear, if the box was emptied meanwhile).
+        always: [
+          {
+            guard: ({ context }) => context.searchPending && context.searchQuery.trim().length > 0,
+            target: "searching",
+            actions: "consumeSearchPending"
+          },
+          {
+            guard: ({ context }) => context.searchPending,
+            actions: ["consumeSearchPending", "clearSearch"]
+          }
+        ],
         on: {
           CLOSE: "closed",
           RETRY: "loading",
@@ -411,7 +439,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
           },
           onError: { target: "ready", actions: "setFailure" }
         },
-        on: { CLOSE: "closed", "MAP.SELECT_NODE": { target: "nodeLoading", reenter: true, actions: "selectNode" }, "INSPECTOR.CLOSE": { target: "ready", actions: "closeInspector" } }
+        on: { CLOSE: "closed", "MAP.SELECT_NODE": { target: "nodeLoading", reenter: true, actions: "selectNode" }, "INSPECTOR.CLOSE": { target: "ready", actions: "closeInspector" }, "SEARCH.RUN": { actions: "markSearchPending" } }
       },
       edgeLoading: {
         invoke: {
@@ -421,7 +449,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
           onDone: { target: "ready", actions: assign(({ event }) => ({ evidence: event.output, error: null })) },
           onError: { target: "ready", actions: "setFailure" }
         },
-        on: { CLOSE: "closed", "MAP.SELECT_EDGE": { target: "edgeLoading", reenter: true, actions: "selectEdge" }, "INSPECTOR.CLOSE": { target: "ready", actions: "closeInspector" } }
+        on: { CLOSE: "closed", "MAP.SELECT_EDGE": { target: "edgeLoading", reenter: true, actions: "selectEdge" }, "INSPECTOR.CLOSE": { target: "ready", actions: "closeInspector" }, "SEARCH.RUN": { actions: "markSearchPending" } }
       },
       pageLoading: {
         invoke: {
@@ -431,7 +459,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
           onDone: { target: "ready", actions: assign(({ event }) => ({ page: event.output, error: null })) },
           onError: { target: "ready", actions: "setFailure" }
         },
-        on: { CLOSE: "closed", "PAGE.BACK": { target: "ready", actions: "backFromPage" } }
+        on: { CLOSE: "closed", "PAGE.BACK": { target: "ready", actions: "backFromPage" }, "SEARCH.RUN": { actions: "markSearchPending" } }
       },
       searching: {
         invoke: {
@@ -441,7 +469,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
           onDone: { target: "ready", actions: assign(({ event }) => ({ searchResults: event.output, error: null })) },
           onError: { target: "ready", actions: "setFailure" }
         },
-        on: { CLOSE: "closed", "SEARCH.QUERY": { target: "ready", actions: "setSearchQuery" } }
+        on: { CLOSE: "closed", "SEARCH.QUERY": { target: "ready", actions: "setSearchQuery" }, "SEARCH.RUN": { actions: "markSearchPending" } }
       },
       reviewing: {
         invoke: {
@@ -486,7 +514,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
           ],
           onError: { target: "ready", actions: "setFailure" }
         },
-        on: { CLOSE: "closed" }
+        on: { CLOSE: "closed", "SEARCH.RUN": { actions: "markSearchPending" } }
       },
       exporting: {
         invoke: {
@@ -496,10 +524,13 @@ export const createMemoryMachine = (api: MemoryApi) =>
           onDone: { target: "ready", actions: assign(({ event }) => ({ exported: event.output })) },
           onError: { target: "ready", actions: "setFailure" }
         },
-        on: { CLOSE: "closed" }
+        on: { CLOSE: "closed", "SEARCH.RUN": { actions: "markSearchPending" } }
       },
       failed: {
-        on: { CLOSE: "closed", RETRY: "loading", "ORGANIZATION.CHANGE": { target: "loading", actions: "clearOrganization" } }
+        // Route through `configuring` like every other state: a selection made in
+        // the error state must be persisted (Config.setMemory) and refresh access,
+        // not jump straight to `loading` with stale access and an unsaved choice.
+        on: { CLOSE: "closed", RETRY: "loading", "ORGANIZATION.CHANGE": { target: "configuring", actions: "clearOrganization" } }
       }
     }
   })

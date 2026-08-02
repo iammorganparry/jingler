@@ -90,10 +90,13 @@ const tools: ReadonlyArray<ToolDefinition> = [
     name: "memory_graph_neighborhood",
     description: "Expand one graph node by one hop without returning the complete graph.",
     privilege: "read"
-  }, Schema.Struct({ nodeId: NonEmptyString, limit: Schema.optional(limit(500)) }),
+  }, Schema.Struct({ nodeId: NonEmptyString, limit: Schema.optional(limit(100)) }),
   (args, claims, requestId) => getRequest(
     claims,
     requestId,
+    // The Worker (and desktop) clamp neighborhood expansion to
+    // MAX_NEIGHBORHOOD_LIMIT = 100; the published schema bound must match so a
+    // client is never told a 101–500 limit is honoured when it is silently cut.
     `/internal/memory/neighborhood/${encodeURIComponent(args.nodeId)}?limit=${args.limit ?? 100}`
   )),
   defineTool({
@@ -367,7 +370,16 @@ const callTool = async (
     return errorResult(parsed.id, -32602, "Unknown or unauthorized tool")
   }
   const args = isStringRecord(parsed.params.arguments) ? parsed.params.arguments : {}
-  const workerRequest = definition.request(args, claims, requestId)
+  let workerRequest: MemoryClientRequest | null
+  try {
+    // A request builder can throw AFTER argument decode — e.g.
+    // memory_schema_publish re-decodes with `Schema.decodeUnknownSync`. Contain
+    // it as a JSON-RPC error so it never escapes as a bare 500 or a mislabeled
+    // 401 "Invalid memory grant".
+    workerRequest = definition.request(args, claims, requestId)
+  } catch {
+    return errorResult(parsed.id, -32603, "Tool request could not be constructed", { requestId })
+  }
   if (!workerRequest) return errorResult(parsed.id, -32602, "Invalid tool arguments")
   try {
     const data = await Effect.runPromise(client.request(workerRequest))
@@ -449,11 +461,24 @@ export const handleMemoryMcpRequest = async (
       requestId
     )
   }
+  let claims: MemoryGrantClaims
   try {
-    const claims = dependencies.verifyGrant(grant, organizationId)
-    return dispatchAuthenticatedRequest(parsed, claims, dependencies.client, requestId)
+    claims = dependencies.verifyGrant(grant, organizationId)
   } catch {
+    // Only a grant-verification failure is a 401. Errors raised while dispatching
+    // must not be relabeled as an invalid grant.
     return jsonResponse(errorResult(parsed.id, -32000, "Invalid memory grant"), 401, requestId)
+  }
+  try {
+    // `await` so a rejected dispatch is caught here rather than escaping the
+    // handler as an enveloped-less Next 500 with no x-request-id.
+    return await dispatchAuthenticatedRequest(parsed, claims, dependencies.client, requestId)
+  } catch {
+    return jsonResponse(
+      errorResult(parsed.id, -32603, "Internal memory service error", { requestId }),
+      500,
+      requestId
+    )
   }
 }
 

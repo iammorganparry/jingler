@@ -2,6 +2,7 @@ import {
   MemoryPage as MemoryPageSchema,
   buildIdentityIndex,
   canonicalJson,
+  compareText,
   extractWikiLinks,
   lintMemory,
   normalizeMemoryIdentity,
@@ -63,9 +64,6 @@ export class ScheduledLintWorkflowError extends Error {
   // biome-ignore lint/security/noSecrets: static Error class name, not a credential.
   override readonly name = "ScheduledLintWorkflowError"
 }
-
-const compareText = (left: string, right: string): number =>
-  left === right ? 0 : left < right ? -1 : 1
 
 const conceptNames = (page: MemoryPage): ReadonlyArray<string> => {
   const values: Array<string> = []

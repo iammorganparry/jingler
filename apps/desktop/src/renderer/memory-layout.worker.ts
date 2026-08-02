@@ -12,13 +12,51 @@ export interface MemoryLayoutResponse {
   readonly positions: ReadonlyArray<MemoryNodePosition>
 }
 
+const TAU = Math.PI * 2
+
+// FNV-1a (32-bit): a stable per-node hash used only for deterministic jitter.
+const FNV_OFFSET_BASIS = 2_166_136_261
+const FNV_PRIME = 16_777_619
+
 const stableHash = (value: string): number => {
-  let hash = 2_166_136_261
+  let hash = FNV_OFFSET_BASIS
   for (let index = 0; index < value.length; index += 1) {
     hash ^= value.charCodeAt(index)
-    hash = Math.imul(hash, 16_777_619)
+    hash = Math.imul(hash, FNV_PRIME)
   }
   return hash >>> 0
+}
+
+// Radial-layout geometry, all in canvas px — named so the deterministic output
+// is auditable and never a bare literal.
+const GROUP_RADIUS_BASE = 190
+const GROUP_RADIUS_PER_GROUP = 5
+const NODE_RING_BASE = 38
+const NODE_RING_STEP = 32
+const NODES_PER_RING = 12
+const JITTER_BUCKETS = 10_000
+const JITTER_STRENGTH = 0.35
+const COORD_DECIMALS = 100 // round positions to 2 dp
+
+const byId = (left: { id: string }, right: { id: string }): number => left.id.localeCompare(right.id)
+const roundCoord = (value: number): number => Math.round(value * COORD_DECIMALS) / COORD_DECIMALS
+
+/** Deterministic jitter in [0, 1) from a node's identity within its topic. */
+const jitterFor = (topic: string, nodeId: string): number =>
+  (stableHash(`${topic}:${nodeId}`) % JITTER_BUCKETS) / JITTER_BUCKETS
+
+/** Group nodes by topic (falling back to kind), with stable ordering throughout. */
+const groupNodesByTopic = (
+  nodes: ReadonlyArray<MemoryGraphNode>
+): ReadonlyArray<readonly [string, ReadonlyArray<MemoryGraphNode>]> => {
+  const topics = new Map<string, Array<MemoryGraphNode>>()
+  for (const node of [...nodes].sort(byId)) {
+    const topic = node.topicId ?? `kind:${node.kind}`
+    const entries = topics.get(topic) ?? []
+    entries.push(node)
+    topics.set(topic, entries)
+  }
+  return [...topics.entries()].sort(([left], [right]) => left.localeCompare(right))
 }
 
 /** Deterministic, bounded radial layout. It never receives page bodies. */
@@ -26,32 +64,26 @@ export const computeMemoryLayout = (
   nodes: ReadonlyArray<MemoryGraphNode>,
   _edges: ReadonlyArray<MemoryGraphEdge>
 ): ReadonlyArray<MemoryNodePosition> => {
-  const topics = new Map<string, Array<MemoryGraphNode>>()
-  for (const node of [...nodes].sort((left, right) => left.id.localeCompare(right.id))) {
-    const topic = node.topicId ?? `kind:${node.kind}`
-    const entries = topics.get(topic) ?? []
-    entries.push(node)
-    topics.set(topic, entries)
-  }
-  const groups = [...topics.entries()].sort(([left], [right]) => left.localeCompare(right))
-  const result: Array<MemoryNodePosition> = []
+  const groups = groupNodesByTopic(nodes)
+  const positions: Array<MemoryNodePosition> = []
   groups.forEach(([topic, entries], groupIndex) => {
-    const groupAngle = (groupIndex / Math.max(1, groups.length)) * Math.PI * 2
-    const groupRadius = groups.length <= 1 ? 0 : 190 + groups.length * 5
+    const groupAngle = (groupIndex / Math.max(1, groups.length)) * TAU
+    const groupRadius =
+      groups.length <= 1 ? 0 : GROUP_RADIUS_BASE + groups.length * GROUP_RADIUS_PER_GROUP
     const centerX = Math.cos(groupAngle) * groupRadius
     const centerY = Math.sin(groupAngle) * groupRadius
     entries.forEach((node, nodeIndex) => {
-      const jitter = (stableHash(`${topic}:${node.id}`) % 10_000) / 10_000
-      const angle = (nodeIndex / Math.max(1, entries.length)) * Math.PI * 2 + jitter * 0.35
-      const ring = 38 + Math.floor(nodeIndex / 12) * 32
-      result.push({
+      const angle =
+        (nodeIndex / Math.max(1, entries.length)) * TAU + jitterFor(topic, node.id) * JITTER_STRENGTH
+      const ring = NODE_RING_BASE + Math.floor(nodeIndex / NODES_PER_RING) * NODE_RING_STEP
+      positions.push({
         id: node.id,
-        x: Math.round((centerX + Math.cos(angle) * ring) * 100) / 100,
-        y: Math.round((centerY + Math.sin(angle) * ring) * 100) / 100
+        x: roundCoord(centerX + Math.cos(angle) * ring),
+        y: roundCoord(centerY + Math.sin(angle) * ring)
       })
     })
   })
-  return result.sort((left, right) => left.id.localeCompare(right.id))
+  return positions.sort(byId)
 }
 
 if (typeof self !== "undefined" && "postMessage" in self) {

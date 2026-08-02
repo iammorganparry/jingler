@@ -220,6 +220,9 @@ const configuredMechanicalFixes = (env: MemoryWorkerEnv): ReadonlyArray<string> 
     .map((value) => value.trim())
     .filter((value) => value.length > 0)
 
+// Default trust model is auto-accept; a human review gate is opt-in per deployment.
+const requiresReview = (env: MemoryWorkerEnv): boolean => env.MEMORY_REQUIRE_REVIEW === "true"
+
 /** Run the still-Promise-based body decoder as a typed Effect at a vault call site. */
 const decodeBody = <Decoded, Encoded>(
   request: { text(): Promise<string> },
@@ -504,7 +507,8 @@ const startCompilerWorkflow = async (
   await createOrReuseWorkflow(env.MEMORY_COMPILER, bindingId, {
     ...body,
     organizationId,
-    autoPublishFixes: configuredMechanicalFixes(env)
+    autoPublishFixes: configuredMechanicalFixes(env),
+    requireReview: requiresReview(env)
   })
   return jsonResponse({ workflowId: body.workflowId, status: "queued" }, 202)
 }
@@ -561,15 +565,24 @@ const readWorkflow = async (
     const instance = await findWorkflowInstance(binding, env, organizationId, workflowId)
     if (instance === undefined) throw new Error("workflow not found")
     const status = await instance.status()
-    const pendingResult = workflowId.startsWith("compiler-")
-      ? {
-          status: "pending_review",
-          workflowId,
-          proposalId: `proposal:${workflowId}`,
-          proposalIds: []
-        }
+    // Synthesize a result ONLY when the run has not emitted its own `output` yet.
+    // A compiler run persists its proposal set in step 05 and then parks on the
+    // review event (`waitForEvent` → platform status "waiting"): only THEN does the
+    // deterministic proposal id exist and the run is genuinely awaiting review. A
+    // still-queued or actively-compiling run ("queued"/"running") has no proposal
+    // id yet, so reporting `pending_review` there makes clients try to review a
+    // proposal that does not exist — surface the platform state instead.
+    const fallback = workflowId.startsWith("compiler-")
+      ? status.status === "waiting"
+        ? {
+            status: "pending_review",
+            workflowId,
+            proposalId: `proposal:${workflowId}`,
+            proposalIds: []
+          }
+        : { status: status.status, workflowId }
       : null
-    return jsonResponse({ workflowId, state: status.status, result: status.output ?? pendingResult })
+    return jsonResponse({ workflowId, state: status.status, result: status.output ?? fallback })
   } catch {
     throw new MemoryVaultError({ code: "not_found", message: `workflow ${workflowId} was not found`, status: 404 })
   }
@@ -590,7 +603,8 @@ const startCompilerForSource = async (
     sourceId: source.id,
     requestedBy: "agent:session-capture",
     createdAt: source.retrievedAt ?? new Date().toISOString(),
-    autoPublishFixes: configuredMechanicalFixes(env)
+    autoPublishFixes: configuredMechanicalFixes(env),
+    requireReview: requiresReview(env)
   })
   return workflowId
 }

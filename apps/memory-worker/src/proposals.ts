@@ -1,6 +1,7 @@
 import {
   assertMemoryValid,
   canonicalJson,
+  compareText,
   parseMemoryMarkdown,
   parseMemoryPage,
   type MemoryPage,
@@ -59,9 +60,6 @@ export interface PreparedProposalSet {
 export class ProposalSetError extends Error {
   override readonly name = "ProposalSetError"
 }
-
-const compareText = (left: string, right: string): number =>
-  left === right ? 0 : left < right ? -1 : 1
 
 const proposalIdFor = (setId: string, pageId: string): string =>
   `${setId}:page:${encodeURIComponent(pageId)}`

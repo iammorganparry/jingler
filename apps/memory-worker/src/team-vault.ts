@@ -9,6 +9,7 @@ import {
   assertMemoryValid,
   buildMemoryGraph,
   canonicalJson,
+  compareText,
   parseMemoryMarkdown,
   parseMemoryPage,
   serializeMemoryMarkdown,
@@ -308,9 +309,6 @@ const emptySnapshot = (): VaultSnapshot => ({
   sessionRetrievals: []
 })
 
-const compareText = (left: string, right: string): number =>
-  left === right ? 0 : left < right ? -1 : 1
-
 const SEARCH_WHITESPACE_PATTERN = /\s+/
 const INVALID_SEARCH_TERM_PATTERN = /[^\p{L}\p{N}_-]+/gu
 
@@ -499,6 +497,14 @@ export class SqliteVaultState implements VaultStateStorage {
     })
   }
 
+  // TODO(memory-scale): this rewrites the WHOLE FTS + page projection on every
+  // commit — including metric-only and status-flip persists that leave page
+  // bodies unchanged — and each caller first re-materializes every body via
+  // loadPages(). At the 10k-page / 64KB-page target that is O(corpus) SQLite
+  // churn per write inside a Durable Object. Make projection updates incremental
+  // (upsert/delete only the affected pages) and derive dashboard/graph from the
+  // stored projection instead of re-parsing every body per read. Tracked as a
+  // dedicated follow-up; correctness is unaffected at current scale.
   private replaceProjection(
     projection: SearchProjection,
     pages: ReadonlyArray<MemoryPage>
@@ -644,7 +650,12 @@ export class SqliteVaultState implements VaultStateStorage {
         .split(SEARCH_WHITESPACE_PATTERN)
         .map((term) => term.replace(INVALID_SEARCH_TERM_PATTERN, ""))
         .filter((term) => term.length > 0)
-        .map((term) => `"${term.replace(/"/g, '""')}"`)
+        // FTS5 PREFIX form (`"term"*`) so partial words match, aligning the DO's
+        // keyword prefilter with the substring scorer + InMemoryVaultState. Without
+        // the trailing `*` a quoted term is an EXACT token match ('"ret"' never
+        // matches the token 'retry'), so partial-word queries that pass against the
+        // in-memory (substring) fake would return zero rows against the real DO.
+        .map((term) => `"${term.replace(/"/g, '""')}"*`)
       if (terms.length === 0) return []
       try {
         return this.sql
@@ -852,7 +863,7 @@ export class TeamVault {
       if (!(yield* this.state.commit(current.version, next, projection, pages))) {
         return yield* new MemoryVaultError({ code: "storage_conflict", message: "vault state changed concurrently", status: 409 })
       }
-      yield* Effect.promise(() => this.objects.putHistorySnapshot(next.version, canonicalJson(historyFor(next))))
+      yield* Effect.promise(() => this.objects.putHistory(next.version, canonicalJson(historyFor(next))))
       return next
     })
   }

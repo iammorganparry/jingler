@@ -1,6 +1,5 @@
 import { useMachine } from "@xstate/react"
 import { useQuery } from "@tanstack/react-query"
-import type { MemoryGraphEdgeKind } from "@jingler/contracts"
 import type { MemoryDeepLink, MemoryMapFilters, MemoryNodePosition, MemoryViewport } from "@jingler/ui"
 import { useCallback, useEffect } from "react"
 import { createMemoryMachine } from "./memory-machine.js"
@@ -85,6 +84,15 @@ export function useMemory() {
     return () => window.clearTimeout(timer)
   }, [send, snapshot.context.searchQuery])
 
+  // The Export button flashes "Exported" once the archive is saved; reset it a
+  // few seconds later so it doesn't stick until the next organization switch.
+  const exported = snapshot.context.exported
+  useEffect(() => {
+    if (exported === null) return
+    const timer = window.setTimeout(() => send({ type: "EXPORT.CLEAR" }), 4000)
+    return () => window.clearTimeout(timer)
+  }, [exported, send])
+
   const open = useCallback(() => send({ type: "OPEN" }), [send])
   const close = useCallback(() => send({ type: "CLOSE" }), [send])
   const retry = useCallback(() => send({ type: "RETRY" }), [send])
@@ -141,6 +149,3 @@ export function useMemory() {
     requestExport
   }
 }
-
-export const relationshipFilterLabel = (relationship: MemoryGraphEdgeKind | null): string =>
-  relationship === null ? "All relationships" : relationship

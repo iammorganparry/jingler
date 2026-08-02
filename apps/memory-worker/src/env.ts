@@ -8,6 +8,8 @@ export interface R2ObjectsLike {
   readonly objects: ReadonlyArray<{ readonly key: string }>
   readonly truncated: boolean
   readonly cursor?: string
+  /** Common prefixes rolled up to the first `delimiter` past `prefix`, when requested. */
+  readonly delimitedPrefixes?: ReadonlyArray<string>
 }
 
 export interface R2PutOptionsLike {
@@ -24,7 +26,11 @@ export interface R2BucketLike {
     value: string | ArrayBuffer | ArrayBufferView,
     options?: R2PutOptionsLike
   ): Promise<{ readonly key: string } | null>
-  list(options?: { readonly prefix?: string; readonly cursor?: string }): Promise<R2ObjectsLike>
+  list(options?: {
+    readonly prefix?: string
+    readonly cursor?: string
+    readonly delimiter?: string
+  }): Promise<R2ObjectsLike>
 }
 
 export interface SqlStorageCursor<Row> extends Iterable<Row> {
@@ -98,7 +104,20 @@ export interface MemoryWorkerEnv {
     import("./workflows/vector-ingest.js").VectorIngestWorkflowInput
   >
   readonly MEMORY_AUTO_PUBLISH_FIXES?: string
+  /**
+   * When "true", factual memory changes wait for a human accept in the review
+   * queue before publishing (safe mechanical fixes still auto-publish). Unset or
+   * anything else = the default trust model: agents publish straight to the
+   * shared vault and are audited/reverted after the fact.
+   */
+  readonly MEMORY_REQUIRE_REVIEW?: string
   readonly MEMORY_LINT_ORGANIZATIONS?: string
+  /**
+   * Optional explicit allow-list of organizations for the daily vector-ingest drift
+   * sweep. The sweep already discovers every org with an R2 vault; this list is a
+   * belt-and-braces override for orgs that must always be reconciled.
+   */
+  readonly MEMORY_VECTOR_ORGANIZATIONS?: string
   /** Advisory vector layer: read ONLY here, never forwarded to the renderer. */
   readonly TURBOPUFFER_API_KEY?: string
   readonly TURBOPUFFER_BASE_URL?: string

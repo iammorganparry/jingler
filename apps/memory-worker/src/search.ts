@@ -2,6 +2,7 @@ import {
   buildBacklinkIndex,
   buildIdentityIndex,
   buildMemoryIndex,
+  compareText,
   extractCitationReferences,
   extractWikiLinks,
   resolveWikiLink,
@@ -39,9 +40,6 @@ export interface SearchProjection {
     readonly tags: string
   }>
 }
-
-const compareText = (left: string, right: string): number =>
-  left === right ? 0 : left < right ? -1 : 1
 
 const MARKDOWN_EXTENSION_PATTERN = /\.md$/i
 

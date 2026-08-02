@@ -1,6 +1,10 @@
 import {
-  buildMemoryGraph,
+  AGING_MAX_DAYS,
+  FRESH_MAX_DAYS,
+  buildMemoryGraphView,
   canonicalJson,
+  compareText,
+  contradictionCount,
   stableContentHash,
   type MemoryGraph,
   type MemoryGraphEdge,
@@ -71,9 +75,6 @@ export interface GraphBuildContext {
   readonly now?: string
 }
 
-const compareText = (left: string, right: string): number =>
-  left === right ? 0 : left < right ? -1 : 1
-
 const edgeId = (edge: MemoryGraphEdge): string => stableContentHash(canonicalJson(edge))
 
 const boundedLimit = (requested: number | undefined, fallback: number, maximum: number): number => {
@@ -86,14 +87,7 @@ const ageStatus = (acceptedAt: string | undefined, now: string | undefined): Vau
   const age = Date.parse(now) - Date.parse(acceptedAt)
   if (!Number.isFinite(age)) return "unknown"
   const days = age / 86_400_000
-  return days <= 30 ? "fresh" : days <= 90 ? "aging" : "stale"
-}
-
-const contradictionCount = (page: MemoryPage | undefined): number => {
-  if (page === undefined) return 0
-  const contradictions = page.metadata.contradictions
-  if (Array.isArray(contradictions)) return contradictions.length
-  return typeof contradictions === "number" && contradictions > 0 ? Math.floor(contradictions) : 0
+  return days <= FRESH_MAX_DAYS ? "fresh" : days <= AGING_MAX_DAYS ? "aging" : "stale"
 }
 
 const graphDegrees = (
@@ -119,6 +113,7 @@ const compactNode = (
   node: MemoryGraphNode,
   pages: ReadonlyMap<string, MemoryPage>,
   degrees: ReadonlyMap<string, { readonly incoming: number; readonly outgoing: number }>,
+  brokenWikiLinksByPage: ReadonlyMap<string, number>,
   context: GraphBuildContext
 ): VaultGraphNode => {
   const page = node.kind === "page" ? pages.get(node.pageId) : undefined
@@ -138,7 +133,9 @@ const compactNode = (
       context.now
     ),
     health: {
-      brokenLinks: 0,
+      // Real per-page broken-wikilink count from the tolerant graph build (the same
+      // resolveWikiLink pass the dashboard uses), not a hard-coded 0.
+      brokenLinks: node.kind === "page" ? (brokenWikiLinksByPage.get(node.pageId) ?? 0) : 0,
       contradictions: contradictionCount(page),
       orphan: node.kind === "page" && degree.incoming + degree.outgoing === 0
     }
@@ -204,13 +201,15 @@ const graphContext = (
   readonly graph: MemoryGraph
   readonly pages: ReadonlyMap<string, MemoryPage>
   readonly degrees: ReadonlyMap<string, { readonly incoming: number; readonly outgoing: number }>
+  readonly brokenWikiLinksByPage: ReadonlyMap<string, number>
   readonly context: GraphBuildContext
 } => {
-  const graph = buildMemoryGraph(pages, sources)
+  const { graph, brokenWikiLinksByPage } = buildMemoryGraphView(pages, sources)
   return {
     graph,
     pages: new Map(pages.map((page) => [page.id, page])),
     degrees: graphDegrees(graph),
+    brokenWikiLinksByPage,
     context
   }
 }
@@ -235,7 +234,7 @@ export const buildBoundedGraphView = (
     version: 1,
     totalNodes: built.graph.nodes.length,
     totalEdges: built.graph.edges.length,
-    nodes: selected.map((node) => compactNode(node, built.pages, built.degrees, built.context)),
+    nodes: selected.map((node) => compactNode(node, built.pages, built.degrees, built.brokenWikiLinksByPage, built.context)),
     edges,
     clusters: clustersFor(pages),
     truncated: next < built.graph.nodes.length,
@@ -271,7 +270,7 @@ export const buildGraphNeighborhood = (
     version: 1,
     totalNodes: built.graph.nodes.length,
     totalEdges: built.graph.edges.length,
-    nodes: nodes.map((node) => compactNode(node, built.pages, built.degrees, built.context)),
+    nodes: nodes.map((node) => compactNode(node, built.pages, built.degrees, built.brokenWikiLinksByPage, built.context)),
     edges: edges.map(compactEdge),
     clusters: clustersFor(
       pages.filter((page) => neighborIds.has(`page:${page.id}`))
@@ -285,7 +284,7 @@ export const findGraphEdgeEvidence = (
   sources: ReadonlyArray<MemorySource>,
   requestedEdgeId: string
 ): VaultGraphEvidenceResponse | undefined => {
-  const edge = buildMemoryGraph(pages, sources).edges.find(
+  const edge = buildMemoryGraphView(pages, sources).graph.edges.find(
     (candidate) => edgeId(candidate) === requestedEdgeId
   )
   return edge === undefined ? undefined : { edge: compactEdge(edge), evidence: edge.evidence }

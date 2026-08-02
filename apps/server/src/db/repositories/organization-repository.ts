@@ -20,23 +20,56 @@ export interface OrganizationMemoryAccess extends OrganizationAuthorization {
 }
 
 const PaidPlan = Schema.Literal("team", "pro", "business", "enterprise")
-const ActiveSubscription = Schema.Union(
-  Schema.Struct({ plan: PaidPlan, status: Schema.Literal("active") }),
-  Schema.Struct({ plan: PaidPlan, subscriptionStatus: Schema.Literal("active") })
-)
-const ActivePaidOrganizationMetadata = Schema.Union(
-  ActiveSubscription,
-  Schema.Struct({ subscription: ActiveSubscription })
-)
+const isPaidPlan = Schema.is(PaidPlan)
+
+const OptionalString = Schema.optional(Schema.String)
+const SubscriptionFields = Schema.Struct({
+  plan: OptionalString,
+  status: OptionalString,
+  subscriptionStatus: OptionalString
+})
+/**
+ * Canonical decode of the billing metadata. Excess keys are ignored, but every
+ * status-bearing field we recognise is captured — top-level and nested — so a
+ * cancelled status can never hide behind an active sibling. `Schema.Struct`
+ * silently drops unlisted props, which is exactly how a cancelled subscription
+ * used to slip through a `status`/`subscriptionStatus` union.
+ */
+const OrganizationMetadata = Schema.Struct({
+  plan: OptionalString,
+  status: OptionalString,
+  subscriptionStatus: OptionalString,
+  subscription: Schema.optional(SubscriptionFields)
+})
+const decodeMetadata = Schema.decodeUnknownEither(Schema.parseJson(OrganizationMetadata))
 
 /**
- * Billing owns this metadata shape. Requiring both a paid plan and an active
- * status means missing, malformed, cancelled, and free metadata all fail closed.
+ * Billing owns this metadata shape. Paid access requires (1) at least one paid
+ * plan, (2) no non-paid plan anywhere, (3) at least one subscription status
+ * field, and (4) EVERY status field present — top-level `status` /
+ * `subscriptionStatus` and their `subscription.*` twins — equal to "active".
+ * Missing, malformed, cancelled, free, and half-active metadata all fail closed.
  */
 export const isActivePaidOrganizationMetadata = (metadata: string | null): boolean => {
   if (!metadata) return false
-  return Schema.decodeUnknownEither(Schema.parseJson(ActivePaidOrganizationMetadata))(metadata)
-    ._tag === "Right"
+  const decoded = decodeMetadata(metadata)
+  if (decoded._tag === "Left") return false
+  const value = decoded.right
+  const plans = [value.plan, value.subscription?.plan].filter(
+    (plan): plan is string => plan !== undefined
+  )
+  const statuses = [
+    value.status,
+    value.subscriptionStatus,
+    value.subscription?.status,
+    value.subscription?.subscriptionStatus
+  ].filter((status): status is string => status !== undefined)
+  return (
+    plans.length > 0 &&
+    plans.every(isPaidPlan) &&
+    statuses.length > 0 &&
+    statuses.every((status) => status === "active")
+  )
 }
 
 /**

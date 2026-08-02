@@ -5,12 +5,11 @@ import {
   BookOpen,
   GitFork,
   Quote,
-  RefreshCw,
-  UsersRound
+  RefreshCw
 } from "lucide-react"
 import type { ReactNode } from "react"
 
-export type MemorySubview = "dashboard" | "map" | "wiki" | "reviews" | "analytics"
+export type MemorySubview = "dashboard" | "map" | "wiki" | "analytics"
 
 export interface MemoryDeepLink {
   readonly view: MemorySubview
@@ -92,7 +91,6 @@ export function MemoryDashboard({
   if (summary === null) return null
   const findings =
     summary.health.orphanPages + summary.health.brokenLinks + summary.health.contradictions
-  const reviewAge = summary.reviewThroughput.medianReviewHours
   const latestGrowth = summary.growth.daily.slice(-7)
   const maxGrowth = Math.max(1, ...latestGrowth.map((day) => day.pages + day.revisions))
 
@@ -139,13 +137,6 @@ export function MemoryDashboard({
           detail={`${summary.health.orphanPages} orphan · ${summary.health.brokenLinks} broken · ${summary.health.contradictions} contradictory`}
           icon={<AlertTriangle size={16} />}
           onClick={() => onNavigate({ view: "map", filter: "unhealthy" })}
-        />
-        <MetricCard
-          title="Pending reviews"
-          value={String(summary.reviewThroughput.open)}
-          detail={reviewAge === null ? "No completed review timing yet" : `Median review age ${reviewAge.toFixed(1)} hours`}
-          icon={<UsersRound size={16} />}
-          onClick={() => onNavigate({ view: "reviews", filter: "open" })}
         />
         <MetricCard
           title="Connectivity"
