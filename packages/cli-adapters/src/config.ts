@@ -3,6 +3,7 @@ import type {
   ContextConfig,
   GitConfig,
   GithubConfig,
+  MemoryConfig,
   NotificationsConfig,
   OpenConnectorConfig,
   OrchestratorPreference,
@@ -121,6 +122,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.fontScale !== undefined ? { fontScale: existing.fontScale } : {}),
             ...(existing?.theme ? { theme: existing.theme } : {}),
             ...(existing?.openConnector ? { openConnector: existing.openConnector } : {}),
+            ...(existing?.memory ? { memory: existing.memory } : {}),
             ...(existing?.disabledPlugins ? { disabledPlugins: existing.disabledPlugins } : {}),
             // MANDATORY: omit a section here and every unrelated save silently
             // drops it, because `patch` is a whole-object read-modify-write.
@@ -220,6 +222,9 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       const setDisabledPlugins = (disabledPlugins: ReadonlyArray<string>) =>
         patch({ disabledPlugins })
 
+      /** Save only renderer-safe memory enablement and organization selection. */
+      const setMemory = (memory: MemoryConfig) => patch({ memory })
+
       /** Replace the override layer wholesale, keeping the active theme id. */
       const setThemeCustomizations = (colorCustomizations: Record<string, string>) =>
         Effect.gen(function* () {
@@ -279,6 +284,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setActiveTheme,
         setThemeCustomizations,
         setOpenConnector,
+        setMemory,
         setDisabledPlugins
       }
     }

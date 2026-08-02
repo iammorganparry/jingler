@@ -50,6 +50,14 @@ describe("Codex diagnostic redaction", () => {
     )
   })
 
+  it("redacts stateless MCP request credentials and rejects retained session ids", () => {
+    expect(
+      redactCodexDiagnosticText(
+        "Mcp-Session-Id: request-state Authorization: Bearer memory-grant"
+      )
+    ).toBe('Mcp-Session-Id: "[REDACTED]" Authorization: "[REDACTED]"')
+  })
+
   it("bounds stderr after redaction", () => {
     const rendered = boundedCodexStderr(`${`sk-${"a".repeat(100)}`} ${"x".repeat(4_050)}`)
     expect(rendered.length).toBeLessThanOrEqual(4_096)

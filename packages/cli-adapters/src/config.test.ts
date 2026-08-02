@@ -40,6 +40,25 @@ describe("ConfigService", () => {
     if (exit._tag === "Success") expect(exit.value?.reposDir).toBe("/Users/me/repos")
   })
 
+  it("persists memory enablement and organization selection across unrelated saves", async () => {
+    const exit = await provided(
+      Effect.gen(function* () {
+        yield* ConfigService.setMemory({ enabled: true, organizationId: "org-team" })
+        yield* ConfigService.setReposDir("/repos/team")
+        return yield* ConfigService.get()
+      })
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") {
+      expect(exit.value?.memory).toStrictEqual({
+        enabled: true,
+        organizationId: "org-team"
+      })
+      expect(JSON.stringify(exit.value)).not.toContain("bearer")
+      expect(JSON.stringify(exit.value)).not.toContain("grant")
+    }
+  })
+
   it("preserves createdAt across a second setReposDir", async () => {
     const exit = await provided(
       Effect.gen(function* () {

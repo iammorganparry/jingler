@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jingler-memory-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-31",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MEMORY_VAULTS",
+        "class_name": "TeamVaultObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TeamVaultObject"]
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEMORY_R2",
+      "bucket_name": "jingler-memory"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "jingler-memory-compiler",
+      "binding": "MEMORY_COMPILER",
+      "class_name": "MemoryCompilerWorkflow"
+    },
+    {
+      "name": "jingler-memory-lint",
+      "binding": "MEMORY_LINT",
+      "class_name": "MemoryLintWorkflow"
+    }
+  ],
+  "triggers": {
+    "crons": ["17 3 * * *"]
+  }
+}

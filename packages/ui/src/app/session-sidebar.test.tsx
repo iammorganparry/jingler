@@ -66,6 +66,35 @@ describe("SessionSidebar archived sessions", () => {
   })
 })
 
+describe("SessionSidebar Memory destination", () => {
+  it("shows Memory only for eligible team members and marks it active without selecting a session", () => {
+    const open = vi.fn()
+    const view = render(
+      <SessionSidebar
+        activeSessionId="session"
+        onSelect={() => {}}
+        sessions={[session({ id: "session" })]}
+        memoryEligible={false}
+        onOpenMemory={open}
+      />
+    )
+    expect(screen.queryByTestId("memory-sidebar-item")).toBeNull()
+    view.rerender(
+      <SessionSidebar
+        activeSessionId="session"
+        onSelect={() => {}}
+        sessions={[session({ id: "session" })]}
+        memoryEligible
+        memoryActive
+        onOpenMemory={open}
+      />
+    )
+    fireEvent.click(screen.getByTestId("memory-sidebar-item"))
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("memory-sidebar-item").getAttribute("aria-current")).toBe("page")
+  })
+})
+
 /**
  * A split is ONE sidebar row, and it must survive every way the list can shrink
  * beneath it. An early version keyed the row on `panes[0]`, so any list that

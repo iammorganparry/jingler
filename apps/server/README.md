@@ -28,6 +28,8 @@ pnpm --filter @jingler/server dev # http://localhost:9100
 ```
 
 Health check: `curl http://localhost:9100/health` → `{"status":"ok",…}`.
+Team Memory readiness: `curl http://localhost:9100/api/memory/health`. It returns
+`ok`, `degraded` (with HTTP 503), or `disabled` without exposing credentials.
 
 Request a magic link (the link is logged to the server console):
 
@@ -98,6 +100,12 @@ See `.env.example`. Required in production:
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth app. Callback: `<BETTER_AUTH_URL>/api/auth/callback/github`. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth client. Redirect: `<BETTER_AUTH_URL>/api/auth/callback/google`. |
 | `RESEND_API_KEY` | Magic-link email. Omit in dev to log links to the console. |
+| `MEMORY_ENABLED` | Paid-team Memory rollout/circuit-breaker. Set `false` to disable grants, MCP, and capture without deleting accepted Markdown. |
+| `MEMORY_GRANT_SECRET` | Dedicated HMAC key for short-lived organization grants. Never reuse the auth or Worker secret. |
+| `MEMORY_GRANT_AUDIENCE` / `MEMORY_GRANT_TTL_SECONDS` | MCP audience and short grant lifetime. |
+| `MEMORY_WORKER_URL` | Private Cloudflare Memory Worker origin. |
+| `MEMORY_WORKER_SERVICE_SECRET` | Rotating Next.js-to-Worker credential. |
+| `MEMORY_REQUEST_TIMEOUT_MS` | Bounded private-service timeout. |
 
 A social provider is only enabled when both its id + secret are set, so dev works
 with magic links alone.
@@ -123,3 +131,11 @@ Set the project root to `apps/server`. `vercel.json` rewrites all traffic to the
 `api/[[...route]].ts` catch-all, which adapts the Hono app via `hono/vercel` on
 the **Node** runtime (Postgres/Drizzle need Node, not edge). Set the env vars
 above in the Vercel project.
+
+The Memory endpoint is a stateless Streamable HTTP POST endpoint for MCP
+`2026-07-28`. It deliberately has no initialize exchange, GET/SSE transport,
+session ID, cookie, or instance affinity. Deployments can therefore scale across
+Vercel instances; workflow and proposal handles carry durable progress. Rotate
+the Worker credential using the Worker's current/previous-secret overlap, then
+rotate the grant secret separately. See [the shared-memory operations guide](../../docs/shared-memory.md)
+for bindings, monitoring, export, rebuild, and recovery.

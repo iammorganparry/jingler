@@ -28,6 +28,10 @@ export interface DialogServiceShape {
    * flags wrong.
    */
   readonly chooseDirectory: (prompt?: ChooseDirectoryPrompt) => Effect.Effect<string | null>
+  readonly saveFile?: (prompt: {
+    readonly title: string
+    readonly defaultPath: string
+  }) => Effect.Effect<string | null>
 }
 
 export class DialogService extends Context.Tag("@jingler/DialogService")<
@@ -55,5 +59,13 @@ export const DialogServiceLive = Layer.succeed(DialogService, {
       Effect.map((result) =>
         result.canceled || result.filePaths.length === 0 ? null : (result.filePaths[0] ?? null)
       )
-    )
+    ),
+  saveFile: (prompt) =>
+    Effect.promise(() =>
+      dialog.showSaveDialog({
+        title: prompt.title,
+        defaultPath: prompt.defaultPath,
+        filters: [{ name: "ZIP archive", extensions: ["zip"] }]
+      })
+    ).pipe(Effect.map((result) => result.canceled ? null : (result.filePath ?? null)))
 })

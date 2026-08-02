@@ -44,6 +44,9 @@ import {
   PrFileChange,
   McpInjectionTarget,
   McpServerStatus,
+  MemoryConfig,
+  MemoryOrganizationRole,
+  MemoryPrivilege,
   OpenConnectorConfig,
   OpenConnectorDefaults,
   OrchestratorPreference,
@@ -107,6 +110,257 @@ import {
 } from "@jingler/core"
 import { Rpc, RpcGroup } from "@effect/rpc"
 import { Schema } from "effect"
+
+/**
+ * Renderer-safe team-memory contract.
+ *
+ * These records deliberately contain presentation data and stable public ids,
+ * never the short-lived hosted grant used by the main process. Graph responses
+ * are compact manifests: page bodies are fetched only by `Memory.page`.
+ */
+export const MemoryOrganizationSummary = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  role: MemoryOrganizationRole,
+  privileges: Schema.Array(MemoryPrivilege)
+})
+export type MemoryOrganizationSummary = Schema.Schema.Type<typeof MemoryOrganizationSummary>
+
+export const MemoryAccess = Schema.Struct({
+  eligible: Schema.Boolean,
+  selectedOrganizationId: Schema.NullOr(Schema.String),
+  organizations: Schema.Array(MemoryOrganizationSummary)
+})
+export type MemoryAccess = Schema.Schema.Type<typeof MemoryAccess>
+
+export const MemoryDailyGrowth = Schema.Struct({
+  day: Schema.String,
+  pages: Schema.Number,
+  revisions: Schema.Number
+})
+
+export const MemoryDashboardSummary = Schema.Struct({
+  version: Schema.Literal(1),
+  asOf: Schema.String,
+  growth: Schema.Struct({
+    acceptedPages: Schema.Number,
+    revisions: Schema.Number,
+    sources: Schema.Number,
+    daily: Schema.Array(MemoryDailyGrowth)
+  }),
+  citationCoverage: Schema.Struct({
+    citations: Schema.Number,
+    citedPages: Schema.Number,
+    totalPages: Schema.Number,
+    ratio: Schema.Number
+  }),
+  freshness: Schema.Struct({
+    fresh: Schema.Number,
+    aging: Schema.Number,
+    stale: Schema.Number,
+    unknown: Schema.Number
+  }),
+  health: Schema.Struct({
+    orphanPages: Schema.Number,
+    brokenLinks: Schema.Number,
+    contradictions: Schema.Number
+  }),
+  reviewThroughput: Schema.Struct({
+    proposed: Schema.Number,
+    accepted: Schema.Number,
+    rejected: Schema.Number,
+    conflicted: Schema.Number,
+    open: Schema.Number,
+    acceptanceRatio: Schema.Number,
+    medianReviewHours: Schema.NullOr(Schema.Number)
+  }),
+  connectivity: Schema.Struct({
+    pages: Schema.Number,
+    directedLinks: Schema.Number,
+    connectedPages: Schema.Number,
+    averageDegree: Schema.Number
+  }),
+  retrieval: Schema.Struct({
+    searches: Schema.Number,
+    reads: Schema.Number,
+    navigation: Schema.Number,
+    graphReads: Schema.Number,
+    proposals: Schema.Number,
+    zeroResultSearches: Schema.Number,
+    zeroResultRatio: Schema.Number,
+    resultsReturned: Schema.Number,
+    uniqueQueryHashes: Schema.Number,
+    medianDurationMs: Schema.NullOr(Schema.Number),
+    p95DurationMs: Schema.NullOr(Schema.Number)
+  })
+})
+export type MemoryDashboardSummary = Schema.Schema.Type<typeof MemoryDashboardSummary>
+
+export const MemoryGraphNode = Schema.Struct({
+  id: Schema.String,
+  kind: Schema.Literal("page", "source", "schema"),
+  title: Schema.String,
+  pageId: Schema.optional(Schema.String),
+  sourceId: Schema.optional(Schema.String),
+  schemaId: Schema.optional(Schema.String),
+  topicId: Schema.optional(Schema.String),
+  degree: Schema.Struct({ incoming: Schema.Number, outgoing: Schema.Number }),
+  freshness: Schema.Literal("fresh", "aging", "stale", "unknown"),
+  health: Schema.Struct({
+    brokenLinks: Schema.Number,
+    contradictions: Schema.Number,
+    orphan: Schema.Boolean
+  })
+})
+export type MemoryGraphNode = Schema.Schema.Type<typeof MemoryGraphNode>
+
+export const MemoryGraphEdgeKind = Schema.Literal(
+  "wikilink",
+  "citation",
+  "dependency",
+  "backlink",
+  "schema"
+)
+export type MemoryGraphEdgeKind = Schema.Schema.Type<typeof MemoryGraphEdgeKind>
+
+export const MemoryGraphEdge = Schema.Struct({
+  id: Schema.String,
+  sourceId: Schema.String,
+  targetId: Schema.String,
+  kind: MemoryGraphEdgeKind
+})
+export type MemoryGraphEdge = Schema.Schema.Type<typeof MemoryGraphEdge>
+
+export const MemoryTopicCluster = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  nodeCount: Schema.Number,
+  sampleNodeIds: Schema.Array(Schema.String)
+})
+export type MemoryTopicCluster = Schema.Schema.Type<typeof MemoryTopicCluster>
+
+export const MemoryGraphView = Schema.Struct({
+  version: Schema.Literal(1),
+  totalNodes: Schema.Number,
+  totalEdges: Schema.Number,
+  nodes: Schema.Array(MemoryGraphNode),
+  edges: Schema.Array(MemoryGraphEdge),
+  clusters: Schema.Array(MemoryTopicCluster),
+  truncated: Schema.Boolean,
+  nextCursor: Schema.optional(Schema.String)
+})
+export type MemoryGraphView = Schema.Schema.Type<typeof MemoryGraphView>
+
+export const MemoryEdgeEvidence = Schema.Struct({
+  edge: MemoryGraphEdge,
+  evidence: Schema.Struct({
+    kind: MemoryGraphEdgeKind,
+    pageId: Schema.optional(Schema.String),
+    sourcePageId: Schema.optional(Schema.String),
+    targetPageId: Schema.optional(Schema.String),
+    sourceId: Schema.optional(Schema.String),
+    citationId: Schema.optional(Schema.String),
+    path: Schema.String,
+    line: Schema.optional(Schema.Number),
+    column: Schema.optional(Schema.Number),
+    raw: Schema.optional(Schema.String),
+    target: Schema.optional(Schema.String),
+    label: Schema.optional(Schema.String)
+  })
+})
+export type MemoryEdgeEvidence = Schema.Schema.Type<typeof MemoryEdgeEvidence>
+
+export const MemoryPageDetail = Schema.Struct({
+  page: Schema.Struct({
+    id: Schema.String,
+    path: Schema.String,
+    title: Schema.String,
+    revision: Schema.Number,
+    aliases: Schema.Array(Schema.String),
+    tags: Schema.Array(Schema.String),
+    body: Schema.String,
+    citations: Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        sourceId: Schema.String,
+        locator: Schema.optional(Schema.String),
+        quote: Schema.optional(Schema.String)
+      })
+    )
+  }),
+  revision: Schema.Struct({
+    id: Schema.String,
+    pageId: Schema.String,
+    revision: Schema.Number,
+    authorId: Schema.String,
+    createdAt: Schema.String,
+    acceptedAt: Schema.String
+  }),
+  sourceIds: Schema.Array(Schema.String),
+  citationIds: Schema.Array(Schema.String),
+  backlinks: Schema.Array(Schema.String),
+  contributors: Schema.Array(Schema.String),
+  health: Schema.Struct({
+    brokenLinks: Schema.Number,
+    contradictions: Schema.Number,
+    orphan: Schema.Boolean
+  })
+})
+export type MemoryPageDetail = Schema.Schema.Type<typeof MemoryPageDetail>
+
+export const MemorySearchResult = Schema.Struct({
+  pageId: Schema.String,
+  path: Schema.String,
+  title: Schema.String,
+  revisionId: Schema.String,
+  snippet: Schema.String
+})
+export type MemorySearchResult = Schema.Schema.Type<typeof MemorySearchResult>
+
+export const MemoryReviewPage = Schema.Struct({
+  proposalId: Schema.String,
+  pageId: Schema.String,
+  title: Schema.String,
+  baseRevisionId: Schema.String,
+  summary: Schema.String,
+  markdown: Schema.String
+})
+
+export const MemoryReviewItem = Schema.Struct({
+  id: Schema.String,
+  workflowId: Schema.String,
+  sourceId: Schema.String,
+  proposedBy: Schema.String,
+  createdAt: Schema.String,
+  status: Schema.Literal("open", "accepted", "rejected", "superseded"),
+  changeKind: Schema.Literal("factual", "mechanical"),
+  pages: Schema.Array(MemoryReviewPage)
+})
+export type MemoryReviewItem = Schema.Schema.Type<typeof MemoryReviewItem>
+
+export const MemoryReviewResult = Schema.Struct({
+  status: Schema.Literal("accepted", "rejected", "conflict"),
+  proposalId: Schema.String,
+  conflicts: Schema.Array(
+    Schema.Struct({
+      pageId: Schema.String,
+      expectedBaseRevisionId: Schema.String,
+      currentHeadRevisionId: Schema.String
+    })
+  )
+})
+export type MemoryReviewResult = Schema.Schema.Type<typeof MemoryReviewResult>
+
+export const MemoryExport = Schema.Struct({
+  filename: Schema.String,
+  saved: Schema.Boolean
+})
+export type MemoryExport = Schema.Schema.Type<typeof MemoryExport>
+
+export class MemoryUiError extends Schema.TaggedError<MemoryUiError>()("MemoryUiError", {
+  message: Schema.String,
+  status: Schema.Number
+}) {}
 
 /**
  * The Jingler RPC surface — a single source of truth shared by the Electron
@@ -824,6 +1078,55 @@ export class JinglerRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: ContextConfig
+  }),
+
+  /** Persist renderer-safe memory enablement and the selected organization. */
+  Rpc.make("Config.setMemory", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: MemoryConfig
+  }),
+
+  /** Eligibility and role data only. The hosted memory grant never crosses IPC. */
+  Rpc.make("Memory.access", {
+    success: MemoryAccess,
+    error: MemoryUiError
+  }),
+
+  Rpc.make("Memory.export", {
+    success: MemoryExport,
+    error: MemoryUiError,
+    payload: { organizationId: Schema.String }
+  }),
+
+  /**
+   * One request envelope keeps the already-large Electron RPC group tractable.
+   * Renderer wrappers decode every operation into the exported schemas above.
+   */
+  Rpc.make("Memory.request", {
+    success: Schema.Unknown,
+    error: MemoryUiError,
+    payload: {
+      organizationId: Schema.String,
+      operation: Schema.Literal(
+        "dashboard",
+        "graph",
+        "neighborhood",
+        "edgeEvidence",
+        "search",
+        "page",
+        "reviews",
+        "review"
+      ),
+      range: Schema.optional(Schema.String),
+      limit: Schema.optional(Schema.Number),
+      nodeId: Schema.optional(Schema.String),
+      edgeId: Schema.optional(Schema.String),
+      query: Schema.optional(Schema.String),
+      pageId: Schema.optional(Schema.String),
+      proposalId: Schema.optional(Schema.String),
+      action: Schema.optional(Schema.Literal("approve", "reject"))
+    }
   }),
 
   /** Per-session auto-compaction override (absent = follow the global setting). */

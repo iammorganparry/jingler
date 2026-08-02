@@ -5,5 +5,5 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node", "react", "react-dom"]
   },
-  "include": ["src", "api", "drizzle.config.ts"]
+  "include": ["src", "api", "app", "drizzle.config.ts", "next.config.ts"]
 }
