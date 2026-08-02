@@ -13,6 +13,7 @@ import {
   PlanDocView,
   type PlanFileEvidence
 } from "./plan-doc/plan-doc-view.js"
+import { PlanFileControlsProvider } from "./plan-doc/plan-file-controls.js"
 import { PlanArchitecture } from "./plan-architecture.js"
 import { PlanFloatingActions } from "./plan-floating-actions.js"
 import { PlanStepOutline } from "./plan-steps/plan-step-outline.js"
@@ -185,13 +186,19 @@ export function PlanEditor({
         {page === "main" && (
           <div ref={setContainer} className="relative min-h-0 min-w-0 flex-1 overflow-auto pb-14">
             {showOutline ? (
-              <div className="mx-auto w-full max-w-[760px]">
-                <PlanStepOutline
-                  prd={projection}
-                  selectedStepId={selectedStepId}
-                  onSelectStep={setSelectedStepId}
-                />
-              </div>
+              <PlanFileControlsProvider
+                evidence={fileEvidence}
+                knownFiles={knownFiles}
+                open={onOpenFile}
+              >
+                <div className="mx-auto w-full max-w-[760px]">
+                  <PlanStepOutline
+                    prd={projection}
+                    selectedStepId={selectedStepId}
+                    onSelectStep={setSelectedStepId}
+                  />
+                </div>
+              </PlanFileControlsProvider>
             ) : (
               <PlanDocView
                 className="mx-auto h-full w-full max-w-[760px]"

@@ -98,13 +98,20 @@ export function PlanCommentLayer({
       return
     }
     const base = container.getBoundingClientRect()
+    // The overlays are absolute children of the SCROLLING container, so their
+    // top/left must be in CONTENT space (viewport offset + scroll), not viewport
+    // space — otherwise every overlay drifts by the scroll amount and clips.
+    const { scrollTop, scrollLeft } = container
+    const toTop = (viewportTop: number) => viewportTop - base.top + scrollTop
+    const toLeft = (viewportLeft: number) => viewportLeft - base.left + scrollLeft
+    const rightEdge = scrollLeft + container.clientWidth - 28
 
     const nextRects: Array<HighlightRect> = []
     const nextPins: Array<Pin> = []
     annotations.forEach((annotation, index) => {
       let orphan = false
+      // Unanchored / orphaned pins stack at the top of the content.
       let pinTop = 8 + index * 30
-      const pinLeft = base.width - 28
       if (annotation.anchor !== undefined) {
         const range = domRangeFromAnchor(container, annotation.anchor)
         const clientRects = range === null ? [] : Array.from(range.getClientRects())
@@ -114,20 +121,20 @@ export function PlanCommentLayer({
           clientRects.forEach((r, i) => {
             nextRects.push({
               key: `${annotation.id}:${i}`,
-              top: r.top - base.top,
-              left: r.left - base.left,
+              top: toTop(r.top),
+              left: toLeft(r.left),
               width: r.width,
               height: r.height,
               resolved: annotation.status === "resolved"
             })
           })
-          pinTop = clientRects[0]!.top - base.top
+          pinTop = toTop(clientRects[0]!.top)
         }
       }
       nextPins.push({
         id: annotation.id,
         top: pinTop,
-        left: pinLeft,
+        left: rightEdge,
         count: annotation.messages.length,
         resolved: annotation.status === "resolved",
         orphan
@@ -142,8 +149,8 @@ export function PlanCommentLayer({
           const r = section.getBoundingClientRect()
           return {
             stageId: section.getAttribute("data-stage") ?? "",
-            top: r.top - base.top + 6,
-            left: r.right - base.left - 8
+            top: toTop(r.top) + 6,
+            left: toLeft(r.right) - 8
           }
         })
         .filter((s) => s.stageId.length > 0)
@@ -152,15 +159,11 @@ export function PlanCommentLayer({
 
   useEffect(() => {
     recompute()
-    const container = containerRef
-    if (container === null) return
-    container.addEventListener("scroll", recompute, { passive: true })
+    // Content-space positions are scroll-invariant, so recompute only when the
+    // annotations or the container SIZE change — not on every scroll frame.
     window.addEventListener("resize", recompute)
-    return () => {
-      container.removeEventListener("scroll", recompute)
-      window.removeEventListener("resize", recompute)
-    }
-  }, [recompute, containerRef])
+    return () => window.removeEventListener("resize", recompute)
+  }, [recompute])
 
   useEffect(() => {
     const container = containerRef
@@ -184,7 +187,11 @@ export function PlanCommentLayer({
       }
       const base = container.getBoundingClientRect()
       const rect = range.getBoundingClientRect()
-      setSelection({ anchor, top: rect.bottom - base.top + 4, left: rect.left - base.left })
+      setSelection({
+        anchor,
+        top: rect.bottom - base.top + container.scrollTop + 4,
+        left: rect.left - base.left + container.scrollLeft
+      })
     }
     doc.addEventListener("selectionchange", onSelect)
     container.addEventListener("mouseup", onSelect)
@@ -217,7 +224,9 @@ export function PlanCommentLayer({
 
   return (
     <PlanCommentThreadControlsProvider controls={controls}>
-      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+      {/* No overflow-hidden: highlights live in content space and must paint
+          below the first viewport as the plan scrolls. */}
+      <div className="pointer-events-none absolute inset-0" aria-hidden="true">
         {rects.map((rect) => (
           <mark
             key={rect.key}
@@ -299,8 +308,12 @@ export function PlanCommentLayer({
               <X className="size-3.5" />
             </button>
           </div>
+          {/* No @mentions on the CREATE path: a new comment is batched to the
+              agent by revisePlan, not dispatched, so a mention here has no
+              delivery semantics (unlike a reply). Offering it would silently
+              drop it. Mentions live on the reply composer inside PlanCommentThread. */}
           <PlanCommentComposer
-            participants={participants}
+            participants={[]}
             autoFocus
             disabled={disabled}
             placeholder="Add a comment…"

@@ -11,6 +11,7 @@ import { Badge } from "../../components/badge.js"
 import { FileChip } from "../../components/file-chip.js"
 import { StatusDot } from "../../components/status-dot.js"
 import { cn } from "../../lib/cn.js"
+import { usePlanFileControls } from "../plan-doc/plan-file-controls.js"
 
 /**
  * Step-based outline card (design screen 04). One digestible card per plan step,
@@ -108,6 +109,10 @@ export interface PlanStepCardProps {
 
 export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
   const body = useMemo(() => taskProse(step.markdown), [step.markdown])
+  // Live worktree evidence + open handler come from the plan file-controls
+  // context (provided around the outline), so chips open the asset and show
+  // live +/- while there's uncommitted work — falling back to declared counts.
+  const fileControls = usePlanFileControls()
   const exec = EXECUTION_META[step.executionStatus]
   const select = () => onSelect?.(step.id)
 
@@ -165,15 +170,27 @@ export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
           <EmptyNote>No file changes declared.</EmptyNote>
         ) : (
           <div className="flex flex-wrap gap-1.5">
-            {step.files.slice(0, MAX_VISIBLE_FILES).map((file) => (
-              <FileChip
-                key={`${file.change}-${file.path}`}
-                path={file.path}
-                added={file.added}
-                removed={file.removed}
-                className={CHANGE_BORDER[file.change]}
-              />
-            ))}
+            {step.files.slice(0, MAX_VISIBLE_FILES).map((file) => {
+              const evidence = fileControls.evidence?.get(file.path)
+              const openable =
+                fileControls.open !== undefined &&
+                (fileControls.knownFiles === undefined ||
+                  fileControls.knownFiles.has(file.path) ||
+                  evidence !== undefined ||
+                  file.added + file.removed > 0)
+              return (
+                <FileChip
+                  key={`${file.change}-${file.path}`}
+                  path={file.path}
+                  // Live evidence wins while it exists; declared counts remain
+                  // once the work is committed and evidence collapses to 0.
+                  added={evidence?.added || file.added}
+                  removed={evidence?.removed || file.removed}
+                  onOpen={openable ? fileControls.open : undefined}
+                  className={CHANGE_BORDER[file.change]}
+                />
+              )
+            })}
             {step.files.length > MAX_VISIBLE_FILES && (
               <span
                 className="inline-flex h-[22px] flex-none items-center rounded-[5px] border border-line/70 bg-surface/40 px-2 font-mono text-[10.5px] text-muted-foreground"

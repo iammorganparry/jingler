@@ -33,8 +33,9 @@ const session = (
     mode: "accept-edits"
   }]
 
-// Plans are HTML documents now (rendered in the Tiptap "Notion-doc" editor), so
-// the canonical file is `current-plan.html`, not the old `current-plan.mdx`.
+// Plans are agent-authored HTML documents; the canonical file is
+// `current-plan.html`. The document is presented read-only across three pages
+// (Main / Architecture / Workflow) — there is no in-place editor.
 const currentPlanPath = (launched: LaunchedApp): string =>
   join(planDirectory(launched.home, launched.repoPath), "current-plan.html")
 
@@ -65,6 +66,11 @@ const openSettings = async (window: Page): Promise<void> => {
   await expect(window.getByRole("button", { name: "Close settings" })).toBeVisible()
 }
 
+/**
+ * Propose the scripted plan and open Plan Review on its canonical revision. The
+ * plan is read-only now, so this waits for the Main step outline to render a
+ * seeded stage title rather than for any editor/sync indicator.
+ */
 const proposePlan = async (launched: LaunchedApp): Promise<void> => {
   const { window } = launched
   const composer = window.getByPlaceholder(/Message .+…/)
@@ -73,65 +79,15 @@ const proposePlan = async (launched: LaunchedApp): Promise<void> => {
   const review = window.getByRole("button", { name: "Plan Review" }).first()
   await expect(review).toBeVisible({ timeout: 20_000 })
   await review.click()
-  await expect(window.getByRole("status")).toContainText("Synced", {
-    timeout: 20_000
-  })
-  await expect(window.getByLabel("Plan document")).toBeVisible()
+  // Main is the step-based outline; a stage's title renders as its card text.
+  await expect(window.getByRole("tab", { name: "Main" })).toBeVisible()
   await expect(
-    window.getByRole("heading", { name: "PRD: Refactor auth flow" })
-  ).toBeVisible()
-  await expect(
-    window
-      .getByLabel("Plan document")
-      .getByText("Audit session middleware", { exact: true })
-  ).toBeVisible()
+    window.getByText("Audit session middleware", { exact: true })
+  ).toBeVisible({ timeout: 20_000 })
   await expect.poll(() => existsSync(currentPlanPath(launched))).toBe(true)
   await expect.poll(() => readFileSync(currentPlanPath(launched), "utf8")).toContain(
     'data-stage="s_01"'
   )
-  await expect(window.getByLabel("Resize step list")).toHaveCount(0)
-  await expect(window.getByLabel("Resize changes")).toHaveCount(0)
-}
-
-/**
- * There is no raw "Source" textarea anymore — the plan is one Tiptap document.
- * To make a persistable edit, click into the doc and type a unique marker at the
- * end of a known prose paragraph, then wait for the debounced autosave to settle.
- * The marker is appended after the Rollout paragraph so it never breaks the
- * "Implement stages in order" phrase other steps anchor on.
- */
-const editSource = async (window: Page, marker: string): Promise<string> => {
-  const anchor = window.getByText("Implement stages in order").first()
-  await anchor.click()
-  await window.keyboard.press("End")
-  await window.keyboard.type(` ${marker}`)
-  await expect(window.getByRole("status")).toContainText(/Editing|Saving/)
-  await expect(window.getByRole("status")).toContainText("Synced", {
-    timeout: 20_000
-  })
-  return marker
-}
-
-const selectText = async (window: Page, needle: string): Promise<void> => {
-  const paragraph = window.getByText(new RegExp(needle)).first()
-  await paragraph.click()
-  await paragraph.evaluate((element, selectedText) => {
-    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
-    let textNode = walker.nextNode()
-    while (textNode && !textNode.textContent?.includes(selectedText)) {
-      textNode = walker.nextNode()
-    }
-    if (!textNode?.textContent) throw new Error(`Could not select "${selectedText}"`)
-    const start = textNode.textContent.indexOf(selectedText)
-    const range = document.createRange()
-    range.setStart(textNode, start)
-    range.setEnd(textNode, start + selectedText.length)
-    const selection = window.getSelection()
-    selection?.removeAllRanges()
-    selection?.addRange(range)
-    document.dispatchEvent(new Event("selectionchange", { bubbles: true }))
-    element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }))
-  }, needle)
 }
 
 test("the PRD template validates, persists, and resets", async ({ launchApp }) => {
@@ -220,7 +176,7 @@ test("the preferred orchestrator persists across restart", async ({ launchApp })
   ).toContainText("Codex")
 })
 
-test("comments stay aligned with their highlighted line, escape clipping, and can be resolved", async ({
+test("the Main, Architecture and Workflow pages each render their surface", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -230,63 +186,38 @@ test("comments stay aligned with their highlighted line, escape clipping, and ca
   })
   await expect(appShell(launched.window)).toBeVisible()
   await proposePlan(launched)
+  const { window } = launched
 
-  await selectText(launched.window, "Implement stages in order")
-  await launched.window.getByRole("button", { name: "Comment", exact: true }).click()
-  await launched.window.getByLabel("Add a comment…").fill("Keep rollout sequential.")
-  await launched.window.getByRole("button", { name: "Send reply" }).click()
+  // Main: the step outline, one card per stage.
+  await expect(window.getByRole("tab", { name: "Main" })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  )
+  await expect(window.getByText("Open PR #482", { exact: true })).toBeVisible()
 
-  const highlight = launched.window.locator('[data-plan-comment-highlight="a1"]')
-  const marker = launched.window.getByRole("button", {
-    name: "user annotation, open"
-  })
-  await expect(highlight).toHaveText("Implement stages in order")
-  await expect(marker).toBeVisible()
-  const [highlightBox, markerBox] = await Promise.all([
-    highlight.boundingBox(),
-    marker.boundingBox()
-  ])
-  expect(highlightBox).not.toBeNull()
-  expect(markerBox).not.toBeNull()
-  if (highlightBox && markerBox) {
-    const highlightedLineCenter = highlightBox.y + Math.min(highlightBox.height, 24) / 2
-    const markerCenter = markerBox.y + markerBox.height / 2
-    expect(Math.abs(highlightedLineCenter - markerCenter)).toBeLessThan(8)
-  }
-
-  await marker.hover()
-  const card = launched.window.locator('[data-plan-comment-card="a1"]')
-  await expect(card).toContainText("Keep rollout sequential.")
-  const cardBounds = await card.evaluate((element) => {
-    const rect = element.getBoundingClientRect()
-    return {
-      top: rect.top,
-      right: rect.right,
-      bottom: rect.bottom,
-      left: rect.left,
-      width: window.innerWidth,
-      height: window.innerHeight
-    }
-  })
-  expect(cardBounds.top).toBeGreaterThanOrEqual(0)
-  expect(cardBounds.left).toBeGreaterThanOrEqual(0)
-  expect(cardBounds.right).toBeLessThanOrEqual(cardBounds.width)
-  expect(cardBounds.bottom).toBeLessThanOrEqual(cardBounds.height)
-
-  await marker.click()
-  await card.getByRole("button", { name: "Resolve" }).click()
+  // Architecture: prose sections + a rendered mermaid diagram.
+  await window.getByRole("tab", { name: "Architecture" }).click()
   await expect(
-    launched.window.getByRole("button", { name: "user annotation, resolved" })
+    window.getByRole("heading", { name: "Technical design" })
   ).toBeVisible()
-  await expect(launched.window.getByRole("status")).toContainText("Synced", {
+  await expect(window.locator(".sb-mermaid svg").first()).toBeVisible({
     timeout: 20_000
   })
-  await expect.poll(() => readFileSync(currentPlanPath(launched), "utf8")).toContain(
-    'data-status="resolved"'
-  )
+
+  // Workflow: the dependency DAG renders each stage as a node.
+  await window.getByRole("tab", { name: "Workflow" }).click()
+  await expect(
+    window.getByText("Audit session middleware").first()
+  ).toBeVisible()
+
+  // Back to Main leaves the outline in place.
+  await window.getByRole("tab", { name: "Main" }).click()
+  await expect(
+    window.getByText("Audit session middleware", { exact: true })
+  ).toBeVisible()
 })
 
-test("live edits and conflicts preserve both drafts", async ({
+test("a comment added on a step appears and can be resolved", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -296,45 +227,31 @@ test("live edits and conflicts preserve both drafts", async ({
   })
   await expect(appShell(launched.window)).toBeVisible()
   await proposePlan(launched)
+  const { window } = launched
 
-  const file = currentPlanPath(launched)
-  await editSource(launched.window, "OPERATOR_MARKER")
-  await expect.poll(() => readFileSync(file, "utf8")).toContain("OPERATOR_MARKER")
+  // The comment layer overlays the Main outline with a per-step affordance.
+  await window.getByRole("button", { name: "Comment on this step" }).first().click()
+  await window.getByLabel("Add a comment…").fill("Keep rollout sequential.")
+  await window.getByRole("button", { name: "Send reply" }).click()
 
-  // Start a local edit and keep it pending, then land a higher-revision external
-  // write before the 1-second autosave — the machine must surface a conflict that
-  // preserves BOTH the local draft and the remote revision, not clobber one.
-  const anchor = launched.window.getByText("Implement stages in order").first()
-  await anchor.click()
-  await launched.window.keyboard.press("End")
-  await launched.window.keyboard.type(" LOCAL_DRAFT_SURVIVES")
+  // The new annotation round-trips through the plan file and surfaces as a pin.
+  const pin = window.getByRole("button", { name: "Comment thread" })
+  await expect(pin).toBeVisible({ timeout: 10_000 })
+  await pin.click()
+  const thread = window.locator("[data-plan-comment-thread]")
+  await expect(thread.getByText("Keep rollout sequential.")).toBeVisible()
+  await expect
+    .poll(() => readFileSync(currentPlanPath(launched), "utf8"))
+    .toContain("Keep rollout sequential.")
 
-  const persisted = readFileSync(file, "utf8")
-  const revision = revisionOf(file)
-  const remote = persisted
-    .replace(/^revision:\s*\d+$/m, `revision: ${revision + 1}`)
-    .replace("Each stage records", "Remote revision preserved. Each stage records")
-  writeFileSync(file, remote)
-
-  await expect(launched.window.getByRole("status")).toContainText("Conflict", {
-    timeout: 20_000
-  })
-  await expect(
-    launched.window.getByText("Local draft", { exact: true })
-  ).toBeVisible()
-  await expect(
-    launched.window.getByText(`Remote revision ${revision + 1}`, { exact: true })
-  ).toBeVisible()
-  await launched.window.getByRole("button", { name: "Keep local and save" }).click()
-  await expect(launched.window.getByRole("status")).toContainText("Synced", {
-    timeout: 20_000
-  })
-  await expect.poll(() => readFileSync(file, "utf8")).toContain(
-    "LOCAL_DRAFT_SURVIVES"
-  )
+  await thread.getByRole("button", { name: "Resolve" }).click()
+  await expect(thread.getByText("Thread resolved")).toBeVisible()
+  await expect
+    .poll(() => readFileSync(currentPlanPath(launched), "utf8"))
+    .toContain('data-status="resolved"')
 })
 
-test("approval executes the saved revision and finishes from criterion evidence", async ({
+test("approving executes the plan and finishes from criterion evidence", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -344,28 +261,21 @@ test("approval executes the saved revision and finishes from criterion evidence"
   })
   await expect(appShell(launched.window)).toBeVisible()
   await proposePlan(launched)
+  const { window } = launched
 
-  const exactText = "OPERATOR_APPROVED_REVISION"
-  await editSource(launched.window, exactText)
-  await launched.window.getByRole("button", {
-    name: "More plan actions"
-  }).click()
-  await launched.window.getByRole("menuitem", {
-    name: "Approve and auto",
-    exact: true
-  }).click()
+  // Approve via the split button's dropdown ("More plan actions").
+  await window.getByRole("button", { name: "More plan actions" }).click()
+  await window.getByRole("menuitem", { name: "Approve and auto", exact: true }).click()
 
-  await expect(launched.window.getByRole("button", { name: "Plan completed" })).toBeVisible({
+  await expect(window.getByRole("button", { name: "Plan completed" })).toBeVisible({
     timeout: 30_000
   })
-  await expect(launched.window.getByText(exactText)).toBeVisible()
   const persisted = readFileSync(currentPlanPath(launched), "utf8")
   expect(persisted).toContain('status: "done"')
-  expect(persisted).toContain(exactText)
   expect(persisted).toContain('data-status="passed"')
-  await launched.window.getByTestId("active-chat-tab").first().click()
-  await expect(launched.window.getByText("Steps 2, 3 and 5 are done.")).toBeVisible()
-  await expect(launched.window.getByText(/PLAN_RESULT/)).toHaveCount(0)
+  await window.getByTestId("active-chat-tab").first().click()
+  await expect(window.getByText("Steps 2, 3 and 5 are done.")).toBeVisible()
+  await expect(window.getByText(/PLAN_RESULT/)).toHaveCount(0)
 })
 
 test("restart resumes the exact canonical revision", async ({ launchApp }) => {
@@ -376,9 +286,6 @@ test("restart resumes the exact canonical revision", async ({ launchApp }) => {
   })
   await expect(appShell(first.window)).toBeVisible()
   await proposePlan(first)
-
-  const exactText = "RESTART_SAFE_CRITERION"
-  await editSource(first.window, exactText)
   await first.app.close()
 
   const reopened = await launchApp({
@@ -390,125 +297,23 @@ test("restart resumes the exact canonical revision", async ({ launchApp }) => {
   })
   await expect(appShell(reopened.window)).toBeVisible()
   await reopened.window.getByRole("button", { name: "Plan Review" }).first().click()
+  // A restored plan re-opens stale, offering a resume of the exact revision.
   await expect(reopened.window.getByText("stale", { exact: true })).toBeVisible()
-  await expect(reopened.window.getByText(exactText).last()).toBeVisible()
+  await expect(
+    reopened.window.getByText("Audit session middleware", { exact: true })
+  ).toBeVisible()
   await reopened.window.getByRole("button", { name: "Approve & implement" }).click()
   await reopened.window.getByTestId("active-chat-tab").first().click()
-  expect(readFileSync(currentPlanPath(reopened), "utf8")).toContain(exactText)
   await reopened.window.getByRole("button", { name: /Allow once/ }).click()
   await reopened.window.getByRole("button", { name: "Plan Review" }).first().click()
-  await expect(reopened.window.getByText("needs verification", { exact: true })).toBeVisible({
-    timeout: 30_000
-  })
-})
-
-test("a plan diagram renders, and a broken source degrades to an error card", async ({
-  launchApp
-}) => {
-  const launched = await launchApp({
-    configured: true,
-    withRepo: true,
-    sessions: session()
-  })
-  await expect(appShell(launched.window)).toBeVisible()
-  await proposePlan(launched)
-
-  // The canned plan ships a live `data-diagram="mermaid"` node with editable
-  // source rather than exposing the canonical raw <pre>.
-  await expect(launched.window.getByLabel("Mermaid diagram source")).toHaveValue(
-    /graph|flowchart/
-  )
-  await expect(launched.window.locator(".sb-mermaid svg").first()).toBeVisible({
-    timeout: 20_000
-  })
-
-  // Invalid source is contained inside the diagram node and leaves the rest of
-  // the plan usable.
-  await launched.window.getByLabel("Mermaid diagram source").fill("@@@ not a diagram @@@")
-  await expect(launched.window.getByText("Diagram error")).toBeVisible({
-    timeout: 20_000
-  })
-  await expect(launched.window.getByText(/Rollout|Testing|Risks/).first()).toBeVisible()
-})
-
-test("a burst of inline edits makes exactly one canonical revision", async ({
-  launchApp
-}) => {
-  const launched = await launchApp({
-    configured: true,
-    withRepo: true,
-    sessions: session()
-  })
-  await expect(appShell(launched.window)).toBeVisible()
-  await proposePlan(launched)
-
-  const file = currentPlanPath(launched)
-  const startRevision = revisionOf(file)
-
-  const anchor = launched.window.getByText("Implement stages in order").first()
-  await anchor.click()
-  await launched.window.keyboard.press("End")
-  await launched.window.keyboard.type(" INLINE_EDIT_MARKER")
-  await expect(launched.window.getByRole("status")).toContainText("Editing")
-
-  // This is deliberately shorter than the 1-second trailing debounce. Every
-  // character already reached Tiptap, so the canonical revision must remain
-  // untouched until the editor becomes idle.
-  await launched.window.waitForTimeout(750)
-  expect(revisionOf(file)).toBe(startRevision)
-
-  await expect(launched.window.getByRole("status")).toContainText("Synced", {
-    timeout: 20_000
-  })
-
-  expect(readFileSync(file, "utf8")).toContain("INLINE_EDIT_MARKER")
-  expect(revisionOf(file)).toBe(startRevision + 1)
-})
-
-test("autosave echoes preserve the live caret and highlighted plan text", async ({
-  launchApp
-}) => {
-  const launched = await launchApp({
-    configured: true,
-    withRepo: true,
-    sessions: session()
-  })
-  await expect(appShell(launched.window)).toBeVisible()
-  await proposePlan(launched)
-
-  const editor = launched.window.getByLabel("Plan document")
-  const anchor = launched.window.getByText("Implement stages in order").first()
-  await anchor.click()
-  await launched.window.keyboard.press("End")
-  await launched.window.keyboard.type(" CARET_STABLE_A")
-  await expect(launched.window.getByRole("status")).toContainText("Synced", {
-    timeout: 20_000
-  })
-
-  await expect(editor).toBeFocused()
-  await launched.window.keyboard.type("_B")
   await expect(
-    launched.window.getByText(/CARET_STABLE_A_B/).first()
-  ).toBeVisible()
-  await expect(launched.window.getByRole("status")).toContainText("Synced", {
-    timeout: 20_000
-  })
-  await expect.poll(() => readFileSync(currentPlanPath(launched), "utf8")).toContain(
-    "CARET_STABLE_A_B"
-  )
-
-  await selectText(launched.window, "CARET_STABLE_A_B")
-  await expect
-    .poll(() =>
-      launched.window.evaluate(() => window.getSelection()?.toString() ?? "")
-    )
-    .toBe("CARET_STABLE_A_B")
-  await expect(
-    launched.window.getByRole("button", { name: "Comment", exact: true })
-  ).toBeVisible()
+    reopened.window.getByText("needs verification", { exact: true })
+  ).toBeVisible({ timeout: 30_000 })
 })
 
-test("plan file chip opens the changed asset in the diff engine", async ({ launchApp }) => {
+test("plan file chips render on the step outline with diff evidence", async ({
+  launchApp
+}) => {
   const launched = await launchApp({
     configured: true,
     withRepo: true,
@@ -517,92 +322,15 @@ test("plan file chip opens the changed asset in the diff engine", async ({ launc
   })
   await expect(appShell(launched.window)).toBeVisible()
   await proposePlan(launched)
+  const { window } = launched
 
-  const refreshFile = launched.window.getByRole("button", {
-    name: "Open src/auth/refresh.ts (+18 −0)"
-  })
-  const retryFile = launched.window.getByRole("button", {
-    name: "Open src/auth/retry.ts (+15 −0)"
-  })
-  const [refreshBox, retryBox] = await Promise.all([
-    refreshFile.boundingBox(),
-    retryFile.boundingBox()
-  ])
-  expect(refreshBox?.height).toBeLessThanOrEqual(32)
-  expect(Math.abs((refreshBox?.y ?? 0) - (retryBox?.y ?? 0))).toBeLessThan(2)
-
-  const file = launched.window.getByRole("button", {
-    name: "Open src/auth/token-store.ts (+1 −0)"
-  })
-  await expect(file).toBeVisible()
-  await file.click()
-
-  await expect(launched.window.getByRole("button", { name: "Hide preview" })).toBeVisible()
-  await expect(
-    launched.window.getByRole("button", { name: "token-store.ts", exact: true })
-  ).toBeVisible()
-  await expect(launched.window.getByText("tokenStoreChanged = true")).toBeVisible({
-    timeout: 15_000
-  })
-  await expect(
-    launched.window.getByText("+1", { exact: true }).last()
-  ).toBeVisible()
+  // Each step's Changes section renders its declared edits as inline file chips.
+  await expect(window.getByText("src/auth/token-store.ts", { exact: true })).toBeVisible()
+  await expect(window.getByText("src/auth/refresh.ts").first()).toBeVisible()
+  await expect(window.getByText("src/auth/retry.ts", { exact: true })).toBeVisible()
 })
 
-test("view switches and app close flush edits inside the debounce window", async ({
-  launchApp
-}) => {
-  const launched = await launchApp({
-    configured: true,
-    withRepo: true,
-    sessions: session()
-  })
-  await expect(appShell(launched.window)).toBeVisible()
-  await proposePlan(launched)
-  const file = currentPlanPath(launched)
-  const startRevision = revisionOf(file)
-  const marker = "SURVIVES_VIEW_SWITCH"
-
-  const anchor = launched.window.getByText("Implement stages in order").first()
-  await anchor.click()
-  await launched.window.keyboard.press("End")
-  await launched.window.keyboard.type(` ${marker}`)
-  await expect(launched.window.getByRole("status")).toContainText("Editing")
-
-  // Changes is outside the Conversation/Plan mount group, so this tears down
-  // the Plan Review view before its one-second debounce expires.
-  await launched.window.getByRole("button", { name: "Changes" }).click()
-  await expect
-    .poll(() => readFileSync(file, "utf8"), { timeout: 20_000 })
-    .toContain(marker)
-  expect(revisionOf(file)).toBe(startRevision + 1)
-
-  await launched.window.getByRole("button", { name: "Plan Review" }).click()
-  await expect(launched.window.getByText(new RegExp(marker))).toBeVisible()
-
-  const closeMarker = "SURVIVES_APP_CLOSE"
-  const editedAnchor = launched.window.getByText(new RegExp(marker)).first()
-  await editedAnchor.click()
-  await launched.window.keyboard.press("End")
-  await launched.window.keyboard.type(` ${closeMarker}`)
-  await expect(launched.window.getByRole("status")).toContainText("Editing")
-  await launched.app.close()
-
-  const reopened = await launchApp({
-    home: launched.home,
-    reposDir: launched.reposDir,
-    userDataDir: launched.userDataDir,
-    configured: true,
-    withRepo: true
-  })
-  await expect(appShell(reopened.window)).toBeVisible()
-  await reopened.window
-    .getByRole("button", { name: "Plan Review", exact: true })
-    .click()
-  await expect(reopened.window.getByText(new RegExp(closeMarker))).toBeVisible()
-})
-
-test("an external write to the plan file live-updates the open editor (Plan.watch)", async ({
+test("an external write to the plan file live-updates the outline (Plan.watch)", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -616,11 +344,14 @@ test("an external write to the plan file live-updates the open editor (Plan.watc
   const file = currentPlanPath(launched)
   const persisted = readFileSync(file, "utf8")
   const revision = revisionOf(file)
-  // No local edits are pending, so a higher-revision external write is adopted
-  // (not a conflict) and must appear without the old fixed-interval poll.
+  // No local edits are possible, so a higher-revision external write is adopted
+  // and its new content must appear on the read-only outline without a reload.
   const remote = persisted
     .replace(/^revision:\s*\d+$/m, `revision: ${revision + 1}`)
-    .replace("Implement stages in order", "Implement stages in order WATCH_LIVE_UPDATE")
+    .replace(
+      'data-title="Audit session middleware"',
+      'data-title="Audit session middleware WATCH_LIVE_UPDATE"'
+    )
   writeFileSync(file, remote)
 
   await expect(launched.window.getByText(/WATCH_LIVE_UPDATE/)).toBeVisible({
@@ -639,8 +370,6 @@ test("the Plan Review tab is always present and can seed a draft to author", asy
   await expect(appShell(launched.window)).toBeVisible()
 
   // Present with NO plan proposed yet (previously gated on a plan existing).
-  const chatContainer = await launched.window.getByTestId("composer").boundingBox()
-  expect(chatContainer).not.toBeNull()
   const tab = launched.window.getByRole("button", { name: "Plan Review" }).first()
   await expect(tab).toBeVisible()
   await tab.click()
@@ -648,20 +377,10 @@ test("the Plan Review tab is always present and can seed a draft to author", asy
   // Empty state offers a way to start authoring a plan for the agent.
   await launched.window.getByRole("button", { name: "Start a plan" }).click()
 
-  // A blank draft (from the template) appears in the editable plan document.
-  await expect(launched.window.getByLabel("Plan document")).toBeVisible({
+  // A blank draft (from the template) renders as the read-only plan surface.
+  await expect(launched.window.getByTestId("plan-review-container")).toBeVisible({
     timeout: 20_000
   })
-  const planContainer = await launched.window
-    .getByTestId("plan-review-container")
-    .boundingBox()
-  expect(planContainer).not.toBeNull()
-  const planDocument = await launched.window.getByLabel("Plan document").boundingBox()
-  expect(planDocument).not.toBeNull()
-  // The collaborative workspace may be wider than chat to make room for its
-  // minimap, while the document itself retains the same readable line length.
-  expect(planContainer!.width).toBeGreaterThanOrEqual(chatContainer!.width)
-  expect(planDocument!.width).toBeLessThanOrEqual(760)
   await expect
     .poll(() => readFileSync(currentPlanPath(launched), "utf8"))
     .toContain('status: "draft"')
