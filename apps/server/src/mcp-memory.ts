@@ -8,7 +8,7 @@ import {
   type MemoryMcpToolName,
   type MemoryPrivilege
 } from "@jingler/core"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { Effect, JSONSchema, Match, Schema } from "effect"
 import type { JsonValue, MemoryClient, MemoryClientRequest } from "./memory-client.js"
 
@@ -132,7 +132,18 @@ const tools: ReadonlyArray<ToolDefinition> = [
     method: "POST",
     path: "/internal/memory/proposals",
     body: {
-      id: `proposal-${requestId}`,
+      // The proposal id is derived SERVER-SIDE from the grant subject plus the
+      // proposal content — never from a client-supplied header. This removes
+      // client control over the durable id (a grant holder could otherwise
+      // collide with a teammate's in-flight proposal, which the vault rejects
+      // with a same-id/different-content 409), namespaces the id by subject so
+      // two users can never collide, and keeps idempotent replay: the same
+      // subject + same content always hashes to the same id, so the vault's
+      // same-id/same-content dedup returns the existing proposal. `requestId`
+      // (the x-request-id header) is retained for tracing only.
+      id: `proposal-${createHash("sha256")
+        .update([claims.subject, args.pageId, args.baseRevisionId, args.markdown].join(" "))
+        .digest("hex")}`,
       ...args,
       proposedBy: claims.subject,
       createdAt: new Date().toISOString()

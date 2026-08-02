@@ -206,6 +206,14 @@ export class InMemoryTurbopufferClient implements TurbopufferClient {
   }
 }
 
+/**
+ * Rows fetched per {@link HttpTurbopufferClient.heads} page. `heads()` paginates
+ * id-ascending until a short page returns, so this only bounds per-request size —
+ * never the total heads surfaced (which must cover the whole namespace or the
+ * tail gets needlessly re-embedded).
+ */
+const HEADS_PAGE_SIZE = 1_000
+
 export interface TurbopufferHttpOptions {
   readonly apiKey: string
   readonly baseUrl?: string
@@ -314,14 +322,40 @@ export class HttpTurbopufferClient implements TurbopufferClient {
   }
 
   async heads(namespace: string): Promise<ReadonlyArray<TurbopufferStoredHead>> {
-    const response = await this.fetchImpl(this.url(namespace, "/query"), {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify({ rank_by: ["id", "asc"], top_k: 1200, include_attributes: ["contentHash"] })
-    })
-    if (!response.ok) return []
-    const body = (await response.json()) as { readonly rows?: ReadonlyArray<TurbopufferHttpRow> }
-    return (body.rows ?? []).map((row) => ({ id: row.id, contentHash: row.contentHash ?? "" }))
+    // Paginate id-ascending until a short page returns. A single unpaginated
+    // top_k would silently cap the result, so a namespace larger than one page
+    // would never surface its tail in the stored-hash map — and syncAcceptedPages
+    // would then re-embed (OpenAI) and re-upsert every tail page on EVERY sync,
+    // an unbounded recurring cost as the namespace grows toward the 10k-page
+    // target. After each full page we advance strictly past the last id seen
+    // using turbopuffer's v2 comparison filter `[attribute, operator, value]`.
+    const heads: Array<TurbopufferStoredHead> = []
+    let after: string | undefined
+    for (;;) {
+      const response = await this.fetchImpl(this.url(namespace, "/query"), {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify({
+          rank_by: ["id", "asc"],
+          top_k: HEADS_PAGE_SIZE,
+          include_attributes: ["contentHash"],
+          ...(after === undefined ? {} : { filters: ["id", "Gt", after] })
+        })
+      })
+      if (!response.ok) break
+      const body = (await response.json()) as { readonly rows?: ReadonlyArray<TurbopufferHttpRow> }
+      const rows = body.rows ?? []
+      for (const row of rows) heads.push({ id: row.id, contentHash: row.contentHash ?? "" })
+      const lastId = rows.at(-1)?.id
+      if (rows.length < HEADS_PAGE_SIZE || lastId === undefined) break
+      after = lastId
+    }
+    if (heads.length > HEADS_PAGE_SIZE) {
+      console.warn(
+        `[turbopuffer] namespace ${namespace} holds ${heads.length} heads across multiple pages`
+      )
+    }
+    return heads
   }
 }
 

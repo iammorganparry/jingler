@@ -4,7 +4,12 @@ import { describe, expect, it } from "vitest"
 import type { DurableObjectStorageLike, SqlStorageCursor, SqlStorageLike } from "./env.js"
 import { InMemoryR2Bucket, MemoryR2Store } from "./r2-store.js"
 import { buildSearchProjection, searchAcceptedPages } from "./search.js"
-import { InMemoryVaultState, SqliteVaultState, TeamVault } from "./team-vault.js"
+import {
+  InMemoryVaultState,
+  RETRIEVAL_RETENTION,
+  SqliteVaultState,
+  TeamVault
+} from "./team-vault.js"
 
 // Runs an Effect-returning vault/layer/state method to a Promise at the test boundary.
 const run = Effect.runPromise
@@ -337,5 +342,104 @@ describe("TeamVault", () => {
     const { commit } = projectedCommit(sql)
     await expect(run(commit)).rejects.toThrow("exec failed")
     expect(sql.transactionSyncCalls).toBe(1)
+  })
+
+  it("bounds in-memory retrieval metrics to the newest RETRIEVAL_RETENTION rows", async () => {
+    const state = new InMemoryVaultState()
+    const total = RETRIEVAL_RETENTION + 250
+    for (let index = 0; index < total; index += 1) {
+      await run(state.recordRetrieval({
+        id: `retrieval:${String(index).padStart(6, "0")}`,
+        occurredAt: new Date(1_700_000_000_000 + index * 1_000).toISOString(),
+        queryHash: `hash-${index}`,
+        resultCount: 0,
+        durationMs: 0
+      }))
+    }
+    const kept = await run(state.listRetrievals())
+    // The cap holds: N+ records leave exactly N retained, keeping the newest and
+    // dropping the oldest.
+    expect(kept).toHaveLength(RETRIEVAL_RETENTION)
+    expect(kept.some((metric) => metric.id === `retrieval:${String(total - 1).padStart(6, "0")}`)).toBe(
+      true
+    )
+    expect(kept.some((metric) => metric.id === "retrieval:000000")).toBe(false)
+  })
+
+  it("prunes the SQLite retrieval table on insert and reads it back bounded", async () => {
+    const sql = new RecordingSqlStorage()
+    const state = new SqliteVaultState(sql)
+    await run(state.recordRetrieval({
+      id: "retrieval:1",
+      occurredAt: "2026-08-02T00:00:00.000Z",
+      queryHash: "hash-1",
+      resultCount: 0,
+      durationMs: 0
+    }))
+    // Every insert is followed by a bounded DELETE keeping only the newest rows.
+    expect(sql.queries.some((query) => query.startsWith("INSERT OR IGNORE INTO memory_retrievals"))).toBe(
+      true
+    )
+    expect(
+      sql.queries.some(
+        (query) =>
+          query.startsWith("DELETE FROM memory_retrievals") &&
+          query.includes("ORDER BY occurred_at DESC, id DESC LIMIT ?")
+      )
+    ).toBe(true)
+    sql.queries.length = 0
+    await run(state.listRetrievals())
+    // The read is itself capped with an explicit LIMIT.
+    expect(
+      sql.queries.some((query) => query.includes("FROM memory_retrievals ORDER BY occurred_at, id LIMIT ?"))
+    ).toBe(true)
+  })
+
+  it("aggregates retrieval metrics into one bounded R2 object per UTC day", async () => {
+    const bucket = new InMemoryR2Bucket()
+    const vault = await run(TeamVault.create("org-retrieval", new InMemoryVaultState(), bucket))
+    await run(vault.ingestSource(source, "Primary runbook evidence"))
+    await run(vault.ingestAcceptedPage({
+      revisionId: "revision-1",
+      markdown: serializeMemoryMarkdown(
+        page(1, "# Runbook\n\nThe albatross procedure is valid. [@runbook-citation]\n")
+      ),
+      actorId: "author",
+      createdAt: "2026-07-01T00:00:00.000Z"
+    }))
+
+    for (let index = 0; index < 5; index += 1) {
+      await run(vault.search("albatross", 10, `2026-08-02T00:00:0${index}.000Z`))
+    }
+    await run(vault.search("albatross", 10, "2026-08-03T00:00:00.000Z"))
+
+    const retrievalKeys = bucket.keys().filter((key) => key.includes("/history/retrievals/"))
+    // One rollup object per UTC day — NOT one immutable object per search.
+    expect(retrievalKeys).toHaveLength(2)
+    expect(retrievalKeys.some((key) => key.endsWith("2026-08-02.json"))).toBe(true)
+    expect(retrievalKeys.some((key) => key.endsWith("2026-08-03.json"))).toBe(true)
+    const dayObject = await bucket.get(
+      retrievalKeys.find((key) => key.endsWith("2026-08-02.json")) ?? ""
+    )
+    expect(JSON.parse((await dayObject?.text()) ?? "[]")).toHaveLength(5)
+  })
+
+  it("folds only a bounded retrieval set into the dashboard", async () => {
+    const state = new InMemoryVaultState()
+    const total = RETRIEVAL_RETENTION + 500
+    for (let index = 0; index < total; index += 1) {
+      await run(state.recordRetrieval({
+        id: `retrieval:${String(index).padStart(6, "0")}`,
+        occurredAt: new Date(1_700_000_000_000 + index * 1_000).toISOString(),
+        queryHash: `hash-${index}`,
+        resultCount: 1,
+        durationMs: 1
+      }))
+    }
+    const vault = await run(TeamVault.create("org-dashboard", state, new InMemoryR2Bucket()))
+    const dashboard = await run(vault.dashboard("2030-01-01T00:00:00.000Z", "all"))
+    // `retrieval.searches` counts the folded retrievals; the fold reads the bounded
+    // table, so it never exceeds the retention cap no matter how many searches ran.
+    expect(dashboard.retrieval.searches).toBe(RETRIEVAL_RETENTION)
   })
 })

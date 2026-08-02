@@ -1,8 +1,9 @@
 import { Effect } from "effect"
-import type { MemoryPage } from "@jingler/memory"
-import { describe, expect, it } from "vitest"
+import { stableContentHash, type MemoryPage } from "@jingler/memory"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { FakeEmbedder } from "./embeddings.js"
 import {
+  HttpTurbopufferClient,
   InMemoryTurbopufferClient,
   TurbopufferVectorLayer,
   createTurbopufferClientFromEnv,
@@ -41,6 +42,73 @@ class RecordingTurbopufferClient extends InMemoryTurbopufferClient {
     return super.upsert(namespace, documents)
   }
 }
+
+interface FakeStoredRow {
+  readonly id: string
+  readonly contentHash: string
+  readonly vector: ReadonlyArray<number>
+}
+
+/**
+ * A minimal fake turbopuffer HTTP backend that honours id-ascending pagination
+ * via the v2 `filters: ["id", "Gt", after]` comparison, so it caps every `/query`
+ * response at `top_k`. It backs a real {@link HttpTurbopufferClient}, proving the
+ * client paginates rather than silently truncating a large namespace.
+ */
+class PaginatingTurbopufferBackend {
+  private readonly rows = new Map<string, FakeStoredRow>()
+  queryCount = 0
+
+  seed(rows: ReadonlyArray<FakeStoredRow>): void {
+    for (const row of rows) this.rows.set(row.id, row)
+  }
+
+  readonly fetch: typeof fetch = async (input, init) => {
+    const url =
+      typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+    const body = init?.body === undefined ? {} : (JSON.parse(init.body as string) as Record<string, unknown>)
+    if (init?.method === "DELETE") {
+      this.rows.clear()
+      return new Response(null, { status: 200 })
+    }
+    if (url.endsWith("/query")) {
+      this.queryCount += 1
+      const filters = body.filters
+      const after = Array.isArray(filters) ? (filters[2] as string) : undefined
+      const topK = typeof body.top_k === "number" ? body.top_k : 10
+      const rows = [...this.rows.values()]
+        .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))
+        .filter((row) => after === undefined || row.id > after)
+        .slice(0, topK)
+        .map((row) => ({ id: row.id, contentHash: row.contentHash }))
+      return Response.json({ rows })
+    }
+    // Namespace-root POST: an upsert (upsert_rows) or a delete (deletes).
+    if (Array.isArray(body.deletes)) {
+      for (const id of body.deletes as ReadonlyArray<string>) this.rows.delete(id)
+      return Response.json({})
+    }
+    const upsertRows = body.upsert_rows
+    if (Array.isArray(upsertRows)) {
+      for (const row of upsertRows as ReadonlyArray<{
+        readonly id: string
+        readonly contentHash: string
+        readonly vector: ReadonlyArray<number>
+      }>) {
+        this.rows.set(row.id, { id: row.id, contentHash: row.contentHash, vector: row.vector })
+      }
+      return Response.json({})
+    }
+    return Response.json({})
+  }
+}
+
+const paddedPage = (index: number): MemoryPage =>
+  page(`page-${String(index).padStart(4, "0")}`, `Body number ${index} about gardens and compost.`)
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 const gardenA = page("garden", "Tomatoes and peppers grow in raised garden beds with compost.")
 const gardenB = page("compost", "Compost enriches garden soil; peppers and tomatoes love raised beds.")
@@ -147,6 +215,51 @@ describe("turbopuffer vector layer", () => {
     const hits = await run(layer.relatedness(gardenB, 5))
     expect(hits.map((n) => n.targetId)).toContain("garden")
     expect(layer.embeddingModel).toBe("fake-embedding-v1")
+  })
+
+  it("08.7 paginates heads() past a single page so the whole namespace is returned", async () => {
+    const backend = new PaginatingTurbopufferBackend()
+    const total = 2_500
+    backend.seed(
+      Array.from({ length: total }, (_unused, index) => ({
+        id: `page-${String(index).padStart(4, "0")}`,
+        contentHash: `hash-${index}`,
+        vector: []
+      }))
+    )
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const client = new HttpTurbopufferClient({ apiKey: "tpuf-test", fetch: backend.fetch })
+
+    const heads = await client.heads("ns-1")
+
+    // Every id is returned, including the tail that a single top_k would drop.
+    expect(heads).toHaveLength(total)
+    expect(heads.at(-1)?.id).toBe("page-2499")
+    expect(new Set(heads.map((head) => head.id)).size).toBe(total)
+    // 2500 rows at 1000/page → three paginated queries, not one truncated query.
+    expect(backend.queryCount).toBe(3)
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it("08.7 does not re-embed the tail of a namespace larger than one heads page", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const backend = new PaginatingTurbopufferBackend()
+    const client = new HttpTurbopufferClient({ apiKey: "tpuf-test", fetch: backend.fetch })
+    const pages = Array.from({ length: 2_500 }, (_unused, index) => paddedPage(index))
+    const layer = new TurbopufferVectorLayer(client, "org-large")
+
+    const first = await run(layer.syncAcceptedPages(pages))
+    expect(first.embedded).toBe(2_500)
+
+    // A second sync with the same pages must skip ALL of them — the tail beyond
+    // the first page is only skippable when heads() paginated it into the map.
+    const second = await run(layer.syncAcceptedPages(pages))
+    expect(second.embedded).toBe(0)
+    expect(second.unchanged).toBe(2_500)
+    // Sanity: the stored head for a tail page carries the current body's hash.
+    const heads = await client.heads(turbopufferNamespace("org-large"))
+    const tail = heads.find((head) => head.id === "page-2499")
+    expect(tail?.contentHash).toBe(stableContentHash(pages[2_499]!.body))
   })
 
   it("08.6 reads the API key only from the Worker env", () => {

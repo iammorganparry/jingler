@@ -383,6 +383,16 @@ export class InMemoryVaultState implements VaultStateStorage {
   recordRetrieval(metric: RetrievalMetric): Effect.Effect<void> {
     return Effect.sync(() => {
       this.retrievals.set(metric.id, metric)
+      // Bound to the newest RETRIEVAL_RETENTION metrics so the table never grows
+      // without limit (mirrors the SQLite prune).
+      if (this.retrievals.size > RETRIEVAL_RETENTION) {
+        this.retrievals = new Map(
+          boundedRetrievals([...this.retrievals.values()], RETRIEVAL_RETENTION).map((entry) => [
+            entry.id,
+            entry
+          ])
+        )
+      }
     })
   }
 
@@ -595,6 +605,14 @@ export class SqliteVaultState implements VaultStateStorage {
         metric.resultCount,
         metric.durationMs
       )
+      // Prune to the newest RETRIEVAL_RETENTION rows (newest by occurred_at, then id)
+      // right after the insert, so the table — and the per-request dashboard fold that
+      // reads it — stays bounded no matter how many searches run. A standalone bounded
+      // DELETE is safe here because recordRetrieval is already its own write.
+      this.sql.exec(
+        "DELETE FROM memory_retrievals WHERE id NOT IN (SELECT id FROM memory_retrievals ORDER BY occurred_at DESC, id DESC LIMIT ?)",
+        RETRIEVAL_RETENTION
+      )
     })
   }
 
@@ -607,7 +625,7 @@ export class SqliteVaultState implements VaultStateStorage {
           readonly query_hash: string
           readonly result_count: number
           readonly duration_ms: number
-        }>("SELECT id, occurred_at, query_hash, result_count, duration_ms FROM memory_retrievals ORDER BY occurred_at, id")
+        }>("SELECT id, occurred_at, query_hash, result_count, duration_ms FROM memory_retrievals ORDER BY occurred_at, id LIMIT ?", RETRIEVAL_RETENTION)
         .toArray()
         .map((row) => ({
           id: row.id,
@@ -672,6 +690,39 @@ const boundedSessionRetrievals = (
         compareText(left.occurredAt, right.occurredAt) || compareText(left.id, right.id)
     )
     .slice(-MAX_SESSION_RETRIEVALS)
+
+/**
+ * Per-search retrieval metrics are ephemeral, privacy-safe analytics — never a
+ * source of truth. They are bounded on all three growth vectors:
+ *  - {@link RETRIEVAL_RETENTION}: newest rows kept in the DO SQLite `memory_retrievals`
+ *    table (pruned on every insert), so per-request dashboard folds stay cheap.
+ *  - {@link RETRIEVAL_DAY_CAP}: max metrics kept in each UTC-day R2 rollup object, so
+ *    R2 grows by (bounded) day count, not by search volume.
+ *  - {@link RETRIEVAL_REBUILD_DAYS}: newest day-rollups read by rebuildFromR2, so
+ *    recovery time is bounded regardless of history length.
+ */
+export const RETRIEVAL_RETENTION = 2_000
+export const RETRIEVAL_DAY_CAP = 500
+export const RETRIEVAL_REBUILD_DAYS = 30
+
+/** The UTC day a metric belongs to, as an R2-rollup `YYYY-MM-DD` key. */
+const retrievalDayOf = (metric: RetrievalMetric): string => metric.occurredAt.slice(0, 10)
+
+/** Newest-N retrieval metrics, deduped by id, ordered by (occurredAt, id). */
+const boundedRetrievals = (
+  values: ReadonlyArray<RetrievalMetric>,
+  limit: number
+): ReadonlyArray<RetrievalMetric> =>
+  [...uniqueById(values)]
+    .sort(
+      (left, right) =>
+        compareText(left.occurredAt, right.occurredAt) || compareText(left.id, right.id)
+    )
+    .slice(-Math.max(0, limit))
+
+const RetrievalArraySchema = Schema.Array(RetrievalMetricSchema)
+const decodeRetrievalArray = (value: string): ReadonlyArray<RetrievalMetric> =>
+  Schema.decodeUnknownSync(RetrievalArraySchema)(JSON.parse(value))
 
 const uniqueSourceRecords = (
   values: ReadonlyArray<StoredSourceRecord>
@@ -1528,7 +1579,19 @@ export class TeamVault {
         resultCount: response.results.length,
         durationMs: Math.max(0, Math.round((performance.now() - startedAt) * 1000) / 1000)
       }
-      yield* Effect.promise(() => this.objects.putRetrievalMetric(metric.id, canonicalJson(metric)))
+      // Persist the metric into the bounded, MUTABLE per-UTC-day R2 rollup rather
+      // than a fresh immutable object per search: read the day's rollup, merge this
+      // metric, cap to the newest RETRIEVAL_DAY_CAP, and overwrite. This keeps R2
+      // durable (so a rebuild onto a fresh DO still recovers analytics) while
+      // bounding R2 growth to one capped object per day. A lost metric under
+      // concurrent same-day RMW is acceptable — these are ephemeral analytics.
+      const day = retrievalDayOf(metric)
+      const existing = yield* Effect.promise(() => this.objects.readRetrievalDay(day))
+      const merged = boundedRetrievals(
+        [...(existing === null ? [] : decodeRetrievalArray(existing)), metric],
+        RETRIEVAL_DAY_CAP
+      )
+      yield* Effect.promise(() => this.objects.putRetrievalDay(day, canonicalJson(merged)))
       yield* this.state.recordRetrieval(metric)
       return response
     })
@@ -1761,14 +1824,18 @@ export class TeamVault {
       )
       const sources = uniqueSourceRecords(yield* Effect.promise(() => this.objects.listSourceRecords()))
       const history = decodeHistory(yield* Effect.promise(() => this.objects.readLatestHistorySnapshot()))
-      const retrievals = uniqueById([
-        ...history.retrievals,
-        ...(yield* Effect.promise(async () => Promise.all(
-          (await this.objects.listRetrievalMetrics()).map(async (value) =>
-            Schema.decodeUnknownSync(RetrievalMetricSchema)(JSON.parse(value))
+      // Recover retrieval analytics from the newest RETRIEVAL_REBUILD_DAYS R2 day
+      // rollups only, so recovery reads a bounded number of objects regardless of
+      // history length. Each rollup is itself an array capped at RETRIEVAL_DAY_CAP.
+      const retrievals = boundedRetrievals(
+        [
+          ...history.retrievals,
+          ...(yield* Effect.promise(() => this.objects.listRetrievalDays(RETRIEVAL_REBUILD_DAYS))).flatMap(
+            (value) => decodeRetrievalArray(value)
           )
-        )))
-      ])
+        ],
+        RETRIEVAL_REBUILD_DAYS * RETRIEVAL_DAY_CAP
+      )
       const latestByPage = new Map<string, StoredRevisionRecord>()
       for (const revision of revisions) {
         const currentHead = latestByPage.get(revision.pageId)

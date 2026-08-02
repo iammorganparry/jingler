@@ -552,6 +552,59 @@ describe("stateless MCP 2026-07-28", () => {
     if (request === undefined) return
     expect((request.body as { createdAt?: string }).createdAt).toMatch(/^\d{4}-/)
   })
+
+  it("derives the proposal id server-side from the subject and content, never the request id", async () => {
+    const proposalArguments = {
+      pageId: "page-1",
+      baseRevisionId: "revision-1",
+      markdown: "---\nid: page-1\n---\nbody one\n"
+    }
+    const proposalIdFor = async (
+      grant: string,
+      argumentsValue: Record<string, unknown>,
+      requestIdHeader: string
+    ): Promise<string> => {
+      const { client, requests } = collectingClient()
+      await handleMemoryMcpRequest(
+        requestFor("tools/call", grant, {
+          params: { name: "memory_propose", arguments: argumentsValue },
+          headers: { "x-request-id": requestIdHeader }
+        }),
+        dependenciesFor(client)
+      )
+      const request = requests[0]
+      expect(request).toBeDefined()
+      return ((request as MemoryClientRequest).body as { id: string }).id
+    }
+
+    const grant = issue("org-paid", ["read", "propose"]).grant
+    // Same subject + same content but a DIFFERENT x-request-id → same id.
+    const idA = await proposalIdFor(grant, proposalArguments, "req-header-A")
+    const idB = await proposalIdFor(grant, proposalArguments, "req-header-B")
+    expect(idA).toBe(idB)
+    expect(idA).toMatch(/^proposal-[0-9a-f]{64}$/)
+    // The id is NOT the x-request-id header value.
+    expect(idA).not.toContain("req-header-A")
+    expect(idA).not.toContain("req-header-B")
+
+    // DIFFERENT content but the SAME x-request-id → different id.
+    const idDifferentContent = await proposalIdFor(
+      grant,
+      { ...proposalArguments, markdown: "---\nid: page-1\n---\nbody two\n" },
+      "req-header-A"
+    )
+    expect(idDifferentContent).not.toBe(idA)
+
+    // A DIFFERENT grant subject with identical content → different id (subject-namespaced).
+    const otherSubjectGrant = issueMemoryGrant(
+      { subject: "user-2", organizationId: "org-paid", privileges: ["read", "propose"] },
+      grantConfig,
+      100,
+      "grant-user-2"
+    ).grant
+    const idOtherSubject = await proposalIdFor(otherSubjectGrant, proposalArguments, "req-header-A")
+    expect(idOtherSubject).not.toBe(idA)
+  })
 })
 
 describe("private Memory Worker client", () => {

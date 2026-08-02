@@ -194,18 +194,38 @@ export class MemoryR2Store {
     return latest === undefined ? null : readRequired(this.bucket, latest)
   }
 
-  async putRetrievalMetric(id: string, value: string): Promise<void> {
-    await putImmutable(
-      this.bucket,
-      this.key(`history/retrievals/${encodeSegment(id)}.json`),
-      value,
-      "application/json"
-    )
+  private retrievalDayKey(day: string): string {
+    return this.key(`history/retrievals/${encodeSegment(day)}.json`)
   }
 
-  async listRetrievalMetrics(): Promise<Array<string>> {
+  /** The current rollup array (JSON) for one UTC day, or null if none exists yet. */
+  async readRetrievalDay(day: string): Promise<string | null> {
+    const object = await this.bucket.get(this.retrievalDayKey(day))
+    return object === null ? null : object.text()
+  }
+
+  /**
+   * Overwrite one UTC day's retrieval rollup. This is a MUTABLE put (not
+   * {@link putImmutable}) precisely because it is read-modify-written on the search
+   * path: retrieval metrics are ephemeral, privacy-safe analytics — never a
+   * source of truth — so R2 growth is bounded to one capped object per UTC day
+   * rather than one immutable object per search.
+   */
+  async putRetrievalDay(day: string, value: string): Promise<void> {
+    await this.bucket.put(this.retrievalDayKey(day), value, {
+      httpMetadata: { contentType: "application/json" }
+    })
+  }
+
+  /**
+   * The newest `newestDays` day-rollups (each a JSON array), oldest-first. Day keys
+   * are `YYYY-MM-DD`, so lexical order is chronological and the newest slice bounds
+   * recovery time regardless of how long the vault has existed.
+   */
+  async listRetrievalDays(newestDays: number): Promise<Array<string>> {
     const keys = await listAllKeys(this.bucket, this.key("history/retrievals/"))
-    return Promise.all(keys.map((key) => readRequired(this.bucket, key)))
+    const newest = newestDays <= 0 ? [] : keys.slice(-newestDays)
+    return Promise.all(newest.map((key) => readRequired(this.bucket, key)))
   }
 
   readMarkdown(key: string): Promise<string> {
