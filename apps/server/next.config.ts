@@ -1,11 +1,16 @@
 const nextConfig = {
   output: "standalone",
   serverExternalPackages: ["postgres"],
-  // The repo type-checks via `pnpm typecheck` (tsc) as the CI gate; the toolchain
-  // is TypeScript 7 native (`typescript@7`), whose compiler API Next's build-time
-  // checker can't load. `@typescript/native-preview` (a devDependency) makes Next
-  // detect the native compiler and skip its own type check gracefully; this flag
-  // is belt-and-suspenders so a type error never blocks the production build.
+  // TypeScript here is a two-compiler split, forced by the toolchain being TS 7
+  // native (the Go compiler), whose JS API the Next/Vercel build tooling can't load:
+  //   • Type CHECKING (the CI gate) runs TS 7 via `tsgo` — `pnpm typecheck` →
+  //     `tsgo --noEmit` (@typescript/native-preview). This is the real gate.
+  //   • The `typescript` package is pinned to 5.x ONLY as a JS-API shim: Vercel's
+  //     `@vercel/next` builder does `require("typescript")` and calls `ts.sys.readFile`,
+  //     which the native TS 7 package does not expose (it crashed the prod build).
+  //     Next's own build detects native-preview and skips its check; the shim is for
+  //     Vercel's separate builder step. `ignoreBuildErrors` keeps a type error from
+  //     ever blocking the deploy — checking is `tsgo`'s job, not the build's.
   typescript: { ignoreBuildErrors: true }
 }
 
