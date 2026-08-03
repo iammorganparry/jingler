@@ -348,7 +348,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
           },
           onError: { target: "failed", actions: "setFailure" }
         },
-        on: { CLOSE: "closed" }
+        on: { CLOSE: "closed", "SEARCH.QUERY": { actions: "setSearchQuery" }, "SEARCH.RUN": { actions: "markSearchPending" } }
       },
       loading: {
         invoke: {
@@ -380,6 +380,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
         on: {
           CLOSE: "closed",
           "ORGANIZATION.CHANGE": { target: "configuring", actions: "clearOrganization" },
+          "SEARCH.QUERY": { actions: "setSearchQuery" },
           "SEARCH.RUN": { actions: "markSearchPending" }
         }
       },
@@ -439,7 +440,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
           },
           onError: { target: "ready", actions: "setFailure" }
         },
-        on: { CLOSE: "closed", "MAP.SELECT_NODE": { target: "nodeLoading", reenter: true, actions: "selectNode" }, "INSPECTOR.CLOSE": { target: "ready", actions: "closeInspector" }, "SEARCH.RUN": { actions: "markSearchPending" } }
+        on: { CLOSE: "closed", "MAP.SELECT_NODE": { target: "nodeLoading", reenter: true, actions: "selectNode" }, "INSPECTOR.CLOSE": { target: "ready", actions: "closeInspector" }, "SEARCH.QUERY": { actions: "setSearchQuery" }, "SEARCH.RUN": { actions: "markSearchPending" } }
       },
       edgeLoading: {
         invoke: {
@@ -449,7 +450,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
           onDone: { target: "ready", actions: assign(({ event }) => ({ evidence: event.output, error: null })) },
           onError: { target: "ready", actions: "setFailure" }
         },
-        on: { CLOSE: "closed", "MAP.SELECT_EDGE": { target: "edgeLoading", reenter: true, actions: "selectEdge" }, "INSPECTOR.CLOSE": { target: "ready", actions: "closeInspector" }, "SEARCH.RUN": { actions: "markSearchPending" } }
+        on: { CLOSE: "closed", "MAP.SELECT_EDGE": { target: "edgeLoading", reenter: true, actions: "selectEdge" }, "INSPECTOR.CLOSE": { target: "ready", actions: "closeInspector" }, "SEARCH.QUERY": { actions: "setSearchQuery" }, "SEARCH.RUN": { actions: "markSearchPending" } }
       },
       pageLoading: {
         invoke: {
@@ -459,7 +460,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
           onDone: { target: "ready", actions: assign(({ event }) => ({ page: event.output, error: null })) },
           onError: { target: "ready", actions: "setFailure" }
         },
-        on: { CLOSE: "closed", "PAGE.BACK": { target: "ready", actions: "backFromPage" }, "SEARCH.RUN": { actions: "markSearchPending" } }
+        on: { CLOSE: "closed", "PAGE.BACK": { target: "ready", actions: "backFromPage" }, "SEARCH.QUERY": { actions: "setSearchQuery" }, "SEARCH.RUN": { actions: "markSearchPending" } }
       },
       searching: {
         invoke: {
@@ -514,7 +515,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
           ],
           onError: { target: "ready", actions: "setFailure" }
         },
-        on: { CLOSE: "closed", "SEARCH.RUN": { actions: "markSearchPending" } }
+        on: { CLOSE: "closed", "SEARCH.QUERY": { actions: "setSearchQuery" }, "SEARCH.RUN": { actions: "markSearchPending" } }
       },
       exporting: {
         invoke: {
@@ -524,7 +525,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
           onDone: { target: "ready", actions: assign(({ event }) => ({ exported: event.output })) },
           onError: { target: "ready", actions: "setFailure" }
         },
-        on: { CLOSE: "closed", "SEARCH.RUN": { actions: "markSearchPending" } }
+        on: { CLOSE: "closed", "SEARCH.QUERY": { actions: "setSearchQuery" }, "SEARCH.RUN": { actions: "markSearchPending" } }
       },
       failed: {
         // Route through `configuring` like every other state: a selection made in

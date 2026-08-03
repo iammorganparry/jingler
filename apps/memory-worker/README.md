@@ -36,6 +36,7 @@ Secrets via `wrangler secret put` (never in `wrangler.jsonc`):
 | --- | --- |
 | `MEMORY_SERVICE_SECRET` | Current Next.js-to-Worker credential; must equal Next.js `MEMORY_WORKER_SERVICE_SECRET`. |
 | `MEMORY_SERVICE_SECRET_PREVIOUS` | Optional overlap slot during rotation. |
+| `MEMORY_WORKFLOW_ID_SECRET` | Stable workflow-id HMAC key. Set once; do not rotate with the service credential. |
 | `TURBOPUFFER_API_KEY` | Advisory vector layer. Absent ⇒ lexical-only suggestions. Read only here; never forwarded to Next.js or the renderer. |
 | `OPENAI_API_KEY` | Client-side embeddings. Absent ⇒ lexical-only suggestions (the vector layer needs BOTH this and `TURBOPUFFER_API_KEY`). Read only here; never forwarded to Next.js or the renderer. |
 
@@ -106,6 +107,8 @@ Run `pnpm --filter @jingler/memory-worker test` before deployment.
 
 ## Credential rotation
 
+Set `MEMORY_WORKFLOW_ID_SECRET` to a dedicated random value before the first
+service-secret rotation and keep it stable for the deployment's lifetime.
 Set the current credential in `MEMORY_SERVICE_SECRET` and the old credential in
 `MEMORY_SERVICE_SECRET_PREVIOUS`, deploy the Worker, update
 `MEMORY_WORKER_SERVICE_SECRET` in Next.js, then remove the previous value and

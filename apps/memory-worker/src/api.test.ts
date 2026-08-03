@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { serializeMemoryMarkdown, type MemoryPage, type MemorySource } from "@jingler/memory"
 import { describe, expect, it } from "vitest"
-import { VAULT_ORGANIZATION_HEADER, workflowBindingId } from "./auth.js"
+import { VAULT_ORGANIZATION_HEADER, workflowBindingId, workflowBindingIds } from "./auth.js"
 import {
   createOrReuseScopedWorkflow,
   handleMemoryWorkerRequest,
@@ -61,6 +61,24 @@ class TestVaultNamespace implements DurableObjectNamespaceLike {
 }
 
 describe("workflow rotation deduplication", () => {
+  it("keeps new workflow ids stable when the service credential rotates", async () => {
+    const before = await workflowBindingIds(
+      { MEMORY_WORKFLOW_ID_SECRET: "stable-workflow-secret", MEMORY_SERVICE_SECRET: "service-a" },
+      "org-a",
+      "compiler-stable"
+    )
+    const after = await workflowBindingIds(
+      {
+        MEMORY_WORKFLOW_ID_SECRET: "stable-workflow-secret",
+        MEMORY_SERVICE_SECRET: "service-b",
+        MEMORY_SERVICE_SECRET_PREVIOUS: "service-a"
+      },
+      "org-a",
+      "compiler-stable"
+    )
+    expect(after[0]).toBe(before[0])
+  })
+
   it("reuses an instance created with the previous service secret", async () => {
     const bucket = new InMemoryR2Bucket()
     const previousId = await workflowBindingId("previous-secret", "org-a", "compiler-stable")

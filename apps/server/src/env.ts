@@ -9,7 +9,15 @@
 type Environment = Readonly<Record<string, string | undefined>>
 
 const optional = (environment: Environment, key: string, fallback = ""): string =>
-  environment[key] ?? fallback
+  environment[key]?.trim() || fallback
+
+const positiveNumber = (environment: Environment, key: string, fallback: number): number => {
+  const raw = optional(environment, key)
+  if (raw === "") return fallback
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value <= 0) throw new Error(`${key} must be a positive number`)
+  return value
+}
 
 const secret = (environment: Environment, key: string, developmentFallback: string): string => {
   const value = environment[key]
@@ -31,7 +39,7 @@ export const loadEnv = (environment: Environment = process.env) => {
   return {
   nodeEnv,
   isDev: nodeEnv !== "production",
-  port: Number(optional(environment, "PORT", "9100")),
+  port: positiveNumber(environment, "PORT", 9100),
   /** Postgres connection string. Defaults to the local Docker instance (port 5433). */
   databaseUrl: optional(environment, "DATABASE_URL", "postgres://postgres:postgres@localhost:5433/jingler"),
   /** BetterAuth signing secret. MUST be overridden in production. */
@@ -49,7 +57,7 @@ export const loadEnv = (environment: Environment = process.env) => {
   /** HMAC key for short-lived team-memory grants. Keep distinct from BetterAuth. */
   memoryGrantSecret: secret(environment, "MEMORY_GRANT_SECRET", "dev-memory-grant-secret-change-me"),
   memoryGrantAudience: optional(environment, "MEMORY_GRANT_AUDIENCE", "jingler-memory-mcp"),
-  memoryGrantTtlSeconds: Number(optional(environment, "MEMORY_GRANT_TTL_SECONDS", "3600")),
+  memoryGrantTtlSeconds: positiveNumber(environment, "MEMORY_GRANT_TTL_SECONDS", 3600),
   /** Private Cloudflare Worker origin and its rotating Next.js service credential. */
   memoryWorkerUrl: optional(environment, "MEMORY_WORKER_URL", "http://localhost:8787"),
   memoryWorkerServiceSecret: secret(
@@ -57,7 +65,7 @@ export const loadEnv = (environment: Environment = process.env) => {
     "MEMORY_WORKER_SERVICE_SECRET",
     "dev-memory-worker-secret-change-me"
   ),
-  memoryRequestTimeoutMs: Number(optional(environment, "MEMORY_REQUEST_TIMEOUT_MS", "5000")),
+  memoryRequestTimeoutMs: positiveNumber(environment, "MEMORY_REQUEST_TIMEOUT_MS", 5000),
   /** Deep-link the desktop app registers; magic links + OAuth bounce back here. */
   desktopRedirect: optional(environment, "DESKTOP_REDIRECT", "jingler://auth/callback")
 } as const

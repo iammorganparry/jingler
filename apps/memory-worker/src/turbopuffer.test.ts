@@ -262,6 +262,22 @@ describe("turbopuffer vector layer", () => {
     expect(tail?.contentHash).toBe(stableContentHash(pages[2_499]!.body))
   })
 
+  it("stops heads pagination when a backend repeats a full page", async () => {
+    const rows = Array.from({ length: 1_000 }, (_unused, index) => ({
+      id: `page-${String(index).padStart(4, "0")}`,
+      contentHash: `hash-${index}`
+    }))
+    let calls = 0
+    const repeating: typeof fetch = async () => {
+      calls += 1
+      return Response.json({ rows })
+    }
+    const client = new HttpTurbopufferClient({ apiKey: "tpuf-test", fetch: repeating })
+    const heads = await client.heads("ns-repeating")
+    expect(calls).toBe(2)
+    expect(heads).toHaveLength(1_000)
+  })
+
   it("08.6 reads the API key only from the Worker env", () => {
     expect(createTurbopufferClientFromEnv({})).toBeUndefined()
     expect(createTurbopufferClientFromEnv({ TURBOPUFFER_API_KEY: "" })).toBeUndefined()

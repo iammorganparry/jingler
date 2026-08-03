@@ -192,6 +192,15 @@ describe("memory production configuration", () => {
     })
   })
 
+  it("uses numeric defaults for blanks and rejects invalid positive numbers", () => {
+    expect(loadEnv({ NODE_ENV: "test", PORT: " ", MEMORY_GRANT_TTL_SECONDS: "", MEMORY_REQUEST_TIMEOUT_MS: "  " }))
+      .toMatchObject({ port: 9100, memoryGrantTtlSeconds: 3600, memoryRequestTimeoutMs: 5000 })
+    expect(() => loadEnv({ NODE_ENV: "test", MEMORY_REQUEST_TIMEOUT_MS: "NaN" }))
+      .toThrow("MEMORY_REQUEST_TIMEOUT_MS must be a positive number")
+    expect(() => loadEnv({ NODE_ENV: "test", MEMORY_GRANT_TTL_SECONDS: "0" }))
+      .toThrow("MEMORY_GRANT_TTL_SECONDS must be a positive number")
+  })
+
   it("defers the production secret assertion to first read so imports never throw", () => {
     // Building the accessor over a production environment WITHOUT secrets must
     // not throw — this mirrors importing env.ts during `next build`.

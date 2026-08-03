@@ -122,7 +122,7 @@ export function MemoryDashboard({
           value={percent(summary.citationCoverage.ratio)}
           detail={`${summary.citationCoverage.citedPages} of ${summary.citationCoverage.totalPages} pages cited`}
           icon={<Quote size={16} />}
-          onClick={() => onNavigate({ view: "wiki", filter: "uncited" })}
+          onClick={() => onNavigate({ view: "wiki" })}
         />
         <MetricCard
           title="Freshness"
@@ -151,7 +151,7 @@ export function MemoryDashboard({
         <section className="rounded-xl border border-line bg-panel p-4" aria-labelledby="memory-growth-title">
           <div className="flex items-center justify-between">
             <h2 id="memory-growth-title" className="m-0 text-[12px] font-semibold text-text-bright">Weekly growth</h2>
-            <button type="button" onClick={() => onNavigate({ view: "analytics", filter: "growth" })} className="text-[11px] text-blue outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <button type="button" onClick={() => onNavigate({ view: "analytics" })} className="text-[11px] text-blue outline-none focus-visible:ring-2 focus-visible:ring-ring">
               View analytics
             </button>
           </div>

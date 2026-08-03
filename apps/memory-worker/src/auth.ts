@@ -102,12 +102,18 @@ export const workflowBindingId = async (
 }
 
 export const workflowBindingIds = async (
-  env: Pick<MemoryWorkerEnv, "MEMORY_SERVICE_SECRET" | "MEMORY_SERVICE_SECRET_PREVIOUS">,
+  env: Pick<MemoryWorkerEnv, "MEMORY_SERVICE_SECRET" | "MEMORY_SERVICE_SECRET_PREVIOUS" | "MEMORY_WORKFLOW_ID_SECRET">,
   organizationId: string,
   publicWorkflowId: string
 ): Promise<ReadonlyArray<string>> =>
   Promise.all(
-    [...new Set([env.MEMORY_SERVICE_SECRET, env.MEMORY_SERVICE_SECRET_PREVIOUS])]
+    // The stable key is first so every new create path uses an id that survives
+    // service-credential rotation. Legacy ids remain lookup-only for migration.
+    [...new Set([
+      env.MEMORY_WORKFLOW_ID_SECRET ?? env.MEMORY_SERVICE_SECRET,
+      env.MEMORY_SERVICE_SECRET,
+      env.MEMORY_SERVICE_SECRET_PREVIOUS
+    ])]
       .filter((secret): secret is string => secret !== undefined && secret.length > 0)
       .map((secret) => workflowBindingId(secret, organizationId, publicWorkflowId))
   )

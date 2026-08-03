@@ -433,9 +433,7 @@ export const memoryExport = (organizationId: string) =>
   Effect.gen(function* () {
     const filename = `jingler-memory-${organizationId}.zip`
     const dialog = yield* DialogService
-    const destination = dialog.saveFile === undefined
-      ? null
-      : yield* dialog.saveFile({ title: "Export team memory", defaultPath: filename })
+    const destination = yield* dialog.saveFile({ title: "Export team memory", defaultPath: filename })
     if (destination === null) return { filename, saved: false }
     const value = yield* memoryTool(organizationId, "memory_export", {})
     const vault = yield* decodeMemory(
@@ -481,10 +479,13 @@ const memoryRpcRequest = (input: {
     case "reviews":
       return memoryReviews(organizationId)
     case "review":
+      if (!input.proposalId || !input.action) {
+        return Effect.fail(memoryUiFailure("Memory review request was incomplete"))
+      }
       return memoryReview(
         organizationId,
-        input.proposalId ?? "",
-        input.action ?? "reject"
+        input.proposalId,
+        input.action
       )
     case "export":
       return memoryExport(organizationId)

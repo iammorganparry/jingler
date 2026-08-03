@@ -250,6 +250,17 @@ describe("memoryMachine", () => {
     expect(api.search).toHaveBeenCalledWith("org-a", "deferred", 50)
   })
 
+  it("keeps query edits made while a page is loading", async () => {
+    const actor = await startReady()
+    ;(api.search as ReturnType<typeof vi.fn>).mockClear()
+    actor.send({ type: "PAGE.OPEN", pageId: "org-a:one" })
+    expect(actor.getSnapshot().matches("pageLoading")).toBe(true)
+    actor.send({ type: "SEARCH.QUERY", query: "typed during load" })
+    actor.send({ type: "SEARCH.RUN" })
+    await waitFor(actor, (snapshot) => snapshot.matches("ready") && snapshot.context.searchResults.length > 0)
+    expect(api.search).toHaveBeenCalledWith("org-a", "typed during load", 50)
+  })
+
   it("clears the export result once EXPORT.CLEAR fires", async () => {
     const actor = await startReady()
     actor.send({ type: "EXPORT" })

@@ -6,6 +6,18 @@ import { createMemoryMachine } from "./memory-machine.js"
 import { rpc } from "./rpc-client.js"
 import type { MemoryLayoutRequest, MemoryLayoutResponse } from "./memory-layout.worker.js"
 
+const graphIdentity = new WeakMap<object, number>()
+let nextGraphIdentity = 1
+
+const layoutIdentity = (graph: object | null): number => {
+  if (graph === null) return 0
+  const existing = graphIdentity.get(graph)
+  if (existing !== undefined) return existing
+  const identity = nextGraphIdentity++
+  graphIdentity.set(graph, identity)
+  return identity
+}
+
 const memoryMachine = createMemoryMachine({
   access: rpc.memoryAccess,
   configure: async (organizationId) => {
@@ -60,7 +72,8 @@ export function useMemory() {
   const [snapshot, send] = useMachine(memoryMachine)
   const graph = snapshot.context.graph
   const layout = useQuery({
-    queryKey: ["memory-layout", graph?.nodes ?? [], graph?.edges ?? []],
+    // The graph is immutable machine output; avoid hashing every node and edge on every render.
+    queryKey: ["memory-layout", layoutIdentity(graph)],
     enabled: graph !== null,
     queryFn: ({ signal }) =>
       calculateMemoryLayout(

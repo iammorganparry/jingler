@@ -584,10 +584,9 @@ const postDigest = (options: {
   readonly issued: MemoryGrantResponse
   readonly digestId: string
   readonly input: MemorySessionDigestInput
-  readonly content?: string
+  readonly content: string
 }): Effect.Effect<boolean> => {
-  const { runtime, selection, issued, digestId, input } = options
-  const content = options.content ?? memoryDigestContent(input)
+  const { runtime, selection, issued, digestId, input, content } = options
   return Effect.tryPromise({
     try: async () => {
       const response = await runtime.fetchImplementation(

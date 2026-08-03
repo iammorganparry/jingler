@@ -98,6 +98,8 @@ export interface MemoryWorkerEnv {
   readonly MEMORY_R2: R2BucketLike
   readonly MEMORY_SERVICE_SECRET: string
   readonly MEMORY_SERVICE_SECRET_PREVIOUS?: string
+  /** Stable HMAC key for Workflow instance ids. Never rotate with the service credential. */
+  readonly MEMORY_WORKFLOW_ID_SECRET?: string
   readonly MEMORY_COMPILER?: WorkflowBindingLike<import("./workflows/compiler.js").CompilerWorkflowInput>
   readonly MEMORY_LINT?: WorkflowBindingLike<import("./workflows/lint.js").ScheduledLintWorkflowInput>
   readonly MEMORY_VECTOR_INGEST?: WorkflowBindingLike<

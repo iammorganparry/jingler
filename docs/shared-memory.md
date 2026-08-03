@@ -65,6 +65,7 @@ Worker secrets — set with `wrangler secret put`, never in `wrangler.jsonc`:
 | --- | --- |
 | `MEMORY_SERVICE_SECRET` | Current Next.js-to-Worker credential; must equal Next.js `MEMORY_WORKER_SERVICE_SECRET`. |
 | `MEMORY_SERVICE_SECRET_PREVIOUS` | Optional overlap slot during rotation. |
+| `MEMORY_WORKFLOW_ID_SECRET` | Stable workflow-id HMAC key. Set once; do not rotate with the service credential. |
 | `TURBOPUFFER_API_KEY` | Advisory vector layer. Absent ⇒ lexical-only suggestions. Read only in the Worker; never forwarded to Next.js or the renderer. |
 | `OPENAI_API_KEY` | Client-side embeddings for the vector layer. Absent ⇒ lexical-only suggestions (the layer needs BOTH this and `TURBOPUFFER_API_KEY`). Read only in the Worker; never forwarded to Next.js or the renderer. |
 
@@ -77,6 +78,7 @@ Worker non-secret vars (committed in `wrangler.jsonc` `vars`):
 
 ```bash
 wrangler secret put MEMORY_SERVICE_SECRET   --config apps/memory-worker/wrangler.jsonc
+wrangler secret put MEMORY_WORKFLOW_ID_SECRET --config apps/memory-worker/wrangler.jsonc
 wrangler secret put TURBOPUFFER_API_KEY     --config apps/memory-worker/wrangler.jsonc
 wrangler secret put OPENAI_API_KEY          --config apps/memory-worker/wrangler.jsonc
 wrangler deploy                             --config apps/memory-worker/wrangler.jsonc

@@ -1,6 +1,8 @@
 # Wrangler local-only values. Copy to .dev.vars; never commit the real file.
 MEMORY_SERVICE_SECRET=dev-memory-worker-secret-change-me
 MEMORY_SERVICE_SECRET_PREVIOUS=
+# Stable workflow-id HMAC key. Set once; do not rotate with the service secret.
+MEMORY_WORKFLOW_ID_SECRET=dev-memory-workflow-id-secret-change-me
 
 # Optional comma-separated operational policy.
 MEMORY_LINT_ORGANIZATIONS=org-local

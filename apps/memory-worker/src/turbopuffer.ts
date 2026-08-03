@@ -374,8 +374,10 @@ export class HttpTurbopufferClient implements TurbopufferClient {
       if (!response.ok) break
       const body = (await response.json()) as { readonly rows?: ReadonlyArray<TurbopufferHttpRow> }
       const rows = body.rows ?? []
-      for (const row of rows) heads.push({ id: row.id, contentHash: row.contentHash ?? "" })
       const lastId = rows.at(-1)?.id
+      // Never spin forever or append duplicates if a backend ignores the cursor.
+      if (after !== undefined && lastId !== undefined && lastId <= after) break
+      for (const row of rows) heads.push({ id: row.id, contentHash: row.contentHash ?? "" })
       if (rows.length < HEADS_PAGE_SIZE || lastId === undefined) break
       after = lastId
     }
