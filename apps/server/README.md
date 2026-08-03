@@ -80,9 +80,16 @@ subscriptions) reference `user.id`.
 
 ```bash
 pnpm --filter @jingler/server db:generate   # generate a migration from schema.ts
-pnpm --filter @jingler/server db:migrate     # apply migrations
+pnpm --filter @jingler/server db:migrate     # apply generated migrations (local)
+pnpm --filter @jingler/server db:push        # push schema straight to the DB, no migration file
+pnpm --filter @jingler/server db:push:prod   # push to prod (loads .env.prod)
 pnpm --filter @jingler/server db:studio      # drizzle-kit studio
 ```
+
+All of these are drizzle-kit's own commands. drizzle-kit doesn't read `.env`
+itself, so `drizzle.config.ts` loads it (`.env` by default, `.env.prod` when
+`DRIZZLE_ENV_FILE` points at it — that's all `db:push:prod` sets). Prod schema
+changes go out via `db:push`, not a migration file.
 
 The client uses `postgres.js` with `prepare:false` and a module-scoped instance,
 so it is safe behind a transaction-mode pooler (Supabase/Neon/PgBouncer) on
