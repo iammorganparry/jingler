@@ -810,29 +810,47 @@ export const makeMemoryService = (
         if (token === null) return Effect.succeed(null)
         return Effect.gen(function* () {
           yield* drainCaptureOutbox(runtime, token).pipe(Effect.forkDaemon)
-          return yield* Effect.tryPromise({
-          try: async (): Promise<MemoryUiAccess | null> => {
-            const response = await runtime.fetchImplementation(
-              endpoint(runtime.baseUrl(), "/api/memory/organizations"),
-              {
-                headers: { authorization: `Bearer ${token}` },
-                signal: AbortSignal.timeout(runtime.uiTimeoutMs)
-              }
-            )
-            if (!response.ok) return null
-            const decoded = Schema.decodeUnknownSync(MemoryOrganizationsResponse)(await response.json())
-            const selected = config?.memory?.enabled === true
-              ? (config.memory.organizationId ?? null)
-              : null
-            return {
-              selectedOrganizationId: decoded.organizations.some((item) => item.id === selected)
-                ? selected
-                : null,
-              organizations: decoded.organizations
-            }
-          },
-          catch: () => new MemoryRequestError({ status: 0 })
+          const organizations = yield* Effect.tryPromise({
+            try: async () => {
+              const response = await runtime.fetchImplementation(
+                endpoint(runtime.baseUrl(), "/api/memory/organizations"),
+                {
+                  headers: { authorization: `Bearer ${token}` },
+                  signal: AbortSignal.timeout(runtime.uiTimeoutMs)
+                }
+              )
+              if (!response.ok) throw new MemoryRequestError({ status: response.status })
+              return Schema.decodeUnknownSync(MemoryOrganizationsResponse)(await response.json())
+                .organizations
+            },
+            catch: () => new MemoryRequestError({ status: 0 })
           }).pipe(Effect.orElseSucceed(() => null))
+          if (organizations === null) return null
+
+          // Engage team memory by DEFAULT. Every downstream hook — MCP attach,
+          // <team-memory> prompt, settled-session capture — is already an
+          // unconditional per-turn call gated only on `memory.enabled` + a selected
+          // org. So the first time an eligible user is seen with exactly ONE org and
+          // no explicit choice yet, enable it and select that org; the agents then
+          // pick it up automatically. An explicit config (even `enabled: false`) is
+          // always respected — this only fills the unset default.
+          let selected = config?.memory?.enabled === true
+            ? (config.memory.organizationId ?? null)
+            : null
+          const soleOrganization = organizations.length === 1 ? organizations[0] : null
+          if (config?.memory === undefined && soleOrganization !== null && soleOrganization !== undefined) {
+            selected = soleOrganization.id
+            yield* ConfigService.setMemory({ enabled: true, organizationId: selected }).pipe(
+              Effect.ignore
+            )
+          }
+
+          return {
+            selectedOrganizationId: organizations.some((item) => item.id === selected)
+              ? selected
+              : null,
+            organizations
+          }
         })
       })
     )
