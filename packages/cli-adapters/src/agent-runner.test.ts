@@ -388,6 +388,42 @@ describe("AgentRunner saveDraftPlan", () => {
     expect(doc?.status).toBe("proposed")
     expect(doc?.plan.title).toBe("PRD: Approved work")
   })
+
+  it("never clobbers a USER-authored draft the operator is editing", async () => {
+    const userDraft: PlanPrd = {
+      title: "PRD: Operator's own draft",
+      sections: [],
+      stages: [
+        {
+          id: "01",
+          title: "Author",
+          intent: "The operator is drafting this.",
+          approach: [],
+          files: [],
+          diagrams: [],
+          notes: [],
+          acceptance: [{ id: "01.1", text: "Kept.", status: "pending", evidence: null }],
+          dependencies: []
+        }
+      ],
+      annotations: []
+    }
+    const doc = await runWith(
+      draftingAdapter(VALID_PLAN),
+      // The operator started their own draft; an agent draft must not reconcile
+      // over it and discard their content.
+      PlanStore.promoteDocument(temp.root, {
+        sessionId: SESSION,
+        producingChatId: SESSION,
+        plan: userDraft,
+        status: "draft",
+        author: "user"
+      }).pipe(Effect.orElseSucceed(() => null))
+    )
+    expect(doc?.status).toBe("draft")
+    expect(doc?.updatedBy).toBe("user")
+    expect(doc?.plan.title).toBe("PRD: Operator's own draft")
+  })
 })
 
 describe("AgentRunner remote MCP attachments", () => {

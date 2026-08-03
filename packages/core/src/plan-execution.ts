@@ -18,6 +18,7 @@ export type PlanExecutionDiagnosticCode =
   | "assignment-conflict"
   | "invalid-file-path"
   | "missing-acceptance"
+  | "duplicate-acceptance"
 
 export interface PlanExecutionDiagnostic {
   readonly code: PlanExecutionDiagnosticCode
@@ -353,6 +354,56 @@ const invalidCompilation = (
  * stages, dependencies, files, complexity, and acceptance criteria, while this
  * compiler owns stable worker identities and concrete execution routes.
  */
+/**
+ * Structural plan invariants that must hold on EVERY persist/submit path,
+ * independent of routing or status: unique stage ids, no self/dangling
+ * dependencies, no dependency cycles, repository-relative file paths, and
+ * globally unique acceptance ids. Schema decoding alone accepts all of these —
+ * and downstream views/mutations key by id, so a duplicate silently collapses
+ * stages or applies evidence to the wrong target. Does NOT require acceptance
+ * criteria (a draft may still be filling them in) — that is an execution-time
+ * check enforced in `compileOrchestrationPlan`.
+ */
+/**
+ * Codes that describe a broken plan STRUCTURE (addressability + dependency
+ * integrity), as opposed to routing fitness (`missing-assignment`,
+ * `assignment-conflict`) which is a scheduling concern enforced only when a plan
+ * is compiled for execution. Persistence guards the former on every path.
+ */
+const STRUCTURAL_INTEGRITY_CODES: ReadonlySet<PlanExecutionDiagnosticCode> = new Set([
+  "duplicate-stage",
+  "dangling-dependency",
+  "self-dependency",
+  "dependency-cycle",
+  "invalid-file-path"
+])
+
+export const planStructuralDiagnostics = (
+  plan: PlanPrd
+): ReadonlyArray<PlanExecutionDiagnostic> => {
+  const graph = buildPlanExecutionGraph(plan.stages)
+  const structural = graph.diagnostics.filter((diagnostic) =>
+    STRUCTURAL_INTEGRITY_CODES.has(diagnostic.code)
+  )
+  const acceptanceOwner = new Map<string, string>()
+  const duplicateAcceptance: Array<PlanExecutionDiagnostic> = []
+  for (const stage of plan.stages) {
+    for (const criterion of stage.acceptance) {
+      const owner = acceptanceOwner.get(criterion.id)
+      if (owner !== undefined) {
+        duplicateAcceptance.push({
+          code: "duplicate-acceptance",
+          message: `Acceptance id "${criterion.id}" appears on stages "${owner}" and "${stage.id}".`,
+          stageId: stage.id
+        })
+      } else {
+        acceptanceOwner.set(criterion.id, stage.id)
+      }
+    }
+  }
+  return [...structural, ...duplicateAcceptance]
+}
+
 export const compileOrchestrationPlan = (
   plan: PlanPrd,
   routing: WorkerRoutingConfig,
@@ -369,11 +420,12 @@ export const compileOrchestrationPlan = (
       message: `Stage "${stage.id}" needs at least one acceptance criterion.`,
       stageId: stage.id
     }))
+  const structural = planStructuralDiagnostics(semantic)
   const semanticGraph = buildPlanExecutionGraph(semantic.stages)
-  if (acceptanceDiagnostics.length > 0 || !semanticGraph.valid) {
+  if (acceptanceDiagnostics.length > 0 || structural.length > 0) {
     return invalidCompilation(semanticGraph, [
       ...acceptanceDiagnostics,
-      ...semanticGraph.diagnostics
+      ...structural
     ])
   }
   const routedStages = assignWorkerRouting(semantic.stages, routing, {

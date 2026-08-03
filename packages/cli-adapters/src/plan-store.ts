@@ -15,6 +15,7 @@ import {
   PlanDocument,
   PlanPersistenceError,
   planStageSemanticFingerprint,
+  planStructuralDiagnostics,
   PlanValidationError,
   reconcilePlanAmendment
 } from "@jingler/core"
@@ -64,9 +65,12 @@ const asDocument = (raw: string): PlanDocument | null => {
 }
 
 /**
- * Validate a plan on the write path. The DTO is already schema-typed at the RPC
- * boundary, so this only guards against a structurally invalid amendment result
- * before it is persisted.
+ * Validate a plan on the write path. The RPC boundary schema-types the DTO, so
+ * this guards the invariants schema decoding cannot express: structural
+ * integrity (unique stage + acceptance ids, no dangling/self dependencies, no
+ * cycles, repository-relative file paths). Downstream views and mutations key by
+ * id, so a duplicate would silently collapse stages or misfile evidence —
+ * rejecting it here keeps every persisted plan addressable.
  */
 const validate = (
   plan: PlanPrd
@@ -74,12 +78,25 @@ const validate = (
   const decoded = Schema.decodeUnknownEither(
     (PlanDocument.fields as { readonly plan: Schema.Schema<PlanPrd> }).plan
   )(plan)
-  return decoded._tag === "Right"
+  if (decoded._tag !== "Right") {
+    return Effect.fail(
+      new PlanValidationError({
+        message: "The plan is not a valid structured plan.",
+        diagnostics: [{ code: "invalid-plan", message: "The plan failed structural validation.", line: 0 }]
+      })
+    )
+  }
+  const structural = planStructuralDiagnostics(decoded.right)
+  return structural.length === 0
     ? Effect.succeed(decoded.right)
     : Effect.fail(
         new PlanValidationError({
-          message: "The plan is not a valid structured plan.",
-          diagnostics: [{ code: "invalid-plan", message: "The plan failed structural validation.", line: 0 }]
+          message: "The plan is not structurally valid.",
+          diagnostics: structural.map((diagnostic) => ({
+            code: diagnostic.code,
+            message: diagnostic.message,
+            line: 0
+          }))
         })
       )
 }

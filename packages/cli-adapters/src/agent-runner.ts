@@ -2184,9 +2184,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // `approvals.awaitPlan` gate `proposePlan` parks on. The file write is
           // all it takes — `Plan.watch` streams the canonical doc to the
           // renderer. Never downgrade a real plan the operator already owns: only
-          // fill an empty slot, or refresh an existing agent draft (amend, so the
-          // revision advances as the orchestrator iterates). Best-effort — a plan
-          // write must never fail the turn.
+          // fill an empty slot, or refresh an existing AGENT draft (amend, so the
+          // revision advances as the orchestrator iterates). A user-authored draft
+          // is the operator actively editing — an agent draft must not reconcile
+          // over it and silently discard their content. Best-effort — a plan write
+          // must never fail the turn.
           const saveDraftPlan = (plan: PlanPrd): Effect.Effect<void> =>
             worktreePath.length === 0
               ? Effect.void
@@ -2194,7 +2196,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   Effect.provide(env),
                   Effect.orElseSucceed(() => null),
                   Effect.flatMap((current) =>
-                    current !== null && current.status !== "draft"
+                    current !== null &&
+                    (current.status !== "draft" || current.updatedBy === "user")
                       ? Effect.void
                       : PlanStore.promoteDocument(worktreePath, {
                           sessionId,

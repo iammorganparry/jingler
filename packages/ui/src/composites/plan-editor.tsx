@@ -11,11 +11,52 @@ import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import type { PlanFileEvidence } from "./plan-doc/plan-file-controls.js"
 import { PlanFileControlsProvider } from "./plan-doc/plan-file-controls.js"
 
+const asArray = (value: unknown): ReadonlyArray<unknown> =>
+  Array.isArray(value) ? value : []
+const asString = (value: unknown): string =>
+  typeof value === "string" ? value : ""
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {}
+
 /**
- * Best-effort decode of a plan source into a `PlanPrd`. The source is a JSON
- * `PlanEmission` (or bare plan), optionally still inside a ` ```json ` fence and
- * possibly incomplete mid-stream — an unparseable snapshot yields null and the
- * outline shows a composing placeholder until the next complete snapshot lands.
+ * Normalize a parsed plan candidate into a render-safe `PlanPrd`. A partial
+ * streaming snapshot — or a complete but MALFORMED agent emission — can omit
+ * required arrays (`files`, `notes`, `acceptance`, …); the outline/architecture/
+ * workflow views `.map` over them, so a missing array would turn a model
+ * formatting error into a Plan Review crash. Filling defaults keeps the preview
+ * degrading gracefully; the canonical document is still schema-decoded on persist.
+ */
+const normalizePlan = (candidate: Record<string, unknown>): PlanPrd =>
+  ({
+    title: asString(candidate.title),
+    sections: asArray(candidate.sections).map((section) => {
+      const s = asRecord(section)
+      return { id: asString(s.id), title: asString(s.title), blocks: asArray(s.blocks) }
+    }),
+    stages: asArray(candidate.stages).map((stage) => {
+      const s = asRecord(stage)
+      return {
+        ...s,
+        id: asString(s.id),
+        title: asString(s.title),
+        intent: asString(s.intent),
+        approach: asArray(s.approach),
+        files: asArray(s.files),
+        diagrams: asArray(s.diagrams),
+        notes: asArray(s.notes),
+        acceptance: asArray(s.acceptance),
+        dependencies: asArray(s.dependencies)
+      }
+    }),
+    annotations: asArray(candidate.annotations)
+  }) as unknown as PlanPrd
+
+/**
+ * Best-effort decode of a plan source into a render-safe `PlanPrd`. The source is
+ * a JSON `PlanEmission` (or bare plan), optionally still inside a ` ```json `
+ * fence and possibly incomplete mid-stream — an unparseable snapshot yields null
+ * and the outline shows a composing placeholder until the next snapshot lands. A
+ * parseable one is normalized so missing arrays can never crash the preview.
  */
 const planFromSource = (source: string): PlanPrd | null => {
   const trimmed = source
@@ -34,7 +75,7 @@ const planFromSource = (source: string): PlanPrd | null => {
       typeof candidate === "object" &&
       Array.isArray((candidate as { readonly stages?: unknown }).stages)
     ) {
-      return candidate as PlanPrd
+      return normalizePlan(candidate as Record<string, unknown>)
     }
   } catch {
     /* incomplete or malformed streaming JSON — wait for the next snapshot */

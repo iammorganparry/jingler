@@ -13,6 +13,7 @@ import {
   applyWorkerRouting,
   buildPlanExecutionGraph,
   compileOrchestrationPlan,
+  planStructuralDiagnostics,
   resolveWorkerRoutingConfig,
   workerRoutingMismatch
 } from "./plan-execution.js"
@@ -60,6 +61,39 @@ const plan = (title: string, stages: ReadonlyArray<PlanPrdStage>): PlanPrd => ({
   sections: [],
   stages: [...stages],
   annotations: []
+})
+
+describe("planStructuralDiagnostics", () => {
+  it("passes a structurally sound plan (unique ids, resolvable deps)", () => {
+    const ok = plan("PRD: ok", [
+      semanticStage("01"),
+      semanticStage("02", { dependencies: ["01"] })
+    ])
+    expect(planStructuralDiagnostics(ok)).toEqual([])
+  })
+
+  it("flags duplicate stage ids, dangling deps, and duplicate acceptance ids", () => {
+    const broken = plan("PRD: broken", [
+      semanticStage("01"),
+      // duplicate stage id
+      semanticStage("01"),
+      // depends on a stage that does not exist
+      semanticStage("02", { dependencies: ["ghost"] }),
+      // reuses acceptance id 01.1 across a distinct stage
+      semanticStage("03", {
+        acceptance: [{ id: "01.1", text: "Reused.", status: "pending", evidence: null }]
+      })
+    ])
+    const codes = planStructuralDiagnostics(broken).map((d) => d.code)
+    expect(codes).toContain("duplicate-stage")
+    expect(codes).toContain("dangling-dependency")
+    expect(codes).toContain("duplicate-acceptance")
+  })
+
+  it("does NOT require acceptance criteria — a draft may still be filling them in", () => {
+    const draftish = plan("PRD: draft", [semanticStage("01", { acceptance: [] })])
+    expect(planStructuralDiagnostics(draftish)).toEqual([])
+  })
 })
 
 describe("buildPlanExecutionGraph", () => {

@@ -132,6 +132,25 @@ describe("PlanReview", () => {
     expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy()
   })
 
+  it("degrades gracefully on a malformed streamed plan instead of crashing", async () => {
+    // A complete-but-malformed agent emission: the stage omits every required
+    // array (files/notes/acceptance/…). The outline/architecture views .map over
+    // those, so without normalization this would throw during render.
+    const malformed = JSON.stringify({
+      mode: "draft",
+      plan: { title: "PRD: Malformed", stages: [{ id: "01", title: "Broken stage" }] }
+    })
+    expect(() =>
+      render(
+        <PlanReview
+          plan={null}
+          streamingDraft={{ id: "plan-malformed", source: malformed, phase: "composing" }}
+        />
+      )
+    ).not.toThrow()
+    expect(await screen.findByText("Broken stage")).toBeTruthy()
+  })
+
   it("lands a progress-dock deep link on its step in the Main outline", async () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView

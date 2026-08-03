@@ -369,6 +369,36 @@ describe("PlanStore canonical document", () => {
     expect(result.current).toStrictEqual(result.first)
   })
 
+  it("rejects a schema-valid but structurally broken plan (duplicate ids collapse targets)", async () => {
+    // Passes Schema decoding, but the duplicate stage/acceptance ids would make
+    // downstream id-keyed views and mutations address the wrong target.
+    const duplicated: PlanPrd = {
+      ...SOURCE,
+      stages: [
+        SOURCE.stages[0]!,
+        { ...SOURCE.stages[0]!, title: "Colliding twin" }
+      ]
+    }
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote()
+        const invalid = yield* Effect.either(
+          PlanStore.updateDocument(WT, {
+            planId: first.id,
+            baseRevision: first.revision,
+            plan: duplicated,
+            author: "agent"
+          })
+        )
+        return { first, invalid, current: yield* PlanStore.readDocument(WT) }
+      })
+    )
+
+    expect(Either.isLeft(result.invalid)).toBe(true)
+    // The canonical document is untouched — the broken plan never persisted.
+    expect(result.current).toStrictEqual(result.first)
+  })
+
   it("updates criteria and annotations without executing or losing special text", async () => {
     const document = await run(
       Effect.gen(function* () {
