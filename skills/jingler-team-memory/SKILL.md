@@ -43,12 +43,21 @@ Codex, Cursor, and generic MCP clients, read **[references/setup.md](references/
 Verify the connection after configuring it:
 
 ```bash
-scripts/check-connection.sh "<JINGLER_MEMORY_URL>" "<TOKEN>" "<ORGANIZATION_ID>"
+JINGLER_MEMORY_TOKEN="<TOKEN>" \
+  scripts/check-connection.sh "<JINGLER_MEMORY_URL>" "<ORGANIZATION_ID>"
 ```
 
 A healthy server lists its tools (`memory_search`, `memory_propose`, …). A 401/403
 means the token is missing/wrong, the organization header is absent, or the org is
 not on a plan that enables memory.
+
+## Deterministic recall/persist (hooks)
+
+This skill is best-effort — recall and remember only happen if the agent acts on
+them. Where a harness supports lifecycle **hooks**, make them deterministic
+instead: a pre-turn hook injects `<recalled-memories>` every turn and a post-turn
+hook submits marked memories for compilation and any configured review. Wiring for Claude Code (both) and Codex (persist;
+recall stays the skill) is in **[references/hooks.md](references/hooks.md)**.
 
 ## Workflow — recall first, remember after
 

@@ -92,7 +92,7 @@ function MemoryPageShell() {
           <MemoryDashboard
             summary={memoryDashboardSummary}
             onNavigate={(target) => {
-              setView(target.view)
+              if (target.view !== "reviews") setView(target.view)
               if (target.view === "wiki") setBrowserFilter(target.filter ?? null)
             }}
             onRetry={fn()}

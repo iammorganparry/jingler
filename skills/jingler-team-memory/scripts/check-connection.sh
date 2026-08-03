@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Verify a Jingler team-memory MCP connection by listing the server's tools.
-# Usage: check-connection.sh <base-url> <token> <organization-id>
-#   e.g. check-connection.sh http://localhost:9100 pat_xxx org_abc123
+# Usage: JINGLER_MEMORY_TOKEN=<token> check-connection.sh <base-url> <organization-id>
+# Keep the credential out of argv so it never appears in process listings.
 set -euo pipefail
 
-URL="${1:?usage: check-connection.sh <base-url> <token> <organization-id>}"
-TOKEN="${2:?token required (arg 2)}"
-ORG="${3:?organization id required (arg 3)}"
+URL="${1:?usage: JINGLER_MEMORY_TOKEN=<token> check-connection.sh <base-url> <organization-id>}"
+ORG="${2:?organization id required (arg 2)}"
+TOKEN="${JINGLER_MEMORY_TOKEN:?JINGLER_MEMORY_TOKEN is required}"
 ENDPOINT="${URL%/}/api/mcp"
 
 response=$(curl -sS -m 15 -w $'\n%{http_code}' -X POST "$ENDPOINT" \
@@ -14,7 +14,8 @@ response=$(curl -sS -m 15 -w $'\n%{http_code}' -X POST "$ENDPOINT" \
   -H "x-jingler-organization-id: ${ORG}" \
   -H "content-type: application/json" \
   -H "mcp-protocol-version: 2026-07-28" \
-  -d '{"jsonrpc":"2.0","id":"check-connection","method":"tools/list","params":{}}') || {
+  -H "mcp-method: tools/list" \
+  -d '{"jsonrpc":"2.0","id":"check-connection","method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"jingler-memory-connection-check","version":"1.0.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}') || {
     echo "✗ Could not reach ${ENDPOINT} (network error / server down)." >&2
     exit 1
   }

@@ -15,7 +15,13 @@ import type { JsonValue, MemoryClient, MemoryClientRequest } from "./memory-clie
 type JsonRpcId = string | number | null
 
 export interface MemoryMcpDependencies {
-  readonly verifyGrant: (grant: string, organizationId: string) => MemoryGrantClaims
+  // Awaitable so the route can compose a synchronous HMAC-grant verifier with an
+  // asynchronous Personal Access Token verifier (which hits the DB + paid gate).
+  // A sync verifier still satisfies this — awaiting a plain value is a no-op.
+  readonly verifyGrant: (
+    grant: string,
+    organizationId: string
+  ) => MemoryGrantClaims | Promise<MemoryGrantClaims>
   readonly client: MemoryClient<JsonValue>
   readonly requestId?: () => string
 }
@@ -123,18 +129,47 @@ const tools: ReadonlyArray<ToolDefinition> = [
     getRequest(claims, requestId, "/internal/memory/export")),
   defineTool({
     name: "memory_propose",
-    description: "Create an explicit revision proposal and return its workflow handle.",
+    description: "Compile a new memory or create an explicit revision proposal.",
     privilege: "propose"
   }, Schema.Struct({
     pageId: NonEmptyString,
     baseRevisionId: NonEmptyString,
     markdown: NonEmptyString
-  }), (args, claims, requestId) => ({
-    organizationId: claims.organizationId,
-    requestId,
-    method: "POST",
-    path: "/internal/memory/proposals",
-    body: {
+  }), (args, claims, requestId) => {
+    const identity = createHash("sha256")
+      .update([claims.subject, args.pageId, args.baseRevisionId, args.markdown].join("\u0000"))
+      .digest("hex")
+
+    // Existing-page proposals require a real accepted head. A brand-new memory
+    // has neither a head nor a citation source, so ingest it as a manual source;
+    // the Worker starts the durable compiler and returns its workflow handle.
+    if (args.baseRevisionId === "new") {
+      const sourceId = `source:proposal-${identity}`
+      return {
+        organizationId: claims.organizationId,
+        requestId,
+        method: "POST",
+        path: "/internal/memory/sources",
+        body: {
+          source: {
+            id: sourceId,
+            kind: "manual",
+            title: `Agent memory proposal: ${args.pageId}`,
+            uri: `jingler://memory-proposal/${identity}`,
+            retrievedAt: new Date().toISOString(),
+            contentHash: createHash("sha256").update(args.markdown).digest("hex")
+          },
+          content: args.markdown
+        }
+      }
+    }
+
+    return {
+      organizationId: claims.organizationId,
+      requestId,
+      method: "POST",
+      path: "/internal/memory/proposals",
+      body: {
       // The proposal id is derived SERVER-SIDE from the grant subject plus the
       // proposal content — never from a client-supplied header. This removes
       // client control over the durable id (a grant holder could otherwise
@@ -144,14 +179,13 @@ const tools: ReadonlyArray<ToolDefinition> = [
       // subject + same content always hashes to the same id, so the vault's
       // same-id/same-content dedup returns the existing proposal. `requestId`
       // (the x-request-id header) is retained for tracing only.
-      id: `proposal-${createHash("sha256")
-        .update([claims.subject, args.pageId, args.baseRevisionId, args.markdown].join(" "))
-        .digest("hex")}`,
-      ...args,
-      proposedBy: claims.subject,
-      createdAt: new Date().toISOString()
+        id: `proposal-${identity}`,
+        ...args,
+        proposedBy: claims.subject,
+        createdAt: new Date().toISOString()
+      }
     }
-  })),
+  }),
   defineTool({
     name: "memory_reviews",
     description: "List bounded proposal sets for the private review inbox.",
@@ -214,8 +248,17 @@ const tools: ReadonlyArray<ToolDefinition> = [
     description:
       "Read advisory 'related pages' relatedness suggestions. These are hints only, never accepted graph edges.",
     privilege: "read"
-  }, Schema.Struct({ limit: Schema.optional(limit(50)) }), (args, claims, requestId) =>
-    getRequest(claims, requestId, `/internal/memory/suggestions?limit=${args.limit ?? 5}`)),
+  }, Schema.Struct({
+    limit: Schema.optional(limit(50)),
+    pageId: Schema.optional(NonEmptyString)
+  }), (args, claims, requestId) =>
+    getRequest(
+      claims,
+      requestId,
+      `/internal/memory/suggestions?limit=${args.limit ?? 5}${
+        args.pageId === undefined ? "" : `&pageId=${encodeURIComponent(args.pageId)}`
+      }`
+    )),
   defineTool({
     name: "memory_workflow_status",
     description: "Poll a proposal or publication workflow by its explicit handle.",
@@ -483,7 +526,7 @@ export const handleMemoryMcpRequest = async (
   }
   let claims: MemoryGrantClaims
   try {
-    claims = dependencies.verifyGrant(grant, organizationId)
+    claims = await dependencies.verifyGrant(grant, organizationId)
   } catch {
     // Only a grant-verification failure is a 401. Errors raised while dispatching
     // must not be relabeled as an invalid grant.

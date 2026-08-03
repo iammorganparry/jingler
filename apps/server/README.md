@@ -102,8 +102,7 @@ See `.env.example`. Required in production:
 | `RESEND_API_KEY` | Magic-link email. Omit in dev to log links to the console. |
 | `MEMORY_ENABLED` | Paid-team Memory rollout/circuit-breaker. Set `false` to disable grants, MCP, and capture without deleting accepted Markdown. |
 | `MEMORY_GRANT_SECRET` | Dedicated HMAC key for short-lived organization grants. Never reuse the auth or Worker secret. |
-| `MEMORY_GRANT_AUDIENCE` / `MEMORY_GRANT_TTL_SECONDS` | MCP audience (`jingler-memory-mcp`) and short desktop-UI grant lifetime (default `300`). |
-| `MEMORY_ATTACHMENT_GRANT_TTL_SECONDS` | Longer lifetime for the agent MCP attachment grant (default `3600`). |
+| `MEMORY_GRANT_AUDIENCE` / `MEMORY_GRANT_TTL_SECONDS` | MCP audience (`jingler-memory-mcp`) and organization-grant lifetime (default `3600`). |
 | `MEMORY_WORKER_URL` | Private Cloudflare Memory Worker origin. |
 | `MEMORY_WORKER_SERVICE_SECRET` | Rotating Next.js-to-Worker credential; must equal the Worker's `MEMORY_SERVICE_SECRET`. |
 | `MEMORY_REQUEST_TIMEOUT_MS` | Bounded private-service timeout (default `5000`). |
@@ -118,6 +117,15 @@ organization gets `403` even when the feature is globally enabled. See the
 [shared-memory operations guide](../../docs/shared-memory.md) for the Cloudflare
 Worker bindings, turbopuffer vector layer, monitoring, export, rebuild, and
 credential rotation (including the turbopuffer key).
+
+Headless MCP clients use organization-scoped Personal Access Tokens. An
+authenticated user creates one with `POST /api/memory/tokens`, lists hash-free
+metadata with `GET /api/memory/tokens`, and revokes their own token with
+`DELETE /api/memory/tokens/:id`. Plaintext `jmem_…` credentials are returned once;
+only SHA-256 hashes are stored. Every MCP request re-checks token revocation,
+expiry, exact organization, live membership, and paid-plan eligibility. See the
+[team-memory setup guide](../../skills/jingler-team-memory/references/setup.md) for
+request examples.
 
 ## Testing
 

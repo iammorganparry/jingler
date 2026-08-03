@@ -83,11 +83,8 @@ const MemoryGrantHeader = Schema.Struct({
 })
 
 const MemoryGrantRequest = Schema.Struct({
-  organizationId: Schema.String.pipe(Schema.minLength(1)),
-  purpose: Schema.optional(Schema.Literal("attachment"))
+  organizationId: Schema.String.pipe(Schema.minLength(1))
 })
-
-export type MemoryGrantPurpose = "attachment"
 
 export const verifyMemoryGrant = (
   grant: string,
@@ -138,8 +135,7 @@ export interface MemoryGrantHandlerDependencies {
   ) => Promise<OrganizationAuthorization | null>
   readonly issue: (
     userId: string,
-    authorization: OrganizationAuthorization,
-    purpose?: MemoryGrantPurpose
+    authorization: OrganizationAuthorization
   ) => MemoryGrantResponse
 }
 
@@ -148,10 +144,10 @@ const json = (body: unknown, status: number): Response =>
 
 const requestedGrant = async (
   request: Request
-): Promise<{ readonly organizationId: string; readonly purpose?: MemoryGrantPurpose } | null> => {
+): Promise<{ readonly organizationId: string } | null> => {
   try {
     const body = Schema.decodeUnknownSync(MemoryGrantRequest)(await request.json())
-    return { organizationId: body.organizationId, purpose: body.purpose }
+    return { organizationId: body.organizationId }
   } catch {
     return null
   }
@@ -167,5 +163,5 @@ export const handleMemoryGrantRequest = async (
   if (!requested) return json({ error: "organizationId is required" }, 400)
   const authorization = await dependencies.authorize(userId, requested.organizationId)
   if (!authorization) return json({ error: "Paid organization membership required" }, 403)
-  return json(dependencies.issue(userId, authorization, requested.purpose), 200)
+  return json(dependencies.issue(userId, authorization), 200)
 }

@@ -8,14 +8,45 @@ harness at it with two headers.
 - **Base URL** (`<JINGLER_MEMORY_URL>`): your Jingler server. Local development
   defaults to `http://localhost:9100`; a hosted deployment is the URL your admin
   provides. The MCP path is always `<JINGLER_MEMORY_URL>/api/mcp`.
-- **Access token** (`<TOKEN>`): a personal access token for your Jingler account.
-  <!-- TODO(pat): replace with the real issuance step once PAT generation ships,
-       e.g. "Create one under Settings › Access tokens in the Jingler dashboard, or
-       run `jingler token create`." Until then, obtain a token from your Jingler
-       admin / the desktop app. -->
+- **Access token** (`<TOKEN>`): an organization-scoped Jingler Memory personal
+  access token, created with the API below. It starts with `jmem_` and is shown
+  only once.
 - **Organization id** (`<ORGANIZATION_ID>`): which team's memory to use. The token is
-  bound to your account; the org id selects the vault. Ask your admin, or read it from
-  the desktop app's memory settings.
+  bound to this exact organization and your live paid membership. Ask your admin,
+  or read it from the desktop app's memory settings.
+
+## Create a personal access token
+
+Use your existing Jingler login bearer (the same session token held by the desktop)
+to create a PAT. The requested role is optional and may only reduce, never exceed,
+your current team role. Omit `expiresAt` for no expiry; an explicit future expiry is
+safer for automation.
+
+```bash
+curl -fsS -X POST "<JINGLER_MEMORY_URL>/api/memory/tokens" \
+  -H "Authorization: Bearer <JINGLER_SESSION_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organizationId": "<ORGANIZATION_ID>",
+    "name": "Claude Code on my laptop",
+    "role": "member",
+    "expiresAt": "2027-08-03T00:00:00Z"
+  }'
+```
+
+Copy the response's `token` immediately; the server stores only its SHA-256 hash
+and cannot show the plaintext again. List safe metadata or revoke a token with:
+
+```bash
+curl -fsS "<JINGLER_MEMORY_URL>/api/memory/tokens?organizationId=<ORGANIZATION_ID>" \
+  -H "Authorization: Bearer <JINGLER_SESSION_TOKEN>"
+
+curl -fsS -X DELETE "<JINGLER_MEMORY_URL>/api/memory/tokens/<TOKEN_ID>" \
+  -H "Authorization: Bearer <JINGLER_SESSION_TOKEN>"
+```
+
+Verification re-checks revocation, expiry, active paid plan, membership, and the
+exact organization on every MCP request.
 
 The endpoint requires **both** headers on every request:
 
@@ -79,7 +110,8 @@ Any client that speaks MCP over streamable HTTP works: `POST` JSON-RPC 2.0 to
 ## Verify
 
 ```bash
-scripts/check-connection.sh "<JINGLER_MEMORY_URL>" "<TOKEN>" "<ORGANIZATION_ID>"
+JINGLER_MEMORY_TOKEN="<TOKEN>" \
+  scripts/check-connection.sh "<JINGLER_MEMORY_URL>" "<ORGANIZATION_ID>"
 ```
 
 - Tools listed → connected.
@@ -88,6 +120,6 @@ scripts/check-connection.sh "<JINGLER_MEMORY_URL>" "<TOKEN>" "<ORGANIZATION_ID>"
 
 ## Security
 
-The token is a credential scoped to your account and the chosen org. Never commit it,
-paste it into code, or echo it into logs. Rotate/revoke it from the Jingler dashboard
-if it leaks.
+The token is a credential scoped to your account and one exact organization. Never
+commit it, paste it into code, or echo it into logs. Revoke it with the management
+API immediately if it leaks.

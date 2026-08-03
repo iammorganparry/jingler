@@ -7,7 +7,7 @@
 import { Effect, Option } from "effect"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
-import { auth } from "./auth.js"
+import { getAuth } from "./auth.js"
 import { UserRepository } from "./db/repositories/user-repository.js"
 import { env } from "./env.js"
 import { runtime } from "./runtime.js"
@@ -31,7 +31,7 @@ app.use(
 app.get("/health", (c) => c.json({ status: "ok", service: "@jingler/server" }))
 
 /** BetterAuth owns everything under /api/auth/* (OAuth, magic link, session). */
-app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
+app.on(["GET", "POST"], "/api/auth/*", (c) => getAuth().handler(c.req.raw))
 
 /**
  * The signed-in user's profile. BetterAuth validates the bearer session; the user
@@ -39,7 +39,7 @@ app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
  * canonical shape for any DB-backed endpoint we add (billing, usage, …).
  */
 app.get("/api/me", async (c) => {
-  const session = await auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null)
+  const session = await getAuth().api.getSession({ headers: c.req.raw.headers }).catch(() => null)
   if (!session?.user) return c.json({ error: "Unauthorized" }, 401)
   const user = await runtime
     .runPromise(UserRepository.findById(session.user.id).pipe(Effect.map(Option.getOrNull)))
@@ -59,7 +59,7 @@ app.get("/api/me", async (c) => {
  * `error` param so the LoginScreen can show its error state.
  */
 app.get("/desktop/callback", async (c) => {
-  const session = await auth.api
+  const session = await getAuth().api
     .getSession({ headers: c.req.raw.headers })
     .catch(() => null)
   if (!session?.session?.token) {

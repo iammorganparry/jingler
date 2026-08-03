@@ -248,7 +248,8 @@ const pageResponse = (page: FakePage) => ({
     acceptedAt: "2026-08-01T00:10:00.000Z"
   },
   sourceIds: page.sourceIds,
-  citationIds: page.citations.map((citation) => citation.id)
+  citationIds: page.citations.map((citation) => citation.id),
+  backlinks: []
 })
 
 const graphFor = (organizationId: string, state: FakeOrganizationMemory) => {
@@ -591,7 +592,15 @@ export const startFakeAuthServer = async (
             data = dashboardFor(state, typeof args.range === "string" ? args.range : "all")
             break
           case "memory_suggestions":
-            data = suggestionsFor(organizationId, state)
+            data = {
+              ...suggestionsFor(organizationId, state),
+              suggestions: suggestionsFor(organizationId, state).suggestions.filter(
+                (suggestion) =>
+                  typeof args.pageId !== "string" ||
+                  suggestion.sourceId === args.pageId ||
+                  suggestion.targetId === args.pageId
+              )
+            }
             break
           case "memory_graph":
           case "memory_graph_neighborhood":
@@ -610,7 +619,7 @@ export const startFakeAuthServer = async (
             const query = typeof args.query === "string" ? args.query.trim().toLocaleLowerCase() : ""
             const results = [...state.pages.values()]
               .filter((page) => query.length > 0 && `${page.title} ${page.body} ${page.aliases.join(" ")}`.toLocaleLowerCase().includes(query))
-              .map((page) => ({ pageId: page.id, revision: page.revision, path: page.path, title: page.title, snippet: page.body.slice(0, 180) }))
+              .map((page) => ({ pageId: page.id, revisionId: `revision:${page.id}:${page.revision}`, revision: page.revision, path: page.path, title: page.title, snippet: page.body.slice(0, 180) }))
             data = { query, results, total: results.length }
             break
           }

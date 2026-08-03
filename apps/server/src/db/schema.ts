@@ -103,6 +103,38 @@ export const invitation = pgTable("invitation", {
     .references(() => user.id, { onDelete: "cascade" })
 })
 
+// ── Personal Access Tokens (headless team-memory MCP auth) ───────────────────
+// Long-lived, org-scoped bearer credentials that let an EXTERNAL agent call the
+// hosted team-memory MCP endpoint without the desktop app minting a short-lived
+// grant. Only the SHA-256 hash of the token is ever stored; the plaintext is
+// shown once at creation and never persisted or logged. Revocation, expiry and
+// the paid-membership gate are re-checked per request at verification time, so a
+// token never outlives the membership that authorised it.
+export const personalAccessToken = pgTable("personal_access_token", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  // Human-readable label ("CI runner", "my laptop") — never security-bearing.
+  name: text("name").notNull(),
+  // SHA-256 hex of the full `jmem_…` token. Unique so a lookup is by hash alone.
+  hashedToken: text("hashed_token").notNull().unique(),
+  // MemoryOrganizationRole the token was minted at; privileges are re-derived and
+  // intersected with the live membership on every request.
+  role: text("role").notNull(),
+  createdAt: timestamp("created_at")
+    .$defaultFn(() => new Date())
+    .notNull(),
+  // NULL = never expires.
+  expiresAt: timestamp("expires_at"),
+  // NULL = active; a timestamp = revoked, permanently rejected thereafter.
+  revokedAt: timestamp("revoked_at"),
+  lastUsedAt: timestamp("last_used_at")
+})
+
 export const schema = {
   user,
   session,
@@ -110,5 +142,6 @@ export const schema = {
   verification,
   organization,
   member,
-  invitation
+  invitation,
+  personalAccessToken
 }

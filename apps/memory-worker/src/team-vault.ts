@@ -7,6 +7,7 @@ import {
   MemoryProposal as MemoryProposalSchema,
   MemorySource as MemorySourceSchema,
   assertMemoryValid,
+  buildBacklinkIndex,
   buildMemoryGraph,
   canonicalJson,
   compareText,
@@ -172,6 +173,11 @@ export interface AcceptedPageResponse {
   readonly revision: StoredRevisionRecord
   readonly sourceIds: ReadonlyArray<string>
   readonly citationIds: ReadonlyArray<string>
+}
+
+export interface ReadPageResponse extends AcceptedPageResponse {
+  /** Bare accepted page ids linking to this page; complete, not graph-window capped. */
+  readonly backlinks: ReadonlyArray<string>
 }
 
 export interface CompilerVaultContext {
@@ -1501,12 +1507,14 @@ export class TeamVault {
     })
   }
 
-  readPage(pageId: string): Effect.Effect<AcceptedPageResponse, MemoryVaultError> {
+  readPage(pageId: string): Effect.Effect<ReadPageResponse, MemoryVaultError> {
     return Effect.gen(this, function* () {
       const snapshot = yield* this.state.load()
       const head = snapshot.heads.find((candidate) => candidate.pageId === pageId)
       if (head === undefined) return yield* new MemoryVaultError({ code: "not_found", message: `page ${pageId} was not found`, status: 404 })
-      return yield* this.acceptedPageResponse(snapshot, head)
+      const accepted = yield* this.acceptedPageResponse(snapshot, head)
+      const backlinks = buildBacklinkIndex(yield* this.loadPages(snapshot))[pageId] ?? []
+      return { ...accepted, backlinks }
     })
   }
 
@@ -1582,7 +1590,10 @@ export class TeamVault {
       const snapshot = yield* this.state.load()
       const candidatePageIds = yield* this.state.searchPageIds(query, Math.max(limit * 4, 100))
       const pages = yield* this.loadPages(snapshot, candidatePageIds)
-      const response = searchAcceptedPages(pages, query, limit)
+      const revisionIdByPageId = new Map(
+        snapshot.heads.map((head) => [head.pageId, head.revisionId])
+      )
+      const response = searchAcceptedPages(pages, query, revisionIdByPageId, limit)
       const metric: RetrievalMetric = {
         id: `retrieval:${crypto.randomUUID()}`,
         occurredAt,
@@ -1739,7 +1750,8 @@ export class TeamVault {
    * returns hints only, never accepted edges, and touches no reproducible hash.
    */
   suggestions(
-    policy: SuggestionPolicy = SUGGESTION_POLICY_DEFAULT
+    policy: SuggestionPolicy = SUGGESTION_POLICY_DEFAULT,
+    pageId?: string
   ): Effect.Effect<VaultSuggestionsResponse, MemoryVaultError> {
     return Effect.gen(this, function* () {
       const snapshot = yield* this.state.load()
@@ -1786,7 +1798,14 @@ export class TeamVault {
         version: 1,
         policy,
         vectorSource,
-        suggestions: combineSuggestions({ pages, graph, policy, neighbors, embeddingModel })
+        suggestions: combineSuggestions({
+          pages,
+          graph,
+          policy,
+          neighbors,
+          embeddingModel,
+          ...(pageId === undefined ? {} : { pageId })
+        })
       }
     })
   }

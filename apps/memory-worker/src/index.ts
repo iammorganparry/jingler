@@ -1,7 +1,6 @@
-import { createOrReuseWorkflow, handleMemoryWorkerRequest } from "./api.js"
+import { createOrReuseScopedWorkflow, handleMemoryWorkerRequest } from "./api.js"
 import type { MemoryWorkerEnv } from "./env.js"
 import { stableContentHash } from "@jingler/memory"
-import { workflowBindingId } from "./auth.js"
 import { listOrganizationIds } from "./r2-store.js"
 
 export * from "./env.js"
@@ -69,8 +68,13 @@ const sweepScheduledLint = async (
   await Promise.all(
     organizations.map(async (organizationId) => {
       const workflowId = `lint-${day}-${stableContentHash(organizationId)}`
-      const bindingId = await workflowBindingId(env.MEMORY_SERVICE_SECRET, organizationId, workflowId)
-      await createOrReuseWorkflow(env.MEMORY_LINT!, bindingId, { workflowId, organizationId, asOf })
+      await createOrReuseScopedWorkflow(
+        env.MEMORY_LINT!,
+        env,
+        organizationId,
+        workflowId,
+        { workflowId, organizationId, asOf }
+      )
     })
   )
 }
@@ -86,8 +90,13 @@ const sweepVectorIngest = async (
   await Promise.all(
     organizations.map(async (organizationId) => {
       const workflowId = `vector-ingest-sweep-${day}-${stableContentHash(organizationId)}`
-      const bindingId = await workflowBindingId(env.MEMORY_SERVICE_SECRET, organizationId, workflowId)
-      await createOrReuseWorkflow(env.MEMORY_VECTOR_INGEST!, bindingId, { organizationId })
+      await createOrReuseScopedWorkflow(
+        env.MEMORY_VECTOR_INGEST!,
+        env,
+        organizationId,
+        workflowId,
+        { organizationId }
+      )
     })
   )
 }

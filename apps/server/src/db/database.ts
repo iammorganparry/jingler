@@ -10,7 +10,7 @@
  * machinery we don't control; everything WE write uses a Repository.
  */
 import { Data, Effect } from "effect"
-import { db } from "./client.js"
+import { getDb } from "./client.js"
 
 /** A tagged failure for any Drizzle operation, carrying the logical op name. */
 export class DatabaseError extends Data.TaggedError("DatabaseError")<{
@@ -19,7 +19,7 @@ export class DatabaseError extends Data.TaggedError("DatabaseError")<{
 }> {}
 
 /** The Drizzle client type, for repositories to type their query callbacks. */
-export type DrizzleClient = typeof db
+export type DrizzleClient = ReturnType<typeof getDb>
 
 export class Database extends Effect.Service<Database>()("@jingler/server/Database", {
   accessors: true,
@@ -33,7 +33,7 @@ export class Database extends Effect.Service<Database>()("@jingler/server/Databa
       query: (client: DrizzleClient) => Promise<A>
     ): Effect.Effect<A, DatabaseError> =>
       Effect.tryPromise({
-        try: () => query(db),
+        try: () => query(getDb()),
         catch: (cause) => new DatabaseError({ operation, cause })
       })
   })

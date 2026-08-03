@@ -50,7 +50,7 @@ export const DEFAULT_MEMORY_VIEWPORT: MemoryViewport = { x: 0, y: 0, zoom: 1 }
 const readLastView = (): MemorySubview => {
   try {
     const value = localStorage.getItem(LAST_VIEW_KEY)
-    return value === "map" || value === "wiki" || value === "analytics"
+    return value === "map" || value === "wiki" || value === "reviews" || value === "analytics"
       ? value
       : "dashboard"
   } catch {

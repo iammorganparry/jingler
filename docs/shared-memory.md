@@ -101,10 +101,8 @@ curl -fsS "$MEMORY_WORKER_URL/health"       # reports binding presence only
 | --- | --- |
 | `MEMORY_ENABLED` | Global rollout/circuit-breaker (`true` or `1` enables). |
 | `MEMORY_GRANT_SECRET` | Dedicated HMAC secret for short-lived desktop grants. |
-| `MEMORY_GRANT_AUDIENCE` | Must match grant verification; default `jingler-memory-mcp`. |
-| `MEMORY_GRANT_TTL_SECONDS` | Short desktop-UI grant lifetime; default `300`. |
-| `MEMORY_ATTACHMENT_GRANT_TTL_SECONDS` | Longer lifetime for the agent MCP attachment grant; default `3600`. Interim until the main-process proxy mints per-request grants. |
-| `MEMORY_GRANT_AUDIENCE` | Grant audience claim; default `jingler-memory-mcp`. Must match Worker verification. |
+| `MEMORY_GRANT_AUDIENCE` | Grant audience claim; default `jingler-memory-mcp`. Must match the Next.js MCP grant verifier. |
+| `MEMORY_GRANT_TTL_SECONDS` | Organization-grant lifetime for UI calls and agent attachments; default `3600`. |
 | `MEMORY_WORKER_URL` | Private Worker origin. |
 | `MEMORY_WORKER_SERVICE_SECRET` | Current Next.js-to-Worker credential. Must equal the Worker's `MEMORY_SERVICE_SECRET`. |
 | `MEMORY_REQUEST_TIMEOUT_MS` | Bounded upstream request timeout; default `5000`. |
@@ -114,6 +112,13 @@ variables separately in Preview and Production. Never expose either Memory
 secret with a `NEXT_PUBLIC_` prefix. The Jingler bearer stays in the desktop
 main-process secret store; the short-lived Memory grant never crosses Electron
 IPC or enters renderer diagnostics.
+
+External/headless MCP clients authenticate with a `jmem_…` Personal Access Token.
+Signed-in paid-team members manage their own tokens through
+`POST|GET /api/memory/tokens` and `DELETE /api/memory/tokens/:id`. The plaintext is
+returned once and only its SHA-256 hash is stored. MCP verification re-checks the
+token's revocation, expiry, organization, live membership, and paid plan on every
+independent POST; PATs never bypass the `MEMORY_ENABLED` circuit breaker.
 
 **The paid-org gate is independent of `MEMORY_ENABLED`.** Even with the feature
 globally enabled, `POST /api/memory/grant` issues a grant only for an

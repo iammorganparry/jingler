@@ -38,6 +38,8 @@ export interface CombineSuggestionsInput {
   /** Empty when turbopuffer is unconfigured — suggestions then degrade to lexical only. */
   readonly neighbors: ReadonlyArray<TurbopufferNeighbor>
   readonly embeddingModel: string
+  /** Optional accepted page id; filters the full candidate set before top-K. */
+  readonly pageId?: string
 }
 
 /**
@@ -47,13 +49,19 @@ export interface CombineSuggestionsInput {
  * advisory only: it is never an accepted edge and never feeds a reproducible hash.
  */
 export const combineSuggestions = (input: CombineSuggestionsInput): ReadonlyArray<SuggestedLink> => {
-  const lexical = buildLexicalSuggestions(input.pages, input.policy, input.graph)
+  const lexical = buildLexicalSuggestions(input.pages, input.policy, input.graph, input.pageId)
   const embedding = materializeSuggestions(
     embeddingCandidates(input.neighbors, input.embeddingModel),
     input.policy,
-    input.graph
+    input.graph,
+    input.pageId
   )
   // A SuggestedLink is a valid SuggestionCandidate, so a final pass unifies the
   // two sources under one set of policy guarantees (self/explicit/minScore/topK/dedup).
-  return materializeSuggestions([...lexical, ...embedding], input.policy, input.graph)
+  return materializeSuggestions(
+    [...lexical, ...embedding],
+    input.policy,
+    input.graph,
+    input.pageId
+  )
 }

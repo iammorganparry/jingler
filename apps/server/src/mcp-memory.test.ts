@@ -698,6 +698,41 @@ describe("stateless MCP 2026-07-28", () => {
     const idOtherSubject = await proposalIdFor(otherSubjectGrant, proposalArguments, "req-header-A")
     expect(idOtherSubject).not.toBe(idA)
   })
+
+  it("routes a new memory through cited source compilation instead of a missing page head", async () => {
+    const { client, requests } = collectingClient()
+    const response = await handleMemoryMcpRequest(
+      requestFor("tools/call", issue("org-paid", ["read", "propose"]).grant, {
+        params: {
+          name: "memory_propose",
+          arguments: {
+            pageId: "mem-refund-limiter",
+            baseRevisionId: "new",
+            markdown: "Refund retries share one limiter to prevent bursts."
+          }
+        }
+      }),
+      dependenciesFor(client)
+    )
+
+    expect(response.status).toBe(200)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      organizationId: "org-paid",
+      method: "POST",
+      path: "/internal/memory/sources",
+      body: {
+        source: {
+          kind: "manual",
+          title: "Agent memory proposal: mem-refund-limiter"
+        },
+        content: "Refund retries share one limiter to prevent bursts."
+      }
+    })
+    const serialized = JSON.stringify(requests[0]?.body)
+    expect(serialized).toMatch(/"id":"source:proposal-[0-9a-f]{64}"/)
+    expect(serialized).toMatch(/"contentHash":"[0-9a-f]{64}"/)
+  })
 })
 
 describe("private Memory Worker client", () => {

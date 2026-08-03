@@ -9,8 +9,12 @@
  */
 import { Layer, ManagedRuntime } from "effect"
 import { Database } from "./db/database.js"
+import { PersonalAccessTokenRepository } from "./db/repositories/personal-access-token-repository.js"
 import { UserRepository } from "./db/repositories/user-repository.js"
 
-const AppLayer = UserRepository.Default.pipe(Layer.provideMerge(Database.Default))
+const AppLayer = Layer.mergeAll(
+  UserRepository.Default,
+  PersonalAccessTokenRepository.Default
+).pipe(Layer.provideMerge(Database.Default))
 
 export const runtime = ManagedRuntime.make(AppLayer)

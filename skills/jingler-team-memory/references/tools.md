@@ -54,7 +54,7 @@ Search accepted team-memory pages using private lexical search.
 
 ### memory_suggestions
 Read advisory 'related pages' relatedness suggestions. These are hints only, never accepted graph edges.
-- Args: `limit` (optional, integer).
+- Args: `limit` (optional, integer); `pageId` (optional, string, non-empty).
 - When to use: Broaden context around a topic after an initial search. Advisory hints, not graph edges.
 
 ### memory_workflow_status
@@ -65,7 +65,7 @@ Poll a proposal or publication workflow by its explicit handle.
 ## Contribution (privilege: propose)
 
 ### memory_propose
-Create an explicit revision proposal and return its workflow handle.
+Compile a new memory or create an explicit revision proposal.
 - Args: `pageId` (required, string, non-empty); `baseRevisionId` (required, string, non-empty); `markdown` (required, string, non-empty).
 - When to use: Publish anything worth remembering (any domain). baseRevisionId is 'new' for a new page, or a memory_read revisionId to update one. Idempotent by identity+content.
 

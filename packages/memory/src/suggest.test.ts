@@ -172,5 +172,17 @@ describe("materialize policy", () => {
     )
     expect(capped).toHaveLength(2)
     expect(capped.map((link) => link.targetId)).toEqual(["one", "two"])
+
+    // Page scoping happens before top-K, so an unrelated stronger pair cannot
+    // consume one endpoint's slot and hide the requested page's suggestion.
+    const pageScoped = materializeSuggestions(
+      [candidate("other", "shared", 0.9), candidate("requested", "shared", 0.8)],
+      { minScore: 0, topK: 1, directed: false, excludeExplicit: false },
+      graph,
+      "requested"
+    )
+    expect(pageScoped).toMatchObject([
+      { sourceId: "requested", targetId: "shared", score: 0.8 }
+    ])
   })
 })

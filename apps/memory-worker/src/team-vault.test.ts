@@ -246,7 +246,14 @@ describe("TeamVault", () => {
       metadata: { citationPolicy: "none" }
     }
     const pages = [linking, target]
-    const targetSearch = searchAcceptedPages(pages, "Target")
+    const revisionIds = new Map([
+      ["linking", "revision-linking"],
+      ["target", "revision-target"]
+    ])
+    const targetSearch = searchAcceptedPages(pages, "Target", revisionIds)
+    expect(targetSearch.results.find((result) => result.pageId === "target")?.revisionId).toBe(
+      "revision-target"
+    )
     expect(targetSearch.results.find((result) => result.pageId === "target")?.matchKinds).toContain(
       "index"
     )
@@ -254,7 +261,7 @@ describe("TeamVault", () => {
       "wikilink"
     )
     expect(
-      searchAcceptedPages(pages, "Linking page").results.find((result) => result.pageId === "target")
+      searchAcceptedPages(pages, "Linking page", revisionIds).results.find((result) => result.pageId === "target")
         ?.matchKinds
     ).toContain("backlink")
     const navigation = buildSearchProjection(pages, [])

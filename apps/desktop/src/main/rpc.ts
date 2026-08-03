@@ -156,6 +156,7 @@ const MemoryBackendSearch = Schema.Struct({
   results: Schema.Array(
     Schema.Struct({
       pageId: Schema.String,
+      revisionId: Schema.String,
       revision: Schema.Number,
       path: Schema.String,
       title: Schema.String,
@@ -191,7 +192,8 @@ const MemoryBackendPage = Schema.Struct({
     acceptedAt: Schema.String
   }),
   sourceIds: Schema.Array(Schema.String),
-  citationIds: Schema.Array(Schema.String)
+  citationIds: Schema.Array(Schema.String),
+  backlinks: Schema.Array(Schema.String)
 })
 
 const MemoryBackendReviews = Schema.Struct({
@@ -348,26 +350,11 @@ const memorySearch = (organizationId: string, query: string, limit: number) =>
         pageId: result.pageId,
         path: result.path,
         title: result.title,
-        revisionId: `revision:${result.pageId}:${result.revision}`,
+        revisionId: result.revisionId,
         snippet: result.snippet
       }))
     )
   )
-
-/**
- * Inbound linkers of a page. buildMemoryGraph emits, for every wikilink A→X, BOTH
- * {src:page:A,tgt:page:X,kind:"wikilink"} and mirror {src:page:X,tgt:page:A,kind:"backlink"}.
- * Only forward wikilink edges whose target is this page name an inbound linker (their sourceId).
- * A "backlink" edge landing on this page mirrors one of THIS page's own outbound wikilinks,
- * so its sourceId is a page we link TO — including it would list outbound targets as backlinks.
- */
-export const deriveMemoryBacklinks = (
-  edges: ReadonlyArray<{ readonly sourceId: string; readonly targetId: string; readonly kind: string }>,
-  pageId: string
-): ReadonlyArray<string> =>
-  edges
-    .filter((edge) => edge.targetId === `page:${pageId}` && edge.kind === "wikilink")
-    .map((edge) => edge.sourceId)
 
 const memoryPage = (organizationId: string, pageId: string) =>
   Effect.all(
@@ -385,12 +372,11 @@ const memoryPage = (organizationId: string, pageId: string) =>
   ).pipe(
     Effect.flatMap(({ page, neighborhood }) => {
       const node = neighborhood?.nodes.find((candidate) => candidate.pageId === pageId)
-      const backlinks = deriveMemoryBacklinks(neighborhood?.edges ?? [], pageId)
       return decodeMemory(
         MemoryPageDetailSchema,
         {
           ...page,
-          backlinks,
+          backlinks: page.backlinks,
           contributors: [page.revision.authorId],
           health: node?.health ?? { brokenLinks: 0, contradictions: 0, orphan: true }
         },
@@ -517,7 +503,11 @@ const memorySuggestions = (
   limit: number
 ) =>
   Effect.flatMap(MemoryService, (service) =>
-    service.suggestions({ organizationId, limit: Math.min(50, Math.max(1, limit)) }).pipe(
+    service.suggestions({
+      organizationId,
+      ...(pageId === undefined || pageId === "" ? {} : { pageId }),
+      limit: Math.min(50, Math.max(1, limit))
+    }).pipe(
       Effect.flatMap((value) =>
         value === null
           ? Effect.fail(memoryUiFailure("Team memory is unavailable or unauthorized"))
@@ -529,18 +519,12 @@ const memorySuggestions = (
       decodeMemory(MemoryBackendSuggestions, value, "Memory suggestions response was invalid")
     ),
     Effect.flatMap((view) => {
-      const scoped =
-        pageId === undefined || pageId === ""
-          ? view.suggestions
-          : view.suggestions.filter(
-              (link) => link.sourceId === pageId || link.targetId === pageId
-            )
       return decodeMemory(
         MemorySuggestionsViewSchema,
         {
           version: 1,
           vectorSource: view.vectorSource,
-          suggestions: scoped.map((link) => ({
+          suggestions: view.suggestions.map((link) => ({
             sourceId: link.sourceId,
             targetId: link.targetId,
             method: link.method,

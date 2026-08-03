@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it, vi } from "vitest"
 import { POST as grantMemory } from "../app/api/memory/grant/route.js"
 import { GET as listMemoryOrganizations } from "../app/api/memory/organizations/route.js"
 import { app } from "./app.js"
-import { sql } from "./db/client.js"
+import { getSql } from "./db/client.js"
 import { runtime } from "./runtime.js"
 
 /**
@@ -20,7 +20,7 @@ const cookieFrom = (res: Response): string => (res.headers.get("set-cookie") ?? 
 describe.skipIf(!RUN)("auth backend (integration, needs Postgres)", () => {
   afterAll(async () => {
     await runtime.dispose()
-    await sql.end()
+    await getSql().end()
   })
 
   it("health check responds", async () => {
@@ -30,6 +30,7 @@ describe.skipIf(!RUN)("auth backend (integration, needs Postgres)", () => {
   })
 
   it("magic link → session → bearer → /api/me → sign out", async () => {
+    const sql = getSql()
     const email = `it_${Date.now()}@example.com`
 
     // 1. Request a magic link; capture the verify URL logged to the console.

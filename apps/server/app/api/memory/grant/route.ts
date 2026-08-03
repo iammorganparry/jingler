@@ -1,4 +1,4 @@
-import { auth } from "../../../../src/auth.js"
+import { getAuth } from "../../../../src/auth.js"
 import { findOrganizationAuthorization } from "../../../../src/db/repositories/organization-repository.js"
 import { env } from "../../../../src/env.js"
 import { handleMemoryGrantRequest, issueMemoryGrant } from "../../../../src/memory-grant.js"
@@ -16,7 +16,7 @@ export const POST = (request: Request): Promise<Response> => {
   }
   return handleMemoryGrantRequest(request, {
     getUserId: async (headers) => {
-      const session = await auth.api.getSession({ headers })
+      const session = await getAuth().api.getSession({ headers })
       return session?.user.id ?? null
     },
     authorize: async (userId, organizationId) => {
@@ -25,7 +25,7 @@ export const POST = (request: Request): Promise<Response> => {
       )
       return Option.getOrNull(authorization)
     },
-    issue: (userId, authorization, purpose) =>
+    issue: (userId, authorization) =>
       issueMemoryGrant(
         {
           subject: userId,
@@ -35,13 +35,9 @@ export const POST = (request: Request): Promise<Response> => {
         {
           secret: env.memoryGrantSecret,
           audience: env.memoryGrantAudience,
-          // A static MCP attachment header lives for the length of an agent turn;
-          // the short capture/UI TTL would 401 mid-run. Server-authoritative so the
-          // desktop can't inflate it.
-          ttlSeconds:
-            purpose === "attachment"
-              ? env.memoryAttachmentGrantTtlSeconds
-              : env.memoryGrantTtlSeconds
+          // All authenticated clients share one explicit lifetime. A request-body
+          // "purpose" cannot be a security boundary; the signed expiry is.
+          ttlSeconds: env.memoryGrantTtlSeconds
         }
       )
   })

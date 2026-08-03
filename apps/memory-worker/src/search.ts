@@ -13,6 +13,7 @@ export type SearchMatchKind = "fulltext" | "index" | "wikilink" | "backlink"
 
 export interface VaultSearchResult {
   readonly pageId: string
+  readonly revisionId: string
   readonly revision: number
   readonly path: string
   readonly title: string
@@ -118,6 +119,7 @@ const resultScore = (page: MemoryPage, query: string, kinds: ReadonlyArray<Searc
 export const searchAcceptedPages = (
   pages: ReadonlyArray<MemoryPage>,
   rawQuery: string,
+  revisionIdByPageId: ReadonlyMap<string, string>,
   limit = 20,
   candidatePageIds?: ReadonlySet<string>
 ): VaultSearchResponse => {
@@ -128,9 +130,11 @@ export const searchAcceptedPages = (
     .filter((page) => candidatePageIds === undefined || candidatePageIds.has(page.id))
     .map((page): VaultSearchResult | null => {
       const matchKinds = matchKindsFor(page, query, backlinkMatches)
-      if (matchKinds.length === 0) return null
+      const revisionId = revisionIdByPageId.get(page.id)
+      if (matchKinds.length === 0 || revisionId === undefined) return null
       return {
         pageId: page.id,
+        revisionId,
         revision: page.revision,
         path: page.path,
         title: page.title,

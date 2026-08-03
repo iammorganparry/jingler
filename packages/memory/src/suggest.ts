@@ -255,12 +255,14 @@ const explicitlyLinkedPairs = (graph: MemoryGraph): ReadonlySet<string> => {
 export const materializeSuggestions = (
   candidates: ReadonlyArray<SuggestionCandidate>,
   policy: SuggestionPolicy,
-  graph: MemoryGraph
+  graph: MemoryGraph,
+  pageId?: string
 ): ReadonlyArray<SuggestedLink> => {
   const excluded = policy.excludeExplicit ? explicitlyLinkedPairs(graph) : new Set<string>()
   const eligible = candidates.filter(
     (candidate) =>
       candidate.sourceId !== candidate.targetId &&
+      (pageId === undefined || candidate.sourceId === pageId || candidate.targetId === pageId) &&
       candidate.score >= policy.minScore &&
       !excluded.has(unorderedKey(candidate.sourceId, candidate.targetId))
   )
@@ -316,7 +318,8 @@ export const materializeSuggestions = (
 export const buildLexicalSuggestions = (
   pages: ReadonlyArray<MemoryPage>,
   policy: SuggestionPolicy,
-  graph: MemoryGraph
+  graph: MemoryGraph,
+  pageId?: string
 ): ReadonlyArray<SuggestedLink> => {
   const vectors = buildVectors(pages)
   const candidates: Array<SuggestionCandidate> = []
@@ -362,7 +365,7 @@ export const buildLexicalSuggestions = (
       }
     }
   }
-  return materializeSuggestions(candidates, policy, graph)
+  return materializeSuggestions(candidates, policy, graph, pageId)
 }
 
 /** Stable serialization used to assert byte-reproducibility of a suggestion set. */

@@ -30,7 +30,9 @@ describe("scheduled vector-ingest drift sweep", () => {
         swept.push(params.organizationId)
         return { id: params.organizationId, status: async () => ({ status: "queued" }) }
       },
-      get: async (id: string) => ({ id, status: async () => ({ status: "queued" }) })
+      get: async () => {
+        throw new Error("instance absent")
+      }
     }
     const env: MemoryWorkerEnv = {
       MEMORY_R2: bucket,

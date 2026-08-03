@@ -23,7 +23,7 @@ const BASE_URL = "https://memory.jingler.test"
 
 const grantResponse = (
   suffix: string,
-  expiresAt = NOW_SECONDS + 300
+  expiresAt = NOW_SECONDS + 3600
 ): MemoryGrantResponse => ({
   grant: `grant.${suffix}.signature`,
   claims: {
@@ -123,8 +123,10 @@ describe("MemoryService stateless attachment", () => {
       })
     }
 
+    const grants = requests.filter((request) => request.url.endsWith("/api/memory/grant"))
     const discoveries = requests.filter((request) => request.url.endsWith("/api/mcp"))
-    expect(discoveries).toHaveLength(3)
+    expect(grants).toHaveLength(1)
+    expect(discoveries).toHaveLength(1)
     for (const request of discoveries) {
       expect(request.headers.get("mcp-protocol-version")).toBe(MEMORY_MCP_PROTOCOL_VERSION)
       expect(request.headers.get("mcp-method")).toBe("server/discover")

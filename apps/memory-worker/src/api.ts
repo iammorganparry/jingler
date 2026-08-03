@@ -14,7 +14,6 @@ import {
   MemoryAuthenticationError,
   assertVaultOrganization,
   authenticateInternalRequest,
-  workflowBindingId,
   workflowBindingIds
 } from "./auth.js"
 import type {
@@ -386,7 +385,12 @@ const dispatchVaultQuery = (
     // Advisory relatedness — deliberately BEFORE the graph dispatcher and kept apart
     // from it: this returns suggestions, never accepted edges.
     if (isRoute(request, route, "GET", "suggestions")) {
-      return jsonResponse(yield* vault.suggestions(suggestionPolicyFromQuery(url)))
+      return jsonResponse(
+        yield* vault.suggestions(
+          suggestionPolicyFromQuery(url),
+          url.searchParams.get("pageId") ?? undefined
+        )
+      )
     }
     return yield* dispatchGraphQuery(request, route, url, vault)
   })
@@ -470,6 +474,30 @@ export const createOrReuseWorkflow = async <Params>(
   }
 }
 
+/**
+ * Reuse a workflow created under either side of a service-secret rotation before
+ * creating the current-secret binding. This keeps the public workflow id as the
+ * dedupe boundary while retaining dual-secret lookup compatibility.
+ */
+export const createOrReuseScopedWorkflow = async <Params>(
+  binding: WorkflowBindingLike<Params>,
+  env: MemoryWorkerEnv,
+  organizationId: string,
+  workflowId: string,
+  params: Params
+): Promise<void> => {
+  const ids = await workflowBindingIds(env, organizationId, workflowId)
+  for (const id of ids) {
+    try {
+      await (await binding.get(id)).status()
+      return
+    } catch {
+      continue
+    }
+  }
+  await createOrReuseWorkflow(binding, ids[0]!, params)
+}
+
 const findWorkflowInstance = async (
   binding: { get(id: string): Promise<WorkflowInstanceLike> },
   env: MemoryWorkerEnv,
@@ -499,12 +527,7 @@ const startCompilerWorkflow = async (
   if (env.MEMORY_COMPILER === undefined) {
     throw new MemoryVaultError({ code: "not_found", message: "compiler workflow binding is unavailable", status: 404 })
   }
-  const bindingId = await workflowBindingId(
-    env.MEMORY_SERVICE_SECRET,
-    organizationId,
-    body.workflowId
-  )
-  await createOrReuseWorkflow(env.MEMORY_COMPILER, bindingId, {
+  await createOrReuseScopedWorkflow(env.MEMORY_COMPILER, env, organizationId, body.workflowId, {
     ...body,
     organizationId,
     autoPublishFixes: configuredMechanicalFixes(env),
@@ -525,12 +548,13 @@ const startLintWorkflow = async (
   if (env.MEMORY_LINT === undefined) {
     throw new MemoryVaultError({ code: "not_found", message: "lint workflow binding is unavailable", status: 404 })
   }
-  const bindingId = await workflowBindingId(
-    env.MEMORY_SERVICE_SECRET,
+  await createOrReuseScopedWorkflow(
+    env.MEMORY_LINT,
+    env,
     organizationId,
-    body.workflowId
+    body.workflowId,
+    { ...body, organizationId }
   )
-  await createOrReuseWorkflow(env.MEMORY_LINT, bindingId, { ...body, organizationId })
   return jsonResponse({ workflowId: body.workflowId, status: "queued" }, 202)
 }
 
@@ -596,8 +620,7 @@ const startCompilerForSource = async (
 ): Promise<string | undefined> => {
   if (!response.ok || env.MEMORY_COMPILER === undefined) return
   const workflowId = `compiler-${stableContentHash(`${organizationId}\u0000${source.id}`)}`
-  const bindingId = await workflowBindingId(env.MEMORY_SERVICE_SECRET, organizationId, workflowId)
-  await createOrReuseWorkflow(env.MEMORY_COMPILER, bindingId, {
+  await createOrReuseScopedWorkflow(env.MEMORY_COMPILER, env, organizationId, workflowId, {
     workflowId,
     organizationId,
     sourceId: source.id,
@@ -682,12 +705,13 @@ const triggerVectorIngest = async (
   }
   try {
     const marker = stableContentHash(await response.clone().text())
-    const bindingId = await workflowBindingId(
-      env.MEMORY_SERVICE_SECRET,
+    await createOrReuseScopedWorkflow(
+      env.MEMORY_VECTOR_INGEST,
+      env,
       organizationId,
-      `vector-ingest-${marker}`
+      `vector-ingest-${marker}`,
+      { organizationId }
     )
-    await createOrReuseWorkflow(env.MEMORY_VECTOR_INGEST, bindingId, { organizationId })
   } catch {
     // Publication already committed; advisory vector ingestion is best-effort and
     // the scheduled drift sweep reconciles anything this trigger could not start.

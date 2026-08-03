@@ -16,7 +16,11 @@ import {
   type RenderedEmail
 } from "./emails/index.js"
 
-const resend = env.resendApiKey ? new Resend(env.resendApiKey) : null
+let cachedResend: Resend | null | undefined
+const resendClient = (): Resend | null => {
+  cachedResend ??= env.resendApiKey ? new Resend(env.resendApiKey) : null
+  return cachedResend
+}
 
 /** Where the "Open Jingler" CTA points (the app registers the deep link). */
 const APP_OPEN_URL = "jingler://open"
@@ -33,6 +37,7 @@ export interface SecurityContext {
 
 /** Send a pre-rendered email, or log it to the console when Resend isn't configured. */
 async function deliver(to: string, email: RenderedEmail): Promise<void> {
+  const resend = resendClient()
   if (!resend) {
     // eslint-disable-next-line no-console
     console.log(

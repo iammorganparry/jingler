@@ -1,8 +1,12 @@
 import { Effect } from "effect"
 import { serializeMemoryMarkdown, type MemoryPage, type MemorySource } from "@jingler/memory"
 import { describe, expect, it } from "vitest"
-import { VAULT_ORGANIZATION_HEADER } from "./auth.js"
-import { handleMemoryWorkerRequest, handleTeamVaultRequest } from "./api.js"
+import { VAULT_ORGANIZATION_HEADER, workflowBindingId } from "./auth.js"
+import {
+  createOrReuseScopedWorkflow,
+  handleMemoryWorkerRequest,
+  handleTeamVaultRequest
+} from "./api.js"
 import type {
   DurableObjectIdLike,
   DurableObjectNamespaceLike,
@@ -55,6 +59,40 @@ class TestVaultNamespace implements DurableObjectNamespaceLike {
     }
   }
 }
+
+describe("workflow rotation deduplication", () => {
+  it("reuses an instance created with the previous service secret", async () => {
+    const bucket = new InMemoryR2Bucket()
+    const previousId = await workflowBindingId("previous-secret", "org-a", "compiler-stable")
+    let creates = 0
+    const binding: WorkflowBindingLike<{ readonly workflowId: string }> = {
+      create: async ({ id }) => {
+        creates += 1
+        return { id, status: async () => ({ status: "queued" }) }
+      },
+      get: async (id) => {
+        if (id !== previousId) throw new Error("instance absent")
+        return { id, status: async () => ({ status: "running" }) }
+      }
+    }
+    const env: MemoryWorkerEnv = {
+      MEMORY_R2: bucket,
+      MEMORY_VAULTS: new TestVaultNamespace(bucket),
+      MEMORY_SERVICE_SECRET: "current-secret",
+      MEMORY_SERVICE_SECRET_PREVIOUS: "previous-secret"
+    }
+
+    await createOrReuseScopedWorkflow(
+      binding,
+      env,
+      "org-a",
+      "compiler-stable",
+      { workflowId: "compiler-stable" }
+    )
+
+    expect(creates).toBe(0)
+  })
+})
 
 const source: MemorySource = { id: "source-stable", kind: "manual", title: "Stable source" }
 
@@ -436,7 +474,10 @@ describe("memory Worker internal API", () => {
       getRequest("org-b", "/internal/memory/search?q=private-org-a&occurredAt=2026-08-01T00:00:00.000Z"),
       env
     )
-    expect(await jsonBody(searchA)).toMatchObject({ total: 1, results: [{ pageId: "shared-slug" }] })
+    expect(await jsonBody(searchA)).toMatchObject({
+      total: 1,
+      results: [{ pageId: "shared-slug", revisionId: "org-a-revision-1" }]
+    })
     expect(await jsonBody(searchB)).toMatchObject({ total: 0, results: [] })
 
     for (const organizationId of ["org-a", "org-b"]) {
@@ -547,7 +588,9 @@ describe("memory Worker internal API", () => {
         created.push({ id, params })
         return { id, status: async () => ({ status: "queued" }) }
       },
-      get: async (id) => ({ id, status: async () => ({ status: "queued" }) })
+      get: async () => {
+        throw new Error("instance absent")
+      }
     }
     const env: MemoryWorkerEnv = {
       MEMORY_R2: bucket,

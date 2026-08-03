@@ -41,6 +41,7 @@ const MAX_DIGEST_CHARACTERS = 8_000
 // clock skew / in-flight-request window still leaves a valid grant. The 401
 // eviction path (below) covers server-side revocation and expiry races.
 const GRANT_REFRESH_MARGIN_SECONDS = 30
+const ATTACHMENT_BACKGROUND_REFRESH_SECONDS = 5 * 60
 // A capture that keeps failing to deliver is dropped rather than re-attempted on
 // every drain forever — bounded by attempt count and by age.
 const MAX_CAPTURE_ATTEMPTS = 5
@@ -139,6 +140,7 @@ export interface MemoryServiceShape {
 export interface MemorySuggestionsRequest {
   readonly organizationId: string
   readonly limit?: number
+  readonly pageId?: string
 }
 
 export interface MemoryUiAccess {
@@ -178,7 +180,17 @@ interface MemoryRuntime {
   readonly grantCache: Map<string, MemoryGrantResponse>
   /** Serializes mint-and-cache so parallel UI requests share one grant. */
   readonly grantLock: Effect.Semaphore
+  /** Validated static MCP attachment per organization and source bearer. */
+  readonly attachmentCache: Map<string, CachedMemoryAttachment>
+  readonly attachmentLock: Effect.Semaphore
+  readonly attachmentRefreshes: Set<string>
   draining: boolean
+}
+
+interface CachedMemoryAttachment {
+  readonly attachment: MemoryAttachment
+  readonly expiresAt: number
+  readonly tokenHash: string
 }
 
 interface MemoryCaptureJob {
@@ -336,7 +348,7 @@ const requestJson = <A, I>(
 const requestGrant = (
   runtime: MemoryRuntime,
   selection: SelectedMemory,
-  purpose?: "attachment"
+  timeoutMs: number = runtime.uiTimeoutMs
 ): Effect.Effect<MemoryGrantResponse, MemoryRequestError> =>
   requestJson(
     runtime,
@@ -345,14 +357,11 @@ const requestGrant = (
       method: "POST",
       headers: grantHeaders(selection.token),
       body: JSON.stringify({
-        organizationId: selection.organizationId,
-        ...(purpose === undefined ? {} : { purpose })
+        organizationId: selection.organizationId
       })
     },
     MemoryGrantResponseSchema,
-    // A UI grant gates interactive reads, so it gets the longer budget; the
-    // attachment grant is fail-open inside a turn and keeps the short one.
-    purpose === "attachment" ? runtime.timeoutMs : runtime.uiTimeoutMs
+    timeoutMs
   ).pipe(
     Effect.flatMap((parsed) => {
       if (
@@ -470,10 +479,10 @@ const attachmentFrom = (
 const validatedAttachment = (
   runtime: MemoryRuntime,
   selection: SelectedMemory
-): Effect.Effect<MemoryAttachment | null> =>
+): Effect.Effect<CachedMemoryAttachment | null> =>
   Effect.gen(function* () {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const issued = yield* requestGrant(runtime, selection, "attachment").pipe(Effect.either)
+      const issued = yield* requestGrant(runtime, selection, runtime.timeoutMs).pipe(Effect.either)
       if (Either.isLeft(issued)) return null
       const discovery = yield* discoverGrant(
         runtime,
@@ -481,12 +490,68 @@ const validatedAttachment = (
         selection.organizationId
       ).pipe(Effect.either)
       if (Either.isRight(discovery)) {
-        return attachmentFrom(runtime, issued.right, selection.organizationId)
+        return {
+          attachment: attachmentFrom(runtime, issued.right, selection.organizationId),
+          expiresAt: issued.right.claims.expiresAt,
+          tokenHash: sha256(selection.token)
+        }
       }
       if (discovery.left.status !== 401) return null
     }
     return null
   })
+
+const refreshAttachmentInBackground = (
+  runtime: MemoryRuntime,
+  selection: SelectedMemory
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const claimed = yield* Effect.sync(() => {
+      if (runtime.attachmentRefreshes.has(selection.organizationId)) return false
+      runtime.attachmentRefreshes.add(selection.organizationId)
+      return true
+    })
+    if (!claimed) return
+    yield* validatedAttachment(runtime, selection).pipe(
+      Effect.tap((entry) =>
+        entry === null
+          ? Effect.void
+          : Effect.sync(() => runtime.attachmentCache.set(selection.organizationId, entry))
+      ),
+      Effect.ensuring(
+        Effect.sync(() => runtime.attachmentRefreshes.delete(selection.organizationId))
+      ),
+      Effect.forkDaemon
+    )
+  })
+
+const cachedAttachment = (
+  runtime: MemoryRuntime,
+  selection: SelectedMemory
+): Effect.Effect<MemoryAttachment | null> =>
+  runtime.attachmentLock.withPermits(1)(
+    Effect.gen(function* () {
+      const cached = runtime.attachmentCache.get(selection.organizationId)
+      const remaining = (cached?.expiresAt ?? 0) - runtime.nowSeconds()
+      if (
+        cached !== undefined &&
+        cached.tokenHash === sha256(selection.token) &&
+        remaining > GRANT_REFRESH_MARGIN_SECONDS
+      ) {
+        if (remaining <= ATTACHMENT_BACKGROUND_REFRESH_SECONDS) {
+          yield* refreshAttachmentInBackground(runtime, selection)
+        }
+        return cached.attachment
+      }
+      const refreshed = yield* validatedAttachment(runtime, selection)
+      if (refreshed === null) {
+        runtime.attachmentCache.delete(selection.organizationId)
+        return null
+      }
+      runtime.attachmentCache.set(selection.organizationId, refreshed)
+      return refreshed.attachment
+    })
+  )
 
 const selectedMemory = Effect.gen(function* () {
   const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
@@ -691,6 +756,9 @@ export const makeMemoryService = (
     outboxLock: Effect.unsafeMakeSemaphore(1),
     grantCache: new Map<string, MemoryGrantResponse>(),
     grantLock: Effect.unsafeMakeSemaphore(1),
+    attachmentCache: new Map<string, CachedMemoryAttachment>(),
+    attachmentLock: Effect.unsafeMakeSemaphore(1),
+    attachmentRefreshes: new Set<string>(),
     draining: false
   }
   const attachment = (cli: CliKind) =>
@@ -698,7 +766,7 @@ export const makeMemoryService = (
       ? Effect.succeed(null)
       : selectedMemory.pipe(
       Effect.flatMap((selection) =>
-        selection === null ? Effect.succeed(null) : validatedAttachment(runtime, selection)
+        selection === null ? Effect.succeed(null) : cachedAttachment(runtime, selection)
       )
       )
   const captureSettledSession = (input: MemorySessionDigestInput) =>
@@ -791,7 +859,10 @@ export const makeMemoryService = (
     uiRequest({
       organizationId: input.organizationId,
       name: "memory_suggestions",
-      arguments: input.limit === undefined ? {} : { limit: input.limit }
+      arguments: {
+        ...(input.limit === undefined ? {} : { limit: input.limit }),
+        ...(input.pageId === undefined ? {} : { pageId: input.pageId })
+      }
     })
 
   return { attachment, captureSettledSession, access, uiRequest, suggestions }
