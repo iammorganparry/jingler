@@ -50,8 +50,18 @@ describe("AuthService.getSession", () => {
   })
 
   it("routes the sign-in callback through the dev loopback when set, else the plain bridge", async () => {
-    const bodyOf = (fetchMock: ReturnType<typeof vi.fn>) =>
-      JSON.parse((fetchMock.mock.calls[0]?.[1] as { body: string }).body) as { callbackURL: string }
+    const bodyOf = (fetchMock: ReturnType<typeof vi.fn>) => {
+      const init: unknown = fetchMock.mock.calls[0]?.[1]
+      if (
+        typeof init !== "object" ||
+        init === null ||
+        !("body" in init) ||
+        typeof init.body !== "string"
+      ) {
+        throw new Error("Expected fetch to receive a string request body")
+      }
+      return JSON.parse(init.body) as { callbackURL: string }
+    }
 
     // Without the env: the plain `/desktop/callback` bridge (deep-link path).
     delete process.env.JINGLER_DEV_AUTH_LOOPBACK

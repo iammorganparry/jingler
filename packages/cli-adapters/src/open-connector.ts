@@ -31,6 +31,8 @@ import { probeServer } from "./mcp-probe.js"
 
 /** The header the bearer is sent under. A constant so redaction + injection agree. */
 const AUTH_HEADER = "Authorization"
+/** Codex resolves the bearer from its launch environment, never from argv. */
+const AUTH_ENVIRONMENT = "JINGLER_OPEN_CONNECTOR_AUTHORIZATION"
 
 /** The `/mcp` endpoint URL for a base, via the shared endpoint normaliser. */
 const mcpUrl = (endpoint: string): string => `${normalizeEndpoint(endpoint)}/mcp`
@@ -78,7 +80,8 @@ const remoteEntry = (
       args: [],
       env: {},
       url,
-      headers: { [AUTH_HEADER]: `Bearer ${token}` }
+      headers: { [AUTH_HEADER]: `Bearer ${token}` },
+      headerEnvironment: { [AUTH_HEADER]: AUTH_ENVIRONMENT }
     }
   }
 }

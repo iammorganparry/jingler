@@ -28,6 +28,12 @@ export interface McpLaunch {
   /** remote only. */
   readonly url?: string
   readonly headers: Readonly<Record<string, string>>
+  /**
+   * Optional header-to-environment-name map for harnesses that can keep secret
+   * values out of process arguments. The concrete values remain in `headers`
+   * for transports that need them directly.
+   */
+  readonly headerEnvironment?: Readonly<Record<string, string>>
 }
 
 /** A server entry, split into its safe-to-send half and its secret-bearing half. */
@@ -47,7 +53,10 @@ export const remoteMcpServer = (
     : {
         name: entry.server.name,
         url: entry.launch.url,
-        headers: entry.launch.headers
+        headers: entry.launch.headers,
+        ...(entry.launch.headerEnvironment === undefined
+          ? {}
+          : { headerEnvironment: entry.launch.headerEnvironment })
       }
 
 export const isRecord = (v: unknown): v is Record<string, unknown> =>
