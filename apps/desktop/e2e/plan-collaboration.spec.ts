@@ -33,7 +33,7 @@ const session = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession>
 ]
 
 const currentPlanPath = (launched: LaunchedApp): string =>
-  join(planDirectory(launched.home, launched.repoPath), "current-plan.html")
+  join(planDirectory(launched.home, launched.repoPath), "current-plan.json")
 
 const columnRatio = async (
   column: ReturnType<LaunchedApp["window"]["getByTestId"]>
@@ -95,14 +95,16 @@ test("streaming plan collaboration survives promotion and reload", async ({
   const resizedRatio = await columnRatio(planColumn)
   expect(resizedRatio).toBeGreaterThan(initialRatio + 0.04)
 
-  // Composing streams the agent's HTML into the read-only document.
-  await expect(window.getByText(/Move session token handling/)).toBeVisible()
+  // Composing tolerant-parses the streamed partial DTO into the read-only outline.
+  await expect(
+    window.getByText("Audit session middleware", { exact: true })
+  ).toBeVisible({ timeout: 20_000 })
 
   // Promotion swaps in the validated canonical revision — the Main step outline.
   await expect.poll(() => existsSync(planFile), { timeout: 20_000 }).toBe(true)
   await expect
     .poll(() => readFileSync(planFile, "utf8"))
-    .toContain('data-stage="s_06"')
+    .toContain('"id": "s_06"')
   await expect(
     window.getByText("Audit session middleware", { exact: true })
   ).toBeVisible({ timeout: 20_000 })

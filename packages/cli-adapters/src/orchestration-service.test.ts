@@ -47,12 +47,13 @@ const stage = (
   id,
   title: `Stage ${id}`,
   intent: `Complete ${id}`,
-  markdown: [
-    `<p>Implement ${id}</p>`,
+  approach: [],
+  files:
     options.declaresFiles === false
-      ? ""
-      : `<ul data-files>${(options.files ?? []).map((file) => `<li>${file}</li>`).join("")}</ul>`
-  ].join(""),
+      ? []
+      : (options.files ?? []).map((file) => ({ path: file, change: "M" as const })),
+  diagrams: [],
+  notes: [{ kind: "prose", id: `${id}-note`, text: `Implement ${id}` }],
   acceptance: [
     {
       id: `${id}.1`,

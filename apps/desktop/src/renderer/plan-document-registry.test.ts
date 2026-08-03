@@ -7,15 +7,13 @@ import {
   stopPlanDocument
 } from "./plan-document-registry.js"
 
-const source = (label: string): string => `<h1>PRD: ${label}</h1>`
 const document = (sessionId: string, revision = 1, label = "Initial"): PlanDocument => ({
   id: `plan-${sessionId}`,
   sessionId,
   producingChatId: `chat-${sessionId}`,
   revision,
   status: "proposed",
-  source: source(label),
-  projection: { title: `PRD: ${label}`, sections: [], stages: [], annotations: [] },
+  plan: { title: `PRD: ${label}`, sections: [], stages: [], annotations: [] },
   updatedAt: `2026-07-31T00:00:0${revision}.000Z`,
   updatedBy: revision === 1 ? "agent" : "user"
 })

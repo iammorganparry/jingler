@@ -7,7 +7,7 @@ import type {
   ReasoningEffort,
   StreamEvent
 } from "@jingler/core"
-import { CliExecError } from "@jingler/core"
+import { CliExecError, defaultPlan } from "@jingler/core"
 import type {
   McpServerConfig,
   PermissionMode as SdkPermissionMode,
@@ -31,14 +31,7 @@ import { requireWorktree } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
 import { capOutput } from "./output-cap.js"
 import { formatQuestionAnswers } from "./question-prompt.js"
-import {
-  draftPlanCandidate,
-  fencedHtmlPlanSubmission,
-  hasOrchestratorPlanSubmission,
-  parsePlan,
-  PLAN_HTML_REFORMAT,
-  planModeInstructions
-} from "./plan-parse.js"
+import { capturePlanEmission, planJsonInstructions } from "./plan-json.js"
 import { createPlanDraftStream } from "./plan-draft-stream.js"
 import { turnContinuation } from "./turn-continuation.js"
 
@@ -146,7 +139,8 @@ export const mapClaudeReasoning = (
  * plans from that block, so a fence-less plan has no steps to review — we ask for
  * one reformat before falling back to showing the raw markdown.
  */
-export const PLAN_REFORMAT = `${PLAN_HTML_REFORMAT} You MUST call ExitPlanMode again.`
+export const PLAN_REFORMAT =
+  "Your plan was not a valid ```json emission ({ \"mode\", \"plan\" }). Re-emit the SAME plan — change only its format, not its content — as one ```json block, each stage carrying a stable id + title, dependencies, files, and acceptance criteria. You MUST call ExitPlanMode again."
 
 /**
  * The gate request for a tool the SDK asked about, or null for read-only tools
@@ -1160,14 +1154,12 @@ export const runClaude = (
             spec.orchestrationPlanApproved !== true
           ) {
             const content = strOf(input.content)?.trim() ?? ""
-            const planId = `plan_${sessionId}_${planCount + 1}`
-            const plan =
-              content.length === 0
-                ? null
-                : parsePlan(content, planId, spec.workerRouting)
-            if (plan?.structured === true) {
+            const capture = content.length === 0 ? null : capturePlanEmission(content)
+            if (capture?._tag === "emission") {
               planCount += 1
-              const decision = await runP(ctx.proposePlan(plan))
+              const decision = await runP(
+                ctx.proposePlan(capture.emission.plan, capture.block)
+              )
               planReplyText = ""
               planDraft.reset()
               planReformatAsked = false
@@ -1184,7 +1176,9 @@ export const runClaude = (
             return {
               behavior: "deny",
               message:
-                "Jingler orchestrator planning is read-only. Submit the complete structured PRD with ExitPlanMode."
+                capture?._tag === "reformat"
+                  ? capture.message
+                  : "Jingler orchestrator planning is read-only. Submit the complete structured plan with ExitPlanMode."
             }
           }
           // `Write` is removed from the SDK denylist for orchestrator runs so a
@@ -1210,41 +1204,36 @@ export const runClaude = (
               }
             }
             const payload = strOf(input.plan)?.trim() ?? ""
-            const planId = `plan_${sessionId}_${planCount + 1}`
-            const payloadPlan =
-              payload.length === 0
-                ? null
-                : parsePlan(payload, planId, spec.workerRouting)
-            const replyPlan =
-              planReplyText.length === 0
-                ? null
-                : parsePlan(planReplyText, planId, spec.workerRouting)
-            const structuredPayload =
-              payloadPlan?.structured === true ? payloadPlan : null
-            const structuredReply =
-              replyPlan?.structured === true ? replyPlan : null
-            const plan = structuredPayload ?? structuredReply
-            const raw = payload || planReplyText
-            // `planModeInstructions` documents the ` ````html ` fence, but a model
-            // can still skip it — and then the operator gets a plan with no
-            // reviewable steps. Bounce the FIRST offender back through the same
-            // deny.message channel a revision uses; it re-calls ExitPlanMode with
-            // the fence and nobody sees the broken version.
-            if (plan === null && !planReformatAsked) {
+            // The plan may arrive in the ExitPlanMode payload or streamed into the
+            // reply as a ```json block. Prefer the payload; fall back to the reply.
+            const payloadCapture = payload.length === 0 ? null : capturePlanEmission(payload)
+            const replyCapture =
+              planReplyText.length === 0 ? null : capturePlanEmission(planReplyText)
+            const capture =
+              payloadCapture?._tag === "emission"
+                ? payloadCapture
+                : replyCapture?._tag === "emission"
+                  ? replyCapture
+                  : payloadCapture ?? replyCapture
+            // The model can still emit a malformed or absent plan — then the
+            // operator would get nothing reviewable. Bounce the FIRST offender back
+            // through the deny.message channel a revision uses.
+            if (capture?._tag !== "emission" && !planReformatAsked) {
               planReformatAsked = true
               planReplyText = ""
               const clear = planDraft.clear()
               if (clear !== null) await runP(ctx.emit(clear))
-              return { behavior: "deny", message: PLAN_REFORMAT }
+              return {
+                behavior: "deny",
+                message: capture?._tag === "reformat" ? capture.message : PLAN_REFORMAT
+              }
             }
             planCount += 1
-            const proposedPlan = plan ?? parsePlan(raw, planId, spec.workerRouting)
+            const proposedPlan =
+              capture?._tag === "emission" ? capture.emission.plan : defaultPlan()
             const submittedBlock =
-              structuredPayload === null && structuredReply !== null
-                ? fencedHtmlPlanSubmission(
-                    planReplyText,
-                    spec.workerRouting
-                  )?.block
+              payloadCapture?._tag !== "emission" && replyCapture?._tag === "emission"
+                ? replyCapture.block
                 : undefined
             const decision = await runP(
               ctx.proposePlan(proposedPlan, submittedBlock)
@@ -1380,8 +1369,7 @@ export const runClaude = (
             ...mapClaudeReasoning(spec.reasoningEffort, spec.thinkingEnabled),
             ...(spec.mode === "plan" || spec.orchestrationRoutes !== undefined
               ? {
-                  planModeInstructions: planModeInstructions(
-                    spec.planTemplate,
+                  planModeInstructions: planJsonInstructions(
                     spec.orchestrationRoutes,
                     spec.workerRouting
                   )
@@ -1567,39 +1555,21 @@ export const runClaude = (
                 planReplyText.length > 0 &&
                 events.some((event) => event._tag === "Done")
               ) {
-                // A delegation submission — native plan mode, or the explicit
-                // reply marker — enters the blocking approval gate. Any other
-                // reply that is a VALID plan is an iteration draft: it only
-                // populates Plan Review (via a `PlanStore` write `Plan.watch`
-                // streams), leaving the visible ```html preview in chat.
-                const submitting =
-                  nativePlanActive || hasOrchestratorPlanSubmission(planReplyText)
-                if (submitting) {
-                  const planId = `plan_${sessionId}_1`
-                  const replyPlan = parsePlan(
-                    planReplyText,
-                    planId,
-                    spec.workerRouting
-                  )
-                  if (replyPlan.structured === true) {
+                // The emission's `mode` decides: "submit" (or native plan mode)
+                // enters the blocking approval gate; "draft" only populates Plan
+                // Review (via a `PlanStore` write `Plan.watch` streams), leaving the
+                // visible ```json preview in chat.
+                const capture = capturePlanEmission(planReplyText)
+                if (capture?._tag === "emission") {
+                  const submitting = nativePlanActive || capture.emission.mode === "submit"
+                  if (submitting) {
                     planCount += 1
-                    const submittedBlock =
-                      fencedHtmlPlanSubmission(
-                        planReplyText,
-                        spec.workerRouting
-                      )?.block
-                    await runP(ctx.proposePlan(replyPlan, submittedBlock))
+                    await runP(ctx.proposePlan(capture.emission.plan, capture.block))
                     planReplyText = ""
                     planDraft.reset()
-                  }
-                } else if (ctx.saveDraftPlan !== undefined) {
-                  const candidate = draftPlanCandidate(
-                    planReplyText,
-                    spec.workerRouting
-                  )
-                  if (candidate !== null) {
+                  } else if (ctx.saveDraftPlan !== undefined) {
                     planCount += 1
-                    await runP(ctx.saveDraftPlan(candidate.source))
+                    await runP(ctx.saveDraftPlan(capture.emission.plan))
                   }
                 }
               }

@@ -1,9 +1,33 @@
-import type { Plan, QuestionRequest, StreamEvent } from "@jingler/core"
+import type { Plan, PlanPrd, QuestionRequest, StreamEvent } from "@jingler/core"
+import { planDocumentToPlan } from "@jingler/core"
 import { Effect } from "effect"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentContext, PlanDecision as PlanDecisionType, SessionSpec } from "./adapter.js"
 import { PlanDecision } from "./adapter.js"
-import { ORCHESTRATOR_PLAN_SUBMISSION_MARKER } from "./plan-parse.js"
+
+/** A structured plan + its JSON emission block, replacing the old HTML+marker fixtures. */
+const PLAN: PlanPrd = {
+  title: "PRD: Stream the plan",
+  sections: [],
+  stages: [
+    {
+      id: "01",
+      title: "Draft",
+      intent: "Show work as it is composed.",
+      approach: [],
+      files: [],
+      diagrams: [],
+      notes: [],
+      acceptance: [{ id: "01.1", text: "Draft is visible.", status: "pending", evidence: null }],
+      dependencies: []
+    }
+  ],
+  annotations: []
+}
+const emission = (mode: "draft" | "submit"): string =>
+  ["```json", JSON.stringify({ mode, plan: PLAN }), "```"].join("\n")
+const SUBMIT_PLAN = emission("submit")
+const DRAFT_PLAN = emission("draft")
 
 /**
  * The Codex plan loop, which is the one part of `runCodex` that cannot be
@@ -90,30 +114,41 @@ const { runCodexSdk: runCodex } = await import("./codex-adapter.js")
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
+const MIGRATION_PLAN: PlanPrd = {
+  title: "Add a tier column",
+  sections: [],
+  stages: [
+    {
+      id: "01",
+      title: "Add the column",
+      intent: "Accounts need a billing tier.",
+      approach: ["write the migration"],
+      files: [{ path: "migrations/003.sql", change: "A", added: 12, removed: 0 }],
+      diagrams: [],
+      notes: [],
+      acceptance: [{ id: "01.1", text: "The column exists.", status: "pending", evidence: null }],
+      dependencies: []
+    },
+    {
+      id: "02",
+      title: "Backfill it",
+      intent: "Existing rows need a value.",
+      approach: ["batch update"],
+      files: [],
+      diagrams: [],
+      notes: [],
+      acceptance: [{ id: "02.1", text: "Rows are backfilled.", status: "pending", evidence: null }],
+      dependencies: ["01"]
+    }
+  ],
+  annotations: []
+}
 const PLAN_TEXT = [
   "Here is what I propose.",
   "",
-  "```plan",
-  "summary: Add a tier column",
-  "01 Add the column",
-  "  intent: Accounts need a billing tier.",
-  "  approach: write the migration",
-  "  files: A migrations/003.sql +12",
-  "02 Backfill it",
-  "  intent: Existing rows need a value.",
-  "  approach: batch update",
-  "  depends: 01",
+  "```json",
+  JSON.stringify({ mode: "submit", plan: MIGRATION_PLAN }),
   "```"
-].join("\n")
-
-const HTML_PLAN_TEXT = [
-  "````html",
-  "<h1>PRD: Stream the plan</h1>",
-  '<section data-stage="01" data-title="Draft">',
-  "<h3>Intent</h3><p>Show work as it is composed.</p>",
-  '<div data-acceptance="01.1" data-status="pending">Draft is visible.</div>',
-  "</section>",
-  "````"
 ].join("\n")
 
 const QUESTION_TEXT = [
@@ -155,11 +190,29 @@ const spec = (over: Partial<SessionSpec> = {}): SessionSpec =>
     ...over
   }) as SessionSpec
 
+/**
+ * Mirror production: when the operator approves, agent-runner threads the
+ * canonical `Plan` back on the decision (`{ ...exactPlan, status: "approved" }`),
+ * which the adapter turns into the execution-resume prompt. The scripted
+ * decisions omit it, so the harness attaches the just-proposed plan.
+ */
+const prdToPlan = (prd: PlanPrd): Plan =>
+  planDocumentToPlan({
+    id: "plan_test",
+    sessionId: "s",
+    producingChatId: "c",
+    revision: 1,
+    status: "approved",
+    plan: prd,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    updatedBy: "agent"
+  })
+
 const harness = (decisions: ReadonlyArray<PlanDecisionType>) => {
   const emitted: StreamEvent[] = []
-  const proposed: Plan[] = []
+  const proposed: PlanPrd[] = []
   const questions: string[] = []
-  const drafts: string[] = []
+  const drafts: PlanPrd[] = []
   let n = 0
   const ctx: AgentContext = {
     emit: (event: StreamEvent) => Effect.sync(() => void emitted.push(event)),
@@ -169,12 +222,15 @@ const harness = (decisions: ReadonlyArray<PlanDecisionType>) => {
         questions.push(request.id)
         return [{ selected: ["Postgres"], other: null }]
       }),
-    proposePlan: (plan: Plan) =>
+    proposePlan: (plan: PlanPrd) =>
       Effect.sync(() => {
         proposed.push(plan)
-        return decisions[n++] ?? PlanDecision.Reject()
+        const decision = decisions[n++] ?? PlanDecision.Reject()
+        return decision._tag === "Approve" && decision.plan === undefined
+          ? PlanDecision.Approve({ mode: decision.mode, plan: prdToPlan(plan) })
+          : decision
       }),
-    saveDraftPlan: (source: string) => Effect.sync(() => void drafts.push(source)),
+    saveDraftPlan: (plan: PlanPrd) => Effect.sync(() => void drafts.push(plan)),
     registerBackgroundStop: () => Effect.void
   } as unknown as AgentContext
   return { ctx, emitted, proposed, questions, drafts }
@@ -196,7 +252,7 @@ describe("the Codex plan loop", () => {
     sdk.state.script = [
       [
         { type: "thread.started", thread_id: "t-auto" },
-        agentMessage(`${ORCHESTRATOR_PLAN_SUBMISSION_MARKER}\n${HTML_PLAN_TEXT}`),
+        agentMessage(SUBMIT_PLAN),
         turnDone
       ]
     ]
@@ -227,8 +283,8 @@ describe("the Codex plan loop", () => {
     ).toBe(false)
   })
 
-  it("mirrors an unmarked plan into a draft while keeping the reply in chat", async () => {
-    sdk.state.script = [[agentMessage(HTML_PLAN_TEXT), turnDone]]
+  it("mirrors a draft-mode plan into a draft while keeping the reply in chat", async () => {
+    sdk.state.script = [[agentMessage(DRAFT_PLAN), turnDone]]
     const { ctx, emitted, proposed, drafts } = harness([])
 
     await Effect.runPromise(
@@ -245,13 +301,13 @@ describe("the Codex plan loop", () => {
       )
     )
 
-    // No delegation submission (no marker) — the approval gate stays untouched…
+    // mode:"draft" — the approval gate stays untouched…
     expect(proposed).toHaveLength(0)
     // …the visible reply still lands in chat…
-    expect(emitted).toContainEqual({ _tag: "Assistant", text: HTML_PLAN_TEXT })
+    expect(emitted).toContainEqual({ _tag: "Assistant", text: DRAFT_PLAN })
     // …and the plan is captured as an iteration draft so Plan Review populates.
     expect(drafts).toHaveLength(1)
-    expect(drafts[0]).toContain("PRD: Stream the plan")
+    expect(drafts[0]?.title).toBe("PRD: Stream the plan")
   })
 
   it("does not create a draft from an ordinary non-plan reply", async () => {
@@ -277,7 +333,7 @@ describe("the Codex plan loop", () => {
   })
 
   it("does not create a draft outside orchestration (a plain direct chat)", async () => {
-    sdk.state.script = [[agentMessage(HTML_PLAN_TEXT), turnDone]]
+    sdk.state.script = [[agentMessage(DRAFT_PLAN), turnDone]]
     const { ctx, drafts } = harness([])
 
     await Effect.runPromise(
@@ -287,14 +343,9 @@ describe("the Codex plan loop", () => {
     expect(drafts).toHaveLength(0)
   })
 
-  it("asks a marked malformed auto-mode submission to reformat with the marker", async () => {
-    const malformed = [
-      ORCHESTRATOR_PLAN_SUBMISSION_MARKER,
-      "````html",
-      "<h1>PRD: Incomplete</h1>",
-      "````"
-    ].join("\n")
-    const corrected = `${ORCHESTRATOR_PLAN_SUBMISSION_MARKER}\n${HTML_PLAN_TEXT}`
+  it("asks a malformed auto-mode submission to reformat, then accepts the corrected JSON", async () => {
+    const malformed = ["```json", '{ "mode": "submit", "plan": { "title":', "```"].join("\n")
+    const corrected = SUBMIT_PLAN
     sdk.state.script = [
       [agentMessage(malformed), turnDone],
       [agentMessage(corrected), turnDone]
@@ -316,16 +367,16 @@ describe("the Codex plan loop", () => {
     )
 
     expect(sdk.state.runs).toHaveLength(2)
-    expect(sdk.state.runs[1]?.prompt).toContain(ORCHESTRATOR_PLAN_SUBMISSION_MARKER)
+    expect(sdk.state.runs[1]?.prompt).toContain("json")
     expect(proposed).toHaveLength(1)
-    expect(proposed[0]?.structured).toBe(true)
+    expect(proposed[0]?.title).toBe("PRD: Stream the plan")
   })
 
   it("leaves an approved-plan amendment in the reply channel without reopening approval", async () => {
     sdk.state.script = [
       [
         { type: "thread.started", thread_id: "t-approved" },
-        agentMessage(HTML_PLAN_TEXT),
+        agentMessage(SUBMIT_PLAN),
         turnDone
       ]
     ]
@@ -356,7 +407,7 @@ describe("the Codex plan loop", () => {
   })
 
   it("publishes the completed SDK message through the progressive draft contract", async () => {
-    sdk.state.script = [[agentMessage(HTML_PLAN_TEXT), turnDone]]
+    sdk.state.script = [[agentMessage(SUBMIT_PLAN), turnDone]]
     const { ctx, emitted, proposed } = harness([PlanDecision.Reject()])
 
     await Effect.runPromise(runCodex("s-draft", spec(), ctx, new Map()))
@@ -366,7 +417,7 @@ describe("the Codex plan loop", () => {
       _tag: "PlanDraft",
       draft: {
         id: "plan_s-draft_1",
-        source: expect.stringContaining("<h1>PRD: Stream the plan</h1>"),
+        source: expect.stringContaining('"PRD: Stream the plan"'),
         phase: "complete"
       }
     })
@@ -463,8 +514,8 @@ describe("the Codex plan loop", () => {
 
     await Effect.runPromise(runCodex("s1", spec(), ctx, new Map()))
 
-    expect(proposed.map((p) => p.summary)).toEqual(["Add a tier column"])
-    expect(proposed[0]!.steps.map((s) => s.number)).toEqual(["01", "02"])
+    expect(proposed.map((p) => p.title)).toEqual(["Add a tier column"])
+    expect(proposed[0]!.stages.map((s) => s.id)).toEqual(["01", "02"])
     // The point of the whole change: planning cannot write, execution can.
     expect(sdk.state.runs.map((r) => r.sandboxMode)).toEqual(["read-only", "workspace-write"])
     // Same thread id, so the agent does not re-derive what it just worked out.
@@ -502,10 +553,8 @@ describe("the Codex plan loop", () => {
       "read-only",
       "danger-full-access"
     ])
+    // Two proposals — the second renders as a revision (PlanStore assigns ids).
     expect(proposed).toHaveLength(2)
-    // Distinct ids, so the second proposal renders as a revision rather than
-    // silently overwriting the first.
-    expect(proposed[0]!.id).not.toBe(proposed[1]!.id)
     // Two intermediate plan rounds, one final execution round, one probe.
     expect(contextProbe.calls).toHaveLength(1)
   })
@@ -535,9 +584,10 @@ describe("the Codex plan loop", () => {
     await Effect.runPromise(runCodex("s1", spec(), ctx, new Map()))
 
     const assistant = emitted.filter((e) => e._tag === "Assistant")
-    expect(assistant.some((e) => "text" in e && e.text.includes("```plan"))).toBe(false)
-    // …and the plan itself kept the prose that surrounded the block.
-    expect(proposed[0]!.raw).toContain("Here is what I propose.")
+    // The captured JSON block is not echoed as chat…
+    expect(assistant.some((e) => "text" in e && e.text.includes("```json"))).toBe(false)
+    // …and the plan Jingler captured is the migration plan.
+    expect(proposed[0]!.title).toBe("Add a tier column")
   })
 
   it("ignores a plan block outside plan mode", async () => {
@@ -583,7 +633,7 @@ describe("the Codex plan loop", () => {
     await Effect.runPromise(runCodex("s1", spec(), ctx, new Map()))
 
     expect(proposed).toHaveLength(6)
-    expect(emitted.some((e) => e._tag === "Assistant" && "text" in e && e.text.includes("```plan"))).toBe(true)
+    expect(emitted.some((e) => e._tag === "Assistant" && "text" in e && e.text.includes("```json"))).toBe(true)
   })
 
   it("keeps the question budget independent from plan revisions", async () => {

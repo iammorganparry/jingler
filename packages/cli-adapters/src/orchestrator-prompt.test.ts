@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { CliKind } from "@jingler/core"
 import { orchestratorNote, orchestratorTurnPrompt } from "./orchestrator-prompt.js"
-import { ORCHESTRATOR_PLAN_SUBMISSION_MARKER } from "./plan-parse.js"
 
 /**
  * The rule these cover: the orchestrator is a role, not a personality. Its voice
@@ -80,18 +79,17 @@ describe("orchestratorNote", () => {
 describe("orchestratorTurnPrompt", () => {
   const text = "Please review our onboarding flow."
 
-  it("wraps the operator's message and decouples drafting from delegation", () => {
+  it("wraps the operator's message and decouples drafting from delegation via mode", () => {
     const prompt = orchestratorTurnPrompt(false, text)
     expect(prompt).toContain(text)
-    // The delegation route: the explicit marker + four-backtick block.
-    expect(prompt).toContain(ORCHESTRATOR_PLAN_SUBMISSION_MARKER)
-    expect(prompt).toContain("````html")
-    // The iteration route — a marker-FREE plan becomes an editable draft. This
-    // is the behaviour that regressed (Plan Review stayed empty); assert the
-    // instruction that communicates it is present.
-    expect(prompt.toLowerCase()).toContain("with no marker")
+    // The single JSON transport; `mode` decides draft vs submit.
+    expect(prompt).toContain("```json")
+    // The iteration route — "draft" mode becomes an editable draft. This is the
+    // behaviour that regressed (Plan Review stayed empty).
+    expect(prompt.toLowerCase()).toContain('"mode":"draft"')
     expect(prompt.toLowerCase()).toContain("editable draft")
-    expect(prompt.toLowerCase()).toContain("mirrors it into plan review")
+    // The mode field, not block position, decides — killing the marker-at-start bug.
+    expect(prompt.toLowerCase()).toContain("the mode field decides, not position")
   })
 
   it("switches to the amend-without-approval instruction once a plan is approved", () => {
@@ -99,7 +97,5 @@ describe("orchestratorTurnPrompt", () => {
     expect(prompt).toContain(text)
     expect(prompt).toContain("A plan is already approved")
     expect(prompt).toContain("without another approval gate")
-    // No fresh submission marker once approved — amendments dispatch on their own.
-    expect(prompt).not.toContain(ORCHESTRATOR_PLAN_SUBMISSION_MARKER)
   })
 })

@@ -1,6 +1,8 @@
 import { Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
+  type PlanFile,
+  type PlanPrd,
   type PlanPrdStage,
   providerReasoningCapabilitiesFor,
   WorkerRoutingConfig,
@@ -8,13 +10,15 @@ import {
 } from "./plan-document.js"
 import { WorkspaceConfig } from "./domain.js"
 import {
-  applyWorkerRoutingToPlanHtml,
+  applyWorkerRouting,
   buildPlanExecutionGraph,
-  compileOrchestrationPlanHtml,
+  compileOrchestrationPlan,
   resolveWorkerRoutingConfig,
   workerRoutingMismatch
 } from "./plan-execution.js"
-import { parsePlanHtml } from "./plan-html.js"
+
+const files = (...paths: ReadonlyArray<string>): Array<PlanFile> =>
+  paths.map((path) => ({ path, change: "M" as const }))
 
 const stage = (
   id: string,
@@ -23,7 +27,10 @@ const stage = (
   id,
   title: `Stage ${id}`,
   intent: "Ship an observable outcome.",
-  markdown: "<p>Work.</p><ul data-files></ul>",
+  approach: [],
+  files: [],
+  diagrams: [],
+  notes: [],
   acceptance: [],
   complexity: "medium",
   dependencies: [],
@@ -35,6 +42,24 @@ const stage = (
   },
   executionStatus: "queued",
   ...options
+})
+
+/** An assignment-free semantic stage, as a planner authors it before routing. */
+const semanticStage = (
+  id: string,
+  options: Partial<PlanPrdStage> = {}
+): PlanPrdStage =>
+  stage(id, {
+    assignment: null,
+    acceptance: [{ id: `${id}.1`, text: "It works.", status: "pending", evidence: null }],
+    ...options
+  })
+
+const plan = (title: string, stages: ReadonlyArray<PlanPrdStage>): PlanPrd => ({
+  title,
+  sections: [],
+  stages: [...stages],
+  annotations: []
 })
 
 describe("buildPlanExecutionGraph", () => {
@@ -62,12 +87,10 @@ describe("buildPlanExecutionGraph", () => {
 
   it("keeps independent assignments separate and joins normalized file overlaps", () => {
     const result = buildPlanExecutionGraph([
-      stage("01", {
-        markdown: '<ul data-files><li data-change="M">packages/core/src/a.ts</li></ul>'
-      }),
+      stage("01", { files: files("packages/core/src/a.ts") }),
       stage("02"),
       stage("03", {
-        markdown: '<ul data-files><li data-change="M">./packages/core/src/x/../a.ts</li></ul>',
+        files: [{ path: "./packages/core/src/x/../a.ts", change: "M" }],
         assignment: {
           agentId: "agent-01",
           cli: "codex",
@@ -82,21 +105,9 @@ describe("buildPlanExecutionGraph", () => {
     expect(result.groups[0]!.files).toEqual(["packages/core/src/a.ts"])
   })
 
-  it("serializes undeclared stages while allowing explicit no-file stages to run independently", () => {
-    const sharedAssignment = stage("01").assignment
-    const conservative = buildPlanExecutionGraph([
-      stage("01", { markdown: "<p>Undeclared work.</p>" }),
-      stage("02", {
-        markdown: "<p>Also undeclared.</p>",
-        assignment: sharedAssignment
-      })
-    ])
+  it("lets stages with no declared files run independently", () => {
     const explicit = buildPlanExecutionGraph([stage("01"), stage("02")])
 
-    expect(conservative.valid).toBe(true)
-    expect(conservative.groups.map((group) => group.stageIds)).toEqual([
-      ["01", "02"]
-    ])
     expect(explicit.valid).toBe(true)
     expect(explicit.groups.map((group) => group.stageIds)).toEqual([
       ["01"],
@@ -104,15 +115,11 @@ describe("buildPlanExecutionGraph", () => {
     ])
   })
 
-  it("aggregates overlaps from every declared file list", () => {
+  it("aggregates overlaps from every declared file", () => {
     const result = buildPlanExecutionGraph([
-      stage("01", {
-        markdown:
-          "<ul data-files><li>src/first.ts</li></ul>" +
-          "<ul data-files><li>src/shared.ts</li></ul>"
-      }),
+      stage("01", { files: files("src/first.ts", "src/shared.ts") }),
       stage("02", {
-        markdown: "<ul data-files><li>src/shared.ts</li></ul>",
+        files: files("src/shared.ts"),
         assignment: stage("01").assignment
       })
     ])
@@ -124,10 +131,7 @@ describe("buildPlanExecutionGraph", () => {
 
   it("rejects absolute and repository-escaping file declarations", () => {
     const result = buildPlanExecutionGraph([
-      stage("01", {
-        markdown:
-          '<ul data-files><li>/tmp/a.ts</li><li>../../outside.ts</li></ul>'
-      })
+      stage("01", { files: files("/tmp/a.ts", "../../outside.ts") })
     ])
 
     expect(result.valid).toBe(false)
@@ -157,7 +161,7 @@ describe("buildPlanExecutionGraph", () => {
     {
       name: "conflicting assignment",
       stages: [
-        stage("01"),
+        stage("01", { files: files("src/shared.ts") }),
         stage("02", { dependencies: ["01"] })
       ],
       code: "assignment-conflict"
@@ -208,13 +212,11 @@ describe("buildPlanExecutionGraph", () => {
     },
     {
       name: "file overlap",
-      second: {
-        markdown: "<ul data-files><li>src/shared.ts</li></ul>"
-      }
+      second: { files: files("src/shared.ts") }
     }
   ])("rejects conflicting reasoning across a $name component", ({ second }) => {
     const first = stage("01", {
-      markdown: "<ul data-files><li>src/shared.ts</li></ul>",
+      files: files("src/shared.ts"),
       assignment: {
         agentId: "agent-shared",
         cli: "codex",
@@ -371,79 +373,62 @@ describe("worker routing", () => {
   })
 
   it("normalizes each dependency/file component to its strongest complexity route", () => {
-    const source = `<h1>PRD: Route work</h1>
-<section data-stage="01" data-title="Inspect" data-complexity="low">
-<div data-assignment data-agent-id="worker-auth" data-cli="codex" data-model="gpt-5.6-sol" data-thinking-enabled="true" data-reasoning-effort="high" data-reason="Planner choice" data-status="queued"></div>
-<ul data-files><li>src/auth.ts</li></ul>
-<div data-acceptance="01.1" data-status="pending">The path is understood.</div>
-</section>
-<section data-stage="02" data-title="Implement" data-depends-on="01" data-complexity="high">
-<div data-assignment data-agent-id="worker-auth" data-cli="codex" data-model="gpt-5.6-sol" data-thinking-enabled="true" data-reasoning-effort="high" data-reason="Planner choice" data-status="queued"></div>
-<ul data-files></ul>
-<div data-acceptance="02.1" data-status="pending">The change works.</div>
-</section>
-<section data-stage="03" data-title="Release" data-complexity="medium">
-<ul data-files></ul>
-<div data-acceptance="03.1" data-status="pending">The release is ready.</div>
-</section>`
-    const parsed = parsePlanHtml(source)
-    expect(parsed.valid).toBe(true)
-    if (!parsed.valid) return
+    const stages = [
+      stage("01", {
+        title: "Inspect",
+        complexity: "low",
+        files: files("src/auth.ts"),
+        assignment: {
+          agentId: "worker-auth",
+          cli: "codex",
+          model: "gpt-5.6-sol",
+          reason: "Planner choice",
+          reasoning: { enabled: true, effort: "high" }
+        }
+      }),
+      stage("02", {
+        title: "Implement",
+        dependencies: ["01"],
+        complexity: "high",
+        assignment: {
+          agentId: "worker-auth",
+          cli: "codex",
+          model: "gpt-5.6-sol",
+          reason: "Planner choice",
+          reasoning: { enabled: true, effort: "high" }
+        }
+      }),
+      stage("03", { title: "Release", complexity: "medium", assignment: null })
+    ]
 
-    const normalized = parsePlanHtml(
-      applyWorkerRoutingToPlanHtml(
-        parsed.html,
-        parsed.projection.stages,
-        configured
-      )
-    )
-    expect(normalized.valid).toBe(true)
-    if (!normalized.valid) return
-    expect(
-      normalized.projection.stages.map((item) => item.assignment)
-    ).toMatchObject([
+    const routed = applyWorkerRouting(stages, configured)
+
+    expect(routed.map((item) => item.assignment)).toMatchObject([
       { agentId: "worker-auth", cli: "claude", model: "opus" },
       { agentId: "worker-auth", cli: "claude", model: "opus" },
       { agentId: "agent-02", cli: "codex", model: "gpt-5.6-sol" }
     ])
-    expect(
-      normalized.projection.stages.every(
-        (item) => item.assignment?.reasoning === undefined
-      )
-    ).toBe(true)
-    expect(normalized.html).not.toContain("data-thinking-enabled")
-    expect(normalized.html).not.toContain("data-reasoning-effort")
-    expect(
-      workerRoutingMismatch(normalized.projection.stages, configured)
-    ).toBeNull()
+    expect(routed.every((item) => item.assignment?.reasoning === undefined)).toBe(true)
+    expect(workerRoutingMismatch(routed, configured)).toBeNull()
   })
 
   it("compiles assignment-free plan semantics into one routed worker per component", () => {
-    const source = `<h1>PRD: Compile workers</h1>
-<section data-stage="01" data-title="Inspect" data-complexity="low">
-<ul data-files><li>src/shared.ts</li></ul>
-<div data-acceptance="01.1" data-status="pending">Inspection is complete.</div>
-</section>
-<section data-stage="02" data-title="Implement" data-depends-on="01" data-complexity="high">
-<ul data-files></ul>
-<div data-acceptance="02.1" data-status="pending">Implementation works.</div>
-</section>
-<section data-stage="03" data-title="Document" data-complexity="low">
-<ul data-files><li>docs/change.md</li></ul>
-<div data-acceptance="03.1" data-status="pending">Documentation is accurate.</div>
-</section>`
+    const source = plan("Compile workers", [
+      semanticStage("01", { title: "Inspect", complexity: "low", files: files("src/shared.ts") }),
+      semanticStage("02", {
+        title: "Implement",
+        dependencies: ["01"],
+        complexity: "high"
+      }),
+      semanticStage("03", { title: "Document", complexity: "low", files: files("docs/change.md") })
+    ])
 
-    const compiled = compileOrchestrationPlanHtml(
-      source,
-      reasoningConfigured
-    )
+    const compiled = compileOrchestrationPlan(source, reasoningConfigured)
 
     expect(compiled.valid).toBe(true)
     if (!compiled.valid) return
     expect(compiled.graph.valid).toBe(true)
-    expect(
-      compiled.projection.stages.map((item) => item.assignment)
-    ).toMatchObject([
+    expect(compiled.plan.stages.map((item) => item.assignment)).toMatchObject([
       {
         agentId: "agent-01",
         cli: "claude",
@@ -466,114 +451,79 @@ describe("worker routing", () => {
   })
 
   it("preserves an existing component identity and allocates a new independent worker", () => {
-    const original = compileOrchestrationPlanHtml(
-      `<h1>PRD: Stable workers</h1>
-<section data-stage="01" data-title="Existing" data-complexity="medium">
-<ul data-files><li>src/existing.ts</li></ul>
-<div data-acceptance="01.1" data-status="pending">Existing work succeeds.</div>
-</section>`,
+    const original = compileOrchestrationPlan(
+      plan("Stable workers", [
+        semanticStage("01", { title: "Existing", complexity: "medium", files: files("src/existing.ts") })
+      ]),
       configured
     )
     expect(original.valid).toBe(true)
     if (!original.valid) return
 
-    const amendment = compileOrchestrationPlanHtml(
-      `<h1>PRD: Stable workers</h1>
-<section data-stage="01" data-title="Existing" data-complexity="medium">
-<ul data-files><li>src/existing.ts</li></ul>
-<div data-acceptance="01.1" data-status="pending">Existing work succeeds.</div>
-</section>
-<section data-stage="02" data-title="Independent" data-complexity="high">
-<ul data-files><li>src/independent.ts</li></ul>
-<div data-acceptance="02.1" data-status="pending">Independent work succeeds.</div>
-</section>
-<section data-stage="03" data-title="Dependent" data-depends-on="01" data-complexity="low">
-<ul data-files><li>src/dependent.ts</li></ul>
-<div data-acceptance="03.1" data-status="pending">Dependent work succeeds.</div>
-</section>`,
+    const amendment = compileOrchestrationPlan(
+      plan("Stable workers", [
+        semanticStage("01", { title: "Existing", complexity: "medium", files: files("src/existing.ts") }),
+        semanticStage("02", { title: "Independent", complexity: "high", files: files("src/independent.ts") }),
+        semanticStage("03", {
+          title: "Dependent",
+          dependencies: ["01"],
+          complexity: "low",
+          files: files("src/dependent.ts")
+        })
+      ]),
       configured,
-      { previousStages: original.projection.stages }
+      { previousStages: original.plan.stages }
     )
 
     expect(amendment.valid).toBe(true)
     if (!amendment.valid) return
-    expect(
-      amendment.projection.stages.map((item) => item.assignment?.agentId)
-    ).toStrictEqual(["agent-01", "agent-02", "agent-01"])
-    expect(amendment.projection.stages[1]?.executionStatus).toBe("queued")
+    expect(amendment.plan.stages.map((item) => item.assignment?.agentId)).toStrictEqual([
+      "agent-01",
+      "agent-02",
+      "agent-01"
+    ])
+    expect(amendment.plan.stages[1]?.executionStatus).toBe("queued")
   })
 
-  it("preserves the exact configured Codex model id in canonical HTML", () => {
-    const source = `<h1>PRD: Preserve the route</h1>
-<section data-stage="01" data-title="Ship" data-complexity="medium">
-<div data-assignment data-agent-id="worker-ship" data-cli="claude" data-model="opus" data-reason="Planner choice" data-status="queued"></div>
-<ul data-files><li>src/ship.ts</li></ul>
-<div data-acceptance="01.1" data-status="pending">The route is preserved.</div>
-</section>`
-    const parsed = parsePlanHtml(source)
-    expect(parsed.valid).toBe(true)
-    if (!parsed.valid) return
-
+  it("applies the exact configured Codex model id to the routed assignment", () => {
     const routing: WorkerRoutingConfig = {
       ...configured,
       medium: { cli: "codex", model: laterPageCodexModel }
     }
-    const canonical = parsePlanHtml(
-      applyWorkerRoutingToPlanHtml(
-        parsed.html,
-        parsed.projection.stages,
-        routing
-      )
+    const routed = applyWorkerRouting(
+      [stage("01", { title: "Ship", complexity: "medium", files: files("src/ship.ts") })],
+      routing
     )
 
-    expect(canonical.valid).toBe(true)
-    if (!canonical.valid) return
-    expect(canonical.html).toContain('data-cli="codex"')
-    expect(canonical.html).toContain(
-      `data-model="${laterPageCodexModel}"`
-    )
-    expect(canonical.projection.stages[0]?.assignment).toMatchObject({
+    expect(routed[0]?.assignment).toMatchObject({
       cli: "codex",
       model: laterPageCodexModel
     })
   })
 
   it("applies every complexity bucket's complete reasoning route", () => {
-    const source = `<h1>PRD: Preserve reasoning routes</h1>
-<section data-stage="01" data-title="Low" data-complexity="low"><ul data-files></ul><div data-acceptance="01.1" data-status="pending">Low works.</div></section>
-<section data-stage="02" data-title="Medium" data-complexity="medium"><ul data-files></ul><div data-acceptance="02.1" data-status="pending">Medium works.</div></section>
-<section data-stage="03" data-title="High" data-complexity="high"><ul data-files></ul><div data-acceptance="03.1" data-status="pending">High works.</div></section>`
-    const parsed = parsePlanHtml(source)
-    expect(parsed.valid).toBe(true)
-    if (!parsed.valid) return
-
-    const routed = parsePlanHtml(
-      applyWorkerRoutingToPlanHtml(
-        parsed.html,
-        parsed.projection.stages,
-        reasoningConfigured
-      )
+    const routed = applyWorkerRouting(
+      [
+        stage("01", { title: "Low", complexity: "low", assignment: null }),
+        stage("02", { title: "Medium", complexity: "medium", assignment: null }),
+        stage("03", { title: "High", complexity: "high", assignment: null })
+      ],
+      reasoningConfigured
     )
 
-    expect(routed.valid).toBe(true)
-    if (!routed.valid) return
-    expect(
-      routed.projection.stages.map((item) => item.assignment?.reasoning)
-    ).toStrictEqual([
+    expect(routed.map((item) => item.assignment?.reasoning)).toStrictEqual([
       { enabled: true, effort: "low" },
       { enabled: true, effort: "medium" },
       { enabled: true, effort: "high" }
     ])
-    expect(routed.html.match(/data-thinking-enabled="true"/g)).toHaveLength(3)
-    expect(workerRoutingMismatch(routed.projection.stages, reasoningConfigured))
-      .toBeNull()
+    expect(workerRoutingMismatch(routed, reasoningConfigured)).toBeNull()
 
-    const medium = routed.projection.stages[1]
+    const medium = routed[1]
     const mediumAssignment = medium?.assignment
     if (medium === undefined || mediumAssignment === null || mediumAssignment === undefined) {
       return
     }
-    const mismatched = routed.projection.stages.map((item) =>
+    const mismatched = routed.map((item) =>
       item.id === medium.id
         ? {
             ...item,

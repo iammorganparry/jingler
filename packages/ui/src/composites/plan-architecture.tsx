@@ -1,6 +1,7 @@
-import { type PlanPrd, sanitizePlanHtml, toPlanArchitectureView } from "@jingler/core"
+import { type PlanBlock, type PlanPrd, toPlanArchitectureView } from "@jingler/core"
 import { useMemo } from "react"
 import { MermaidDiagram } from "../components/mermaid-diagram.js"
+import { PlanBlocks } from "./plan-doc/plan-blocks.js"
 import { cn } from "../lib/cn.js"
 
 /**
@@ -31,25 +32,20 @@ import { cn } from "../lib/cn.js"
  * diagram is drawn exactly once, in the dedicated diagrams region.
  */
 
-/** Sanitize a section body and drop any embedded diagram blocks (rendered separately). */
-const sectionProse = (markdown: string): string => {
-  const html = sanitizePlanHtml(markdown)
-  if (typeof DOMParser === "undefined") return html
-  const doc = new DOMParser().parseFromString(html, "text/html")
-  for (const el of doc.querySelectorAll("[data-diagram]")) el.remove()
-  return doc.body.innerHTML.trim()
-}
-
-function ArchitectureSection({ title, markdown }: { title: string; markdown: string }) {
-  const body = useMemo(() => sectionProse(markdown), [markdown])
+function ArchitectureSection({
+  title,
+  blocks
+}: {
+  title: string
+  blocks: ReadonlyArray<PlanBlock>
+}) {
+  // Diagrams are surfaced once in the dedicated diagrams region below, so drop
+  // them from the section's own block flow here.
+  const prose = blocks.filter((block) => block.kind !== "diagram")
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-[13px] font-semibold text-text-bright">{title}</h2>
-      <div
-        className="sb-md text-[13px] leading-[1.65] text-text-body"
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitizePlanHtml allowlist strips scripts/handlers/inline styles before render
-        dangerouslySetInnerHTML={{ __html: body }}
-      />
+      <PlanBlocks blocks={prose} className="sb-md text-[13px] leading-[1.65] text-text-body" />
     </section>
   )
 }
@@ -78,7 +74,7 @@ export function PlanArchitecture({ prd, className }: { prd: PlanPrd; className?:
   return (
     <div className={cn("flex flex-col gap-6 p-4", className)}>
       {view.sections.map((section) => (
-        <ArchitectureSection key={section.id} title={section.title} markdown={section.markdown} />
+        <ArchitectureSection key={section.id} title={section.title} blocks={section.blocks} />
       ))}
 
       {view.diagrams.length > 0 && (

@@ -1,7 +1,7 @@
 import type { PermissionMode, Question, QuestionAnswer, ReasoningEffort } from "@jingler/core"
 import { CliExecError, resumePlanPrompt } from "@jingler/core"
 import { Effect, Runtime } from "effect"
-import type { AgentContext, SessionSpec } from "./adapter.js"
+import type { AgentContext, PlanDecision, SessionSpec } from "./adapter.js"
 import {
   agentMessageDelta,
   codexAppServerMessageToStreamEvents,
@@ -24,14 +24,7 @@ import {
 import { stageCodexInput, toCodexAppServerInput } from "./codex-input.js"
 import { codexMcpEnvironment, codexMcpOverrides } from "./mcp-config.js"
 import { requireWorktree } from "./cwd.js"
-import {
-  draftPlanCandidate,
-  hasOrchestratorPlanSubmission,
-  hasPlanBlock,
-  ORCHESTRATOR_PLAN_HTML_REFORMAT,
-  parsePlan,
-  PLAN_HTML_REFORMAT
-} from "./plan-parse.js"
+import { capturePlanEmission, type PlanCapture } from "./plan-json.js"
 import { createPlanDraftStream } from "./plan-draft-stream.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
 import { harnessEnv, hasSubscriptionAuth } from "./subscription.js"
@@ -658,7 +651,7 @@ export const runCodexAppServer = (
                 }
               }
 
-              const reply = followUp === null ? completedAgentReply(message) : null
+              const reply: string | null = followUp === null ? completedAgentReply(message) : null
               const asked =
                 reply !== null && questionRound < MAX_QUESTION_ROUNDS
                   ? parseQuestionBlock(reply)
@@ -678,33 +671,26 @@ export const runCodexAppServer = (
                 continue
               }
 
-              const proposed =
+              const capturing: boolean =
                 reply !== null &&
                 (planning ||
                   (spec.orchestrationRoutes !== undefined &&
-                    spec.orchestrationPlanApproved !== true &&
-                    hasOrchestratorPlanSubmission(reply))) &&
-                planRound < MAX_PLAN_ROUNDS &&
-                (planning ? hasPlanBlock(reply) : true)
-                  ? reply
-                  : null
-              if (proposed !== null) {
+                    spec.orchestrationPlanApproved !== true)) &&
+                planRound < MAX_PLAN_ROUNDS
+              const capture: PlanCapture | null =
+                capturing && reply !== null ? capturePlanEmission(reply) : null
+              if (capture?._tag === "reformat" && !planReformatAsked) {
+                planReformatAsked = true
+                const clear = planDraft.clear()
+                if (clear !== null) await runP(ctx.emit(clear))
+                followUp = capture.message
+                continue
+              }
+              if (capture?._tag === "emission" && (planning || capture.emission.mode === "submit")) {
                 planRound += 1
-                const plan = parsePlan(
-                  proposed,
-                  `plan_${sessionId}_${planRound}`,
-                  spec.workerRouting
+                const decision: PlanDecision = await runP(
+                  ctx.proposePlan(capture.emission.plan, capture.block)
                 )
-                if (plan.structured === false && !planReformatAsked) {
-                  planReformatAsked = true
-                  const clear = planDraft.clear()
-                  if (clear !== null) await runP(ctx.emit(clear))
-                  followUp = planning
-                    ? PLAN_HTML_REFORMAT
-                    : ORCHESTRATOR_PLAN_HTML_REFORMAT
-                  continue
-                }
-                const decision = await runP(ctx.proposePlan(plan))
                 planDraft.reset()
                 if (decision._tag === "Revise") {
                   followUp = decision.feedback
@@ -722,24 +708,18 @@ export const runCodexAppServer = (
                     sandbox: activePolicy.sandbox,
                     approvalPolicy: activePolicy.approvalPolicy
                   })
-                  followUp = resumePlanPrompt(decision.plan ?? plan)
+                  if (decision.plan !== undefined) followUp = resumePlanPrompt(decision.plan)
                 }
                 continue
               }
-              // No delegation submission this reply — but in Auto orchestration a
-              // plan the agent merely SHOWS (no marker) is an iteration draft:
-              // mirror it into Plan Review, then let the reply emit as chat.
-              else if (
-                reply !== null &&
+              // A "draft" emission in auto orchestration mirrors into Plan Review,
+              // then falls through to emit as ordinary chat.
+              if (
+                capture?._tag === "emission" &&
                 !planning &&
-                spec.orchestrationRoutes !== undefined &&
-                spec.orchestrationPlanApproved !== true &&
                 ctx.saveDraftPlan !== undefined
               ) {
-                const candidate = draftPlanCandidate(reply, spec.workerRouting)
-                if (candidate !== null) {
-                  await runP(ctx.saveDraftPlan(candidate.source))
-                }
+                await runP(ctx.saveDraftPlan(capture.emission.plan))
               }
 
               for (const event of codexAppServerMessageToStreamEvents(

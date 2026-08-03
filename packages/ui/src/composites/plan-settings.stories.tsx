@@ -1,11 +1,13 @@
 import {
-  DEFAULT_PLAN_TEMPLATE_HTML,
+  defaultPlan,
   type CliInfo,
   type CliKind,
   type ModelOption
 } from "@jingler/core"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { PlanSettings } from "./plan-settings.js"
+
+const DEFAULT_PLAN_TEMPLATE_HTML = JSON.stringify(defaultPlan("PRD: Template"))
 
 const CLIS: ReadonlyArray<CliInfo> = [
   {

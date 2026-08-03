@@ -111,14 +111,13 @@ describe("mapPermissionMode", () => {
 
 describe("PLAN_REFORMAT", () => {
   it("names the missing block and tells the agent how to re-submit", () => {
-    // Handed back through deny.message when a plan skips the HTML block — it's the only
+    // Handed back through deny.message when a plan skips the JSON emission — it's the only
     // channel that reaches the agent, so it has to be self-contained.
-    expect(PLAN_REFORMAT).toContain("````html")
-    expect(PLAN_REFORMAT).not.toContain("````html plan")
-    expect(PLAN_REFORMAT).toContain("<section data-stage>")
+    expect(PLAN_REFORMAT).toContain("```json")
+    expect(PLAN_REFORMAT).toContain('"mode"')
     expect(PLAN_REFORMAT).toContain("ExitPlanMode")
     expect(PLAN_REFORMAT).toContain("stable id + title")
-    expect(PLAN_REFORMAT).toContain("data-acceptance")
+    expect(PLAN_REFORMAT).toContain("acceptance")
   })
 
   it("asks for a reformat, NOT a different plan", () => {

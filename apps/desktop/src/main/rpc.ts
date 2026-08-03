@@ -991,7 +991,7 @@ const routePlanMessageWithRouting = <R>(
       document = initial.document
     }
     const lastMessageId = (): string | null =>
-      document.projection.annotations
+      document.plan.annotations
         .find((annotation) => annotation.id === input.annotationId)
         ?.messages.at(-1)?.id ?? null
     const initialMessageId = initial?.messageId ?? lastMessageId()
@@ -1099,7 +1099,7 @@ const routePlanMessageWithRouting = <R>(
     const visitedEdges = new Set<string>()
     while (queueIndex < queue.length) {
       const current = queue[queueIndex++]!
-      const persistedMessage = document.projection.annotations
+      const persistedMessage = document.plan.annotations
         .find((annotation) => annotation.id === input.annotationId)
         ?.messages.find((message) => message.id === current.messageId)
       current.deliveries = persistedMessage?.mentionDeliveries
@@ -1313,7 +1313,7 @@ export const planDispatchExistingMessageWithRouting = <R>(
         )
       )
     }
-    const message = document.projection.annotations
+    const message = document.plan.annotations
       .find((annotation) => annotation.id === input.annotationId)
       ?.messages.find((candidate) => candidate.id === input.messageId)
     if (
@@ -1367,11 +1367,11 @@ export const mergeCanonicalOrchestrationCheckpoints = (
   const checkpointByAgent = new Map(
     checkpoints.map((checkpoint) => [checkpoint.agentId, checkpoint])
   )
-  for (const stage of document.projection.stages) {
+  for (const stage of document.plan.stages) {
     const agentId = stage.assignment?.agentId
     if (agentId === undefined) continue
     const prior = checkpointByAgent.get(agentId)
-    const completedStageIds = document.projection.stages
+    const completedStageIds = document.plan.stages
       .filter(
         (candidate) =>
           candidate.assignment?.agentId === agentId &&
@@ -1405,7 +1405,7 @@ export const restoredOrchestrationSnapshot = (
   checkpoints: ReadonlyArray<OrchestrationCheckpoint>
 ): WorkerActivityReset | null => {
   if (checkpoints.length === 0) return null
-  const graph = buildOrchestrationGroups(document.projection.stages)
+  const graph = buildOrchestrationGroups(document.plan.stages)
   if (!graph.valid) return null
   const recovered = new Map(
     recoverOrchestrationCheckpoints(
@@ -1475,7 +1475,7 @@ export const orchestrationStagesCompleted = (
   document: PlanDocument | null
 ): boolean =>
   document !== null &&
-  document.projection.stages.every(
+  document.plan.stages.every(
     (stage) => stage.executionStatus === "completed"
   )
 
@@ -1483,7 +1483,7 @@ const queuedOrchestrationFingerprints = (
   document: PlanDocument
 ): ReadonlySet<string> =>
   new Set(
-    document.projection.stages.flatMap((stage) =>
+    document.plan.stages.flatMap((stage) =>
       stage.assignment !== null &&
       stage.assignment !== undefined &&
       stage.executionStatus === "queued"
@@ -1528,7 +1528,7 @@ const recordOrchestrationFailure = (
       session.activeChatId
     )
     if (document === null || document.id !== planId) return
-    const stage = document.projection.stages.find(
+    const stage = document.plan.stages.find(
       (candidate) => candidate.executionStatus !== "completed"
     )
     if (stage?.assignment !== null && stage?.assignment !== undefined) {
@@ -1602,7 +1602,7 @@ export const executeOrchestration = (
         planId,
         producingChatId: document.producingChatId,
         planRevision: document.revision,
-        stages: document.projection.stages,
+        stages: document.plan.stages,
         checkpoints: currentCheckpoints,
         maxConcurrency: 4,
         ...(agentIds === undefined ? {} : { agentIds }),
@@ -1624,7 +1624,7 @@ export const executeOrchestration = (
               Effect.provide(persistence),
               Effect.map(
                 (latest) =>
-                  latest?.projection.stages.find(
+                  latest?.plan.stages.find(
                     (stage) => stage.id === stageId
                   ) ?? null
               )
@@ -3350,7 +3350,7 @@ const HandlersLayer = JinglerRpcs.toLayer({
       )
     ),
   "Plan.watch": ({ sessionId }) => planWatch(sessionId),
-  "Plan.updateDocument": ({ sessionId, planId, baseRevision, source, author }) =>
+  "Plan.updateDocument": ({ sessionId, planId, baseRevision, plan, author }) =>
     SessionStore.get(sessionId).pipe(
       Effect.map((session) => session.worktreePath),
       Effect.flatMap((worktreePath) =>
@@ -3365,7 +3365,7 @@ const HandlersLayer = JinglerRpcs.toLayer({
           : PlanStore.updateDocument(worktreePath, {
               planId,
               baseRevision,
-              source,
+              plan,
               author
             })
       ),

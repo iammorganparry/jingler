@@ -1,7 +1,7 @@
 import type { CliKind, WorkerRoutingConfig } from "@jingler/core"
-import { DEFAULT_PLAN_TEMPLATE_HTML, supportsPlanMode } from "@jingler/core"
+import { supportsPlanMode } from "@jingler/core"
 import type { OrchestrationRoute } from "./adapter.js"
-import { planInstructions } from "./plan-parse.js"
+import { planJsonInstructions } from "./plan-json.js"
 
 /**
  * The per-turn instruction telling an agent how to submit a plan.
@@ -27,7 +27,6 @@ import { planInstructions } from "./plan-parse.js"
  */
 export const planNote = (
   cli: CliKind,
-  template: string = DEFAULT_PLAN_TEMPLATE_HTML,
   orchestration?: ReadonlyArray<OrchestrationRoute>,
   workerRouting?: WorkerRoutingConfig
 ): string | null => {
@@ -37,6 +36,6 @@ export const planNote = (
     "PLAN MODE — you are READ-ONLY this turn. The harness sandbox will reject any",
     "edit or write command, so do not attempt one: research, then plan.",
     "",
-    planInstructions("reply", template, orchestration, workerRouting)
+    planJsonInstructions(orchestration, workerRouting)
   ].join("\n")
 }

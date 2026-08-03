@@ -1,14 +1,12 @@
 import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import {
-  parsePlanHtml,
-  type Plan,
+  type PlanPrd,
   type StreamEvent,
   type WorkerRoutingConfig
 } from "@jingler/core"
 import { Effect } from "effect"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentContext, SessionSpec } from "./adapter.js"
-import { ORCHESTRATOR_PLAN_SUBMISSION_MARKER } from "./plan-parse.js"
 
 /**
  * Regression for signal-position-ms7r9fpb.
@@ -20,31 +18,60 @@ import { ORCHESTRATOR_PLAN_SUBMISSION_MARKER } from "./plan-parse.js"
  * SDK asks canUseTool to authorize ExitPlanMode.
  */
 
-const planHtml = (title: string): string => [
-  `\`\`\`\`html`,
-  `<h1>PRD: ${title}</h1>`,
-  '<section data-stage="01" data-title="Persist the plan">',
-  "<h3>Intent</h3><p>Populate Plan Review.</p>",
-  '<div data-acceptance="01.1" data-status="pending">Plan Review is populated.</div>',
-  "</section>",
-  "````"
-].join("\n")
+/** A plan as its fenced JSON emission (replaces the former HTML fixture). */
+const planPrd = (title: string): PlanPrd => ({
+  title: `PRD: ${title}`,
+  sections: [],
+  stages: [
+    {
+      id: "01",
+      title: "Persist the plan",
+      intent: "Populate Plan Review.",
+      approach: [],
+      files: [],
+      diagrams: [],
+      notes: [],
+      acceptance: [{ id: "01.1", text: "Plan Review is populated.", status: "pending", evidence: null }],
+      dependencies: []
+    }
+  ],
+  annotations: []
+})
+const planHtml = (title: string, mode: "draft" | "submit" = "submit"): string =>
+  ["```json", JSON.stringify({ mode, plan: planPrd(title) }), "```"].join("\n")
 
-const repeatedAgentPlanHtml = [
-  "````html",
-  "<h1>PRD: Routed streamed plan</h1>",
-  '<section data-stage="05" data-title="Pricing" data-complexity="high">',
-  '<div data-assignment data-agent-id="worker-pricing" data-cli="codex" data-model="gpt-5" data-reason="Pricing work." data-status="queued"></div>',
-  '<ul data-files><li>src/pricing.ts</li></ul>',
-  '<div data-acceptance="05.1" data-status="pending">Pricing works.</div>',
-  "</section>",
-  '<section data-stage="06" data-title="Packaging" data-complexity="high">',
-  '<div data-assignment data-agent-id="worker-pricing" data-cli="codex" data-model="gpt-5" data-reason="Packaging work." data-status="queued"></div>',
-  '<ul data-files><li>src/packaging.ts</li></ul>',
-  '<div data-acceptance="06.1" data-status="pending">Packaging works.</div>',
-  "</section>",
-  "````"
-].join("\n")
+const routedStreamedPlan: PlanPrd = {
+  title: "PRD: Routed streamed plan",
+  sections: [],
+  stages: [
+    {
+      id: "05",
+      title: "Pricing",
+      intent: "Pricing work.",
+      approach: [],
+      files: [{ path: "src/pricing.ts", change: "M" }],
+      diagrams: [],
+      notes: [],
+      acceptance: [{ id: "05.1", text: "Pricing works.", status: "pending", evidence: null }],
+      dependencies: [],
+      complexity: "high"
+    },
+    {
+      id: "06",
+      title: "Packaging",
+      intent: "Packaging work.",
+      approach: [],
+      files: [{ path: "src/packaging.ts", change: "M" }],
+      diagrams: [],
+      notes: [],
+      acceptance: [{ id: "06.1", text: "Packaging works.", status: "pending", evidence: null }],
+      dependencies: [],
+      complexity: "high"
+    }
+  ],
+  annotations: []
+}
+const repeatedAgentPlanHtml = ["```json", JSON.stringify({ mode: "submit", plan: routedStreamedPlan }), "```"].join("\n")
 
 const workerRouting: WorkerRoutingConfig = {
   default: { cli: "codex", model: "gpt-5" },
@@ -197,8 +224,8 @@ const harness = (
   > = [{ _tag: "Reject" }]
 ) => {
   const events: StreamEvent[] = []
-  const proposed: Plan[] = []
-  const drafts: string[] = []
+  const proposed: PlanPrd[] = []
+  const drafts: PlanPrd[] = []
   const ctx: AgentContext = {
     emit: (event) => Effect.sync(() => void events.push(event)),
     canUseTool: () => Effect.succeed("allow"),
@@ -208,7 +235,7 @@ const harness = (
         proposed.push(plan)
         return decisions[proposed.length - 1] ?? { _tag: "Reject" }
       }),
-    saveDraftPlan: (source: string) => Effect.sync(() => void drafts.push(source)),
+    saveDraftPlan: (plan: PlanPrd) => Effect.sync(() => void drafts.push(plan)),
     registerBackgroundStop: () => Effect.void
   }
   return { ctx, events, proposed, drafts }
@@ -250,7 +277,7 @@ describe("Claude plan submission", () => {
 
     expect(disallowedTools).not.toContain("Write")
     expect(proposed).toHaveLength(1)
-    expect(proposed[0]?.summary).toBe("Auto native plan")
+    expect(proposed[0]?.title).toBe("PRD: Auto native plan")
     expect(writeDecision).toMatchObject({ behavior: "deny" })
   })
 
@@ -297,7 +324,7 @@ describe("Claude plan submission", () => {
 
     expect(disallowedTools).not.toContain("Write")
     expect(proposed).toHaveLength(1)
-    expect(proposed[0]?.summary).toBe("Native plan file")
+    expect(proposed[0]?.title).toBe("PRD: Native plan file")
     expect(writeDecision).toMatchObject({ behavior: "deny" })
   })
 
@@ -308,10 +335,7 @@ describe("Claude plan submission", () => {
     await Effect.runPromise(runClaude("session-0", spec, ctx, new Map()))
 
     expect(proposed).toHaveLength(1)
-    expect(proposed[0]).toMatchObject({
-      summary: "Buffered plan",
-      structured: true
-    })
+    expect(proposed[0]?.title).toBe("PRD: Buffered plan")
   })
 
   it("uses the streamed inline PRD when ExitPlanMode has an empty payload", async () => {
@@ -320,17 +344,14 @@ describe("Claude plan submission", () => {
     await Effect.runPromise(runClaude("session-1", spec, ctx, new Map()))
 
     expect(proposed).toHaveLength(1)
-    expect(proposed[0]).toMatchObject({
-      summary: "Buffered plan",
-      structured: true
-    })
-    expect(proposed[0]?.steps.map((step) => step.id)).toEqual(["01"])
-    expect(proposed[0]?.raw).toContain("<h1>PRD: Buffered plan</h1>")
+    expect(proposed[0]?.title).toBe("PRD: Buffered plan")
+    expect(proposed[0]?.stages.map((stage) => stage.id)).toEqual(["01"])
+    expect(proposed[0]?.title).toBe("PRD: Buffered plan")
     expect(events).toContainEqual({
       _tag: "PlanDraft",
       draft: {
         id: "plan_session-1_1",
-        source: expect.stringContaining("<h1>PRD: Buffered plan</h1>"),
+        source: expect.stringContaining('"PRD: Buffered plan"'),
         phase: "complete"
       }
     })
@@ -355,16 +376,7 @@ describe("Claude plan submission", () => {
     // The reported bug: an Auto (not native-plan) orchestrator streams a plan in
     // an ordinary three-backtick block and never calls ExitPlanMode, so Plan
     // Review stayed empty. It must now become a draft — no approval gate.
-    const shownPlan = [
-      "Here's the plan for review:",
-      "",
-      "```html",
-      "<h1>PRD: Onboarding perf</h1>",
-      '<section data-stage="01" data-title="Observability">',
-      '<div data-acceptance="01.1" data-status="pending">Events emit.</div>',
-      "</section>",
-      "```"
-    ].join("\n")
+    const shownPlan = `Here's the plan for review:\n\n${planHtml("Onboarding perf", "draft")}`
     visibleReply = shownPlan
     callExitPlanMode = false
     const { ctx, events, proposed, drafts } = harness()
@@ -389,13 +401,13 @@ describe("Claude plan submission", () => {
     expect(proposed).toHaveLength(0)
     // …the plan is captured as an iteration draft so Plan Review populates…
     expect(drafts).toHaveLength(1)
-    expect(drafts[0]).toContain("PRD: Onboarding perf")
+    expect(drafts[0]?.title).toBe("PRD: Onboarding perf")
     // …and the visible reply still shows in chat.
     expect(events).toContainEqual({ _tag: "Assistant", text: shownPlan })
   })
 
   it("submits (not drafts) an Auto orchestrator plan carrying the delegation marker", async () => {
-    visibleReply = `${ORCHESTRATOR_PLAN_SUBMISSION_MARKER}\n${planHtml("Marked plan")}`
+    visibleReply = planHtml("Marked plan")
     callExitPlanMode = false
     const { ctx, proposed, drafts } = harness([{ _tag: "Reject" }])
 
@@ -417,7 +429,7 @@ describe("Claude plan submission", () => {
 
     // The marker routes to the blocking approval gate, not the draft path.
     expect(proposed).toHaveLength(1)
-    expect(proposed[0]?.summary).toBe("Marked plan")
+    expect(proposed[0]?.title).toBe("PRD: Marked plan")
     expect(drafts).toHaveLength(0)
   })
 
@@ -435,16 +447,10 @@ describe("Claude plan submission", () => {
     )
 
     expect(proposed).toHaveLength(1)
-    expect(proposed[0]).toMatchObject({
-      summary: "Routed streamed plan",
-      structured: true
-    })
-    expect(proposed[0]?.raw).not.toContain("````")
-    const parsed = parsePlanHtml(proposed[0]?.raw ?? "")
-    expect(parsed.valid).toBe(true)
-    expect(
-      parsed.projection?.stages.map((stage) => stage.assignment?.agentId)
-    ).toStrictEqual(["agent-01", "agent-02"])
+    // The adapter passes the decoded plan through; worker routing is applied
+    // later in agent-runner's proposePlan (covered by plan-execution tests).
+    expect(proposed[0]?.title).toBe("PRD: Routed streamed plan")
+    expect(proposed[0]?.stages.map((stage) => stage.id)).toStrictEqual(["05", "06"])
   })
 
   it("prefers a valid explicit payload over buffered assistant text", async () => {
@@ -454,7 +460,7 @@ describe("Claude plan submission", () => {
     await Effect.runPromise(runClaude("session-2", spec, ctx, new Map()))
 
     expect(proposed).toHaveLength(1)
-    expect(proposed[0]?.summary).toBe("Payload plan")
+    expect(proposed[0]?.title).toBe("PRD: Payload plan")
   })
 
   it("prefers a structured streamed PRD over a complete but invalid explicit fence", async () => {
@@ -471,10 +477,7 @@ describe("Claude plan submission", () => {
     await Effect.runPromise(runClaude("session-3", spec, ctx, new Map()))
 
     expect(proposed).toHaveLength(1)
-    expect(proposed[0]).toMatchObject({
-      summary: "Buffered plan",
-      structured: true
-    })
+    expect(proposed[0]?.title).toBe("PRD: Buffered plan")
   })
 
   it("does not reuse the previous streamed plan after the operator requests a revision", async () => {
@@ -486,10 +489,10 @@ describe("Claude plan submission", () => {
     await Effect.runPromise(runClaude("session-4", spec, ctx, new Map()))
 
     expect(proposed).toHaveLength(1)
-    expect(proposed[0]?.summary).toBe("Buffered plan")
+    expect(proposed[0]?.title).toBe("PRD: Buffered plan")
     expect(followupDecision).toMatchObject({
       behavior: "deny",
-      message: expect.stringContaining("not valid Jingler plan HTML")
+      message: expect.stringContaining("json emission")
     })
   })
 })

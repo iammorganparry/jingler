@@ -40,7 +40,10 @@ const planStage = (
   id,
   title,
   intent: title,
-  markdown: "",
+  approach: [],
+  files: [],
+  diagrams: [],
+  notes: [],
   acceptance: [
     {
       id: `${id}.1`,
@@ -59,8 +62,7 @@ const LIVE_PLAN: PlanDocument = {
   producingChatId: "chat-story",
   revision: 8,
   status: "executing",
-  source: "<h1>PRD: Provider-neutral orchestration</h1>",
-  projection: {
+  plan: {
     title: "PRD: Provider-neutral orchestration",
     sections: [],
     stages: [

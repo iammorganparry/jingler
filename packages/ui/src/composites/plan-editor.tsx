@@ -1,5 +1,4 @@
 import {
-  parsePlanHtml,
   type PlanPrd,
   type ExecutionMode,
   type PlanDocument
@@ -9,11 +8,39 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { parseUnifiedDiff } from "../diff/parse.js"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
-import {
-  PlanDocView,
-  type PlanFileEvidence
-} from "./plan-doc/plan-doc-view.js"
+import type { PlanFileEvidence } from "./plan-doc/plan-file-controls.js"
 import { PlanFileControlsProvider } from "./plan-doc/plan-file-controls.js"
+
+/**
+ * Best-effort decode of a plan source into a `PlanPrd`. The source is a JSON
+ * `PlanEmission` (or bare plan), optionally still inside a ` ```json ` fence and
+ * possibly incomplete mid-stream — an unparseable snapshot yields null and the
+ * outline shows a composing placeholder until the next complete snapshot lands.
+ */
+const planFromSource = (source: string): PlanPrd | null => {
+  const trimmed = source
+    .replace(/^\s*```json\s*/i, "")
+    .replace(/```\s*$/, "")
+    .trim()
+  if (trimmed.length === 0) return null
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    const candidate =
+      parsed !== null && typeof parsed === "object" && "plan" in parsed
+        ? (parsed as { readonly plan: unknown }).plan
+        : parsed
+    if (
+      candidate !== null &&
+      typeof candidate === "object" &&
+      Array.isArray((candidate as { readonly stages?: unknown }).stages)
+    ) {
+      return candidate as PlanPrd
+    }
+  } catch {
+    /* incomplete or malformed streaming JSON — wait for the next snapshot */
+  }
+  return null
+}
 import { PlanArchitecture } from "./plan-architecture.js"
 import { PlanFloatingActions } from "./plan-floating-actions.js"
 import { PlanStepOutline } from "./plan-steps/plan-step-outline.js"
@@ -119,10 +146,9 @@ export function PlanEditor({
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const widthTier = useWidthTier()
   const streaming = transientState !== undefined
-  const parsed = useMemo(() => parsePlanHtml(source), [source])
-  const projection: PlanPrd | null =
-    parsed.valid ? parsed.projection : doc?.projection ?? null
-  const showOutline = !streaming && projection !== null
+  const parsedPlan = useMemo(() => planFromSource(source), [source])
+  const projection: PlanPrd | null = parsedPlan ?? doc?.plan ?? null
+  const showOutline = projection !== null
 
   const fileEvidence = useMemo<ReadonlyMap<string, PlanFileEvidence>>(
     () =>
@@ -225,16 +251,7 @@ export function PlanEditor({
                 </div>
               </PlanFileControlsProvider>
             ) : (
-              <PlanDocView
-                className="mx-auto h-full w-full max-w-[760px]"
-                source={source}
-                fileEvidence={fileEvidence}
-                knownFiles={knownFiles}
-                onOpenFile={onOpenFile}
-                workerControls={
-                  streaming ? undefined : { stop: onStopWorker, retry: onRetryWorker }
-                }
-              />
+              <EmptyPage>{streaming ? "Composing plan…" : "No plan yet."}</EmptyPage>
             )}
             {!streaming && commentLayer}
           </div>

@@ -1,4 +1,3 @@
-import { type HTMLElement, parse } from "node-html-parser"
 import type {
   PlanPrd,
   PlanPrdStage,
@@ -9,8 +8,6 @@ import type {
 } from "./plan-document.js"
 import { workerReasoningSettingIssue } from "./plan-document.js"
 import type { ReasoningSetting } from "./domain.js"
-import { writePlanAssignmentReasoningAttributes } from "./plan-assignment-html.js"
-import { type PlanHtmlDiagnostic, parsePlanHtml } from "./plan-html.js"
 
 export type PlanExecutionDiagnosticCode =
   | "duplicate-stage"
@@ -20,6 +17,7 @@ export type PlanExecutionDiagnosticCode =
   | "missing-assignment"
   | "assignment-conflict"
   | "invalid-file-path"
+  | "missing-acceptance"
 
 export interface PlanExecutionDiagnostic {
   readonly code: PlanExecutionDiagnosticCode
@@ -57,17 +55,15 @@ export interface WorkerRouteCatalogEntry {
 export type OrchestrationPlanCompilation =
   | {
       readonly valid: true
-      readonly html: string
-      readonly projection: PlanPrd
+      readonly plan: PlanPrd
       readonly graph: PlanExecutionGraph
       readonly diagnostics: readonly []
     }
   | {
       readonly valid: false
-      readonly html: string
-      readonly projection: null
+      readonly plan: null
       readonly graph: PlanExecutionGraph | null
-      readonly diagnostics: ReadonlyArray<PlanHtmlDiagnostic>
+      readonly diagnostics: ReadonlyArray<PlanExecutionDiagnostic>
     }
 
 export interface OrchestrationPlanCompilerOptions {
@@ -116,28 +112,23 @@ export const normalizePlanFilePath = (value: string): string | null => {
   return segments.length === 0 ? null : segments.join("/")
 }
 
-/** Read the authoritative `<ul data-files>` declaration from a stage body. */
+/** Normalize a stage's structured file declarations to repository-relative keys. */
 const declaredFiles = (
   stage: PlanPrdStage
 ): {
-  readonly declared: boolean
   readonly files: ReadonlyArray<string>
   readonly invalid: ReadonlyArray<string>
 } => {
-  const lists = parse(stage.markdown).querySelectorAll("ul[data-files]")
-  if (lists.length === 0) return { declared: false, files: [], invalid: [] }
   const files = new Set<string>()
   const invalid: Array<string> = []
-  for (const list of lists) {
-    for (const item of list.querySelectorAll("li")) {
-      const raw = item.text.trim()
-      if (raw.length === 0) continue
-      const normalized = normalizePlanFilePath(raw)
-      if (normalized === null) invalid.push(raw)
-      else files.add(normalized)
-    }
+  for (const file of stage.files) {
+    const raw = file.path.trim()
+    if (raw.length === 0) continue
+    const normalized = normalizePlanFilePath(raw)
+    if (normalized === null) invalid.push(raw)
+    else files.add(normalized)
   }
-  return { declared: true, files: [...files], invalid }
+  return { files: [...files], invalid }
 }
 
 const reasoningRoute = (reasoning: ReasoningSetting | undefined): string =>
@@ -261,19 +252,18 @@ interface WorkerRoutingWriteOptions {
   readonly reserveHistoricalIds: boolean
 }
 
-const writeWorkerRouting = (
-  html: string,
+/**
+ * Assign each stage the operator's concrete complexity route by writing a
+ * structured `assignment` field (no HTML). One connected component — joined by
+ * dependencies and overlapping files — receives exactly one route and one
+ * logical agent id, kept stable across recompiles where possible.
+ */
+const assignWorkerRouting = (
   stages: ReadonlyArray<PlanPrdStage>,
   routing: WorkerRoutingConfig,
   options: WorkerRoutingWriteOptions
-): string => {
+): ReadonlyArray<PlanPrdStage> => {
   const graph = buildPlanExecutionGraph(stagesWithoutAssignments(stages))
-  const root = parse(html)
-  const stageElements = new Map(
-    root
-      .querySelectorAll("section[data-stage]")
-      .map((element) => [element.getAttribute("data-stage") ?? "", element])
-  )
   const identityByStageId = new Map(
     options.identityStages.map((stage) => [stage.id, stage])
   )
@@ -285,6 +275,7 @@ const writeWorkerRouting = (
     )
   )
   const usedAgentIds = new Set<string>()
+  const assignmentByStageId = new Map<string, PlanStageAssignment>()
 
   for (const [index, group] of graph.groups.entries()) {
     const agentId = allocateAgentId({
@@ -300,133 +291,101 @@ const writeWorkerRouting = (
     const reason =
       `Worker router selected ${route.cli}/${route.model} for this ` +
       `${group.complexity}-complexity dependency/file component.`
-
     for (const stageId of group.stageIds) {
-      const stage = stageElements.get(stageId)
-      if (stage === undefined) continue
-      stage.removeAttribute("data-execution-status")
-      let assignment = stage.querySelector("[data-assignment]")
-      if (assignment === null) {
-        stage.insertAdjacentHTML("afterbegin", "<div data-assignment></div>")
-        assignment = stage.querySelector("[data-assignment]")
-      }
-      if (assignment === null) continue
-      assignment.setAttribute("data-assignment", "")
-      assignment.setAttribute("data-agent-id", agentId)
-      assignment.setAttribute("data-cli", route.cli)
-      assignment.setAttribute("data-model", route.model)
-      writePlanAssignmentReasoningAttributes(assignment, route.reasoning)
-      assignment.setAttribute("data-reason", reason)
-      assignment.setAttribute("data-status", "queued")
+      assignmentByStageId.set(stageId, {
+        agentId,
+        cli: route.cli,
+        model: route.model,
+        reason,
+        ...(route.reasoning !== undefined ? { reasoning: route.reasoning } : {})
+      })
     }
   }
-  return root.toString()
+
+  return stages.map((stage) => {
+    const assignment = assignmentByStageId.get(stage.id) ?? null
+    return { ...stage, assignment, executionStatus: "queued" }
+  })
 }
 
 /**
  * Rewrite planner-authored assignments to the operator's concrete complexity
- * routes before the document becomes canonical. Logical agent ids remain
- * stable where possible; dependencies and overlapping files still determine
- * ownership, so one connected component receives exactly one route.
+ * routes before the document becomes canonical.
  */
-export const applyWorkerRoutingToPlanHtml = (
-  html: string,
+export const applyWorkerRouting = (
   stages: ReadonlyArray<PlanPrdStage>,
   routing: WorkerRoutingConfig
-): string => {
-  return writeWorkerRouting(html, stages, routing, {
+): ReadonlyArray<PlanPrdStage> =>
+  assignWorkerRouting(stages, routing, {
     identityStages: stages,
     reserveHistoricalIds: false
   })
-}
 
-const orchestrationSemanticsHtml = (source: string): string => {
-  const root = parse(source)
-  for (const assignment of root.querySelectorAll("[data-assignment]")) {
-    assignment.remove()
-  }
-  for (const stage of root.querySelectorAll("section[data-stage]")) {
-    stage.removeAttribute("data-execution-status")
-  }
-  for (const criterion of root.querySelectorAll("[data-acceptance]")) {
-    criterion.setAttribute("data-status", "pending")
-    criterion.removeAttribute("data-evidence")
-  }
-  return root.toString()
-}
+/** Strip operational state so only planner-owned semantics remain. */
+const orchestrationSemantics = (plan: PlanPrd): PlanPrd => ({
+  ...plan,
+  stages: plan.stages.map((stage) => ({
+    ...stage,
+    assignment: null,
+    executionStatus: undefined,
+    acceptance: stage.acceptance.map((criterion) => ({
+      ...criterion,
+      status: "pending" as const,
+      evidence: null
+    }))
+  }))
+})
 
 const invalidCompilation = (
-  html: string,
-  diagnostics: ReadonlyArray<PlanHtmlDiagnostic>,
-  graph: PlanExecutionGraph | null = null
+  graph: PlanExecutionGraph | null,
+  diagnostics: ReadonlyArray<PlanExecutionDiagnostic>
 ): Extract<OrchestrationPlanCompilation, { readonly valid: false }> => ({
   valid: false,
-  html,
-  projection: null,
+  plan: null,
   graph,
   diagnostics
 })
 
-const htmlDiagnostics = (
-  graph: PlanExecutionGraph
-): ReadonlyArray<PlanHtmlDiagnostic> =>
-  graph.diagnostics.map((diagnostic) => ({
-    code: diagnostic.code,
-    message: diagnostic.message
-  }))
-
 /**
  * Compile planner-authored plan semantics into the canonical executable form.
  *
- * Operational assignment markup is deliberately discarded: the planner owns
+ * Operational assignment state is deliberately discarded: the planner owns
  * stages, dependencies, files, complexity, and acceptance criteria, while this
  * compiler owns stable worker identities and concrete execution routes.
  */
-export const compileOrchestrationPlanHtml = (
-  source: string,
+export const compileOrchestrationPlan = (
+  plan: PlanPrd,
   routing: WorkerRoutingConfig,
   options: OrchestrationPlanCompilerOptions = {}
 ): OrchestrationPlanCompilation => {
-  const semantic = parsePlanHtml(orchestrationSemanticsHtml(source), {
-    validateExecutionGraph: false
+  const semantic = orchestrationSemantics(plan)
+  // Every stage must carry at least one acceptance criterion — a stage with no
+  // verifiable outcome cannot be completed from evidence, so it is rejected
+  // before routing rather than silently accepted.
+  const acceptanceDiagnostics: ReadonlyArray<PlanExecutionDiagnostic> = semantic.stages
+    .filter((stage) => stage.acceptance.length === 0)
+    .map((stage) => ({
+      code: "missing-acceptance" as const,
+      message: `Stage "${stage.id}" needs at least one acceptance criterion.`,
+      stageId: stage.id
+    }))
+  const semanticGraph = buildPlanExecutionGraph(semantic.stages)
+  if (acceptanceDiagnostics.length > 0 || !semanticGraph.valid) {
+    return invalidCompilation(semanticGraph, [
+      ...acceptanceDiagnostics,
+      ...semanticGraph.diagnostics
+    ])
+  }
+  const routedStages = assignWorkerRouting(semantic.stages, routing, {
+    identityStages: options.previousStages ?? [],
+    reserveHistoricalIds: true
   })
-  if (!semantic.valid) {
-    return invalidCompilation(semantic.html, semantic.diagnostics)
-  }
-  const semanticGraph = buildPlanExecutionGraph(semantic.projection.stages)
-  if (!semanticGraph.valid) {
-    return invalidCompilation(
-      semantic.html,
-      htmlDiagnostics(semanticGraph),
-      semanticGraph
-    )
-  }
-  const html = writeWorkerRouting(
-    semantic.html,
-    semantic.projection.stages,
-    routing,
-    {
-      identityStages: options.previousStages ?? [],
-      reserveHistoricalIds: true
-    }
-  )
-  const compiled = parsePlanHtml(html)
-  if (!compiled.valid) {
-    return invalidCompilation(compiled.html, compiled.diagnostics)
-  }
-  const graph = buildPlanExecutionGraph(compiled.projection.stages, {
-    requireAssignments: true
-  })
+  const routedPlan: PlanPrd = { ...semantic, stages: routedStages }
+  const graph = buildPlanExecutionGraph(routedStages, { requireAssignments: true })
   if (!graph.valid) {
-    return invalidCompilation(compiled.html, htmlDiagnostics(graph), graph)
+    return invalidCompilation(graph, graph.diagnostics)
   }
-  return {
-    valid: true,
-    html: compiled.html,
-    projection: compiled.projection,
-    graph,
-    diagnostics: []
-  }
+  return { valid: true, plan: routedPlan, graph, diagnostics: [] }
 }
 
 /** Return the first canonical component that disagrees with the active router. */
@@ -519,15 +478,6 @@ export const buildPlanExecutionGraph = (
   const declarations = new Map(
     [...stageById.values()].map((stage) => [stage.id, declaredFiles(stage)])
   )
-  const undeclaredStageIds = [...declarations.entries()]
-    .filter(([, declaration]) => !declaration.declared)
-    .map(([stageId]) => stageId)
-  if (undeclaredStageIds.length > 0) {
-    const firstStageId = stageById.keys().next().value
-    if (firstStageId !== undefined) {
-      for (const stageId of stageById.keys()) union(firstStageId, stageId)
-    }
-  }
 
   const firstStageByFile = new Map<string, string>()
   for (const stage of stageById.values()) {

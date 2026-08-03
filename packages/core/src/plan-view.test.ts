@@ -15,7 +15,10 @@ const stage = (
   id,
   title: `Stage ${id}`,
   intent: `Intent ${id}`,
-  markdown: `<h3>Intent</h3><p>Intent ${id}</p>`,
+  approach: [],
+  files: [],
+  diagrams: [],
+  notes: [],
   acceptance: [],
   dependencies: [...dependencies],
   ...overrides
@@ -64,15 +67,14 @@ describe("toPlanStepViews", () => {
     expect(running?.complexity).toBe("high")
   })
 
-  it("parses a stage's data-files list into path/change/added/removed", () => {
+  it("passes a stage's structured file list through", () => {
     const [step] = toPlanStepViews(
       prd([
         stage("a", [], {
-          markdown:
-            '<h3>Intent</h3><ul data-files>' +
-            '<li data-change="A" data-added="10" data-removed="2">src/foo.ts</li>' +
-            '<li data-change="D" data-added="0" data-removed="5">src/bar.ts</li>' +
-            "</ul>"
+          files: [
+            { path: "src/foo.ts", change: "A", added: 10, removed: 2 },
+            { path: "src/bar.ts", change: "D", added: 0, removed: 5 }
+          ]
         })
       ])
     )
@@ -152,21 +154,20 @@ describe("toPlanArchitectureView", () => {
     expect(toPlanArchitectureView(prd([]))).toEqual({ sections: [], diagrams: [] })
   })
 
-  it("extracts prose sections and mermaid diagrams from section and stage markdown", () => {
+  it("collects mermaid diagrams from section blocks and stage diagrams", () => {
     const sections: Array<PlanPrdSection> = [
       {
         id: "context",
         title: "Context",
-        markdown:
-          "<p>One document is authoritative.</p>" +
-          '<div data-diagram="mermaid"><pre>graph TD; A--&gt;B</pre></div>'
+        blocks: [
+          { kind: "prose", id: "p1", text: "One document is authoritative." },
+          { kind: "diagram", id: "d1", source: "graph TD; A-->B" }
+        ]
       }
     ]
     const stages = [
       stage("a", [], {
-        markdown:
-          "<h3>Intent</h3>" +
-          '<div data-diagram="mermaid"><pre>flowchart LR; X--&gt;Y</pre></div>'
+        diagrams: [{ id: "sd1", source: "flowchart LR; X-->Y" }]
       })
     ]
     const view = toPlanArchitectureView(prd(stages, sections))
@@ -183,7 +184,13 @@ describe("toPlanView", () => {
     const view = toPlanView(
       prd(
         [stage("a", []), stage("b", ["a"])],
-        [{ id: "context", title: "Context", markdown: "<p>Prose.</p>" }]
+        [
+          {
+            id: "context",
+            title: "Context",
+            blocks: [{ kind: "prose", id: "p1", text: "Prose." }]
+          }
+        ]
       )
     )
     expect(ids(view.steps)).toEqual(["a", "b"])

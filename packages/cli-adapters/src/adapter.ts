@@ -4,6 +4,7 @@ import type {
   ModelOption,
   PermissionMode,
   Plan,
+  PlanPrd,
   QuestionAnswer,
   QuestionRequest,
   ReasoningEffort,
@@ -188,25 +189,24 @@ export type PlanDecision = Data.TaggedEnum<{
 export const PlanDecision = Data.taggedEnum<PlanDecision>()
 
 /**
- * Present a structured plan (from ExitPlanMode) and await the operator's
- * decision. The `AgentRunner` supplies one that emits `PlanProposed` and parks
- * until approve/revise/reject, mirroring `askQuestion`. `submittedBlock` is the
- * exact visible protocol fence when the harness streamed it into the transcript;
- * payload-only submissions omit it so unrelated visible HTML is preserved.
+ * Present a structured plan (`mode:"submit"`) and await the operator's decision.
+ * The `AgentRunner` supplies one that emits `PlanProposed` and parks until
+ * approve/revise/reject, mirroring `askQuestion`. `submittedBlock` is the exact
+ * visible ` ```json ` fence when the harness streamed it into the transcript;
+ * payload-only submissions omit it so unrelated visible content is preserved.
  */
 export type ProposePlan = (
-  plan: Plan,
+  plan: PlanPrd,
   submittedBlock?: string
 ) => Effect.Effect<PlanDecision>
 
 /**
- * Persist an orchestrator-emitted plan as a DRAFT `PlanDocument` WITHOUT the
- * approval gate `proposePlan` blocks on. Auto/orchestrator mode: a plan the
- * agent shows (no delegation marker) populates Plan Review for iteration, and
- * `source` is its canonical/validated HTML. Never clobbers a non-draft plan, so
- * calling it is always safe. Returns immediately — nothing to await.
+ * Persist an orchestrator-emitted plan (`mode:"draft"`) as a DRAFT `PlanDocument`
+ * WITHOUT the approval gate `proposePlan` blocks on. Auto/orchestrator mode: a
+ * plan the agent shows for iteration populates Plan Review. Never clobbers a
+ * non-draft plan, so calling it is always safe. Returns immediately.
  */
-export type SaveDraftPlan = (source: string) => Effect.Effect<void>
+export type SaveDraftPlan = (plan: PlanPrd) => Effect.Effect<void>
 
 /**
  * What the adapter is handed for a run: an ordered `emit` sink for normalized
@@ -441,6 +441,84 @@ export const scriptedPlan = (
     holdWorker
   )
 })
+
+/** The structured-DTO counterpart of `scriptedPlan`, for the JSON emission path. */
+export const scriptedPlanPrd = (
+  sessionId: string,
+  rev: number,
+  holdWorker = false,
+  includeAuditStage = false
+): PlanPrd => {
+  const assignment = {
+    agentId: "worker-auth",
+    cli: "claude" as const,
+    model: "opus",
+    reason: "The dependent auth stages share one context."
+  }
+  const stage = (
+    id: string,
+    title: string,
+    dependencies: ReadonlyArray<string>,
+    complexity: "low" | "medium" | "high",
+    files: ReadonlyArray<{ path: string; change: "A" | "M" | "D" }>,
+    acceptance: ReadonlyArray<{ id: string; text: string; status: "pending" | "passed" | "failed" | "waived" }>,
+    notes: ReadonlyArray<{ kind: "prose"; id: string; text: string }> = []
+  ) => ({
+    id,
+    title,
+    intent: `${title}.`,
+    approach: [],
+    files: files.map((f) => ({ ...f })),
+    diagrams: [],
+    notes,
+    acceptance: acceptance.map((a) => ({ ...a, evidence: null })),
+    dependencies: [...dependencies],
+    complexity,
+    assignment: { ...assignment }
+  })
+  const stages = [
+    stage("s_01", "Audit session middleware", [], "low", [{ path: "src/auth/memory-store.ts", change: "M" }], [{ id: "s_01.1", text: "The current token read path is documented.", status: "pending" }]),
+    stage("s_02", "Create TokenStore module", ["s_01"], "medium", [{ path: "src/auth/token-store.ts", change: "A" }], [{ id: "s_02.1", text: "TokenStore exposes get/set/refresh and is covered by tests.", status: "passed" }]),
+    stage("s_03", "Swap MemoryStore to TokenStore", ["s_02"], "medium", [{ path: "src/auth/session.ts", change: "M" }], [{ id: "s_03.1", text: "Session reads route through TokenStore.", status: "pending" }]),
+    stage("s_04", "Handle token refresh", ["s_03"], "high", [{ path: "src/auth/refresh.ts", change: "M" }], [{ id: "s_04.1", text: "The refresh decision is specified.", status: "pending" }]),
+    stage("s_05", "Update auth tests", ["s_04"], "medium", [{ path: "src/auth/session.test.ts", change: "M" }], [{ id: "s_05.1", text: `Tests cover the store, the 401 retry${rev > 1 ? ", and the requested audit amendment" : ""}.`, status: "pending" }]),
+    stage(
+      "s_06",
+      "Open PR #482",
+      [],
+      "low",
+      [{ path: "CHANGELOG.md", change: "M" }],
+      [{ id: "s_06.1", text: "A PR is opened against main.", status: "pending" }],
+      holdWorker
+        ? [{ kind: "prose" as const, id: "hold", text: "[[worker-hold]] Wait for an explicit stop before completing the first attempt." }]
+        : []
+    ),
+    ...(includeAuditStage
+      ? [stage("s_07", "Add independent audit coverage", [], "low", [{ path: "src/auth/audit.test.ts", change: "A" }], [{ id: "s_07.1", text: "Independent audit coverage completes with recorded evidence.", status: "pending" }])]
+      : [])
+  ]
+  return {
+    title: `PRD: Refactor auth flow${rev > 1 ? " (revised)" : ""}`,
+    sections: [
+      {
+        id: "context",
+        title: "Context",
+        blocks: [{ kind: "prose", id: "c1", text: "Move session token handling into a dedicated TokenStore and add a guarded 401-retry refresh path." }]
+      }
+    ],
+    stages,
+    annotations: []
+  }
+}
+
+/** A scripted plan JSON emission block, for the streaming + submission fakes. */
+export const scriptedPlanEmission = (
+  sessionId: string,
+  rev: number,
+  holdWorker = false,
+  mode: "draft" | "submit" = "submit"
+): string =>
+  JSON.stringify({ mode, plan: scriptedPlanPrd(sessionId, rev, holdWorker) }, null, 2)
 
 /**
  * The scripted run body — a deterministic sequence (thinking, reads, a gated
@@ -808,7 +886,7 @@ export const scriptedRun =
         yield* pause
         yield* emit({
           _tag: "Assistant",
-          text: `Folding that in.\n\n\`\`\`\`html\n${scriptedPlanHtml("Refactor auth flow (revised)", false, true)}\n\`\`\`\``
+          text: `Folding that in.\n\n\`\`\`json\n${scriptedPlanEmission(sessionId, 2, false, "submit")}\n\`\`\``
         })
         yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
         return
@@ -862,21 +940,15 @@ export const scriptedRun =
         let rev = spec.prompt.includes("[[amendment]]") ? 2 : 1
         while (true) {
           if (spec.prompt.includes("[[stream-plan]]")) {
-            const source = scriptedPlan(
+            const source = `\`\`\`json\n${scriptedPlanEmission(
               sessionId,
               rev,
               spec.prompt.includes("[[worker-hold]]")
-            ).raw
-            const h1End = source.indexOf("</h1>") + "</h1>".length
-            const contextEnd =
-              source.indexOf("</p>", source.indexOf("<h2>Context</h2>")) +
-              "</p>".length
-            const firstStageEnd =
-              source.indexOf("</section>") + "</section>".length
+            )}\n\`\`\``
             const boundaries = [
-              h1End,
-              contextEnd,
-              firstStageEnd,
+              Math.floor(source.length * 0.3),
+              Math.floor(source.length * 0.6),
+              Math.floor(source.length * 0.85),
               source.length
             ]
             for (const [index, end] of boundaries.entries()) {
@@ -895,7 +967,7 @@ export const scriptedRun =
             }
           }
           const decision = yield* proposePlan(
-            scriptedPlan(
+            scriptedPlanPrd(
               sessionId,
               rev,
               spec.prompt.includes("[[worker-hold]]")

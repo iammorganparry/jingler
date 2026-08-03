@@ -38,6 +38,7 @@ import {
   PlanApprovalResult,
   PlanCommentMessageDeliveryState,
   PlanDocument,
+  PlanPrd,
   PlanMentionDelivery,
   PlanParticipant,
   PlanTemplateConfig,
@@ -1402,7 +1403,7 @@ export class JinglerRpcs extends RpcGroup.make(
       sessionId: Schema.String,
       planId: Schema.String,
       baseRevision: Schema.Number,
-      source: Schema.String,
+      plan: PlanPrd,
       author: Schema.Literal("user", "agent")
     }
   }),

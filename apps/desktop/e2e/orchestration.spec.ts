@@ -106,7 +106,7 @@ test("an existing Jingler plan can change its orchestrator model across restart"
   const originalChatId = session.activeChatId
   const planFile = join(
     planDirectory(first.home, session.worktreePath),
-    "current-plan.html"
+    "current-plan.json"
   )
   const composer = first.window.getByPlaceholder("Message Claude…")
   await composer.fill("[[plan]] refactor auth to a TokenStore")
@@ -116,7 +116,7 @@ test("an existing Jingler plan can change its orchestrator model across restart"
       () => (existsSync(planFile) ? readFileSync(planFile, "utf8") : ""),
       { timeout: 20_000 }
     )
-    .toContain("jinglerPlan: 1")
+    .toContain('"revision"')
 
   const currentModel = first.window.getByRole("button", {
     name: DEFAULT_CLAUDE_MODEL,
@@ -187,8 +187,14 @@ const WORKER_RELEASE_TAB = /^agent-02 /
 const AUDIT_WORKER_TAB = /^agent-03 /
 const AUDIT_WORKER_ROUTE = /codex · gpt-5\.6-terra · xhigh reasoning/
 const REQUESTED_AUDIT_TEXT = /requested audit amendment/
+// The canonical file is pretty-printed `PlanDocument` JSON now; assignment fields
+// and acceptance evidence span several lines, so these match across them.
 const AUDIT_EVIDENCE =
-  /data-acceptance="s_07\.1"[^>]*data-status="passed"[^>]*data-evidence="Scripted worker completed/
+  /"id": "s_07\.1"[\s\S]*?"status": "passed"[\s\S]*?"evidence": "Scripted worker completed/
+const assignmentJson = (agentId: string): RegExp =>
+  new RegExp(
+    `"agentId": "${agentId}"[\\s\\S]*?"model": "gpt-5\\.6-terra"[\\s\\S]*?"effort": "xhigh"`
+  )
 const WORKER_STAGE_THOUGHT = "Executing the assigned stage and its verification."
 
 test("an orchestrator completes bounded work directly with its auto tools", async ({
@@ -216,7 +222,7 @@ test("an orchestrator completes bounded work directly with its auto tools", asyn
   const worktreePath = sessions[0].worktreePath as string
   const planFile = join(
     planDirectory(home, worktreePath),
-    "current-plan.html"
+    "current-plan.json"
   )
 
   const composer = window.getByPlaceholder("Message Codex…")
@@ -295,7 +301,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   const worktreePath = sessions[0].worktreePath as string
   const planFile = join(
     planDirectory(home, worktreePath),
-    "current-plan.html"
+    "current-plan.json"
   )
 
   const composer = window.getByPlaceholder("Message Codex…")
@@ -306,7 +312,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
       () => (existsSync(planFile) ? readFileSync(planFile, "utf8") : ""),
       { timeout: 20_000 }
     )
-    .toContain('data-agent-id="agent-01"')
+    .toContain('"agentId": "agent-01"')
 
   await window.getByRole("button", { name: "Plan Review" }).first().click()
   await expect(window.locator('[data-plan-assignment-card="true"]')).toHaveCount(8)
@@ -322,9 +328,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   await expect(releaseAssignment).toContainText("queued")
   await expect
     .poll(() => readFileSync(planFile, "utf8"))
-    .toContain(
-      'data-agent-id="agent-02" data-cli="codex" data-model="gpt-5.6-terra" data-thinking-enabled="true" data-reasoning-effort="xhigh"'
-    )
+    .toMatch(assignmentJson("agent-02"))
 
   await window.getByRole("button", { name: "More plan actions" }).click()
   await window
@@ -335,7 +339,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
       () =>
         (
           readFileSync(planFile, "utf8").match(
-            /data-status="running"/g
+            /"executionStatus": "running"/g
           ) ?? []
         ).length,
       { timeout: 20_000 }
@@ -361,9 +365,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
     .toContain("requested audit amendment")
   await expect
     .poll(() => readFileSync(planFile, "utf8"), { timeout: 20_000 })
-    .toContain(
-      'data-agent-id="agent-03" data-cli="codex" data-model="gpt-5.6-terra" data-thinking-enabled="true" data-reasoning-effort="xhigh"'
-    )
+    .toMatch(assignmentJson("agent-03"))
   // Worker tabs belong to the canonical plan, not to the orchestrator's latest
   // turn. Amending that same plan must not sweep either transcript away.
   await expect(workerAuthTab).toBeVisible()
@@ -392,7 +394,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
       () =>
         (
           readFileSync(planFile, "utf8").match(
-            /data-status="completed"/g
+            /"executionStatus": "completed"/g
           ) ?? []
         ).length,
       { timeout: 30_000 }
@@ -401,7 +403,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
 
   await expect
     .poll(() => readFileSync(planFile, "utf8"), { timeout: 30_000 })
-    .toContain('status: "done"')
+    .toContain('"status": "done"')
 
   // Plan.watch normally applies the completed canonical revision directly. If
   // an editor save races that revision, the same valid result is presented as
@@ -425,15 +427,11 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
   await expect(completedStatus).toBeVisible()
 
   const persisted = readFileSync(planFile, "utf8")
-  expect(persisted).toContain('status: "done"')
-  expect(persisted).toContain(
-    'data-agent-id="agent-02" data-cli="codex" data-model="gpt-5.6-terra" data-thinking-enabled="true" data-reasoning-effort="xhigh"'
-  )
-  expect(persisted).toContain(
-    'data-agent-id="agent-03" data-cli="codex" data-model="gpt-5.6-terra" data-thinking-enabled="true" data-reasoning-effort="xhigh"'
-  )
+  expect(persisted).toContain('"status": "done"')
+  expect(persisted).toMatch(assignmentJson("agent-02"))
+  expect(persisted).toMatch(assignmentJson("agent-03"))
   expect(persisted).toContain("requested audit amendment")
-  expect(persisted).toContain('data-evidence="Scripted worker completed')
+  expect(persisted).toContain('"evidence": "Scripted worker completed')
   expect(persisted).toMatch(AUDIT_EVIDENCE)
   const checkpoints = JSON.parse(
     readFileSync(

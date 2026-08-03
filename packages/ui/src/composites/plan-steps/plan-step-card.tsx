@@ -3,9 +3,9 @@ import {
   type PlanAcceptance,
   type PlanStageComplexity,
   type PlanStageExecutionStatus,
-  type PlanStepView,
-  sanitizePlanHtml
+  type PlanStepView
 } from "@jingler/core"
+import { PlanBlocks } from "../plan-doc/plan-blocks.js"
 import { Check, Circle, MinusCircle, X } from "lucide-react"
 import { Badge } from "../../components/badge.js"
 import { FileChip } from "../../components/file-chip.js"
@@ -79,26 +79,6 @@ const MAX_VISIBLE_FILES = 12
  * `[data-assignment]` worker metadata, and any embedded mermaid diagrams (an
  * Architecture-surface concern). Mirrors `plan-architecture`'s `sectionProse`.
  */
-const taskProse = (markdown: string): string => {
-  const html = sanitizePlanHtml(markdown)
-  if (typeof DOMParser === "undefined") return html
-  const doc = new DOMParser().parseFromString(html, "text/html")
-  for (const el of doc.querySelectorAll(
-    "ul[data-files], [data-acceptance], [data-assignment], [data-diagram]"
-  ))
-    el.remove()
-  // The stage's `intent` is rendered in its own slot above the prose, and the
-  // plan dialect also carries it as an "Intent" heading + paragraph in the body.
-  // Drop that heading (and the paragraph it introduces) so it isn't shown twice.
-  for (const heading of doc.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
-    if (heading.textContent?.trim().toLowerCase() !== "intent") continue
-    const next = heading.nextElementSibling
-    heading.remove()
-    if (next?.tagName === "P") next.remove()
-  }
-  return doc.body.innerHTML.trim()
-}
-
 export interface PlanStepCardProps {
   readonly step: PlanStepView
   /** Renders the selected state and marks the card current. */
@@ -108,7 +88,8 @@ export interface PlanStepCardProps {
 }
 
 export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
-  const body = useMemo(() => taskProse(step.markdown), [step.markdown])
+  const hasNotes = step.notes.length > 0
+  const hasApproach = step.approach.length > 0
   // Live worktree evidence + open handler come from the plan file-controls
   // context (provided around the outline), so chips open the asset and show
   // live +/- while there's uncommitted work — falling back to declared counts.
@@ -183,15 +164,15 @@ export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
                 (fileControls.knownFiles === undefined ||
                   fileControls.knownFiles.has(file.path) ||
                   evidence !== undefined ||
-                  file.added + file.removed > 0)
+                  (file.added ?? 0) + (file.removed ?? 0) > 0)
               return (
                 <FileChip
                   key={`${file.change}-${file.path}`}
                   path={file.path}
                   // Live evidence wins while it exists; declared counts remain
                   // once the work is committed and evidence collapses to 0.
-                  added={evidence?.added || file.added}
-                  removed={evidence?.removed || file.removed}
+                  added={evidence?.added || file.added || 0}
+                  removed={evidence?.removed || file.removed || 0}
                   onOpen={openable ? fileControls.open : undefined}
                   className={CHANGE_BORDER[file.change]}
                 />
@@ -209,19 +190,22 @@ export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
         )}
       </CardSection>
 
-      {/* Tasks: intent + approach prose */}
+      {/* Tasks: intent + approach + prose blocks */}
       <CardSection title="Tasks">
         {step.intent.trim().length > 0 && (
           <p className="m-0 text-[12.5px] leading-[1.55] text-text-body">{step.intent}</p>
         )}
-        {body.length > 0 && (
-          <div
-            className="sb-md text-[12.5px] leading-[1.6] text-text-body"
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitizePlanHtml allowlist strips scripts/handlers/inline styles before render
-            dangerouslySetInnerHTML={{ __html: body }}
-          />
+        {hasApproach && (
+          <ol className="m-0 pl-4 text-[12.5px] leading-[1.6] text-text-body">
+            {step.approach.map((item, index) => (
+              <li key={index}>{item}</li>
+            ))}
+          </ol>
         )}
-        {step.intent.trim().length === 0 && body.length === 0 && (
+        {hasNotes && (
+          <PlanBlocks blocks={step.notes} className="sb-md text-[12.5px] leading-[1.6] text-text-body" />
+        )}
+        {step.intent.trim().length === 0 && !hasApproach && !hasNotes && (
           <EmptyNote>No task detail yet.</EmptyNote>
         )}
       </CardSection>

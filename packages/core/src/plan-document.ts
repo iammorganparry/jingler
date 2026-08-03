@@ -1,16 +1,17 @@
 import { Schema } from "effect"
-import { parse } from "node-html-parser"
 import { CliKind } from "./cli.js"
 import type { Plan } from "./conversation.js"
 import type { ReasoningEffort, ReasoningSetting } from "./domain.js"
 
 /**
- * Jingler's plan document is a deliberately small HTML dialect.
+ * Jingler's plan document is a fully structured DTO — an Effect `Schema` the
+ * agent emits directly (as a fenced JSON block) rather than HTML we parse.
  *
- * Ordinary HTML carries prose. `data-stage`, `data-acceptance`, and
- * `data-annotation` attributes carry structure through a fixed parser and Tiptap
- * schema. Plan documents never execute scripts, styles, or arbitrary component
- * code.
+ * Prose, file lists, and diagrams are typed blocks (`PlanBlock`), not opaque
+ * markup, so there is no HTML dialect, no sanitizer, and no derivation step: the
+ * document IS the projection. The renderer maps each block/stage/acceptance to a
+ * maintained React component (the "generative-UI map"). Plan documents never
+ * carry scripts, styles, or arbitrary component code.
  */
 
 export const PlanAcceptanceStatus = Schema.Literal("pending", "passed", "failed", "waived")
@@ -26,12 +27,16 @@ export type PlanAcceptance = Schema.Schema.Type<typeof PlanAcceptance>
 
 /**
  * A W3C-style TextQuote anchor: the exact `quote` plus a little `prefix`/`suffix`
- * context. Quote-based anchoring is used instead of raw ProseMirror positions
- * because plan source is edited and round-tripped through markdown, where numeric
- * offsets drift but a quoted span with context can be re-found (or flagged
- * orphaned when the text it quoted no longer exists). See `plan-anchor.ts`.
+ * context, scoped to a single block. Quote-based anchoring is used instead of raw
+ * positions because a block's text is edited over time, where numeric offsets
+ * drift but a quoted span with context can be re-found (or flagged orphaned when
+ * the text it quoted no longer exists). `blockId` scopes resolution to one block's
+ * text projection so context never spans component boundaries. See
+ * `plan-anchor.ts`.
  */
 export const PlanAnnotationAnchor = Schema.Struct({
+  /** The block whose text projection this anchor resolves against. */
+  blockId: Schema.optional(Schema.String),
   quote: Schema.String,
   prefix: Schema.String,
   suffix: Schema.String
@@ -101,10 +106,87 @@ export const PlanAnnotation = Schema.Struct({
 })
 export type PlanAnnotation = Schema.Schema.Type<typeof PlanAnnotation>
 
+/**
+ * A file touched by a stage. Structured so the renderer draws a real file chip
+ * (open + live diff stats) instead of parsing `<ul data-files>` HTML. Diff stats
+ * are optional — a pre-execution plan estimates files it will touch.
+ */
+export const PlanFile = Schema.Struct({
+  path: Schema.String,
+  /** Added / Modified / Deleted. */
+  change: Schema.Literal("A", "M", "D"),
+  added: Schema.optional(Schema.Number),
+  removed: Schema.optional(Schema.Number)
+})
+export type PlanFile = Schema.Schema.Type<typeof PlanFile>
+
+/** A structured, embeddable flow diagram. Rendered live by the mermaid component. */
+export const PlanDiagram = Schema.Struct({
+  id: Schema.String,
+  source: Schema.String
+})
+export type PlanDiagram = Schema.Schema.Type<typeof PlanDiagram>
+
+/**
+ * A prose block. `kind` is the discriminant the renderer's generative-UI map
+ * keys on. Inline formatting inside `text`/list items/cells is a constrained
+ * markdown subset (bold, italic, inline code, links) rendered safely — never
+ * block-level HTML.
+ */
+export const PlanProseBlock = Schema.Struct({
+  kind: Schema.Literal("prose"),
+  id: Schema.String,
+  text: Schema.String
+})
+export const PlanHeadingBlock = Schema.Struct({
+  kind: Schema.Literal("heading"),
+  id: Schema.String,
+  level: Schema.Literal(2, 3, 4),
+  text: Schema.String
+})
+export const PlanListBlock = Schema.Struct({
+  kind: Schema.Literal("list"),
+  id: Schema.String,
+  ordered: Schema.Boolean,
+  items: Schema.Array(Schema.String)
+})
+export const PlanCodeBlock = Schema.Struct({
+  kind: Schema.Literal("code"),
+  id: Schema.String,
+  language: Schema.optional(Schema.String),
+  code: Schema.String
+})
+export const PlanTableBlock = Schema.Struct({
+  kind: Schema.Literal("table"),
+  id: Schema.String,
+  headers: Schema.Array(Schema.String),
+  rows: Schema.Array(Schema.Array(Schema.String))
+})
+export const PlanDiagramBlock = Schema.Struct({
+  kind: Schema.Literal("diagram"),
+  id: Schema.String,
+  source: Schema.String
+})
+
+/**
+ * A structured content block. This union IS the generative-UI contract: each
+ * `kind` maps to a maintained React component in `packages/ui`. New widget kinds
+ * are added here and in the registry together.
+ */
+export const PlanBlock = Schema.Union(
+  PlanProseBlock,
+  PlanHeadingBlock,
+  PlanListBlock,
+  PlanCodeBlock,
+  PlanTableBlock,
+  PlanDiagramBlock
+)
+export type PlanBlock = Schema.Schema.Type<typeof PlanBlock>
+
 export const PlanPrdSection = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
-  markdown: Schema.String
+  blocks: Schema.Array(PlanBlock)
 })
 export type PlanPrdSection = Schema.Schema.Type<typeof PlanPrdSection>
 
@@ -237,10 +319,17 @@ export type PlanStageExecutionStatus = Schema.Schema.Type<typeof PlanStageExecut
 export const PlanPrdStage = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
+  /** One-line summary of what the stage does. */
   intent: Schema.String,
-  markdown: Schema.String,
+  /** Ordered approach steps (was the stage's `<h3>Approach</h3>` list). */
+  approach: Schema.Array(Schema.String),
+  /** Repository-relative files the stage touches, with change kind + diff stats. */
+  files: Schema.Array(PlanFile),
+  /** Embedded flow diagrams. */
+  diagrams: Schema.Array(PlanDiagram),
+  /** Any remaining rich prose for the stage body. */
+  notes: Schema.Array(PlanBlock),
   acceptance: Schema.Array(PlanAcceptance),
-  /** Optional at the persistence boundary so projections written before orchestration still decode. */
   dependencies: Schema.optional(Schema.Array(Schema.String)),
   complexity: Schema.optional(PlanStageComplexity),
   assignment: Schema.optional(Schema.NullOr(PlanStageAssignment)),
@@ -255,6 +344,14 @@ export const PlanPrd = Schema.Struct({
   annotations: Schema.Array(PlanAnnotation)
 })
 export type PlanPrd = Schema.Schema.Type<typeof PlanPrd>
+
+/** A blank plan for a fresh user draft (replaces DEFAULT_PLAN_TEMPLATE_HTML). */
+export const defaultPlan = (title = "Plan"): PlanPrd => ({
+  title,
+  sections: [],
+  stages: [],
+  annotations: []
+})
 
 export const PlanDocumentStatus = Schema.Literal(
   "draft",
@@ -286,8 +383,9 @@ export const PlanApprovalResult = Schema.Union(
 export type PlanApprovalResult = Schema.Schema.Type<typeof PlanApprovalResult>
 
 /**
- * `source` is authoritative. `projection` is derived from it on every accepted
- * write and crosses RPC so the renderer never needs to parse the source itself.
+ * The structured plan IS the document — `plan` is authoritative and crosses RPC
+ * as-is; there is no HTML source to parse and no derived projection to keep in
+ * sync.
  */
 export const PlanDocument = Schema.Struct({
   id: Schema.String,
@@ -295,50 +393,63 @@ export const PlanDocument = Schema.Struct({
   producingChatId: Schema.String,
   revision: Schema.Number,
   status: PlanDocumentStatus,
-  source: Schema.String,
-  projection: PlanPrd,
+  plan: PlanPrd,
   updatedAt: Schema.String,
   updatedBy: PlanDocumentAuthor
 })
 export type PlanDocument = Schema.Schema.Type<typeof PlanDocument>
 
+/**
+ * A user-configured starting plan. `source` is a JSON-serialized `PlanPrd`
+ * (formerly HTML); an empty string means "use the built-in blank draft".
+ */
 export const PlanTemplateConfig = Schema.Struct({
   source: Schema.String
 })
 export type PlanTemplateConfig = Schema.Schema.Type<typeof PlanTemplateConfig>
 
-const CHANGES = new Set(["A", "M", "D"])
-
-/** The `<li>` texts under a stage's `<h3>Approach</h3>` heading's following list. */
-const stageApproach = (html: string): ReadonlyArray<string> => {
-  const heading = parse(html)
-    .querySelectorAll("h3")
-    .find((h) => /approach/i.test(h.text))
-  const list = heading?.nextElementSibling
-  const tag = list?.rawTagName?.toLowerCase()
-  if (list == null || (tag !== "ol" && tag !== "ul")) return []
-  return list.querySelectorAll("li").map((li) => li.text.trim()).filter((t) => t.length > 0)
-}
-
-/** Parse `<ul data-files><li data-change data-added data-removed>path</li></ul>`. */
-const stageFiles = (html: string): Plan["steps"][number]["files"] => {
-  const list = parse(html).querySelector("ul[data-files]")
-  if (list === null) return []
-  return list.querySelectorAll("li").map((li) => {
-    const change = (li.getAttribute("data-change") ?? "M").toUpperCase()
-    return {
-      change: (CHANGES.has(change) ? change : "M") as "A" | "M" | "D",
-      path: li.text.trim(),
-      added: Number(li.getAttribute("data-added") ?? "0") || 0,
-      removed: Number(li.getAttribute("data-removed") ?? "0") || 0
-    }
-  })
+/** The plain text of one block — the substrate comment anchors resolve against. */
+export const planBlockText = (block: PlanBlock): string => {
+  switch (block.kind) {
+    case "prose":
+    case "heading":
+      return block.text
+    case "list":
+      return block.items.join("\n")
+    case "code":
+      return block.code
+    case "table":
+      return [block.headers, ...block.rows].map((row) => row.join(" │ ")).join("\n")
+    case "diagram":
+      return ""
+  }
 }
 
 /**
- * Compatibility projection for transcript cards. The HTML source remains
- * authoritative; this shape is derived whenever an older Plan consumer needs
- * to render the current document.
+ * A deterministic plain-text rendering of a plan, in document order. Comment
+ * anchoring resolves against this (per block) instead of rendered DOM text, so
+ * offsets never depend on component chrome or layout.
+ */
+export const planTextProjection = (plan: PlanPrd): string => {
+  const parts: Array<string> = [plan.title]
+  for (const section of plan.sections) {
+    parts.push(section.title)
+    for (const block of section.blocks) parts.push(planBlockText(block))
+  }
+  for (const stage of plan.stages) {
+    parts.push(stage.title, stage.intent)
+    for (const step of stage.approach) parts.push(step)
+    for (const block of stage.notes) parts.push(planBlockText(block))
+    for (const criterion of stage.acceptance) parts.push(criterion.text)
+  }
+  return parts.filter((part) => part.length > 0).join("\n\n")
+}
+
+/**
+ * Compatibility projection for transcript cards, derived from the structured
+ * plan whenever an older `Plan` consumer needs to render the current document.
+ * `raw` carries a plain-text projection of the plan so legacy markdown renderers
+ * still show something meaningful.
  */
 export const planDocumentToPlan = (document: PlanDocument): Plan => {
   const status: Plan["status"] =
@@ -357,24 +468,28 @@ export const planDocumentToPlan = (document: PlanDocument): Plan => {
 
   return {
     id: document.id,
-    summary: document.projection.title.replace(/^PRD:\s*/i, ""),
-    steps: document.projection.stages.map((stage, index) => {
+    summary: document.plan.title.replace(/^PRD:\s*/i, ""),
+    steps: document.plan.stages.map((stage, index) => {
       const complete = stage.acceptance.every(
         (criterion) => criterion.status === "passed" || criterion.status === "waived"
       )
-      const approach = stageApproach(stage.markdown)
       return {
         id: stage.id,
         number: String(index + 1).padStart(2, "0"),
         title: stage.title,
         intent: stage.intent,
-        approach,
+        approach: [...stage.approach],
         kind: "step",
         condition: null,
         parentId: null,
         dependsOn: stage.dependencies ?? [],
         blocks: [],
-        files: stageFiles(stage.markdown),
+        files: stage.files.map((file) => ({
+          change: file.change,
+          path: file.path,
+          added: file.added ?? 0,
+          removed: file.removed ?? 0
+        })),
         guards: stage.acceptance.map((criterion) => ({
           text: criterion.text,
           status:
@@ -398,12 +513,12 @@ export const planDocumentToPlan = (document: PlanDocument): Plan => {
               : "proposed",
         flagged:
           stage.acceptance.some((criterion) => criterion.status === "failed") ||
-          document.projection.annotations.some(
+          document.plan.annotations.some(
             (annotation) => annotation.stageId === stage.id && annotation.status === "open"
           )
       }
     }),
-    comments: document.projection.annotations.map((annotation) => {
+    comments: document.plan.annotations.map((annotation) => {
       const message = annotation.messages.at(-1)
       return {
         id: annotation.id,
@@ -416,6 +531,6 @@ export const planDocumentToPlan = (document: PlanDocument): Plan => {
     }),
     status,
     structured: true,
-    raw: document.source
+    raw: planTextProjection(document.plan)
   }
 }

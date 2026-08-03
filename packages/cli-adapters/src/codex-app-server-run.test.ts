@@ -1,9 +1,9 @@
-import type { Plan, QuestionRequest, StreamEvent } from "@jingler/core"
+import type { Plan, PlanPrd, QuestionRequest, StreamEvent } from "@jingler/core"
+import { planDocumentToPlan } from "@jingler/core"
 import { Effect, Fiber } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentContext, PlanDecision as PlanDecisionType, SessionSpec } from "./adapter.js"
 import { PlanDecision } from "./adapter.js"
-import { ORCHESTRATOR_PLAN_SUBMISSION_MARKER } from "./plan-parse.js"
 import type { StartCodexAppServerOptions } from "./codex-app-server-client.js"
 
 const server = vi.hoisted(() => {
@@ -152,9 +152,22 @@ const spec = (over: Partial<SessionSpec> = {}): SessionSpec =>
     ...over
   }) as SessionSpec
 
+/** Mirror production: an approval threads the canonical `Plan` back on the decision. */
+const prdToPlan = (prd: PlanPrd): Plan =>
+  planDocumentToPlan({
+    id: "plan_test",
+    sessionId: "s",
+    producingChatId: "c",
+    revision: 1,
+    status: "approved",
+    plan: prd,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    updatedBy: "agent"
+  })
+
 const harness = (decision: PlanDecisionType = PlanDecision.Reject()) => {
   const emitted: StreamEvent[] = []
-  const proposed: Plan[] = []
+  const proposed: PlanPrd[] = []
   const asked: QuestionRequest[] = []
   const ctx: AgentContext = {
     emit: (event) => Effect.sync(() => void emitted.push(event)),
@@ -167,7 +180,9 @@ const harness = (decision: PlanDecisionType = PlanDecision.Reject()) => {
     proposePlan: (plan) =>
       Effect.sync(() => {
         proposed.push(plan)
-        return decision
+        return decision._tag === "Approve" && decision.plan === undefined
+          ? PlanDecision.Approve({ mode: decision.mode, plan: prdToPlan(plan) })
+          : decision
       }),
     registerBackgroundStop: () => Effect.void,
     registerTurnSteer: (steer) =>
@@ -863,12 +878,29 @@ describe("runCodexAppServer", () => {
 
   it("reopens an approved plan with write access and continues on the same thread", async () => {
     const plan = [
-      "```plan",
-      "summary: Add a column",
-      "01 Add column",
-      "  intent: Store the tier.",
-      "  approach: add a migration",
-      "  files: A migrations/003.sql +12",
+      "```json",
+      JSON.stringify({
+        mode: "submit",
+        plan: {
+          title: "PRD: Add a column",
+          sections: [],
+          stages: [
+            {
+              id: "01",
+              title: "Add column",
+              intent: "Store the tier.",
+              approach: ["add a migration"],
+              files: [{ path: "migrations/003.sql", change: "A" }],
+              diagrams: [],
+              notes: [],
+              acceptance: [{ id: "01.1", text: "The column exists.", status: "pending", evidence: null }],
+              dependencies: [],
+              complexity: "low"
+            }
+          ],
+          annotations: []
+        }
+      }),
       "```"
     ].join("\n")
     server.state.messages = [
@@ -937,14 +969,30 @@ describe("runCodexAppServer", () => {
 
   it("accepts an orchestrator plan from auto mode without narrowing native tools", async () => {
     const plan = [
-      ORCHESTRATOR_PLAN_SUBMISSION_MARKER,
-      "````html",
-      "<h1>PRD: Delegate focused work</h1>",
-      '<section data-stage="01" data-title="Implement" data-complexity="low">',
-      '<ul data-files><li>src/component.ts</li></ul>',
-      '<div data-acceptance="01.1" data-status="pending">The component works.</div>',
-      "</section>",
-      "````"
+      "```json",
+      JSON.stringify({
+        mode: "submit",
+        plan: {
+          title: "PRD: Delegate focused work",
+          sections: [],
+          stages: [
+            {
+              id: "01",
+              title: "Implement",
+              intent: "Implement the component.",
+              approach: [],
+              files: [{ path: "src/component.ts", change: "M" }],
+              diagrams: [],
+              notes: [],
+              acceptance: [{ id: "01.1", text: "The component works.", status: "pending", evidence: null }],
+              dependencies: [],
+              complexity: "low"
+            }
+          ],
+          annotations: []
+        }
+      }),
+      "```"
     ].join("\n")
     server.state.messages = [
       {

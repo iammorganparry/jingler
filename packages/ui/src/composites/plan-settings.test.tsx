@@ -1,9 +1,33 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import {
-  DEFAULT_PLAN_TEMPLATE_HTML,
-  type WorkerRoutingConfig
-} from "@jingler/core"
+import type { PlanPrd, WorkerRoutingConfig } from "@jingler/core"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+
+/** A structured plan template with a Context section and one stage to edit. */
+const TEMPLATE: PlanPrd = {
+  title: "PRD: Template",
+  sections: [
+    {
+      id: "context",
+      title: "Context",
+      blocks: [{ kind: "prose", id: "c1", text: "Why this work matters." }]
+    }
+  ],
+  stages: [
+    {
+      id: "01",
+      title: "First stage",
+      intent: "Do the work.",
+      approach: [],
+      files: [],
+      diagrams: [],
+      notes: [],
+      acceptance: [{ id: "01.1", text: "It works.", status: "pending", evidence: null }],
+      dependencies: []
+    }
+  ],
+  annotations: []
+}
+const DEFAULT_PLAN_TEMPLATE_HTML = JSON.stringify(TEMPLATE)
 import {
   PlanSettings,
   resolveEffectiveOrchestrator,
@@ -36,16 +60,19 @@ describe("PlanSettings", () => {
     render(<PlanSettings source={DEFAULT_PLAN_TEMPLATE_HTML} onSave={onSave} />)
     const source = screen.getByLabelText("Plan template source")
     fireEvent.change(source, {
-      target: { value: DEFAULT_PLAN_TEMPLATE_HTML.replace("<h2>Context</h2>", "<h2>Product context</h2>") }
+      target: { value: DEFAULT_PLAN_TEMPLATE_HTML.replace('"Context"', '"Product context"') }
     })
     expect(screen.getByText("Product context")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Save template" }))
     await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
   })
 
-  it("rejects invalid plan HTML (no title / no stage)", () => {
-    expect(validatePlanTemplate("<p>no title, no stage</p>")).toContain(
-      "A plan must start with an <h1> title."
+  it("rejects a template that is not a structured plan", () => {
+    expect(validatePlanTemplate("<p>no longer HTML</p>")).toContain(
+      "The plan template is not valid JSON."
+    )
+    expect(validatePlanTemplate('{ "not": "a plan" }')).toContain(
+      "The plan template is not a valid structured plan."
     )
   })
 
@@ -53,7 +80,7 @@ describe("PlanSettings", () => {
     const onSave = vi.fn().mockRejectedValue(new Error("Plan template is invalid: duplicate id"))
     render(<PlanSettings source={DEFAULT_PLAN_TEMPLATE_HTML} onSave={onSave} />)
     fireEvent.change(screen.getByLabelText("Plan template source"), {
-      target: { value: DEFAULT_PLAN_TEMPLATE_HTML.replace("<h2>Context</h2>", "<h2>Product context</h2>") }
+      target: { value: DEFAULT_PLAN_TEMPLATE_HTML.replace('"Context"', '"Product context"') }
     })
     fireEvent.click(screen.getByRole("button", { name: "Save template" }))
     expect(await screen.findByText("Plan template is invalid: duplicate id")).toBeTruthy()
@@ -65,7 +92,7 @@ describe("PlanSettings", () => {
     })
     render(<PlanSettings source={DEFAULT_PLAN_TEMPLATE_HTML} onSave={onSave} />)
     fireEvent.change(screen.getByLabelText("Plan template source"), {
-      target: { value: DEFAULT_PLAN_TEMPLATE_HTML.replace("<h2>Context</h2>", "<h2>Product context</h2>") }
+      target: { value: DEFAULT_PLAN_TEMPLATE_HTML.replace('"Context"', '"Product context"') }
     })
     fireEvent.click(screen.getByRole("button", { name: "Save template" }))
     expect(await screen.findByText("Plan template transport is unavailable")).toBeTruthy()

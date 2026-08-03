@@ -260,7 +260,7 @@ describe("createOpencodeMapper — plan-turn text suppression", () => {
           id: "prt_plan",
           messageID: "msg_plan",
           type: "text",
-          text: "````html\n<h1>PRD: Live"
+          text: '```json\n{"mode":"submit","plan":{"title":"PRD: Live"'
         })
       )
     ).toEqual([
@@ -268,7 +268,7 @@ describe("createOpencodeMapper — plan-turn text suppression", () => {
         _tag: "PlanDraft",
         draft: {
           id: "plan-opencode-1",
-          source: "<h1>PRD: Live</h1>",
+          source: '{"mode":"submit","plan":{"title":"PRD: Live"',
           phase: "composing"
         }
       }
@@ -279,7 +279,7 @@ describe("createOpencodeMapper — plan-turn text suppression", () => {
           id: "prt_plan",
           messageID: "msg_plan",
           type: "text",
-          text: "````html\n<h1>PRD: Live</h1><p>More</p>"
+          text: '```json\n{"mode":"submit","plan":{"title":"PRD: Live","stages":[]}}'
         })
       )
     ).toEqual([
@@ -287,7 +287,7 @@ describe("createOpencodeMapper — plan-turn text suppression", () => {
         _tag: "PlanDraft",
         draft: {
           id: "plan-opencode-1",
-          source: "<h1>PRD: Live</h1><p>More</p>",
+          source: '{"mode":"submit","plan":{"title":"PRD: Live","stages":[]}}',
           phase: "composing"
         }
       }

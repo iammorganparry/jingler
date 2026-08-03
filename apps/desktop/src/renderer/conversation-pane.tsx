@@ -155,7 +155,7 @@ export function ConversationPane({
   useEffect(() => {
     const document = canonicalPlan.document
     if (document === null) return
-    const pending = document.projection.annotations
+    const pending = document.plan.annotations
       .flatMap((annotation) =>
         annotation.messages.map((message) => ({ annotation, message }))
       )
@@ -182,7 +182,7 @@ export function ConversationPane({
       .catch(async () => {
         initialThreadDispatches.current.delete(key)
         const latest = await rpc.planCurrent(session.id).catch(() => null)
-        const stillPending = latest?.projection.annotations
+        const stillPending = latest?.plan.annotations
           .find((annotation) => annotation.id === pending.annotation.id)
           ?.messages.find((message) => message.id === pending.message.id)
         if (latest === null || stillPending?.deliveryState !== "pending") return
@@ -612,7 +612,9 @@ export function ConversationPane({
         // Hand the user-authored draft to the agent as a plan-mode turn: switch
         // into plan mode and send the draft MDX as the starting point. The agent
         // proposes a refined plan, which replaces the draft as the canonical doc.
-        const source = canonicalPlan.draft ?? canonicalPlan.document?.source ?? ""
+        const source =
+          canonicalPlan.draft ??
+          (canonicalPlan.document ? JSON.stringify(canonicalPlan.document.plan) : "")
         convo.setMode("plan")
         convo.sendPrompt(
           [

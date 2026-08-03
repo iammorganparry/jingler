@@ -1,10 +1,10 @@
 import type {
   CliKind,
+  PlanPrd,
   PlanPrdStage
 } from "@jingler/core"
 import {
   buildPlanExecutionGraph,
-  parsePlanHtml,
   supportsPlanMode
 } from "@jingler/core"
 import type { OrchestrationRoute } from "./adapter.js"
@@ -18,7 +18,7 @@ export interface OrchestratorEvalRoute {
 /** Observable output from one planning or amendment turn. */
 export interface OrchestratorEvalObservation {
   readonly route: OrchestratorEvalRoute
-  readonly source: string | null
+  readonly plan: PlanPrd | null
   readonly availableRoutes: ReadonlyArray<OrchestrationRoute>
   readonly delegated: boolean
   readonly task?: {
@@ -40,7 +40,7 @@ export interface OrchestratorEvalObservation {
     readonly integrated: boolean
     readonly finalReported: boolean
   }
-  readonly previousSource?: string
+  readonly previousPlan?: PlanPrd
   readonly expectedAmendment?: string
 }
 
@@ -96,21 +96,18 @@ const assignmentRoute = (stage: PlanPrdStage): string | null => {
 }
 
 const previousStableIds = (
-  source: string | undefined
+  plan: PlanPrd | undefined
 ): {
   readonly stageIds: ReadonlyArray<string>
   readonly acceptanceIds: ReadonlyArray<string>
 } => {
-  if (source === undefined) return { stageIds: [], acceptanceIds: [] }
-  const parsed = parsePlanHtml(source)
-  return parsed.valid
-    ? {
-        stageIds: parsed.projection.stages.map((stage) => stage.id),
-        acceptanceIds: parsed.projection.stages.flatMap((stage) =>
-          stage.acceptance.map((criterion) => criterion.id)
-        )
-      }
-    : { stageIds: [], acceptanceIds: [] }
+  if (plan === undefined) return { stageIds: [], acceptanceIds: [] }
+  return {
+    stageIds: plan.stages.map((stage) => stage.id),
+    acceptanceIds: plan.stages.flatMap((stage) =>
+      stage.acceptance.map((criterion) => criterion.id)
+    )
+  }
 }
 
 /**
@@ -121,9 +118,8 @@ const previousStableIds = (
 export const evaluateOrchestratorProcedure = (
   observation: OrchestratorEvalObservation
 ): OrchestratorEvalReport => {
-  const parsed =
-    observation.source === null ? null : parsePlanHtml(observation.source)
-  const stages = parsed?.valid === true ? parsed.projection.stages : []
+  const parsed = observation.plan
+  const stages = parsed?.stages ?? []
   const graph =
     stages.length === 0
       ? null
@@ -146,7 +142,7 @@ export const evaluateOrchestratorProcedure = (
       )
       .map((criterion) => criterion.id)
   ])
-  const previousIds = previousStableIds(observation.previousSource)
+  const previousIds = previousStableIds(observation.previousPlan)
   const currentStageIds = new Set(stages.map((stage) => stage.id))
   const currentAcceptanceIds = new Set(
     stages.flatMap((stage) =>
@@ -163,7 +159,8 @@ export const evaluateOrchestratorProcedure = (
   ]
   const amendmentPresent =
     observation.expectedAmendment === undefined ||
-    observation.source?.includes(observation.expectedAmendment) === true
+    (observation.plan !== null &&
+      JSON.stringify(observation.plan).includes(observation.expectedAmendment))
   const independentComponents =
     observation.task?.independentComponents ?? graph?.groups.length ?? 0
   const delegationBeneficial =
@@ -223,15 +220,13 @@ export const evaluateOrchestratorProcedure = (
     },
     {
       id: "canonical-html",
-      passed: !observation.delegated || parsed?.valid === true,
+      passed: !observation.delegated || parsed !== null,
       evidence:
         !observation.delegated
           ? "direct execution needs no canonical worker plan"
           : parsed === null
-          ? "no plan was proposed"
-          : parsed.valid
-            ? `${parsed.projection.stages.length} canonical stages parsed`
-            : parsed.diagnostics.map((diagnostic) => diagnostic.message).join(" ")
+            ? "no plan was proposed"
+            : `${parsed.stages.length} canonical stages`
     },
     {
       id: "assignments",

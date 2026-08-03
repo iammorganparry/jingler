@@ -16,7 +16,8 @@ const step: PlanStepView = {
   executionStatus: "running",
   acceptance: [],
   files: [{ path: "src/auth/token-store.ts", change: "M", added: 2, removed: 1 }],
-  markdown: ""
+  approach: [],
+  notes: [],
 }
 
 describe("PlanStepCard file chips", () => {
