@@ -275,7 +275,10 @@ describe("AgentRunner remote MCP attachments", () => {
       {
         name: "operator-tools",
         url: "https://connector.example/mcp",
-        headers: { Authorization: "Bearer connector-secret" }
+        headers: { Authorization: "Bearer connector-secret" },
+        headerEnvironment: {
+          Authorization: "JINGLER_OPEN_CONNECTOR_AUTHORIZATION"
+        }
       },
       PREVIEW_MCP
     ])

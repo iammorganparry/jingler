@@ -76,6 +76,9 @@ describe("OpenConnectorService", () => {
     // Launch half: the real bearer, kept out of anything that crosses RPC.
     expect(entry.launch.url).toBe("https://mcp.internal/mcp")
     expect(entry.launch.headers.Authorization).toBe("Bearer sk-secret-123")
+    expect(entry.launch.headerEnvironment).toStrictEqual({
+      Authorization: "JINGLER_OPEN_CONNECTOR_AUTHORIZATION"
+    })
   })
 
   it("withholds the server from a harness explicitly disabled in perCli", async () => {

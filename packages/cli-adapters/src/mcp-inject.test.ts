@@ -18,6 +18,9 @@ const OPEN_CONNECTOR: RemoteMcpServer = {
   headers: {
     Authorization: "Bearer connector-token",
     "X-Connector-Scope": "workspace"
+  },
+  headerEnvironment: {
+    Authorization: "JINGLER_OPEN_CONNECTOR_AUTHORIZATION"
   }
 }
 
@@ -33,10 +36,11 @@ describe("codexMcpOverrides", () => {
     expect(codexMcpOverrides([OPEN_CONNECTOR, PREVIEW_BROWSER])).toEqual([
       "features.tool_call_mcp_elicitation=false",
       'mcp_servers.open-connector.url="https://connector.example/mcp"',
-      'mcp_servers.open-connector.http_headers.Authorization="Bearer connector-token"',
+      'mcp_servers.open-connector.env_http_headers.Authorization="JINGLER_OPEN_CONNECTOR_AUTHORIZATION"',
       'mcp_servers.open-connector.http_headers.X-Connector-Scope="workspace"',
       'mcp_servers.jingler-browser.url="http://127.0.0.1:32123/mcp"',
       'mcp_servers.jingler-browser.env_http_headers.Authorization="JINGLER_BROWSER_MCP_AUTHORIZATION"',
+      'shell_environment_policy.filters.JINGLER_OPEN_CONNECTOR_AUTHORIZATION="exclude"',
       'shell_environment_policy.filters.JINGLER_BROWSER_MCP_AUTHORIZATION="exclude"'
     ])
   })
@@ -57,8 +61,9 @@ describe("codexMcpOverrides", () => {
     expect(codexMcpOverrides([OPEN_CONNECTOR])).toEqual([
       "features.tool_call_mcp_elicitation=false",
       'mcp_servers.open-connector.url="https://connector.example/mcp"',
-      'mcp_servers.open-connector.http_headers.Authorization="Bearer connector-token"',
-      'mcp_servers.open-connector.http_headers.X-Connector-Scope="workspace"'
+      'mcp_servers.open-connector.env_http_headers.Authorization="JINGLER_OPEN_CONNECTOR_AUTHORIZATION"',
+      'mcp_servers.open-connector.http_headers.X-Connector-Scope="workspace"',
+      'shell_environment_policy.filters.JINGLER_OPEN_CONNECTOR_AUTHORIZATION="exclude"'
     ])
   })
 
@@ -75,17 +80,23 @@ describe("codexMcpOverrides", () => {
     ).toEqual([
       "features.tool_call_mcp_elicitation=false",
       'mcp_servers.open-connector.url="https://connector.example/mcp"',
-      'mcp_servers.open-connector.http_headers.Authorization="Bearer connector-token"',
-      'mcp_servers.open-connector.http_headers.X-Connector-Scope="workspace"'
+      'mcp_servers.open-connector.env_http_headers.Authorization="JINGLER_OPEN_CONNECTOR_AUTHORIZATION"',
+      'mcp_servers.open-connector.http_headers.X-Connector-Scope="workspace"',
+      'shell_environment_policy.filters.JINGLER_OPEN_CONNECTOR_AUTHORIZATION="exclude"'
     ])
   })
 
   it("keeps mapped bearer values out of argv and supplies them through the run environment", () => {
-    const overrides = codexMcpOverrides([PREVIEW_BROWSER])
+    const overrides = codexMcpOverrides([OPEN_CONNECTOR, PREVIEW_BROWSER])
+    expect(overrides.join(" ")).not.toContain("connector-token")
     expect(overrides.join(" ")).not.toContain("preview-token")
-    expect(codexMcpEnvironment([PREVIEW_BROWSER])).toStrictEqual({
+    expect(codexMcpEnvironment([OPEN_CONNECTOR, PREVIEW_BROWSER])).toStrictEqual({
+      JINGLER_OPEN_CONNECTOR_AUTHORIZATION: "Bearer connector-token",
       JINGLER_BROWSER_MCP_AUTHORIZATION: "Bearer preview-token"
     })
+    expect(overrides).toContain(
+      'shell_environment_policy.filters.JINGLER_OPEN_CONNECTOR_AUTHORIZATION="exclude"'
+    )
     expect(overrides).toContain(
       'shell_environment_policy.filters.JINGLER_BROWSER_MCP_AUTHORIZATION="exclude"'
     )

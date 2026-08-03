@@ -78,10 +78,10 @@ name deterministically. Each adapter registers the normalized collection in its
 own way:
 
 - **Claude** — the SDK `query()` `mcpServers` option (`claude-adapter.ts`).
-- **Codex** — one pair of
-  `-c mcp_servers.<name>.url/http_headers.*` overrides per server on the
-  app-server spawn (`codexMcpOverrides` →
-  `startCodexAppServer.configOverrides`).
+- **Codex** — the URL and an `env_http_headers` reference are passed as `-c`
+  overrides on the app-server spawn (`codexMcpOverrides` →
+  `startCodexAppServer.configOverrides`); the bearer itself exists only in the
+  child environment and is filtered from agent shell commands.
 - **opencode** — a remote `mcp` block merged into `OPENCODE_CONFIG_CONTENT`
   (`opencodeMcpConfig`, `opencode-adapter.ts`).
 - **Cursor** — Jingler has no cursor run path, so nothing to inject.
