@@ -98,6 +98,23 @@ describe("CodexAppServerConnection", () => {
     connection.close()
   })
 
+  it("drops an oversized unterminated line and resynchronizes on the next", async () => {
+    const { connection, diagnostics, output } = harness()
+    // A single JSON-RPC line beyond the 64 MB ceiling, arriving with no newline —
+    // e.g. a command_execution whose aggregated_output dumped a huge transcript.
+    // It must be discarded, not buffered, so the heap never grows without bound.
+    output.write(`{"jsonrpc":"2.0","method":"item/completed","params":{"x":"${"a".repeat(33 * 1024 * 1024)}`)
+    output.write("b".repeat(33 * 1024 * 1024))
+
+    // The next complete message must still be delivered after resync.
+    output.write(
+      `\n${JSON.stringify({ jsonrpc: "2.0", method: "turn/started", params: { threadId: "t1" } })}\n`
+    )
+    await expect(connection.nextMessage()).resolves.toMatchObject({ method: "turn/started" })
+    expect(diagnostics.some(({ event }) => event === "protocol.oversized_line")).toBe(true)
+    connection.close()
+  })
+
   it("preserves notification and server-request ordering", async () => {
     const { connection, output } = harness()
     output.write(

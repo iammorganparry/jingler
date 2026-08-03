@@ -556,8 +556,10 @@ export const createOpencodeMapper = (
               meta: state.title.length > 0 ? state.title : null,
               diff: null,
               // opencode returns tool output as a plain string; the transcript
-              // renders it as the collapsed preview.
-              preview: state.output.length > 0 ? state.output : null,
+              // renders it as the collapsed preview. Cap it — an uncapped dump
+              // (e.g. `rg` over huge files) rides the RPC and is persisted whole,
+              // the same output that OOM'd Electron on the codex path.
+              preview: state.output.length > 0 ? capOutput(state.output) : null,
               ...forAgent
             })
           }

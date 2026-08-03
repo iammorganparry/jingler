@@ -714,6 +714,30 @@ describe("createOpencodeMapper", () => {
     ])
   })
 
+  it("caps a completed tool's output so a huge dump cannot bloat the RPC or transcript", () => {
+    const m = mapper()
+    const events = m.apply(
+      part({
+        id: "prt_big",
+        messageID: "msg_a",
+        type: "tool",
+        callID: "call_big",
+        tool: "bash",
+        state: {
+          status: "completed",
+          input: { command: "rg pattern huge.jsonl" },
+          output: "z".repeat(5_000_000),
+          title: "rg",
+          metadata: {},
+          time: { start: 1, end: 2 }
+        }
+      })
+    ) as ReadonlyArray<{ _tag: string; preview?: string | null }>
+    const end = events.find((e) => e._tag === "ToolEnd")
+    expect(end?.preview?.length ?? 0).toBeLessThan(7_000)
+    expect(end?.preview).toContain("characters omitted")
+  })
+
   it("streams a running command's partial output as a ToolDelta when opencode exposes it", () => {
     const m = mapper()
     const running = (output: string) =>

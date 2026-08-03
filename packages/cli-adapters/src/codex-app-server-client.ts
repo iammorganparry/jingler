@@ -44,6 +44,17 @@ export interface CodexAppServerRequestOptions {
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 
 /**
+ * Hard ceiling on a single JSON-RPC line before it is discarded rather than
+ * buffered. Normal app-server messages are tiny; only a pathological one — a
+ * `command_execution` whose `aggregated_output` carries hundreds of MB from a
+ * command like `rg` over large transcript files — approaches this. Assembling
+ * such a line here (plus the copy `JSON.parse` makes) exhausted Electron's V8
+ * heap. Past the ceiling we drop bytes until the next newline resynchronizes the
+ * stream: one lost message instead of a crashed app.
+ */
+const MAX_MESSAGE_BYTES = 64 * 1024 * 1024
+
+/**
  * A newline-delimited JSON-RPC 2.0 connection to Codex app-server.
  *
  * Responses are correlated here; notifications and server-initiated requests
@@ -61,6 +72,7 @@ export class CodexAppServerConnection {
   readonly #waiting: Array<(message: JsonRpcMessage | null) => void> = []
   #nextId = 1
   #buffer = ""
+  #overflow = false
   #closed = false
   #failure: Error | null = null
 
@@ -84,8 +96,30 @@ export class CodexAppServerConnection {
   readonly #onData = (chunk: Buffer | string): void => {
     this.#buffer += chunk.toString()
     for (;;) {
+      if (this.#overflow) {
+        // Mid-resynchronization after an oversized line: drop everything up to
+        // and including the next newline, then resume normal framing.
+        const resync = this.#buffer.indexOf("\n")
+        if (resync < 0) {
+          this.#buffer = ""
+          break
+        }
+        this.#buffer = this.#buffer.slice(resync + 1)
+        this.#overflow = false
+      }
       const newline = this.#buffer.indexOf("\n")
-      if (newline < 0) break
+      if (newline < 0) {
+        // No frame boundary yet. If an unterminated line has grown past the
+        // ceiling, drop it and resync rather than let the buffer OOM the heap.
+        if (this.#buffer.length > MAX_MESSAGE_BYTES) {
+          this.recordDiagnostic("protocol.oversized_line", {
+            bytes: Buffer.byteLength(this.#buffer)
+          })
+          this.#buffer = ""
+          this.#overflow = true
+        }
+        break
+      }
       const line = this.#buffer.slice(0, newline)
       this.#buffer = this.#buffer.slice(newline + 1)
       if (line.trim().length === 0) continue

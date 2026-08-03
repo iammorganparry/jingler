@@ -98,6 +98,25 @@ describe("codex app-server event mapping", () => {
     ])
   })
 
+  it("bounds accumulated output so a flood of deltas cannot exhaust the heap", () => {
+    const state = makeCodexAppServerEventState()
+    let last: readonly { output?: string }[] = []
+    // 200 deltas of 1 MB each — the raw concatenation would retain 200 MB.
+    for (let i = 0; i < 200; i++) {
+      last = codexAppServerMessageToStreamEvents(
+        {
+          method: "item/commandExecution/outputDelta",
+          params: { itemId: "c1", delta: "q".repeat(1024 * 1024) }
+        },
+        "t1",
+        state
+      ) as readonly { output?: string }[]
+    }
+    const output = last[0]?.output ?? ""
+    expect(output.length).toBeLessThan(7_000)
+    expect(output).toContain("characters omitted")
+  })
+
   it("maps completed update and create diffs to an edit-card preview", () => {
     const state = makeCodexAppServerEventState()
     const events = codexAppServerMessageToStreamEvents(

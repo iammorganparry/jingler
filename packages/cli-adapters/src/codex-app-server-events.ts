@@ -1,5 +1,5 @@
 import type { StreamEvent } from "@jingler/core"
-import { capOutput } from "./output-cap.js"
+import { type CappedAccumulator, capOutput, makeCappedAccumulator } from "./output-cap.js"
 import type { JsonRpcMessage } from "./codex-app-server-client.js"
 import { codexContextUsageFromMessage } from "./codex-app-server.js"
 import { codexFileChangeStats } from "./codex-file-change.js"
@@ -27,7 +27,12 @@ const arrayAt = (record: Record<string, unknown>, key: string): ReadonlyArray<un
 
 export interface CodexAppServerEventState {
   readonly startedTools: Set<string>
-  readonly toolOutput: Map<string, string>
+  /**
+   * Per-tool running output, bounded to O(OUTPUT_CAP). A raw string here grew
+   * without bound as `outputDelta`s streamed and OOM'd Electron on commands that
+   * printed hundreds of MB — see `makeCappedAccumulator`.
+   */
+  readonly toolOutput: Map<string, CappedAccumulator>
 }
 
 export const makeCodexAppServerEventState = (): CodexAppServerEventState => ({
@@ -114,8 +119,11 @@ const completedItemEvents = (
   if (type === "commandExecution") {
     const status = stringAt(item, "status")
     const exitCode = item.exitCode
+    // A whole `aggregatedOutput` still needs capping; the accumulator snapshot is
+    // already capped, so never double-cap it (that would re-slice its marker).
+    const aggregated = stringAt(item, "aggregatedOutput")
     const output =
-      stringAt(item, "aggregatedOutput") ?? state.toolOutput.get(id) ?? ""
+      aggregated !== null ? capOutput(aggregated) : state.toolOutput.get(id)?.snapshot() ?? ""
     return [
       ...starts,
       {
@@ -125,7 +133,7 @@ const completedItemEvents = (
         meta: typeof exitCode === "number" ? `exit ${exitCode}` : null,
         diff: null,
         preview: null,
-        ...(output.length > 0 ? { output: capOutput(output) } : {})
+        ...(output.length > 0 ? { output } : {})
       }
     ]
   }
@@ -230,9 +238,13 @@ export const codexAppServerMessageToStreamEvents = (
     const id = stringAt(params, "itemId")
     const delta = stringAt(params, "delta")
     if (id === null || delta === null || delta.length === 0) return []
-    const output = `${state.toolOutput.get(id) ?? ""}${delta}`
-    state.toolOutput.set(id, output)
-    return [{ _tag: "ToolDelta", id, output: capOutput(output) }]
+    let output = state.toolOutput.get(id)
+    if (output === undefined) {
+      output = makeCappedAccumulator()
+      state.toolOutput.set(id, output)
+    }
+    output.append(delta)
+    return [{ _tag: "ToolDelta", id, output: output.snapshot() }]
   }
   if (method === "error") {
     // Recoverable transport/model retries are informational. Emitting Failed
