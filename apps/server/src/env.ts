@@ -34,8 +34,37 @@ const enabled = (environment: Environment, key: string, fallback = true): boolea
   return value === "1" || value.toLocaleLowerCase("en-US") === "true"
 }
 
+const isLocalhost = (url: string): boolean => /localhost|127\.0\.0\.1|\[::1\]/.test(url)
+
+/**
+ * A URL with a convenient localhost dev default that is WRONG in production. Like
+ * `optional`, but in prod a missing or localhost value is a misconfiguration that
+ * must fail loudly — otherwise the app silently talks to localhost (a dead worker,
+ * an auth callback pointing at a dev port) with no boot-time signal. `require`
+ * lets a URL be prod-mandatory only when the feature using it is on (e.g. the
+ * memory worker URL only matters when memory is enabled).
+ */
+const prodUrl = (
+  environment: Environment,
+  key: string,
+  developmentFallback: string,
+  { require: isRequired = true }: { require?: boolean } = {}
+): string => {
+  const raw = optional(environment, key)
+  const isProd = environment.NODE_ENV === "production"
+  if (raw !== "") {
+    if (isProd && isRequired && isLocalhost(raw)) {
+      throw new Error(`${key} must not be a localhost URL in production`)
+    }
+    return raw
+  }
+  if (isProd && isRequired) throw new Error(`${key} must be set in production`)
+  return developmentFallback
+}
+
 export const loadEnv = (environment: Environment = process.env) => {
   const nodeEnv = optional(environment, "NODE_ENV", "development")
+  const memoryEnabled = enabled(environment, "MEMORY_ENABLED")
   return {
   nodeEnv,
   isDev: nodeEnv !== "production",
@@ -45,7 +74,7 @@ export const loadEnv = (environment: Environment = process.env) => {
   /** BetterAuth signing secret. MUST be overridden in production. */
   authSecret: secret(environment, "BETTER_AUTH_SECRET", "dev-insecure-secret-change-me"),
   /** Public base URL the auth server is reachable at (used for OAuth callbacks). */
-  authBaseUrl: optional(environment, "BETTER_AUTH_URL", "http://localhost:9100"),
+  authBaseUrl: prodUrl(environment, "BETTER_AUTH_URL", "http://localhost:9100"),
   githubClientId: optional(environment, "GITHUB_CLIENT_ID"),
   githubClientSecret: optional(environment, "GITHUB_CLIENT_SECRET"),
   googleClientId: optional(environment, "GOOGLE_CLIENT_ID"),
@@ -59,7 +88,9 @@ export const loadEnv = (environment: Environment = process.env) => {
   memoryGrantAudience: optional(environment, "MEMORY_GRANT_AUDIENCE", "jingler-memory-mcp"),
   memoryGrantTtlSeconds: positiveNumber(environment, "MEMORY_GRANT_TTL_SECONDS", 3600),
   /** Private Cloudflare Worker origin and its rotating Next.js service credential. */
-  memoryWorkerUrl: optional(environment, "MEMORY_WORKER_URL", "http://localhost:8787"),
+  memoryWorkerUrl: prodUrl(environment, "MEMORY_WORKER_URL", "http://localhost:8787", {
+    require: memoryEnabled
+  }),
   memoryWorkerServiceSecret: secret(
     environment,
     "MEMORY_WORKER_SERVICE_SECRET",

@@ -170,18 +170,35 @@ describe("memory operations health", () => {
 })
 
 describe("memory production configuration", () => {
-  it("requires signing and service secrets in production", () => {
-    expect(() => loadEnv({ NODE_ENV: "production" })).toThrow("BETTER_AUTH_SECRET")
+  it("requires signing/service secrets and non-localhost URLs in production", () => {
+    const base = { NODE_ENV: "production" }
+    expect(() => loadEnv(base)).toThrow("BETTER_AUTH_SECRET")
+    expect(() => loadEnv({ ...base, BETTER_AUTH_SECRET: "auth-secret" })).toThrow("BETTER_AUTH_URL")
+    const withAuthUrl = { ...base, BETTER_AUTH_SECRET: "auth-secret", BETTER_AUTH_URL: "https://auth.jingler.app" }
+    expect(() => loadEnv(withAuthUrl)).toThrow("MEMORY_GRANT_SECRET")
+    const withGrant = { ...withAuthUrl, MEMORY_GRANT_SECRET: "grant-secret" }
+    expect(() => loadEnv(withGrant)).toThrow("MEMORY_WORKER_URL")
     expect(() =>
-      loadEnv({ NODE_ENV: "production", BETTER_AUTH_SECRET: "auth-secret" })
-    ).toThrow("MEMORY_GRANT_SECRET")
-    expect(() =>
-      loadEnv({
-        NODE_ENV: "production",
-        BETTER_AUTH_SECRET: "auth-secret",
-        MEMORY_GRANT_SECRET: "grant-secret"
-      })
+      loadEnv({ ...withGrant, MEMORY_WORKER_URL: "https://memory.jingler.workers.dev" })
     ).toThrow("MEMORY_WORKER_SERVICE_SECRET")
+  })
+
+  it("rejects a localhost worker/auth URL in production but allows it when memory is disabled", () => {
+    const base = {
+      NODE_ENV: "production",
+      BETTER_AUTH_SECRET: "s",
+      BETTER_AUTH_URL: "https://auth.jingler.app",
+      MEMORY_GRANT_SECRET: "g",
+      MEMORY_WORKER_SERVICE_SECRET: "w"
+    }
+    expect(() => loadEnv({ ...base, MEMORY_WORKER_URL: "http://localhost:8787" })).toThrow(
+      "MEMORY_WORKER_URL must not be a localhost URL"
+    )
+    // With memory off, the worker URL is unused, so a localhost value is tolerated.
+    expect(
+      loadEnv({ ...base, MEMORY_ENABLED: "false", MEMORY_WORKER_URL: "http://localhost:8787" })
+        .memoryWorkerUrl
+    ).toBe("http://localhost:8787")
   })
 
   it("retains zero-configuration local defaults", () => {
@@ -214,7 +231,9 @@ describe("memory production configuration", () => {
     const configured = createEnv({
       NODE_ENV: "production",
       BETTER_AUTH_SECRET: "auth-secret",
+      BETTER_AUTH_URL: "https://auth.jingler.app",
       MEMORY_GRANT_SECRET: "grant-secret",
+      MEMORY_WORKER_URL: "https://memory.jingler.workers.dev",
       MEMORY_WORKER_SERVICE_SECRET: "worker-secret"
     })
     expect(configured.authSecret).toBe("auth-secret")
