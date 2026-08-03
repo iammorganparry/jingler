@@ -497,6 +497,75 @@ const dispatchAuthenticatedRequest = async (
     )
   ))
 
+/** Fallback MCP revision if a standard client's `initialize` omits one; we echo theirs when present. */
+const STANDARD_MCP_DEFAULT_VERSION = "2025-06-18"
+
+/**
+ * Serve a STANDARD MCP client — the harnesses' native codex / opencode / Claude
+ * clients. Unlike the bespoke stateless protocol above, they send no `Mcp-*`
+ * headers and no per-request `_meta`, may omit `params`/`id`, and open with the
+ * spec `initialize` handshake (+ `notifications/initialized`) before ever calling
+ * `tools/list`. Without answering that handshake their client aborts and never
+ * discovers the tools. We answer it and reuse the same grant-gated dispatch, so
+ * the tools load. Still stateless — no session id is minted or required.
+ */
+const handleStandardMcpRequest = async (
+  body: unknown,
+  organizationId: string,
+  grant: string,
+  dependencies: MemoryMcpDependencies,
+  requestId: string
+): Promise<Response> => {
+  if (!isStringRecord(body) || typeof body.method !== "string") {
+    return jsonResponse(errorResult(null, -32600, "Invalid request"), 400, requestId)
+  }
+  const method = body.method
+  const id = typeof body.id === "string" || typeof body.id === "number" ? body.id : null
+  const params = isStringRecord(body.params) ? body.params : {}
+
+  // Notifications (initialized, cancelled, …) carry no id and expect no result.
+  if (id === null || method.startsWith("notifications/")) {
+    return new Response(null, {
+      status: 202,
+      headers: { "x-request-id": requestId, "cache-control": "no-store" }
+    })
+  }
+  if (method === "initialize") {
+    const protocolVersion =
+      typeof params.protocolVersion === "string" ? params.protocolVersion : STANDARD_MCP_DEFAULT_VERSION
+    return jsonResponse(
+      {
+        jsonrpc: "2.0",
+        id,
+        result: { protocolVersion, capabilities: { tools: {} }, serverInfo: MEMORY_MCP_SERVER_INFO }
+      },
+      200,
+      requestId
+    )
+  }
+  if (method === "ping") {
+    return jsonResponse({ jsonrpc: "2.0", id, result: {} }, 200, requestId)
+  }
+  if (method !== "tools/list" && method !== "tools/call") {
+    return jsonResponse(errorResult(id, -32601, "Method not found"), 404, requestId)
+  }
+  let claims: MemoryGrantClaims
+  try {
+    claims = await dependencies.verifyGrant(grant, organizationId)
+  } catch {
+    return jsonResponse(errorResult(id, -32000, "Invalid memory grant"), 401, requestId)
+  }
+  try {
+    return await dispatchAuthenticatedRequest({ id, method, params }, claims, dependencies.client, requestId)
+  } catch {
+    return jsonResponse(
+      errorResult(id, -32603, "Internal memory service error", { requestId }),
+      500,
+      requestId
+    )
+  }
+}
+
 export const handleMemoryMcpRequest = async (
   request: Request,
   dependencies: MemoryMcpDependencies
@@ -514,6 +583,15 @@ export const handleMemoryMcpRequest = async (
   } catch {
     return jsonResponse(errorResult(null, -32700, "Invalid JSON"), 400, requestId)
   }
+
+  // A standard MCP client (native codex/opencode/Claude) sends none of Jingler's
+  // bespoke `Mcp-*` headers. Route it through the spec-compliant handshake path so
+  // its client can actually discover the tools; the strict path below stays for
+  // the stateless `Mcp-Method`-tagged protocol.
+  if (request.headers.get("mcp-method") === null) {
+    return handleStandardMcpRequest(body, organizationId, grant, dependencies, requestId)
+  }
+
   const parsed = parseRequest(body)
   if (!parsed) return jsonResponse(errorResult(null, -32600, "Invalid request"), 400, requestId)
   const validationError = validateHeaders(request, parsed) ?? validateMetadata(parsed.params)

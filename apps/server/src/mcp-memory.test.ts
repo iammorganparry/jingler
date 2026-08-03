@@ -129,6 +129,69 @@ const dependenciesFor = (
   requestId: () => "request-stable"
 })
 
+// A native codex/opencode/Claude MCP client: no bespoke Mcp-* headers, no _meta.
+const standardRequest = (
+  method: string,
+  grant: string,
+  body: Record<string, unknown> = {}
+): Request =>
+  new Request("https://jingler.test/api/mcp", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${grant}`,
+      "content-type": "application/json",
+      "x-jingler-organization-id": "org-paid"
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", method, ...body })
+  })
+
+describe("standard MCP client compatibility", () => {
+  it("answers the initialize handshake, echoing the client's protocol version", async () => {
+    const grant = issue().grant
+    const response = await handleMemoryMcpRequest(
+      standardRequest("initialize", grant, {
+        id: 1,
+        params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "codex", version: "1" } }
+      }),
+      dependenciesFor(collectingClient().client)
+    )
+    expect(response.status).toBe(200)
+    const payload = (await response.json()) as { result: Record<string, unknown> }
+    expect(payload.result.protocolVersion).toBe("2025-06-18")
+    expect(payload.result.capabilities).toEqual({ tools: {} })
+    expect(payload.result.serverInfo).toEqual(MEMORY_MCP_SERVER_INFO)
+  })
+
+  it("acks notifications/initialized with 202 and no body", async () => {
+    const grant = issue().grant
+    const response = await handleMemoryMcpRequest(
+      standardRequest("notifications/initialized", grant),
+      dependenciesFor(collectingClient().client)
+    )
+    expect(response.status).toBe(202)
+    expect(await response.text()).toBe("")
+  })
+
+  it("lists tools for a native client with NO bespoke headers or _meta", async () => {
+    const grant = issue().grant
+    const response = await handleMemoryMcpRequest(
+      standardRequest("tools/list", grant, { id: 2 }),
+      dependenciesFor(collectingClient().client)
+    )
+    expect(response.status).toBe(200)
+    const payload = (await response.json()) as { result: { tools: ReadonlyArray<{ name: string }> } }
+    expect(payload.result.tools.length).toBeGreaterThan(0)
+  })
+
+  it("still rejects a tools/list with an invalid grant", async () => {
+    const response = await handleMemoryMcpRequest(
+      standardRequest("tools/list", "not-a-real-grant", { id: 3 }),
+      dependenciesFor(collectingClient().client)
+    )
+    expect(response.status).toBe(401)
+  })
+})
+
 describe("memory operations health", () => {
   it("reports disabled without probing Cloudflare", async () => {
     let calls = 0
