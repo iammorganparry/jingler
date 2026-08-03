@@ -52,7 +52,7 @@ import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
-import { orchestratorNote } from "./orchestrator-prompt.js"
+import { orchestratorNote, orchestratorTurnPrompt } from "./orchestrator-prompt.js"
 import { stripOrchestratorAmendment } from "./orchestrator-amend.js"
 import { modeOnApproval, modeToRestore } from "./exec-mode.js"
 import { isTerminal, routeOf } from "./turn-events.js"
@@ -66,7 +66,6 @@ import { runLifetime } from "./run-lifetime.js"
 import { planNote } from "./plan-prompt.js"
 import {
   completeHtmlPlanSubmissions,
-  ORCHESTRATOR_PLAN_SUBMISSION_MARKER,
   stripHtmlPlanBlock
 } from "./plan-parse.js"
 import { questionNote } from "./question-prompt.js"
@@ -1365,15 +1364,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
           const promptText = orchestrating
-            ? [
-                "You are this session's orchestrator.",
-                planApproved
-                  ? "A plan is already approved. Apply the standing direct/delegation policy. When a request changes delegated work, amend the COMPLETE semantic plan as one four-backtick HTML block opened with exactly ````html; keep stage and acceptance ids stable and omit assignments/routes. Jingler returns an applied, invalid, or conflict outcome with the current revision and dispatches valid changed work automatically, without another approval gate."
-                  : `Start with your full native tools. If the standing signals favor delegation, inspect the repository and deliberately enter your native plan mode when available; otherwise submit by starting the reply with exactly ${ORCHESTRATOR_PLAN_SUBMISSION_MARKER} on its own line, immediately followed by the COMPLETE semantic plan as one four-backtick HTML block opened with exactly \`\`\`\`html. Use this marker only to deliberately submit a plan for delegation, never when explaining, reviewing, or quoting one. Declare complexity, dependencies, files, and acceptance criteria, but no assignments or routes. The first delegated plan has one approval gate; bounded direct work has none.`,
-                "Plan grammar (only when delegating or amending): use <section data-stage=\"...\" data-title=\"...\" data-complexity=\"low|medium|high\" data-depends-on=\"...\">, one <ul data-files> of repository-relative <li> paths, and pending <div data-acceptance=\"...\" data-status=\"pending\"> criteria. Never emit data-assignment elements, agent ids, harnesses, models, or routes.",
-                "",
-                text
-              ].join("\n")
+            ? orchestratorTurnPrompt(planApproved, text)
             : text
           const providerReasoning =
             cli === "claude" || cli === "codex" || cli === "opencode"
@@ -2209,6 +2200,36 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               )
             })
 
+          // The marker-free DRAFT path: persist an emitted plan as a draft
+          // `PlanDocument` so Plan Review populates for iteration, WITHOUT the
+          // `approvals.awaitPlan` gate `proposePlan` parks on. The file write is
+          // all it takes — `Plan.watch` streams the canonical doc to the
+          // renderer. Never downgrade a real plan the operator already owns: only
+          // fill an empty slot, or refresh an existing agent draft (amend, so the
+          // revision advances as the orchestrator iterates). Best-effort — a plan
+          // write must never fail the turn.
+          const saveDraftPlan = (source: string): Effect.Effect<void> =>
+            worktreePath.length === 0
+              ? Effect.void
+              : PlanStore.readDocument(worktreePath, sessionId, chatId).pipe(
+                  Effect.provide(env),
+                  Effect.orElseSucceed(() => null),
+                  Effect.flatMap((current) =>
+                    current !== null && current.status !== "draft"
+                      ? Effect.void
+                      : PlanStore.promoteDocument(worktreePath, {
+                          sessionId,
+                          producingChatId: chatId,
+                          source,
+                          status: "draft",
+                          author: "agent",
+                          ...(current !== null
+                            ? { basePlanId: current.id }
+                            : {})
+                        }).pipe(Effect.provide(env), Effect.ignore)
+                  )
+                )
+
           // Publish live handles so comment/revise/approve can reach this run;
           // torn down when the run ends so out-of-band calls become no-ops.
           const steer = (
@@ -2314,6 +2335,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             canUseTool,
             askQuestion,
             proposePlan,
+            saveDraftPlan,
             registerBackgroundStop,
             registerTurnSteer
           })

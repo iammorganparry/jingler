@@ -6,6 +6,7 @@ import { Effect, Runtime } from "effect"
 import type { AgentContext, PermissionRequest, SessionSpec } from "./adapter.js"
 import { capOutput } from "./output-cap.js"
 import {
+  draftPlanCandidate,
   fencedHtmlPlanSubmission,
   hasOrchestratorPlanSubmission,
   hasPlanBlock,
@@ -931,6 +932,20 @@ const driveOpencode = async (
             const clear = planDraft.clear()
             if (clear !== null) await runP(ctx.emit(clear))
             await runP(ctx.emit({ _tag: "Assistant", text: reply }))
+          }
+        } else if (
+          !planning &&
+          spec.orchestrationRoutes !== undefined &&
+          spec.orchestrationPlanApproved !== true &&
+          ctx.saveDraftPlan !== undefined
+        ) {
+          // Auto orchestration, no delegation marker: a plan the agent merely
+          // SHOWS is an iteration draft. Prose is not suppressed here (planning
+          // is false), so the ```html preview already streamed to chat — this
+          // only mirrors it into Plan Review.
+          const candidate = draftPlanCandidate(reply, spec.workerRouting)
+          if (candidate !== null) {
+            await runP(ctx.saveDraftPlan(candidate.source))
           }
         }
 

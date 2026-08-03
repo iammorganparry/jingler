@@ -159,6 +159,7 @@ const harness = (decisions: ReadonlyArray<PlanDecisionType>) => {
   const emitted: StreamEvent[] = []
   const proposed: Plan[] = []
   const questions: string[] = []
+  const drafts: string[] = []
   let n = 0
   const ctx: AgentContext = {
     emit: (event: StreamEvent) => Effect.sync(() => void emitted.push(event)),
@@ -173,9 +174,10 @@ const harness = (decisions: ReadonlyArray<PlanDecisionType>) => {
         proposed.push(plan)
         return decisions[n++] ?? PlanDecision.Reject()
       }),
+    saveDraftPlan: (source: string) => Effect.sync(() => void drafts.push(source)),
     registerBackgroundStop: () => Effect.void
   } as unknown as AgentContext
-  return { ctx, emitted, proposed, questions }
+  return { ctx, emitted, proposed, questions, drafts }
 }
 
 beforeEach(() => {
@@ -225,9 +227,9 @@ describe("the Codex plan loop", () => {
     ).toBe(false)
   })
 
-  it("keeps an unmarked plan-looking auto-mode answer in the ordinary reply channel", async () => {
+  it("mirrors an unmarked plan into a draft while keeping the reply in chat", async () => {
     sdk.state.script = [[agentMessage(HTML_PLAN_TEXT), turnDone]]
-    const { ctx, emitted, proposed } = harness([])
+    const { ctx, emitted, proposed, drafts } = harness([])
 
     await Effect.runPromise(
       runCodex(
@@ -243,8 +245,46 @@ describe("the Codex plan loop", () => {
       )
     )
 
+    // No delegation submission (no marker) — the approval gate stays untouched…
     expect(proposed).toHaveLength(0)
+    // …the visible reply still lands in chat…
     expect(emitted).toContainEqual({ _tag: "Assistant", text: HTML_PLAN_TEXT })
+    // …and the plan is captured as an iteration draft so Plan Review populates.
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0]).toContain("PRD: Stream the plan")
+  })
+
+  it("does not create a draft from an ordinary non-plan reply", async () => {
+    sdk.state.script = [[agentMessage("I read the code; no changes needed yet."), turnDone]]
+    const { ctx, proposed, drafts } = harness([])
+
+    await Effect.runPromise(
+      runCodex(
+        "s-auto-no-plan",
+        spec({
+          mode: "auto",
+          orchestrationRoutes: [
+            { cli: "codex", models: [{ id: "gpt-5.6-sol", label: "Sol" }] }
+          ]
+        }),
+        ctx,
+        new Map()
+      )
+    )
+
+    expect(proposed).toHaveLength(0)
+    expect(drafts).toHaveLength(0)
+  })
+
+  it("does not create a draft outside orchestration (a plain direct chat)", async () => {
+    sdk.state.script = [[agentMessage(HTML_PLAN_TEXT), turnDone]]
+    const { ctx, drafts } = harness([])
+
+    await Effect.runPromise(
+      runCodex("s-direct", spec({ mode: "auto" }), ctx, new Map())
+    )
+
+    expect(drafts).toHaveLength(0)
   })
 
   it("asks a marked malformed auto-mode submission to reformat with the marker", async () => {

@@ -200,6 +200,15 @@ export type ProposePlan = (
 ) => Effect.Effect<PlanDecision>
 
 /**
+ * Persist an orchestrator-emitted plan as a DRAFT `PlanDocument` WITHOUT the
+ * approval gate `proposePlan` blocks on. Auto/orchestrator mode: a plan the
+ * agent shows (no delegation marker) populates Plan Review for iteration, and
+ * `source` is its canonical/validated HTML. Never clobbers a non-draft plan, so
+ * calling it is always safe. Returns immediately — nothing to await.
+ */
+export type SaveDraftPlan = (source: string) => Effect.Effect<void>
+
+/**
  * What the adapter is handed for a run: an ordered `emit` sink for normalized
  * events, the `canUseTool` gate, `askQuestion` for structured input, and
  * `proposePlan` for plan-mode review. Because the adapter drives a single fiber
@@ -237,6 +246,12 @@ export interface AgentContext {
   readonly canUseTool: CanUseTool
   readonly askQuestion: AskQuestion
   readonly proposePlan: ProposePlan
+  /**
+   * Persist an emitted plan as a draft (no approval gate). Optional: only the
+   * `AgentRunner` supplies it, and an adapter simply skips draft capture when
+   * absent (`ctx.saveDraftPlan?.(source)`).
+   */
+  readonly saveDraftPlan?: SaveDraftPlan
   /**
    * Publish a handle the operator's "Stop" button can reach. Adapters whose
    * harness has no per-task cancellation (codex, opencode — both can only abort

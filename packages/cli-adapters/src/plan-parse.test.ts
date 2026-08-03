@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { parsePlanHtml, type WorkerRoutingConfig } from "@jingler/core"
 import {
+  draftPlanCandidate,
   fencedHtmlPlan,
   hasPlanBlock,
   hasOrchestratorPlanSubmission,
@@ -459,6 +460,60 @@ describe("hasOrchestratorPlanSubmission", () => {
 
   it("does not treat a quoted marker and plan as a submission", () => {
     expect(hasOrchestratorPlanSubmission(`Here is the format to quote:\n\n${plan}`)).toBe(false)
+  })
+})
+
+describe("draftPlanCandidate — marker-free draft capture", () => {
+  const VALID_ORCH = [
+    "<h1>PRD: Signals pricing</h1>",
+    '<section data-stage="05" data-title="Pricing" data-complexity="high">',
+    "<ul data-files><li>src/pricing.ts</li></ul>",
+    '<div data-acceptance="05.1" data-status="pending">Pricing works.</div>',
+    "</section>"
+  ].join("\n")
+
+  it("captures a plan the model merely SHOWED in an ordinary three-backtick block", () => {
+    const raw = ["Here is my plan for review:", "", "```html", VALID_ORCH, "```"].join("\n")
+    // The submission scanners reject this exact reply — three-backtick, no marker…
+    expect(parsePlan(raw, "plan_x", ROUTING).structured).toBe(false)
+    expect(hasOrchestratorPlanSubmission(raw)).toBe(false)
+    // …but the draft path captures it and compiles the canonical HTML.
+    const candidate = draftPlanCandidate(raw, ROUTING)
+    expect(candidate).not.toBeNull()
+    expect(parsePlanHtml(candidate!.source).valid).toBe(true)
+    expect(candidate!.source).toContain("Signals pricing")
+  })
+
+  it("also captures a four-backtick block and unfenced raw HTML", () => {
+    const fenced = ["````html", VALID_ORCH, "````"].join("\n")
+    expect(draftPlanCandidate(fenced, ROUTING)).not.toBeNull()
+    // No fence at all — validity gating makes trying the whole reply safe.
+    expect(draftPlanCandidate(VALID_ORCH, ROUTING)).not.toBeNull()
+  })
+
+  it("returns null for prose or an incomplete plan — never a false draft", () => {
+    expect(
+      draftPlanCandidate("I'll audit the auth flow and then refactor it.", ROUTING)
+    ).toBeNull()
+    expect(draftPlanCandidate("```html\n<h1>Incomplete</h1>\n```", ROUTING)).toBeNull()
+    expect(draftPlanCandidate("", ROUTING)).toBeNull()
+  })
+
+  it("compiles with worker routing, or validates raw PRD HTML without it", () => {
+    // With routing → canonical compiled HTML with worker assignments materialised.
+    const compiled = draftPlanCandidate(VALID_ORCH, ROUTING)
+    expect(
+      parsePlanHtml(compiled!.source).projection?.stages[0]?.assignment?.agentId
+    ).toBe("agent-01")
+    // Without routing → validated PRD HTML returned as-is (no assignment).
+    const plain = draftPlanCandidate(VALID_ORCH)
+    expect(plain).not.toBeNull()
+    expect(parsePlanHtml(plain!.source).valid).toBe(true)
+  })
+
+  it("captures a marked plan too — the marker governs delegation, not draft validity", () => {
+    const marked = ["<!-- jingler:submit-plan -->", "````html", VALID_ORCH, "````"].join("\n")
+    expect(draftPlanCandidate(marked, ROUTING)).not.toBeNull()
   })
 })
 

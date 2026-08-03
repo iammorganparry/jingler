@@ -8,6 +8,7 @@ import {
 import { Effect } from "effect"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentContext, SessionSpec } from "./adapter.js"
+import { ORCHESTRATOR_PLAN_SUBMISSION_MARKER } from "./plan-parse.js"
 
 /**
  * Regression for signal-position-ms7r9fpb.
@@ -197,6 +198,7 @@ const harness = (
 ) => {
   const events: StreamEvent[] = []
   const proposed: Plan[] = []
+  const drafts: string[] = []
   const ctx: AgentContext = {
     emit: (event) => Effect.sync(() => void events.push(event)),
     canUseTool: () => Effect.succeed("allow"),
@@ -206,9 +208,10 @@ const harness = (
         proposed.push(plan)
         return decisions[proposed.length - 1] ?? { _tag: "Reject" }
       }),
+    saveDraftPlan: (source: string) => Effect.sync(() => void drafts.push(source)),
     registerBackgroundStop: () => Effect.void
   }
-  return { ctx, events, proposed }
+  return { ctx, events, proposed, drafts }
 }
 
 beforeEach(() => {
@@ -346,6 +349,76 @@ describe("Claude plan submission", () => {
       _tag: "Assistant",
       text: visibleReply
     })
+  })
+
+  it("mirrors an Auto orchestrator's unmarked plan into a draft without native plan mode", async () => {
+    // The reported bug: an Auto (not native-plan) orchestrator streams a plan in
+    // an ordinary three-backtick block and never calls ExitPlanMode, so Plan
+    // Review stayed empty. It must now become a draft — no approval gate.
+    const shownPlan = [
+      "Here's the plan for review:",
+      "",
+      "```html",
+      "<h1>PRD: Onboarding perf</h1>",
+      '<section data-stage="01" data-title="Observability">',
+      '<div data-acceptance="01.1" data-status="pending">Events emit.</div>',
+      "</section>",
+      "```"
+    ].join("\n")
+    visibleReply = shownPlan
+    callExitPlanMode = false
+    const { ctx, events, proposed, drafts } = harness()
+
+    await Effect.runPromise(
+      runClaude(
+        "session-auto-draft",
+        {
+          ...spec,
+          mode: "auto",
+          readOnly: undefined,
+          orchestrationRoutes: [
+            { cli: "claude", models: [{ id: "opus", label: "Opus" }] }
+          ]
+        },
+        ctx,
+        new Map()
+      )
+    )
+
+    // Not a delegation submission — the approval gate is untouched…
+    expect(proposed).toHaveLength(0)
+    // …the plan is captured as an iteration draft so Plan Review populates…
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0]).toContain("PRD: Onboarding perf")
+    // …and the visible reply still shows in chat.
+    expect(events).toContainEqual({ _tag: "Assistant", text: shownPlan })
+  })
+
+  it("submits (not drafts) an Auto orchestrator plan carrying the delegation marker", async () => {
+    visibleReply = `${ORCHESTRATOR_PLAN_SUBMISSION_MARKER}\n${planHtml("Marked plan")}`
+    callExitPlanMode = false
+    const { ctx, proposed, drafts } = harness([{ _tag: "Reject" }])
+
+    await Effect.runPromise(
+      runClaude(
+        "session-auto-marked",
+        {
+          ...spec,
+          mode: "auto",
+          readOnly: undefined,
+          orchestrationRoutes: [
+            { cli: "claude", models: [{ id: "opus", label: "Opus" }] }
+          ]
+        },
+        ctx,
+        new Map()
+      )
+    )
+
+    // The marker routes to the blocking approval gate, not the draft path.
+    expect(proposed).toHaveLength(1)
+    expect(proposed[0]?.summary).toBe("Marked plan")
+    expect(drafts).toHaveLength(0)
   })
 
   it("discards planner worker ids before proposing a compiled orchestrator PRD", async () => {

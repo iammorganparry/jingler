@@ -32,7 +32,9 @@ import { worktreeEnv } from "./worktree-env.js"
 import { capOutput } from "./output-cap.js"
 import { formatQuestionAnswers } from "./question-prompt.js"
 import {
+  draftPlanCandidate,
   fencedHtmlPlanSubmission,
+  hasOrchestratorPlanSubmission,
   parsePlan,
   PLAN_HTML_REFORMAT,
   planModeInstructions
@@ -1105,6 +1107,15 @@ export const runClaude = (
         // so it cannot tell us whether a later native plan-file Write is really
         // a plan submission.
         let nativePlanActive = spec.mode === "plan"
+        // An unapproved orchestrator turn can populate Plan Review straight from
+        // the reply — either a delegation submission (native plan mode or the
+        // explicit marker → the approval gate) or, WITHOUT a marker, a draft the
+        // operator iterates on. Claude only accumulated `planReplyText` under
+        // native plan mode, so an Auto orchestrator that streamed a plan left
+        // Plan Review empty; this widens accumulation + terminal capture to it.
+        const orchestratingUnapproved =
+          spec.orchestrationRoutes !== undefined &&
+          spec.orchestrationPlanApproved !== true
         // Claude's native plan flow normally supplies the PRD through
         // `ExitPlanMode.input.plan`, but read-only orchestrator runs can instead
         // stream the complete fenced document as assistant text and call the
@@ -1496,13 +1507,19 @@ export const runClaude = (
              * nothing below depends on it having run late.
              */
             let events = streamEventsFor(msg, tools, bgState)
-            if (nativePlanActive) {
+            if (nativePlanActive || orchestratingUnapproved) {
               const drafts: Array<StreamEvent> = []
               for (const event of events) {
                 if (event._tag === "Assistant" && event.agentId === undefined) {
                   planReplyText += event.text
-                  const draft = planDraft.append(event.text)
-                  if (draft !== null) drafts.push(draft)
+                  // Live streaming preview only in native plan mode; an Auto
+                  // orchestrator's plan lands in Plan Review at the terminal
+                  // boundary, so a per-token draft card here would flicker over
+                  // ordinary orchestrator prose that isn't a plan.
+                  if (nativePlanActive) {
+                    const draft = planDraft.append(event.text)
+                    if (draft !== null) drafts.push(draft)
+                  }
                 }
               }
               if (drafts.length > 0) events = [...events, ...drafts]
@@ -1545,27 +1562,45 @@ export const runClaude = (
               // ExitPlanMode's live approval result so it can continue into
               // implementation under the restored execution mode.
               if (
-                nativePlanActive &&
-                spec.orchestrationRoutes !== undefined &&
-                spec.orchestrationPlanApproved !== true &&
+                orchestratingUnapproved &&
                 planCount === 0 &&
+                planReplyText.length > 0 &&
                 events.some((event) => event._tag === "Done")
               ) {
-                const planId = `plan_${sessionId}_1`
-                const replyPlan =
-                  planReplyText.length === 0
-                    ? null
-                    : parsePlan(planReplyText, planId, spec.workerRouting)
-                if (replyPlan?.structured === true) {
-                  planCount += 1
-                  const submittedBlock =
-                    fencedHtmlPlanSubmission(
-                      planReplyText,
-                      spec.workerRouting
-                    )?.block
-                  await runP(ctx.proposePlan(replyPlan, submittedBlock))
-                  planReplyText = ""
-                  planDraft.reset()
+                // A delegation submission — native plan mode, or the explicit
+                // reply marker — enters the blocking approval gate. Any other
+                // reply that is a VALID plan is an iteration draft: it only
+                // populates Plan Review (via a `PlanStore` write `Plan.watch`
+                // streams), leaving the visible ```html preview in chat.
+                const submitting =
+                  nativePlanActive || hasOrchestratorPlanSubmission(planReplyText)
+                if (submitting) {
+                  const planId = `plan_${sessionId}_1`
+                  const replyPlan = parsePlan(
+                    planReplyText,
+                    planId,
+                    spec.workerRouting
+                  )
+                  if (replyPlan.structured === true) {
+                    planCount += 1
+                    const submittedBlock =
+                      fencedHtmlPlanSubmission(
+                        planReplyText,
+                        spec.workerRouting
+                      )?.block
+                    await runP(ctx.proposePlan(replyPlan, submittedBlock))
+                    planReplyText = ""
+                    planDraft.reset()
+                  }
+                } else if (ctx.saveDraftPlan !== undefined) {
+                  const candidate = draftPlanCandidate(
+                    planReplyText,
+                    spec.workerRouting
+                  )
+                  if (candidate !== null) {
+                    planCount += 1
+                    await runP(ctx.saveDraftPlan(candidate.source))
+                  }
                 }
               }
               // A terminal, non-plan reply must not leave an incomplete draft

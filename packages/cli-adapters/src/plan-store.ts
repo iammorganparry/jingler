@@ -36,7 +36,7 @@ import type { OrchestrationCheckpoint } from "./orchestration-service.js"
 import { AppPaths } from "./app-paths.js"
 import { legacyPlanToHtml, parsePlanHtml } from "./plan-html.js"
 
-type PlanStoreEnv = FileSystem.FileSystem | Path.Path | AppPaths
+export type PlanStoreEnv = FileSystem.FileSystem | Path.Path | AppPaths
 
 /** Editors save a file two or three times within a few ms; collapse the burst. */
 const WATCH_DEBOUNCE_MS = 150
