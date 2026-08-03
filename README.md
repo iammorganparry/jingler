@@ -14,6 +14,7 @@ the coding CLIs already installed on your machine and keeps its desktop state in
 - Review plans, diffs, agent activity, and pull requests without leaving the session.
 - Start work from a new branch, an existing GitHub pull request, or a GitHub issue.
 - Use built-in terminals, browser previews, themes, MCP servers, and agent skills.
+- Give paid teams a cited, review-gated shared Memory wiki with private lexical search, analytics, and an explicit-evidence mind map.
 
 ## Requirements
 
@@ -131,12 +132,18 @@ guide.
 | --- | --- |
 | `apps/desktop` | Electron main process, preload bridge, React renderer, and end-to-end tests |
 | `apps/server` | Hono, Better Auth, PostgreSQL/Drizzle, and email templates |
+| `apps/memory-worker` | Organization-isolated Cloudflare vault, workflows, search, graph, and analytics |
+| `packages/memory` | Deterministic Markdown, revision, graph, analytics, export, and linting contracts |
 | `packages/core` | Shared domain models, schemas, and orchestration logic |
 | `packages/cli-adapters` | Coding-agent, git, GitHub, terminal, session, and workspace services |
 | `packages/ui` | Shared React components, screens, styles, and themes |
 
 The monorepo uses Turborepo and pnpm workspaces. Shared packages export TypeScript source directly,
 so development changes are picked up without a separate package build.
+
+Shared Memory deployment and recovery are documented in
+[docs/shared-memory.md](docs/shared-memory.md); Worker binding details live in
+[apps/memory-worker/README.md](apps/memory-worker/README.md).
 
 ## Troubleshooting
 

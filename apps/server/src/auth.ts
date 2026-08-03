@@ -12,7 +12,7 @@
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { bearer, magicLink, organization } from "better-auth/plugins"
-import { db } from "./db/client.js"
+import { getDb } from "./db/client.js"
 import { schema } from "./db/schema.js"
 import { env, hasGithub, hasGoogle } from "./env.js"
 import {
@@ -23,14 +23,6 @@ import {
   sendVerifyEmail,
   sendWelcomeEmail
 } from "./email.js"
-
-const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {}
-if (hasGithub) {
-  socialProviders.github = { clientId: env.githubClientId, clientSecret: env.githubClientSecret }
-}
-if (hasGoogle) {
-  socialProviders.google = { clientId: env.googleClientId, clientSecret: env.googleClientSecret }
-}
 
 /** Short "macOS · Chrome" device label from a request's User-Agent (best-effort). */
 function deviceFrom(request?: Request): string {
@@ -61,12 +53,21 @@ function deviceFrom(request?: Request): string {
   return `${os} · ${browser}`
 }
 
-export const auth = betterAuth({
+const createAuth = () => {
+  const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {}
+  if (hasGithub()) {
+    socialProviders.github = { clientId: env.githubClientId, clientSecret: env.githubClientSecret }
+  }
+  if (hasGoogle()) {
+    socialProviders.google = { clientId: env.googleClientId, clientSecret: env.googleClientSecret }
+  }
+
+  return betterAuth({
   secret: env.authSecret,
   baseURL: env.authBaseUrl,
   // The desktop app lives behind a custom protocol; allow it as a redirect target.
   trustedOrigins: ["jingler://"],
-  database: drizzleAdapter(db, { provider: "pg", schema }),
+  database: drizzleAdapter(getDb(), { provider: "pg", schema }),
   socialProviders,
   // Email + password. Sign-up requires verifying the address first; the reset
   // flow emails a link, then confirms the change with a security notification.
@@ -134,6 +135,15 @@ export const auth = betterAuth({
     }),
     bearer()
   ]
-})
+  })
+}
 
-export type Auth = typeof auth
+let cachedAuth: ReturnType<typeof createAuth> | undefined
+
+/** Resolve BetterAuth only on the first request, never while Next imports routes. */
+export const getAuth = (): ReturnType<typeof createAuth> => {
+  cachedAuth ??= createAuth()
+  return cachedAuth
+}
+
+export type Auth = ReturnType<typeof createAuth>

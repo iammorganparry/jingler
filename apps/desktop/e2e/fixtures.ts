@@ -244,6 +244,13 @@ export interface LaunchOptions {
    * itself (auth.spec).
    */
   readonly signedIn?: boolean
+  /**
+   * Reuse one stateful offline auth/MCP/memory fake across several launches.
+   * This is the teammate and organization-isolation boundary: accepted state
+   * survives app instances, while each launch still has isolated local files.
+   * The caller owns the supplied server and closes it after the scenario.
+   */
+  readonly authServer?: FakeAuthServer
 
   /**
    * Install a deterministic fake `opencode` on PATH so discovery, the version
@@ -1105,8 +1112,12 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
 
       // Offline auth backend. Signed-in by default: seed the token file that the
       // e2e plaintext SecretStore reads, so the app boots past the wall.
-      const authServer = await startFakeAuthServer()
-      cleanups.push(() => void authServer.close())
+      const authServer = options.authServer ?? await startFakeAuthServer()
+      if (options.authServer === undefined) {
+        cleanups.push(() => {
+          authServer.close().catch(() => {})
+        })
+      }
       const signedIn = options.signedIn ?? true
       if (signedIn) {
         mkdirSync(jinglerDir, { recursive: true })

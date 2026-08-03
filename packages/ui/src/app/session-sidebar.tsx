@@ -3,6 +3,7 @@ import type { SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, U
 import { displayStatusOf, persistentOf, UNTITLED_SESSION } from "@jingler/core"
 import {
   ChevronRight,
+  BrainCircuit,
   Columns2,
   GitBranch,
   Layers,
@@ -106,6 +107,10 @@ export interface SessionSidebarProps {
   onToggleCollapsed?: (repoName: string) => void | Promise<void>
   /** App version (from `__APP_VERSION__`), shown in the footer. */
   version?: string
+  /** Paid-team memory is a first-class destination, not a session row. */
+  memoryEligible?: boolean
+  memoryActive?: boolean
+  onOpenMemory?: () => void
   /**
    * Open on these filters instead of the persisted ones.
    *
@@ -156,6 +161,9 @@ function SidebarBody({
   onToggleCollapsed,
   version,
   defaultFilters,
+  memoryEligible = false,
+  memoryActive = false,
+  onOpenMemory,
   onCollapse
 }: SessionSidebarProps & {
   /** Current docked width in px. */
@@ -239,7 +247,7 @@ function SidebarBody({
     () =>
       groupSessions(
         filtered.filter(
-          (s) => !(persistentOf(s) && !s.archived) && !splitMemberIds.has(s.id)
+          (s) => !((persistentOf(s) && !s.archived) || splitMemberIds.has(s.id))
         ),
         filters,
         statusOf,
@@ -297,7 +305,7 @@ function SidebarBody({
       onSplitWith={onSplitWith}
       onSetPersistent={onSetPersistent}
       splitCandidates={sessions.filter(
-        (c) => !c.archived && !split.panes.some((p) => p.sessionId === c.id)
+        (c) => !(c.archived || split.panes.some((p) => p.sessionId === c.id))
       )}
     />
   )
@@ -437,6 +445,27 @@ function SidebarBody({
           <Plus size={15} />
         </button>
       </div>
+
+      {memoryEligible && (
+        <div className="px-2 pb-2">
+          <button
+            type="button"
+            data-testid="memory-sidebar-item"
+            aria-current={memoryActive ? "page" : undefined}
+            onClick={onOpenMemory}
+            className={cn(
+              "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[12px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+              memoryActive
+                ? "bg-surface text-text-bright"
+                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
+            )}
+          >
+            <BrainCircuit size={15} className={memoryActive ? "text-blue" : undefined} />
+            <span className="flex-1">Memory</span>
+            {memoryActive && <span className="text-[10px] text-blue">Open</span>}
+          </button>
+        </div>
+      )}
 
       {/* Fixed persistent navigation: never narrowed by the ordinary list's
           status/repo filters, and never duplicated in those groups. */}
@@ -680,6 +709,9 @@ function SessionRail({
   prStates,
   onSelect,
   onNewSession,
+  memoryEligible,
+  memoryActive,
+  onOpenMemory,
   onExpand
 }: {
   sessions: ReadonlyArray<Session>
@@ -688,6 +720,9 @@ function SessionRail({
   prStates?: Record<string, SessionPrStatus>
   onSelect?: (id: string) => void
   onNewSession?: () => void
+  memoryEligible?: boolean
+  memoryActive?: boolean
+  onOpenMemory?: () => void
   /** Re-dock the sidebar (the top button). */
   onExpand: () => void
 }) {
@@ -795,6 +830,24 @@ function SessionRail({
         <Plus size={15} />
       </button>
       <span className="my-1 h-px w-6 flex-none bg-hairline" />
+      {memoryEligible && (
+        <button
+          type="button"
+          data-testid="memory-rail-item"
+          onClick={onOpenMemory}
+          aria-current={memoryActive ? "page" : undefined}
+          aria-label="Memory"
+          title="Memory"
+          className={cn(
+            "flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+            memoryActive
+              ? "bg-surface text-blue"
+              : "text-dim hover:bg-surface hover:text-text"
+          )}
+        >
+          <BrainCircuit size={16} />
+        </button>
+      )}
       <div className="sb-no-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto">
         {persistent.map(renderCell)}
         {persistent.length > 0 && ordinary.length > 0 && (
@@ -876,6 +929,9 @@ export function SessionSidebar(props: SessionSidebarProps) {
       prStates={props.prStates}
       onSelect={props.onSelect}
       onNewSession={props.onNewSession}
+      memoryEligible={props.memoryEligible}
+      memoryActive={props.memoryActive}
+      onOpenMemory={props.onOpenMemory}
       onExpand={() => setPin(true)}
     />
   )

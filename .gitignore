@@ -7,6 +7,12 @@ storybook-static/
 .DS_Store
 .env
 .env.local
+
+# Cloudflare Worker local secrets (wrangler). The committed template is
+# .dev.vars.example; the real .dev.vars (turbopuffer key, etc.) never lands in git.
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
 coverage/
 *.tsbuildinfo
 
@@ -29,3 +35,7 @@ release/
 # Anchored at the repo root, so a legitimate nested fixture dir
 # (`packages/*/data/`) is still tracked.
 /data/
+
+# Next.js build output
+.next/
+next-env.d.ts

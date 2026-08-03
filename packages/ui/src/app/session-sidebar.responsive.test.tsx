@@ -40,6 +40,14 @@ describe("SessionSidebar at shell width", () => {
     expect(onSelect).toHaveBeenCalledWith("b")
   })
 
+  it("keeps the eligible Memory destination reachable from the collapsed rail", () => {
+    const onOpenMemory = vi.fn()
+    renderAt(820, { memoryEligible: true, memoryActive: true, onOpenMemory })
+    fireEvent.click(screen.getByRole("button", { name: "Memory" }))
+    expect(onOpenMemory).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("memory-rail-item").getAttribute("aria-current")).toBe("page")
+  })
+
   it("orders persistent sessions before ordinary sessions with a separator", () => {
     render(
       <WidthTierValue width={820}>

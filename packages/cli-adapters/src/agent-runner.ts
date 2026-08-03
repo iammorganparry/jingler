@@ -93,7 +93,13 @@ import { branchAt, ensureWorktreeLinked } from "./git.js"
 import { OpenConnectorService } from "./open-connector.js"
 import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
 import { remoteMcpServer } from "./mcp-config.js"
-import { SecretStore } from "./secret-store.js"
+import {
+  EMPTY_MEMORY_RETRIEVAL_SUMMARY,
+  MemoryService,
+  MemoryServiceLive,
+  recordMemoryRetrieval
+} from "./memory.js"
+import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
@@ -371,7 +377,6 @@ type PromptEnv =
   | PlanStore
   | DiscoveryService
   | ContextManager
-  | ConfigService
   | OpenConnectorService
   | BrowserControlMcpService
   | SecretStore
@@ -383,17 +388,16 @@ type PromptEnv =
 /**
  * Compose main-only launch attachments in stable priority order.
  *
- * The operator-configured connector is first and therefore wins any name
- * collision with an internal attachment. Keeping the first occurrence also
- * makes malformed duplicate inputs deterministic for every adapter.
+ * Keeping the first occurrence makes duplicate inputs deterministic. Callers
+ * put Jingler-owned attachments first so an operator connector cannot shadow a
+ * credential-bound internal service by claiming its reserved name.
  */
 export const composeRemoteMcpServers = (
-  operatorConfigured: RemoteMcpServer | null,
-  internal: RemoteMcpServer | null
+  ...entries: ReadonlyArray<RemoteMcpServer | null>
 ): ReadonlyArray<RemoteMcpServer> => {
   const names = new Set<string>()
   const attachments: RemoteMcpServer[] = []
-  for (const entry of [operatorConfigured, internal]) {
+  for (const entry of entries) {
     if (entry === null || names.has(entry.name)) continue
     names.add(entry.name)
     attachments.push(entry)
@@ -410,9 +414,10 @@ export const composeRemoteMcpServers = (
  * paused run.
  */
 export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRunner", {
-  dependencies: [ModelsService.Default],
+  dependencies: [ModelsService.Default, MemoryServiceLive],
   effect: Effect.gen(function* () {
     const modelsService = yield* ModelsService
+    const memoryService = yield* MemoryService
     // gateId → the pending gate (shared across prompt/decideGate/stop calls).
     /** Human-in-the-loop state, and the rule that decides what needs approval. */
     const approvals = yield* makeApprovals
@@ -1396,7 +1401,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const browserAttachment = yield* (
             yield* BrowserControlMcpService
           ).acquire(`${sessionId}:${chatId}`)
+          const memoryAttachment = yield* memoryService.attachment(cli)
           const remoteMcpServers = composeRemoteMcpServers(
+            memoryAttachment?.server ?? null,
             remoteMcpServer(openConnectorServer),
             browserAttachment
           )
@@ -1413,7 +1420,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             // opens with a command, the context rides along AFTER it instead.
             prompt: composeTurnPrompt(
               promptText,
-              { primer, planPointer, adhd, ask, planProtocol },
+              {
+                primer,
+                planPointer,
+                adhd,
+                memory: memoryAttachment?.instructions ?? null,
+                ask,
+                planProtocol
+              },
               { leadWithText: leadsWithCommand(cli, promptText) }
             ),
             images,
@@ -1486,6 +1500,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             | FileSystem.FileSystem
             | Path.Path
             | AppPaths
+            | SecretStore
           >()
 
           const now = yield* Effect.sync(() => new Date().toISOString())
@@ -1549,6 +1564,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const eventCount = yield* Ref.make(0)
           const lastEvent = yield* Ref.make<string>("<none>")
           const wasInterrupted = yield* Ref.make(false)
+          const memoryRetrieval = yield* Ref.make(EMPTY_MEMORY_RETRIEVAL_SUMMARY)
 
           // toolUseId → the file an edit tool is writing, remembered at ToolStart so
           // its ToolEnd can mark the matching plan step done (see markPlanProgress).
@@ -1826,6 +1842,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // vanished is a different failure from one that emitted nothing.
               yield* Ref.update(eventCount, (n) => n + 1)
               yield* Ref.set(lastEvent, event._tag)
+              if (event._tag === "ToolStart") {
+                yield* Ref.update(memoryRetrieval, (summary) =>
+                  recordMemoryRetrieval(summary, event.name)
+                )
+              }
               if (event._tag === "SubagentStarted") {
                 const ownerRoutingId = orchestratorParticipantRoutingId(chatId)
                 const routingId = subagentParticipantRoutingId(
@@ -1964,6 +1985,20 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               if (event._tag === "Done") {
                 yield* ContextManager.settle(chatId).pipe(Effect.ignore)
                 yield* finalizePlanVerification()
+                const settledText = next.parts
+                  .filter((part) => part._tag === "Text")
+                  .map((part) => part.text)
+                  .join("\n")
+                yield* memoryService.captureSettledSession({
+                  sessionId,
+                  chatId,
+                  turnId: next.id,
+                  cli,
+                  userText: text,
+                  assistantText: settledText,
+                  settledAt: new Date().toISOString(),
+                  retrieval: yield* Ref.get(memoryRetrieval)
+                }).pipe(Effect.ignore)
               }
               // Amendment diagnostics are part of the canonical assistant
               // message, so live consumers must receive the same appended text

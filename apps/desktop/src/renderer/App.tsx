@@ -22,6 +22,11 @@ import type {
 import { clampFontScale, DEFAULT_THEME_ID, workspaceModeOf } from "@jingler/core"
 import {
   ConfirmDialog,
+  MemoryAnalytics,
+  MemoryBrowser,
+  MemoryDashboard,
+  MemoryInspector,
+  MemoryMap,
   LoadingScreen,
   LoginScreen,
   SetupScreen,
@@ -30,6 +35,16 @@ import {
   useSplashHold,
   useThemeCatalog
 } from "@jingler/ui"
+import type { MemorySubview } from "@jingler/ui"
+import {
+  BarChart3,
+  BookOpen,
+  ClipboardCheck,
+  Download,
+  LayoutDashboard,
+  Map as MapIcon,
+  Search
+} from "lucide-react"
 import { appMachine } from "./app-machine.js"
 import { authMachine } from "./auth-machine.js"
 import { ConversationPane } from "./conversation-pane.js"
@@ -73,6 +88,7 @@ import {
   usePluginTabs
 } from "./plugin-registry.js"
 import { usePlugins } from "./use-plugins.js"
+import { useMemory } from "./use-memory.js"
 
 const GH_UNKNOWN: GhStatus = {
   available: false,
@@ -87,6 +103,159 @@ const ARCHIVE_POLL_MS = 60_000
 
 /** How long a fetched PR state stays fresh before the sweep will re-fetch it. */
 const PR_STATE_STALE_MS = 5 * 60_000
+
+const MEMORY_TABS: ReadonlyArray<{
+  readonly id: MemorySubview
+  readonly label: string
+  readonly icon: typeof LayoutDashboard
+}> = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "map", label: "Map", icon: MapIcon },
+  { id: "wiki", label: "Wiki", icon: BookOpen },
+  { id: "reviews", label: "Reviews", icon: ClipboardCheck },
+  { id: "analytics", label: "Analytics", icon: BarChart3 }
+]
+
+function MemoryReviewsView({ memory }: { memory: ReturnType<typeof useMemory> }) {
+  const { context } = memory
+  const selected = context.reviews.find((review) => review.id === context.selectedReviewId) ?? null
+  const open = context.reviews.filter((review) => review.status === "open")
+  return (
+    <main className="grid min-h-0 flex-1 grid-cols-[minmax(14rem,0.32fr)_minmax(0,1fr)] bg-editor">
+      <aside className="min-h-0 overflow-y-auto border-r border-hairline bg-panel p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h2 className="text-xs font-semibold text-text-bright">Review queue</h2>
+          <span className="font-mono text-[10px] text-dim">{open.length} open</span>
+        </div>
+        <div className="space-y-1.5">
+          {context.reviews.map((review) => (
+            <button
+              key={review.id}
+              type="button"
+              onClick={() => memory.selectReview(review.id)}
+              aria-pressed={review.id === context.selectedReviewId}
+              className="w-full rounded-md border border-line bg-sunken p-2 text-left outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring aria-pressed:bg-surface"
+            >
+              <strong className="block truncate font-mono text-[10.5px] text-text-bright">{review.id}</strong>
+              <span className="mt-1 block text-[10px] text-muted-foreground">{review.pages.length} page{review.pages.length === 1 ? "" : "s"} · {review.changeKind} · {review.status}</span>
+            </button>
+          ))}
+          {context.reviews.length === 0 && <p className="py-8 text-center text-xs text-muted-foreground">No proposals need review.</p>}
+        </div>
+      </aside>
+      <section className="min-h-0 overflow-y-auto p-4">
+        {selected === null ? (
+          <div className="grid min-h-full place-items-center text-xs text-muted-foreground">Select a proposal to review.</div>
+        ) : (
+          <div className="mx-auto max-w-4xl">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="font-mono text-sm font-semibold text-text-bright">{selected.id}</h2>
+                <p className="mt-1 text-[10.5px] text-muted-foreground">From {selected.sourceId} · proposed by {selected.proposedBy}</p>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" disabled={!memory.canReview || memory.reviewing || selected.status !== "open"} onClick={() => memory.decideReview(selected.id, "reject")} className="rounded-md border border-line bg-sunken px-3 py-1.5 text-[10.5px] text-text outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">Reject all</button>
+                <button type="button" disabled={!memory.canReview || memory.reviewing || selected.status !== "open"} onClick={() => memory.decideReview(selected.id, "approve")} className="rounded-md border border-line bg-brand px-3 py-1.5 text-[10.5px] font-semibold text-text-bright outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">{memory.reviewing ? "Publishing…" : "Accept all"}</button>
+              </div>
+            </div>
+            {memory.conflict && context.reviewResult !== null && (
+              <div role="alert" className="mt-4 rounded-md border border-red bg-sunken p-3 text-xs text-text">
+                <strong className="text-red">Publication conflict</strong>
+                {context.reviewResult.conflicts.map((conflict) => (
+                  <p key={`${conflict.pageId}:${conflict.currentHeadRevisionId}`} className="mt-1 font-mono text-[10.5px] text-muted-foreground">
+                    {conflict.pageId}: expected {conflict.expectedBaseRevisionId}; current {conflict.currentHeadRevisionId}
+                  </p>
+                ))}
+              </div>
+            )}
+            <div role="tablist" aria-label="Proposed pages" className="mt-4 flex flex-wrap gap-1 border-b border-hairline pb-2">
+              {selected.pages.map((page, index) => (
+                <button key={page.proposalId} type="button" role="tab" aria-selected={index === 0} className="rounded-md bg-surface px-2.5 py-1.5 text-[10.5px] text-text-bright">{page.title}</button>
+              ))}
+            </div>
+            <div className="mt-3 space-y-3">
+              {selected.pages.map((page) => (
+                <article key={page.proposalId} className="rounded-md border border-line bg-panel p-3">
+                  <h3 className="text-xs font-semibold text-text-bright">{page.title}</h3>
+                  <p className="mt-1 text-[10.5px] leading-4 text-muted-foreground">{page.summary}</p>
+                  <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-md bg-sunken p-3 font-mono text-[10px] leading-4 text-text">{page.markdown}</pre>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+    </main>
+  )
+}
+
+function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
+  const { context } = memory
+  const selectedReview = context.reviews.find((review) => review.id === context.selectedReviewId)
+  const reviewCount = selectedReview?.pages.length ?? 0
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col bg-editor" data-testid="memory-workspace">
+      <header className="flex flex-none flex-wrap items-center gap-2 border-b border-hairline bg-panel px-3 py-2">
+        <strong className="mr-2 text-[12px] text-text-bright">Memory</strong>
+        <select
+          aria-label="Memory organization"
+          value={context.organizationId ?? ""}
+          onChange={(event) => memory.changeOrganization(event.currentTarget.value)}
+          className="max-w-48 rounded-md border border-line bg-sunken px-2 py-1.5 text-[10.5px] text-text outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {context.organizationId === null && <option value="">Choose a paid team…</option>}
+          {context.access?.organizations.map((organization) => (
+            <option key={organization.id} value={organization.id}>{organization.name}</option>
+          ))}
+        </select>
+        <label className="flex min-w-40 flex-1 items-center gap-2 rounded-md border border-line bg-sunken px-2.5 py-1.5 focus-within:ring-2 focus-within:ring-ring">
+          <Search size={13} className="text-muted-foreground" />
+          <span className="sr-only">Search all memory</span>
+          <input
+            disabled={context.organizationId === null}
+            value={context.searchQuery}
+            onChange={(event) => {
+              memory.setQuery(event.currentTarget.value)
+              if (context.view !== "wiki") memory.navigate({ view: "wiki" })
+            }}
+            placeholder="Search memory"
+            className="min-w-0 flex-1 bg-transparent text-[10.5px] text-text outline-none placeholder:text-dim"
+          />
+        </label>
+        <select disabled={context.organizationId === null} aria-label="Memory time range" value={context.range} onChange={(event) => memory.changeRange(event.currentTarget.value)} className="rounded-md border border-line bg-sunken px-2 py-1.5 text-[10.5px] text-text outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <option value="7d">7 days</option><option value="30d">30 days</option><option value="90d">90 days</option><option value="all">All time</option>
+        </select>
+        <button type="button" disabled={context.organizationId === null || memory.exporting} onClick={memory.requestExport} className="flex items-center gap-1.5 rounded-md border border-line bg-sunken px-2.5 py-1.5 text-[10.5px] text-text outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"><Download size={12} /> {context.exported?.saved ? "Exported" : memory.exporting ? "Preparing…" : "Export"}</button>
+      </header>
+      {context.organizationId === null ? (
+        <main className="grid min-h-0 flex-1 place-items-center p-6">
+          <div className="max-w-md rounded-xl border border-line bg-panel p-5 text-center">
+            <h2 className="text-sm font-semibold text-text-bright">Choose a team memory vault</h2>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              Select one of your paid teams above. Jingler will remember the choice and attach its shared memory to future agent sessions.
+            </p>
+          </div>
+        </main>
+      ) : (
+        <>
+      <nav className="flex flex-none items-center gap-1 border-b border-hairline bg-panel px-3 py-1.5" aria-label="Memory views">
+        {MEMORY_TABS.map(({ id, label, icon: Icon }) => (
+          <button type="button" key={id} aria-current={context.view === id ? "page" : undefined} onClick={() => memory.navigate({ view: id })} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[10.5px] text-muted-foreground outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring aria-[current=page]:bg-surface aria-[current=page]:text-text-bright"><Icon size={12} /> {id === "reviews" ? `${label} (${context.reviews.filter((review) => review.status === "open").length})` : label}</button>
+        ))}
+      </nav>
+      {context.view === "dashboard" && <MemoryDashboard summary={context.summary} loading={memory.loading} error={context.error} onNavigate={memory.navigate} onRetry={memory.retry} />}
+      {context.view === "map" && <MemoryMap graph={context.graph} positions={memory.positions} filters={context.filters} viewport={context.viewport} selectedNodeId={context.selectedNodeId} selectedEdgeId={context.selectedEdgeId} loading={memory.loading} onSelectNode={memory.selectNode} onSelectEdge={memory.selectEdge} onExpandNode={memory.expandNode} onViewportChange={memory.setViewport} onFiltersChange={memory.setFilters} />}
+      {context.view === "wiki" && <MemoryBrowser query={context.searchQuery} results={context.searchResults} page={context.page} loading={memory.loading} filter={context.filters.healthOnly ? "health findings" : context.filters.freshness} onQueryChange={memory.setQuery} onOpenPage={memory.openPage} onBack={memory.backFromPage} />}
+      {context.view === "reviews" && <MemoryReviewsView memory={memory} />}
+      {context.view === "analytics" && <MemoryAnalytics summary={context.summary} />}
+      {(context.selectedNodeId || context.selectedEdgeId) && (
+        <MemoryInspector node={memory.selectedNode} evidence={context.evidence} page={context.page} loading={memory.loading} pendingProposalCount={reviewCount} suggestions={context.suggestions?.suggestions ?? []} suggestionsSource={context.suggestions?.vectorSource ?? "lexical"} onBack={memory.closeInspector} onOpenPage={memory.openPage} onExpandNeighborhood={memory.expandNode} onPromoteSuggestion={(fromPageId) => memory.openPage(fromPageId)} />
+      )}
+        </>
+      )}
+    </div>
+  )
+}
 
 /**
  * Thin view over `appMachine` (which drives the first-run/loading/session flow).
@@ -107,6 +276,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   const pluginPanes = usePluginPanes()
   const pluginCommands = usePluginCommands()
   const plugins = usePlugins()
+  const memory = useMemory()
 
   // The conversation machine persists a session's settled status by itself, with
   // no route back here. Fold those records into the list, or the sidebar keeps
@@ -721,6 +891,13 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       onVisibleSessionsChange={onVisibleSessionsChange}
       sessions={sessions}
       user={user}
+      memory={{
+        eligible: memory.eligible,
+        active: memory.active,
+        content: <MemoryWorkspace memory={memory} />,
+        onOpen: memory.open,
+        onClose: memory.close
+      }}
       onSignOut={onSignOut}
       repos={repos}
       starredRepos={starredRepos}

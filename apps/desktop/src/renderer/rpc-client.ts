@@ -42,6 +42,7 @@ import type {
   OAuthClientInfo,
   ConnectorActionResult,
   Message,
+  MemoryConfig,
   ModelOption,
   OpencodeProviderInfo,
   OrchestratorPreference,
@@ -81,10 +82,31 @@ import type {
   WorkerActivity,
   WorkspaceConfig
 } from "@jingler/core"
-import { JinglerRpcs } from "@jingler/contracts"
+import {
+  JinglerRpcs,
+  MemoryAccess as MemoryAccessSchema,
+  MemoryDashboardSummary as MemoryDashboardSummarySchema,
+  MemoryEdgeEvidence as MemoryEdgeEvidenceSchema,
+  MemoryExport as MemoryExportSchema,
+  MemoryGraphView as MemoryGraphViewSchema,
+  MemoryPageDetail as MemoryPageDetailSchema,
+  MemoryReviewItem as MemoryReviewItemSchema,
+  MemoryReviewResult as MemoryReviewResultSchema,
+  MemorySearchResult as MemorySearchResultSchema,
+  type MemoryAccess,
+  type MemoryDashboardSummary,
+  type MemoryEdgeEvidence,
+  type MemoryExport,
+  type MemoryGraphView,
+  type MemoryPageDetail,
+  type MemoryReviewItem,
+  type MemoryReviewResult,
+  type MemorySearchResult,
+  type MemorySuggestionsView
+} from "@jingler/contracts"
 import { RpcClient } from "@effect/rpc"
 import type { FromClientEncoded, FromServerEncoded } from "@effect/rpc/RpcMessage"
-import { Cause, Effect, Exit, Fiber, Layer, ManagedRuntime, Runtime, Scope, Stream } from "effect"
+import { Cause, Effect, Exit, Fiber, Layer, ManagedRuntime, Runtime, Schema, Scope, Stream } from "effect"
 
 /**
  * A custom `RpcClient.Protocol` bound to the preload bridge. `send` ships a
@@ -120,13 +142,16 @@ const runtime = ManagedRuntime.make(ClientProtocolLive)
  */
 const clientScope = Effect.runSync(Scope.make())
 
-const clientPromise = runtime.runPromise(
-  RpcClient.make(JinglerRpcs).pipe(Scope.extend(clientScope))
-)
+const clientEffect = RpcClient.make(JinglerRpcs)
+const scopedClientEffect = Scope.extend(clientEffect, clientScope)
+const clientPromise = runtime.runPromise(scopedClientEffect)
 
 const run = <A>(
   f: (client: Awaited<typeof clientPromise>) => Effect.Effect<A, unknown>
 ): Promise<A> => clientPromise.then((client) => runtime.runPromise(f(client)))
+
+const decodeMemoryResult = <A, I>(schema: Schema.Schema<A, I>, value: unknown): Promise<A> =>
+  Schema.decodeUnknownPromise(schema)(value)
 
 /**
  * Forward a run's events to `onEvent`, guaranteeing the turn settles.
@@ -173,6 +198,73 @@ export const rpc = {
     run((c) => c.Discovery.list()),
   configGet: (): Promise<WorkspaceConfig | null> =>
     run((c) => c.Config.get()),
+  memoryAccess: (): Promise<MemoryAccess> =>
+    run((c) => c.Memory.request({ operation: "access" })).then((value) =>
+      decodeMemoryResult(MemoryAccessSchema, value)
+    ),
+  memoryConfigure: (memory: MemoryConfig): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setMemory(memory)),
+  memoryDashboard: (organizationId: string, range: string): Promise<MemoryDashboardSummary> =>
+    run((c) => c.Memory.request({ organizationId, operation: "dashboard", range })).then((value) =>
+      decodeMemoryResult(MemoryDashboardSummarySchema, value)
+    ),
+  memoryGraph: (organizationId: string, limit = 250): Promise<MemoryGraphView> =>
+    run((c) => c.Memory.request({ organizationId, operation: "graph", limit })).then((value) =>
+      decodeMemoryResult(MemoryGraphViewSchema, value)
+    ),
+  memoryNeighborhood: (
+    organizationId: string,
+    nodeId: string,
+    limit = 100
+  ): Promise<MemoryGraphView> =>
+    run((c) => c.Memory.request({ organizationId, operation: "neighborhood", nodeId, limit })).then((value) =>
+      decodeMemoryResult(MemoryGraphViewSchema, value)
+    ),
+  memoryEdgeEvidence: (organizationId: string, edgeId: string): Promise<MemoryEdgeEvidence> =>
+    run((c) => c.Memory.request({ organizationId, operation: "edgeEvidence", edgeId })).then((value) =>
+      decodeMemoryResult(MemoryEdgeEvidenceSchema, value)
+    ),
+  memorySearch: (
+    organizationId: string,
+    query: string,
+    limit = 50
+  ): Promise<ReadonlyArray<MemorySearchResult>> =>
+    run((c) => c.Memory.request({ organizationId, operation: "search", query, limit })).then((value) =>
+      decodeMemoryResult(Schema.Array(MemorySearchResultSchema), value)
+    ),
+  memoryPage: (organizationId: string, pageId: string): Promise<MemoryPageDetail> =>
+    run((c) => c.Memory.request({ organizationId, operation: "page", pageId })).then((value) =>
+      decodeMemoryResult(MemoryPageDetailSchema, value)
+    ),
+  memoryReviews: (organizationId: string): Promise<ReadonlyArray<MemoryReviewItem>> =>
+    run((c) => c.Memory.request({ organizationId, operation: "reviews" })).then((value) =>
+      decodeMemoryResult(Schema.Array(MemoryReviewItemSchema), value)
+    ),
+  memoryReview: (
+    organizationId: string,
+    proposalId: string,
+    action: "approve" | "reject"
+  ): Promise<MemoryReviewResult> =>
+    run((c) => c.Memory.request({ organizationId, operation: "review", proposalId, action })).then((value) =>
+      decodeMemoryResult(MemoryReviewResultSchema, value)
+    ),
+  memoryExport: (organizationId: string): Promise<MemoryExport> =>
+    run((c) => c.Memory.request({ organizationId, operation: "export" })).then((value) =>
+      decodeMemoryResult(MemoryExportSchema, value)
+    ),
+  /** Advisory relatedness suggestions — NON-AUTHORITATIVE, never accepted edges. */
+  memorySuggestions: (
+    organizationId: string,
+    pageId?: string,
+    limit = 5
+  ): Promise<MemorySuggestionsView> =>
+    run((c) =>
+      c.Memory.suggestions({
+        organizationId,
+        limit,
+        ...(pageId === undefined ? {} : { pageId })
+      })
+    ),
   chooseReposDir: (): Promise<WorkspaceConfig | null> =>
     run((c) => c.Setup.chooseReposDir()),
   workspaceRepos: (): Promise<ReadonlyArray<Repo>> =>

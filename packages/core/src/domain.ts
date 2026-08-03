@@ -713,6 +713,26 @@ export const OPEN_CONNECTOR_DEFAULT: OpenConnectorConfig = {
 }
 
 /**
+ * Team-memory selection persisted with the workspace.
+ *
+ * This is deliberately only a choice and an organization scope. The user's
+ * Jingler bearer remains in `SecretStore`, while the short-lived memory grant is
+ * obtained in the main process for each stateless attachment.
+ */
+export const MemoryConfig = Schema.Struct({
+  /** Master switch for retrieval and settled-session capture. */
+  enabled: Schema.Boolean,
+  /** The exact paid organization selected by the operator. */
+  organizationId: Schema.NullOr(Schema.String)
+})
+export type MemoryConfig = Schema.Schema.Type<typeof MemoryConfig>
+
+export const MEMORY_CONFIG_DEFAULT: MemoryConfig = {
+  enabled: false,
+  organizationId: null
+}
+
+/**
  * Environment-aware onboarding defaults for OpenConnector, resolved in the main
  * process (it alone knows `app.isPackaged`). The Settings panel prefills from these
  * and offers a one-click "Set up automatically":
@@ -864,6 +884,11 @@ export const WorkspaceConfig = Schema.Struct({
    * the bearer token is NEVER stored here — it lives in `SecretStore`.
    */
   openConnector: Schema.optional(OpenConnectorConfig),
+  /**
+   * Stateless team-memory attachment. Older configs omit it, which is the same
+   * as `MEMORY_CONFIG_DEFAULT`: disabled and with no selected organization.
+   */
+  memory: Schema.optional(MemoryConfig),
   /**
    * Ids of plugins the operator has turned OFF. Absent (or a missing id) means
    * enabled — the safe default, since a freshly-dropped-in plugin should work

@@ -49,7 +49,7 @@ const diagnosticFileName = (now: Date): string =>
 export const redactCodexDiagnosticText = (value: string): string =>
   value
     .replace(
-      /\b(session_id|authorization|api[_-]?key|access[_-]?token|refresh[_-]?token)(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|Bearer\s+\S+|\S+)/gi,
+      /\b(session_id|mcp[_-]?session[_-]?id|authorization|api[_-]?key|access[_-]?token|refresh[_-]?token)(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|Bearer\s+\S+|\S+)/gi,
       // biome-ignore lint/security/noSecrets: This literal is the replacement marker, not a credential.
       '$1$2"[REDACTED]"'
     )

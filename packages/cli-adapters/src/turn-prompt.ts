@@ -4,8 +4,8 @@ import type { CliKind } from "@jingler/core"
  * How a turn's prompt is assembled from the operator's message and the notes that
  * ride along with it.
  *
- * Every turn can carry up to five prefixes — a compaction primer, a saved-plan
- * pointer, ADHD mode, the ask-properly note, and the plan-mode protocol — and they
+ * Every turn can carry prefixes for compaction, saved plans, output shaping,
+ * private memory, structured questions, and the plan-mode protocol — and they
  * go in front of the message, in a fixed order, except when they must not. That
  * exception is a real bug that shipped: a harness only expands a slash command
  * when it is the FIRST thing in the message, so prefixing a primer turned
@@ -50,6 +50,8 @@ export interface TurnNotes {
   readonly planPointer?: string | null
   /** ADHD final-summary shaping, when the operator has it on. */
   readonly adhd?: string | null
+  /** Stateless, evidence-first team-memory instructions when attachment succeeded. */
+  readonly memory?: string | null
   /** How to ask the operator a question so it actually reaches them. */
   readonly ask?: string | null
   /** How this harness is expected to submit a plan. */
@@ -58,7 +60,7 @@ export interface TurnNotes {
 
 /** The notes, in order, each followed by a blank line. Empty when there are none. */
 const prefixOf = (notes: TurnNotes): string =>
-  [notes.primer, notes.planPointer, notes.adhd, notes.ask, notes.planProtocol]
+  [notes.primer, notes.planPointer, notes.adhd, notes.memory, notes.ask, notes.planProtocol]
     .filter((note): note is string => note !== null && note !== undefined && note !== "")
     .map((note) => `${note}\n\n`)
     .join("")

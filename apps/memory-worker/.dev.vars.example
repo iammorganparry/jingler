@@ -1,0 +1,16 @@
+# Wrangler local-only values. Copy to .dev.vars; never commit the real file.
+MEMORY_SERVICE_SECRET=dev-memory-worker-secret-change-me
+MEMORY_SERVICE_SECRET_PREVIOUS=
+# Stable workflow-id HMAC key. Set once; do not rotate with the service secret.
+MEMORY_WORKFLOW_ID_SECRET=dev-memory-workflow-id-secret-change-me
+
+# Optional comma-separated operational policy.
+MEMORY_LINT_ORGANIZATIONS=org-local
+MEMORY_AUTO_PUBLISH_FIXES=
+
+# Advisory vector layer (relatedness suggestions only). Both keys must be present
+# for the vector path to activate; absent = lexical-only suggestions.
+# Placeholders — never commit real keys.
+TURBOPUFFER_API_KEY=tpuf-local-placeholder-change-me
+OPENAI_API_KEY=
+OPENAI_EMBED_MODEL=text-embedding-3-small

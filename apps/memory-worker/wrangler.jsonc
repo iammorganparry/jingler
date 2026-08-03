@@ -1,0 +1,57 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jingler-memory-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-31",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MEMORY_VAULTS",
+        "class_name": "TeamVaultObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TeamVaultObject"]
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEMORY_R2",
+      "bucket_name": "jingler-memory"
+    }
+  ],
+  // Advisory turbopuffer vector layer. Non-secret config only; TURBOPUFFER_API_KEY
+  // and OPENAI_API_KEY are provided via `wrangler secret put` / .dev.vars and are
+  // never committed here or forwarded to the renderer.
+  "vars": {
+    "TURBOPUFFER_BASE_URL": "https://api.turbopuffer.com",
+    // Client-side OpenAI embedding model. Non-secret; text-embedding-3-small emits
+    // 1536-dim vectors, stored as explicit vectors in turbopuffer.
+    "OPENAI_EMBED_MODEL": "text-embedding-3-small"
+  },
+  "workflows": [
+    {
+      "name": "jingler-memory-compiler",
+      "binding": "MEMORY_COMPILER",
+      "class_name": "MemoryCompilerWorkflow"
+    },
+    {
+      "name": "jingler-memory-lint",
+      "binding": "MEMORY_LINT",
+      "class_name": "MemoryLintWorkflow"
+    },
+    // Advisory turbopuffer namespace reconciliation, OFF the suggestions read path.
+    // Triggered on accepted publication and swept by the cron below.
+    {
+      "name": "jingler-memory-vector-ingest",
+      "binding": "MEMORY_VECTOR_INGEST",
+      "class_name": "MemoryVectorIngestWorkflow"
+    }
+  ],
+  "triggers": {
+    "crons": ["17 3 * * *"]
+  }
+}
