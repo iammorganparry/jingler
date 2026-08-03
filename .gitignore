@@ -6,6 +6,7 @@ storybook-static/
 *.log
 .DS_Store
 .env
+.env.*
 .env.local
 
 # Cloudflare Worker local secrets (wrangler). The committed template is
@@ -39,3 +40,4 @@ release/
 # Next.js build output
 .next/
 next-env.d.ts
+.vercel
