@@ -12,6 +12,7 @@ import type { AgentContext, SessionSpec } from "./adapter.js"
 import { capOutput } from "./output-cap.js"
 import { codexFileChangeStats } from "./codex-file-change.js"
 import {
+  draftPlanCandidate,
   hasOrchestratorPlanSubmission,
   hasPlanBlock,
   ORCHESTRATOR_PLAN_HTML_REFORMAT,
@@ -642,6 +643,22 @@ export const runCodexSdk = (
               // Reject: `followUp` stays null, so the turn ends here — which is
               // what rejection means. `Done` is emitted normally below.
               continue
+            }
+            // No delegation submission this reply — but in Auto orchestration a
+            // plan the agent merely SHOWS (no marker) is an iteration draft:
+            // mirror it into Plan Review, then let the reply fall through and
+            // emit as ordinary chat (the visible ```html preview stays).
+            else if (
+              reply !== null &&
+              !planning &&
+              spec.orchestrationRoutes !== undefined &&
+              spec.orchestrationPlanApproved !== true &&
+              ctx.saveDraftPlan !== undefined
+            ) {
+              const candidate = draftPlanCandidate(reply, spec.workerRouting)
+              if (candidate !== null) {
+                await runP(ctx.saveDraftPlan(candidate.source))
+              }
             }
             for (const se of codexEventToStreamEvents(event, sessionId, startedTools)) {
               await runP(ctx.emit(se))

@@ -38,7 +38,7 @@ import { DiscoveryService } from "./discovery.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
-import { PlanStore } from "./plan-store.js"
+import { PlanStore, type PlanStoreEnv } from "./plan-store.js"
 import { parsePlan } from "./plan-parse.js"
 import { reserveSessionRun } from "./run-coordinator.js"
 import { initGitRepo, withTempRoot } from "./test-support.js"
@@ -223,6 +223,89 @@ describe("orchestrator amendment outcomes", () => {
         diagnostics: []
       })
     ).toBeNull()
+  })
+})
+
+describe("AgentRunner saveDraftPlan", () => {
+  const VALID_PLAN = [
+    "<h1>PRD: Draft persist</h1>",
+    '<section data-stage="01" data-title="Persist">',
+    '<div data-acceptance="01.1" data-status="pending">Draft persists.</div>',
+    "</section>"
+  ].join("\n")
+
+  const draftingAdapter = (source: string): Layer.Layer<CliAdapter> =>
+    Layer.succeed(
+      CliAdapter,
+      CliAdapter.of({
+        run: (_sessionId, _spec, ctx) =>
+          (ctx.saveDraftPlan ?? (() => Effect.void))(source).pipe(
+            Effect.zipRight(ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }))
+          ) as ReturnType<CliAdapterShape["run"]>,
+        stop: () => Effect.void
+      })
+    )
+
+  const runWith = (
+    adapter: Layer.Layer<CliAdapter>,
+    seed?: Effect.Effect<unknown, never, PlanStore | PlanStoreEnv>
+  ) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (seed !== undefined) yield* seed
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "auto")
+        yield* runner
+          .prompt(SESSION, SESSION, "Plan it.")
+          .pipe(Stream.runDrain)
+        return yield* PlanStore.readDocument(temp.root, SESSION, SESSION)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            AgentRunner.Default,
+            OpenConnectorService.Default,
+            BrowserControlMcpServiceTest,
+            InMemorySecretStoreLive,
+            ConfigService.Default,
+            SessionStore.Default,
+            TranscriptStore.Default,
+            BackgroundTaskStore.Default,
+            PlanStore.Default,
+            adapter,
+            DiscoveryService.Default,
+            ContextManager.Default,
+            temp.layer
+          )
+        )
+      )
+    )
+
+  it("persists an emitted plan as a draft document (no approval gate)", async () => {
+    const doc = await runWith(draftingAdapter(VALID_PLAN))
+    expect(doc?.status).toBe("draft")
+    expect(doc?.updatedBy).toBe("agent")
+    expect(doc?.source).toContain("PRD: Draft persist")
+  })
+
+  it("never clobbers a real (non-draft) plan the operator already owns", async () => {
+    const proposed = "<h1>PRD: Approved work</h1>" +
+      '<section data-stage="01" data-title="Ship">' +
+      '<div data-acceptance="01.1" data-status="pending">Ships.</div></section>'
+    const doc = await runWith(
+      draftingAdapter(VALID_PLAN),
+      // A proposed plan already exists when the orchestrator re-emits a plan.
+      PlanStore.promoteDocument(temp.root, {
+        sessionId: SESSION,
+        producingChatId: SESSION,
+        source: proposed,
+        status: "proposed",
+        author: "agent"
+      }).pipe(Effect.orElseSucceed(() => null))
+    )
+    // The draft write is a no-op — the proposed plan stands untouched.
+    expect(doc?.status).toBe("proposed")
+    expect(doc?.source).toContain("PRD: Approved work")
+    expect(doc?.source).not.toContain("PRD: Draft persist")
   })
 })
 

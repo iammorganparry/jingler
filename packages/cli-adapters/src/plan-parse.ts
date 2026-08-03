@@ -300,6 +300,66 @@ export const orchestratorPlanSubmission = (
 export const hasOrchestratorPlanSubmission = (raw: string): boolean =>
   orchestratorPlanSubmission(raw) !== null
 
+/**
+ * Every candidate plan-HTML body in a reply, for the marker-free DRAFT path.
+ *
+ * Unlike `completeHtmlPlanSubmissions` — which demands the exact four-backtick
+ * delegation transport — a model that is merely SHOWING a plan streams it in an
+ * ordinary three-backtick ` ```html ` block. So this accepts three OR four
+ * backticks, and finally the whole reply as an unfenced fallback. Line-based
+ * rather than one regex so a `<pre>` full of backticks inside the plan cannot
+ * confuse fence detection. Validity (not transport) is what keeps a review that
+ * only quotes a plan from becoming a draft — the caller filters each body
+ * through `parsePlanHtml`/`compileOrchestrationPlanHtml`.
+ */
+const htmlPlanBodies = function* (raw: string): Generator<string> {
+  const lines = raw.split("\n")
+  let open = -1
+  let matched = false
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!
+    if (open < 0) {
+      if (/^[ \t]*`{3,4}html(?:[ \t]+plan)?[ \t]*\r?$/i.test(line)) open = i
+    } else if (/^[ \t]*`{3,4}[ \t]*\r?$/.test(line)) {
+      matched = true
+      yield lines.slice(open + 1, i).join("\n").replace(/\s+$/, "")
+      open = -1
+    }
+  }
+  if (!matched) yield raw.replace(/\s+$/, "")
+}
+
+export interface DraftPlanCandidate {
+  readonly source: string
+}
+
+/**
+ * The DRAFT counterpart to `fencedHtmlPlanSubmission`: find the first plan a
+ * reply contains WITHOUT requiring the delegation marker or four-backtick fence.
+ *
+ * This is the auto/orchestrator path where an emitted plan should populate Plan
+ * Review for iteration, decoupled from the delegation decision. With
+ * `workerRouting` the body is compiled to the canonical orchestration HTML —
+ * byte-identical to what a delegation submission would persist — so a draft and
+ * its later delegated form share one shape; without it the body is validated as
+ * PRD HTML and returned as-is. Returns null when nothing validates, so a review
+ * that merely quotes a plan is never mistaken for one.
+ */
+export const draftPlanCandidate = (
+  raw: string,
+  workerRouting?: WorkerRoutingConfig
+): DraftPlanCandidate | null => {
+  for (const body of htmlPlanBodies(raw)) {
+    if (workerRouting !== undefined) {
+      const compiled = compileOrchestrationPlanHtml(body, workerRouting)
+      if (compiled.valid) return { source: compiled.html }
+    } else if (parsePlanHtml(body).valid) {
+      return { source: body }
+    }
+  }
+  return null
+}
+
 export const fencedHtmlPlan = (raw: string): string | null =>
   fencedHtmlPlanSubmission(raw)?.body ?? null
 

@@ -25,6 +25,7 @@ import { stageCodexInput, toCodexAppServerInput } from "./codex-input.js"
 import { codexMcpEnvironment, codexMcpOverrides } from "./mcp-config.js"
 import { requireWorktree } from "./cwd.js"
 import {
+  draftPlanCandidate,
   hasOrchestratorPlanSubmission,
   hasPlanBlock,
   ORCHESTRATOR_PLAN_HTML_REFORMAT,
@@ -724,6 +725,21 @@ export const runCodexAppServer = (
                   followUp = resumePlanPrompt(decision.plan ?? plan)
                 }
                 continue
+              }
+              // No delegation submission this reply — but in Auto orchestration a
+              // plan the agent merely SHOWS (no marker) is an iteration draft:
+              // mirror it into Plan Review, then let the reply emit as chat.
+              else if (
+                reply !== null &&
+                !planning &&
+                spec.orchestrationRoutes !== undefined &&
+                spec.orchestrationPlanApproved !== true &&
+                ctx.saveDraftPlan !== undefined
+              ) {
+                const candidate = draftPlanCandidate(reply, spec.workerRouting)
+                if (candidate !== null) {
+                  await runP(ctx.saveDraftPlan(candidate.source))
+                }
               }
 
               for (const event of codexAppServerMessageToStreamEvents(
