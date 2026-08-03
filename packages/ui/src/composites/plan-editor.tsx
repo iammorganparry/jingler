@@ -7,7 +7,7 @@ import {
 import type { ReactNode } from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { parseUnifiedDiff } from "../diff/parse.js"
-import { SegmentedControl } from "../components/segmented-control.js"
+import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import {
   PlanDocView,
@@ -181,8 +181,30 @@ export function PlanEditor({
           {error}
         </div>
       )}
-      <div className="flex flex-none items-center gap-2 border-b border-hairline bg-panel/40 px-3 py-2">
-        <SegmentedControl<PlanPage> items={PLAN_PAGES} value={page} onChange={setPage} />
+      <div
+        role="tablist"
+        className="sb-no-scrollbar flex h-8 flex-none items-center gap-0.5 overflow-x-auto border-b border-hairline bg-editor px-2"
+      >
+        {PLAN_PAGES.map((item) => {
+          const active = item.value === page
+          return (
+            <button
+              key={item.value}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setPage(item.value)}
+              className={cn(
+                "group flex flex-none items-center gap-1.5 rounded-md px-2 py-0.5 text-[11.5px] outline-none transition-colors",
+                active
+                  ? "bg-panel text-text-bright"
+                  : "text-muted-foreground hover:bg-panel/60 hover:text-text"
+              )}
+            >
+              <span className="whitespace-nowrap font-medium">{item.label}</span>
+            </button>
+          )
+        })}
       </div>
       {pageNav}
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-editor">
