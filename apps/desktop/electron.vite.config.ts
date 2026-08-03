@@ -27,7 +27,22 @@ const workspacePackages = [
   "@jingler/plugin-sdk"
 ]
 
-export default defineConfig({
+export default defineConfig(({ command }) => {
+  // Local dev talks to the DEPLOYED auth + team-memory backend (apps/server on
+  // Vercel) so the memory features work without running the server locally. The
+  // memory service reads `JINGLER_MEMORY_URL ?? JINGLER_AUTH_URL`, and the memory
+  // token is minted by signing in against the auth origin — so auth and memory
+  // must share one origin. Setting it here (before electron-vite spawns the main
+  // process, which inherits this env) points both at prod.
+  //
+  // `??=`, and dev-only (`serve`): a developer running a fully-local stack can
+  // still override by exporting JINGLER_AUTH_URL=http://localhost:9100, and a
+  // packaged build is unaffected (it must set the URL at launch).
+  if (command === "serve") {
+    process.env.JINGLER_AUTH_URL ??= "https://jingler-nine.vercel.app"
+  }
+
+  return {
   main: {
     define,
     plugins: [externalizeDepsPlugin({ exclude: workspacePackages })],
@@ -73,5 +88,6 @@ export default defineConfig({
         input: { index: resolve(import.meta.dirname, "src/renderer/index.html") }
       }
     }
+  }
   }
 })
