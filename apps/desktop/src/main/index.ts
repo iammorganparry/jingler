@@ -30,6 +30,7 @@ import {
   parseAuthCallback,
   registerProtocolClient
 } from "./deep-link.js"
+import { startAuthLoopback } from "./auth-loopback.js"
 import { jinglerRoot } from "./app-paths.js"
 import { isExternallyOpenable, sameOrigin } from "./window-guards.js"
 import { registerPluginProtocolHandler, registerPluginScheme } from "./plugin-protocol.js"
@@ -178,6 +179,20 @@ if (!gotPrimaryLock) {
     }
     focusMainWindow()
   })
+
+  // macOS can't route `jingler://` to an UNpackaged Electron (dev), so in dev we
+  // also accept the callback over a 127.0.0.1 loopback and expose its URL to
+  // AuthService via env — it becomes the sign-in `callbackURL`. Packaged builds
+  // use the deep link above and never start this listener.
+  if (!app.isPackaged) {
+    void startAuthLoopback(deliverAuthCallback)
+      .then((loopback) => {
+        process.env.JINGLER_DEV_AUTH_LOOPBACK = loopback.url
+      })
+      .catch(() => {
+        // Loopback unavailable → dev falls back to the deep link. Non-fatal.
+      })
+  }
 
   /**
    * The window's pre-paint background, resolved from the active theme.

@@ -20,8 +20,18 @@ import { SecretStore } from "./secret-store.js"
 /** Base URL of the auth backend. Overridable (prod deploy, e2e fake server). */
 const authBaseUrl = (): string => process.env.JINGLER_AUTH_URL ?? "http://localhost:9100"
 
-/** Where the browser flow bounces back to before redirecting to `jingler://`. */
-const desktopCallback = (base: string): string => `${base}/desktop/callback`
+/**
+ * Where the browser flow bounces back to. Always the server's `/desktop/callback`
+ * bridge (same origin — no trusted-origins change needed). In dev the main
+ * process sets `JINGLER_DEV_AUTH_LOOPBACK` to a `http://127.0.0.1:<port>` URL it
+ * listens on; we pass it as a `redirect` the bridge honours (loopback only), so
+ * the token lands over HTTP instead of the macOS-unroutable `jingler://` link.
+ */
+const desktopCallback = (base: string): string => {
+  const target = `${base}/desktop/callback`
+  const loopback = process.env.JINGLER_DEV_AUTH_LOOPBACK
+  return loopback ? `${target}?redirect=${encodeURIComponent(loopback)}` : target
+}
 
 interface SessionResponse {
   readonly session?: { readonly expiresAt?: string } | null

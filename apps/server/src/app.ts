@@ -51,22 +51,49 @@ app.get("/api/me", async (c) => {
 })
 
 /**
+ * Only a LOOPBACK http target is honoured as a `redirect` override — never an
+ * arbitrary host — so this bridge can't be turned into an open redirect that
+ * exfiltrates a freshly-minted bearer token. Used by the desktop DEV loopback
+ * (macOS can't route the `jingler://` scheme to an unpackaged Electron), where
+ * the app listens on `http://127.0.0.1:<port>` instead of the deep link.
+ */
+export const isLoopbackRedirect = (raw: string): boolean => {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return false
+  }
+  if (url.protocol !== "http:") return false
+  // URL.hostname keeps the brackets for IPv6, hence "[::1]".
+  return (
+    url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]"
+  )
+}
+
+/** Append a query string, respecting a target that already carries one (the loopback nonce). */
+const withQuery = (url: string, query: string): string =>
+  `${url}${url.includes("?") ? "&" : "?"}${query}`
+
+/**
  * Desktop bridge. OAuth and magic-link flows complete in the user's browser,
  * where the session is a cookie the desktop app can't read. The client sets THIS
  * route as its `callbackURL`; here we read the freshly-created session server-
- * side and 302 to the `jingler://` deep link carrying the bearer token, which
- * the desktop then stores in the OS keychain. On failure we bounce back with an
+ * side and 302 the bearer token to the desktop. By default that is the
+ * `jingler://` deep link (packaged app); a `redirect` query pointing at a
+ * loopback address overrides it for dev. On failure we bounce back with an
  * `error` param so the LoginScreen can show its error state.
  */
 app.get("/desktop/callback", async (c) => {
+  const requested = c.req.query("redirect")
+  const target = requested && isLoopbackRedirect(requested) ? requested : env.desktopRedirect
   const session = await getAuth().api
     .getSession({ headers: c.req.raw.headers })
     .catch(() => null)
   if (!session?.session?.token) {
-    return c.redirect(`${env.desktopRedirect}?error=nosession`)
+    return c.redirect(withQuery(target, "error=nosession"))
   }
-  const token = encodeURIComponent(session.session.token)
-  return c.redirect(`${env.desktopRedirect}?token=${token}`)
+  return c.redirect(withQuery(target, `token=${encodeURIComponent(session.session.token)}`))
 })
 
 export default app

@@ -49,6 +49,39 @@ describe("AuthService.getSession", () => {
     expect(session?.user.name).toBe("Ada")
   })
 
+  it("routes the sign-in callback through the dev loopback when set, else the plain bridge", async () => {
+    const bodyOf = (fetchMock: ReturnType<typeof vi.fn>) =>
+      JSON.parse((fetchMock.mock.calls[0]?.[1] as { body: string }).body) as { callbackURL: string }
+
+    // Without the env: the plain `/desktop/callback` bridge (deep-link path).
+    delete process.env.JINGLER_DEV_AUTH_LOOPBACK
+    const plain = vi.fn(async () => new Response("{}", { status: 200 }))
+    vi.stubGlobal("fetch", plain)
+    await Effect.runPromise(
+      AuthService.sendMagicLink("a@b.com").pipe(
+        Effect.provide(AuthService.Default),
+        Effect.provide(withStore(null))
+      )
+    )
+    expect(bodyOf(plain).callbackURL).toMatch(/\/desktop\/callback$/)
+
+    // With the env: the loopback is passed as a `redirect` the bridge honours.
+    const loopback = "http://127.0.0.1:5599/callback?state=abc123"
+    process.env.JINGLER_DEV_AUTH_LOOPBACK = loopback
+    const dev = vi.fn(async () => new Response("{}", { status: 200 }))
+    vi.stubGlobal("fetch", dev)
+    await Effect.runPromise(
+      AuthService.sendMagicLink("a@b.com").pipe(
+        Effect.provide(AuthService.Default),
+        Effect.provide(withStore(null))
+      )
+    )
+    const { callbackURL } = bodyOf(dev)
+    expect(callbackURL).toContain("/desktop/callback?redirect=")
+    expect(decodeURIComponent(callbackURL.split("redirect=")[1] ?? "")).toBe(loopback)
+    delete process.env.JINGLER_DEV_AUTH_LOOPBACK
+  })
+
   it("clears a dead token (401) and returns null", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 401 })))
     // Use a shared store so we can observe it was cleared.
