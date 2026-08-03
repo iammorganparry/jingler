@@ -32,7 +32,11 @@ const runHook = (
     readonly withoutJq?: boolean
   } = {}
 ) =>
-  spawnSync("sh", [script, ...(options.args ?? [])], {
+  // Execute the committed entry point so its shebang selects the promised
+  // shell. Forcing every script through `sh` masks this on macOS (where sh is
+  // bash-compatible) but makes the bash connection checker exit 2 under
+  // Ubuntu's dash before it ever reaches curl.
+  spawnSync(script, options.args ?? [], {
     encoding: "utf8",
     env: {
       ...hookEnvironment(),
