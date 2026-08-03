@@ -109,7 +109,9 @@ describe("MemoryService stateless attachment", () => {
         authorization: "JINGLER_MEMORY_AUTHORIZATION"
       })
       expect(attachment?.instructions).toContain("memory_navigation")
-      expect(attachment?.instructions).toContain("stable page, revision, source, and citation")
+      expect(attachment?.instructions).toContain(
+        "page, revision, source, and citation identifiers"
+      )
       expect(attachment?.instructions).toContain("memory_workflow_status")
     }
     const codexServer = attachments[1]?.server
