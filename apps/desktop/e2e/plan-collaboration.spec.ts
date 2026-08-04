@@ -154,23 +154,27 @@ test("streaming plan collaboration survives promotion and reload", async ({
     )
   ).toBeLessThan(24)
 
-  // Comment on a step and mention the active scripted child agent. The dispatch
-  // goes through the real Plan RPC, relays through its owning run, and appends
-  // the returned agent response to this same durable thread.
+  // Comment on a step, then @mention the active scripted child agent from the
+  // thread's REPLY composer — mentions are a reply-only affordance now (a
+  // create-comment is batched via revisePlan with no delivery, so it carries no
+  // mentions). The reply dispatches through the real Plan RPC, relays through the
+  // owning run, and appends the returned agent response to this durable thread.
   await window.getByRole("button", { name: "Comment on this step" }).first().click()
-  const comment = window.getByLabel("Add a comment…")
-  await comment.fill("Please confirm @")
-  const mentions = window.getByRole("listbox", { name: "Mention an agent" })
-  await expect(mentions.getByText("Orchestrator · Parked")).toBeVisible()
-  await expect(mentions.getByText("Sub-agent · Active")).toBeVisible()
-  await mentions.getByText("Explore", { exact: true }).click()
+  await window.getByLabel("Add a comment…").fill("Please confirm the rollout.")
   await window.getByRole("button", { name: "Send reply" }).click()
 
   const marker = window.getByRole("button", { name: "Comment thread" })
   await expect(marker).toBeVisible({ timeout: 10_000 })
   await marker.click()
   const thread = window.locator("[data-plan-comment-thread]")
-  await expect(thread.getByText("Please confirm @Explore")).toBeVisible()
+  const reply = thread.getByLabel("Reply to this thread…")
+  await reply.fill("Confirming with @")
+  const mentions = window.getByRole("listbox", { name: "Mention an agent" })
+  await expect(mentions.getByText("Sub-agent · Active")).toBeVisible()
+  await mentions.getByText("Explore", { exact: true }).click()
+  await thread.getByRole("button", { name: "Send reply" }).click()
+
+  await expect(thread.getByText(/Confirming with @Explore/)).toBeVisible()
   await expect(
     thread.getByText(
       "Explore confirms the anchored rollout guidance is safe to keep."
@@ -204,7 +208,7 @@ test("streaming plan collaboration survives promotion and reload", async ({
   await expect(persistedMarker).toBeVisible()
   await persistedMarker.click()
   const persistedThread = reopened.window.locator("[data-plan-comment-thread]")
-  await expect(persistedThread.getByText("Please confirm @Explore")).toBeVisible()
+  await expect(persistedThread.getByText(/Confirming with @Explore/)).toBeVisible()
   await expect(
     persistedThread.getByText(
       "Explore confirms the anchored rollout guidance is safe to keep."
