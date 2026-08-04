@@ -1,5 +1,4 @@
 import {
-  parsePlanHtml,
   type ExecutionMode,
   type PlanAnnotationAnchor,
   type PlanCommentMessage,
@@ -135,21 +134,14 @@ function PlanReviewBody(props: PlanReviewProps) {
 
   const [container, setContainer] = useState<HTMLElement | null>(null)
 
-  const promotedPlan =
-    plan?.structured === true ? parsePlanHtml(plan.raw) : null
-  const promotingSource =
-    document == null && promotedPlan?.valid === true
-      ? promotedPlan.html
-      : null
+  const promotingSource = null
   const transientSource = streamingDraft?.source ?? promotingSource
   const transientState =
     streamingDraft !== null && streamingDraft !== undefined
       ? streamingDraft.phase === "complete"
         ? "validating"
         : "composing"
-      : promotingSource !== null
-        ? "promoting"
-        : undefined
+      : undefined
 
   if (!document && plan && promotingSource === null && transientSource === null) {
     return (
@@ -186,7 +178,7 @@ function PlanReviewBody(props: PlanReviewProps) {
   const commentLayer =
     document != null ? (
       <PlanCommentLayer
-        annotations={document.projection.annotations}
+        annotations={document.plan.annotations}
         participants={participants ?? []}
         containerRef={container}
         onAddComment={onAddComment ?? (() => {})}
@@ -207,7 +199,7 @@ function PlanReviewBody(props: PlanReviewProps) {
       >
         <PlanEditor
           document={document ?? null}
-          source={transientSource ?? draft ?? document?.source ?? ""}
+          source={transientSource ?? draft ?? (document ? JSON.stringify(document.plan) : "")}
           transientState={transientState}
           state={syncState}
           error={syncError}

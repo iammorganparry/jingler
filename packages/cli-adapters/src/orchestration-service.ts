@@ -1,7 +1,25 @@
 import {
   buildPlanExecutionGraph,
+  planBlockText,
   planStageSemanticFingerprint
 } from "@jingler/core"
+
+/** Render a structured stage into a plain-text spec for the worker prompt. */
+const renderStageSpec = (stage: PlanPrdStage): string =>
+  [
+    stage.approach.length > 0
+      ? `Approach:\n${stage.approach.map((step) => `- ${step}`).join("\n")}`
+      : "",
+    stage.files.length > 0
+      ? `Files:\n${stage.files.map((file) => `- ${file.change} ${file.path}`).join("\n")}`
+      : "",
+    ...stage.notes.map(planBlockText),
+    stage.acceptance.length > 0
+      ? `Acceptance:\n${stage.acceptance.map((c) => `- [${c.id}] ${c.text}`).join("\n")}`
+      : ""
+  ]
+    .filter((part) => part.length > 0)
+    .join("\n\n")
 import type {
   CliExecError,
   CliKind,
@@ -359,7 +377,7 @@ Stage: ${stage.id} — ${stage.title}
 Intent: ${stage.intent}
 
 Stage specification:
-${stage.markdown}
+${renderStageSpec(stage)}
 
 Complete only this stage in the shared worktree. Dependencies assigned to you run
 before this stage. Do not edit the canonical plan directly; Jingler records

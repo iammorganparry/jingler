@@ -65,7 +65,7 @@ export const planDocumentMachine = setup({
       const { document } = params
       return {
         document,
-        draft: document?.source ?? "",
+        draft: document ? JSON.stringify(document.plan) : "",
         error: null
       }
     }),
@@ -73,7 +73,7 @@ export const planDocumentMachine = setup({
       event.type === "REMOTE"
         ? {
             document: event.document,
-            draft: event.document.source,
+            draft: JSON.stringify(event.document.plan),
             error: null
           }
         : {}

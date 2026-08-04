@@ -7,13 +7,20 @@ import type {
   Message,
   PermissionMode,
   Plan,
+  PlanPrd,
   Session,
   StreamEvent
 } from "@jingler/core"
 import { CliExecError, findApprovedPlan, STOPPED_NOTE } from "@jingler/core"
 import { Deferred, Effect, Fiber, Layer, Ref, Stream, TestClock, TestContext } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { CliAdapter, makeScriptedCliAdapter, scriptedPlan } from "./adapter.js"
+import {
+  CliAdapter,
+  makeScriptedCliAdapter,
+  scriptedPlan,
+  scriptedPlanEmission,
+  scriptedPlanPrd
+} from "./adapter.js"
 import type {
   CliAdapterShape,
   PermissionDecision,
@@ -39,7 +46,6 @@ import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore, type PlanStoreEnv } from "./plan-store.js"
-import { parsePlan } from "./plan-parse.js"
 import { reserveSessionRun } from "./run-coordinator.js"
 import { initGitRepo, withTempRoot } from "./test-support.js"
 import {
@@ -99,6 +105,55 @@ afterEach(() => {
 })
 
 const SESSION = "s_test"
+
+/** A minimal structured plan fixture (replaces the former HTML `SOURCE` strings). */
+const mkPlan = (
+  title: string,
+  acceptanceText: string,
+  status: "pending" | "passed" = "pending"
+): PlanPrd => ({
+  title,
+  sections: [],
+  stages: [
+    {
+      id: "01",
+      title: "Stage",
+      intent: "Do it.",
+      approach: [],
+      files: [],
+      diagrams: [],
+      notes: [],
+      acceptance: [
+        { id: "01.1", text: acceptanceText, status, evidence: status === "passed" ? "done" : null }
+      ],
+      dependencies: []
+    }
+  ],
+  annotations: []
+})
+
+/** An approved delegation plan whose sole stage is a completed worker component. */
+const EXISTING_DELEGATION: PlanPrd = {
+  title: "PRD: Existing delegation",
+  sections: [],
+  stages: [
+    {
+      id: "01",
+      title: "Existing",
+      intent: "Existing.",
+      approach: [],
+      files: [{ path: "src/existing.ts", change: "M" }],
+      diagrams: [],
+      notes: [],
+      acceptance: [{ id: "01.1", text: "Existing work is verified.", status: "passed", evidence: "verified" }],
+      dependencies: [],
+      complexity: "medium",
+      assignment: { agentId: "worker-a", cli: "claude", model: "opus", reason: "Existing work." },
+      executionStatus: "completed"
+    }
+  ],
+  annotations: []
+}
 const chatForSession = (
   updatedAt: string,
   fields: Partial<Session["chats"][number]> = {}
@@ -227,19 +282,31 @@ describe("orchestrator amendment outcomes", () => {
 })
 
 describe("AgentRunner saveDraftPlan", () => {
-  const VALID_PLAN = [
-    "<h1>PRD: Draft persist</h1>",
-    '<section data-stage="01" data-title="Persist">',
-    '<div data-acceptance="01.1" data-status="pending">Draft persists.</div>',
-    "</section>"
-  ].join("\n")
+  const VALID_PLAN: PlanPrd = {
+    title: "PRD: Draft persist",
+    sections: [],
+    stages: [
+      {
+        id: "01",
+        title: "Persist",
+        intent: "Persist the draft.",
+        approach: [],
+        files: [],
+        diagrams: [],
+        notes: [],
+        acceptance: [{ id: "01.1", text: "Draft persists.", status: "pending", evidence: null }],
+        dependencies: []
+      }
+    ],
+    annotations: []
+  }
 
-  const draftingAdapter = (source: string): Layer.Layer<CliAdapter> =>
+  const draftingAdapter = (plan: PlanPrd): Layer.Layer<CliAdapter> =>
     Layer.succeed(
       CliAdapter,
       CliAdapter.of({
         run: (_sessionId, _spec, ctx) =>
-          (ctx.saveDraftPlan ?? (() => Effect.void))(source).pipe(
+          (ctx.saveDraftPlan ?? (() => Effect.void))(plan).pipe(
             Effect.zipRight(ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }))
           ) as ReturnType<CliAdapterShape["run"]>,
         stop: () => Effect.void
@@ -284,28 +351,78 @@ describe("AgentRunner saveDraftPlan", () => {
     const doc = await runWith(draftingAdapter(VALID_PLAN))
     expect(doc?.status).toBe("draft")
     expect(doc?.updatedBy).toBe("agent")
-    expect(doc?.source).toContain("PRD: Draft persist")
+    expect(doc?.plan.title).toBe("PRD: Draft persist")
   })
 
   it("never clobbers a real (non-draft) plan the operator already owns", async () => {
-    const proposed = "<h1>PRD: Approved work</h1>" +
-      '<section data-stage="01" data-title="Ship">' +
-      '<div data-acceptance="01.1" data-status="pending">Ships.</div></section>'
+    const proposed: PlanPrd = {
+      title: "PRD: Approved work",
+      sections: [],
+      stages: [
+        {
+          id: "01",
+          title: "Ship",
+          intent: "Ship it.",
+          approach: [],
+          files: [],
+          diagrams: [],
+          notes: [],
+          acceptance: [{ id: "01.1", text: "Ships.", status: "pending", evidence: null }],
+          dependencies: []
+        }
+      ],
+      annotations: []
+    }
     const doc = await runWith(
       draftingAdapter(VALID_PLAN),
       // A proposed plan already exists when the orchestrator re-emits a plan.
       PlanStore.promoteDocument(temp.root, {
         sessionId: SESSION,
         producingChatId: SESSION,
-        source: proposed,
+        plan: proposed,
         status: "proposed",
         author: "agent"
       }).pipe(Effect.orElseSucceed(() => null))
     )
     // The draft write is a no-op — the proposed plan stands untouched.
     expect(doc?.status).toBe("proposed")
-    expect(doc?.source).toContain("PRD: Approved work")
-    expect(doc?.source).not.toContain("PRD: Draft persist")
+    expect(doc?.plan.title).toBe("PRD: Approved work")
+  })
+
+  it("never clobbers a USER-authored draft the operator is editing", async () => {
+    const userDraft: PlanPrd = {
+      title: "PRD: Operator's own draft",
+      sections: [],
+      stages: [
+        {
+          id: "01",
+          title: "Author",
+          intent: "The operator is drafting this.",
+          approach: [],
+          files: [],
+          diagrams: [],
+          notes: [],
+          acceptance: [{ id: "01.1", text: "Kept.", status: "pending", evidence: null }],
+          dependencies: []
+        }
+      ],
+      annotations: []
+    }
+    const doc = await runWith(
+      draftingAdapter(VALID_PLAN),
+      // The operator started their own draft; an agent draft must not reconcile
+      // over it and discard their content.
+      PlanStore.promoteDocument(temp.root, {
+        sessionId: SESSION,
+        producingChatId: SESSION,
+        plan: userDraft,
+        status: "draft",
+        author: "user"
+      }).pipe(Effect.orElseSucceed(() => null))
+    )
+    expect(doc?.status).toBe("draft")
+    expect(doc?.updatedBy).toBe("user")
+    expect(doc?.plan.title).toBe("PRD: Operator's own draft")
   })
 })
 
@@ -1152,7 +1269,7 @@ describe("AgentRunner plan mode", () => {
             description: "Inspect the plan",
             parentId: null
           })
-          const plan = scriptedPlan(SESSION, 1)
+          const plan = scriptedPlanPrd(SESSION, 1)
           yield* context.proposePlan(plan)
           yield* context.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
         }),
@@ -1240,7 +1357,7 @@ describe("AgentRunner plan mode", () => {
             }, 100)
             return "accepted"
           }) ?? Effect.void
-          const plan = scriptedPlan(SESSION, 1)
+          const plan = scriptedPlanPrd(SESSION, 1)
           yield* context.proposePlan(plan)
           yield* context.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
         }),
@@ -1366,7 +1483,7 @@ describe("AgentRunner plan mode", () => {
         Stream.tap((ev) =>
           ev._tag === "PlanProposed"
             ? runner
-                .commentPlanStep(SESSION, ev.plan.id, "s_4a", "Guard the refresh loop.")
+                .commentPlanStep(SESSION, ev.plan.id, "s_04", "Guard the refresh loop.")
                 .pipe(Effect.zipRight(runner.approvePlan(SESSION, ev.plan.id)))
             : Effect.void
         ),
@@ -1387,7 +1504,7 @@ describe("AgentRunner plan mode", () => {
     const plan = parts[0]!.plan
     expect(plan.status).toBe("approved")
     expect(plan.comments.map((c) => c.body)).toContain("Guard the refresh loop.")
-    expect(plan.steps.find((s) => s.id === "s_4a")?.flagged).toBe(true)
+    expect(plan.steps.find((s) => s.id === "s_04")?.flagged).toBe(true)
   })
 
   it("registers the approval gate before the canonical proposal becomes visible", async () => {
@@ -1513,10 +1630,7 @@ describe("AgentRunner plan mode", () => {
             const edited = yield* PlanStore.updateDocument(temp.root, {
               planId: proposed!.id,
               baseRevision: proposed!.revision,
-              source: proposed!.source.replace(
-                "Implement stages in order and keep the canonical revision recoverable.",
-                "Deliver the operator-edited canonical implementation safely"
-              ),
+              plan: { ...proposed!.plan, title: `${proposed!.plan.title} (operator edit)` },
               author: "user"
             })
             observed.staleApprovalResult = (
@@ -1555,12 +1669,12 @@ describe("AgentRunner plan mode", () => {
     expect(observed.exactApprovalResult).toBe("accepted")
     expect(observed.approvedRevision).toBe(2)
     expect(ranTool(result.events, "plan-edit-1")).toBe(true)
-    expect(planParts(result.transcript)[0]!.plan.raw).toContain(
-      "operator-edited canonical implementation"
-    )
+    // The exact edited revision (title carries the operator's edit) is the one
+    // that reached execution — proof rev 2, not the original rev 1, is canonical.
+    expect(planParts(result.transcript)[0]!.plan.raw).toContain("(operator edit)")
     expect(result.document?.status).toBe("done")
     const criteria =
-      result.document?.projection.stages.flatMap((stage) => stage.acceptance) ?? []
+      result.document?.plan.stages.flatMap((stage) => stage.acceptance) ?? []
     expect(
       criteria.every((criterion) =>
         criterion.status === "passed" || criterion.status === "waived"
@@ -1735,16 +1849,13 @@ describe("AgentRunner plan mode", () => {
           sessionId: SESSION,
           producingChatId: SESSION,
           id: "stale-plan",
-          source: `<h1>PRD: Stale plan</h1>
-<section data-stage="01" data-title="Implement">
-<div data-acceptance="01.1" data-status="pending">It works.</div>
-</section>`,
+          plan: mkPlan("PRD: Stale plan", "It works."),
           author: "agent"
         })
         yield* PlanStore.updateDocument(temp.root, {
           planId: first.id,
           baseRevision: first.revision,
-          source: first.source.replace("It works.", "The newer revision works."),
+          plan: mkPlan("PRD: Stale plan", "The newer revision works."),
           author: "user"
         })
         const out: Array<StreamEvent> = []
@@ -1775,10 +1886,7 @@ describe("AgentRunner plan mode", () => {
           sessionId: SESSION,
           producingChatId: SESSION,
           id: "waiting-plan",
-          source: `<h1>PRD: Waiting plan</h1>
-<section data-stage="01" data-title="Verify">
-<div data-acceptance="01.1" data-status="pending">Evidence is required.</div>
-</section>`,
+          plan: mkPlan("PRD: Waiting plan", "Evidence is required."),
           status: "needs-verification",
           author: "agent"
         })
@@ -1817,7 +1925,7 @@ describe("AgentRunner plan mode", () => {
           proposedRaw = ev.plan.raw
           return first
             ? runner
-                .commentPlanStep(SESSION, ev.plan.id, "s_4a", "Add a single-flight guard.")
+                .commentPlanStep(SESSION, ev.plan.id, "s_04", "Add a single-flight guard.")
                 .pipe(Effect.zipRight(runner.revisePlan(SESSION, ev.plan.id)))
             : runner.approvePlan(SESSION, ev.plan.id)
         }),
@@ -2008,12 +2116,7 @@ describe("AgentRunner plan library", () => {
           id: "approved-plan",
           status: "executing",
           author: "agent",
-          source: `<h1>PRD: Existing delegation</h1>
-<section data-stage="01" data-title="Existing" data-complexity="medium">
-<div data-assignment data-agent-id="worker-a" data-cli="claude" data-model="opus" data-reason="Existing work." data-status="completed"></div>
-<ul data-files><li>src/existing.ts</li></ul>
-<div data-acceptance="01.1" data-status="passed" data-evidence="verified">Existing work is verified.</div>
-</section>`
+          plan: EXISTING_DELEGATION
         })
         yield* runner
           .prompt(SESSION, SESSION, "Integrate and report the result.")
@@ -2033,7 +2136,7 @@ describe("AgentRunner plan library", () => {
     expect(captured.specs[0]?.orchestrationPlanApproved).toBe(false)
     expect(captured.specs[1]?.orchestrationPlanApproved).toBe(true)
     expect(captured.specs[0]?.prompt).toContain("full native tools")
-    expect(captured.specs[0]?.prompt).toContain("Plan grammar")
+    expect(captured.specs[0]?.prompt).toContain("Submit a plan as ONE fenced")
     expect(captured.specs[1]?.prompt).toContain("without another approval gate")
   })
 
@@ -2102,15 +2205,28 @@ describe("AgentRunner plan library", () => {
 
   it("persists a tagged invalid amendment with diagnostics and the current revision", async () => {
     seedSessionWithWorktree("auto", "orchestrator")
+    // A re-emitted plan whose new stage declares no acceptance criterion — the
+    // compiler rejects it (`missing-acceptance`) rather than making it canonical.
+    const invalidAmendment = {
+      ...EXISTING_DELEGATION,
+      stages: [
+        ...EXISTING_DELEGATION.stages,
+        {
+          id: "02",
+          title: "Missing acceptance",
+          intent: "A stage with no verifiable outcome.",
+          approach: [],
+          files: [{ path: "src/new.ts", change: "A" as const }],
+          diagrams: [],
+          notes: [],
+          acceptance: [],
+          dependencies: []
+        }
+      ]
+    }
     const captured = {
       prompt: null,
-      reply: `I could not complete this amendment.
-\`\`\`\`html
-<h1>PRD: Invalid amendment</h1>
-<section data-stage="02" data-title="Missing acceptance" data-complexity="medium">
-<ul data-files><li>src/new.ts</li></ul>
-</section>
-\`\`\`\``
+      reply: `I could not complete this amendment.\n\n\`\`\`json\n${JSON.stringify({ mode: "submit", plan: invalidAmendment })}\n\`\`\``
     }
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -2120,12 +2236,7 @@ describe("AgentRunner plan library", () => {
           id: "approved-plan",
           status: "executing",
           author: "agent",
-          source: `<h1>PRD: Existing delegation</h1>
-<section data-stage="01" data-title="Existing" data-complexity="medium">
-<div data-assignment data-agent-id="worker-a" data-cli="claude" data-model="opus" data-reason="Existing work." data-status="completed"></div>
-<ul data-files><li>src/existing.ts</li></ul>
-<div data-acceptance="01.1" data-status="passed" data-evidence="verified">Existing work is verified.</div>
-</section>`
+          plan: EXISTING_DELEGATION
         })
         const before = yield* PlanStore.readDocument(WT, SESSION, SESSION)
         const runner = yield* AgentRunner
@@ -2151,22 +2262,11 @@ describe("AgentRunner plan library", () => {
     )
   })
 
-  it("rejects an ambiguous reply with multiple complete amendment blocks", async () => {
+  it("leaves the approved plan untouched when the reply carries no amendment block", async () => {
     seedSessionWithWorktree("auto", "orchestrator")
-    const existing = `<h1>PRD: Existing delegation</h1>
-<section data-stage="01" data-title="Existing" data-complexity="medium">
-<div data-assignment data-agent-id="worker-a" data-cli="claude" data-model="opus" data-reason="Existing work." data-status="completed"></div>
-<ul data-files><li>src/existing.ts</li></ul>
-<div data-acceptance="01.1" data-status="passed" data-evidence="verified">Existing work is verified.</div>
-</section>`
-    const changed = `<h1>PRD: Changed delegation</h1>
-<section data-stage="02" data-title="Changed" data-complexity="medium">
-<ul data-files><li>src/changed.ts</li></ul>
-<div data-acceptance="02.1" data-status="pending">Changed work is verified.</div>
-</section>`
     const captured = {
       prompt: null,
-      reply: `Earlier plan:\n\n\`\`\`\`html\n${existing}\n\`\`\`\`\n\nActual amendment:\n\n\`\`\`\`html\n${changed}\n\`\`\`\``
+      reply: "Just some coordination prose — no plan JSON block here."
     }
 
     await Effect.runPromise(
@@ -2177,25 +2277,18 @@ describe("AgentRunner plan library", () => {
           id: "approved-plan",
           status: "executing",
           author: "agent",
-          source: existing
+          plan: EXISTING_DELEGATION
         })
         const before = yield* PlanStore.readDocument(WT, SESSION, SESSION)
         const runner = yield* AgentRunner
         yield* runner
-          .prompt(SESSION, SESSION, "Apply exactly one amendment.")
+          .prompt(SESSION, SESSION, "Coordinate, but do not amend.")
           .pipe(Stream.runDrain)
         const after = yield* PlanStore.readDocument(WT, SESSION, SESSION)
-        const messages = yield* TranscriptStore.list(SESSION)
-        const feedback = messages
-          .at(-1)
-          ?.parts.filter((part) => part._tag === "Text")
-          .map((part) => part.text)
-          .join("\n")
 
+        // No plan block → no amendment → the canonical plan is unchanged.
         expect(after?.revision).toBe(before?.revision)
-        expect(after?.source).toBe(before?.source)
-        expect(feedback).toContain("Jingler amendment outcome: invalid.")
-        expect(feedback).toContain("multiple complete HTML plan blocks")
+        expect(after?.plan).toStrictEqual(before?.plan)
       }).pipe(Effect.provide(baseWithAdapter(recordingAdapter(captured))))
     )
   })
@@ -2238,11 +2331,11 @@ describe("AgentRunner plan library", () => {
     expect(readFileSync(file, "utf8")).toContain("Refactor auth flow")
   })
 
-  it("canonicalizes a non-empty fallback before publishing PlanProposed", async () => {
+  it("canonicalizes a proposed plan before publishing PlanProposed", async () => {
     seedSessionWithWorktree("plan")
-    const fallback = parsePlan(
-      "# Refactor auth\n\nExtract the token store, update callers, and run the auth tests.",
-      "plan_fallback"
+    const fallback = mkPlan(
+      "PRD: Refactor auth",
+      "Extract the token store, update callers, and run the auth tests."
     )
     const fallbackAdapter = Layer.succeed(
       CliAdapter,
@@ -2281,12 +2374,9 @@ describe("AgentRunner plan library", () => {
     )
     expect(document).not.toBeNull()
     expect(proposed).toHaveLength(1)
-    expect(proposed[0]).toMatchObject({
-      id: document?.id,
-      structured: true
-    })
-    expect(proposed[0]?.raw).toContain("Imported from a legacy native plan artifact")
-    expect(document?.source).toContain("Extract the token store")
+    expect(proposed[0]).toMatchObject({ id: document?.id, structured: true })
+    expect(document?.plan.title).toBe("PRD: Refactor auth")
+    expect(JSON.stringify(document?.plan)).toContain("Extract the token store")
   })
 
   it("removes the streamed HTML protocol block after publishing the canonical plan", async () => {
@@ -2294,11 +2384,11 @@ describe("AgentRunner plan library", () => {
     const reply = [
       "Planning complete.",
       "",
-      "````html",
-      scriptedPlan("streamed", 1).raw,
-      "````"
+      "```json",
+      scriptedPlanEmission("streamed", 1),
+      "```"
     ].join("\n")
-    const streamedPlan = parsePlan(reply, "plan_streamed")
+    const streamedPlan = scriptedPlanPrd("streamed", 1)
     const streamedAdapter = Layer.succeed(
       CliAdapter,
       CliAdapter.of({
@@ -2308,7 +2398,7 @@ describe("AgentRunner plan library", () => {
             yield* ctx.emit({ _tag: "Assistant", text: reply })
             yield* ctx.proposePlan(
               streamedPlan,
-              reply.slice(reply.indexOf("````html"))
+              reply.slice(reply.indexOf("```json"))
             )
             yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
           }) as ReturnType<CliAdapterShape["run"]>,
@@ -2344,29 +2434,14 @@ describe("AgentRunner plan library", () => {
 
   it("preserves visible HTML when the selected plan came from a separate payload", async () => {
     seedSessionWithWorktree("plan")
-    const visiblePlanHtml = scriptedPlan("visible-example", 1).raw.replace(
-      "Refactor auth flow",
-      "Visible documentation"
-    )
     const visibleExample = [
       "Payload submitted separately; keep this documentation:",
       "",
-      "````html",
-      visiblePlanHtml,
-      "````"
+      "```json",
+      scriptedPlanEmission("visible-example", 1).replace("Refactor auth flow", "Visible documentation"),
+      "```"
     ].join("\n")
-    const payloadPlanHtml = scriptedPlan("payload", 1).raw.replace(
-      "Refactor auth flow",
-      "Payload canonical plan"
-    )
-    const payloadPlan = parsePlan(
-      [
-        "````html",
-        payloadPlanHtml,
-        "````"
-      ].join("\n"),
-      "plan_payload"
-    )
+    const payloadPlan = scriptedPlanPrd("payload", 1)
     const payloadAdapter = Layer.succeed(
       CliAdapter,
       CliAdapter.of({
@@ -2429,7 +2504,16 @@ describe("AgentRunner plan library", () => {
     )
     // A saved plan already exists for this worktree.
     const planFile = await Effect.runPromise(
-      PlanStore.write(WT, { ...scriptedPlan("s1", 1), summary: "Ship it", raw: "the full plan" }).pipe(
+      Effect.gen(function* () {
+        yield* PlanStore.promoteDocument(WT, {
+          sessionId: "s1",
+          producingChatId: "s1",
+          id: "s1-plan",
+          plan: scriptedPlanPrd("s1", 1),
+          author: "agent"
+        })
+        return yield* PlanStore.currentFileFor(WT)
+      }).pipe(
         Effect.provide(Layer.merge(PlanStore.Default, temp.layer))
       )
     )
@@ -2502,7 +2586,16 @@ describe("AgentRunner plan library", () => {
       temp.layer
     )
     await Effect.runPromise(
-      PlanStore.write(WT, { ...scriptedPlan("s1", 1), summary: "Ship it", raw: "the full plan" }).pipe(
+      Effect.gen(function* () {
+        yield* PlanStore.promoteDocument(WT, {
+          sessionId: "s1",
+          producingChatId: "s1",
+          id: "s1-plan",
+          plan: scriptedPlanPrd("s1", 1),
+          author: "agent"
+        })
+        return yield* PlanStore.currentFileFor(WT)
+      }).pipe(
         Effect.provide(Layer.merge(PlanStore.Default, temp.layer))
       )
     )
@@ -2644,7 +2737,7 @@ describe("AgentRunner plan progress across turns", () => {
    * and execution runs on across many later turns, each with its own assistant
    * message. `edit` is the path the second turn writes.
    */
-  const twoTurnAdapter = (edit: string, plan?: (p: Plan) => Plan): Layer.Layer<CliAdapter> => {
+  const twoTurnAdapter = (edit: string, plan?: (p: PlanPrd) => PlanPrd): Layer.Layer<CliAdapter> => {
     let turn = 0
     return Layer.succeed(
       CliAdapter,
@@ -2653,7 +2746,7 @@ describe("AgentRunner plan progress across turns", () => {
           Effect.gen(function* () {
             turn += 1
             if (turn === 1) {
-              const base = scriptedPlan(sessionId, 1)
+              const base = scriptedPlanPrd(sessionId, 1)
               yield* ctx.proposePlan(plan ? plan(base) : base)
               yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
               return
@@ -2675,7 +2768,7 @@ describe("AgentRunner plan progress across turns", () => {
   }
 
   /** Turn 1: propose + approve. Turn 2: the edit lands. Returns the plan after. */
-  const runTwoTurns = (edit: string, plan?: (p: Plan) => Plan) => {
+  const runTwoTurns = (edit: string, plan?: (p: PlanPrd) => PlanPrd) => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
@@ -2730,10 +2823,9 @@ describe("AgentRunner plan progress across turns", () => {
   })
 
   /** Point step s_01 at a bare filename — the shape that breaks a naive suffix match. */
-  const bareFilenameStep = (p: Plan): Plan => ({
+  const bareFilenameStep = (p: PlanPrd): PlanPrd => ({
     ...p,
-    raw: p.raw.replace(">src/auth/memory-store.ts</li>", ">session.ts</li>"),
-    steps: p.steps.map((s) =>
+    stages: p.stages.map((s) =>
       s.id === "s_01"
         ? { ...s, files: [{ path: "session.ts", change: "M" as const, added: 1, removed: 0 }] }
         : s

@@ -46,7 +46,7 @@ test("a streamed plan opens beside chat, stays read-only, and promotes in place"
   await expect(appShell(window)).toBeVisible()
   const planFile = join(
     planDirectory(launched.home, launched.repoPath),
-    "current-plan.html"
+    "current-plan.json"
   )
 
   const composer = window.getByPlaceholder(composerPlaceholder)
@@ -57,15 +57,18 @@ test("a streamed plan opens beside chat, stays read-only, and promotes in place"
   // transcript. It is not a revision yet, so no file or approval controls exist.
   await expect(window.getByTestId("composer")).toBeVisible()
   await expect(window.getByLabel("Resize plan")).toBeVisible()
-  await expect(window.getByLabel("Plan document")).toBeVisible()
+  await expect(window.getByTestId("plan-review-container")).toBeVisible()
   await expect(window.getByTestId("plan-status-summary")).toContainText(
     transientStatus
   )
   expect(existsSync(planFile)).toBe(false)
   await expect(window.getByLabel("Plan approval options")).toHaveCount(0)
 
-  // Composing streams the agent's HTML into the read-only document.
-  await expect(window.getByText(/Move session token handling/)).toBeVisible()
+  // Composing tolerant-parses the streamed partial DTO into the read-only outline
+  // live, so a stage title appears before the canonical file is ever written.
+  await expect(
+    window.getByText("Audit session middleware", { exact: true }).first()
+  ).toBeVisible({ timeout: 20_000 })
 
   // Promotion swaps in the validated canonical revision: the Main step outline
   // takes over (with the stage titles) and the revision becomes approvable.
@@ -73,7 +76,7 @@ test("a streamed plan opens beside chat, stays read-only, and promotes in place"
     .poll(() => existsSync(planFile), { timeout: 20_000 })
     .toBe(true)
   await expect(
-    window.getByText("Audit session middleware", { exact: true })
+    window.getByText("Audit session middleware", { exact: true }).first()
   ).toBeVisible({ timeout: 20_000 })
   await expect(window.getByTestId("plan-floating-actions")).toBeVisible()
 })
@@ -90,7 +93,7 @@ test("later plan drafts respect a split the operator closed", async ({
   await expect(appShell(window)).toBeVisible()
   const planFile = join(
     planDirectory(launched.home, launched.repoPath),
-    "current-plan.html"
+    "current-plan.json"
   )
   const composer = window.getByPlaceholder(composerPlaceholder)
 
@@ -112,7 +115,7 @@ test("later plan drafts respect a split the operator closed", async ({
   await nextComposer.fill("[[plan]] [[stream-plan]] revise auth")
   await nextComposer.press("Enter")
   await expect(
-    window.getByRole("toolbar", { name: "Plan approval options" })
+    window.getByLabel("Plan approval options").first()
   ).toBeVisible({ timeout: 20_000 })
   await expect(window.getByTestId("plan-split-column")).toHaveCount(0)
 
@@ -155,7 +158,7 @@ test("a closed plan split stays closed after an app restart", async ({
   await nextComposer.press("Enter")
 
   await expect(
-    reopened.window.getByRole("toolbar", { name: "Plan approval options" })
+    reopened.window.getByLabel("Plan approval options").first()
   ).toBeVisible({ timeout: 20_000 })
   await expect(reopened.window.getByTestId("plan-split-column")).toHaveCount(0)
 })

@@ -15,35 +15,45 @@ const RICH_PRD: PlanPrd = {
     {
       id: "context",
       title: "Context",
-      markdown:
-        "<p>Reviewers currently jump between the diff and the plan doc to " +
-        "understand <strong>why</strong> a change exists. The architecture view " +
-        "gives them the plan's prose and diagrams in one read-only place.</p>"
+      blocks: [
+        {
+          kind: "prose",
+          id: "context-1",
+          text: "Reviewers currently jump between the diff and the plan doc to understand **why** a change exists. The architecture view gives them the plan's prose and diagrams in one read-only place."
+        }
+      ]
     },
     {
       id: "goals",
       title: "Goals",
-      markdown:
-        "<ul><li>Surface Context / Goals / Technical design / Decisions as prose.</li>" +
-        "<li>Render embedded mermaid flow diagrams inline.</li>" +
-        "<li>Stay strictly read-only — no editing affordances.</li></ul>"
+      blocks: [
+        {
+          kind: "list",
+          id: "goals-1",
+          ordered: false,
+          items: [
+            "Surface Context / Goals / Technical design / Decisions as prose.",
+            "Render embedded mermaid flow diagrams inline.",
+            "Stay strictly read-only — no editing affordances."
+          ]
+        }
+      ]
     },
     {
       id: "technical-design",
       title: "Technical design",
-      markdown:
-        "<p>The projection lives in <code>@jingler/core</code> and is pure, so the " +
-        "UI is a thin render layer. Data flows one way:</p>" +
-        '<div data-diagram="mermaid"><pre>graph LR; PRD --&gt; View; View --&gt; Sections; View --&gt; Diagrams</pre></div>'
+      blocks: [
+        { kind: "prose", id: "td-1", text: "The projection lives in `@jingler/core` and is pure, so the UI is a thin render layer. Data flows one way:" },
+        { kind: "diagram", id: "td-diagram", source: "graph LR; PRD --> View; View --> Sections; View --> Diagrams" }
+      ]
     },
     {
       id: "decisions",
       title: "Decisions",
-      markdown:
-        "<p>Diagrams are aggregated into a single flat list rather than kept " +
-        "inline with their section, so the workflow surface can reuse the same " +
-        "id-stamped projection.</p>" +
-        '<div data-diagram="mermaid"><pre>graph TD; Section --&gt; Diagram; Stage --&gt; Diagram</pre></div>'
+      blocks: [
+        { kind: "prose", id: "dec-1", text: "Diagrams are aggregated into a single flat list rather than kept inline with their section, so the workflow surface can reuse the same id-stamped projection." },
+        { kind: "diagram", id: "dec-diagram", source: "graph TD; Section --> Diagram; Stage --> Diagram" }
+      ]
     }
   ],
   stages: [],

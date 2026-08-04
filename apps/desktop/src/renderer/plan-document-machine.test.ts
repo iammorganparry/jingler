@@ -3,7 +3,16 @@ import { createActor, waitFor } from "xstate"
 import { describe, expect, it } from "vitest"
 import { planDocumentMachine } from "./plan-document-machine.js"
 
-const source = (label: string) => `<h1>PRD: ${label}</h1>`
+const plan = (label: string) => ({
+  title: `PRD: ${label}`,
+  sections: [],
+  stages: [],
+  annotations: []
+})
+
+// The machine seeds `draft` with the serialized structured plan (the DTO IS the
+// document — there is no HTML source).
+const source = (label: string) => JSON.stringify(plan(label))
 
 const document = (revision = 1, label = "Initial"): PlanDocument => ({
   id: "plan-1",
@@ -11,13 +20,7 @@ const document = (revision = 1, label = "Initial"): PlanDocument => ({
   producingChatId: "c1",
   revision,
   status: "proposed",
-  source: source(label),
-  projection: {
-    title: `PRD: ${label}`,
-    sections: [],
-    stages: [],
-    annotations: []
-  },
+  plan: plan(label),
   updatedAt: `2026-07-28T00:00:0${revision}.000Z`,
   updatedBy: revision === 1 ? "agent" : "user"
 })

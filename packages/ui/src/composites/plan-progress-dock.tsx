@@ -90,7 +90,7 @@ export function PlanProgressDock({
 }) {
   const [expanded, setExpanded] = useState(false)
   const listId = useId()
-  const stages = document.projection.stages
+  const stages = document.plan.stages
   if (stages.length === 0) return null
 
   const rows = stages.map((stage, index) => ({

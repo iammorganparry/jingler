@@ -9,15 +9,15 @@ import type {
   WorkerRoutingConfig
 } from "@jingler/core"
 import {
-  DEFAULT_PLAN_TEMPLATE_HTML,
   defaultModel,
-  parsePlanHtml,
+  PlanPrd,
   providerReasoningCapabilitiesFor,
   resolveOrchestratorPreference,
   resolveWorkerRoutingConfig,
   supportsPlanMode,
   workerReasoningSettingIssue
 } from "@jingler/core"
+import { Schema } from "effect"
 import { RotateCcw, Save } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { Button } from "../components/button.js"
@@ -316,14 +316,36 @@ function WorkerRoutingSettings({
 }
 
 export const validatePlanTemplate = (source: string): ReadonlyArray<string> => {
-  const result = parsePlanHtml(source)
-  return result.valid ? [] : result.diagnostics.map((diagnostic) => diagnostic.message)
+  if (source.trim().length === 0) return []
+  try {
+    const parsed: unknown = JSON.parse(source)
+    return Schema.decodeUnknownEither(PlanPrd)(parsed)._tag === "Right"
+      ? []
+      : ["The plan template is not a valid structured plan."]
+  } catch {
+    return ["The plan template is not valid JSON."]
+  }
 }
 
-const headingsOf = (source: string): ReadonlyArray<string> =>
-  [...source.matchAll(/<h[12][^>]*>([\s\S]*?)<\/h[12]>/gi)].map((match) =>
-    match[1]!.replace(/<[^>]+>/g, "").trim()
-  )
+/**
+ * The preview outline: the plan title, then each section and stage title, read
+ * from the structured DTO (the template is stored as a `PlanPrd` JSON document).
+ */
+const headingsOf = (source: string): ReadonlyArray<string> => {
+  if (source.trim().length === 0) return []
+  try {
+    const decoded = Schema.decodeUnknownEither(PlanPrd)(JSON.parse(source))
+    if (decoded._tag !== "Right") return []
+    const plan = decoded.right
+    return [
+      plan.title,
+      ...plan.sections.map((section) => section.title),
+      ...plan.stages.map((stage) => stage.title)
+    ]
+  } catch {
+    return []
+  }
+}
 
 export const resolveEffectiveOrchestrator = (
   clis: ReadonlyArray<CliInfo>,
@@ -536,7 +558,7 @@ export function PlanSettings({
   workerRouting,
   onSaveWorkerRouting
 }: PlanSettingsProps) {
-  const persisted = source ?? DEFAULT_PLAN_TEMPLATE_HTML
+  const persisted = source ?? ""
   const [draft, setDraft] = useState(persisted)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -632,8 +654,8 @@ export function PlanSettings({
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setDraft(DEFAULT_PLAN_TEMPLATE_HTML)}
-          disabled={draft === DEFAULT_PLAN_TEMPLATE_HTML}
+          onClick={() => setDraft("")}
+          disabled={draft === ""}
         >
           <RotateCcw size={13} />
           Reset default

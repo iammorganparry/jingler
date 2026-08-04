@@ -17,7 +17,10 @@ const stage = (
   id,
   title,
   intent: title,
-  markdown: "",
+  approach: [],
+  files: [],
+  diagrams: [],
+  notes: [],
   acceptance: [
     {
       id: `${id}.1`,
@@ -39,8 +42,7 @@ const documentWith = (
   producingChatId: "chat-story",
   revision: 8,
   status,
-  source: "<h1>PRD: Composer progress</h1>",
-  projection: {
+  plan: {
     title: "PRD: Composer progress",
     sections: [],
     stages,

@@ -4,20 +4,9 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { PlanReview } from "./plan-review.js"
 
-const source = `<h1>PRD: Editor-only plan</h1>
-<section data-stage="01" data-title="Build">
-<h3>Intent</h3><p>Use one document editor.</p>
-<div data-acceptance="01.1" data-status="pending">Legacy rails are absent.</div>
-</section>`
-
-const document: PlanDocument = {
-  id: "plan-1",
-  sessionId: "s1",
-  producingChatId: "c1",
-  revision: 2,
-  status: "proposed",
-  source,
-  projection: {
+const source = JSON.stringify({
+  mode: "draft",
+  plan: {
     title: "PRD: Editor-only plan",
     sections: [],
     stages: [
@@ -25,7 +14,38 @@ const document: PlanDocument = {
         id: "01",
         title: "Build",
         intent: "Use one document editor.",
-        markdown: "",
+        approach: [],
+        files: [],
+        diagrams: [],
+        notes: [],
+        acceptance: [
+          { id: "01.1", text: "Legacy rails are absent.", status: "pending", evidence: null }
+        ],
+        dependencies: []
+      }
+    ],
+    annotations: []
+  }
+})
+
+const document: PlanDocument = {
+  id: "plan-1",
+  sessionId: "s1",
+  producingChatId: "c1",
+  revision: 2,
+  status: "proposed",
+  plan: {
+    title: "PRD: Editor-only plan",
+    sections: [],
+    stages: [
+      {
+        id: "01",
+        title: "Build",
+        intent: "Use one document editor.",
+        approach: [],
+        files: [],
+        diagrams: [],
+        notes: [],
         acceptance: [
           {
             id: "01.1",
@@ -95,10 +115,9 @@ describe("PlanReview", () => {
       />
     )
 
-    // While composing, the raw sanitized document renders read-only and the
-    // single loader is the disabled "Composing plan" button.
-    const editor = await screen.findByLabelText("Plan document")
-    expect(editor.getAttribute("contenteditable")).not.toBe("true")
+    // While composing, the partial DTO renders read-only as the step outline and
+    // the single loader is the disabled "Composing plan" button — no Approve.
+    expect(await screen.findByText("Build")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Composing plan" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull()
 
@@ -111,6 +130,25 @@ describe("PlanReview", () => {
     expect(screen.getByText("Build")).toBeTruthy()
     expect(screen.queryByText("revision 2")).toBeNull()
     expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy()
+  })
+
+  it("degrades gracefully on a malformed streamed plan instead of crashing", async () => {
+    // A complete-but-malformed agent emission: the stage omits every required
+    // array (files/notes/acceptance/…). The outline/architecture views .map over
+    // those, so without normalization this would throw during render.
+    const malformed = JSON.stringify({
+      mode: "draft",
+      plan: { title: "PRD: Malformed", stages: [{ id: "01", title: "Broken stage" }] }
+    })
+    expect(() =>
+      render(
+        <PlanReview
+          plan={null}
+          streamingDraft={{ id: "plan-malformed", source: malformed, phase: "composing" }}
+        />
+      )
+    ).not.toThrow()
+    expect(await screen.findByText("Broken stage")).toBeTruthy()
   })
 
   it("lands a progress-dock deep link on its step in the Main outline", async () => {

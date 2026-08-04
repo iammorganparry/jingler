@@ -1,7 +1,9 @@
 import { writeFileSync } from "node:fs"
 import { mkdirSync } from "node:fs"
 import { FileSystem } from "@effect/platform"
-import { DEFAULT_PLAN_TEMPLATE_HTML, DEFAULT_THEME_ID } from "@jingler/core"
+import { defaultPlan, DEFAULT_THEME_ID } from "@jingler/core"
+
+const DEFAULT_PLAN_TEMPLATE_HTML = JSON.stringify(defaultPlan("PRD: Template"))
 import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AppPaths } from "./app-paths.js"

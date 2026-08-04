@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { DEFAULT_PLAN_TEMPLATE_HTML } from "@jingler/core"
 import type { Page } from "@playwright/test"
 import {
   appShell,
@@ -33,11 +32,39 @@ const session = (
     mode: "accept-edits"
   }]
 
-// Plans are agent-authored HTML documents; the canonical file is
-// `current-plan.html`. The document is presented read-only across three pages
-// (Main / Architecture / Workflow) — there is no in-place editor.
+// Plans are structured DTOs (`PlanDocument`); the canonical file is
+// `current-plan.json` (pretty-printed JSON). The document is presented read-only
+// across three pages (Main / Architecture / Workflow) — there is no in-place editor.
 const currentPlanPath = (launched: LaunchedApp): string =>
-  join(planDirectory(launched.home, launched.repoPath), "current-plan.html")
+  join(planDirectory(launched.home, launched.repoPath), "current-plan.json")
+
+// A valid structured plan template: a title, a Context and a Risks section, and
+// one stage. Stored as a `PlanPrd` JSON document (replaces the deleted HTML template).
+const PLAN_TEMPLATE = JSON.stringify(
+  {
+    title: "PRD: Template",
+    sections: [
+      { id: "context", title: "Context", blocks: [{ kind: "prose", id: "c1", text: "Why this work matters." }] },
+      { id: "risks", title: "Risks", blocks: [{ kind: "prose", id: "r1", text: "Known risks." }] }
+    ],
+    stages: [
+      {
+        id: "01",
+        title: "First stage",
+        intent: "Do the work.",
+        approach: [],
+        files: [],
+        diagrams: [],
+        notes: [],
+        acceptance: [{ id: "01.1", text: "It works.", status: "pending", evidence: null }],
+        dependencies: []
+      }
+    ],
+    annotations: []
+  },
+  null,
+  2
+)
 
 const seedPlanAsset = ({ repoPath }: { repoPath: string }): void => {
   mkdirSync(join(repoPath, "src", "auth"), { recursive: true })
@@ -58,7 +85,7 @@ const seedPlanAsset = ({ repoPath }: { repoPath: string }): void => {
 }
 
 const revisionOf = (file: string): number =>
-  Number(/^revision:\s*(\d+)$/m.exec(readFileSync(file, "utf8"))?.[1] ?? 0)
+  Number(/"revision":\s*(\d+)/.exec(readFileSync(file, "utf8"))?.[1] ?? 0)
 
 const openSettings = async (window: Page): Promise<void> => {
   await window.getByRole("button", { name: "Account menu" }).click()
@@ -86,7 +113,7 @@ const proposePlan = async (launched: LaunchedApp): Promise<void> => {
   ).toBeVisible({ timeout: 20_000 })
   await expect.poll(() => existsSync(currentPlanPath(launched))).toBe(true)
   await expect.poll(() => readFileSync(currentPlanPath(launched), "utf8")).toContain(
-    'data-stage="s_01"'
+    '"id": "s_01"'
   )
 }
 
@@ -101,18 +128,15 @@ test("the PRD template validates, persists, and resets", async ({ launchApp }) =
   await first.window.getByRole("button", { name: "Plan", exact: true }).click()
 
   const source = first.window.getByLabel("Plan template source")
-  // Plan-mode templates are validated as PRD HTML now: a fragment with no <h1>
-  // title and no stage is rejected, and saving is blocked while it is invalid.
-  await source.fill("<p>no title, no stage</p>")
+  // Plan-mode templates are validated as structured plan JSON now: a non-JSON
+  // fragment is rejected, and saving is blocked while it is invalid.
+  await source.fill("<p>no longer HTML</p>")
   await expect(first.window.getByRole("alert")).toContainText(
-    "A plan must contain at least one stage."
+    "The plan template is not valid JSON."
   )
   await expect(first.window.getByRole("button", { name: "Save template" })).toBeDisabled()
 
-  const customised = DEFAULT_PLAN_TEMPLATE_HTML.replace(
-    "<h2>Risks</h2>",
-    "<h2>Constraints and risks</h2>"
-  )
+  const customised = PLAN_TEMPLATE.replace('"Risks"', '"Constraints and risks"')
   await source.fill(customised)
   await expect(
     first.window.getByText("Constraints and risks", { exact: true })
@@ -248,7 +272,7 @@ test("a comment added on a step appears and can be resolved", async ({
   await expect(thread.getByText("Thread resolved")).toBeVisible()
   await expect
     .poll(() => readFileSync(currentPlanPath(launched), "utf8"))
-    .toContain('data-status="resolved"')
+    .toContain('"status": "resolved"')
 })
 
 test("approving executes the plan and finishes from criterion evidence", async ({
@@ -271,8 +295,8 @@ test("approving executes the plan and finishes from criterion evidence", async (
     timeout: 30_000
   })
   const persisted = readFileSync(currentPlanPath(launched), "utf8")
-  expect(persisted).toContain('status: "done"')
-  expect(persisted).toContain('data-status="passed"')
+  expect(persisted).toContain('"status": "done"')
+  expect(persisted).toContain('"status": "passed"')
   await window.getByTestId("active-chat-tab").first().click()
   await expect(window.getByText("Steps 2, 3 and 5 are done.")).toBeVisible()
   await expect(window.getByText(/PLAN_RESULT/)).toHaveCount(0)
@@ -327,7 +351,7 @@ test("plan file chips render on the step outline with diff evidence", async ({
   // Each step's Changes section renders its declared edits as inline file chips.
   await expect(window.getByText("src/auth/token-store.ts", { exact: true })).toBeVisible()
   await expect(window.getByText("src/auth/refresh.ts").first()).toBeVisible()
-  await expect(window.getByText("src/auth/retry.ts", { exact: true })).toBeVisible()
+  await expect(window.getByText("src/auth/session.test.ts", { exact: true })).toBeVisible()
 })
 
 test("an external write to the plan file live-updates the outline (Plan.watch)", async ({
@@ -347,10 +371,10 @@ test("an external write to the plan file live-updates the outline (Plan.watch)",
   // No local edits are possible, so a higher-revision external write is adopted
   // and its new content must appear on the read-only outline without a reload.
   const remote = persisted
-    .replace(/^revision:\s*\d+$/m, `revision: ${revision + 1}`)
+    .replace(/"revision":\s*\d+/, `"revision": ${revision + 1}`)
     .replace(
-      'data-title="Audit session middleware"',
-      'data-title="Audit session middleware WATCH_LIVE_UPDATE"'
+      '"title": "Audit session middleware"',
+      '"title": "Audit session middleware WATCH_LIVE_UPDATE"'
     )
   writeFileSync(file, remote)
 
@@ -383,7 +407,7 @@ test("the Plan Review tab is always present and can seed a draft to author", asy
   })
   await expect
     .poll(() => readFileSync(currentPlanPath(launched), "utf8"))
-    .toContain('status: "draft"')
+    .toContain('"status": "draft"')
   // A draft (no agent run yet) offers a handoff, not the no-op Revise/Approve.
   await expect(
     launched.window.getByRole("button", { name: "Send to agent" })
@@ -419,7 +443,7 @@ test("Claude, Codex, and opencode share native plan mode", async ({ launchApp })
             : "",
         { timeout: 20_000 }
       )
-      .toContain("jinglerPlan: 1")
+      .toContain("\"revision\"")
     await launched.app.close()
   }
 })
@@ -463,5 +487,5 @@ test("switching to a Codex model keeps the active plan mode", async ({ launchApp
           : "",
       { timeout: 20_000 }
     )
-    .toContain("jinglerPlan: 1")
+    .toContain("\"revision\"")
 })

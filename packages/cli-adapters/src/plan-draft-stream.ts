@@ -1,9 +1,9 @@
-import { sanitizePlanHtml, type StreamEvent } from "@jingler/core"
+import type { StreamEvent } from "@jingler/core"
 
-const OPENING = /^[\t ]*`{4}(?!`)html(?:[\t ]+plan)?[\t ]*\r?\n/im
-const CLOSING = /^[\t ]*`{4}(?!`)[\t ]*(?=\r?$)/m
-const PLAN_TITLE = /^<h1>\s*(?:PRD|Plan)\s*:/i
-const RAW_PLAN_TITLE = /^[\t \r\n]*<h1>\s*(?:PRD|Plan)\s*:/i
+const OPENING = /^[\t ]*`{3,4}(?!`)json[\t ]*\r?\n/im
+const CLOSING = /^[\t ]*`{3,4}(?!`)[\t ]*(?=\r?$)/m
+/** The plan emission envelope's discriminant — present from the block's start. */
+const PLAN_MARKER = /"mode"\s*:/
 export const PLAN_DRAFT_MIN_INTERVAL_MS = 50
 
 export interface PlanDraftStream {
@@ -23,14 +23,13 @@ interface ExtractedDraft {
 }
 
 /**
- * Extract only Jingler's top-level four-backtick plan transport.
+ * Extract Jingler's fenced JSON plan transport for a streaming preview.
  *
- * A four-backtick fence alone is not enough: assistant replies can teach with
- * HTML examples. Requiring the plan dialect's leading `PRD:`/`Plan:` h1 keeps
- * those examples in the transcript while tolerating a short prose preamble before
- * a real submission. The HTML parser closes incomplete tags while sanitizing, so
- * token-level snapshots are safe and renderable without pretending the still-open
- * transport is structurally valid.
+ * A ` ```json ` fence alone is not enough — a reply may teach with a JSON
+ * example — so we require the emission envelope's `"mode":` discriminant, which
+ * appears from the block's start. The still-incomplete JSON is returned verbatim;
+ * the renderer tolerant-parses partial objects into a partial plan, so token-level
+ * snapshots fill Plan Review in live without pretending the block is complete.
  */
 export const extractPlanDraft = (message: string): ExtractedDraft | null => {
   const opening = OPENING.exec(message)
@@ -38,9 +37,8 @@ export const extractPlanDraft = (message: string): ExtractedDraft | null => {
   const bodyStart = opening.index + opening[0].length
   const remainder = message.slice(bodyStart)
   const closing = CLOSING.exec(remainder)
-  const raw = remainder.slice(0, closing?.index ?? remainder.length)
-  const source = sanitizePlanHtml(raw)
-  return source.length === 0 || !PLAN_TITLE.test(source)
+  const source = remainder.slice(0, closing?.index ?? remainder.length).trim()
+  return source.length === 0 || !PLAN_MARKER.test(source)
     ? null
     : { source, complete: closing !== null }
 }
@@ -67,7 +65,7 @@ export const createPlanDraftStream = (
     const opening = OPENING.exec(message)
     return (
       opening !== null &&
-      RAW_PLAN_TITLE.test(message.slice(opening.index + opening[0].length))
+      PLAN_MARKER.test(message.slice(opening.index + opening[0].length))
     )
   }
 

@@ -1,8 +1,9 @@
-import { parse } from "node-html-parser"
-import type { PlanFileChange } from "./conversation.js"
 import { buildPlanExecutionGraph } from "./plan-execution.js"
 import type {
   PlanAcceptance,
+  PlanBlock,
+  PlanDiagram,
+  PlanFile,
   PlanPrd,
   PlanPrdSection,
   PlanPrdStage,
@@ -10,21 +11,15 @@ import type {
   PlanStageExecutionStatus
 } from "./plan-document.js"
 
+export type { PlanDiagram } from "./plan-document.js"
+
 /**
  * Pure, framework-free view models for the three plan UI surfaces (steps,
  * architecture, workflow graph). Everything here is a derived projection of the
- * canonical `PlanPrd`: no React, no Tiptap, no filesystem, no Effect. The plan
- * document keeps file lists and mermaid diagrams inside HTML `markdown` strings
- * (there is no dedicated projection field for either), so this module re-parses
- * those strings with the same small HTML dialect the rest of `@jingler/core`
- * uses, and reuses `buildPlanExecutionGraph` for dependency-topological order.
+ * canonical `PlanPrd`: no React, no filesystem, no Effect. File lists, diagrams,
+ * and prose are structured fields on the plan, so these projections read them
+ * directly and reuse `buildPlanExecutionGraph` for dependency-topological order.
  */
-
-/** A single mermaid diagram lifted out of a section/stage markdown string. */
-export interface PlanDiagram {
-  readonly id: string
-  readonly source: string
-}
 
 /** One plan stage projected for the step-oriented review surface. */
 export interface PlanStepView {
@@ -36,10 +31,18 @@ export interface PlanStepView {
   /** Durable worker state; defaults to "queued" for not-yet-executed stages. */
   readonly executionStatus: PlanStageExecutionStatus
   readonly acceptance: ReadonlyArray<PlanAcceptance>
-  /** Parsed from the stage's `<ul data-files>` declaration; empty when absent. */
-  readonly files: ReadonlyArray<PlanFileChange>
-  /** The raw stage body HTML, verbatim from the projection. */
-  readonly markdown: string
+  /** Ordered approach steps. */
+  readonly approach: ReadonlyArray<string>
+  /** Structured file declarations. */
+  readonly files: ReadonlyArray<PlanFile>
+  /** Remaining rich prose blocks for the stage body. */
+  readonly notes: ReadonlyArray<PlanBlock>
+  /** The assigned worker's agent id, when a worker owns this stage; else null. */
+  readonly agentId: string | null
+  /** A short "cli · model" worker label, when assigned; else null. */
+  readonly worker: string | null
+  /** The worker's reasoning effort (e.g. "xhigh"), when set; else null. */
+  readonly reasoningEffort: string | null
 }
 
 /** Prose sections plus every mermaid diagram found across the document. */
@@ -81,46 +84,30 @@ export interface PlanView {
   readonly workflow: PlanWorkflowGraph
 }
 
-const CHANGE_KINDS = new Set(["A", "M", "D"])
-
-/** Parse `<ul data-files><li data-change data-added data-removed>path</li></ul>`. */
-const filesFrom = (markdown: string): Array<PlanFileChange> => {
-  const list = parse(markdown).querySelector("ul[data-files]")
-  if (list === null) return []
-  return list
-    .querySelectorAll("li")
-    .map((li) => {
-      const change = (li.getAttribute("data-change") ?? "M").toUpperCase()
-      return {
-        path: li.text.trim(),
-        change: (CHANGE_KINDS.has(change) ? change : "M") as "A" | "M" | "D",
-        added: Number(li.getAttribute("data-added") ?? "0") || 0,
-        removed: Number(li.getAttribute("data-removed") ?? "0") || 0
-      }
-    })
-    .filter((file) => file.path.length > 0)
+const toStepView = (stage: PlanPrdStage): PlanStepView => {
+  const assignment = stage.assignment ?? null
+  return {
+    id: stage.id,
+    title: stage.title,
+    intent: stage.intent,
+    complexity: stage.complexity,
+    executionStatus: stage.executionStatus ?? "queued",
+    acceptance: stage.acceptance,
+    approach: stage.approach,
+    files: stage.files,
+    notes: stage.notes,
+    agentId: assignment?.agentId ?? null,
+    worker: assignment ? `${assignment.cli} · ${assignment.model}` : null,
+    reasoningEffort: assignment?.reasoning?.effort ?? null
+  }
 }
 
-/** Extract every `<div data-diagram="mermaid">` source from one markdown string. */
-const diagramSourcesFrom = (markdown: string): Array<string> => {
-  if (markdown.trim().length === 0) return []
-  return parse(markdown)
-    .querySelectorAll("[data-diagram]")
-    .filter((el) => el.getAttribute("data-diagram") === "mermaid")
-    .map((el) => (el.querySelector("pre") ?? el).text.trim())
+/** Every mermaid source carried by a section's blocks or a stage's diagrams. */
+const sectionDiagramSources = (section: PlanPrdSection): Array<string> =>
+  section.blocks
+    .filter((block): block is Extract<PlanBlock, { kind: "diagram" }> => block.kind === "diagram")
+    .map((block) => block.source.trim())
     .filter((source) => source.length > 0)
-}
-
-const toStepView = (stage: PlanPrdStage): PlanStepView => ({
-  id: stage.id,
-  title: stage.title,
-  intent: stage.intent,
-  complexity: stage.complexity,
-  executionStatus: stage.executionStatus ?? "queued",
-  acceptance: stage.acceptance,
-  files: filesFrom(stage.markdown),
-  markdown: stage.markdown
-})
 
 /**
  * Dependency-topological stage order. `buildPlanExecutionGraph` groups stages by
@@ -164,9 +151,9 @@ export const toPlanStepViews = (prd: PlanPrd): Array<PlanStepView> =>
  */
 export const toPlanArchitectureView = (prd: PlanPrd): PlanArchitectureView => {
   const sources = [
-    ...prd.sections.flatMap((section) => diagramSourcesFrom(section.markdown)),
-    ...prd.stages.flatMap((stage) => diagramSourcesFrom(stage.markdown))
-  ]
+    ...prd.sections.flatMap(sectionDiagramSources),
+    ...prd.stages.flatMap((stage) => stage.diagrams.map((diagram) => diagram.source.trim()))
+  ].filter((source) => source.length > 0)
   return {
     sections: prd.sections,
     diagrams: sources.map((source, index) => ({

@@ -52,6 +52,7 @@ import type {
   PlanApprovalResult,
   PlanCommentMessageDeliveryState,
   PlanDocument,
+  PlanPrd,
   PlanMentionDelivery,
   PlanParticipant,
   PlanTemplateConfig,
@@ -854,7 +855,7 @@ export const rpc = {
     sessionId: string
     planId: string
     baseRevision: number
-    source: string
+    plan: PlanPrd
     author: "user" | "agent"
   }): Promise<PlanDocument> => run((c) => c.Plan.updateDocument(input)),
   planParticipants: (

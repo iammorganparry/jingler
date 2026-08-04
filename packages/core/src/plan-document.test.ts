@@ -1,7 +1,7 @@
 import { Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
-import { DEFAULT_PLAN_TEMPLATE_HTML } from "./plan-html.js"
 import {
+  defaultPlan,
   PlanAcceptance,
   PlanCommentMessage,
   PlanDocument,
@@ -10,13 +10,30 @@ import {
   planDocumentToPlan
 } from "./plan-document.js"
 
+const structuredStage = {
+  id: "02",
+  title: "Execute workers",
+  intent: "Run independent work concurrently.",
+  approach: ["Read the runtime", "Dispatch each worker"],
+  files: [{ path: "src/runtime.ts", change: "M" }],
+  diagrams: [],
+  notes: [{ kind: "prose", id: "n1", text: "Work happens here." }],
+  acceptance: [],
+  dependencies: ["01"],
+  complexity: "high",
+  assignment: {
+    agentId: "worker-a",
+    cli: "codex",
+    model: "gpt-5",
+    reason: "The stage spans concurrency and persistence."
+  },
+  executionStatus: "running"
+}
+
 describe("plan document schemas", () => {
-  it("ships a PRD template with semantic stages and acceptance criteria", () => {
-    expect(DEFAULT_PLAN_TEMPLATE_HTML).toContain("<h1>PRD:")
-    expect(DEFAULT_PLAN_TEMPLATE_HTML).toContain("<section data-stage=")
-    expect(DEFAULT_PLAN_TEMPLATE_HTML).toContain("data-acceptance=")
-    expect(DEFAULT_PLAN_TEMPLATE_HTML).toContain("<h2>Testing</h2>")
-    expect(DEFAULT_PLAN_TEMPLATE_HTML).toContain("<h2>Risks</h2>")
+  it("builds a blank default plan", () => {
+    expect(defaultPlan()).toEqual({ title: "Plan", sections: [], stages: [], annotations: [] })
+    expect(defaultPlan("PRD: Custom").title).toBe("PRD: Custom")
   })
 
   it("accepts evidence-bearing criteria", () => {
@@ -75,51 +92,30 @@ describe("plan document schemas", () => {
     ).toBe(true)
   })
 
-  it("decodes typed execution metadata while keeping legacy stages compatible", () => {
-    const stage = {
-      id: "02",
-      title: "Execute workers",
-      intent: "Run independent work concurrently.",
-      markdown: "<p>Work.</p>",
-      acceptance: [],
-      dependencies: ["01"],
-      complexity: "high",
-      assignment: {
-        agentId: "worker-a",
-        cli: "codex",
-        model: "gpt-5",
-        reason: "The stage spans concurrency and persistence."
-      },
-      executionStatus: "running"
-    }
-    expect(Either.isRight(Schema.decodeUnknownEither(PlanPrdStage)(stage))).toBe(true)
+  it("decodes a structured stage with typed blocks, files, and execution metadata", () => {
+    expect(Either.isRight(Schema.decodeUnknownEither(PlanPrdStage)(structuredStage))).toBe(true)
 
-    const legacy = {
-      id: "01",
-      title: "Legacy",
-      intent: "Keep old projections readable.",
-      markdown: "<p>Old.</p>",
-      acceptance: []
-    }
-    expect(Either.isRight(Schema.decodeUnknownEither(PlanPrdStage)(legacy))).toBe(true)
+    // Required block arrays are structural — omitting them is a typed error the
+    // reformat loop surfaces, not a silent legacy fallback.
+    const { files: _files, ...missingFiles } = structuredStage
+    expect(Either.isLeft(Schema.decodeUnknownEither(PlanPrdStage)(missingFiles))).toBe(true)
   })
 
-  it("keeps source and projection together at the RPC boundary", () => {
+  it("carries the structured plan at the RPC boundary", () => {
     const decoded = Schema.decodeUnknownEither(PlanDocument)({
       id: "p1",
       sessionId: "s1",
       producingChatId: "c1",
       revision: 1,
       status: "proposed",
-      source: DEFAULT_PLAN_TEMPLATE_HTML,
-      projection: { title: "PRD", sections: [], stages: [], annotations: [] },
+      plan: { title: "PRD", sections: [], stages: [], annotations: [] },
       updatedAt: "2026-07-28T12:00:00.000Z",
       updatedBy: "agent"
     })
     expect(Either.isRight(decoded)).toBe(true)
     expect(
       Either.isRight(
-        Schema.decodeUnknownEither(PlanTemplateConfig)({ source: DEFAULT_PLAN_TEMPLATE_HTML })
+        Schema.decodeUnknownEither(PlanTemplateConfig)({ source: "" })
       )
     ).toBe(true)
   })
@@ -131,8 +127,7 @@ describe("plan document schemas", () => {
       producingChatId: "c1",
       revision: 1,
       status: "proposed" as const,
-      source: DEFAULT_PLAN_TEMPLATE_HTML,
-      projection: {
+      plan: {
         title: "PRD: Canonical interactive planning",
         sections: [],
         stages: [],

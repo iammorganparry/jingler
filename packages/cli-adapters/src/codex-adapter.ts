@@ -8,17 +8,10 @@ import type {
   ThreadEvent
 } from "@openai/codex-sdk"
 import { Effect, Runtime } from "effect"
-import type { AgentContext, SessionSpec } from "./adapter.js"
+import type { AgentContext, PlanDecision, SessionSpec } from "./adapter.js"
 import { capOutput } from "./output-cap.js"
 import { codexFileChangeStats } from "./codex-file-change.js"
-import {
-  draftPlanCandidate,
-  hasOrchestratorPlanSubmission,
-  hasPlanBlock,
-  ORCHESTRATOR_PLAN_HTML_REFORMAT,
-  parsePlan,
-  PLAN_HTML_REFORMAT
-} from "./plan-parse.js"
+import { capturePlanEmission, type PlanCapture } from "./plan-json.js"
 import { createPlanDraftStream } from "./plan-draft-stream.js"
 import { formatQuestionAnswers, parseQuestionBlock } from "./question-prompt.js"
 import { requireWorktree } from "./cwd.js"
@@ -556,7 +549,7 @@ export const runCodexSdk = (
             // Null once a follow-up is queued: one Codex turn answers one
             // interception, and a reply that has already been acted on must not
             // be re-read by the next channel down.
-            const reply = followUp === null ? agentReply(event) : null
+            const reply: string | null = followUp === null ? agentReply(event) : null
             if (reply !== null && planning) {
               const draft = planDraft.update(reply)
               if (draft !== null) await runP(ctx.emit(draft))
@@ -582,54 +575,36 @@ export const runCodexSdk = (
               followUp = formatQuestionAnswers(asked.questions, answers)
               continue
             }
-            // Native plan mode is itself an intent signal. Auto orchestration
-            // instead requires the explicit submission marker; a valid fence
-            // may otherwise just be an explanation, review, or quotation.
-            const proposed =
+            // Capture a plan emission when native plan mode is active, or in auto
+            // orchestration before the first plan is approved. `mode` decides:
+            // "submit" enters the approval gate, "draft" mirrors into Plan Review.
+            const capturing: boolean =
               reply !== null &&
               (planning ||
                 (spec.orchestrationRoutes !== undefined &&
-                  spec.orchestrationPlanApproved !== true &&
-                  hasOrchestratorPlanSubmission(reply))) &&
-              planRound < MAX_PLAN_ROUNDS &&
-              (planning ? hasPlanBlock(reply) : true)
-                ? reply
-                : null
-            if (proposed !== null) {
+                  spec.orchestrationPlanApproved !== true)) &&
+              planRound < MAX_PLAN_ROUNDS
+            const capture: PlanCapture | null =
+              capturing && reply !== null ? capturePlanEmission(reply) : null
+            if (capture?._tag === "reformat" && !planReformatAsked) {
+              planReformatAsked = true
+              const clear = planDraft.clear()
+              if (clear !== null) await runP(ctx.emit(clear))
+              followUp = capture.message
+              continue
+            }
+            if (capture?._tag === "emission" && (planning || capture.emission.mode === "submit")) {
               planRound += 1
-              // The WHOLE message is the plan, not just the fence: `parsePlan`
-              // also reads the per-step ```flow and ```<lang> step <NN> blocks
-              // that sit below it, exactly as it does for Claude's ExitPlanMode
-              // payload. So this is deliberately not emitted as Assistant text —
-              // the Plan card renders it, and doing both would double it up.
-              const plan = parsePlan(
-                proposed,
-                `plan_${sessionId}_${planRound}`,
-                spec.workerRouting
+              const decision: PlanDecision = await runP(
+                ctx.proposePlan(capture.emission.plan, capture.block)
               )
-              if (plan.structured === false && !planReformatAsked) {
-                planReformatAsked = true
-                const clear = planDraft.clear()
-                if (clear !== null) await runP(ctx.emit(clear))
-                followUp = planning
-                  ? PLAN_HTML_REFORMAT
-                  : ORCHESTRATOR_PLAN_HTML_REFORMAT
-                continue
-              }
-              const decision = await runP(ctx.proposePlan(plan))
               planDraft.reset()
               if (decision._tag === "Revise") followUp = decision.feedback
               else if (decision._tag === "Approve") {
                 planning = false
                 // Codex fixes its sandbox when the thread OPENS, so widening it
                 // for execution means re-opening the same thread id under the
-                // restored exec mode. Same id ⇒ the planning conversation is
-                // still there; a fresh thread would make the agent re-derive
-                // everything it just worked out.
-                //
-                // `spec.readOnly` still wins: a caller that pinned this run
-                // read-only (the adversarial roles) does not get write access
-                // handed back to it by an approval.
+                // restored exec mode.
                 const policy = mapCodexPolicy(
                   decision.mode,
                   spec.readOnly ?? false,
@@ -638,27 +613,19 @@ export const runCodexSdk = (
                 if (threadId !== null) {
                   thread = codex.resumeThread(threadId, { ...threadOptions, ...policy })
                 }
-                followUp = resumePlanPrompt(decision.plan ?? plan)
+                if (decision.plan !== undefined) followUp = resumePlanPrompt(decision.plan)
               }
-              // Reject: `followUp` stays null, so the turn ends here — which is
-              // what rejection means. `Done` is emitted normally below.
+              // Reject: `followUp` stays null, so the turn ends here.
               continue
             }
-            // No delegation submission this reply — but in Auto orchestration a
-            // plan the agent merely SHOWS (no marker) is an iteration draft:
-            // mirror it into Plan Review, then let the reply fall through and
-            // emit as ordinary chat (the visible ```html preview stays).
-            else if (
-              reply !== null &&
+            // A "draft" emission in auto orchestration mirrors into Plan Review,
+            // then falls through to emit as ordinary chat (the visible preview stays).
+            if (
+              capture?._tag === "emission" &&
               !planning &&
-              spec.orchestrationRoutes !== undefined &&
-              spec.orchestrationPlanApproved !== true &&
               ctx.saveDraftPlan !== undefined
             ) {
-              const candidate = draftPlanCandidate(reply, spec.workerRouting)
-              if (candidate !== null) {
-                await runP(ctx.saveDraftPlan(candidate.source))
-              }
+              await runP(ctx.saveDraftPlan(capture.emission.plan))
             }
             for (const se of codexEventToStreamEvents(event, sessionId, startedTools)) {
               await runP(ctx.emit(se))

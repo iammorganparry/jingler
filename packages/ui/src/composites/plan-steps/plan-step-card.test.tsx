@@ -4,6 +4,7 @@ import type { PlanStepView } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { PlanFileControlsProvider } from "../plan-doc/plan-file-controls.js"
+import { PlanWorkerControlsProvider } from "../plan-doc/plan-worker-controls.js"
 import { PlanStepCard } from "./plan-step-card.js"
 
 afterEach(cleanup)
@@ -16,8 +17,54 @@ const step: PlanStepView = {
   executionStatus: "running",
   acceptance: [],
   files: [{ path: "src/auth/token-store.ts", change: "M", added: 2, removed: 1 }],
-  markdown: ""
+  approach: [],
+  notes: [],
+  agentId: null,
+  worker: null,
+  reasoningEffort: null
 }
+
+describe("PlanStepCard assignment card", () => {
+  it("renders the worker route + reasoning + status only when the stage is delegated", () => {
+    const { rerender } = render(<PlanStepCard step={step} />)
+    // Plain plan-mode stage: no worker, so no assignment card.
+    expect(document.querySelector('[data-plan-assignment-card="true"]')).toBeNull()
+
+    rerender(
+      <PlanStepCard
+        step={{
+          ...step,
+          executionStatus: "queued",
+          agentId: "agent-02",
+          worker: "codex · gpt-5.6-terra",
+          reasoningEffort: "xhigh"
+        }}
+      />
+    )
+    const card = document.querySelector('[data-plan-assignment-card="true"]')
+    expect(card).not.toBeNull()
+    expect(card).toHaveTextContent("agent-02")
+    expect(card).toHaveTextContent("codex · gpt-5.6-terra")
+    expect(card).toHaveTextContent("Reasoning: xhigh")
+    expect(card).toHaveTextContent("Queued")
+  })
+
+  it("offers Stop on a running worker and calls the control", () => {
+    const stop = vi.fn()
+    render(
+      <PlanWorkerControlsProvider controls={{ stop }}>
+        <PlanStepCard
+          step={{ ...step, executionStatus: "running", agentId: "agent-02", worker: "codex · gpt-5" }}
+        />
+      </PlanWorkerControlsProvider>
+    )
+    const button = screen.getByRole("button", { name: "Stop worker agent-02" })
+    fireEvent.click(button)
+    expect(stop).toHaveBeenCalledWith("agent-02")
+    // A queued (non-running) worker offers no Stop control.
+    expect(screen.queryByRole("button", { name: /^Retry worker/ })).toBeNull()
+  })
+})
 
 describe("PlanStepCard file chips", () => {
   it("renders a plan file as a live diff link that opens the asset", () => {

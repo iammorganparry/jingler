@@ -17,7 +17,11 @@ const step = (over: Partial<PlanStepView> & Pick<PlanStepView, "id" | "title">):
   executionStatus: "queued",
   acceptance: [],
   files: [],
-  markdown: "",
+  approach: [],
+  notes: [],
+  agentId: null,
+  worker: null,
+  reasoningEffort: null,
   ...over
 })
 
@@ -27,7 +31,8 @@ const running = step({
   intent: "Render the agent's sanitized HTML read-only; remove the WYSIWYG editor.",
   complexity: "high",
   executionStatus: "running",
-  markdown: "<p>Delete the <code>plan-doc/</code> TipTap surface and re-render from the projection.</p>",
+  approach: [],
+  notes: [],
   files: [
     { path: "packages/ui/src/composites/plan-doc/plan-doc-view.tsx", change: "A", added: 240, removed: 0 },
     { path: "packages/ui/src/composites/plan-doc/plan-doc-editor.tsx", change: "D", added: 0, removed: 812 }

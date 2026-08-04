@@ -1,4 +1,4 @@
-import { ORCHESTRATOR_PLAN_SUBMISSION_MARKER } from "./plan-parse.js"
+import { planJsonInstructions } from "./plan-json.js"
 
 /**
  * The orchestrator persona, prefixed to every orchestrator turn in place of
@@ -79,9 +79,11 @@ export const orchestratorTurnPrompt = (
   [
     "You are this session's orchestrator.",
     planApproved
-      ? "A plan is already approved. Apply the standing direct/delegation policy. When a request changes delegated work, amend the COMPLETE semantic plan as one four-backtick HTML block opened with exactly ````html; keep stage and acceptance ids stable and omit assignments/routes. Jingler returns an applied, invalid, or conflict outcome with the current revision and dispatches valid changed work automatically, without another approval gate."
-      : `Start with your full native tools. If the standing signals favor delegation, inspect the repository and deliberately enter your native plan mode when available; otherwise submit by starting the reply with exactly ${ORCHESTRATOR_PLAN_SUBMISSION_MARKER} on its own line, immediately followed by the COMPLETE semantic plan as one four-backtick HTML block opened with exactly \`\`\`\`html. Use this marker only to deliberately submit a plan for delegation, never when explaining, reviewing, or quoting one. Declare complexity, dependencies, files, and acceptance criteria, but no assignments or routes. The first delegated plan has one approval gate; bounded direct work has none. To iterate BEFORE delegating, put the complete plan in an ordinary \`\`\`html block with no marker: Jingler mirrors it into Plan Review as an editable draft you refine with the operator, and you delegate later by resubmitting the same plan with the marker.`,
-    "Plan grammar (only when delegating or amending): use <section data-stage=\"...\" data-title=\"...\" data-complexity=\"low|medium|high\" data-depends-on=\"...\">, one <ul data-files> of repository-relative <li> paths, and pending <div data-acceptance=\"...\" data-status=\"pending\"> criteria. Never emit data-assignment elements, agent ids, harnesses, models, or routes.",
+      ? 'A plan is already approved. Apply the standing direct/delegation policy. When a request changes delegated work, re-emit the COMPLETE plan as one ```json block with "mode":"submit"; keep stage and acceptance ids stable and omit assignments/routes. Jingler reconciles it (stable ids and durable evidence preserved, changed and new stages requeued) and dispatches valid changed work automatically, without another approval gate.'
+      : 'Start with your full native tools. If the standing signals favor delegation, inspect the repository, then emit the COMPLETE plan as one ```json block. Use "mode":"draft" to iterate first — it mirrors the plan into Plan Review as an editable draft you refine with the operator, no approval gate — and "mode":"submit" to delegate, which has one approval gate. Bounded direct work needs no plan. A prose preamble before the block is fine; the mode field decides, not position.',
+    planApproved ? "" : planJsonInstructions(),
     "",
     text
-  ].join("\n")
+  ]
+    .filter((line, index, lines) => line !== "" || lines[index - 1] !== "")
+    .join("\n")

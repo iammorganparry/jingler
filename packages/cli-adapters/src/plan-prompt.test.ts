@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest"
-import { parsePlan, planInstructions, planModeInstructions } from "./plan-parse.js"
 import {
   planningOrchestrationRoutes,
   unavailableOrchestrationAssignment
@@ -7,45 +6,30 @@ import {
 import { planNote } from "./plan-prompt.js"
 
 describe("planNote", () => {
-  const orchestration = [
-    {
-      cli: "claude" as const,
-      models: [{ id: "haiku", label: "Haiku 4.5" }]
-    },
-    {
-      cli: "codex" as const,
-      models: [{ id: "gpt-5.6-sol", label: "gpt-5.6-sol" }]
-    }
-  ]
-
-  it("is null for Claude, which has a real tool to be steered toward", () => {
-    // Restating the protocol in the prompt body would compete with the
-    // `planModeInstructions` SDK option the adapter already passes.
+  it("is null for Claude, which has a real tool (planModeInstructions) to be steered toward", () => {
     expect(planNote("claude")).toBe(null)
+  })
+
+  it("is null for harnesses that cannot plan at all (cursor falls through to the stub)", () => {
+    expect(planNote("cursor")).toBe(null)
   })
 
   it("advertises live provider models and rejects retired assignments", () => {
     const routes = planningOrchestrationRoutes([
-      {
-        cli: "opencode",
-        models: [{ id: "user/provider-model", label: "User model" }]
-      },
-      {
-        cli: "cursor",
-        models: [{ id: "auto", label: "Auto" }]
-      }
+      { cli: "opencode", models: [{ id: "user/provider-model", label: "User model" }] },
+      { cli: "cursor", models: [{ id: "auto", label: "Auto" }] }
     ])
     expect(routes).toEqual([
-      {
-        cli: "opencode",
-        models: [{ id: "user/provider-model", label: "User model" }]
-      }
+      { cli: "opencode", models: [{ id: "user/provider-model", label: "User model" }] }
     ])
     const baseStage = {
       id: "01",
       title: "Implement",
       intent: "Ship it.",
-      markdown: "<p>Ship it.</p>",
+      approach: [],
+      files: [],
+      diagrams: [],
+      notes: [],
       acceptance: [],
       dependencies: [],
       complexity: "medium" as const,
@@ -85,140 +69,27 @@ describe("planNote", () => {
     ).toBeNull()
   })
 
-  it("is null for harnesses that cannot plan at all", () => {
-    // cursor falls through to the scripted stub.
-    expect(planNote("cursor")).toBe(null)
-  })
-
-  it("hands codex and opencode the identical protocol", () => {
+  it("hands codex and opencode the identical JSON protocol", () => {
     // The two differ only in transport. A note that drifted between them would
-    // mean a plan parses on one harness and degrades to raw text on the other.
+    // mean a plan decodes on one harness and degrades to raw text on the other.
     expect(planNote("codex")).toBe(planNote("opencode"))
-    expect(planNote("codex")).toContain("````html")
-    expect(planNote("codex")).not.toContain("````html plan")
+    expect(planNote("codex")).toContain("```json")
   })
 
   it("tells the harness it is read-only, not merely that it should behave", () => {
-    // The sandbox enforces this (`mapCodexPolicy`); saying so stops the model
-    // burning a turn on an edit it will watch get rejected.
     expect(planNote("codex")).toContain("READ-ONLY")
   })
 
   it("never tells a non-Claude harness to call ExitPlanMode", () => {
-    // The whole reason plan mode was Claude-only: steering a harness toward a
-    // tool it does not have produces a turn that ends with nothing submitted.
     expect(planNote("codex")).not.toContain("ExitPlanMode")
-    expect(planModeInstructions()).toContain("ExitPlanMode")
   })
 
-  it("asks every planning harness for semantics while reserving assignments for the compiler", () => {
-    const routing = {
-      default: { cli: "claude" as const, model: "opus" },
-      low: { cli: "claude" as const, model: "haiku" },
-      medium: { cli: "codex" as const, model: "gpt-5.6-sol" },
-      high: { cli: "claude" as const, model: "opus" }
-    }
-    const claude = planModeInstructions(undefined, orchestration, routing)
-    const codex = planNote("codex", undefined, orchestration, routing)
-
-    for (const instruction of [
-      "data-complexity",
-      "data-depends-on",
-      "<ul data-files>",
-      "Do NOT add data-assignment",
-      "deterministically compiles dependency/file components",
-      "preserves stable worker identities across amendments",
-      "workers own mechanical progress and PLAN_RESULT evidence"
-    ]) {
-      expect(claude).toContain(instruction)
-      expect(codex).toContain(instruction)
-    }
-    for (const prompt of [claude, codex]) {
-      expect(prompt).toContain("planning harness never implements")
-      expect(prompt).not.toContain("implementation may continue in this same")
-      expect(prompt).not.toContain("prompted again, with write access")
-      expect(prompt).not.toContain("data-agent-id=")
-      expect(prompt).not.toContain("claude/haiku")
-      expect(prompt).not.toContain("codex/gpt-5.6-sol")
-    }
-  })
-
-  it("asks for concise, deterministic deliverables instead of plan prose", () => {
-    for (const prompt of [planModeInstructions(), planNote("codex")]) {
-      expect(prompt).toContain("operational visual aid, not an essay")
-      expect(prompt).toContain("one self-contained, independently reviewable deliverable")
-      expect(prompt).toContain("deterministic from the repository state")
-      expect(prompt).toContain("exact repository-relative files")
-      expect(prompt).toContain("revise this canonical HTML")
-    }
-  })
-})
-
-describe("the reply-channel grammar agrees with the real parser", () => {
-  // `planInstructions` is shared between the two channels precisely so the
-  // grammar cannot drift — but "shared" is only worth anything if the grammar
-  // itself parses. A plan written exactly as the reply note describes must
-  // survive `parsePlan`, or a Codex plan renders as unreviewable raw markdown.
-  const written = [
-    "```plan",
-    "summary: Add a tier column to accounts",
-    "01 Add the column",
-    "  intent: Accounts need a billing tier.",
-    "  approach: write the migration; run it",
-    "  files: A migrations/003_tier.sql +12",
-    "  guards: the migration is idempotent; the backfill is resumable (warn)",
-    "  blocks: 02",
-    "02 Backfill from billing",
-    "  intent: Existing accounts need a value.",
-    "  approach: batch update",
-    "  files: M scripts/backfill.ts +40 -3",
-    "  depends: 01",
-    "```",
-    "",
-    "Some human-readable prose below the block.",
-    "",
-    "```flow step 02",
-    'start   n0 "batch starts"',
-    'decision n1 "rows remaining?"',
-    'action  n2 "update 500 rows"',
-    'terminal n3 "done"',
-    "n0 -> n1",
-    "n1 -> n2 : yes",
-    "n1 -> n3 : no",
-    "n2 -> n1",
-    "```"
-  ].join("\n")
-
-  const plan = parsePlan(written, "p1")
-
-  it("parses the summary and both steps", () => {
-    expect(plan.structured).toBe(true)
-    expect(plan.summary).toBe("Add a tier column to accounts")
-    expect(plan.steps.map((s) => s.number)).toEqual(["01", "02"])
-  })
-
-  it("parses the fields the note documents", () => {
-    const first = plan.steps[0]!
-    expect(first.intent).toBe("Accounts need a billing tier.")
-    expect(first.approach).toEqual(["write the migration", "run it"])
-    expect(first.files.map((f) => f.path)).toEqual(["migrations/003_tier.sql"])
-    expect(first.guards.map((g) => g.status)).toEqual(["ok", "warn"])
-    expect(plan.steps[1]!.dependsOn).toEqual(["01"])
-  })
-
-  it("parses the per-step flow block the note documents", () => {
-    expect(plan.steps[1]!.graph?.nodes.map((n) => n.id)).toEqual(["n0", "n1", "n2", "n3"])
-    expect(plan.steps[1]!.graph?.edges.map((e) => e.label)).toContain("yes")
-  })
-
-  it("keeps both channels on one grammar", () => {
-    // The two notes differ ONLY in the opening sentence and the submit rule.
-    // Everything from the flow-block section down is byte-identical — which is
-    // the guarantee that a plan written by Codex parses like one written by
-    // Claude.
-    const grammarOf = (s: string) => s.slice(s.indexOf("Return one fenced"))
-    expect(grammarOf(planInstructions("reply"))).toBe(grammarOf(planInstructions("tool")))
-    expect(planInstructions("reply")).toContain("````html")
-    expect(planInstructions("reply")).not.toContain("````html plan")
+  it("asks for structured semantics while reserving worker assignments for Jingler", () => {
+    const note = planNote("codex") ?? ""
+    // The DTO envelope + block grammar, no worker routing.
+    expect(note).toContain('"mode"')
+    expect(note).toContain('"stages"')
+    expect(note).toContain("never emit worker assignments")
+    expect(note).not.toContain("data-agent-id")
   })
 })

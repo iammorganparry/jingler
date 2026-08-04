@@ -21,7 +21,10 @@ const assignedStage: PlanPrdStage = {
   id: "01",
   title: "Ship",
   intent: "Ship the change.",
-  markdown: "<p>Ship the change.</p><ul data-files></ul>",
+  approach: [],
+  files: [],
+  diagrams: [],
+  notes: [],
   acceptance: [],
   complexity: "low",
   dependencies: [],
@@ -130,14 +133,9 @@ describe("Codex plan model catalogue", () => {
           routing ?? configured
         )
       ).toBeNull()
-      const plannerPrompt = planNote(
-        "codex",
-        undefined,
-        routes,
-        routing ?? undefined
-      )
+      const plannerPrompt = planNote("codex", routes, routing ?? undefined)
       expect(plannerPrompt).not.toContain(`codex/${LATER_PAGE_MODEL}`)
-      expect(plannerPrompt).toContain("Do NOT add data-assignment")
+      expect(plannerPrompt).toContain("never emit worker assignments")
     } finally {
       fake.cleanup()
     }

@@ -1,5 +1,4 @@
 import {
-  parsePlanHtml,
   type PlanPrd,
   type ExecutionMode,
   type PlanDocument
@@ -9,11 +8,81 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { parseUnifiedDiff } from "../diff/parse.js"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
-import {
-  PlanDocView,
-  type PlanFileEvidence
-} from "./plan-doc/plan-doc-view.js"
+import type { PlanFileEvidence } from "./plan-doc/plan-file-controls.js"
 import { PlanFileControlsProvider } from "./plan-doc/plan-file-controls.js"
+import { PlanWorkerControlsProvider } from "./plan-doc/plan-worker-controls.js"
+
+const asArray = (value: unknown): ReadonlyArray<unknown> =>
+  Array.isArray(value) ? value : []
+const asString = (value: unknown): string =>
+  typeof value === "string" ? value : ""
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {}
+
+/**
+ * Normalize a parsed plan candidate into a render-safe `PlanPrd`. A partial
+ * streaming snapshot — or a complete but MALFORMED agent emission — can omit
+ * required arrays (`files`, `notes`, `acceptance`, …); the outline/architecture/
+ * workflow views `.map` over them, so a missing array would turn a model
+ * formatting error into a Plan Review crash. Filling defaults keeps the preview
+ * degrading gracefully; the canonical document is still schema-decoded on persist.
+ */
+const normalizePlan = (candidate: Record<string, unknown>): PlanPrd =>
+  ({
+    title: asString(candidate.title),
+    sections: asArray(candidate.sections).map((section) => {
+      const s = asRecord(section)
+      return { id: asString(s.id), title: asString(s.title), blocks: asArray(s.blocks) }
+    }),
+    stages: asArray(candidate.stages).map((stage) => {
+      const s = asRecord(stage)
+      return {
+        ...s,
+        id: asString(s.id),
+        title: asString(s.title),
+        intent: asString(s.intent),
+        approach: asArray(s.approach),
+        files: asArray(s.files),
+        diagrams: asArray(s.diagrams),
+        notes: asArray(s.notes),
+        acceptance: asArray(s.acceptance),
+        dependencies: asArray(s.dependencies)
+      }
+    }),
+    annotations: asArray(candidate.annotations)
+  }) as unknown as PlanPrd
+
+/**
+ * Best-effort decode of a plan source into a render-safe `PlanPrd`. The source is
+ * a JSON `PlanEmission` (or bare plan), optionally still inside a ` ```json `
+ * fence and possibly incomplete mid-stream — an unparseable snapshot yields null
+ * and the outline shows a composing placeholder until the next snapshot lands. A
+ * parseable one is normalized so missing arrays can never crash the preview.
+ */
+const planFromSource = (source: string): PlanPrd | null => {
+  const trimmed = source
+    .replace(/^\s*```json\s*/i, "")
+    .replace(/```\s*$/, "")
+    .trim()
+  if (trimmed.length === 0) return null
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    const candidate =
+      parsed !== null && typeof parsed === "object" && "plan" in parsed
+        ? (parsed as { readonly plan: unknown }).plan
+        : parsed
+    if (
+      candidate !== null &&
+      typeof candidate === "object" &&
+      Array.isArray((candidate as { readonly stages?: unknown }).stages)
+    ) {
+      return normalizePlan(candidate as Record<string, unknown>)
+    }
+  } catch {
+    /* incomplete or malformed streaming JSON — wait for the next snapshot */
+  }
+  return null
+}
 import { PlanArchitecture } from "./plan-architecture.js"
 import { PlanFloatingActions } from "./plan-floating-actions.js"
 import { PlanStepOutline } from "./plan-steps/plan-step-outline.js"
@@ -119,10 +188,9 @@ export function PlanEditor({
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const widthTier = useWidthTier()
   const streaming = transientState !== undefined
-  const parsed = useMemo(() => parsePlanHtml(source), [source])
-  const projection: PlanPrd | null =
-    parsed.valid ? parsed.projection : doc?.projection ?? null
-  const showOutline = !streaming && projection !== null
+  const parsedPlan = useMemo(() => planFromSource(source), [source])
+  const projection: PlanPrd | null = parsedPlan ?? doc?.plan ?? null
+  const showOutline = projection !== null
 
   const fileEvidence = useMemo<ReadonlyMap<string, PlanFileEvidence>>(
     () =>
@@ -216,25 +284,20 @@ export function PlanEditor({
                 knownFiles={knownFiles}
                 open={onOpenFile}
               >
-                <div className="mx-auto w-full max-w-[760px]">
-                  <PlanStepOutline
-                    prd={projection}
-                    selectedStepId={selectedStepId}
-                    onSelectStep={setSelectedStepId}
-                  />
-                </div>
+                <PlanWorkerControlsProvider
+                  controls={{ stop: onStopWorker, retry: onRetryWorker }}
+                >
+                  <div className="mx-auto w-full max-w-[760px]">
+                    <PlanStepOutline
+                      prd={projection}
+                      selectedStepId={selectedStepId}
+                      onSelectStep={setSelectedStepId}
+                    />
+                  </div>
+                </PlanWorkerControlsProvider>
               </PlanFileControlsProvider>
             ) : (
-              <PlanDocView
-                className="mx-auto h-full w-full max-w-[760px]"
-                source={source}
-                fileEvidence={fileEvidence}
-                knownFiles={knownFiles}
-                onOpenFile={onOpenFile}
-                workerControls={
-                  streaming ? undefined : { stop: onStopWorker, retry: onRetryWorker }
-                }
-              />
+              <EmptyPage>{streaming ? "Composing plan…" : "No plan yet."}</EmptyPage>
             )}
             {!streaming && commentLayer}
           </div>

@@ -16,7 +16,10 @@ const stage = (
   id,
   title,
   intent: title,
-  markdown: "",
+  approach: [],
+  files: [],
+  diagrams: [],
+  notes: [],
   acceptance: [
     {
       id: `${id}.1`,
@@ -40,8 +43,7 @@ const document: PlanDocument = {
   producingChatId: "chat-1",
   revision: 7,
   status: "executing",
-  source: "<h1>PRD: Progress</h1>",
-  projection: {
+  plan: {
     title: "PRD: Progress",
     sections: [],
     stages: [
@@ -113,9 +115,9 @@ describe("PlanProgressDock", () => {
         document={{
           ...document,
           revision: 8,
-          projection: {
-            ...document.projection,
-            stages: document.projection.stages.map((item) => ({
+          plan: {
+            ...document.plan,
+            stages: document.plan.stages.map((item) => ({
               ...item,
               executionStatus: "completed" as const,
               acceptance: item.acceptance.map((criterion) => ({

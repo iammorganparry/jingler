@@ -25,6 +25,7 @@ import type { AgentContext, CliAdapterShape, SessionSpec } from "@jingler/cli-ad
 import type {
   Attachment,
   PlanDocument,
+  PlanPrd,
   PlanParticipant,
   Session,
   StreamEvent,
@@ -267,10 +268,23 @@ describe("RPC handlers", () => {
           sessionId: "session-plan-thread",
           producingChatId: "chat-plan-thread",
           id: "plan-thread",
-          source: `<h1>PRD: Thread RPC</h1>
-<section data-stage="01" data-title="Persist">
-<div data-acceptance="01.1" data-status="pending">It persists.</div>
-</section>`,
+          plan: {
+            title: "PRD: Thread RPC",
+            sections: [],
+            stages: [
+              {
+                id: "01",
+                title: "Persist",
+                intent: "Persist.",
+                approach: [],
+                files: [],
+                diagrams: [],
+                notes: [],
+                acceptance: [{ id: "01.1", text: "It persists.", status: "pending", evidence: null }]
+              }
+            ],
+            annotations: []
+          },
           author: "agent"
         })
         const withThread = yield* PlanStore.addAnnotation(worktreePath, {
@@ -280,7 +294,7 @@ describe("RPC handlers", () => {
           body: "Can you verify this?",
           author: "user"
         })
-        const annotationId = withThread.projection.annotations[0]!.id
+        const annotationId = withThread.plan.annotations[0]!.id
         const watchedFiber = yield* planWatch("session-plan-thread").pipe(
           Stream.take(1),
           Stream.runCollect,
@@ -299,7 +313,7 @@ describe("RPC handlers", () => {
           deliveryState: "pending"
         })
         const watched = Chunk.toReadonlyArray(yield* Fiber.join(watchedFiber))[0]
-        const messageId = appended.projection.annotations[0]!.messages[1]!.id
+        const messageId = appended.plan.annotations[0]!.messages[1]!.id
         const delivered = yield* planUpdateMessageDelivery({
           sessionId: "session-plan-thread",
           planId: plan.id,
@@ -331,17 +345,17 @@ describe("RPC handlers", () => {
       }).pipe(Effect.provide(services))
     )
 
-    expect(result.appended.projection.annotations[0]?.messages[1]).toMatchObject({
+    expect(result.appended.plan.annotations[0]?.messages[1]).toMatchObject({
       body: "Verified.",
       authorKind: "agent",
       authorId: "worker-storage",
       mentionedParticipantIds: ["operator"],
       deliveryState: "pending"
     })
-    expect(result.delivered.projection.annotations[0]?.messages[1]?.deliveryState).toBe("sent")
-    expect(result.resolved.projection.annotations[0]?.status).toBe("resolved")
+    expect(result.delivered.plan.annotations[0]?.messages[1]?.deliveryState).toBe("sent")
+    expect(result.resolved.plan.annotations[0]?.status).toBe("resolved")
     expect(result.watched?.revision).toBe(result.appended.revision)
-    expect(result.watched?.projection.annotations[0]?.messages[1]?.body).toBe(
+    expect(result.watched?.plan.annotations[0]?.messages[1]?.body).toBe(
       "Verified."
     )
     expect(Either.isLeft(result.stale)).toBe(true)
@@ -437,10 +451,23 @@ describe("RPC handlers", () => {
           sessionId: "session-mentions",
           producingChatId: "chat-mentions",
           id: "plan-mentions",
-          source: `<h1>PRD: Mentions</h1>
-<section data-stage="01" data-title="Route">
-<div data-acceptance="01.1" data-status="pending">It routes.</div>
-</section>`,
+          plan: {
+            title: "PRD: Mentions",
+            sections: [],
+            stages: [
+              {
+                id: "01",
+                title: "Route",
+                intent: "Route.",
+                approach: [],
+                files: [],
+                diagrams: [],
+                notes: [],
+                acceptance: [{ id: "01.1", text: "It routes.", status: "pending", evidence: null }]
+              }
+            ],
+            annotations: []
+          },
           author: "agent"
         })
         const withThread = yield* PlanStore.addAnnotation(worktreePath, {
@@ -450,7 +477,7 @@ describe("RPC handlers", () => {
           body: "Initial note.",
           author: "user"
         })
-        const annotationId = withThread.projection.annotations[0]!.id
+        const annotationId = withThread.plan.annotations[0]!.id
         const routed = yield* planDispatchMessageWithRouting(
           {
             sessionId: "session-mentions",
@@ -512,7 +539,7 @@ describe("RPC handlers", () => {
           mentionedParticipantIds: [orchestrator.routingId],
           deliveryState: "pending"
         })
-        const pendingAnnotation = pendingThread.projection.annotations.at(-1)!
+        const pendingAnnotation = pendingThread.plan.annotations.at(-1)!
         const existing = yield* planDispatchExistingMessageWithRouting(
           {
             sessionId: "session-mentions",
@@ -607,7 +634,7 @@ describe("RPC handlers", () => {
           mentionedParticipantIds: [worker.routingId],
           deliveryState: "failed"
         })
-        const agentRelayMessage = agentRelay.projection.annotations[0]!.messages.at(-1)!
+        const agentRelayMessage = agentRelay.plan.annotations[0]!.messages.at(-1)!
         const retriedAgentRelay = yield* planDispatchExistingMessageWithRouting(
           {
             sessionId: "session-mentions",
@@ -712,7 +739,7 @@ describe("RPC handlers", () => {
     )
 
     const routedMessages =
-      result.routed.document.projection.annotations[0]!.messages
+      result.routed.document.plan.annotations[0]!.messages
     expect(routedMessages.slice(1)).toMatchObject([
       {
         body: "Please coordinate this check.",
@@ -738,7 +765,7 @@ describe("RPC handlers", () => {
     expect(prompts).toHaveLength(4)
 
     const unavailableMessages =
-      result.unavailable.document.projection.annotations[0]!.messages
+      result.unavailable.document.plan.annotations[0]!.messages
     expect(unavailableMessages.at(-2)).toMatchObject({
       body: "Try the old worker.",
       deliveryState: "failed"
@@ -754,7 +781,7 @@ describe("RPC handlers", () => {
     expect(result.unavailableRetry._tag).toBe("Left")
     expect(result.staleRetryRoutes).toBe(0)
     const existingMessages =
-      result.existing.document.projection.annotations.at(-1)!.messages
+      result.existing.document.plan.annotations.at(-1)!.messages
     expect(existingMessages.map((message) => message.body)).toEqual([
       "Route this selection comment once.",
       "I will ask the implementation worker.",
@@ -764,7 +791,7 @@ describe("RPC handlers", () => {
     expect(result.partialCalls).toEqual([orchestrator.routingId, worker.routingId])
     expect(result.retryCalls).toEqual([worker.routingId])
     expect(
-      result.retried.document.projection.annotations[0]?.messages.find(
+      result.retried.document.plan.annotations[0]?.messages.find(
         (message) => message.id === result.partial.messageId
       )?.mentionDeliveries
     ).toMatchObject([
@@ -773,12 +800,12 @@ describe("RPC handlers", () => {
     ])
     expect(result.externalAccepted).toBe(true)
     expect(
-      result.raced.document.projection.annotations.some(
+      result.raced.document.plan.annotations.some(
         (annotation) => annotation.body === "Concurrent editor mutation."
       )
     ).toBe(true)
     expect(
-      result.raced.document.projection.annotations[0]?.messages.some(
+      result.raced.document.plan.annotations[0]?.messages.some(
         (message) => message.body === "Accepted once."
       )
     ).toBe(true)
@@ -787,7 +814,7 @@ describe("RPC handlers", () => {
     ])
     expect(result.cycleCalls).toEqual(["subagent:a", "subagent:b", "subagent:a"])
     expect(
-      result.cycle.document.projection.annotations[0]?.messages.at(-1)?.body
+      result.cycle.document.plan.annotations[0]?.messages.at(-1)?.body
     ).toContain("relay safety limit")
     expect(result.budgetCalls).toHaveLength(32)
     expect(
@@ -803,7 +830,7 @@ describe("RPC handlers", () => {
       reason: "Test."
     }
     const document = {
-      projection: {
+      plan: {
         stages: [
           {
             id: "01",
@@ -834,9 +861,9 @@ describe("RPC handlers", () => {
     expect(
       orchestrationStagesCompleted({
         ...document,
-        projection: {
-          ...document.projection,
-          stages: document.projection.stages.map((stage) => ({
+        plan: {
+          ...document.plan,
+          stages: document.plan.stages.map((stage) => ({
             ...stage,
             executionStatus: "completed" as const
           }))
@@ -852,10 +879,9 @@ describe("RPC handlers", () => {
       producingChatId: "chat-1",
       revision: 2,
       status: "needs-verification",
-      source: "<h1>Plan</h1>",
       updatedAt: "2026-07-30T12:00:00.000Z",
       updatedBy: "agent",
-      projection: {
+      plan: {
         title: "Plan",
         sections: [],
         annotations: [],
@@ -864,7 +890,10 @@ describe("RPC handlers", () => {
             id: "01",
             title: "Auth",
             intent: "Implement auth",
-                    markdown: "<p>Auth</p><ul data-files><li>src/auth.ts</li></ul>",
+            approach: [],
+            files: [{ path: "src/auth.ts", change: "M" }],
+            diagrams: [],
+            notes: [],
             acceptance: [],
             dependencies: [],
             complexity: "medium",
@@ -881,7 +910,10 @@ describe("RPC handlers", () => {
             id: "02",
             title: "Release",
             intent: "Implement release",
-                    markdown: "<p>Release</p><ul data-files><li>src/release.ts</li></ul>",
+            approach: [],
+            files: [{ path: "src/release.ts", change: "M" }],
+            diagrams: [],
+            notes: [],
             acceptance: [],
             dependencies: [],
             complexity: "medium",
@@ -1034,20 +1066,33 @@ describe("RPC handlers", () => {
       ])
     )
 
-    const stageHtml = (id: string, agentId: string, file: string) => `
-<section data-stage="${id}" data-title="Stage ${id}" data-depends-on="" data-complexity="medium" data-execution-status="queued">
-<h3>Intent</h3><p>Execute stage ${id}.</p>
-<h3>Approach</h3><ol><li>Implement it.</li></ol>
-<ul data-files><li>${file}</li></ul>
-<div data-assignment="${agentId}" data-agent-id="${agentId}" data-cli="codex" data-model="gpt-5.6-terra" data-reason="Medium complexity." data-status="queued"></div>
-<div data-acceptance="${id}.1" data-status="pending">Stage ${id} is verified.</div>
-</section>`
-    const source = (includeAmendment: boolean) =>
-      `<h1>PRD: Amendment drain</h1>${stageHtml("01", "agent-01", "src/one.ts")}${
-        includeAmendment
-          ? stageHtml("02", "agent-02", "src/two.ts")
-          : ""
-      }`
+    const stageFixture = (id: string, agentId: string, file: string) => ({
+      id,
+      title: `Stage ${id}`,
+      intent: `Execute stage ${id}.`,
+      approach: ["Implement it."],
+      files: [{ path: file, change: "M" as const }],
+      diagrams: [],
+      notes: [],
+      acceptance: [{ id: `${id}.1`, text: `Stage ${id} is verified.`, status: "pending" as const, evidence: null }],
+      dependencies: [],
+      complexity: "medium" as const,
+      assignment: {
+        agentId,
+        cli: "codex" as const,
+        model: "gpt-5.6-terra",
+        reason: "Medium complexity."
+      },
+      executionStatus: "queued" as const
+    })
+    const source = (includeAmendment: boolean): PlanPrd => ({
+      title: "PRD: Amendment drain",
+      sections: [],
+      stages: includeAmendment
+        ? [stageFixture("01", "agent-01", "src/one.ts"), stageFixture("02", "agent-02", "src/two.ts")]
+        : [stageFixture("01", "agent-01", "src/one.ts")],
+      annotations: []
+    })
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -1126,7 +1171,7 @@ describe("RPC handlers", () => {
             sessionId,
             producingChatId: chatId,
             id: planId,
-            source: source(false),
+            plan: source(false),
             status: "executing",
             author: "agent"
           })
@@ -1137,7 +1182,7 @@ describe("RPC handlers", () => {
           yield* PlanStore.updateDocument(worktreePath, {
             planId,
             baseRevision: initial.revision,
-            source: source(true),
+            plan: source(true),
             author: "agent",
             reconcile: true
           })
@@ -1155,7 +1200,7 @@ describe("RPC handlers", () => {
 
     expect(result.calls).toBe(2)
     expect(result.executed).toEqual([["01"], ["02"]])
-    expect(result.document?.projection.stages.map((stage) => stage.executionStatus))
+    expect(result.document?.plan.stages.map((stage) => stage.executionStatus))
       .toEqual(["completed", "completed"])
   })
 

@@ -25,7 +25,7 @@ import {
   assistantMessage,
   buildPlanExecutionGraph,
   CliExecError,
-  compileOrchestrationPlanHtml,
+  compileOrchestrationPlan,
   defaultModeFor,
   defaultModel,
   findApprovedPlan,
@@ -44,7 +44,7 @@ import {
   supportsPlanMode,
   userMessage,
   workspaceModeOf,
-  DEFAULT_PLAN_TEMPLATE_HTML,
+  type PlanPrd,
   resolveWorkerRoutingConfig,
   workerRoutingMismatch
 } from "@jingler/core"
@@ -53,7 +53,7 @@ import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
 import { orchestratorNote, orchestratorTurnPrompt } from "./orchestrator-prompt.js"
-import { stripOrchestratorAmendment } from "./orchestrator-amend.js"
+import { parseOrchestratorAmendment, stripOrchestratorAmendment } from "./orchestrator-amend.js"
 import { modeOnApproval, modeToRestore } from "./exec-mode.js"
 import { isTerminal, routeOf } from "./turn-events.js"
 import {
@@ -64,10 +64,7 @@ import {
 import { buildGate, makeApprovals, verdict } from "./approvals.js"
 import { runLifetime } from "./run-lifetime.js"
 import { planNote } from "./plan-prompt.js"
-import {
-  completeHtmlPlanSubmissions,
-  stripHtmlPlanBlock
-} from "./plan-parse.js"
+import { capturePlanEmission, stripPlanJsonBlock } from "./plan-json.js"
 import { questionNote } from "./question-prompt.js"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
@@ -103,7 +100,7 @@ import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore } from "./plan-store.js"
-import { resolvePlanAnnotations } from "./plan-html.js"
+import { resolveAnnotations } from "./plan-mutations.js"
 import {
   appendSteeredReply,
   collectSteeredReply,
@@ -751,28 +748,32 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         if (plan === null) return
         const open = plan.comments.filter((c) => !c.routed && c.author === "user")
         const routedIds = new Set(open.map((comment) => comment.id))
-        const routedSource =
+        const routedPlan =
           canonical === null
             ? null
-            : resolvePlanAnnotations(canonical.document.source, routedIds)
+            : resolveAnnotations(canonical.document.plan, routedIds)
         const feedback =
-          canonical === null
+          canonical === null || routedPlan === null
             ? revisionText(plan, open)
             : [
-                `Revise canonical PRD revision ${canonical.document.revision}.`,
-                "Treat the full HTML below, including human edits and annotations, as the source of truth.",
-                "Return a complete replacement four-backtick fenced HTML document. Open it with exactly ````html.",
+                `Revise canonical plan revision ${canonical.document.revision}.`,
+                "Treat the full plan below, including human edits and annotations, as the source of truth.",
+                'Return a complete replacement as one ```json block with "mode":"submit".',
                 "",
-                "````html",
-                routedSource?.trim() ?? canonical.document.source.trim(),
-                "````"
+                "```json",
+                JSON.stringify({ mode: "submit", plan: routedPlan }, null, 2),
+                "```"
               ].join("\n")
-        if (canonical !== null && routedSource !== null) {
+        if (canonical !== null && routedPlan !== null) {
           yield* PlanStore.updateDocument(canonical.worktreePath, {
             planId,
             baseRevision: canonical.document.revision,
-            source: routedSource,
+            plan: routedPlan,
             author: "user",
+            // A status-only mutation (comments flushed to resolved). Skip the
+            // user-edit reconcile: its `mergeAnnotation` keeps the PRIOR thread
+            // authoritative and would discard the just-resolved status.
+            semantic: false,
             status: "revising"
           }).pipe(Effect.ignore)
         }
@@ -828,7 +829,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         }
         if (orchestrating && canonical !== null) {
           const graph = buildPlanExecutionGraph(
-            canonical.document.projection.stages,
+            canonical.document.plan.stages,
             { requireAssignments: true }
           )
           if (!graph.valid) {
@@ -860,7 +861,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             )
           }
           const unavailable = unavailableOrchestrationAssignment(
-            canonical.document.projection.stages,
+            canonical.document.plan.stages,
             catalog
           )
           if (unavailable?.assignment) {
@@ -870,7 +871,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             )
           }
           const routingMismatch = workerRoutingMismatch(
-            canonical.document.projection.stages,
+            canonical.document.plan.stages,
             workerRouting
           )
           if (routingMismatch?.assignment) {
@@ -885,7 +886,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const approval = yield* PlanStore.updateDocument(canonical.worktreePath, {
             planId,
             baseRevision: canonical.document.revision,
-            source: canonical.document.source,
+            plan: canonical.document.plan,
             author: "user",
             status: "executing"
           }).pipe(Effect.either)
@@ -991,7 +992,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             const execution = yield* PlanStore.updateDocument(canonical.worktreePath, {
               planId,
               baseRevision: canonical.document.revision,
-              source: canonical.document.source,
+              plan: canonical.document.plan,
               author: "user",
               status: "executing"
             }).pipe(Effect.either)
@@ -1355,7 +1356,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             mode === "plan"
               ? planNote(
                   cli,
-                  workspaceConfig?.planTemplate?.source ?? DEFAULT_PLAN_TEMPLATE_HTML,
                   orchestrating ? orchestrationRoutes : undefined,
                   orchestrating ? workerRouting ?? undefined : undefined
                 )
@@ -1426,10 +1426,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             mode,
             model: chat.model ?? defaultModel(cli),
             ...(mode === "plan"
-              ? {
-                  planTemplate:
-                    workspaceConfig?.planTemplate?.source ?? DEFAULT_PLAN_TEMPLATE_HTML
-                }
+              ? { planTemplate: workspaceConfig?.planTemplate?.source ?? "" }
               : {}),
             ...(orchestrating
               ? { orchestrationRoutes, orchestrationPlanApproved: planApproved }
@@ -1669,7 +1666,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               let document: NonNullable<typeof initial> = initial
               for (const marker of markers) {
                 if (
-                  !document.projection.stages.some((stage) =>
+                  !document.plan.stages.some((stage) =>
                     stage.acceptance.some((criterion) => criterion.id === marker.criterionId)
                   )
                 ) continue
@@ -1683,7 +1680,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 }).pipe(Effect.either)
                 if (updated._tag === "Right") document = updated.right
               }
-              const complete = document.projection.stages.every((stage) =>
+              const complete = document.plan.stages.every((stage) =>
                 stage.acceptance.every(
                   (criterion) =>
                     criterion.status === "passed" || criterion.status === "waived"
@@ -1693,7 +1690,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 yield* PlanStore.updateDocument(worktreePath, {
                   planId: document.id,
                   baseRevision: document.revision,
-                  source: document.source,
+                  plan: document.plan,
                   author: "agent",
                   status: "done"
                 }).pipe(Effect.ignore)
@@ -1711,7 +1708,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 document.id !== activePlanId ||
                 document.status !== "executing"
               ) return
-              const complete = document.projection.stages.every((stage) =>
+              const complete = document.plan.stages.every((stage) =>
                 stage.acceptance.every(
                   (criterion) =>
                     criterion.status === "passed" || criterion.status === "waived"
@@ -1720,7 +1717,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               yield* PlanStore.updateDocument(worktreePath, {
                 planId: document.id,
                 baseRevision: document.revision,
-                source: document.source,
+                plan: document.plan,
                 author: "agent",
                 status: complete ? "done" : "needs-verification"
               }).pipe(Effect.ignore)
@@ -1738,19 +1735,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               if (!orchestrating || !planApproved || worktreePath.length === 0) {
                 return amendmentNotPresent(knownRevision)
               }
-              const submissions = completeHtmlPlanSubmissions(text)
-              if (submissions.length > 1) {
-                return amendmentFailure("invalid", knownRevision, [
-                  "The amendment reply contains multiple complete HTML plan blocks. Return exactly one canonical amendment block."
-                ])
-              }
-              const submission = submissions[0]
-              if (submission === undefined) {
-                if (PLAN_HTML_SUBMISSION_OPENING.test(text)) {
-                  return amendmentFailure("invalid", knownRevision, [
-                    "The amendment HTML block is incomplete or malformed."
-                  ])
-                }
+              const amendment = parseOrchestratorAmendment(text)
+              if (amendment === null) {
                 return amendmentNotPresent(knownRevision)
               }
               const current = yield* PlanStore.readDocument(worktreePath, sessionId, chatId)
@@ -1772,10 +1758,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   "No valid worker routing configuration is available."
                 ])
               }
-              const compiled = compileOrchestrationPlanHtml(
-                submission.body,
+              const compiled = compileOrchestrationPlan(
+                amendment,
                 workerRouting,
-                { previousStages: current.projection.stages }
+                { previousStages: current.plan.stages }
               )
               if (!compiled.valid) {
                 return amendmentFailure(
@@ -1789,7 +1775,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               const updated = yield* PlanStore.updateDocument(worktreePath, {
                 planId: current.id,
                 baseRevision: current.revision,
-                source: compiled.html,
+                plan: compiled.plan,
                 author: "agent",
                 reconcile: true,
                 status: "executing"
@@ -2085,12 +2071,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             })
 
           const proposePlan = (
-            plan: Plan,
+            plan: PlanPrd,
             submittedBlock?: string
           ): Effect.Effect<PlanDecision> =>
             Effect.gen(function* () {
               let basePlanId: string | undefined
-              let currentPlanId: string | undefined
               let previousStages: ReadonlyArray<PlanPrdStage> = []
               if (worktreePath.length > 0) {
                 const current = yield* PlanStore.readDocument(
@@ -2105,50 +2090,49 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   current.status !== "rejected"
                     ? current.id
                     : undefined
-                currentPlanId = current?.id
                 if (basePlanId !== undefined && current !== null) {
-                  previousStages = current.projection.stages
+                  previousStages = current.plan.stages
                 }
               }
               const compiled =
                 orchestrating && workerRouting !== null
-                  ? compileOrchestrationPlanHtml(plan.raw, workerRouting, {
-                      previousStages
-                    })
+                  ? compileOrchestrationPlan(plan, workerRouting, { previousStages })
                   : null
-              const proposedPlan =
-                compiled?.valid === true
-                  ? { ...plan, raw: compiled.html }
-                  : plan
-              const approvalPlanId =
-                basePlanId ??
-                (currentPlanId === proposedPlan.id
-                  ? randomUUID()
-                  : proposedPlan.id)
-              let canonicalPlan = {
-                ...proposedPlan,
-                id: approvalPlanId
-              }
+              const proposedPlan = compiled?.valid === true ? compiled.plan : plan
+              const approvalPlanId = basePlanId ?? randomUUID()
               const revisingCanonicalPlan = basePlanId !== undefined
+              // The Plan-shaped card emitted to the transcript; replaced by the
+              // exact canonical projection once PlanStore promotes it.
+              let canonicalPlan: Plan = planDocumentToPlan({
+                id: approvalPlanId,
+                sessionId,
+                producingChatId: chatId,
+                revision: 1,
+                status: "proposed",
+                plan: proposedPlan,
+                updatedAt: new Date().toISOString(),
+                updatedBy: "agent"
+              })
               // Register the approval waiter BEFORE PlanStore makes the proposal
               // visible to file watchers. The announce effect then promotes and
               // publishes the exact canonical projection while the gate is live.
               return yield* approvals.awaitPlan(
                 sessionId,
                 chatId,
-                canonicalPlan.id,
+                approvalPlanId,
                 Effect.gen(function* () {
                   if (worktreePath.length > 0) {
                     const promotion = yield* PlanStore.promote(
                       sessionId,
                       worktreePath,
                       chatId,
-                      canonicalPlan,
-                      basePlanId
-                    ).pipe(
-                      Effect.provide(env),
-                      Effect.either
-                    )
+                      proposedPlan,
+                      {
+                        id: approvalPlanId,
+                        ...(basePlanId === undefined ? {} : { basePlanId }),
+                        status: "proposed"
+                      }
+                    ).pipe(Effect.provide(env), Effect.either)
                     if (promotion._tag === "Left") {
                       yield* emit({
                         _tag: "Failed",
@@ -2156,16 +2140,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                       })
                       return yield* Effect.interrupt
                     }
-                    // PlanStore owns validation, sanitization, legacy fallback,
-                    // and amendment reconciliation. Publish exactly its
-                    // projection so transcript and Plan Review share one
-                    // identity and source.
+                    // PlanStore owns validation and amendment reconciliation.
+                    // Publish exactly its projection so transcript and Plan Review
+                    // share one identity.
                     canonicalPlan = promotion.right.plan
                   }
-                  // Claude streams plan text before ExitPlanMode asks us to
-                  // promote it. Once the canonical Plan card owns that document,
-                  // remove only that exact visible transport. Payload-only plans
-                  // omit `submittedBlock`, preserving unrelated HTML examples.
+                  // The agent streams the plan's JSON block before we promote it.
+                  // Once the canonical Plan card owns the document, remove only that
+                  // exact visible transport. Payload-only plans omit `submittedBlock`.
                   if (submittedBlock !== undefined) {
                     yield* turnMutation.withPermits(1)(
                       Effect.gen(function* () {
@@ -2175,10 +2157,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                           parts: current.parts.flatMap(
                             (part): ReadonlyArray<ContentPart> => {
                               if (part._tag !== "Text") return [part]
-                              const text = stripHtmlPlanBlock(
-                                part.text,
-                                submittedBlock
-                              )
+                              const text = stripPlanJsonBlock(part.text, submittedBlock)
                               return text.length === 0 ? [] : [{ ...part, text }]
                             }
                           )
@@ -2205,22 +2184,25 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // `approvals.awaitPlan` gate `proposePlan` parks on. The file write is
           // all it takes — `Plan.watch` streams the canonical doc to the
           // renderer. Never downgrade a real plan the operator already owns: only
-          // fill an empty slot, or refresh an existing agent draft (amend, so the
-          // revision advances as the orchestrator iterates). Best-effort — a plan
-          // write must never fail the turn.
-          const saveDraftPlan = (source: string): Effect.Effect<void> =>
+          // fill an empty slot, or refresh an existing AGENT draft (amend, so the
+          // revision advances as the orchestrator iterates). A user-authored draft
+          // is the operator actively editing — an agent draft must not reconcile
+          // over it and silently discard their content. Best-effort — a plan write
+          // must never fail the turn.
+          const saveDraftPlan = (plan: PlanPrd): Effect.Effect<void> =>
             worktreePath.length === 0
               ? Effect.void
               : PlanStore.readDocument(worktreePath, sessionId, chatId).pipe(
                   Effect.provide(env),
                   Effect.orElseSucceed(() => null),
                   Effect.flatMap((current) =>
-                    current !== null && current.status !== "draft"
+                    current !== null &&
+                    (current.status !== "draft" || current.updatedBy === "user")
                       ? Effect.void
                       : PlanStore.promoteDocument(worktreePath, {
                           sessionId,
                           producingChatId: chatId,
-                          source,
+                          plan,
                           status: "draft",
                           author: "agent",
                           ...(current !== null

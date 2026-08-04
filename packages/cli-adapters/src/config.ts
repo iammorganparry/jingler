@@ -14,9 +14,11 @@ import type {
 import { clampFontScale, DEFAULT_THEME_ID, WorkspaceConfig } from "@jingler/core"
 import { ConfigError } from "@jingler/core"
 import { FileSystem } from "@effect/platform"
-import { Effect, Schema } from "effect"
+import { Effect, Either, Schema } from "effect"
+import { PlanPrd } from "@jingler/core"
 import { AppPaths } from "./app-paths.js"
-import { formatPlanHtmlDiagnostics, parsePlanHtml } from "./plan-html.js"
+
+const decodePlanTemplate = Schema.decodeUnknownEither(Schema.parseJson(PlanPrd))
 
 type ConfigEnv = FileSystem.FileSystem | AppPaths
 
@@ -167,14 +169,15 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       /** Save the auto-compaction levers (master switch + working-set budget). */
       const setContext = (context: ContextConfig) => patch({ context })
 
-      /** Persist the PRD/MDX structure injected into native plan mode. */
+      /** Persist the starting plan structure (a JSON PlanPrd; empty = built-in default). */
       const setPlanTemplate = (planTemplate: PlanTemplateConfig) => {
-        const result = parsePlanHtml(planTemplate.source)
-        return result.valid
+        if (planTemplate.source.trim().length === 0) return patch({ planTemplate })
+        const result = decodePlanTemplate(planTemplate.source)
+        return Either.isRight(result)
           ? patch({ planTemplate })
           : Effect.fail(
               new ConfigError({
-                message: `Plan template is invalid:\n${formatPlanHtmlDiagnostics(result.diagnostics)}`
+                message: "Plan template is not a valid structured plan (JSON PlanPrd)."
               })
             )
       }

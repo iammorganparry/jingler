@@ -126,7 +126,7 @@ export * from "./composites/plan-steps/plan-step-card.js"
 export * from "./composites/plan-architecture.js"
 export * from "./composites/plan-workflow.js"
 // Read-only sanitized HTML plan document view
-export * from "./composites/plan-doc/plan-doc-view.js"
+export * from "./composites/plan-doc/plan-blocks.js"
 export * from "./composites/plan-doc/plan-comment-thread.js"
 export * from "./composites/plan-doc/plan-comment-layer.js"
 export * from "./composites/auth-card.js"

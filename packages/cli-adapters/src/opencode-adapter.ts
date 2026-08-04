@@ -5,15 +5,7 @@ import type { SessionPromptData } from "@opencode-ai/sdk/v2/client"
 import { Effect, Runtime } from "effect"
 import type { AgentContext, PermissionRequest, SessionSpec } from "./adapter.js"
 import { capOutput } from "./output-cap.js"
-import {
-  draftPlanCandidate,
-  fencedHtmlPlanSubmission,
-  hasOrchestratorPlanSubmission,
-  hasPlanBlock,
-  ORCHESTRATOR_PLAN_HTML_REFORMAT,
-  parsePlan,
-  PLAN_HTML_REFORMAT
-} from "./plan-parse.js"
+import { capturePlanEmission } from "./plan-json.js"
 import { createPlanDraftStream } from "./plan-draft-stream.js"
 import { stopChild, trackChild } from "./child-registry.js"
 import { requireWorktree } from "./cwd.js"
@@ -876,76 +868,52 @@ const driveOpencode = async (
         if (result.error !== undefined) throw new Error(promptError(result.error))
 
         const reply = assistantText(result.data?.parts)
-        const autoOrchestrationPlan =
+        const orchestratingUnapproved =
           !planning &&
           spec.orchestrationRoutes !== undefined &&
-          spec.orchestrationPlanApproved !== true &&
-          hasOrchestratorPlanSubmission(reply)
-        if (planning || autoOrchestrationPlan) {
-          // The mapper held this turn's prose back, so the reply has to be read
-          // off the response rather than the stream. `parts` is the whole final
-          // message — which is what `parsePlan` wants anyway: it reads the
-          // ```flow and ```<lang> step <NN> blocks below the fence too, exactly
-          // as it does for Claude's ExitPlanMode payload.
-          if (hasPlanBlock(reply) && planRound < MAX_PLAN_ROUNDS) {
+          spec.orchestrationPlanApproved !== true
+        // The mapper held this turn's prose back in plan mode, so the reply is
+        // read off the response. `mode` in the emission decides submit vs draft.
+        const capture =
+          (planning || orchestratingUnapproved) && planRound < MAX_PLAN_ROUNDS
+            ? capturePlanEmission(reply)
+            : null
+        if (planning || orchestratingUnapproved) {
+          if (capture?._tag === "reformat" && !planReformatAsked) {
+            planReformatAsked = true
+            const clear = planDraft.clear()
+            if (clear !== null) await runP(ctx.emit(clear))
+            followUp = capture.message
+            turnPrompt = followUp
+            continue
+          }
+          if (capture?._tag === "emission" && (planning || capture.emission.mode === "submit")) {
             planRound += 1
-            const plan = parsePlan(
-              reply,
-              `plan_${sessionId}_${planRound}`,
-              spec.workerRouting
-            )
-            if (plan.structured === false && !planReformatAsked) {
-              planReformatAsked = true
-              const clear = planDraft.clear()
-              if (clear !== null) await runP(ctx.emit(clear))
-              followUp = planning
-                ? PLAN_HTML_REFORMAT
-                : ORCHESTRATOR_PLAN_HTML_REFORMAT
-              turnPrompt = followUp
-              continue
-            }
             const decision = await runP(
-              ctx.proposePlan(
-                plan,
-                autoOrchestrationPlan
-                  ? fencedHtmlPlanSubmission(
-                      reply,
-                      spec.workerRouting
-                    )?.block
-                  : undefined
-              )
+              ctx.proposePlan(capture.emission.plan, capture.block)
             )
             planDraft.reset()
             if (decision._tag === "Revise") followUp = decision.feedback
             else if (decision._tag === "Approve") {
-              // The restriction lifts here and nowhere else. `spec.readOnly`
-              // still wins — a caller that pinned this run read-only (the
-              // adversarial roles) is not handed write access by an approval.
+              // The restriction lifts here; `spec.readOnly` still wins.
               planning = spec.readOnly !== true && decision.mode !== "plan"
-              followUp = resumePlanPrompt(decision.plan ?? plan)
+              if (decision.plan !== undefined) followUp = resumePlanPrompt(decision.plan)
             }
-            // Reject: `followUp` stays null and the turn ends, which is what
-            // rejection means.
+            // Reject: `followUp` stays null and the turn ends.
+          } else if (
+            capture?._tag === "emission" &&
+            orchestratingUnapproved &&
+            ctx.saveDraftPlan !== undefined
+          ) {
+            // A "draft" emission in auto orchestration mirrors into Plan Review;
+            // prose already streamed (not suppressed when planning is false).
+            await runP(ctx.saveDraftPlan(capture.emission.plan))
           } else if (planning && reply.length > 0) {
-            // No plan (or the round cap is spent), so the held-back prose is all
-            // the operator gets — replay it rather than returning silence.
+            // No plan (or the round cap is spent): replay the held-back prose
+            // rather than returning silence.
             const clear = planDraft.clear()
             if (clear !== null) await runP(ctx.emit(clear))
             await runP(ctx.emit({ _tag: "Assistant", text: reply }))
-          }
-        } else if (
-          !planning &&
-          spec.orchestrationRoutes !== undefined &&
-          spec.orchestrationPlanApproved !== true &&
-          ctx.saveDraftPlan !== undefined
-        ) {
-          // Auto orchestration, no delegation marker: a plan the agent merely
-          // SHOWS is an iteration draft. Prose is not suppressed here (planning
-          // is false), so the ```html preview already streamed to chat — this
-          // only mirrors it into Plan Review.
-          const candidate = draftPlanCandidate(reply, spec.workerRouting)
-          if (candidate !== null) {
-            await runP(ctx.saveDraftPlan(candidate.source))
           }
         }
 

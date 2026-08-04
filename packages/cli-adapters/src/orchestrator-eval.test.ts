@@ -23,26 +23,73 @@ const routes = [
   }
 ]
 
-const source = (amendment = ""): string => `<h1>PRD: Eval fixture</h1>
-<h2>Context</h2><p>Exercise dependency-safe orchestration. ${amendment}</p>
-<section data-stage="schema" data-title="Schema" data-depends-on="" data-complexity="high">
-<h3>Intent</h3><p>Add storage.</p>
-<div data-assignment="worker-api" data-agent-id="worker-api" data-cli="claude" data-model="haiku" data-reason="Shared API dependency" data-status="queued"></div>
-<ul data-files><li>src/schema.ts</li></ul>
-<div data-acceptance="schema.1" data-status="pending">Schema test passes.</div>
-</section>
-<section data-stage="api" data-title="API" data-depends-on="schema" data-complexity="high">
-<h3>Intent</h3><p>Expose storage.</p>
-<div data-assignment="worker-api" data-agent-id="worker-api" data-cli="claude" data-model="haiku" data-reason="Shares schema dependency" data-status="queued"></div>
-<ul data-files><li>src/api.ts</li></ul>
-<div data-acceptance="api.1" data-status="pending">API test passes.</div>
-</section>
-<section data-stage="docs" data-title="Docs" data-depends-on="" data-complexity="low">
-<h3>Intent</h3><p>Document the API.</p>
-<div data-assignment="worker-docs" data-agent-id="worker-docs" data-cli="codex" data-model="gpt-5.6-sol" data-reason="Independent documentation" data-status="queued"></div>
-<ul data-files><li>docs/api.md</li></ul>
-<div data-acceptance="docs.1" data-status="pending">Docs are accurate.</div>
-</section>`
+import type { PlanPrd } from "@jingler/core"
+
+const source = (amendment = ""): PlanPrd => ({
+  title: "PRD: Eval fixture",
+  sections: [
+    {
+      id: "context",
+      title: "Context",
+      blocks: [{ kind: "prose", id: "c1", text: `Exercise dependency-safe orchestration. ${amendment}` }]
+    }
+  ],
+  stages: [
+    {
+      id: "schema",
+      title: "Schema",
+      intent: "Add storage.",
+      approach: [],
+      files: [{ path: "src/schema.ts", change: "M" }],
+      diagrams: [],
+      notes: [],
+      acceptance: [{ id: "schema.1", text: "Schema test passes.", status: "pending", evidence: null }],
+      dependencies: [],
+      complexity: "high",
+      assignment: { agentId: "worker-api", cli: "claude", model: "haiku", reason: "Shared API dependency" },
+      executionStatus: "queued"
+    },
+    {
+      id: "api",
+      title: "API",
+      intent: "Expose storage.",
+      approach: [],
+      files: [{ path: "src/api.ts", change: "M" }],
+      diagrams: [],
+      notes: [],
+      acceptance: [{ id: "api.1", text: "API test passes.", status: "pending", evidence: null }],
+      dependencies: ["schema"],
+      complexity: "high",
+      assignment: { agentId: "worker-api", cli: "claude", model: "haiku", reason: "Shares schema dependency" },
+      executionStatus: "queued"
+    },
+    {
+      id: "docs",
+      title: "Docs",
+      intent: "Document the API.",
+      approach: [],
+      files: [{ path: "docs/api.md", change: "M" }],
+      diagrams: [],
+      notes: [],
+      acceptance: [{ id: "docs.1", text: "Docs are accurate.", status: "pending", evidence: null }],
+      dependencies: [],
+      complexity: "low",
+      assignment: { agentId: "worker-docs", cli: "codex", model: "gpt-5.6-sol", reason: "Independent documentation" },
+      executionStatus: "queued"
+    }
+  ],
+  annotations: []
+})
+
+/** Mutate a plan's stage/acceptance status (agent-owned mechanical progress the eval flags). */
+const withPlannerProgress = (plan: PlanPrd): PlanPrd => ({
+  ...plan,
+  stages: plan.stages.map((stage) => ({
+    ...stage,
+    executionStatus: "completed",
+    acceptance: stage.acceptance.map((c) => ({ ...c, status: "passed", evidence: "trust me" }))
+  }))
+})
 
 const ownedHandoff = {
   monitored: true,
@@ -76,7 +123,7 @@ describe.each(expandOrchestratorEvalRoutes(routes))(
     it("passes provider-neutral planning, handoff, assignment, and progress rules", () => {
       const report = evaluateOrchestratorProcedure({
         route,
-        source: source(),
+        plan: source(),
         availableRoutes: routes,
         delegated: true,
         postHandoff: ownedHandoff
@@ -89,8 +136,8 @@ describe.each(expandOrchestratorEvalRoutes(routes))(
     it("preserves stable ids and includes a user amendment", () => {
       const report = evaluateOrchestratorProcedure({
         route,
-        source: source("Require an immutable audit record."),
-        previousSource: source(),
+        plan: source("Require an immutable audit record."),
+        previousPlan: source(),
         expectedAmendment: "immutable audit record",
         availableRoutes: routes,
         delegated: true,
@@ -113,7 +160,7 @@ describe("orchestrator direct/delegation decision eval", () => {
   it("passes bounded single-outcome work only when it is completed and verified directly", () => {
     const report = evaluateOrchestratorProcedure({
       route: { cli: "codex", model: "gpt-5.6-sol" },
-      source: null,
+      plan: null,
       availableRoutes: routes,
       delegated: false,
       task: {
@@ -135,7 +182,7 @@ describe("orchestrator direct/delegation decision eval", () => {
   it("fails unnecessary delegation of bounded work", () => {
     const report = evaluateOrchestratorProcedure({
       route: { cli: "claude", model: "haiku" },
-      source: source(),
+      plan: source(),
       availableRoutes: routes,
       delegated: true,
       task: {
@@ -164,7 +211,7 @@ describe("orchestrator direct/delegation decision eval", () => {
   ])("fails to delegate %s", (_label, signal) => {
     const report = evaluateOrchestratorProcedure({
       route: { cli: "opencode", model: "opencode/big-pickle" },
-      source: null,
+      plan: null,
       availableRoutes: routes,
       delegated: false,
       task: {
@@ -183,13 +230,11 @@ describe("orchestrator direct/delegation decision eval", () => {
 
 describe("orchestrator procedure eval failures", () => {
   it("fails claimed worker evidence and abandoned post-handoff ownership", () => {
-    const broken = source()
-      .replace('data-status="queued"', 'data-status="completed"')
-      .replace('data-status="pending"', 'data-status="passed" data-evidence="trust me"')
+    const broken = withPlannerProgress(source())
 
     const report = evaluateOrchestratorProcedure({
       route: { cli: "claude", model: "haiku" },
-      source: broken,
+      plan: broken,
       availableRoutes: routes,
       delegated: true,
       postHandoff: {
@@ -216,15 +261,22 @@ describe("orchestrator procedure eval failures", () => {
   })
 
   it("fails unavailable assignments and dependency ownership conflicts", () => {
-    const broken = source()
-      .replace(
-        'data-agent-id="worker-api" data-cli="claude" data-model="haiku" data-reason="Shares schema dependency"',
-        'data-agent-id="worker-other" data-cli="opencode" data-model="missing" data-reason="Wrong route"'
+    const base = source()
+    const broken: PlanPrd = {
+      ...base,
+      stages: base.stages.map((s) =>
+        s.id === "api"
+          ? {
+              ...s,
+              assignment: { agentId: "worker-other", cli: "opencode", model: "missing", reason: "Wrong route" }
+            }
+          : s
       )
+    }
 
     const report = evaluateOrchestratorProcedure({
       route: { cli: "claude", model: "haiku" },
-      source: broken,
+      plan: broken,
       availableRoutes: routes,
       delegated: true,
       postHandoff: ownedHandoff
@@ -237,7 +289,8 @@ describe("orchestrator procedure eval failures", () => {
         .map((assertion) => assertion.id)
     ).toEqual(
       expect.arrayContaining([
-        "canonical-html",
+        // The plan is structurally valid (canonical-html passes); only its
+        // routing is wrong.
         "assignments",
         "dependency-ownership",
         "available-routes"
@@ -246,13 +299,18 @@ describe("orchestrator procedure eval failures", () => {
   })
 
   it("fails an amendment that renames a stable acceptance id", () => {
+    const renamed = source("Require an immutable audit record.")
     const report = evaluateOrchestratorProcedure({
       route: { cli: "claude", model: "haiku" },
-      source: source("Require an immutable audit record.").replace(
-        'data-acceptance="schema.1"',
-        'data-acceptance="schema.renamed"'
-      ),
-      previousSource: source(),
+      plan: {
+        ...renamed,
+        stages: renamed.stages.map((s) =>
+          s.id === "schema"
+            ? { ...s, acceptance: s.acceptance.map((c) => (c.id === "schema.1" ? { ...c, id: "schema.renamed" } : c)) }
+            : s
+        )
+      },
+      previousPlan: source(),
       expectedAmendment: "immutable audit record",
       availableRoutes: routes,
       delegated: true,

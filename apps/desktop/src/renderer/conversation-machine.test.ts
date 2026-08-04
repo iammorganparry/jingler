@@ -1540,11 +1540,7 @@ describe("conversationMachine — PlanUpdated across turns", () => {
     producingChatId,
     revision,
     status: stepStatus === "done" ? "done" : "proposed",
-    source:
-      '# PRD: Refactor auth\n\n<Stage id="s_01" title="Create TokenStore"><Acceptance id="a1" status="' +
-      (stepStatus === "done" ? "passed" : "pending") +
-      '">Done</Acceptance></Stage>',
-    projection: {
+    plan: {
       title: "PRD: Refactor auth",
       sections: [],
       stages: [
@@ -1552,7 +1548,10 @@ describe("conversationMachine — PlanUpdated across turns", () => {
           id: "s_01",
           title: "Create TokenStore",
           intent: "A dedicated store.",
-          markdown: "",
+          approach: [],
+          files: [],
+          diagrams: [],
+          notes: [],
           acceptance: [
             {
               id: "a1",
