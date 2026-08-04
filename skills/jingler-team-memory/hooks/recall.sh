@@ -3,8 +3,9 @@
 #
 # Wire this to a context-injecting hook (Claude Code `UserPromptSubmit`). The
 # harness pipes the hook payload as JSON on stdin; we pull the user's prompt out
-# of it, search Jingler team memory for related pages, and print the top hits to
-# STDOUT wrapped in a single <recalled-memories>…</recalled-memories> block.
+# of it, search Jingler team memory for related pages, read the accepted pages,
+# and print the bounded page records to STDOUT wrapped in one
+# <recalled-memories>…</recalled-memories> block.
 # Claude Code injects a UserPromptSubmit hook's stdout into the model context, so
 # that block becomes deterministic recall the model sees before it answers.
 #
@@ -49,6 +50,7 @@ command -v curl >/dev/null 2>&1 || exit 0
 
 ENDPOINT="${JINGLER_MEMORY_URL%/}/api/mcp"
 LIMIT=5
+READ_LIMIT=3
 
 # --- build and send a JSON-RPC search request ------------------------------
 # jq builds a correctly-escaped body when present; otherwise escape the query by
@@ -66,7 +68,7 @@ search_memory() {
     body=$(printf '{"jsonrpc":"2.0","id":"recall","method":"tools/call","params":{"name":"memory_search","arguments":{"query":"%s","limit":%s},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"jingler-memory-recall-hook","version":"1.0.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}' "$esc" "$LIMIT")
   fi
 
-  curl -sS -m 8 --connect-timeout 4 -X POST "$ENDPOINT" \
+  curl -sS -m 4 --connect-timeout 2 -X POST "$ENDPOINT" \
     -H "Authorization: Bearer ${JINGLER_MEMORY_TOKEN}" \
     -H "x-jingler-organization-id: ${JINGLER_MEMORY_ORG}" \
     -H "content-type: application/json" \
@@ -80,11 +82,12 @@ RESP=$(search_memory "$PROMPT")
 
 [ -z "$RESP" ] && exit 0
 
-# --- format the hits into a <recalled-memories> block ----------------------
-# The tool result lives at .result.structuredContent.data. Field names for a hit
-# vary, so we try several (title/name, snippet/excerpt/summary/body, id/pageId).
-OUT=""
-format_hits() {
+# --- resolve search hits to accepted pages ---------------------------------
+# Search snippets are discovery hints, not accepted evidence. Extract only
+# stable page ids, then memory_read up to READ_LIMIT pages. This guarantees the
+# injected context came from the accepted page endpoint and includes the ids an
+# agent needs to ground or refresh it.
+extract_page_ids() {
   printf '%s' "$1" | jq -r '
     ( .result.structuredContent.data
       // .result.structuredContent.results
@@ -92,27 +95,60 @@ format_hits() {
       // [] ) as $d
     | (if ($d|type)=="array" then $d else ($d.data // $d.results // []) end)
     | map(select(type=="object"))
-    | .[:5]
-    | map(
-        (.title // .name // .pageTitle // "Untitled") as $t
-        | (.snippet // .excerpt // .summary // .body // .content // "") as $s
-        | (.id // .pageId // .page_id // "") as $id
-        | "- " + $t
-          + (if $id != "" then "  [" + ($id|tostring) + "]" else "" end)
-          + (if $s != "" then "\n  " + (($s|tostring)|gsub("\\s+";" ")|.[0:280]) else "" end)
-      )
-    | join("\n")
+    | .[]
+    | (.pageId // .id // .page_id // empty)
   ' 2>/dev/null || true
 }
 
+read_memory() {
+  page_id=$1
+  body=$(jq -cn --arg id "$page_id" \
+    '{jsonrpc:"2.0",id:"recall-read",method:"tools/call",params:{name:"memory_read",arguments:{pageId:$id},_meta:{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{name:"jingler-memory-recall-hook",version:"1.0.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}' \
+    2>/dev/null) || return 0
+
+  curl -sS -m 3 --connect-timeout 1 -X POST "$ENDPOINT" \
+    -H "Authorization: Bearer ${JINGLER_MEMORY_TOKEN}" \
+    -H "x-jingler-organization-id: ${JINGLER_MEMORY_ORG}" \
+    -H "content-type: application/json" \
+    -H "mcp-protocol-version: 2026-07-28" \
+    -H "mcp-method: tools/call" \
+    -H "mcp-name: memory_read" \
+    -d "$body" 2>/dev/null || true
+}
+
+format_read_page() {
+  printf '%s' "$1" | jq -r '
+    ( .result.structuredContent.data
+      // .result.structuredContent
+      // empty ) as $d
+    | ($d.page // $d) as $p
+    | ($p.id // $d.pageId // empty) as $pageId
+    | ($d.revision.id // $d.revisionId // empty) as $revisionId
+    | ($p.body // $p.markdown // $d.body // $d.markdown // "") as $body
+    | select($pageId != "" and $revisionId != "")
+    | {
+        pageId: $pageId,
+        revisionId: $revisionId,
+        sourceIds: ($d.sourceIds // []),
+        citationIds: ($d.citationIds // []),
+        title: ($p.title // "Untitled"),
+        body: $body[0:4000],
+        bodyTruncated: (($body | length) > 4000)
+      }
+    | @json
+    | gsub("<"; "\\u003c")
+  ' 2>/dev/null || true
+}
+
+PAGE_IDS=""
 if command -v jq >/dev/null 2>&1; then
-  OUT=$(format_hits "$RESP")
+  PAGE_IDS=$(extract_page_ids "$RESP" | awk '!seen[$0]++' | head -n "$READ_LIMIT")
 
   # The vault's lexical search is literal-substring based. A whole natural-
   # language question can therefore miss a page even when a distinctive term
   # matches. Retry once with the longest useful prompt term; one bounded fallback
   # keeps hook latency predictable while making normal question prompts useful.
-  if [ -z "$OUT" ]; then
+  if [ -z "$PAGE_IDS" ]; then
     FALLBACK=$(printf '%s' "$PROMPT" | jq -Rr '
       [scan("[[:alnum:]_-]{4,}")
         | ascii_downcase
@@ -121,17 +157,55 @@ if command -v jq >/dev/null 2>&1; then
     ' 2>/dev/null || true)
     if [ -n "$FALLBACK" ] && [ "$FALLBACK" != "$PROMPT" ]; then
       RESP=$(search_memory "$FALLBACK")
-      [ -n "$RESP" ] && OUT=$(format_hits "$RESP")
+      [ -n "$RESP" ] && PAGE_IDS=$(extract_page_ids "$RESP" | awk '!seen[$0]++' | head -n "$READ_LIMIT")
     fi
   fi
 fi
 
 # No jq, or jq produced nothing: emit nothing rather than dumping raw JSON
 # (which could be large and is not useful context). Fail open.
+[ -z "$PAGE_IDS" ] && exit 0
+
+# Accepted-page reads are independent. Run the bounded set concurrently so a
+# slow page costs one read timeout, not READ_LIMIT sequential timeouts. Numbered
+# files preserve search order without sharing shell variables across subshells.
+READ_DIR=$(mktemp -d "${TMPDIR:-/tmp}/jingler-memory-recall.XXXXXX" 2>/dev/null || true)
+[ -z "$READ_DIR" ] && exit 0
+trap 'rm -rf "$READ_DIR"' EXIT HUP INT TERM
+
+read_index=0
+read_pids=""
+while IFS= read -r page_id; do
+  [ -z "$page_id" ] && continue
+  read_index=$((read_index + 1))
+  (
+    page_response=$(read_memory "$page_id")
+    [ -n "$page_response" ] && format_read_page "$page_response"
+  ) > "$READ_DIR/$read_index" &
+  read_pids="$read_pids $!"
+done <<EOF
+$PAGE_IDS
+EOF
+
+for read_pid in $read_pids; do
+  wait "$read_pid" 2>/dev/null || true
+done
+
+OUT=""
+read_index=1
+while [ "$read_index" -le "$READ_LIMIT" ]; do
+  [ -s "$READ_DIR/$read_index" ] && OUT="${OUT}$(cat "$READ_DIR/$read_index")
+"
+  read_index=$((read_index + 1))
+done
+OUT=$(printf '%s' "$OUT" | sed '/^$/d')
+
+# Do not fall back to snippets if every accepted-page read failed. That keeps
+# the hook's trust boundary identical to the skill: read before relying.
 [ -z "$OUT" ] && exit 0
 
 printf '<recalled-memories>\n'
-printf 'Relevant team memory (recall first; verify against source when it matters):\n'
+printf 'Accepted team-memory pages (verify cited sources when it matters):\n'
 printf '%s\n' "$OUT"
 printf '</recalled-memories>\n'
 exit 0

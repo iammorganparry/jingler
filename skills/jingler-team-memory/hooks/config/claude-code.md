@@ -5,8 +5,9 @@ memory deterministic instead of best-effort:
 
 - **`UserPromptSubmit`** runs before the model sees your prompt, and its **stdout
   is injected into the model's context**. `recall.sh` uses this to search team
-  memory for your prompt and inject a `<recalled-memories>` block every turn — no
-  reliance on the model choosing to search.
+  memory, read up to three accepted pages, and inject a bounded
+  `<recalled-memories>` block with stable evidence ids every turn — no reliance
+  on the model choosing to search or on unverified snippets.
 - **`Stop`** runs after the assistant finishes a turn. `persist.sh` uses it to
   submit anything the turn marked as worth keeping for compilation and any
   configured review (see gating below).

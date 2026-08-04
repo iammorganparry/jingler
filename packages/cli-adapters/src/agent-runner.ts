@@ -1392,7 +1392,15 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const browserAttachment = yield* (
             yield* BrowserControlMcpService
           ).acquire(`${sessionId}:${chatId}`)
-          const memoryAttachment = yield* memoryService.attachment(cli)
+          // Jingler owns this pre-turn boundary, so recall is deterministic for
+          // every harness (including Codex, which has no context-injecting hook).
+          // Pass only the raw operator text: orchestration/persona notes are not
+          // useful search terms and would dilute a narrow memory query.
+          const memoryAttachment = yield* memoryService.attachment(
+            cli,
+            text,
+            `${sessionId}:${chatId}`
+          )
           const remoteMcpServers = composeRemoteMcpServers(
             memoryAttachment?.server ?? null,
             remoteMcpServer(openConnectorServer),
@@ -1555,7 +1563,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const eventCount = yield* Ref.make(0)
           const lastEvent = yield* Ref.make<string>("<none>")
           const wasInterrupted = yield* Ref.make(false)
-          const memoryRetrieval = yield* Ref.make(EMPTY_MEMORY_RETRIEVAL_SUMMARY)
+          const memoryRetrieval = yield* Ref.make(
+            memoryAttachment?.retrieval ?? EMPTY_MEMORY_RETRIEVAL_SUMMARY
+          )
 
           // toolUseId → the file an edit tool is writing, remembered at ToolStart so
           // its ToolEnd can mark the matching plan step done (see markPlanProgress).

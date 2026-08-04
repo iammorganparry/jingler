@@ -10,8 +10,10 @@ Codex's hook surface is asymmetric, so be honest about what is deterministic her
   injects a hook's stdout into the model context before the turn. There is no
   deterministic pre-turn injection point. So on Codex, **recall stays the skill's
   job** — the `jingler-team-memory` SKILL.md instructs the agent to `memory_search`
-  first over MCP. That is best-effort (the model must choose to act), which is the
-  exact gap hooks close elsewhere. Set expectations accordingly.
+  first over MCP. The MCP server repeats the recall/read/propose/poll rules in its
+  native `initialize` instructions, so Codex sees them even if it does not activate
+  the skill; acting on either instruction is still model-mediated. Set expectations
+  accordingly.
 
 ## 1. Environment variables
 
@@ -22,6 +24,17 @@ subprocess inherits them:
 export JINGLER_MEMORY_URL="http://localhost:9100"
 export JINGLER_MEMORY_TOKEN="jmem_xxxxxxxxxxxxxxxxxxxx"
 export JINGLER_MEMORY_ORG="org_xxxxxxxxxxxxxxxx"
+```
+
+Keep the token out of `config.toml` by using Codex's environment-backed HTTP auth:
+
+```toml
+[mcp_servers.jingler-memory]
+url = "https://memory.example.com/api/mcp"
+bearer_token_env_var = "JINGLER_MEMORY_TOKEN"
+
+[mcp_servers.jingler-memory.env_http_headers]
+x-jingler-organization-id = "JINGLER_MEMORY_ORG"
 ```
 
 ## 2. Wire persist to the `notify` hook
@@ -48,10 +61,11 @@ first arg → `MEMORY:` lines in the transcript. No candidate → nothing submit
 
 Because there is no deterministic pre-turn injection, keep the
 `jingler-team-memory` skill active: it tells the agent to `memory_search` team
-memory before answering or acting. If Codex later adds a context-injecting
-pre-turn hook, wire `recall.sh` to it the same way Claude Code's
-`UserPromptSubmit` does — the script is harness-agnostic and reads its prompt
-defensively from whatever JSON it is handed on stdin.
+memory and `memory_read` accepted hits before answering or acting. The server's
+MCP initialization instructions provide the same fallback at connection time. If
+Codex later adds a context-injecting pre-turn hook, wire `recall.sh` to it the same
+way Claude Code's `UserPromptSubmit` does — the script is harness-agnostic and
+reads its prompt defensively from whatever JSON it is handed on stdin.
 
 ## 4. Verify fail-open
 

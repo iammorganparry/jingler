@@ -18,7 +18,7 @@ import {
   GitService,
   HarnessCliAdapterLive,
   ModelsService,
-  MemoryService,
+  MemoryServiceLive,
   OrchestrationService,
   PlanStore,
   PluginRegistry,
@@ -73,7 +73,10 @@ const StoreLayers = Layer.mergeAll(
  */
 const HarnessLayers = Layer.mergeAll(
   AgentRunner.Default,
-  MemoryService.Default,
+  // AgentRunner.Default also depends on this exact layer reference. Effect's
+  // layer memoization therefore builds one app-lifetime MemoryService for both
+  // runner captures and renderer RPCs, keeping the outbox lock and proxy shared.
+  MemoryServiceLive,
   OrchestrationService.Default,
   ReviewService.Default,
   ContextManager.Default

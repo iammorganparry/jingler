@@ -71,6 +71,23 @@ const requestFor = (
   })
 }
 
+// The wire shape emitted by native Claude/Codex streamable-HTTP clients: no
+// Jingler-specific MCP headers and no custom request metadata.
+const standardRequestFor = (
+  method: string,
+  bearer: string,
+  body: Record<string, unknown> = {}
+): Request =>
+  new Request("https://jingler.test/api/mcp", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${bearer}`,
+      "content-type": "application/json",
+      "x-jingler-organization-id": "org-paid"
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", method, ...body })
+  })
+
 const collectingClient = (): {
   readonly client: MemoryClient<JsonValue>
   readonly requests: Array<MemoryClientRequest>
@@ -182,6 +199,108 @@ describe("personal access token minting", () => {
 })
 
 describe("personal access token MCP auth", () => {
+  it("supports a native client's authenticated recall/read/propose/poll round trip", async () => {
+    const { token, record } = mint({ role: "member" })
+    const requests: Array<MemoryClientRequest> = []
+    const client: MemoryClient<JsonValue> = {
+      request: (input) => {
+        requests.push(input)
+        if (input.path.startsWith("/internal/memory/search?")) {
+          return Effect.succeed({
+            results: [{ pageId: "page-stable", revisionId: "revision-stable", snippet: "Found it." }]
+          })
+        }
+        if (input.path === "/internal/memory/pages/page-stable") {
+          return Effect.succeed({
+            page: { id: "page-stable", title: "Stable fact", body: "Accepted body." },
+            revision: { id: "revision-stable" },
+            sourceIds: ["source-stable"],
+            citationIds: ["citation-stable"]
+          })
+        }
+        if (input.path === "/internal/memory/sources") {
+          return Effect.succeed({ workflowId: "workflow-stable", status: "running" })
+        }
+        return Effect.succeed({
+          workflowId: "workflow-stable",
+          status: "published",
+          pageIds: ["page-created"]
+        })
+      }
+    }
+    const dependencies = composedDependencies(client, {
+      store: storeFor(record),
+      authorize: paidAuthorize("member")
+    })
+    const invoke = async (
+      id: number,
+      name: string,
+      args: Record<string, unknown>
+    ): Promise<unknown> => {
+      const response = await handleMemoryMcpRequest(
+        standardRequestFor("tools/call", token, {
+          id,
+          params: { name, arguments: args }
+        }),
+        dependencies
+      )
+      expect(response.status).toBe(200)
+      return response.json()
+    }
+
+    const initialized = await handleMemoryMcpRequest(
+      standardRequestFor("initialize", token, {
+        id: 1,
+        params: { protocolVersion: "2025-06-18", capabilities: {} }
+      }),
+      dependencies
+    )
+    expect(initialized.status).toBe(200)
+    await expect(initialized.json()).resolves.toMatchObject({
+      result: { instructions: expect.stringContaining("memory_read") }
+    })
+
+    const searched = await invoke(2, "memory_search", { query: "stable", limit: 3 })
+    expect(searched).toMatchObject({
+      result: { structuredContent: { data: { results: [{ pageId: "page-stable" }] } } }
+    })
+
+    const read = await invoke(3, "memory_read", { pageId: "page-stable" })
+    expect(read).toMatchObject({
+      result: { structuredContent: { data: {
+        page: { id: "page-stable", body: "Accepted body." },
+        revision: { id: "revision-stable" },
+        sourceIds: ["source-stable"],
+        citationIds: ["citation-stable"]
+      } } }
+    })
+
+    const proposed = await invoke(4, "memory_propose", {
+      pageId: "page-created",
+      baseRevisionId: "new",
+      markdown: "A durable setup fact."
+    })
+    expect(proposed).toMatchObject({
+      result: { structuredContent: { data: { workflowId: "workflow-stable" } } }
+    })
+
+    const settled = await invoke(5, "memory_workflow_status", { workflowId: "workflow-stable" })
+    expect(settled).toMatchObject({
+      result: { structuredContent: { data: {
+        workflowId: "workflow-stable",
+        status: "published",
+        pageIds: ["page-created"]
+      } } }
+    })
+
+    expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
+      "GET /internal/memory/search?q=stable&limit=3",
+      "GET /internal/memory/pages/page-stable",
+      "POST /internal/memory/sources",
+      "GET /internal/memory/workflows/workflow-stable"
+    ])
+  })
+
   it("authorizes a tools/call for a valid PAT with the intersected privileges", async () => {
     const { token, record } = mint({ role: "member" })
     const { client, requests } = collectingClient()

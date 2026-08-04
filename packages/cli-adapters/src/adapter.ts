@@ -589,6 +589,37 @@ export const scriptedRun =
       yield* emit({ _tag: "Started", sessionId })
       yield* pause
 
+      // Exercise native MCP wiring in the deterministic adapter too. This is
+      // deliberately a standard, header-free MCP call through the attachment
+      // URL: it proves the harness-facing loopback proxy works end to end while
+      // keeping the upstream organization grant in Jingler's main process.
+      const memoryServer = spec.remoteMcpServers?.find(
+        ({ name }) => name === "jingler-memory"
+      )
+      if (memoryServer !== undefined) {
+        yield* Effect.tryPromise({
+          try: () =>
+            fetch(memoryServer.url, {
+              method: "POST",
+              headers: {
+                ...memoryServer.headers,
+                "content-type": "application/json",
+                "mcp-protocol-version": "2026-07-28"
+              },
+              body: JSON.stringify({
+                jsonrpc: "2.0",
+                id: `scripted-memory-${sessionId}`,
+                method: "tools/call",
+                params: {
+                  name: "memory_navigation",
+                  arguments: {}
+                }
+              })
+            }),
+          catch: () => null
+        }).pipe(Effect.ignore)
+      }
+
       // A deterministic busy window for queue E2E. Plan approval used to stand
       // in for this, but messages sent against a proposed plan are now revision
       // feedback by design and must never be treated as an ordinary work queue.
