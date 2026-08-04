@@ -719,7 +719,7 @@ export const runCodexAppServer = (
                 !planning &&
                 ctx.saveDraftPlan !== undefined
               ) {
-                await runP(ctx.saveDraftPlan(capture.emission.plan))
+                await runP(ctx.saveDraftPlan(capture.emission.plan, capture.block))
               }
 
               for (const event of codexAppServerMessageToStreamEvents(

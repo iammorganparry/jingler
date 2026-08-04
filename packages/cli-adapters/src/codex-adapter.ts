@@ -625,7 +625,7 @@ export const runCodexSdk = (
               !planning &&
               ctx.saveDraftPlan !== undefined
             ) {
-              await runP(ctx.saveDraftPlan(capture.emission.plan))
+              await runP(ctx.saveDraftPlan(capture.emission.plan, capture.block))
             }
             for (const se of codexEventToStreamEvents(event, sessionId, startedTools)) {
               await runP(ctx.emit(se))

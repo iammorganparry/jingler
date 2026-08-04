@@ -206,7 +206,7 @@ export type ProposePlan = (
  * plan the agent shows for iteration populates Plan Review. Never clobbers a
  * non-draft plan, so calling it is always safe. Returns immediately.
  */
-export type SaveDraftPlan = (plan: PlanPrd) => Effect.Effect<void>
+export type SaveDraftPlan = (plan: PlanPrd, block?: string) => Effect.Effect<void>
 
 /**
  * What the adapter is handed for a run: an ordered `emit` sink for normalized

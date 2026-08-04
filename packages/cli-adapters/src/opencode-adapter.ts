@@ -907,7 +907,7 @@ const driveOpencode = async (
           ) {
             // A "draft" emission in auto orchestration mirrors into Plan Review;
             // prose already streamed (not suppressed when planning is false).
-            await runP(ctx.saveDraftPlan(capture.emission.plan))
+            await runP(ctx.saveDraftPlan(capture.emission.plan, capture.block))
           } else if (planning && reply.length > 0) {
             // No plan (or the round cap is spent): replay the held-back prose
             // rather than returning silence.

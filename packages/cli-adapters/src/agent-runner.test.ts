@@ -389,6 +389,36 @@ describe("AgentRunner saveDraftPlan", () => {
     expect(doc?.plan.title).toBe("PRD: Approved work")
   })
 
+  it("scrubs the draft's raw JSON block from the transcript, keeping the prose", async () => {
+    const block = ["```json", JSON.stringify({ mode: "draft", plan: VALID_PLAN }), "```"].join("\n")
+    const emittingDraftAdapter = Layer.succeed(
+      CliAdapter,
+      CliAdapter.of({
+        run: (_sessionId, _spec, ctx) =>
+          Effect.gen(function* () {
+            yield* ctx.emit({ _tag: "Assistant", text: `Here is the draft.\n\n${block}` })
+            yield* (ctx.saveDraftPlan ?? (() => Effect.void))(VALID_PLAN, block)
+            yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+          }) as ReturnType<CliAdapterShape["run"]>,
+        stop: () => Effect.void
+      })
+    )
+    await runWith(emittingDraftAdapter)
+    const transcript = await Effect.runPromise(
+      TranscriptStore.list(SESSION).pipe(
+        Effect.provide(Layer.mergeAll(TranscriptStore.Default, temp.layer))
+      )
+    )
+    const visible = transcript
+      .flatMap((message) => message.parts)
+      .filter((part) => part._tag === "Text")
+      .map((part) => part.text)
+      .join("\n")
+    expect(visible).toContain("Here is the draft.")
+    expect(visible).not.toContain('"mode"')
+    expect(visible).not.toContain("```json")
+  })
+
   it("never clobbers a USER-authored draft the operator is editing", async () => {
     const userDraft: PlanPrd = {
       title: "PRD: Operator's own draft",

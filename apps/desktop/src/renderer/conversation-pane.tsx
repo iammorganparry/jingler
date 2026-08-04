@@ -609,21 +609,21 @@ export function ConversationPane({
       }}
       onStartDraft={canonicalPlan.startDraft}
       onSendToAgent={() => {
-        // Hand the user-authored draft to the agent as a plan-mode turn: switch
-        // into plan mode and send the draft MDX as the starting point. The agent
-        // proposes a refined plan, which replaces the draft as the canonical doc.
+        // Hand the draft to the agent as a plan-mode turn: switch into plan mode
+        // and send the draft plan (the structured DTO) as the starting point. The
+        // agent proposes a refined plan, which replaces the draft as canonical.
         const source =
           canonicalPlan.draft ??
-          (canonicalPlan.document ? JSON.stringify(canonicalPlan.document.plan) : "")
+          (canonicalPlan.document ? JSON.stringify(canonicalPlan.document.plan, null, 2) : "")
         convo.setMode("plan")
         convo.sendPrompt(
           [
             "I've drafted the plan below. Treat it as the starting point:",
             "review it, fill in the gaps, and propose a complete plan.",
             "",
-            "````html",
+            "```json",
             source.trim(),
-            "````"
+            "```"
           ].join("\n")
         )
       }}

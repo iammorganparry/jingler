@@ -64,7 +64,15 @@ const primaryAction = (input: {
 
   switch (input.status) {
     case "draft":
-      return { label: "Send to agent", icon: Send, onRun: input.onSendToAgent }
+      // A draft is a complete plan the operator can run directly — promote it to
+      // executing and drive implementation (same re-drive path as a stale plan).
+      // Refining it with the agent stays available as a secondary action.
+      return {
+        label: "Approve & implement",
+        icon: Play,
+        disabled: !input.canApprove,
+        onRun: input.onResume
+      }
     case "proposed":
     case "revising":
       return {
@@ -145,6 +153,9 @@ export function PlanFloatingActions({
       : []),
     ...(status === "stale"
       ? [{ label: "Revise with agent", icon: Send, onRun: onRevise }]
+      : []),
+    ...(status === "draft"
+      ? [{ label: "Send to agent to refine", icon: Send, onRun: onSendToAgent }]
       : [])
   ]
   const PrimaryIcon = primary?.icon
@@ -153,7 +164,7 @@ export function PlanFloatingActions({
     <div
       role="toolbar"
       aria-label={
-        status === "proposed" || status === "revising"
+        status === "proposed" || status === "revising" || status === "draft"
           ? "Plan approval options"
           : "Plan actions"
       }
