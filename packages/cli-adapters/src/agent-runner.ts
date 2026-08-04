@@ -1396,7 +1396,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // every harness (including Codex, which has no context-injecting hook).
           // Pass only the raw operator text: orchestration/persona notes are not
           // useful search terms and would dilute a narrow memory query.
-          const memoryAttachment = yield* memoryService.attachment(cli, text)
+          const memoryAttachment = yield* memoryService.attachment(
+            cli,
+            text,
+            `${sessionId}:${chatId}`
+          )
           const remoteMcpServers = composeRemoteMcpServers(
             memoryAttachment?.server ?? null,
             remoteMcpServer(openConnectorServer),

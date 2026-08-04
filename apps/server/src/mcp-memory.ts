@@ -501,9 +501,11 @@ const dispatchAuthenticatedRequest = async (
 const STANDARD_MCP_DEFAULT_VERSION = "2025-06-18"
 
 /**
- * Native MCP clients surface these server instructions before the model chooses
- * a tool. Keep the opening self-contained because Codex may truncate server
+ * Canonical transport-level workflow for native clients connecting outside
+ * Jingler. Keep the opening self-contained because Codex may truncate server
  * instructions after its configured limit (512 characters by default).
+ * Jingler's richer privacy/orchestration policy lives in memory-prompt.ts and
+ * deliberately augments, rather than replaces, this portable MCP contract.
  */
 export const MEMORY_MCP_INSTRUCTIONS =
   "Recall first: before answering or acting, call memory_search, then memory_read every page you rely on; never treat search snippets or navigation as the page. Cite its pageId, revisionId, sourceIds, and citationIds. When durable knowledge emerges, call memory_propose with baseRevisionId 'new' for a new page or the accepted revision for an update. Retain its workflow handle and poll memory_workflow_status until it settles. Requests are independent; do not create or reuse MCP sessions or cookies."

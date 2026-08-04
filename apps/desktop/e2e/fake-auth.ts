@@ -562,7 +562,11 @@ export const startFakeAuthServer = async (
           organizationId === null ||
           organizationFromGrant(req.headers.authorization) !== organizationId ||
           req.headers["mcp-protocol-version"] !== MEMORY_PROTOCOL ||
-          mcpMethod !== rpcMethod ||
+          !(
+            (mcpMethod === null && mcpName === null) ||
+            (mcpMethod === rpcMethod &&
+              (rpcMethod !== "tools/call" || params.name === mcpName))
+          ) ||
           req.headers["mcp-session-id"] !== undefined
         ) {
           return json(401, { error: "invalid stateless MCP request" }, { "x-fake-next-instance": assignedInstance })
@@ -580,7 +584,11 @@ export const startFakeAuthServer = async (
             }
           }, { "x-fake-next-instance": assignedInstance })
         }
-        if (rpcMethod !== "tools/call" || typeof params.name !== "string" || params.name !== mcpName) {
+        if (
+          rpcMethod !== "tools/call" ||
+          typeof params.name !== "string" ||
+          (mcpName !== null && params.name !== mcpName)
+        ) {
           return json(400, { error: "tool call headers do not match body" }, { "x-fake-next-instance": assignedInstance })
         }
         const state = stateFor(organizationId)

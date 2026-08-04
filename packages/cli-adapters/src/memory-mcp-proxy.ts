@@ -75,17 +75,27 @@ const bodyOf = (request: IncomingMessage): Promise<string> =>
   new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let total = 0
+    let settled = false
     request.on("data", (chunk: Buffer) => {
+      if (settled) return
       total += chunk.byteLength
       if (total > MAX_REQUEST_BYTES) {
+        settled = true
         reject(new Error("Memory MCP request is too large"))
-        request.destroy()
         return
       }
       chunks.push(chunk)
     })
-    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")))
-    request.on("error", reject)
+    request.on("end", () => {
+      if (settled) return
+      settled = true
+      resolve(Buffer.concat(chunks).toString("utf8"))
+    })
+    request.on("error", (cause) => {
+      if (settled) return
+      settled = true
+      reject(cause)
+    })
   })
 
 const closeServer = (server: Server): Effect.Effect<void> =>
@@ -221,6 +231,16 @@ const registerWith = (
       existing.forward = forward
       return existing.attachment
     }
+    // An attachment can remain in a running harness for hours. Evicting a
+    // registration here would invalidate that live URL while its caller still
+    // believes it is usable, so reject new registrations once the app-lifetime
+    // bound is reached and preserve every attachment already handed out.
+    if (runtime.registrations.size >= MAX_REGISTRATIONS) {
+      return yield* new MemoryMcpProxyError({
+        message: "Memory MCP proxy registration limit reached",
+        cause: null
+      })
+    }
     const token = yield* Effect.try({
       try: () => randomBytes(32).toString("base64url"),
       catch: (cause) =>
@@ -240,10 +260,6 @@ const registerWith = (
       }
     }
     runtime.registrations.set(key, { path, authorization, attachment, forward })
-    if (runtime.registrations.size > MAX_REGISTRATIONS) {
-      const oldest = runtime.registrations.keys().next().value
-      if (oldest !== undefined) runtime.registrations.delete(oldest)
-    }
     return attachment
   })
 

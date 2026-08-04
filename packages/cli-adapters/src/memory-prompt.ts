@@ -1,7 +1,8 @@
 /**
- * Shared instructions for every harness receiving the stateless team-memory
- * endpoint. Keeping one prompt avoids Claude, Codex, and OpenCode learning
- * subtly different retrieval or publication rules.
+ * Jingler-specific privacy and orchestration policy for every attached harness.
+ * The MCP server's MEMORY_MCP_INSTRUCTIONS remains the canonical, compact
+ * transport workflow for external clients; this prompt adds deterministic
+ * pre-turn recall and silent-use rules that only Jingler can guarantee.
  */
 export const memoryPrompt = (): string =>
   [

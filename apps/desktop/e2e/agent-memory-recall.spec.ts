@@ -41,9 +41,6 @@ for (const cli of ["claude", "codex"] as const) {
   }) => {
     const fake = await startFakeAuthServer()
     try {
-      const sourcesBefore = fake.memorySnapshot("org-e2e").sourceCount
-      const searchesBefore = memoryRequestCount(fake.memoryRequests, "memory_search")
-      const readsBefore = memoryRequestCount(fake.memoryRequests, "memory_read")
       const app = await launchApp({
         authServer: fake,
         configured: true,
@@ -64,19 +61,25 @@ for (const cli of ["claude", "codex"] as const) {
 
       await expect
         .poll(() => memoryRequestCount(fake.memoryRequests, "memory_search"))
-        .toBe(searchesBefore + 1)
+        .toBe(1)
       await expect
         .poll(() => memoryRequestCount(fake.memoryRequests, "memory_read"))
-        .toBeGreaterThan(readsBefore)
+        .toBeGreaterThan(0)
 
-      const recall = recalledRequests(fake.memoryRequests).slice(searchesBefore + readsBefore)
+      const recall = recalledRequests(fake.memoryRequests)
       expect(recall[0]?.mcpName).toBe("memory_search")
       expect(recall.some((request) => request.mcpName === "memory_read")).toBe(true)
       expect(recall.every((request) => request.hasCookie === false)).toBe(true)
       expect(recall.every((request) => request.hasSessionId === false)).toBe(true)
+      expect(fake.memoryRequests.some(
+        (request) =>
+          request.rpcMethod === "tools/call" &&
+          request.mcpMethod === null &&
+          request.mcpName === null
+      )).toBe(true)
       await expect
         .poll(() => fake.memorySnapshot("org-e2e").sourceCount, { timeout: 30_000 })
-        .toBe(sourcesBefore + 1)
+        .toBe(1)
 
       await app.app.close()
     } finally {

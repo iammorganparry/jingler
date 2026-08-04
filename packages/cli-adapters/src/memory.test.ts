@@ -20,6 +20,7 @@ import type {
   MemoryMcpForwarder,
   MemoryMcpProxy
 } from "./memory-mcp-proxy.js"
+import { MemoryMcpProxyError } from "./memory-mcp-proxy.js"
 import { codexMcpEnvironment, codexMcpOverrides } from "./mcp-config.js"
 import { makeInMemorySecretStore, SecretStore } from "./secret-store.js"
 import { withTempRoot } from "./test-support.js"
@@ -261,6 +262,33 @@ describe("MemoryService stateless attachment", () => {
     expect(forwarded.every((request) => request.headers.get("mcp-name") === null)).toBe(true)
   })
 
+  it("fails closed when the private loopback proxy cannot register", async () => {
+    const proxy: MemoryMcpProxy = {
+      register: () => Effect.fail(new MemoryMcpProxyError({
+        message: "loopback unavailable",
+        cause: null
+      }))
+    }
+    const fetchImplementation: typeof fetch = async (input) =>
+      String(input).endsWith("/api/memory/grant")
+        ? Response.json(grantResponse("proxy-failed"))
+        : discoveryResponse()
+    const service = makeMemoryService({
+      fetch: fetchImplementation,
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS,
+      proxy
+    })
+
+    const attachment = await Effect.runPromise(
+      withEnabledMemory(service.attachment("claude")).pipe(
+        Effect.provide(configuredLayer())
+      )
+    )
+
+    expect(attachment).toBeNull()
+  })
+
   it("searches and loads a bounded accepted working set before the harness starts", async () => {
     const requests: Request[] = []
     const fetchImplementation: typeof fetch = async (input, init) => {
@@ -281,7 +309,8 @@ describe("MemoryService stateless attachment", () => {
         name === "memory_search"
           ? {
               results: ["one", "two", "three", "four"].map((id) => ({
-                pageId: `page-${id}`
+                pageId: `page-${id}`,
+                revisionId: `revision:page-${id}:1`
               }))
             }
           : {
@@ -307,9 +336,26 @@ describe("MemoryService stateless attachment", () => {
     })
 
     const attachment = await Effect.runPromise(
-      withEnabledMemory(service.attachment("codex", "How do refunds work?")).pipe(
+      withEnabledMemory(
+        service.attachment(
+          "codex",
+          "How do refunds work? api_key=secret-should-not-egress",
+          "session-1:chat-1"
+        )
+      ).pipe(
         Effect.provide(configuredLayer())
       )
+    )
+
+    const repeated = await Effect.runPromise(
+      withEnabledMemory(
+        service.attachment("codex", "How do refunds work?", "session-1:chat-1")
+      ).pipe(Effect.provide(configuredLayer()))
+    )
+    const separateConversation = await Effect.runPromise(
+      withEnabledMemory(
+        service.attachment("codex", "How do refunds work?", "session-2:chat-1")
+      ).pipe(Effect.provide(configuredLayer()))
     )
 
     expect(attachment?.retrieval).toStrictEqual({
@@ -323,6 +369,15 @@ describe("MemoryService stateless attachment", () => {
     expect(attachment?.instructions).toContain("Accepted body for page-one")
     expect(attachment?.instructions).toContain('"revisionId": "revision:page-one:1"')
     expect(attachment?.instructions).not.toContain("page-four")
+    expect(repeated?.retrieval).toStrictEqual({
+      searches: 1,
+      reads: 0,
+      navigation: 0,
+      graphReads: 0,
+      proposals: 0
+    })
+    expect(repeated?.instructions).not.toContain("Accepted body for page-one")
+    expect(separateConversation?.instructions).toContain("Accepted body for page-one")
 
     const calls = requests.filter(
       (request) => request.headers.get("mcp-method") === "tools/call"
@@ -331,10 +386,20 @@ describe("MemoryService stateless attachment", () => {
       "memory_search",
       "memory_read",
       "memory_read",
+      "memory_read",
+      "memory_search",
+      "memory_search",
+      "memory_read",
+      "memory_read",
       "memory_read"
     ])
     expect(calls.every((request) => request.headers.get("cookie") === null)).toBe(true)
     expect(calls.every((request) => request.headers.get("mcp-session-id") === null)).toBe(true)
+    const searchBody = (await calls[0]!.json()) as {
+      params: { arguments: { query: string } }
+    }
+    expect(searchBody.params.arguments.query).toContain("api_key=[REDACTED]")
+    expect(searchBody.params.arguments.query).not.toContain("secret-should-not-egress")
   })
 
   it("does not attach team memory to Cursor, which Jingler cannot launch", async () => {

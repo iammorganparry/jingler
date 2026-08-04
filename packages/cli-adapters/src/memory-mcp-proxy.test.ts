@@ -99,4 +99,67 @@ loopbackDescribe("MemoryMcpProxy registration lifecycle", () => {
       )
     )
   })
+
+  it("preserves live attachments when the registration limit is reached", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const proxy = yield* makeMemoryMcpProxy()
+          const attachments = yield* Effect.forEach(
+            Array.from({ length: 32 }, (_, index) => index),
+            (index) =>
+              proxy.register(`registration-${index}`, async () => ({
+                status: 200,
+                contentType: "text/plain",
+                body: `registration-${index}`
+              }))
+          )
+
+          const overflow = yield* proxy.register("registration-32", async () => ({
+            status: 200,
+            contentType: "text/plain",
+            body: "overflow"
+          })).pipe(Effect.either)
+          expect(overflow._tag).toBe("Left")
+
+          const first = attachments[0]!
+          const response = yield* Effect.promise(() =>
+            fetch(first.url, {
+              method: "POST",
+              headers: first.headers,
+              body: "{}"
+            })
+          )
+          expect(response.status).toBe(200)
+          expect(yield* Effect.promise(() => response.text())).toBe("registration-0")
+        })
+      )
+    )
+  })
+
+  it("returns a JSON 413 without resetting an oversized request", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const proxy = yield* makeMemoryMcpProxy()
+          const attachment = yield* proxy.register("large-request", async () => ({
+            status: 200,
+            contentType: "text/plain",
+            body: "unexpected"
+          }))
+          const response = yield* Effect.promise(() =>
+            fetch(attachment.url, {
+              method: "POST",
+              headers: attachment.headers,
+              body: "x".repeat(1024 * 1024 + 1)
+            })
+          )
+          expect(response.status).toBe(413)
+          expect(yield* Effect.promise(() => response.json())).toMatchObject({
+            error: { message: "Private memory service request failed" }
+          })
+        })
+      )
+    )
+  })
 })

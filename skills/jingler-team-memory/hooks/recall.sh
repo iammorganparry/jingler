@@ -68,7 +68,7 @@ search_memory() {
     body=$(printf '{"jsonrpc":"2.0","id":"recall","method":"tools/call","params":{"name":"memory_search","arguments":{"query":"%s","limit":%s},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"jingler-memory-recall-hook","version":"1.0.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}' "$esc" "$LIMIT")
   fi
 
-  curl -sS -m 8 --connect-timeout 4 -X POST "$ENDPOINT" \
+  curl -sS -m 4 --connect-timeout 2 -X POST "$ENDPOINT" \
     -H "Authorization: Bearer ${JINGLER_MEMORY_TOKEN}" \
     -H "x-jingler-organization-id: ${JINGLER_MEMORY_ORG}" \
     -H "content-type: application/json" \
@@ -95,7 +95,7 @@ extract_page_ids() {
       // [] ) as $d
     | (if ($d|type)=="array" then $d else ($d.data // $d.results // []) end)
     | map(select(type=="object"))
-    | .[:3][]
+    | .[]
     | (.pageId // .id // .page_id // empty)
   ' 2>/dev/null || true
 }
@@ -106,7 +106,7 @@ read_memory() {
     '{jsonrpc:"2.0",id:"recall-read",method:"tools/call",params:{name:"memory_read",arguments:{pageId:$id},_meta:{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{name:"jingler-memory-recall-hook",version:"1.0.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}' \
     2>/dev/null) || return 0
 
-  curl -sS -m 4 --connect-timeout 2 -X POST "$ENDPOINT" \
+  curl -sS -m 3 --connect-timeout 1 -X POST "$ENDPOINT" \
     -H "Authorization: Bearer ${JINGLER_MEMORY_TOKEN}" \
     -H "x-jingler-organization-id: ${JINGLER_MEMORY_ORG}" \
     -H "content-type: application/json" \
@@ -166,11 +166,39 @@ fi
 # (which could be large and is not useful context). Fail open.
 [ -z "$PAGE_IDS" ] && exit 0
 
-OUT=$(printf '%s\n' "$PAGE_IDS" | while IFS= read -r page_id; do
+# Accepted-page reads are independent. Run the bounded set concurrently so a
+# slow page costs one read timeout, not READ_LIMIT sequential timeouts. Numbered
+# files preserve search order without sharing shell variables across subshells.
+READ_DIR=$(mktemp -d "${TMPDIR:-/tmp}/jingler-memory-recall.XXXXXX" 2>/dev/null || true)
+[ -z "$READ_DIR" ] && exit 0
+trap 'rm -rf "$READ_DIR"' EXIT HUP INT TERM
+
+read_index=0
+read_pids=""
+while IFS= read -r page_id; do
   [ -z "$page_id" ] && continue
-  page_response=$(read_memory "$page_id")
-  [ -n "$page_response" ] && format_read_page "$page_response"
-done)
+  read_index=$((read_index + 1))
+  (
+    page_response=$(read_memory "$page_id")
+    [ -n "$page_response" ] && format_read_page "$page_response"
+  ) > "$READ_DIR/$read_index" &
+  read_pids="$read_pids $!"
+done <<EOF
+$PAGE_IDS
+EOF
+
+for read_pid in $read_pids; do
+  wait "$read_pid" 2>/dev/null || true
+done
+
+OUT=""
+read_index=1
+while [ "$read_index" -le "$READ_LIMIT" ]; do
+  [ -s "$READ_DIR/$read_index" ] && OUT="${OUT}$(cat "$READ_DIR/$read_index")
+"
+  read_index=$((read_index + 1))
+done
+OUT=$(printf '%s' "$OUT" | sed '/^$/d')
 
 # Do not fall back to snippets if every accepted-page read failed. That keeps
 # the hook's trust boundary identical to the skill: read before relying.

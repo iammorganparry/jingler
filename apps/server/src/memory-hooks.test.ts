@@ -137,6 +137,28 @@ describe("team-memory recall hook", () => {
     expect(request).toContain('"query":"deterministic"')
   })
 
+  it("deduplicates before applying the accepted-page read limit", async () => {
+    const fakeCurl = resolve(fixtureDirectory, "curl")
+    await writeFile(
+      fakeCurl,
+      [
+        "#!/bin/sh",
+        'printf \'%s\\n\' "$@" >> "$HOOK_CURL_LOG"',
+        "case \"$*\" in",
+        "  *memory_read*) printf '%s' '{\"result\":{\"structuredContent\":{\"data\":{\"page\":{\"id\":\"page-read\",\"title\":\"Accepted page\",\"body\":\"Accepted body.\"},\"revision\":{\"id\":\"revision-read\"},\"sourceIds\":[],\"citationIds\":[]}}}}' ;;",
+        "  *) printf '%s' '{\"result\":{\"structuredContent\":{\"data\":{\"results\":[{\"pageId\":\"page-1\"},{\"pageId\":\"page-1\"},{\"pageId\":\"page-2\"},{\"pageId\":\"page-3\"}]}}}}' ;;",
+        "esac"
+      ].join("\n")
+    )
+    await chmod(fakeCurl, 0o755)
+
+    const result = runHook(recallHook, { input: '{"prompt":"accepted pages"}' })
+
+    expect(result.status).toBe(0)
+    const request = await readFile(curlLog, "utf8")
+    expect(request.match(/mcp-name: memory_read/g)).toHaveLength(3)
+  })
+
 })
 
 describe("team-memory persist hook", () => {

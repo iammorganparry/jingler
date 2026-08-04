@@ -26,7 +26,8 @@ import {
   makeMemoryMcpProxy,
   type MemoryMcpForwardRequest,
   type MemoryMcpForwardResponse,
-  type MemoryMcpProxy
+  type MemoryMcpProxy,
+  type MemoryMcpProxyError
 } from "./memory-mcp-proxy.js"
 import { memoryPrompt } from "./memory-prompt.js"
 import { SecretStore } from "./secret-store.js"
@@ -46,6 +47,7 @@ const MAX_DIGEST_CHARACTERS = 8_000
 const AUTOMATIC_RECALL_LIMIT = 3
 const MAX_AUTOMATIC_RECALL_QUERY_CHARACTERS = 2_000
 const MAX_RECALLED_PAGE_CHARACTERS = 4_000
+const MAX_RECALL_SCOPES = 128
 // Reuse a minted grant until it is within this many seconds of expiry, so the
 // clock skew / in-flight-request window still leaves a valid grant. The 401
 // eviction path (below) covers server-side revocation and expiry races.
@@ -93,7 +95,8 @@ export const EMPTY_MEMORY_RETRIEVAL_SUMMARY: MemoryRetrievalSummary = {
 const AutomaticRecallSearchResponse = Schema.Struct({
   results: Schema.Array(
     Schema.Struct({
-      pageId: Schema.String
+      pageId: Schema.String,
+      revisionId: Schema.optional(Schema.String)
     })
   )
 })
@@ -116,6 +119,13 @@ type AutomaticRecallPage = Schema.Schema.Type<typeof AutomaticRecallPageResponse
 interface AutomaticRecall {
   readonly instructions: string
   readonly retrieval: MemoryRetrievalSummary
+  readonly searchFingerprint: string
+  readonly evidenceFingerprint: string
+}
+
+interface RecallCacheEntry {
+  readonly searchFingerprint: string
+  readonly evidenceFingerprint: string
 }
 
 const recalledBody = (body: string): string =>
@@ -197,7 +207,9 @@ export interface MemoryServiceShape {
   readonly attachment: (
     cli: CliKind,
     /** Raw operator text. When present, Jingler performs bounded recall first. */
-    query?: string
+    query?: string,
+    /** Stable conversation boundary used to avoid reinjecting unchanged pages. */
+    recallScope?: string
   ) => Effect.Effect<MemoryAttachment | null, never, MemoryServiceEnvironment>
   readonly captureSettledSession: (
     input: MemorySessionDigestInput
@@ -268,6 +280,8 @@ interface MemoryRuntime {
   readonly attachmentCache: Map<string, CachedMemoryAttachment>
   readonly attachmentLock: Effect.Semaphore
   readonly attachmentRefreshes: Set<string>
+  /** Last accepted recall working set per active conversation. */
+  readonly recallCache: Map<string, RecallCacheEntry>
   draining: boolean
 }
 
@@ -597,7 +611,8 @@ const automaticRecall = (
   runtime: MemoryRuntime,
   issued: MemoryGrantResponse,
   organizationId: string,
-  query: string
+  query: string,
+  previous?: RecallCacheEntry
 ): Effect.Effect<AutomaticRecall, MemoryRequestError> =>
   Effect.gen(function* () {
     const rawSearch = yield* callMemoryTool(
@@ -615,8 +630,32 @@ const automaticRecall = (
       return yield* Effect.fail(new MemoryRequestError({ status: 502 }))
     }
 
-    const pageIds = [...new Set(decodedSearch.right.results.map(({ pageId }) => pageId))]
-      .slice(0, AUTOMATIC_RECALL_LIMIT)
+    const hits = decodedSearch.right.results.filter(
+      (candidate, index, all) =>
+        all.findIndex(({ pageId }) => pageId === candidate.pageId) === index
+    ).slice(0, AUTOMATIC_RECALL_LIMIT)
+    const searchFingerprint = JSON.stringify(
+      hits.map(({ pageId, revisionId }) => [pageId, revisionId ?? null])
+    )
+    // Standard search results carry the accepted revision id. If the exact
+    // working set is unchanged for this conversation, avoid both rereading and
+    // reinjecting the same page bodies into the next harness turn.
+    if (
+      previous?.searchFingerprint === searchFingerprint &&
+      hits.every(({ revisionId }) => revisionId !== undefined)
+    ) {
+      return {
+        instructions: "",
+        retrieval: {
+          ...EMPTY_MEMORY_RETRIEVAL_SUMMARY,
+          searches: 1
+        },
+        searchFingerprint,
+        evidenceFingerprint: previous.evidenceFingerprint
+      }
+    }
+
+    const pageIds = hits.map(({ pageId }) => pageId)
     const reads = yield* Effect.forEach(
       pageIds,
       (pageId) =>
@@ -638,21 +677,44 @@ const automaticRecall = (
     if (pageIds.length > 0 && pages.length === 0) {
       return yield* Effect.fail(new MemoryRequestError({ status: 502 }))
     }
+    const evidenceFingerprint = JSON.stringify(
+      pages.map(({ page, revision }) => [page.id, revision.id])
+    )
     return {
-      instructions: renderRecalledMemories(pages),
+      instructions:
+        previous?.evidenceFingerprint === evidenceFingerprint
+          ? ""
+          : renderRecalledMemories(pages),
       retrieval: {
         ...EMPTY_MEMORY_RETRIEVAL_SUMMARY,
         searches: 1,
         reads: pages.length
-      }
+      },
+      searchFingerprint,
+      evidenceFingerprint
     }
   })
+
+const rememberRecall = (
+  runtime: MemoryRuntime,
+  scope: string,
+  recall: AutomaticRecall
+): void => {
+  runtime.recallCache.delete(scope)
+  runtime.recallCache.set(scope, {
+    searchFingerprint: recall.searchFingerprint,
+    evidenceFingerprint: recall.evidenceFingerprint
+  })
+  if (runtime.recallCache.size <= MAX_RECALL_SCOPES) return
+  const oldest = runtime.recallCache.keys().next().value
+  if (oldest !== undefined) runtime.recallCache.delete(oldest)
+}
 
 const attachmentFrom = (
   runtime: MemoryRuntime,
   issued: MemoryGrantResponse,
   selection: SelectedMemory
-): Effect.Effect<MemoryAttachment> => {
+): Effect.Effect<MemoryAttachment, MemoryMcpProxyError> => {
   const fallback: RemoteMcpServer = {
     name: MEMORY_SERVER_NAME,
     url: endpoint(runtime.baseUrl(), "/api/mcp").toString(),
@@ -663,15 +725,12 @@ const attachmentFrom = (
     },
     headerEnvironment: { authorization: MEMORY_AUTH_ENVIRONMENT }
   }
-  const server =
-    runtime.proxy === undefined
-      ? Effect.succeed(fallback)
-      : runtime.proxy
-          .register(
-            `${selection.organizationId}:${sha256(selection.token)}`,
-            (request) => Effect.runPromise(forwardMemoryMcp(runtime, selection, request))
-          )
-          .pipe(Effect.orElseSucceed(() => fallback))
+  const server = runtime.proxy === undefined
+    ? Effect.succeed(fallback)
+    : runtime.proxy.register(
+        `${selection.organizationId}:${sha256(selection.token)}`,
+        (request) => Effect.runPromise(forwardMemoryMcp(runtime, selection, request))
+      )
   return server.pipe(
     Effect.map((resolved) => ({
       server: resolved,
@@ -696,9 +755,19 @@ const validatedAttachment = (
       ).pipe(Effect.either)
       if (Either.isRight(discovery)) {
         runtime.grantCache.set(selection.organizationId, issued.right)
-        const attachment = yield* attachmentFrom(runtime, issued.right, selection)
+        const attachmentResult = yield* attachmentFrom(
+          runtime,
+          issued.right,
+          selection
+        ).pipe(Effect.either)
+        if (Either.isLeft(attachmentResult)) {
+          yield* Effect.logWarning(
+            `Team memory attachment unavailable: ${attachmentResult.left.message}`
+          )
+          return null
+        }
         return {
-          attachment,
+          attachment: attachmentResult.right,
           issued: issued.right,
           expiresAt: issued.right.claims.expiresAt,
           tokenHash: sha256(selection.token)
@@ -967,9 +1036,10 @@ export const makeMemoryService = (
     attachmentCache: new Map<string, CachedMemoryAttachment>(),
     attachmentLock: Effect.unsafeMakeSemaphore(1),
     attachmentRefreshes: new Set<string>(),
+    recallCache: new Map<string, RecallCacheEntry>(),
     draining: false
   }
-  const attachment = (cli: CliKind, query?: string) =>
+  const attachment = (cli: CliKind, query?: string, recallScope?: string) =>
     cli === "cursor"
       ? Effect.succeed(null)
       : selectedMemory.pipe(
@@ -978,22 +1048,32 @@ export const makeMemoryService = (
             return cachedAttachment(runtime, selection).pipe(
               Effect.flatMap((cached) => {
                 if (cached === null) return Effect.succeed(null)
-                const trimmedQuery = (query?.trim() ?? "").slice(
-                  0,
-                  MAX_AUTOMATIC_RECALL_QUERY_CHARACTERS
-                )
+                const trimmedQuery = redactMemoryText(query ?? "")
+                  .trim()
+                  .slice(0, MAX_AUTOMATIC_RECALL_QUERY_CHARACTERS)
                 if (trimmedQuery.length === 0) return Effect.succeed(cached.attachment)
+                const cacheScope = recallScope === undefined
+                  ? undefined
+                  : `${selection.organizationId}:${recallScope}`
                 return automaticRecall(
                   runtime,
                   cached.issued,
                   selection.organizationId,
-                  trimmedQuery
+                  trimmedQuery,
+                  cacheScope === undefined
+                    ? undefined
+                    : runtime.recallCache.get(cacheScope)
                 ).pipe(
-                  Effect.map((recalled) => ({
-                    ...cached.attachment,
-                    instructions: `${cached.attachment.instructions}\n${recalled.instructions}`,
-                    retrieval: recalled.retrieval
-                  })),
+                  Effect.map((recalled) => {
+                    if (cacheScope !== undefined) rememberRecall(runtime, cacheScope, recalled)
+                    return {
+                      ...cached.attachment,
+                      instructions: recalled.instructions.length === 0
+                        ? cached.attachment.instructions
+                        : `${cached.attachment.instructions}\n${recalled.instructions}`,
+                      retrieval: recalled.retrieval
+                    }
+                  }),
                   Effect.orElseSucceed(() => cached.attachment)
                 )
               })
