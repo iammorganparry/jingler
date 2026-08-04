@@ -312,7 +312,10 @@ export function PlanEditor({
           </div>
         )}
         {page === "workflow" && (
-          <div className="min-h-0 min-w-0 flex-1">
+          // Must be a flex COLUMN: PlanWorkflow (and its React Flow canvas) sizes
+          // itself with `flex-1`, so a non-flex parent collapses it to 0 height
+          // and the graph renders blank.
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {projection ? (
               <PlanWorkflow
                 prd={projection}

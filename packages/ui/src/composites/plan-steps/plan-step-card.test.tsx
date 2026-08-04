@@ -93,4 +93,22 @@ describe("PlanStepCard file chips", () => {
     expect(screen.queryByRole("button", { name: /^Open src\/auth/ })).toBeNull()
     expect(screen.getByText("src/auth/token-store.ts")).toBeVisible()
   })
+
+  it("expands the '+N more' file chip to reveal the rest, then collapses", () => {
+    const files = Array.from({ length: 15 }, (_, i) => ({
+      path: `src/file-${i}.ts`,
+      change: "M" as const,
+      added: 1,
+      removed: 0
+    }))
+    render(<PlanStepCard step={{ ...step, files }} />)
+
+    // Only the first 12 render; file 14 is hidden behind "+3 more".
+    expect(screen.queryByText("src/file-14.ts")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "+3 more" }))
+    expect(screen.getByText("src/file-14.ts")).toBeVisible()
+    // Collapses again via "Show less".
+    fireEvent.click(screen.getByRole("button", { name: "Show less" }))
+    expect(screen.queryByText("src/file-14.ts")).toBeNull()
+  })
 })

@@ -192,10 +192,13 @@ function PlanReviewBody(props: PlanReviewProps) {
     ) : null
 
   return (
-    <div className={cn("flex min-h-0 min-w-0 flex-1 bg-editor", gutter)}>
+    // Pane-width like the conversation view's agent bar: the editor (and its tab
+    // bar) span the full pane, and each page centres its own content — so the tab
+    // bar is NOT indented by a gutter/max-width wrapper.
+    <div className="flex min-h-0 min-w-0 flex-1 bg-editor">
       <div
         data-testid="plan-review-container"
-        className="mx-auto flex min-h-0 w-full max-w-[980px] flex-1"
+        className="flex min-h-0 w-full flex-1"
       >
         <PlanEditor
           document={document ?? null}
