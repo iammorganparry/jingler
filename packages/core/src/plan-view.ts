@@ -37,6 +37,12 @@ export interface PlanStepView {
   readonly files: ReadonlyArray<PlanFile>
   /** Remaining rich prose blocks for the stage body. */
   readonly notes: ReadonlyArray<PlanBlock>
+  /** The assigned worker's agent id, when a worker owns this stage; else null. */
+  readonly agentId: string | null
+  /** A short "cli · model" worker label, when assigned; else null. */
+  readonly worker: string | null
+  /** The worker's reasoning effort (e.g. "xhigh"), when set; else null. */
+  readonly reasoningEffort: string | null
 }
 
 /** Prose sections plus every mermaid diagram found across the document. */
@@ -78,17 +84,23 @@ export interface PlanView {
   readonly workflow: PlanWorkflowGraph
 }
 
-const toStepView = (stage: PlanPrdStage): PlanStepView => ({
-  id: stage.id,
-  title: stage.title,
-  intent: stage.intent,
-  complexity: stage.complexity,
-  executionStatus: stage.executionStatus ?? "queued",
-  acceptance: stage.acceptance,
-  approach: stage.approach,
-  files: stage.files,
-  notes: stage.notes
-})
+const toStepView = (stage: PlanPrdStage): PlanStepView => {
+  const assignment = stage.assignment ?? null
+  return {
+    id: stage.id,
+    title: stage.title,
+    intent: stage.intent,
+    complexity: stage.complexity,
+    executionStatus: stage.executionStatus ?? "queued",
+    acceptance: stage.acceptance,
+    approach: stage.approach,
+    files: stage.files,
+    notes: stage.notes,
+    agentId: assignment?.agentId ?? null,
+    worker: assignment ? `${assignment.cli} · ${assignment.model}` : null,
+    reasoningEffort: assignment?.reasoning?.effort ?? null
+  }
+}
 
 /** Every mermaid source carried by a section's blocks or a stage's diagrams. */
 const sectionDiagramSources = (section: PlanPrdSection): Array<string> =>

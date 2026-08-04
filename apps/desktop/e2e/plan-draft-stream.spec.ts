@@ -67,7 +67,7 @@ test("a streamed plan opens beside chat, stays read-only, and promotes in place"
   // Composing tolerant-parses the streamed partial DTO into the read-only outline
   // live, so a stage title appears before the canonical file is ever written.
   await expect(
-    window.getByText("Audit session middleware", { exact: true })
+    window.getByText("Audit session middleware", { exact: true }).first()
   ).toBeVisible({ timeout: 20_000 })
 
   // Promotion swaps in the validated canonical revision: the Main step outline
@@ -76,7 +76,7 @@ test("a streamed plan opens beside chat, stays read-only, and promotes in place"
     .poll(() => existsSync(planFile), { timeout: 20_000 })
     .toBe(true)
   await expect(
-    window.getByText("Audit session middleware", { exact: true })
+    window.getByText("Audit session middleware", { exact: true }).first()
   ).toBeVisible({ timeout: 20_000 })
   await expect(window.getByTestId("plan-floating-actions")).toBeVisible()
 })
@@ -115,7 +115,7 @@ test("later plan drafts respect a split the operator closed", async ({
   await nextComposer.fill("[[plan]] [[stream-plan]] revise auth")
   await nextComposer.press("Enter")
   await expect(
-    window.getByRole("toolbar", { name: "Plan approval options" })
+    window.getByLabel("Plan approval options").first()
   ).toBeVisible({ timeout: 20_000 })
   await expect(window.getByTestId("plan-split-column")).toHaveCount(0)
 
@@ -158,7 +158,7 @@ test("a closed plan split stays closed after an app restart", async ({
   await nextComposer.press("Enter")
 
   await expect(
-    reopened.window.getByRole("toolbar", { name: "Plan approval options" })
+    reopened.window.getByLabel("Plan approval options").first()
   ).toBeVisible({ timeout: 20_000 })
   await expect(reopened.window.getByTestId("plan-split-column")).toHaveCount(0)
 })

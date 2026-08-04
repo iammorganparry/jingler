@@ -351,7 +351,7 @@ test("plan file chips render on the step outline with diff evidence", async ({
   // Each step's Changes section renders its declared edits as inline file chips.
   await expect(window.getByText("src/auth/token-store.ts", { exact: true })).toBeVisible()
   await expect(window.getByText("src/auth/refresh.ts").first()).toBeVisible()
-  await expect(window.getByText("src/auth/retry.ts", { exact: true })).toBeVisible()
+  await expect(window.getByText("src/auth/session.test.ts", { exact: true })).toBeVisible()
 })
 
 test("an external write to the plan file live-updates the outline (Plan.watch)", async ({

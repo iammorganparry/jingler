@@ -315,7 +315,9 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
     .toContain('"agentId": "agent-01"')
 
   await window.getByRole("button", { name: "Plan Review" }).first().click()
-  await expect(window.locator('[data-plan-assignment-card="true"]')).toHaveCount(8)
+  // One assignment card per stage; the DTO plan flattens the old HTML branch arms
+  // (s_4a/s_4b) so there are six stages, each with a routed worker.
+  await expect(window.locator('[data-plan-assignment-card="true"]')).toHaveCount(6)
   await expect(window.getByText("agent-01").first()).toBeVisible()
   await expect(window.getByText("claude · opus").first()).toBeVisible()
   await expect(window.getByText("agent-02").first()).toBeVisible()
@@ -325,7 +327,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
     .filter({ hasText: "agent-02" })
     .first()
   await expect(releaseAssignment).toContainText("Reasoning: xhigh")
-  await expect(releaseAssignment).toContainText("queued")
+  await expect(releaseAssignment).toContainText("Queued")
   await expect
     .poll(() => readFileSync(planFile, "utf8"))
     .toMatch(assignmentJson("agent-02"))
@@ -399,7 +401,7 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
         ).length,
       { timeout: 30_000 }
     )
-    .toBe(9)
+    .toBe(7)
 
   await expect
     .poll(() => readFileSync(planFile, "utf8"), { timeout: 30_000 })
@@ -499,9 +501,9 @@ test("a stopped worker stays interrupted across restart and retries from its che
     .getByRole("menuitem", { name: "Approve and auto", exact: true })
     .click()
   await expect(
-    first.window.getByRole("button", {
-      name: "Stop worker agent-02"
-    })
+    first.window
+      .getByRole("button", { name: "Stop worker agent-02" })
+      .first()
   ).toBeVisible({ timeout: 20_000 })
 
   await first.window.getByTestId("active-chat-tab").first().click()
@@ -519,7 +521,7 @@ test("a stopped worker stays interrupted across restart and retries from its che
   await workerAuthTab.click()
   await expect(
     first.window.getByText(WORKER_STAGE_THOUGHT, { exact: true })
-  ).toHaveCount(7, { timeout: 20_000 })
+  ).toHaveCount(5, { timeout: 20_000 })
   await workerReleaseTab.click()
   await expect(
     first.window.getByText(WORKER_STAGE_THOUGHT, { exact: true })
@@ -528,7 +530,7 @@ test("a stopped worker stays interrupted across restart and retries from its che
 
   await first.window.getByRole("button", { name: "Main", exact: true }).click()
   const progress = first.window.getByRole("button", {
-    name: /Plan progress: \d+ of 8 done/
+    name: /Plan progress: \d+ of 6 done/
   })
   await expect(progress).toBeVisible()
   await progress.click()
@@ -539,7 +541,7 @@ test("a stopped worker stays interrupted across restart and retries from its che
     first.window.getByTestId("plan-progress-stage-s_06")
   ).toContainText("agent-02 · opus")
   await first.window.getByTestId("plan-progress-stage-s_06").click()
-  await expect(first.window.getByLabel("Plan document")).toBeVisible()
+  await expect(first.window.getByTestId("plan-review-container")).toBeVisible()
 
   await first.window.getByTestId("active-chat-tab").first().click()
   await first.window
@@ -577,7 +579,7 @@ test("a stopped worker stays interrupted across restart and retries from its che
   await workerAuthTab.click()
   await expect(
     first.window.getByText(WORKER_STAGE_THOUGHT, { exact: true })
-  ).toHaveCount(7)
+  ).toHaveCount(5)
 
   await first.app.close()
   const reopened = await launchApp({
@@ -607,14 +609,17 @@ test("a stopped worker stays interrupted across restart and retries from its che
     .first()
     .click()
   await expect(
-    reopened.window.getByRole("button", {
-      name: "Retry worker agent-02"
-    })
+    reopened.window
+      .getByRole("button", { name: "Retry worker agent-02" })
+      .first()
   ).toBeVisible()
-  await expect(reopened.window.getByRole("status")).toContainText("Synced")
+  // (The old editable-plan "Synced" indicator was removed with the in-place
+  // editor — the plan is read-only now; the restored Retry affordance above and
+  // the checkpoint retry below verify the plan re-hydrated.)
 
   await reopened.window
     .getByRole("button", { name: "Retry worker agent-02" })
+    .first()
     .click()
   await expect
     .poll(() => checkpoints().find((worker) => worker.agentId === "agent-02"), {

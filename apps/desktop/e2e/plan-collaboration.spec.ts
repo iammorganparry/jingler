@@ -73,11 +73,17 @@ test("streaming plan collaboration survives promotion and reload", async ({
   await expect(window.getByTestId("plan-status-summary")).toContainText(
     transientStatus
   )
-  await expect(
-    window.getByText("PRD: Refactor auth flow", { exact: true })
-  ).toBeVisible()
+  // While the status is still composing the transient is a live projection, not a
+  // canonical revision: the DTO is streamed, not yet promoted to `current-plan.json`,
+  // and there is no approval gate. (Checked before the title, which also renders
+  // once the plan promotes.)
   expect(existsSync(planFile)).toBe(false)
   await expect(window.getByLabel("Plan approval options")).toHaveCount(0)
+  // The composing transient renders the streamed DTO as the read-only step outline,
+  // so a stage title is live before promotion (the plan title needs a promoted doc).
+  await expect(
+    window.getByText("Audit session middleware", { exact: true }).first()
+  ).toBeVisible({ timeout: 20_000 })
 
   const initialRatio = await columnRatio(planColumn)
   expect(initialRatio).toBeGreaterThan(0.48)
@@ -97,7 +103,7 @@ test("streaming plan collaboration survives promotion and reload", async ({
 
   // Composing tolerant-parses the streamed partial DTO into the read-only outline.
   await expect(
-    window.getByText("Audit session middleware", { exact: true })
+    window.getByText("Audit session middleware", { exact: true }).first()
   ).toBeVisible({ timeout: 20_000 })
 
   // Promotion swaps in the validated canonical revision — the Main step outline.
@@ -106,7 +112,7 @@ test("streaming plan collaboration survives promotion and reload", async ({
     .poll(() => readFileSync(planFile, "utf8"))
     .toContain('"id": "s_06"')
   await expect(
-    window.getByText("Audit session middleware", { exact: true })
+    window.getByText("Audit session middleware", { exact: true }).first()
   ).toBeVisible({ timeout: 20_000 })
   expect(await columnRatio(planColumn)).toBeCloseTo(resizedRatio, 2)
 
@@ -189,7 +195,7 @@ test("streaming plan collaboration survives promotion and reload", async ({
   await expect(appShell(reopened.window)).toBeVisible()
   await reopened.window.getByRole("button", { name: "Plan Review" }).first().click()
   await expect(
-    reopened.window.getByText("Audit session middleware", { exact: true })
+    reopened.window.getByText("Audit session middleware", { exact: true }).first()
   ).toBeVisible()
 
   const persistedMarker = reopened.window.getByRole("button", {
@@ -222,7 +228,7 @@ test("narrow streamed plans use full-width review chrome", async ({ launchApp })
   await composer.fill("[[plan]] [[stream-plan]] refactor auth")
   await composer.press("Enter")
 
-  await expect(window.getByLabel("Plan document")).toBeVisible()
+  await expect(window.getByTestId("plan-review-container")).toBeVisible()
   await expect(window.getByTestId("composer")).toHaveCount(0)
   await expect(window.getByRole("navigation", { name: "Plan minimap" })).toHaveCount(0)
   const controls = window.getByTestId("plan-floating-actions")

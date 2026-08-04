@@ -504,6 +504,14 @@ export const scriptedPlanPrd = (
         id: "context",
         title: "Context",
         blocks: [{ kind: "prose", id: "c1", text: "Move session token handling into a dedicated TokenStore and add a guarded 401-retry refresh path." }]
+      },
+      {
+        id: "design",
+        title: "Technical design",
+        blocks: [
+          { kind: "prose", id: "d1", text: "Reads route through TokenStore; a 401 triggers a single guarded refresh, then one replay." },
+          { kind: "diagram", id: "d2", source: "flowchart TD\n  A[Request] --> B{401?}\n  B -->|yes| C[refresh once]\n  C --> D[replay]\n  B -->|no| D" }
+        ]
       }
     ],
     stages,
@@ -516,9 +524,14 @@ export const scriptedPlanEmission = (
   sessionId: string,
   rev: number,
   holdWorker = false,
-  mode: "draft" | "submit" = "submit"
+  mode: "draft" | "submit" = "submit",
+  includeAuditStage = false
 ): string =>
-  JSON.stringify({ mode, plan: scriptedPlanPrd(sessionId, rev, holdWorker) }, null, 2)
+  JSON.stringify(
+    { mode, plan: scriptedPlanPrd(sessionId, rev, holdWorker, includeAuditStage) },
+    null,
+    2
+  )
 
 /**
  * The scripted run body — a deterministic sequence (thinking, reads, a gated
@@ -886,7 +899,7 @@ export const scriptedRun =
         yield* pause
         yield* emit({
           _tag: "Assistant",
-          text: `Folding that in.\n\n\`\`\`json\n${scriptedPlanEmission(sessionId, 2, false, "submit")}\n\`\`\``
+          text: `Folding that in.\n\n\`\`\`json\n${scriptedPlanEmission(sessionId, 2, false, "submit", true)}\n\`\`\``
         })
         yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
         return

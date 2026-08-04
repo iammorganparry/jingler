@@ -10,6 +10,7 @@ import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import type { PlanFileEvidence } from "./plan-doc/plan-file-controls.js"
 import { PlanFileControlsProvider } from "./plan-doc/plan-file-controls.js"
+import { PlanWorkerControlsProvider } from "./plan-doc/plan-worker-controls.js"
 
 const asArray = (value: unknown): ReadonlyArray<unknown> =>
   Array.isArray(value) ? value : []
@@ -283,13 +284,17 @@ export function PlanEditor({
                 knownFiles={knownFiles}
                 open={onOpenFile}
               >
-                <div className="mx-auto w-full max-w-[760px]">
-                  <PlanStepOutline
-                    prd={projection}
-                    selectedStepId={selectedStepId}
-                    onSelectStep={setSelectedStepId}
-                  />
-                </div>
+                <PlanWorkerControlsProvider
+                  controls={{ stop: onStopWorker, retry: onRetryWorker }}
+                >
+                  <div className="mx-auto w-full max-w-[760px]">
+                    <PlanStepOutline
+                      prd={projection}
+                      selectedStepId={selectedStepId}
+                      onSelectStep={setSelectedStepId}
+                    />
+                  </div>
+                </PlanWorkerControlsProvider>
               </PlanFileControlsProvider>
             ) : (
               <EmptyPage>{streaming ? "Composing plan…" : "No plan yet."}</EmptyPage>
