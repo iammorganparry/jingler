@@ -2,15 +2,18 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import type { CliKind, MemoryGrantResponse } from "@jingler/core"
 import { MEMORY_MCP_PROTOCOL_VERSION } from "@jingler/core"
-import { Effect, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ConfigService } from "./config.js"
 import {
   EMPTY_MEMORY_RETRIEVAL_SUMMARY,
   makeMemoryService,
+  MemoryService,
+  MemoryServiceLive,
   memoryDigestContent,
   recordMemoryRetrieval,
   redactMemoryText,
+  type MemoryServiceShape,
   type MemorySessionDigestInput
 } from "./memory.js"
 import type {
@@ -72,6 +75,25 @@ const withEnabledMemory = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   ConfigService.setMemory({ enabled: true, organizationId: ORGANIZATION_ID }).pipe(
     Effect.zipRight(effect)
   )
+
+describe("MemoryServiceLive layer identity", () => {
+  it("shares one service when a consumer dependency and the app runtime use the same layer", async () => {
+    const RunnerMemory = Context.GenericTag<MemoryServiceShape>(
+      "@jingler/test/RunnerMemory"
+    )
+    const runnerLayer = Layer.effect(RunnerMemory, MemoryService).pipe(
+      Layer.provide(MemoryServiceLive)
+    )
+
+    const [rpcMemory, runnerMemory] = await Effect.runPromise(
+      Effect.all([MemoryService, RunnerMemory]).pipe(
+        Effect.provide(Layer.mergeAll(MemoryServiceLive, runnerLayer))
+      )
+    )
+
+    expect(rpcMemory).toBe(runnerMemory)
+  })
+})
 
 describe("MemoryService stateless attachment", () => {
   it("attaches the same organization-scoped endpoint and instructions to Claude, Codex, and OpenCode", async () => {
