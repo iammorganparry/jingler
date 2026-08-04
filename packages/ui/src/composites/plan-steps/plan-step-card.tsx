@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo } from "react"
+import { type ReactNode, useMemo, useState } from "react"
 import {
   type PlanAcceptance,
   type PlanStageComplexity,
@@ -100,6 +100,7 @@ export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
   // live +/- while there's uncommitted work — falling back to declared counts.
   const fileControls = usePlanFileControls()
   const workerControls = usePlanWorkerControls()
+  const [filesExpanded, setFilesExpanded] = useState(false)
   const exec = EXECUTION_META[step.executionStatus]
   const canStop =
     step.agentId !== null && STOPPABLE.has(step.executionStatus) && workerControls.stop !== undefined
@@ -214,7 +215,7 @@ export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
           <EmptyNote>No file changes declared.</EmptyNote>
         ) : (
           <div className="flex flex-wrap gap-1.5">
-            {step.files.slice(0, MAX_VISIBLE_FILES).map((file) => {
+            {(filesExpanded ? step.files : step.files.slice(0, MAX_VISIBLE_FILES)).map((file) => {
               const evidence = fileControls.evidence?.get(file.path)
               const openable =
                 fileControls.open !== undefined &&
@@ -236,12 +237,19 @@ export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
               )
             })}
             {step.files.length > MAX_VISIBLE_FILES && (
-              <span
-                className="inline-flex h-[22px] flex-none items-center rounded-[5px] border border-line/70 bg-surface/40 px-2 font-mono text-[10.5px] text-muted-foreground"
-                title={`${step.files.length - MAX_VISIBLE_FILES} more changed files`}
+              <button
+                type="button"
+                aria-expanded={filesExpanded}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setFilesExpanded((open) => !open)
+                }}
+                className="inline-flex h-[22px] flex-none items-center rounded-[5px] border border-line/70 bg-surface/40 px-2 font-mono text-[10.5px] text-muted-foreground outline-none transition-colors hover:border-line-strong hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring"
               >
-                +{step.files.length - MAX_VISIBLE_FILES} more
-              </span>
+                {filesExpanded
+                  ? "Show less"
+                  : `+${step.files.length - MAX_VISIBLE_FILES} more`}
+              </button>
             )}
           </div>
         )}

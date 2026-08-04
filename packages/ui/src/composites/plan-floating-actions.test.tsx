@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { PlanDocumentStatus } from "@jingler/core"
 import { PlanFloatingActions } from "./plan-floating-actions.js"
 
@@ -8,7 +8,7 @@ afterEach(cleanup)
 
 describe("PlanFloatingActions", () => {
   const expected: ReadonlyArray<[PlanDocumentStatus, string]> = [
-    ["draft", "Send to agent"],
+    ["draft", "Approve & implement"],
     ["proposed", "Approve"],
     ["stale", "Approve & implement"],
     ["executing", "Implementation running"],
@@ -21,6 +21,18 @@ describe("PlanFloatingActions", () => {
       expect(screen.getByRole("button", { name: label })).toBeTruthy()
     })
   }
+
+  it("lets the operator approve a draft directly, with refine behind the dropdown", () => {
+    const onResume = vi.fn()
+    render(
+      <PlanFloatingActions status="draft" syncState="clean" onResume={onResume} />
+    )
+    // Primary approves + implements the draft directly (fixes "no way to approve").
+    fireEvent.click(screen.getByRole("button", { name: "Approve & implement" }))
+    expect(onResume).toHaveBeenCalledOnce()
+    // "Send to agent to refine" is offered as a secondary action.
+    expect(screen.getByRole("button", { name: "More plan actions" })).toBeTruthy()
+  })
 
   it("offers the extra approval options behind the split-button dropdown", () => {
     render(<PlanFloatingActions status="proposed" syncState="clean" />)

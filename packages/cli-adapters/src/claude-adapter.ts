@@ -1569,7 +1569,7 @@ export const runClaude = (
                     planDraft.reset()
                   } else if (ctx.saveDraftPlan !== undefined) {
                     planCount += 1
-                    await runP(ctx.saveDraftPlan(capture.emission.plan))
+                    await runP(ctx.saveDraftPlan(capture.emission.plan, capture.block))
                   }
                 }
               }

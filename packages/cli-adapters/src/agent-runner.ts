@@ -1510,6 +1510,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const an = yield* nextId
           const acc = yield* Ref.make(assistantMessage(`a_${chatId}_${an}`, now))
           yield* TranscriptStore.append(chatId, yield* Ref.get(acc))
+          // The exact ```json blocks `saveDraftPlan` captured this turn, scrubbed
+          // from the reply on settle (the plan lives in Plan Review, not the chat).
+          const savedDraftBlocks = yield* Ref.make<ReadonlyArray<string>>([])
           const turnSteer = yield* Ref.make<SteerTurn | null>(null)
           const steeredReply = yield* Ref.make<RunReplyWaiter | null>(null)
           const replyGate = yield* Effect.makeSemaphore(1)
@@ -1934,6 +1937,27 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   })
                 }
               }
+              // A "draft" emission mirrors into Plan Review but leaves its raw
+              // ```json block in the reply (submit blocks are scrubbed at promotion).
+              // On settle, remove exactly the blocks `saveDraftPlan` captured this
+              // turn — never a plan the agent merely quoted — so the transcript
+              // reads as prose, not a wall of JSON.
+              if (event._tag === "Done") {
+                const draftBlocks = yield* Ref.get(savedDraftBlocks)
+                if (draftBlocks.length > 0) {
+                  next = {
+                    ...next,
+                    parts: next.parts.flatMap((part): ReadonlyArray<ContentPart> => {
+                      if (part._tag !== "Text") return [part]
+                      const text = draftBlocks.reduce(
+                        (acc, block) => stripPlanJsonBlock(acc, block),
+                        part.text
+                      )
+                      return text.length === 0 ? [] : [{ ...part, text }]
+                    })
+                  }
+                }
+              }
               yield* Ref.set(acc, next)
               yield* TranscriptStore.patchLast(chatId, () => next).pipe(Effect.ignore)
               // Persist the harness's actual model (reported on init) so the chip
@@ -2189,7 +2213,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // is the operator actively editing — an agent draft must not reconcile
           // over it and silently discard their content. Best-effort — a plan write
           // must never fail the turn.
-          const saveDraftPlan = (plan: PlanPrd): Effect.Effect<void> =>
+          const saveDraftPlan = (plan: PlanPrd, block?: string): Effect.Effect<void> =>
             worktreePath.length === 0
               ? Effect.void
               : PlanStore.readDocument(worktreePath, sessionId, chatId).pipe(
@@ -2209,6 +2233,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                             ? { basePlanId: current.id }
                             : {})
                         }).pipe(Effect.provide(env), Effect.ignore)
+                  ),
+                  // Record the captured transport so the settle handler scrubs
+                  // exactly this block from the reply (never a quoted example).
+                  Effect.zipRight(
+                    block === undefined
+                      ? Effect.void
+                      : Ref.update(savedDraftBlocks, (blocks) => [...blocks, block])
                   )
                 )
 
