@@ -56,7 +56,8 @@ beforeEach(async () => {
       'printf \'%s\\n\' "$@" >> "$HOOK_CURL_LOG"',
       "case \"$*\" in",
       "  *tools/list*) printf '%s' '{\"result\":{\"tools\":[{\"name\":\"memory_search\"}]}}' ;;",
-      "  *) printf '%s' '{\"result\":{\"structuredContent\":{\"data\":[{\"title\":\"Team fact\",\"pageId\":\"page-1\",\"snippet\":\"Use the shared limiter.\"}]}}}' ;;",
+      "  *memory_read*) printf '%s' '{\"result\":{\"structuredContent\":{\"data\":{\"page\":{\"id\":\"page-1\",\"title\":\"Team fact\",\"body\":\"Use the accepted shared limiter.\"},\"revision\":{\"id\":\"revision-1\"},\"sourceIds\":[\"source-1\"],\"citationIds\":[\"citation-1\"]}}}}' ;;",
+      "  *) printf '%s' '{\"result\":{\"structuredContent\":{\"data\":{\"results\":[{\"title\":\"Team fact\",\"pageId\":\"page-1\",\"revisionId\":\"revision-1\",\"snippet\":\"Search-only snippet.\"}]}}}}' ;;",
       "esac",
       "case \"$*\" in *%{http_code}*) printf '\\n200' ;; esac"
     ].join("\n")
@@ -93,11 +94,16 @@ describe("team-memory recall hook", () => {
     expect(result.stderr).not.toContain("jmem_test-secret-never-logged")
     expect(result.stdout).toContain("<recalled-memories>")
     expect(result.stdout).toContain("Team fact")
+    expect(result.stdout).toContain("Use the accepted shared limiter.")
+    expect(result.stdout).toContain('"revisionId":"revision-1"')
+    expect(result.stdout).toContain('"sourceIds":["source-1"]')
+    expect(result.stdout).not.toContain("Search-only snippet")
 
     const request = await readFile(curlLog, "utf8")
     expect(request).toContain("mcp-protocol-version: 2026-07-28")
     expect(request).toContain("mcp-method: tools/call")
     expect(request).toContain("mcp-name: memory_search")
+    expect(request).toContain("mcp-name: memory_read")
     expect(request).toContain('"io.modelcontextprotocol/protocolVersion":"2026-07-28"')
     expect(request).toContain('"name":"jingler-memory-recall-hook"')
   })
@@ -110,6 +116,7 @@ describe("team-memory recall hook", () => {
         "#!/bin/sh",
         'printf \'%s\\n\' "$@" >> "$HOOK_CURL_LOG"',
         "case \"$*\" in",
+        "  *memory_read*) printf '%s' '{\"result\":{\"structuredContent\":{\"data\":{\"page\":{\"id\":\"page-qa\",\"title\":\"Hook QA\",\"body\":\"Deterministic hooks passed accepted-page QA.\"},\"revision\":{\"id\":\"revision-qa\"},\"sourceIds\":[],\"citationIds\":[]}}}}' ;;",
         "  *\\\"query\\\":\\\"deterministic\\\"*) printf '%s' '{\"result\":{\"structuredContent\":{\"data\":{\"results\":[{\"title\":\"Hook QA\",\"pageId\":\"page-qa\",\"snippet\":\"Deterministic hooks passed QA.\"}]}}}}' ;;",
         "  *) printf '%s' '{\"result\":{\"structuredContent\":{\"data\":{\"results\":[]}}}}' ;;",
         "esac"
@@ -123,8 +130,10 @@ describe("team-memory recall hook", () => {
 
     expect(result.status).toBe(0)
     expect(result.stdout).toContain("Hook QA")
+    expect(result.stdout).toContain("accepted-page QA")
     const request = await readFile(curlLog, "utf8")
     expect(request.match(/mcp-name: memory_search/g)).toHaveLength(2)
+    expect(request.match(/mcp-name: memory_read/g)).toHaveLength(1)
     expect(request).toContain('"query":"deterministic"')
   })
 

@@ -13,6 +13,10 @@ import {
   redactMemoryText,
   type MemorySessionDigestInput
 } from "./memory.js"
+import type {
+  MemoryMcpForwarder,
+  MemoryMcpProxy
+} from "./memory-mcp-proxy.js"
 import { codexMcpEnvironment, codexMcpOverrides } from "./mcp-config.js"
 import { makeInMemorySecretStore, SecretStore } from "./secret-store.js"
 import { withTempRoot } from "./test-support.js"
@@ -150,6 +154,165 @@ describe("MemoryService stateless attachment", () => {
       })
       expect(JSON.stringify(body)).not.toContain("initialize")
     }
+  })
+
+  it("refreshes an expired upstream grant without changing a running harness attachment", async () => {
+    const requests: Request[] = []
+    let grants = 0
+    let forwardedCalls = 0
+    let forwarder: MemoryMcpForwarder | undefined
+    const proxy: MemoryMcpProxy = {
+      register: (_key, forward) => {
+        forwarder = forward
+        return Effect.succeed({
+          name: "jingler-memory",
+          url: "http://127.0.0.1:32124/mcp/stable",
+          headers: { Authorization: "Bearer local-only" },
+          headerEnvironment: { Authorization: "JINGLER_MEMORY_AUTHORIZATION" }
+        })
+      }
+    }
+    const fetchImplementation: typeof fetch = async (input, init) => {
+      const request = requestOf(input, init)
+      requests.push(request)
+      if (request.url.endsWith("/api/memory/grant")) {
+        grants += 1
+        return Response.json(grantResponse(`proxy-${grants}`))
+      }
+      const body = (await request.clone().json()) as {
+        method?: string
+        params?: { name?: string }
+      }
+      if (body.method === "server/discover") return discoveryResponse()
+      forwardedCalls += 1
+      if (forwardedCalls === 1) {
+        return Response.json({ error: "expired" }, { status: 401 })
+      }
+      return Response.json({
+        jsonrpc: "2.0",
+        id: "late",
+        result: { content: [{ type: "text", text: "stored" }] }
+      })
+    }
+    const service = makeMemoryService({
+      fetch: fetchImplementation,
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS,
+      proxy
+    })
+
+    const attachment = await Effect.runPromise(
+      withEnabledMemory(service.attachment("claude")).pipe(
+        Effect.provide(configuredLayer())
+      )
+    )
+    expect(attachment?.server.url).toBe("http://127.0.0.1:32124/mcp/stable")
+    expect(attachment?.server.headers).toStrictEqual({
+      Authorization: "Bearer local-only"
+    })
+    expect(forwarder).toBeDefined()
+
+    const body = JSON.stringify({
+      jsonrpc: "2.0",
+      id: "late",
+      method: "tools/call",
+      params: { name: "memory_propose", arguments: { pageId: "late" } }
+    })
+    const response = await forwarder?.({
+      body,
+      protocolVersion: MEMORY_MCP_PROTOCOL_VERSION
+    })
+    expect(response?.status).toBe(200)
+    expect(grants).toBe(2)
+
+    const forwarded = requests.filter((request) => {
+      if (!request.url.endsWith("/api/mcp")) return false
+      return request.headers.get("mcp-method") === null
+    })
+    expect(forwarded).toHaveLength(2)
+    expect(forwarded.map((request) => request.headers.get("authorization"))).toStrictEqual([
+      "Bearer grant.proxy-1.signature",
+      "Bearer grant.proxy-2.signature"
+    ])
+    expect(forwarded.every((request) => request.headers.get("mcp-session-id") === null)).toBe(true)
+    expect(forwarded.every((request) => request.headers.get("cookie") === null)).toBe(true)
+    expect(forwarded.every((request) => request.headers.get("mcp-name") === null)).toBe(true)
+  })
+
+  it("searches and loads a bounded accepted working set before the harness starts", async () => {
+    const requests: Request[] = []
+    const fetchImplementation: typeof fetch = async (input, init) => {
+      const request = requestOf(input, init)
+      requests.push(request)
+      if (request.url.endsWith("/api/memory/grant")) {
+        return Response.json(grantResponse("automatic-recall"))
+      }
+
+      const body = (await request.clone().json()) as {
+        method?: string
+        params?: { name?: string; arguments?: { pageId?: string } }
+      }
+      if (body.method === "server/discover") return discoveryResponse()
+      const name = body.params?.name
+      const pageId = body.params?.arguments?.pageId ?? ""
+      const data =
+        name === "memory_search"
+          ? {
+              results: ["one", "two", "three", "four"].map((id) => ({
+                pageId: `page-${id}`
+              }))
+            }
+          : {
+              page: {
+                id: pageId,
+                title: `Title ${pageId}`,
+                body: `Accepted body for ${pageId}`
+              },
+              revision: { id: `revision:${pageId}:1` },
+              sourceIds: [`source:${pageId}`],
+              citationIds: [`citation:${pageId}`]
+            }
+      return Response.json({
+        jsonrpc: "2.0",
+        id: "tool",
+        result: { resultType: "complete", structuredContent: { data } }
+      })
+    }
+    const service = makeMemoryService({
+      fetch: fetchImplementation,
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS
+    })
+
+    const attachment = await Effect.runPromise(
+      withEnabledMemory(service.attachment("codex", "How do refunds work?")).pipe(
+        Effect.provide(configuredLayer())
+      )
+    )
+
+    expect(attachment?.retrieval).toStrictEqual({
+      searches: 1,
+      reads: 3,
+      navigation: 0,
+      graphReads: 0,
+      proposals: 0
+    })
+    expect(attachment?.instructions).toContain("<recalled-memories>")
+    expect(attachment?.instructions).toContain("Accepted body for page-one")
+    expect(attachment?.instructions).toContain('"revisionId": "revision:page-one:1"')
+    expect(attachment?.instructions).not.toContain("page-four")
+
+    const calls = requests.filter(
+      (request) => request.headers.get("mcp-method") === "tools/call"
+    )
+    expect(calls.map((request) => request.headers.get("mcp-name"))).toStrictEqual([
+      "memory_search",
+      "memory_read",
+      "memory_read",
+      "memory_read"
+    ])
+    expect(calls.every((request) => request.headers.get("cookie") === null)).toBe(true)
+    expect(calls.every((request) => request.headers.get("mcp-session-id") === null)).toBe(true)
   })
 
   it("does not attach team memory to Cursor, which Jingler cannot launch", async () => {
@@ -696,11 +859,15 @@ describe("MemoryService settled-session capture", () => {
       ).pipe(Effect.provide(configuredLayer()))
     )
 
-    // The 403 drain drops the job rather than leaving it to re-attempt forever.
-    const outbox: unknown = JSON.parse(
-      readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
-    )
-    expect(outbox).toHaveLength(0)
+    // The drain is deliberately forked so capture never blocks a terminal
+    // event. Poll its observable outbox result instead of assuming a 30ms
+    // scheduler window, which is too narrow under the repository-wide suite.
+    await vi.waitFor(() => {
+      const outbox: unknown = JSON.parse(
+        readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
+      )
+      expect(outbox).toHaveLength(0)
+    })
     expect(grants).toBe(1)
 
     // A second drain finds nothing to do — no further grant round-trips.

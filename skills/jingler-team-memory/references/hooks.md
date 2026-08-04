@@ -22,8 +22,10 @@ the in-turn judgment layer that decides *what* is worth marking for persist.
 ## The hooks
 
 - **`hooks/recall.sh`** — pre-turn. Reads the hook payload on stdin, extracts the
-  user prompt, `memory_search`es it (limit 5), and prints the top hits wrapped in a
-  single `<recalled-memories>…</recalled-memories>` block to stdout. On Claude
+  user prompt, `memory_search`es it (limit 5), then `memory_read`s up to three
+  accepted hits and prints bounded page records with stable page, revision,
+  source, and citation ids in a single `<recalled-memories>…</recalled-memories>`
+  block. It never injects unverified search snippets. On Claude
   Code's `UserPromptSubmit`, that stdout is injected into the model context — so
   the model sees relevant team memory before it answers, deterministically.
 
@@ -49,7 +51,8 @@ print the token.
   `.claude/settings.json` block (`UserPromptSubmit` → `recall.sh`, `Stop` →
   `persist.sh`).
 - **Codex** — persist is deterministic via the `notify` hook; recall has no
-  deterministic pre-turn injection point, so it stays the skill's job. See
+  deterministic pre-turn injection point, so it stays the skill's job, reinforced
+  by the MCP server's initialization instructions. See
   [../hooks/config/codex.md](../hooks/config/codex.md).
 - **Other MCP harnesses** — if the harness has a context-injecting pre-turn hook
   and/or a post-turn hook, wire the same two scripts to them; they read their

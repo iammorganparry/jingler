@@ -557,6 +557,17 @@ describe("AgentRunner team memory", () => {
         return Response.json(memoryGrant())
       }
       if (request.url.endsWith("/api/mcp")) {
+        const body = (await request.clone().json()) as { method?: string }
+        if (body.method === "tools/call") {
+          return Response.json({
+            jsonrpc: "2.0",
+            id: "recall",
+            result: {
+              resultType: "complete",
+              structuredContent: { data: { results: [] } }
+            }
+          })
+        }
         return Response.json({
           jsonrpc: "2.0",
           id: "discover",
@@ -629,6 +640,7 @@ describe("AgentRunner team memory", () => {
     ])
     expect(captured[0]?.prompt).toContain("memory_navigation")
     expect(captured[0]?.prompt).toContain("memory_workflow_status")
+    expect(captured[0]?.prompt).toContain("Initial recall completed with no accepted matches")
     await vi.waitFor(() => {
       expect(requests.filter((request) => request.url.endsWith("/api/memory/sources"))).toHaveLength(1)
     })
@@ -636,7 +648,8 @@ describe("AgentRunner team memory", () => {
     const sourceBody = JSON.stringify(await sourceRequests[0]!.json())
     expect(sourceBody).not.toContain("private-user-value")
     expect(sourceBody).not.toContain("private-value")
-    expect(sourceBody).toContain('"searches":1')
+    // One deterministic pre-turn search plus the scripted agent's own search.
+    expect(sourceBody).toContain('"searches":2')
     expect(JSON.stringify(transcript)).not.toContain("memory-grant-value")
     expect(JSON.stringify(transcript)).not.toContain("jingler-user-token")
     expect(readFileSync(join(temp.root, "sessions.json"), "utf8")).not.toContain(

@@ -21,6 +21,7 @@ import {
 } from "./memory-client.js"
 import {
   handleMemoryMcpRequest,
+  MEMORY_MCP_INSTRUCTIONS,
   rejectMemoryMcpGet,
   type MemoryMcpDependencies
 } from "./mcp-memory.js"
@@ -160,6 +161,24 @@ describe("standard MCP client compatibility", () => {
     expect(payload.result.protocolVersion).toBe("2025-06-18")
     expect(payload.result.capabilities).toEqual({ tools: {} })
     expect(payload.result.serverInfo).toEqual(MEMORY_MCP_SERVER_INFO)
+    expect(payload.result.instructions).toBe(MEMORY_MCP_INSTRUCTIONS)
+    expect(MEMORY_MCP_INSTRUCTIONS.length).toBeLessThanOrEqual(512)
+    expect(MEMORY_MCP_INSTRUCTIONS.slice(0, 512)).toContain("memory_read")
+    expect(MEMORY_MCP_INSTRUCTIONS.slice(0, 512)).toContain("memory_workflow_status")
+  })
+
+  it("rejects an invalid grant during initialize instead of appearing connected", async () => {
+    const response = await handleMemoryMcpRequest(
+      standardRequest("initialize", "not-a-real-grant", {
+        id: 9,
+        params: { protocolVersion: "2025-06-18", capabilities: {} }
+      }),
+      dependenciesFor(collectingClient().client)
+    )
+    expect(response.status).toBe(401)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: -32000, message: "Invalid memory grant" }
+    })
   })
 
   it("acks notifications/initialized with 202 and no body", async () => {
@@ -448,7 +467,8 @@ describe("stateless MCP 2026-07-28", () => {
       result: {
         resultType: "complete",
         supportedVersions: [MEMORY_MCP_PROTOCOL_VERSION],
-        serverInfo: MEMORY_MCP_SERVER_INFO
+        serverInfo: MEMORY_MCP_SERVER_INFO,
+        instructions: MEMORY_MCP_INSTRUCTIONS
       }
     })
     expect(response.headers.has("mcp-session-id")).toBe(false)

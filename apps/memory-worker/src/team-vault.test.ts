@@ -266,6 +266,7 @@ describe("TeamVault", () => {
     ).toContain("backlink")
     const navigation = buildSearchProjection(pages, [])
     expect(navigation.indexMarkdown).toContain("[[target|Target]] — backlinks: linking")
+    expect(navigation.indexMarkdown).toContain("pageId: target")
   })
 
   it("exports accepted Markdown verbatim in an Obsidian vault layout", async () => {

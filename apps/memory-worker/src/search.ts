@@ -166,7 +166,12 @@ export const buildSearchProjection = (
   for (const page of index.pages) {
     const incoming = backlinks[page.id] ?? []
     const suffix = incoming.length === 0 ? "" : ` — backlinks: ${incoming.join(", ")}`
-    indexLines.push(`- [[${page.path.replace(MARKDOWN_EXTENSION_PATTERN, "")}|${page.title}]]${suffix}`)
+    // The wikilink targets the Obsidian export path, which is not necessarily
+    // the stable id accepted by memory_read. Expose both so an agent navigating
+    // this index can reliably load the accepted page.
+    indexLines.push(
+      `- [[${page.path.replace(MARKDOWN_EXTENSION_PATTERN, "")}|${page.title}]]${suffix} — pageId: ${page.id}`
+    )
   }
   const logLines = [
     "# Memory log",

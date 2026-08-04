@@ -467,7 +467,7 @@ const dispatchAuthenticatedRequest = async (
         supportedVersions: [MEMORY_MCP_PROTOCOL_VERSION],
         capabilities: { tools: {} },
         serverInfo: MEMORY_MCP_SERVER_INFO,
-        instructions: "Search accepted team memory and use proposal handles for changes.",
+        instructions: MEMORY_MCP_INSTRUCTIONS,
         ttlMs: 60_000,
         cacheScope: "private"
       }),
@@ -501,6 +501,14 @@ const dispatchAuthenticatedRequest = async (
 const STANDARD_MCP_DEFAULT_VERSION = "2025-06-18"
 
 /**
+ * Native MCP clients surface these server instructions before the model chooses
+ * a tool. Keep the opening self-contained because Codex may truncate server
+ * instructions after its configured limit (512 characters by default).
+ */
+export const MEMORY_MCP_INSTRUCTIONS =
+  "Recall first: before answering or acting, call memory_search, then memory_read every page you rely on; never treat search snippets or navigation as the page. Cite its pageId, revisionId, sourceIds, and citationIds. When durable knowledge emerges, call memory_propose with baseRevisionId 'new' for a new page or the accepted revision for an update. Retain its workflow handle and poll memory_workflow_status until it settles. Requests are independent; do not create or reuse MCP sessions or cookies."
+
+/**
  * Serve a STANDARD MCP client — the harnesses' native codex / opencode / Claude
  * clients. Unlike the bespoke stateless protocol above, they send no `Mcp-*`
  * headers and no per-request `_meta`, may omit `params`/`id`, and open with the
@@ -530,6 +538,17 @@ const handleStandardMcpRequest = async (
       headers: { "x-request-id": requestId, "cache-control": "no-store" }
     })
   }
+  // The transport is deliberately stateless, so validate the bearer and live
+  // organization membership on every request that can read or act — including
+  // initialize and ping. No-op notifications were acknowledged above.
+  // Otherwise a revoked/expired PAT can appear connected until the first tool
+  // request, which is a particularly confusing failure for external clients.
+  let claims: MemoryGrantClaims
+  try {
+    claims = await dependencies.verifyGrant(grant, organizationId)
+  } catch {
+    return jsonResponse(errorResult(id, -32000, "Invalid memory grant"), 401, requestId)
+  }
   if (method === "initialize") {
     const protocolVersion =
       typeof params.protocolVersion === "string" ? params.protocolVersion : STANDARD_MCP_DEFAULT_VERSION
@@ -537,7 +556,12 @@ const handleStandardMcpRequest = async (
       {
         jsonrpc: "2.0",
         id,
-        result: { protocolVersion, capabilities: { tools: {} }, serverInfo: MEMORY_MCP_SERVER_INFO }
+        result: {
+          protocolVersion,
+          capabilities: { tools: {} },
+          serverInfo: MEMORY_MCP_SERVER_INFO,
+          instructions: MEMORY_MCP_INSTRUCTIONS
+        }
       },
       200,
       requestId
@@ -548,12 +572,6 @@ const handleStandardMcpRequest = async (
   }
   if (method !== "tools/list" && method !== "tools/call") {
     return jsonResponse(errorResult(id, -32601, "Method not found"), 404, requestId)
-  }
-  let claims: MemoryGrantClaims
-  try {
-    claims = await dependencies.verifyGrant(grant, organizationId)
-  } catch {
-    return jsonResponse(errorResult(id, -32000, "Invalid memory grant"), 401, requestId)
   }
   try {
     return await dispatchAuthenticatedRequest({ id, method, params }, claims, dependencies.client, requestId)
