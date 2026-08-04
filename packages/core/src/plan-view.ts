@@ -110,11 +110,12 @@ const sectionDiagramSources = (section: PlanPrdSection): Array<string> =>
     .filter((source) => source.length > 0)
 
 /**
- * Dependency-topological stage order. `buildPlanExecutionGraph` groups stages by
- * connected component then orders each component topologically (source order as
- * the tie-breaker); flattening the groups yields a single valid topological
- * ordering over every stage. Any stage the graph didn't place (e.g. an isolated
- * one) is appended in source order.
+ * Dependency-topological stage order. Groups are now file-overlap components, so a
+ * dependency can cross group boundaries — flattening the (source-ordered) groups no
+ * longer yields a valid topological order. So the groups are themselves topologically
+ * sorted by their cross-group `dependsOn` (prerequisites first; source order as the
+ * stable tie-breaker), then flattened — each group's `stageIds` are already
+ * topo-ordered internally. Any stage the graph didn't place is appended in source order.
  *
  * Stages are keyed by `id`, which must be unique — the graph, react-flow node
  * ids and step keys all require it — so a duplicate id necessarily collapses to
@@ -124,13 +125,53 @@ const sectionDiagramSources = (section: PlanPrdSection): Array<string> =>
 const orderedStages = (prd: PlanPrd): Array<PlanPrdStage> => {
   const stageById = new Map(prd.stages.map((stage) => [stage.id, stage]))
   const graph = buildPlanExecutionGraph(prd.stages)
+  const groupById = new Map(graph.groups.map((group) => [group.id, group]))
+  const groupRank = new Map(graph.groups.map((group, index) => [group.id, index]))
+  const indegree = new Map(
+    graph.groups.map((group) => [
+      group.id,
+      group.dependsOn.filter((id) => groupById.has(id)).length
+    ])
+  )
+  const dependents = new Map<string, Array<string>>()
+  for (const group of graph.groups) {
+    for (const dependency of group.dependsOn) {
+      if (!groupById.has(dependency)) continue
+      const list = dependents.get(dependency) ?? []
+      list.push(group.id)
+      dependents.set(dependency, list)
+    }
+  }
+  const byRank = (left: string, right: string): number =>
+    (groupRank.get(left) ?? 0) - (groupRank.get(right) ?? 0)
+  const ready = graph.groups
+    .filter((group) => (indegree.get(group.id) ?? 0) === 0)
+    .map((group) => group.id)
+  const orderedGroupIds: Array<string> = []
+  while (ready.length > 0) {
+    ready.sort(byRank)
+    const current = ready.shift()
+    if (current === undefined) break
+    orderedGroupIds.push(current)
+    for (const dependent of dependents.get(current) ?? []) {
+      const next = (indegree.get(dependent) ?? 0) - 1
+      indegree.set(dependent, next)
+      if (next === 0) ready.push(dependent)
+    }
+  }
+  for (const group of graph.groups) {
+    if (!orderedGroupIds.includes(group.id)) orderedGroupIds.push(group.id)
+  }
+
   const seen = new Set<string>()
   const ordered: Array<PlanPrdStage> = []
-  for (const id of graph.groups.flatMap((group) => group.stageIds)) {
-    const stage = stageById.get(id)
-    if (stage === undefined || seen.has(id)) continue
-    seen.add(id)
-    ordered.push(stage)
+  for (const groupId of orderedGroupIds) {
+    for (const id of groupById.get(groupId)?.stageIds ?? []) {
+      const stage = stageById.get(id)
+      if (stage === undefined || seen.has(id)) continue
+      seen.add(id)
+      ordered.push(stage)
+    }
   }
   for (const stage of prd.stages) {
     if (seen.has(stage.id)) continue

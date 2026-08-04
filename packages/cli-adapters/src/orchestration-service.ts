@@ -143,6 +143,8 @@ export interface OrchestrationWorkerGroup {
   readonly agentId: string
   readonly assignment: OrchestrationAssignment
   readonly stages: ReadonlyArray<OrchestrationStage>
+  /** agentIds of the groups that must finish before this one may start. */
+  readonly dependsOn: ReadonlyArray<string>
 }
 
 export type OrchestrationGraphIssue = PlanExecutionDiagnostic
@@ -208,7 +210,8 @@ export const buildOrchestrationGroups = (
     return [{
       agentId: group.assignment.agentId,
       assignment: group.assignment,
-      stages: members
+      stages: members,
+      dependsOn: group.dependsOn
     }]
   })
   return { valid: true, groups }
@@ -1587,19 +1590,53 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                 return next
               })
             }
+            // Dependency-aware scheduling: a group runs only once every group it
+            // `dependsOn` (that is part of THIS run) has finished — a dependency not
+            // scheduled here already completed in a prior invocation. Independent
+            // groups run in parallel, bounded by `maxConcurrency`; the ordering
+            // waits hold no permit, so they never deadlock the pool.
+            const groupDone = new Map<string, Deferred.Deferred<void>>()
+            for (const group of groups) {
+              groupDone.set(group.agentId, yield* Deferred.make<void>())
+            }
+            const runGate = yield* Effect.makeSemaphore(
+              boundedConcurrency(input.maxConcurrency)
+            )
             const workers = yield* Effect.forEach(
               groups,
-              (group) => {
-                const prior = checkpoints.get(group.agentId)
-                return runGroup(
-                  input,
-                  group,
-                  new Set(prior?.completedStageIds ?? []),
-                  prior?.resumeId ?? null,
-                  (prior?.attempt ?? 0) + 1
-                )
-              },
-              { concurrency: boundedConcurrency(input.maxConcurrency) }
+              (group) =>
+                Effect.gen(function* () {
+                  yield* Effect.forEach(
+                    group.dependsOn,
+                    (dependencyAgentId) => {
+                      const deferred = groupDone.get(dependencyAgentId)
+                      return deferred === undefined
+                        ? Effect.void
+                        : Deferred.await(deferred)
+                    },
+                    { concurrency: "unbounded", discard: true }
+                  )
+                  const prior = checkpoints.get(group.agentId)
+                  return yield* runGate.withPermits(1)(
+                    runGroup(
+                      input,
+                      group,
+                      new Set(prior?.completedStageIds ?? []),
+                      prior?.resumeId ?? null,
+                      (prior?.attempt ?? 0) + 1
+                    )
+                  )
+                }).pipe(
+                  // Release dependents when this group settles, success or failure —
+                  // the model runs every group and surfaces failures per worker, so a
+                  // dependent still runs (and can be retried) after its prerequisite.
+                  Effect.ensuring(
+                    Deferred.succeed(groupDone.get(group.agentId)!, undefined).pipe(
+                      Effect.ignore
+                    )
+                  )
+                ),
+              { concurrency: "unbounded" }
             )
             return {
               planId: input.planId,

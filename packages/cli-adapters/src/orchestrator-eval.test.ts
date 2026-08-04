@@ -60,7 +60,9 @@ const source = (amendment = ""): PlanPrd => ({
       acceptance: [{ id: "api.1", text: "API test passes.", status: "pending", evidence: null }],
       dependencies: ["schema"],
       complexity: "high",
-      assignment: { agentId: "worker-api", cli: "claude", model: "haiku", reason: "Shares schema dependency" },
+      // A dependency now ORDERS work across separate workers rather than sharing
+      // one, so the API stage runs on its own agent after the schema stage.
+      assignment: { agentId: "worker-api-impl", cli: "claude", model: "haiku", reason: "Runs after the schema stage." },
       executionStatus: "queued"
     },
     {
@@ -260,14 +262,18 @@ describe("orchestrator procedure eval failures", () => {
     )
   })
 
-  it("fails unavailable assignments and dependency ownership conflicts", () => {
+  it("fails unavailable assignments and file-ownership conflicts", () => {
     const base = source()
+    // `api` now shares the schema stage's FILE but takes a different worker — a
+    // file-ownership conflict (two workers can't edit one file) — AND an
+    // unavailable route. (A dependency alone no longer forces shared ownership.)
     const broken: PlanPrd = {
       ...base,
       stages: base.stages.map((s) =>
         s.id === "api"
           ? {
               ...s,
+              files: [{ path: "src/schema.ts", change: "M" as const }],
               assignment: { agentId: "worker-other", cli: "opencode", model: "missing", reason: "Wrong route" }
             }
           : s
@@ -289,8 +295,6 @@ describe("orchestrator procedure eval failures", () => {
         .map((assertion) => assertion.id)
     ).toEqual(
       expect.arrayContaining([
-        // The plan is structurally valid (canonical-html passes); only its
-        // routing is wrong.
         "assignments",
         "dependency-ownership",
         "available-routes"
