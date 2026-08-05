@@ -1461,28 +1461,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           })
         )
 
-      const pendingGitHubFeedback = (): Effect.Effect<
-        ReadonlyArray<GitHubFeedbackOutboxEntry>,
-        never,
-        PersistEnv
-      > =>
-        Effect.gen(function* () {
-          const sessions = yield* readAll()
-          const outbox = yield* readFeedbackOutbox()
-          return outbox.filter((entry) => {
-            if (entry.status !== "pending") return false
-            const session = sessions.find((candidate) => candidate.id === entry.sessionId)
-            return Boolean(
-              session &&
-                !session.archived &&
-                session.activeChatId === entry.chatId &&
-                session.githubInstallationId === entry.installationId &&
-                session.githubRepositoryId === entry.repositoryId &&
-                session.prNumber === entry.prNumber
-            )
-          })
-        })
-
       /** Persist an authoritative publication checkpoint for restart-safe retries. */
       const setPublishCheckpoint = (id: string, publish: Session["publish"]) =>
         update(id, (s) => ({ ...s, publish }))
@@ -1637,7 +1615,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setGitHubLink,
         claimGitHubFeedback,
         markGitHubFeedbackDispatched,
-        pendingGitHubFeedback,
         setPublishCheckpoint,
         setWorktreePath,
         setIssue,

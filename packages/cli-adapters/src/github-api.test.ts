@@ -367,6 +367,29 @@ describe("GitHubApi installation permission scopes", () => {
     ).toHaveLength(2)
   })
 
+  it.each([
+    ["merged", { number: 7, state: "closed", merged_at: "2026-08-05T12:00:00Z", head: { sha: "abc123" } }],
+    ["closed", { number: 7, state: "closed", merged_at: null, head: { sha: "abc123" } }]
+  ] as const)("does not fetch checks or statuses for a %s pull request", async (expectedState, pull) => {
+    const { client, credentialRequests, seen } = makeClient((request) => {
+      if (pathIs(request, "/repos/acme/widget")) return json(repository)
+      if (pathIs(request, "/repos/acme/widget/pulls/7")) return json(pull)
+      throw new Error(`unexpected ${request.method} ${request.url}`)
+    })
+
+    await expect(client.prState("/repo", 7)).resolves.toEqual({
+      state: expectedState,
+      checks: null
+    })
+    expect(credentialRequests.map((request) => request.permissions)).not.toContainEqual([
+      "checks:read"
+    ])
+    expect(credentialRequests.map((request) => request.permissions)).not.toContainEqual([
+      "statuses:read"
+    ])
+    expect(seen.some((request) => request.url.pathname.includes("/commits/"))).toBe(false)
+  })
+
   it("uses the documented minimum write permissions for PR mutations", async () => {
     const { client, credentialRequests } = makeClient((request) => {
       if (pathIs(request, "/repos/acme/widget")) return json(repository)

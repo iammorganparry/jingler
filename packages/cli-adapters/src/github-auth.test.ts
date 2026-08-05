@@ -27,6 +27,59 @@ const response = (body: unknown, status = 200): Response =>
   })
 
 describe("GitHubAuth desktop grants", () => {
+  it("owns the connection lifecycle endpoints behind the canonical status schema", async () => {
+    const requests: Array<{ path: string; method: string }> = []
+    const refreshed = { ...STATUS, lastRefreshedAt: "2026-08-05T10:00:00.000Z" }
+    const loopback = "http://127.0.0.1:3210/callback"
+    const responseForPath = new Map<string, () => Response>([
+      ["/api/github/status", () => response(STATUS)],
+      [
+        "/api/github/install",
+        () => response({ url: "https://github.com/apps/jingler/installations/new" })
+      ],
+      ["/api/github/refresh", () => response(refreshed)],
+      ["/api/github/disconnect", () => new Response(null, { status: 204 })]
+    ])
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      requests.push({ path: `${url.pathname}${url.search}`, method: init?.method ?? "GET" })
+      return responseForPath.get(url.pathname)?.() ?? response({ error: "not found" }, 404)
+    })
+    const client = makeGitHubAuthClient({
+      bearer: async () => "session",
+      fetch,
+      baseUrl: () => "https://server.jingler.test"
+    })
+
+    await expect(client.status()).resolves.toEqual(STATUS)
+    await expect(client.install(loopback))
+      .resolves.toBe("https://github.com/apps/jingler/installations/new")
+    await expect(client.refresh()).resolves.toEqual(refreshed)
+    await expect(client.disconnect()).resolves.toBeUndefined()
+    expect(requests).toEqual([
+      { path: "/api/github/status", method: "GET" },
+      {
+        path: `/api/github/install?redirect=${encodeURIComponent(loopback)}`,
+        method: "GET"
+      },
+      { path: "/api/github/refresh", method: "POST" },
+      { path: "/api/github/disconnect", method: "POST" }
+    ])
+  })
+
+  it("rejects a status payload that violates the shared renderer contract", async () => {
+    const client = makeGitHubAuthClient({
+      bearer: async () => "session",
+      fetch: async () => response({ ...STATUS, installations: [{ id: "77" }] }),
+      baseUrl: () => "https://server.jingler.test"
+    })
+
+    await expect(client.status()).rejects.toMatchObject({
+      reason: "unavailable",
+      message: "The GitHub connection service returned an invalid status response."
+    })
+  })
+
   it("adds workflows write only when an inspected workflow path changed", () => {
     expect(githubPushPermissions(["src/index.ts", "README.md"]))
       .toEqual(["contents:write"])

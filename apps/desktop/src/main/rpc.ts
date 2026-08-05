@@ -92,7 +92,6 @@ import {
   SessionNotFoundError,
   workspaceModeOf,
 } from "@jingler/core";
-import { GitHubAppConnectionStatus as GitHubAppConnectionStatusSchema } from "@jingler/core";
 import type {
   BrowserBounds,
   AdversarialReview,
@@ -190,20 +189,12 @@ export const RPC_CHANNEL = "jingler/rpc";
 export const configGet = () =>
   ConfigService.get().pipe(Effect.orElseSucceed(() => null));
 
-const githubApiBaseUrl = (): string =>
-  (
-    process.env.JINGLER_GITHUB_URL ??
-    process.env.JINGLER_AUTH_URL ??
-    "http://localhost:9100"
-  ).replace(/\/$/, "");
-
-const githubAuthError = (message: string): AuthError =>
-  new AuthError({ message });
+const githubConnectionError = (error: GitHubApiError): AuthError =>
+  new AuthError({ message: error.message });
 
 interface PendingRelayAcknowledgement {
   readonly resolve: () => void;
   readonly reject: (cause: Error) => void;
-  readonly timer: ReturnType<typeof setTimeout>;
 }
 
 const pendingRelayAcknowledgements = new Map<
@@ -221,130 +212,36 @@ export const githubAckEvent = (
     const key = relayAcknowledgementKey(clientId, cursor);
     const pending = pendingRelayAcknowledgements.get(key);
     if (!pending) return;
-    clearTimeout(pending.timer);
     pendingRelayAcknowledgements.delete(key);
     pending.resolve();
   });
 
-/**
- * Authenticated GitHub App HTTP request. The BetterAuth bearer stays in main;
- * neither the renderer nor the typed RPC payload ever sees it.
- */
-const githubRequest = (
-  path: string,
-  method: "GET" | "POST" | "DELETE",
-  body?: unknown,
-): Effect.Effect<Response, AuthError, SecretStore> =>
-  Effect.gen(function* () {
-    const secrets = yield* SecretStore;
-    const token = yield* secrets.get;
-    if (!token) {
-      return yield* Effect.fail(
-        githubAuthError("Sign in to Jingler before connecting GitHub."),
-      );
-    }
-    const response = yield* Effect.tryPromise({
-      try: () =>
-        fetch(`${githubApiBaseUrl()}${path}`, {
-          method,
-          headers: {
-            Authorization: `Bearer ${token}`,
-            ...(body === undefined
-              ? {}
-              : { "content-type": "application/json" }),
-          },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        }),
-      catch: () =>
-        githubAuthError("Couldn't reach the GitHub connection service."),
-    });
-    if (!response.ok) {
-      return yield* Effect.fail(
-        githubAuthError(
-          response.status === 401
-            ? "Your Jingler session expired. Sign in again before connecting GitHub."
-            : "The GitHub connection service couldn't complete that request.",
-        ),
-      );
-    }
-    return response;
-  });
-
-const githubStatusResponse = (
-  path: "/api/github/status" | "/api/github/refresh",
-  method: "GET" | "POST",
-): Effect.Effect<GitHubAppConnectionStatus, AuthError, SecretStore> =>
-  githubRequest(path, method).pipe(
-    Effect.flatMap((response) =>
-      Effect.tryPromise({
-        try: () => response.json() as Promise<unknown>,
-        catch: () =>
-          githubAuthError(
-            "The GitHub connection service returned an invalid response.",
-          ),
-      }),
-    ),
-    Effect.flatMap((body) =>
-      Schema.decodeUnknown(GitHubAppConnectionStatusSchema)(body).pipe(
-        Effect.mapError(() =>
-          githubAuthError(
-            "The GitHub connection service returned an invalid response.",
-          ),
-        ),
-      ),
-    ),
-  );
-
 export const githubConnectionStatus = (): Effect.Effect<
   GitHubAppConnectionStatus,
   AuthError,
-  SecretStore
-> => githubStatusResponse("/api/github/status", "GET");
+  GitHubAuth
+> => GitHubAuth.status().pipe(Effect.mapError(githubConnectionError));
 
 export const githubConnectionRefresh = (): Effect.Effect<
   GitHubAppConnectionStatus,
   AuthError,
-  SecretStore
-> => githubStatusResponse("/api/github/refresh", "POST");
+  GitHubAuth
+> => GitHubAuth.refresh().pipe(Effect.mapError(githubConnectionError));
 
 export const githubConnectionInstall = (): Effect.Effect<
   string,
   AuthError,
-  SecretStore
-> => {
-  const loopback = process.env.JINGLER_DEV_AUTH_LOOPBACK;
-  const suffix = loopback ? `?redirect=${encodeURIComponent(loopback)}` : "";
-  return githubRequest(`/api/github/install${suffix}`, "GET").pipe(
-    Effect.flatMap((response) =>
-      Effect.tryPromise({
-        try: () => response.json() as Promise<unknown>,
-        catch: () =>
-          githubAuthError(
-            "The GitHub connection service returned an invalid response.",
-          ),
-      }),
-    ),
-    Effect.flatMap((body) =>
-      typeof body === "object" &&
-      body !== null &&
-      "url" in body &&
-      typeof body.url === "string" &&
-      /^https?:\/\//i.test(body.url)
-        ? Effect.succeed(body.url)
-        : Effect.fail(
-            githubAuthError(
-              "The GitHub connection service returned an invalid install URL.",
-            ),
-          ),
-    ),
+  GitHubAuth
+> =>
+  GitHubAuth.install(process.env.JINGLER_DEV_AUTH_LOOPBACK).pipe(
+    Effect.mapError(githubConnectionError),
   );
-};
 
 export const githubConnectionDisconnect = (): Effect.Effect<
   void,
   AuthError,
-  SecretStore
-> => githubRequest("/api/github/disconnect", "POST").pipe(Effect.asVoid);
+  GitHubAuth
+> => GitHubAuth.disconnect().pipe(Effect.mapError(githubConnectionError));
 
 const MemoryBackendSearch = Schema.Struct({
   results: Schema.Array(
@@ -2989,18 +2886,14 @@ export const reconcileRelaySessionRoutes = async (
   });
 };
 
-const awaitRelayAcknowledgement = (
+export const awaitRelayAcknowledgement = (
   delivery: GitHubRelayDelivery,
-  mailbox: Mailbox.Mailbox<GitHubRelayStreamMessage>,
+  offer: (delivery: GitHubRelayDelivery) => void,
 ): Promise<void> =>
   new Promise<void>((resolve, reject) => {
     const key = relayAcknowledgementKey(delivery.clientId, delivery.cursor);
-    const timer = setTimeout(() => {
-      pendingRelayAcknowledgements.delete(key);
-      reject(new Error("GitHub feedback routing acknowledgement timed out"));
-    }, 60_000);
-    pendingRelayAcknowledgements.set(key, { resolve, reject, timer });
-    mailbox.unsafeOffer(delivery);
+    pendingRelayAcknowledgements.set(key, { resolve, reject });
+    offer(delivery);
   });
 
 /** A transcript append is the durable visible-instruction acceptance boundary. */
@@ -3153,7 +3046,7 @@ export const githubEvents = () =>
                   sessionId: session.id,
                   chatId: session.activeChatId,
                 },
-                mailbox,
+                (delivery) => mailbox.unsafeOffer(delivery),
               );
             },
           });
@@ -3180,7 +3073,6 @@ export const githubEvents = () =>
               ) {
                 continue;
               }
-              clearTimeout(pending.timer);
               pendingRelayAcknowledgements.delete(key);
               pending.reject(new Error("GitHub relay stream closed"));
             }

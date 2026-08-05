@@ -200,7 +200,7 @@ export const createPublishMachine = (
         src: "push",
         input: ({ context }) => context.inspection!.branch!,
         onDone: {
-          target: "resolving-pr",
+          target: "checking-pr",
           actions: { type: "markCompleted", params: { step: "pushing" } }
         },
         onError: {
@@ -212,13 +212,19 @@ export const createPublishMachine = (
         }
       }
     },
+    "checking-pr": {
+      always: [
+        { guard: "hasPr", target: "updating-pr" },
+        { target: "resolving-pr" }
+      ]
+    },
     "resolving-pr": {
       invoke: {
         src: "resolvePr", input: ({ context }) => context.inspection!.branch!,
         onDone: {
           target: "prResolved",
           actions: [
-            assign({ prNumber: ({ event }) => event.output }),
+            assign({ prNumber: ({ context, event }) => context.prNumber ?? event.output }),
             { type: "markCompleted", params: { step: "resolving-pr" } }
           ]
         },
@@ -282,6 +288,7 @@ export const createPublishMachine = (
 const visibleStep = (value: string): PublishStep => {
   if (value === "inspectionReady") return "verifying-branch"
   if (value === "metadataReady") return "generating-metadata"
+  if (value === "checking-pr") return "pushing"
   if (value === "prResolved") return "resolving-pr"
   return value as PublishStep
 }
@@ -309,15 +316,23 @@ export const runPublishMachine = async (
 ): Promise<PublishCheckpoint> => {
   const actor = createActor(createPublishMachine(checkpoint, operations))
   let writes = Promise.resolve()
+  let persistError: unknown = null
   let latest: PublishCheckpoint | null = null
-  const result = new Promise<PublishCheckpoint>((resolve) => {
+  const result = new Promise<PublishCheckpoint>((resolve, reject) => {
     actor.subscribe((snapshot) => {
       const next = checkpointFor(snapshot as never)
       latest = next
       onCheckpoint?.(next)
-      writes = writes.then(() => persist(next))
+      writes = writes
+        .then(() => persist(next))
+        .catch((error: unknown) => {
+          persistError ??= error
+        })
       if (snapshot.status === "done" || snapshot.matches("failed")) {
-        void writes.then(() => resolve(latest!))
+        void writes.then(() => {
+          if (persistError !== null) reject(persistError)
+          else resolve(latest!)
+        })
       }
     })
   })

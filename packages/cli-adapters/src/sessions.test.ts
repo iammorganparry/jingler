@@ -872,7 +872,6 @@ describe("SessionStore", () => {
           })
 
         const first = yield* claim()
-        const pending = yield* SessionStore.pendingGitHubFeedback()
         const duplicateDelivery = yield* claim({
           semanticKey: "comment-2",
           event: feedbackEvent({ semanticKey: "comment-2" })
@@ -906,7 +905,6 @@ describe("SessionStore", () => {
         const persisted = yield* SessionStore.get(created.id)
         return {
           first,
-          pending,
           duplicateDelivery,
           duplicateSemantic,
           wrongRepository,
@@ -930,65 +928,8 @@ describe("SessionStore", () => {
       dispatched: "dispatched",
       archived: "rejected"
     })
-    expect(result.value.pending).toHaveLength(1)
     expect(result.value.persisted.githubFeedbackDeliveryIds).toEqual(["delivery-1"])
     expect(result.value.persisted.githubFeedbackSemanticKeys).toEqual(["comment-1"])
-  })
-
-  it("recovers a pending GitHub feedback outbox entry through a fresh store", async () => {
-    const created = await runExit(
-      Effect.gen(function* () {
-        const session = yield* SessionStore.create(input({ title: "Crash recovery" }))
-        yield* SessionStore.setGitHubLink(session.id, {
-          installationId: "installation-1",
-          repositoryId: "repository-1",
-          prNumber: 42
-        })
-        const status = yield* SessionStore.claimGitHubFeedback(session.id, {
-          installationId: "installation-1",
-          repositoryId: "repository-1",
-          prNumber: 42,
-          deliveryId: "delivery-1",
-          semanticKey: "comment-1",
-          event: feedbackEvent()
-        })
-        return { id: session.id, status }
-      }).pipe(Effect.provide(services)),
-      temp.layer
-    )
-    expect(created._tag).toBe("Success")
-    if (created._tag !== "Success") return
-    expect(created.value.status).toBe("pending")
-
-    // Fresh SessionStore.Default models a renderer/main restart after the
-    // durable write but before the conversation actor saw SEND.
-    const recovered = await runExit(
-      Effect.gen(function* () {
-        const pending = yield* SessionStore.pendingGitHubFeedback()
-        const claimed = yield* SessionStore.claimGitHubFeedback(created.value.id, {
-          installationId: "installation-1",
-          repositoryId: "repository-1",
-          prNumber: 42,
-          deliveryId: "delivery-1",
-          semanticKey: "comment-1",
-          event: feedbackEvent()
-        })
-        const marked = yield* SessionStore.markGitHubFeedbackDispatched(
-          created.value.id,
-          "delivery-1",
-          "comment-1"
-        )
-        const remaining = yield* SessionStore.pendingGitHubFeedback()
-        return { pending, claimed, marked, remaining }
-      }).pipe(Effect.provide(SessionStore.Default)),
-      temp.layer
-    )
-    expect(recovered._tag).toBe("Success")
-    if (recovered._tag !== "Success") return
-    expect(recovered.value.pending).toHaveLength(1)
-    expect(recovered.value.claimed).toBe("pending")
-    expect(recovered.value.marked).toBe(true)
-    expect(recovered.value.remaining).toEqual([])
   })
 
   it("setMode / setModel persist onto the session across a fresh read", async () => {

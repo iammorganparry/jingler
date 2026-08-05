@@ -653,6 +653,10 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
     prState: async (cwd, pullNumber) => {
       try {
         const pr = await pull(cwd, pullNumber)
+        const stateWithoutChecks = mapPrState(pr, [])
+        if (stateWithoutChecks?.state === "merged" || stateWithoutChecks?.state === "closed") {
+          return stateWithoutChecks
+        }
         const sha = text(record(pr.head).sha)
         const checks = sha ? await checksFor(cwd, sha) : []
         return mapPrState(pr, checks)

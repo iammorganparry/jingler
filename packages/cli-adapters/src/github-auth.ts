@@ -5,14 +5,18 @@ import type {
   GitHubSessionRelayGrantResponse,
   GitHubSessionRoute
 } from "@jingler/core"
-import { GitHubApiError } from "@jingler/core"
-import { Effect } from "effect"
+import {
+  GitHubApiError,
+  GitHubAppConnectionStatus as GitHubAppConnectionStatusSchema
+} from "@jingler/core"
+import { Effect, Schema } from "effect"
 import { SecretStore } from "./secret-store.js"
 
 const DEFAULT_BASE_URL = "http://localhost:9100"
 const GRANT_REFRESH_SKEW_SECONDS = 30
 const STATUS_CACHE_TTL_MS = 30_000
 const WORKFLOW_DIRECTORY = ".github/workflows/"
+const HTTP_URL_PATTERN = /^https?:\/\//i
 
 /** Minimum GitHub App permissions needed to push the inspected paths. */
 export const githubPushPermissions = (
@@ -54,6 +58,9 @@ export interface GitHubInstallationCredential {
 
 export interface GitHubAuthClient {
   readonly status: () => Promise<GitHubAppConnectionStatus>
+  readonly install: (redirect?: string) => Promise<string>
+  readonly refresh: () => Promise<GitHubAppConnectionStatus>
+  readonly disconnect: () => Promise<void>
   /** Authenticated GitHub user identity; never inferred from an installation token. */
   readonly viewerLogin: () => Promise<string | null>
   readonly grantForInstallation: (
@@ -157,81 +164,8 @@ const errorForStatus = (status: number, retryAt?: string): GitHubApiError => {
 }
 
 const parseStatus = (value: unknown): GitHubAppConnectionStatus | null => {
-  const body = record(value)
-  if (
-    !body ||
-    typeof body.enabled !== "boolean" ||
-    typeof body.connected !== "boolean" ||
-    !Array.isArray(body.installations) ||
-    !(body.lastRefreshedAt === null || typeof body.lastRefreshedAt === "string")
-  ) {
-    return null
-  }
-  const installations = body.installations.flatMap((candidate): ReadonlyArray<GitHubAppInstallation> => {
-    const installation = record(candidate)
-    const account = record(installation?.account)
-    const id = string(installation?.id)
-    const accountId = string(account?.id)
-    const login = string(account?.login)
-    const type = string(account?.type)
-    const repositorySelection = installation?.repositorySelection
-    const status = installation?.status
-    if (
-      !installation ||
-      !account ||
-      !id ||
-      !accountId ||
-      !login ||
-      !type ||
-      (repositorySelection !== "all" && repositorySelection !== "selected") ||
-      (status !== "active" && status !== "suspended")
-    ) {
-      return []
-    }
-    const permissions = record(installation.permissions) ?? {}
-    const repositories = Array.isArray(installation.repositories)
-      ? installation.repositories.flatMap((candidate) => {
-          const repository = record(candidate)
-          const repositoryId = string(repository?.id)
-          const fullName = string(repository?.fullName)
-          return repositoryId && fullName ? [{ id: repositoryId, fullName }] : []
-        })
-      : []
-    return [{
-      id,
-      account: {
-        id: accountId,
-        login,
-        type,
-        avatarUrl: string(account.avatarUrl)
-      },
-      repositorySelection,
-      repositories,
-      permissions: Object.fromEntries(
-        Object.entries(permissions).filter(
-          (entry): entry is [string, string] => typeof entry[1] === "string"
-        )
-      ),
-      status,
-      suspendedAt: string(installation.suspendedAt)
-    }]
-  })
-  const user = record(body.user)
-  return {
-    enabled: body.enabled,
-    connected: body.connected,
-    user:
-      user && string(user.id) && string(user.login)
-        ? {
-            id: string(user.id)!,
-            login: string(user.login)!,
-            name: string(user.name),
-            avatarUrl: string(user.avatarUrl)
-          }
-        : null,
-    installations,
-    lastRefreshedAt: body.lastRefreshedAt as string | null
-  }
+  const decoded = Schema.decodeUnknownEither(GitHubAppConnectionStatusSchema)(value)
+  return decoded._tag === "Right" ? decoded.right : null
 }
 
 const parseGrant = (value: unknown): GitHubDesktopGrantResponse | null => {
@@ -398,6 +332,41 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
     } finally {
       statusRequest = null
     }
+  }
+
+  const install = async (redirect?: string): Promise<string> => {
+    const suffix = redirect ? `?redirect=${encodeURIComponent(redirect)}` : ""
+    const response = await authenticatedRequest(`/api/github/install${suffix}`)
+    const body = record(await response.json().catch(() => null))
+    const url = string(body?.url)
+    if (!(url && HTTP_URL_PATTERN.test(url))) {
+      throw new GitHubApiError({
+        reason: "unavailable",
+        message: "The GitHub connection service returned an invalid install URL."
+      })
+    }
+    return url
+  }
+
+  const refresh = async (): Promise<GitHubAppConnectionStatus> => {
+    const response = await authenticatedRequest("/api/github/refresh", { method: "POST" })
+    const parsed = parseStatus(await response.json().catch(() => null))
+    if (!parsed) {
+      throw new GitHubApiError({
+        reason: "unavailable",
+        message: "The GitHub connection service returned an invalid status response."
+      })
+    }
+    return rememberStatus(parsed)
+  }
+
+  const disconnect = async (): Promise<void> => {
+    await authenticatedRequest("/api/github/disconnect", { method: "POST" })
+    statusCache = null
+    installationsByOwner.clear()
+    grants.clear()
+    sessionGrants.clear()
+    credentials.clear()
   }
 
   const grantForInstallation = async (
@@ -592,6 +561,9 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
 
   return {
     status,
+    install,
+    refresh,
+    disconnect,
     viewerLogin: async () => (await status()).user?.login ?? null,
     grantForInstallation,
     grantForOwner: async (owner, scopes = []) => {
@@ -669,6 +641,9 @@ export class GitHubAuth extends Effect.Service<GitHubAuth>()("@jingler/GitHubAut
       })
     return {
       status: () => wrap(client.status),
+      install: (redirect?: string) => wrap(() => client.install(redirect)),
+      refresh: () => wrap(client.refresh),
+      disconnect: () => wrap(client.disconnect),
       viewerLogin: () => wrap(client.viewerLogin),
       grantForInstallation: (installationId: string, scopes: ReadonlyArray<string> = []) =>
         wrap(() => client.grantForInstallation(installationId, scopes)),

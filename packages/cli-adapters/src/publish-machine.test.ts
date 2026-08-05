@@ -95,6 +95,39 @@ describe("deterministic publish machine", () => {
     expect(ops.updatePr).toHaveBeenCalledWith(42, metadata)
   })
 
+  it("keeps a durable PR number when branch resolution no longer finds it", async () => {
+    const ops = operations({
+      inspect: vi.fn(async () => ({
+        branch: "fix/retry-publish",
+        hasChanges: false,
+        unpublished: 1,
+        changedPaths: [],
+        diffSummary: "",
+        headSha: "commit-sha"
+      })),
+      resolvePr: vi.fn(async () => null)
+    })
+    const checkpoint: PublishCheckpoint = {
+      step: "failed",
+      completed: ["inspecting", "generating-metadata", "staging", "committing", "resolving-pr", "creating-pr"],
+      metadata,
+      branch: "fix/retry-publish",
+      commitSha: "commit-sha",
+      prNumber: 900,
+      error: "update interrupted",
+      resumeFrom: "updating-pr",
+      updatedAt: new Date().toISOString()
+    }
+
+    const result = await runPublishMachine(checkpoint, ops, async () => undefined)
+
+    expect(result).toMatchObject({ step: "complete", prNumber: 900 })
+    expect(ops.resolvePr).not.toHaveBeenCalled()
+    expect(ops.createPr).not.toHaveBeenCalled()
+    expect(ops.updatePr).toHaveBeenCalledWith(900, metadata)
+    expect(ops.link).toHaveBeenCalledWith(900)
+  })
+
   it("persists the failing stage for actionable retry", async () => {
     const ops = operations({ push: vi.fn(async () => { throw new Error("push rejected") }) })
     const result = await runPublishMachine(undefined, ops, async () => undefined)
@@ -230,6 +263,25 @@ describe("deterministic publish machine", () => {
     expect(ops.push).toHaveBeenCalledOnce()
     expect(ops.createPr).toHaveBeenCalledOnce()
     expect(ops.link).toHaveBeenCalledOnce()
+  })
+
+  it("rejects a failed checkpoint persist and releases the single-flight entry", async () => {
+    const key = `persist-failure-${crypto.randomUUID()}`
+    const persistError = new Error("checkpoint write failed")
+
+    await expect(
+      runPublishMachineExclusive(key, undefined, operations(), async () => {
+        throw persistError
+      })
+    ).rejects.toBe(persistError)
+
+    const retried = await runPublishMachineExclusive(
+      key,
+      undefined,
+      operations(),
+      async () => undefined
+    )
+    expect(retried.step).toBe("complete")
   })
 
   it.each([
