@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
 
@@ -14,6 +14,7 @@ interface PersistedPublishSession {
   readonly branch: string
   readonly worktreePath: string
   readonly prNumber: number | null
+  readonly semanticBranchProposal?: { readonly type: string; readonly slug: string }
   readonly semanticBranchPending?: boolean
   readonly publish?: {
     readonly step: string
@@ -26,10 +27,15 @@ const sessionsAt = (home: string): ReadonlyArray<PersistedPublishSession> =>
   JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf8")) as ReadonlyArray<PersistedPublishSession>
 
 const prepareHermeticPush = (worktreePath: string, repoPath: string): void => {
-  // Keep the fetch URL parseable as github.com while routing the actual push
-  // into the hermetic repository.
-  git(worktreePath, ["remote", "set-url", "origin", "https://github.com/acme/widget.git"])
-  git(worktreePath, ["remote", "set-url", "--push", "origin", `file://${repoPath}`])
+  // The fetch remote remains SSH and its push URL is deliberately unusable.
+  // Only the API-derived canonical HTTPS URL can reach the hermetic target.
+  git(worktreePath, ["remote", "set-url", "origin", "git@github.com:acme/widget.git"])
+  git(worktreePath, ["remote", "set-url", "--push", "origin", `file://${repoPath}-wrong-origin`])
+  git(worktreePath, [
+    "config",
+    `url.file://${repoPath}.insteadOf`,
+    "https://github.com/acme/widget.git"
+  ])
   git(repoPath, ["config", "receive.denyCurrentBranch", "updateInstead"])
   git(repoPath, ["config", "receive.denyNonFastForwards", "false"])
 }
@@ -40,7 +46,6 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   const first = await launchApp({
     configured: true,
     withRepo: true,
-    withoutGithubCli: true,
     config: {
       github: { enabled: true, autoCreatePr: false, autoDetectPr: false }
     },
@@ -77,7 +82,11 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   const session = sessionsAt(home)[0]!
   expect(session.branch).toMatch(/^chore\//)
   prepareHermeticPush(session.worktreePath, repoPath)
-  writeFileSync(join(session.worktreePath, "publish-proof.txt"), "deterministic publish\n")
+  mkdirSync(join(session.worktreePath, ".github", "workflows"), { recursive: true })
+  writeFileSync(
+    join(session.worktreePath, ".github", "workflows", "publish.yml"),
+    "name: Publish proof\n"
+  )
 
   // Create succeeds, but the following description update fails once. This is
   // the awkward partial-success boundary: a restart must discover PR #900 and
@@ -98,12 +107,19 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   )
   expect(git(session.worktreePath, ["rev-list", "--count", "main..HEAD"])).toBe("1")
   expect(githubServer.operations.filter((operation) => operation.startsWith("pr create"))).toHaveLength(1)
+  expect(git(session.worktreePath, ["remote", "get-url", "origin"]))
+    .toBe("git@github.com:acme/widget.git")
+  expect(git(session.worktreePath, ["remote", "get-url", "--push", "origin"]))
+    .toBe(`file://${repoPath}-wrong-origin`)
+  expect(githubServer.credentialRequests).toContainEqual({
+    repository: "acme/widget",
+    permissions: ["contents:write", "workflows:write"]
+  })
 
   await first.app.close()
   const restarted = await launchApp({
     configured: true,
     withRepo: true,
-    withoutGithubCli: true,
     home: first.home,
     reposDir: first.reposDir,
     userDataDir: first.userDataDir,
@@ -120,6 +136,9 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   await restarted.window.getByRole("button", { name: /Retry from updating-pr/ }).click()
   await expect.poll(() => sessionsAt(home)[0]?.publish?.step, { timeout: 25_000 }).toBe("complete")
   await expect(restarted.window.getByRole("heading", { name: "Ship deterministic publish" })).toBeVisible()
+  await expect(
+    restarted.window.getByRole("button", { name: "Open on GitHub ↗" })
+  ).toBeVisible()
 
   const recovered = sessionsAt(home)[0]!
   expect(recovered.prNumber).toBe(900)
@@ -141,7 +160,6 @@ test("auto-create preference uses the same semantic publish flow", async ({ laun
   const launched = await launchApp({
     configured: true,
     withRepo: true,
-    withoutGithubCli: true,
     config: {
       github: { enabled: true, autoCreatePr: true, autoDetectPr: false }
     },
@@ -170,4 +188,72 @@ test("auto-create preference uses the same semantic publish flow", async ({ laun
   expect(session.prNumber).toBe(900)
   expect(git(session.worktreePath, ["rev-list", "--count", "main..HEAD"])).toBe("1")
   expect(githubServer.operations.filter((operation) => operation.startsWith("pr create"))).toHaveLength(1)
+  expect(githubServer.credentialRequests).toContainEqual({
+    repository: "acme/widget",
+    permissions: ["contents:write"]
+  })
+  expect(
+    githubServer.credentialRequests.some(({ permissions }) => permissions.includes("workflows:write"))
+  ).toBe(false)
+})
+
+test("publishes a migration-era established jingler branch without renaming it", async ({
+  launchApp
+}) => {
+  const branch = "jingler/historical-publish"
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: {
+      github: { enabled: true, autoCreatePr: false, autoDetectPr: false }
+    },
+    githubApp: { connected: true, userLogin: "e2e-user", accountLogin: "acme" },
+    sessions: ({ repoPath, reposDir }) => [{
+      id: "s_historical_publish",
+      repo: "widget",
+      repoPath,
+      branch,
+      title: "Publish historical session",
+      status: "idle",
+      cli: "claude",
+      diff: { added: 0, removed: 0 },
+      prNumber: null,
+      costUsd: 0,
+      tokens: 0,
+      updatedAt: "2026-08-04T09:00:00.000Z",
+      worktreePath: join(reposDir, "historical-publish"),
+      baseBranch: "main"
+    }],
+    seed: ({ repoPath, reposDir }) => {
+      const worktreePath = join(reposDir, "historical-publish")
+      git(repoPath, ["worktree", "add", "-b", branch, worktreePath, "main"])
+      writeFileSync(join(worktreePath, "historical-proof.txt"), "historical publish\n")
+    }
+  })
+  const { window, home, repoPath, githubServer } = launched
+  const historicalWorktree = sessionsAt(home)[0]!.worktreePath
+  prepareHermeticPush(historicalWorktree, repoPath)
+
+  await expect(appShell(window)).toBeVisible()
+  await sessionRow(window, "Publish historical session").click()
+  await window.getByRole("button", { name: "Pull Request", exact: true }).click()
+  await window.getByRole("button", { name: "Publish pull request" }).click()
+  await expect.poll(
+    () => sessionsAt(home)[0]?.publish?.step,
+    { timeout: 25_000 }
+  ).toBe("complete")
+
+  const persisted = sessionsAt(home)[0]!
+  expect(persisted.branch).toBe(branch)
+  expect(persisted.semanticBranchPending).toBeUndefined()
+  expect(persisted.semanticBranchProposal).toBeUndefined()
+  expect(git(historicalWorktree, ["rev-list", "--count", "main..HEAD"])).toBe("1")
+  expect(git(historicalWorktree, ["log", "-1", "--format=%s"])).toBe(
+    "chore: historical publish"
+  )
+  expect(githubServer.publishedPr()).toMatchObject({
+    head: branch,
+    base: "main",
+    title: "Publish historical session"
+  })
 })

@@ -49,14 +49,15 @@ export const connectionFromStatus = (status: GitHubAppConnectionStatus): GitHubC
 }
 
 /**
- * Resolve one local GitHub slug against live installations. Selected-only
- * installations are conservative: the status API does not expose repository
- * names, so Jingler asks the user to confirm access instead of enabling writes
- * it cannot prove are authorized.
+ * Resolve one local GitHub repository against identities proven by the live
+ * installation status. New sessions can supply the immutable repository id;
+ * historical sessions fall back to an exact canonical full-name match against
+ * that same GitHub-returned repository list.
  */
 export const repositoryAccess = (
   connection: GitHubConnection,
-  githubSlug: string | null
+  githubSlug: string | null,
+  githubRepositoryId: string | null = null
 ): GitHubRepositoryAccess => {
   if (!githubSlug) {
     return {
@@ -66,25 +67,48 @@ export const repositoryAccess = (
       reason: "This repository has no GitHub remote."
     }
   }
+  const canonicalSlug = githubSlug.toLowerCase()
   const owner = githubSlug.split("/")[0]?.toLowerCase() ?? ""
   const candidates = connection.installations.filter(
     (installation) => installation.account.login.toLowerCase() === owner
   )
-  const active = candidates.find((installation) => installation.status === "active")
-  if (active?.repositorySelection === "all") {
+  const activeInstallations = connection.installations.filter(
+    (installation) => installation.status === "active"
+  )
+  const selected = activeInstallations.find((installation) =>
+    (installation.repositories ?? []).some((repository) =>
+      githubRepositoryId !== null
+        ? repository.id === githubRepositoryId
+        : repository.fullName.toLowerCase() === canonicalSlug
+    )
+  )
+  if (selected) {
     return {
       status: "accessible",
-      installationId: active.id,
-      accountLogin: active.account.login,
-      reason: `The @${active.account.login} installation can access all repositories.`
+      installationId: selected.id,
+      accountLogin: selected.account.login,
+      reason: `${githubSlug} is selected for the @${selected.account.login} installation.`
     }
   }
-  if (active) {
+  const all = candidates.find(
+    (installation) =>
+      installation.status === "active" && installation.repositorySelection === "all"
+  )
+  if (all) {
+    return {
+      status: "accessible",
+      installationId: all.id,
+      accountLogin: all.account.login,
+      reason: `The @${all.account.login} installation can access all repositories.`
+    }
+  }
+  const partial = candidates.find((installation) => installation.status === "active")
+  if (partial) {
     return {
       status: "partial",
-      installationId: active.id,
-      accountLogin: active.account.login,
-      reason: `${githubSlug} must be included in the @${active.account.login} installation's selected repositories.`
+      installationId: partial.id,
+      accountLogin: partial.account.login,
+      reason: `${githubSlug} is not included in the @${partial.account.login} installation's selected repositories.`
     }
   }
   const suspended = candidates[0]

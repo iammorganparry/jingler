@@ -1368,7 +1368,13 @@ function ToggleRow({
         <div className="text-[12.5px] font-medium text-text-body">{label}</div>
         <div className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">{description}</div>
       </div>
-      <Toggle checked={checked} disabled={disabled} onCheckedChange={onChange} className="mt-0.5" />
+      <Toggle
+        aria-label={label}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onChange}
+        className="mt-0.5"
+      />
     </div>
   )
 }

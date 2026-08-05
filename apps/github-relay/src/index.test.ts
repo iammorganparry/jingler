@@ -1,36 +1,53 @@
-import { env, runInDurableObject, SELF } from "cloudflare:test"
+import { env, introspectWorkflow, SELF } from "cloudflare:test"
 import { describe, expect, it } from "vitest"
-import { githubPayload, hmacHex, issueTestRelayGrant, normalizedEvent } from "./test-support.js"
-import type { UserEventsObject } from "./user-events.js"
+import { githubPayload, hmacHex, issueTestRelayGrant } from "./test-support.js"
 
-interface EventCountRow {
-  readonly [key: string]: SqlStorageValue
-  readonly count: number
-}
-
-const storedEventCount = async (userId: string): Promise<number> => {
-  const stub = env.USER_EVENTS.getByName(userId)
-  return runInDurableObject(stub, async (_instance: UserEventsObject, state) => {
-    const row = state.storage.sql.exec<EventCountRow>("SELECT COUNT(*) AS count FROM events").one()
-    return row.count
-  })
-}
-
-const signedWebhook = async (
-  deliveryId: string,
-  payload: unknown = githubPayload(),
-  eventName = "issue_comment"
-): Promise<Response> => {
+const signedWebhook = async (deliveryId: string, payload: unknown = githubPayload()): Promise<Response> => {
   const body = JSON.stringify(payload)
   return SELF.fetch("https://relay.test/webhooks/github", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-github-delivery": deliveryId,
-      "x-github-event": eventName,
+      "x-github-event": "issue_comment",
       "x-hub-signature-256": `sha256=${await hmacHex(body, "test-webhook-secret")}`
     },
     body
+  })
+}
+
+const signedInternal = async (path: string, payload: unknown): Promise<Response> => {
+  const body = JSON.stringify(payload)
+  const timestamp = String(Math.floor(Date.now() / 1_000))
+  const signature = await hmacHex(`${timestamp}.${body}`, "test-relay-signing-secret")
+  return SELF.fetch(`https://relay.test${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-jingler-timestamp": timestamp,
+      "x-jingler-signature": `sha256=${signature}`
+    },
+    body
+  })
+}
+
+const registerRouteDirectly = async (
+  relaySessionId: string,
+  pullRequestNumber = 42,
+  installationId = "99",
+  repositoryId = "10"
+) => {
+  const routes = env.INSTALLATION_ROUTES.getByName(installationId)
+  await routes.setOwner("user-1", "active", installationId, 1, `owner-${relaySessionId}`)
+  await routes.applySessionRoute({
+    mutationId: `route-${relaySessionId}`,
+    generation: 1,
+    state: "active",
+    userId: "user-1",
+    installationId,
+    repositoryId,
+    pullRequestNumber,
+    relaySessionId
   })
 }
 
@@ -47,257 +64,149 @@ const nextMessage = (socket: WebSocket): Promise<Record<string, unknown>> =>
     )
   })
 
-const nextClose = (socket: WebSocket): Promise<{ readonly code: number; readonly reason: string }> =>
-  new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Timed out waiting for websocket close")), 4_000)
-    socket.addEventListener(
-      "close",
-      (event) => {
-        clearTimeout(timer)
-        resolve({ code: event.code, reason: event.reason })
-      },
-      { once: true }
-    )
-  })
-
-const connectSocket = async (grant: string, clientId: string): Promise<WebSocket> => {
-  const response = await SELF.fetch(
-    `https://relay.test/events?clientId=${encodeURIComponent(clientId)}&cursor=0`,
-    { headers: { Upgrade: "websocket", Authorization: `Bearer ${grant}` } }
-  )
-  expect(response.status).toBe(101)
-  const socket = response.webSocket!
-  const hello = nextMessage(socket)
-  socket.accept()
-  await expect(hello).resolves.toMatchObject({ type: "hello" })
-  return socket
-}
-
-const revokeInternally = async (userId: string, installationId: string): Promise<Response> => {
-  const body = JSON.stringify({ userId, installationId, reason: "disconnect" })
-  const timestamp = String(Math.floor(Date.now() / 1_000))
-  const signature = await hmacHex(`${timestamp}.${body}`, "test-relay-signing-secret")
-  return SELF.fetch("https://relay.test/internal/revoke", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-jingler-timestamp": timestamp,
-      "x-jingler-signature": `sha256=${signature}`
-    },
-    body
-  })
-}
-
 describe("GitHub relay HTTP boundary", () => {
-  it("exposes only the fixed health, webhook, and event paths", async () => {
-    const health = await SELF.fetch("https://relay.test/health")
-    expect(health.status).toBe(200)
-    await expect(health.json()).resolves.toMatchObject({
+  it("reports Durable Object and Workflow binding health", async () => {
+    const response = await SELF.fetch("https://relay.test/health")
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
       status: "ok",
-      service: "@jingler/github-relay"
+      bindings: {
+        sessionEvents: true,
+        installationRoutes: true,
+        deliveryWorkflow: true,
+        registrationWorkflow: true
+      }
     })
-    expect((await SELF.fetch("https://relay.test/webhooks/github")).status).toBe(404)
-    expect(
-      (await SELF.fetch("https://relay.test/webhooks/github/", { method: "POST" })).status
-    ).toBe(404)
   })
 
-  it("rejects unverified webhook bytes before parsing", async () => {
+  it("rejects invalid signatures before parsing payloads", async () => {
     const response = await SELF.fetch("https://relay.test/webhooks/github", {
       method: "POST",
       headers: {
-        "x-github-delivery": "delivery-invalid",
+        "x-github-delivery": "invalid-signature-delivery",
         "x-github-event": "issue_comment",
-        "x-hub-signature-256": "sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        "x-hub-signature-256": `sha256=${"a".repeat(64)}`
       },
       body: "not-json"
     })
     expect(response.status).toBe(401)
   })
 
-  it("rejects unsigned internal revocation requests", async () => {
-    const response = await SELF.fetch("https://relay.test/internal/revoke", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ userId: "user-a", installationId: "99" })
-    })
-    expect(response.status).toBe(401)
+  it("creates one deterministic delivery Workflow for duplicate GitHub deliveries", async () => {
+    const installationId = "9911"
+    const repositoryId = "1011"
+    await registerRouteDirectly("relay-session-workflow-1", 42, installationId, repositoryId)
+    const introspector = await introspectWorkflow(env.GITHUB_DELIVERY_WORKFLOW)
+    try {
+      const payload = githubPayload({
+        installation: { id: Number(installationId) },
+        repository: {
+          id: Number(repositoryId),
+          name: "jingler",
+          full_name: "acme/jingler",
+          owner: { login: "acme" }
+        }
+      })
+      const first = await signedWebhook("deterministic-delivery", payload)
+      const duplicate = await signedWebhook("deterministic-delivery", payload)
+      expect(first.status).toBe(202)
+      expect(duplicate.status).toBe(202)
+      const firstBody = (await first.json()) as { workflowId: string; duplicate: boolean }
+      const duplicateBody = (await duplicate.json()) as { workflowId: string; duplicate: boolean }
+      expect(firstBody.workflowId).toBe(duplicateBody.workflowId)
+      expect(firstBody.duplicate).toBe(false)
+      expect(duplicateBody.duplicate).toBe(true)
+      const [instance] = introspector.get()
+      expect(instance).toBeDefined()
+      await instance!.waitForStatus("complete")
+      await expect(env.SESSION_EVENTS.getByName("relay-session-workflow-1").eventCount()).resolves.toBe(1)
+    } finally {
+      await introspector.dispose()
+    }
   })
 
-  it("acknowledges duplicate delivery ids without duplicate persistence", async () => {
-    const installation = env.INSTALLATION_ROUTES.getByName("99")
-    await installation.subscribe("user-deduplicated", Date.now() + 60_000)
-    const first = await signedWebhook("delivery-deduplicated")
-    const duplicate = await signedWebhook("delivery-deduplicated")
-    expect(first.status).toBe(200)
-    expect(duplicate.status).toBe(200)
-    await expect(duplicate.json()).resolves.toMatchObject({ duplicate: true, routedUsers: 0 })
-    await expect(storedEventCount("user-deduplicated")).resolves.toBe(1)
-  })
-})
-
-describe("installation routing and user isolation", () => {
-  it("fans one shared installation out to every subscribed user and no unrelated user", async () => {
-    const installation = env.INSTALLATION_ROUTES.getByName("shared-installation")
-    await installation.subscribe("user-a", Date.now() + 60_000)
-    await installation.subscribe("user-b", Date.now() + 60_000)
-    await env.INSTALLATION_ROUTES.getByName("other-installation").subscribe(
-      "user-c",
-      Date.now() + 60_000
+  it("accepts signed session route registration through a deterministic Workflow", async () => {
+    await env.INSTALLATION_ROUTES.getByName("99").setOwner(
+      "user-1",
+      "active",
+      "99",
+      1,
+      "owner-session-route-http"
     )
-
-    await expect(
-      installation.dispatch(
-        normalizedEvent({ installationId: "shared-installation", deliveryId: "shared-delivery" })
-      )
-    ).resolves.toEqual({ duplicate: false, routedUsers: 2 })
-    await expect(storedEventCount("user-a")).resolves.toBe(1)
-    await expect(storedEventCount("user-b")).resolves.toBe(1)
-    await expect(storedEventCount("user-c")).resolves.toBe(0)
-  })
-
-  it("expires individual subscriptions without overwriting the remaining set", async () => {
-    const installation = env.INSTALLATION_ROUTES.getByName("expiring-installation")
-    await installation.subscribe("expired-user", Date.now() - 1)
-    await installation.subscribe("active-user", Date.now() + 60_000)
-    await expect(
-      installation.dispatch(
-        normalizedEvent({ installationId: "expiring-installation", deliveryId: "expiry-delivery" })
-      )
-    ).resolves.toEqual({ duplicate: false, routedUsers: 1 })
-    await expect(storedEventCount("expired-user")).resolves.toBe(0)
-    await expect(storedEventCount("active-user")).resolves.toBe(1)
-  })
-
-  it("deduplicates semantically unchanged feedback with distinct GitHub deliveries", async () => {
-    const stream = env.USER_EVENTS.getByName("semantic-user")
-    await expect(stream.publish(normalizedEvent())).resolves.toMatchObject({ inserted: true })
-    await expect(
-      stream.publish(normalizedEvent({ deliveryId: "delivery-edited" }))
-    ).resolves.toEqual({ inserted: false, cursor: null })
-    await expect(storedEventCount("semantic-user")).resolves.toBe(1)
+    const introspector = await introspectWorkflow(env.RELAY_REGISTRATION_WORKFLOW)
+    const response = await signedInternal("/internal/session-routes", {
+      mutationId: "session-route-http",
+      generation: 1,
+      state: "active",
+      userId: "user-1",
+      installationId: "99",
+      repositoryId: "10",
+      pullRequestNumber: 44,
+      relaySessionId: "relay-session-http-0001"
+    })
+    expect(response.status).toBe(202)
+    try {
+      const [instance] = introspector.get()
+      expect(instance).toBeDefined()
+      await instance!.waitForStatus("complete")
+      await expect(env.INSTALLATION_ROUTES.getByName("99").resolveRoute("10", 44)).resolves.toMatchObject({
+        relaySessionId: "relay-session-http-0001"
+      })
+    } finally {
+      await introspector.dispose()
+    }
   })
 })
 
-describe("hibernating websocket replay", () => {
-  it("registers the grant subject, streams an event, and persists its client acknowledgement", async () => {
+describe("session-scoped websocket delivery", () => {
+  it("opens only the Durable Object named by the signed session grant", async () => {
+    const relaySessionId = "relay-session-socket-0001"
+    await registerRouteDirectly(relaySessionId)
     const now = Math.floor(Date.now() / 1_000)
-    const grant = await issueTestRelayGrant({ issuedAt: now, expiresAt: now + 300 })
+    const grant = await issueTestRelayGrant({
+      relaySessionId,
+      issuedAt: now,
+      expiresAt: now + 300
+    })
     const response = await SELF.fetch("https://relay.test/events?clientId=desktop-1&cursor=0", {
       headers: { Upgrade: "websocket", Authorization: `Bearer ${grant}` }
     })
     expect(response.status).toBe(101)
-    const socket = response.webSocket
-    expect(socket).not.toBeNull()
-    socket?.accept()
-    await expect(nextMessage(socket!)).resolves.toMatchObject({ type: "hello", cursor: 0 })
+    const socket = response.webSocket!
+    const hello = nextMessage(socket)
+    socket.accept()
+    await expect(hello).resolves.toMatchObject({ type: "hello", cursor: 0 })
 
-    const eventPromise = nextMessage(socket!)
-    const webhook = await signedWebhook("delivery-live")
-    expect(webhook.status).toBe(200)
-    const delivered = await eventPromise
-    expect(delivered).toMatchObject({ type: "event", cursor: 1 })
-    socket?.send(JSON.stringify({ type: "ack", cursor: 1 }))
-    socket?.close(1000, "reconnect")
+    const introspector = await introspectWorkflow(env.GITHUB_DELIVERY_WORKFLOW)
+    try {
+      const eventMessage = nextMessage(socket)
+      await signedWebhook("socket-delivery")
+      const [instance] = introspector.get()
+      expect(instance).toBeDefined()
+      await instance!.waitForStatus("complete")
+      await expect(eventMessage).resolves.toMatchObject({
+        type: "event",
+        event: { deliveryId: "socket-delivery" }
+      })
+      await expect(env.SESSION_EVENTS.getByName("relay-session-unrelated").eventCount()).resolves.toBe(0)
+    } finally {
+      socket.close(1000, "done")
+      await introspector.dispose()
+    }
+  })
 
-    const reconnect = await SELF.fetch("https://relay.test/events?clientId=desktop-1&cursor=0", {
+  it("rejects a valid grant whose user does not own the session route", async () => {
+    await registerRouteDirectly("relay-session-owned-0001")
+    const now = Math.floor(Date.now() / 1_000)
+    const grant = await issueTestRelayGrant({
+      subject: "another-user",
+      relaySessionId: "relay-session-owned-0001",
+      issuedAt: now,
+      expiresAt: now + 300
+    })
+    const response = await SELF.fetch("https://relay.test/events?clientId=desktop-2&cursor=0", {
       headers: { Upgrade: "websocket", Authorization: `Bearer ${grant}` }
     })
-    const reconnectSocket = reconnect.webSocket
-    reconnectSocket?.accept()
-    await expect(nextMessage(reconnectSocket!)).resolves.toMatchObject({
-      type: "hello",
-      cursor: 1,
-      newestCursor: 1
-    })
-    reconnectSocket?.close(1000, "done")
+    expect(response.status).toBe(403)
   })
-
-  it("closes at grant expiry and only reconnects with a fresh grant", async () => {
-    const now = Math.floor(Date.now() / 1_000)
-    const expiring = await issueTestRelayGrant({
-      grantId: "expiring",
-      issuedAt: now,
-      expiresAt: now + 1
-    })
-    const socket = await connectSocket(expiring, "desktop-expiry")
-    await expect(nextClose(socket)).resolves.toMatchObject({
-      code: 4001,
-      reason: "Relay grant expired"
-    })
-    expect(
-      (
-        await SELF.fetch("https://relay.test/events?clientId=desktop-expiry&cursor=0", {
-          headers: { Upgrade: "websocket", Authorization: `Bearer ${expiring}` }
-        })
-      ).status
-    ).toBe(401)
-
-    const fresh = await issueTestRelayGrant({
-      grantId: "fresh",
-      issuedAt: Math.floor(Date.now() / 1_000),
-      expiresAt: Math.floor(Date.now() / 1_000) + 300
-    })
-    const reconnected = await connectSocket(fresh, "desktop-expiry")
-    reconnected.close(1000, "done")
-  })
-
-  it("revokes one user and installation immediately without crossing users", async () => {
-    const now = Math.floor(Date.now() / 1_000)
-    const socketA = await connectSocket(
-      await issueTestRelayGrant({
-        subject: "revoked-user",
-        installationId: "99",
-        issuedAt: now,
-        expiresAt: now + 300
-      }),
-      "desktop-revoked"
-    )
-    const socketB = await connectSocket(
-      await issueTestRelayGrant({
-        subject: "other-user",
-        installationId: "99",
-        issuedAt: now,
-        expiresAt: now + 300
-      }),
-      "desktop-other"
-    )
-    const closed = nextClose(socketA)
-    const response = await revokeInternally("revoked-user", "99")
-    expect(response.status).toBe(200)
-    await expect(closed).resolves.toMatchObject({ code: 4003 })
-
-    const delivered = nextMessage(socketB)
-    expect((await signedWebhook("delivery-after-revoke")).status).toBe(200)
-    await expect(delivered).resolves.toMatchObject({
-      type: "event",
-      event: { deliveryId: "delivery-after-revoke" }
-    })
-    await expect(storedEventCount("revoked-user")).resolves.toBe(0)
-    socketB.close(1000, "done")
-  })
-
-  it.each(["suspend", "deleted"])(
-    "reconciles installation %s lifecycle webhooks by closing every affected socket",
-    async (action) => {
-      const now = Math.floor(Date.now() / 1_000)
-      const socket = await connectSocket(
-        await issueTestRelayGrant({
-          subject: `lifecycle-${action}`,
-          installationId: "99",
-          issuedAt: now,
-          expiresAt: now + 300
-        }),
-        `desktop-${action}`
-      )
-      const closed = nextClose(socket)
-      const response = await signedWebhook(
-        `lifecycle-delivery-${action}`,
-        githubPayload({ action, installation: { id: 99 } }),
-        "installation"
-      )
-      expect(response.status).toBe(200)
-      await expect(closed).resolves.toMatchObject({ code: 4003 })
-    }
-  )
 })

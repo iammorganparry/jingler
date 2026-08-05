@@ -253,7 +253,7 @@ describe("memory operations health", () => {
 
 describe("memory production configuration", () => {
   it("requires signing/service secrets and non-localhost URLs in production", () => {
-    const base = { NODE_ENV: "production" }
+    const base = { NODE_ENV: "production", CRON_SECRET: "cron-secret-abcdefghijklmnopqrstuvwxyz" }
     expect(() => loadEnv(base)).toThrow("BETTER_AUTH_SECRET")
     expect(() => loadEnv({ ...base, BETTER_AUTH_SECRET: "auth-secret" })).toThrow("BETTER_AUTH_URL")
     const withAuthUrl = { ...base, BETTER_AUTH_SECRET: "auth-secret", BETTER_AUTH_URL: "https://auth.jingler.app" }
@@ -271,7 +271,8 @@ describe("memory production configuration", () => {
       BETTER_AUTH_SECRET: "s",
       BETTER_AUTH_URL: "https://auth.jingler.app",
       MEMORY_GRANT_SECRET: "g",
-      MEMORY_WORKER_SERVICE_SECRET: "w"
+      MEMORY_WORKER_SERVICE_SECRET: "w",
+      CRON_SECRET: "cron-secret-abcdefghijklmnopqrstuvwxyz"
     }
     expect(() => loadEnv({ ...base, MEMORY_WORKER_URL: "http://localhost:8787" })).toThrow(
       "MEMORY_WORKER_URL must not be a localhost URL"
@@ -316,7 +317,8 @@ describe("memory production configuration", () => {
       BETTER_AUTH_URL: "https://auth.jingler.app",
       MEMORY_GRANT_SECRET: "grant-secret",
       MEMORY_WORKER_URL: "https://memory.jingler.workers.dev",
-      MEMORY_WORKER_SERVICE_SECRET: "worker-secret"
+      MEMORY_WORKER_SERVICE_SECRET: "worker-secret",
+      CRON_SECRET: "cron-secret-abcdefghijklmnopqrstuvwxyz"
     })
     expect(configured.authSecret).toBe("auth-secret")
     expect(configured.memoryGrantSecret).toBe("grant-secret")

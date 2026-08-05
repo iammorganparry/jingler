@@ -15,7 +15,7 @@ import {
   GateDecision,
   GitHubAppConnectionStatus,
   GitHubFeedbackClaimStatus,
-  GitHubRelayDelivery,
+  GitHubRelayStreamMessage,
   GitHubRelayEvent,
   GitConfig,
   GithubConfig,
@@ -622,7 +622,11 @@ export class JinglerRpcs extends RpcGroup.make(
   Rpc.make("Sessions.renameChat", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String, chatId: Schema.String, title: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      title: Schema.String
+    }
   }),
 
   /** Close one chat; closing the last creates a fresh Chat 1 replacement. */
@@ -743,7 +747,11 @@ export class JinglerRpcs extends RpcGroup.make(
 
   /** Change a session's HITL permission mode (ask / accept-edits / auto / plan). */
   Rpc.make("Agent.setMode", {
-    payload: { sessionId: Schema.String, chatId: Schema.String, mode: PermissionMode }
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      mode: PermissionMode
+    }
   }),
 
   /** Change the current provider's native thinking settings. */
@@ -884,7 +892,11 @@ export class JinglerRpcs extends RpcGroup.make(
    * so there is no reply here that the tab isn't already about to receive.
    */
   Rpc.make("Agent.stopSubagent", {
-    payload: { sessionId: Schema.String, chatId: Schema.String, agentId: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      agentId: Schema.String
+    }
   }),
 
   /**
@@ -1227,7 +1239,7 @@ export class JinglerRpcs extends RpcGroup.make(
 
   /** Verified GitHub webhook deliveries awaiting durable visible routing. */
   Rpc.make("Github.events", {
-    success: GitHubRelayDelivery,
+    success: GitHubRelayStreamMessage,
     stream: true
   }),
 
@@ -1445,11 +1457,7 @@ export class JinglerRpcs extends RpcGroup.make(
   /** Compare-and-swap the canonical source after safe MDX validation. */
   Rpc.make("Plan.updateDocument", {
     success: PlanDocument,
-    error: Schema.Union(
-      PlanConflictError,
-      PlanValidationError,
-      PlanPersistenceError
-    ),
+    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1478,11 +1486,7 @@ export class JinglerRpcs extends RpcGroup.make(
       messageId: Schema.String,
       deliveries: Schema.Array(PlanMentionDelivery)
     }),
-    error: Schema.Union(
-      PlanConflictError,
-      PlanValidationError,
-      PlanPersistenceError
-    ),
+    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1501,11 +1505,7 @@ export class JinglerRpcs extends RpcGroup.make(
       messageId: Schema.String,
       deliveries: Schema.Array(PlanMentionDelivery)
     }),
-    error: Schema.Union(
-      PlanConflictError,
-      PlanValidationError,
-      PlanPersistenceError
-    ),
+    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1518,11 +1518,7 @@ export class JinglerRpcs extends RpcGroup.make(
   /** Update delivery state for one message without replacing the thread. */
   Rpc.make("Plan.updateMessageDelivery", {
     success: PlanDocument,
-    error: Schema.Union(
-      PlanConflictError,
-      PlanValidationError,
-      PlanPersistenceError
-    ),
+    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1537,11 +1533,7 @@ export class JinglerRpcs extends RpcGroup.make(
   /** Resolve or reopen one annotation thread under the canonical revision guard. */
   Rpc.make("Plan.setThreadResolved", {
     success: PlanDocument,
-    error: Schema.Union(
-      PlanConflictError,
-      PlanValidationError,
-      PlanPersistenceError
-    ),
+    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1551,7 +1543,6 @@ export class JinglerRpcs extends RpcGroup.make(
       author: Schema.Literal("user", "agent")
     }
   }),
-
 
   Rpc.make("Review.run", {
     success: AdversarialReview,
@@ -1727,7 +1718,11 @@ export class JinglerRpcs extends RpcGroup.make(
    */
   Rpc.make("Github.comment", {
     error: GitHubApiError,
-    payload: { sessionId: Schema.String, body: Schema.String, toGithub: Schema.Boolean }
+    payload: {
+      sessionId: Schema.String,
+      body: Schema.String,
+      toGithub: Schema.Boolean
+    }
   }),
 
   /**
@@ -1745,13 +1740,20 @@ export class JinglerRpcs extends RpcGroup.make(
   Rpc.make("Github.submitReview", {
     success: Schema.Number,
     error: GitHubApiError,
-    payload: { sessionId: Schema.String, comments: Schema.Array(ReviewComment) }
+    payload: {
+      sessionId: Schema.String,
+      comments: Schema.Array(ReviewComment)
+    }
   }),
 
   /** Submit a review (comment / approve / request-changes) on the session's PR. */
   Rpc.make("Github.review", {
     error: GitHubApiError,
-    payload: { sessionId: Schema.String, kind: ReviewSubmitKind, body: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      kind: ReviewSubmitKind,
+      body: Schema.String
+    }
   }),
 
   /**
@@ -1760,7 +1762,11 @@ export class JinglerRpcs extends RpcGroup.make(
    */
   Rpc.make("Github.resolveThread", {
     error: GitHubApiError,
-    payload: { sessionId: Schema.String, threadId: Schema.String, resolved: Schema.Boolean }
+    payload: {
+      sessionId: Schema.String,
+      threadId: Schema.String,
+      resolved: Schema.Boolean
+    }
   }),
 
   /**
@@ -1769,7 +1775,11 @@ export class JinglerRpcs extends RpcGroup.make(
    */
   Rpc.make("Github.replyToThread", {
     error: GitHubApiError,
-    payload: { sessionId: Schema.String, commentId: Schema.Number, body: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      commentId: Schema.Number,
+      body: Schema.String
+    }
   }),
 
   /**
@@ -1778,7 +1788,10 @@ export class JinglerRpcs extends RpcGroup.make(
    */
   Rpc.make("Github.merge", {
     error: GitHubApiError,
-    payload: { sessionId: Schema.String, method: Schema.optional(PrMergeMethod) }
+    payload: {
+      sessionId: Schema.String,
+      method: Schema.optional(PrMergeMethod)
+    }
   }),
 
   /**
@@ -1842,7 +1855,11 @@ export class JinglerRpcs extends RpcGroup.make(
 
   /** Resize a terminal's PTY (drives SIGWINCH so TUIs reflow). No-op if unknown. */
   Rpc.make("Terminal.resize", {
-    payload: { terminalId: Schema.String, cols: Schema.Number, rows: Schema.Number }
+    payload: {
+      terminalId: Schema.String,
+      cols: Schema.Number,
+      rows: Schema.Number
+    }
   }),
 
   /** Kill a terminal's shell (SIGHUP) and drop it. Idempotent. */
@@ -2079,7 +2096,11 @@ export class JinglerRpcs extends RpcGroup.make(
       SessionNotFoundError,
       BrowserPreviewError
     ),
-    payload: { sessionId: Schema.String, path: Schema.String, bounds: BrowserBounds }
+    payload: {
+      sessionId: Schema.String,
+      path: Schema.String,
+      bounds: BrowserBounds
+    }
   }),
 
   /** Hide the PDF view without destroying it (the dock switched tabs). */
@@ -2163,7 +2184,9 @@ export class JinglerRpcs extends RpcGroup.make(
   Rpc.make("Theme.setCustomizations", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: { colors: Schema.Record({ key: Schema.String, value: Schema.String }) }
+    payload: {
+      colors: Schema.Record({ key: Schema.String, value: Schema.String })
+    }
   }),
 
   /**

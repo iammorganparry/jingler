@@ -27,6 +27,7 @@ import type {
   GitHubAppConnectionStatus,
   GitHubFeedbackClaimStatus,
   GitHubRelayDelivery,
+  GitHubRelayConnectionUpdate,
   GitHubRelayEvent,
   GitConfig,
   NotificationKind,
@@ -112,7 +113,18 @@ import {
 } from "@jingler/contracts"
 import { RpcClient } from "@effect/rpc"
 import type { FromClientEncoded, FromServerEncoded } from "@effect/rpc/RpcMessage"
-import { Cause, Effect, Exit, Fiber, Layer, ManagedRuntime, Runtime, Schema, Scope, Stream } from "effect"
+import {
+  Cause,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+  Runtime,
+  Schema,
+  Scope,
+  Stream
+} from "effect"
 
 /**
  * A custom `RpcClient.Protocol` bound to the preload bridge. `send` ships a
@@ -130,8 +142,7 @@ const ClientProtocolLive = Layer.effect(
       })
 
       return {
-        send: (request: FromClientEncoded) =>
-          Effect.sync(() => window.jingler.send(request)),
+        send: (request: FromClientEncoded) => Effect.sync(() => window.jingler.send(request)),
         supportsAck: true,
         supportsTransferables: false
       }
@@ -204,10 +215,8 @@ const drainRun = (
 export const rpc = {
   /** What each installed harness will actually be billed to. */
   billingPaths: (): Promise<ReadonlyArray<HarnessBilling>> => run((c) => c.Billing.paths()),
-  discoveryList: (): Promise<ReadonlyArray<CliInfo>> =>
-    run((c) => c.Discovery.list()),
-  configGet: (): Promise<WorkspaceConfig | null> =>
-    run((c) => c.Config.get()),
+  discoveryList: (): Promise<ReadonlyArray<CliInfo>> => run((c) => c.Discovery.list()),
+  configGet: (): Promise<WorkspaceConfig | null> => run((c) => c.Config.get()),
   memoryAccess: (): Promise<MemoryAccess> =>
     run((c) => c.Memory.request({ operation: "access" })).then((value) =>
       decodeMemoryResult(MemoryAccessSchema, value)
@@ -227,20 +236,25 @@ export const rpc = {
     nodeId: string,
     limit = 100
   ): Promise<MemoryGraphView> =>
-    run((c) => c.Memory.request({ organizationId, operation: "neighborhood", nodeId, limit })).then((value) =>
-      decodeMemoryResult(MemoryGraphViewSchema, value)
-    ),
+    run((c) =>
+      c.Memory.request({
+        organizationId,
+        operation: "neighborhood",
+        nodeId,
+        limit
+      })
+    ).then((value) => decodeMemoryResult(MemoryGraphViewSchema, value)),
   memoryEdgeEvidence: (organizationId: string, edgeId: string): Promise<MemoryEdgeEvidence> =>
-    run((c) => c.Memory.request({ organizationId, operation: "edgeEvidence", edgeId })).then((value) =>
-      decodeMemoryResult(MemoryEdgeEvidenceSchema, value)
+    run((c) => c.Memory.request({ organizationId, operation: "edgeEvidence", edgeId })).then(
+      (value) => decodeMemoryResult(MemoryEdgeEvidenceSchema, value)
     ),
   memorySearch: (
     organizationId: string,
     query: string,
     limit = 50
   ): Promise<ReadonlyArray<MemorySearchResult>> =>
-    run((c) => c.Memory.request({ organizationId, operation: "search", query, limit })).then((value) =>
-      decodeMemoryResult(Schema.Array(MemorySearchResultSchema), value)
+    run((c) => c.Memory.request({ organizationId, operation: "search", query, limit })).then(
+      (value) => decodeMemoryResult(Schema.Array(MemorySearchResultSchema), value)
     ),
   memoryPage: (organizationId: string, pageId: string): Promise<MemoryPageDetail> =>
     run((c) => c.Memory.request({ organizationId, operation: "page", pageId })).then((value) =>
@@ -255,9 +269,14 @@ export const rpc = {
     proposalId: string,
     action: "approve" | "reject"
   ): Promise<MemoryReviewResult> =>
-    run((c) => c.Memory.request({ organizationId, operation: "review", proposalId, action })).then((value) =>
-      decodeMemoryResult(MemoryReviewResultSchema, value)
-    ),
+    run((c) =>
+      c.Memory.request({
+        organizationId,
+        operation: "review",
+        proposalId,
+        action
+      })
+    ).then((value) => decodeMemoryResult(MemoryReviewResultSchema, value)),
   memoryExport: (organizationId: string): Promise<MemoryExport> =>
     run((c) => c.Memory.request({ organizationId, operation: "export" })).then((value) =>
       decodeMemoryResult(MemoryExportSchema, value)
@@ -275,24 +294,16 @@ export const rpc = {
         ...(pageId === undefined ? {} : { pageId })
       })
     ),
-  chooseReposDir: (): Promise<WorkspaceConfig | null> =>
-    run((c) => c.Setup.chooseReposDir()),
-  workspaceRepos: (): Promise<ReadonlyArray<Repo>> =>
-    run((c) => c.Workspace.repos()),
+  chooseReposDir: (): Promise<WorkspaceConfig | null> => run((c) => c.Setup.chooseReposDir()),
+  workspaceRepos: (): Promise<ReadonlyArray<Repo>> => run((c) => c.Workspace.repos()),
   workspaceBranches: (repoPath: string): Promise<ReadonlyArray<string>> =>
     run((c) => c.Workspace.branches({ repoPath })),
-  githubConnectionStatus: (): Promise<GitHubAppConnectionStatus> =>
-    run((c) => c.GitHub.status()),
-  githubConnectionInstall: (): Promise<string> =>
-    run((c) => c.GitHub.install()),
-  githubConnectionRefresh: (): Promise<GitHubAppConnectionStatus> =>
-    run((c) => c.GitHub.refresh()),
-  githubConnectionDisconnect: (): Promise<void> =>
-    run((c) => c.GitHub.disconnect()),
-  sessionsList: (): Promise<ReadonlyArray<Session>> =>
-    run((c) => c.Sessions.list()),
-  sessionsGet: (id: string): Promise<Session> =>
-    run((c) => c.Sessions.get({ id })),
+  githubConnectionStatus: (): Promise<GitHubAppConnectionStatus> => run((c) => c.GitHub.status()),
+  githubConnectionInstall: (): Promise<string> => run((c) => c.GitHub.install()),
+  githubConnectionRefresh: (): Promise<GitHubAppConnectionStatus> => run((c) => c.GitHub.refresh()),
+  githubConnectionDisconnect: (): Promise<void> => run((c) => c.GitHub.disconnect()),
+  sessionsList: (): Promise<ReadonlyArray<Session>> => run((c) => c.Sessions.list()),
+  sessionsGet: (id: string): Promise<Session> => run((c) => c.Sessions.get({ id })),
   sessionsCreate: (input: CreateSessionInput): Promise<Session> =>
     run((c) => c.Sessions.create(input)),
   sessionsCreateFromPr: (input: CreateSessionFromPrInput): Promise<Session> =>
@@ -359,8 +370,7 @@ export const rpc = {
     messages: ReadonlyArray<Message>
     hasMore: boolean
     cursor?: string
-  }> =>
-    run((c) => c.Sessions.transcriptPage({ sessionId, chatId, before, limit })),
+  }> => run((c) => c.Sessions.transcriptPage({ sessionId, chatId, before, limit })),
   /** One image attachment's base64, or null when the id is unknown. */
   sessionsAttachment: (chatId: string, attachmentId: string): Promise<string | null> =>
     run((c) => c.Sessions.attachment({ chatId, attachmentId })),
@@ -472,15 +482,13 @@ export const rpc = {
     chatId: string,
     gateId: string,
     decision: GateDecision
-  ): Promise<void> =>
-    run((c) => c.Agent.decideGate({ sessionId, chatId, gateId, decision })),
+  ): Promise<void> => run((c) => c.Agent.decideGate({ sessionId, chatId, gateId, decision })),
   agentAnswerQuestion: (
     sessionId: string,
     chatId: string,
     requestId: string,
     answers: ReadonlyArray<QuestionAnswer>
-  ): Promise<void> =>
-    run((c) => c.Agent.answerQuestion({ sessionId, chatId, requestId, answers })),
+  ): Promise<void> => run((c) => c.Agent.answerQuestion({ sessionId, chatId, requestId, answers })),
   agentSetMode: (sessionId: string, chatId: string, mode: PermissionMode): Promise<void> =>
     run((c) => c.Agent.setMode({ sessionId, chatId, mode })),
   agentSetReasoning: (
@@ -491,14 +499,17 @@ export const rpc = {
     run((c) => {
       if (cli === "claude") {
         const effort = reasoning?.effort
-        const compatible = reasoning === undefined
-          ? undefined
-          : {
-              enabled: reasoning.enabled,
-              ...(effort === undefined
-                ? {}
-                : { effort: effort === "minimal" ? "low" as const : effort })
-            }
+        const compatible =
+          reasoning === undefined
+            ? undefined
+            : {
+                enabled: reasoning.enabled,
+                ...(effort === undefined
+                  ? {}
+                  : {
+                      effort: effort === "minimal" ? ("low" as const) : effort
+                    })
+              }
         return c.Agent.setReasoning({
           sessionId,
           cli,
@@ -506,14 +517,15 @@ export const rpc = {
         })
       }
       const effort = reasoning?.effort
-      const compatible = reasoning === undefined
-        ? undefined
-        : {
-            enabled: reasoning.enabled,
-            ...(effort === undefined
-              ? {}
-              : { effort: effort === "max" ? "xhigh" as const : effort })
-          }
+      const compatible =
+        reasoning === undefined
+          ? undefined
+          : {
+              enabled: reasoning.enabled,
+              ...(effort === undefined
+                ? {}
+                : { effort: effort === "max" ? ("xhigh" as const) : effort })
+            }
       return c.Agent.setReasoning({
         sessionId,
         cli,
@@ -525,9 +537,21 @@ export const rpc = {
     planId: string,
     stepId: string,
     body: string,
-    anchor?: { readonly quote: string; readonly prefix: string; readonly suffix: string }
+    anchor?: {
+      readonly quote: string
+      readonly prefix: string
+      readonly suffix: string
+    }
   ): Promise<void> =>
-    run((c) => c.Agent.commentPlanStep({ sessionId, planId, stepId, body, ...(anchor ? { anchor } : {}) })),
+    run((c) =>
+      c.Agent.commentPlanStep({
+        sessionId,
+        planId,
+        stepId,
+        body,
+        ...(anchor ? { anchor } : {})
+      })
+    ),
   agentRevisePlan: (sessionId: string, planId: string): Promise<void> =>
     run((c) => c.Agent.revisePlan({ sessionId, planId })),
   agentApprovePlan: (
@@ -537,17 +561,9 @@ export const rpc = {
     revision?: number
   ): Promise<PlanApprovalResult> =>
     run((c) => c.Agent.approvePlan({ sessionId, planId, executionMode, revision })),
-  agentStopWorker: (
-    sessionId: string,
-    planId: string,
-    agentId: string
-  ): Promise<void> =>
+  agentStopWorker: (sessionId: string, planId: string, agentId: string): Promise<void> =>
     run((c) => c.Agent.stopWorker({ sessionId, planId, agentId })),
-  agentRetryWorker: (
-    sessionId: string,
-    planId: string,
-    agentId: string
-  ): Promise<void> =>
+  agentRetryWorker: (sessionId: string, planId: string, agentId: string): Promise<void> =>
     run((c) => c.Agent.retryWorker({ sessionId, planId, agentId })),
   /**
    * Observe one canonical plan's orchestration workers without starting or
@@ -567,9 +583,7 @@ export const rpc = {
         if (cancelled) return
         const streamFiber = runtime.runFork(
           client.Agent.watchWorkers({ sessionId, planId, chatId }).pipe(
-            Stream.runForEach((activity) =>
-              Effect.sync(() => onActivity(activity))
-            )
+            Stream.runForEach((activity) => Effect.sync(() => onActivity(activity)))
           )
         )
         fiber = streamFiber
@@ -598,8 +612,12 @@ export const rpc = {
       if (fiber) runtime.runFork(Fiber.interrupt(fiber))
     }
   },
-  agentSetHarness: (sessionId: string, chatId: string, cli: CliKind, model: string): Promise<Session> =>
-    run((c) => c.Agent.setHarness({ sessionId, chatId, cli, model })),
+  agentSetHarness: (
+    sessionId: string,
+    chatId: string,
+    cli: CliKind,
+    model: string
+  ): Promise<Session> => run((c) => c.Agent.setHarness({ sessionId, chatId, cli, model })),
   agentStop: (sessionId: string, chatId: string): Promise<void> =>
     run((c) => c.Agent.stop({ sessionId, chatId })),
   agentStopSubagent: (sessionId: string, chatId: string, agentId: string): Promise<void> =>
@@ -609,13 +627,11 @@ export const rpc = {
     chatId: string,
     text: string,
     images: ReadonlyArray<Attachment>
-  ) =>
-    run((c) => c.Agent.steer({ sessionId, chatId, text, images: [...images] })),
+  ) => run((c) => c.Agent.steer({ sessionId, chatId, text, images: [...images] })),
 
   configSetGithub: (github: GithubConfig): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setGithub(github)),
-  configSetGit: (git: GitConfig): Promise<WorkspaceConfig> =>
-    run((c) => c.Config.setGit(git)),
+  configSetGit: (git: GitConfig): Promise<WorkspaceConfig> => run((c) => c.Config.setGit(git)),
   configSetNotifications: (notifications: NotificationsConfig): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setNotifications(notifications)),
   /** Turn plan mode's unattended (read-only) command execution on or off. */
@@ -679,18 +695,25 @@ export const rpc = {
     run((c) => c.Github.issue({ sessionId })),
   githubFiles: (sessionId: string): Promise<ReadonlyArray<PrFileChange>> =>
     run((c) => c.Github.files({ sessionId })),
-  githubDiff: (sessionId: string): Promise<string> =>
-    run((c) => c.Github.diff({ sessionId })),
+  githubDiff: (sessionId: string): Promise<string> => run((c) => c.Github.diff({ sessionId })),
   githubDetectPr: (sessionId: string): Promise<number | null> =>
     run((c) => c.Github.detectPr({ sessionId })),
-  githubEvents: (onDelivery: (delivery: GitHubRelayDelivery) => void): (() => void) => {
+  githubEvents: (
+    onDelivery: (delivery: GitHubRelayDelivery) => void,
+    onStatus?: (status: GitHubRelayConnectionUpdate) => void
+  ): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
     let cancelled = false
     void clientPromise.then((client) => {
       if (cancelled) return
       fiber = runtime.runFork(
         client.Github.events().pipe(
-          Stream.runForEach((delivery) => Effect.sync(() => onDelivery(delivery)))
+          Stream.runForEach((message) =>
+            Effect.sync(() => {
+              if ("event" in message) onDelivery(message)
+              else onStatus?.(message)
+            })
+          )
         )
       )
     })
@@ -842,8 +865,7 @@ export const rpc = {
   terminalResize: (terminalId: string, cols: number, rows: number): Promise<void> =>
     run((c) => c.Terminal.resize({ terminalId, cols, rows })),
   /** Kill a terminal's shell and drop it. */
-  terminalKill: (terminalId: string): Promise<void> =>
-    run((c) => c.Terminal.kill({ terminalId })),
+  terminalKill: (terminalId: string): Promise<void> => run((c) => c.Terminal.kill({ terminalId })),
   /** List a session's live terminals (rebuild the tab strip on mount). */
   terminalList: (sessionId: string): Promise<ReadonlyArray<TerminalInfo>> =>
     run((c) => c.Terminal.list({ sessionId })),
@@ -914,10 +936,7 @@ export const rpc = {
     plan: PlanPrd
     author: "user" | "agent"
   }): Promise<PlanDocument> => run((c) => c.Plan.updateDocument(input)),
-  planParticipants: (
-    sessionId: string,
-    planId: string
-  ): Promise<ReadonlyArray<PlanParticipant>> =>
+  planParticipants: (sessionId: string, planId: string): Promise<ReadonlyArray<PlanParticipant>> =>
     run((c) => c.Plan.participants({ sessionId, planId })),
   planDispatchMessage: (input: {
     sessionId: string
@@ -951,8 +970,7 @@ export const rpc = {
     messageId: string
     deliveryState: PlanCommentMessageDeliveryState
     author: "user" | "agent"
-  }): Promise<PlanDocument> =>
-    run((c) => c.Plan.updateMessageDelivery(input)),
+  }): Promise<PlanDocument> => run((c) => c.Plan.updateMessageDelivery(input)),
   planSetThreadResolved: (input: {
     sessionId: string
     planId: string
@@ -961,10 +979,7 @@ export const rpc = {
     resolved: boolean
     author: "user" | "agent"
   }): Promise<PlanDocument> => run((c) => c.Plan.setThreadResolved(input)),
-  planWatch: (
-    sessionId: string,
-    onDocument: (document: PlanDocument) => void
-  ): (() => void) => {
+  planWatch: (sessionId: string, onDocument: (document: PlanDocument) => void): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
     let cancelled = false
     void clientPromise.then((client) => {
@@ -1001,10 +1016,7 @@ export const rpc = {
     }
   },
 
-  terminalAttach: (
-    terminalId: string,
-    onChunk: (chunk: TerminalChunk) => void
-  ): (() => void) => {
+  terminalAttach: (terminalId: string, onChunk: (chunk: TerminalChunk) => void): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
     let cancelled = false
     void clientPromise.then((client) => {
@@ -1080,8 +1092,7 @@ export const rpc = {
   pluginsUninstall: (pluginId: string): Promise<void> =>
     run((c) => c.Plugins.uninstall({ pluginId })),
 
-  pluginsReveal: (pluginId: string): Promise<void> =>
-    run((c) => c.Plugins.reveal({ pluginId })),
+  pluginsReveal: (pluginId: string): Promise<void> => run((c) => c.Plugins.reveal({ pluginId })),
 
   pluginsInstallFromFolder: (sourcePath: string): Promise<LoadedPlugin> =>
     run((c) => c.Plugins.installFromFolder({ sourcePath })),

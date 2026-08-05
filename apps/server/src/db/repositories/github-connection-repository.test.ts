@@ -46,6 +46,20 @@ const callbackRow = {
   createdAt: new Date("2026-08-04T10:00:00Z")
 }
 
+const relayMutationRow = {
+  id: "relay-mutation-1",
+  userId: "user-1",
+  installationId: "99",
+  desiredState: "removed",
+  generation: 3,
+  attemptCount: 2,
+  nextAttemptAt: new Date("2026-08-04T10:02:00Z"),
+  deliveredAt: null,
+  lastError: "Error",
+  createdAt: new Date("2026-08-04T10:00:00Z"),
+  updatedAt: new Date("2026-08-04T10:01:00Z")
+}
+
 const runWith = <A>(
   results: Readonly<Record<string, unknown>>,
   effect: Effect.Effect<A, unknown, GitHubConnectionRepository>
@@ -62,7 +76,9 @@ describe("GitHubConnectionRepository", () => {
   it("maps encrypted authorization state without touching BetterAuth accounts", async () => {
     const authorization = Option.getOrNull(
       await runWith(
-        { "GitHubConnectionRepository.findAuthorizationByUserId": [authorizationRow] },
+        {
+          "GitHubConnectionRepository.findAuthorizationByUserId": [authorizationRow]
+        },
         GitHubConnectionRepository.findAuthorizationByUserId("user-1")
       )
     )
@@ -76,7 +92,9 @@ describe("GitHubConnectionRepository", () => {
 
   it("maps installation ownership and extensible permission metadata", async () => {
     const installations = await runWith(
-      { "GitHubConnectionRepository.listInstallationsByAuthorizationId": [installationRow] },
+      {
+        "GitHubConnectionRepository.listInstallationsByAuthorizationId": [installationRow]
+      },
       GitHubConnectionRepository.listInstallationsByAuthorizationId("authorization-1")
     )
     expect(installations).toEqual([
@@ -111,6 +129,29 @@ describe("GitHubConnectionRepository", () => {
         at: new Date("2026-08-04T10:01:00Z")
       })
     )
-    expect(Option.getOrNull(consumed)).toMatchObject({ kind: "install", userId: "user-1" })
+    expect(Option.getOrNull(consumed)).toMatchObject({
+      kind: "install",
+      userId: "user-1"
+    })
+  })
+
+  it("maps retryable relay mutations without installation credentials or payload bodies", async () => {
+    const mutations = await runWith(
+      {
+        "GitHubConnectionRepository.listPendingRelayMutations": [relayMutationRow]
+      },
+      GitHubConnectionRepository.listPendingRelayMutations(new Date("2026-08-04T10:03:00Z"))
+    )
+    expect(mutations).toEqual([
+      {
+        id: "relay-mutation-1",
+        userId: "user-1",
+        installationId: "99",
+        desiredState: "removed",
+        generation: 3,
+        attemptCount: 2
+      }
+    ])
+    expect(JSON.stringify(mutations)).not.toMatch(/token|body|credential/i)
   })
 })

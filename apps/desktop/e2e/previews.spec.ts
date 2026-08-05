@@ -32,7 +32,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   {
     id: "s_seeded",
     repo: "widget",
-    branch: "jingler/refactor",
+    branch: "chore/refactor",
     title: "Refactor auth flow",
     status: "idle",
     cli: "claude",

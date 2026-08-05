@@ -9,6 +9,15 @@ export type SupportedGitHubEvent =
   | "check_suite"
   | "status"
 
+export interface NormalizedPullRequest {
+  readonly id: string
+  readonly number: number
+  readonly title: string
+  readonly url: string
+  readonly headSha: string
+  readonly baseSha: string
+}
+
 export interface NormalizedGitHubEvent {
   readonly version: 1
   readonly deliveryId: string
@@ -22,14 +31,9 @@ export interface NormalizedGitHubEvent {
     readonly name: string
     readonly fullName: string
   }
-  readonly pullRequest: {
-    readonly id: string
-    readonly number: number
-    readonly title: string
-    readonly url: string
-    readonly headSha: string
-    readonly baseSha: string
-  } | null
+  readonly pullRequest: NormalizedPullRequest | null
+  /** Internal routing fan-out for check payloads associated with multiple PRs. */
+  readonly routePullRequests?: readonly NormalizedPullRequest[]
   readonly actor: {
     readonly id: string
     readonly login: string
@@ -171,26 +175,44 @@ const feedbackFrom = (
   }
 }
 
-const pullRequestFrom = (
+const pullRequestsFrom = (
   payload: Record<string, unknown>
-): NormalizedGitHubEvent["pullRequest"] => {
+): readonly NormalizedPullRequest[] => {
   const issue = record(payload.issue)
   const pullRequest = record(payload.pull_request)
-  if (!pullRequest && !record(issue?.pull_request)) return null
-  const source = pullRequest ?? issue
-  const id = identifier(source?.id)
-  const number = integer(source?.number)
-  if (!source || !id || number === null) return null
-  const head = record(source.head)
-  const base = record(source.base)
-  return {
-    id,
-    number,
-    title: string(source.title) ?? "",
-    url: string(source.html_url) ?? "",
-    headSha: string(head?.sha) ?? "",
-    baseSha: string(base?.sha) ?? ""
-  }
+  const checkRun = record(payload.check_run)
+  const checkSuite = record(payload.check_suite)
+  const checkPullRequests = Array.isArray(checkRun?.pull_requests)
+    ? checkRun.pull_requests
+    : Array.isArray(checkSuite?.pull_requests)
+      ? checkSuite.pull_requests
+      : []
+  const candidates = pullRequest
+    ? [pullRequest]
+    : checkPullRequests.length > 0
+      ? checkPullRequests
+      : record(issue?.pull_request)
+        ? [issue]
+        : []
+  const sources = candidates.flatMap((candidate) => {
+    const source = record(candidate)
+    return source ? [source] : []
+  })
+  return sources.flatMap((source) => {
+    const id = identifier(source.id)
+    const number = integer(source.number)
+    if (!id || number === null) return []
+    const head = record(source.head)
+    const base = record(source.base)
+    return [{
+      id,
+      number,
+      title: string(source.title) ?? "",
+      url: string(source.html_url) ?? string(source.url) ?? "",
+      headSha: string(head?.sha) ?? "",
+      baseSha: string(base?.sha) ?? ""
+    }]
+  })
 }
 
 const SUPPORTED_EVENTS = new Set<SupportedGitHubEvent>([
@@ -238,7 +260,8 @@ export const normalizeGitHubWebhook = async (input: {
     return null
   }
   const feedback = feedbackFrom(event, payload)
-  const pullRequest = event === "status" ? null : pullRequestFrom(payload)
+  const routePullRequests = event === "status" ? [] : pullRequestsFrom(payload)
+  const pullRequest = routePullRequests[0] ?? null
   if (event === "issue_comment" && !pullRequest) return null
   const human = actorType.toLocaleLowerCase("en-US") === "user"
   const actionableAction =
@@ -272,6 +295,7 @@ export const normalizeGitHubWebhook = async (input: {
       fullName: string(repository.full_name) ?? `${repositoryOwner}/${repositoryName}`
     },
     pullRequest,
+    ...(routePullRequests.length > 1 ? { routePullRequests } : {}),
     actor: { id: actorId, login: actorLogin, type: actorType },
     feedback,
     actionable,

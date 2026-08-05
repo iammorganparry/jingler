@@ -9,7 +9,9 @@ import {
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Effect } from "effect"
+import { randomBytes } from "node:crypto"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { createServer, type Server } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AppPaths } from "./app-paths.js"
@@ -62,6 +64,103 @@ export const branchAt = (
  * to reach it would add a dependency to eighteen unrelated test layer sets.
  */
 const linkChecked = new Set<string>()
+
+const ASKPASS_SOURCE = `#!/usr/bin/env node
+import { createConnection } from "node:net"
+const endpoint = process.env.JINGLER_GIT_ASKPASS_ENDPOINT ?? ""
+const nonce = process.env.JINGLER_GIT_ASKPASS_NONCE ?? ""
+const type = process.argv.slice(2).join(" ").toLowerCase().includes("username") ? "username" : "password"
+if (!endpoint || !nonce) process.exit(1)
+const socket = createConnection(endpoint)
+let response = ""
+socket.setTimeout(5000, () => socket.destroy())
+socket.once("connect", () => socket.write(JSON.stringify({ nonce, type }) + "\\n"))
+socket.on("data", (chunk) => { response += chunk.toString("utf8") })
+socket.once("end", () => process.stdout.write(response))
+socket.once("error", () => process.exit(1))
+`
+
+interface AskpassBoundary {
+  readonly dir: string
+  readonly script: string
+  readonly endpoint: string
+  readonly nonce: string
+  readonly server: Server
+}
+
+const closeServer = (server: Server): Promise<void> =>
+  new Promise((resolve) => {
+    if (!server.listening) {
+      resolve()
+      return
+    }
+    server.close(() => resolve())
+  })
+
+const prepareAskpassBoundary = async (token: string): Promise<AskpassBoundary> => {
+  const dir = await mkdtemp(join(tmpdir(), "jingler-git-askpass-"))
+  try {
+    const script = join(dir, "askpass.mjs")
+    await writeFile(script, ASKPASS_SOURCE, { mode: 0o700 })
+    await chmod(script, 0o700)
+    const nonce = randomBytes(32).toString("hex")
+    const endpoint = process.platform === "win32"
+      ? `\\\\.\\pipe\\jingler-git-${nonce}`
+      : join(dir, "askpass.sock")
+    const server = createServer((socket) => {
+      let request = ""
+      socket.setTimeout(5_000, () => socket.destroy())
+      socket.on("data", (chunk) => {
+        request += chunk.toString("utf8")
+        if (request.length > 1_024) {
+          socket.destroy()
+          return
+        }
+        const newline = request.indexOf("\n")
+        if (newline < 0) return
+        try {
+          const message = JSON.parse(request.slice(0, newline)) as {
+            readonly nonce?: unknown
+            readonly type?: unknown
+          }
+          if (message.nonce !== nonce) {
+            socket.destroy()
+            return
+          }
+          socket.end(message.type === "username" ? "x-access-token" : token)
+        } catch {
+          socket.destroy()
+        }
+      })
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject)
+      server.listen(endpoint, () => {
+        server.off("error", reject)
+        resolve()
+      })
+    })
+    return { dir, script, endpoint, nonce, server }
+  } catch (error) {
+    await rm(dir, { recursive: true, force: true })
+    throw error
+  }
+}
+
+/** Canonical GitHub.com HTTPS transport derived only from API-verified identity. */
+export const githubHttpsPushUrl = (fullName: string): string | null => {
+  const [owner, repository, extra] = fullName.split("/")
+  if (
+    !owner ||
+    !repository ||
+    extra !== undefined ||
+    !/^[a-z0-9](?:[a-z0-9-]{0,38})$/i.test(owner) ||
+    !/^[a-z0-9._-]+$/i.test(repository)
+  ) {
+    return null
+  }
+  return `https://github.com/${owner}/${repository}.git`
+}
 
 /** Test seam: forget what has been checked, so a case can observe the first call. */
 export const resetWorktreeLinkCache = (): void => linkChecked.clear()
@@ -453,15 +552,20 @@ export class GitService extends Effect.Service<GitService>()(
       const publishInspection = (cwd: string, baseBranch: string) =>
         Effect.gen(function* () {
           const branch = yield* branchAt(cwd)
-          const status = yield* runGit(cwd, ["status", "--porcelain=v1", "--untracked-files=all"])
-          const dirtyPaths = status
-            .split("\n")
-            .map((line) => line.slice(3).trim())
+          const [unstaged, staged, untracked] = yield* Effect.all([
+            runGit(cwd, ["diff", "--name-only", "--no-renames"]),
+            runGit(cwd, ["diff", "--cached", "--name-only", "--no-renames"]),
+            runGit(cwd, ["ls-files", "--others", "--exclude-standard"])
+          ])
+          const dirtyPaths = [unstaged, staged, untracked]
+            .flatMap((output) => output.split("\n"))
+            .map((path) => path.trim())
             .filter(Boolean)
-            .map((path) => path.includes(" -> ") ? path.split(" -> ").at(-1)! : path)
           const base = yield* gitLine(cwd, "rev-parse", "--verify", `origin/${baseBranch}`)
           const baseRef = base ?? baseBranch
-          const committedPaths = (yield* runGit(cwd, ["diff", "--name-only", `${baseRef}...HEAD`]))
+          const committedPaths = (yield* runGit(cwd, [
+            "diff", "--name-only", "--no-renames", `${baseRef}...HEAD`
+          ]))
             .split("\n")
             .map((path) => path.trim())
             .filter(Boolean)
@@ -496,34 +600,71 @@ export class GitService extends Effect.Service<GitService>()(
         )
 
       /**
-       * Push through GitHub's HTTPS credential protocol without putting the
-       * installation token in argv, a remote URL, git config, or a file.
+       * Push through an API-derived GitHub HTTPS URL without consulting the
+       * configured origin/push URL. The token is brokered to askpass over an
+       * ephemeral IPC socket, so it never enters argv, environment,
+       * process listings, git config, remotes, logs, or a file.
        */
-      const pushWithInstallationToken = (cwd: string, branch: string, token: string) =>
-        Effect.acquireUseRelease(
-          Effect.tryPromise({
-            try: async () => {
-              const dir = await mkdtemp(join(tmpdir(), "jingler-git-askpass-"))
-              const script = join(dir, "askpass.mjs")
-              await writeFile(
-                script,
-                "#!/usr/bin/env node\nconst p=process.argv.slice(2).join(' ').toLowerCase(); process.stdout.write(p.includes('username') ? 'x-access-token' : (process.env.JINGLER_GIT_TOKEN ?? ''));\n",
-                { mode: 0o700 }
-              )
-              await chmod(script, 0o700)
-              return { dir, script }
-            },
-            catch: (cause) => new GitError({ message: "Could not prepare secure GitHub authentication.", cause })
-          }),
-          ({ script }) => runGitWithEnv(cwd, [
-            "-c", "core.hooksPath=/dev/null", "push", "--set-upstream", "origin", branch
-          ], {
-            GIT_ASKPASS: script,
-            GIT_TERMINAL_PROMPT: "0",
-            JINGLER_GIT_TOKEN: token
-          }).pipe(Effect.asVoid),
-          ({ dir }) => Effect.promise(() => rm(dir, { recursive: true, force: true }))
+      const pushWithInstallationToken = (
+        cwd: string,
+        branch: string,
+        repositoryFullName: string,
+        token: string
+      ) => {
+        const pushUrl = githubHttpsPushUrl(repositoryFullName)
+        if (!pushUrl || token.length === 0) {
+          return Effect.fail(
+            new GitError({ message: "GitHub returned an invalid repository identity or credential." })
+          )
+        }
+        return runGit(cwd, ["check-ref-format", "--branch", branch]).pipe(
+          Effect.zipRight(
+            Effect.acquireUseRelease(
+              Effect.tryPromise({
+                try: () => prepareAskpassBoundary(token),
+                catch: (cause) =>
+                  new GitError({ message: "Could not prepare secure GitHub authentication.", cause })
+              }),
+              ({ script, endpoint, nonce }) =>
+                runGitWithEnv(
+                  cwd,
+                  [
+                    "-c", "core.hooksPath=/dev/null",
+                    "-c", "credential.helper=",
+                    "-c", "credential.interactive=never",
+                    "-c", "credential.useHttpPath=true",
+                    "-c", "credential.username=x-access-token",
+                    "-c", "http.extraHeader=",
+                    "push", pushUrl, `HEAD:refs/heads/${branch}`
+                  ],
+                  {
+                    GIT_ASKPASS: script,
+                    GIT_TERMINAL_PROMPT: "0",
+                    JINGLER_GIT_ASKPASS_ENDPOINT: endpoint,
+                    JINGLER_GIT_ASKPASS_NONCE: nonce,
+                    GITHUB_TOKEN: "",
+                    GH_TOKEN: ""
+                  }
+                ).pipe(
+                  Effect.asVoid,
+                  Effect.mapError(
+                    (error) =>
+                      new GitError({
+                        message: token.length > 0
+                          ? error.message.replaceAll(token, "[redacted]")
+                          : error.message
+                      })
+                  )
+                ),
+              ({ dir, server }) =>
+                Effect.promise(async () => {
+                  await closeServer(server)
+                  await rm(dir, { recursive: true, force: true })
+                })
+            )
+          )
         )
+      }
 
       /**
        * Check out an existing local `branch` into the worktree at `cwd`, even

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
   issueGitHubRelayGrant,
+  issueGitHubSessionRelayGrant,
+  verifyGitHubSessionRelayGrant,
   verifyGitHubRelayGrant
 } from "./github-relay-grant.js"
 
@@ -57,5 +59,27 @@ describe("GitHub relay grants", () => {
     expect(() => verifyGitHubRelayGrant(future.grant, config.relaySigningSecret, 200)).toThrow(
       "invalid-grant"
     )
+  })
+
+  it("issues a grant scoped to one opaque relay session", () => {
+    const response = issueGitHubSessionRelayGrant(
+      {
+        userId: "user-1",
+        installationId: "99",
+        relaySessionId: "opaque_session_identifier_123"
+      },
+      config,
+      100,
+      "grant-session"
+    )
+    expect(verifyGitHubSessionRelayGrant(response.grant, config.relaySigningSecret, 399)).toEqual(
+      response.claims
+    )
+    expect(response.claims).toMatchObject({
+      subject: "user-1",
+      installationId: "99",
+      relaySessionId: "opaque_session_identifier_123"
+    })
+    expect(JSON.stringify(response)).not.toContain("local-session")
   })
 })

@@ -59,8 +59,45 @@ const httpUrl = (value: string, key: string, production: boolean): string => {
   if (!(url.protocol === "http:" || url.protocol === "https:")) {
     throw new Error(`${key} must be a valid HTTP URL`)
   }
-  if (production && url.protocol !== "https:") throw new Error(`${key} must use HTTPS in production`)
+  if (production && url.protocol !== "https:")
+    throw new Error(`${key} must use HTTPS in production`)
   return value
+}
+
+const validateGitHubSecrets = (environment: Environment): void => {
+  if (environment.NODE_ENV !== "production") return
+  const keys = [
+    "GITHUB_APP_WEBHOOK_SECRET",
+    "GITHUB_APP_RELAY_SIGNING_SECRET",
+    "GITHUB_APP_TOKEN_ENCRYPTION_KEY"
+  ] as const
+  const values = keys.map((key) => [key, optional(environment, key)] as const)
+  for (const [key, value] of values) {
+    if (Buffer.byteLength(value, "utf8") < 32) {
+      throw new Error(`${key} must contain at least 32 bytes in production`)
+    }
+  }
+  const previous = optional(environment, "GITHUB_APP_TOKEN_ENCRYPTION_PREVIOUS_KEY")
+  if (previous !== "" && Buffer.byteLength(previous, "utf8") < 32) {
+    throw new Error(
+      "GITHUB_APP_TOKEN_ENCRYPTION_PREVIOUS_KEY must contain at least 32 bytes in production"
+    )
+  }
+  const distinct = [
+    ...values,
+    ["BETTER_AUTH_SECRET", optional(environment, "BETTER_AUTH_SECRET")] as const,
+    ["CRON_SECRET", optional(environment, "CRON_SECRET")] as const,
+    ...(previous === ""
+      ? []
+      : [["GITHUB_APP_TOKEN_ENCRYPTION_PREVIOUS_KEY", previous] as const])
+  ]
+  for (let left = 0; left < distinct.length; left += 1) {
+    for (let right = left + 1; right < distinct.length; right += 1) {
+      if (distinct[left]?.[1] === distinct[right]?.[1]) {
+        throw new Error(`${distinct[left]?.[0]} and ${distinct[right]?.[0]} must be distinct`)
+      }
+    }
+  }
 }
 
 /**
@@ -93,6 +130,11 @@ export const loadEnv = (environment: Environment = process.env) => {
   const nodeEnv = optional(environment, "NODE_ENV", "development")
   const memoryEnabled = enabled(environment, "MEMORY_ENABLED")
   const githubAppEnabled = enabled(environment, "GITHUB_APP_ENABLED", false)
+  const authSecret = secret(environment, "BETTER_AUTH_SECRET", "dev-insecure-secret-change-me")
+  const cronSecret = secret(environment, "CRON_SECRET", "dev-cron-secret-change-me")
+  if (nodeEnv === "production" && Buffer.byteLength(cronSecret, "utf8") < 32) {
+    throw new Error("CRON_SECRET must contain at least 32 bytes in production")
+  }
   const githubAppConfigured = featureConfiguration(environment, "GITHUB_APP", githubAppEnabled, [
     "GITHUB_APP_ID",
     "GITHUB_APP_CLIENT_ID",
@@ -100,59 +142,74 @@ export const loadEnv = (environment: Environment = process.env) => {
     "GITHUB_APP_PRIVATE_KEY",
     "GITHUB_APP_WEBHOOK_SECRET",
     "GITHUB_APP_RELAY_URL",
-    "GITHUB_APP_RELAY_SIGNING_SECRET"
+    "GITHUB_APP_RELAY_SIGNING_SECRET",
+    "GITHUB_APP_TOKEN_ENCRYPTION_KEY"
   ])
   const githubAppId = optional(environment, "GITHUB_APP_ID")
   const numericGithubAppId = Number(githubAppId)
   if (
     githubAppConfigured &&
-    (!/^\d+$/.test(githubAppId) || !Number.isSafeInteger(numericGithubAppId) || numericGithubAppId <= 0)
+    (!/^\d+$/.test(githubAppId) ||
+      !Number.isSafeInteger(numericGithubAppId) ||
+      numericGithubAppId <= 0)
   ) {
     throw new Error("GITHUB_APP_ID must be a positive integer")
   }
-  const githubAppRelayUrl = prodUrl(
-    environment,
-    "GITHUB_APP_RELAY_URL",
-    "http://localhost:9200",
-    { require: githubAppEnabled }
-  )
+  const githubAppRelayUrl = prodUrl(environment, "GITHUB_APP_RELAY_URL", "http://localhost:9200", {
+    require: githubAppEnabled
+  })
   if (githubAppConfigured) {
     httpUrl(githubAppRelayUrl, "GITHUB_APP_RELAY_URL", nodeEnv === "production")
+    validateGitHubSecrets(environment)
   }
   return {
-  nodeEnv,
-  isDev: nodeEnv !== "production",
-  port: positiveNumber(environment, "PORT", 9100),
-  /** Postgres connection string. Defaults to the local Docker instance (port 5433). */
-  databaseUrl: optional(environment, "DATABASE_URL", "postgres://postgres:postgres@localhost:5433/jingler"),
-  /** BetterAuth signing secret. MUST be overridden in production. */
-  authSecret: secret(environment, "BETTER_AUTH_SECRET", "dev-insecure-secret-change-me"),
-  /** Public base URL the auth server is reachable at (used for OAuth callbacks). */
-  authBaseUrl: prodUrl(environment, "BETTER_AUTH_URL", "http://localhost:9100"),
-  githubClientId: optional(environment, "GITHUB_CLIENT_ID"),
-  githubClientSecret: optional(environment, "GITHUB_CLIENT_SECRET"),
-  /** Product GitHub App integration. Deliberately separate from social login above. */
-  githubAppEnabled,
-  githubAppConfigured,
-  githubAppId,
-  githubAppClientId: optional(environment, "GITHUB_APP_CLIENT_ID"),
-  githubAppClientSecret: optional(environment, "GITHUB_APP_CLIENT_SECRET"),
-  githubAppPrivateKey: optional(environment, "GITHUB_APP_PRIVATE_KEY").replace(/\\n/g, "\n"),
-  githubAppWebhookSecret: optional(environment, "GITHUB_APP_WEBHOOK_SECRET"),
-  githubAppRelayUrl,
-  /** HMAC key for relay grants and root material for encrypted GitHub user tokens. */
-  githubAppRelaySigningSecret: optional(environment, "GITHUB_APP_RELAY_SIGNING_SECRET"),
-  googleClientId: optional(environment, "GOOGLE_CLIENT_ID"),
-  googleClientSecret: optional(environment, "GOOGLE_CLIENT_SECRET"),
-  resendApiKey: optional(environment, "RESEND_API_KEY"),
-  emailFrom: optional(environment, "EMAIL_FROM", "Jingler <login@jingler.local>"),
-  /** Global paid-team rollout/circuit-breaker. Disabling it never mutates the vault. */
-  memoryEnabled: enabled(environment, "MEMORY_ENABLED"),
-  /** HMAC key for short-lived team-memory grants. Keep distinct from BetterAuth. */
-  memoryGrantSecret: secret(environment, "MEMORY_GRANT_SECRET", "dev-memory-grant-secret-change-me"),
-  memoryGrantAudience: optional(environment, "MEMORY_GRANT_AUDIENCE", "jingler-memory-mcp"),
-  memoryGrantTtlSeconds: positiveNumber(environment, "MEMORY_GRANT_TTL_SECONDS", 3600),
-  /** Private Cloudflare Worker origin and its rotating Next.js service credential. */
+    nodeEnv,
+    isDev: nodeEnv !== "production",
+    port: positiveNumber(environment, "PORT", 9100),
+    /** Postgres connection string. Defaults to the local Docker instance (port 5433). */
+    databaseUrl: optional(
+      environment,
+      "DATABASE_URL",
+      "postgres://postgres:postgres@localhost:5433/jingler"
+    ),
+    /** BetterAuth signing secret. MUST be overridden in production. */
+    authSecret,
+    /** Public base URL the auth server is reachable at (used for OAuth callbacks). */
+    authBaseUrl: prodUrl(environment, "BETTER_AUTH_URL", "http://localhost:9100"),
+    githubClientId: optional(environment, "GITHUB_CLIENT_ID"),
+    githubClientSecret: optional(environment, "GITHUB_CLIENT_SECRET"),
+    /** Product GitHub App integration. Deliberately separate from social login above. */
+    githubAppEnabled,
+    githubAppConfigured,
+    githubAppId,
+    githubAppClientId: optional(environment, "GITHUB_APP_CLIENT_ID"),
+    githubAppClientSecret: optional(environment, "GITHUB_APP_CLIENT_SECRET"),
+    githubAppPrivateKey: optional(environment, "GITHUB_APP_PRIVATE_KEY").replace(/\\n/g, "\n"),
+    githubAppWebhookSecret: optional(environment, "GITHUB_APP_WEBHOOK_SECRET"),
+    githubAppRelayUrl,
+    /** HMAC key for relay grants and authenticated server-to-relay requests only. */
+    githubAppRelaySigningSecret: optional(environment, "GITHUB_APP_RELAY_SIGNING_SECRET"),
+    /** Independent root keys for versioned GitHub OAuth-token envelopes. */
+    githubAppTokenEncryptionKey: optional(environment, "GITHUB_APP_TOKEN_ENCRYPTION_KEY"),
+    githubAppTokenEncryptionPreviousKey: optional(
+      environment,
+      "GITHUB_APP_TOKEN_ENCRYPTION_PREVIOUS_KEY"
+    ),
+    googleClientId: optional(environment, "GOOGLE_CLIENT_ID"),
+    googleClientSecret: optional(environment, "GOOGLE_CLIENT_SECRET"),
+    resendApiKey: optional(environment, "RESEND_API_KEY"),
+    emailFrom: optional(environment, "EMAIL_FROM", "Jingler <login@jingler.local>"),
+    /** Global paid-team rollout/circuit-breaker. Disabling it never mutates the vault. */
+    memoryEnabled: enabled(environment, "MEMORY_ENABLED"),
+    /** HMAC key for short-lived team-memory grants. Keep distinct from BetterAuth. */
+    memoryGrantSecret: secret(
+      environment,
+      "MEMORY_GRANT_SECRET",
+      "dev-memory-grant-secret-change-me"
+    ),
+    memoryGrantAudience: optional(environment, "MEMORY_GRANT_AUDIENCE", "jingler-memory-mcp"),
+    memoryGrantTtlSeconds: positiveNumber(environment, "MEMORY_GRANT_TTL_SECONDS", 3600),
+    /** Private Cloudflare Worker origin and its rotating Next.js service credential. */
   memoryWorkerUrl: prodUrl(environment, "MEMORY_WORKER_URL", "http://localhost:8787", {
     require: memoryEnabled
   }),
@@ -163,7 +220,9 @@ export const loadEnv = (environment: Environment = process.env) => {
   ),
   memoryRequestTimeoutMs: positiveNumber(environment, "MEMORY_REQUEST_TIMEOUT_MS", 5000),
   /** Deep-link the desktop app registers; magic links + OAuth bounce back here. */
-  desktopRedirect: optional(environment, "DESKTOP_REDIRECT", "jingler://auth/callback")
+    desktopRedirect: optional(environment, "DESKTOP_REDIRECT", "jingler://auth/callback"),
+    /** Vercel Cron bearer used only by autonomous maintenance endpoints. */
+    cronSecret
 } as const
 }
 

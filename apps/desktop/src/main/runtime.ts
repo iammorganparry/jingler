@@ -155,6 +155,9 @@ const AppLayer = RpcServicesLayer.pipe(
     )
   ),
   Layer.provide(UsageService.Default),
+  // GitHub is deliberately an HTTP/App-authenticated service. There is no
+  // GitHub CLI layer in the runtime, so a machine's ambient PATH cannot become
+  // a hidden credential or transport fallback.
   Layer.provide(GitHubApi.Default),
   Layer.provide(GitHubEventStore.Default),
   // Retained for the plugin-host provider as well as consumed by GitHubApi.

@@ -37,7 +37,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   {
     id: "s_seeded",
     repo: "widget",
-    branch: "jingler/refactor",
+    branch: "chore/refactor",
     title: "Refactor auth flow",
     status: "idle",
     cli: "claude",
@@ -284,7 +284,7 @@ const seededPrSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<See
   {
     id: "s_pr",
     repo: "widget",
-    branch: "jingler/refactor",
+    branch: "chore/refactor",
     title: "Refactor auth flow",
     status: "idle",
     cli: "claude",
@@ -495,7 +495,7 @@ test("the Pull Request tab leads with the description, in the conversation's col
         {
           number: 482,
           title: "Refactor auth flow",
-          headRefName: "jingler/refactor",
+          headRefName: "chore/refactor",
           baseRefName: "main",
           author: { login: "e2e-user" },
           additions: 313,
@@ -539,7 +539,7 @@ test("the merge box offers a strategy, and merges with the one chosen", async ({
         {
           number: 482,
           title: "Refactor auth flow",
-          headRefName: "jingler/refactor",
+          headRefName: "chore/refactor",
           baseRefName: "main",
           author: { login: "e2e-user" }
         }
@@ -576,7 +576,7 @@ test("an out-of-date branch offers Update branch, not just a blocker", async ({ 
         {
           number: 482,
           title: "Refactor auth flow",
-          headRefName: "jingler/refactor",
+          headRefName: "chore/refactor",
           baseRefName: "main",
           author: { login: "e2e-user" },
           mergeStateStatus: "BEHIND"
@@ -607,7 +607,7 @@ test("a passing check still links to its run", async ({ launchApp }) => {
         {
           number: 482,
           title: "Refactor auth flow",
-          headRefName: "jingler/refactor",
+          headRefName: "chore/refactor",
           baseRefName: "main",
           author: { login: "e2e-user" },
           checks: [{ name: "build", detailsUrl: "https://ci.example/build/1" }]
@@ -783,7 +783,7 @@ const twoSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSess
   {
     id: "s_keep",
     repo: "widget",
-    branch: "jingler/one",
+    branch: "chore/one",
     title: "First session",
     status: "idle",
     cli: "claude",
@@ -798,7 +798,7 @@ const twoSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSess
   {
     id: "s_act",
     repo: "widget",
-    branch: "jingler/two",
+    branch: "chore/two",
     title: "Second session",
     status: "idle",
     cli: "claude",
@@ -940,7 +940,7 @@ test("a running adversarial review reports its phase and appears in the agent ta
         {
           number: 482,
           title: "Refactor auth flow",
-          headRefName: "jingler/refactor",
+          headRefName: "chore/refactor",
           baseRefName: "main",
           author: { login: "octocat" },
           state: "OPEN"

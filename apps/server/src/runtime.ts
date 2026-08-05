@@ -11,12 +11,14 @@ import { Layer, ManagedRuntime } from "effect"
 import { Database } from "./db/database.js"
 import { PersonalAccessTokenRepository } from "./db/repositories/personal-access-token-repository.js"
 import { GitHubConnectionRepository } from "./db/repositories/github-connection-repository.js"
+import { GitHubSessionRouteRepository } from "./db/repositories/github-session-route-repository.js"
 import { UserRepository } from "./db/repositories/user-repository.js"
 
 const AppLayer = Layer.mergeAll(
   UserRepository.Default,
   PersonalAccessTokenRepository.Default,
-  GitHubConnectionRepository.Default
+  GitHubConnectionRepository.Default,
+  GitHubSessionRouteRepository.Default
 ).pipe(Layer.provideMerge(Database.Default))
 
 export const runtime = ManagedRuntime.make(AppLayer)

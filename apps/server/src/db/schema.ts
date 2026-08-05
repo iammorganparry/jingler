@@ -4,7 +4,8 @@
  * needed. Downstream product tables (billing, subscriptions) will reference
  * `user.id` — this is the anchor the paid-user work hangs off.
  */
-import { boolean, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
+import { sql } from "drizzle-orm"
+import { boolean, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -211,6 +212,115 @@ export const githubCallbackState = pgTable("github_callback_state", {
     .notNull()
 })
 
+/**
+ * Durable desired-state handoff to the relay. Rows deliberately outlive the
+ * GitHub authorization they revoke, so local disconnect never depends on relay
+ * availability. The unique target makes every delivery idempotent.
+ */
+export const githubRelayRegistrationOutbox = pgTable(
+  "github_relay_registration_outbox",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    installationId: text("installation_id").notNull(),
+    desiredState: text("desired_state").notNull(),
+    generation: integer("generation").default(1).notNull(),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    nextAttemptAt: timestamp("next_attempt_at").notNull(),
+    deliveredAt: timestamp("delivered_at"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull()
+  },
+  (table) => [
+    uniqueIndex("github_relay_outbox_user_installation_unique").on(
+      table.userId,
+      table.installationId
+    )
+  ]
+)
+
+/**
+ * Authenticated ownership of a local Jingler session's linked pull request.
+ * `sessionId` is visible only to its owning user. The relay sees only the
+ * independently generated `relaySessionId`, which is also the Durable Object
+ * identity and therefore must never be accepted from an unverified webhook.
+ */
+export const githubSessionRoute = pgTable(
+  "github_session_route",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
+    relaySessionId: text("relay_session_id").notNull().unique(),
+    installationId: text("installation_id").notNull(),
+    repositoryId: text("repository_id").notNull(),
+    pullRequestNumber: integer("pull_request_number").notNull(),
+    state: text("state").notNull(),
+    generation: integer("generation").default(1).notNull(),
+    archivedAt: timestamp("archived_at"),
+    unlinkedAt: timestamp("unlinked_at"),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull()
+  },
+  (table) => [
+    uniqueIndex("github_session_route_user_session_unique").on(table.userId, table.sessionId),
+    uniqueIndex("github_session_route_pull_request_unique").on(
+      table.installationId,
+      table.repositoryId,
+      table.pullRequestNumber
+    ).where(sql`${table.state} <> 'removed'`)
+  ]
+)
+
+/**
+ * Latest desired session-route state waiting to be handed to the relay
+ * Workflow. Snapshot fields deliberately survive route changes and retries.
+ */
+export const githubSessionRouteOutbox = pgTable(
+  "github_session_route_outbox",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    relaySessionId: text("relay_session_id").notNull(),
+    installationId: text("installation_id").notNull(),
+    repositoryId: text("repository_id").notNull(),
+    pullRequestNumber: integer("pull_request_number").notNull(),
+    desiredState: text("desired_state").notNull(),
+    generation: integer("generation").default(1).notNull(),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    nextAttemptAt: timestamp("next_attempt_at").notNull(),
+    deliveredAt: timestamp("delivered_at"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull()
+  },
+  (table) => [
+    uniqueIndex("github_session_route_outbox_session_generation_unique").on(
+      table.relaySessionId,
+      table.generation
+    )
+  ]
+)
+
 export const schema = {
   user,
   session,
@@ -222,5 +332,8 @@ export const schema = {
   personalAccessToken,
   githubUserAuthorization,
   githubInstallation,
-  githubCallbackState
+  githubCallbackState,
+  githubRelayRegistrationOutbox,
+  githubSessionRoute,
+  githubSessionRouteOutbox
 }

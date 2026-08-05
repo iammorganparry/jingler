@@ -2,9 +2,9 @@
  * GitHub App protocol and cryptographic boundary.
  *
  * User and refresh tokens leave this module only so the repository adapter can
- * encrypt them. Installation access tokens are returned only to trusted server
- * callers; routes never serialize them and the database schema has no column
- * capable of storing one.
+ * encrypt them. Installation access tokens are returned only through the
+ * trusted Electron-main credential boundary, and the database schema has no
+ * column capable of storing one.
  */
 import {
   createCipheriv,
@@ -56,17 +56,20 @@ export interface GitHubApiInstallation {
   readonly suspendedAt: Date | null
 }
 
+export interface GitHubApiRepository {
+  /** Immutable GitHub database id. */
+  readonly id: string
+  /** Canonical owner/repository name. */
+  readonly fullName: string
+}
+
 export interface GitHubInstallationAccessToken {
   readonly token: string
   readonly expiresAt: Date
 }
 
 export type GitHubAppFailureCode =
-  | "invalid-response"
-  | "oauth-rejected"
-  | "api-rejected"
-  | "invalid-private-key"
-  | "invalid-grant"
+  "invalid-response" | "oauth-rejected" | "api-rejected" | "invalid-private-key" | "invalid-grant"
 
 /** Deliberately carries no upstream body, URL query, or credential material. */
 export class GitHubAppError extends Error {
@@ -90,7 +93,11 @@ export const createGitHubAppJwt = (
 ): string => {
   const header = encodeJson({ alg: "RS256", typ: "JWT" })
   // GitHub permits at most ten minutes and recommends backdating for clock skew.
-  const payload = encodeJson({ iat: nowSeconds - 60, exp: nowSeconds + 9 * 60, iss: config.appId })
+  const payload = encodeJson({
+    iat: nowSeconds - 60,
+    exp: nowSeconds + 9 * 60,
+    iss: config.appId
+  })
   const signed = `${header}.${payload}`
   try {
     const signer = createSign("RSA-SHA256")
@@ -129,7 +136,10 @@ const permissionsFrom = (value: unknown): Readonly<Record<string, string>> => {
 }
 
 const requestHeaders = (authorization?: string): Headers => {
-  const headers = new Headers({ Accept: JSON_ACCEPT, "X-GitHub-Api-Version": API_VERSION })
+  const headers = new Headers({
+    Accept: JSON_ACCEPT,
+    "X-GitHub-Api-Version": API_VERSION
+  })
   if (authorization) headers.set("Authorization", authorization)
   return headers
 }
@@ -141,6 +151,10 @@ export interface GitHubAppClient {
   readonly refreshUserToken: (refreshToken: string) => Promise<GitHubUserToken>
   readonly getUser: (accessToken: string) => Promise<GitHubApiUser>
   readonly listInstallations: (accessToken: string) => Promise<ReadonlyArray<GitHubApiInstallation>>
+  readonly listInstallationRepositories: (
+    accessToken: string,
+    installationId: string
+  ) => Promise<ReadonlyArray<GitHubApiRepository>>
   readonly createInstallationAccessToken: (
     installationId: string,
     scope: {
@@ -180,7 +194,10 @@ export const createGitHubAppClient = (
   const oauthToken = async (parameters: URLSearchParams): Promise<GitHubUserToken> => {
     const response = await request(`${webBaseUrl}/login/oauth/access_token`, {
       method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
       body: parameters
     })
     if (!response.ok) throw new GitHubAppError("oauth-rejected", response.status)
@@ -262,10 +279,9 @@ export const createGitHubAppClient = (
     listInstallations: async (accessToken) => {
       const installations: Array<GitHubApiInstallation> = []
       for (let page = 1; page <= 100; page += 1) {
-        const body = await json(
-          `${apiBaseUrl}/user/installations?per_page=100&page=${page}`,
-          { headers: requestHeaders(`Bearer ${accessToken}`) }
-        )
+        const body = await json(`${apiBaseUrl}/user/installations?per_page=100&page=${page}`, {
+          headers: requestHeaders(`Bearer ${accessToken}`)
+        })
         const rows = Array.isArray(body.installations) ? body.installations : null
         if (!rows) throw new GitHubAppError("invalid-response")
         for (const value of rows) {
@@ -291,6 +307,27 @@ export const createGitHubAppClient = (
         if (rows.length < 100) break
       }
       return installations
+    },
+
+    listInstallationRepositories: async (accessToken, installationId) => {
+      const repositories: Array<GitHubApiRepository> = []
+      for (let page = 1; page <= 100; page += 1) {
+        const body = await json(
+          `${apiBaseUrl}/user/installations/${encodeURIComponent(installationId)}/repositories?per_page=100&page=${page}`,
+          { headers: requestHeaders(`Bearer ${accessToken}`) }
+        )
+        const rows = Array.isArray(body.repositories) ? body.repositories : null
+        if (!rows) throw new GitHubAppError("invalid-response")
+        for (const value of rows) {
+          const row = object(value)
+          const id = number(row?.id)
+          const fullName = string(row?.full_name)
+          if (id === null || !fullName) throw new GitHubAppError("invalid-response")
+          repositories.push({ id: String(id), fullName })
+        }
+        if (rows.length < 100) break
+      }
+      return repositories
     },
 
     createInstallationAccessToken: async (installationId, scope) => {
@@ -344,8 +381,24 @@ export interface GitHubTokenCipher {
   readonly decrypt: (envelope: string) => string
 }
 
-export const createGitHubTokenCipher = (rootSecret: string): GitHubTokenCipher => {
-  const key = Buffer.from(
+interface TokenEncryptionKey {
+  readonly id: string
+  readonly current: Buffer
+  readonly legacy: Buffer
+}
+
+const tokenEncryptionKey = (rootSecret: string): TokenEncryptionKey => ({
+  id: createHash("sha256").update(rootSecret).digest("base64url").slice(0, 12),
+  current: Buffer.from(
+    hkdfSync(
+      "sha256",
+      Buffer.from(rootSecret, "utf8"),
+      Buffer.from("jingler-github-app", "utf8"),
+      Buffer.from("user-token-encryption-v2", "utf8"),
+      32
+    )
+  ),
+  legacy: Buffer.from(
     hkdfSync(
       "sha256",
       Buffer.from(rootSecret, "utf8"),
@@ -354,28 +407,67 @@ export const createGitHubTokenCipher = (rootSecret: string): GitHubTokenCipher =
       32
     )
   )
+})
+
+const decryptEnvelope = (
+  key: Buffer,
+  encodedIv: string,
+  encodedTag: string,
+  encodedCiphertext: string
+): string => {
+  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(encodedIv, "base64url"))
+  decipher.setAuthTag(Buffer.from(encodedTag, "base64url"))
+  return Buffer.concat([
+    decipher.update(Buffer.from(encodedCiphertext, "base64url")),
+    decipher.final()
+  ]).toString("utf8")
+}
+
+export const createGitHubTokenCipher = (
+  currentRootSecret: string,
+  previousRootSecret?: string
+): GitHubTokenCipher => {
+  if (!currentRootSecret) throw new GitHubAppError("invalid-response")
+  const current = tokenEncryptionKey(currentRootSecret)
+  const keys = [current, ...(previousRootSecret ? [tokenEncryptionKey(previousRootSecret)] : [])]
   return {
     encrypt: (plaintext) => {
       const iv = randomBytes(12)
-      const cipher = createCipheriv("aes-256-gcm", key, iv)
+      const cipher = createCipheriv("aes-256-gcm", current.current, iv)
       const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()])
-      return ["v1", iv.toString("base64url"), cipher.getAuthTag().toString("base64url"), ciphertext.toString("base64url")].join(".")
+      return [
+        "v2",
+        current.id,
+        iv.toString("base64url"),
+        cipher.getAuthTag().toString("base64url"),
+        ciphertext.toString("base64url")
+      ].join(".")
     },
     decrypt: (envelope) => {
-      const [version, encodedIv, encodedTag, encodedCiphertext, extra] = envelope.split(".")
-      if (version !== "v1" || !encodedIv || !encodedTag || !encodedCiphertext || extra) {
-        throw new GitHubAppError("invalid-response")
+      const parts = envelope.split(".")
+      const candidates: ReadonlyArray<{
+        readonly key: Buffer
+        readonly offset: number
+      }> =
+        parts[0] === "v2" && parts.length === 5 && parts[1]
+          ? keys
+              .filter((key) => key.id === parts[1])
+              .map((key) => ({ key: key.current, offset: 2 }))
+          : parts[0] === "v1" && parts.length === 4
+            ? keys.map((key) => ({ key: key.legacy, offset: 1 }))
+            : []
+      for (const candidate of candidates) {
+        const encodedIv = parts[candidate.offset]
+        const encodedTag = parts[candidate.offset + 1]
+        const encodedCiphertext = parts[candidate.offset + 2]
+        if (!encodedIv || !encodedTag || !encodedCiphertext) continue
+        try {
+          return decryptEnvelope(candidate.key, encodedIv, encodedTag, encodedCiphertext)
+        } catch {
+          // Try the previous key during the explicit rotation window.
+        }
       }
-      try {
-        const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(encodedIv, "base64url"))
-        decipher.setAuthTag(Buffer.from(encodedTag, "base64url"))
-        return Buffer.concat([
-          decipher.update(Buffer.from(encodedCiphertext, "base64url")),
-          decipher.final()
-        ]).toString("utf8")
-      } catch {
-        throw new GitHubAppError("invalid-response")
-      }
+      throw new GitHubAppError("invalid-response")
     }
   }
 }
@@ -394,7 +486,4 @@ export const createGitHubPkce = (): {
   }
 }
 
-export {
-  issueGitHubDesktopGrant,
-  verifyGitHubDesktopGrant
-} from "./github-relay-grant.js"
+export { issueGitHubDesktopGrant, verifyGitHubDesktopGrant } from "./github-relay-grant.js"

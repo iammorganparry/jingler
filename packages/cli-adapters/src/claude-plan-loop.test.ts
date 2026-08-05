@@ -204,7 +204,7 @@ const { runClaude } = await import("./claude-adapter.js")
 const spec: SessionSpec = {
   cli: "claude",
   repo: "widget",
-  branch: "jingler/plan",
+  branch: "chore/plan",
   cwd: process.cwd(),
   prompt: "Plan the fix.",
   images: [],

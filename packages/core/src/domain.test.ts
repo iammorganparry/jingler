@@ -8,6 +8,9 @@ import {
   type CliKind,
   CreateSessionInput,
   defaultModeFor,
+  GitHubRelayDelivery,
+  GitHubSessionRelayGrantResponse,
+  GitHubSessionRoute,
   GithubConfig,
   persistentOf,
   Repo,
@@ -32,6 +35,84 @@ import {
 
 const decode = <A, I>(schema: Schema.Schema<A, I>, input: unknown) =>
   Schema.decodeUnknownEither(schema)(input)
+
+describe("GitHub session relay schemas", () => {
+  const route = {
+    sessionId: "s_one",
+    relaySessionId: "opaque_session_route_1234",
+    installationId: "4492350",
+    repositoryId: "301",
+    pullRequestNumber: 153,
+    state: "active" as const,
+    updatedAt: "2026-08-05T15:00:00.000Z"
+  }
+
+  it("decodes one opaque relay route for an exact local session", () => {
+    expect(Schema.decodeUnknownSync(GitHubSessionRoute)(route)).toStrictEqual(route)
+  })
+
+  it("requires session-scoped claims for a relay grant", () => {
+    const result = decode(GitHubSessionRelayGrantResponse, {
+      relayUrl: "https://github-relay.jingler.dev",
+      grant: "signed-grant",
+      claims: {
+        version: 1,
+        issuer: "jingler",
+        audience: "jingler-github-relay",
+        subject: "user-one",
+        installationId: route.installationId,
+        relaySessionId: route.relaySessionId,
+        issuedAt: 1,
+        expiresAt: 301,
+        grantId: "grant-one"
+      }
+    })
+    expect(Either.isRight(result)).toBe(true)
+  })
+
+  it("requires every renderer delivery to identify its exact session", () => {
+    const delivery = {
+      clientId: "client-one",
+      cursor: 1,
+      relaySessionId: route.relaySessionId,
+      sessionId: route.sessionId,
+      chatId: "chat-one",
+      event: {
+        version: 1,
+        deliveryId: "delivery-one",
+        semanticKey: "review-comment:1",
+        event: "pull_request_review_comment",
+        action: "created",
+        installationId: route.installationId,
+        repository: { id: route.repositoryId, owner: "owner", name: "repo", fullName: "owner/repo" },
+        pullRequest: {
+          id: "pr-one",
+          number: route.pullRequestNumber,
+          title: "Review me",
+          url: "https://github.com/owner/repo/pull/153",
+          headSha: "head",
+          baseSha: "base"
+        },
+        actor: { id: "actor-one", login: "reviewer", type: "User" },
+        feedback: {
+          kind: "review-comment",
+          id: "comment-one",
+          body: "Please fix this",
+          state: null,
+          path: "src/index.ts",
+          line: 3,
+          side: "RIGHT"
+        },
+        actionable: true,
+        occurredAt: "2026-08-05T15:00:01.000Z"
+      }
+    }
+    expect(Either.isRight(decode(GitHubRelayDelivery, delivery))).toBe(true)
+    expect(
+      Either.isLeft(decode(GitHubRelayDelivery, { ...delivery, sessionId: undefined }))
+    ).toBe(true)
+  })
+})
 
 describe("WorkspaceConfig", () => {
   it("decodes a configured workspace", () => {
@@ -240,7 +321,7 @@ describe("Session", () => {
   const base: Session = {
     id: "s_fix-login_abc",
     repo: "trigify-app",
-    branch: "jingler/fix-login",
+    branch: "chore/fix-login",
     title: "Fix login",
     status: "idle",
     cli: "claude",

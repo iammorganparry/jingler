@@ -18,7 +18,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   {
     id: "s_ctx",
     repo: "widget",
-    branch: "jingler/context",
+    branch: "chore/context",
     title: "Long running session",
     status: "idle",
     cli: "claude",

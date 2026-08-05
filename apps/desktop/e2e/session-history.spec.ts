@@ -20,7 +20,7 @@ import type { SeedSession } from "./fixtures.js"
 
 const baseSession = (over: Partial<SeedSession> & { id: string }): SeedSession => ({
   repo: "widget",
-  branch: `jingler/${over.id}`,
+  branch: `chore/${over.id}`,
   title: over.id,
   status: "idle",
   cli: "claude",
@@ -244,7 +244,7 @@ test("a session whose PR merged stays in the sidebar instead of auto-archiving",
         {
           number: 7,
           title: "Multi PR session",
-          headRefName: "jingler/s_merged",
+          headRefName: "chore/s_merged",
           baseRefName: "main",
           author: { login: "morgan" },
           state: "MERGED"

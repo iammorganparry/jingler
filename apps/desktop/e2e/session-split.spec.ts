@@ -23,7 +23,7 @@ import type { SeedSession } from "./fixtures.js"
 
 const baseSession = (over: Partial<SeedSession> & { id: string }): SeedSession => ({
   repo: "widget",
-  branch: `jingler/${over.id}`,
+  branch: `chore/${over.id}`,
   title: over.id,
   status: "idle",
   cli: "claude",

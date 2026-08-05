@@ -102,6 +102,47 @@ describe("GitHub webhook normalization", () => {
     })
   })
 
+  it("extracts pull-request routing identity from check run and check suite payloads", async () => {
+    for (const [eventName, checkField] of [
+      ["check_run", "check_run"],
+      ["check_suite", "check_suite"]
+    ] as const) {
+      const event = await normalizeGitHubWebhook({
+        deliveryId: `delivery-${eventName}`,
+        eventName,
+        payload: githubPayload({
+          action: "completed",
+          [checkField]: {
+            id: 501,
+            updated_at: "2026-08-05T10:02:00Z",
+            pull_requests: [
+              {
+                id: 200,
+                number: 42,
+                url: "https://api.github.com/repos/acme/jingler/pulls/42",
+                head: { sha: "head" },
+                base: { sha: "base" }
+              },
+              {
+                id: 201,
+                number: 43,
+                url: "https://api.github.com/repos/acme/jingler/pulls/43",
+                head: { sha: "head-2" },
+                base: { sha: "base" }
+              }
+            ]
+          }
+        })
+      })
+      expect(event).toMatchObject({
+        event: eventName,
+        actionable: false,
+        pullRequest: { id: "200", number: 42, headSha: "head", baseSha: "base" }
+      })
+      expect(event?.routePullRequests?.map(({ number }) => number)).toEqual([42, 43])
+    }
+  })
+
   it("uses a content-derived semantic key so unchanged edits deduplicate downstream", async () => {
     const created = await normalizeGitHubWebhook({
       deliveryId: "delivery-created",

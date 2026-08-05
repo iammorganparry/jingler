@@ -1,4 +1,9 @@
-import type { GitHubDesktopGrantClaims, GitHubDesktopGrantResponse } from "@jingler/core"
+import type {
+  GitHubDesktopGrantClaims,
+  GitHubDesktopGrantResponse,
+  GitHubSessionRelayGrantClaims,
+  GitHubSessionRelayGrantResponse
+} from "@jingler/core"
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 
 export interface GitHubRelayGrantConfig {
@@ -109,6 +114,58 @@ export const verifyGitHubRelayGrant = (
       expiresAt: claims.expiresAt,
       grantId: claims.grantId
     }
+  } catch (error) {
+    if (error instanceof GitHubRelayGrantError) throw error
+    throw new GitHubRelayGrantError()
+  }
+}
+
+/** Mint a five-minute credential scoped to exactly one linked session stream. */
+export const issueGitHubSessionRelayGrant = (
+  input: {
+    readonly userId: string
+    readonly installationId: string
+    readonly relaySessionId: string
+  },
+  config: GitHubRelayGrantConfig,
+  nowSeconds = Math.floor(Date.now() / 1_000),
+  grantId: string = randomUUID()
+): GitHubSessionRelayGrantResponse => {
+  const claims: GitHubSessionRelayGrantClaims = {
+    version: 1,
+    issuer: "jingler",
+    audience: "jingler-github-relay",
+    subject: input.userId,
+    installationId: input.installationId,
+    relaySessionId: input.relaySessionId,
+    issuedAt: nowSeconds,
+    expiresAt: nowSeconds + (config.ttlSeconds ?? 300),
+    grantId
+  }
+  const header = encodeJson({ alg: "HS256", typ: "JinglerGitHubGrant", version: 1 })
+  const payload = encodeJson(claims)
+  const signed = `${header}.${payload}`
+  return {
+    relayUrl: config.relayUrl,
+    grant: `${signed}.${sign(signed, config.relaySigningSecret)}`,
+    claims
+  }
+}
+
+export const verifyGitHubSessionRelayGrant = (
+  grant: string,
+  secret: string,
+  nowSeconds = Math.floor(Date.now() / 1_000)
+): GitHubSessionRelayGrantClaims => {
+  const base = verifyGitHubRelayGrant(grant, secret, nowSeconds)
+  try {
+    const payloadPart = grant.split(".")[1]
+    if (!payloadPart) throw new GitHubRelayGrantError()
+    const claims = object(JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8")))
+    if (!string(claims?.relaySessionId) || !/^[A-Za-z0-9_-]{20,128}$/.test(claims.relaySessionId)) {
+      throw new GitHubRelayGrantError()
+    }
+    return { ...base, relaySessionId: claims.relaySessionId }
   } catch (error) {
     if (error instanceof GitHubRelayGrantError) throw error
     throw new GitHubRelayGrantError()

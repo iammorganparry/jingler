@@ -335,6 +335,8 @@ test("creating a session from an issue forks a linked branch and seeds the task"
 
   // The prefill step shows the editable task textarea, seeded from the issue.
   await expect(window.getByRole("textbox")).toHaveValue(/Fix the refund route/)
+  await expect(window.getByText("Semantic branch after task understanding")).toBeVisible()
+  await expect(window.getByText(/jingler\//)).toHaveCount(0)
 
   // Create the session.
   const create = window.getByRole("button", { name: "Create session" })

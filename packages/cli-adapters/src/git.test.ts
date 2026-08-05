@@ -1,9 +1,15 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { GitService, ensureWorktreeLinked, mainTreeHoldsBranch, resetWorktreeLinkCache } from "./git.js"
+import {
+  GitService,
+  ensureWorktreeLinked,
+  githubHttpsPushUrl,
+  mainTreeHoldsBranch,
+  resetWorktreeLinkCache
+} from "./git.js"
 import { advanceOrigin, failureOf, initGitRepo, initGitRepoWithOrigin, mkTemp, runExit, withTempRoot } from "./test-support.js"
 
 /**
@@ -596,6 +602,85 @@ describe("GitService.publishInspection", () => {
     expect(exit.value.changedPaths).toEqual(expect.arrayContaining(["committed.ts", "dirty.ts"]))
     expect(exit.value.diffSummary).toContain("committed.ts")
   })
+
+  it("retains both sides of a dirty workflow rename for permission selection", async () => {
+    const dir = initGitRepo(join(repos.dir, "workflow-rename"))
+    const workflowDir = join(dir, ".github", "workflows")
+    execFileSync("mkdir", ["-p", workflowDir])
+    writeFileSync(join(workflowDir, "ci.yml"), "name: CI\n")
+    execFileSync("git", ["add", "-A"], { cwd: dir })
+    execFileSync("git", ["commit", "-m", "ci: add workflow", "--no-gpg-sign"], { cwd: dir })
+    execFileSync("git", ["switch", "-c", "ci/move-workflow"], { cwd: dir })
+    renameSync(join(workflowDir, "ci.yml"), join(dir, "ci.yml"))
+
+    const exit = await runExit(
+      GitService.publishInspection(dir, "main").pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.changedPaths).toEqual(
+      expect.arrayContaining([".github/workflows/ci.yml", "ci.yml"])
+    )
+  })
+})
+
+describe("GitService.pushWithInstallationToken", () => {
+  let temp: ReturnType<typeof withTempRoot>
+  let repos: ReturnType<typeof mkTemp>
+
+  beforeEach(() => {
+    temp = withTempRoot()
+    repos = mkTemp("jingler-secure-push-")
+  })
+  afterEach(() => {
+    temp.cleanup()
+    repos.cleanup()
+  })
+
+  it("ignores an SSH origin and pushurl, targeting the API-derived HTTPS repository", async () => {
+    const dir = initGitRepo(join(repos.dir, "widget"))
+    const target = join(repos.dir, "github-widget.git")
+    execFileSync("git", ["init", "--bare", target])
+    execFileSync("git", ["remote", "add", "origin", "git@github.com:acme/widget.git"], { cwd: dir })
+    execFileSync("git", ["remote", "set-url", "--push", "origin", join(repos.dir, "wrong.git")], { cwd: dir })
+    execFileSync("git", ["config", `url.file://${target}.insteadOf`, "https://github.com/acme/widget.git"], { cwd: dir })
+    execFileSync("git", ["switch", "-c", "feat/secure-publish"], { cwd: dir })
+    writeFileSync(join(dir, "secure.ts"), "export const secure = true\n")
+    execFileSync("git", ["add", "secure.ts"], { cwd: dir })
+    execFileSync("git", ["commit", "-m", "feat: secure publish", "--no-gpg-sign"], { cwd: dir })
+    const token = "ghs_secret_not_for_disk_or_logs"
+
+    const exit = await runExit(
+      GitService.pushWithInstallationToken(
+        dir,
+        "feat/secure-publish",
+        "acme/widget",
+        token
+      ).pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+
+    const failure = failureOf(exit)
+    expect(exit._tag, `${failure?.message} ${String(failure?.cause)}`).toBe("Success")
+    expect(execFileSync("git", ["rev-parse", "refs/heads/feat/secure-publish"], {
+      cwd: target,
+      encoding: "utf8"
+    }).trim()).toBe(execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).trim())
+    expect(execFileSync("git", ["remote", "get-url", "origin"], { cwd: dir, encoding: "utf8" }).trim())
+      .toBe("git@github.com:acme/widget.git")
+    expect(execFileSync("git", ["remote", "get-url", "--push", "origin"], { cwd: dir, encoding: "utf8" }).trim())
+      .toBe(join(repos.dir, "wrong.git"))
+    expect(readFileSync(join(dir, ".git", "config"), "utf8")).not.toContain(token)
+  })
+
+  it("constructs only validated GitHub HTTPS repository URLs", () => {
+    expect(githubHttpsPushUrl("acme/widget")).toBe("https://github.com/acme/widget.git")
+    expect(githubHttpsPushUrl("acme/widget/extra")).toBeNull()
+    expect(githubHttpsPushUrl("acme;touch-owned/widget")).toBeNull()
+    expect(githubHttpsPushUrl("acme/widget\n--upload-pack=owned")).toBeNull()
+  })
 })
 
 /**
@@ -696,7 +781,7 @@ describe("mainTreeHoldsBranch", () => {
   // `git worktree list --porcelain`: blank-line separated records, main first.
   const porcelain = [
     "worktree /repos/widget\nHEAD abc123\nbranch refs/heads/main",
-    "worktree /jingler/worktrees/widget/fix-auth\nHEAD def456\nbranch refs/heads/jingler/fix-auth",
+    "worktree /jingler/worktrees/widget/fix-auth\nHEAD def456\nbranch refs/heads/fix/auth-refresh",
     "worktree /jingler/worktrees/widget/detached\nHEAD 789abc\ndetached"
   ].join("\n\n")
 
@@ -706,7 +791,7 @@ describe("mainTreeHoldsBranch", () => {
 
   it("does NOT report a branch held only by another session worktree", () => {
     // Sharing between two sessions is the case the lever legitimately opts into.
-    expect(mainTreeHoldsBranch(porcelain, "jingler/fix-auth")).toBe(false)
+    expect(mainTreeHoldsBranch(porcelain, "fix/auth-refresh")).toBe(false)
   })
 
   it("does not match a branch nobody has checked out", () => {

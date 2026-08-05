@@ -274,6 +274,11 @@ describe("deterministic publish machine", () => {
       resolvePr: vi.fn(async () => pullRequest),
       createPr: vi.fn(async () => {
         if (failureStage === "create" && !failed) {
+          // Model the ambiguous boundary: GitHub committed the PR, but the
+          // response never reached Jingler. Re-inspection must discover it and
+          // skip a second create rather than relying on the missing response.
+          pullRequest = 42
+          successfulCreates += 1
           failed = true
           throw new Error("create interrupted")
         }

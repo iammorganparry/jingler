@@ -66,7 +66,7 @@ describe("filterSessions", () => {
 
   it("matches title, branch and repo", () => {
     expect(filterSessions(SESSIONS, "gtm", DEFAULT_FILTERS).map((x) => x.id)).toStrictEqual(["c"])
-    expect(filterSessions(SESSIONS, "jingler/a", DEFAULT_FILTERS).map((x) => x.id)).toStrictEqual(["a"])
+    expect(filterSessions(SESSIONS, "chore/a", DEFAULT_FILTERS).map((x) => x.id)).toStrictEqual(["a"])
   })
 })
 

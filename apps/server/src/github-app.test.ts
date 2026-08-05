@@ -1,4 +1,10 @@
-import { generateKeyPairSync, verify } from "node:crypto"
+import {
+  createCipheriv,
+  generateKeyPairSync,
+  hkdfSync,
+  randomBytes,
+  verify
+} from "node:crypto"
 import { describe, expect, it, vi } from "vitest"
 import { loadEnv } from "./env.js"
 import {
@@ -13,6 +19,27 @@ import {
 const keys = generateKeyPairSync("rsa", { modulusLength: 2048 })
 const privateKey = keys.privateKey.export({ type: "pkcs8", format: "pem" }).toString()
 const publicKey = keys.publicKey.export({ type: "spki", format: "pem" }).toString()
+
+const legacyTokenEnvelope = (rootSecret: string, plaintext: string): string => {
+  const key = Buffer.from(
+    hkdfSync(
+      "sha256",
+      Buffer.from(rootSecret),
+      Buffer.from("jingler-github-app"),
+      Buffer.from("user-token-encryption-v1"),
+      32
+    )
+  )
+  const iv = randomBytes(12)
+  const cipher = createCipheriv("aes-256-gcm", key, iv)
+  const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()])
+  return [
+    "v1",
+    iv.toString("base64url"),
+    cipher.getAuthTag().toString("base64url"),
+    ciphertext.toString("base64url")
+  ].join(".")
+}
 
 const config = {
   appId: "1234",
@@ -33,7 +60,8 @@ describe("GitHub App configuration", () => {
       BETTER_AUTH_URL: "https://auth.jingler.test",
       MEMORY_ENABLED: "false",
       MEMORY_GRANT_SECRET: "memory-grant-secret",
-      MEMORY_WORKER_SERVICE_SECRET: "memory-worker-secret"
+      MEMORY_WORKER_SERVICE_SECRET: "memory-worker-secret",
+      CRON_SECRET: "cron-secret-abcdefghijklmnopqrstuvwxyz"
     }
     expect(loadEnv(production).githubAppEnabled).toBe(false)
     expect(() => loadEnv({ ...production, GITHUB_APP_ENABLED: "true" })).toThrow(
@@ -47,15 +75,46 @@ describe("GitHub App configuration", () => {
         GITHUB_APP_CLIENT_ID: "client-id",
         GITHUB_APP_CLIENT_SECRET: "client-secret",
         GITHUB_APP_PRIVATE_KEY: "line-1\\nline-2",
-        GITHUB_APP_WEBHOOK_SECRET: "webhook-secret",
+        GITHUB_APP_WEBHOOK_SECRET: "webhook-secret-abcdefghijklmnopqrstuvwxyz",
         GITHUB_APP_RELAY_URL: "https://relay.jingler.test",
-        GITHUB_APP_RELAY_SIGNING_SECRET: "relay-secret"
+        GITHUB_APP_RELAY_SIGNING_SECRET: "relay-secret-abcdefghijklmnopqrstuvwxyz",
+        GITHUB_APP_TOKEN_ENCRYPTION_KEY: "token-encryption-key-v2-abcdefghijk"
       })
     ).toMatchObject({
       githubAppEnabled: true,
       githubAppConfigured: true,
       githubAppPrivateKey: "line-1\nline-2"
     })
+  })
+
+  it("rejects weak or reused production GitHub secrets", () => {
+    const production = {
+      NODE_ENV: "production",
+      BETTER_AUTH_SECRET: "auth-secret",
+      BETTER_AUTH_URL: "https://auth.jingler.test",
+      MEMORY_ENABLED: "false",
+      MEMORY_GRANT_SECRET: "memory-grant-secret",
+      MEMORY_WORKER_SERVICE_SECRET: "memory-worker-secret",
+      CRON_SECRET: "cron-secret-abcdefghijklmnopqrstuvwxyz",
+      GITHUB_APP_ENABLED: "true",
+      GITHUB_APP_ID: "1234",
+      GITHUB_APP_CLIENT_ID: "client-id",
+      GITHUB_APP_CLIENT_SECRET: "client-secret",
+      GITHUB_APP_PRIVATE_KEY: "line-1\\nline-2",
+      GITHUB_APP_WEBHOOK_SECRET: "webhook-secret-abcdefghijklmnopqrstuvwxyz",
+      GITHUB_APP_RELAY_URL: "https://relay.jingler.test",
+      GITHUB_APP_RELAY_SIGNING_SECRET: "relay-secret-abcdefghijklmnopqrstuvwxyz",
+      GITHUB_APP_TOKEN_ENCRYPTION_KEY: "token-encryption-key-v2-abcdefghijk"
+    }
+    expect(() =>
+      loadEnv({ ...production, GITHUB_APP_WEBHOOK_SECRET: "too-short" })
+    ).toThrow("at least 32 bytes")
+    expect(() =>
+      loadEnv({
+        ...production,
+        GITHUB_APP_RELAY_SIGNING_SECRET: production.GITHUB_APP_WEBHOOK_SECRET
+      })
+    ).toThrow("must be distinct")
   })
 })
 
@@ -94,6 +153,24 @@ describe("GitHub App cryptography", () => {
     parts[2] = `${tag[0] === "a" ? "b" : "a"}${tag.slice(1)}`
     const tampered = parts.join(".")
     expect(() => cipher.decrypt(tampered)).toThrow(GitHubAppError)
+  })
+
+  it("decrypts previous-key envelopes during rotation independently from relay signing", () => {
+    const oldCipher = createGitHubTokenCipher("old-token-key")
+    const oldEnvelope = oldCipher.encrypt("ghu_rotating-secret")
+    const legacyEnvelope = legacyTokenEnvelope("old-token-key", "ghu_legacy-secret")
+    const rotatingCipher = createGitHubTokenCipher("new-token-key", "old-token-key")
+
+    expect(rotatingCipher.decrypt(oldEnvelope)).toBe("ghu_rotating-secret")
+    expect(rotatingCipher.decrypt(legacyEnvelope)).toBe("ghu_legacy-secret")
+    const reencrypted = rotatingCipher.encrypt("ghu_rotating-secret")
+    expect(reencrypted).not.toBe(oldEnvelope)
+    expect(createGitHubTokenCipher("new-token-key").decrypt(reencrypted)).toBe(
+      "ghu_rotating-secret"
+    )
+    expect(() => createGitHubTokenCipher("relay-signing-secret").decrypt(oldEnvelope)).toThrow(
+      GitHubAppError
+    )
   })
 
   it("issues audience-bound, expiring desktop grants without GitHub credentials", () => {
@@ -135,6 +212,11 @@ describe("GitHub API client", () => {
       if (url.endsWith("/user")) {
         return Response.json({ id: 7, login: "octocat", name: "Octo Cat", avatar_url: null })
       }
+      if (url.includes("/user/installations/99/repositories")) {
+        return Response.json({
+          repositories: [{ id: 301, full_name: "acme/widget" }]
+        })
+      }
       if (url.includes("/user/installations")) {
         return Response.json({
           installations: [
@@ -174,6 +256,9 @@ describe("GitHub API client", () => {
         repositorySelection: "selected",
         suspendedAt: new Date("2026-08-01T10:00:00.000Z")
       })
+    ])
+    expect(await client.listInstallationRepositories(rotated.accessToken, "99")).toEqual([
+      { id: "301", fullName: "acme/widget" }
     ])
 
     const beforeMint = requests.length

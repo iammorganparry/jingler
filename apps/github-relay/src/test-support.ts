@@ -35,6 +35,7 @@ export const issueTestRelayGrant = async (
     audience: "jingler-github-relay",
     subject: "user-1",
     installationId: "99",
+    relaySessionId: "relay-session-0001",
     issuedAt: 100,
     expiresAt: 400,
     grantId: "grant-1",

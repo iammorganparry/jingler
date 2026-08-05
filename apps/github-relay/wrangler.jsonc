@@ -13,8 +13,8 @@
   "durable_objects": {
     "bindings": [
       {
-        "name": "USER_EVENTS",
-        "class_name": "UserEventsObject"
+        "name": "SESSION_EVENTS",
+        "class_name": "SessionEventsObject"
       },
       {
         "name": "INSTALLATION_ROUTES",
@@ -26,6 +26,27 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["UserEventsObject", "InstallationRoutesObject"]
+    },
+    {
+      "tag": "v2",
+      "renamed_classes": [
+        {
+          "from": "UserEventsObject",
+          "to": "SessionEventsObject"
+        }
+      ]
+    }
+  ],
+  "workflows": [
+    {
+      "binding": "GITHUB_DELIVERY_WORKFLOW",
+      "name": "jingler-github-delivery",
+      "class_name": "GitHubDeliveryWorkflow"
+    },
+    {
+      "binding": "RELAY_REGISTRATION_WORKFLOW",
+      "name": "jingler-relay-registration",
+      "class_name": "RelayRegistrationWorkflow"
     }
   ],
   "observability": {

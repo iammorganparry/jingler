@@ -11,7 +11,7 @@ import type { SeedSession } from "./fixtures.js"
 const seeded: SeedSession = {
   id: "s_auth_1",
   repo: "widget",
-  branch: "jingler/seed",
+  branch: "chore/seed",
   title: "Seeded session",
   status: "idle",
   cli: "claude",

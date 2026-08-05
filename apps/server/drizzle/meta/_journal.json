@@ -29,6 +29,27 @@
       "when": 1785870786364,
       "tag": "0003_github_app",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785916800000,
+      "tag": "0004_github_relay_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785945364101,
+      "tag": "0005_github_session_routes",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785949062667,
+      "tag": "0006_github_route_generations",
+      "breakpoints": true
     }
   ]
 }

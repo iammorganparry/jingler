@@ -14,7 +14,9 @@ export const expandHome = (p: string): Effect.Effect<string> =>
 
 /**
  * Run a command and return trimmed stdout, or null on any failure (including a
- * non-zero exit). Used for detection-style probes where absence is not an error.
+ * non-zero exit). Used for coding-harness detection probes where absence is not
+ * an error. GitHub product operations must use `GitHubApi`/`GitHubAuth`; do not
+ * add GitHub command discovery or execution to this generic seam.
  */
 export const runString = (
   bin: string,
@@ -29,7 +31,7 @@ export const runString = (
     Effect.catchAll(() => Effect.succeed(null))
   )
 
-/** Resolve a binary on PATH via `which`/`where`; returns the first hit or null. */
+/** Resolve a coding-harness binary via `which`/`where`; returns the first hit or null. */
 export const which = (
   bin: string
 ): Effect.Effect<string | null, never, CommandExecutor.CommandExecutor> =>

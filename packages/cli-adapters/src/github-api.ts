@@ -36,6 +36,12 @@ const JSON_ACCEPT = "application/vnd.github+json"
 const PAGE_SIZE = 100
 const MAX_PAGES = 100
 
+const paginationLimitError = (resource: string): GitHubApiError =>
+  new GitHubApiError({
+    reason: "unavailable",
+    message: `GitHub returned more ${resource} than Jingler can safely load. Narrow the request and retry.`
+  })
+
 type RequestParameters = Readonly<Record<string, unknown>> & {
   readonly headers?: Readonly<Record<string, string>>
 }
@@ -131,6 +137,7 @@ export interface GitHubApiClient {
 
 export interface GitHubApiClientOptions {
   readonly auth: {
+    readonly viewerLogin: () => Promise<string | null>
     readonly credentialsForOwner: (
       owner: string,
       repository: string,
@@ -181,10 +188,21 @@ const headersRecord = (headers: ResponseHeaders): Readonly<Record<string, string
     ])
   )
 
-const retryAtFrom = (headers: ResponseHeaders | undefined): string | undefined => {
-  const raw = headers?.["x-ratelimit-reset"]
-  const seconds = raw === undefined ? Number.NaN : Number(raw)
-  return Number.isFinite(seconds) ? new Date(seconds * 1_000).toISOString() : undefined
+const retryAtFrom = (
+  headers: Readonly<Record<string, string | undefined>>,
+  now = Date.now()
+): string | undefined => {
+  const retryAfter = headers["retry-after"]
+  if (retryAfter !== undefined) {
+    const seconds = Number(retryAfter)
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return new Date(now + seconds * 1_000).toISOString()
+    }
+    const date = Date.parse(retryAfter)
+    if (Number.isFinite(date)) return new Date(date).toISOString()
+  }
+  const reset = Number(headers["x-ratelimit-reset"])
+  return Number.isFinite(reset) ? new Date(reset * 1_000).toISOString() : undefined
 }
 
 const messageFrom = (error: unknown): string => {
@@ -202,10 +220,15 @@ const githubError = (
   const raw = record(error)
   const response = record(raw.response)
   const status = number(raw.status) ?? number(response.status) ?? undefined
-  const responseHeaders = record(response.headers) as ResponseHeaders
+  const responseHeaders = headersRecord(record(response.headers) as ResponseHeaders)
   const upstreamMessage = messageFrom(error)
   const remaining = responseHeaders["x-ratelimit-remaining"]
-  const retryAt = retryAtFrom(responseHeaders)
+  const secondaryRateLimit =
+    status === 403 &&
+    (responseHeaders["retry-after"] !== undefined ||
+      /secondary rate limit|abuse detection|temporarily blocked/i.test(upstreamMessage))
+  const retryAt = retryAtFrom(responseHeaders) ??
+    (secondaryRateLimit ? new Date(Date.now() + 60_000).toISOString() : undefined)
   if (status === 401) {
     return new GitHubApiError({
       reason: "token-expired",
@@ -215,7 +238,7 @@ const githubError = (
       ...(installationId ? { installationId } : {})
     })
   }
-  if (status === 429 || remaining === "0") {
+  if (status === 429 || remaining === "0" || secondaryRateLimit) {
     return new GitHubApiError({
       reason: "rate-limited",
       message: retryAt
@@ -402,8 +425,8 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
     cwd: string,
     method: string,
     url: string,
-    parameters: RequestParameters = {},
-    scopes: ReadonlyArray<string> = ["contents:read"]
+    parameters: RequestParameters,
+    scopes: ReadonlyArray<string>
   ): Promise<GitHubApiResult<A>> => {
     const repository = await resolveRepository(cwd)
     const grant = await grantForRepository(repository, scopes)
@@ -419,18 +442,22 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
   const paginate = async (
     cwd: string,
     url: string,
-    parameters: RequestParameters = {}
+    parameters: RequestParameters,
+    scopes: ReadonlyArray<string>
   ): Promise<ReadonlyArray<Record<string, unknown>>> => {
     const output: Array<Record<string, unknown>> = []
     for (let page = 1; page <= MAX_PAGES; page += 1) {
-      const response = await repositoryCall<unknown[]>(cwd, "GET", url, {
-        ...parameters,
-        per_page: PAGE_SIZE,
-        page
-      })
+      const response = await repositoryCall<unknown[]>(
+        cwd,
+        "GET",
+        url,
+        { ...parameters, per_page: PAGE_SIZE, page },
+        scopes
+      )
       const pageRows = records(response.data)
       output.push(...pageRows)
       if (pageRows.length < PAGE_SIZE) break
+      if (page === MAX_PAGES) throw paginationLimitError("results")
     }
     return output
   }
@@ -441,7 +468,8 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         cwd,
         "GET",
         "/repos/{owner}/{repo}/pulls/{pull_number}",
-        { pull_number: pullNumber }
+        { pull_number: pullNumber },
+        ["pull_requests:read"]
       )
     ).data
 
@@ -452,24 +480,33 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         cwd,
         "GET",
         "/repos/{owner}/{repo}/commits/{ref}/check-runs",
-        { ref: sha, per_page: PAGE_SIZE, page }
+        { ref: sha, per_page: PAGE_SIZE, page },
+        ["checks:read"]
       )
       const pageRows = records(response.data.check_runs)
       checks.push(...pageRows.map(mapCheck))
       if (pageRows.length < PAGE_SIZE) break
+      if (page === MAX_PAGES) throw paginationLimitError("check runs")
     }
-    const statuses = await repositoryCall<Record<string, unknown>>(
-      cwd,
-      "GET",
-      "/repos/{owner}/{repo}/commits/{ref}/status",
-      { ref: sha, per_page: PAGE_SIZE }
-    ).catch((error) => {
-      if (error instanceof GitHubApiError && error.reason === "not-found") {
-        return { data: { statuses: [] }, rateLimit: latestRateLimit! }
+    for (let page = 1; page <= MAX_PAGES; page += 1) {
+      let response: GitHubApiResult<Record<string, unknown>>
+      try {
+        response = await repositoryCall<Record<string, unknown>>(
+          cwd,
+          "GET",
+          "/repos/{owner}/{repo}/commits/{ref}/status",
+          { ref: sha, per_page: PAGE_SIZE, page },
+          ["statuses:read"]
+        )
+      } catch (error) {
+        if (error instanceof GitHubApiError && error.reason === "not-found") break
+        throw error
       }
-      throw error
-    })
-    checks.push(...records(statuses.data.statuses).map(mapCheck))
+      const pageRows = records(response.data.statuses)
+      checks.push(...pageRows.map(mapCheck))
+      if (pageRows.length < PAGE_SIZE) break
+      if (page === MAX_PAGES) throw paginationLimitError("commit statuses")
+    }
     return checks
   }
 
@@ -504,6 +541,7 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
       const connection = record(pr.reviewThreads)
       const pageInfo = record(connection.pageInfo)
       if (pageInfo.hasNextPage !== true || !text(pageInfo.endCursor)) break
+      if (page === MAX_PAGES) throw paginationLimitError("review threads")
       after = text(pageInfo.endCursor)
     }
     return output
@@ -512,14 +550,14 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
   const prFiles = (cwd: string, pullNumber: number): Promise<ReadonlyArray<PrFileChange>> =>
     paginate(cwd, "/repos/{owner}/{repo}/pulls/{pull_number}/files", {
       pull_number: pullNumber
-    }).then(mapApiFiles)
+    }, ["pull_requests:read"]).then(mapApiFiles)
 
   const prForBranch = async (cwd: string, branch: string): Promise<number | null> => {
     const repository = await resolveRepository(cwd)
     const pulls = await paginate(cwd, "/repos/{owner}/{repo}/pulls", {
       state: "open",
       head: `${repository.owner}:${branch}`
-    })
+    }, ["pull_requests:read"])
     const match = pulls.find((candidate) => {
       const head = record(candidate.head)
       const headRepository = record(head.repo)
@@ -541,25 +579,17 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
       return current ? prForBranch(cwd, current) : null
     },
     listPrs: async (cwd, listOptions) => {
-      const [repository, pulls] = await Promise.all([
-        resolveRepository(cwd),
-        paginate(cwd, "/repos/{owner}/{repo}/pulls", { state: "open" })
-      ])
-      const grant = await grantForRepository(repository, ["contents:read"])
-      let viewer: string | null = null
-      if (listOptions.mine) {
-        const response = await call<Record<string, unknown>>(
-          grant,
-          "GET",
-          "/user",
-          {},
-          repository.fullName
-        )
-        viewer = text(response.data.login)
-      }
+      const pulls = await paginate(
+        cwd,
+        "/repos/{owner}/{repo}/pulls",
+        { state: "open" },
+        ["pull_requests:read"]
+      )
+      const viewer = listOptions.mine ? await options.auth.viewerLogin() : null
       const search = listOptions.search.trim().toLowerCase()
       return pulls
         .filter((candidate) => {
+          if (listOptions.mine && !viewer) return false
           if (viewer && text(record(candidate.user).login)?.toLowerCase() !== viewer.toLowerCase()) {
             return false
           }
@@ -572,20 +602,18 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         .map(mapPrSummary)
     },
     listIssues: async (cwd, listOptions) => {
-      const [repository, issues] = await Promise.all([
-        resolveRepository(cwd),
-        paginate(cwd, "/repos/{owner}/{repo}/issues", { state: "open" })
-      ])
-      const grant = await grantForRepository(repository, ["contents:read"])
-      let viewer: string | null = null
-      if (listOptions.mine) {
-        const response = await call<Record<string, unknown>>(grant, "GET", "/user")
-        viewer = text(response.data.login)
-      }
+      const issues = await paginate(
+        cwd,
+        "/repos/{owner}/{repo}/issues",
+        { state: "open" },
+        ["issues:read"]
+      )
+      const viewer = listOptions.mine ? await options.auth.viewerLogin() : null
       const search = listOptions.search.trim().toLowerCase()
       return issues
         .filter((candidate) => {
           if (candidate.pull_request !== undefined) return false
+          if (listOptions.mine && !viewer) return false
           if (
             viewer &&
             !records(candidate.assignees).some(
@@ -609,11 +637,12 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
             cwd,
             "GET",
             "/repos/{owner}/{repo}/issues/{issue_number}",
-            { issue_number: issueNumber }
+            { issue_number: issueNumber },
+            ["issues:read"]
           ),
           paginate(cwd, "/repos/{owner}/{repo}/issues/{issue_number}/comments", {
             issue_number: issueNumber
-          })
+          }, ["issues:read"])
         ])
         return mapIssue({ ...issue.data, comments })
       } catch (error) {
@@ -649,15 +678,16 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
           prFiles(cwd, pullNumber),
           paginate(cwd, "/repos/{owner}/{repo}/pulls/{pull_number}/reviews", {
             pull_number: pullNumber
-          }),
+          }, ["pull_requests:read"]),
           paginate(cwd, "/repos/{owner}/{repo}/issues/{issue_number}/comments", {
             issue_number: pullNumber
-          }),
+          }, ["pull_requests:read"]),
           repositoryCall<Record<string, unknown>>(
             cwd,
             "GET",
             "/repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers",
-            { pull_number: pullNumber }
+            { pull_number: pullNumber },
+            ["pull_requests:read"]
           ).then((response) => records(response.data.users)),
           sha ? checksFor(cwd, sha) : Promise.resolve([]),
           reviewThreads(cwd, repository, pullNumber)
@@ -688,7 +718,8 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
           {
             pull_number: pullNumber,
             headers: { accept: "application/vnd.github.diff" }
-          }
+          },
+          ["pull_requests:read"]
         )
         return typeof response.data === "string" ? response.data : ""
       } catch (error) {
@@ -715,6 +746,7 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
           const pageRows = records(response.data)
           files.push(...pageRows)
           if (pageRows.length < PAGE_SIZE) break
+          if (page === MAX_PAGES) throw paginationLimitError("pull-request files")
         }
         return unifiedDiffFromApiFiles(files)
       }
@@ -792,7 +824,7 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         "POST",
         "/repos/{owner}/{repo}/issues/{issue_number}/comments",
         { issue_number: pullNumber, body },
-        ["issues:write"]
+        ["pull_requests:write"]
       )
     },
     prReviewComments: async (cwd, pullNumber, input) => {
@@ -853,7 +885,7 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         "PUT",
         "/repos/{owner}/{repo}/pulls/{pull_number}/merge",
         { pull_number: pullNumber, merge_method: method },
-        ["pull_requests:write"]
+        ["contents:write"]
       )
     },
     prUpdateBranch: async (cwd, pullNumber) => {
@@ -862,7 +894,7 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         "PUT",
         "/repos/{owner}/{repo}/pulls/{pull_number}/update-branch",
         { pull_number: pullNumber },
-        ["pull_requests:write"]
+        ["pull_requests:write", "contents:write"]
       )
     },
     prReady: async (cwd, pullNumber) => {
@@ -914,6 +946,7 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
     const run = Runtime.runPromise(runtime)
     const client = makeGitHubApiClient({
       auth: {
+        viewerLogin: () => run(auth.viewerLogin()),
         credentialsForOwner: (owner, repository, permissions) =>
           run(auth.credentialsForOwner(owner, repository, permissions)),
         invalidate: (installationId) => {

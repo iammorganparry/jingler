@@ -14,7 +14,6 @@ test("GitHub App API browses and checks out a fork PR without GitHub CLI", async
   const launched = await launchApp({
     configured: true,
     withRepo: true,
-    withoutGithubCli: true,
     seed: ({ repoPath }) => {
       execFileSync("git", ["branch", "feature/from-fork", "main"], { cwd: repoPath })
     },
@@ -93,13 +92,20 @@ test("GitHub App API browses and checks out a fork PR without GitHub CLI", async
     baseBranch: "main"
   })
   expect(githubServer.requests.some((request) => request.path.includes("/pulls/482"))).toBe(true)
+  expect(githubServer.credentialRequests).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ permissions: ["pull_requests:read"] }),
+      expect.objectContaining({ permissions: ["checks:read"] }),
+      expect.objectContaining({ permissions: ["statuses:read"] }),
+      expect.objectContaining({ permissions: ["contents:write"] })
+    ])
+  )
 })
 
 test("GitHub App API lists and opens an issue without GitHub CLI", async ({ launchApp }) => {
   const { window, home, githubServer } = await launchApp({
     configured: true,
     withRepo: true,
-    withoutGithubCli: true,
     githubApp: {
       connected: true,
       userLogin: "e2e-user",
@@ -131,4 +137,9 @@ test("GitHub App API lists and opens an issue without GitHub CLI", async ({ laun
   ) as ReadonlyArray<Record<string, unknown>>
   expect(persisted[0]).toMatchObject({ issueNumber: 128, repo: "widget" })
   expect(githubServer.requests.some((request) => request.path.endsWith("/issues"))).toBe(true)
+  expect(githubServer.requests.some((request) => request.path === "/user")).toBe(false)
+  expect(githubServer.credentialRequests).toContainEqual({
+    repository: "acme/widget",
+    permissions: ["issues:read"]
+  })
 })

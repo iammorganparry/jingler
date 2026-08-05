@@ -14,7 +14,7 @@ type Story = StoryObj<typeof meta>
 
 const session = (over: Partial<Session> & Pick<Session, "id" | "title">): Session => ({
   repo: "jingler",
-  branch: "jingler/witty-berners",
+  branch: "chore/witty-berners",
   status: "idle",
   cli: "claude",
   diff: { added: 0, removed: 0 },

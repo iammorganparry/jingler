@@ -17,7 +17,7 @@ test("a configured workspace boots into the app shell with its sessions", async 
   const seeded: SeedSession = {
     id: "s_seed_1",
     repo: "widget",
-    branch: "jingler/seed-session",
+    branch: "chore/seed-session",
     title: "Seeded session",
     status: "idle",
     cli: "claude",

@@ -55,7 +55,7 @@ Copy `apps/server/.env.example` → `apps/server/.env` for local dev; the server
 - `apps/server` — the **BetterAuth** backend (`@jingler/server`) on Hono + Postgres/Drizzle; runs locally via `tsx` and deploys to Vercel (`api/[[...route]].ts`).
 - `packages/core` — domain types and errors, expressed as **Effect `Schema`** (`CliKind`, `Session`, `AuthSession`, tagged errors). No runtime logic.
 - `packages/contracts` — the **RPC contract** (`JinglerRpcs`, an `@effect/rpc` `RpcGroup`). The single source of truth for every desktop main↔renderer call.
-- `apps/github-relay` — the Cloudflare Worker that verifies GitHub App webhooks and fans resumable review events out through per-user Durable Objects.
+- `apps/github-relay` — the Cloudflare Worker that verifies raw GitHub App webhooks, resolves durable installation/repository/PR ownership, and fans resumable review events out through one Durable Object per linked Jingler session.
 - `packages/cli-adapters` — the desktop **backend logic** as **Effect services** (`Effect.Service`): `SessionStore`, `AgentRunner`, `WorkspaceService` (git/worktrees), `TerminalService`, `GitHubApi`, `GitHubAuth`, `AuthService`, `DiscoveryService`, etc. These run in the Electron **main** process.
 - `packages/themes` — the **theme engine**: nine vendored VS Code themes, the fold from a VS Code theme JSON to Jingler's `ThemeTokens`, and the colour maths. Pure — no Effect, no filesystem, no React — because main, `cli-adapters` and the renderer all import it.
 - `packages/ui` — React component library (Tailwind, **themeable** — One Dark Pro is the default and the fallback, Storybook). Consumed by the renderer.
@@ -171,9 +171,48 @@ New plugin: `node scripts/create-jingler-plugin.mjs my-plugin`.
 
 Desktop state is **JSON files under `~/jingler`** (no ORM) — see `apps/desktop/src/main/app-paths.ts`: `config.json`, `sessions.json`, `worktrees/`, `transcripts/`, `themes/` (user colour themes, watched for live reload), `.jingler/` (plans), `auth.enc` (the bearer token via `SecretStore`). **`JINGLER_HOME` overrides the root** — the e2e suite points it at a throwaway dir so tests never touch the developer's real `~/jingler`. The auth server's own state lives in **Postgres** (Drizzle schema in `apps/server/src/db/schema.ts`), separate from the desktop's JSON store.
 
+Persistence schemas are migration boundaries. `WorkspaceConfig` additions stay
+optional and read-modify-write helpers must preserve every unrelated section.
+`Session` additions also stay compatible with records from before semantic
+branches and GitHub App routing: an established historical branch is live state,
+not metadata to regenerate or rename.
+
 ### Auth flow
 
 `apps/server` (BetterAuth: GitHub/Google OAuth + email magic link, `bearer` plugin) issues a token the desktop stores via `SecretStore`. The renderer drives sign-in through the `Auth.*` RPCs → `AuthService` (`packages/cli-adapters/src/auth.ts`), which talks to the backend. OAuth/magic-link bounce back through the `jingler://` custom-protocol deep link, handled in `apps/desktop/src/main/deep-link.ts`. The desktop targets `http://localhost:9100` by default (override with `JINGLER_AUTH_URL`).
+
+### GitHub App boundary
+
+GitHub social login above is identity-provider state only. Product access is the
+shared GitHub App: user authorization and installation ownership live in the
+server's dedicated GitHub tables, and the relay's durable installation routing
+is synchronized through an idempotent server outbox.
+
+- `GitHubApi` and `GitHubAuth` run in Electron main behind typed RPC. The
+  renderer, scripted harness, plugins, and persisted sessions never receive an
+  installation token.
+- GitHub requests use endpoint-specific permissions. Authenticated pushes use
+  an explicit canonical HTTPS GitHub URL plus ephemeral askpass; ambient SSH,
+  origin push URLs, command arguments, and git config are not credential
+  fallbacks.
+- There is no built-in GitHub CLI service. Do not add GitHub discovery or
+  execution to `command.ts`, runtime layers, plugin auth, fixtures, examples, or
+  setup copy. Agent-authored shell text may still mention historical commands;
+  that is conversation data, not a Jingler-owned runtime path.
+- Fresh worktree tasks start detached from the refreshed base. The first
+  task-understanding pass proposes bounded semantic metadata, and `GitService`
+  validates plus creates `type/kebab-slug`. Direct sessions retain the current
+  developer branch; PR sessions retain the GitHub head; established historical
+  branches are never automatically renamed.
+- Relay installation ownership, session-route ownership, short-lived
+  session-scoped socket grants, webhook delivery deduplication, and per-session
+  replay retention are separate lifecycles. Each linked Jingler session owns an
+  opaque `SessionEventsObject`; never collapse event logs into a per-user object
+  or make route durability depend on a live desktop or grant expiry.
+
+Registration, permissions, encryption-key rotation, relay deployment,
+monitoring, replay recovery, live cloudflared smoke, and rollback are maintained
+in `apps/server/README.md` and `apps/github-relay/README.md`.
 
 ## Conventions & gotchas
 

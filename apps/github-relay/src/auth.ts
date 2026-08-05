@@ -4,6 +4,7 @@ export interface RelayGrantClaims {
   readonly audience: "jingler-github-relay"
   readonly subject: string
   readonly installationId: string
+  readonly relaySessionId: string
   readonly issuedAt: number
   readonly expiresAt: number
   readonly grantId: string
@@ -78,6 +79,8 @@ export const verifyRelayGrant = async (
       !nonEmptyString(claims.subject) ||
       !nonEmptyString(claims.installationId) ||
       !/^\d+$/.test(claims.installationId) ||
+      !nonEmptyString(claims.relaySessionId) ||
+      !/^[a-zA-Z0-9_-]{16,128}$/.test(claims.relaySessionId) ||
       !finiteInteger(claims.issuedAt) ||
       !finiteInteger(claims.expiresAt) ||
       !nonEmptyString(claims.grantId) ||
@@ -92,6 +95,7 @@ export const verifyRelayGrant = async (
       audience: "jingler-github-relay",
       subject: claims.subject,
       installationId: claims.installationId,
+      relaySessionId: claims.relaySessionId,
       issuedAt: claims.issuedAt,
       expiresAt: claims.expiresAt,
       grantId: claims.grantId

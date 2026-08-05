@@ -19,7 +19,11 @@ import type {
 import { GitHubApiError, workspaceModeOf } from "@jingler/core"
 import { GitHubApi } from "./github-api.js"
 import { GitService } from "./git.js"
-import { SessionStore, migrateRepoName } from "./sessions.js"
+import {
+  isSessionPublishBranchReady,
+  SessionStore,
+  migrateRepoName
+} from "./sessions.js"
 import {
   failureOf,
   fakeCommandExecutor,
@@ -596,6 +600,49 @@ describe("SessionStore", () => {
     if (reread._tag !== "Success") return
     expect(reread.value.repo).toBe(basename(repoPath))
     expect(reread.value.repo).not.toBe("old-name")
+  })
+
+  it("keeps a pre-semantic established branch publishable without synthesizing metadata", async () => {
+    const created = await runExit(
+      SessionStore.create(input({ title: "Historical work" })).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(created._tag).toBe("Success")
+    if (created._tag !== "Success") return
+    const {
+      semanticBranchPending: _pending,
+      semanticBranchProposal: _proposal,
+      workspaceMode: _workspaceMode,
+      ...legacy
+    } = created.value
+    writeFileSync(
+      join(temp.root, "sessions.json"),
+      // Explicit migration fixture: releases before semantic naming persisted
+      // `jingler/*`; established history remains publishable without rename.
+      JSON.stringify([{ ...legacy, branch: "jingler/historical-auth-fix" }])
+    )
+
+    const reread = await runExit(
+      SessionStore.get(created.value.id).pipe(Effect.provide(SessionStore.Default)),
+      temp.layer
+    )
+    expect(reread._tag).toBe("Success")
+    if (reread._tag !== "Success") return
+    expect(reread.value.semanticBranchPending).toBeUndefined()
+    expect(reread.value.semanticBranchProposal).toBeUndefined()
+    expect(isSessionPublishBranchReady(reread.value, "jingler/historical-auth-fix")).toBe(true)
+  })
+
+  it("does not treat a fresh pending or direct session as branch-ready", () => {
+    expect(isSessionPublishBranchReady({
+      branch: "main",
+      semanticBranchPending: true,
+      workspaceMode: "worktree"
+    }, "main")).toBe(false)
+    expect(isSessionPublishBranchReady({
+      branch: "feature/direct",
+      workspaceMode: "direct"
+    }, "feature/direct")).toBe(false)
   })
 
   it("keeps the native resume id while reasoning changes", async () => {

@@ -4,12 +4,13 @@
  * have different credentials, lifecycles, and ownership.
  */
 import { randomUUID } from "node:crypto"
-import { and, eq, gt, inArray, isNull } from "drizzle-orm"
+import { and, asc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm"
 import { Effect, Option } from "effect"
 import { Database, type DatabaseError, type DrizzleClient } from "../database.js"
 import {
   githubCallbackState,
   githubInstallation,
+  githubRelayRegistrationOutbox,
   githubUserAuthorization
 } from "../schema.js"
 
@@ -60,6 +61,17 @@ export interface GitHubCallbackStateRecord {
   readonly createdAt: Date
 }
 
+export type GitHubRelayRegistrationState = "active" | "suspended" | "removed"
+
+export interface GitHubRelayRegistrationMutation {
+  readonly id: string
+  readonly userId: string
+  readonly installationId: string
+  readonly desiredState: GitHubRelayRegistrationState
+  readonly generation: number
+  readonly attemptCount: number
+}
+
 export interface SaveGitHubConnectionInput {
   readonly authorization: {
     readonly id: string
@@ -86,7 +98,9 @@ export interface SaveGitHubConnectionInput {
   readonly refreshedAt: Date
 }
 
-const toAuthorization = (row: AuthorizationRow): GitHubAuthorizationRecord => ({ ...row })
+const toAuthorization = (row: AuthorizationRow): GitHubAuthorizationRecord => ({
+  ...row
+})
 
 const parsePermissions = (raw: string): Readonly<Record<string, string>> => {
   try {
@@ -102,9 +116,7 @@ const parsePermissions = (raw: string): Readonly<Record<string, string>> => {
   }
 }
 
-const toInstallation = (
-  row: typeof githubInstallation.$inferSelect
-): GitHubInstallationRecord => ({
+const toInstallation = (row: typeof githubInstallation.$inferSelect): GitHubInstallationRecord => ({
   ...row,
   repositorySelection: row.repositorySelection === "selected" ? "selected" : "all",
   permissions: parsePermissions(row.permissions)
@@ -115,6 +127,66 @@ const toCallbackState = (row: CallbackStateRow): GitHubCallbackStateRecord => ({
   kind: row.kind === "install" ? "install" : "authorize"
 })
 
+const relayState = (suspendedAt: Date | null): GitHubRelayRegistrationState =>
+  suspendedAt === null ? "active" : "suspended"
+
+const toRelayMutation = (
+  row: typeof githubRelayRegistrationOutbox.$inferSelect
+): GitHubRelayRegistrationMutation => ({
+  id: row.id,
+  userId: row.userId,
+  installationId: row.installationId,
+  desiredState:
+    row.desiredState === "active" || row.desiredState === "suspended"
+      ? row.desiredState
+      : "removed",
+  generation: row.generation,
+  attemptCount: row.attemptCount
+})
+
+const queueRelayMutation = async (
+  tx: Pick<DrizzleClient, "insert">,
+  input: {
+    readonly userId: string
+    readonly installationId: string
+    readonly desiredState: GitHubRelayRegistrationState
+    readonly at: Date
+  }
+): Promise<void> => {
+  const mutationId = randomUUID()
+  await tx
+    .insert(githubRelayRegistrationOutbox)
+    .values({
+      id: mutationId,
+      userId: input.userId,
+      installationId: input.installationId,
+      desiredState: input.desiredState,
+      generation: 1,
+      attemptCount: 0,
+      nextAttemptAt: input.at,
+      deliveredAt: null,
+      lastError: null,
+      createdAt: input.at,
+      updatedAt: input.at
+    })
+    .onConflictDoUpdate({
+      target: [
+        githubRelayRegistrationOutbox.userId,
+        githubRelayRegistrationOutbox.installationId
+      ],
+      set: {
+        id: mutationId,
+        desiredState: input.desiredState,
+        generation: sql`${githubRelayRegistrationOutbox.generation} + 1`,
+        attemptCount: 0,
+        nextAttemptAt: input.at,
+        deliveredAt: null,
+        lastError: null,
+        updatedAt: input.at
+      }
+    })
+}
+
 const repositoryFor = (database: Database) => {
   const findAuthorization = (
     operation: string,
@@ -122,9 +194,7 @@ const repositoryFor = (database: Database) => {
   ): Effect.Effect<Option.Option<GitHubAuthorizationRecord>, DatabaseError> =>
     database
       .run(operation, query)
-      .pipe(
-        Effect.map((rows) => Option.fromNullable(rows[0]).pipe(Option.map(toAuthorization)))
-      )
+      .pipe(Effect.map((rows) => Option.fromNullable(rows[0]).pipe(Option.map(toAuthorization))))
 
   return {
     createCallbackState: (values: typeof githubCallbackState.$inferInsert) =>
@@ -160,9 +230,7 @@ const repositoryFor = (database: Database) => {
             )
             .returning()
         )
-        .pipe(
-          Effect.map((rows) => Option.fromNullable(rows[0]).pipe(Option.map(toCallbackState)))
-        ),
+        .pipe(Effect.map((rows) => Option.fromNullable(rows[0]).pipe(Option.map(toCallbackState)))),
 
     findAuthorizationByUserId: (userId: string) =>
       findAuthorization("GitHubConnectionRepository.findAuthorizationByUserId", (db) =>
@@ -216,6 +284,14 @@ const repositoryFor = (database: Database) => {
       database
         .run("GitHubConnectionRepository.saveConnection", (db) =>
           db.transaction(async (tx) => {
+            const previous = await tx
+              .select({ installation: githubInstallation })
+              .from(githubInstallation)
+              .innerJoin(
+                githubUserAuthorization,
+                eq(githubInstallation.authorizationId, githubUserAuthorization.id)
+              )
+              .where(eq(githubUserAuthorization.userId, input.authorization.userId))
             const rows = await tx
               .insert(githubUserAuthorization)
               .values({
@@ -264,6 +340,34 @@ const repositoryFor = (database: Database) => {
                 }))
               )
             }
+            const previousStates = new Map(
+              previous.map(({ installation }) => [
+                installation.installationId,
+                relayState(installation.suspendedAt)
+              ])
+            )
+            const currentStates = new Map(
+              input.installations.map((installation) => [
+                installation.installationId,
+                relayState(installation.suspendedAt)
+              ])
+            )
+            const changes = [
+              ...[...currentStates].filter(
+                ([installationId, state]) => previousStates.get(installationId) !== state
+              ),
+              ...[...previousStates.keys()]
+                .filter((installationId) => !currentStates.has(installationId))
+                .map((installationId) => [installationId, "removed"] as const)
+            ]
+            for (const [installationId, desiredState] of changes) {
+              await queueRelayMutation(tx, {
+                userId: input.authorization.userId,
+                installationId,
+                desiredState,
+                at: input.refreshedAt
+              })
+            }
             return authorization
           })
         )
@@ -277,6 +381,16 @@ const repositoryFor = (database: Database) => {
       database
         .run("GitHubConnectionRepository.replaceInstallations", (db) =>
           db.transaction(async (tx) => {
+            const authorization = await tx
+              .select()
+              .from(githubUserAuthorization)
+              .where(eq(githubUserAuthorization.id, input.authorizationId))
+              .limit(1)
+            const userId = authorization[0]?.userId
+            const previous = await tx
+              .select()
+              .from(githubInstallation)
+              .where(eq(githubInstallation.authorizationId, input.authorizationId))
             await tx
               .delete(githubInstallation)
               .where(eq(githubInstallation.authorizationId, input.authorizationId))
@@ -300,8 +414,41 @@ const repositoryFor = (database: Database) => {
             }
             await tx
               .update(githubUserAuthorization)
-              .set({ updatedAt: input.refreshedAt, lastRefreshedAt: input.refreshedAt })
+              .set({
+                updatedAt: input.refreshedAt,
+                lastRefreshedAt: input.refreshedAt
+              })
               .where(eq(githubUserAuthorization.id, input.authorizationId))
+            if (userId) {
+              const previousStates = new Map(
+                previous.map((installation) => [
+                  installation.installationId,
+                  relayState(installation.suspendedAt)
+                ])
+              )
+              const currentStates = new Map(
+                input.installations.map((installation) => [
+                  installation.installationId,
+                  relayState(installation.suspendedAt)
+                ])
+              )
+              const changes = [
+                ...[...currentStates].filter(
+                  ([installationId, state]) => previousStates.get(installationId) !== state
+                ),
+                ...[...previousStates.keys()]
+                  .filter((installationId) => !currentStates.has(installationId))
+                  .map((installationId) => [installationId, "removed"] as const)
+              ]
+              for (const [installationId, desiredState] of changes) {
+                await queueRelayMutation(tx, {
+                  userId,
+                  installationId,
+                  desiredState,
+                  at: input.refreshedAt
+                })
+              }
+            }
           })
         )
         .pipe(Effect.asVoid),
@@ -333,12 +480,82 @@ const repositoryFor = (database: Database) => {
       database
         .run("GitHubConnectionRepository.disconnect", (db) =>
           db.transaction(async (tx) => {
+            const installations = await tx
+              .select({ installationId: githubInstallation.installationId })
+              .from(githubInstallation)
+              .innerJoin(
+                githubUserAuthorization,
+                eq(githubInstallation.authorizationId, githubUserAuthorization.id)
+              )
+              .where(eq(githubUserAuthorization.userId, userId))
             // Invalidate in-flight browser callbacks as part of disconnect.
             await tx.delete(githubCallbackState).where(eq(githubCallbackState.userId, userId))
             await tx
               .delete(githubUserAuthorization)
               .where(eq(githubUserAuthorization.userId, userId))
+            const disconnectedAt = new Date()
+            for (const installation of installations) {
+              await queueRelayMutation(tx, {
+                userId,
+                installationId: installation.installationId,
+                desiredState: "removed",
+                at: disconnectedAt
+              })
+            }
           })
+        )
+        .pipe(Effect.asVoid),
+
+    listPendingRelayMutations: (
+      at: Date,
+      limit = 50
+    ): Effect.Effect<ReadonlyArray<GitHubRelayRegistrationMutation>, DatabaseError> =>
+      database
+        .run("GitHubConnectionRepository.listPendingRelayMutations", (db) =>
+          db
+            .select()
+            .from(githubRelayRegistrationOutbox)
+            .where(
+              and(
+                isNull(githubRelayRegistrationOutbox.deliveredAt),
+                lte(githubRelayRegistrationOutbox.nextAttemptAt, at)
+              )
+            )
+            .orderBy(asc(githubRelayRegistrationOutbox.nextAttemptAt))
+            .limit(Math.max(1, Math.min(limit, 100)))
+        )
+        .pipe(Effect.map((rows) => rows.map(toRelayMutation))),
+
+    markRelayMutationDelivered: (
+      id: string,
+      deliveredAt: Date
+    ): Effect.Effect<void, DatabaseError> =>
+      database
+        .run("GitHubConnectionRepository.markRelayMutationDelivered", (db) =>
+          db
+            .update(githubRelayRegistrationOutbox)
+            .set({ deliveredAt, lastError: null, updatedAt: deliveredAt })
+            .where(eq(githubRelayRegistrationOutbox.id, id))
+        )
+        .pipe(Effect.asVoid),
+
+    markRelayMutationFailed: (input: {
+      readonly id: string
+      readonly retryAt: Date
+      readonly updatedAt: Date
+      readonly error: string
+    }): Effect.Effect<void, DatabaseError> =>
+      database
+        .run("GitHubConnectionRepository.markRelayMutationFailed", (db) =>
+          db
+            .update(githubRelayRegistrationOutbox)
+            .set({
+              attemptCount: sql`${githubRelayRegistrationOutbox.attemptCount} + 1`,
+              nextAttemptAt: input.retryAt,
+              lastError: input.error.slice(0, 200),
+              updatedAt: input.updatedAt
+            })
+            .where(eq(githubRelayRegistrationOutbox.id, input.id))
         )
         .pipe(Effect.asVoid)
   } as const

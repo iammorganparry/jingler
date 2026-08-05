@@ -84,7 +84,7 @@ beforeEach(() => {
     JSON.stringify([{
       id: SESSION,
       repo: "widget",
-      branch: "jingler/test",
+      branch: "chore/test",
       title: "Test",
       status: "idle",
       cli: "claude",
@@ -2082,7 +2082,7 @@ describe("AgentRunner plan library", () => {
     const session: Session = {
       id: SESSION,
       repo: "acme/widget",
-      branch: "jingler/mysession",
+      branch: "chore/mysession",
       title: "My session",
       status: "idle",
       cli: "claude",
@@ -2756,7 +2756,7 @@ describe("AgentRunner plan progress across turns", () => {
     const session: Session = {
       id: SESSION,
       repo: "acme/widget",
-      branch: "jingler/crossturn",
+      branch: "chore/crossturn",
       title: "Cross-turn session",
       status: "idle",
       cli: "claude",
@@ -3058,7 +3058,7 @@ describe("AgentRunner failures", () => {
         {
           id: SESSION,
           repo: "acme/widget",
-          branch: "jingler/auth",
+          branch: "chore/auth",
           title: "Auth failure",
           status: "idle",
           cli: "claude",

@@ -59,6 +59,23 @@ describe("repositoryAccess", () => {
     })
   })
 
+  it("enables a selected repository by immutable identity and rejects unselected repositories", () => {
+    const partial = connectionFromStatus(
+      status({
+        installations: [installation({
+          repositorySelection: "selected",
+          repositories: [{ id: "301", fullName: "acme/widget" }]
+        })]
+      })
+    )
+    expect(repositoryAccess(partial, "acme/widget", "301")).toMatchObject({
+      status: "accessible",
+      installationId: "101"
+    })
+    expect(repositoryAccess(partial, "acme/widget", "different-id").status).toBe("partial")
+    expect(repositoryAccess(partial, "acme/other").status).toBe("partial")
+  })
+
   it("requires recovery for selected-only and suspended installations", () => {
     const partial = connectionFromStatus(
       status({ installations: [installation({ repositorySelection: "selected" })] })
@@ -121,6 +138,44 @@ describe("githubConnectionMachine", () => {
     actor.send({ type: "DISCONNECT" })
     await waitFor(actor, (snapshot) => snapshot.matches("disconnected"))
     expect(disconnect).toHaveBeenCalledOnce()
+    actor.stop()
+  })
+
+  it("applies repository-selection changes on refresh without restarting", async () => {
+    const selected = status({
+      installations: [installation({
+        repositorySelection: "selected",
+        repositories: [{ id: "301", fullName: "acme/widget" }]
+      })]
+    })
+    const removed = status({
+      installations: [installation({
+        repositorySelection: "selected",
+        repositories: [{ id: "302", fullName: "acme/other" }]
+      })],
+      lastRefreshedAt: "2026-08-04T09:00:01.000Z"
+    })
+    const actor = createActor(
+      githubConnectionMachine.provide({
+        actors: {
+          loadStatus: fromPromise(async () => selected),
+          openInstall: fromPromise<void>(async () => {}),
+          refreshStatus: fromPromise(async () => removed),
+          disconnect: fromPromise<void>(async () => {})
+        }
+      })
+    ).start()
+    await waitFor(actor, (snapshot) => snapshot.matches("partialAccess"))
+    expect(repositoryAccess(actor.getSnapshot().context.connection, "acme/widget", "301").status)
+      .toBe("accessible")
+
+    actor.send({ type: "REFRESH" })
+    await waitFor(
+      actor,
+      (snapshot) => snapshot.context.connection.lastRefreshedAt === "2026-08-04T09:00:01.000Z"
+    )
+    expect(repositoryAccess(actor.getSnapshot().context.connection, "acme/widget", "301"))
+      .toMatchObject({ status: "partial", installationId: "101" })
     actor.stop()
   })
 })

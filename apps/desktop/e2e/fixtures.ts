@@ -270,8 +270,6 @@ export interface LaunchOptions {
   readonly githubServer?: FakeGitHubServer
   /** Reuse a stateful relay across app restarts. */
   readonly githubRelay?: FakeGitHubRelay
-  /** Launch with a minimal PATH containing node + system git. */
-  readonly withoutGithubCli?: boolean
   /** Test-only process flags for forcing a precise persistence/crash boundary. */
   readonly e2eEnv?: Readonly<Record<string, string>>
 
@@ -898,7 +896,6 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
       // Optional fake harness preparation. GitHub itself is always exercised
       // through the HTTP GitHub App fixture below.
       let opencodeEnv: Record<string, string> = {}
-      let pathPrefix = ""
       const binDir = join(home, "bin")
       // A connected App fixture needs an origin for immutable repository
       // resolution and API-driven checkout.
@@ -916,7 +913,6 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
       }
       if (options.opencode) {
         opencodeEnv = installFakeOpencode(binDir, options.opencode)
-        pathPrefix = `${binDir}:`
       }
 
       /**
@@ -932,7 +928,6 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
        */
       installVersionOnlyHarness(binDir, "claude", "2.0.0 (Claude Code)")
       installFakeCodex(binDir)
-      pathPrefix = `${binDir}:`
 
       // Offline auth backend. Signed-in by default: seed the token file that the
       // e2e plaintext SecretStore reads, so the app boots past the wall.
@@ -990,9 +985,11 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
           ...process.env,
           ...opencodeEnv,
           ...mcpEnv,
-          PATH: options.withoutGithubCli
-            ? `${binDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`
-            : `${pathPrefix}${process.env.PATH ?? ""}`,
+          // Run every built-app scenario against the same clean-machine
+          // boundary: fixture harnesses, Electron/Node, and system git. Never
+          // inherit the developer's PATH. In particular, a locally installed
+          // GitHub CLI must not hide a built-in regression back to `gh`.
+          PATH: `${binDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
           JINGLER_HOME: home,
           // Pin harness discovery to the fixture's own bin dir. PATH alone can't
           // do this: `CLI_SPECS.candidates` hardcodes absolute install paths

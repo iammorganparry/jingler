@@ -27,7 +27,7 @@ const AGENT_LINE = "It issues and verifies bearer tokens."
 const session: SeedSession = {
   id: "s_textsize",
   repo: "widget",
-  branch: "jingler/s_textsize",
+  branch: "chore/s_textsize",
   title: "Text size demo",
   status: "idle",
   cli: "claude",

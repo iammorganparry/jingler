@@ -1,7 +1,9 @@
 import type {
   GitHubAppConnectionStatus,
   GitHubAppInstallation,
-  GitHubDesktopGrantResponse
+  GitHubDesktopGrantResponse,
+  GitHubSessionRelayGrantResponse,
+  GitHubSessionRoute
 } from "@jingler/core"
 import { GitHubApiError } from "@jingler/core"
 import { Effect } from "effect"
@@ -9,6 +11,21 @@ import { SecretStore } from "./secret-store.js"
 
 const DEFAULT_BASE_URL = "http://localhost:9100"
 const GRANT_REFRESH_SKEW_SECONDS = 30
+const WORKFLOW_DIRECTORY = ".github/workflows/"
+
+/** Minimum GitHub App permissions needed to push the inspected paths. */
+export const githubPushPermissions = (
+  paths: ReadonlyArray<string>
+): ReadonlyArray<string> => {
+  const changesWorkflow = paths.some((path) => {
+    const slashes = path.replaceAll("\\", "/")
+    const normalized = slashes.startsWith("./") ? slashes.slice(2) : slashes
+    return normalized.startsWith(WORKFLOW_DIRECTORY)
+  })
+  return changesWorkflow
+    ? ["contents:write", "workflows:write"]
+    : ["contents:write"]
+}
 
 export interface GitHubRelayGrant {
   readonly relayUrl: string
@@ -16,6 +33,15 @@ export interface GitHubRelayGrant {
   readonly installationId: string
   readonly expiresAt: number
   readonly scopes: ReadonlyArray<string>
+}
+
+/** Relay socket credential for exactly one opaque session Durable Object. */
+export interface GitHubSessionRelayGrant {
+  readonly relayUrl: string
+  readonly grant: string
+  readonly installationId: string
+  readonly relaySessionId: string
+  readonly expiresAt: number
 }
 
 /** Short-lived installation credential. Kept in Electron main memory only. */
@@ -27,6 +53,8 @@ export interface GitHubInstallationCredential {
 
 export interface GitHubAuthClient {
   readonly status: () => Promise<GitHubAppConnectionStatus>
+  /** Authenticated GitHub user identity; never inferred from an installation token. */
+  readonly viewerLogin: () => Promise<string | null>
   readonly grantForInstallation: (
     installationId: string,
     scopes?: ReadonlyArray<string>
@@ -35,6 +63,16 @@ export interface GitHubAuthClient {
     owner: string,
     scopes?: ReadonlyArray<string>
   ) => Promise<GitHubRelayGrant>
+  readonly sessionRoutes: () => Promise<ReadonlyArray<GitHubSessionRoute>>
+  readonly upsertSessionRoute: (input: {
+    readonly sessionId: string
+    readonly installationId: string
+    readonly repositoryId: string
+    readonly pullRequestNumber: number
+  }) => Promise<GitHubSessionRoute>
+  readonly grantForSession: (relaySessionId: string) => Promise<GitHubSessionRelayGrant>
+  readonly archiveSessionRoute: (relaySessionId: string) => Promise<GitHubSessionRoute>
+  readonly unlinkSessionRoute: (relaySessionId: string) => Promise<void>
   readonly credentialsForInstallation: (
     installationId: string,
     repository: string,
@@ -150,6 +188,14 @@ const parseStatus = (value: unknown): GitHubAppConnectionStatus | null => {
       return []
     }
     const permissions = record(installation.permissions) ?? {}
+    const repositories = Array.isArray(installation.repositories)
+      ? installation.repositories.flatMap((candidate) => {
+          const repository = record(candidate)
+          const repositoryId = string(repository?.id)
+          const fullName = string(repository?.fullName)
+          return repositoryId && fullName ? [{ id: repositoryId, fullName }] : []
+        })
+      : []
     return [{
       id,
       account: {
@@ -159,6 +205,7 @@ const parseStatus = (value: unknown): GitHubAppConnectionStatus | null => {
         avatarUrl: string(account.avatarUrl)
       },
       repositorySelection,
+      repositories,
       permissions: Object.fromEntries(
         Object.entries(permissions).filter(
           (entry): entry is [string, string] => typeof entry[1] === "string"
@@ -210,11 +257,71 @@ const parseGrant = (value: unknown): GitHubDesktopGrantResponse | null => {
   }
 }
 
+const parseSessionRoute = (value: unknown): GitHubSessionRoute | null => {
+  const route = record(value)
+  const sessionId = string(route?.sessionId)
+  const relaySessionId = string(route?.relaySessionId)
+  const installationId = string(route?.installationId)
+  const repositoryId = string(route?.repositoryId)
+  const state = route?.state
+  const pullRequestNumber = number(route?.pullRequestNumber)
+  const updatedAt = string(route?.updatedAt)
+  if (
+    !route ||
+    !sessionId ||
+    !relaySessionId ||
+    !installationId ||
+    !repositoryId ||
+    pullRequestNumber === null ||
+    !Number.isSafeInteger(pullRequestNumber) ||
+    (state !== "active" && state !== "archived" && state !== "removed") ||
+    !updatedAt
+  ) {
+    return null
+  }
+  return {
+    sessionId,
+    relaySessionId,
+    installationId,
+    repositoryId,
+    pullRequestNumber,
+    state,
+    updatedAt
+  }
+}
+
+const parseSessionGrant = (value: unknown): GitHubSessionRelayGrantResponse | null => {
+  const body = record(value)
+  const claims = record(body?.claims)
+  const relayUrl = string(body?.relayUrl)
+  const grant = string(body?.grant)
+  const installationId = string(claims?.installationId)
+  const relaySessionId = string(claims?.relaySessionId)
+  const expiresAt = number(claims?.expiresAt)
+  if (!relayUrl || !grant || !installationId || !relaySessionId || expiresAt === null) return null
+  return {
+    relayUrl,
+    grant,
+    claims: {
+      version: 1,
+      issuer: "jingler",
+      audience: "jingler-github-relay",
+      subject: string(claims?.subject) ?? "",
+      installationId,
+      relaySessionId,
+      issuedAt: number(claims?.issuedAt) ?? 0,
+      expiresAt,
+      grantId: string(claims?.grantId) ?? ""
+    }
+  }
+}
+
 export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAuthClient => {
   const request = options.fetch ?? fetch
   const baseUrl = options.baseUrl ?? apiBaseUrl
   const now = options.now ?? (() => new Date())
   const grants = new Map<string, GitHubRelayGrant>()
+  const sessionGrants = new Map<string, GitHubSessionRelayGrant>()
   const credentials = new Map<string, GitHubInstallationCredential>()
   const credentialKey = (installationId: string, scopes: ReadonlyArray<string>): string =>
     `${installationId}:${[...new Set(scopes)].sort().join(",")}`
@@ -300,6 +407,92 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
     return grant
   }
 
+  const sessionRoutes = async (): Promise<ReadonlyArray<GitHubSessionRoute>> => {
+    const response = await authenticatedRequest("/api/github/session-routes")
+    const body = record(await response.json().catch(() => null))
+    if (!Array.isArray(body?.routes)) {
+      throw new GitHubApiError({
+        reason: "unavailable",
+        message: "The GitHub connection service returned invalid session routes."
+      })
+    }
+    const routes = body.routes.map(parseSessionRoute)
+    if (routes.some((route) => route === null)) {
+      throw new GitHubApiError({
+        reason: "unavailable",
+        message: "The GitHub connection service returned invalid session routes."
+      })
+    }
+    return routes.filter((route): route is GitHubSessionRoute => route !== null)
+  }
+
+  const upsertSessionRoute: GitHubAuthClient["upsertSessionRoute"] = async (input) => {
+    const response = await authenticatedRequest("/api/github/session-routes", {
+      method: "POST",
+      body: JSON.stringify(input)
+    })
+    const body = record(await response.json().catch(() => null))
+    const route = parseSessionRoute(body?.route)
+    if (!route || route.sessionId !== input.sessionId) {
+      throw new GitHubApiError({
+        reason: "unavailable",
+        message: "The GitHub connection service returned an invalid session route."
+      })
+    }
+    return route
+  }
+
+  const grantForSession = async (relaySessionId: string): Promise<GitHubSessionRelayGrant> => {
+    const cached = sessionGrants.get(relaySessionId)
+    const nowSeconds = Math.floor(now().getTime() / 1_000)
+    if (cached && cached.expiresAt - GRANT_REFRESH_SKEW_SECONDS > nowSeconds) return cached
+    sessionGrants.delete(relaySessionId)
+    const response = await authenticatedRequest("/api/github/session-grant", {
+      method: "POST",
+      body: JSON.stringify({ relaySessionId })
+    })
+    const parsed = parseSessionGrant(await response.json().catch(() => null))
+    if (!parsed || parsed.claims.relaySessionId !== relaySessionId) {
+      throw new GitHubApiError({
+        reason: "unavailable",
+        message: "The GitHub connection service returned an invalid session relay grant."
+      })
+    }
+    const grant: GitHubSessionRelayGrant = {
+      relayUrl: parsed.relayUrl.replace(/\/$/, ""),
+      grant: parsed.grant,
+      installationId: parsed.claims.installationId,
+      relaySessionId,
+      expiresAt: parsed.claims.expiresAt
+    }
+    sessionGrants.set(relaySessionId, grant)
+    return grant
+  }
+
+  const archiveSessionRoute = async (relaySessionId: string): Promise<GitHubSessionRoute> => {
+    const response = await authenticatedRequest(
+      `/api/github/session-routes/${encodeURIComponent(relaySessionId)}/archive`,
+      { method: "POST" }
+    )
+    const body = record(await response.json().catch(() => null))
+    const route = parseSessionRoute(body?.route)
+    if (!route || route.relaySessionId !== relaySessionId || route.state !== "archived") {
+      throw new GitHubApiError({
+        reason: "unavailable",
+        message: "The GitHub connection service returned an invalid archived session route."
+      })
+    }
+    sessionGrants.delete(relaySessionId)
+    return route
+  }
+
+  const unlinkSessionRoute = async (relaySessionId: string): Promise<void> => {
+    await authenticatedRequest(`/api/github/session-routes/${encodeURIComponent(relaySessionId)}`, {
+      method: "DELETE"
+    })
+    sessionGrants.delete(relaySessionId)
+  }
+
   const installationForOwner = async (owner: string): Promise<GitHubAppInstallation> => {
     const connection = await status()
     const matching = connection.installations.find(
@@ -365,11 +558,17 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
 
   return {
     status,
+    viewerLogin: async () => (await status()).user?.login ?? null,
     grantForInstallation,
     grantForOwner: async (owner, scopes = []) => {
       const installation = await installationForOwner(owner)
       return grantForInstallation(installation.id, scopes)
     },
+    sessionRoutes,
+    upsertSessionRoute,
+    grantForSession,
+    archiveSessionRoute,
+    unlinkSessionRoute,
     credentialsForInstallation,
     credentialsForOwner: async (owner, repository, permissions) => {
       if (repository.split("/")[0]?.toLowerCase() !== owner.toLowerCase()) {
@@ -405,6 +604,9 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
       for (const key of credentials.keys()) {
         if (key.startsWith(`${installationId}:`)) credentials.delete(key)
       }
+      for (const [relaySessionId, grant] of sessionGrants) {
+        if (grant.installationId === installationId) sessionGrants.delete(relaySessionId)
+      }
     }
   }
 }
@@ -429,10 +631,24 @@ export class GitHubAuth extends Effect.Service<GitHubAuth>()("@jingler/GitHubAut
       })
     return {
       status: () => wrap(client.status),
+      viewerLogin: () => wrap(client.viewerLogin),
       grantForInstallation: (installationId: string, scopes: ReadonlyArray<string> = []) =>
         wrap(() => client.grantForInstallation(installationId, scopes)),
       grantForOwner: (owner: string, scopes: ReadonlyArray<string> = []) =>
         wrap(() => client.grantForOwner(owner, scopes)),
+      sessionRoutes: () => wrap(client.sessionRoutes),
+      upsertSessionRoute: (input: {
+        readonly sessionId: string
+        readonly installationId: string
+        readonly repositoryId: string
+        readonly pullRequestNumber: number
+      }) => wrap(() => client.upsertSessionRoute(input)),
+      grantForSession: (relaySessionId: string) =>
+        wrap(() => client.grantForSession(relaySessionId)),
+      archiveSessionRoute: (relaySessionId: string) =>
+        wrap(() => client.archiveSessionRoute(relaySessionId)),
+      unlinkSessionRoute: (relaySessionId: string) =>
+        wrap(() => client.unlinkSessionRoute(relaySessionId)),
       credentialsForInstallation: (
         installationId: string,
         repository: string,

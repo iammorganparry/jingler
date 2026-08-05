@@ -13,7 +13,7 @@ type Story = StoryObj
 
 const session = (over: Partial<Session> & Pick<Session, "id" | "title">): Session => ({
   repo: "jingler",
-  branch: `jingler/${over.id}`,
+  branch: `chore/${over.id}`,
   status: "idle",
   cli: "claude",
   diff: { added: 0, removed: 0 },

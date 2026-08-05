@@ -16,7 +16,7 @@ const session = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession>
   {
     id: "s_browser_mcp",
     repo: "widget",
-    branch: "jingler/browser-mcp",
+    branch: "chore/browser-mcp",
     title: "Browser MCP parity",
     status: "idle",
     cli: "codex",

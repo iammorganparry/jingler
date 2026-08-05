@@ -19,6 +19,7 @@ import type {
 import {
   GitHubApiError,
   GitError,
+  semanticBranchProposalFromName,
   SessionNotFoundError,
   supportsPlanMode,
   UNTITLED_SESSION,
@@ -225,6 +226,27 @@ export const taskSlug = (input: string): string =>
     // Truncation can land mid-word and leave a trailing dash; trim again so the
     // slug never ends in one.
     .replace(/-+$/g, "") || "session"
+
+/**
+ * Publish-readiness for the live branch, including persisted sessions created
+ * before semantic proposals existed. The explicit pending marker is the
+ * durable proof that a fresh task still needs branch creation; metadata absence
+ * alone identifies neither freshness nor an error because historical and PR
+ * sessions intentionally have established non-semantic branches.
+ */
+export const isSessionPublishBranchReady = (
+  session: Pick<
+    Session,
+    "branch" | "semanticBranchPending" | "semanticBranchProposal" | "workspaceMode"
+  >,
+  liveBranch: string | null
+): boolean => {
+  if (workspaceModeOf(session) !== "worktree") return false
+  if (session.semanticBranchPending === true) return false
+  if (liveBranch === null || liveBranch !== session.branch) return false
+  return session.semanticBranchProposal === undefined ||
+    semanticBranchProposalFromName(liveBranch) !== null
+}
 
 type PersistEnv = FileSystem.FileSystem | AppPaths
 

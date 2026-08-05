@@ -4,23 +4,39 @@ import type {
   GitHubCallbackStateKind,
   GitHubCallbackStateRecord,
   GitHubInstallationRecord,
+  GitHubRelayRegistrationMutation,
+  GitHubRelayRegistrationState,
   SaveGitHubConnectionInput
 } from "./db/repositories/github-connection-repository.js"
+import type {
+  GitHubSessionRouteMutation,
+  GitHubSessionRouteRecord,
+  GitHubSessionRouteState
+} from "./db/repositories/github-session-route-repository.js"
 import {
   createGitHubTokenCipher,
   verifyGitHubDesktopGrant,
   type GitHubApiInstallation,
+  type GitHubApiRepository,
   type GitHubAppClient
 } from "./github-app.js"
 import {
   createGitHubRoutes,
   type GitHubConnectionStore,
-  type GitHubRoutesDependencies
+  type GitHubRoutesDependencies,
+  type GitHubSessionRouteStore
 } from "./github-routes.js"
 
-const githubInstallation = (overrides: Partial<GitHubApiInstallation> = {}): GitHubApiInstallation => ({
+const githubInstallation = (
+  overrides: Partial<GitHubApiInstallation> = {}
+): GitHubApiInstallation => ({
   id: "99",
-  account: { id: "8", login: "acme", type: "Organization", avatarUrl: "avatar" },
+  account: {
+    id: "8",
+    login: "acme",
+    type: "Organization",
+    avatarUrl: "avatar"
+  },
   repositorySelection: "all",
   permissions: { contents: "read", pull_requests: "write" },
   suspendedAt: null,
@@ -32,31 +48,60 @@ interface Harness {
   readonly authorizations: Map<string, GitHubAuthorizationRecord>
   readonly states: Map<string, GitHubCallbackStateRecord & { readonly stateHash: string }>
   readonly setInstallations: (value: ReadonlyArray<GitHubApiInstallation>) => void
+  readonly setRepositories: (value: ReadonlyArray<GitHubApiRepository>) => void
   readonly getSaveCount: () => number
   readonly getRevoked: () => ReadonlyArray<string>
-  readonly getRelayRevocations: () => ReadonlyArray<{
+  readonly getRelayRegistrations: () => ReadonlyArray<{
+    readonly mutationId: string
     readonly userId: string
     readonly installationId: string
-    readonly reason: "disconnect" | "uninstall" | "suspension"
+    readonly state: GitHubRelayRegistrationState
   }>
+  readonly setRelayAvailable: (available: boolean) => void
+  readonly getPendingRelayMutations: () => number
   readonly getMintedInstallations: () => ReadonlyArray<string>
   readonly getMintedScopes: () => ReadonlyArray<{
     readonly permissions?: Readonly<Record<string, "read" | "write">>
     readonly repositories?: ReadonlyArray<string>
   }>
+  readonly getSessionRelayRegistrations: () => ReadonlyArray<{
+    readonly mutationId: string
+    readonly state: GitHubSessionRouteState
+    readonly userId: string
+    readonly relaySessionId: string
+    readonly installationId: string
+    readonly repositoryId: string
+    readonly pullRequestNumber: number
+  }>
+  readonly getPendingSessionMutations: () => number
   readonly setNow: (value: Date) => void
 }
 
 const harness = (): Harness => {
-  const cipher = createGitHubTokenCipher("test-relay-signing-secret")
+  const cipher = createGitHubTokenCipher("test-token-encryption-key")
   const authorizations = new Map<string, GitHubAuthorizationRecord>()
   const installationRows = new Map<string, Array<GitHubInstallationRecord>>()
   const states = new Map<string, GitHubCallbackStateRecord & { readonly stateHash: string }>()
   const revoked: Array<string> = []
-  const relayRevocations: Array<{
+  const relayRegistrations: Array<{
+    mutationId: string
     userId: string
     installationId: string
-    reason: "disconnect" | "uninstall" | "suspension"
+    state: GitHubRelayRegistrationState
+    generation: number
+  }> = []
+  const relayMutations = new Map<string, GitHubRelayRegistrationMutation>()
+  const sessionRoutes = new Map<string, GitHubSessionRouteRecord>()
+  const sessionMutations = new Map<string, GitHubSessionRouteMutation>()
+  const sessionRelayRegistrations: Array<{
+    mutationId: string
+    state: GitHubSessionRouteState
+    userId: string
+    relaySessionId: string
+    installationId: string
+    repositoryId: string
+    pullRequestNumber: number
+    generation: number
   }> = []
   const mintedInstallations: Array<string> = []
   const mintedScopes: Array<{
@@ -64,9 +109,27 @@ const harness = (): Harness => {
     readonly repositories?: ReadonlyArray<string>
   }> = []
   let installations: ReadonlyArray<GitHubApiInstallation> = [githubInstallation()]
+  let repositories: ReadonlyArray<GitHubApiRepository> = [{ id: "301", fullName: "acme/widget" }]
   let now = new Date("2026-08-04T10:00:00Z")
   let sequence = 0
   let saveCount = 0
+  let relayAvailable = true
+
+  const queueRelayMutation = (
+    userId: string,
+    installationId: string,
+    desiredState: GitHubRelayRegistrationState
+  ): void => {
+    const id = `relay-${userId}-${installationId}`
+    relayMutations.set(id, {
+      id,
+      userId,
+      installationId,
+      desiredState,
+      generation: (relayMutations.get(id)?.generation ?? 0) + 1,
+      attemptCount: 0
+    })
+  }
 
   const rowsFor = (
     authorizationId: string,
@@ -114,6 +177,7 @@ const harness = (): Harness => {
     saveConnection: async (input) => {
       saveCount += 1
       const existing = authorizations.get(input.authorization.userId)
+      const previous = existing ? (installationRows.get(existing.id) ?? []) : []
       const record: GitHubAuthorizationRecord = {
         ...input.authorization,
         id: existing?.id ?? input.authorization.id,
@@ -122,10 +186,23 @@ const harness = (): Harness => {
         lastRefreshedAt: input.refreshedAt
       }
       authorizations.set(record.userId, record)
-      installationRows.set(
-        record.id,
-        rowsFor(record.id, input.installations, input.refreshedAt)
-      )
+      installationRows.set(record.id, rowsFor(record.id, input.installations, input.refreshedAt))
+      for (const installation of input.installations) {
+        queueRelayMutation(
+          input.authorization.userId,
+          installation.installationId,
+          installation.suspendedAt ? "suspended" : "active"
+        )
+      }
+      for (const installation of previous) {
+        if (
+          !input.installations.some(
+            (current) => current.installationId === installation.installationId
+          )
+        ) {
+          queueRelayMutation(input.authorization.userId, installation.installationId, "removed")
+        }
+      }
       return record
     },
     replaceInstallations: async (input) => {
@@ -140,8 +217,154 @@ const harness = (): Harness => {
     },
     disconnect: async (userId) => {
       const authorization = authorizations.get(userId)
-      if (authorization) installationRows.delete(authorization.id)
+      if (authorization) {
+        for (const installation of installationRows.get(authorization.id) ?? []) {
+          queueRelayMutation(userId, installation.installationId, "removed")
+        }
+        installationRows.delete(authorization.id)
+      }
       authorizations.delete(userId)
+    },
+    listPendingRelayMutations: async () => [...relayMutations.values()],
+    markRelayMutationDelivered: async (id) => {
+      relayMutations.delete(id)
+    },
+    markRelayMutationFailed: async (input) => {
+      const current = relayMutations.get(input.id)
+      if (current) {
+        relayMutations.set(input.id, {
+          ...current,
+          attemptCount: current.attemptCount + 1
+        })
+      }
+    }
+  }
+
+  const sessionRouteStore: GitHubSessionRouteStore = {
+    listByUserId: async (userId) =>
+      [...sessionRoutes.values()].filter((route) => route.userId === userId),
+    findForUser: async (userId, relaySessionId) => {
+      const route = sessionRoutes.get(relaySessionId)
+      return route?.userId === userId ? route : null
+    },
+    upsertActive: async (input) => {
+      const conflicting = [...sessionRoutes.values()].find(
+        (route) =>
+          route.installationId === input.installationId &&
+          route.repositoryId === input.repositoryId &&
+          route.pullRequestNumber === input.pullRequestNumber &&
+          route.state !== "removed" &&
+          (route.userId !== input.userId || route.sessionId !== input.sessionId)
+      )
+      if (conflicting) throw new Error("pull request already linked")
+      const existing = [...sessionRoutes.values()].find(
+        (route) => route.userId === input.userId && route.sessionId === input.sessionId
+      )
+      const identityChanged =
+        existing !== undefined &&
+        (existing.installationId !== input.installationId ||
+          existing.repositoryId !== input.repositoryId ||
+          existing.pullRequestNumber !== input.pullRequestNumber)
+      const generationIncrement = identityChanged && existing.state !== "removed" ? 2 : 1
+      const route: GitHubSessionRouteRecord = {
+        id: existing?.id ?? `route-${sessionRoutes.size + 1}`,
+        userId: input.userId,
+        sessionId: input.sessionId,
+        relaySessionId: identityChanged
+          ? input.relaySessionId
+          : (existing?.relaySessionId ?? input.relaySessionId),
+        installationId: input.installationId,
+        repositoryId: input.repositoryId,
+        pullRequestNumber: input.pullRequestNumber,
+        state: "active",
+        generation: (existing?.generation ?? 0) + generationIncrement,
+        archivedAt: null,
+        unlinkedAt: null,
+        createdAt: existing?.createdAt ?? input.at,
+        updatedAt: input.at
+      }
+      if (identityChanged && existing.relaySessionId !== route.relaySessionId) {
+        sessionRoutes.delete(existing.relaySessionId)
+      }
+      sessionRoutes.set(route.relaySessionId, route)
+      if (identityChanged && existing.state !== "removed") {
+        const removedId = `session-mutation-${route.relaySessionId}-${route.generation - 1}`
+        sessionMutations.set(removedId, {
+          id: removedId,
+          userId: existing.userId,
+          relaySessionId: existing.relaySessionId,
+          installationId: existing.installationId,
+          repositoryId: existing.repositoryId,
+          pullRequestNumber: existing.pullRequestNumber,
+          desiredState: "removed",
+          generation: route.generation - 1,
+          attemptCount: 0
+        })
+      }
+      const activeId = `session-mutation-${route.relaySessionId}-${route.generation}`
+      sessionMutations.set(activeId, {
+        id: activeId,
+        userId: route.userId,
+        relaySessionId: route.relaySessionId,
+        installationId: route.installationId,
+        repositoryId: route.repositoryId,
+        pullRequestNumber: route.pullRequestNumber,
+        desiredState: route.state,
+        generation: route.generation,
+        attemptCount: 0
+      })
+      return route
+    },
+    setState: async (input) => {
+      const route = sessionRoutes.get(input.relaySessionId)
+      if (!route || route.userId !== input.userId) return null
+      const updated: GitHubSessionRouteRecord = {
+        ...route,
+        state: input.state,
+        archivedAt: input.state === "archived" ? input.at : null,
+        unlinkedAt: input.state === "removed" ? input.at : null,
+        generation: route.generation + 1,
+        updatedAt: input.at
+      }
+      sessionRoutes.set(updated.relaySessionId, updated)
+      const mutationId = `session-mutation-${updated.relaySessionId}-${updated.generation}`
+      sessionMutations.set(mutationId, {
+        id: mutationId,
+        userId: updated.userId,
+        relaySessionId: updated.relaySessionId,
+        installationId: updated.installationId,
+        repositoryId: updated.repositoryId,
+        pullRequestNumber: updated.pullRequestNumber,
+        desiredState: updated.state,
+        generation: updated.generation,
+        attemptCount: 0
+      })
+      return updated
+    },
+    removeAllForUser: async (userId, at) => {
+      for (const route of [...sessionRoutes.values()]) {
+        if (route.userId === userId) {
+          await sessionRouteStore.setState({
+            userId,
+            relaySessionId: route.relaySessionId,
+            state: "removed",
+            at
+          })
+        }
+      }
+    },
+    listPendingMutations: async () => [...sessionMutations.values()],
+    markMutationDelivered: async (id) => {
+      sessionMutations.delete(id)
+    },
+    markMutationFailed: async (input) => {
+      const mutation = [...sessionMutations.values()].find((value) => value.id === input.id)
+      if (mutation) {
+        sessionMutations.set(mutation.id, {
+          ...mutation,
+          attemptCount: mutation.attemptCount + 1
+        })
+      }
     }
   }
 
@@ -162,8 +385,14 @@ const harness = (): Harness => {
       accessTokenExpiresAt: new Date(now.getTime() + 8 * 60 * 60 * 1_000),
       refreshTokenExpiresAt: new Date(now.getTime() + 180 * 24 * 60 * 60 * 1_000)
     }),
-    getUser: async () => ({ id: "7", login: "octocat", name: "Octo Cat", avatarUrl: null }),
+    getUser: async () => ({
+      id: "7",
+      login: "octocat",
+      name: "Octo Cat",
+      avatarUrl: null
+    }),
     listInstallations: async () => installations,
+    listInstallationRepositories: async () => repositories,
     createInstallationAccessToken: async (installationId, scope) => {
       mintedInstallations.push(installationId)
       mintedScopes.push(scope)
@@ -187,12 +416,19 @@ const harness = (): Harness => {
     github,
     cipher,
     store,
-    revokeRelaySubscription: async (input) => {
-      relayRevocations.push(input)
+    sessionRoutes: sessionRouteStore,
+    syncRelayRegistration: async (input) => {
+      if (!relayAvailable) throw new Error("relay unavailable")
+      relayRegistrations.push(input)
+    },
+    syncRelaySessionRoute: async (input) => {
+      if (!relayAvailable) throw new Error("relay unavailable")
+      sessionRelayRegistrations.push(input)
     },
     now: () => now,
     randomState: () => `state-${++sequence}`,
-    randomId: () => `id-${sequence}`
+    randomId: () => `id-${sequence}`,
+    randomRelaySessionId: () => `opaque_session_identifier_${++sequence}`
   }
 
   return {
@@ -202,11 +438,20 @@ const harness = (): Harness => {
     setInstallations: (value) => {
       installations = value
     },
+    setRepositories: (value) => {
+      repositories = value
+    },
     getSaveCount: () => saveCount,
     getRevoked: () => revoked,
-    getRelayRevocations: () => relayRevocations,
+    getRelayRegistrations: () => relayRegistrations,
+    setRelayAvailable: (available) => {
+      relayAvailable = available
+    },
+    getPendingRelayMutations: () => relayMutations.size,
     getMintedInstallations: () => mintedInstallations,
     getMintedScopes: () => mintedScopes,
+    getSessionRelayRegistrations: () => sessionRelayRegistrations,
+    getPendingSessionMutations: () => sessionMutations.size,
     setNow: (value) => {
       now = value
     }
@@ -215,12 +460,10 @@ const harness = (): Harness => {
 
 const asUser = (userId: string): HeadersInit => ({ "x-test-user": userId })
 
-const start = async (
-  value: Harness,
-  path = "/authorize",
-  userId = "user-1"
-): Promise<string> => {
-  const response = await value.routes.request(path, { headers: asUser(userId) })
+const start = async (value: Harness, path = "/authorize", userId = "user-1"): Promise<string> => {
+  const response = await value.routes.request(path, {
+    headers: asUser(userId)
+  })
   expect(response.status).toBe(200)
   const body = (await response.json()) as { readonly url: string }
   const state = new URL(body.url).searchParams.get("state")
@@ -246,13 +489,23 @@ describe("GitHub connection routes", () => {
     expect(persisted?.accessTokenEncrypted).not.toContain("ghu_user-secret")
     expect(persisted?.refreshTokenEncrypted).not.toContain("ghr_refresh-secret")
 
-    const response = await value.routes.request("/status", { headers: asUser("user-1") })
+    // Reconciliation must take identity metadata from GitHub even when the
+    // still-valid user token does not need rotating.
+    value.authorizations.set("user-1", {
+      ...persisted!,
+      githubLogin: "stale-login",
+      githubName: "Stale Name"
+    })
+
+    const response = await value.routes.request("/status", {
+      headers: asUser("user-1")
+    })
     const body = await response.json()
     expect(response.status).toBe(200)
     expect(body).toMatchObject({
       enabled: true,
       connected: true,
-      user: { id: "7", login: "octocat" },
+      user: { id: "7", login: "octocat", name: "Octo Cat" },
       installations: [
         {
           id: "99",
@@ -263,6 +516,41 @@ describe("GitHub connection routes", () => {
       ]
     })
     expect(JSON.stringify(body)).not.toMatch(/gh[urs]_|accessToken|refreshToken/)
+  })
+
+  it("completes GitHub's combined install-and-authorize callback", async () => {
+    const value = harness()
+    const state = await start(value, "/install")
+    const callback = await value.routes.request(
+      `/callback?code=oauth-code&state=${state}&installation_id=99`,
+      { headers: asUser("user-1") }
+    )
+
+    expect(callback.status).toBe(302)
+    expect(callback.headers.get("location")).toBe("jingler://auth/callback?github=connected")
+    expect(value.authorizations.get("user-1")).toMatchObject({
+      githubUserId: "7",
+      githubLogin: "octocat"
+    })
+  })
+
+  it("rotates expiring user credentials back into encrypted persistence", async () => {
+    const value = harness()
+    expect((await connect(value)).status).toBe(302)
+    value.setNow(new Date("2026-08-04T17:59:30Z"))
+
+    const refreshed = await value.routes.request("/refresh", {
+      method: "POST",
+      headers: asUser("user-1")
+    })
+    expect(refreshed.status).toBe(200)
+
+    const persisted = value.authorizations.get("user-1")!
+    expect(persisted.accessTokenEncrypted).not.toContain("ghu_rotated-secret")
+    expect(persisted.refreshTokenEncrypted).not.toContain("ghr_rotated-secret")
+    const cipher = createGitHubTokenCipher("test-token-encryption-key")
+    expect(cipher.decrypt(persisted.accessTokenEncrypted)).toBe("ghu_rotated-secret")
+    expect(cipher.decrypt(persisted.refreshTokenEncrypted!)).toBe("ghr_rotated-secret")
   })
 
   it("rejects invalid, expired, replayed, and cross-user state without cross-user persistence", async () => {
@@ -378,19 +666,61 @@ describe("GitHub connection routes", () => {
         })
       ).status
     ).toBe(403)
-    expect(value.getRelayRevocations()).toContainEqual({
+    expect(value.getRelayRegistrations()).toContainEqual({
+      mutationId: "relay-user-1-99",
       userId: "user-1",
       installationId: "99",
-      reason: "suspension"
+      state: "suspended",
+      generation: 1
     })
 
     value.setInstallations([])
-    const uninstalled = await value.routes.request("/status", { headers: asUser("user-1") })
-    expect(await uninstalled.json()).toMatchObject({ connected: true, installations: [] })
-    expect(value.getRelayRevocations()).toContainEqual({
+    const uninstalled = await value.routes.request("/status", {
+      headers: asUser("user-1")
+    })
+    expect(await uninstalled.json()).toMatchObject({
+      connected: true,
+      installations: []
+    })
+    expect(value.getRelayRegistrations()).toContainEqual({
+      mutationId: "relay-user-1-99",
       userId: "user-1",
       installationId: "99",
-      reason: "uninstall"
+      state: "removed",
+      generation: 1
+    })
+  })
+
+  it("returns immutable selected repository identities and reconciles selection changes", async () => {
+    const value = harness()
+    value.setInstallations([githubInstallation({ repositorySelection: "selected" })])
+    expect((await connect(value)).status).toBe(302)
+
+    const selected = await value.routes.request("/status", {
+      headers: asUser("user-1")
+    })
+    expect(await selected.json()).toMatchObject({
+      installations: [
+        {
+          id: "99",
+          repositorySelection: "selected",
+          repositories: [{ id: "301", fullName: "acme/widget" }]
+        }
+      ]
+    })
+
+    value.setRepositories([{ id: "302", fullName: "acme/other" }])
+    const refreshed = await value.routes.request("/refresh", {
+      method: "POST",
+      headers: asUser("user-1")
+    })
+    expect(await refreshed.json()).toMatchObject({
+      installations: [
+        {
+          id: "99",
+          repositories: [{ id: "302", fullName: "acme/other" }]
+        }
+      ]
     })
   })
 
@@ -402,7 +732,9 @@ describe("GitHub connection routes", () => {
       headers: { ...asUser("user-1"), "content-type": "application/json" },
       body: JSON.stringify({ installationId: "99" })
     })
-    const grantBody = (await grantResponse.json()) as { readonly grant: string }
+    const grantBody = (await grantResponse.json()) as {
+      readonly grant: string
+    }
     expect(grantResponse.status).toBe(200)
     expect(
       verifyGitHubDesktopGrant(
@@ -419,14 +751,50 @@ describe("GitHub connection routes", () => {
     })
     expect(disconnected.status).toBe(204)
     expect(value.getRevoked()).toEqual(["ghu_user-secret"])
-    expect(value.getRelayRevocations()).toContainEqual({
+    expect(value.getRelayRegistrations()).toContainEqual({
+      mutationId: "relay-user-1-99",
       userId: "user-1",
       installationId: "99",
-      reason: "disconnect"
+      state: "removed",
+      generation: 1
     })
     expect(value.authorizations.has("user-1")).toBe(false)
-    const status = await value.routes.request("/status", { headers: asUser("user-1") })
-    expect(await status.json()).toMatchObject({ connected: false, installations: [] })
+    const status = await value.routes.request("/status", {
+      headers: asUser("user-1")
+    })
+    expect(await status.json()).toMatchObject({
+      connected: false,
+      installations: []
+    })
+  })
+
+  it("deletes local authorization before retrying an unavailable relay revocation", async () => {
+    const value = harness()
+    expect((await connect(value)).status).toBe(302)
+    value.setRelayAvailable(false)
+
+    const disconnected = await value.routes.request("/disconnect", {
+      method: "POST",
+      headers: asUser("user-1")
+    })
+    expect(disconnected.status).toBe(204)
+    expect(value.authorizations.has("user-1")).toBe(false)
+    expect(value.getPendingRelayMutations()).toBe(1)
+
+    value.setRelayAvailable(true)
+    const status = await value.routes.request("/status", {
+      headers: asUser("user-1")
+    })
+    expect(status.status).toBe(200)
+    expect(await status.json()).toMatchObject({ connected: false })
+    expect(value.getPendingRelayMutations()).toBe(0)
+    expect(value.getRelayRegistrations()).toContainEqual({
+      mutationId: "relay-user-1-99",
+      userId: "user-1",
+      installationId: "99",
+      state: "removed",
+      generation: 1
+    })
   })
 
   it("mints installation credentials only for an active installation owned by the signed-in user", async () => {
@@ -505,9 +873,7 @@ describe("GitHub connection routes", () => {
     expect(crossUser.status).toBe(403)
     expect(value.getMintedInstallations()).toEqual([])
 
-    value.setInstallations([
-      githubInstallation({ suspendedAt: new Date("2026-08-04T10:05:00Z") })
-    ])
+    value.setInstallations([githubInstallation({ suspendedAt: new Date("2026-08-04T10:05:00Z") })])
     const suspended = await value.routes.request("/installation-credentials", {
       method: "POST",
       headers: { ...asUser("user-1"), "content-type": "application/json" },
@@ -515,5 +881,251 @@ describe("GitHub connection routes", () => {
     })
     expect(suspended.status).toBe(403)
     expect(value.getMintedInstallations()).toEqual([])
+  })
+
+  it("registers an authenticated session route and mints a grant scoped to its opaque id", async () => {
+    const value = harness()
+    expect((await connect(value)).status).toBe(302)
+    const linked = await value.routes.request("/session-routes", {
+      method: "POST",
+      headers: { ...asUser("user-1"), "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "local-session-1",
+        installationId: "99",
+        repositoryId: "301",
+        pullRequestNumber: 42
+      })
+    })
+    expect(linked.status).toBe(200)
+    const body = (await linked.json()) as {
+      route: { relaySessionId: string; sessionId: string; state: string }
+    }
+    expect(body.route).toMatchObject({ sessionId: "local-session-1", state: "active" })
+    expect(value.getSessionRelayRegistrations()).toContainEqual(
+      expect.objectContaining({
+        state: "active",
+        userId: "user-1",
+        relaySessionId: body.route.relaySessionId,
+        installationId: "99",
+        repositoryId: "301",
+        pullRequestNumber: 42
+      })
+    )
+    expect(JSON.stringify(value.getSessionRelayRegistrations())).not.toContain("local-session-1")
+
+    const grant = await value.routes.request("/session-grant", {
+      method: "POST",
+      headers: { ...asUser("user-1"), "content-type": "application/json" },
+      body: JSON.stringify({ relaySessionId: body.route.relaySessionId })
+    })
+    expect(grant.status).toBe(200)
+    expect(await grant.json()).toMatchObject({
+      claims: {
+        subject: "user-1",
+        installationId: "99",
+        relaySessionId: body.route.relaySessionId
+      }
+    })
+  })
+
+  it("rejects cross-user session grants and unavailable repositories", async () => {
+    const value = harness()
+    expect((await connect(value)).status).toBe(302)
+    const linked = await value.routes.request("/session-routes", {
+      method: "POST",
+      headers: { ...asUser("user-1"), "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "local-session-1",
+        installationId: "99",
+        repositoryId: "301",
+        pullRequestNumber: 42
+      })
+    })
+    const relaySessionId = ((await linked.json()) as { route: { relaySessionId: string } }).route
+      .relaySessionId
+    expect(
+      (
+        await value.routes.request("/session-grant", {
+          method: "POST",
+          headers: { ...asUser("user-2"), "content-type": "application/json" },
+          body: JSON.stringify({ relaySessionId })
+        })
+      ).status
+    ).toBe(403)
+
+    const unavailable = await value.routes.request("/session-routes", {
+      method: "POST",
+      headers: { ...asUser("user-1"), "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "local-session-2",
+        installationId: "99",
+        repositoryId: "999",
+        pullRequestNumber: 43
+      })
+    })
+    expect(unavailable.status).toBe(403)
+
+    value.setRepositories([{ id: "302", fullName: "acme/other" }])
+    const revokedGrant = await value.routes.request("/session-grant", {
+      method: "POST",
+      headers: { ...asUser("user-1"), "content-type": "application/json" },
+      body: JSON.stringify({ relaySessionId })
+    })
+    expect(revokedGrant.status).toBe(403)
+    expect(value.getSessionRelayRegistrations()).toContainEqual(
+      expect.objectContaining({ relaySessionId, state: "removed" })
+    )
+  })
+
+  it("removes the old tuple before activating a changed session route identity", async () => {
+    const value = harness()
+    expect((await connect(value)).status).toBe(302)
+    const first = await value.routes.request("/session-routes", {
+      method: "POST",
+      headers: { ...asUser("user-1"), "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "local-session-1",
+        installationId: "99",
+        repositoryId: "301",
+        pullRequestNumber: 42
+      })
+    })
+    const relaySessionId = ((await first.json()) as { route: { relaySessionId: string } }).route
+      .relaySessionId
+    value.setRepositories([
+      { id: "301", fullName: "acme/widget" },
+      { id: "302", fullName: "acme/other" }
+    ])
+    const changed = await value.routes.request("/session-routes", {
+      method: "POST",
+      headers: { ...asUser("user-1"), "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "local-session-1",
+        installationId: "99",
+        repositoryId: "302",
+        pullRequestNumber: 43
+      })
+    })
+    expect(changed.status).toBe(200)
+    const changedBody = (await changed.json()) as { route: { relaySessionId: string } }
+    expect(changedBody.route.relaySessionId).not.toBe(relaySessionId)
+    expect(value.getSessionRelayRegistrations().slice(-2)).toEqual([
+      expect.objectContaining({
+        relaySessionId,
+        repositoryId: "301",
+        pullRequestNumber: 42,
+        state: "removed",
+        generation: 2
+      }),
+      expect.objectContaining({
+        relaySessionId: changedBody.route.relaySessionId,
+        repositoryId: "302",
+        pullRequestNumber: 43,
+        state: "active",
+        generation: 3
+      })
+    ])
+  })
+
+  it("allows a removed pull request tuple to be linked to another session", async () => {
+    const value = harness()
+    expect((await connect(value)).status).toBe(302)
+    const first = await value.routes.request("/session-routes", {
+      method: "POST",
+      headers: { ...asUser("user-1"), "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "local-session-1",
+        installationId: "99",
+        repositoryId: "301",
+        pullRequestNumber: 42
+      })
+    })
+    const relaySessionId = ((await first.json()) as { route: { relaySessionId: string } }).route
+      .relaySessionId
+    expect(
+      (
+        await value.routes.request(`/session-routes/${relaySessionId}/unlink`, {
+          method: "POST",
+          headers: asUser("user-1")
+        })
+      ).status
+    ).toBe(204)
+    const relinked = await value.routes.request("/session-routes", {
+      method: "POST",
+      headers: { ...asUser("user-1"), "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "local-session-2",
+        installationId: "99",
+        repositoryId: "301",
+        pullRequestNumber: 42
+      })
+    })
+    expect(relinked.status).toBe(200)
+    expect(await relinked.json()).toMatchObject({ route: { sessionId: "local-session-2" } })
+  })
+
+  it("retains a session route mutation until relay Workflow creation recovers", async () => {
+    const value = harness()
+    expect((await connect(value)).status).toBe(302)
+    value.setRelayAvailable(false)
+    const linked = await value.routes.request("/session-routes", {
+      method: "POST",
+      headers: { ...asUser("user-1"), "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "local-session-1",
+        installationId: "99",
+        repositoryId: "301",
+        pullRequestNumber: 42
+      })
+    })
+    expect(linked.status).toBe(200)
+    expect(value.getPendingSessionMutations()).toBe(1)
+
+    value.setRelayAvailable(true)
+    const listed = await value.routes.request("/session-routes", {
+      headers: asUser("user-1")
+    })
+    expect(listed.status).toBe(200)
+    expect(value.getPendingSessionMutations()).toBe(0)
+    expect(value.getSessionRelayRegistrations()).toHaveLength(1)
+  })
+
+  it("archives and unlinks only the authenticated user's session route", async () => {
+    const value = harness()
+    expect((await connect(value)).status).toBe(302)
+    const linked = await value.routes.request("/session-routes", {
+      method: "POST",
+      headers: { ...asUser("user-1"), "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "local-session-1",
+        installationId: "99",
+        repositoryId: "301",
+        pullRequestNumber: 42
+      })
+    })
+    const relaySessionId = ((await linked.json()) as { route: { relaySessionId: string } }).route
+      .relaySessionId
+    expect(
+      (
+        await value.routes.request(`/session-routes/${relaySessionId}/archive`, {
+          method: "POST",
+          headers: asUser("user-2")
+        })
+      ).status
+    ).toBe(404)
+    const archived = await value.routes.request(`/session-routes/${relaySessionId}/archive`, {
+      method: "POST",
+      headers: asUser("user-1")
+    })
+    expect(archived.status).toBe(200)
+    expect(await archived.json()).toMatchObject({ route: { state: "archived" } })
+    const removed = await value.routes.request(`/session-routes/${relaySessionId}/unlink`, {
+      method: "POST",
+      headers: asUser("user-1")
+    })
+    expect(removed.status).toBe(204)
+    expect(value.getSessionRelayRegistrations()).toContainEqual(
+      expect.objectContaining({ relaySessionId, state: "removed" })
+    )
   })
 })

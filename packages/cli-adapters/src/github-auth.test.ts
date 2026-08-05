@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect"
 import { describe, expect, it, vi } from "vitest"
-import { GitHubAuth, makeGitHubAuthClient } from "./github-auth.js"
+import { GitHubAuth, githubPushPermissions, makeGitHubAuthClient } from "./github-auth.js"
 import { makeGithubAuthProvider } from "./plugin-auth-github.js"
 
 const STATUS = {
@@ -27,6 +27,17 @@ const response = (body: unknown, status = 200): Response =>
   })
 
 describe("GitHubAuth desktop grants", () => {
+  it("adds workflows write only when an inspected workflow path changed", () => {
+    expect(githubPushPermissions(["src/index.ts", "README.md"]))
+      .toEqual(["contents:write"])
+    expect(githubPushPermissions(["./.github/workflows/ci.yml", "src/index.ts"]))
+      .toEqual(["contents:write", "workflows:write"])
+    expect(githubPushPermissions([".github/workflows-old/ci.yml"]))
+      .toEqual(["contents:write"])
+    expect(githubPushPermissions([".github\\workflows\\release.yml"]))
+      .toEqual(["contents:write", "workflows:write"])
+  })
+
   it("binds grants to installations and refreshes only near expiry", async () => {
     let now = new Date("2030-01-01T00:00:00.000Z")
     let grantNumber = 0
@@ -65,6 +76,67 @@ describe("GitHubAuth desktop grants", () => {
     const refreshed = await client.grantForOwner("acme", ["pull_requests:read"])
     expect(refreshed.grant).toBe("grant-2")
     expect(fetch.mock.calls.filter(([input]) => String(input).includes("desktop-grant"))).toHaveLength(2)
+  })
+
+  it("registers and grants exactly one opaque relay session", async () => {
+    const route = {
+      sessionId: "s_one",
+      relaySessionId: "opaque_session_route_1234",
+      installationId: "77",
+      repositoryId: "301",
+      pullRequestNumber: 153,
+      state: "active",
+      updatedAt: "2030-01-01T00:00:00.000Z"
+    } as const
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      if (url.pathname === "/api/github/session-routes" && init?.method === "POST") {
+        return response({ route })
+      }
+      if (url.pathname === "/api/github/session-routes") return response({ routes: [route] })
+      if (url.pathname === "/api/github/session-grant") {
+        return response({
+          relayUrl: "https://relay.jingler.test",
+          grant: "session-grant",
+          claims: {
+            version: 1,
+            issuer: "jingler",
+            audience: "jingler-github-relay",
+            subject: "user-one",
+            installationId: route.installationId,
+            relaySessionId: route.relaySessionId,
+            issuedAt: 1_893_456_000,
+            expiresAt: 1_893_456_300,
+            grantId: "grant-one"
+          }
+        })
+      }
+      return response({ error: "not found" }, 404)
+    })
+    const client = makeGitHubAuthClient({
+      bearer: async () => "session",
+      fetch,
+      baseUrl: () => "https://server.jingler.test",
+      now: () => new Date("2030-01-01T00:00:00.000Z")
+    })
+
+    expect(await client.sessionRoutes()).toEqual([route])
+    expect(
+      await client.upsertSessionRoute({
+        sessionId: route.sessionId,
+        installationId: route.installationId,
+        repositoryId: route.repositoryId,
+        pullRequestNumber: route.pullRequestNumber
+      })
+    ).toEqual(route)
+    const grant = await client.grantForSession(route.relaySessionId)
+    expect(grant).toMatchObject({
+      relaySessionId: route.relaySessionId,
+      installationId: route.installationId,
+      grant: "session-grant"
+    })
+    expect(await client.grantForSession(route.relaySessionId)).toBe(grant)
+    expect(fetch.mock.calls.filter(([input]) => String(input).includes("session-grant"))).toHaveLength(1)
   })
 
   it("rejects a suspended installation before requesting a grant", async () => {

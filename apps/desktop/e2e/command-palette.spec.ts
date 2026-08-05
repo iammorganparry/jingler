@@ -19,7 +19,7 @@ const seededSessions: ReadonlyArray<SeedSession> = [
   {
     id: "sess-alpha",
     repo: "widget",
-    branch: "jingler/alpha",
+    branch: "chore/alpha",
     title: "Alpha session",
     status: "idle",
     cli: "claude",
@@ -33,7 +33,7 @@ const seededSessions: ReadonlyArray<SeedSession> = [
   {
     id: "sess-beta",
     repo: "widget",
-    branch: "jingler/beta",
+    branch: "chore/beta",
     title: "Beta session",
     status: "idle",
     cli: "claude",

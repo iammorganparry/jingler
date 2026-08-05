@@ -52,7 +52,8 @@ const requestOf = async (input: string | URL | Request, init?: RequestInit): Pro
 const repository = {
   id: 101,
   node_id: "R_widget",
-  full_name: "acme/widget"
+  full_name: "acme/widget",
+  private: true
 }
 
 const makeClient = (
@@ -73,6 +74,7 @@ const makeClient = (
   }> = []
   const client = makeGitHubApiClient({
     auth: {
+      viewerLogin: async () => "octocat",
       credentialsForOwner: async (owner, repository, permissions) => {
         credentialRequests.push({ owner, repository, permissions })
         return {
@@ -173,6 +175,30 @@ describe("GitHubApi remote and repository identity", () => {
 })
 
 describe("GitHubApi pagination and large pull requests", () => {
+  it("fails explicitly instead of silently truncating a capped pagination stream", async () => {
+    const { client, seen } = makeClient((request) => {
+      if (pathIs(request, "/repos/acme/widget")) return json(repository)
+      if (pathIs(request, "/repos/acme/widget/pulls/6/files")) {
+        return json(
+          Array.from({ length: 100 }, (_, index) => ({
+            filename: `src/page-file-${index}.ts`,
+            additions: 1,
+            deletions: 0
+          }))
+        )
+      }
+      throw new Error(`unexpected ${request.method} ${request.url}`)
+    })
+
+    await expect(client.prFiles("/repo", 6)).rejects.toMatchObject({
+      reason: "unavailable",
+      message: expect.stringContaining("more results")
+    })
+    expect(
+      seen.filter((request) => pathIs(request, "/repos/acme/widget/pulls/6/files"))
+    ).toHaveLength(100)
+  })
+
   it("keeps every file after page 1 in the review surface", async () => {
     const { client, seen } = makeClient((request) => {
       if (pathIs(request, "/repos/acme/widget")) return json(repository)
@@ -225,6 +251,141 @@ describe("GitHubApi pagination and large pull requests", () => {
   })
 })
 
+describe("GitHubApi installation permission scopes", () => {
+  it("uses connection identity for mine filters and requests endpoint-specific permissions", async () => {
+    const { client, seen, credentialRequests } = makeClient((request) => {
+      if (pathIs(request, "/repos/acme/widget")) return json(repository)
+      if (pathIs(request, "/repos/acme/widget/issues")) {
+        return json([
+          {
+            number: 10,
+            title: "Assigned issue",
+            user: { login: "author" },
+            assignees: [{ login: "octocat" }]
+          },
+          {
+            number: 11,
+            title: "Someone else's issue",
+            user: { login: "author" },
+            assignees: [{ login: "someone-else" }]
+          }
+        ])
+      }
+      if (pathIs(request, "/repos/acme/widget/issues/10")) {
+        return json({
+          number: 10,
+          title: "Assigned issue",
+          state: "open",
+          user: { login: "author" },
+          assignees: [{ login: "octocat" }]
+        })
+      }
+      if (pathIs(request, "/repos/acme/widget/issues/10/comments")) {
+        return json([{ body: "Issue context", user: { login: "maintainer" } }])
+      }
+      throw new Error(`unexpected ${request.method} ${request.url}`)
+    })
+
+    await expect(client.listIssues("/repo", { mine: true, search: "" })).resolves.toEqual([
+      expect.objectContaining({ number: 10, title: "Assigned issue" })
+    ])
+    await expect(client.issueView("/repo", 10)).resolves.toMatchObject({
+      number: 10,
+      comments: [
+        expect.objectContaining({
+          author: expect.objectContaining({ login: "maintainer" }),
+          body: "Issue context"
+        })
+      ]
+    })
+    expect(seen.some((request) => request.url.pathname === "/user")).toBe(false)
+    expect(credentialRequests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ permissions: ["contents:read"] }),
+        expect.objectContaining({ permissions: ["issues:read"] })
+      ])
+    )
+  })
+
+  it("does not broaden Mine results when the connected identity is unavailable", async () => {
+    const { client, seen } = makeClient(
+      (request) => {
+        if (pathIs(request, "/repos/acme/widget")) return json(repository)
+        if (pathIs(request, "/repos/acme/widget/pulls")) {
+          return json([{ number: 1, title: "Not implicitly mine", user: { login: "someone" } }])
+        }
+        throw new Error(`unexpected ${request.method} ${request.url}`)
+      },
+      {
+        auth: {
+          viewerLogin: async () => null,
+          credentialsForOwner: async () => ({
+            token: "short-lived-installation-token",
+            installationId: "77",
+            expiresAt: "2030-01-01T00:00:00.000Z"
+          }),
+          invalidate: () => undefined
+        }
+      }
+    )
+
+    await expect(client.listPrs("/repo", { mine: true, search: "" })).resolves.toEqual([])
+    expect(seen.some((request) => request.url.pathname === "/user")).toBe(false)
+  })
+
+  it("mints separate pull-request, checks, and status credentials for PR state", async () => {
+    const { client, credentialRequests, seen } = makeClient((request) => {
+      if (pathIs(request, "/repos/acme/widget")) return json(repository)
+      if (pathIs(request, "/repos/acme/widget/pulls/7")) {
+        return json({ number: 7, state: "open", head: { sha: "abc123" } })
+      }
+      if (pathIs(request, "/repos/acme/widget/commits/abc123/check-runs")) {
+        return json({ check_runs: [] })
+      }
+      if (pathIs(request, "/repos/acme/widget/commits/abc123/status")) {
+        const page = Number(request.url.searchParams.get("page"))
+        return json({
+          statuses: Array.from({ length: page === 1 ? 100 : 1 }, (_, index) => ({
+            context: `status-${page}-${index}`,
+            state: "success"
+          }))
+        })
+      }
+      throw new Error(`unexpected ${request.method} ${request.url}`)
+    })
+
+    await client.prState("/repo", 7)
+    expect(credentialRequests.map((request) => request.permissions)).toEqual(
+      expect.arrayContaining([
+        ["pull_requests:read"],
+        ["checks:read"],
+        ["statuses:read"]
+      ])
+    )
+    expect(
+      seen.filter((request) => pathIs(request, "/repos/acme/widget/commits/abc123/status"))
+    ).toHaveLength(2)
+  })
+
+  it("uses the documented minimum write permissions for PR mutations", async () => {
+    const { client, credentialRequests } = makeClient((request) => {
+      if (pathIs(request, "/repos/acme/widget")) return json(repository)
+      return json({ merged: true })
+    })
+
+    await client.prMerge("/repo", 7, "squash")
+    await client.prUpdateBranch("/repo", 7)
+    await client.prComment("/repo", 7, "ship it")
+
+    expect(credentialRequests.map(({ permissions }) => permissions)).toEqual([
+      ["contents:read"],
+      ["contents:write"],
+      ["pull_requests:write", "contents:write"],
+      ["pull_requests:write"]
+    ])
+  })
+})
+
 describe("GitHubApi typed failures", () => {
   it.each([
     [401, { message: "Bad credentials" }, "token-expired"],
@@ -254,13 +415,47 @@ describe("GitHubApi typed failures", () => {
       retryAt: "2030-01-01T00:00:00.000Z"
     })
   })
+
+  it("maps a primary-limit 403 to retry guidance rather than repository access", async () => {
+    const { client } = makeClient(() =>
+      json(
+        { message: "API rate limit exceeded" },
+        403,
+        { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1893456000" }
+      )
+    )
+    await expect(client.repository("/repo")).rejects.toMatchObject({
+      reason: "rate-limited",
+      retryAt: "2030-01-01T00:00:00.000Z"
+    })
+  })
+
+  it("maps a secondary-limit 403 Retry-After header to an actionable retry time", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"))
+    try {
+      const { client } = makeClient(() =>
+        json(
+          { message: "You have exceeded a secondary rate limit." },
+          403,
+          { "x-ratelimit-remaining": "4999", "retry-after": "90" }
+        )
+      )
+      await expect(client.repository("/repo")).rejects.toMatchObject({
+        reason: "rate-limited",
+        retryAt: "2030-01-01T00:01:30.000Z"
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe("GitHubApi writes and fork metadata", () => {
   it("normalizes review payloads and every supported write to typed HTTP requests", async () => {
     const writes: SeenRequest[] = []
     const git = vi.fn(async () => "")
-    const { client } = makeClient(
+    const { client, credentialRequests } = makeClient(
       (request) => {
         if (pathIs(request, "/repos/acme/widget") && request.method === "GET") {
           return json(repository)
@@ -306,6 +501,7 @@ describe("GitHubApi writes and fork metadata", () => {
       ]
     })
     await client.prReview("/repo", 7, "approve", "looks good")
+    await client.prUpdate("/repo", 7, { title: "Updated title", body: "Updated body" })
     await client.resolveThread("/repo", "THREAD_1", true)
     await client.replyToThread("/repo", 7, 42, "reply")
     await client.prMerge("/repo", 7, "squash")
@@ -339,12 +535,35 @@ describe("GitHubApi writes and fork metadata", () => {
         }
       ]
     })
+    expect(
+      writes.find(
+        (request) =>
+          request.method === "PATCH" && pathIs(request, "/repos/acme/widget/pulls/7")
+      )?.body
+    ).toMatchObject({ title: "Updated title", body: "Updated body" })
     expect(writes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ method: "PUT" }),
         expect.objectContaining({ method: "PATCH" })
       ])
     )
+    expect(credentialRequests.map(({ permissions }) => permissions)).toEqual([
+      ["contents:read"],
+      ["pull_requests:read"],
+      ["pull_requests:write"],
+      ["pull_requests:write"],
+      ["pull_requests:write"],
+      ["pull_requests:write"],
+      ["pull_requests:write"],
+      ["contents:write"],
+      ["pull_requests:write", "contents:write"],
+      ["pull_requests:read"],
+      ["pull_requests:write"],
+      ["pull_requests:write"],
+      ["issues:write"],
+      ["issues:write"],
+      ["pull_requests:write"]
+    ])
     // GitHubApi owns HTTP only. The deterministic publisher performs the
     // authenticated push through GitService before creating the PR.
     expect(git).not.toHaveBeenCalled()
