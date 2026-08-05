@@ -114,7 +114,12 @@ export const retitleSession = (sessionId: string, gen: TitleGenerator) =>
     // Only auto-named sessions are retitled. `autoTitle` absent ⇒ the session was
     // named by the user (legacy/explicit) and is left pinned.
     if (session.autoTitle !== true && session.semanticBranchPending !== true) return session
-    const messages = yield* TranscriptStore.list(sessionId).pipe(Effect.orElseSucceed(() => []))
+    // Transcripts are owned by chats, not sessions. Legacy session-keyed
+    // transcripts are adopted into activeChatId when the session is loaded, so
+    // reading by sessionId here silently misses every modern turn.
+    const messages = yield* TranscriptStore.list(session.activeChatId).pipe(
+      Effect.orElseSucceed(() => [])
+    )
     const proposal = yield* gen.generate(messages)
     const title = session.autoTitle === true ? proposal.title : session.title
     // A direct session never owns a task branch. Retitling still updates its

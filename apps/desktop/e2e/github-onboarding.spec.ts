@@ -51,6 +51,26 @@ test("first-run GitHub is explicitly skippable", async ({ launchApp }) => {
   await expect(appShell(window)).toBeVisible()
 })
 
+test("first-run GitHub remains skippable when the browser flow is abandoned", async ({
+  launchApp
+}) => {
+  const { app, window, reposDir } = await launchApp({
+    withRepo: true,
+    githubApp: { accountLogin: "acme" }
+  })
+  await chooseFixtureRepo(app, reposDir)
+  await app.evaluate(({ shell }) => {
+    shell.openExternal = async () => {}
+  })
+  await window.getByRole("button", { name: "Choose repos folder" }).click()
+  await window.getByRole("button", { name: "Continue" }).click()
+  await window.getByRole("button", { name: "Install / Connect GitHub" }).click()
+
+  await expect(window.getByRole("button", { name: "Skip for now" })).toBeEnabled()
+  await window.getByRole("button", { name: "Skip for now" }).click()
+  await expect(appShell(window)).toBeVisible()
+})
+
 test("a migration-era WorkspaceConfig keeps its preferences and offers App reconnection once", async ({
   launchApp
 }) => {

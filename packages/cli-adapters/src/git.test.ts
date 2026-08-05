@@ -6,11 +6,29 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   GitService,
   ensureWorktreeLinked,
+  gitAskpassWrapperSource,
   githubHttpsPushUrl,
   mainTreeHoldsBranch,
   resetWorktreeLinkCache
 } from "./git.js"
 import { advanceOrigin, failureOf, initGitRepo, initGitRepoWithOrigin, mkTemp, runExit, withTempRoot } from "./test-support.js"
+
+describe("gitAskpassWrapperSource", () => {
+  it("uses the app runtime on POSIX without resolving node from PATH", () => {
+    const source = gitAskpassWrapperSource("darwin")
+    expect(source).toContain('"$JINGLER_GIT_ASKPASS_RUNTIME"')
+    expect(source).toContain('"$JINGLER_GIT_ASKPASS_MODULE"')
+    expect(source).toContain("ELECTRON_RUN_AS_NODE=1")
+    expect(source).not.toContain("/usr/bin/env node")
+  })
+
+  it("uses the app runtime through a Windows command wrapper", () => {
+    const source = gitAskpassWrapperSource("win32")
+    expect(source).toContain('"%JINGLER_GIT_ASKPASS_RUNTIME%"')
+    expect(source).toContain('"%JINGLER_GIT_ASKPASS_MODULE%"')
+    expect(source).toContain("ELECTRON_RUN_AS_NODE=1")
+  })
+})
 
 /**
  * GitService.createDetachedWorktree runs real `git worktree add`. We assert the
@@ -859,6 +877,55 @@ describe("GitService.checkoutPullRequestHead", () => {
     expect(existsSync(join(base, "fork-only.ts"))).toBe(true)
     expect(git(base, ["remote", "get-url", "jingler-pr-303"])).toBe(forkOrigin)
     expect(git(base, ["config", "branch.feature/from-fork.remote"])).toBe("jingler-pr-303")
+  })
+
+  it("fast-forwards an existing stale local branch to the fetched PR head", async () => {
+    const base = join(repos.dir, "base-stale")
+    initGitRepoWithOrigin(base)
+    const fork = join(repos.dir, "fork-stale")
+    const { origin: forkOrigin } = initGitRepoWithOrigin(fork)
+    git(fork, ["checkout", "-b", "feature/stale"])
+    writeFileSync(join(fork, "first.ts"), "export const first = true\n")
+    git(fork, ["add", "first.ts"])
+    git(fork, ["commit", "-m", "first", "--no-gpg-sign"])
+    git(fork, ["push", "origin", "feature/stale"])
+    const firstSha = git(fork, ["rev-parse", "HEAD"])
+
+    const first = await runExit(
+      GitService.checkoutPullRequestHead(base, {
+        repositoryId: "404",
+        fullName: "contributor/widget",
+        ref: "feature/stale",
+        sha: firstSha,
+        cloneUrl: forkOrigin,
+        sshUrl: null
+      }).pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+    expect(first._tag).toBe("Success")
+    git(base, ["checkout", "main"])
+
+    writeFileSync(join(fork, "second.ts"), "export const second = true\n")
+    git(fork, ["add", "second.ts"])
+    git(fork, ["commit", "-m", "second", "--no-gpg-sign"])
+    git(fork, ["push", "origin", "feature/stale"])
+    const secondSha = git(fork, ["rev-parse", "HEAD"])
+
+    const second = await runExit(
+      GitService.checkoutPullRequestHead(base, {
+        repositoryId: "404",
+        fullName: "contributor/widget",
+        ref: "feature/stale",
+        sha: secondSha,
+        cloneUrl: forkOrigin,
+        sshUrl: null
+      }).pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+
+    expect(second._tag).toBe("Success")
+    expect(git(base, ["rev-parse", "HEAD"])).toBe(secondSha)
+    expect(existsSync(join(base, "second.ts"))).toBe(true)
   })
 })
 

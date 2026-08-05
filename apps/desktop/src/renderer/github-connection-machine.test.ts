@@ -117,6 +117,33 @@ describe("githubConnectionMachine", () => {
     actor.stop()
   })
 
+  it("recovers when the browser flow is abandoned", async () => {
+    const disconnected = status({
+      connected: false,
+      user: null,
+      installations: [],
+      lastRefreshedAt: null
+    })
+    const actor = createActor(
+      githubConnectionMachine.provide({
+        actors: {
+          loadStatus: fromPromise(async () => disconnected),
+          openInstall: fromPromise<void>(async () => {}),
+          refreshStatus: fromPromise(async () => disconnected),
+          disconnect: fromPromise<void>(async () => {})
+        }
+      })
+    ).start()
+    await waitFor(actor, (snapshot) => snapshot.matches("disconnected"))
+    actor.send({ type: "CONNECT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("connecting"))
+
+    actor.send({ type: "REFRESH" })
+    await waitFor(actor, (snapshot) => snapshot.matches("disconnected"))
+    expect(actor.getSnapshot().context.connection.mode).toBe("disconnected")
+    actor.stop()
+  })
+
   it("refreshes suspension and disconnects without changing BetterAuth", async () => {
     const suspended = status({
       installations: [installation({ status: "suspended", suspendedAt: "2026-08-04" })]

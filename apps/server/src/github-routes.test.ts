@@ -489,13 +489,13 @@ describe("GitHub connection routes", () => {
     expect(persisted?.accessTokenEncrypted).not.toContain("ghu_user-secret")
     expect(persisted?.refreshTokenEncrypted).not.toContain("ghr_refresh-secret")
 
-    // Reconciliation must take identity metadata from GitHub even when the
-    // still-valid user token does not need rotating.
+    // A status read is persisted state, not an implicit GitHub refresh.
     value.authorizations.set("user-1", {
       ...persisted!,
       githubLogin: "stale-login",
       githubName: "Stale Name"
     })
+    const saveCount = value.getSaveCount()
 
     const response = await value.routes.request("/status", {
       headers: asUser("user-1")
@@ -505,7 +505,7 @@ describe("GitHub connection routes", () => {
     expect(body).toMatchObject({
       enabled: true,
       connected: true,
-      user: { id: "7", login: "octocat", name: "Octo Cat" },
+      user: { id: "7", login: "stale-login", name: "Stale Name" },
       installations: [
         {
           id: "99",
@@ -515,7 +515,17 @@ describe("GitHub connection routes", () => {
         }
       ]
     })
+    expect(value.getSaveCount()).toBe(saveCount)
     expect(JSON.stringify(body)).not.toMatch(/gh[urs]_|accessToken|refreshToken/)
+
+    const refreshed = await value.routes.request("/refresh", {
+      method: "POST",
+      headers: asUser("user-1")
+    })
+    expect(await refreshed.json()).toMatchObject({
+      user: { id: "7", login: "octocat", name: "Octo Cat" }
+    })
+    expect(value.getSaveCount()).toBe(saveCount + 1)
   })
 
   it("completes GitHub's combined install-and-authorize callback", async () => {
@@ -675,7 +685,8 @@ describe("GitHub connection routes", () => {
     })
 
     value.setInstallations([])
-    const uninstalled = await value.routes.request("/status", {
+    const uninstalled = await value.routes.request("/refresh", {
+      method: "POST",
       headers: asUser("user-1")
     })
     expect(await uninstalled.json()).toMatchObject({
@@ -819,6 +830,27 @@ describe("GitHub connection routes", () => {
     expect(value.getMintedScopes()).toEqual([
       { permissions: { pull_requests: "read" }, repositories: ["widgets"] }
     ])
+  })
+
+  it("deduplicates stale reconciliation across concurrent credential requests", async () => {
+    const value = harness()
+    expect((await connect(value)).status).toBe(302)
+    value.setNow(new Date("2026-08-04T10:01:01Z"))
+    const saveCount = value.getSaveCount()
+    const request = () =>
+      value.routes.request("/installation-credentials", {
+        method: "POST",
+        headers: { ...asUser("user-1"), "content-type": "application/json" },
+        body: JSON.stringify({
+          installationId: "99",
+          scopes: ["pull_requests:read", "repository:acme/widgets"]
+        })
+      })
+
+    const responses = await Promise.all(Array.from({ length: 8 }, request))
+
+    expect(responses.every((response) => response.status === 200)).toBe(true)
+    expect(value.getSaveCount()).toBe(saveCount + 1)
   })
 
   it("rejects repository-owner mismatches and permission escalation before minting", async () => {
@@ -966,6 +998,7 @@ describe("GitHub connection routes", () => {
     expect(unavailable.status).toBe(403)
 
     value.setRepositories([{ id: "302", fullName: "acme/other" }])
+    value.setNow(new Date("2026-08-04T10:01:01Z"))
     const revokedGrant = await value.routes.request("/session-grant", {
       method: "POST",
       headers: { ...asUser("user-1"), "content-type": "application/json" },

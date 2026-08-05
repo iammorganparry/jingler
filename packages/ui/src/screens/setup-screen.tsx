@@ -169,7 +169,11 @@ export function SetupScreen({
                     ? "Manage repositories"
                     : "Install / Connect GitHub"}
               </Button>
-              <Button variant="ghost" onClick={onSkipGithub} disabled={githubBusy}>
+              <Button
+                variant="ghost"
+                onClick={onSkipGithub}
+                disabled={busy && github.mode !== "connecting"}
+              >
                 Skip for now
               </Button>
             </div>

@@ -11,6 +11,7 @@ import { SecretStore } from "./secret-store.js"
 
 const DEFAULT_BASE_URL = "http://localhost:9100"
 const GRANT_REFRESH_SKEW_SECONDS = 30
+const STATUS_CACHE_TTL_MS = 30_000
 const WORKFLOW_DIRECTORY = ".github/workflows/"
 
 /** Minimum GitHub App permissions needed to push the inspected paths. */
@@ -323,6 +324,10 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
   const grants = new Map<string, GitHubRelayGrant>()
   const sessionGrants = new Map<string, GitHubSessionRelayGrant>()
   const credentials = new Map<string, GitHubInstallationCredential>()
+  const credentialRequests = new Map<string, Promise<GitHubInstallationCredential>>()
+  const installationsByOwner = new Map<string, GitHubAppInstallation>()
+  let statusCache: { readonly value: GitHubAppConnectionStatus; readonly expiresAt: number } | null = null
+  let statusRequest: Promise<GitHubAppConnectionStatus> | null = null
   const credentialKey = (installationId: string, scopes: ReadonlyArray<string>): string =>
     `${installationId}:${[...new Set(scopes)].sort().join(",")}`
 
@@ -365,16 +370,34 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
     return response
   }
 
-  const status = async (): Promise<GitHubAppConnectionStatus> => {
-    const response = await authenticatedRequest("/api/github/status")
-    const parsed = parseStatus(await response.json().catch(() => null))
-    if (!parsed) {
-      throw new GitHubApiError({
-        reason: "unavailable",
-        message: "The GitHub connection service returned an invalid status response."
-      })
+  const rememberStatus = (value: GitHubAppConnectionStatus): GitHubAppConnectionStatus => {
+    statusCache = { value, expiresAt: now().getTime() + STATUS_CACHE_TTL_MS }
+    installationsByOwner.clear()
+    for (const installation of value.installations) {
+      installationsByOwner.set(installation.account.login.toLowerCase(), installation)
     }
-    return parsed
+    return value
+  }
+
+  const status = async (): Promise<GitHubAppConnectionStatus> => {
+    if (statusCache && statusCache.expiresAt > now().getTime()) return statusCache.value
+    if (statusRequest) return statusRequest
+    statusRequest = (async () => {
+      const response = await authenticatedRequest("/api/github/status")
+      const parsed = parseStatus(await response.json().catch(() => null))
+      if (!parsed) {
+        throw new GitHubApiError({
+          reason: "unavailable",
+          message: "The GitHub connection service returned an invalid status response."
+        })
+      }
+      return rememberStatus(parsed)
+    })()
+    try {
+      return await statusRequest
+    } finally {
+      statusRequest = null
+    }
   }
 
   const grantForInstallation = async (
@@ -494,9 +517,10 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
   }
 
   const installationForOwner = async (owner: string): Promise<GitHubAppInstallation> => {
-    const connection = await status()
-    const matching = connection.installations.find(
-      (installation) => installation.account.login.toLowerCase() === owner.toLowerCase()
+    const normalizedOwner = owner.toLowerCase()
+    const cached = installationsByOwner.get(normalizedOwner)
+    const matching = cached ?? (await status()).installations.find(
+      (installation) => installation.account.login.toLowerCase() === normalizedOwner
     )
     if (matching?.status === "suspended") {
       throw new GitHubApiError({
@@ -537,23 +561,33 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
       return cached
     }
     credentials.delete(key)
-    const response = await authenticatedRequest("/api/github/installation-credentials", {
-      method: "POST",
-      body: JSON.stringify({ installationId, scopes: [...new Set(scopes)].sort() })
-    })
-    const body = record(await response.json().catch(() => null))
-    const token = string(body?.token)
-    const returnedId = string(body?.installationId)
-    const expiresAt = string(body?.expiresAt)
-    if (!token || returnedId !== installationId || !expiresAt || !Number.isFinite(Date.parse(expiresAt))) {
-      throw new GitHubApiError({
-        reason: "unavailable",
-        message: "The GitHub connection service returned an invalid installation credential."
+    const inFlight = credentialRequests.get(key)
+    if (inFlight) return inFlight
+    const requestCredential = (async () => {
+      const response = await authenticatedRequest("/api/github/installation-credentials", {
+        method: "POST",
+        body: JSON.stringify({ installationId, scopes: [...new Set(scopes)].sort() })
       })
+      const body = record(await response.json().catch(() => null))
+      const token = string(body?.token)
+      const returnedId = string(body?.installationId)
+      const expiresAt = string(body?.expiresAt)
+      if (!token || returnedId !== installationId || !expiresAt || !Number.isFinite(Date.parse(expiresAt))) {
+        throw new GitHubApiError({
+          reason: "unavailable",
+          message: "The GitHub connection service returned an invalid installation credential."
+        })
+      }
+      const credential = { token, installationId, expiresAt }
+      credentials.set(key, credential)
+      return credential
+    })()
+    credentialRequests.set(key, requestCredential)
+    try {
+      return await requestCredential
+    } finally {
+      credentialRequests.delete(key)
     }
-    const credential = { token, installationId, expiresAt }
-    credentials.set(key, credential)
-    return credential
   }
 
   return {
@@ -601,6 +635,10 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
     },
     invalidate: (installationId) => {
       grants.delete(installationId)
+      statusCache = null
+      for (const [owner, installation] of installationsByOwner) {
+        if (installation.id === installationId) installationsByOwner.delete(owner)
+      }
       for (const key of credentials.keys()) {
         if (key.startsWith(`${installationId}:`)) credentials.delete(key)
       }

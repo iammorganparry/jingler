@@ -53,7 +53,10 @@ describe("retitleSession", () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const s = yield* SessionStore.create(input())
-        yield* TranscriptStore.append(s.id, userMessage("u1", "help me add caching", "2026-07-13T00:00:00.000Z"))
+        yield* TranscriptStore.append(
+          s.activeChatId,
+          userMessage("u1", "help me add caching", "2026-07-13T00:00:00.000Z")
+        )
         const updated = yield* retitleSession(s.id, fixed("Add response caching"))
         const persisted = yield* SessionStore.get(s.id)
         return { updated, persisted }
@@ -79,6 +82,36 @@ describe("retitleSession", () => {
     ).toBe("feat/add-response-caching")
   })
 
+  it("derives semantic metadata from the active chat transcript", async () => {
+    let received: ReadonlyArray<unknown> = []
+    const generator: TitleGenerator = {
+      generate: (messages) => {
+        received = messages
+        return Effect.succeed({
+          title: "Fix active chat routing",
+          branch: { type: "fix", slug: "active-chat-routing" }
+        })
+      }
+    }
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const session = yield* SessionStore.create(input())
+        yield* TranscriptStore.append(
+          session.activeChatId,
+          userMessage("u1", "Fix active chat routing", "2026-07-13T00:00:00.000Z")
+        )
+        return yield* retitleSession(session.id, generator)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(received).toHaveLength(1)
+    expect(exit.value.branch).toBe("fix/active-chat-routing")
+    expect(exit.value.semanticBranchPending).toBe(false)
+  })
+
   it("falls back to the first user message when the generator yields the heuristic", async () => {
     const fallbackGen: TitleGenerator = {
       generate: (messages) => Effect.succeed({
@@ -89,7 +122,10 @@ describe("retitleSession", () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const s = yield* SessionStore.create(input())
-        yield* TranscriptStore.append(s.id, userMessage("u1", "Refactor the auth middleware", "2026-07-13T00:00:00.000Z"))
+        yield* TranscriptStore.append(
+          s.activeChatId,
+          userMessage("u1", "Refactor the auth middleware", "2026-07-13T00:00:00.000Z")
+        )
         return yield* retitleSession(s.id, fallbackGen)
       }).pipe(Effect.provide(services)),
       temp.layer
@@ -105,7 +141,7 @@ describe("retitleSession", () => {
           input({ title: undefined, useWorktree: false })
         )
         yield* TranscriptStore.append(
-          session.id,
+          session.activeChatId,
           userMessage("u1", "Improve the cache", "2026-07-13T00:00:00.000Z")
         )
         return yield* retitleSession(session.id, fixed("Improve cache"))
@@ -156,7 +192,7 @@ describe("retitleSession", () => {
       Effect.gen(function* () {
         const session = yield* SessionStore.create(input())
         yield* TranscriptStore.append(
-          session.id,
+          session.activeChatId,
           userMessage("u1", "Build the first task", "2026-07-13T00:00:00.000Z")
         )
         const first = yield* retitleSession(session.id, fixed("First task"))
@@ -181,7 +217,7 @@ describe("retitleSession", () => {
       Effect.gen(function* () {
         const session = yield* SessionStore.create(input({ title: "Pinned display" }))
         yield* TranscriptStore.append(
-          session.id,
+          session.activeChatId,
           userMessage("u1", "Fix callback replay", "2026-07-13T00:00:00.000Z")
         )
         yield* SessionStore.setSemanticBranchProposal(session.id, {
@@ -227,7 +263,7 @@ describe("retitleSession", () => {
       Effect.gen(function* () {
         const session = yield* SessionStore.create(input({ title: "Pinned display" }))
         yield* TranscriptStore.append(
-          session.id,
+          session.activeChatId,
           userMessage("u1", "Fix review routing", "2026-07-13T00:00:00.000Z")
         )
         return yield* retitleSession(session.id, fixed("Generated replacement", "fix"))

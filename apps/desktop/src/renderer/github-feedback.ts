@@ -43,7 +43,7 @@ export type GitHubFeedbackRouteResult =
  * be recreated without affecting relay replay semantics.
  */
 export class GitHubFeedbackRouter {
-  private serial: Promise<void> = Promise.resolve();
+  private readonly serialBySession = new Map<string, Promise<void>>();
 
   constructor(private readonly options: GitHubFeedbackRouterOptions) {}
 
@@ -51,13 +51,21 @@ export class GitHubFeedbackRouter {
     event: GitHubRelayEvent,
     target: GitHubFeedbackTarget,
   ): Promise<GitHubFeedbackRouteResult> {
-    const operation = this.serial.then(() => this.routeSerial(event, target));
-    // Keep later deliveries ordered even when this operation fails, but return
-    // the original rejection to the main process so it withholds the cursor ack.
-    this.serial = operation.then(
+    const previous = this.serialBySession.get(target.sessionId) ?? Promise.resolve();
+    const operation = previous.then(() => this.routeSerial(event, target));
+    // Preserve ordering only within the owning session. An agent holding one
+    // session's acknowledgement must not stall an unrelated session's Durable
+    // Object, socket, or cursor.
+    const tail = operation.then(
       () => undefined,
       () => undefined,
     );
+    this.serialBySession.set(target.sessionId, tail);
+    void tail.then(() => {
+      if (this.serialBySession.get(target.sessionId) === tail) {
+        this.serialBySession.delete(target.sessionId);
+      }
+    });
     return operation;
   }
 

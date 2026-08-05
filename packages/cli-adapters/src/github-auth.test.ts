@@ -207,6 +207,38 @@ describe("GitHubAuth desktop grants", () => {
     ])
   })
 
+  it("deduplicates status and credential requests across concurrent repository calls", async () => {
+    const paths: string[] = []
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
+      const path = new URL(input instanceof Request ? input.url : String(input)).pathname
+      paths.push(path)
+      if (path === "/api/github/status") return response(STATUS)
+      return response({
+        token: "ghs_shared",
+        installationId: "77",
+        expiresAt: "2030-01-01T01:00:00.000Z"
+      })
+    })
+    const client = makeGitHubAuthClient({
+      bearer: async () => "session",
+      fetch,
+      baseUrl: () => "https://server.jingler.test",
+      now: () => new Date("2030-01-01T00:00:00.000Z")
+    })
+
+    const credentials = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        client.credentialsForOwner("acme", "acme/widgets", ["pull_requests:read"])
+      )
+    )
+
+    expect(new Set(credentials.map((credential) => credential.token))).toEqual(new Set(["ghs_shared"]))
+    expect(paths).toEqual([
+      "/api/github/status",
+      "/api/github/installation-credentials"
+    ])
+  })
+
   it("rejects unqualified or permission-less credential requests locally", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>()
     const client = makeGitHubAuthClient({

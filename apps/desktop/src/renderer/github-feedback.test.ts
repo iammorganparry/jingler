@@ -228,6 +228,39 @@ describe("GitHubFeedbackRouter", () => {
     expect(h.dispatch).toHaveBeenCalledTimes(2);
   });
 
+  it("does not let a busy session block feedback for another session", async () => {
+    let releaseFirst!: () => void;
+    const firstAccepted = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const dispatched: string[] = [];
+    const router = new GitHubFeedbackRouter({
+      claim: async () => "pending",
+      markDispatched: async () => true,
+      invalidate: () => {},
+      dispatch: async ({ sessionId }) => {
+        dispatched.push(sessionId);
+        if (sessionId === "session-1") await firstAccepted;
+      },
+    });
+
+    const blocked = router.route(event(), target());
+    await vi.waitFor(() => expect(dispatched).toEqual(["session-1"]));
+    await expect(
+      router.route(
+        event({ deliveryId: "delivery-2", semanticKey: "semantic-2" }),
+        target({ sessionId: "session-2", chatId: "chat-2" }),
+      ),
+    ).resolves.toEqual({ status: "routed", sessionId: "session-2" });
+    expect(dispatched).toEqual(["session-1", "session-2"]);
+
+    releaseFirst();
+    await expect(blocked).resolves.toEqual({
+      status: "routed",
+      sessionId: "session-1",
+    });
+  });
+
   it("retries a pending outbox entry after a crash between persistence and dispatch", async () => {
     const state = new Map<string, "pending" | "dispatched">();
     const crashed = setup({ state, failDispatch: true });

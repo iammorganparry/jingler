@@ -40,6 +40,8 @@ import { runtime } from "./runtime.js"
 
 const STATE_TTL_MS = 10 * 60 * 1_000
 const TOKEN_REFRESH_SKEW_MS = 60 * 1_000
+const RECONCILE_TTL_MS = 60 * 1_000
+const STATUS_CACHE_TTL_MS = 15 * 1_000
 
 export interface GitHubConnectionStore {
   readonly createCallbackState: (input: {
@@ -772,6 +774,56 @@ export const createGitHubRoutes = (
   resolveDependencies: () => GitHubRoutesDependencies = defaultDependencies
 ): Hono => {
   const routes = new Hono()
+  const statusCache = new Map<
+    string,
+    { readonly value: GitHubAppConnectionStatus; readonly expiresAt: number }
+  >()
+  const reconcileRequests = new Map<string, Promise<GitHubAuthorizationRecord | null>>()
+
+  const invalidateStatus = (userId: string): void => {
+    statusCache.delete(userId)
+  }
+
+  const readStatus = async (
+    dependencies: GitHubRoutesDependencies,
+    userId: string
+  ): Promise<GitHubAppConnectionStatus> => {
+    const now = (dependencies.now ?? (() => new Date()))().getTime()
+    const cached = statusCache.get(userId)
+    if (cached && cached.expiresAt > now) return cached.value
+    const value = await statusFor(dependencies, userId)
+    statusCache.set(userId, { value, expiresAt: now + STATUS_CACHE_TTL_MS })
+    return value
+  }
+
+  const refreshConnection = async (
+    dependencies: GitHubRoutesDependencies,
+    userId: string
+  ): Promise<GitHubAuthorizationRecord | null> => {
+    const inFlight = reconcileRequests.get(userId)
+    if (inFlight) return inFlight
+    const request = reconcile(dependencies, userId)
+    reconcileRequests.set(userId, request)
+    try {
+      return await request
+    } finally {
+      reconcileRequests.delete(userId)
+      invalidateStatus(userId)
+    }
+  }
+
+  const reconcileIfStale = async (
+    dependencies: GitHubRoutesDependencies,
+    userId: string
+  ): Promise<GitHubAuthorizationRecord | null> => {
+    const authorization = await dependencies.store.findAuthorizationByUserId(userId)
+    if (!authorization) return null
+    const now = (dependencies.now ?? (() => new Date()))().getTime()
+    if (now - authorization.lastRefreshedAt.getTime() < RECONCILE_TTL_MS) {
+      return authorization
+    }
+    return refreshConnection(dependencies, userId)
+  }
 
   const authenticated = async (
     headers: Headers,
@@ -873,6 +925,7 @@ export const createGitHubRoutes = (
         installations: installations.map(toInstallationInput),
         refreshedAt: now
       })
+      invalidateStatus(userId)
       await flushGitHubRelayOutbox(dependencies)
       return Response.redirect(withQuery(callbackState.redirectUri, { github: "connected" }), 302)
     } catch {
@@ -898,7 +951,7 @@ export const createGitHubRoutes = (
     })
     if (!callbackState) return callbackError()
     try {
-      await reconcile(dependencies, userId)
+      await refreshConnection(dependencies, userId)
       const installation = await dependencies.store.findInstallationForUser(userId, installationId)
       if (!installation) return callbackError()
       return Response.redirect(withQuery(callbackState.redirectUri, { github: "connected" }), 302)
@@ -926,8 +979,7 @@ export const createGitHubRoutes = (
     }
     try {
       await flushGitHubRelayOutbox(dependencies)
-      await reconcile(dependencies, userId)
-      return c.json(await statusFor(dependencies, userId), 200, noStore)
+      return c.json(await readStatus(dependencies, userId), 200, noStore)
     } catch {
       return c.json({ error: "GitHub refresh failed" }, 502, noStore)
     }
@@ -959,8 +1011,8 @@ export const createGitHubRoutes = (
     }
     try {
       await flushGitHubRelayOutbox(dependencies)
-      await reconcile(dependencies, userId)
-      return c.json(await statusFor(dependencies, userId), 200, noStore)
+      await refreshConnection(dependencies, userId)
+      return c.json(await readStatus(dependencies, userId), 200, noStore)
     } catch {
       return c.json({ error: "GitHub refresh failed" }, 502, noStore)
     }
@@ -987,6 +1039,7 @@ export const createGitHubRoutes = (
     const disconnectedAt = (dependencies.now ?? (() => new Date()))()
     await dependencies.sessionRoutes.removeAllForUser(userId, disconnectedAt)
     await dependencies.store.disconnect(userId)
+    invalidateStatus(userId)
     if (accessToken) {
       try {
         await dependencies.github.revokeUserToken(accessToken)
@@ -1047,7 +1100,7 @@ export const createGitHubRoutes = (
       return c.json({ error: "Valid session route fields are required" }, 400, noStore)
     }
     try {
-      await reconcile(dependencies, userId)
+      await reconcileIfStale(dependencies, userId)
       const installation = await dependencies.store.findInstallationForUser(
         userId,
         input.installationId
@@ -1101,7 +1154,7 @@ export const createGitHubRoutes = (
     }
     if (!relaySessionId) return c.json({ error: "relaySessionId is required" }, 400, noStore)
     try {
-      await reconcile(dependencies, userId)
+      await reconcileIfStale(dependencies, userId)
     } catch {
       return c.json({ error: "GitHub repository access could not be verified" }, 502, noStore)
     }
@@ -1186,7 +1239,7 @@ export const createGitHubRoutes = (
     }
     if (!installationId) return c.json({ error: "installationId is required" }, 400, noStore)
     try {
-      await reconcile(dependencies, userId)
+      await reconcileIfStale(dependencies, userId)
       const installation = await dependencies.store.findInstallationForUser(userId, installationId)
       if (!installation || installation.suspendedAt) {
         return c.json({ error: "Active installation required" }, 403, noStore)
@@ -1246,7 +1299,7 @@ export const createGitHubRoutes = (
       return c.json({ error: "installationId and valid scopes are required" }, 400, noStore)
     }
     try {
-      await reconcile(dependencies, userId)
+      await reconcileIfStale(dependencies, userId)
       const installation = await dependencies.store.findInstallationForUser(userId, installationId)
       if (!installation || installation.suspendedAt) {
         return c.json({ error: "Active installation required" }, 403, noStore)

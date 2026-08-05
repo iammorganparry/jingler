@@ -1750,6 +1750,11 @@ function GithubSection({
               </Button>
             </>
           )}
+          {connection.mode === "connecting" && (
+            <Button variant="secondary" size="sm" onClick={onRefresh}>
+              Cancel / check status
+            </Button>
+          )}
         </div>
 
         <div className="divide-y divide-hairline">

@@ -65,8 +65,7 @@ export const branchAt = (
  */
 const linkChecked = new Set<string>()
 
-const ASKPASS_SOURCE = `#!/usr/bin/env node
-import { createConnection } from "node:net"
+const ASKPASS_SOURCE = `import { createConnection } from "node:net"
 const endpoint = process.env.JINGLER_GIT_ASKPASS_ENDPOINT ?? ""
 const nonce = process.env.JINGLER_GIT_ASKPASS_NONCE ?? ""
 const type = process.argv.slice(2).join(" ").toLowerCase().includes("username") ? "username" : "password"
@@ -80,9 +79,18 @@ socket.once("end", () => process.stdout.write(response))
 socket.once("error", () => process.exit(1))
 `
 
+/** Invoke askpass with Electron's bundled Node runtime, never ambient PATH. */
+export const gitAskpassWrapperSource = (
+  platform: NodeJS.Platform = process.platform
+): string =>
+  platform === "win32"
+    ? `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"%JINGLER_GIT_ASKPASS_RUNTIME%" "%JINGLER_GIT_ASKPASS_MODULE%" %*\r\n`
+    : `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec "$JINGLER_GIT_ASKPASS_RUNTIME" "$JINGLER_GIT_ASKPASS_MODULE" "$@"\n`
+
 interface AskpassBoundary {
   readonly dir: string
   readonly script: string
+  readonly module: string
   readonly endpoint: string
   readonly nonce: string
   readonly server: Server
@@ -100,8 +108,10 @@ const closeServer = (server: Server): Promise<void> =>
 const prepareAskpassBoundary = async (token: string): Promise<AskpassBoundary> => {
   const dir = await mkdtemp(join(tmpdir(), "jingler-git-askpass-"))
   try {
-    const script = join(dir, "askpass.mjs")
-    await writeFile(script, ASKPASS_SOURCE, { mode: 0o700 })
+    const module = join(dir, "askpass.mjs")
+    const script = join(dir, process.platform === "win32" ? "askpass.cmd" : "askpass.sh")
+    await writeFile(module, ASKPASS_SOURCE, { mode: 0o600 })
+    await writeFile(script, gitAskpassWrapperSource(), { mode: 0o700 })
     await chmod(script, 0o700)
     const nonce = randomBytes(32).toString("hex")
     const endpoint = process.platform === "win32"
@@ -140,7 +150,7 @@ const prepareAskpassBoundary = async (token: string): Promise<AskpassBoundary> =
         resolve()
       })
     })
-    return { dir, script, endpoint, nonce, server }
+    return { dir, script, module, endpoint, nonce, server }
   } catch (error) {
     await rm(dir, { recursive: true, force: true })
     throw error
@@ -625,7 +635,7 @@ export class GitService extends Effect.Service<GitService>()(
                 catch: (cause) =>
                   new GitError({ message: "Could not prepare secure GitHub authentication.", cause })
               }),
-              ({ script, endpoint, nonce }) =>
+              ({ script, module, endpoint, nonce }) =>
                 runGitWithEnv(
                   cwd,
                   [
@@ -642,6 +652,8 @@ export class GitService extends Effect.Service<GitService>()(
                     GIT_TERMINAL_PROMPT: "0",
                     JINGLER_GIT_ASKPASS_ENDPOINT: endpoint,
                     JINGLER_GIT_ASKPASS_NONCE: nonce,
+                    JINGLER_GIT_ASKPASS_RUNTIME: process.execPath,
+                    JINGLER_GIT_ASKPASS_MODULE: module,
                     GITHUB_TOKEN: "",
                     GH_TOKEN: ""
                   }
@@ -747,10 +759,29 @@ export class GitService extends Effect.Service<GitService>()(
               "--track",
               `${remoteName}/${head.ref}`
             ])
-          } else if (allowSharedCheckout) {
-            yield* checkoutBranch(cwd, head.ref)
           } else {
-            yield* runGit(cwd, ["checkout", head.ref])
+            const localSha = yield* gitLine(cwd, "rev-parse", `refs/heads/${head.ref}`)
+            const canFastForward = localSha !== null && (yield* runGit(cwd, [
+              "merge-base",
+              "--is-ancestor",
+              localSha,
+              trackingRef
+            ]).pipe(
+              Effect.as(true),
+              Effect.catchAll(() => Effect.succeed(false))
+            ))
+            if (!canFastForward) {
+              return yield* Effect.fail(
+                new GitError({
+                  message:
+                    `Local branch "${head.ref}" has diverged from the pull request head. ` +
+                    "Preserve or rename the local branch before retrying."
+                })
+              )
+            }
+            if (allowSharedCheckout) yield* checkoutBranch(cwd, head.ref)
+            else yield* runGit(cwd, ["checkout", head.ref])
+            yield* runGit(cwd, ["reset", "--hard", trackingRef])
           }
           yield* runGit(cwd, ["config", `branch.${head.ref}.remote`, remoteName])
           yield* runGit(cwd, ["config", `branch.${head.ref}.merge`, `refs/heads/${head.ref}`])
