@@ -1,4 +1,10 @@
-import type { PermissionMode, Question, QuestionAnswer, ReasoningEffort } from "@jingler/core"
+import type {
+  Attachment,
+  PermissionMode,
+  Question,
+  QuestionAnswer,
+  ReasoningEffort
+} from "@jingler/core"
 import { CliExecError, resumePlanPrompt } from "@jingler/core"
 import { Effect, Runtime } from "effect"
 import type { AgentContext, PlanDecision, SessionSpec } from "./adapter.js"
@@ -367,6 +373,36 @@ const cumulativeUsage = (message: JsonRpcMessage, expectedThreadId: string): num
   return typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0 ? tokens : null
 }
 
+const steerCodexTurn = async (input: {
+  readonly connection: CodexAppServerConnection
+  readonly threadId: string
+  readonly turnId: string
+  readonly text: string
+  readonly images: ReadonlyArray<Attachment>
+  readonly retainCleanup: (cleanup: () => Promise<void>) => void
+}): Promise<"accepted" | "deferred"> => {
+  const staged = await stageCodexInput(input.text, input.images)
+  let retained = false
+  try {
+    const response = await input.connection.request("turn/steer", {
+      threadId: input.threadId,
+      expectedTurnId: input.turnId,
+      input: toCodexAppServerInput(staged.input)
+    })
+    if (turnIdFromResponse(response) !== input.turnId) return "deferred"
+    // App-server accepts the path synchronously but reads the file later while
+    // processing the active turn. Cleaning up at the RPC response races Codex's
+    // asynchronous image ingestion, so retain accepted assets until completion.
+    input.retainCleanup(staged.cleanup)
+    retained = true
+    return "accepted"
+  } catch {
+    return "deferred"
+  } finally {
+    if (!retained) await staged.cleanup()
+  }
+}
+
 const awaitNativeCompaction = async (
   connection: CodexAppServerConnection,
   threadId: string,
@@ -473,6 +509,7 @@ export const runCodexAppServer = (
           connection?.close()
           throw cause
         })
+        const acceptedSteerCleanups: Array<() => Promise<void>> = []
         try {
           const prior =
             spec.fresh === true ? undefined : (resume.get(sessionId) ?? spec.resumeId ?? undefined)
@@ -521,19 +558,16 @@ export const runCodexAppServer = (
                 if (connection === null || activeThreadId === null || activeTurnId === null) {
                   return "deferred"
                 }
-                const steered = await stageCodexInput(text, images)
-                try {
-                  const response = await connection.request("turn/steer", {
-                    threadId: activeThreadId,
-                    expectedTurnId: activeTurnId,
-                    input: toCodexAppServerInput(steered.input)
-                  })
-                  return turnIdFromResponse(response) === activeTurnId ? "accepted" : "deferred"
-                } catch {
-                  return "deferred"
-                } finally {
-                  await steered.cleanup()
-                }
+                return steerCodexTurn({
+                  connection,
+                  threadId: activeThreadId,
+                  turnId: activeTurnId,
+                  text,
+                  images,
+                  retainCleanup: (cleanup) => {
+                    acceptedSteerCleanups.push(cleanup)
+                  }
+                })
               })
             )
           }
@@ -787,7 +821,11 @@ export const runCodexAppServer = (
           }
         } finally {
           try {
-            await staged.cleanup()
+            try {
+              await Promise.all(acceptedSteerCleanups.map((cleanup) => cleanup()))
+            } finally {
+              await staged.cleanup()
+            }
           } finally {
             if (ctx.registerTurnSteer !== undefined) {
               await runP(ctx.registerTurnSteer(null))
