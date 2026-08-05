@@ -20,7 +20,7 @@ const session = (
     {
       id,
       repo: "widget",
-      branch: `jingler/${id}`,
+      branch: `chore/${id}`,
       title: "Streamed plan",
       status: "idle",
       cli: "claude",

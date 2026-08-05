@@ -20,8 +20,8 @@ const filledBars = (chip: HTMLElement) =>
 
 describe("Composer send row", () => {
   it("puts the branch on the lower row, after send and to the right of the repo", () => {
-    render(<Composer branch="jingler/wandering-watt" repo="widget" />)
-    const branch = screen.getByTitle("Working branch: jingler/wandering-watt")
+    render(<Composer branch="chore/wandering-watt" repo="widget" />)
+    const branch = screen.getByTitle("Working branch: chore/wandering-watt")
     const send = screen.getByRole("button", { name: /Send/ })
     const repo = screen.getByTitle("Repository: widget")
     // The branch left the toolbar for the lower metadata row, so it now FOLLOWS

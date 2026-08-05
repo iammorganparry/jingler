@@ -38,4 +38,18 @@ describe("startAuthLoopback", () => {
       loopback.close()
     }
   })
+
+  it("delivers GitHub App callbacks on a separate path", async () => {
+    const deliverAuth = vi.fn()
+    const deliverGitHub = vi.fn()
+    const loopback = await startAuthLoopback(deliverAuth, deliverGitHub)
+    try {
+      const res = await fetch(`${loopback.url}&github=connected`)
+      expect(res.status).toBe(200)
+      expect(deliverGitHub).toHaveBeenCalledWith({ connected: true, error: null })
+      expect(deliverAuth).not.toHaveBeenCalled()
+    } finally {
+      loopback.close()
+    }
+  })
 })

@@ -10,6 +10,8 @@ import { cors } from "hono/cors"
 import { getAuth } from "./auth.js"
 import { UserRepository } from "./db/repositories/user-repository.js"
 import { env } from "./env.js"
+import { createGitHubRoutes, isLoopbackRedirect, withQuery } from "./github-routes.js"
+import { proxyGitHubWebhook } from "./github-webhook-proxy.js"
 import { runtime } from "./runtime.js"
 
 export const app = new Hono()
@@ -30,8 +32,16 @@ app.use(
 /** Liveness probe (Vercel + local + e2e all hit this). */
 app.get("/health", (c) => c.json({ status: "ok", service: "@jingler/server" }))
 
+/** Keep the registered App URL stable while the relay owns verification and delivery. */
+app.post("/webhooks/github", (c) =>
+  proxyGitHubWebhook(c.req.raw, env.githubAppRelayUrl)
+)
+
 /** BetterAuth owns everything under /api/auth/* (OAuth, magic link, session). */
 app.on(["GET", "POST"], "/api/auth/*", (c) => getAuth().handler(c.req.raw))
+
+/** Product GitHub App connection; intentionally outside BetterAuth's routes. */
+app.route("/api/github", createGitHubRoutes())
 
 /**
  * The signed-in user's profile. BetterAuth validates the bearer session; the user
@@ -57,23 +67,7 @@ app.get("/api/me", async (c) => {
  * (macOS can't route the `jingler://` scheme to an unpackaged Electron), where
  * the app listens on `http://127.0.0.1:<port>` instead of the deep link.
  */
-export const isLoopbackRedirect = (raw: string): boolean => {
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    return false
-  }
-  if (url.protocol !== "http:") return false
-  // URL.hostname keeps the brackets for IPv6, hence "[::1]".
-  return (
-    url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]"
-  )
-}
-
-/** Append a query string, respecting a target that already carries one (the loopback nonce). */
-const withQuery = (url: string, query: string): string =>
-  `${url}${url.includes("?") ? "&" : "?"}${query}`
+export { isLoopbackRedirect }
 
 /**
  * Desktop bridge. OAuth and magic-link flows complete in the user's browser,
@@ -91,9 +85,9 @@ app.get("/desktop/callback", async (c) => {
     .getSession({ headers: c.req.raw.headers })
     .catch(() => null)
   if (!session?.session?.token) {
-    return c.redirect(withQuery(target, "error=nosession"))
+    return c.redirect(withQuery(target, { error: "nosession" }))
   }
-  return c.redirect(withQuery(target, `token=${encodeURIComponent(session.session.token)}`))
+  return c.redirect(withQuery(target, { token: session.session.token }))
 })
 
 export default app

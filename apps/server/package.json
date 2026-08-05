@@ -9,11 +9,12 @@
   },
   "scripts": {
     "dev": "next dev --port 9100",
-    "build": "NODE_ENV=production next build",
+    "build": "pnpm email:bundle && NODE_ENV=production next build",
     "start": "next start --port 9100",
     "dev:hono": "tsx watch --env-file-if-exists=.env src/index.ts",
     "typecheck": "tsgo --noEmit",
     "email:dev": "email dev --dir src/emails --port 3010",
+    "email:bundle": "esbuild src/emails/index.tsx --bundle --platform=node --format=esm --packages=external --minify --banner:js='// biome-ignore-all lint: generated deployment bundle' --outfile=src/emails-runtime.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",

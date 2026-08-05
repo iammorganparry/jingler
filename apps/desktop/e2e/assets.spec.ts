@@ -75,7 +75,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   {
     id: "s_assets",
     repo: "widget",
-    branch: "jingler/assets",
+    branch: "chore/assets",
     title: "Write the spec",
     status: "idle",
     cli: "claude",

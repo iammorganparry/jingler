@@ -8,8 +8,8 @@ const FRIENDLY_WORKTREE_RE = /[\\/][a-z]+-[a-z]+$/
 /**
  * The full ⌘N create-session flow, end to end against real git: open the dialog,
  * name the session, pick a base branch, hit Create, and verify the real outcomes
- * — the session shows in the sidebar, a real worktree + `jingler/<slug>` branch
- * were created, and the session was persisted to sessions.json.
+ * — the session shows in the sidebar, a detached fresh-base worktree was
+ * created, and the session was persisted to sessions.json.
  */
 test("creating a session forks a real worktree and persists it", async ({ launchApp }) => {
   const { window, home, repoPath } = await launchApp({ configured: true, withRepo: true })
@@ -24,8 +24,8 @@ test("creating a session forks a real worktree and persists it", async ({ launch
   const noHarness = await window.getByText("No coding CLI found", { exact: false }).count()
   test.skip(noHarness > 0, "no coding CLI installed on this host")
 
-  // Naming is optional. Supplying one pins the title and creates the accurate
-  // readable branch immediately; blank sessions take the agent-naming path.
+  // Naming is optional. Supplying one pins the display title; the agent still
+  // proposes the semantic branch once it understands the task.
   await window.getByPlaceholder("Leave blank for agent naming").fill("Fix token refresh")
   const create = window.getByRole("button", { name: "Create" })
   await expect(create).toBeEnabled()
@@ -33,25 +33,28 @@ test("creating a session forks a real worktree and persists it", async ({ launch
 
   await expect(sessionRow(window, "Fix token refresh")).toBeVisible()
 
-  // Real outcome: the trimmed operator title is pinned and its branch is
-  // readable immediately.
+  // Real outcome: the trimmed operator title is pinned while branch creation is pending.
   const persisted = JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf-8"))
   expect(persisted).toHaveLength(1)
   expect(persisted[0]).toMatchObject({
     title: "Fix token refresh",
     repo: "widget",
     status: "idle",
-    autoTitle: false
+    autoTitle: false,
+    branch: "main",
+    semanticBranchPending: true
   })
-  expect(persisted[0].branch).toMatch(/^jingler\/fix-token-refresh-[a-z0-9]+$/)
 
-  // Real outcome: that branch + worktree actually exist on disk.
+  // Real outcome: the worktree exists at the selected base without a branded ref.
   expect(existsSync(persisted[0].worktreePath)).toBe(true)
-  const branches = execFileSync("git", ["branch", "--format=%(refname:short)"], {
+  expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd: persisted[0].worktreePath,
+    encoding: "utf-8"
+  }).trim()).toBe("HEAD")
+  expect(execFileSync("git", ["branch", "--list", "jingler/*"], {
     cwd: repoPath,
     encoding: "utf-8"
-  })
-  expect(branches).toContain(persisted[0].branch)
+  }).trim()).toBe("")
 })
 
 /**
@@ -197,7 +200,7 @@ test("a new session inherits the preferred orchestrator harness, model, and chat
 
 /**
  * The "new session from an existing PR" flow, end to end against real git with a
- * deterministic fake `gh`: toggle the dialog to "From PR", pick an open PR, hit
+ * deterministic fake GitHub API: toggle the dialog to "From PR", pick an open PR, hit
  * Create, and verify the session was created ON the PR's head branch and linked
  * to its number (so the sidebar badge + PR tabs light up).
  */
@@ -207,8 +210,9 @@ test("creating a session from a PR checks out its head branch and links the PR",
   const { window, home } = await launchApp({
     configured: true,
     withRepo: true,
-    gh: {
-      login: "e2e-user",
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
       prs: [
         {
           number: 482,
@@ -238,7 +242,7 @@ test("creating a session from a PR checks out its head branch and links the PR",
   const noHarness = await window.getByText("No coding CLI found", { exact: false }).count()
   test.skip(noHarness > 0, "no coding CLI installed on this host")
 
-  // The fake gh reports authenticated, so the "From PR" toggle is available.
+  // The fake GitHub App reports connected, so the "From PR" toggle is available.
   await window.getByRole("tab", { name: "From PR" }).click()
 
   // The picker chrome + the seeded open PRs render.
@@ -282,19 +286,20 @@ test("creating a session from a PR checks out its head branch and links the PR",
 
 /**
  * The "new session from a GitHub issue" flow, end to end against real git with a
- * deterministic fake `gh issue list`: toggle to "From issue", pick an open issue,
- * advance to the prefill step, create — and verify the session was forked onto a
- * fresh `jingler/<n>-slug` branch, linked to the issue, with the task seeded from
- * the issue and the automations persisted.
+ * deterministic fake GitHub API: toggle to "From issue", pick an open issue,
+ * advance to the prefill step, create — and verify the session starts detached
+ * from main for semantic agent naming, linked to the issue, with the task seeded
+ * from the issue and the automations persisted.
  */
 test("creating a session from an issue forks a linked branch and seeds the task", async ({
   launchApp
 }) => {
-  const { window, home, repoPath } = await launchApp({
+  const { window, home } = await launchApp({
     configured: true,
     withRepo: true,
-    gh: {
-      login: "e2e-user",
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
       issues: [
         {
           number: 128,
@@ -330,6 +335,8 @@ test("creating a session from an issue forks a linked branch and seeds the task"
 
   // The prefill step shows the editable task textarea, seeded from the issue.
   await expect(window.getByRole("textbox")).toHaveValue(/Fix the refund route/)
+  await expect(window.getByText("Semantic branch after task understanding")).toBeVisible()
+  await expect(window.getByText(/jingler\//)).toHaveCount(0)
 
   // Create the session.
   const create = window.getByRole("button", { name: "Create session" })
@@ -372,7 +379,8 @@ test("creating a session from an issue forks a linked branch and seeds the task"
   await expect(window.getByTestId("plugin-error-github-issues")).toHaveCount(0)
   await expect(window.getByRole("button", { name: "Issue" })).toBeVisible()
 
-  // Real outcome: a fresh `jingler/128-<slug>` worktree exists on that branch.
+  // Real outcome: the deterministic issue worktree exists but remains detached
+  // from main until the agent proposes a semantic feat/fix/chore branch.
   const worktreePath = join(
     home,
     "jingler",
@@ -381,18 +389,19 @@ test("creating a session from an issue forks a linked branch and seeds the task"
     "128-refund-route-500s-on-a-stale-token"
   )
   expect(existsSync(worktreePath)).toBe(true)
-  const branches = execFileSync("git", ["branch", "--format=%(refname:short)"], {
-    cwd: repoPath,
+  const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd: worktreePath,
     encoding: "utf-8"
-  })
-  expect(branches).toContain("jingler/128-refund-route-500s-on-a-stale-token")
+  }).trim()
+  expect(branch).toBe("HEAD")
 
   // Real outcome: the session is persisted with the issue linked + task seeded.
   const persisted = JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf-8"))
   expect(persisted).toHaveLength(1)
   expect(persisted[0]).toMatchObject({
     title: "Refund route 500s on a stale token",
-    branch: "jingler/128-refund-route-500s-on-a-stale-token",
+    branch: "main",
+    semanticBranchPending: true,
     baseBranch: "main",
     issueNumber: 128,
     issueUrl: "https://github.com/acme/widget/issues/128",

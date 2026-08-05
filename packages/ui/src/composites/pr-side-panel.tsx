@@ -121,7 +121,7 @@ export function PrSidePanel({
   width = 352,
   className
 }: PrSidePanelProps) {
-  // Merge-commit default, matching `gh pr merge` and the previous hardcoded
+  // Merge-commit default, matching GitHub and the previous hardcoded
   // behaviour — a picker that silently changed what the button did would be a
   // worse regression than not having one.
   const [method, setMethod] = useState<PrMergeMethod>("merge")
@@ -264,7 +264,7 @@ export function PrSidePanel({
           <div className="flex flex-col gap-3">
             <Callout tone="green">This branch has no conflicts and can be merged.</Callout>
             {/*
-              The strategy picker. `PrMergeMethod` and `gh pr merge --<method>`
+              The strategy picker. `PrMergeMethod` and the GitHub API value
               supported all three from the start; only the UI didn't, so every
               merge from here was a merge commit. Squash is most teams' default,
               which made this the likeliest reason to give up and open the

@@ -12,11 +12,11 @@
  * becomes `untrustedRepos`), and where Jingler has a surface VS Code lacks
  * (session tabs, split panes) the contribution point is new.
  *
- * ## Why there is no `permissions: ["git", "gh"]`
+ * ## Why there is no coarse `permissions: ["github"]`
  *
  * The obvious design is a static array of capability flags in the manifest, and
  * it is wrong for the case that matters most: a plugin that talks to a real
- * GitHub account. A coarse `"gh"` flag answers "may this plugin run gh?" when
+ * GitHub account. A coarse `"github"` flag answers "may this plugin access GitHub?" when
  * the question the operator actually needs answered is "which account, with
  * which scopes, and can I take it back?" — and a flag can express none of that.
  *

@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { Effect } from "effect"
 import { planDraftPost } from "./review-post.js"
-import { GhService } from "./gh.js"
-import { fakeCommandExecutor, runExit } from "./test-support.js"
 
 /**
  * The reviewer's own drafts becoming REAL inline comments on the PR.
@@ -108,82 +105,5 @@ describe("planDraftPost", () => {
     // The ones that DID anchor must not be duplicated into the body — they'd
     // then read twice on the PR, once inline and once in the summary.
     expect(plan?.body).not.toContain("keeps its line")
-  })
-})
-
-describe("GhService.prReviewComments payload", () => {
-  /** Capture the JSON body fed to `gh api --input -`. */
-  const postAndCapture = async (
-    comments: ReadonlyArray<{ path: string; line: number; startLine: number | null; body: string }>
-  ) => {
-    let body: unknown = null
-    const exit = await runExit(
-      GhService.prReviewComments("/w", 7, { commitSha: "sha1", body: "summary", comments }).pipe(
-        Effect.provide(GhService.Default)
-      ),
-      fakeCommandExecutor((_cmd, args, stdin) => {
-        if (args[0] === "api") {
-          body = JSON.parse(stdin)
-          return { exitCode: 0, stdout: "{}" }
-        }
-        return undefined
-      })
-    )
-    expect(exit._tag).toBe("Success")
-    return body as { commit_id: string; event: string; body: string; comments: ReadonlyArray<Record<string, unknown>> }
-  }
-
-  it("posts a COMMENT review anchored to the head sha", async () => {
-    const payload = await postAndCapture([{ path: "a.ts", line: 2, startLine: null, body: "c" }])
-    expect(payload.commit_id).toBe("sha1")
-    // Never REQUEST_CHANGES — a review blocking a PR over a nit gets the
-    // reviewer muted.
-    expect(payload.event).toBe("COMMENT")
-    expect(payload.body).toBe("summary")
-  })
-
-  it("OMITS start_line for a single-line comment rather than sending null", async () => {
-    const payload = await postAndCapture([{ path: "a.ts", line: 2, startLine: null, body: "c" }])
-    // GitHub 422s an explicit `start_line: null`.
-    expect(payload.comments[0]).toStrictEqual({ path: "a.ts", line: 2, side: "RIGHT", body: "c" })
-    expect(payload.comments[0]).not.toHaveProperty("start_line")
-  })
-
-  it("sends start_line + start_side for a real range", async () => {
-    const payload = await postAndCapture([{ path: "a.ts", line: 5, startLine: 2, body: "c" }])
-    expect(payload.comments[0]).toStrictEqual({
-      path: "a.ts",
-      line: 5,
-      start_line: 2,
-      start_side: "RIGHT",
-      side: "RIGHT",
-      body: "c"
-    })
-  })
-
-  it("omits start_line when it is not strictly above line", async () => {
-    // GitHub rejects a start_line equal to line.
-    const payload = await postAndCapture([{ path: "a.ts", line: 3, startLine: 3, body: "c" }])
-    expect(payload.comments[0]).not.toHaveProperty("start_line")
-  })
-
-  it("degrades to a body-only review when nothing anchored", async () => {
-    const payload = await postAndCapture([])
-    expect(payload.comments).toStrictEqual([])
-    expect(payload.body).toBe("summary")
-  })
-
-  it("surfaces a GhError when GitHub rejects the review", async () => {
-    const exit = await runExit(
-      GhService.prReviewComments("/w", 7, {
-        commitSha: "sha1",
-        body: "b",
-        comments: [{ path: "a.ts", line: 2, startLine: null, body: "c" }]
-      }).pipe(Effect.provide(GhService.Default)),
-      fakeCommandExecutor((_cmd, args) =>
-        args[0] === "api" ? { exitCode: 1, stderr: "HTTP 422: line must be part of the diff" } : undefined
-      )
-    )
-    expect(exit._tag).toBe("Failure")
   })
 })

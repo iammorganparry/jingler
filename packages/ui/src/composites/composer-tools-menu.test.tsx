@@ -16,9 +16,9 @@ const openMenu = () =>
 
 describe("Composer tools menu", () => {
   it("shows the session branch in the toolbar", () => {
-    render(<Composer branch="jingler/wandering-watt" />)
+    render(<Composer branch="chore/wandering-watt" />)
 
-    expect(screen.getByTitle("Working branch: jingler/wandering-watt")).toBeTruthy()
+    expect(screen.getByTitle("Working branch: chore/wandering-watt")).toBeTruthy()
   })
 
   it("folds attachments and skills behind one plus button", () => {

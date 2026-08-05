@@ -1,6 +1,6 @@
 /**
  * Renderer hook backing the Code Review tab. Owns two diff sources — the PR
- * (`gh pr diff`) and the session worktree's uncommitted changes (`git diff HEAD`)
+ * (GitHub's diff API) and the session worktree's uncommitted changes (`git diff HEAD`)
  * — plus the "your review" draft tray. On the local source it also drives reverts
  * (line-range + whole-file) against the worktree, refetching after each.
  */
@@ -108,7 +108,7 @@ export function useReview(session: Session): ReviewState {
   )
   const seq = useRef(0)
 
-  // "Viewed" is a reviewer-local marker (gh/git don't report it) — persist it per
+  // "Viewed" is a reviewer-local marker (GitHub/git don't report it) — persist it per
   // session in localStorage so ticking a file off survives tab switches + reloads.
   const toggleViewed = useCallback(
     (path: string, viewed: boolean) => {

@@ -15,9 +15,16 @@ import { app } from "electron"
 export const AUTH_PROTOCOL = "jingler"
 /** IPC channel the main process uses to tell the renderer a sign-in resolved. */
 export const AUTH_COMPLETE_CHANNEL = "jingler/auth-complete"
+/** Dedicated channel for GitHub App callbacks (never a BetterAuth sign-in). */
+export const GITHUB_COMPLETE_CHANNEL = "jingler/github-complete"
 
 export interface AuthCallback {
   readonly token: string | null
+  readonly error: string | null
+}
+
+export interface GitHubCallback {
+  readonly connected: boolean
   readonly error: string | null
 }
 
@@ -34,7 +41,25 @@ export const parseAuthCallback = (raw: string): AuthCallback | null => {
   }
   if (url.protocol !== `${AUTH_PROTOCOL}:`) return null
   if (url.host !== "auth") return null
+  if (url.searchParams.has("github")) return null
   return { token: url.searchParams.get("token"), error: url.searchParams.get("error") }
+}
+
+/** Parse the GitHub App result carried over the existing desktop bridge. */
+export const parseGitHubCallback = (raw: string): GitHubCallback | null => {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return null
+  }
+  if (url.protocol !== `${AUTH_PROTOCOL}:` || url.host !== "auth") return null
+  const result = url.searchParams.get("github")
+  if (result === null) return null
+  return {
+    connected: result === "connected",
+    error: result === "connected" ? null : (url.searchParams.get("error") ?? "callback")
+  }
 }
 
 /** Find the first `jingler://…` deep link in a process argv array. */

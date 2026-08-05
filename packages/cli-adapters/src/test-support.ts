@@ -10,7 +10,7 @@
  *     because it verifies behaviour, not mocked internals.
  *  2. **Fake command output** — `fakeCommandExecutor` swaps the platform
  *     `CommandExecutor` for one that returns canned stdout/exit per command. Used
- *     only for `gh`/CLI detection, where the real binaries aren't present in CI.
+ *     for command-discovery boundaries where real binaries aren't present in CI.
  */
 import { execFileSync } from "node:child_process"
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
@@ -168,9 +168,8 @@ export interface FakeCommandResult {
  * nothing (e.g. `which` for an absent binary is handled by matching, not here).
  *
  * `stdin` carries anything the command was `Command.feed`-ed, decoded to a
- * string ("" when nothing was). This is the only way to observe a `gh api
- * --input -` payload: the body is deliberately kept out of argv (see
- * `runGhInput`), so an argv-only handler sees a POST with no content.
+ * string ("" when nothing was). This lets tests observe command payloads kept
+ * out of argv, where an argv-only handler would otherwise see no content.
  */
 export type FakeCommandHandler = (
   command: string,

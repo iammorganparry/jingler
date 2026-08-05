@@ -21,7 +21,7 @@ const seededSession = (
   {
     id: `s_automatic_memory_${cli}`,
     repo: "widget",
-    branch: `jingler/automatic-memory-${cli}`,
+    branch: `chore/automatic-memory-${cli}`,
     title: `Automatic memory ${cli}`,
     status: "idle",
     cli,

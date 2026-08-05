@@ -37,7 +37,7 @@ const session = (over: Partial<Session> = {}): Session =>
   ({
     id: "s1",
     repo: "trigify/api",
-    branch: "jingler/s1",
+    branch: "chore/s1",
     title: "Fix auth",
     status: "idle",
     cli: "claude",

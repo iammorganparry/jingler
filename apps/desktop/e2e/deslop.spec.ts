@@ -14,7 +14,7 @@ import type { SeedSession } from "./fixtures.js"
 const seeded = (worktreePath: string): SeedSession => ({
   id: "s_deslop_1",
   repo: "widget",
-  branch: "jingler/deslop-session",
+  branch: "chore/deslop-session",
   title: "Deslop source session",
   status: "idle",
   cli: "claude",

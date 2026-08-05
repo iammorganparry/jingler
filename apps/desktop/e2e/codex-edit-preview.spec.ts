@@ -7,7 +7,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   {
     id: "s_codex_preview",
     repo: "widget",
-    branch: "jingler/codex-preview",
+    branch: "chore/codex-preview",
     title: "Codex edit preview",
     status: "idle",
     cli: "codex",

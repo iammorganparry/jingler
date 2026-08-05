@@ -7,7 +7,7 @@
   <true/>
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
   <true/>
-  <!-- Jingler shells out to git / gh / coding CLIs; allow inherited env vars. -->
+  <!-- Jingler shells out to git and coding CLIs; allow inherited env vars. -->
   <key>com.apple.security.cs.allow-dyld-environment-variables</key>
   <true/>
   <key>com.apple.security.cs.disable-library-validation</key>

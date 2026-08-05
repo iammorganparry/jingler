@@ -24,8 +24,8 @@ the coding CLIs already installed on your machine and keeps its desktop state in
 - [Docker](https://www.docker.com/) for the local PostgreSQL auth database
 - Git and at least one supported coding CLI, already installed and signed in
 
-[GitHub CLI](https://cli.github.com/) is optional. Install it and run `gh auth login` to enable
-pull-request and issue features.
+Pull-request and issue features use the Jingler GitHub App. Connect it during
+onboarding or from **Settings → GitHub**; the GitHub CLI is not required.
 
 Jingler currently requires Codex CLI 0.144 or newer and OpenCode 1.18 or newer. The app reports
 an upgrade command if it finds an older version.
@@ -78,14 +78,17 @@ an upgrade command if it finds an older version.
 2. Open **New session** or press <kbd>⌘</kbd><kbd>N</kbd>, then select a repository and base
    branch. The default coding CLI is configured under **Settings → Providers**.
 
-3. Create the session. Jingler forks a branch into an isolated worktree under
-   `~/jingler/worktrees` and opens the conversation for that worktree.
+3. Create the session. A fresh worktree starts detached at the latest available
+   `origin/<base>` (or the safe local base while offline) under
+   `~/jingler/worktrees`. After the first task-understanding turn, Jingler
+   validates the agent's metadata and creates a conventional `type/kebab-slug`
+   branch itself.
 
 4. Describe the task in the composer. Use the plan controls when you want a reviewable plan before
    implementation, and inspect file changes from the session's changes view.
 
-5. If GitHub CLI is connected, create or link a pull request from the PR view. Sessions can also
-   be created directly from open pull requests or issues.
+5. If the Jingler GitHub App is connected, create or link a pull request from the PR view.
+   Sessions can also be created directly from open pull requests or issues.
 
 ## Common commands
 
@@ -132,6 +135,7 @@ guide.
 | --- | --- |
 | `apps/desktop` | Electron main process, preload bridge, React renderer, and end-to-end tests |
 | `apps/server` | Hono, Better Auth, PostgreSQL/Drizzle, and email templates |
+| `apps/github-relay` | Cloudflare Worker that verifies GitHub webhooks and streams resumable review events |
 | `apps/memory-worker` | Organization-isolated Cloudflare vault, workflows, search, graph, and analytics |
 | `packages/memory` | Deterministic Markdown, revision, graph, analytics, export, and linting contracts |
 | `packages/core` | Shared domain models, schemas, and orchestration logic |
@@ -144,6 +148,32 @@ so development changes are picked up without a separate package build.
 Shared Memory deployment and recovery are documented in
 [docs/shared-memory.md](docs/shared-memory.md); Worker binding details live in
 [apps/memory-worker/README.md](apps/memory-worker/README.md).
+
+GitHub App registration, Vercel configuration, and credential rotation are
+documented in [apps/server/README.md](apps/server/README.md#github-app-registration).
+Webhook relay deployment, replay, and incident recovery are documented in
+[apps/github-relay/README.md](apps/github-relay/README.md).
+
+## GitHub and branch migration
+
+GitHub social sign-in and the product GitHub App are separate connections. An
+existing `config.json` remains valid when it has no GitHub section: open
+**Settings → GitHub** once, reconnect the App, and enable pull-request features
+if they were previously disabled. Saving those preferences preserves every
+unrelated workspace setting.
+
+Fresh isolated task sessions use semantic branches with one of `feat`, `fix`,
+`refactor`, `docs`, `test`, `chore`, `perf`, `build`, `ci`, `style`, or `revert`.
+Jingler normalizes and validates the complete ref, resolves collisions, and owns
+the git mutation; model output is never executed. Direct sessions keep the
+developer's checked-out branch, sessions opened from a PR keep its head ref,
+and established historical sessions — including persisted `jingler/*` branches
+from older releases — remain publishable without automatic rename.
+
+Built-in GitHub reads, writes, checkout, authenticated push, plugin grants, and
+realtime feedback use the shared GitHub App. Installation credentials live only
+in the Electron main process and are never persisted or returned to the
+renderer. A clean machine needs `git`, not the GitHub CLI.
 
 ## Troubleshooting
 
@@ -165,8 +195,9 @@ terminal.
 
 **GitHub features are unavailable**
 
-Install GitHub CLI, run `gh auth login`, and use the welcome screen's recheck action or restart
-Jingler.
+Open **Settings → GitHub**, then install or reconnect the Jingler GitHub App. If Jingler is
+connected but a repository is unavailable, use **Manage repositories** to add it to the
+installation, or ask the installation owner to restore access if the installation is suspended.
 
 **The auth server cannot connect to PostgreSQL**
 
@@ -184,10 +215,11 @@ Before opening a pull request, run:
 pnpm lint
 pnpm typecheck
 pnpm test
+pnpm --filter @jingler/desktop e2e
 ```
 
 Add a Changeset with `pnpm changeset` for user-facing changes. CI runs the same lint, typecheck,
-and unit-test gates on every pull request.
+and unit-test gates on every pull request; the built Electron e2e is a required local release gate.
 
 ## Plugins
 

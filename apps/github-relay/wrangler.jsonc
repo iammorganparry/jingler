@@ -1,0 +1,56 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jingler-github-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-05",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "github-relay.jingler.dev",
+      "custom_domain": true
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SESSION_EVENTS",
+        "class_name": "SessionEventsObject"
+      },
+      {
+        "name": "INSTALLATION_ROUTES",
+        "class_name": "InstallationRoutesObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["UserEventsObject", "InstallationRoutesObject"]
+    },
+    {
+      "tag": "v2",
+      "renamed_classes": [
+        {
+          "from": "UserEventsObject",
+          "to": "SessionEventsObject"
+        }
+      ]
+    }
+  ],
+  "workflows": [
+    {
+      "binding": "GITHUB_DELIVERY_WORKFLOW",
+      "name": "jingler-github-delivery",
+      "class_name": "GitHubDeliveryWorkflow"
+    },
+    {
+      "binding": "RELAY_REGISTRATION_WORKFLOW",
+      "name": "jingler-relay-registration",
+      "class_name": "RelayRegistrationWorkflow"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

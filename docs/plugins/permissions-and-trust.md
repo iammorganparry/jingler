@@ -40,7 +40,7 @@ your machine from a plugin you chose to install.
 A Jingler manifest has no `permissions: ["github", "network"]` field. Do not
 look for one; it was considered and rejected.
 
-A coarse flag answers "may this plugin run `gh`?" — but the question an operator
+A coarse flag answers "may this plugin access GitHub?" — but the question an operator
 actually has is *"which account, with which scopes, and can I take it back?"*
 A flag can express none of those. Worse, a `permissions` list is read once at
 install time, when the operator has the least context about what the plugin will
@@ -87,16 +87,21 @@ A granted token lives in the extension host. `AuthSessionInfo` — the shape eve
 which a log line, a crash report or a devtools inspection in the renderer can
 leak one.
 
-### One caveat, stated plainly
+### GitHub credentials
 
-The built-in `github` provider borrows the token `gh` is already authenticated
-with, rather than running a second OAuth app. That means **the scopes a plugin
-requests are recorded intent, not an enforced restriction** — `gh`'s token has
-whatever scopes it has. The consent prompt tells you what is being asked for and
-the grant records it; it does not mint a narrower token.
+The built-in `github` provider uses a short-lived credential issued for the
+repositories selected on the user's Jingler GitHub App installation. It does not
+discover or borrow a GitHub CLI token. The credential stays in the extension
+host, expires naturally, and is never returned to plugin UI.
 
-The upside is that the account a plugin acts as is visibly the account the rest
-of Jingler acts as, which is what you would assume anyway.
+The scopes a plugin requests remain the operator-facing consent boundary. GitHub
+also enforces the GitHub App's configured permissions and selected-repository
+boundary; a plugin cannot use this provider to reach a repository outside the
+installation or obtain organization-administration access.
+
+A third-party plugin is trusted native code and may independently launch any
+installed subprocess, including `gh`. That is outside Jingler's credential
+provider and is another reason to install only plugins whose source you trust.
 
 ## No privileged plugins
 

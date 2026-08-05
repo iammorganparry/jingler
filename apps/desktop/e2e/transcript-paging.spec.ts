@@ -25,7 +25,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   {
     id: "s_paging",
     repo: "widget",
-    branch: "jingler/paging",
+    branch: "chore/paging",
     title: "A long conversation",
     status: "idle",
     cli: "claude",

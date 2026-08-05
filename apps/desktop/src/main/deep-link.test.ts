@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { findDeepLinkInArgv, parseAuthCallback } from "./deep-link.js"
+import { findDeepLinkInArgv, parseAuthCallback, parseGitHubCallback } from "./deep-link.js"
 
 /**
  * The deep-link parsers are pure (no Electron), so they're unit-tested directly.
@@ -31,6 +31,23 @@ describe("parseAuthCallback", () => {
 
   it("rejects an unparseable URL", () => {
     expect(parseAuthCallback("not a url")).toBeNull()
+  })
+
+  it("does not conflate a GitHub App callback with BetterAuth", () => {
+    expect(parseAuthCallback("jingler://auth/callback?github=connected")).toBeNull()
+  })
+})
+
+describe("parseGitHubCallback", () => {
+  it("extracts a successful GitHub App callback", () => {
+    expect(parseGitHubCallback("jingler://auth/callback?github=connected")).toEqual({
+      connected: true,
+      error: null
+    })
+  })
+
+  it("rejects ordinary BetterAuth callbacks", () => {
+    expect(parseGitHubCallback("jingler://auth/callback?token=abc123")).toBeNull()
   })
 })
 

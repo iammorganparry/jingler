@@ -1,14 +1,14 @@
 /**
  * Renderer hook backing the Pull Request tab. react-query owns the PR read
  * (`useQuery`) and the GitHub writes (`useMutation`, invalidating the read).
- * "Create pull request" and every other `gh` write go through the MAIN-process
- * `GhService` (`rpc.github*`), where the binary can reach the macOS keychain —
- * NOT a sandboxed agent turn, which can't read `~/.config/gh` and 401s.
+ * "Create pull request" and every other GitHub write go through the main-process
+ * `GitHubApi` service (`rpc.github*`) with a short-lived App grant. The renderer
+ * and sandboxed agent never receive installation credentials.
  * Routed review feedback still goes to the agent (a normal conversation turn),
  * so its work + any approval gates/questions surface in the Conversation tab.
  * Keeps `@jingler/ui`'s `PullRequestView` presentational.
  */
-import { useCallback, useState } from "react"
+import { useCallback } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PrMergeMethod, PullRequest, ReviewSubmitKind, Session } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
@@ -28,26 +28,23 @@ export const prKey = (sessionId: string, prNumber: number | null) =>
 export interface PullRequestState {
   readonly pr: PullRequest | null
   readonly busy: boolean
-  /** The message from a failed `gh pr create`, or null. */
-  readonly createError: string | null
-  readonly createPr: () => Promise<void>
   /** Merge the PR. Defaults to a merge commit; the side panel offers the choice. */
   readonly mergePr: (method?: PrMergeMethod) => Promise<void>
   /** A merge is in flight. */
   readonly merging: boolean
-  /** The message from a failed `gh pr merge`, or null. */
+  /** The message from a failed merge API request, or null. */
   readonly mergeError: string | null
   /** Flip the linked draft PR to ready for review. */
   readonly markReady: () => Promise<void>
   /** A mark-ready is in flight. */
   readonly markingReady: boolean
-  /** The message from a failed `gh pr ready`, or null. */
+  /** The message from a failed mark-ready API request, or null. */
   readonly markReadyError: string | null
   /** Merge the base into the PR's head (clears a `BEHIND` merge state). */
   readonly updateBranch: () => Promise<void>
   /** A branch update is in flight. */
   readonly updatingBranch: boolean
-  /** The message from a failed `gh pr update-branch`, or null. */
+  /** The message from a failed update-branch API request, or null. */
   readonly updateBranchError: string | null
   readonly submitReview: (input: { body: string; kind: ReviewSubmitKind; routeToAgent: boolean }) => Promise<void>
   readonly sendEntryToAgent: (entryId: string) => Promise<void>
@@ -65,7 +62,6 @@ export function usePullRequest(
   opts: { connected: boolean; autoDetect: boolean; onPrLinked?: (sessionId: string, prNumber: number) => void }
 ): PullRequestState {
   const qc = useQueryClient()
-  const [createError, setCreateError] = useState<string | null>(null)
   const { connected, autoDetect, onPrLinked } = opts
 
   const query = useQuery({
@@ -83,8 +79,7 @@ export function usePullRequest(
   // Route an instruction to the session's agent as a NORMAL conversation turn
   // (via the persistent actor), so its work + any approval gates / questions are
   // visible and answerable in the Conversation tab. A bare `rpc.agentRun` ran a
-  // hidden turn whose gates rendered nowhere — so `gh pr create` (a gated command)
-  // stalled it forever.
+  // hidden turn whose gates rendered nowhere, so a gated command stalled forever.
   const routeToAgent = useCallback(
     (text: string) => {
       getConversationActor(session).send({ type: "SEND", text })
@@ -92,41 +87,20 @@ export function usePullRequest(
     [session]
   )
 
-  // "Create pull request" opens the PR through the MAIN-process `GhService`
-  // (`gh pr create --fill`, run with keychain access), NOT a sandboxed agent
-  // turn. gh pushes the branch and fills the title/body from its commits; we
-  // link the returned number and re-read so the tab flips to the live PR.
-  const createPr = useCallback(async () => {
-    setCreateError(null)
-    try {
-      const n = await rpc.githubCreatePr({
-        sessionId: session.id,
-        title: "",
-        body: "",
-        base: session.baseBranch ?? "main",
-        draft: false
-      })
-      onPrLinked?.(session.id, n)
-      await qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
-    } catch (e) {
-      setCreateError((e as { message?: string }).message ?? "Failed to create pull request")
-    }
-  }, [session.id, session.baseBranch, session.prNumber, onPrLinked, qc])
-
   const reviewMutation = useMutation({
     mutationFn: (input: { body: string; kind: ReviewSubmitKind }) =>
       rpc.githubReview(session.id, input.kind, input.body),
     onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
   })
 
-  // "Merge pull request" merges the linked PR via `gh pr merge`. On success the
+  // "Merge pull request" merges the linked PR through GitHub's API. On success the
   // PR read is invalidated so the header flips to "Merged" (and the archive
   // sweep, which polls the PR state, retires the session).
   const mergeMutation = useMutation({
     mutationFn: (method: PrMergeMethod) => rpc.githubMerge(session.id, method),
     onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
   })
-  // "Ready for review" flips a draft PR via `gh pr ready`. On success the PR
+  // "Ready for review" flips a draft PR through GraphQL. On success the PR
   // read is invalidated so the header + side panel leave the Draft state.
   const markReadyMutation = useMutation({
     mutationFn: () => rpc.githubMarkReady(session.id),
@@ -221,8 +195,6 @@ export function usePullRequest(
   return {
     pr,
     busy: query.isPending,
-    createError,
-    createPr,
     mergePr,
     merging: mergeMutation.isPending,
     mergeError: mergeMutation.error

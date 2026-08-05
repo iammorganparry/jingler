@@ -1,0 +1,26 @@
+{
+  "name": "@jingler/github-relay",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Verified GitHub webhooks and replayable realtime delivery for Jingler desktops.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "wrangler dev --port 9200",
+    "pretypecheck": "wrangler types",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "types": "wrangler types",
+    "deploy:dry": "wrangler deploy --dry-run",
+    "clean": "rimraf dist .wrangler .turbo *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.0",
+    "@jingler/tsconfig": "workspace:*",
+    "rimraf": "^6.0.1",
+    "vitest": "^3.2.6",
+    "wrangler": "^4.118.0"
+  }
+}
