@@ -1,4 +1,4 @@
-import { CliExecError } from "@jingler/core"
+import { CliExecError, planStageSemanticFingerprint } from "@jingler/core"
 import type { CliKind, WorkerActivity } from "@jingler/core"
 import { Deferred, Effect, Fiber, Layer, Stream } from "effect"
 import { createActor } from "xstate"
@@ -179,6 +179,163 @@ describe("orchestration graph", () => {
 })
 
 describe("OrchestrationService", () => {
+  it("streams ordered task progress and rejects foreign or stale task ids", async () => {
+    const currentStage: OrchestrationStage = {
+      ...stage("01", "agent-a"),
+      tasks: [
+        { id: "01.task.1", text: "Add the protocol", status: "pending" },
+        { id: "01.task.2", text: "Verify live updates", status: "pending" }
+      ]
+    }
+    const updates: Array<{
+      readonly taskId: string
+      readonly status: string
+      readonly stageFingerprint: string
+    }> = []
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) =>
+        Effect.gen(function* () {
+          const fingerprint = /PLAN_TASK stage=01 fingerprint=(\S+) task=<task-id>/.exec(
+            spec.prompt
+          )?.[1]
+          expect(fingerprint).toBeDefined()
+          yield* context.emit({
+            _tag: "Assistant",
+            text: [
+              `PLAN_TASK stage=01 fingerprint=${fingerprint} task=01.task.1 status=in-progress`,
+              `PLAN_TASK stage=02 fingerprint=${fingerprint} task=01.task.1 status=completed`,
+              `PLAN_TASK stage=01 fingerprint=stale task=01.task.1 status=completed`,
+              `PLAN_TASK stage=01 fingerprint=${fingerprint} task=foreign.task status=completed`,
+              `PLAN_TASK stage=01 fingerprint=${fingerprint} task=01.task.2 status=in-progress`,
+              `PLAN_TASK stage=01 fingerprint=${fingerprint} task=01.task.1 status=completed`,
+              `PLAN_TASK stage=01 fingerprint=${fingerprint} task=01.task.2 status=in-progress`
+            ].join("\n")
+          })
+          yield* passCurrentStage(spec, context)
+        }),
+      stop: () => Effect.void
+    }
+
+    const report = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* OrchestrationService
+        return yield* service.execute(
+          input([currentStage], {
+            callbacks: {
+              onTaskState: (update) =>
+                Effect.sync(() => {
+                  updates.push({
+                    taskId: update.taskId,
+                    status: update.status,
+                    stageFingerprint: update.stageFingerprint
+                  })
+                })
+            }
+          })
+        )
+      }).pipe(Effect.provide(layerFor(adapter)))
+    )
+
+    expect(report.workers[0]?.status).toBe("completed")
+    expect(updates).toEqual([
+      {
+        taskId: "01.task.1",
+        status: "in-progress",
+        stageFingerprint: planStageSemanticFingerprint(currentStage)
+      },
+      {
+        taskId: "01.task.1",
+        status: "completed",
+        stageFingerprint: planStageSemanticFingerprint(currentStage)
+      },
+      {
+        taskId: "01.task.2",
+        status: "in-progress",
+        stageFingerprint: planStageSemanticFingerprint(currentStage)
+      },
+      {
+        taskId: "01.task.2",
+        status: "completed",
+        stageFingerprint: planStageSemanticFingerprint(currentStage)
+      }
+    ])
+  })
+
+  it("restores task progress from the canonical plan after restart", async () => {
+    const queuedStage: OrchestrationStage = {
+      ...stage("01", "agent-a"),
+      tasks: [
+        { id: "01.task.1", text: "Persist the first change", status: "pending" },
+        { id: "01.task.2", text: "Resume the worker", status: "pending" },
+        { id: "01.task.3", text: "Finish verification", status: "pending" }
+      ]
+    }
+    const canonicalStage: OrchestrationStage = {
+      ...queuedStage,
+      tasks: [
+        { id: "01.task.1", text: "Persist the first change", status: "completed" },
+        { id: "01.task.2", text: "Resume the worker", status: "in-progress" },
+        { id: "01.task.3", text: "Finish verification", status: "pending" }
+      ]
+    }
+    const updates: Array<string> = []
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) =>
+        Effect.gen(function* () {
+          expect(spec.resumeId).toBe("resume-after-restart")
+          expect(spec.prompt).toContain("1. [completed] 01.task.1")
+          expect(spec.prompt).toContain("2. [in-progress] 01.task.2")
+          const fingerprint = /PLAN_TASK stage=01 fingerprint=(\S+) task=<task-id>/.exec(
+            spec.prompt
+          )?.[1]
+          yield* context.emit({
+            _tag: "Assistant",
+            text: [
+              `PLAN_TASK stage=01 fingerprint=${fingerprint} task=01.task.1 status=in-progress`,
+              `PLAN_TASK stage=01 fingerprint=${fingerprint} task=01.task.2 status=completed`,
+              `PLAN_TASK stage=01 fingerprint=${fingerprint} task=01.task.3 status=in-progress`
+            ].join("\n")
+          })
+          yield* passCurrentStage(spec, context)
+        }),
+      stop: () => Effect.void
+    }
+
+    const report = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* OrchestrationService
+        return yield* service.execute(
+          input([queuedStage], {
+            checkpoints: [
+              {
+                agentId: "agent-a",
+                state: "interrupted",
+                completedStageIds: [],
+                resumeId: "resume-after-restart",
+                message: "The desktop process stopped.",
+                attempt: 1
+              }
+            ],
+            refreshStage: () => Effect.succeed(canonicalStage),
+            callbacks: {
+              onTaskState: (update) =>
+                Effect.sync(() => {
+                  updates.push(`${update.taskId}:${update.status}`)
+                })
+            }
+          })
+        )
+      }).pipe(Effect.provide(layerFor(adapter)))
+    )
+
+    expect(report.workers[0]?.status).toBe("completed")
+    expect(updates).toEqual([
+      "01.task.2:completed",
+      "01.task.3:in-progress",
+      "01.task.3:completed"
+    ])
+  })
+
   it("projects live worker and nested-agent routes, steers the owner, and rejects stale ids", async () => {
     const ready = await Effect.runPromise(Deferred.make<void>())
     const release = await Effect.runPromise(Deferred.make<void>())

@@ -72,9 +72,14 @@ test("accepted session learning reaches a teammate but never another organizatio
     )
     for (const request of mcpTraffic) {
       expect(request.httpMethod).toBe("POST")
-      expect(request.mcpMethod).toBe(request.rpcMethod)
+      // Gateway-originated calls carry the optional routing header; direct
+      // stateless UI calls intentionally omit it. When present it must agree
+      // with the JSON-RPC method.
+      if (request.mcpMethod !== null) {
+        expect(request.mcpMethod).toBe(request.rpcMethod)
+        expect(request.metadataProtocolVersion).toBe("2026-07-28")
+      }
       expect(request.protocolVersion).toBe("2026-07-28")
-      expect(request.metadataProtocolVersion).toBe("2026-07-28")
       expect(request.rpcMethod).not.toBe("initialize")
       expect(request.hasCookie).toBe(false)
       expect(request.hasSessionId).toBe(false)

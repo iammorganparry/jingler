@@ -3,6 +3,7 @@ import {
   planningOrchestrationRoutes,
   unavailableOrchestrationAssignment
 } from "./agent-runner.js"
+import { PLAN_JSON_REFORMAT, planJsonInstructions } from "./plan-json.js"
 import { planNote } from "./plan-prompt.js"
 
 describe("planNote", () => {
@@ -91,5 +92,25 @@ describe("planNote", () => {
     expect(note).toContain('"stages"')
     expect(note).toContain("never emit worker assignments")
     expect(note).not.toContain("data-agent-id")
+  })
+
+  it("requires TLDR, detailed tasks, stage diagrams, and concrete test references", () => {
+    // Claude receives this shared payload through planModeInstructions; Codex
+    // and OpenCode receive the same payload inside their per-turn plan note.
+    const contract = planJsonInstructions()
+    expect(contract).toContain('FIRST section must be titled "TL;DR"')
+    expect(contract).toContain('"tasks": [{ "id", "text", "status": "pending" }]')
+    expect(contract).toContain("Put every diagram in its owning stage")
+    expect(contract).toContain('"testReferences": [{ "path", "cases": string[] }]')
+    expect(contract).toContain("repository-relative test path")
+    expect(contract).toContain("exact named test cases")
+    expect(planNote("codex")).toContain(contract)
+    expect(planNote("opencode")).toContain(contract)
+
+    const reformat = PLAN_JSON_REFORMAT("- plan.stages.0.tasks: is missing")
+    expect(reformat).toContain("TL;DR")
+    expect(reformat).toContain("tasks")
+    expect(reformat).toContain("owning stage")
+    expect(reformat).toContain("testReferences")
   })
 })

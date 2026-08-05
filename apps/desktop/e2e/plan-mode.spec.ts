@@ -84,6 +84,20 @@ const seedPlanAsset = ({ repoPath }: { repoPath: string }): void => {
   )
 }
 
+const seedStageReviewAssets = ({ repoPath }: { repoPath: string }): void => {
+  seedPlanAsset({ repoPath })
+  writeFileSync(
+    join(repoPath, "src", "auth", "session.test.ts"),
+    'import { expect, it } from "vitest"\nit("keeps stage review traceable", () => expect(true).toBe(true))\n'
+  )
+  execFileSync("git", ["add", "src/auth/session.test.ts"], { cwd: repoPath })
+  execFileSync(
+    "git",
+    ["commit", "-m", "seed stage review test", "--no-gpg-sign"],
+    { cwd: repoPath }
+  )
+}
+
 const revisionOf = (file: string): number =>
   Number(/"revision":\s*(\d+)/.exec(readFileSync(file, "utf8"))?.[1] ?? 0)
 
@@ -115,6 +129,24 @@ const proposePlan = async (launched: LaunchedApp): Promise<void> => {
   await expect.poll(() => readFileSync(currentPlanPath(launched), "utf8")).toContain(
     '"id": "s_01"'
   )
+}
+
+const writeTaskProgressPlan = (file: string): void => {
+  const current = JSON.parse(readFileSync(file, "utf8"))
+  current.revision += 1
+  const stage = current.plan.stages[0]
+  stage.tasks = [
+    { id: "s_01.task.1", text: "Trace live worker progress", status: "pending" }
+  ]
+  stage.notes = [
+    ...(stage.notes ?? []),
+    {
+      kind: "prose",
+      id: "hold-for-progress",
+      text: "[[worker-hold]] Keep the scripted worker running after it reports progress."
+    }
+  ]
+  writeFileSync(file, JSON.stringify(current, null, 2))
 }
 
 test("the PRD template validates, persists, and resets", async ({ launchApp }) => {
@@ -219,14 +251,15 @@ test("the Main, Architecture and Workflow pages each render their surface", asyn
   )
   await expect(window.getByText("Open PR #482", { exact: true })).toBeVisible()
 
-  // Architecture: prose sections + a rendered mermaid diagram.
+  // Architecture: prose sections + stage-owned architecture grouping. The
+  // dedicated test below verifies the dynamically loaded hand-drawn SVG.
   await window.getByRole("tab", { name: "Architecture" }).click()
   await expect(
     window.getByRole("heading", { name: "Technical design" })
   ).toBeVisible()
-  await expect(window.locator(".sb-mermaid svg").first()).toBeVisible({
-    timeout: 20_000
-  })
+  await expect(
+    window.getByRole("region", { name: "Architecture for Audit session middleware" })
+  ).toBeVisible()
 
   // Workflow: the dependency DAG renders each stage as a node.
   await window.getByRole("tab", { name: "Workflow" }).click()
@@ -239,6 +272,126 @@ test("the Main, Architecture and Workflow pages each render their surface", asyn
   await expect(
     window.getByText("Audit session middleware", { exact: true })
   ).toBeVisible()
+})
+
+test("the Main and Architecture pages keep TLDR and stage architecture connected", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session()
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await proposePlan(launched)
+  const { window } = launched
+
+  const stage = window.locator('[data-step-id="s_01"]')
+  await expect(stage.getByText("0 of 2 completed", { exact: true })).toBeVisible()
+  await expect(window.getByText("Trace the existing token path", { exact: true })).toBeVisible()
+  await expect(stage.locator('.sb-mermaid [data-look="handDrawn"]').first()).toBeVisible({
+    timeout: 20_000
+  })
+
+  await window.getByRole("tab", { name: "Architecture" }).click()
+  await expect(window.getByRole("heading", { level: 2 }).first()).toHaveText("TL;DR")
+  const architecture = window.getByRole("region", {
+    name: "Architecture for Audit session middleware"
+  })
+  await expect(
+    architecture.locator('.sb-mermaid [data-look="handDrawn"]').first()
+  ).toBeVisible({ timeout: 20_000 })
+  await architecture.getByRole("button", {
+    name: "Open stage Audit session middleware in Main"
+  }).click()
+
+  await expect(window.getByRole("tab", { name: "Main" })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  )
+  await expect(window.locator('[data-step-id="s_01"]')).toHaveAttribute("aria-pressed", "true")
+})
+
+test("acceptance tests open their referenced file and identify the named case", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: seedStageReviewAssets,
+    sessions: session()
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await proposePlan(launched)
+  const { window } = launched
+  const stage = window.locator('[data-step-id="s_01"]')
+  const namedCases = stage.getByRole("list", {
+    name: "Named test cases in src/auth/session.test.ts"
+  })
+
+  await expect(namedCases).toContainText("keeps stage review traceable")
+  await stage
+    .getByRole("button", { name: "Open src/auth/session.test.ts", exact: true })
+    .click()
+
+  await expect(window.getByRole("button", { name: "Hide preview" })).toBeVisible()
+  await expect(window.getByTitle("src/auth/session.test.ts", { exact: true })).toBeVisible()
+})
+
+test("worker task progress streams into the canonical plan review", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: {
+      orchestrator: { cli: "codex", model: "gpt-5.6-sol" }
+    }
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  const { window, home } = launched
+
+  await window.getByTestId("new-session").click()
+  await window
+    .getByPlaceholder("Leave blank for agent naming")
+    .fill("Task progress orchestration")
+  await window.getByRole("button", { name: "Create" }).click()
+
+  const sessionsFile = join(home, "jingler", "sessions.json")
+  await expect.poll(() => existsSync(sessionsFile), { timeout: 10_000 }).toBe(true)
+  const sessions = JSON.parse(readFileSync(sessionsFile, "utf8"))
+  const worktreePath = sessions[0].worktreePath as string
+  const planFile = join(planDirectory(home, worktreePath), "current-plan.json")
+  const composer = window.getByPlaceholder("Message Codex…")
+  await composer.fill("[[plan]] refactor auth to a TokenStore")
+  await composer.press("Enter")
+  await expect.poll(() => existsSync(planFile), { timeout: 20_000 }).toBe(true)
+  await window.getByRole("button", { name: "Plan Review" }).first().click()
+  await expect(window.getByText("Audit session middleware", { exact: true })).toBeVisible({
+    timeout: 20_000
+  })
+
+  writeTaskProgressPlan(planFile)
+  const stageCard = window.locator('[data-step-id="s_01"]')
+  await expect(stageCard.getByText("Trace live worker progress", { exact: true })).toBeVisible({
+    timeout: 10_000
+  })
+  await expect(
+    stageCard.getByRole("list", { name: "Stage tasks" }).getByText("Pending", { exact: true })
+  ).toBeVisible()
+
+  await window.getByRole("button", { name: "More plan actions" }).click()
+  await window.getByRole("menuitem", { name: "Approve and auto", exact: true }).click()
+
+  await expect(stageCard.getByText("In progress", { exact: true })).toBeVisible({
+    timeout: 20_000
+  })
+  await expect
+    .poll(() => {
+      const document = JSON.parse(readFileSync(planFile, "utf8"))
+      return document.plan.stages[0].tasks[0].status
+    })
+    .toBe("in-progress")
 })
 
 test("a comment added on a step appears and can be resolved", async ({
@@ -351,7 +504,7 @@ test("plan file chips render on the step outline with diff evidence", async ({
   // Each step's Changes section renders its declared edits as inline file chips.
   await expect(window.getByText("src/auth/token-store.ts", { exact: true })).toBeVisible()
   await expect(window.getByText("src/auth/refresh.ts").first()).toBeVisible()
-  await expect(window.getByText("src/auth/session.test.ts", { exact: true })).toBeVisible()
+  await expect(window.getByText("src/auth/session.test.ts", { exact: true }).first()).toBeVisible()
 })
 
 test("an external write to the plan file live-updates the outline (Plan.watch)", async ({
@@ -408,9 +561,9 @@ test("the Plan Review tab is always present and can seed a draft to author", asy
   await expect
     .poll(() => readFileSync(currentPlanPath(launched), "utf8"))
     .toContain('"status": "draft"')
-  // A draft (no agent run yet) offers a handoff, not the no-op Revise/Approve.
+  // A local draft can move directly into the one approval gate.
   await expect(
-    launched.window.getByRole("button", { name: "Send to agent" })
+    launched.window.getByRole("button", { name: "Approve & implement" })
   ).toBeVisible()
 })
 

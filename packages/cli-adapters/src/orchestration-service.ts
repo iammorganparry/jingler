@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import {
   buildPlanExecutionGraph,
   planBlockText,
@@ -9,6 +10,11 @@ const renderStageSpec = (stage: PlanPrdStage): string =>
   [
     stage.approach.length > 0
       ? `Approach:\n${stage.approach.map((step) => `- ${step}`).join("\n")}`
+      : "",
+    (stage.tasks ?? []).length > 0
+      ? `Tasks (complete in this order):\n${(stage.tasks ?? [])
+          .map((task, index) => `${index + 1}. [${task.status}] ${task.id} — ${task.text}`)
+          .join("\n")}`
       : "",
     stage.files.length > 0
       ? `Files:\n${stage.files.map((file) => `- ${file.change} ${file.path}`).join("\n")}`
@@ -27,6 +33,7 @@ import type {
   PlanExecutionDiagnostic,
   PlanPrdStage,
   PlanStageAssignment,
+  PlanTaskStatus,
   StreamEvent,
   WorkerActivity,
   WorkerActivityReset,
@@ -247,6 +254,19 @@ export interface OrchestrationStageUpdate {
   readonly stageFingerprint: string
 }
 
+export type OrchestrationTaskStatus = Exclude<PlanTaskStatus, "pending">
+
+export interface OrchestrationTaskUpdate {
+  readonly sessionId: string
+  readonly planId: string
+  readonly agentId: string
+  readonly stageId: string
+  readonly taskId: string
+  readonly status: OrchestrationTaskStatus
+  /** Raw semantic fingerprint used by canonical persistence as a stale-write guard. */
+  readonly stageFingerprint: string
+}
+
 export interface OrchestrationCheckpoint {
   readonly agentId: string
   readonly state: OrchestrationWorkerStatus
@@ -275,6 +295,9 @@ export interface OrchestrationCallbacks {
   ) => Effect.Effect<void, OrchestrationPersistenceError, never>
   readonly onStageState?: (
     update: OrchestrationStageUpdate
+  ) => Effect.Effect<void, OrchestrationPersistenceError, never>
+  readonly onTaskState?: (
+    update: OrchestrationTaskUpdate
   ) => Effect.Effect<void, OrchestrationPersistenceError, never>
   readonly onEvent?: (
     agentId: string,
@@ -369,7 +392,17 @@ const workerPrompt = (
   input: OrchestrationExecuteInput,
   group: OrchestrationWorkerGroup,
   stage: OrchestrationStage
-): string => `[[orchestration-worker]]
+): string => {
+  const progressInstructions = (stage.tasks ?? []).length === 0
+    ? ""
+    : `
+Task progress protocol:
+Complete tasks in the listed order. Immediately after each task state change,
+emit exactly one line in this form (using only in-progress, completed, or blocked):
+PLAN_TASK stage=${stage.id} fingerprint=${taskProgressFingerprint(stage)} task=<task-id> status=<status>
+Only use task ids listed above. Do not repeat an unchanged status.`
+
+  return `[[orchestration-worker]]
 You are worker ${group.agentId} executing an approved Jingler plan.
 
 Plan: ${input.planId}, revision ${input.planRevision}
@@ -377,7 +410,7 @@ Stage: ${stage.id} — ${stage.title}
 Intent: ${stage.intent}
 
 Stage specification:
-${renderStageSpec(stage)}
+${renderStageSpec(stage)}${progressInstructions}
 
 Complete only this stage in the shared worktree. Dependencies assigned to you run
 before this stage. Do not edit the canonical plan directly; Jingler records
@@ -386,6 +419,88 @@ criterion you verified:
 PLAN_RESULT criterion=<id> status=<passed|failed> evidence=<concise observable evidence>
 
 Criteria: ${stage.acceptance.map((criterion) => criterion.id).join(", ")}`
+}
+
+const TASK_PROGRESS_LINE_MAX = 2048
+const TASK_PROGRESS_EVENT_MAX = 64 * 1024
+const TASK_PROGRESS_UPDATE_MAX = 256
+const TASK_PROGRESS_LINE_PATTERN =
+  /^PLAN_TASK stage=(\S+) fingerprint=(\S+) task=(\S+) status=(in-progress|completed|blocked)$/
+
+/** Compact, copy-safe identity for the stage semantics embedded in worker output. */
+const taskProgressFingerprint = (stage: OrchestrationStage): string =>
+  createHash("sha256")
+    .update(planStageSemanticFingerprint(stage))
+    .digest("hex")
+    .slice(0, 24)
+
+interface ParsedTaskProgress {
+  readonly taskId: string
+  readonly status: OrchestrationTaskStatus
+}
+
+/**
+ * Stateful per-stage protocol parser. It accepts only bounded, ordered
+ * transitions and starts from canonical task statuses, which makes a resumed
+ * worker continue rather than replay already persisted progress.
+ */
+const taskProgressTracker = (stage: OrchestrationStage) => {
+  const tasks = stage.tasks ?? []
+  const statuses = new Map(tasks.map((task) => [task.id, task.status]))
+  const fingerprint = taskProgressFingerprint(stage)
+  let accepted = 0
+
+  const activeTaskId = (): string | null =>
+    tasks.find((task) => {
+      const status = statuses.get(task.id) ?? task.status
+      return status !== "completed"
+    })?.id ?? null
+
+  const accept = (text: string): ReadonlyArray<ParsedTaskProgress> => {
+    if (accepted >= TASK_PROGRESS_UPDATE_MAX) return []
+    const updates: Array<ParsedTaskProgress> = []
+    for (const rawLine of text.slice(0, TASK_PROGRESS_EVENT_MAX).split(/\r?\n/)) {
+      if (accepted >= TASK_PROGRESS_UPDATE_MAX) break
+      if (rawLine.length > TASK_PROGRESS_LINE_MAX) continue
+      const line = rawLine.trim()
+      if (!line.startsWith("PLAN_TASK")) continue
+      const match = TASK_PROGRESS_LINE_PATTERN.exec(line)
+      if (match === null) continue
+      const [, stageId, emittedFingerprint, taskId, statusValue] = match
+      if (
+        stageId !== stage.id ||
+        emittedFingerprint !== fingerprint ||
+        taskId !== activeTaskId()
+      ) continue
+      const current = statuses.get(taskId)
+      const status = statusValue as OrchestrationTaskStatus
+      const valid =
+        (status === "in-progress" && (current === "pending" || current === "blocked")) ||
+        (status === "completed" && current === "in-progress") ||
+        (status === "blocked" && (current === "pending" || current === "in-progress"))
+      if (!valid) continue
+      statuses.set(taskId, status)
+      accepted += 1
+      updates.push({ taskId, status })
+    }
+    return updates
+  }
+
+  const settle = (
+    status: "completed" | "blocked"
+  ): ReadonlyArray<ParsedTaskProgress> => {
+    const updates: Array<ParsedTaskProgress> = []
+    for (const task of tasks) {
+      const current = statuses.get(task.id) ?? task.status
+      if (current === "completed" || current === "blocked") continue
+      statuses.set(task.id, status)
+      updates.push({ taskId: task.id, status })
+    }
+    return updates
+  }
+
+  return { accept, settle }
+}
 
 interface ParsedStageEvidence {
   readonly evidence: ReadonlyArray<OrchestrationEvidence>
@@ -940,6 +1055,12 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
       ): Effect.Effect<void, OrchestrationPersistenceError> =>
         callbacks?.onStageState?.(update) ?? Effect.void
 
+      const notifyTask = (
+        callbacks: OrchestrationCallbacks | undefined,
+        update: OrchestrationTaskUpdate
+      ): Effect.Effect<void, OrchestrationPersistenceError> =>
+        callbacks?.onTaskState?.(update) ?? Effect.void
+
       const checkpoint = (
         callbacks: OrchestrationCallbacks | undefined,
         value: OrchestrationCheckpoint
@@ -1147,6 +1268,24 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
               const blocker = yield* Ref.make<string | null>(null)
               const persistenceFailure =
                 yield* Ref.make<OrchestrationPersistenceError | null>(null)
+              const taskProgress = taskProgressTracker(latestStage)
+              const persistTaskUpdates = (
+                updates: ReadonlyArray<ParsedTaskProgress>
+              ): Effect.Effect<void, OrchestrationPersistenceError> =>
+                Effect.forEach(
+                  updates,
+                  (update) =>
+                    notifyTask(input.callbacks, {
+                      sessionId: input.sessionId,
+                      planId: input.planId,
+                      agentId: group.agentId,
+                      stageId: latestStage.id,
+                      taskId: update.taskId,
+                      status: update.status,
+                      stageFingerprint
+                    }),
+                  { discard: true }
+                )
               const prompt = workerPrompt(input, group, latestStage)
               const requested = input.makeSessionSpec({
                 ownerId,
@@ -1206,6 +1345,13 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                   }
                   if (event._tag === "Assistant") {
                     yield* Ref.update(assistant, (chunks) => [...chunks, event.text])
+                    const persistedProgress = yield* persistTaskUpdates(
+                      taskProgress.accept(event.text)
+                    ).pipe(Effect.either)
+                    if (persistedProgress._tag === "Left") {
+                      yield* Ref.set(persistenceFailure, persistedProgress.left)
+                      return yield* Effect.interrupt
+                    }
                     const waiter = yield* Ref.get(workerRoute.replyWaiter)
                     if (waiter !== null) {
                       yield* appendSteeredReply(waiter, event.text)
@@ -1292,6 +1438,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
 
               const blocked = yield* Ref.get(blocker)
               if (blocked !== null) {
+                yield* persistTaskUpdates(taskProgress.settle("blocked"))
                 yield* notifyStage(input.callbacks, {
                   sessionId: input.sessionId,
                   planId: input.planId,
@@ -1321,6 +1468,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                 const classified = classifyProviderFailure(failure)
                 const status =
                   classified.classification === "terminal-operator" ? "blocked" : "failed"
+                yield* persistTaskUpdates(taskProgress.settle("blocked"))
                 yield* notifyStage(input.callbacks, {
                   sessionId: input.sessionId,
                   planId: input.planId,
@@ -1348,6 +1496,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
               if (stageEvidence.structuralErrors.length > 0) {
                 const verificationMessage =
                   stageEvidence.structuralErrors.join(" ")
+                yield* persistTaskUpdates(taskProgress.settle("blocked"))
                 yield* notifyStage(input.callbacks, {
                   sessionId: input.sessionId,
                   planId: input.planId,
@@ -1405,6 +1554,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
               if (stageEvidence.verificationErrors.length > 0) {
                 const verificationMessage =
                   stageEvidence.verificationErrors.join(" ")
+                yield* persistTaskUpdates(taskProgress.settle("blocked"))
                 yield* notifyStage(input.callbacks, {
                   sessionId: input.sessionId,
                   planId: input.planId,
@@ -1422,6 +1572,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                   readonly message: string
                 }
               }
+              yield* persistTaskUpdates(taskProgress.settle("completed"))
               completed.add(stage.id)
               yield* notifyStage(input.callbacks, {
                 sessionId: input.sessionId,

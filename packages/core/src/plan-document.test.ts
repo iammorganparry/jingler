@@ -6,7 +6,9 @@ import {
   PlanCommentMessage,
   PlanDocument,
   PlanPrdStage,
+  PlanTask,
   PlanTemplateConfig,
+  PlanTestReference,
   planDocumentToPlan
 } from "./plan-document.js"
 
@@ -31,6 +33,88 @@ const structuredStage = {
 }
 
 describe("plan document schemas", () => {
+  it("decodes progressable tasks and named test references", () => {
+    const decoded = Schema.decodeUnknownEither(PlanPrdStage)({
+      ...structuredStage,
+      tasks: [
+        { id: "02.task.1", text: "Dispatch independent workers", status: "in-progress" },
+        { id: "02.task.2", text: "Collect verification evidence", status: "blocked" }
+      ],
+      acceptance: [
+        {
+          id: "02.1",
+          text: "Independent workers complete.",
+          testReferences: [
+            {
+              path: "packages/core/src/plan-document.test.ts",
+              cases: ["decodes progressable tasks and named test references"]
+            }
+          ],
+          status: "pending",
+          evidence: null
+        }
+      ]
+    })
+
+    expect(Either.isRight(decoded)).toBe(true)
+    if (Either.isLeft(decoded)) return
+    expect(decoded.right.tasks).toEqual([
+      { id: "02.task.1", text: "Dispatch independent workers", status: "in-progress" },
+      { id: "02.task.2", text: "Collect verification evidence", status: "blocked" }
+    ])
+    expect(decoded.right.acceptance[0]?.testReferences).toEqual([
+      {
+        path: "packages/core/src/plan-document.test.ts",
+        cases: ["decodes progressable tasks and named test references"]
+      }
+    ])
+    expect(
+      Either.isRight(
+        Schema.decodeUnknownEither(PlanTask)({ id: "task", text: "Do work", status: "completed" })
+      )
+    ).toBe(true)
+    expect(
+      Either.isRight(
+        Schema.decodeUnknownEither(PlanTestReference)({ path: "src/example.test.ts", cases: ["works"] })
+      )
+    ).toBe(true)
+  })
+
+  it("keeps legacy plans without tasks or test references readable", () => {
+    const decoded = Schema.decodeUnknownEither(PlanDocument)({
+      id: "legacy-plan",
+      sessionId: "session-1",
+      producingChatId: "chat-1",
+      revision: 3,
+      status: "proposed",
+      plan: {
+        title: "PRD: Legacy plan",
+        sections: [],
+        stages: [
+          {
+            ...structuredStage,
+            acceptance: [
+              {
+                id: "02.1",
+                text: "The old criterion remains readable.",
+                status: "passed",
+                evidence: "legacy evidence"
+              }
+            ]
+          }
+        ],
+        annotations: []
+      },
+      updatedAt: "2026-07-28T12:00:00.000Z",
+      updatedBy: "agent"
+    })
+
+    expect(Either.isRight(decoded)).toBe(true)
+    if (Either.isLeft(decoded)) return
+    expect(decoded.right.plan.stages[0]?.tasks).toEqual([])
+    expect(decoded.right.plan.stages[0]?.acceptance[0]?.testReferences).toEqual([])
+  })
+
   it("builds a blank default plan", () => {
     expect(defaultPlan()).toEqual({ title: "Plan", sections: [], stages: [], annotations: [] })
     expect(defaultPlan("PRD: Custom").title).toBe("PRD: Custom")

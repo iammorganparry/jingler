@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest"
 import type { Plan, PlanDocument } from "@jingler/core"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { PlanReview } from "./plan-review.js"
 
@@ -138,7 +139,26 @@ describe("PlanReview", () => {
     // those, so without normalization this would throw during render.
     const malformed = JSON.stringify({
       mode: "draft",
-      plan: { title: "PRD: Malformed", stages: [{ id: "01", title: "Broken stage" }] }
+      plan: {
+        title: "PRD: Malformed",
+        stages: [
+          {
+            id: "01",
+            title: "Broken stage",
+            tasks: [null, { id: "task", text: "Still readable", status: "unknown" }],
+            diagrams: [null, { id: "diagram", source: 42 }],
+            acceptance: [
+              {
+                id: "criterion",
+                text: "Malformed references do not crash.",
+                status: "unknown",
+                evidence: {},
+                testReferences: [null, { path: 42, cases: null }]
+              }
+            ]
+          }
+        ]
+      }
     })
     expect(() =>
       render(
@@ -149,6 +169,7 @@ describe("PlanReview", () => {
       )
     ).not.toThrow()
     expect(await screen.findByText("Broken stage")).toBeTruthy()
+    expect(screen.getByText("Still readable")).toBeTruthy()
   })
 
   it("lands a progress-dock deep link on its step in the Main outline", async () => {
@@ -191,6 +212,48 @@ describe("PlanReview", () => {
     // Back to Main.
     fireEvent.click(screen.getByRole("tab", { name: "Main" }))
     expect(screen.getByText("Build")).toBeTruthy()
+  })
+
+  it("shows TLDR first and jumps from stage architecture to its Main card", async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    const architectureDocument: PlanDocument = {
+      ...document,
+      plan: {
+        ...document.plan,
+        sections: [
+          {
+            id: "context",
+            title: "Context",
+            blocks: [{ kind: "prose", id: "context-copy", text: "Background detail." }]
+          },
+          {
+            id: "tldr",
+            title: "TL;DR",
+            blocks: [{ kind: "prose", id: "tldr-copy", text: "Outcome first." }]
+          }
+        ],
+        stages: document.plan.stages.map((stage) => ({
+          ...stage,
+          diagrams: [{ id: "build-flow", source: "flowchart LR; Plan-->Build" }]
+        }))
+      }
+    }
+
+    render(<PlanReview plan={null} document={architectureDocument} />)
+    fireEvent.click(screen.getByRole("tab", { name: "Architecture" }))
+
+    const headings = screen.getAllByRole("heading", { level: 2 })
+    expect(headings[0]).toHaveTextContent("TL;DR")
+    expect(screen.getByText("Outcome first.")).toBeVisible()
+    expect(screen.getByRole("region", { name: "Architecture for Build" })).toBeVisible()
+
+    fireEvent.click(screen.getByRole("button", { name: "Open stage Build in Main" }))
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Main" })).toHaveAttribute("aria-selected", "true")
+      expect(globalThis.document.querySelector('[data-step-id="01"]')).toHaveAttribute("aria-pressed", "true")
+    })
+    expect(scrollIntoView).toHaveBeenCalled()
   })
 
   it("renders an older plan as its original Markdown without the legacy workspace", () => {

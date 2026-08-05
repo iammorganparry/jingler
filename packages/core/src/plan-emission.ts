@@ -4,7 +4,8 @@ import {
   PlanPrd,
   PlanPrdStage,
   PlanStageAssignment,
-  PlanStageExecutionStatus
+  PlanStageExecutionStatus,
+  PlanTaskStatus
 } from "./plan-document.js"
 
 /**
@@ -85,6 +86,12 @@ export const PlanDelta = Schema.Union(
     afterStageId: Schema.optional(Schema.NullOr(Schema.String))
   }),
   Schema.Struct({ _tag: Schema.Literal("RemoveStage"), stageId: Schema.String }),
+  Schema.Struct({
+    _tag: Schema.Literal("SetTaskStatus"),
+    stageId: Schema.String,
+    taskId: Schema.String,
+    status: PlanTaskStatus
+  }),
   Schema.Struct({
     _tag: Schema.Literal("SetAcceptanceStatus"),
     stageId: Schema.String,

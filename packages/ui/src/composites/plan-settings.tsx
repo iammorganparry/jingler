@@ -205,7 +205,8 @@ function WorkerRoutingSettings({
         <p className="mt-1 max-w-[760px] text-[11.5px] leading-relaxed text-muted-foreground">
           Jingler routes each dependency/file component by its strongest stage
           complexity. These concrete worker routes are independent of the
-          orchestrator model.
+          orchestrator model, and saved selections remain exact while they are
+          available.
         </p>
       </div>
       <div className="mt-4 divide-y divide-line rounded-lg border border-line">
@@ -302,12 +303,14 @@ function WorkerRoutingSettings({
       </div>
       {routing === null || routing === undefined ? (
         <p className="mt-3 text-[11px] text-muted-foreground">
-          Sensible default: every bucket uses the first available
-          planning-capable route until you customize it.
+          Automatic policy: low uses an efficient route, medium a balanced
+          route, and high the strongest route. The selectors above show the
+          effective routes.
         </p>
       ) : fallbackBuckets.length > 0 ? (
         <p className="mt-3 rounded-md border border-yellow/35 bg-yellow/5 px-3 py-2 text-[11px] text-yellow">
-          Unavailable saved routes are using the configured default:{" "}
+          Unavailable saved routes are using their complexity-aware automatic
+          replacements:{" "}
           {fallbackBuckets.map((bucket) => bucket.label).join(", ")}.
         </p>
       ) : null}

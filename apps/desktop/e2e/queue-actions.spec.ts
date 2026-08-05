@@ -61,16 +61,18 @@ test("Send now turns queued plan feedback into a real revision", async ({ launch
   // the exact row from the reported bug rather than relying on a synthetic seed.
   await expect(window.getByTestId("plan-split-column")).toBeVisible({ timeout: 15_000 })
   const busyComposer = window.getByPlaceholder("Queue a message while the agent works…")
-  await busyComposer.fill("Use durable objects for concurrency.")
+  const feedback = "Use durable objects for concurrency."
+  await busyComposer.fill(feedback)
   await busyComposer.press("Enter")
-  await expect(window.getByText("Queued", { exact: true })).toBeVisible()
+  const queuedFeedback = window.getByText(feedback, { exact: true })
+  await expect(queuedFeedback.locator("..").getByText("Queued", { exact: true })).toBeVisible()
 
   await expect(window.getByRole("button", { name: "Approve", exact: true }).first()).toBeVisible({
     timeout: 15_000
   })
   await window.getByRole("button", { name: "Send now" }).click()
 
-  await expect(window.getByText("Queued", { exact: true })).toHaveCount(0)
+  await expect(queuedFeedback).toHaveCount(0)
   await expect(window.getByText("Refactor auth flow (revised)", { exact: true })).toBeVisible({
     timeout: 20_000
   })

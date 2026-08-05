@@ -5,7 +5,8 @@ import type {
   PlanCommentMessageDeliveryState,
   PlanPrd,
   PlanAcceptanceStatus,
-  PlanStageExecutionStatus
+  PlanStageExecutionStatus,
+  PlanTaskStatus
 } from "@jingler/core"
 
 /**
@@ -43,6 +44,26 @@ export const setStageExecution = (
     if (stage.id !== stageId) return stage
     found = true
     return { ...stage, executionStatus: status }
+  })
+  return found ? { ...plan, stages } : null
+}
+
+/** Set one task's mechanical progress without changing any stage semantics. */
+export const setTaskStatus = (
+  plan: PlanPrd,
+  stageId: string,
+  taskId: string,
+  status: PlanTaskStatus
+): PlanPrd | null => {
+  let found = false
+  const stages = plan.stages.map((stage) => {
+    if (stage.id !== stageId) return stage
+    const tasks = (stage.tasks ?? []).map((task) => {
+      if (task.id !== taskId) return task
+      found = true
+      return { ...task, status }
+    })
+    return found ? { ...stage, tasks } : stage
   })
   return found ? { ...plan, stages } : null
 }

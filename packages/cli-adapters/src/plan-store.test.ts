@@ -435,6 +435,44 @@ describe("PlanStore canonical document", () => {
     expect(document.plan.stages[0]?.acceptance[0]?.status).toBe("passed")
   })
 
+  it("persists task progress without changing plan semantics", async () => {
+    const source: PlanPrd = {
+      ...SOURCE,
+      stages: SOURCE.stages.map((stage) => ({
+        ...stage,
+        tasks: [
+          { id: "01.task.1", text: "Add the mutation", status: "pending" },
+          { id: "01.task.2", text: "Verify persistence", status: "pending" }
+        ]
+      }))
+    }
+
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(source)
+        const before = planStageSemanticFingerprint(first.plan.stages[0]!)
+        const updated = yield* PlanStore.setTaskStatusLatest(WT, {
+          planId: first.id,
+          stageId: "01",
+          taskId: "01.task.1",
+          status: "in-progress",
+          expectedStageFingerprint: before
+        })
+        const restored = yield* PlanStore.readDocument(WT)
+        return { first, before, updated, restored }
+      })
+    )
+
+    expect(result.updated?.revision).toBe(result.first.revision + 1)
+    expect(result.restored?.plan.stages[0]?.tasks).toEqual([
+      { id: "01.task.1", text: "Add the mutation", status: "in-progress" },
+      { id: "01.task.2", text: "Verify persistence", status: "pending" }
+    ])
+    expect(planStageSemanticFingerprint(result.restored!.plan.stages[0]!)).toBe(
+      result.before
+    )
+  })
+
   it("revision-guards appending, delivery updates, and thread resolution", async () => {
     const result = await run(
       Effect.gen(function* () {

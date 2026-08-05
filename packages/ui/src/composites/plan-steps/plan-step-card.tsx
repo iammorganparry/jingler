@@ -1,14 +1,16 @@
-import { type ReactNode, useMemo, useState } from "react"
-import {
-  type PlanAcceptance,
-  type PlanStageComplexity,
-  type PlanStageExecutionStatus,
-  type PlanStepView
+import { type ReactNode, useState } from "react"
+import type {
+  PlanAcceptance,
+  PlanStageComplexity,
+  PlanStageExecutionStatus,
+  PlanStepView,
+  PlanTask
 } from "@jingler/core"
 import { PlanBlocks } from "../plan-doc/plan-blocks.js"
 import { Check, Circle, MinusCircle, RotateCw, Square, X } from "lucide-react"
 import { Badge } from "../../components/badge.js"
 import { FileChip } from "../../components/file-chip.js"
+import { MermaidDiagram } from "../../components/mermaid-diagram.js"
 import { StatusDot } from "../../components/status-dot.js"
 import { cn } from "../../lib/cn.js"
 import { usePlanFileControls } from "../plan-doc/plan-file-controls.js"
@@ -23,10 +25,9 @@ const RETRYABLE: ReadonlySet<PlanStageExecutionStatus> = new Set(["failed", "int
  * built entirely from `PlanStepView` — the pure `@jingler/core` projection — so
  * the whole outline is testable without a live plan document.
  *
- * A card carries three scannable sections: **Changes** (the step's declared file
- * edits, as thin inline `FileChip`s with diff evidence), **Tasks** (the step's
- * one-line `intent` plus its sanitized approach prose), and **Tests** (each
- * acceptance criterion with its status and any recorded evidence).
+ * A card carries four scannable sections: **Changes** (declared files), **Tasks**
+ * (durable checklist progress plus approach prose), the stage's own
+ * **Architecture**, and **Tests** (criteria, evidence, and linked named cases).
  *
  * Selection is the whole card: clicking (or activating with the keyboard) calls
  * `onSelect(step.id)`, and `active` paints the selected state. A stable
@@ -65,6 +66,17 @@ const ACCEPTANCE_META: Record<
   waived: { Icon: MinusCircle, text: "text-muted-foreground", label: "Waived" }
 }
 
+/** Task progress -> checklist icon + token colour. */
+const TASK_META: Record<
+  PlanTask["status"],
+  { readonly Icon: typeof Check; readonly text: string; readonly label: string }
+> = {
+  pending: { Icon: Circle, text: "text-dim", label: "Pending" },
+  "in-progress": { Icon: RotateCw, text: "text-blue", label: "In progress" },
+  completed: { Icon: Check, text: "text-green", label: "Completed" },
+  blocked: { Icon: MinusCircle, text: "text-yellow", label: "Blocked" }
+}
+
 const CHANGE_BORDER: Record<PlanStepView["files"][number]["change"], string | undefined> = {
   A: "border-green/40",
   M: undefined,
@@ -93,6 +105,9 @@ export interface PlanStepCardProps {
 }
 
 export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
+  const tasks = step.tasks ?? []
+  const diagrams = step.diagrams ?? []
+  const completedTasks = tasks.filter((task) => task.status === "completed").length
   const hasNotes = step.notes.length > 0
   const hasApproach = step.approach.length > 0
   // Live worktree evidence + open handler come from the plan file-controls
@@ -257,6 +272,40 @@ export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
 
       {/* Tasks: intent + approach + prose blocks */}
       <CardSection title="Tasks">
+        {tasks.length > 0 && (
+          <>
+            <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+              {completedTasks} of {tasks.length} completed
+            </span>
+            <ol aria-label="Stage tasks" className="m-0 flex list-none flex-col gap-1.5 p-0">
+              {tasks.map((task, index) => {
+                const meta = TASK_META[task.status]
+                const { Icon } = meta
+                return (
+                  <li key={task.id} className="flex items-start gap-2 text-[12px] leading-[1.5]">
+                    <span className="w-4 flex-none font-mono text-[10px] tabular-nums text-dim">
+                      {index + 1}.
+                    </span>
+                    <Icon
+                      aria-label={meta.label}
+                      className={cn("mt-0.5 size-3.5 flex-none", meta.text)}
+                      strokeWidth={2.25}
+                    />
+                    <span className="min-w-0 flex-1 text-text-body">{task.text}</span>
+                    <span
+                      className={cn(
+                        "flex-none text-[9.5px] font-medium uppercase tracking-wide",
+                        meta.text
+                      )}
+                    >
+                      {meta.label}
+                    </span>
+                  </li>
+                )
+              })}
+            </ol>
+          </>
+        )}
         {step.intent.trim().length > 0 && (
           <p className="m-0 text-[12.5px] leading-[1.55] text-text-body">{step.intent}</p>
         )}
@@ -270,10 +319,33 @@ export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
         {hasNotes && (
           <PlanBlocks blocks={step.notes} className="sb-md text-[12.5px] leading-[1.6] text-text-body" />
         )}
-        {step.intent.trim().length === 0 && !hasApproach && !hasNotes && (
+        {tasks.length === 0 && step.intent.trim().length === 0 && !hasApproach && !hasNotes && (
           <EmptyNote>No task detail yet.</EmptyNote>
         )}
       </CardSection>
+
+      {diagrams.length > 0 && (
+        <section
+          aria-label={`Architecture for ${step.title}`}
+          className="flex flex-col gap-1.5"
+        >
+          <h4 className="m-0 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">
+            Architecture
+          </h4>
+          <div className="flex flex-col gap-2">
+            {diagrams.map((diagram) => (
+              <div
+                key={diagram.id}
+                role="img"
+                aria-label={`Diagram ${diagram.id}`}
+                className="overflow-hidden rounded-md border border-line bg-surface/40 px-2 py-1"
+              >
+                <MermaidDiagram source={diagram.source} className="my-2" />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Tests: acceptance criteria */}
       <CardSection title="Tests" count={step.acceptance.length}>
@@ -284,8 +356,9 @@ export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
             {step.acceptance.map((criterion) => {
               const meta = ACCEPTANCE_META[criterion.status]
               const { Icon } = meta
+              const testReferences = criterion.testReferences ?? []
               return (
-                <li key={criterion.id} className="flex flex-col gap-1">
+                <li key={criterion.id} className="flex flex-col gap-1.5">
                   <div className="flex items-start gap-2 text-[12px] leading-[1.5]">
                     <Icon className={cn("mt-0.5 size-3.5 flex-none", meta.text)} strokeWidth={2.25} />
                     <span className="min-w-0 flex-1 text-text-body">{criterion.text}</span>
@@ -297,6 +370,42 @@ export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
                     <p className="m-0 pl-[22px] text-[11px] leading-[1.5] text-muted-foreground">
                       {criterion.evidence}
                     </p>
+                  )}
+                  {testReferences.length > 0 && (
+                    <div className="flex flex-col gap-1.5 pl-[22px]">
+                      {testReferences.map((reference) => {
+                        const openable =
+                          fileControls.open !== undefined &&
+                          (fileControls.knownFiles === undefined ||
+                            fileControls.knownFiles.has(reference.path))
+                        return (
+                          <div
+                            key={reference.path}
+                            className="flex min-w-0 flex-col items-start gap-1"
+                          >
+                            <FileChip
+                              path={reference.path}
+                              onOpen={openable ? fileControls.open : undefined}
+                            />
+                            {reference.cases.length > 0 && (
+                              <ul
+                                aria-label={`Named test cases in ${reference.path}`}
+                                className="m-0 flex list-none flex-col gap-0.5 p-0 pl-1"
+                              >
+                                {reference.cases.map((testCase) => (
+                                  <li
+                                    key={testCase}
+                                    className="font-mono text-[10.5px] leading-[1.45] text-muted-foreground"
+                                  >
+                                    {testCase}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
                   )}
                 </li>
               )

@@ -19,6 +19,57 @@ export const ProviderModels = Schema.Struct({
 })
 export type ProviderModels = Schema.Schema.Type<typeof ProviderModels>
 
+/** The three capability bands used by automatic implementation-worker routing. */
+export type ModelCapabilityTier = "efficient" | "balanced" | "strongest"
+
+/** Stable harness tie-break for equally suitable automatic worker routes. */
+export const AUTOMATIC_MODEL_PROVIDER_ORDER: ReadonlyArray<CliKind> = [
+  "claude",
+  "codex",
+  "opencode",
+  "cursor"
+]
+
+const MODEL_TOKEN_SEPARATOR = /[^a-z0-9]+/
+
+const normalizedModelTokens = (model: string): ReadonlySet<string> =>
+  new Set(
+    model
+      .toLowerCase()
+      .split(MODEL_TOKEN_SEPARATOR)
+      .filter((token) => token.length > 0)
+  )
+
+const hasAnyToken = (
+  tokens: ReadonlySet<string>,
+  candidates: ReadonlyArray<string>
+): boolean => candidates.some((candidate) => tokens.has(candidate))
+
+/**
+ * Infer the broad capability band encoded by model-family names exposed by the
+ * installed harnesses. This deliberately stays small and provider-neutral:
+ * live discovery remains authoritative for availability, while unknown model
+ * families take the balanced middle rather than being guessed cheap or strong.
+ */
+export const modelCapabilityTier = (model: string): ModelCapabilityTier => {
+  const tokens = normalizedModelTokens(model)
+  if (
+    hasAnyToken(tokens, [
+      "haiku",
+      "luna",
+      "mini",
+      "nano",
+      "flash",
+      "lite",
+      "small"
+    ])
+  ) return "efficient"
+  if (hasAnyToken(tokens, ["opus", "fable", "sol", "pro", "ultra"])) {
+    return "strongest"
+  }
+  return "balanced"
+}
+
 /**
  * Fallback model choices per harness — used only when live discovery from the
  * provider fails (offline / no credentials). The real list is fetched at runtime
@@ -58,6 +109,7 @@ export const FALLBACK_MODELS: Record<CliKind, ReadonlyArray<ModelOption>> = {
   codex: [
     { id: "gpt-5.6-sol", label: "gpt-5.6-sol" },
     { id: "gpt-5.6-terra", label: "gpt-5.6-terra" },
+    { id: "gpt-5.6-luna", label: "gpt-5.6-luna" },
     { id: "gpt-5.5", label: "gpt-5.5" }
   ],
   cursor: [

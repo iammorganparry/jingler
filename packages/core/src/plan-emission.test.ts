@@ -1,5 +1,10 @@
+import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
-import { decodePlanEmission, formatPlanEmissionDiagnostics } from "./plan-emission.js"
+import {
+  decodePlanEmission,
+  formatPlanEmissionDiagnostics,
+  PlanDelta
+} from "./plan-emission.js"
 import { type PlanPrd, planTextProjection } from "./plan-document.js"
 
 const validPlan: PlanPrd = {
@@ -73,6 +78,24 @@ describe("decodePlanEmission", () => {
     expect(result.valid).toBe(false)
     if (result.valid) return
     expect(result.diagnostics[0]?.message).toContain("JSON")
+  })
+})
+
+describe("PlanDelta", () => {
+  it("decodes a granular task status delta", () => {
+    const delta = Schema.decodeUnknownSync(PlanDelta)({
+      _tag: "SetTaskStatus",
+      stageId: "01",
+      taskId: "01.task.2",
+      status: "in-progress"
+    })
+
+    expect(delta).toEqual({
+      _tag: "SetTaskStatus",
+      stageId: "01",
+      taskId: "01.task.2",
+      status: "in-progress"
+    })
   })
 })
 
