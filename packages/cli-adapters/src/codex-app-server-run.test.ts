@@ -1,6 +1,7 @@
 import type { Plan, PlanPrd, QuestionRequest, StreamEvent } from "@jingler/core"
 import { planDocumentToPlan } from "@jingler/core"
 import { Effect, Fiber } from "effect"
+import { access } from "node:fs/promises"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentContext, PlanDecision as PlanDecisionType, SessionSpec } from "./adapter.js"
 import { PlanDecision } from "./adapter.js"
@@ -609,6 +610,61 @@ describe("runCodexAppServer", () => {
     })
     await running
     expect(server.state.turnSteer).toBeNull()
+  })
+
+  it("keeps steered image files alive until Codex finishes the active turn", async () => {
+    server.state.hangMessages = true
+    const { ctx } = harness()
+    const running = Effect.runPromise(runCodexAppServer("s1", spec(), ctx, new Map()))
+
+    await vi.waitFor(() => {
+      expect(server.state.turnSteer).not.toBeNull()
+      expect(server.state.requests.some((request) => request.method === "turn/start")).toBe(true)
+    })
+    await expect(
+      server.state.turnSteer?.("inspect this screenshot", [
+        {
+          id: "shot",
+          name: "screen.png",
+          mediaType: "image/png",
+          data: Buffer.from("image bytes").toString("base64")
+        }
+      ])
+    ).resolves.toBe("accepted")
+
+    const steer = server.state.requests.find((request) => request.method === "turn/steer")
+    if (
+      steer === undefined ||
+      typeof steer.params !== "object" ||
+      steer.params === null ||
+      !("input" in steer.params) ||
+      !Array.isArray(steer.params.input)
+    ) {
+      throw new Error("expected a structured turn/steer request")
+    }
+    const image = steer.params.input.find(
+      (item): item is { type: "localImage"; path: string } =>
+        typeof item === "object" &&
+        item !== null &&
+        "type" in item &&
+        item.type === "localImage" &&
+        "path" in item &&
+        typeof item.path === "string"
+    )
+    if (image === undefined) throw new Error("expected a steered local image")
+
+    await expect(access(image.path)).resolves.toBeUndefined()
+
+    server.state.pendingMessageResolver?.({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: null }
+      }
+    })
+    await running
+
+    await expect(access(image.path)).rejects.toThrow()
   })
 
   it("waits for delayed replay usage before starting a resumed turn", async () => {
