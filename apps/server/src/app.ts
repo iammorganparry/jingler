@@ -11,6 +11,7 @@ import { getAuth } from "./auth.js"
 import { UserRepository } from "./db/repositories/user-repository.js"
 import { env } from "./env.js"
 import { createGitHubRoutes, isLoopbackRedirect, withQuery } from "./github-routes.js"
+import { proxyGitHubWebhook } from "./github-webhook-proxy.js"
 import { runtime } from "./runtime.js"
 
 export const app = new Hono()
@@ -30,6 +31,11 @@ app.use(
 
 /** Liveness probe (Vercel + local + e2e all hit this). */
 app.get("/health", (c) => c.json({ status: "ok", service: "@jingler/server" }))
+
+/** Keep the registered App URL stable while the relay owns verification and delivery. */
+app.post("/webhooks/github", (c) =>
+  proxyGitHubWebhook(c.req.raw, env.githubAppRelayUrl)
+)
 
 /** BetterAuth owns everything under /api/auth/* (OAuth, magic link, session). */
 app.on(["GET", "POST"], "/api/auth/*", (c) => getAuth().handler(c.req.raw))
