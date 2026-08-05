@@ -14,7 +14,7 @@ import {
   renderVerifyEmail,
   renderWelcome,
   type RenderedEmail
-} from "./emails/index.js"
+} from "./emails/index.tsx"
 
 let cachedResend: Resend | null | undefined
 const resendClient = (): Resend | null => {
