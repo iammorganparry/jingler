@@ -103,7 +103,7 @@ describe("ReviewCodeView selection", () => {
     expect(onAddDraft).toHaveBeenCalledExactlyOnceWith({
       path,
       line: 1,
-      endLine: null,
+      endLine: 2,
       body: "Keep the legacy contract.",
       routeToAgent: true
     })
@@ -190,6 +190,22 @@ describe("ReviewCodeView selection", () => {
         behavior: "smooth"
       })
     )
+
+    scrollTo.mockClear()
+    const diffHost = await waitFor(() => {
+      const element = document.querySelector("diffs-container")
+      expect(element?.shadowRoot).toBeTruthy()
+      return element!
+    })
+    const oldLine = diffHost.shadowRoot!.querySelector<HTMLElement>(
+      '[data-column-number="1"]'
+    )!
+    fireEvent.pointerDown(oldLine, { pointerId: 1, clientX: 10, clientY: 10 })
+    fireEvent.pointerUp(document, { pointerId: 1, clientX: 10, clientY: 10 })
+    await screen.findByPlaceholderText(
+      "Suggest a change or ask the agent to fix this…"
+    )
+    expect(scrollTo).not.toHaveBeenCalled()
   })
 
   it("mounts saved drafts and GitHub threads as persistent Pierre annotations", async () => {

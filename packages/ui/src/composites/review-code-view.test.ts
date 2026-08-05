@@ -4,7 +4,8 @@ import { pierreActiveCodeItemPath } from "../diff/pierre-provider.js"
 import type { JinglerLineSelection } from "../diff/pierre-selection.js"
 import {
   createReviewCodeFiles,
-  createReviewCodeItems
+  createReviewCodeItems,
+  newSideRangeForReviewSelection
 } from "./review-code-view.js"
 
 const modifiedPatch = [
@@ -134,6 +135,38 @@ describe("review CodeView model", () => {
     expect(pierreActiveCodeItemPath(items, 500, (id) => tops.get(id))).toBe(
       files[1]!.path
     )
+  })
+
+  it("translates an old-side selection to its new-side hunk range", () => {
+    const shiftedPatch = [
+      "diff --git a/src/auth/session.ts b/src/auth/session.ts",
+      "--- a/src/auth/session.ts",
+      "+++ b/src/auth/session.ts",
+      "@@ -1,2 +1,3 @@",
+      "+const inserted = true",
+      " const stable = true",
+      " const other = true",
+      "@@ -20,2 +21,2 @@",
+      "-const token = oldToken",
+      "+const token = nextToken",
+      " export { token }"
+    ].join("\n")
+    const [entry] = createReviewCodeFiles(files.slice(0, 1), [
+      { path: files[0]!.path, diff: shiftedPatch }
+    ])
+
+    expect(
+      newSideRangeForReviewSelection(
+        {
+          path: files[0]!.path,
+          side: "old",
+          startLine: 20,
+          endLine: 20,
+          endSide: "old"
+        },
+        entry!.fileDiff
+      )
+    ).toEqual({ startLine: 21, endLine: 22 })
   })
 
   it("ignores a GitHub thread whose live and original anchors are both absent", () => {

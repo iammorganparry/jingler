@@ -459,6 +459,7 @@ export function PierreCodeView({
   const renderer = usePierreRenderer()
   const viewRef = useRef<CodeViewHandle<PierreAnnotationMetadata> | null>(null)
   const lastActivePath = useRef<string | null>(null)
+  const lastScrollRevision = useRef<number | null>(null)
   const { handleSelectionChange, upstreamSelection } = useCodeViewSelection(
     items,
     selection,
@@ -467,11 +468,14 @@ export function PierreCodeView({
 
   useEffect(() => {
     if (scrollRequest === undefined || scrollRequest === null) return
+    if (lastScrollRevision.current === scrollRequest.revision) return
     const item = items.find(
       (candidate) => codeItemPath(candidate) === scrollRequest.path
     )
     if (item === undefined) return
-    viewRef.current?.scrollTo({
+    const view = viewRef.current
+    if (view === null) return
+    view.scrollTo({
       type: "item",
       id: item.id,
       align: "start",
@@ -479,6 +483,7 @@ export function PierreCodeView({
         ? {}
         : { behavior: scrollRequest.behavior })
     })
+    lastScrollRevision.current = scrollRequest.revision
   }, [items, scrollRequest])
 
   const handleScroll = useCallback(

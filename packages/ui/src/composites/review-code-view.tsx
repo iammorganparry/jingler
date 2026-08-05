@@ -117,6 +117,51 @@ const annotationIdentity = (
   annotations: readonly { readonly metadata: PierreAnnotationMetadata }[]
 ): string => JSON.stringify(annotations.map((annotation) => annotation.metadata.payload))
 
+export interface NewSideReviewRange {
+  readonly startLine: number
+  readonly endLine: number
+}
+
+/**
+ * Draft and local-revert APIs currently accept NEW-file coordinates. Preserve
+ * Pierre's side-aware selection in the UI, then translate a left-side range to
+ * the new-side span of the hunk(s) it selected before crossing that boundary.
+ */
+export const newSideRangeForReviewSelection = (
+  selection: JinglerLineSelection,
+  fileDiff: FileDiffMetadata
+): NewSideReviewRange | null => {
+  if (selection.side === "new" && selection.endSide === "new") {
+    return {
+      startLine: Math.min(selection.startLine, selection.endLine),
+      endLine: Math.max(selection.startLine, selection.endLine)
+    }
+  }
+
+  const oldLines = [
+    ...(selection.side === "old" ? [selection.startLine] : []),
+    ...(selection.endSide === "old" ? [selection.endLine] : [])
+  ]
+  if (oldLines.length === 0) return null
+  const oldStart = Math.min(...oldLines)
+  const oldEnd = Math.max(...oldLines)
+  const matchingHunks = fileDiff.hunks.filter((hunk) => {
+    const hunkOldEnd =
+      hunk.deletionStart + Math.max(hunk.deletionCount, 1) - 1
+    return hunk.deletionStart <= oldEnd && hunkOldEnd >= oldStart
+  })
+  if (matchingHunks.length === 0) return null
+
+  return {
+    startLine: Math.min(...matchingHunks.map((hunk) => hunk.additionStart)),
+    endLine: Math.max(
+      ...matchingHunks.map(
+        (hunk) => hunk.additionStart + Math.max(hunk.additionCount, 1) - 1
+      )
+    )
+  }
+}
+
 export interface CreateReviewCodeItemsOptions {
   readonly entries: readonly ReviewCodeFile[]
   readonly drafts: readonly ReviewDraft[]
@@ -354,12 +399,22 @@ export function ReviewCodeView({
       switch (payload.kind) {
         case "inline-composer": {
           const selected = payload.selection
+          const selectedEntry = entryByPath.get(
+            canonicalPierrePath(selected.path)
+          )
+          const newSideRange =
+            selectedEntry === undefined
+              ? null
+              : newSideRangeForReviewSelection(selected, selectedEntry.fileDiff)
           const submit = (draft: { body: string; routeToAgent: boolean }) => {
+            if (newSideRange === null) return
             onAddDraft({
               path: selected.path,
-              line: selected.startLine,
+              line: newSideRange.startLine,
               endLine:
-                selected.endLine === selected.startLine ? null : selected.endLine,
+                newSideRange.endLine === newSideRange.startLine
+                  ? null
+                  : newSideRange.endLine,
               body: draft.body,
               routeToAgent: draft.routeToAgent
             })
@@ -385,12 +440,12 @@ export function ReviewCodeView({
                 onAddToReview={submit}
                 onCommentAndSend={submit}
                 onRevert={
-                  local && onRevertLines !== undefined
+                  local && onRevertLines !== undefined && newSideRange !== null
                     ? () => {
                         onRevertLines({
                           path: selected.path,
-                          startLine: selected.startLine,
-                          endLine: selected.endLine
+                          startLine: newSideRange.startLine,
+                          endLine: newSideRange.endLine
                         })
                         clearSelection()
                       }
@@ -425,6 +480,7 @@ export function ReviewCodeView({
     },
     [
       clearSelection,
+      entryByPath,
       local,
       onAddDraft,
       onRemoveDraft,
