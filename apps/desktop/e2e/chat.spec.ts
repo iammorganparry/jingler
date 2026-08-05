@@ -488,8 +488,9 @@ test("the Pull Request tab leads with the description, in the conversation's col
     configured: true,
     withRepo: true,
     sessions: seededPrSessions,
-    gh: {
-      login: "e2e-user",
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
       prs: [
         {
           number: 482,
@@ -523,16 +524,17 @@ test("the Pull Request tab leads with the description, in the conversation's col
 })
 
 test("the merge box offers a strategy, and merges with the one chosen", async ({ launchApp }) => {
-  // `PrMergeMethod` and `gh pr merge --<method>` supported all three from the
+  // `PrMergeMethod` and the GitHub merge endpoint supported all three from the
   // start; only the UI didn't, so every merge from here was a merge commit —
   // squash being most teams' default made this the likeliest reason to give up
   // and open the browser.
-  const { window, ghCalls } = await launchApp({
+  const { window, githubOperations } = await launchApp({
     configured: true,
     withRepo: true,
     sessions: seededPrSessions,
-    gh: {
-      login: "e2e-user",
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
       prs: [
         {
           number: 482,
@@ -556,19 +558,20 @@ test("the merge box offers a strategy, and merges with the one chosen", async ({
   await expect(window.getByRole("button", { name: "Squash and merge" })).toBeVisible()
 
   await window.getByRole("button", { name: "Squash and merge" }).click()
-  await expect.poll(() => ghCalls().join("\n"), { timeout: 15_000 }).toContain("--squash")
+  await expect.poll(() => githubOperations().join("\n"), { timeout: 15_000 }).toContain("--squash")
 })
 
 test("an out-of-date branch offers Update branch, not just a blocker", async ({ launchApp }) => {
   // `mergeStateStatus` was fetched all along and only ever collapsed into a
   // blocker STRING, so the box stated the problem and offered nothing. Being
   // behind is the one blocker the operator can clear from here.
-  const { window, ghCalls } = await launchApp({
+  const { window, githubOperations } = await launchApp({
     configured: true,
     withRepo: true,
     sessions: seededPrSessions,
-    gh: {
-      login: "e2e-user",
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
       prs: [
         {
           number: 482,
@@ -587,7 +590,7 @@ test("an out-of-date branch offers Update branch, not just a blocker", async ({ 
     timeout: 20_000
   })
   await window.getByRole("button", { name: "Update branch" }).click()
-  await expect.poll(() => ghCalls().join("\n"), { timeout: 15_000 }).toContain("update-branch")
+  await expect.poll(() => githubOperations().join("\n"), { timeout: 15_000 }).toContain("update-branch")
 })
 
 test("a passing check still links to its run", async ({ launchApp }) => {
@@ -597,8 +600,9 @@ test("a passing check still links to its run", async ({ launchApp }) => {
     configured: true,
     withRepo: true,
     sessions: seededPrSessions,
-    gh: {
-      login: "e2e-user",
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
       prs: [
         {
           number: 482,
@@ -621,8 +625,8 @@ test("a passing check still links to its run", async ({ launchApp }) => {
 })
 
 test("Code Review shows the Uncommitted source and reverts a whole file", async ({ launchApp }) => {
-  // A session whose worktree (the e2e repo) has an uncommitted change. gh isn't
-  // authenticated on the runner, so the PR source is empty and the view falls
+  // A session whose worktree (the e2e repo) has an uncommitted change. GitHub is
+  // disconnected, so the PR source is empty and the view falls
   // back to the "Uncommitted" (local) diff — where Revert is enabled.
   const { window } = await launchApp({
     configured: true,
@@ -636,7 +640,7 @@ test("Code Review shows the Uncommitted source and reverts a whole file", async 
 
   await window.getByRole("button", { name: "Code Review" }).first().click()
 
-  // The pane mounts (gh calls for the empty PR source can be slow), the source
+  // The pane mounts after resolving the empty PR source, the source
   // toggle shows "Uncommitted" selected (the view falls back to the local source),
   // and the local diff renders the changed file + edit.
   await expect(window.getByRole("tab", { name: "Uncommitted" })).toBeVisible({ timeout: 20_000 })
@@ -668,7 +672,7 @@ test("the sidebar Settings cog opens the settings view with the GitHub section",
   ).toBeVisible()
 
   // Switch to the GitHub section → its section + pull-request toggle render (the
-  // exact gh connection line depends on the runner, so we don't assert it).
+  // exact GitHub connection line depends on the runner, so we don't assert it).
   await window.getByRole("button", { name: /GitHub/ }).click()
   await expect(window.getByText("Enable pull-request features")).toBeVisible()
 })
@@ -865,9 +869,10 @@ test("a merged PR badges its linked session but never archives it", async ({ lau
   const { window } = await launchApp({
     configured: true,
     withRepo: true,
-    // gh reports this PR as merged; the sweep should badge, not archive.
-    gh: {
-      login: "e2e-user",
+    // The GitHub fixture reports this PR as merged; the sweep should badge, not archive.
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
       prs: [
         {
           number: 500,
@@ -928,8 +933,9 @@ test("a running adversarial review reports its phase and appears in the agent ta
     configured: true,
     withRepo: true,
     sessions: seededPrSessions,
-    gh: {
-      login: "e2e-user",
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
       prs: [
         {
           number: 482,

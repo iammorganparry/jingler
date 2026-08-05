@@ -381,9 +381,9 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
           )
         }
 
-        // `gh pr diff` folds any failure to "". Reviewing "" produces a confident
+        // A failed diff fetch must not fold to "". Reviewing "" produces a confident
         // "found nothing", which then gets cached against the real head SHA — so a
-        // transient gh hiccup becomes a permanent false all-clear that only a
+        // transient API failure becomes a permanent false all-clear that only a
         // forced re-run can clear. An empty diff is never worth reviewing anyway.
         if (input.diff.trim().length === 0) {
           return yield* Effect.fail(
@@ -501,7 +501,7 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
           // rather than an empty list that reads as "no bugs found".
           note: findings === null ? nonEmpty(text) ?? "The reviewer produced no output." : null,
           // Routing and posting are the CALLER's business, not the reviewer's.
-          // This service's one job is the verdict — it has no GhService and no
+          // This service's one job is the verdict — it has no GitHubApi and no
           // conversation to send to, and keeping it that way is what lets it be
           // driven from a test without a GitHub in sight. The `Review.run`
           // handler stamps these once it has acted on the split.

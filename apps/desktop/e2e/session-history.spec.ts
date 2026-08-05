@@ -229,7 +229,7 @@ test("history written during a run is still there after a restart", async ({ lau
 test("a session whose PR merged stays in the sidebar instead of auto-archiving", async ({
   launchApp
 }) => {
-  // Regression 2. The `gh` fake reports PR #7 as merged; the session must remain
+  // Regression 2. The GitHub API fake reports PR #7 as merged; the session must remain
   // listed and active, because merging one PR says nothing about whether the
   // session's work is finished.
   const session = baseSession({ id: "s_merged", title: "Multi PR session", prNumber: 7 })
@@ -237,8 +237,9 @@ test("a session whose PR merged stays in the sidebar instead of auto-archiving",
     configured: true,
     withRepo: true,
     sessions: (ctx) => [{ ...session, worktreePath: ctx.repoPath }],
-    gh: {
-      login: "morgan",
+    githubApp: {
+      connected: true,
+      userLogin: "morgan",
       prs: [
         {
           number: 7,

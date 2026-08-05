@@ -13,8 +13,17 @@ import type { Session } from "@jingler/core"
 export const newlyPlannedSessionIds = (
   prev: ReadonlySet<string>,
   next: ReadonlySet<string>,
-  sessions: ReadonlyArray<Pick<Session, "id" | "autoTitle">>
+  sessions: ReadonlyArray<Pick<Session, "id" | "autoTitle" | "semanticBranchPending">>
 ): ReadonlyArray<string> =>
   [...next].filter(
-    (id) => !prev.has(id) && sessions.find((s) => s.id === id)?.autoTitle === true
+    (id) => {
+      const session = sessions.find((s) => s.id === id)
+      return !prev.has(id) &&
+        (session?.autoTitle === true || session?.semanticBranchPending === true)
+    }
   )
+
+/** Whether a settled turn still needs display-title or semantic-branch generation. */
+export const needsSessionRetitle = (
+  session: Pick<Session, "autoTitle" | "semanticBranchPending"> | undefined
+): boolean => session?.autoTitle === true || session?.semanticBranchPending === true

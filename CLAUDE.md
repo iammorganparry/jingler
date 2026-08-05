@@ -55,7 +55,8 @@ Copy `apps/server/.env.example` → `apps/server/.env` for local dev; the server
 - `apps/server` — the **BetterAuth** backend (`@jingler/server`) on Hono + Postgres/Drizzle; runs locally via `tsx` and deploys to Vercel (`api/[[...route]].ts`).
 - `packages/core` — domain types and errors, expressed as **Effect `Schema`** (`CliKind`, `Session`, `AuthSession`, tagged errors). No runtime logic.
 - `packages/contracts` — the **RPC contract** (`JinglerRpcs`, an `@effect/rpc` `RpcGroup`). The single source of truth for every desktop main↔renderer call.
-- `packages/cli-adapters` — the desktop **backend logic** as **Effect services** (`Effect.Service`): `SessionStore`, `AgentRunner`, `WorkspaceService` (git/worktrees), `TerminalService`, `GhService`, `AuthService`, `DiscoveryService`, etc. These run in the Electron **main** process.
+- `apps/github-relay` — the Cloudflare Worker that verifies GitHub App webhooks and fans resumable review events out through per-user Durable Objects.
+- `packages/cli-adapters` — the desktop **backend logic** as **Effect services** (`Effect.Service`): `SessionStore`, `AgentRunner`, `WorkspaceService` (git/worktrees), `TerminalService`, `GitHubApi`, `GitHubAuth`, `AuthService`, `DiscoveryService`, etc. These run in the Electron **main** process.
 - `packages/themes` — the **theme engine**: nine vendored VS Code themes, the fold from a VS Code theme JSON to Jingler's `ThemeTokens`, and the colour maths. Pure — no Effect, no filesystem, no React — because main, `cli-adapters` and the renderer all import it.
 - `packages/ui` — React component library (Tailwind, **themeable** — One Dark Pro is the default and the fallback, Storybook). Consumed by the renderer.
 - `packages/tsconfig` — shared tsconfig presets: `base.json`, `node.json`, `react.json` (the last adds `jsx` + DOM/React types).

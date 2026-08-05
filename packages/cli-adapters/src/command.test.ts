@@ -4,7 +4,7 @@ import { expandHome, runGit } from "./command.js"
 import { failureOf, fakeCommandExecutor, runExit } from "./test-support.js"
 
 /**
- * The shared command helpers are a real module boundary (git/gh/discovery all
+ * The shared command helpers are a real module boundary (git and discovery
  * build on them), so their contract is worth asserting directly: how `~` is
  * expanded, and that `runGit` fails with the stderr message on a non-zero exit.
  */

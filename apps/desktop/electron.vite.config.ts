@@ -39,7 +39,7 @@ export default defineConfig(({ command }) => {
   // still override by exporting JINGLER_AUTH_URL=http://localhost:9100, and a
   // packaged build is unaffected (it must set the URL at launch).
   if (command === "serve") {
-    process.env.JINGLER_AUTH_URL ??= "https://jingler-nine.vercel.app"
+    process.env.JINGLER_AUTH_URL ??= "https://api.jingler.dev"
   }
 
   return {

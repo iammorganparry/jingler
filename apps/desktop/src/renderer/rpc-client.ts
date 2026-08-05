@@ -22,8 +22,12 @@ import type {
   CreateSessionFromPrInput,
   CreateSessionInput,
   ExecutionMode,
+  ExternalInstructionIdentity,
   GateDecision,
-  GhStatus,
+  GitHubAppConnectionStatus,
+  GitHubFeedbackClaimStatus,
+  GitHubRelayDelivery,
+  GitHubRelayEvent,
   GitConfig,
   NotificationKind,
   NotificationsConfig,
@@ -62,6 +66,7 @@ import type {
   SessionPrStatus,
   PrSummary,
   ProviderConfig,
+  PublishCheckpoint,
   PullRequest,
   QuestionAnswer,
   ReasoningSetting,
@@ -143,6 +148,10 @@ const runtime = ManagedRuntime.make(ClientProtocolLive)
  */
 const clientScope = Effect.runSync(Scope.make())
 
+// The generated client now spans every unary API plus several typed streams.
+// TypeScript's instantiation-depth ceiling is lower than Effect RPC's valid
+// mapped type here; downstream calls remain inferred from `JinglerRpcs`.
+// @ts-expect-error TS2589: valid generated RPC client exceeds compiler depth
 const clientEffect = RpcClient.make(JinglerRpcs)
 const scopedClientEffect = Scope.extend(clientEffect, clientScope)
 const clientPromise = runtime.runPromise(scopedClientEffect)
@@ -272,8 +281,14 @@ export const rpc = {
     run((c) => c.Workspace.repos()),
   workspaceBranches: (repoPath: string): Promise<ReadonlyArray<string>> =>
     run((c) => c.Workspace.branches({ repoPath })),
-  ghStatus: (): Promise<GhStatus> =>
-    run((c) => c.Gh.status()),
+  githubConnectionStatus: (): Promise<GitHubAppConnectionStatus> =>
+    run((c) => c.GitHub.status()),
+  githubConnectionInstall: (): Promise<string> =>
+    run((c) => c.GitHub.install()),
+  githubConnectionRefresh: (): Promise<GitHubAppConnectionStatus> =>
+    run((c) => c.GitHub.refresh()),
+  githubConnectionDisconnect: (): Promise<void> =>
+    run((c) => c.GitHub.disconnect()),
   sessionsList: (): Promise<ReadonlyArray<Session>> =>
     run((c) => c.Sessions.list()),
   sessionsGet: (id: string): Promise<Session> =>
@@ -668,6 +683,34 @@ export const rpc = {
     run((c) => c.Github.diff({ sessionId })),
   githubDetectPr: (sessionId: string): Promise<number | null> =>
     run((c) => c.Github.detectPr({ sessionId })),
+  githubEvents: (onDelivery: (delivery: GitHubRelayDelivery) => void): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then((client) => {
+      if (cancelled) return
+      fiber = runtime.runFork(
+        client.Github.events().pipe(
+          Stream.runForEach((delivery) => Effect.sync(() => onDelivery(delivery)))
+        )
+      )
+    })
+    return () => {
+      cancelled = true
+      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
+    }
+  },
+  githubClaimFeedback: (input: {
+    operation: "claim" | "mark-dispatched"
+    sessionId: string
+    installationId: string
+    repositoryId: string
+    prNumber: number
+    deliveryId: string
+    semanticKey: string
+    event: GitHubRelayEvent
+  }): Promise<GitHubFeedbackClaimStatus> => run((client) => client.Github.claimFeedback(input)),
+  githubAckEvent: (clientId: string, cursor: number): Promise<void> =>
+    run((client) => client.Github.ackEvent({ clientId, cursor })),
   /**
    * Run an adversarial review of the session's PR. Cheap and safe to call
    * speculatively: the main process short-circuits on an unchanged PR head, so
@@ -690,13 +733,25 @@ export const rpc = {
    */
   reviewReconcile: (sessionId: string): Promise<AdversarialReview | null> =>
     run((c) => c.Review.reconcile({ sessionId })),
-  githubCreatePr: (input: {
-    sessionId: string
-    title: string
-    body: string
-    base: string
-    draft: boolean
-  }): Promise<number> => run((c) => c.Github.createPr(input)),
+  githubPublish: (
+    sessionId: string,
+    onCheckpoint: (checkpoint: PublishCheckpoint) => void
+  ): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then((client) => {
+      if (cancelled) return
+      fiber = runtime.runFork(
+        client.Github.createPr({ sessionId }).pipe(
+          Stream.runForEach((checkpoint) => Effect.sync(() => onCheckpoint(checkpoint)))
+        )
+      )
+    })
+    return () => {
+      cancelled = true
+      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
+    }
+  },
   githubComment: (sessionId: string, body: string, toGithub: boolean): Promise<void> =>
     run((c) => c.Github.comment({ sessionId, body, toGithub })),
   githubReview: (sessionId: string, kind: ReviewSubmitKind, body: string): Promise<void> =>
@@ -735,6 +790,7 @@ export const rpc = {
     images: ReadonlyArray<Attachment> = [],
     options: {
       readonly reasoning?: ReasoningSetting | null
+      readonly externalInstruction?: ExternalInstructionIdentity
     } = {}
   ): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null

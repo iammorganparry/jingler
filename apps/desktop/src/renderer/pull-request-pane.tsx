@@ -8,28 +8,33 @@ import { workspaceModeOf } from "@jingler/core"
 import { PullRequestView } from "@jingler/ui"
 import { usePullRequest } from "./use-pull-request.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
+import { usePublish } from "./use-publish.js"
 
 export function PullRequestPane({
   session,
   connected,
   autoDetect,
   viewerLogin,
+  connectionMessage,
+  connectionActionLabel,
   onConnectGithub,
-  onPrLinked
+  onPrLinked,
+  onPublishCheckpoint
 }: {
   session: Session
   connected: boolean
   autoDetect: boolean
   /** The authenticated GitHub login (to disable approving your own PR). */
   viewerLogin?: string | null
+  connectionMessage?: string
+  connectionActionLabel?: string
   onConnectGithub: () => void
   onPrLinked: (sessionId: string, prNumber: number) => void
+  onPublishCheckpoint: (sessionId: string, checkpoint: NonNullable<Session["publish"]>) => void
 }) {
   const {
     pr,
     busy,
-    createError,
-    createPr,
     mergePr,
     merging,
     mergeError,
@@ -46,6 +51,7 @@ export function PullRequestPane({
     replyToThread,
     openOnGithub
   } = usePullRequest(session, { connected, autoDetect, onPrLinked })
+  const publish = usePublish(session, onPrLinked, onPublishCheckpoint)
 
   const {
     review,
@@ -62,13 +68,18 @@ export function PullRequestPane({
     <PullRequestView
       pr={pr}
       connected={connected}
+      connectionMessage={connectionMessage}
+      connectionActionLabel={connectionActionLabel}
       busy={busy}
       viewerLogin={viewerLogin}
-      createError={createError}
+      publish={publish.checkpoint}
+      publishing={publish.publishing}
+      branch={session.branch}
       sessionTitle={session.title}
       onCreatePr={
-        workspaceModeOf(session) === "worktree" ? createPr : undefined
+        workspaceModeOf(session) === "worktree" ? publish.publish : undefined
       }
+      onRetryPublish={publish.retry}
       onMerge={mergePr}
       merging={merging}
       mergeError={mergeError}

@@ -134,7 +134,7 @@ export const fenceFor = (content: string): string => {
  * The full reviewer prompt for one PR diff.
  *
  * The diff is embedded rather than fetched by the agent: it is already in hand
- * (`gh pr diff`), and handing it over saves the reviewer a tool round-trip it
+ * from GitHub's diff API, and handing it over saves the reviewer a tool round-trip it
  * would otherwise have to spend a denied `bash` call discovering it can't make.
  */
 export const adversarialPrompt = (input: {

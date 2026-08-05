@@ -8,13 +8,13 @@ import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
-  GhStatus,
   GitConfig,
   GithubConfig,
   NotificationsConfig,
   OrchestratorPreference,
   WorkerRoutingConfig,
   ProviderConfig,
+  PublishCheckpoint,
   Session,
   SessionActivity,
   User
@@ -61,7 +61,10 @@ import {
   clearPlanAutoPresentation,
   usePlanSessions
 } from "./plan-presence.js"
-import { disposeConversationActor } from "./conversation-registry.js"
+import {
+  disposeConversationActor,
+  getConversationActor
+} from "./conversation-registry.js"
 import {
   flushPlanDocument,
   stopPlanDocument
@@ -75,7 +78,7 @@ import { completedSessionIds } from "./pr-refresh.js"
 import { issuesToCloseOnMerge, prsToNotify } from "./pr-sweep.js"
 import { routeReviewToAgent } from "./auto-route.js"
 import { reviewQueryKey } from "./review-routing.js"
-import { newlyPlannedSessionIds } from "./retitle-triggers.js"
+import { needsSessionRetitle, newlyPlannedSessionIds } from "./retitle-triggers.js"
 import { rpc } from "./rpc-client.js"
 import { themeCatalogKey, useTheme } from "./use-theme.js"
 import { useConnectorCenter } from "./use-connector-center.js"
@@ -89,14 +92,9 @@ import {
 } from "./plugin-registry.js"
 import { usePlugins } from "./use-plugins.js"
 import { useMemory } from "./use-memory.js"
-
-const GH_UNKNOWN: GhStatus = {
-  available: false,
-  authenticated: false,
-  login: null,
-  host: null,
-  version: null
-}
+import { repositoryAccess } from "./github-connection-machine.js"
+import { useGitHubConnection } from "./use-github-connection.js"
+import { GitHubFeedbackRouter } from "./github-feedback.js"
 
 /** How often the archive sweep re-checks each linked PR's merged/closed state. */
 const ARCHIVE_POLL_MS = 60_000
@@ -259,8 +257,8 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
 
 /**
  * Thin view over `appMachine` (which drives the first-run/loading/session flow).
- * Everything else the shell needs is read through react-query — `gh` status,
- * the persisted config (GitHub prefs), and usage — so there are no ad-hoc
+ * Everything else the shell needs is read through machines/react-query — the
+ * GitHub App connection, persisted preferences, and usage — so there are no ad-hoc
  * `useEffect` + `useState` fetches here; a mutation just updates the cache.
  *
  * Only mounted once signed in (see the `App` auth gate below), so none of its
@@ -269,6 +267,7 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
  */
 function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void }) {
   const [state, send] = useMachine(appMachine)
+  const github = useGitHubConnection()
   const { clis, repos, reposDir, sessions } = state.context
   // Merged with the built-ins inside `SessionPane`, through the same registry —
   // a plugin tab is not a separate region of the tab bar.
@@ -345,7 +344,6 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
 
   // Renderer-side rpc reads, via react-query.
   const configQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
-  const ghStatusQuery = useQuery({ queryKey: ["gh-status"], queryFn: () => rpc.ghStatus() })
   const usageQuery = useQuery({ queryKey: ["usage"], queryFn: () => rpc.usageGet(), enabled: false })
 
   const githubConfig = configQuery.data?.github ?? null
@@ -371,12 +369,10 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   const starredRepos = configQuery.data?.starredRepos ?? []
   const collapsedRepos = configQuery.data?.collapsedRepos ?? []
   const lastRepoPath = configQuery.data?.lastRepoPath ?? null
-  const ghStatus = ghStatusQuery.data ?? GH_UNKNOWN
   const usage = usageQuery.data ?? null
 
-  // The usage modal loads on open; the settings modal rechecks gh on demand.
+  // The usage modal loads on open; GitHub refreshes live through its machine.
   const loadUsage = () => usageQuery.refetch().then(() => undefined)
-  const recheckGh = () => ghStatusQuery.refetch().then(() => undefined)
   const saveGithubConfig = (config: GithubConfig) =>
     rpc.configSetGithub(config).then((saved) => {
       qc.setQueryData(["config"], saved)
@@ -525,8 +521,16 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     send({ type: "SESSION_CREATED", session })
     return session
   }
-  const onPrLinked = (sessionId: string, prNumber: number) =>
-    send({ type: "SESSION_PR_LINKED", sessionId, prNumber })
+  const onPrLinked = useCallback(
+    (sessionId: string, prNumber: number) =>
+      send({ type: "SESSION_PR_LINKED", sessionId, prNumber }),
+    [send]
+  )
+  const onPublishCheckpoint = useCallback(
+    (sessionId: string, checkpoint: PublishCheckpoint) =>
+      send({ type: "SESSION_PUBLISH_UPDATED", sessionId, checkpoint }),
+    [send]
+  )
 
   // Unlinking an issue used to live here, wired to the built-in Issue tab's
   // `onUnlink`. That tab retired in favour of the github-issues plugin and this
@@ -595,10 +599,130 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     send({ type: "SESSION_DELETED", sessionId })
   }
 
-  const connected = ghStatus.available && ghStatus.authenticated
+  const connected =
+    github.connection.connected &&
+    github.connection.installations.some((installation) => installation.status === "active")
   const autoDetect = connected && (githubConfig?.autoDetectPr ?? true)
+  const autoCreate =
+    connected &&
+    (githubConfig?.enabled ?? false) &&
+    (githubConfig?.autoCreatePr ?? false)
+  const autoPublishCancels = useRef(new Map<string, () => void>())
+  const startAutoPublish = useCallback((session: Session) => {
+    if (
+      !autoCreate ||
+      session.archived ||
+      session.prNumber !== null ||
+      workspaceModeOf(session) !== "worktree" ||
+      session.semanticBranchPending ||
+      !session.semanticBranchProposal ||
+      session.publish?.step === "complete" ||
+      autoPublishCancels.current.has(session.id)
+    ) return
+
+    const cancel = rpc.githubPublish(session.id, (checkpoint) => {
+      onPublishCheckpoint(session.id, checkpoint)
+      if (checkpoint.step === "complete" && checkpoint.prNumber !== undefined) {
+        onPrLinked(session.id, checkpoint.prNumber)
+      }
+      if (["complete", "failed", "no-changes"].includes(checkpoint.step)) {
+        autoPublishCancels.current.delete(session.id)
+      }
+    })
+    autoPublishCancels.current.set(session.id, cancel)
+  }, [autoCreate, onPrLinked, onPublishCheckpoint])
+  useEffect(() => () => {
+    for (const cancel of autoPublishCancels.current.values()) cancel()
+    autoPublishCancels.current.clear()
+  }, [])
   const sessionsRef = useRef(sessions)
   sessionsRef.current = sessions
+
+  const feedbackRouter = useMemo(
+    () =>
+      new GitHubFeedbackRouter({
+        // Main resolves exact persisted installation/repository/PR ownership and
+        // includes the session identity with the delivery. Keeping this empty
+        // prevents a stale renderer session list from making a second guess.
+        targets: () => [],
+        claim: (target, event) =>
+          rpc.githubClaimFeedback({
+            operation: "claim",
+            sessionId: target.sessionId,
+            installationId: target.installationId,
+            repositoryId: target.repositoryId,
+            prNumber: target.prNumber,
+            deliveryId: event.deliveryId,
+            semanticKey: event.semanticKey,
+            event
+          }),
+        markDispatched: async (target, event) =>
+          (await rpc.githubClaimFeedback({
+            operation: "mark-dispatched",
+            sessionId: target.sessionId,
+            installationId: target.installationId,
+            repositoryId: target.repositoryId,
+            prNumber: target.prNumber,
+            deliveryId: event.deliveryId,
+            semanticKey: event.semanticKey,
+            event
+          })) === "dispatched",
+        invalidate: () => {
+          void qc.invalidateQueries({ queryKey: ["github"] })
+          void qc.invalidateQueries({ queryKey: ["pr-state"] })
+        },
+        dispatch: async ({ sessionId, chatId, text, externalInstruction }) => {
+          const session = sessionsRef.current.find((candidate) => candidate.id === sessionId)
+          if (!session || session.archived) {
+            throw new Error(`GitHub feedback session ${sessionId} is no longer active`)
+          }
+          // SEND is the same visible conversation intent used by the composer.
+          // While an agent is running, the conversation machine owns steering
+          // or FIFO queueing; this never starts a hidden parallel run.
+          await new Promise<void>((resolve) => {
+            getConversationActor(session, chatId).send({
+              type: "SEND",
+              text,
+              externalInstruction,
+              onExternalAccepted: resolve
+            })
+          })
+        }
+      }),
+    [qc]
+  )
+
+  useEffect(() => {
+    if (!connected) return
+    const cancelEvents = rpc.githubEvents((delivery) => {
+      const session = delivery.sessionId
+        ? sessionsRef.current.find((candidate) => candidate.id === delivery.sessionId)
+        : undefined
+      const pullRequest = delivery.event.pullRequest
+      const target =
+        session && delivery.chatId && pullRequest
+          ? {
+              sessionId: session.id,
+              chatId: delivery.chatId,
+              installationId: delivery.event.installationId,
+              repositoryId: delivery.event.repository.id,
+              prNumber: pullRequest.number,
+              archived: Boolean(session.archived)
+            }
+          : undefined
+
+      void feedbackRouter
+        .route(delivery.event, target)
+        // Cursor acknowledgement happens only after the exact-session claim is
+        // durable and SEND has reached the visible conversation actor. A crash
+        // before this point deliberately causes relay replay.
+        .then(() => rpc.githubAckEvent(delivery.clientId, delivery.cursor))
+        .catch((cause: unknown) => {
+          console.error("GitHub feedback delivery failed; withholding acknowledgement:", cause)
+        })
+    })
+    return cancelEvents
+  }, [connected, feedbackRouter])
 
   // Continuously resolve the OPEN PR on every live worktree branch. Sessions can
   // outlive a merged PR and open a replacement, so linked sessions stay in the
@@ -637,15 +761,22 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     prevLiveRef.current = liveActivity
     const completed = completedSessionIds(prev, liveActivity, sessions)
     for (const id of completed) {
+      const current = sessions.find((session) => session.id === id)
+      if (!current) continue
       // Only auto-named sessions retitle; skip pinned/legacy ones (autoTitle not
       // explicitly true) to avoid a needless RPC. The handler guards too.
-      if (sessions.find((s) => s.id === id)?.autoTitle !== true) continue
-      // SESSION_UPDATED replaces the whole record; it re-reads the store at the end
-      // so it converges with a concurrent SESSION_PR_LINKED regardless of order.
-      void rpc
-        .sessionsRetitle(id)
-        .then((session) => send({ type: "SESSION_UPDATED", session }))
-        .catch(() => {})
+      const ready = needsSessionRetitle(current)
+        ? rpc.sessionsRetitle(id).then((session) => {
+            // SESSION_UPDATED replaces the whole record; it re-reads the store at
+            // the end so it converges with concurrent PR/publish checkpoints.
+            send({ type: "SESSION_UPDATED", session })
+            return session
+          })
+        : Promise.resolve(current)
+      // Manual and preference-driven publication enter the same main-process
+      // single-flight state machine. Retitling resolves first so a fresh task is
+      // never asked to publish while it is still detached.
+      void ready.then(startAutoPublish).catch(() => {})
     }
     if (!autoDetect) return
     for (const id of completed) {
@@ -657,7 +788,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       // Partial key (id only) — matches regardless of the linked PR number.
       void qc.invalidateQueries({ queryKey: ["pr-state", id] })
     }
-  }, [liveActivity, sessions, autoDetect, send, qc])
+  }, [liveActivity, sessions, autoDetect, send, qc, startAutoPublish])
 
   // Retitle a session as soon as it has a PLAN — a run that plans then executes
   // stays "present" (thinking/needs-input) throughout, so the on-completion
@@ -722,7 +853,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   // Auto adversarial review (opt-in). Polls `Review.run` on the same cadence as
   // the archive sweep, which sounds expensive but isn't: the main process
   // short-circuits on an unchanged PR head, so a tick with no new commits costs
-  // one `gh pr view` and spawns nothing. That server-side de-dupe is why this
+  // one GitHub API read and spawns nothing. That server-side de-dupe is why this
   // needs no client-side "already reviewed this SHA" guard of its own — the
   // renderer can fire naively and stay correct.
   // Gated on `enabled` as well as the toggle itself: turning PR features off must
@@ -743,7 +874,7 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       refetchInterval: ARCHIVE_POLL_MS,
       refetchIntervalInBackground: true,
       refetchOnWindowFocus: true,
-      // A reviewer that can't run (gh hiccup, harness missing) must never retry
+      // A reviewer that can't run (API failure, harness missing) must never retry
       // in a loop or surface anywhere — the manual button remains the recourse.
       retry: false
     })),
@@ -844,6 +975,13 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
     if (seeding) prBaselineRef.current = true
   }, [prLifecycle, sweepTargets])
 
+  useEffect(() => {
+    if (!state.matches({ setup: "github" })) return
+    if (!github.connection.connected) return
+    if (!github.connection.installations.some((installation) => installation.status === "active")) return
+    send({ type: "GITHUB_CONNECTED" })
+  }, [state, github.connection, send])
+
   const splashHeld = useSplashHold()
 
   // The splash outstays the boot when the boot is quicker than the brand
@@ -867,14 +1005,16 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
   if (state.matches("setup")) {
     return (
       <SetupScreen
+        step={state.matches({ setup: "github" }) ? "github" : "workspace"}
         clis={clis}
-        ghStatus={ghStatus}
+        github={github.connection}
         repos={repos}
         reposDir={reposDir}
-        busy={state.matches({ setup: "choosing" })}
+        busy={state.matches({ setup: { workspace: "choosing" } }) || github.busy}
         onChooseDir={() => send({ type: "CHOOSE" })}
         onContinue={() => send({ type: "CONTINUE" })}
-        onRecheckGh={recheckGh}
+        onConnectGithub={github.connection.connected ? github.manage : github.connect}
+        onSkipGithub={() => send({ type: "SKIP_GITHUB" })}
       />
     )
   }
@@ -905,7 +1045,12 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       collapsedRepos={collapsedRepos}
       onToggleCollapsed={toggleCollapsed}
       defaultRepoPath={lastRepoPath}
-      ghStatus={ghStatus}
+      githubConnection={github.connection}
+      githubBusy={github.busy}
+      onGithubConnect={github.connect}
+      onGithubManage={github.manage}
+      onGithubRefresh={github.refresh}
+      onGithubDisconnect={github.disconnect}
       liveActivity={liveActivity}
       prStates={prStates}
       liveDiff={liveDiff}
@@ -947,7 +1092,6 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
         onToggle: injectionTargets.setEnabled
       }}
       connector={connector}
-      onRecheckGh={recheckGh}
       loadBranches={rpc.workspaceBranches}
       onCreateSession={createSession}
       onRenameSession={renameSession}
@@ -978,32 +1122,64 @@ function AuthedApp({ user, onSignOut }: { user?: User; onSignOut?: () => void })
       renderChatTabs={(session: Session, onSelectConversation) => (
         <SessionChatTabs session={session} onSelectConversation={onSelectConversation} />
       )}
-      renderPullRequest={(session, ctx) => (
-        <PullRequestPane
-          session={session}
-          connected={connected}
-          autoDetect={autoDetect}
-          viewerLogin={ghStatus.login}
-          onConnectGithub={ctx.onConnectGithub}
-          onPrLinked={onPrLinked}
-        />
-      )}
-      renderReview={(session, ctx) => (
-        <ReviewPane
-          key={`${session.id}:${session.prNumber ?? "none"}`}
-          session={session}
-          connected={connected}
-          onConnectGithub={ctx.onConnectGithub}
-        />
-      )}
-      renderCode={(session, ctx) => (
-        <ReviewPane
-          key={`${session.id}:${session.prNumber ?? "none"}`}
-          session={session}
-          connected={connected}
-          onConnectGithub={ctx.onConnectGithub}
-        />
-      )}
+      renderPullRequest={(session, ctx) => {
+        const repo = repos.find((candidate) => candidate.path === session.repoPath || candidate.name === session.repo)
+        const access = repositoryAccess(github.connection, repo?.githubSlug ?? null)
+        const sessionConnected = github.connection.connected && access.status === "accessible"
+        return (
+          <PullRequestPane
+            session={session}
+            connected={sessionConnected}
+            autoDetect={sessionConnected && autoDetect}
+            viewerLogin={github.connection.user?.login}
+            connectionMessage={
+              github.connection.connected
+                ? access.reason
+                : "Connect the GitHub App to create and review pull requests."
+            }
+            connectionActionLabel={
+              access.status === "suspended"
+                ? "Repair GitHub access"
+                : github.connection.connected
+                  ? "Manage repositories"
+                  : "Connect GitHub"
+            }
+            onConnectGithub={ctx.onConnectGithub}
+            onPrLinked={onPrLinked}
+            onPublishCheckpoint={onPublishCheckpoint}
+          />
+        )
+      }}
+      renderReview={(session, ctx) => {
+        const repo = repos.find((candidate) => candidate.path === session.repoPath || candidate.name === session.repo)
+        const access = repositoryAccess(github.connection, repo?.githubSlug ?? null)
+        const sessionConnected = github.connection.connected && access.status === "accessible"
+        return (
+          <ReviewPane
+            key={`${session.id}:${session.prNumber ?? "none"}`}
+            session={session}
+            connected={sessionConnected}
+            connectionMessage={github.connection.connected ? access.reason : undefined}
+            connectionActionLabel={github.connection.connected ? "Manage repositories" : "Connect GitHub"}
+            onConnectGithub={ctx.onConnectGithub}
+          />
+        )
+      }}
+      renderCode={(session, ctx) => {
+        const repo = repos.find((candidate) => candidate.path === session.repoPath || candidate.name === session.repo)
+        const access = repositoryAccess(github.connection, repo?.githubSlug ?? null)
+        const sessionConnected = github.connection.connected && access.status === "accessible"
+        return (
+          <ReviewPane
+            key={`${session.id}:${session.prNumber ?? "none"}`}
+            session={session}
+            connected={sessionConnected}
+            connectionMessage={github.connection.connected ? access.reason : undefined}
+            connectionActionLabel={github.connection.connected ? "Manage repositories" : "Connect GitHub"}
+            onConnectGithub={ctx.onConnectGithub}
+          />
+        )
+      }}
       terminalDockSide={termDock.side}
       // The palette's route to the same toggle ⌃` drives. The dock's visibility
       // is this file's state, so without these two props the shell can lay the

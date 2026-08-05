@@ -1,7 +1,7 @@
 import { Command } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import type { PlatformError } from "@effect/platform/Error"
-import { GhError, GitError } from "@jingler/core"
+import { GitError } from "@jingler/core"
 import { Effect, Stream } from "effect"
 
 /** The user's home directory, from the environment (empty string if unset). */
@@ -83,6 +83,38 @@ export const runGit = (
     )
   )
 
+/** Strict git command with explicit environment additions (values are never rendered in errors). */
+export const runGitWithEnv = (
+  cwd: string,
+  args: ReadonlyArray<string>,
+  environment: Readonly<Record<string, string>>
+): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const proc = yield* Command.make("git", ...args).pipe(
+        Command.workingDirectory(cwd),
+        Command.env({ ...process.env, ...environment }),
+        Command.start
+      )
+      const [stdout, stderr, exitCode] = yield* Effect.all(
+        [decodeStream(proc.stdout), decodeStream(proc.stderr), proc.exitCode],
+        { concurrency: 3 }
+      )
+      if (exitCode !== 0) {
+        return yield* Effect.fail(
+          new GitError({ message: stderr.trim() || stdout.trim() || "git command failed" })
+        )
+      }
+      return stdout.trim()
+    })
+  ).pipe(
+    Effect.catchAll((error) =>
+      error instanceof GitError
+        ? Effect.fail(error)
+        : Effect.fail(new GitError({ message: "git command failed", cause: error }))
+    )
+  )
+
 /**
  * Run a read-only `git diff` command.
  *
@@ -125,64 +157,3 @@ export const runGitDiff = (
           )
     )
   )
-
-/**
- * The shared body of `runGh` / `runGhInput`: run `gh` in `cwd`, capture both
- * streams, and FAIL with `GhError` on a non-zero exit. `input`, when non-null,
- * is fed to the process on stdin.
- */
-const ghProcess = (
-  cwd: string,
-  args: ReadonlyArray<string>,
-  input: string | null
-): Effect.Effect<string, GhError, CommandExecutor.CommandExecutor> =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const base = Command.make("gh", ...args).pipe(Command.workingDirectory(cwd))
-      const command = input === null ? base : base.pipe(Command.feed(input))
-      const proc = yield* command.pipe(Command.start)
-      const [stdout, stderr, exitCode] = yield* Effect.all(
-        [decodeStream(proc.stdout), decodeStream(proc.stderr), proc.exitCode],
-        { concurrency: 3 }
-      )
-      if (exitCode !== 0) {
-        const detail = stderr.trim() || stdout.trim() || `gh ${args.join(" ")} exited ${exitCode}`
-        return yield* Effect.fail(new GhError({ message: detail }))
-      }
-      return stdout.trim()
-    })
-  ).pipe(
-    Effect.catchAll((error) =>
-      error instanceof GhError
-        ? Effect.fail(error)
-        : Effect.fail(new GhError({ message: `gh ${args.join(" ")} failed`, cause: error }))
-    )
-  )
-
-/**
- * Run `gh` in `cwd` and FAIL with `GhError` on a non-zero exit — used for the
- * mutating GitHub operations (`pr create`, `pr comment`, `pr review`) where a
- * failure must surface to the user. Captures stderr for the failure message.
- */
-export const runGh = (
-  cwd: string,
-  args: ReadonlyArray<string>
-): Effect.Effect<string, GhError, CommandExecutor.CommandExecutor> => ghProcess(cwd, args, null)
-
-/**
- * `runGh`, but feeding `input` to the process on stdin.
- *
- * Exists for `gh api --input -`. The `gh api` flag vocabulary (`-f`, `-F`) can
- * only express flat key/value pairs, so any payload with a NESTED ARRAY — the
- * `comments` list on a pull-request review being the case in hand — has to
- * arrive as raw JSON on stdin. There is no argv-shaped way to send it.
- *
- * The body is deliberately NOT in `args`: it would land in the `GhError`
- * message on failure (`runGh` interpolates the args), turning a 422 into a
- * screenful of JSON. Errors here quote gh's stderr and nothing else.
- */
-export const runGhInput = (
-  cwd: string,
-  args: ReadonlyArray<string>,
-  input: string
-): Effect.Effect<string, GhError, CommandExecutor.CommandExecutor> => ghProcess(cwd, args, input)

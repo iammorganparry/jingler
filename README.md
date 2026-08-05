@@ -24,8 +24,8 @@ the coding CLIs already installed on your machine and keeps its desktop state in
 - [Docker](https://www.docker.com/) for the local PostgreSQL auth database
 - Git and at least one supported coding CLI, already installed and signed in
 
-[GitHub CLI](https://cli.github.com/) is optional. Install it and run `gh auth login` to enable
-pull-request and issue features.
+Pull-request and issue features use the Jingler GitHub App. Connect it during
+onboarding or from **Settings → GitHub**; the GitHub CLI is not required.
 
 Jingler currently requires Codex CLI 0.144 or newer and OpenCode 1.18 or newer. The app reports
 an upgrade command if it finds an older version.
@@ -84,8 +84,8 @@ an upgrade command if it finds an older version.
 4. Describe the task in the composer. Use the plan controls when you want a reviewable plan before
    implementation, and inspect file changes from the session's changes view.
 
-5. If GitHub CLI is connected, create or link a pull request from the PR view. Sessions can also
-   be created directly from open pull requests or issues.
+5. If the Jingler GitHub App is connected, create or link a pull request from the PR view.
+   Sessions can also be created directly from open pull requests or issues.
 
 ## Common commands
 
@@ -132,6 +132,7 @@ guide.
 | --- | --- |
 | `apps/desktop` | Electron main process, preload bridge, React renderer, and end-to-end tests |
 | `apps/server` | Hono, Better Auth, PostgreSQL/Drizzle, and email templates |
+| `apps/github-relay` | Cloudflare Worker that verifies GitHub webhooks and streams resumable review events |
 | `apps/memory-worker` | Organization-isolated Cloudflare vault, workflows, search, graph, and analytics |
 | `packages/memory` | Deterministic Markdown, revision, graph, analytics, export, and linting contracts |
 | `packages/core` | Shared domain models, schemas, and orchestration logic |
@@ -144,6 +145,11 @@ so development changes are picked up without a separate package build.
 Shared Memory deployment and recovery are documented in
 [docs/shared-memory.md](docs/shared-memory.md); Worker binding details live in
 [apps/memory-worker/README.md](apps/memory-worker/README.md).
+
+GitHub App registration, Vercel configuration, and credential rotation are
+documented in [apps/server/README.md](apps/server/README.md#github-app-registration).
+Webhook relay deployment, replay, and incident recovery are documented in
+[apps/github-relay/README.md](apps/github-relay/README.md).
 
 ## Troubleshooting
 
@@ -165,8 +171,9 @@ terminal.
 
 **GitHub features are unavailable**
 
-Install GitHub CLI, run `gh auth login`, and use the welcome screen's recheck action or restart
-Jingler.
+Open **Settings → GitHub**, then install or reconnect the Jingler GitHub App. If Jingler is
+connected but a repository is unavailable, use **Manage repositories** to add it to the
+installation, or ask the installation owner to restore access if the installation is suspended.
 
 **The auth server cannot connect to PostgreSQL**
 

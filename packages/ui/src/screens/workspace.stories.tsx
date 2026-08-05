@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { CliInfo, GhStatus, PrSummary, Repo } from "@jingler/core"
+import type { CliInfo, GitHubConnection, PrSummary, Repo } from "@jingler/core"
 import { SetupScreen } from "./setup-screen.js"
 import { NewSessionDialog } from "../composites/new-session-dialog.js"
 import { PrPickerList } from "../composites/pr-picker-list.js"
@@ -14,20 +14,31 @@ const clis: ReadonlyArray<CliInfo> = [
   { kind: "cursor", label: "Cursor Agent", binPath: null, version: null, available: false }
 ]
 
-const ghAuthed: GhStatus = {
-  available: true,
-  authenticated: true,
-  login: "iammorganparry",
-  host: "github.com",
-  version: "2.68.1"
+const githubConnected: GitHubConnection = {
+  mode: "connected",
+  enabled: true,
+  connected: true,
+  user: { id: "1", login: "iammorganparry", name: "Morgan Parry", avatarUrl: null },
+  installations: [{
+    id: "101",
+    account: { id: "2", login: "trigify", type: "Organization", avatarUrl: null },
+    repositorySelection: "all",
+    permissions: { contents: "write" },
+    status: "active",
+    suspendedAt: null
+  }],
+  lastRefreshedAt: "2026-08-04T09:00:00.000Z",
+  error: null
 }
 
-const ghMissing: GhStatus = {
-  available: false,
-  authenticated: false,
-  login: null,
-  host: null,
-  version: null
+const githubDisconnected: GitHubConnection = {
+  mode: "disconnected",
+  enabled: true,
+  connected: false,
+  user: null,
+  installations: [],
+  lastRefreshedAt: null,
+  error: null
 }
 
 const repos: ReadonlyArray<Repo> = [
@@ -37,17 +48,17 @@ const repos: ReadonlyArray<Repo> = [
   { name: "eland", path: "/Users/m/repos/eland", defaultBranch: "master", currentBranch: "master", remoteUrl: "git@github.com:trigify/eland.git", githubSlug: "trigify/eland" }
 ]
 
-/** First run — no directory chosen yet; harnesses + gh status shown. */
+/** First run — no directory chosen yet. */
 export const SetupFirstRun: Story = {
   render: () => (
-    <SetupScreen clis={clis} ghStatus={ghAuthed} onChooseDir={() => {}} onContinue={() => {}} />
+    <SetupScreen step="workspace" clis={clis} github={githubDisconnected} onChooseDir={() => {}} onContinue={() => {}} onConnectGithub={() => {}} onSkipGithub={() => {}} />
   )
 }
 
-/** First run when the GitHub CLI is not installed (non-blocking notice). */
-export const SetupGhMissing: Story = {
+/** Explicit GitHub App step, still skippable. */
+export const SetupGithub: Story = {
   render: () => (
-    <SetupScreen clis={clis} ghStatus={ghMissing} onChooseDir={() => {}} onContinue={() => {}} />
+    <SetupScreen step="github" clis={clis} github={githubDisconnected} repos={repos} reposDir="/Users/morganparry/repos" onChooseDir={() => {}} onContinue={() => {}} onConnectGithub={() => {}} onSkipGithub={() => {}} />
   )
 }
 
@@ -56,11 +67,14 @@ export const SetupChosen: Story = {
   render: () => (
     <SetupScreen
       clis={clis}
-      ghStatus={ghAuthed}
+      step="workspace"
+      github={githubConnected}
       reposDir="/Users/morganparry/repos"
       repos={repos}
       onChooseDir={() => {}}
       onContinue={() => {}}
+      onConnectGithub={() => {}}
+      onSkipGithub={() => {}}
     />
   )
 }

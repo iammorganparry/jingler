@@ -1,7 +1,7 @@
 /**
  * The main-process Effect runtime. `AppLayer` wires every backend dependency the
  * RPC handlers need — the Node platform (`CommandExecutor` + `FileSystem` +
- * `Path`), the workspace/config/git/gh/discovery/session services, the native
+ * `Path`), the workspace/config/git/GitHub API/discovery/session services, the native
  * dialog + `~/jingler` path layers — and launches the RPC server.
  * `ManagedRuntime` keeps the layer's scope (forked server daemon + IPC listener)
  * alive for the lifetime of the app.
@@ -14,7 +14,9 @@ import {
   ConfigService,
   ContextManager,
   DiscoveryService,
-  GhService,
+  GitHubApi,
+  GitHubAuth,
+  GitHubEventStore,
   GitService,
   HarnessCliAdapterLive,
   ModelsService,
@@ -153,7 +155,12 @@ const AppLayer = RpcServicesLayer.pipe(
     )
   ),
   Layer.provide(UsageService.Default),
-  Layer.provide(GhService.Default),
+  Layer.provide(GitHubApi.Default),
+  Layer.provide(GitHubEventStore.Default),
+  // Retained for the plugin-host provider as well as consumed by GitHubApi.
+  // Supplying SecretStore here closes the layer locally; an outer provider
+  // cannot consume services retained by the inner RPC layer.
+  Layer.provideMerge(GitHubAuth.Default.pipe(Layer.provide(SecretStoreLayer))),
   // provideMerge: the `Config.*` handlers consume ConfigService AND the boot
   // theme resolution reads the active theme id from it before any window
   // exists.
@@ -170,7 +177,7 @@ const AppLayer = RpcServicesLayer.pipe(
   // provideMerge so ThemeService/ConfigService stay callable from the runtime
   // directly (boot theme), not only from inside an RPC handler.
   Layer.provideMerge(AppPathsLive),
-  // NodeContext bundles CommandExecutor + FileSystem + Path used by the git/gh/
+  // NodeContext bundles CommandExecutor + FileSystem + Path used by git, API,
   // discovery/config/workspace/session services. Merged (not just provided) so
   // the startup prefetch can run `DiscoveryService.list`, which needs the executor.
   Layer.provideMerge(NodeContext.layer)

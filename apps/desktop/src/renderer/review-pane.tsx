@@ -21,10 +21,14 @@ const deslopPrompt = (path: string): string =>
 export function ReviewPane({
   session,
   connected,
+  connectionMessage,
+  connectionActionLabel,
   onConnectGithub
 }: {
   session: Session
   connected: boolean
+  connectionMessage?: string
+  connectionActionLabel?: string
   onConnectGithub: () => void
 }) {
   const review = useReview(session)
@@ -53,6 +57,8 @@ export function ReviewPane({
       drafts={review.drafts}
       routeTargetSession={session.title}
       connected={connected}
+      connectionMessage={connectionMessage}
+      connectionActionLabel={connectionActionLabel}
       source={review.source}
       prAvailable={review.prAvailable}
       localAvailable={review.localAvailable}

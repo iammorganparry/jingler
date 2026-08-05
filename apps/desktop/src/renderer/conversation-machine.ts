@@ -12,6 +12,7 @@ import type {
   Attachment,
   CliKind,
   ExecutionMode,
+  ExternalInstructionIdentity,
   GateDecision,
   Message,
   PermissionMode,
@@ -163,6 +164,10 @@ export interface ConversationContext {
   readonly pendingText: string
   /** Images attached to the turn currently running (sent to the harness). */
   readonly pendingImages: ReadonlyArray<Attachment>
+  /** Stable source for the running external turn, when this is not a composer send. */
+  readonly pendingExternalInstruction: ExternalInstructionIdentity | null
+  /** Every coalesced delivery waiter resolves only after main durably accepts the turn. */
+  readonly pendingExternalAcceptances: ReadonlyArray<() => void>
   /** Provider-native thinking state for the next and subsequent turns. */
   readonly reasoning?: ReasoningSetting
   /**
@@ -266,14 +271,35 @@ export interface QueuedMessage {
   readonly id: string
   readonly text: string
   readonly images: ReadonlyArray<Attachment>
+  readonly externalInstruction?: ExternalInstructionIdentity
+  readonly externalAcceptances: ReadonlyArray<() => void>
 }
+
+/**
+ * Relay feedback has a stricter delivery boundary than an ordinary operator
+ * correction. Native steering persists a plain user turn, so it cannot
+ * atomically accept the relay identity that makes replay idempotent. Keep these
+ * items on the queue until they can enter the normal Agent.run path instead.
+ *
+ * Check both fields defensively. They are created together today, but treating
+ * either one as external prevents a future partial mapping from silently
+ * resolving an acknowledgement through the non-durable steer path.
+ */
+const requiresDurableRunAcceptance = (queued: QueuedMessage): boolean =>
+  queued.externalInstruction !== undefined || queued.externalAcceptances.length > 0
 
 type SteerResult =
   | { readonly status: "accepted"; readonly user: Message; readonly assistant: Message }
   | { readonly status: "deferred" | "unsupported" }
 
 type ConversationEvent =
-  | { type: "SEND"; text: string; images?: ReadonlyArray<Attachment> }
+  | {
+      type: "SEND"
+      text: string
+      images?: ReadonlyArray<Attachment>
+      externalInstruction?: ExternalInstructionIdentity
+      onExternalAccepted?: () => void
+    }
   // Addressed by id, never by position — see `QueuedMessage.id`.
   | { type: "UNQUEUE"; id: string }
   | { type: "SEND_NOW"; id: string }
@@ -533,6 +559,7 @@ const agentStream = fromCallback<
     resumePlanId: string | null
     resumePlanRevision: number | null
     reasoning?: ReasoningSetting
+    externalInstruction: ExternalInstructionIdentity | null
   }
 >(({ sendBack, input }) => {
   const onEvent = (event: StreamEvent) => sendBack({ type: "STREAM_EVENT", event })
@@ -545,7 +572,10 @@ const agentStream = fromCallback<
         onEvent
       )
     : rpc.agentRun(input.sessionId, input.chatId, input.text, onEvent, input.images, {
-        reasoning: input.reasoning ?? null
+        reasoning: input.reasoning ?? null,
+        ...(input.externalInstruction === null
+          ? {}
+          : { externalInstruction: input.externalInstruction })
       })
   return cancel
 })
@@ -585,6 +615,12 @@ const gateStatusFor = (decision: GateDecision) =>
 
 const stamp = () => Date.now().toString(36)
 
+const sameExternalInstruction = (
+  left: ExternalInstructionIdentity | undefined | null,
+  right: ExternalInstructionIdentity
+): boolean =>
+  left?.deliveryId === right.deliveryId || left?.semanticKey === right.semanticKey
+
 type PlanFeedback = {
   readonly plan: Plan
   readonly text: string
@@ -608,6 +644,7 @@ const planFeedbackFor = (
   if (plan === null || plan.status !== "proposed") return null
 
   if (event.type === "SEND") {
+    if (event.externalInstruction !== undefined) return null
     const text = event.text.trim()
     // Plan annotations cannot carry images. Preserve attachment-bearing sends in
     // the ordinary queue instead of silently discarding their visual context.
@@ -617,7 +654,12 @@ const planFeedbackFor = (
 
   if (event.type !== "SEND_NOW" || context.steeringId !== null) return null
   const queued = context.queued.find((item) => item.id === event.id)
-  if (queued === undefined || queued.text.trim().length === 0 || queued.images.length > 0) {
+  if (
+    queued === undefined ||
+    requiresDurableRunAcceptance(queued) ||
+    queued.text.trim().length === 0 ||
+    queued.images.length > 0
+  ) {
     return null
   }
   return { plan, text: queued.text.trim(), queuedId: queued.id }
@@ -717,10 +759,35 @@ export const conversationMachine = setup({
       if (event.type !== "STREAM_EVENT" || event.event._tag !== "ToolEnd") return false
       if (context.steeringId !== null || context.queued.length === 0) return false
       if (!supportsSteer(context.cli)) return false
-      return context.resumePlanId === null
+      return (
+        context.resumePlanId === null &&
+        !requiresDurableRunAcceptance(context.queued[0]!)
+      )
+    },
+    canSteerQueued: ({ context, event }) => {
+      if (event.type !== "SEND_NOW" || context.steeringId !== null) return false
+      const queued = context.queued.find((item) => item.id === event.id)
+      return queued !== undefined && !requiresDurableRunAcceptance(queued)
     },
     canRoutePlanFeedback: ({ context, event }) =>
       planFeedbackFor(context, event) !== null,
+    canCoalesceExternalSend: ({ context, event }) =>
+      event.type === "SEND" &&
+      event.externalInstruction !== undefined &&
+      (sameExternalInstruction(
+        context.pendingExternalInstruction,
+        event.externalInstruction
+      ) ||
+        context.queued.some((queued) =>
+          sameExternalInstruction(queued.externalInstruction, event.externalInstruction!)
+        )),
+    isDuplicateExternalAcceptance: ({ event }) =>
+      event.type === "STREAM_EVENT" &&
+      event.event._tag === "ExternalInstructionAccepted" &&
+      event.event.duplicate,
+    isExternalAcceptance: ({ event }) =>
+      event.type === "STREAM_EVENT" &&
+      event.event._tag === "ExternalInstructionAccepted",
     /** Older turns remain, and no page is already in flight. */
     canLoadOlder: ({ context }) =>
       context.hasMoreHistory &&
@@ -737,6 +804,11 @@ export const conversationMachine = setup({
       return {
         pendingText: text,
         pendingImages: images,
+        pendingExternalInstruction: event.externalInstruction ?? null,
+        pendingExternalAcceptances:
+          event.externalInstruction !== undefined && event.onExternalAccepted !== undefined
+            ? [event.onExternalAccepted]
+            : [],
         // See `dequeueTurn`: a new run must never inherit the previous turn's
         // in-flight steer guard.
         steeringId: null,
@@ -777,6 +849,8 @@ export const conversationMachine = setup({
         planActionError: null,
         pendingText: "",
         pendingImages: [],
+        pendingExternalInstruction: null,
+        pendingExternalAcceptances: [],
         // A fresh run (the plan re-drive) starts with no sub-agents carried over.
         subagents: [],
         reviewer: keepReviewer(context.reviewer),
@@ -799,10 +873,71 @@ export const conversationMachine = setup({
       return {
         queued: [
           ...context.queued,
-          { id: `q_${stamp()}_${context.queued.length}`, text, images }
+          {
+            id: `q_${stamp()}_${context.queued.length}`,
+            text,
+            images,
+            ...(event.externalInstruction === undefined
+              ? {}
+              : { externalInstruction: event.externalInstruction }),
+            externalAcceptances:
+              event.externalInstruction !== undefined && event.onExternalAccepted !== undefined
+                ? [event.onExternalAccepted]
+                : []
+          }
         ]
       }
     }),
+    coalesceExternalSend: assign(({ context, event }) => {
+      if (
+        event.type !== "SEND" ||
+        event.externalInstruction === undefined ||
+        event.onExternalAccepted === undefined
+      ) {
+        return {}
+      }
+      if (sameExternalInstruction(context.pendingExternalInstruction, event.externalInstruction)) {
+        return {
+          pendingExternalAcceptances: [
+            ...context.pendingExternalAcceptances,
+            event.onExternalAccepted
+          ]
+        }
+      }
+      return {
+        queued: context.queued.map((queued) =>
+          sameExternalInstruction(queued.externalInstruction, event.externalInstruction!)
+            ? {
+                ...queued,
+                externalAcceptances: [
+                  ...queued.externalAcceptances,
+                  event.onExternalAccepted!
+                ]
+              }
+            : queued
+        )
+      }
+    }),
+    acceptExternalInstruction: assign(({ context, event }) => {
+      if (
+        event.type !== "STREAM_EVENT" ||
+        event.event._tag !== "ExternalInstructionAccepted" ||
+        !sameExternalInstruction(context.pendingExternalInstruction, event.event.identity)
+      ) {
+        return {}
+      }
+      for (const accepted of context.pendingExternalAcceptances) accepted()
+      return { pendingExternalAcceptances: [] }
+    }),
+    discardDuplicateExternalTurn: assign(({ context }) => ({
+      messages: context.messages.slice(0, -2),
+      pendingText: "",
+      pendingImages: [],
+      pendingExternalInstruction: null,
+      pendingExternalAcceptances: [],
+      runStartedAt: null,
+      lastOutcome: null
+    })),
     // Drop a still-pending queued message before it's sent.
     removeQueued: assign(({ context, event }) => {
       if (event.type !== "UNQUEUE") return {}
@@ -972,6 +1107,8 @@ export const conversationMachine = setup({
         queued: rest,
         pendingText: next.text,
         pendingImages: next.images,
+        pendingExternalInstruction: next.externalInstruction ?? null,
+        pendingExternalAcceptances: next.externalAcceptances,
         // A new run starts UNLATCHED. `steeringId` guards one in-flight steer
         // against the turn it was aimed at; carrying it into the next turn would
         // disable the flush and "Send now" for a reply that can no longer come.
@@ -1077,7 +1214,9 @@ export const conversationMachine = setup({
           tokens: context.tokens > 0 ? context.tokens : e.tokens,
           runStartedAt: null,
           lastOutcome: "done" as const,
-          planDraft: null
+          planDraft: null,
+          pendingExternalInstruction: null,
+          pendingExternalAcceptances: []
         }
       }
       if (e._tag === "Failed") {
@@ -1086,7 +1225,9 @@ export const conversationMachine = setup({
           subagents: settled,
           runStartedAt: null,
           lastOutcome: "failed" as const,
-          planDraft: null
+          planDraft: null,
+          pendingExternalInstruction: null,
+          pendingExternalAcceptances: []
         }
       }
       // The harness reports its actual model on init — reflect it in the chip.
@@ -1531,6 +1672,8 @@ export const conversationMachine = setup({
       ),
       runStartedAt: null,
       planDraft: null,
+      pendingExternalInstruction: null,
+      pendingExternalAcceptances: [],
       // The OPERATOR stopped this run. Recording it as `failed` would notify
       // them that their own deliberate action went wrong.
       lastOutcome: null
@@ -1624,6 +1767,8 @@ export const conversationMachine = setup({
       patch: "",
       pendingText: "",
       pendingImages: [],
+      pendingExternalInstruction: null,
+      pendingExternalAcceptances: [],
       reasoning,
       queued: [],
       steeringId: null,
@@ -1674,6 +1819,7 @@ export const conversationMachine = setup({
         // clears and the operator believes they sent it. Hold it and run it the
         // moment the load settles, exactly as a send during a run is held.
         SEND: [
+          { guard: "canCoalesceExternalSend", actions: "coalesceExternalSend" },
           { guard: "canRoutePlanFeedback", actions: "routePlanFeedback" },
           { actions: "enqueue" }
         ],
@@ -1739,7 +1885,10 @@ export const conversationMachine = setup({
       // status can be recorded truthfully.
       entry: "persistSettledStatus",
       on: {
-        SEND: { target: "running", actions: "appendTurns" },
+        SEND: [
+          { guard: "canCoalesceExternalSend", actions: "coalesceExternalSend" },
+          { target: "running", actions: "appendTurns" }
+        ],
         /**
          * The parked queue's release valve.
          *
@@ -1776,11 +1925,18 @@ export const conversationMachine = setup({
           images: context.pendingImages,
           resumePlanId: context.resumePlanId,
           resumePlanRevision: context.resumePlanRevision,
-          reasoning: context.reasoning
+          reasoning: context.reasoning,
+          externalInstruction: context.pendingExternalInstruction
         })
       },
       on: {
         STREAM_EVENT: [
+          {
+            guard: "isDuplicateExternalAcceptance",
+            target: "refreshingDiff",
+            actions: ["acceptExternalInstruction", "discardDuplicateExternalTurn"]
+          },
+          { guard: "isExternalAcceptance", actions: "acceptExternalInstruction" },
           { guard: "isTerminal", target: "refreshingDiff", actions: "foldEvent" },
           // A tool just finished and something is waiting: hand it to the live
           // turn now rather than holding it until the turn ends. See `canAutoFlush`.
@@ -1796,6 +1952,7 @@ export const conversationMachine = setup({
         // Sent mid-run: queued, then flushed into this turn at the next tool
         // boundary where the harness can take it (see `canAutoFlush`).
         SEND: [
+          { guard: "canCoalesceExternalSend", actions: "coalesceExternalSend" },
           { guard: "canRoutePlanFeedback", actions: "routePlanFeedback" },
           { actions: "enqueue" }
         ],
@@ -1807,7 +1964,11 @@ export const conversationMachine = setup({
         // refreshingDiff dequeues it (the rest of the queue follows).
         SEND_NOW: [
           { guard: "canRoutePlanFeedback", actions: "routePlanFeedback" },
-          { actions: "promoteAndSteer" }
+          { guard: "canSteerQueued", actions: "promoteAndSteer" },
+          // External feedback may be prioritised, but it must wait for the live
+          // turn to settle and then dequeue through Agent.run. Steering would
+          // bypass durable identity acceptance and make a crash replay unsafe.
+          { actions: "promoteQueued" }
         ],
         STEER_RESULT: [
           {
@@ -1869,7 +2030,10 @@ export const conversationMachine = setup({
       after: { [STOP_SETTLE_CAP]: { target: "refreshingDiff" } },
       on: {
         // Keep accepting sends — they run once the diff settles, as elsewhere.
-        SEND: { actions: "enqueue" },
+        SEND: [
+          { guard: "canCoalesceExternalSend", actions: "coalesceExternalSend" },
+          { actions: "enqueue" }
+        ],
         UNQUEUE: { actions: "removeQueued" },
         EDIT_QUEUED: { actions: "editQueued" },
         SEND_NOW: { actions: "promoteQueued" },
@@ -1906,7 +2070,10 @@ export const conversationMachine = setup({
       },
       on: {
         // Still accept queued sends while the diff refreshes (a brief window).
-        SEND: { actions: "enqueue" },
+        SEND: [
+          { guard: "canCoalesceExternalSend", actions: "coalesceExternalSend" },
+          { actions: "enqueue" }
+        ],
         UNQUEUE: { actions: "removeQueued" },
         EDIT_QUEUED: { actions: "editQueued" },
         // The turn already ended — just jump the picked message to the head so the

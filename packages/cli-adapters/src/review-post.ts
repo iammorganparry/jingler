@@ -1,6 +1,6 @@
 import type { AdversarialReview, ReviewFinding } from "@jingler/core"
 import { findingLocation, partitionFindings } from "@jingler/core"
-import { postableLines } from "./gh.js"
+import { postableLines } from "./github-mappers.js"
 
 /**
  * Turning a review's minor/nit half into ONE GitHub review payload.
@@ -8,7 +8,7 @@ import { postableLines } from "./gh.js"
  * Pure, and separate from the `Review.run` handler on purpose: the interesting
  * behaviour here is entirely about which findings can be anchored and what
  * happens to the ones that can't, and that deserves to be testable without a
- * `gh` binary, a worktree, or an agent in sight.
+ * a GitHub client, a worktree, or an agent in sight.
  */
 
 /** One inline comment's markdown body. */

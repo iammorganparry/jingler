@@ -7,11 +7,11 @@ import { GitService, ensureWorktreeLinked, mainTreeHoldsBranch, resetWorktreeLin
 import { advanceOrigin, failureOf, initGitRepo, initGitRepoWithOrigin, mkTemp, runExit, withTempRoot } from "./test-support.js"
 
 /**
- * GitService.createWorktree runs real `git worktree add`. We assert the real
- * outcomes on disk — the worktree exists, the branch was created and git tracks
- * the worktree — not the git invocations.
+ * GitService.createDetachedWorktree runs real `git worktree add`. We assert the
+ * real outcomes on disk — the worktree exists at the resolved base without
+ * creating a branded/task ref, and git tracks it — not the git invocations.
  */
-describe("GitService.createWorktree", () => {
+describe("GitService.createDetachedWorktree", () => {
   let temp: ReturnType<typeof withTempRoot>
   let repos: ReturnType<typeof mkTemp>
   beforeEach(() => {
@@ -25,20 +25,20 @@ describe("GitService.createWorktree", () => {
 
   const create = (repoPath: string, repoName: string) =>
     runExit(
-      GitService.createWorktree({ repoPath, repoName, slug: "fix-auth", baseBranch: "main" }).pipe(
+      GitService.createDetachedWorktree({ repoPath, repoName, slug: "fix-auth", baseBranch: "main" }).pipe(
         Effect.provide(GitService.Default)
       ),
       temp.layer
     )
 
-  it("creates the worktree on a fresh jingler/<slug> branch", async () => {
+  it("creates a detached worktree without creating a task branch", async () => {
     const repoPath = initGitRepo(join(repos.dir, "widget"))
     const exit = await create(repoPath, "widget")
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
 
     const worktree = exit.value
-    expect(worktree.branch).toBe("jingler/fix-auth")
+    expect(worktree.branch).toBe("main")
     expect(worktree.path).toBe(join(temp.root, "worktrees", "widget", "fix-auth"))
     expect(existsSync(worktree.path)).toBe(true)
 
@@ -46,7 +46,13 @@ describe("GitService.createWorktree", () => {
       cwd: repoPath,
       encoding: "utf-8"
     })
-    expect(branches).toContain("jingler/fix-auth")
+    expect(branches).not.toMatch(/(?:^|\n)(?:feat|fix|chore|jingler)\//)
+    expect(
+      execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd: worktree.path,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe("HEAD")
 
     const worktrees = execFileSync("git", ["worktree", "list"], { cwd: repoPath, encoding: "utf-8" })
     expect(worktrees).toContain(worktree.path)
@@ -103,7 +109,7 @@ describe("GitService.createWorktree", () => {
 
   it("forks off the fresh remote tip — a session picks up commits the local clone hadn't fetched", async () => {
     // A real clone with a bare origin, then push a commit to origin the clone
-    // hasn't seen. createWorktree must fetch + fork off origin/main, not stale local.
+    // hasn't seen. Detached creation must fetch + fork off origin/main, not stale local.
     const repoPath = join(repos.dir, "fresh")
     const { origin } = initGitRepoWithOrigin(repoPath)
     advanceOrigin(origin, "remote-only-commit")
@@ -135,7 +141,45 @@ describe("GitService.createWorktree", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     expect(existsSync(exit.value.path)).toBe(true)
-    expect(exit.value.branch).toBe("jingler/fix-auth")
+    expect(exit.value.branch).toBe("main")
+    expect(
+      execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd: exit.value.path,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe("HEAD")
+  })
+
+  it("uses the local base after an offline fetch instead of a stale remote-tracking ref", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "stale-offline"), {
+      remote: join(repos.dir, "missing-origin.git")
+    })
+    execFileSync("git", ["update-ref", "refs/remotes/origin/main", "HEAD"], {
+      cwd: repoPath
+    })
+    const staleRemote = execFileSync("git", ["rev-parse", "origin/main"], {
+      cwd: repoPath,
+      encoding: "utf8"
+    }).trim()
+    writeFileSync(join(repoPath, "local-only.ts"), "local base\n")
+    execFileSync("git", ["add", "local-only.ts"], { cwd: repoPath })
+    execFileSync("git", ["commit", "-m", "advance local base", "--no-gpg-sign"], {
+      cwd: repoPath
+    })
+    const localBase = execFileSync("git", ["rev-parse", "main"], {
+      cwd: repoPath,
+      encoding: "utf8"
+    }).trim()
+    expect(localBase).not.toBe(staleRemote)
+
+    const exit = await create(repoPath, "stale-offline")
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: exit.value.path,
+      encoding: "utf8"
+    }).trim()).toBe(localBase)
   })
 
   it("forks off a local-only base branch when there is no matching remote ref", async () => {
@@ -143,7 +187,7 @@ describe("GitService.createWorktree", () => {
     // a no-op and we fall back to forking off the local branch.
     const repoPath = initGitRepo(join(repos.dir, "localbase"), { branches: ["feature-x"] })
     const exit = await runExit(
-      GitService.createWorktree({ repoPath, repoName: "localbase", slug: "off-x", baseBranch: "feature-x" }).pipe(
+      GitService.createDetachedWorktree({ repoPath, repoName: "localbase", slug: "off-x", baseBranch: "feature-x" }).pipe(
         Effect.provide(GitService.Default)
       ),
       temp.layer
@@ -200,7 +244,7 @@ describe("GitService.createWorktree", () => {
       )
 
     // First attempt leaves a real detached worktree on disk (mimicking a create
-    // that failed AFTER the worktree add — e.g. gh pr checkout errored).
+    // that failed AFTER the worktree add — e.g. a PR checkout fetch errored).
     const first = await detached()
     expect(first._tag).toBe("Success")
     if (first._tag !== "Success") return
@@ -245,14 +289,14 @@ describe("GitService.createWorktree", () => {
     }).trim()
 
     const named = await runExit(
-      GitService.createTaskBranch(cwd, "fix-token-refresh").pipe(
+      GitService.createTaskBranch(cwd, "fix/token-refresh").pipe(
         Effect.provide(GitService.Default)
       ),
       temp.layer
     )
     expect(named._tag).toBe("Success")
     if (named._tag !== "Success") return
-    expect(named.value).toBe("jingler/fix-token-refresh")
+    expect(named.value).toBe("fix/token-refresh")
     expect(
       execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
         cwd,
@@ -267,7 +311,7 @@ describe("GitService.createWorktree", () => {
 
   it("uses a deterministic suffix when the task branch already exists", async () => {
     const repoPath = initGitRepo(join(repos.dir, "collision"))
-    execFileSync("git", ["branch", "jingler/fix-token-refresh"], { cwd: repoPath })
+    execFileSync("git", ["branch", "fix/token-refresh"], { cwd: repoPath })
     const detached = await runExit(
       GitService.createDetachedWorktree({
         repoPath,
@@ -280,12 +324,64 @@ describe("GitService.createWorktree", () => {
     if (detached._tag !== "Success") throw new Error("expected detached worktree")
 
     const named = await runExit(
-      GitService.createTaskBranch(detached.value.path, "fix-token-refresh").pipe(
+      GitService.createTaskBranch(detached.value.path, "fix/token-refresh").pipe(
         Effect.provide(GitService.Default)
       ),
       temp.layer
     )
-    expect(named._tag === "Success" && named.value).toBe("jingler/fix-token-refresh-2")
+    expect(named._tag === "Success" && named.value).toBe("fix/token-refresh-2")
+  })
+
+  it("retries the next suffix when concurrent worktrees race to create the same task branch", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "concurrent-collision"))
+    const createDetached = (slug: string) =>
+      runExit(
+        GitService.createDetachedWorktree({
+          repoPath,
+          repoName: "concurrent-collision",
+          slug,
+          baseBranch: "main"
+        }).pipe(Effect.provide(GitService.Default)),
+        temp.layer
+      )
+    const firstDetached = await createDetached("first-pad")
+    const secondDetached = await createDetached("second-pad")
+    if (firstDetached._tag !== "Success" || secondDetached._tag !== "Success") {
+      throw new Error("expected detached worktrees")
+    }
+
+    const [first, second] = await Promise.all([
+      runExit(
+        GitService.createTaskBranch(firstDetached.value.path, "fix/token-refresh").pipe(
+          Effect.provide(GitService.Default)
+        ),
+        temp.layer
+      ),
+      runExit(
+        GitService.createTaskBranch(secondDetached.value.path, "fix/token-refresh").pipe(
+          Effect.provide(GitService.Default)
+        ),
+        temp.layer
+      )
+    ])
+
+    expect(first._tag).toBe("Success")
+    expect(second._tag).toBe("Success")
+    if (first._tag !== "Success" || second._tag !== "Success") return
+    expect([first.value, second.value].sort()).toStrictEqual([
+      "fix/token-refresh",
+      "fix/token-refresh-2"
+    ])
+    expect(
+      [firstDetached.value.path, secondDetached.value.path]
+        .map((cwd) =>
+          execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+            cwd,
+            encoding: "utf-8"
+          }).trim()
+        )
+        .sort()
+    ).toStrictEqual(["fix/token-refresh", "fix/token-refresh-2"])
   })
 
   it("reuses the live branch when task activation is triggered twice", async () => {
@@ -302,33 +398,98 @@ describe("GitService.createWorktree", () => {
     if (detached._tag !== "Success") throw new Error("expected detached worktree")
 
     const first = await runExit(
-      GitService.createTaskBranch(detached.value.path, "fix-token-refresh").pipe(
+      GitService.createTaskBranch(detached.value.path, "fix/token-refresh").pipe(
         Effect.provide(GitService.Default)
       ),
       temp.layer
     )
     const second = await runExit(
-      GitService.createTaskBranch(detached.value.path, "fix-token-refresh").pipe(
+      GitService.createTaskBranch(detached.value.path, "fix/token-refresh").pipe(
         Effect.provide(GitService.Default)
       ),
       temp.layer
     )
 
-    expect(first._tag === "Success" && first.value).toBe("jingler/fix-token-refresh")
-    expect(second._tag === "Success" && second.value).toBe("jingler/fix-token-refresh")
+    expect(first._tag === "Success" && first.value).toBe("fix/token-refresh")
+    expect(second._tag === "Success" && second.value).toBe("fix/token-refresh")
     expect(
       execFileSync(
         "git",
         [
           "for-each-ref",
           "--format=%(refname:short)",
-          "refs/heads/jingler/fix-token-refresh"
+          "refs/heads/fix/token-refresh"
         ],
         { cwd: repoPath, encoding: "utf-8" }
       )
         .trim()
         .split("\n")
-    ).toStrictEqual(["jingler/fix-token-refresh"])
+    ).toStrictEqual(["fix/token-refresh"])
+  })
+
+  it("suffixes a semantic branch when only a remote-tracking ref collides", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "remote-collision"))
+    execFileSync("git", ["update-ref", "refs/remotes/origin/fix/token-refresh", "HEAD"], {
+      cwd: repoPath
+    })
+    const detached = await runExit(
+      GitService.createDetachedWorktree({
+        repoPath,
+        repoName: "remote-collision",
+        slug: "landing-pad",
+        baseBranch: "main"
+      }).pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+    if (detached._tag !== "Success") throw new Error("expected detached worktree")
+
+    const named = await runExit(
+      GitService.createTaskBranch(detached.value.path, "fix/token-refresh").pipe(
+        Effect.provide(GitService.Default)
+      ),
+      temp.layer
+    )
+    expect(named._tag === "Success" && named.value).toBe("fix/token-refresh-2")
+  })
+
+  it("rejects an unsafe semantic ref and leaves the worktree detached", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "unsafe-ref"))
+    const detached = await runExit(
+      GitService.createDetachedWorktree({
+        repoPath,
+        repoName: "unsafe-ref",
+        slug: "landing-pad",
+        baseBranch: "main"
+      }).pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+    if (detached._tag !== "Success") throw new Error("expected detached worktree")
+
+    const injectionSentinel = join(detached.value.path, "model-owned")
+    for (const ref of [
+      `fix/safe; touch ${injectionSentinel}`,
+      "fix/../../main",
+      "topic/not-a-conventional-type",
+      "fix/HEAD",
+      `fix/${"x".repeat(81)}`,
+      "fix/two/components",
+      "fix/"
+    ]) {
+      const named = await runExit(
+        GitService.createTaskBranch(detached.value.path, ref).pipe(
+          Effect.provide(GitService.Default)
+        ),
+        temp.layer
+      )
+      expect(named._tag).toBe("Failure")
+      expect(
+        execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+          cwd: detached.value.path,
+          encoding: "utf8"
+        }).trim()
+      ).toBe("HEAD")
+    }
+    expect(existsSync(injectionSentinel)).toBe(false)
   })
 
   it("pins otherwise unreachable detached commits before worktree removal", async () => {
@@ -360,13 +521,80 @@ describe("GitService.createWorktree", () => {
       ),
       temp.layer
     )
-    expect(preserved._tag === "Success" && preserved.value).toBe("jingler/quiet-curie")
+    expect(preserved._tag === "Success" && preserved.value).toBe("chore/quiet-curie")
     expect(
-      execFileSync("git", ["rev-parse", "jingler/quiet-curie"], {
+      execFileSync("git", ["rev-parse", "chore/quiet-curie"], {
         cwd: repoPath,
         encoding: "utf-8"
       }).trim()
     ).toBe(head)
+  })
+
+  it("normalizes an unsafe recovery hint to a validated semantic fallback", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "safe-rescue"))
+    const detached = await runExit(
+      GitService.createDetachedWorktree({
+        repoPath,
+        repoName: "safe-rescue",
+        slug: "landing-pad",
+        baseBranch: "main"
+      }).pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+    if (detached._tag !== "Success") throw new Error("expected detached worktree")
+    writeFileSync(join(detached.value.path, "work.ts"), "saved\n")
+    execFileSync("git", ["add", "work.ts"], { cwd: detached.value.path })
+    execFileSync("git", ["commit", "-m", "detached work", "--no-gpg-sign"], {
+      cwd: detached.value.path
+    })
+
+    const preserved = await runExit(
+      GitService.preserveDetachedHead(detached.value.path, "../../main; echo owned").pipe(
+        Effect.provide(GitService.Default)
+      ),
+      temp.layer
+    )
+
+    expect(preserved._tag === "Success" && preserved.value).toBe("chore/main-echo-owned")
+    expect(execFileSync("git", ["branch", "--list", "jingler/*"], {
+      cwd: repoPath,
+      encoding: "utf8"
+    }).trim()).toBe("")
+  })
+})
+
+describe("GitService.publishInspection", () => {
+  let temp: ReturnType<typeof withTempRoot>
+  let repos: ReturnType<typeof mkTemp>
+
+  beforeEach(() => {
+    temp = withTempRoot()
+    repos = mkTemp("jingler-publish-inspection-")
+  })
+  afterEach(() => {
+    temp.cleanup()
+    repos.cleanup()
+  })
+
+  it("reports committed and dirty paths while distinguishing the need for a new commit", async () => {
+    const dir = initGitRepo(join(repos.dir, "widget"))
+    execFileSync("git", ["switch", "-c", "feat/publish-inspection"], { cwd: dir })
+    writeFileSync(join(dir, "committed.ts"), "committed\n")
+    execFileSync("git", ["add", "committed.ts"], { cwd: dir })
+    execFileSync("git", ["commit", "-m", "feat: committed work", "--no-gpg-sign"], { cwd: dir })
+    writeFileSync(join(dir, "dirty.ts"), "dirty\n")
+
+    const exit = await runExit(
+      GitService.publishInspection(dir, "main").pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.hasChanges).toBe(true)
+    expect(exit.value.unpublished).toBe(1)
+    expect(exit.value.changedPaths).toEqual(expect.arrayContaining(["committed.ts", "dirty.ts"]))
+    expect(exit.value.diffSummary).toContain("committed.ts")
   })
 })
 
@@ -503,6 +731,52 @@ describe("mainTreeHoldsBranch", () => {
   })
 })
 
+describe("GitService.checkoutPullRequestHead", () => {
+  let temp: ReturnType<typeof withTempRoot>
+  let repos: ReturnType<typeof mkTemp>
+  beforeEach(() => {
+    temp = withTempRoot()
+    repos = mkTemp("jingler-pr-fork-")
+  })
+  afterEach(() => {
+    temp.cleanup()
+    repos.cleanup()
+  })
+
+  const git = (dir: string, args: Array<string>) =>
+    execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim()
+
+  it("fetches and tracks the API-resolved ref from a fork remote", async () => {
+    const base = join(repos.dir, "base")
+    initGitRepoWithOrigin(base)
+    const fork = join(repos.dir, "fork")
+    const { origin: forkOrigin } = initGitRepoWithOrigin(fork)
+    git(fork, ["checkout", "-b", "feature/from-fork"])
+    writeFileSync(join(fork, "fork-only.ts"), "export const fromFork = true\n")
+    git(fork, ["add", "fork-only.ts"])
+    git(fork, ["commit", "-m", "fork change", "--no-gpg-sign"])
+    git(fork, ["push", "origin", "feature/from-fork"])
+
+    const exit = await runExit(
+      GitService.checkoutPullRequestHead(base, {
+        repositoryId: "303",
+        fullName: "contributor/widget",
+        ref: "feature/from-fork",
+        sha: git(fork, ["rev-parse", "HEAD"]),
+        cloneUrl: forkOrigin,
+        sshUrl: null
+      }).pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    expect(git(base, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("feature/from-fork")
+    expect(existsSync(join(base, "fork-only.ts"))).toBe(true)
+    expect(git(base, ["remote", "get-url", "jingler-pr-303"])).toBe(forkOrigin)
+    expect(git(base, ["config", "branch.feature/from-fork.remote"])).toBe("jingler-pr-303")
+  })
+})
+
 /**
  * checkoutBranch against real git. The guard exists to stop an agent's commits
  * moving the branch the developer is standing on, so the assertion that matters
@@ -593,7 +867,7 @@ describe("ensureWorktreeLinked", () => {
   const forkWorktree = async (name: string) => {
     const repoPath = initGitRepo(join(repos.dir, name))
     const exit = await runExit(
-      GitService.createWorktree({
+      GitService.createDetachedWorktree({
         repoPath,
         repoName: name,
         slug: "fix-auth",

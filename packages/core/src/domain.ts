@@ -225,8 +225,8 @@ export const supportsSteer = (cli: CliKind): boolean =>
  * per-action gate.
  *
  * `auto` is the default a fresh session lands in when the harness supports it,
- * because that is how the operator drives the CLI directly (unsandboxed, keychain
- * reachable, `gh`/`git push` "just work"). A harness that does NOT support it
+ * because that is how the operator drives the CLI directly (unsandboxed and able
+ * to run repository tools such as `git push`). A harness that does NOT support it
  * falls back to `accept-edits`, where the sandbox stays on and any action needing
  * escalation is FORWARDED to the operator through the approval gate. Every harness
  * Jingler ships today supports `auto`; the predicate exists so a future harness
@@ -300,11 +300,64 @@ export const chatRoleOf = (chat: Pick<Chat, "role">): ChatRole =>
 export const WorkspaceMode = Schema.Literal("worktree", "direct")
 export type WorkspaceMode = Schema.Schema.Type<typeof WorkspaceMode>
 
+export const PublishStep = Schema.Literal(
+  "idle",
+  "inspecting",
+  "verifying-branch",
+  "generating-metadata",
+  "staging",
+  "committing",
+  "authenticating",
+  "pushing",
+  "resolving-pr",
+  "creating-pr",
+  "updating-pr",
+  "linking",
+  "complete",
+  "failed",
+  "no-changes"
+)
+export type PublishStep = Schema.Schema.Type<typeof PublishStep>
+
+/** Model-suggested prose which Jingler validates before any git/GitHub mutation. */
+export const PublishMetadata = Schema.Struct({
+  commitMessage: Schema.String,
+  prTitle: Schema.String,
+  prBody: Schema.String
+})
+export type PublishMetadata = Schema.Schema.Type<typeof PublishMetadata>
+
+/** Durable checkpoint for the deterministic session publishing workflow. */
+export const PublishCheckpoint = Schema.Struct({
+  step: PublishStep,
+  completed: Schema.Array(PublishStep),
+  metadata: Schema.optional(PublishMetadata),
+  branch: Schema.optional(Schema.String),
+  commitSha: Schema.optional(Schema.String),
+  prNumber: Schema.optional(Schema.Number),
+  error: Schema.optional(Schema.String),
+  resumeFrom: Schema.optional(PublishStep),
+  updatedAt: Schema.String
+})
+export type PublishCheckpoint = Schema.Schema.Type<typeof PublishCheckpoint>
+
 export const Session = Schema.Struct({
   id: Schema.String,
   /** owner/repo, e.g. "trigify/api". */
   repo: Schema.String,
   branch: Schema.String,
+  /** Agent-proposed semantic task branch; persisted once Jingler validates and creates it. */
+  semanticBranchProposal: Schema.optional(
+    Schema.Struct({
+      type: Schema.Literal(
+        "feat", "fix", "refactor", "docs", "test", "chore",
+        "perf", "build", "ci", "style", "revert"
+      ),
+      slug: Schema.String
+    })
+  ),
+  /** True while a fresh isolated task worktree is detached and awaiting its branch. */
+  semanticBranchPending: Schema.optional(Schema.Boolean),
   title: Schema.String,
   status: SessionStatus,
   /** Which CLI is driving this session. */
@@ -312,6 +365,16 @@ export const Session = Schema.Struct({
   diff: DiffStat,
   /** Optional linked pull-request number. */
   prNumber: Schema.NullOr(Schema.Number),
+  /** Immutable GitHub App installation owning the linked repository. */
+  githubInstallationId: Schema.optional(Schema.String),
+  /** Immutable GitHub repository database id used for webhook/session routing. */
+  githubRepositoryId: Schema.optional(Schema.String),
+  /** Bounded exactly-once ledger persisted before realtime feedback dispatch. */
+  githubFeedbackDeliveryIds: Schema.optional(Schema.Array(Schema.String)),
+  /** Suppresses edited webhook deliveries whose actionable content did not change. */
+  githubFeedbackSemanticKeys: Schema.optional(Schema.Array(Schema.String)),
+  /** Resumable deterministic commit/push/PR publication state. */
+  publish: Schema.optional(PublishCheckpoint),
   /** Optional linked GitHub issue number (drives the sidebar badge + banner). */
   issueNumber: Schema.optional(Schema.Number),
   /** Linked issue web URL (the banner "Open" link). */
@@ -828,7 +891,7 @@ export const WorkspaceConfig = Schema.Struct({
    * approval. Absent means ON (see `PLAN_AUTO_RUN_DEFAULT`).
    *
    * On by default because plan mode cannot write: the harness refuses edits, so
-   * the commands a planning turn wants are reads — `git log`, `rg`, `gh pr view`.
+   * the commands a planning turn wants are reads — `git log`, `rg`, and file inspection.
    * Gating those turned every plan into a queue of approval prompts for actions
    * that cannot change anything, which is how operators learn to click "allow"
    * without reading. Edits still gate exactly as before, in every mode.
@@ -1009,7 +1072,7 @@ export type Repo = Schema.Schema.Type<typeof Repo>
 export const Worktree = Schema.Struct({
   /** Absolute path to the worktree, under `~/jingler/worktrees/…`. */
   path: Schema.String,
-  /** The new branch checked out in the worktree (e.g. "jingler/refactor-auth"). */
+  /** The new branch checked out in the worktree (e.g. "refactor/auth-store"). */
   branch: Schema.String,
   /** The branch the worktree was forked from. */
   baseBranch: Schema.String,
@@ -1018,28 +1081,13 @@ export const Worktree = Schema.Struct({
 })
 export type Worktree = Schema.Schema.Type<typeof Worktree>
 
-/** Detection + auth state of the GitHub CLI (`gh`). Never fails; folds to false. */
-export const GhStatus = Schema.Struct({
-  /** `gh` is installed and on PATH. */
-  available: Schema.Boolean,
-  /** `gh auth status` reported an authenticated account. */
-  authenticated: Schema.Boolean,
-  /** The authenticated account handle, or null. */
-  login: Schema.NullOr(Schema.String),
-  /** The authenticated host (e.g. "github.com"), or null. */
-  host: Schema.NullOr(Schema.String),
-  /** Reported `gh` version, or null when unavailable. */
-  version: Schema.NullOr(Schema.String)
-})
-export type GhStatus = Schema.Schema.Type<typeof GhStatus>
-
 // ── Pull requests / code review ──────────────────────────────────────────────
 
 /** Overall state of a pull request. "draft" is synthesized from `isDraft`. */
 export const PrState = Schema.Literal("open", "closed", "merged", "draft")
 export type PrState = Schema.Schema.Type<typeof PrState>
 
-/** Normalized CI check status (mapped from `gh pr checks` buckets). */
+/** Normalized CI check status (mapped from GitHub checks and commit statuses). */
 export const PrCheckStatus = Schema.Literal("pass", "fail", "running", "pending")
 export type PrCheckStatus = Schema.Schema.Type<typeof PrCheckStatus>
 
@@ -1049,9 +1097,8 @@ export type PrCheckStatus = Schema.Schema.Type<typeof PrCheckStatus>
  *
  * Deliberately NOT the full `PullRequest`. This is polled for every session with
  * a PR, on a timer, forever — so it carries only what the row renders, and its
- * `gh` call asks for three JSON fields rather than the twenty `PR_VIEW_FIELDS`
- * asks for. Anything richer belongs in the Pull Request tab, which is fetched
- * once, on demand, for one session.
+   * API read asks only for lifecycle/check fields. Anything richer belongs in
+   * the Pull Request tab, which is fetched once, on demand, for one session.
  */
 export const SessionPrStatus = Schema.Struct({
   state: PrState,
@@ -1081,7 +1128,7 @@ export type PrReviewKind = Schema.Schema.Type<typeof PrReviewKind>
 export const ReviewSubmitKind = Schema.Literal("comment", "approve", "request-changes")
 export type ReviewSubmitKind = Schema.Schema.Type<typeof ReviewSubmitKind>
 
-/** The strategy `gh pr merge` uses when merging a pull request. */
+/** The strategy the GitHub merge API uses when merging a pull request. */
 export const PrMergeMethod = Schema.Literal("merge", "squash", "rebase")
 export type PrMergeMethod = Schema.Schema.Type<typeof PrMergeMethod>
 
@@ -1091,6 +1138,199 @@ export const GithubUser = Schema.Struct({
   avatarUrl: Schema.NullOr(Schema.String)
 })
 export type GithubUser = Schema.Schema.Type<typeof GithubUser>
+
+// ── Shared GitHub App connection ────────────────────────────────────────────
+
+/** GitHub identity authorized for product access (not a BetterAuth login account). */
+export const GitHubAppUser = Schema.Struct({
+  id: Schema.String,
+  login: Schema.String,
+  name: Schema.NullOr(Schema.String),
+  avatarUrl: Schema.NullOr(Schema.String)
+})
+export type GitHubAppUser = Schema.Schema.Type<typeof GitHubAppUser>
+
+/** One app installation visible to the authorized GitHub user. */
+export const GitHubAppInstallation = Schema.Struct({
+  id: Schema.String,
+  account: Schema.Struct({
+    id: Schema.String,
+    login: Schema.String,
+    type: Schema.String,
+    avatarUrl: Schema.NullOr(Schema.String)
+  }),
+  repositorySelection: Schema.Literal("all", "selected"),
+  permissions: Schema.Record({ key: Schema.String, value: Schema.String }),
+  status: Schema.Literal("active", "suspended"),
+  suspendedAt: Schema.NullOr(Schema.String)
+})
+export type GitHubAppInstallation = Schema.Schema.Type<typeof GitHubAppInstallation>
+
+/** Renderer-safe connection view. No user, refresh, or installation token fields. */
+export const GitHubAppConnectionStatus = Schema.Struct({
+  enabled: Schema.Boolean,
+  connected: Schema.Boolean,
+  user: Schema.NullOr(GitHubAppUser),
+  installations: Schema.Array(GitHubAppInstallation),
+  lastRefreshedAt: Schema.NullOr(Schema.String)
+})
+export type GitHubAppConnectionStatus = Schema.Schema.Type<typeof GitHubAppConnectionStatus>
+
+/** Installation-aware mode shown by onboarding, Settings, and recovery states. */
+export const GitHubConnectionMode = Schema.Literal(
+  "disconnected",
+  "connecting",
+  "connected",
+  "partial-access",
+  "suspended",
+  "error"
+)
+export type GitHubConnectionMode = Schema.Schema.Type<typeof GitHubConnectionMode>
+
+/**
+ * Renderer-facing GitHub App state. This deliberately remains separate from
+ * BetterAuth's GitHub social identity and from any local command discovery.
+ */
+export const GitHubConnection = Schema.Struct({
+  mode: GitHubConnectionMode,
+  enabled: Schema.Boolean,
+  connected: Schema.Boolean,
+  user: Schema.NullOr(GitHubAppUser),
+  installations: Schema.Array(GitHubAppInstallation),
+  lastRefreshedAt: Schema.NullOr(Schema.String),
+  error: Schema.NullOr(Schema.String)
+})
+export type GitHubConnection = Schema.Schema.Type<typeof GitHubConnection>
+
+/** Whether one local repository can use the live GitHub App installation. */
+export const GitHubRepositoryAccess = Schema.Struct({
+  status: Schema.Literal("accessible", "partial", "suspended", "unavailable"),
+  installationId: Schema.NullOr(Schema.String),
+  accountLogin: Schema.NullOr(Schema.String),
+  reason: Schema.String
+})
+export type GitHubRepositoryAccess = Schema.Schema.Type<typeof GitHubRepositoryAccess>
+
+/** Authorization the desktop main process can exchange with the configured relay. */
+export const GitHubDesktopGrantClaims = Schema.Struct({
+  version: Schema.Literal(1),
+  issuer: Schema.Literal("jingler"),
+  audience: Schema.Literal("jingler-github-relay"),
+  subject: Schema.String,
+  installationId: Schema.String,
+  issuedAt: Schema.Number,
+  expiresAt: Schema.Number,
+  grantId: Schema.String
+})
+export type GitHubDesktopGrantClaims = Schema.Schema.Type<typeof GitHubDesktopGrantClaims>
+
+export const GitHubDesktopGrantResponse = Schema.Struct({
+  relayUrl: Schema.String,
+  grant: Schema.String,
+  claims: GitHubDesktopGrantClaims
+})
+export type GitHubDesktopGrantResponse = Schema.Schema.Type<typeof GitHubDesktopGrantResponse>
+
+export const GitHubRelayEventName = Schema.Literal(
+  "pull_request_review",
+  "pull_request_review_comment",
+  "issue_comment",
+  "pull_request",
+  "check_run",
+  "check_suite",
+  "status"
+)
+export type GitHubRelayEventName = Schema.Schema.Type<typeof GitHubRelayEventName>
+
+/** Renderer-safe, versioned event produced only after webhook verification. */
+export const GitHubRelayEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  deliveryId: Schema.String,
+  semanticKey: Schema.String,
+  event: GitHubRelayEventName,
+  action: Schema.String,
+  installationId: Schema.String,
+  repository: Schema.Struct({
+    id: Schema.String,
+    owner: Schema.String,
+    name: Schema.String,
+    fullName: Schema.String
+  }),
+  pullRequest: Schema.NullOr(
+    Schema.Struct({
+      id: Schema.String,
+      number: Schema.Number,
+      title: Schema.String,
+      url: Schema.String,
+      headSha: Schema.String,
+      baseSha: Schema.String
+    })
+  ),
+  actor: Schema.Struct({ id: Schema.String, login: Schema.String, type: Schema.String }),
+  feedback: Schema.NullOr(
+    Schema.Struct({
+      kind: Schema.Literal("review", "review-comment", "issue-comment"),
+      id: Schema.String,
+      body: Schema.String,
+      state: Schema.NullOr(Schema.String),
+      path: Schema.NullOr(Schema.String),
+      line: Schema.NullOr(Schema.Number),
+      side: Schema.NullOr(Schema.String)
+    })
+  ),
+  actionable: Schema.Boolean,
+  occurredAt: Schema.String
+})
+export type GitHubRelayEvent = Schema.Schema.Type<typeof GitHubRelayEvent>
+
+export const GitHubFeedbackOutboxStatus = Schema.Literal("pending", "dispatched")
+export type GitHubFeedbackOutboxStatus = Schema.Schema.Type<
+  typeof GitHubFeedbackOutboxStatus
+>
+
+/** Durable exact-session instruction written before any conversation dispatch. */
+export const GitHubFeedbackOutboxEntry = Schema.Struct({
+  sessionId: Schema.String,
+  chatId: Schema.String,
+  installationId: Schema.String,
+  repositoryId: Schema.String,
+  prNumber: Schema.Number,
+  event: GitHubRelayEvent,
+  status: GitHubFeedbackOutboxStatus,
+  createdAt: Schema.String,
+  dispatchedAt: Schema.NullOr(Schema.String)
+})
+export type GitHubFeedbackOutboxEntry = Schema.Schema.Type<
+  typeof GitHubFeedbackOutboxEntry
+>
+
+export const GitHubFeedbackClaimStatus = Schema.Literal(
+  "pending",
+  "dispatched",
+  "rejected"
+)
+export type GitHubFeedbackClaimStatus = Schema.Schema.Type<
+  typeof GitHubFeedbackClaimStatus
+>
+
+/** One relay frame awaiting durable renderer routing and cursor acknowledgement. */
+export const GitHubRelayDelivery = Schema.Struct({
+  clientId: Schema.String,
+  cursor: Schema.Number,
+  event: GitHubRelayEvent,
+  sessionId: Schema.NullOr(Schema.String),
+  chatId: Schema.NullOr(Schema.String)
+})
+export type GitHubRelayDelivery = Schema.Schema.Type<typeof GitHubRelayDelivery>
+
+/** Rate-limit metadata captured from every GitHub API response. */
+export const GitHubRateLimit = Schema.Struct({
+  limit: Schema.NullOr(Schema.Number),
+  remaining: Schema.NullOr(Schema.Number),
+  used: Schema.NullOr(Schema.Number),
+  resetAt: Schema.NullOr(Schema.String)
+})
+export type GitHubRateLimit = Schema.Schema.Type<typeof GitHubRateLimit>
 
 /** A PR label chip. */
 export const PrLabel = Schema.Struct({
@@ -1217,7 +1457,7 @@ export const PrFileChange = Schema.Struct({
   path: Schema.String,
   additions: Schema.Number,
   deletions: Schema.Number,
-  /** Inline-comment count on this file (0 in v1 — not exposed by `gh pr view`). */
+  /** Inline-comment count on this file. */
   commentCount: Schema.Number,
   /** Whether the reviewer marked the file viewed (false in v1). */
   viewed: Schema.Boolean
@@ -1225,8 +1465,8 @@ export const PrFileChange = Schema.Struct({
 export type PrFileChange = Schema.Schema.Type<typeof PrFileChange>
 
 /**
- * A pull request linked to a session, assembled from `gh pr view` + `gh pr
- * checks`. Read-only view model for the Pull Request tab.
+ * A pull request linked to a session, assembled from GitHub REST and GraphQL
+ * responses. Read-only view model for the Pull Request tab.
  */
 export const PullRequest = Schema.Struct({
   number: Schema.Number,
@@ -1261,8 +1501,8 @@ export const PullRequest = Schema.Struct({
 export type PullRequest = Schema.Schema.Type<typeof PullRequest>
 
 /**
- * A lightweight PR list-item for the "new session from a PR" picker (from
- * `gh pr list --json …`). Distinct from the full `PullRequest` view model —
+ * A lightweight PR list-item for the "new session from a PR" picker. Distinct
+ * from the full `PullRequest` view model —
  * only the fields the picker row + session creation need.
  */
 export const PrSummary = Schema.Struct({
@@ -1284,7 +1524,7 @@ export type PrSummary = Schema.Schema.Type<typeof PrSummary>
 
 /**
  * A lightweight open-issue list-item for the "new session from an issue" picker
- * and the attach-issue dialog (from `gh issue list --json …`). Mirrors
+ * and the attach-issue dialog. Mirrors
  * `PrSummary`; `body` seeds the prefilled task.
  */
 export const IssueSummary = Schema.Struct({
@@ -1311,8 +1551,7 @@ export const IssueComment = Schema.Struct({
 export type IssueComment = Schema.Schema.Type<typeof IssueComment>
 
 /**
- * The full GitHub issue view model for the Issue tab — a recreation of the
- * issue page (from `gh issue view --json …`). Read-only.
+ * The full GitHub issue view model for the Issue tab. Read-only.
  */
 export const Issue = Schema.Struct({
   number: Schema.Number,
@@ -1467,7 +1706,7 @@ export const AdversarialReview = Schema.Struct({
    * Why posting the minor/nit half to the PR failed, or null.
    *
    * Posting is best-effort: a review costs real tokens and its verdict is useful
-   * whether or not GitHub accepted the comments, so a `gh` failure lands here
+   * whether or not GitHub accepted the comments, so an API failure lands here
    * instead of failing the run and throwing the findings away.
    */
   postError: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null })
@@ -1482,8 +1721,9 @@ export const CreateSessionInput = Schema.Struct({
   repoName: Schema.String,
   /**
    * Optional session title. When omitted/blank the session is auto-named by the
-   * agent from a detached fresh-base worktree; when provided it seeds the title
-   * (pinned) and creates a readable branch immediately.
+   * agent from a detached fresh-base worktree; when provided it seeds and pins
+   * the display title. Both paths remain detached until task understanding
+   * produces a validated semantic branch.
    */
   title: Schema.optional(Schema.String),
   /** Which CLI will drive the session. */
@@ -1500,7 +1740,7 @@ export type CreateSessionInput = Schema.Schema.Type<typeof CreateSessionInput>
 
 /**
  * Parameters for creating a session from an *existing* pull request. Unlike
- * `CreateSessionInput` (which forks a fresh `jingler/<slug>` branch), this
+ * `CreateSessionInput` (which starts detached before creating a semantic branch), this
  * checks out the PR's head branch into the worktree so the agent's commits
  * update the PR directly. Title + base come from the PR itself.
  */
@@ -1524,7 +1764,7 @@ export type CreateSessionFromPrInput = Schema.Schema.Type<typeof CreateSessionFr
 /**
  * Parameters for creating a session from a GitHub issue. Unlike
  * `CreateSessionFromPrInput` (which checks out an existing PR branch), this
- * forks a fresh `<number>-<slug>` branch off `baseBranch` like a blank session,
+ * starts detached from `baseBranch` like a blank session,
  * links the issue, and seeds the task from the issue title + body.
  */
 export const CreateSessionFromIssueInput = Schema.Struct({

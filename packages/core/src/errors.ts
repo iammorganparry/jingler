@@ -90,15 +90,31 @@ export class GitError extends Schema.TaggedError<GitError>()(
 ) {}
 
 /**
- * Raised when a `gh` (GitHub CLI) write fails — `gh pr create`, `gh pr comment`,
- * `gh pr review`. A `Schema.TaggedError` so it can cross the RPC boundary as the
- * error channel for the `Github.*` write RPCs. Reads never fail (fold to null).
+ * A typed failure from the GitHub App API boundary.
+ *
+ * `reason` is intentionally renderer-safe and actionable. Upstream response
+ * bodies are not carried: validation payloads can contain user content and
+ * request diagnostics can contain the short-lived relay grant. The status,
+ * repository and retry timestamp are sufficient for UI recovery without
+ * turning an error object into a credential/logging side channel.
  */
-export class GhError extends Schema.TaggedError<GhError>()(
-  "GhError",
+export class GitHubApiError extends Schema.TaggedError<GitHubApiError>()(
+  "GitHubApiError",
   {
+    reason: Schema.Literal(
+      "repository-access",
+      "installation-suspended",
+      "token-expired",
+      "rate-limited",
+      "validation",
+      "not-found",
+      "unavailable"
+    ),
     message: Schema.String,
-    cause: Schema.optional(Schema.Unknown)
+    status: Schema.optional(Schema.Number),
+    repository: Schema.optional(Schema.String),
+    installationId: Schema.optional(Schema.String),
+    retryAt: Schema.optional(Schema.String)
   }
 ) {}
 

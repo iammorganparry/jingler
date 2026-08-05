@@ -6,7 +6,7 @@ import {
   CliAdapter,
   ConfigService,
   DiscoveryService,
-  GhService,
+  GitHubApi,
   GitService,
   InMemorySecretStoreLive,
   MemoryService,
@@ -31,7 +31,7 @@ import type {
   StreamEvent,
   WorkerActivity
 } from "@jingler/core"
-import { GitError, planStageSemanticFingerprint } from "@jingler/core"
+import { GitError, GitHubApiError, planStageSemanticFingerprint } from "@jingler/core"
 import { appPathsFor, fakeCommandExecutor } from "@jingler/cli-adapters/test-support"
 import { NodeContext } from "@effect/platform-node"
 import type { CommandExecutor } from "@effect/platform"
@@ -76,6 +76,18 @@ import {
   workspaceRevertLines
 } from "./rpc.js"
 
+/** Typed GitHub service fixture; tests override only the operations they exercise. */
+const fakeGithubApi = (overrides: Record<string, unknown> = {}) =>
+  Layer.succeed(
+    GitHubApi,
+    {
+      prHeadSha: () => Effect.succeed("headsha"),
+      prDiff: () => Effect.succeed("diff --git a/a.ts b/a.ts\n+x\n"),
+      prReviewComments: () => Effect.void,
+      ...overrides
+    } as never
+  )
+
 /**
  * The RPC handlers own the app's error-folding policy: a config read error must
  * look like "not configured" (→ first-run setup), and a cancelled folder picker
@@ -108,8 +120,8 @@ describe("RPC handlers", () => {
       cli: "codex",
       options: {
         chatRole: "direct",
-        // No configured default → `auto` (codex supports it): unsandboxed, keychain
-        // reachable, so `gh`/`git` work as they do in a direct CLI.
+        // No configured default → `auto` (codex supports it): unsandboxed and
+        // able to use git as it does in a direct CLI.
         defaultMode: "auto",
         defaultModel: undefined
       }
@@ -1535,11 +1547,11 @@ describe("RPC handlers", () => {
   describe("Github.pr / Github.detectPr", () => {
     // A PR-less / unknown session must be a no-op (null), never an error, so the
     // renderer shows the empty "Create pull request" state.
-    it("returns null for an unknown session without spawning gh", async () => {
-      const gh = Layer.mergeAll(base, SessionStore.Default, GhService.Default)
-      const pr = await Effect.runPromise(githubPr("nope").pipe(Effect.provide(gh)))
+    it("returns null for an unknown session without a GitHub request", async () => {
+      const github = Layer.mergeAll(base, SessionStore.Default, fakeGithubApi())
+      const pr = await Effect.runPromise(githubPr("nope").pipe(Effect.provide(github)))
       expect(pr).toBeNull()
-      const detected = await Effect.runPromise(githubDetectPr("nope").pipe(Effect.provide(gh)))
+      const detected = await Effect.runPromise(githubDetectPr("nope").pipe(Effect.provide(github)))
       expect(detected).toBeNull()
     })
   })
@@ -1549,12 +1561,12 @@ describe("RPC handlers", () => {
     // succeeding on a session with no PR would swallow the reviewer's drafts
     // with no sign they went nowhere.
     it("fails rather than silently dropping drafts when no PR is linked", async () => {
-      const gh = Layer.mergeAll(base, SessionStore.Default, GhService.Default)
+      const github = Layer.mergeAll(base, SessionStore.Default, fakeGithubApi())
       const exit = await Effect.runPromiseExit(
         githubSubmitReview({
           sessionId: "nope",
           comments: [{ path: "a.ts", line: 2, startLine: null, body: "c" }]
-        }).pipe(Effect.provide(gh))
+        }).pipe(Effect.provide(github))
       )
       expect(exit._tag).toBe("Failure")
     })
@@ -1562,7 +1574,7 @@ describe("RPC handlers", () => {
     /**
      * The whole point of the handler: a draft written on a line becomes an
      * INLINE comment on that line, anchored to the PR's current head. Asserting
-     * the JSON that actually reaches `gh` is the only way to know that — every
+     * the typed API payload is the only way to know that — every
      * layer above it can look correct while posting a flattened blob.
      */
     it("posts anchorable drafts inline and folds the rest into the body", async () => {
@@ -1588,25 +1600,24 @@ describe("RPC handlers", () => {
         ])
       )
 
-      let posted: { commit_id: string; body: string; comments: ReadonlyArray<Record<string, unknown>> } | null = null
-      const gh = Layer.mergeAll(
+      let posted: {
+        commitSha: string
+        body: string
+        comments: ReadonlyArray<Record<string, unknown>>
+      } | null = null
+      const github = Layer.mergeAll(
         base,
         SessionStore.Default,
-        GhService.Default,
-        fakeCommandExecutor((cmd, args, stdin) => {
-          if (cmd !== "gh") return { stdout: "" }
-          if (args[1] === "view") return { stdout: JSON.stringify({ headRefOid: "headsha" }) }
-          // a.ts gains new-side lines 1-2; nothing else is in the diff.
-          if (args[1] === "diff") {
-            return {
-              stdout: ["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts", "@@ -1,1 +1,2 @@", " const x = 1", "+const y = 2"].join("\n")
-            }
-          }
-          if (args[0] === "api") {
-            posted = JSON.parse(stdin)
-            return { exitCode: 0, stdout: "{}" }
-          }
-          return { stdout: "" }
+        fakeGithubApi({
+          prHeadSha: () => Effect.succeed("headsha"),
+          prDiff: () =>
+            Effect.succeed(
+              ["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts", "@@ -1,1 +1,2 @@", " const x = 1", "+const y = 2"].join("\n")
+            ),
+          prReviewComments: (_cwd: string, _number: number, input: unknown) =>
+            Effect.sync(() => {
+              posted = input as typeof posted
+            })
         })
       )
 
@@ -1617,14 +1628,14 @@ describe("RPC handlers", () => {
             { path: "a.ts", line: 2, startLine: null, body: "on the diff" },
             { path: "a.ts", line: 99, startLine: null, body: "moved off the diff" }
           ]
-        }).pipe(Effect.provide(gh))
+        }).pipe(Effect.provide(github))
       )
 
       expect(unanchored).toBe(1)
       expect(posted).not.toBeNull()
-      expect(posted!.commit_id).toBe("headsha")
+      expect(posted!.commitSha).toBe("headsha")
       expect(posted!.comments).toStrictEqual([
-        { path: "a.ts", line: 2, side: "RIGHT", body: "on the diff" }
+        { path: "a.ts", line: 2, startLine: null, body: "on the diff" }
       ])
       // The stale one keeps its words instead of 422-ing the whole review.
       expect(posted!.body).toContain("moved off the diff")
@@ -1634,7 +1645,7 @@ describe("RPC handlers", () => {
 
   /**
    * The head-SHA short-circuit is what makes the auto-review trigger safe to
-   * fire off a poll loop: an unchanged PR must cost a cheap `gh pr view`, never
+   * fire off a poll loop: an unchanged PR must cost one cheap API read, never
    * an agent run. These tests count reviewer spawns to assert that as a fact
    * rather than an intention.
    */
@@ -1666,21 +1677,24 @@ describe("RPC handlers", () => {
     }
 
     /**
-     * `gh` reporting a fixed head SHA + a non-empty diff, on a host where the
+     * The typed API reports a fixed head SHA + a non-empty diff, on a host where the
      * `claude` binary resolves. The binary matters: with no binary the reviewer
      * would be dispatched to the scripted stub, and ReviewService rejects that
      * rather than pass stub prose off as a review.
      */
-    const fakeGh = (headSha: string) =>
-      fakeCommandExecutor((cmd, args) => {
-        if (cmd === "which" || cmd === "where") {
-          return args[0] === "claude" ? { stdout: "/usr/local/bin/claude" } : { stdout: "" }
-        }
-        if (cmd !== "gh") return { stdout: "2.1.0" }
-        if (args[1] === "view") return { stdout: JSON.stringify({ headRefOid: headSha }) }
-        if (args[1] === "diff") return { stdout: "diff --git a/a.ts b/a.ts\n+x\n" }
-        return { stdout: "" }
-      })
+    const fakeGitHub = (headSha: string) =>
+      Layer.mergeAll(
+        fakeCommandExecutor((cmd, args) => {
+          if (cmd === "which" || cmd === "where") {
+            return args[0] === "claude" ? { stdout: "/usr/local/bin/claude" } : { stdout: "" }
+          }
+          return { stdout: "2.1.0" }
+        }),
+        fakeGithubApi({
+          prHeadSha: () => Effect.succeed(headSha),
+          prDiff: () => Effect.succeed("diff --git a/a.ts b/a.ts\n+x\n")
+        })
+      )
 
     /** A reviewer stub that counts its runs and always reports one finding. */
     const countingAdapter = () => {
@@ -1706,13 +1720,12 @@ describe("RPC handlers", () => {
       Layer.mergeAll(
         Layer.succeed(AppPaths, appPathsFor(root)),
         NodeContext.layer,
-        fakeGh(headSha)
+        fakeGitHub(headSha)
       ).pipe(
         (leaf) =>
           Layer.mergeAll(
             ConfigService.Default,
             SessionStore.Default,
-            GhService.Default,
             ReviewStore.Default,
             ReviewService.Default,
             DiscoveryService.Default,
@@ -1771,7 +1784,7 @@ describe("RPC handlers", () => {
      * review pane re-renders on every turn for nothing.
      */
     describe("Review.reconcile", () => {
-      /** `gh` as above, plus a `git log` whose output is the commits since the head. */
+      /** Typed API fixture plus a `git log` whose output is the commits since the head. */
       const gitEnv = (headSha: string, log: string, adapter: Layer.Layer<CliAdapter>) =>
         Layer.mergeAll(
           Layer.succeed(AppPaths, appPathsFor(root)),
@@ -1781,17 +1794,17 @@ describe("RPC handlers", () => {
               return args[0] === "claude" ? { stdout: "/usr/local/bin/claude" } : { stdout: "" }
             }
             if (cmd === "git") return args[2] === "log" ? { stdout: log } : { stdout: "" }
-            if (cmd !== "gh") return { stdout: "2.1.0" }
-            if (args[1] === "view") return { stdout: JSON.stringify({ headRefOid: headSha }) }
-            if (args[1] === "diff") return { stdout: "diff --git a/a.ts b/a.ts\n+x\n" }
-            return { stdout: "" }
+            return { stdout: "2.1.0" }
+          }),
+          fakeGithubApi({
+            prHeadSha: () => Effect.succeed(headSha),
+            prDiff: () => Effect.succeed("diff --git a/a.ts b/a.ts\n+x\n")
           })
         ).pipe(
           (leaf) =>
             Layer.mergeAll(
               ConfigService.Default,
               SessionStore.Default,
-              GhService.Default,
               GitService.Default,
               ReviewStore.Default,
               ReviewService.Default,
@@ -1944,8 +1957,7 @@ describe("RPC handlers", () => {
      * Posting the low-severity half to the PR.
      *
      * The payload's SHAPE is `planReviewPost`'s business and is pinned there
-     * (review-post.test.ts) — the fake executor drains stdin, so the fed JSON
-     * isn't observable here anyway. What these pin is the handler's job: does it
+     * (review-post.test.ts). What these pin is the handler's job: does it
      * call GitHub at all, on which path, and what does it stamp on the review.
      */
     describe("posting to the PR", () => {
@@ -1960,24 +1972,33 @@ describe("RPC handlers", () => {
         "+three"
       ].join("\n")
 
-      /** `gh` that records every invocation, and can fail the review POST. */
-      const recordingGh = (headSha: string, opts: { postFails?: boolean } = {}) => {
-        const calls: Array<ReadonlyArray<string>> = []
-        const layer = fakeCommandExecutor((cmd, args) => {
-          if (cmd === "which" || cmd === "where") {
-            return args[0] === "claude" ? { stdout: "/usr/local/bin/claude" } : { stdout: "" }
-          }
-          if (cmd !== "gh") return { stdout: "2.1.0" }
-          calls.push([...args])
-          if (args[1] === "view") return { stdout: JSON.stringify({ headRefOid: headSha }) }
-          if (args[1] === "diff") return { stdout: POSTABLE_DIFF }
-          if (args[0] === "api" && args.includes("--method")) {
-            return opts.postFails
-              ? { exitCode: 1, stderr: "HTTP 422: line must be part of the diff" }
-              : { stdout: "{}" }
-          }
-          return { stdout: "" }
-        })
+      /** Typed API that records writes and can reject the review payload. */
+      const recordingGithub = (headSha: string, opts: { postFails?: boolean } = {}) => {
+        const calls: Array<string> = []
+        const layer = Layer.mergeAll(
+          fakeCommandExecutor((cmd, args) => {
+            if (cmd === "which" || cmd === "where") {
+              return args[0] === "claude" ? { stdout: "/usr/local/bin/claude" } : { stdout: "" }
+            }
+            return { stdout: "2.1.0" }
+          }),
+          fakeGithubApi({
+            prHeadSha: () => Effect.succeed(headSha),
+            prDiff: () => Effect.succeed(POSTABLE_DIFF),
+            prReviewComments: () => {
+              calls.push("prReviewComments")
+              return opts.postFails
+                ? Effect.fail(
+                    new GitHubApiError({
+                      reason: "validation",
+                      message: "HTTP 422: line must be part of the diff",
+                      status: 422
+                    })
+                  )
+                : Effect.void
+            }
+          })
+        )
         return { calls, layer }
       }
 
@@ -1995,13 +2016,15 @@ describe("RPC handlers", () => {
           })
         )
 
-      const envWith = (gh: Layer.Layer<CommandExecutor.CommandExecutor>, adapter: Layer.Layer<CliAdapter>) =>
-        Layer.mergeAll(Layer.succeed(AppPaths, appPathsFor(root)), NodeContext.layer, gh).pipe(
+      const envWith = (
+        github: Layer.Layer<GitHubApi | CommandExecutor.CommandExecutor>,
+        adapter: Layer.Layer<CliAdapter>
+      ) =>
+        Layer.mergeAll(Layer.succeed(AppPaths, appPathsFor(root)), NodeContext.layer, github).pipe(
           (leaf) =>
             Layer.mergeAll(
               ConfigService.Default,
               SessionStore.Default,
-              GhService.Default,
               ReviewStore.Default,
               ReviewService.Default,
               DiscoveryService.Default,
@@ -2009,16 +2032,15 @@ describe("RPC handlers", () => {
             ).pipe(Layer.provideMerge(leaf))
         )
 
-      const isReviewPost = (args: ReadonlyArray<string>) =>
-        args[0] === "api" && args.some((a) => a.endsWith("/reviews"))
+      const isReviewPost = (call: string) => call === "prReviewComments"
 
       it("posts the minor/nit findings and stamps postedAt", async () => {
         withSession()
-        const { calls, layer: gh } = recordingGh("sha-one")
+        const { calls, layer: github } = recordingGithub("sha-one")
         const review = await Effect.runPromise(
           reviewRun("s1", false).pipe(
             Effect.provide(
-              envWith(gh, adapterReporting([{ title: "Prefer const", severity: "nit", path: "a.ts", line: 2 }]))
+              envWith(github, adapterReporting([{ title: "Prefer const", severity: "nit", path: "a.ts", line: 2 }]))
             )
           )
         )
@@ -2031,11 +2053,11 @@ describe("RPC handlers", () => {
       // duplicate it and turn the reviewer into a PR spammer.
       it("posts nothing when every finding is critical or major", async () => {
         withSession()
-        const { calls, layer: gh } = recordingGh("sha-one")
+        const { calls, layer: github } = recordingGithub("sha-one")
         const review = await Effect.runPromise(
           reviewRun("s1", false).pipe(
             Effect.provide(
-              envWith(gh, adapterReporting([{ title: "Data loss", severity: "critical", path: "a.ts", line: 2 }]))
+              envWith(github, adapterReporting([{ title: "Data loss", severity: "critical", path: "a.ts", line: 2 }]))
             )
           )
         )
@@ -2051,11 +2073,11 @@ describe("RPC handlers", () => {
        */
       it("keeps the review and records postError when GitHub rejects the post", async () => {
         withSession()
-        const { layer: gh } = recordingGh("sha-one", { postFails: true })
+        const { layer: github } = recordingGithub("sha-one", { postFails: true })
         const review = await Effect.runPromise(
           reviewRun("s1", false).pipe(
             Effect.provide(
-              envWith(gh, adapterReporting([{ title: "Prefer const", severity: "nit", path: "a.ts", line: 2 }]))
+              envWith(github, adapterReporting([{ title: "Prefer const", severity: "nit", path: "a.ts", line: 2 }]))
             )
           )
         )
@@ -2066,9 +2088,9 @@ describe("RPC handlers", () => {
 
       it("persists the failed post so the UI still sees it after a reload", async () => {
         withSession()
-        const { layer: gh } = recordingGh("sha-one", { postFails: true })
+        const { layer: github } = recordingGithub("sha-one", { postFails: true })
         const env = envWith(
-          gh,
+          github,
           adapterReporting([{ title: "Prefer const", severity: "nit", path: "a.ts", line: 2 }])
         )
         await Effect.runPromise(reviewRun("s1", false).pipe(Effect.provide(env)))
@@ -2082,9 +2104,9 @@ describe("RPC handlers", () => {
        */
       it("does not re-post when the head is unchanged", async () => {
         withSession()
-        const { calls, layer: gh } = recordingGh("sha-one")
+        const { calls, layer: github } = recordingGithub("sha-one")
         const env = envWith(
-          gh,
+          github,
           adapterReporting([{ title: "Prefer const", severity: "nit", path: "a.ts", line: 2 }])
         )
         await Effect.runPromise(reviewRun("s1", false).pipe(Effect.provide(env)))
@@ -2100,12 +2122,15 @@ describe("RPC handlers", () => {
      */
     describe("Review.markRouted", () => {
       const env = () =>
-        Layer.mergeAll(Layer.succeed(AppPaths, appPathsFor(root)), NodeContext.layer, fakeGh("sha-one")).pipe(
+        Layer.mergeAll(
+          Layer.succeed(AppPaths, appPathsFor(root)),
+          NodeContext.layer,
+          fakeGitHub("sha-one")
+        ).pipe(
           (leaf) =>
             Layer.mergeAll(
               ConfigService.Default,
               SessionStore.Default,
-              GhService.Default,
               ReviewStore.Default,
               ReviewService.Default,
               DiscoveryService.Default,

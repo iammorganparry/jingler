@@ -26,7 +26,7 @@ import { defineManifest } from "@jingler/plugin-sdk"
 export const manifest = defineManifest({
   id: "github-issues",
   name: "GitHub Issues",
-  version: "1.0.0",
+  version: "1.1.0",
   description: "Read the issue linked to a session, without leaving Jingler.",
   ui: "dist/ui.js",
   main: "dist/main.js",

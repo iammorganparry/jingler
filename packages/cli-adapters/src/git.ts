@@ -1,10 +1,20 @@
 import type { ResolvingCommit, Worktree } from "@jingler/core"
-import { GitError } from "@jingler/core"
+import {
+  GitError,
+  MAX_SEMANTIC_BRANCH_NAME_LENGTH,
+  cleanSemanticBranchProposal,
+  semanticBranchName,
+  semanticBranchProposalFromName
+} from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Effect } from "effect"
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { AppPaths } from "./app-paths.js"
-import { gitLine, runGit, runString } from "./command.js"
+import { gitLine, runGit, runGitWithEnv, runString } from "./command.js"
+import type { GitHubPullRequestHead } from "./github-api.js"
 
 /** Parameters for forking an isolated worktree from a repo. */
 export interface CreateWorktreeInput {
@@ -12,7 +22,7 @@ export interface CreateWorktreeInput {
   readonly repoPath: string
   /** The repo's folder name (namespaces the worktree directory). */
   readonly repoName: string
-  /** Kebab slug for the branch/worktree (branch becomes `jingler/<slug>`). */
+  /** Kebab slug used only for the worktree directory. */
   readonly slug: string
   /** The branch to fork from. */
   readonly baseBranch: string
@@ -101,17 +111,34 @@ export const ensureWorktreeLinked = (
     yield* runGit(repoPath, ["worktree", "repair", worktreePath]).pipe(Effect.ignore)
   })
 
-/** Switch a detached worktree, or return the branch a concurrent switch activated. */
+/**
+ * Switch a detached worktree, return a branch activated in this worktree, or
+ * retry when another worktree won creation of the same ref.
+ */
 const switchTaskBranch = (
   cwd: string,
-  branch: string
+  branch: string,
+  retryCollision: () => Effect.Effect<string, GitError, CommandExecutor.CommandExecutor>
 ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
   runGit(cwd, ["switch", "-c", branch]).pipe(
     Effect.as(branch),
     Effect.catchAll((error) =>
       branchAt(cwd).pipe(
         Effect.flatMap((winner) =>
-          winner === null ? Effect.fail(error) : Effect.succeed(winner)
+          winner !== null
+            ? Effect.succeed(winner)
+            : runString(
+                "git",
+                "-C",
+                cwd,
+                "for-each-ref",
+                "--format=%(refname)",
+                `refs/heads/${branch}`
+              ).pipe(
+                Effect.flatMap((createdRef) =>
+                  createdRef === `refs/heads/${branch}` ? retryCollision() : Effect.fail(error)
+                )
+              )
         )
       )
     )
@@ -119,16 +146,29 @@ const switchTaskBranch = (
 
 const claimTaskBranch = (
   cwd: string,
-  slug: string,
+  semanticName: string,
   suffix: number
 ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> => {
-  const branch = `jingler/${slug}${suffix === 1 ? "" : `-${suffix}`}`
-  return gitLine(cwd, "show-ref", "--verify", `refs/heads/${branch}`).pipe(
-    Effect.flatMap((existing) => {
-      if (existing !== null) return claimTaskBranch(cwd, slug, suffix + 1)
+  const branch = `${semanticName}${suffix === 1 ? "" : `-${suffix}`}`
+  if (branch.length > MAX_SEMANTIC_BRANCH_NAME_LENGTH) {
+    return Effect.fail(
+      new GitError({ message: `Could not allocate a bounded task branch for ${semanticName}` })
+    )
+  }
+  return runString(
+    "git", "-C", cwd, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"
+  ).pipe(
+    Effect.flatMap((refs) => {
+      const collides = (refs ?? "").split("\n").some((ref) =>
+        ref === `refs/heads/${branch}` ||
+        (ref.startsWith("refs/remotes/") && ref.endsWith(`/${branch}`))
+      )
+      if (collides) return claimTaskBranch(cwd, semanticName, suffix + 1)
       return branchAt(cwd).pipe(
         Effect.flatMap((active) =>
-          active === null ? switchTaskBranch(cwd, branch) : Effect.succeed(active)
+          active === null
+            ? switchTaskBranch(cwd, branch, () => claimTaskBranch(cwd, semanticName, suffix + 1))
+            : Effect.succeed(active)
         )
       )
     })
@@ -140,18 +180,28 @@ const claimTaskBranch = (
  *
  * `git switch -c` creates the ref at the current detached commit and keeps both
  * uncommitted changes and detached commits in place. Existing names receive a
- * deterministic numeric suffix. Concurrent activations converge on the branch
- * that first became live instead of creating another suffix.
+ * deterministic numeric suffix. Concurrent activation in the same worktree
+ * converges on its live branch; separate worktrees claim successive suffixes.
  */
 const createTaskBranch = (
   cwd: string,
-  slug: string
-): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
-  branchAt(cwd).pipe(
-    Effect.flatMap((active) =>
-      active === null ? claimTaskBranch(cwd, slug, 1) : Effect.succeed(active)
+  semanticName: string
+): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> => {
+  if (semanticBranchProposalFromName(semanticName) === null) {
+    return Effect.fail(
+      new GitError({ message: `Invalid semantic task branch: ${semanticName}` })
+    )
+  }
+  return runGit(cwd, ["check-ref-format", "--branch", semanticName]).pipe(
+    Effect.zipRight(
+      branchAt(cwd).pipe(
+        Effect.flatMap((active) =>
+          active === null ? claimTaskBranch(cwd, semanticName, 1) : Effect.succeed(active)
+        )
+      )
     )
   )
+}
 
 /**
  * Whether `branch` is checked out in the repo's MAIN working tree, per the
@@ -176,8 +226,7 @@ export const mainTreeHoldsBranch = (porcelain: string, branch: string): boolean 
 
 /**
  * Creates isolated git worktrees for sessions. A worktree is added under
- * `~/jingler/worktrees/<repo>/<slug>` on a fresh `jingler/<slug>` branch forked
- * from `baseBranch`.
+ * `~/jingler/worktrees/<repo>/<slug>` forked from `baseBranch`.
  *
  * Dependencies are NOT mirrored here. This service used to build the worktree a
  * `node_modules` out of symlinks into the origin repo's, to avoid duplicating
@@ -264,8 +313,11 @@ export class GitService extends Effect.Service<GitService>()(
       const fetchBase = (
         repoPath: string,
         baseBranch: string
-      ): Effect.Effect<void, never, CommandExecutor.CommandExecutor> =>
-        runGit(repoPath, ["fetch", "--no-tags", "origin", baseBranch]).pipe(Effect.ignore)
+      ): Effect.Effect<boolean, never, CommandExecutor.CommandExecutor> =>
+        runGit(repoPath, ["fetch", "--no-tags", "origin", baseBranch]).pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false)
+        )
 
       /**
        * The start-point to fork the session branch from: the fresh
@@ -275,40 +327,19 @@ export class GitService extends Effect.Service<GitService>()(
        */
       const resolveStartPoint = (
         repoPath: string,
-        baseBranch: string
+        baseBranch: string,
+        fetched: boolean
       ): Effect.Effect<string, never, CommandExecutor.CommandExecutor> =>
-        gitLine(repoPath, "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${baseBranch}`).pipe(
-          Effect.map((sha) => (sha ? `origin/${baseBranch}` : baseBranch))
-        )
-
-      /** Fork an isolated worktree on a fresh `jingler/<slug>` branch. */
-      const createWorktree = (
-        input: CreateWorktreeInput
-      ): Effect.Effect<Worktree, GitError, GitEnv> =>
-        Effect.gen(function* () {
-          const branch = `jingler/${input.slug}`
-          const worktreePath = yield* resolveWorktreePath(input)
-          yield* reclaimStaleWorktree(input.repoPath, worktreePath)
-          // Freshen the base from origin, then fork off the remote tip when we have
-          // one — so a session always starts from an up-to-date base (e.g. main).
-          yield* fetchBase(input.repoPath, input.baseBranch)
-          const startPoint = yield* resolveStartPoint(input.repoPath, input.baseBranch)
-          yield* runGit(input.repoPath, [
-            "worktree",
-            "add",
-            "-b",
-            branch,
-            worktreePath,
-            startPoint
-          ])
-          // Report the logical base the user picked, not the start-point ref.
-          return { path: worktreePath, branch, baseBranch: input.baseBranch, repoPath: input.repoPath }
-        })
+        fetched
+          ? gitLine(repoPath, "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${baseBranch}`).pipe(
+              Effect.map((sha) => (sha ? `origin/${baseBranch}` : baseBranch))
+            )
+          : Effect.succeed(baseBranch)
 
       /**
        * Add a worktree with a DETACHED HEAD at the fresh base tip (no new
-       * branch). Used both for unnamed sessions awaiting their generated task
-       * name and as the landing pad for a "session from PR" flow.
+       * branch). Used for every fresh isolated task awaiting semantic metadata
+       * and as the landing pad for a "session from PR" flow.
        */
       const createDetachedWorktree = (
         input: CreateWorktreeInput
@@ -316,8 +347,12 @@ export class GitService extends Effect.Service<GitService>()(
         Effect.gen(function* () {
           const worktreePath = yield* resolveWorktreePath(input)
           yield* reclaimStaleWorktree(input.repoPath, worktreePath)
-          yield* fetchBase(input.repoPath, input.baseBranch)
-          const startPoint = yield* resolveStartPoint(input.repoPath, input.baseBranch)
+          const fetched = yield* fetchBase(input.repoPath, input.baseBranch)
+          const startPoint = yield* resolveStartPoint(
+            input.repoPath,
+            input.baseBranch,
+            fetched
+          )
           yield* runGit(input.repoPath, [
             "worktree",
             "add",
@@ -326,7 +361,7 @@ export class GitService extends Effect.Service<GitService>()(
             startPoint
           ])
           // `branch` is a placeholder — the caller overwrites it with the real
-          // head branch after `gh pr checkout` moves this worktree's HEAD.
+          // head branch after the API-resolved head ref is fetched and checked out.
           return {
             path: worktreePath,
             branch: input.baseBranch,
@@ -391,7 +426,7 @@ export class GitService extends Effect.Service<GitService>()(
       /**
        * Keep commits made on a detached session reachable before its worktree is
        * removed. A detached HEAD already contained by any local or remote ref is
-       * safe; otherwise create a collision-safe `jingler/<slug>` branch at HEAD.
+       * safe; otherwise create a collision-safe semantic recovery branch at HEAD.
        */
       const preserveDetachedHead = (
         cwd: string,
@@ -411,8 +446,84 @@ export class GitService extends Effect.Service<GitService>()(
             "refs/remotes"
           )
           if (containingRefs?.trim()) return null
-          return yield* createTaskBranch(cwd, slug)
+          const fallback = cleanSemanticBranchProposal(null, slug)
+          return yield* createTaskBranch(cwd, semanticBranchName(fallback))
         })
+
+      const publishInspection = (cwd: string, baseBranch: string) =>
+        Effect.gen(function* () {
+          const branch = yield* branchAt(cwd)
+          const status = yield* runGit(cwd, ["status", "--porcelain=v1", "--untracked-files=all"])
+          const dirtyPaths = status
+            .split("\n")
+            .map((line) => line.slice(3).trim())
+            .filter(Boolean)
+            .map((path) => path.includes(" -> ") ? path.split(" -> ").at(-1)! : path)
+          const base = yield* gitLine(cwd, "rev-parse", "--verify", `origin/${baseBranch}`)
+          const baseRef = base ?? baseBranch
+          const committedPaths = (yield* runGit(cwd, ["diff", "--name-only", `${baseRef}...HEAD`]))
+            .split("\n")
+            .map((path) => path.trim())
+            .filter(Boolean)
+          const changedPaths = [...new Set([...committedPaths, ...dirtyPaths])]
+          const unpublished = yield* runGit(cwd, [
+            "rev-list", "--count", `${baseRef}..HEAD`
+          ]).pipe(Effect.map((value) => Number.parseInt(value, 10) || 0))
+          const diffSummary = yield* runGit(cwd, ["diff", "--stat", baseRef])
+          const headSha = yield* gitLine(cwd, "rev-parse", "HEAD")
+          return {
+            branch,
+            hasChanges: dirtyPaths.length > 0,
+            changedPaths,
+            unpublished,
+            diffSummary,
+            headSha
+          }
+        })
+
+      const stageAll = (cwd: string) => runGit(cwd, ["add", "--all"]).pipe(Effect.asVoid)
+
+      const hasStagedChanges = (cwd: string) =>
+        runGit(cwd, ["diff", "--cached", "--quiet"]).pipe(
+          Effect.as(false),
+          Effect.catchAll(() => Effect.succeed(true))
+        )
+
+      const commit = (cwd: string, message: string) =>
+        runGit(cwd, ["commit", "--message", message]).pipe(
+          Effect.zipRight(gitLine(cwd, "rev-parse", "HEAD")),
+          Effect.flatMap((sha) => sha ? Effect.succeed(sha) : Effect.fail(new GitError({ message: "Git did not return the new commit SHA." })))
+        )
+
+      /**
+       * Push through GitHub's HTTPS credential protocol without putting the
+       * installation token in argv, a remote URL, git config, or a file.
+       */
+      const pushWithInstallationToken = (cwd: string, branch: string, token: string) =>
+        Effect.acquireUseRelease(
+          Effect.tryPromise({
+            try: async () => {
+              const dir = await mkdtemp(join(tmpdir(), "jingler-git-askpass-"))
+              const script = join(dir, "askpass.mjs")
+              await writeFile(
+                script,
+                "#!/usr/bin/env node\nconst p=process.argv.slice(2).join(' ').toLowerCase(); process.stdout.write(p.includes('username') ? 'x-access-token' : (process.env.JINGLER_GIT_TOKEN ?? ''));\n",
+                { mode: 0o700 }
+              )
+              await chmod(script, 0o700)
+              return { dir, script }
+            },
+            catch: (cause) => new GitError({ message: "Could not prepare secure GitHub authentication.", cause })
+          }),
+          ({ script }) => runGitWithEnv(cwd, [
+            "-c", "core.hooksPath=/dev/null", "push", "--set-upstream", "origin", branch
+          ], {
+            GIT_ASKPASS: script,
+            GIT_TERMINAL_PROMPT: "0",
+            JINGLER_GIT_TOKEN: token
+          }).pipe(Effect.asVoid),
+          ({ dir }) => Effect.promise(() => rm(dir, { recursive: true, force: true }))
+        )
 
       /**
        * Check out an existing local `branch` into the worktree at `cwd`, even
@@ -452,6 +563,57 @@ export class GitService extends Effect.Service<GitService>()(
             )
           }
           yield* runGit(cwd, ["checkout", "--ignore-other-worktrees", branch])
+        })
+
+      /**
+       * Fetch and check out an API-resolved pull-request head with ordinary git.
+       *
+       * The remote is keyed by the immutable repository id, so renamed forks do
+       * not accumulate aliases and two forks with the same branch name cannot be
+       * conflated. A normal checkout preserves git's other-worktree safeguard;
+       * the explicit sharing preference uses `checkoutBranch`, including its
+       * refusal to share a ref with the developer's main working tree.
+       */
+      const checkoutPullRequestHead = (
+        cwd: string,
+        head: GitHubPullRequestHead,
+        allowSharedCheckout = false
+      ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
+        Effect.gen(function* () {
+          const safeId = head.repositoryId.replace(/[^A-Za-z0-9-]/g, "").slice(0, 40)
+          const remoteName = `jingler-pr-${safeId || "head"}`
+          const originUrl = yield* runString("git", "-C", cwd, "remote", "get-url", "origin")
+          const fetchUrl = originUrl?.startsWith("git@") && head.sshUrl ? head.sshUrl : head.cloneUrl
+          const currentUrl = yield* runString("git", "-C", cwd, "remote", "get-url", remoteName)
+          if (currentUrl === null) {
+            yield* runGit(cwd, ["remote", "add", remoteName, fetchUrl])
+          } else if (currentUrl !== fetchUrl) {
+            yield* runGit(cwd, ["remote", "set-url", remoteName, fetchUrl])
+          }
+          const trackingRef = `refs/remotes/${remoteName}/${head.ref}`
+          yield* runGit(cwd, [
+            "fetch",
+            "--no-tags",
+            remoteName,
+            `+refs/heads/${head.ref}:${trackingRef}`
+          ])
+          const local = yield* gitLine(cwd, "show-ref", "--verify", `refs/heads/${head.ref}`)
+          if (local === null) {
+            yield* runGit(cwd, [
+              "checkout",
+              "-b",
+              head.ref,
+              "--track",
+              `${remoteName}/${head.ref}`
+            ])
+          } else if (allowSharedCheckout) {
+            yield* checkoutBranch(cwd, head.ref)
+          } else {
+            yield* runGit(cwd, ["checkout", head.ref])
+          }
+          yield* runGit(cwd, ["config", `branch.${head.ref}.remote`, remoteName])
+          yield* runGit(cwd, ["config", `branch.${head.ref}.merge`, `refs/heads/${head.ref}`])
+          return head.ref
         })
 
       /**
@@ -567,14 +729,19 @@ export class GitService extends Effect.Service<GitService>()(
 
       return {
         worktreePathFor,
-        createWorktree,
         createDetachedWorktree,
         switchBranch,
         repositoryIdentity,
         branchAt,
         createTaskBranch,
         preserveDetachedHead,
+        publishInspection,
+        stageAll,
+        hasStagedChanges,
+        commit,
+        pushWithInstallationToken,
         checkoutBranch,
+        checkoutPullRequestHead,
         commitsSince,
         removeWorktreeAt
       }

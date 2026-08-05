@@ -68,10 +68,13 @@ export const activate: Activate = async (ctx) => {
     ctx.commands.register("linear.sync", async (arg) => {
       const { repo } = arg as { repo: string }
 
-      const session = await ctx.authentication.getSession("github", ["repo"])
+      const session = await ctx.authentication.getSession("github", [
+        "issues:read",
+        `repository:${repo}`
+      ])
       if (!session) return []
 
-      const res = await fetch(`https://api.example.com/issues?repo=${repo}`, {
+      const res = await fetch(`${session.apiBaseUrl}/repos/${repo}/issues`, {
         headers: { authorization: `Bearer ${session.accessToken}` }
       })
       return (await res.json()) as Issue[]

@@ -16,13 +16,17 @@ import {
   AgentRunner,
   AssetService,
   AuthService,
+  type BrowserControlMcpService,
+  type CliAdapter,
   buildOrchestrationGroups,
   ConfigService,
   claudeTitleGenerator,
   DiscoveryService,
   fetchOpencodeProviders,
   filterVisible,
-  GhService,
+  GitHubApi,
+  GitHubAuth,
+  GitHubEventStore,
   GitService,
   ModelsService,
   MemoryService,
@@ -31,6 +35,7 @@ import {
   OrchestrationPersistenceError,
   OrchestrationService,
   recoverOrchestrationCheckpoints,
+  SecretStore,
   SecretStoreUnavailable,
   planDraftPost,
   billingPath,
@@ -54,17 +59,21 @@ import {
   ThemeService,
   BackgroundTaskStore,
   TranscriptStore,
+  claudePublishMetadataGenerator,
+  isCommitSubjectSafe,
+  runPublishMachineExclusive,
   UsageService,
   WorkspaceService
 } from "@jingler/cli-adapters"
 import { homedir } from "node:os"
 import { dirname, resolve } from "node:path"
 import {
+  AuthError,
   ConfigError,
   ConnectorError,
   activePlanParticipants,
   defaultModeFor,
-  GhError,
+  GitHubApiError,
   GitError,
   parsePlanThreadReply,
   PlanConflictError,
@@ -78,8 +87,10 @@ import {
   resolveOrchestratorPreference,
   PluginError,
   SessionNotFoundError,
+  semanticBranchProposalFromName,
   workspaceModeOf
 } from "@jingler/core"
+import { GitHubAppConnectionStatus as GitHubAppConnectionStatusSchema } from "@jingler/core"
 import type {
   BrowserBounds,
   AdversarialReview,
@@ -102,11 +113,15 @@ import type {
   PlanStageAssignment,
   PluginCatalog,
   PrMergeMethod,
+  PublishCheckpoint,
   ProviderConfig,
   ReviewComment,
   ReviewSubmitKind,
   ReasoningSetting,
   Session,
+  GitHubAppConnectionStatus,
+  GitHubRelayDelivery,
+  GitHubRelayEvent,
   SettledSessionStatus,
   WorkerActivityReset,
   WorkerState,
@@ -116,6 +131,7 @@ import type {
   OrchestrationCheckpoint,
   OrchestrationExecutionReport,
   OrchestrationStageStatus,
+  GitHubRepository,
   SessionSpec
 } from "@jingler/cli-adapters"
 import {
@@ -141,6 +157,7 @@ import { showNotification, shouldNotify } from "./notifications.js"
 import { PreviewViewService } from "./preview-view.js"
 import { DialogService } from "./dialog.js"
 import { createZipArchive } from "./zip.js"
+import { dialGitHubRelay, GitHubRelayConnection } from "./github-relay.js"
 
 /** The single IPC channel both directions of the RPC transport ride on. */
 export const RPC_CHANNEL = "jingler/rpc"
@@ -151,6 +168,127 @@ export const RPC_CHANNEL = "jingler/rpc"
  * than surfacing a read error. Exported so its folding behaviour is unit-tested.
  */
 export const configGet = () => ConfigService.get().pipe(Effect.orElseSucceed(() => null))
+
+const githubApiBaseUrl = (): string =>
+  (process.env.JINGLER_GITHUB_URL ?? process.env.JINGLER_AUTH_URL ?? "http://localhost:9100").replace(
+    /\/$/,
+    ""
+  )
+
+const githubAuthError = (message: string): AuthError => new AuthError({ message })
+
+interface PendingRelayAcknowledgement {
+  readonly resolve: () => void
+  readonly reject: (cause: Error) => void
+  readonly timer: ReturnType<typeof setTimeout>
+}
+
+const pendingRelayAcknowledgements = new Map<string, PendingRelayAcknowledgement>()
+const relayAcknowledgementKey = (clientId: string, cursor: number): string =>
+  `${clientId}:${cursor}`
+
+export const githubAckEvent = (clientId: string, cursor: number): Effect.Effect<void> =>
+  Effect.sync(() => {
+    const key = relayAcknowledgementKey(clientId, cursor)
+    const pending = pendingRelayAcknowledgements.get(key)
+    if (!pending) return
+    clearTimeout(pending.timer)
+    pendingRelayAcknowledgements.delete(key)
+    pending.resolve()
+  })
+
+/**
+ * Authenticated GitHub App HTTP request. The BetterAuth bearer stays in main;
+ * neither the renderer nor the typed RPC payload ever sees it.
+ */
+const githubRequest = (
+  path: string,
+  method: "GET" | "POST"
+): Effect.Effect<Response, AuthError, SecretStore> =>
+  Effect.gen(function* () {
+    const secrets = yield* SecretStore
+    const token = yield* secrets.get
+    if (!token) {
+      return yield* Effect.fail(githubAuthError("Sign in to Jingler before connecting GitHub."))
+    }
+    const response = yield* Effect.tryPromise({
+      try: () =>
+        fetch(`${githubApiBaseUrl()}${path}`, {
+          method,
+          headers: { Authorization: `Bearer ${token}` }
+        }),
+      catch: () => githubAuthError("Couldn't reach the GitHub connection service.")
+    })
+    if (!response.ok) {
+      return yield* Effect.fail(
+        githubAuthError(
+          response.status === 401
+            ? "Your Jingler session expired. Sign in again before connecting GitHub."
+            : "The GitHub connection service couldn't complete that request."
+        )
+      )
+    }
+    return response
+  })
+
+const githubStatusResponse = (
+  path: "/api/github/status" | "/api/github/refresh",
+  method: "GET" | "POST"
+): Effect.Effect<GitHubAppConnectionStatus, AuthError, SecretStore> =>
+  githubRequest(path, method).pipe(
+    Effect.flatMap((response) =>
+      Effect.tryPromise({
+        try: () => response.json() as Promise<unknown>,
+        catch: () => githubAuthError("The GitHub connection service returned an invalid response.")
+      })
+    ),
+    Effect.flatMap((body) =>
+      Schema.decodeUnknown(GitHubAppConnectionStatusSchema)(body).pipe(
+        Effect.mapError(() =>
+          githubAuthError("The GitHub connection service returned an invalid response.")
+        )
+      )
+    )
+  )
+
+export const githubConnectionStatus = (): Effect.Effect<
+  GitHubAppConnectionStatus,
+  AuthError,
+  SecretStore
+> => githubStatusResponse("/api/github/status", "GET")
+
+export const githubConnectionRefresh = (): Effect.Effect<
+  GitHubAppConnectionStatus,
+  AuthError,
+  SecretStore
+> => githubStatusResponse("/api/github/refresh", "POST")
+
+export const githubConnectionInstall = (): Effect.Effect<string, AuthError, SecretStore> => {
+  const loopback = process.env.JINGLER_DEV_AUTH_LOOPBACK
+  const suffix = loopback ? `?redirect=${encodeURIComponent(loopback)}` : ""
+  return githubRequest(`/api/github/install${suffix}`, "GET").pipe(
+    Effect.flatMap((response) =>
+      Effect.tryPromise({
+        try: () => response.json() as Promise<unknown>,
+        catch: () => githubAuthError("The GitHub connection service returned an invalid response.")
+      })
+    ),
+    Effect.flatMap((body) =>
+      typeof body === "object" &&
+      body !== null &&
+      "url" in body &&
+      typeof body.url === "string" &&
+      /^https?:\/\//i.test(body.url)
+        ? Effect.succeed(body.url)
+        : Effect.fail(
+            githubAuthError("The GitHub connection service returned an invalid install URL.")
+          )
+    )
+  )
+}
+
+export const githubConnectionDisconnect = (): Effect.Effect<void, AuthError, SecretStore> =>
+  githubRequest("/api/github/disconnect", "POST").pipe(Effect.asVoid)
 
 const MemoryBackendSearch = Schema.Struct({
   results: Schema.Array(
@@ -1993,15 +2131,15 @@ export const unlinkIssue = (sessionId: string) =>
 
 /**
  * `Github.closeIssue` handler — close the session's linked issue (close-on-merge).
- * Fails with `GhError` when there's no worktree or linked issue.
+ * Fails with `GitHubApiError` when there's no worktree or linked issue.
  */
 export const githubCloseIssue = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId)
     if (!session?.worktreePath || session.issueNumber == null) {
-      return yield* Effect.fail(new GhError({ message: "No linked issue to close" }))
+      return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "No linked issue to close" }))
     }
-    yield* GhService.closeIssue(session.worktreePath, session.issueNumber)
+    yield* GitHubApi.closeIssue(session.worktreePath, session.issueNumber)
   })
 
 /** `Github.issue` handler — the full linked-issue view model for the Issue tab. */
@@ -2009,7 +2147,7 @@ export const githubIssue = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId)
     if (!session?.worktreePath || session.issueNumber == null) return null
-    return yield* GhService.issueView(session.worktreePath, session.issueNumber)
+    return yield* GitHubApi.issueView(session.worktreePath, session.issueNumber)
   })
 
 /**
@@ -2117,14 +2255,14 @@ export const workspaceRevertLines = (input: {
   })
 
 /**
- * `Github.pr` handler. Returns the linked PR (via `gh pr view`) or null when the
+ * `Github.pr` handler. Returns the linked PR via GitHub APIs or null when the
  * session has no worktree or no linked PR. Exported for tests.
  */
 export const githubPr = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId)
     if (!session?.worktreePath || session.prNumber === null) return null
-    return yield* GhService.prView(session.worktreePath, session.prNumber)
+    return yield* GitHubApi.prView(session.worktreePath, session.prNumber)
   })
 
 /**
@@ -2136,7 +2274,7 @@ export const githubPrState = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId)
     if (!session?.worktreePath || session.prNumber === null) return null
-    return yield* GhService.prState(session.worktreePath, session.prNumber)
+    return yield* GitHubApi.prState(session.worktreePath, session.prNumber)
   })
 
 /**
@@ -2214,7 +2352,7 @@ export const githubFiles = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId)
     if (!session?.worktreePath || session.prNumber === null) return []
-    return yield* GhService.prFiles(session.worktreePath, session.prNumber)
+    return yield* GitHubApi.prFiles(session.worktreePath, session.prNumber)
   })
 
 /** `Github.diff` handler — the PR's unified diff (empty without a linked PR). */
@@ -2222,7 +2360,7 @@ export const githubDiff = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId)
     if (!session?.worktreePath || session.prNumber === null) return ""
-    return yield* GhService.prDiff(session.worktreePath, session.prNumber)
+    return yield* GitHubApi.prDiff(session.worktreePath, session.prNumber)
   })
 
 /** `Review.get` handler — the stored review for the active PR, or null. */
@@ -2344,7 +2482,7 @@ export const reviewReconcile = (sessionId: string) =>
  * `Review.run` handler — run an adversarial review of the session's linked PR.
  *
  * The head-SHA short-circuit is the load-bearing part: it means an unchanged PR
- * costs one cheap `gh pr view` instead of an agent run. That is what lets the
+ * costs one cheap GitHub API read instead of an agent run. That is what lets the
  * auto-review trigger fire naively off the renderer's poll loop without needing
  * a client-side guard of its own — a duplicate effect is simply a no-op.
  *
@@ -2361,7 +2499,7 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       )
     }
 
-    const headSha = yield* GhService.prHeadSha(session.worktreePath, session.prNumber)
+    const headSha = yield* GitHubApi.prHeadSha(session.worktreePath, session.prNumber)
     if (headSha === null) {
       return yield* Effect.fail(
         new ReviewError({
@@ -2386,7 +2524,7 @@ export const reviewRun = (sessionId: string, force: boolean) =>
     const cli = config?.github?.reviewCli ?? "claude"
     const model = reviewModelFor(cli, config?.github?.reviewModel)
 
-    const diff = yield* GhService.prDiff(session.worktreePath, session.prNumber)
+    const diff = yield* GitHubApi.prDiff(session.worktreePath, session.prNumber)
 
     const review = yield* ReviewService.run({
       sessionId,
@@ -2423,7 +2561,7 @@ export const reviewRun = (sessionId: string, force: boolean) =>
  * **Best-effort by construction.** A review costs real tokens on a frontier
  * model, and its verdict is just as true whether or not GitHub accepted the
  * comments — so every failure here lands in `postError` and the findings survive.
- * Failing the run instead would throw away the whole review over a `gh` hiccup,
+ * Failing the run instead would throw away the whole review over an API hiccup,
  * and (because the caller persists only on success) leave the auto-trigger
  * re-running the reviewer on the same head every tick.
  */
@@ -2432,7 +2570,7 @@ const postReviewToPr = (
   prNumber: number,
   review: AdversarialReview,
   diff: string
-): Effect.Effect<AdversarialReview, never, GhService | CommandExecutor.CommandExecutor> =>
+): Effect.Effect<AdversarialReview, never, GitHubApi | CommandExecutor.CommandExecutor> =>
   Effect.gen(function* () {
     const plan = planReviewPost(review, diff)
     // Nothing low-severity to say. Not an error, and not a failed post — leave
@@ -2440,7 +2578,7 @@ const postReviewToPr = (
     if (plan === null) return review
 
     const now = yield* Effect.sync(() => new Date().toISOString())
-    return yield* GhService.prReviewComments(cwd, prNumber, {
+    return yield* GitHubApi.prReviewComments(cwd, prNumber, {
       commitSha: review.headSha,
       body: plan.body,
       comments: plan.comments
@@ -2466,37 +2604,308 @@ export const githubDetectPr = (sessionId: string) =>
     if (!session?.worktreePath) return null
     // Resolve against the worktree's live branch — the stored `session.branch`
     // drifts once the agent checks out / creates a different branch there.
-    const n = yield* GhService.prForWorktree(session.worktreePath)
-    if (n !== null && n !== session.prNumber) {
-      yield* SessionStore.setPrNumber(session.id, n).pipe(Effect.ignore)
+    const n = yield* GitHubApi.prForWorktree(session.worktreePath)
+    if (n !== null) {
+      const repository = yield* GitHubApi.repository(session.worktreePath)
+      yield* SessionStore.setGitHubLink(session.id, {
+        installationId: repository.installationId,
+        repositoryId: repository.id,
+        prNumber: n
+      }).pipe(Effect.ignore)
     }
     return n
   })
 
-/** `Github.createPr` handler — open a PR from the session's branch and link it. */
-export const githubCreatePr = (input: {
-  sessionId: string
-  title: string
-  body: string
-  base: string
-  draft: boolean
-}) =>
-  Effect.gen(function* () {
-    const session = yield* resolveSession(input.sessionId)
-    if (!session?.worktreePath) {
-      return yield* Effect.fail(
-        new GhError({ message: "Session has no worktree to open a PR from" })
-      )
+const hydrateGitHubSessionLinks = (
+  list: () => Promise<ReadonlyArray<Session>>,
+  repository: (worktreePath: string) => Promise<GitHubRepository>,
+  link: (
+    sessionId: string,
+    identity: { readonly installationId: string; readonly repositoryId: string; readonly prNumber: number }
+  ) => Promise<void>
+): Promise<void> =>
+  list().then(async (sessions) => {
+    for (const session of sessions) {
+      if (
+        session.prNumber === null ||
+        !session.worktreePath ||
+        (session.githubInstallationId && session.githubRepositoryId)
+      ) {
+        continue
+      }
+      try {
+        const resolved = await repository(session.worktreePath)
+        await link(session.id, {
+          installationId: resolved.installationId,
+          repositoryId: resolved.id,
+          prNumber: session.prNumber
+        })
+      } catch {
+        // A stale/inaccessible legacy session remains safely unlinked.
+      }
     }
-    const n = yield* GhService.prCreate(session.worktreePath, {
-      title: input.title,
-      body: input.body,
-      base: input.base,
-      draft: input.draft
-    })
-    yield* SessionStore.setPrNumber(session.id, n).pipe(Effect.ignore)
-    return n
   })
+
+const relayTarget = (
+  list: () => Promise<ReadonlyArray<Session>>,
+  event: GitHubRelayEvent
+): Promise<{ readonly sessionId: string | null; readonly chatId: string | null }> =>
+  list().then((sessions) => {
+    const number = event.pullRequest?.number
+    if (number === undefined) return { sessionId: null, chatId: null }
+    const target = sessions.find(
+      (session) =>
+        !session.archived &&
+        session.prNumber === number &&
+        session.githubInstallationId === event.installationId &&
+        session.githubRepositoryId === event.repository.id
+    )
+    return target
+      ? { sessionId: target.id, chatId: target.activeChatId }
+      : { sessionId: null, chatId: null }
+  })
+
+const awaitRelayAcknowledgement = (
+  delivery: GitHubRelayDelivery,
+  mailbox: Mailbox.Mailbox<GitHubRelayDelivery>
+): Promise<void> =>
+  new Promise<void>((resolve, reject) => {
+    const key = relayAcknowledgementKey(delivery.clientId, delivery.cursor)
+    const timer = setTimeout(() => {
+      pendingRelayAcknowledgements.delete(key)
+      reject(new Error("GitHub feedback routing acknowledgement timed out"))
+    }, 60_000)
+    pendingRelayAcknowledgements.set(key, { resolve, reject, timer })
+    mailbox.unsafeOffer(delivery)
+  })
+
+/** Verified relay events held unacknowledged until renderer routing settles. */
+export const githubEvents = () =>
+  Stream.unwrapScoped(
+    Effect.gen(function* () {
+      const mailbox = yield* Mailbox.make<GitHubRelayDelivery>()
+      const runtime = yield* Effect.runtime<
+        | GitHubAuth
+        | GitHubApi
+        | GitHubEventStore
+        | SessionStore
+        | AppPaths
+        | FileSystem.FileSystem
+        | Path.Path
+      >()
+      const run = Runtime.runPromise(runtime)
+      const status = yield* GitHubAuth.status()
+      const pendingFeedback = yield* SessionStore.pendingGitHubFeedback()
+      for (const pending of pendingFeedback) {
+        mailbox.unsafeOffer({
+          clientId: `outbox:${pending.sessionId}`,
+          cursor: 0,
+          event: pending.event,
+          sessionId: pending.sessionId,
+          chatId: pending.chatId
+        })
+      }
+      const listSessions = () => run(SessionStore.list())
+      yield* Effect.tryPromise(() =>
+        hydrateGitHubSessionLinks(
+          listSessions,
+          (worktreePath) => run(GitHubApi.repository(worktreePath)),
+          (sessionId, identity) => run(SessionStore.setGitHubLink(sessionId, identity))
+        )
+      ).pipe(Effect.ignore)
+      const connections: GitHubRelayConnection[] = []
+      const ownedClientIds = new Set<string>()
+      for (const installation of status.installations) {
+        if (installation.status !== "active") continue
+        const clientId = yield* GitHubEventStore.clientId(installation.id)
+        ownedClientIds.add(clientId)
+        const connection = new GitHubRelayConnection({
+          clientId,
+          grant: () => run(GitHubAuth.grantForInstallation(installation.id)),
+          cursorStore: {
+            load: () => run(GitHubEventStore.cursor(clientId)),
+            save: (_ignored, cursor) => run(GitHubEventStore.setCursor(clientId, cursor))
+          },
+          dial: dialGitHubRelay,
+          onEvent: async (event, cursor) => {
+            const target = await relayTarget(listSessions, event)
+            await awaitRelayAcknowledgement(
+              { clientId, cursor, event, ...target },
+              mailbox
+            )
+          }
+        })
+        connections.push(connection)
+      }
+      yield* Effect.addFinalizer(() =>
+        Effect.gen(function* () {
+          yield* Effect.sync(() => {
+            for (const connection of connections) connection.stop()
+            for (const [key, pending] of pendingRelayAcknowledgements) {
+              if (![...ownedClientIds].some((clientId) => key.startsWith(`${clientId}:`))) {
+                continue
+              }
+              clearTimeout(pending.timer)
+              pendingRelayAcknowledgements.delete(key)
+              pending.reject(new Error("GitHub relay stream closed"))
+            }
+          })
+          yield* mailbox.end
+        })
+      )
+      yield* Effect.tryPromise(() => Promise.all(connections.map((connection) => connection.start())))
+      return Mailbox.toStream(mailbox)
+    })
+  ).pipe(Stream.catchAll(() => Stream.empty))
+
+const publishFailure = (
+  message: string,
+  previous?: PublishCheckpoint
+): PublishCheckpoint => ({
+  step: "failed",
+  completed: previous?.completed ?? [],
+  ...(previous?.metadata ? { metadata: previous.metadata } : {}),
+  ...(previous?.branch ? { branch: previous.branch } : {}),
+  ...(previous?.commitSha ? { commitSha: previous.commitSha } : {}),
+  ...(previous?.prNumber !== undefined ? { prNumber: previous.prNumber } : {}),
+  error: message,
+  resumeFrom: "inspecting",
+  updatedAt: new Date().toISOString()
+})
+
+/**
+ * `Github.publish` is the sole mutation owner for publishing session work.
+ * Installation credentials are captured only in this main-process scope and
+ * cleared immediately after the authenticated push.
+ */
+export const githubPublish = (sessionId: string) =>
+  Stream.unwrapScoped(
+    Effect.gen(function* () {
+      const mailbox = yield* Mailbox.make<PublishCheckpoint>()
+      const runtime = yield* Effect.runtime<
+        | GitService
+        | GitHubApi
+        | GitHubAuth
+        | SessionStore
+        | TranscriptStore
+        | CommandExecutor.CommandExecutor
+        | AppPaths
+        | FileSystem.FileSystem
+        | Path.Path
+      >()
+      const run = Runtime.runPromise(runtime)
+      const offer = (checkpoint: PublishCheckpoint): void => {
+        mailbox.unsafeOffer(checkpoint)
+      }
+
+      yield* Effect.forkScoped(
+        Effect.tryPromise({
+          try: async () => {
+            const session = await run(SessionStore.get(sessionId))
+            if (!session.worktreePath) {
+              const failure = publishFailure("This session has no worktree to publish.", session.publish)
+              await run(SessionStore.setPublishCheckpoint(session.id, failure))
+              offer(failure)
+              return
+            }
+
+            const cwd = session.worktreePath
+            let repositoryIdentity: {
+              readonly id: string
+              readonly installationId: string
+              readonly fullName: string
+            } | null = null
+            const messages = await run(TranscriptStore.list(session.activeChatId))
+            await runPublishMachineExclusive(
+              session.id,
+              session.publish,
+              {
+                inspect: async () => {
+                  return run(GitService.publishInspection(cwd, session.baseBranch ?? "main"))
+                },
+                verifyBranch: async (inspection) => {
+                  if (session.semanticBranchPending || !session.semanticBranchProposal) {
+                    throw new Error("Finish creating the semantic task branch before publishing.")
+                  }
+                  if (!inspection.branch) {
+                    throw new Error("The task worktree is detached. Finish semantic branch creation before publishing.")
+                  }
+                  if (inspection.branch !== session.branch) {
+                    throw new Error(`The worktree branch changed to ${inspection.branch}. Refresh the session before publishing.`)
+                  }
+                  if (semanticBranchProposalFromName(inspection.branch) === null) {
+                    throw new Error("The worktree is not on a validated semantic task branch.")
+                  }
+                  return inspection.branch
+                },
+                generateMetadata: (inspection) => run(claudePublishMetadataGenerator.generate({
+                  session,
+                  messages,
+                  changedPaths: inspection.changedPaths,
+                  diffSummary: inspection.diffSummary
+                })),
+                stage: async () => {
+                  await run(GitService.stageAll(cwd))
+                  if (!(await run(GitService.hasStagedChanges(cwd)))) {
+                    throw new Error("Git found no staged changes to commit. Review ignored files and try again.")
+                  }
+                },
+                commit: (message) => {
+                  if (!isCommitSubjectSafe(message)) {
+                    throw new Error("The generated commit subject was not safe to publish.")
+                  }
+                  return run(GitService.commit(cwd, message))
+                },
+                authenticate: async () => {
+                  const repository = await run(GitHubApi.repository(cwd))
+                  repositoryIdentity = repository
+                },
+                push: async (branch) => {
+                  const repository = repositoryIdentity ?? await run(GitHubApi.repository(cwd))
+                  const credential = await run(GitHubAuth.credentialsForInstallation(
+                    repository.installationId,
+                    repository.fullName,
+                    ["contents:write"]
+                  ))
+                  await run(GitService.pushWithInstallationToken(cwd, branch, credential.token))
+                },
+                resolvePr: (branch) => run(GitHubApi.prForBranch(cwd, branch)),
+                createPr: (metadata) => run(GitHubApi.prCreate(cwd, {
+                  title: metadata.prTitle,
+                  body: metadata.prBody,
+                  base: session.baseBranch ?? "main",
+                  draft: false
+                })),
+                updatePr: (number, metadata) => run(GitHubApi.prUpdate(cwd, number, {
+                  title: metadata.prTitle,
+                  body: metadata.prBody
+                })),
+                link: async (number) => {
+                  const repository = repositoryIdentity ?? await run(GitHubApi.repository(cwd))
+                  await run(SessionStore.setGitHubLink(session.id, {
+                    installationId: repository.installationId,
+                    repositoryId: repository.id,
+                    prNumber: number
+                  }))
+                }
+              },
+              async (checkpoint) => {
+                await run(SessionStore.setPublishCheckpoint(session.id, checkpoint))
+              },
+              offer
+            )
+          },
+          catch: (cause) => cause
+        }).pipe(
+          Effect.catchAll((cause) => Effect.sync(() => offer(publishFailure(
+            cause instanceof Error ? cause.message : "Publishing failed."
+          )))),
+          Effect.ensuring(mailbox.end)
+        )
+      )
+      return Mailbox.toStream(mailbox)
+    })
+  )
 
 /**
  * `Github.comment` handler — post a top-level PR comment when `toGithub`. The
@@ -2508,9 +2917,9 @@ export const githubComment = (input: { sessionId: string; body: string; toGithub
     if (!input.toGithub) return
     const session = yield* resolveSession(input.sessionId)
     if (!session?.worktreePath || session.prNumber === null) {
-      return yield* Effect.fail(new GhError({ message: "No linked pull request to comment on" }))
+      return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "No linked pull request to comment on" }))
     }
-    yield* GhService.prComment(session.worktreePath, session.prNumber, input.body)
+    yield* GitHubApi.prComment(session.worktreePath, session.prNumber, input.body)
   })
 
 /**
@@ -2531,21 +2940,22 @@ export const githubSubmitReview = (input: {
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId)
     if (!session?.worktreePath || session.prNumber === null) {
-      return yield* Effect.fail(new GhError({ message: "No linked pull request to review" }))
+      return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "No linked pull request to review" }))
     }
-    const headSha = yield* GhService.prHeadSha(session.worktreePath, session.prNumber)
+    const headSha = yield* GitHubApi.prHeadSha(session.worktreePath, session.prNumber)
     if (headSha === null) {
       return yield* Effect.fail(
-        new GhError({
+        new GitHubApiError({
+          reason: "validation",
           message: "Couldn't resolve the pull request's head commit to anchor comments against"
         })
       )
     }
-    const diff = yield* GhService.prDiff(session.worktreePath, session.prNumber)
+    const diff = yield* GitHubApi.prDiff(session.worktreePath, session.prNumber)
     const plan = planDraftPost(input.comments, diff)
     if (plan === null) return 0
 
-    yield* GhService.prReviewComments(session.worktreePath, session.prNumber, {
+    yield* GitHubApi.prReviewComments(session.worktreePath, session.prNumber, {
       commitSha: headSha,
       body: plan.body,
       comments: plan.comments
@@ -2558,9 +2968,9 @@ export const githubReview = (input: { sessionId: string; kind: ReviewSubmitKind;
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId)
     if (!session?.worktreePath || session.prNumber === null) {
-      return yield* Effect.fail(new GhError({ message: "No linked pull request to review" }))
+      return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "No linked pull request to review" }))
     }
-    yield* GhService.prReview(session.worktreePath, session.prNumber, input.kind, input.body)
+    yield* GitHubApi.prReview(session.worktreePath, session.prNumber, input.kind, input.body)
   })
 
 /** `Github.resolveThread` handler — resolve/unresolve an inline review thread. */
@@ -2572,9 +2982,9 @@ export const githubResolveThread = (input: {
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId)
     if (!session?.worktreePath) {
-      return yield* Effect.fail(new GhError({ message: "No worktree to resolve the thread from" }))
+      return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "No worktree to resolve the thread from" }))
     }
-    yield* GhService.resolveThread(session.worktreePath, input.threadId, input.resolved)
+    yield* GitHubApi.resolveThread(session.worktreePath, input.threadId, input.resolved)
   })
 
 /** `Github.replyToThread` handler — post a reply into an inline review thread. */
@@ -2586,9 +2996,9 @@ export const githubReplyToThread = (input: {
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId)
     if (!session?.worktreePath || session.prNumber === null) {
-      return yield* Effect.fail(new GhError({ message: "No linked pull request to reply to" }))
+      return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "No linked pull request to reply to" }))
     }
-    yield* GhService.replyToThread(
+    yield* GitHubApi.replyToThread(
       session.worktreePath,
       session.prNumber,
       input.commentId,
@@ -2601,9 +3011,9 @@ export const githubMerge = (input: { sessionId: string; method?: PrMergeMethod }
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId)
     if (!session?.worktreePath || session.prNumber === null) {
-      return yield* Effect.fail(new GhError({ message: "No linked pull request to merge" }))
+      return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "No linked pull request to merge" }))
     }
-    yield* GhService.prMerge(session.worktreePath, session.prNumber, input.method)
+    yield* GitHubApi.prMerge(session.worktreePath, session.prNumber, input.method)
   })
 
 /** `Github.markReady` handler — flip the session's draft PR to ready for review. */
@@ -2611,9 +3021,9 @@ export const githubMarkReady = (input: { sessionId: string }) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId)
     if (!session?.worktreePath || session.prNumber === null) {
-      return yield* Effect.fail(new GhError({ message: "No linked pull request to mark ready" }))
+      return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "No linked pull request to mark ready" }))
     }
-    yield* GhService.prReady(session.worktreePath, session.prNumber)
+    yield* GitHubApi.prReady(session.worktreePath, session.prNumber)
   })
 
 /** `Github.updateBranch` handler — merge the base into the PR's head on GitHub. */
@@ -2621,9 +3031,9 @@ export const githubUpdateBranch = (input: { sessionId: string }) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId)
     if (!session?.worktreePath || session.prNumber === null) {
-      return yield* Effect.fail(new GhError({ message: "No linked pull request to update" }))
+      return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "No linked pull request to update" }))
     }
-    yield* GhService.prUpdateBranch(session.worktreePath, session.prNumber)
+    yield* GitHubApi.prUpdateBranch(session.worktreePath, session.prNumber)
   })
 
 /**
@@ -2884,6 +3294,9 @@ export const pluginStorageKeys = (pluginId: string) =>
  * pulls in a `CommandExecutor` requirement (via `DiscoveryService.list()`) that
  * `AppLayer` satisfies with the Node platform layer.
  */
+let failGitHubFeedbackMarkOnce =
+  process.env.JINGLER_E2E_GITHUB_FAIL_MARK_ONCE === "1"
+
 const HandlersLayer = JinglerRpcs.toLayer({
   "Billing.paths": () => billingPaths,
   "Discovery.list": () => DiscoveryService.list(),
@@ -3049,12 +3462,20 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Sessions.diff": ({ id }) => sessionDiff(id),
   // The streaming agent seam: unwrap the runner's `Stream<StreamEvent>` so the
   // renderer subscribes to normalized events, harness-agnostic.
-  "Agent.run": ({ sessionId, chatId, text, images, reasoning }) =>
+  "Agent.run": ({ sessionId, chatId, text, images, reasoning, externalInstruction }) =>
     Stream.unwrap(
       Effect.map(AgentRunner, (runner) => {
         let amendmentApplied = false
         return runner
-          .prompt(sessionId, chatId, text, images ?? [], reasoning)
+          .prompt(
+            sessionId,
+            chatId,
+            text,
+            images ?? [],
+            reasoning,
+            undefined,
+            externalInstruction
+          )
           .pipe(
             Stream.tap((event) =>
               Effect.sync(() => {
@@ -3272,7 +3693,10 @@ const HandlersLayer = JinglerRpcs.toLayer({
         Effect.fail(new GitError({ message: "Session not found", cause }))
       )
     ),
-  "Gh.status": () => GhService.status(),
+  "GitHub.status": () => githubConnectionStatus(),
+  "GitHub.install": () => githubConnectionInstall(),
+  "GitHub.refresh": () => githubConnectionRefresh(),
+  "GitHub.disconnect": () => githubConnectionDisconnect(),
   "Config.setGithub": (github) => ConfigService.setGithub(github),
   "Config.setGit": (git) => ConfigService.setGit(git),
   "Config.setNotifications": (notifications) => ConfigService.setNotifications(notifications),
@@ -3318,10 +3742,28 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Config.setPlanTemplate": ({ template }) => ConfigService.setPlanTemplate(template),
   "Config.setProvider": ({ cli, provider }) => ConfigService.setProvider(cli, provider),
   "Github.pr": ({ sessionId }) => githubPr(sessionId),
+  "Github.events": () => githubEvents(),
+  "Github.claimFeedback": (input) => {
+    if (input.operation === "claim") {
+      return SessionStore.claimGitHubFeedback(input.sessionId, input)
+    }
+    if (failGitHubFeedbackMarkOnce) {
+      failGitHubFeedbackMarkOnce = false
+      return Effect.fail(
+        new GitError({ message: "E2E forced crash boundary before feedback outbox mark" })
+      )
+    }
+    return SessionStore.markGitHubFeedbackDispatched(
+      input.sessionId,
+      input.deliveryId,
+      input.semanticKey
+    ).pipe(Effect.map((marked) => (marked ? "dispatched" as const : "rejected" as const)))
+  },
+  "Github.ackEvent": ({ clientId, cursor }) => githubAckEvent(clientId, cursor),
   "Github.prState": ({ sessionId }) => githubPrState(sessionId),
-  "Github.listPrs": ({ repoPath, mine, search }) => GhService.listPrs(repoPath, { mine, search }),
+  "Github.listPrs": ({ repoPath, mine, search }) => GitHubApi.listPrs(repoPath, { mine, search }),
   "Github.listIssues": ({ repoPath, mine, search }) =>
-    GhService.listIssues(repoPath, { mine, search }),
+    GitHubApi.listIssues(repoPath, { mine, search }),
   "Github.closeIssue": ({ sessionId }) => githubCloseIssue(sessionId),
   "Github.issue": ({ sessionId }) => githubIssue(sessionId),
   "Github.files": ({ sessionId }) => githubFiles(sessionId),
@@ -3408,7 +3850,7 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "Review.get": ({ sessionId }) => reviewGet(sessionId),
   "Review.markRouted": ({ sessionId }) => reviewMarkRouted(sessionId),
   "Review.reconcile": ({ sessionId }) => reviewReconcile(sessionId),
-  "Github.createPr": (input) => githubCreatePr(input),
+  "Github.createPr": ({ sessionId }) => githubPublish(sessionId),
   "Github.comment": (input) => githubComment(input),
   "Github.review": (input) => githubReview(input),
   "Github.submitReview": (input) => githubSubmitReview(input),
@@ -3776,7 +4218,53 @@ const ServerProtocolLive = Layer.effect(
  * TypeScript cannot NAME an inferred type that reaches into a workspace
  * package's internals without a reference to it in scope.
  */
-export const RpcServerLive = RpcServer.layer(JinglerRpcs).pipe(
+const RpcServerLayer = RpcServer.layer(JinglerRpcs).pipe(
   Layer.provide(HandlersLayer),
   Layer.provide(ServerProtocolLive)
 )
+
+// Keep the large mapped handler context named at this module boundary. Letting
+// TypeScript re-infer it through the runtime's long Layer.provide chain widens
+// the input to `any` once the RPC group is large enough, defeating the final
+// ManagedRuntime check. The assignment below also verifies this list stays a
+// superset of every handler requirement.
+export type RpcServerRequirements =
+  | AgentRunner
+  | AppPaths
+  | AssetService
+  | AuthService
+  | BackgroundTaskStore
+  | BrowserControlMcpService
+  | CliAdapter
+  | CommandExecutor.CommandExecutor
+  | ConfigService
+  | ContextManager
+  | DialogService
+  | DiscoveryService
+  | FileSystem.FileSystem
+  | GitHubApi
+  | GitHubAuth
+  | GitHubEventStore
+  | GitService
+  | MemoryService
+  | ModelsService
+  | OpenConnectorApi
+  | OpenConnectorService
+  | OrchestrationService
+  | Path.Path
+  | PlanStore
+  | PluginAuth
+  | PluginHost
+  | PluginRegistry
+  | PreviewViewService
+  | ReviewService
+  | ReviewStore
+  | SecretStore
+  | SessionStore
+  | SkillsService
+  | TerminalService
+  | ThemeService
+  | TranscriptStore
+  | UsageService
+  | WorkspaceService
+export const RpcServerLive: Layer.Layer<never, never, RpcServerRequirements> = RpcServerLayer

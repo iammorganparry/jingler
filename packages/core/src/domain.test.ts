@@ -8,7 +8,6 @@ import {
   type CliKind,
   CreateSessionInput,
   defaultModeFor,
-  GhStatus,
   GithubConfig,
   persistentOf,
   Repo,
@@ -444,30 +443,6 @@ describe("CreateSessionInput", () => {
       baseBranch: "main"
     })
     expect(Either.isLeft(result)).toBe(true)
-  })
-})
-
-describe("GhStatus", () => {
-  it("decodes an authenticated status", () => {
-    const result = decode(GhStatus, {
-      available: true,
-      authenticated: true,
-      login: "octocat",
-      host: "github.com",
-      version: "2.68.1"
-    })
-    expect(Either.isRight(result)).toBe(true)
-  })
-
-  it("decodes an unavailable status (all nulls)", () => {
-    const result = decode(GhStatus, {
-      available: false,
-      authenticated: false,
-      login: null,
-      host: null,
-      version: null
-    })
-    expect(Either.isRight(result)).toBe(true)
   })
 })
 

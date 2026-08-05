@@ -446,6 +446,16 @@ export const ContentPart = Schema.Union(
 )
 export type ContentPart = Schema.Schema.Type<typeof ContentPart>
 
+/** Stable identity for a non-composer instruction entering a conversation. */
+export const ExternalInstructionIdentity = Schema.Struct({
+  source: Schema.Literal("github-feedback"),
+  deliveryId: Schema.String,
+  semanticKey: Schema.String
+})
+export type ExternalInstructionIdentity = Schema.Schema.Type<
+  typeof ExternalInstructionIdentity
+>
+
 /** One turn in the transcript: an ordered list of content parts. */
 export const Message = Schema.Struct({
   id: Schema.String,
@@ -453,7 +463,9 @@ export const Message = Schema.Struct({
   parts: Schema.Array(ContentPart),
   /** True while the agent is still producing this turn. */
   streaming: Schema.Boolean,
-  createdAt: Schema.String
+  createdAt: Schema.String,
+  /** Optional for every transcript written before external instructions existed. */
+  externalInstruction: Schema.optional(ExternalInstructionIdentity)
 })
 export type Message = Schema.Schema.Type<typeof Message>
 
@@ -611,6 +623,11 @@ export const PlanDraft = Schema.Struct({
 export type PlanDraft = Schema.Schema.Type<typeof PlanDraft>
 
 export const StreamEvent = Schema.Union(
+  /** Main persisted the external turn before any harness side effect began. */
+  Schema.TaggedStruct("ExternalInstructionAccepted", {
+    identity: ExternalInstructionIdentity,
+    duplicate: Schema.Boolean
+  }),
   Schema.TaggedStruct("Started", {
     sessionId: Schema.String,
     /** The actual model the harness is running, when known (from init). */
@@ -776,7 +793,8 @@ export const userMessage = (
   id: string,
   text: string,
   createdAt: string,
-  images: ReadonlyArray<Attachment> = []
+  images: ReadonlyArray<Attachment> = [],
+  externalInstruction?: ExternalInstructionIdentity
 ): Message => ({
   id,
   role: "user",
@@ -785,7 +803,8 @@ export const userMessage = (
     ...(text.length > 0 ? [{ _tag: "Text" as const, text }] : [])
   ],
   streaming: false,
-  createdAt
+  createdAt,
+  ...(externalInstruction === undefined ? {} : { externalInstruction })
 })
 
 /** A fresh, empty assistant turn to be filled by streaming events. */
@@ -904,6 +923,7 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
   const last = parts[parts.length - 1]
 
   return Match.value(event).pipe(
+    Match.tag("ExternalInstructionAccepted", () => msg),
     Match.tag("Started", () => ({ ...msg, streaming: true })),
 
     Match.tag("Thinking", (e) => {

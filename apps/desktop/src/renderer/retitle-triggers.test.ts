@@ -1,6 +1,6 @@
 import type { Session } from "@jingler/core"
 import { describe, expect, it } from "vitest"
-import { newlyPlannedSessionIds } from "./retitle-triggers.js"
+import { needsSessionRetitle, newlyPlannedSessionIds } from "./retitle-triggers.js"
 
 /**
  * `newlyPlannedSessionIds` is the pure trigger for retitling a session right
@@ -10,7 +10,15 @@ import { newlyPlannedSessionIds } from "./retitle-triggers.js"
  * plan doesn't re-fire on every render.
  */
 
-const session = (id: string, autoTitle?: boolean): Pick<Session, "id" | "autoTitle"> => ({ id, autoTitle })
+const session = (
+  id: string,
+  autoTitle?: boolean,
+  semanticBranchPending?: boolean
+): Pick<Session, "id" | "autoTitle" | "semanticBranchPending"> => ({
+  id,
+  autoTitle,
+  semanticBranchPending
+})
 
 describe("newlyPlannedSessionIds", () => {
   const sessions = [session("a", true), session("b", true), session("c", false)]
@@ -33,5 +41,11 @@ describe("newlyPlannedSessionIds", () => {
 
   it("returns only the newly-added ids when several change at once", () => {
     expect(newlyPlannedSessionIds(new Set(["a"]), new Set(["a", "b"]), sessions)).toStrictEqual(["b"])
+  })
+
+  it("fires for a pinned title whose fresh worktree still needs a branch", () => {
+    const pinnedPending = [session("p", false, true)]
+    expect(newlyPlannedSessionIds(new Set(), new Set(["p"]), pinnedPending)).toStrictEqual(["p"])
+    expect(needsSessionRetitle(pinnedPending[0])).toBe(true)
   })
 })

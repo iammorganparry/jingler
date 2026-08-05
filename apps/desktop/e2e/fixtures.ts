@@ -11,11 +11,20 @@ import {
   writeFileSync
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { basename, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { expect, test as base } from "@playwright/test"
 import type { ElectronApplication, Page } from "@playwright/test"
 import { _electron as electron } from "playwright"
 import { startFakeAuthServer, type FakeAuthServer } from "./fake-auth.js"
+import {
+  startFakeGitHubServer,
+  type FakeGitHubOptions,
+  type FakeGitHubServer
+} from "./fake-github.js"
+import {
+  startFakeGitHubRelay,
+  type FakeGitHubRelay
+} from "./fake-github-relay.js"
 import { MAIN_ENTRY } from "./global-setup.js"
 import { FALLBACK_MODELS } from "@jingler/core"
 
@@ -163,6 +172,10 @@ export interface SeedSession {
   readonly cli: "claude" | "codex" | "cursor" | "opencode"
   readonly diff: { added: number; removed: number }
   readonly prNumber: number | null
+  readonly githubInstallationId?: string
+  readonly githubRepositoryId?: string
+  readonly githubFeedbackDeliveryIds?: ReadonlyArray<string>
+  readonly githubFeedbackSemanticKeys?: ReadonlyArray<string>
   readonly issueNumber?: number | null
   readonly costUsd: number
   readonly tokens: number
@@ -251,6 +264,16 @@ export interface LaunchOptions {
    * The caller owns the supplied server and closes it after the scenario.
    */
   readonly authServer?: FakeAuthServer
+  /** Initial state for the offline shared GitHub App API. */
+  readonly githubApp?: FakeGitHubOptions
+  /** Reuse a stateful fake GitHub API across app restarts. */
+  readonly githubServer?: FakeGitHubServer
+  /** Reuse a stateful relay across app restarts. */
+  readonly githubRelay?: FakeGitHubRelay
+  /** Launch with a minimal PATH containing node + system git. */
+  readonly withoutGithubCli?: boolean
+  /** Test-only process flags for forcing a precise persistence/crash boundary. */
+  readonly e2eEnv?: Readonly<Record<string, string>>
 
   /**
    * Install a deterministic fake `opencode` on PATH so discovery, the version
@@ -270,52 +293,6 @@ export interface LaunchOptions {
       readonly source?: "env" | "config" | "custom" | "api"
       readonly env?: ReadonlyArray<string>
       readonly models?: ReadonlyArray<string>
-    }>
-  }
-  /**
-   * Install a deterministic fake `gh` on PATH so the GitHub flows run offline:
-   * `gh` reports authenticated, `gh pr list` returns these PRs, and
-   * `gh pr checkout <n>` checks out the matching head branch (pre-created in the
-   * repo). Lets the "new session from a PR" flow run end-to-end against real git.
-   */
-  readonly gh?: {
-    readonly login: string
-    readonly prs?: ReadonlyArray<{
-      number: number
-      title: string
-      headRefName: string
-      baseRefName: string
-      author: { login: string }
-      state?: string
-      isDraft?: boolean
-      additions?: number
-      deletions?: number
-      updatedAt?: string
-      /** The PR description, as `gh pr view --json body` reports it. */
-      body?: string
-      labels?: ReadonlyArray<{ name: string; color?: string }>
-      /** `CLEAN` | `BEHIND` | `BLOCKED` | `DIRTY` — drives the merge box. */
-      mergeStateStatus?: string
-      /** `statusCheckRollup` entries, for the Checks rail. */
-      checks?: ReadonlyArray<{
-        name: string
-        conclusion?: string
-        status?: string
-        detailsUrl?: string
-      }>
-    }>
-    /** The unified diff served by `gh pr diff` (what an adversarial review reads). */
-    readonly diff?: string
-    /** Open issues served by `gh issue list` (for the "new session from an issue" flow). */
-    readonly issues?: ReadonlyArray<{
-      number: number
-      title: string
-      url?: string
-      body?: string
-      labels?: ReadonlyArray<{ name: string; color?: string }>
-      author: { login: string }
-      assignees?: ReadonlyArray<{ login: string }>
-      updatedAt?: string
     }>
   }
 }
@@ -792,6 +769,10 @@ export interface LaunchedApp {
   readonly repoPath: string
   /** The offline fake auth backend this launch talks to. */
   readonly authServer: FakeAuthServer
+  /** Stateful GitHub App fake used by the real main-process HTTP bridge. */
+  readonly githubServer: FakeGitHubServer
+  /** Authenticated reconnectable websocket relay used by realtime-feedback specs. */
+  readonly githubRelay: FakeGitHubRelay
   /**
    * Keys the fake opencode was asked to store, in the order it was asked. The
    * point of the assertion is WHERE a key lands: opencode's own credential
@@ -805,12 +786,10 @@ export interface LaunchedApp {
    * normally do this after the browser flow). Emits the main-process `open-url`.
    */
   readonly completeDeepLinkSignIn: () => Promise<void>
-  /**
-   * The `gh pr merge|update-branch|ready` invocations the fake gh recorded, in
-   * order — one raw argv line each. Lets a test assert WHICH command ran (the
-   * merge strategy, say) rather than only that the button stopped spinning.
-   */
-  readonly ghCalls: () => ReadonlyArray<string>
+  /** Complete GitHub installation and emit its dedicated desktop callback. */
+  readonly completeGitHubConnection: () => Promise<void>
+  /** Semantic GitHub writes observed by the fake API server. */
+  readonly githubOperations: () => ReadonlyArray<string>
 }
 
 const git = (cwd: string, args: ReadonlyArray<string>) =>
@@ -825,168 +804,6 @@ const initRepo = (dir: string): void => {
   writeFileSync(join(dir, "README.md"), "# e2e repo\n")
   git(dir, ["add", "-A"])
   git(dir, ["commit", "-m", "init", "--no-gpg-sign"])
-}
-
-/**
- * Install a fake `gh` into `binDir` and pre-create each PR's head branch in the
- * repo, so `gh pr checkout` has a real branch to switch onto. Returns the env
- * vars the shim reads (the PR-list JSON + a number→head-ref map). The shim is a
- * tiny bash script — deterministic, offline, no real GitHub.
- */
-const installFakeGh = (
-  binDir: string,
-  repoPath: string,
-  gh: NonNullable<LaunchOptions["gh"]>
-): Record<string, string> => {
-  mkdirSync(binDir, { recursive: true })
-  const prs = (gh.prs ?? []).map((p) => ({
-    number: p.number,
-    title: p.title,
-    headRefName: p.headRefName,
-    baseRefName: p.baseRefName,
-    author: p.author,
-    state: p.state ?? "OPEN",
-    isDraft: p.isDraft ?? false,
-    additions: p.additions ?? 0,
-    deletions: p.deletions ?? 0,
-    updatedAt: p.updatedAt ?? "2026-07-11T00:00:00Z"
-  }))
-  const issues = (gh.issues ?? []).map((i) => ({
-    number: i.number,
-    title: i.title,
-    url: i.url ?? `https://github.com/acme/widget/issues/${i.number}`,
-    body: i.body ?? "",
-    labels: (i.labels ?? []).map((l) => ({ name: l.name, color: l.color ?? "cccccc" })),
-    author: i.author,
-    assignees: i.assignees ?? [],
-    updatedAt: i.updatedAt ?? "2026-07-11T00:00:00Z"
-  }))
-  // Per-issue `gh issue view` payloads (the Issue tab fetches these).
-  for (const i of issues) {
-    writeFileSync(
-      join(binDir, `issue-${i.number}.json`),
-      JSON.stringify({
-        number: i.number,
-        title: i.title,
-        url: i.url,
-        state: "OPEN",
-        body: i.body,
-        author: i.author,
-        assignees: i.assignees,
-        labels: i.labels,
-        createdAt: i.updatedAt,
-        comments: []
-      })
-    )
-  }
-  // Per-PR `gh pr view --json <PR_VIEW_FIELDS>` payloads — what the Pull Request
-  // tab reads. Kept separate from the cheap `--json state` poll below, which the
-  // shim answers inline.
-  for (const p of gh.prs ?? []) {
-    writeFileSync(
-      join(binDir, `pr-${p.number}.json`),
-      JSON.stringify({
-        number: p.number,
-        state: p.state ?? "OPEN",
-        title: p.title,
-        body: p.body ?? "",
-        url: `https://github.com/acme/widget/pull/${p.number}`,
-        headRefName: p.headRefName,
-        baseRefName: p.baseRefName,
-        isDraft: p.isDraft ?? false,
-        author: p.author,
-        createdAt: p.updatedAt ?? "2026-07-11T00:00:00Z",
-        commits: [{ oid: "c1" }],
-        files: [{ path: "a.ts", additions: p.additions ?? 0, deletions: p.deletions ?? 0 }],
-        additions: p.additions ?? 0,
-        deletions: p.deletions ?? 0,
-        labels: (p.labels ?? []).map((l) => ({ name: l.name, color: l.color ?? "cccccc" })),
-        reviews: [],
-        comments: [],
-        reviewRequests: [],
-        statusCheckRollup: (p.checks ?? []).map((c) => ({
-          name: c.name,
-          status: c.status ?? "COMPLETED",
-          conclusion: c.conclusion ?? "SUCCESS",
-          detailsUrl: c.detailsUrl ?? null,
-          startedAt: "2026-07-11T00:00:00Z",
-          completedAt: "2026-07-11T00:00:48Z"
-        })),
-        mergeable: "MERGEABLE",
-        mergeStateStatus: p.mergeStateStatus ?? "CLEAN"
-      })
-    )
-  }
-  // Pre-create the head branches off main so `gh pr checkout` can land on them.
-  for (const p of prs) {
-    if (repoPath) git(repoPath, ["branch", p.headRefName, "main"])
-  }
-  const heads = prs.map((p) => `${p.number}:${p.headRefName}`).join(",")
-  const states = prs.map((p) => `${p.number}:${p.state}`).join(",")
-  const script = `#!/usr/bin/env bash
-case "$1" in
-  --version) echo "gh version 2.60.0 (2026-01-01)"; exit 0;;
-esac
-if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
-  echo "github.com" 1>&2
-  echo "  ✓ Logged in to github.com account ${gh.login} (keyring)" 1>&2
-  exit 0
-fi
-if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
-  printf '%s' "$JINGLER_E2E_GH_PRS"; exit 0
-fi
-if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-  # The adversarial-review de-dupe reads the head SHA on its own cadence, as a
-  # single-field query — answer that separately from the state read above.
-  case "$*" in
-    *headRefOid*) printf '{"headRefOid":"e2ehead%s"}' "$3"; exit 0;;
-    # statusCheckRollup appears only in the Pull Request tab's full field list,
-    # never in the cheap state poll — so it's the marker for "serve the whole PR".
-    *statusCheckRollup*) cat "$JINGLER_E2E_GH_DIR/pr-$3.json" 2>/dev/null || echo '{}'; exit 0;;
-  esac
-  st=$(printf '%s' "$JINGLER_E2E_GH_STATES" | tr ',' '\\n' | awk -F: -v n="$3" '$1==n{print $2}')
-  [ -z "$st" ] && st="OPEN"
-  printf '{"state":"%s"}' "$st"; exit 0
-fi
-if [ "$1" = "pr" ] && [ "$2" = "diff" ]; then
-  printf '%s' "$JINGLER_E2E_GH_DIFF"; exit 0
-fi
-# Record write commands so a test can assert WHICH one ran (e.g. the merge
-# strategy). Appended, one invocation per line, to $JINGLER_E2E_GH_LOG.
-if [ "$1" = "pr" ] && { [ "$2" = "merge" ] || [ "$2" = "update-branch" ] || [ "$2" = "ready" ]; }; then
-  printf '%s\\n' "$*" >> "$JINGLER_E2E_GH_LOG"; exit 0
-fi
-if [ "$1" = "pr" ] && [ "$2" = "checkout" ]; then
-  ref=$(printf '%s' "$JINGLER_E2E_GH_HEADS" | tr ',' '\\n' | awk -F: -v n="$3" '$1==n{print $2}')
-  git checkout "$ref" >/dev/null 2>&1; exit $?
-fi
-if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
-  printf '%s' "$JINGLER_E2E_GH_ISSUES"; exit 0
-fi
-if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
-  cat "$JINGLER_E2E_GH_DIR/issue-$3.json" 2>/dev/null || echo '{}'; exit 0
-fi
-if [ "$1" = "issue" ]; then
-  exit 0
-fi
-exit 0
-`
-  const ghPath = join(binDir, "gh")
-  writeFileSync(ghPath, script)
-  chmodSync(ghPath, 0o755)
-  return {
-    // A reviewer refuses to run on an empty diff (that would cache a false
-    // all-clear), so `gh pr diff` has to return something real.
-    JINGLER_E2E_GH_DIFF:
-      gh.diff ??
-      "diff --git a/src/auth.ts b/src/auth.ts\n--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -1,3 +1,4 @@\n const a = 1\n+const token = refresh()\n",
-    JINGLER_E2E_GH_PRS: JSON.stringify(prs),
-    JINGLER_E2E_GH_ISSUES: JSON.stringify(issues),
-    JINGLER_E2E_GH_DIR: binDir,
-    JINGLER_E2E_GH_HEADS: heads,
-    JINGLER_E2E_GH_STATES: states,
-    JINGLER_E2E_GH_LOG: join(binDir, "gh-calls.log")
-  }
 }
 
 export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promise<LaunchedApp> }>({
@@ -1078,17 +895,24 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
         JINGLER_HARNESS_HOME: join(home, "harness-home")
       }
 
-      // Optional fake `gh` / `opencode` on PATH (offline + deterministic). Both
-      // land in the same bin dir, which is prefixed onto PATH so the shims win
-      // over any real install on this host — that's what makes these tests say
-      // the same thing on every machine.
-      let ghEnv: Record<string, string> = {}
+      // Optional fake harness preparation. GitHub itself is always exercised
+      // through the HTTP GitHub App fixture below.
       let opencodeEnv: Record<string, string> = {}
       let pathPrefix = ""
       const binDir = join(home, "bin")
-      if (options.gh) {
-        ghEnv = installFakeGh(binDir, repoPath, options.gh)
-        pathPrefix = `${binDir}:`
+      // A connected App fixture needs an origin for immutable repository
+      // resolution and API-driven checkout.
+      if (options.githubApp?.connected && repoPath) {
+        const remotes = execFileSync("git", ["remote"], {
+          cwd: repoPath,
+          encoding: "utf8"
+        }).trim()
+        if (!remotes.split("\n").includes("origin")) {
+          git(repoPath, ["remote", "add", "origin", "git@github.com:acme/widget.git"])
+        }
+        for (const pr of options.githubApp.prs ?? []) {
+          git(repoPath, ["branch", "--force", pr.headRefName, "main"])
+        }
       }
       if (options.opencode) {
         opencodeEnv = installFakeOpencode(binDir, options.opencode)
@@ -1124,6 +948,27 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
         writeFileSync(join(jinglerDir, "auth.enc"), authServer.token)
       }
 
+      const githubRelay = options.githubRelay ?? await startFakeGitHubRelay()
+      if (options.githubRelay === undefined) {
+        cleanups.push(() => {
+          githubRelay.close().catch(() => {})
+        })
+      }
+
+      const githubServer = options.githubServer ?? await startFakeGitHubServer(authServer.token, {
+        ...options.githubApp,
+        relayUrl: githubRelay.url,
+        relayGrant: githubRelay.grant,
+        // A native App fixture normally resolves PR heads from the repository
+        // created for this launch. Callers can still supply a fork checkout.
+        ...(repoPath && options.githubApp?.cloneUrl === undefined ? { cloneUrl: repoPath } : {})
+      })
+      if (options.githubServer === undefined) {
+        cleanups.push(() => {
+          githubServer.close().catch(() => {})
+        })
+      }
+
       // A throwaway Chromium profile per launch. `JINGLER_HOME` isolates the
       // app's own JSON state, but NOT `localStorage` — which lives in Electron's
       // userData dir and backs the renderer's UI chrome prefs (browser-preview
@@ -1143,10 +988,11 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
         args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`],
         env: {
           ...process.env,
-          ...ghEnv,
           ...opencodeEnv,
           ...mcpEnv,
-          PATH: `${pathPrefix}${process.env.PATH ?? ""}`,
+          PATH: options.withoutGithubCli
+            ? `${binDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`
+            : `${pathPrefix}${process.env.PATH ?? ""}`,
           JINGLER_HOME: home,
           // Pin harness discovery to the fixture's own bin dir. PATH alone can't
           // do this: `CLI_SPECS.candidates` hardcodes absolute install paths
@@ -1160,6 +1006,8 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
           // Auth: talk to the offline fake backend, and store the token as a plain
           // file (no OS keychain prompts under headless Playwright).
           JINGLER_AUTH_URL: authServer.url,
+          JINGLER_GITHUB_URL: githubServer.url,
+          JINGLER_GITHUB_API_URL: githubServer.url,
           JINGLER_SECRET_STORE: "memory",
           // Force the deterministic scripted agent so chat e2e never spawns a
           // real harness (no auth, no network, reproducible).
@@ -1170,7 +1018,8 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
           // every launch — which makes running the suite locally (its only home;
           // it's not in CI) incompatible with using the machine at the same time.
           // Set JINGLER_E2E_HEADED=1 to watch a run instead.
-          JINGLER_E2E_HEADLESS: process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1"
+          JINGLER_E2E_HEADLESS: process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1",
+          ...options.e2eEnv
         }
       })
       apps.push(app)
@@ -1186,6 +1035,17 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
         )
       }
 
+      const completeGitHubConnection = async () => {
+        githubServer.connect()
+        await app.evaluate(({ app: electronApp }) => {
+          electronApp.emit(
+            "open-url",
+            { preventDefault() {} },
+            "jingler://auth/callback?github=connected"
+          )
+        })
+      }
+
       const opencodeAuthWrites = () => {
         const log = join(home, "bin", "auth-writes.jsonl")
         if (!existsSync(log)) return []
@@ -1195,11 +1055,7 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
           .map((l) => JSON.parse(l) as { id: string; body: { type: string; key: string } })
       }
 
-      const ghCalls = () => {
-        const log = join(home, "bin", "gh-calls.log")
-        if (!existsSync(log)) return []
-        return readFileSync(log, "utf8").split("\n").filter((l) => l.length > 0)
-      }
+      const githubOperations = () => [...githubServer.operations]
 
       const codexCalls = () => {
         const log = join(home, "bin", "codex-calls.log")
@@ -1215,10 +1071,13 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
         userDataDir,
         repoPath,
         authServer,
+        githubServer,
+        githubRelay,
         completeDeepLinkSignIn,
+        completeGitHubConnection,
         opencodeAuthWrites,
         codexCalls,
-        ghCalls
+        githubOperations
       }
     }
 

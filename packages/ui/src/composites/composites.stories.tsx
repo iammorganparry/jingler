@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { CliInfo, GhStatus, ModelOption, ProvidersConfig } from "@jingler/core"
+import type { CliInfo, GitHubConnection, ModelOption, ProvidersConfig } from "@jingler/core"
 import { SettingsView } from "./settings-view.js"
 import { ToolCall } from "./tool-call.js"
 import { ThoughtBlock } from "./thought-block.js"
@@ -106,12 +106,21 @@ const DEMO_PROVIDERS: ProvidersConfig = {
   codex: { enabled: true, defaultMode: "accept-edits", defaultModel: "gpt-5-codex" }
 }
 
-const DEMO_GH: GhStatus = {
-  available: true,
-  authenticated: true,
-  login: "morganparry",
-  host: "github.com",
-  version: "2.55.0"
+const DEMO_GITHUB: GitHubConnection = {
+  mode: "connected",
+  enabled: true,
+  connected: true,
+  user: { id: "1", login: "morganparry", name: "Morgan Parry", avatarUrl: null },
+  installations: [{
+    id: "101",
+    account: { id: "1", login: "jingler", type: "Organization", avatarUrl: null },
+    repositorySelection: "all",
+    permissions: { contents: "write", pull_requests: "write" },
+    status: "active",
+    suspendedAt: null
+  }],
+  lastRefreshedAt: "2026-08-04T09:00:00.000Z",
+  error: null
 }
 
 const DEMO_MODELS: Record<string, ReadonlyArray<ModelOption>> = {
@@ -180,7 +189,7 @@ export const Settings: Story = {
         providers={DEMO_PROVIDERS}
         onSaveProvider={() => {}}
         loadModels={async (cli) => DEMO_MODELS[cli] ?? []}
-        ghStatus={DEMO_GH}
+        githubConnection={DEMO_GITHUB}
         github={{ enabled: true, autoCreatePr: false, autoDetectPr: true }}
         git={{ shareCheckedOutBranches: true }}
         onSaveGithub={() => {}}

@@ -4,7 +4,7 @@
  * pick + scan, session load) inside declarative `fromPromise` actors — no
  * data-fetching `useEffect`s, minimal `useState`.
  */
-import type { CliInfo, Repo, Session } from "@jingler/core"
+import type { CliInfo, PublishCheckpoint, Repo, Session } from "@jingler/core"
 import { assign, fromPromise, setup } from "xstate"
 import { rpc } from "./rpc-client.js"
 
@@ -16,16 +16,21 @@ export interface AppContext {
   readonly error: string | null
 }
 
-interface InitialData {
+export interface InitialData {
   readonly configured: boolean
   readonly clis: ReadonlyArray<CliInfo>
   readonly repos: ReadonlyArray<Repo>
   readonly sessions: ReadonlyArray<Session>
 }
 
+export interface ChosenRepositoryDirectory {
+  readonly reposDir: string
+  readonly repos: ReadonlyArray<Repo>
+}
+
 /**
- * Initial load: config + discovered CLIs decide setup vs. app. `gh` status is a
- * react-query in the view (App.tsx), not part of the load gate.
+ * Initial load: config + discovered CLIs decide setup vs. app. GitHub App state
+ * has its own machine; first-run coordinates with it through explicit events.
  */
 const initialLoad = fromPromise<InitialData>(async () => {
   const [config, clis] = await Promise.all([rpc.configGet(), rpc.discoveryList()])
@@ -37,7 +42,7 @@ const initialLoad = fromPromise<InitialData>(async () => {
 })
 
 /** Open the native picker, persist, and scan; null when the user cancels. */
-const chooseDir = fromPromise<{ reposDir: string; repos: ReadonlyArray<Repo> } | null>(
+const chooseDir = fromPromise<ChosenRepositoryDirectory | null>(
   async () => {
     const config = await rpc.chooseReposDir()
     if (!config?.reposDir) return null
@@ -57,8 +62,11 @@ export const appMachine = setup({
     events: {} as
       | { type: "CHOOSE" }
       | { type: "CONTINUE" }
+      | { type: "SKIP_GITHUB" }
+      | { type: "GITHUB_CONNECTED" }
       | { type: "SESSION_CREATED"; session: Session }
       | { type: "SESSION_PR_LINKED"; sessionId: string; prNumber: number }
+      | { type: "SESSION_PUBLISH_UPDATED"; sessionId: string; checkpoint: PublishCheckpoint }
       | { type: "SESSION_UPDATED"; session: Session }
       | { type: "SESSION_DELETED"; sessionId: string }
       | { type: "RETRY" }
@@ -102,32 +110,43 @@ export const appMachine = setup({
       }
     },
     setup: {
-      initial: "idle",
+      initial: "workspace",
       states: {
-        idle: {
-          on: {
-            CHOOSE: "choosing",
-            CONTINUE: {
-              target: "#app.starting",
-              guard: ({ context }) => context.reposDir !== null
+        workspace: {
+          initial: "idle",
+          states: {
+            idle: {
+              on: {
+                CHOOSE: "choosing",
+                CONTINUE: {
+                  target: "#app.setup.github",
+                  guard: ({ context }) => context.reposDir !== null
+                }
+              }
+            },
+            choosing: {
+              invoke: {
+                src: "chooseDir",
+                onDone: {
+                  target: "idle",
+                  actions: assign(({ event }) =>
+                    event.output
+                      ? { reposDir: event.output.reposDir, repos: event.output.repos }
+                      : {}
+                  )
+                },
+                onError: {
+                  target: "#app.failure",
+                  actions: assign(({ event }) => ({ error: messageOf(event.error) }))
+                }
+              }
             }
           }
         },
-        choosing: {
-          invoke: {
-            src: "chooseDir",
-            onDone: {
-              target: "idle",
-              actions: assign(({ event }) =>
-                event.output
-                  ? { reposDir: event.output.reposDir, repos: event.output.repos }
-                  : {}
-              )
-            },
-            onError: {
-              target: "#app.failure",
-              actions: assign(({ event }) => ({ error: messageOf(event.error) }))
-            }
+        github: {
+          on: {
+            GITHUB_CONNECTED: "#app.starting",
+            SKIP_GITHUB: "#app.starting"
           }
         }
       }
@@ -158,6 +177,23 @@ export const appMachine = setup({
           actions: assign(({ context, event }) => ({
             sessions: context.sessions.map((s) =>
               s.id === event.sessionId ? { ...s, prNumber: event.prNumber } : s
+            )
+          }))
+        },
+        // Merge the streamed checkpoint instead of replacing the whole session
+        // with a stale snapshot while title/status writes may be concurrent.
+        SESSION_PUBLISH_UPDATED: {
+          actions: assign(({ context, event }) => ({
+            sessions: context.sessions.map((session) =>
+              session.id === event.sessionId
+                ? {
+                    ...session,
+                    publish: event.checkpoint,
+                    ...(event.checkpoint.step === "complete" && event.checkpoint.prNumber !== undefined
+                      ? { prNumber: event.checkpoint.prNumber }
+                      : {})
+                  }
+                : session
             )
           }))
         },

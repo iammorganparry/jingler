@@ -97,14 +97,21 @@ serverless.
 
 ## Environment
 
-See `.env.example`. Required in production:
+See `.env.example`. Core production variables and optional integration variables:
 
 | Var | Notes |
 |-----|-------|
 | `DATABASE_URL` | Managed Postgres, ideally via a pooler. |
 | `BETTER_AUTH_SECRET` | Strong random value (`openssl rand -base64 32`). |
-| `BETTER_AUTH_URL` | Public URL of this service. |
-| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth app. Callback: `<BETTER_AUTH_URL>/api/auth/callback/github`. |
+| `BETTER_AUTH_URL` | Public URL of this service; production is `https://api.jingler.dev`. |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Optional GitHub **social sign-in OAuth App**. Callback: `<BETTER_AUTH_URL>/api/auth/callback/github`. These are not the Jingler GitHub App credentials below. |
+| `GITHUB_APP_ENABLED` | Enables the product GitHub integration. Production fails closed if this is `true` and any required GitHub App variable is absent. |
+| `GITHUB_APP_ID` | Numeric ID shown in the GitHub App's General settings. |
+| `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` | GitHub App user-authorization credentials. Keep the secret in the deployment secret store. |
+| `GITHUB_APP_PRIVATE_KEY` | GitHub App private key PEM. In Vercel, store it on one line with literal `\\n` escapes. |
+| `GITHUB_APP_WEBHOOK_SECRET` | The shared App webhook secret. Use the same value for the relay's `GITHUB_WEBHOOK_SECRET`; the relay performs signature verification. |
+| `GITHUB_APP_RELAY_URL` | Relay origin; production is `https://github-relay.jingler.dev`. |
+| `GITHUB_APP_RELAY_SIGNING_SECRET` | HMAC key for short-lived relay grants. Must equal the Worker's `GITHUB_RELAY_SIGNING_SECRET`; do not reuse an auth or webhook secret. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth client. Redirect: `<BETTER_AUTH_URL>/api/auth/callback/google`. |
 | `RESEND_API_KEY` | Magic-link email. Omit in dev to log links to the console. |
 | `MEMORY_ENABLED` | Paid-team Memory rollout/circuit-breaker. Set `false` to disable grants, MCP, and capture without deleting accepted Markdown. |
@@ -116,6 +123,65 @@ See `.env.example`. Required in production:
 
 A social provider is only enabled when both its id + secret are set, so dev works
 with magic links alone.
+
+## GitHub App registration
+
+Register one shared, public GitHub App. GitHub social sign-in is optional and
+remains a separate OAuth App; installing the product App must not create or reuse
+a BetterAuth account record.
+
+Use these production fields:
+
+| GitHub field | Value |
+|---|---|
+| GitHub App name | `Jingler` (or the available production display name) |
+| Homepage URL | `https://jingler.dev` |
+| User authorization callback URL | `https://api.jingler.dev/api/github/callback` |
+| Setup URL | `https://api.jingler.dev/api/github/setup` |
+| Redirect on update | Enabled |
+| Webhook URL | `https://github-relay.jingler.dev/webhooks/github` |
+| Webhook content type | `application/json` |
+| Webhook active | Enabled |
+| Request user authorization during installation | Enabled |
+| Expire user authorization tokens | Enabled |
+| Where can this GitHub App be installed? | Any account |
+
+Configure only these repository permissions:
+
+| Repository permission | Access |
+|---|---|
+| Checks | Read-only |
+| Commit statuses | Read-only |
+| Contents | Read and write |
+| Issues | Read and write |
+| Metadata | Read-only (GitHub adds this automatically) |
+| Pull requests | Read and write |
+| Workflows | Read and write |
+
+Leave Actions, Administration, Members, Secrets, and all organization/account
+permissions at **No access**. Subscribe to these webhook events:
+
+- Check run
+- Check suite
+- Installation
+- Installation repositories
+- Issue comment
+- Pull request
+- Pull request review
+- Pull request review comment
+- Status
+
+After saving, copy the App ID and client ID, generate a client secret, generate a
+private key, and generate a high-entropy webhook secret. Never place client
+secrets, private keys, webhook secrets, or relay signing secrets in source,
+examples, logs, screenshots, or support messages. If one is disclosed, revoke it
+and replace it in every environment before continuing.
+
+For local App testing, replace `https://api.jingler.dev` above with
+`http://localhost:9100`. The local relay runs on `http://localhost:9200`; expose
+it using the cloudflared flow in
+[the relay guide](../github-relay/README.md#local-development) and temporarily
+use that tunnel's `/webhooks/github` URL in the development App.
 
 Team Memory is gated twice: `MEMORY_ENABLED` is the global rollout/circuit
 breaker, and on top of it `POST /api/memory/grant` issues a grant only for an
@@ -155,6 +221,42 @@ Set the project root to `apps/server`. `vercel.json` rewrites all traffic to the
 `api/[[...route]].ts` catch-all, which adapts the Hono app via `hono/vercel` on
 the **Node** runtime (Postgres/Drizzle need Node, not edge). Set the env vars
 above in the Vercel project.
+
+For production, attach `api.jingler.dev` to the Vercel project and set
+`BETTER_AUTH_URL=https://api.jingler.dev`,
+`GITHUB_APP_RELAY_URL=https://github-relay.jingler.dev`, and
+`GITHUB_APP_ENABLED=true`. Add every `GITHUB_APP_*` value as a Vercel encrypted
+environment variable for Production (and Preview only when a preview App and
+callback are deliberately configured). Redeploy after changing environment
+variables. The desktop build targets the same server with
+`JINGLER_AUTH_URL=https://api.jingler.dev`.
+
+The server mints GitHub installation credentials only after authenticating the
+Jingler user, reconciling installation ownership, and rejecting suspended or
+cross-user installations. Installation credentials are short-lived and must not
+be persisted, logged, forwarded to the renderer, or exposed to agents. The
+credential response is `Cache-Control: no-store`.
+
+### Rotation and rollback
+
+Rotate one credential class at a time and verify `/health`, GitHub connection
+status, and a non-destructive repository read after each change:
+
+1. Add a new GitHub App client secret, update Vercel, redeploy, then delete the
+   old client secret in GitHub.
+2. Generate a new App private key, update Vercel, verify token minting, then
+   delete the old key in GitHub.
+3. Update the GitHub App and relay Worker with a new webhook secret together,
+   then redeliver a recent webhook from GitHub.
+4. Update the server and relay signing secret together. Existing five-minute
+   relay grants may reconnect only after the desktop refreshes them.
+
+Monitor failed installation reconciliation, credential-mint failures, GitHub
+rate-limit/validation responses, and relay-grant failures without logging tokens
+or request authorization headers. To roll back, restore the previous Vercel
+deployment and compatible secrets. Set `GITHUB_APP_ENABLED=false` as the product
+integration circuit breaker; this disables new GitHub operations without
+deleting installation ownership records.
 
 The Memory endpoint is a stateless Streamable HTTP POST endpoint for MCP
 `2026-07-28`. It deliberately has no initialize exchange, GET/SSE transport,

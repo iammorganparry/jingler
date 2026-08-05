@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jingler-github-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-05",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "github-relay.jingler.dev",
+      "custom_domain": true
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "USER_EVENTS",
+        "class_name": "UserEventsObject"
+      },
+      {
+        "name": "INSTALLATION_ROUTES",
+        "class_name": "InstallationRoutesObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["UserEventsObject", "InstallationRoutesObject"]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

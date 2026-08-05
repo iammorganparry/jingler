@@ -41,6 +41,59 @@ describe("TranscriptStore", () => {
     expect(messages).toStrictEqual([user])
   })
 
+  it("accepts one external turn atomically and rejects delivery or semantic replay after a fresh read", async () => {
+    const identity = {
+      source: "github-feedback" as const,
+      deliveryId: "delivery-1",
+      semanticKey: "semantic-1"
+    }
+    const first = await run(
+      TranscriptStore.appendTurn(
+        "s1",
+        userMessage("u1", "fix it", "2026-07-11T10:00:00.000Z", [], identity),
+        assistantMessage("a1", "2026-07-11T10:00:00.000Z"),
+        identity
+      )
+    )
+    // A second service layer models a fresh main process reading only disk.
+    const result = await run(
+      Effect.gen(function* () {
+        const deliveryReplay = yield* TranscriptStore.appendTurn(
+          "s1",
+          userMessage("u2", "duplicate", "2026-07-11T10:00:01.000Z", [], {
+            ...identity,
+            semanticKey: "semantic-2"
+          }),
+          assistantMessage("a2", "2026-07-11T10:00:01.000Z"),
+          { ...identity, semanticKey: "semantic-2" }
+        )
+        const semanticReplay = yield* TranscriptStore.appendTurn(
+          "s1",
+          userMessage("u3", "duplicate", "2026-07-11T10:00:02.000Z", [], {
+            ...identity,
+            deliveryId: "delivery-2"
+          }),
+          assistantMessage("a3", "2026-07-11T10:00:02.000Z"),
+          { ...identity, deliveryId: "delivery-2" }
+        )
+        return {
+          deliveryReplay,
+          semanticReplay,
+          hasIdentity: yield* TranscriptStore.hasExternalInstruction("s1", identity),
+          messages: yield* TranscriptStore.list("s1")
+        }
+      })
+    )
+    expect(first).toBe(true)
+    expect(result).toMatchObject({
+      deliveryReplay: false,
+      semanticReplay: false,
+      hasIdentity: true
+    })
+    expect(result.messages).toHaveLength(2)
+    expect(result.messages[0]?.externalInstruction).toEqual(identity)
+  })
+
   it("keeps sibling chat transcripts isolated", async () => {
     const first = userMessage("u1", "Implement parser", "2026-07-11T10:00:00.000Z")
     const second = userMessage("u2", "Review migrations", "2026-07-11T10:00:01.000Z")
