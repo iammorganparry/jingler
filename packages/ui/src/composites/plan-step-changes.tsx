@@ -3,34 +3,8 @@ import type { PlanStep } from "@jingler/core"
 import { FileDiff } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { DiffView } from "../diff/diff-view.js"
-
-/**
- * Slice a full worktree unified diff down to the blocks that touch a given set of
- * files, so a plan step can show *its* actual changes. Matching is suffix-based
- * (`b/<path>`) so a step's repo-relative path matches the diff's `a/…`,`b/…`.
- */
-const subPatchForFiles = (patch: string, paths: ReadonlyArray<string>): string => {
-  if (patch.length === 0 || paths.length === 0) return ""
-  const wanted = paths.map((p) => p.replace(/\\/g, "/"))
-  const blocks: Array<string> = []
-  let current: Array<string> | null = null
-  const flush = () => {
-    if (current) blocks.push(current.join("\n"))
-    current = null
-  }
-  for (const line of patch.split("\n")) {
-    if (line.startsWith("diff --git ")) {
-      flush()
-      current = [line]
-    } else if (current) {
-      current.push(line)
-    }
-  }
-  flush()
-  const matches = (block: string): boolean =>
-    wanted.some((p) => block.includes(` b/${p}`) || block.includes(`+++ b/${p}`) || block.endsWith(`/${p}`))
-  return blocks.filter(matches).join("\n")
-}
+import { canonicalPierrePath } from "../diff/pierre-model.js"
+import { parsePierreFileDiffs } from "../diff/parse.js"
 
 /**
  * The right rail of Plan Review: the *actual* file changes the agent has made for
@@ -48,8 +22,17 @@ export function PlanStepChanges({
   className?: string
 }) {
   const paths = useMemo(() => step.files.map((f) => f.path), [step.files])
-  const sub = useMemo(() => subPatchForFiles(patch, paths), [patch, paths])
-  const hasChanges = sub.trim().length > 0
+  const fileDiffs = useMemo(() => {
+    if (patch.trim().length === 0 || paths.length === 0) return []
+    const wanted = new Set(paths.map(canonicalPierrePath))
+    return parsePierreFileDiffs(patch).filter(
+      (fileDiff) =>
+        wanted.has(canonicalPierrePath(fileDiff.name)) ||
+        (fileDiff.prevName !== undefined &&
+          wanted.has(canonicalPierrePath(fileDiff.prevName)))
+    )
+  }, [patch, paths])
+  const hasChanges = fileDiffs.length > 0
 
   return (
     <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col bg-panel", className)}>
@@ -64,7 +47,7 @@ export function PlanStepChanges({
       </div>
       {hasChanges ? (
         <div className="min-h-0 flex-1 overflow-hidden">
-          <DiffView patch={sub} />
+          <DiffView fileDiffs={fileDiffs} label={`Changes in ${step.title}`} />
         </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-5 text-center">

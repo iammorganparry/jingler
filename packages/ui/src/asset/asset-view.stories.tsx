@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { ASSET_SIZE_CAP, type AssetPayload } from "@jingler/core"
+import { jinglerDark, toTokens } from "@jingler/themes"
+import { PierreProvider } from "../diff/pierre-provider.js"
 import { AssetError, AssetLoading, AssetTooLarge, AssetUnsupported, AssetView } from "./asset-view.js"
 
 const meta: Meta<typeof AssetView> = {
@@ -12,7 +14,9 @@ type Story = StoryObj<typeof AssetView>
 
 /** Every story renders inside a fixed dock-sized frame. */
 const Frame = ({ children }: { children: React.ReactNode }) => (
-  <div className="h-[520px] w-[640px] overflow-hidden rounded-lg border border-line">{children}</div>
+  <PierreProvider tokens={toTokens(jinglerDark)} workers={false}>
+    <div className="h-[520px] w-[640px] overflow-hidden rounded-lg border border-line">{children}</div>
+  </PierreProvider>
 )
 
 const base = { path: "report.md", absolutePath: "/tmp/report.md", size: 1024 }

@@ -42,8 +42,21 @@ const renderAt = (
   props: Partial<React.ComponentProps<typeof CodeReviewView>> = {}
 ) => render(reviewAt(width, props))
 
-beforeEach(() => localStorage.clear())
-afterEach(cleanup)
+beforeEach(() => {
+  localStorage.clear()
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  )
+})
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 describe("CodeReviewView responsive rails", () => {
   it("docks default rails when they leave a readable diff", () => {

@@ -1,13 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { PrFileChange } from "@jingler/core"
 import { useMemo, useState } from "react"
+import { PierreProvider } from "../diff/pierre-provider.js"
 import { ReviewFileRail } from "./review-file-rail.js"
-import { ReviewFileRow } from "./review-file-row.js"
 import { useCodeReviewView } from "./use-code-review-view.js"
 
 /**
  * Playground for the Code Review left rail — the search bar, the type/feedback
- * filters, and the file rows with their (now shadcn-sized) viewed checkboxes.
+ * filters, and the hierarchical Pierre tree with Git status decoration.
  *
  * The rail is driven by the real `useCodeReviewView` machine, so filtering and
  * search behave exactly as they do in the app; only the file data and the
@@ -48,67 +48,37 @@ const FEEDBACK = new Map<string, number>([
 
 function RailHarness() {
   const controls = useCodeReviewView()
-  const [files, setFiles] = useState<readonly PrFileChange[]>(SEED)
   const [activePath, setActivePath] = useState<string | null>("README.md")
 
   const filtered = useMemo(() => {
     const q = controls.query.trim().toLowerCase()
-    return files.filter((f) => {
+    return SEED.filter((f) => {
       if (q && !f.path.toLowerCase().includes(q)) return false
       if (controls.feedbackOnly && !FEEDBACK.has(f.path)) return false
       return true
     })
-  }, [files, controls.query, controls.feedbackOnly])
-
-  const setViewed = (path: string, viewed: boolean) =>
-    setFiles((prev) => prev.map((f) => (f.path === path ? { ...f, viewed } : f)))
+  }, [controls.query, controls.feedbackOnly])
 
   return (
-    <div className="flex h-[720px] w-[320px] flex-col overflow-hidden rounded-lg border border-line bg-panel">
-      <ReviewFileRail
-        files={filtered}
-        totalFiles={files.length}
-        activePath={activePath}
-        feedback={FEEDBACK}
-        feedbackAny
-        added={files.reduce((n, f) => n + f.additions, 0)}
-        removed={files.reduce((n, f) => n + f.deletions, 0)}
-        viewed={files.filter((f) => f.viewed).length}
-        controls={controls}
-        onSelectFile={setActivePath}
-        onToggleViewed={setViewed}
-      />
-    </div>
+    <PierreProvider workers={false}>
+      <div className="flex h-[720px] w-[320px] flex-col overflow-hidden rounded-lg border border-line bg-panel">
+        <ReviewFileRail
+          files={filtered}
+          totalFiles={SEED.length}
+          activePath={activePath}
+          feedback={FEEDBACK}
+          feedbackAny
+          statusByPath={new Map(SEED.map((entry) => [entry.path, "modified" as const]))}
+          added={SEED.reduce((n, f) => n + f.additions, 0)}
+          removed={SEED.reduce((n, f) => n + f.deletions, 0)}
+          viewed={SEED.filter((f) => f.viewed).length}
+          controls={controls}
+          onSelectFile={setActivePath}
+        />
+      </div>
+    </PierreProvider>
   )
 }
 
-/** The full rail, wired to the real filter machine and local viewed state. */
+/** The full hierarchical rail, wired to the real filter machine. */
 export const Rail: Story = { render: () => <RailHarness /> }
-
-/** Just the rows, to isolate the checkbox / feedback-marker sizing. */
-export const Rows: Story = {
-  render: () => (
-    <div className="flex w-[300px] flex-col gap-px rounded-lg border border-line bg-panel p-2">
-      <ReviewFileRow
-        file={file("packages/contracts/src/rpc.ts", 335, 4)}
-        active
-        feedback={6}
-        onSelect={() => {}}
-        onToggleViewed={() => {}}
-      />
-      <ReviewFileRow
-        file={file("README.md", 7, 0, true)}
-        active={false}
-        feedback={1}
-        onSelect={() => {}}
-        onToggleViewed={() => {}}
-      />
-      <ReviewFileRow
-        file={file("packages/ui/src/app/App.tsx", 90, 0)}
-        active={false}
-        onSelect={() => {}}
-        onToggleViewed={() => {}}
-      />
-    </div>
-  )
-}

@@ -17,6 +17,24 @@ import { Schema } from "effect"
 export const AssetKind = Schema.Literal("markdown", "code", "text", "csv", "image", "pdf")
 export type AssetKind = Schema.Schema.Type<typeof AssetKind>
 
+/** Git decoration shown beside a repository asset in Pierre Trees. */
+export const AssetFileStatus = Schema.Literal(
+  "clean",
+  "modified",
+  "added",
+  "deleted",
+  "renamed",
+  "untracked"
+)
+export type AssetFileStatus = Schema.Schema.Type<typeof AssetFileStatus>
+
+/** One validated, canonical worktree-relative file returned by `Asset.list`. */
+export const AssetFileEntry = Schema.Struct({
+  path: Schema.String,
+  status: AssetFileStatus
+})
+export type AssetFileEntry = Schema.Schema.Type<typeof AssetFileEntry>
+
 /**
  * The kinds whose bytes arrive as UTF-8 text. Split out because the payload
  * union below branches on exactly this distinction, and so does the read path.

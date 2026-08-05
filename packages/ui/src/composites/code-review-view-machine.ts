@@ -20,6 +20,7 @@ export type CodeReviewViewEvent =
   | { type: "CLEAR_FILTERS" }
   | { type: "TOGGLE_FOCUS" }
   | { type: "TOGGLE_SHEET"; sheet: Exclude<ReviewSheet, null> }
+  | { type: "CLOSE_SHEET" }
   | { type: "DOCK" }
   | { type: "UNDOCK" }
 
@@ -71,7 +72,8 @@ export const codeReviewViewMachine = setup({
     FEEDBACK_EMPTY: { actions: "clearFeedback" },
     TOGGLE_COLLAPSE_VIEWED: { actions: "toggleCollapseViewed" },
     CLEAR_FILTERS: { actions: "clearFilters" },
-    TOGGLE_SHEET: { actions: "toggleSheet" }
+    TOGGLE_SHEET: { actions: "toggleSheet" },
+    CLOSE_SHEET: { actions: "closeSheet" }
   },
   states: {
     presentation: {

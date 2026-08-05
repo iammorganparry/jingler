@@ -1,5 +1,8 @@
+import { useMemo } from "react"
 import { cn } from "../lib/cn.js"
-import { DiffStat } from "../components/diff-stat.js"
+import { DiffView } from "./diff-view.js"
+import { createPierreFileDiffFromPatch } from "./pierre-model.js"
+import { patchFromStructuredLines } from "./parse.js"
 
 export interface HunkLine {
   type: "add" | "del" | "normal"
@@ -7,7 +10,7 @@ export interface HunkLine {
   content: string
 }
 
-/** A compact, non-virtualized single-file hunk (for cards & inline previews). */
+/** A compact, read-only single-file hunk rendered by Pierre. */
 export function DiffHunk({
   path,
   status = "M",
@@ -23,34 +26,36 @@ export function DiffHunk({
   lines: ReadonlyArray<HunkLine>
   className?: string
 }) {
-  const statusColor = status === "A" ? "text-green" : status === "D" ? "text-red" : "text-yellow"
+  const fileDiff = useMemo(
+    () =>
+      lines.length === 0
+        ? null
+        : createPierreFileDiffFromPatch(
+            patchFromStructuredLines({
+              path,
+              status: status === "A" ? "added" : status === "D" ? "deleted" : "modified",
+              lines: lines.map((line) => ({
+                type: line.type,
+                content: line.content,
+                oldLn: line.type === "add" ? null : line.ln,
+                newLn: line.type === "del" ? null : line.ln
+              }))
+            })
+          ),
+    [lines, path, status]
+  )
+
+  if (fileDiff === null) return null
   return (
-    <div className={cn("overflow-hidden rounded-md border border-line", className)}>
-      <div className="flex items-center gap-2 bg-surface px-[11px] py-[7px] font-mono text-[11px] text-muted-foreground">
-        <span className={statusColor}>{status}</span>
-        {path}
-        <div className="flex-1" />
-        <DiffStat added={added} removed={removed} />
-      </div>
-      <div className="bg-editor font-mono text-[11px] leading-[1.85]">
-        {lines.map((line, i) => {
-          const bg = line.type === "add" ? "bg-diff-add" : line.type === "del" ? "bg-diff-del" : ""
-          const fg = line.type === "add" ? "text-green" : line.type === "del" ? "text-red" : "text-muted-foreground"
-          const gutter = line.type === "add" ? "text-diff-add-fg" : line.type === "del" ? "text-diff-del-fg" : "text-line-strong"
-          const sign = line.type === "add" ? "+ " : line.type === "del" ? "- " : "  "
-          return (
-            <div key={i} className={cn("flex", bg)}>
-              <span className={cn("w-8 shrink-0 select-none pr-2 text-right tabular-nums", gutter)}>
-                {line.ln}
-              </span>
-              <span className={cn("whitespace-pre", fg)}>
-                {sign}
-                {line.content}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    </div>
+    <DiffView
+      fileDiff={fileDiff}
+      label={`${path} diff, ${added} additions and ${removed} deletions`}
+      fill={false}
+      className={cn("overflow-hidden rounded-md border border-line", className)}
+      options={{
+        stickyHeader: false,
+        hunkSeparators: "simple"
+      }}
+    />
   )
 }

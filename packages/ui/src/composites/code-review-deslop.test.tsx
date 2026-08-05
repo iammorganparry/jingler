@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { PrFileChange } from "@jingler/core"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
 import { CodeReviewView } from "./code-review-view.js"
 
@@ -42,7 +42,20 @@ const renderView = (props: Partial<React.ComponentProps<typeof CodeReviewView>>)
     </WidthTierValue>
   )
 
-afterEach(cleanup)
+beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  )
+})
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 describe("CodeReviewView Deslop button", () => {
   it("hides the button when no handler is supplied", () => {

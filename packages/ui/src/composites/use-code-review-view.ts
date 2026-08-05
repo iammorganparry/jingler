@@ -29,6 +29,7 @@ export function useCodeReviewView() {
       (value: Exclude<ReviewSheet, null>) => send({ type: "TOGGLE_SHEET", sheet: value }),
       [send]
     ),
+    closeSheet: useCallback(() => send({ type: "CLOSE_SHEET" }), [send]),
     dock: useCallback(() => send({ type: "DOCK" }), [send]),
     undock: useCallback(() => send({ type: "UNDOCK" }), [send])
   }

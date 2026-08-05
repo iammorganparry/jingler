@@ -1,9 +1,23 @@
 import type { PrReviewThread } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PrReviewThreadView } from "./pr-review-thread.js"
 
-afterEach(cleanup)
+beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  )
+})
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 const thread = (over: Partial<PrReviewThread> = {}): PrReviewThread => ({
   id: "PRRT_1",

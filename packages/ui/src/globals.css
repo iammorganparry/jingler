@@ -814,3 +814,41 @@
   overflow-x: auto;
   overflow-y: hidden;
 }
+
+/*
+ * Pierre integration hosts. Row-level styling lives behind Pierre's shadow
+ * roots and is mapped in pierre-theme.ts; this outer contract owns sizing,
+ * clipping, and accessible focus without reaching into beta DOM internals.
+ */
+[data-jingler-pierre-view] {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--sb-editor);
+  color: var(--sb-text);
+}
+
+.jingler-pierre-primitive {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.jingler-pierre-file-tree {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--sb-panel);
+  color: var(--sb-text);
+}
+
+[data-jingler-pierre-view]:focus-visible,
+.jingler-pierre-file-tree:focus-visible {
+  outline: 2px solid var(--sb-ring);
+  outline-offset: -2px;
+}

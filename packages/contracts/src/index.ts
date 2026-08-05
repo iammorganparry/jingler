@@ -2,6 +2,7 @@ import {
   AdversarialReview,
   HarnessBilling,
   ArchiveReason,
+  AssetFileEntry,
   AssetPayload,
   Attachment,
   AuthProvider,
@@ -407,12 +408,26 @@ export class MemoryUiError extends Schema.TaggedError<MemoryUiError>()("MemoryUi
 }) {}
 
 /**
+ * Kept as a small group so the renderer can construct this client separately
+ * from the long-lived core client. Mapping the entire application RPC union to
+ * one nested client type exceeds TypeScript's instantiation depth; the server
+ * merges both groups back into the single IPC surface below.
+ */
+export class AssetListRpcs extends RpcGroup.make(
+  Rpc.make("Asset.list", {
+    success: Schema.Array(AssetFileEntry),
+    error: Schema.Union(AssetOutsideWorktreeError, GitError, SessionNotFoundError),
+    payload: { sessionId: Schema.String }
+  })
+) {}
+
+/**
  * The Jingler RPC surface — a single source of truth shared by the Electron
  * main process (which implements the handlers as Effect services) and the
  * renderer (which calls them through a typed `RpcClient`). Transport is Electron
  * IPC; serialization is JSON. See `apps/desktop/src/main/rpc` for the wiring.
  */
-export class JinglerRpcs extends RpcGroup.make(
+export class JinglerCoreRpcs extends RpcGroup.make(
   /** List every known coding CLI and whether it is installed on this host. */
   /**
    * What each installed harness will actually be billed to.
@@ -1352,7 +1367,11 @@ export class JinglerRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: { cli: CliKind, provider: ProviderConfig }
-  }),
+  })
+) {}
+
+/** Review, preview, theme, and plugin half of the renderer RPC client. */
+export class JinglerReviewRpcs extends RpcGroup.make(
 
   /**
    * Run an adversarial review of the session's linked PR: a reviewer agent runs
@@ -2355,3 +2374,6 @@ export class JinglerRpcs extends RpcGroup.make(
     payload: { pluginId: PluginId, providerId: Schema.String }
   })
 ) {}
+
+/** The complete server contract; split clients still share this one IPC surface. */
+export const JinglerRpcs = JinglerCoreRpcs.merge(JinglerReviewRpcs, AssetListRpcs)
