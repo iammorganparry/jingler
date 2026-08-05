@@ -21,6 +21,8 @@
     "@jingler/core": "workspace:*",
     "@jingler/themes": "workspace:*",
     "@paper-design/shaders-react": "^0.0.78",
+    "@pierre/diffs": "1.2.12",
+    "@pierre/trees": "1.0.0-beta.6",
     "@radix-ui/react-avatar": "^1.2.2",
     "@radix-ui/react-context-menu": "^2.2.16",
     "@radix-ui/react-dialog": "^1.1.19",

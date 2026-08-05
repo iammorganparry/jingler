@@ -2,6 +2,7 @@ import type { PrFileChange } from "@jingler/core"
 import { EyeOff, MessageSquare, Search } from "lucide-react"
 import { DiffStat } from "../components/diff-stat.js"
 import { Input } from "../components/input.js"
+import type { JinglerFileStatus } from "../diff/pierre-model.js"
 import {
   Select,
   SelectContent,
@@ -11,7 +12,7 @@ import {
 } from "../components/select.js"
 import { cn } from "../lib/cn.js"
 import type { ReviewFileKind } from "./code-review-view-machine.js"
-import { ReviewFileRow } from "./review-file-row.js"
+import { ReviewFileTree } from "./review-file-tree.js"
 import type { useCodeReviewView } from "./use-code-review-view.js"
 
 const REVIEW_KIND_OPTIONS: ReadonlyArray<{
@@ -32,24 +33,24 @@ export function ReviewFileRail({
   activePath,
   feedback,
   feedbackAny,
+  statusByPath,
   added,
   removed,
   viewed,
   controls,
-  onSelectFile,
-  onToggleViewed
+  onSelectFile
 }: {
   readonly files: readonly PrFileChange[]
   readonly totalFiles: number
   readonly activePath: string | null
   readonly feedback: ReadonlyMap<string, number>
   readonly feedbackAny: boolean
+  readonly statusByPath: ReadonlyMap<string, JinglerFileStatus>
   readonly added: number
   readonly removed: number
   readonly viewed: number
   readonly controls: ReturnType<typeof useCodeReviewView>
   readonly onSelectFile: (path: string) => void
-  readonly onToggleViewed: (path: string, viewed: boolean) => void
 }) {
   return (
     <>
@@ -141,17 +142,14 @@ export function ReviewFileRail({
           </button>
         )}
       </div>
-      <div className="flex flex-1 flex-col gap-px overflow-auto p-2">
-        {files.map((file) => (
-          <ReviewFileRow
-            key={file.path}
-            file={file}
-            active={file.path === activePath}
-            feedback={feedback.get(file.path) ?? 0}
-            onSelect={() => onSelectFile(file.path)}
-            onToggleViewed={(next) => onToggleViewed(file.path, next)}
-          />
-        ))}
+      <div className="flex min-h-0 flex-1 flex-col p-1.5">
+        <ReviewFileTree
+          files={files}
+          activePath={activePath}
+          statusByPath={statusByPath}
+          query={controls.query}
+          onSelectFile={onSelectFile}
+        />
       </div>
       <div className="flex h-11 flex-none items-center gap-1.5 border-t border-hairline px-[14px] font-mono text-[10.5px] text-dim">
         <DiffStat added={added} removed={removed} className="text-[10.5px]" />

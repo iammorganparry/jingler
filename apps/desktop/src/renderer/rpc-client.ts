@@ -5,6 +5,7 @@
  * `JinglerRpcs` group. Callers get plain, typed Promises back.
  */
 import type {
+  AssetFileEntry,
   AssetPayload,
   BackgroundTask,
   AdversarialReview,
@@ -84,7 +85,9 @@ import type {
   WorkspaceConfig
 } from "@jingler/core"
 import {
-  JinglerRpcs,
+  AssetListRpcs,
+  JinglerCoreRpcs,
+  JinglerReviewRpcs,
   MemoryAccess as MemoryAccessSchema,
   MemoryDashboardSummary as MemoryDashboardSummarySchema,
   MemoryEdgeEvidence as MemoryEdgeEvidenceSchema,
@@ -134,8 +137,15 @@ const ClientProtocolLive = Layer.effect(
   )
 )
 
-/** One runtime provides the IPC client protocol for the app's lifetime. */
-const runtime = ManagedRuntime.make(ClientProtocolLive)
+/**
+ * Each typed RPC group owns a protocol runtime. Effect's Protocol deliberately
+ * serializes `run` with a one-writer semaphore, so sharing one Protocol service
+ * between clients would leave every client after the first unable to receive
+ * responses. They still use the same IPC channel; request ids are process-global.
+ */
+const coreRuntime = ManagedRuntime.make(ClientProtocolLive)
+const reviewRuntime = ManagedRuntime.make(ClientProtocolLive)
+const assetListRuntime = ManagedRuntime.make(ClientProtocolLive)
 
 /**
  * The client's background fibers must outlive any single call, so we build it
@@ -143,13 +153,26 @@ const runtime = ManagedRuntime.make(ClientProtocolLive)
  */
 const clientScope = Effect.runSync(Scope.make())
 
-const clientEffect = RpcClient.make(JinglerRpcs)
+const clientEffect = RpcClient.make(JinglerCoreRpcs)
 const scopedClientEffect = Scope.extend(clientEffect, clientScope)
-const clientPromise = runtime.runPromise(scopedClientEffect)
+const reviewClientEffect = RpcClient.make(JinglerReviewRpcs)
+const scopedReviewClientEffect = Scope.extend(reviewClientEffect, clientScope)
+const clientPromise = Promise.all([
+  coreRuntime.runPromise(scopedClientEffect),
+  reviewRuntime.runPromise(scopedReviewClientEffect)
+]).then(([core, review]) => ({ ...core, ...review }))
+
+const assetListClientEffect = RpcClient.make(AssetListRpcs)
+const scopedAssetListClientEffect = Scope.extend(assetListClientEffect, clientScope)
+const assetListClientPromise = assetListRuntime.runPromise(scopedAssetListClientEffect)
 
 const run = <A>(
   f: (client: Awaited<typeof clientPromise>) => Effect.Effect<A, unknown>
-): Promise<A> => clientPromise.then((client) => runtime.runPromise(f(client)))
+): Promise<A> => clientPromise.then((client) => coreRuntime.runPromise(f(client)))
+
+const runAssetList = <A>(
+  f: (client: Awaited<typeof assetListClientPromise>) => Effect.Effect<A, unknown>
+): Promise<A> => assetListClientPromise.then((client) => assetListRuntime.runPromise(f(client)))
 
 const decodeMemoryResult = <A, I>(schema: Schema.Schema<A, I>, value: unknown): Promise<A> =>
   Schema.decodeUnknownPromise(schema)(value)
@@ -352,6 +375,9 @@ export const rpc = {
   sessionsDiff: (id: string): Promise<string> => run((c) => c.Sessions.diff({ id })),
   workspaceFiles: (repoPath: string): Promise<ReadonlyArray<string>> =>
     run((c) => c.Workspace.files({ repoPath })),
+  /** Validated repository browser entries for one session worktree. */
+  assetList: (sessionId: string): Promise<ReadonlyArray<AssetFileEntry>> =>
+    runAssetList((c) => c.Asset.list({ sessionId })),
   /**
    * Read one asset out of a session's worktree. `path` is worktree-relative and
    * is re-validated in main — the renderer never gets to say where on disk a
@@ -550,7 +576,7 @@ export const rpc = {
     void clientPromise.then(
       (client) => {
         if (cancelled) return
-        const streamFiber = runtime.runFork(
+        const streamFiber = coreRuntime.runFork(
           client.Agent.watchWorkers({ sessionId, planId, chatId }).pipe(
             Stream.runForEach((activity) =>
               Effect.sync(() => onActivity(activity))
@@ -558,7 +584,7 @@ export const rpc = {
           )
         )
         fiber = streamFiber
-        runtime.runFork(
+        coreRuntime.runFork(
           Fiber.await(streamFiber).pipe(
             Effect.tap((exit) =>
               Effect.sync(() => {
@@ -580,7 +606,7 @@ export const rpc = {
     )
     return () => {
       cancelled = true
-      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   },
   agentSetHarness: (sessionId: string, chatId: string, cli: CliKind, model: string): Promise<Session> =>
@@ -741,13 +767,13 @@ export const rpc = {
     let cancelled = false
     void clientPromise.then((client) => {
       if (cancelled) return
-      fiber = runtime.runFork(
+      fiber = coreRuntime.runFork(
         drainRun(client.Agent.run({ sessionId, chatId, text, images, ...options }), onEvent)
       )
     })
     return () => {
       cancelled = true
-      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   },
   agentResumePlan: (
@@ -761,13 +787,13 @@ export const rpc = {
     let cancelled = false
     void clientPromise.then((client) => {
       if (cancelled) return
-      fiber = runtime.runFork(
+      fiber = coreRuntime.runFork(
         drainRun(client.Agent.resumePlan({ sessionId, chatId, planId, revision }), onEvent)
       )
     })
     return () => {
       cancelled = true
-      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   },
 
@@ -913,7 +939,7 @@ export const rpc = {
     let cancelled = false
     void clientPromise.then((client) => {
       if (cancelled) return
-      fiber = runtime.runFork(
+      fiber = coreRuntime.runFork(
         client.Plan.watch({ sessionId }).pipe(
           Stream.runForEach((document) => Effect.sync(() => onDocument(document)))
         )
@@ -921,7 +947,7 @@ export const rpc = {
     })
     return () => {
       cancelled = true
-      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   },
   reviewWatch: (
@@ -933,7 +959,7 @@ export const rpc = {
     let cancelled = false
     void clientPromise.then((client) => {
       if (cancelled) return
-      fiber = runtime.runFork(
+      fiber = coreRuntime.runFork(
         client.Review.watch({ sessionId, chatId }).pipe(
           Stream.runForEach((event) => Effect.sync(() => onEvent(event)))
         )
@@ -941,7 +967,7 @@ export const rpc = {
     })
     return () => {
       cancelled = true
-      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   },
 
@@ -953,7 +979,7 @@ export const rpc = {
     let cancelled = false
     void clientPromise.then((client) => {
       if (cancelled) return
-      fiber = runtime.runFork(
+      fiber = coreRuntime.runFork(
         client.Terminal.attach({ terminalId }).pipe(
           Stream.runForEach((chunk) => Effect.sync(() => onChunk(chunk)))
         )
@@ -961,7 +987,7 @@ export const rpc = {
     })
     return () => {
       cancelled = true
-      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   },
 
@@ -1002,7 +1028,7 @@ export const rpc = {
     let cancelled = false
     void clientPromise.then((client) => {
       if (cancelled) return
-      fiber = runtime.runFork(
+      fiber = coreRuntime.runFork(
         client.Theme.watch().pipe(
           Stream.runForEach((catalog) => Effect.sync(() => onCatalog(catalog)))
         )
@@ -1010,7 +1036,7 @@ export const rpc = {
     })
     return () => {
       cancelled = true
-      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   },
 
@@ -1069,7 +1095,7 @@ export const rpc = {
     let cancelled = false
     void clientPromise.then((client) => {
       if (cancelled) return
-      fiber = runtime.runFork(
+      fiber = coreRuntime.runFork(
         client.Plugins.watch().pipe(
           Stream.runForEach((catalog) => Effect.sync(() => onCatalog(catalog)))
         )
@@ -1077,7 +1103,7 @@ export const rpc = {
     })
     return () => {
       cancelled = true
-      if (fiber) runtime.runFork(Fiber.interrupt(fiber))
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   }
 }

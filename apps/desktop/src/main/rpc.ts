@@ -14,9 +14,12 @@
  */
 import {
   AgentRunner,
+  AppPaths,
   AssetService,
   AuthService,
+  BrowserControlMcpService,
   buildOrchestrationGroups,
+  CliAdapter,
   ConfigService,
   claudeTitleGenerator,
   DiscoveryService,
@@ -46,6 +49,7 @@ import {
   retitleSession,
   ReviewService,
   ReviewStore,
+  SecretStore,
   SessionStore,
   ContextManager,
   setOpencodeAuth,
@@ -129,7 +133,6 @@ import {
   MemorySuggestionsView as MemorySuggestionsViewSchema,
   MemoryUiError
 } from "@jingler/contracts"
-import { AppPaths } from "@jingler/cli-adapters"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { RpcServer } from "@effect/rpc"
@@ -2028,6 +2031,12 @@ const assetWorktree = (sessionId: string) =>
     return session.worktreePath
   })
 
+/** `Asset.list` handler — repository files scoped to the session worktree. */
+export const assetList = (input: { sessionId: string }) =>
+  Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
+    AssetService.list(worktree)
+  )
+
 /** `Asset.read` handler — one asset's contents, sandboxed to the session worktree. */
 export const assetRead = (input: { sessionId: string; path: string }) =>
   Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
@@ -3468,6 +3477,7 @@ const HandlersLayer = JinglerRpcs.toLayer({
   "BrowserControl.waitForSelector": ({ selector, timeoutMs }) =>
     Effect.flatMap(PreviewViewService, (b) => b.controlWaitForSelector(selector, timeoutMs)),
 
+  "Asset.list": (input) => assetList(input),
   "Asset.read": (input) => assetRead(input),
   "Asset.reveal": (input) => assetReveal(input),
   "Asset.openPdf": (input) => assetOpenPdf(input),
@@ -3776,7 +3786,47 @@ const ServerProtocolLive = Layer.effect(
  * TypeScript cannot NAME an inferred type that reaches into a workspace
  * package's internals without a reference to it in scope.
  */
-export const RpcServerLive = RpcServer.layer(JinglerRpcs).pipe(
+type RpcServerRequirements =
+  | AgentRunner
+  | AppPaths
+  | AssetService
+  | AuthService
+  | BackgroundTaskStore
+  | BrowserControlMcpService
+  | CliAdapter
+  | CommandExecutor.CommandExecutor
+  | ConfigService
+  | ContextManager
+  | DialogService
+  | DiscoveryService
+  | FileSystem.FileSystem
+  | GhService
+  | GitService
+  | MemoryService
+  | ModelsService
+  | OpenConnectorApi
+  | OpenConnectorService
+  | OrchestrationService
+  | Path.Path
+  | PlanStore
+  | PluginAuth
+  | PluginHost
+  | PluginRegistry
+  | PreviewViewService
+  | ReviewService
+  | ReviewStore
+  | SecretStore
+  | SessionStore
+  | SkillsService
+  | TerminalService
+  | ThemeService
+  | TranscriptStore
+  | UsageService
+  | WorkspaceService
+
+export const RpcServerLive: Layer.Layer<never, never, RpcServerRequirements> = RpcServer.layer(
+  JinglerRpcs
+).pipe(
   Layer.provide(HandlersLayer),
   Layer.provide(ServerProtocolLive)
 )

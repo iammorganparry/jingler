@@ -46,19 +46,50 @@
  * so the renderer can throw it away would be the entire cost of the feature
  * for none of its benefit.
  */
-import { FileSystem, Path } from "@effect/platform"
-import type { AssetKind, AssetPayload } from "@jingler/core"
+import { CommandExecutor, FileSystem, Path } from "@effect/platform"
+import type { AssetFileEntry, AssetFileStatus, AssetKind, AssetPayload } from "@jingler/core"
 import {
   ASSET_SIZE_CAP,
   AssetOutsideWorktreeError,
   AssetTooLargeError,
   AssetUnsupportedError,
+  GitError,
   extensionToKind,
   extensionToLanguage
 } from "@jingler/core"
 import { Effect } from "effect"
+import { runGitRaw } from "./command.js"
 
-type AssetEnv = FileSystem.FileSystem | Path.Path
+// Platform services are captured when the service layer is built. Individual
+// operations therefore have no invocation-time environment requirements.
+type AssetEnv = never
+type AssetListEnv = never
+
+const nulPaths = (output: string): string[] =>
+  output.split("\0").filter((path) => path.length > 0)
+
+const statusFromCode = (code: string): AssetFileStatus => {
+  if (code === "??") return "untracked"
+  if (code.includes("R")) return "renamed"
+  if (code.includes("A")) return "added"
+  if (code.includes("D")) return "deleted"
+  return "modified"
+}
+
+/** Parse porcelain-v1 `-z`; rename/copy records carry a second old-path field. */
+const parseGitStatus = (output: string): ReadonlyMap<string, AssetFileStatus> => {
+  const fields = nulPaths(output)
+  const status = new Map<string, AssetFileStatus>()
+  for (let index = 0; index < fields.length; index += 1) {
+    const field = fields[index]!
+    if (field.length < 4 || field[2] !== " ") continue
+    const code = field.slice(0, 2)
+    const path = field.slice(3)
+    status.set(path, statusFromCode(code))
+    if (code.includes("R") || code.includes("C")) index += 1
+  }
+  return status
+}
 
 /**
  * Extension → media type for the `data:` URL an image viewer builds.
@@ -89,6 +120,16 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
   effect: Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const path_ = yield* Path.Path
+    const commandExecutor = yield* CommandExecutor.CommandExecutor
+    const gitRaw = (cwd: string, args: ReadonlyArray<string>) =>
+      runGitRaw(cwd, args).pipe(
+        Effect.provideService(CommandExecutor.CommandExecutor, commandExecutor)
+      )
+    let listCache: {
+      readonly root: string
+      readonly fingerprint: string
+      readonly entries: ReadonlyArray<AssetFileEntry>
+    } | null = null
 
     /**
      * Resolve `requested` inside `worktree`, or refuse.
@@ -122,6 +163,73 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
     /** The worktree-relative form of an absolute path, in POSIX separators. */
     const relativeTo = (root: string, absolutePath: string): string =>
       path_.relative(root, absolutePath).split(path_.sep).join("/")
+
+    /**
+     * Repository browser input: Git decides which paths exist for browsing, then
+     * the same realpath + regular-file checks as `read` decide which may cross
+     * the process boundary. A tracked symlink escaping the worktree is omitted.
+     */
+    const list = (
+      worktree: string
+    ): Effect.Effect<
+      ReadonlyArray<AssetFileEntry>,
+      AssetOutsideWorktreeError | GitError,
+      AssetListEnv
+    > =>
+      Effect.gen(function* () {
+        const { root } = yield* resolveInside(worktree, ".")
+        const output = yield* Effect.all(
+          {
+            tracked: gitRaw(root, ["ls-files", "-z", "--cached"]),
+            untracked: gitRaw(root, [
+              "ls-files",
+              "-z",
+              "--others",
+              "--exclude-standard"
+            ]),
+            status: gitRaw(root, [
+              "status",
+              "--porcelain=v1",
+              "-z",
+              "--untracked-files=all"
+            ])
+          },
+          { concurrency: 3 }
+        )
+        const fingerprint = `${output.tracked}\u0001${output.untracked}\u0001${output.status}`
+        if (listCache?.root === root && listCache.fingerprint === fingerprint) {
+          return listCache.entries
+        }
+        const statusByPath = parseGitStatus(output.status)
+        const requestedPaths = [...nulPaths(output.tracked), ...nulPaths(output.untracked)]
+        const validated = yield* Effect.forEach(
+          requestedPaths,
+          (requested) =>
+            Effect.gen(function* () {
+              if (requested === ".git" || requested.startsWith(".git/")) return null
+              const resolved = yield* resolveInside(root, requested).pipe(Effect.option)
+              if (resolved._tag === "None") return null
+              const info = yield* fs.stat(resolved.value.absolutePath).pipe(Effect.option)
+              if (info._tag === "None" || info.value.type !== "File") return null
+              const path = relativeTo(root, resolved.value.absolutePath)
+              if (path.length === 0 || path === ".git" || path.startsWith(".git/")) return null
+              return {
+                path,
+                status: statusByPath.get(requested) ?? "clean"
+              } satisfies AssetFileEntry
+            }),
+          { concurrency: 32 }
+        )
+        const byPath = new Map<string, AssetFileEntry>()
+        for (const entry of validated) {
+          if (entry !== null) byPath.set(entry.path, entry)
+        }
+        const entries = [...byPath.values()].sort((left, right) =>
+          left.path.localeCompare(right.path)
+        )
+        listCache = { root, fingerprint, entries }
+        return entries
+      })
 
     /**
      * The absolute path to load into Chromium's native PDF viewer, or a refusal.
@@ -218,6 +326,6 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
     const revealPath = (worktree: string, requested: string) =>
       Effect.map(resolveInside(worktree, requested), (r) => r.absolutePath)
 
-    return { read, pdfPath, revealPath } as const
+    return { list, read, pdfPath, revealPath } as const
   })
 }) {}

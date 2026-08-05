@@ -12,6 +12,10 @@ const { version } = JSON.parse(
   readFileSync(resolve(import.meta.dirname, "package.json"), "utf-8")
 )
 const define = { __APP_VERSION__: JSON.stringify(version) }
+const pierreDiffWorkerEntry = resolve(
+  import.meta.dirname,
+  "../../node_modules/@pierre/diffs/dist/worker/worker.js"
+)
 
 // The `@jingler/*` workspace packages ship raw TypeScript source (their
 // `exports` point at `src/*.ts`). Node can't run those directly in the main
@@ -83,6 +87,22 @@ export default defineConfig(({ command }) => {
     define,
     root: resolve(import.meta.dirname, "src/renderer"),
     plugins: [react(), tailwindcss()],
+    resolve: {
+      // The workspace ships raw @jingler/ui source, while Pierre ships bundled
+      // React entry points. Dedupe at the renderer boundary so both resolve to
+      // the app's single React/Shiki instances.
+      dedupe: ["react", "react-dom", "shiki"],
+      alias: {
+        // pierre-provider.tsx uses this static alias in new URL(...). Vite can
+        // then emit the worker as a production asset instead of leaving a bare
+        // package URL for Electron's file:// runtime to fail on.
+        "@jingler/pierre-diffs-worker": pierreDiffWorkerEntry
+      }
+    },
+    worker: { format: "es" },
+    optimizeDeps: {
+      include: ["@pierre/diffs/react", "@pierre/trees/react"]
+    },
     build: {
       rollupOptions: {
         input: { index: resolve(import.meta.dirname, "src/renderer/index.html") }

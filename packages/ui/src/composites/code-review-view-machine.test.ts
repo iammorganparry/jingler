@@ -13,6 +13,17 @@ describe("codeReviewViewMachine", () => {
     actor.send({ type: "TOGGLE_SHEET", sheet: "files" })
     expect(actor.getSnapshot().context.sheet).toBe("files")
 
+    actor.send({ type: "TOGGLE_SHEET", sheet: "tray" })
+    expect(actor.getSnapshot().context.sheet).toBe("tray")
+    actor.send({ type: "DOCK" })
+    expect(actor.getSnapshot().matches({ layout: "docked" })).toBe(true)
+    expect(actor.getSnapshot().context.sheet).toBeNull()
+    actor.send({ type: "UNDOCK" })
+
+    actor.send({ type: "CLOSE_SHEET" })
+    expect(actor.getSnapshot().context.sheet).toBeNull()
+    actor.send({ type: "TOGGLE_SHEET", sheet: "files" })
+
     actor.send({ type: "TOGGLE_FOCUS" })
     expect(actor.getSnapshot().matches({ presentation: "focused" })).toBe(true)
     expect(actor.getSnapshot().context.sheet).toBeNull()
@@ -23,6 +34,14 @@ describe("codeReviewViewMachine", () => {
       kind: "all",
       feedbackOnly: false
     })
+  })
+
+  it("drops feedback-only mode when the filtered source becomes empty", () => {
+    const actor = createActor(codeReviewViewMachine).start()
+    actor.send({ type: "TOGGLE_FEEDBACK" })
+    expect(actor.getSnapshot().context.feedbackOnly).toBe(true)
+    actor.send({ type: "FEEDBACK_EMPTY" })
+    expect(actor.getSnapshot().context.feedbackOnly).toBe(false)
   })
 
   it("collapses viewed code by default and can reveal it", () => {

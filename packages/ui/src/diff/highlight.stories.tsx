@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { LookFor } from "../story-support.js"
-import { ReviewDiff } from "../composites/review-diff.js"
 import { DiffView } from "./diff-view.js"
 
 const meta: Meta = { title: "Diff/Syntax Highlighting", parameters: { layout: "fullscreen" } }
@@ -93,13 +92,7 @@ export const ReviewDiffHighlighted: Story = {
         its interpolation.
       </LookFor>
       <div className="p-6">
-        <ReviewDiff
-          path="src/auth/session.ts"
-          diff={TS_DIFF}
-          connected
-          onAddDraft={() => {}}
-          scroll={false}
-        />
+        <DiffView patch={TS_DIFF} fill={false} />
       </div>
     </div>
   )
@@ -145,12 +138,9 @@ export const UnknownLanguageFallback: Story = {
         tinted. This is also the async window every highlighted diff passes through.
       </LookFor>
       <div className="p-6">
-        <ReviewDiff
-          path="vendor/legacy.zig"
-          diff={TS_DIFF.replace("src/auth/session.ts", "vendor/legacy.zig")}
-          connected
-          onAddDraft={() => {}}
-          scroll={false}
+        <DiffView
+          patch={TS_DIFF.replaceAll("src/auth/session.ts", "vendor/legacy.zig")}
+          fill={false}
         />
       </div>
     </div>

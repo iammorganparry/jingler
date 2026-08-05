@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { parseUnifiedDiffForPath } from "./parse.js"
+import {
+  normalizeDiffPreviewPatch,
+  normalizePatchHunkCounts,
+  parsePierreFileDiffs,
+  parseUnifiedDiffForPath
+} from "./parse.js"
 
 const patch = [
   "diff --git a/src/a.ts b/src/a.ts",
@@ -29,5 +34,25 @@ describe("parseUnifiedDiffForPath", () => {
 
   it("returns no rows when the file is unchanged", () => {
     expect(parseUnifiedDiffForPath(patch, "src/missing.ts")).toEqual([])
+  })
+})
+
+describe("Pierre patch normalization", () => {
+  it("keeps truncation notices as hunk context rather than source lines", () => {
+    const [file] = parsePierreFileDiffs(
+      normalizeDiffPreviewPatch("-before\n+after\n…12 more diff line(s)")
+    )
+
+    expect(file?.hunks).toHaveLength(2)
+    expect(file?.hunks[1]).toMatchObject({
+      hunkContent: [],
+      hunkContext: "…12 more diff line(s)"
+    })
+    expect(file?.additionLines).not.toContain("…12 more diff line(s)\n")
+  })
+
+  it("does not count a blank separator before the next file as context", () => {
+    const normalized = normalizePatchHunkCounts(`${patch}\n\n${patch}`)
+    expect(normalized.match(/@@ -1,1 \+1,1 @@/g)).toHaveLength(4)
   })
 })

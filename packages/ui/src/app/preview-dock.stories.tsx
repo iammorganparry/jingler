@@ -100,6 +100,11 @@ export const WithAssets: Story = {
               {tab.kind === "browser" ? "Native browser view" : tab.path}
             </div>
           )}
+          renderAssetManager={(tab) => (
+            <div className="absolute inset-0 flex items-center justify-center font-mono text-[12px] text-dim">
+              Persistent repository tree + {tab?.path ?? "asset canvas"}
+            </div>
+          )}
         />
       </Frame>
     )

@@ -1,7 +1,6 @@
 import type { PrReviewThread, PrThreadComment } from "@jingler/core"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { useState } from "react"
-import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge } from "../components/badge.js"
@@ -138,7 +137,8 @@ export function PrReviewThreadView({
   sentEntryIds,
   onSendToAgent,
   onResolve,
-  onReply
+  onReply,
+  inline = false
 }: {
   thread: PrReviewThread
   /** The PR's author login, for the "Author" chip. */
@@ -148,6 +148,8 @@ export function PrReviewThreadView({
   onResolve?: (threadId: string, resolved: boolean) => Promise<void> | void
   /** Reply to the thread. `commentId` is the first comment's REST databaseId. */
   onReply?: (commentId: number, body: string) => Promise<void> | void
+  /** Pierre already supplies the annotation frame and source context. */
+  inline?: boolean
 }) {
   const [open, setOpen] = useState(!thread.isResolved)
   const [draft, setDraft] = useState("")
@@ -166,9 +168,10 @@ export function PrReviewThreadView({
 
   const caption = anchorCaption(thread)
   const replyTo = thread.comments[0]?.databaseId ?? null
+  const Container = inline ? "div" : Card
 
   return (
-    <Card>
+    <Container data-review-thread-annotation={inline || undefined}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -203,7 +206,12 @@ export function PrReviewThreadView({
               {caption}
             </div>
           )}
-          {thread.diffHunk && <ReviewThreadHunk hunk={thread.diffHunk} className="border-b border-hairline" />}
+          {!inline && thread.diffHunk && (
+            <ReviewThreadHunk
+              hunk={thread.diffHunk}
+              className="border-b border-hairline"
+            />
+          )}
 
           {thread.comments.map((c) => (
             <ThreadComment
@@ -261,6 +269,6 @@ export function PrReviewThreadView({
           )}
         </>
       )}
-    </Card>
+    </Container>
   )
 }

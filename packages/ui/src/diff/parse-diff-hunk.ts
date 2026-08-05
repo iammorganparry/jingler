@@ -1,3 +1,7 @@
+import type { FileDiffMetadata } from "@pierre/diffs"
+import { createPierreFileDiffFromPatch } from "./pierre-model.js"
+import { patchFromStructuredLines } from "./parse.js"
+
 /** One line of a parsed hunk, carrying BOTH gutters (GitHub shows old + new). */
 export interface ThreadHunkLine {
   type: "add" | "del" | "normal"
@@ -63,4 +67,20 @@ export const parseDiffHunk = (hunk: string, tail: number = DEFAULT_TAIL): Readon
   }
 
   return tail === Infinity || lines.length <= tail ? lines : lines.slice(-tail)
+}
+
+/**
+ * Convert GitHub's header-only `diffHunk` payload into the structured partial
+ * diff Pierre renders. The displayed tail retains its original line numbers.
+ */
+export const parseDiffHunkToPierre = (
+  hunk: string,
+  path = "review-thread.diff",
+  tail: number = DEFAULT_TAIL
+): FileDiffMetadata | null => {
+  const lines = parseDiffHunk(hunk, tail)
+  if (lines.length === 0) return null
+  return createPierreFileDiffFromPatch(
+    patchFromStructuredLines({ path, lines })
+  )
 }

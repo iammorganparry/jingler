@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
@@ -55,6 +56,9 @@ const failureTag = <A, E>(exit: Exit.Exit<A, E>): string | null => {
 
 const readAsset = (path: string) =>
   run(Effect.flatMap(AssetService, (s) => s.read(worktree.dir, path)))
+
+const listAssets = () =>
+  run(Effect.flatMap(AssetService, (s) => s.list(worktree.dir)))
 
 describe("AssetService.read — containment", () => {
   it("refuses a `..` traversal out of the worktree", async () => {
@@ -204,5 +208,81 @@ describe("AssetService.pdfPath — the SECOND door into the filesystem", () => {
   it("refuses a DIRECTORY named like a PDF", async () => {
     mkdirSync(join(worktree.dir, "dir.pdf"), { recursive: true })
     expect(failureTag(await pdfPath("dir.pdf"))).toBe("AssetOutsideWorktreeError")
+  })
+})
+
+describe("AssetService.list — Git-aware repository discovery", () => {
+  const git = (args: ReadonlyArray<string>) =>
+    execFileSync("git", args, { cwd: worktree.dir, stdio: "ignore" })
+
+  it("returns canonical tracked and non-ignored untracked files with status", async () => {
+    git(["init"])
+    git(["config", "user.email", "test@jingler.dev"])
+    git(["config", "user.name", "Jingler Test"])
+    mkdirSync(join(worktree.dir, "src"), { recursive: true })
+    writeFileSync(join(worktree.dir, ".gitignore"), "ignored.log\n")
+    writeFileSync(join(worktree.dir, "README.md"), "# Clean\n")
+    writeFileSync(join(worktree.dir, "old-name.txt"), "rename me\n")
+    writeFileSync(join(worktree.dir, "src", "main.ts"), "export const value = 1\n")
+    writeFileSync(join(worktree.dir, " leading-space.txt"), "preserve my name\n")
+    git(["add", "-A"])
+    git(["commit", "-m", "seed", "--no-gpg-sign"])
+
+    writeFileSync(join(worktree.dir, "src", "main.ts"), "export const value = 2\n")
+    git(["mv", "old-name.txt", "renamed.txt"])
+    writeFileSync(join(worktree.dir, "added.txt"), "staged\n")
+    git(["add", "added.txt"])
+    writeFileSync(join(worktree.dir, "notes.md"), "untracked\n")
+    writeFileSync(join(worktree.dir, "ignored.log"), "build spew\n")
+    symlinkSync(join(outside.dir, "secret.txt"), join(worktree.dir, "escape.txt"))
+    git(["add", "escape.txt"])
+
+    const exit = await listAssets()
+    expect(Exit.isSuccess(exit)).toBe(true)
+    if (!Exit.isSuccess(exit)) return
+
+    expect(exit.value).toEqual([
+      { path: " leading-space.txt", status: "clean" },
+      { path: ".gitignore", status: "clean" },
+      { path: "added.txt", status: "added" },
+      { path: "notes.md", status: "untracked" },
+      { path: "README.md", status: "clean" },
+      { path: "renamed.txt", status: "renamed" },
+      { path: "src/main.ts", status: "modified" }
+    ])
+    expect(exit.value.some((entry) => entry.path.startsWith(".git/"))).toBe(false)
+    expect(exit.value.some((entry) => entry.path === "ignored.log")).toBe(false)
+    expect(exit.value.some((entry) => entry.path === "escape.txt")).toBe(false)
+    expect(exit.value.some((entry) => entry.path === "old-name.txt")).toBe(false)
+  })
+
+  it("fails with GitError instead of crawling a non-repository directory", async () => {
+    expect(failureTag(await listAssets())).toBe("GitError")
+  })
+
+  it("lists a large repository completely without including ignored build output", async () => {
+    git(["init"])
+    writeFileSync(join(worktree.dir, ".gitignore"), "build/\n")
+    const count = 1_200
+    for (let directory = 0; directory < 12; directory += 1) {
+      const root = join(worktree.dir, "packages", `group-${directory}`)
+      mkdirSync(root, { recursive: true })
+      for (let file = 0; file < 100; file += 1) {
+        writeFileSync(join(root, `file-${file}.ts`), `export const value = ${file}\n`)
+      }
+    }
+    mkdirSync(join(worktree.dir, "build"), { recursive: true })
+    writeFileSync(join(worktree.dir, "build", "bundle.js"), "ignored\n")
+
+    const exit = await listAssets()
+    expect(Exit.isSuccess(exit)).toBe(true)
+    if (!Exit.isSuccess(exit)) return
+
+    expect(exit.value).toHaveLength(count + 1)
+    expect(exit.value.filter((entry) => entry.status === "untracked")).toHaveLength(
+      count + 1
+    )
+    expect(exit.value.some((entry) => entry.path === "build/bundle.js")).toBe(false)
+    expect(new Set(exit.value.map((entry) => entry.path)).size).toBe(exit.value.length)
   })
 })
