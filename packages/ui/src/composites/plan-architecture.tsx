@@ -6,30 +6,22 @@ import { cn } from "../lib/cn.js"
 
 /**
  * The **Architecture** surface: a read-only render of a plan's prose sections
- * (Context / Goals / Technical design / Decisions) and every embedded mermaid
- * flow diagram.
+ * (TL;DR first, then Context / Goals / Technical design / Decisions) and every
+ * embedded mermaid flow diagram grouped by its owning stage.
  *
  * The component takes the canonical `PlanPrd` and derives its view with
  * `toPlanArchitectureView` — the pure `@jingler/core` projection that returns
- * the verbatim prose `sections` plus a flat, id-stamped `diagrams` list lifted
- * out of both the sections and the stages. Keeping the projection in core (not
- * here) means the same derivation is testable without React.
+ * the verbatim prose `sections` plus stage-owned diagram groups. Keeping the
+ * projection in core (not here) means ownership is testable without React.
  *
  * ## Read-only
  *
- * There is no editor here — section bodies are the plan HTML dialect rendered
- * through `sanitizePlanHtml` into `dangerouslySetInnerHTML`, the same guarded
- * path the rest of the app uses for attacker-influenceable plan HTML. Diagrams
- * render through `MermaidDiagram` (strict mode, DOMPurify'd SVG).
+ * There is no editor here — section bodies use the typed `PlanBlock` renderer.
+ * Diagrams render through `MermaidDiagram` (strict mode, DOMPurify'd SVG).
  *
- * ## Why diagrams are stripped from the prose
- *
- * `toPlanArchitectureView` returns section `markdown` verbatim, so a section
- * that embeds a `<div data-diagram="mermaid">` still carries that block — and it
- * ALSO surfaces in `diagrams`. Rendering the section HTML as-is would therefore
- * print the raw mermaid source (as a `<pre>`) directly above the rendered
- * diagram. `sectionProse` removes the diagram blocks from the prose so each
- * diagram is drawn exactly once, in the dedicated diagrams region.
+ * Section-owned diagrams remain in their section block flow. Stage diagrams are
+ * rendered separately under a heading and jump link carrying the same stage id
+ * as the Main card.
  */
 
 function ArchitectureSection({
@@ -39,13 +31,10 @@ function ArchitectureSection({
   title: string
   blocks: ReadonlyArray<PlanBlock>
 }) {
-  // Diagrams are surfaced once in the dedicated diagrams region below, so drop
-  // them from the section's own block flow here.
-  const prose = blocks.filter((block) => block.kind !== "diagram")
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-[13px] font-semibold text-text-bright">{title}</h2>
-      <PlanBlocks blocks={prose} className="sb-md text-[13px] leading-[1.65] text-text-body" />
+      <PlanBlocks blocks={blocks} className="sb-md text-[13px] leading-[1.65] text-text-body" />
     </section>
   )
 }
@@ -54,9 +43,24 @@ function ArchitectureSection({
  * Read-only Architecture view for a plan. Pass the canonical `PlanPrd`; the
  * component derives its own `PlanArchitectureView` via `toPlanArchitectureView`.
  */
-export function PlanArchitecture({ prd, className }: { prd: PlanPrd; className?: string }) {
+export function PlanArchitecture({
+  prd,
+  className,
+  onOpenStage
+}: {
+  prd: PlanPrd
+  className?: string
+  onOpenStage?: (stageId: string) => void
+}) {
   const view = useMemo(() => toPlanArchitectureView(prd), [prd])
-  const isEmpty = view.sections.length === 0 && view.diagrams.length === 0
+  const sections = useMemo(() => {
+    const isTldr = (title: string) => title.replace(/[^a-z0-9]/gi, "").toLowerCase() === "tldr"
+    return [
+      ...view.sections.filter((section) => isTldr(section.title)),
+      ...view.sections.filter((section) => !isTldr(section.title))
+    ]
+  }, [view.sections])
+  const isEmpty = sections.length === 0 && view.stages.length === 0
 
   if (isEmpty) {
     return (
@@ -73,25 +77,49 @@ export function PlanArchitecture({ prd, className }: { prd: PlanPrd; className?:
 
   return (
     <div className={cn("flex flex-col gap-6 p-4", className)}>
-      {view.sections.map((section) => (
+      {sections.map((section) => (
         <ArchitectureSection key={section.id} title={section.title} blocks={section.blocks} />
       ))}
 
-      {view.diagrams.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-[13px] font-semibold text-text-bright">Diagrams</h2>
+      {view.stages.map((stage) => (
+        <section
+          key={stage.id}
+          aria-label={`Architecture for ${stage.title}`}
+          data-stage-architecture={stage.id}
+          className="flex flex-col gap-3 rounded-lg border border-hairline bg-panel px-4 py-3.5"
+        >
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+              {stage.id}
+            </span>
+            <h2 className="min-w-0 flex-1 text-[13px] font-semibold text-text-bright">
+              {stage.title}
+            </h2>
+            {onOpenStage && (
+              <button
+                type="button"
+                aria-label={`Open stage ${stage.title} in Main`}
+                onClick={() => onOpenStage(stage.id)}
+                className="flex-none rounded-md border border-line px-2 py-1 text-[10.5px] font-medium text-blue outline-none transition-colors hover:border-line-strong hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                Open in Main
+              </button>
+            )}
+          </div>
           <div className="flex flex-col gap-3">
-            {view.diagrams.map((diagram) => (
+            {stage.diagrams.map((diagram) => (
               <div
                 key={diagram.id}
-                className="overflow-hidden rounded-md border border-line bg-panel px-3 py-2"
+                role="img"
+                aria-label={`Diagram ${diagram.id}`}
+                className="overflow-hidden rounded-md border border-line bg-surface/40 px-3 py-2"
               >
                 <MermaidDiagram source={diagram.source} />
               </div>
             ))}
           </div>
         </section>
-      )}
+      ))}
     </div>
   )
 }

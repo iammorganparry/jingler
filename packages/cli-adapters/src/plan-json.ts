@@ -75,15 +75,20 @@ export const PLAN_JSON_REFORMAT = (diagnostics: string): string =>
     "Your plan JSON did not decode. Re-emit the COMPLETE plan as one ```json block",
     "with these corrected:",
     diagnostics,
-    "The block must be exactly { \"mode\": \"draft\"|\"submit\", \"plan\": { … } }."
+    "The block must be exactly { \"mode\": \"draft\"|\"submit\", \"plan\": { … } }.",
+    'Keep the first section titled "TL;DR", every stage\'s detailed tasks and diagrams in its owning stage,',
+    "and every acceptance criterion's concrete testReferences."
   ].join("\n")
 
 const STAGE_GRAMMAR = [
   "  Each stage: {",
   '    "id", "title", "intent",',
-  '    "approach": string[], "files": [{ "path", "change": "A"|"M"|"D" }],',
+  '    "approach": string[], "tasks": [{ "id", "text", "status": "pending" }],',
+  '    "files": [{ "path", "change": "A"|"M"|"D" }],',
   '    "diagrams": [{ "id", "source" }], "notes": PlanBlock[],',
-  '    "acceptance": [{ "id", "text", "status": "pending", "evidence": null }],',
+  '    "acceptance": [{ "id", "text",',
+  '      "testReferences": [{ "path", "cases": string[] }],',
+  '      "status": "pending", "evidence": null }],',
   '    "dependencies"?: string[], "complexity"?: "low"|"medium"|"high"',
   "  }",
   '  A PlanBlock is one of { "kind":"prose","id","text" } |',
@@ -110,7 +115,12 @@ export const planJsonInstructions = (
     "to delegate (one approval gate). A prose preamble before the block is fine — the mode",
     "field decides, not position.",
     '  A PlanPrdSection: { "id", "title", "blocks": PlanBlock[] }.',
+    'The FIRST section must be titled "TL;DR" and briefly summarize the outcome, approach, and main risk.',
     STAGE_GRAMMAR,
+    "Give every stage a detailed tasks list; new or revised tasks must start pending.",
+    'Put every diagram in its owning stage\'s "diagrams" array (use [] when no diagram materially helps).',
+    "Give every acceptance criterion concrete testReferences: a repository-relative test path",
+    "and the exact named test cases that prove that criterion.",
     "Declare complexity, dependencies, files, and acceptance criteria.",
     "Do NOT add data-assignment: never emit worker assignments, agent ids, harnesses, models, or routes — Jingler assigns those."
   ].join("\n")

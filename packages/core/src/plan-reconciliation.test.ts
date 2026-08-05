@@ -5,7 +5,7 @@ import type {
   PlanPrd,
   PlanPrdStage,
   PlanStageAssignment,
-  PlanStageExecutionStatus
+  PlanTask
 } from "./plan-document.js"
 import {
   planStageSemanticFingerprint,
@@ -18,6 +18,12 @@ const criterion = (
   status: PlanAcceptance["status"] = "pending",
   evidence: string | null = null
 ): PlanAcceptance => ({ id, text, status, evidence })
+
+const task = (
+  id: string,
+  text: string,
+  status: PlanTask["status"] = "pending"
+): PlanTask => ({ id, text, status })
 
 const assignment = (
   agentId: string,
@@ -70,6 +76,53 @@ const annotation = (
 })
 
 describe("reconcilePlanAmendment", () => {
+  it("preserves task progress for unchanged stages and resets changed tasks", () => {
+    const previous = plan([
+      stage("01", {
+        tasks: [
+          task("01.task.1", "Keep the stable task", "completed"),
+          task("01.task.2", "Continue the active task", "in-progress")
+        ]
+      }),
+      stage("02", {
+        tasks: [
+          task("02.task.1", "Keep this task too", "completed"),
+          task("02.task.2", "Implement the old behavior", "blocked")
+        ]
+      })
+    ])
+    const replacement = plan([
+      stage("01", {
+        tasks: [
+          task("01.task.1", "Keep the stable task"),
+          task("01.task.2", "Continue the active task", "completed")
+        ]
+      }),
+      stage("02", {
+        tasks: [
+          task("02.task.1", "Keep this task too"),
+          task("02.task.2", "Implement the revised behavior", "completed"),
+          task("02.task.3", "Verify the new behavior", "completed")
+        ]
+      })
+    ])
+
+    const result = reconcilePlanAmendment(previous, replacement)
+
+    expect(result.valid).toBe(true)
+    if (!result.valid) return
+    expect(result.changedStageIds).toEqual(["02"])
+    expect(result.plan.stages[0]?.tasks).toEqual([
+      task("01.task.1", "Keep the stable task", "completed"),
+      task("01.task.2", "Continue the active task", "in-progress")
+    ])
+    expect(result.plan.stages[1]?.tasks).toEqual([
+      task("02.task.1", "Keep this task too", "completed"),
+      task("02.task.2", "Implement the revised behavior"),
+      task("02.task.3", "Verify the new behavior")
+    ])
+  })
+
   it("requeues changed work and invalidates evidence collected for its prior semantics", () => {
     const previous = plan([
       stage("01", {
@@ -100,8 +153,20 @@ describe("reconcilePlanAmendment", () => {
     expect(changed.assignment?.agentId).toBe("worker-a")
     expect(changed.executionStatus).toBe("queued")
     expect(changed.acceptance).toEqual([
-      { id: "01.1", text: "The stable behavior works.", status: "pending", evidence: null },
-      { id: "01.2", text: "The added behavior works.", status: "pending", evidence: null }
+      {
+        id: "01.1",
+        text: "The stable behavior works.",
+        testReferences: [],
+        status: "pending",
+        evidence: null
+      },
+      {
+        id: "01.2",
+        text: "The added behavior works.",
+        testReferences: [],
+        status: "pending",
+        evidence: null
+      }
     ])
     expect(result.changedStageIds).toEqual(["01"])
   })
@@ -403,6 +468,53 @@ describe("reconcilePlanAmendment", () => {
 })
 
 describe("planStageSemanticFingerprint", () => {
+  it("includes task text, test references, and diagram identity while ignoring task progress", () => {
+    const base = stage("01", {
+      tasks: [task("01.task.1", "Implement the contract")],
+      diagrams: [{ id: "01-flow", source: "flowchart LR\n  A --> B" }],
+      acceptance: [
+        {
+          ...criterion("01.1", "The contract decodes."),
+          testReferences: [
+            { path: "packages/core/src/plan-document.test.ts", cases: ["decodes the contract"] }
+          ]
+        }
+      ]
+    })
+
+    expect(
+      planStageSemanticFingerprint({
+        ...base,
+        tasks: [task("01.task.1", "Implement the contract", "completed")]
+      })
+    ).toBe(planStageSemanticFingerprint(base))
+    expect(
+      planStageSemanticFingerprint({
+        ...base,
+        tasks: [task("01.task.1", "Implement the revised contract")]
+      })
+    ).not.toBe(planStageSemanticFingerprint(base))
+    expect(
+      planStageSemanticFingerprint({
+        ...base,
+        acceptance: [
+          {
+            ...criterion("01.1", "The contract decodes."),
+            testReferences: [
+              { path: "packages/core/src/plan-document.test.ts", cases: ["decodes the revised contract"] }
+            ]
+          }
+        ]
+      })
+    ).not.toBe(planStageSemanticFingerprint(base))
+    expect(
+      planStageSemanticFingerprint({
+        ...base,
+        diagrams: [{ id: "01-revised-flow", source: "flowchart LR\n  A --> B" }]
+      })
+    ).not.toBe(planStageSemanticFingerprint(base))
+  })
+
   it("ignores assignment and execution-status changes", () => {
     const compact = stage("01", {
       title: "Stable",

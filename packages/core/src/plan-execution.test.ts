@@ -348,22 +348,107 @@ describe("worker routing", () => {
     }
   }
 
-  it("uses a capability-first default and falls unavailable buckets back to it", () => {
-    expect(resolveWorkerRoutingConfig(undefined, catalog)).toEqual({
-      default: { cli: "claude", model: "opus" },
-      low: { cli: "claude", model: "opus" },
-      medium: { cli: "claude", model: "opus" },
-      high: { cli: "claude", model: "opus" }
+  it("derives distinct automatic routes for low, medium, and high complexity when viable models exist", () => {
+    const automatic = resolveWorkerRoutingConfig(undefined, [
+      {
+        cli: "codex",
+        models: [
+          { id: "gpt-5.6-sol" },
+          { id: "gpt-5.6-terra" },
+          { id: "gpt-5.6-luna" }
+        ]
+      }
+    ])
+
+    expect(automatic).toStrictEqual({
+      default: { cli: "codex", model: "gpt-5.6-terra" },
+      low: { cli: "codex", model: "gpt-5.6-luna" },
+      medium: { cli: "codex", model: "gpt-5.6-terra" },
+      high: { cli: "codex", model: "gpt-5.6-sol" }
     })
+    if (automatic === null) return
+
+    const compiled = compileOrchestrationPlan(
+      plan("Automatic routes", [
+        semanticStage("low", { complexity: "low" }),
+        semanticStage("medium", { complexity: "medium" }),
+        semanticStage("high", { complexity: "high" })
+      ]),
+      automatic
+    )
+
+    expect(compiled.valid).toBe(true)
+    if (!compiled.valid) return
     expect(
-      resolveWorkerRoutingConfig(
-        {
-          ...configured,
-          low: { cli: "codex", model: "retired" }
-        },
-        catalog
-      )?.low
-    ).toEqual({ cli: "claude", model: "opus" })
+      compiled.plan.stages.map((item) => item.assignment?.model)
+    ).toStrictEqual(["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"])
+  })
+
+  it("preserves available saved worker routes and deterministically replaces unavailable routes", () => {
+    const liveCatalog = [
+      {
+        cli: "opencode" as const,
+        models: [{ id: "user/balanced-model" }]
+      },
+      {
+        cli: "codex" as const,
+        models: [
+          { id: "gpt-5.6-luna" },
+          { id: "gpt-5.6-terra" },
+          { id: "gpt-5.6-sol" }
+        ]
+      },
+      {
+        cli: "claude" as const,
+        models: [{ id: "haiku" }, { id: "sonnet" }, { id: "opus" }]
+      }
+    ]
+    const saved: WorkerRoutingConfig = {
+      default: {
+        cli: "codex",
+        model: "gpt-5.6-terra",
+        reasoning: { enabled: true, effort: "high" }
+      },
+      low: {
+        cli: "codex",
+        model: "retired-efficient",
+        reasoning: { enabled: true, effort: "minimal" }
+      },
+      medium: {
+        cli: "opencode",
+        model: "user/balanced-model",
+        reasoning: { enabled: true, effort: "xhigh" }
+      },
+      high: {
+        cli: "claude",
+        model: "retired-strong",
+        reasoning: { enabled: true, effort: "max" }
+      }
+    }
+
+    const expected: WorkerRoutingConfig = {
+      default: saved.default,
+      low: { cli: "claude", model: "haiku" },
+      medium: saved.medium,
+      high: { cli: "claude", model: "opus" }
+    }
+    expect(resolveWorkerRoutingConfig(saved, liveCatalog)).toStrictEqual(expected)
+    expect(
+      resolveWorkerRoutingConfig(saved, [...liveCatalog].reverse())
+    ).toStrictEqual(expected)
+  })
+
+  it("collapses automatic tiers safely when only one model is available", () => {
+    expect(
+      resolveWorkerRoutingConfig(undefined, [
+        { cli: "codex", models: [{ id: "gpt-5.6-sol" }] }
+      ])
+    ).toEqual({
+      default: { cli: "codex", model: "gpt-5.6-sol" },
+      low: { cli: "codex", model: "gpt-5.6-sol" },
+      medium: { cli: "codex", model: "gpt-5.6-sol" },
+      high: { cli: "codex", model: "gpt-5.6-sol" }
+    })
   })
 
   it("decodes legacy routes as provider-default reasoning", () => {

@@ -150,11 +150,11 @@ describe("stagesToGraph", () => {
 })
 
 describe("toPlanArchitectureView", () => {
-  it("returns empty sections and diagrams for an empty plan", () => {
-    expect(toPlanArchitectureView(prd([]))).toEqual({ sections: [], diagrams: [] })
+  it("returns empty sections and stages for an empty plan", () => {
+    expect(toPlanArchitectureView(prd([]))).toEqual({ sections: [], stages: [] })
   })
 
-  it("collects mermaid diagrams from section blocks and stage diagrams", () => {
+  it("keeps section diagrams in their section and stage diagrams in their stage", () => {
     const sections: Array<PlanPrdSection> = [
       {
         id: "context",
@@ -172,10 +172,50 @@ describe("toPlanArchitectureView", () => {
     ]
     const view = toPlanArchitectureView(prd(stages, sections))
     expect(view.sections.map((section) => section.title)).toEqual(["Context"])
-    expect(view.diagrams).toHaveLength(2)
-    expect(view.diagrams[0]).toMatchObject({ id: "diagram-1" })
-    expect(view.diagrams[0]?.source).toContain("graph TD")
-    expect(view.diagrams[1]?.source).toContain("flowchart")
+    expect(view.sections[0]?.blocks[1]).toEqual({
+      kind: "diagram",
+      id: "d1",
+      source: "graph TD; A-->B"
+    })
+    expect(view.stages).toEqual([
+      {
+        id: "a",
+        title: "Stage a",
+        diagrams: [{ id: "sd1", source: "flowchart LR; X-->Y" }]
+      }
+    ])
+  })
+
+  it("keeps every architecture diagram associated with its owning stage", () => {
+    const view = toPlanArchitectureView(
+      prd([
+        stage("a", [], {
+          diagrams: [
+            { id: "a-flow", source: "flowchart LR; Input-->Core" },
+            { id: "a-state", source: "stateDiagram-v2; [*]-->Ready" }
+          ]
+        }),
+        stage("b", ["a"], {
+          diagrams: [{ id: "b-flow", source: "flowchart LR; Core-->UI" }]
+        })
+      ])
+    )
+
+    expect(view.stages).toEqual([
+      {
+        id: "a",
+        title: "Stage a",
+        diagrams: [
+          { id: "a-flow", source: "flowchart LR; Input-->Core" },
+          { id: "a-state", source: "stateDiagram-v2; [*]-->Ready" }
+        ]
+      },
+      {
+        id: "b",
+        title: "Stage b",
+        diagrams: [{ id: "b-flow", source: "flowchart LR; Core-->UI" }]
+      }
+    ])
   })
 })
 

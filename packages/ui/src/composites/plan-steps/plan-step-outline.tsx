@@ -10,9 +10,11 @@ import { PlanStepCard } from "./plan-step-card.js"
  * the pure `@jingler/core` projection — so no plan-document plumbing leaks into
  * the view. A composing/streaming plan (stages still arriving from the planner)
  * needs no special branch: the projection simply yields the stages that exist so
- * far, and the outline renders those cards, growing as more land. Selection is
- * lifted: `selectedStepId` drives the active card and `onSelectStep` reports
- * clicks back up, using the same stage id the Workflow graph keys on.
+ * far, and the outline renders those cards, growing as more land. Each projected
+ * row carries its stage-owned tasks and diagrams intact into `PlanStepCard`.
+ * Selection is lifted: `selectedStepId` drives the active card and
+ * `onSelectStep` reports clicks back up, using the same stage id the Workflow
+ * and Architecture surfaces key on.
  */
 export interface PlanStepOutlineProps {
   readonly prd: PlanPrd

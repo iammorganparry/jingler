@@ -7,6 +7,7 @@ import type {
   PlanPrd,
   PlanPrdSection,
   PlanPrdStage,
+  PlanTask,
   PlanStageComplexity,
   PlanStageExecutionStatus
 } from "./plan-document.js"
@@ -31,6 +32,10 @@ export interface PlanStepView {
   /** Durable worker state; defaults to "queued" for not-yet-executed stages. */
   readonly executionStatus: PlanStageExecutionStatus
   readonly acceptance: ReadonlyArray<PlanAcceptance>
+  /** Planner-authored work items with durable per-task progress. */
+  readonly tasks?: ReadonlyArray<PlanTask>
+  /** Architecture owned by this stage, preserving planner-authored ids. */
+  readonly diagrams?: ReadonlyArray<PlanDiagram>
   /** Ordered approach steps. */
   readonly approach: ReadonlyArray<string>
   /** Structured file declarations. */
@@ -45,10 +50,17 @@ export interface PlanStepView {
   readonly reasoningEffort: string | null
 }
 
-/** Prose sections plus every mermaid diagram found across the document. */
+/** One stage's architecture, kept linked to the Main review card by stage id. */
+export interface PlanArchitectureStageView {
+  readonly id: string
+  readonly title: string
+  readonly diagrams: ReadonlyArray<PlanDiagram>
+}
+
+/** Document prose plus stage-owned architecture groups. */
 export interface PlanArchitectureView {
   readonly sections: ReadonlyArray<PlanPrdSection>
-  readonly diagrams: ReadonlyArray<PlanDiagram>
+  readonly stages: ReadonlyArray<PlanArchitectureStageView>
 }
 
 /** One node per stage in the dependency workflow graph. */
@@ -93,6 +105,8 @@ const toStepView = (stage: PlanPrdStage): PlanStepView => {
     complexity: stage.complexity,
     executionStatus: stage.executionStatus ?? "queued",
     acceptance: stage.acceptance,
+    tasks: stage.tasks ?? [],
+    diagrams: stage.diagrams,
     approach: stage.approach,
     files: stage.files,
     notes: stage.notes,
@@ -101,13 +115,6 @@ const toStepView = (stage: PlanPrdStage): PlanStepView => {
     reasoningEffort: assignment?.reasoning?.effort ?? null
   }
 }
-
-/** Every mermaid source carried by a section's blocks or a stage's diagrams. */
-const sectionDiagramSources = (section: PlanPrdSection): Array<string> =>
-  section.blocks
-    .filter((block): block is Extract<PlanBlock, { kind: "diagram" }> => block.kind === "diagram")
-    .map((block) => block.source.trim())
-    .filter((source) => source.length > 0)
 
 /**
  * Dependency-topological stage order. `buildPlanExecutionGraph` groups stages by
@@ -145,21 +152,21 @@ export const toPlanStepViews = (prd: PlanPrd): Array<PlanStepView> =>
   orderedStages(prd).map(toStepView)
 
 /**
- * Prose sections (verbatim) plus every mermaid diagram found across those
- * sections and the stages, ordered sections-first then stages, and assigned
- * stable sequential ids. Empty arrays when the plan carries neither.
+ * Prose sections (verbatim) plus stage-owned mermaid diagrams. Stage and diagram
+ * ids survive projection so Architecture can link back to the corresponding
+ * Main card. Blank diagrams are ignored; empty stages need no architecture group.
  */
 export const toPlanArchitectureView = (prd: PlanPrd): PlanArchitectureView => {
-  const sources = [
-    ...prd.sections.flatMap(sectionDiagramSources),
-    ...prd.stages.flatMap((stage) => stage.diagrams.map((diagram) => diagram.source.trim()))
-  ].filter((source) => source.length > 0)
   return {
     sections: prd.sections,
-    diagrams: sources.map((source, index) => ({
-      id: `diagram-${index + 1}`,
-      source
-    }))
+    stages: orderedStages(prd).flatMap((stage) => {
+      const diagrams = stage.diagrams
+        .map((diagram) => ({ ...diagram, source: diagram.source.trim() }))
+        .filter((diagram) => diagram.source.length > 0)
+      return diagrams.length > 0
+        ? [{ id: stage.id, title: stage.title, diagrams }]
+        : []
+    })
   }
 }
 

@@ -8,6 +8,11 @@ import type {
 } from "./plan-document.js"
 import { workerReasoningSettingIssue } from "./plan-document.js"
 import type { ReasoningSetting } from "./domain.js"
+import {
+  AUTOMATIC_MODEL_PROVIDER_ORDER,
+  modelCapabilityTier,
+  type ModelCapabilityTier
+} from "./models.js"
 
 export type PlanExecutionDiagnosticCode =
   | "duplicate-stage"
@@ -160,35 +165,62 @@ const routeAvailable = (
       provider.models.some((model) => model.id === route.model)
   )
 
+const automaticWorkerRoutingConfig = (
+  catalog: ReadonlyArray<WorkerRouteCatalogEntry>
+): WorkerRoutingConfig | null => {
+  const candidates = [...catalog]
+    .sort(
+      (left, right) =>
+        AUTOMATIC_MODEL_PROVIDER_ORDER.indexOf(left.cli) -
+        AUTOMATIC_MODEL_PROVIDER_ORDER.indexOf(right.cli)
+    )
+    .flatMap((provider) =>
+      provider.models.map((model): WorkerModelRoute => ({
+        cli: provider.cli,
+        model: model.id
+      }))
+    )
+  if (candidates.length === 0) return null
+
+  const routeFor = (
+    tiers: ReadonlyArray<ModelCapabilityTier>
+  ): WorkerModelRoute =>
+    tiers
+      .map((tier) =>
+        candidates.find((candidate) => modelCapabilityTier(candidate.model) === tier)
+      )
+      .find((candidate): candidate is WorkerModelRoute => candidate !== undefined) ??
+    candidates[0]!
+
+  const low = routeFor(["efficient", "balanced", "strongest"])
+  const medium = routeFor(["balanced", "strongest", "efficient"])
+  const high = routeFor(["strongest", "balanced", "efficient"])
+  return { default: medium, low, medium, high }
+}
+
 /**
  * Resolve persisted worker routing against the same live catalogue used for
- * planner advertising and approval. An unavailable bucket falls back to the
- * configured default; an unavailable default falls back to the first live
- * planning route. With no saved config, every bucket uses that capability-first
- * route so a cheap orchestrator cannot downgrade implementation by accident.
+ * planner advertising and approval. Available saved routes remain authoritative;
+ * each missing route returns to its own capability-tier automatic selection.
+ * With no saved config, low, medium, and high resolve independently to efficient,
+ * balanced, and strongest live models (collapsing safely when a tier is absent).
  */
 export const resolveWorkerRoutingConfig = (
   configured: WorkerRoutingConfig | null | undefined,
   catalog: ReadonlyArray<WorkerRouteCatalogEntry>
 ): WorkerRoutingConfig | null => {
-  const firstProvider = catalog.find((provider) => provider.models.length > 0)
-  const firstModel = firstProvider?.models[0]
-  if (firstProvider === undefined || firstModel === undefined) return null
-  const safeDefault: WorkerModelRoute = {
-    cli: firstProvider.cli,
-    model: firstModel.id
-  }
-  const fallback = routeAvailable(configured?.default, catalog)
-    ? configured.default
-    : safeDefault
-  const bucket = (
-    route: WorkerModelRoute | undefined
-  ): WorkerModelRoute => routeAvailable(route, catalog) ? route : fallback
+  const automatic = automaticWorkerRoutingConfig(catalog)
+  if (automatic === null) return null
+  if (configured === null || configured === undefined) return automatic
+  const bucket = <Key extends keyof WorkerRoutingConfig>(
+    key: Key
+  ): WorkerRoutingConfig[Key] =>
+    routeAvailable(configured[key], catalog) ? configured[key] : automatic[key]
   return {
-    default: fallback,
-    low: bucket(configured?.low),
-    medium: bucket(configured?.medium),
-    high: bucket(configured?.high)
+    default: bucket("default"),
+    low: bucket("low"),
+    medium: bucket("medium"),
+    high: bucket("high")
   }
 }
 

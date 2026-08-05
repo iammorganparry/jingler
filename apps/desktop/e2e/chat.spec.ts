@@ -400,7 +400,7 @@ test("a worktree session without a PR shows a Changes tab with the Code Review v
   await expect(rail.getByTitle("config.json")).toBeVisible()
   await expect(rail.getByTitle("src/auth.test.ts")).toHaveCount(0)
 
-  await rail.getByRole("button", { name: "Mark viewed" }).click()
+  await rail.getByRole("checkbox", { name: "Mark viewed" }).click()
   await expect(window.getByRole("button", { name: "Viewed · code collapsed" })).toBeVisible()
 
   await window.getByRole("button", { name: "Focus diff" }).click()

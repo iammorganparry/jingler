@@ -1630,6 +1630,20 @@ export const executeOrchestration = (
               )
             ),
         callbacks: {
+          onTaskState: (update) =>
+            store
+              .setTaskStatusLatest(worktreePath, {
+                planId,
+                stageId: update.stageId,
+                taskId: update.taskId,
+                status: update.status,
+                expectedStageFingerprint: update.stageFingerprint
+              })
+              .pipe(
+                Effect.provide(persistence),
+                Effect.mapError(orchestrationPersistenceError),
+                Effect.asVoid
+              ),
           onStageState: (update) => {
             const status = persistedStageStatus(update.status)
             return status === null

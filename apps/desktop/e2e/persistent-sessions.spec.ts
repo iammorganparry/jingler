@@ -227,8 +227,7 @@ test("a direct session completes a turn and deletion preserves its checkout", as
   if ((await jingler.getAttribute("aria-pressed")) === "true") {
     await jingler.click()
   }
-  await window.getByRole("button", { name: "plan", exact: true }).click()
-  await window.getByRole("menuitem", { name: "auto" }).click()
+  await expect(window.getByRole("button", { name: "auto", exact: true })).toBeVisible()
   await composer.fill("Run the direct-checkout verification.")
   await composer.press("Enter")
   await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })

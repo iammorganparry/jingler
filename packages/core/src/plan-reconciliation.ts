@@ -1,10 +1,12 @@
 import type {
+  PlanAcceptance,
   PlanAnnotation,
   PlanCommentMessage,
   PlanPrd,
   PlanPrdStage,
   PlanStageAssignment,
-  PlanStageExecutionStatus
+  PlanStageExecutionStatus,
+  PlanTask
 } from "./plan-document.js"
 
 export interface PlanReconciliationDiagnostic {
@@ -26,9 +28,11 @@ export type PlanAmendmentReconciliation =
     }
 
 /**
- * Stable semantic identity for one dispatched stage. Worker status, assignment,
- * and per-criterion evidence/status are mechanical and deliberately omitted, so
- * re-issuing a plan with the same semantics never re-queues settled work.
+ * Stable semantic identity for one dispatched stage. Worker/task status,
+ * assignment, and per-criterion evidence/status are mechanical and deliberately
+ * omitted, so re-issuing a plan with the same semantics never re-queues settled
+ * work. Task text, concrete test references, and diagram identities remain
+ * semantic because changing any of them changes what the stage promises.
  */
 export const planStageSemanticFingerprint = (stage: PlanPrdStage): string =>
   JSON.stringify({
@@ -38,14 +42,19 @@ export const planStageSemanticFingerprint = (stage: PlanPrdStage): string =>
     dependencies: [...(stage.dependencies ?? [])].sort(),
     complexity: stage.complexity ?? "medium",
     approach: stage.approach,
+    tasks: (stage.tasks ?? []).map((task) => ({ id: task.id, text: task.text })),
     files: [...stage.files]
       .map((file) => ({ path: file.path, change: file.change }))
       .sort((left, right) => left.path.localeCompare(right.path)),
-    diagrams: stage.diagrams.map((diagram) => diagram.source),
+    diagrams: stage.diagrams.map((diagram) => ({ id: diagram.id, source: diagram.source })),
     notes: stage.notes,
     acceptance: stage.acceptance.map((criterion) => ({
       id: criterion.id,
-      text: criterion.text
+      text: criterion.text,
+      testReferences: (criterion.testReferences ?? []).map((reference) => ({
+        path: reference.path,
+        cases: reference.cases
+      }))
     }))
   })
 
@@ -90,6 +99,37 @@ const mergeAnnotation = (
     extra.push(message)
   }
   return { ...previous, messages: [...previous.messages, ...extra] }
+}
+
+const reconcileAcceptance = (
+  previous: PlanPrdStage | undefined,
+  replacement: PlanPrdStage,
+  stageChanged: boolean
+): ReadonlyArray<PlanAcceptance> => {
+  const previousCriteria = new Map(
+    (previous?.acceptance ?? []).map((criterion) => [criterion.id, criterion])
+  )
+  return replacement.acceptance.map((criterion) => {
+    const prior = previousCriteria.get(criterion.id)
+    const normalized = { ...criterion, testReferences: criterion.testReferences ?? [] }
+    return !stageChanged && prior !== undefined && prior.text === criterion.text
+      ? { ...normalized, status: prior.status, evidence: prior.evidence }
+      : { ...normalized, status: "pending" as const, evidence: null }
+  })
+}
+
+/** Preserve mechanical progress only while a task id keeps the same semantic text. */
+const reconcileTasks = (
+  previous: PlanPrdStage | undefined,
+  replacement: PlanPrdStage
+): ReadonlyArray<PlanTask> => {
+  const previousTasks = new Map((previous?.tasks ?? []).map((task) => [task.id, task]))
+  return (replacement.tasks ?? []).map((task) => {
+    const prior = previousTasks.get(task.id)
+    return prior !== undefined && prior.text === task.text
+      ? { ...task, status: prior.status }
+      : { ...task, status: "pending" as const }
+  })
 }
 
 /**
@@ -171,19 +211,10 @@ export const reconcilePlanAmendment = (
 
     const assignment = reconcileStageAssignment(previousStage, replacementStage, stableAgentId)
 
-    // Unchanged criteria keep prior status + evidence; changed/new go pending.
-    const previousCriteria = new Map(
-      (previousStage?.acceptance ?? []).map((criterion) => [criterion.id, criterion])
-    )
-    const acceptance = replacementStage.acceptance.map((criterion) => {
-      const prior = previousCriteria.get(criterion.id)
-      if (!changed && prior !== undefined && prior.text === criterion.text) {
-        return { ...criterion, status: prior.status, evidence: prior.evidence }
-      }
-      return { ...criterion, status: "pending" as const, evidence: null }
-    })
+    const acceptance = reconcileAcceptance(previousStage, replacementStage, changed)
+    const tasks = reconcileTasks(previousStage, replacementStage)
 
-    return { ...replacementStage, assignment, executionStatus: status, acceptance }
+    return { ...replacementStage, assignment, executionStatus: status, tasks, acceptance }
   })
 
   // Preserve/merge prior comment threads onto the replacement.

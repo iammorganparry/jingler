@@ -6,6 +6,7 @@ import type {
   PlanDocumentStatus,
   PlanPrd,
   PlanStageExecutionStatus,
+  PlanTaskStatus,
   SessionPlanArtifact
 } from "@jingler/core"
 import {
@@ -31,6 +32,7 @@ import {
   setAnnotationStatus,
   setCriterionStatus as setPlanCriterionStatus,
   setStageExecution,
+  setTaskStatus as setPlanTaskStatus,
   updateMentionDeliveries,
   updateMessageDelivery,
   upsertWorkerAnnotation
@@ -517,6 +519,32 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           ) return { plan: null }
           return {
             plan: setPlanCriterionStatus(plan, input.criterionId, input.status, input.evidence)
+          }
+        })
+
+      const setTaskStatusLatest = (
+        worktreePath: string,
+        input: {
+          readonly planId: string
+          readonly stageId: string
+          readonly taskId: string
+          readonly status: PlanTaskStatus
+          readonly expectedStageFingerprint?: string
+        }
+      ): Effect.Effect<
+        PlanDocument | null,
+        PlanValidationError | PlanPersistenceError,
+        PlanStoreEnv
+      > =>
+        updateMechanical(worktreePath, input.planId, (plan) => {
+          const stage = plan.stages.find((candidate) => candidate.id === input.stageId)
+          if (
+            stage === undefined ||
+            (input.expectedStageFingerprint !== undefined &&
+              planStageSemanticFingerprint(stage) !== input.expectedStageFingerprint)
+          ) return { plan: null }
+          return {
+            plan: setPlanTaskStatus(plan, input.stageId, input.taskId, input.status)
           }
         })
 
@@ -1162,6 +1190,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         updateDocument,
         setStageExecutionStatus,
         setCriterionStatusLatest,
+        setTaskStatusLatest,
         settleOrchestration,
         readOrchestrationCheckpoints,
         writeOrchestrationCheckpoint,

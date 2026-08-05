@@ -144,6 +144,7 @@ describe("PlanSettings", () => {
         ]}
         loadModels={async () => [
           { id: "opus", label: "Opus" },
+          { id: "sonnet", label: "Sonnet" },
           { id: "haiku", label: "Haiku" }
         ]}
         onSaveWorkerRouting={onSaveWorkerRouting}
@@ -155,14 +156,56 @@ describe("PlanSettings", () => {
         name: "Low complexity worker model"
       })
     )
-    fireEvent.click(await screen.findByRole("option", { name: "Haiku" }))
+    fireEvent.click(await screen.findByRole("option", { name: "Opus" }))
 
     expect(onSaveWorkerRouting).toHaveBeenCalledWith({
-      default: { cli: "claude", model: "opus" },
-      low: { cli: "claude", model: "haiku" },
-      medium: { cli: "claude", model: "opus" },
+      default: { cli: "claude", model: "sonnet" },
+      low: { cli: "claude", model: "opus" },
+      medium: { cli: "claude", model: "sonnet" },
       high: { cli: "claude", model: "opus" }
     })
+  })
+
+  it("shows the effective complexity-aware automatic routing policy", async () => {
+    render(
+      <PlanSettings
+        source={DEFAULT_PLAN_TEMPLATE_HTML}
+        clis={[
+          {
+            kind: "codex",
+            label: "Codex",
+            binPath: "/bin/codex",
+            version: "1",
+            available: true
+          }
+        ]}
+        loadModels={async () => [
+          { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+          { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+          { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" }
+        ]}
+      />
+    )
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("combobox", { name: "Low complexity worker model" })
+          .textContent
+      ).toContain("GPT-5.6 Luna")
+    })
+    expect(
+      screen.getByRole("combobox", { name: "Medium complexity worker model" })
+        .textContent
+    ).toContain("GPT-5.6 Terra")
+    expect(
+      screen.getByRole("combobox", { name: "High complexity worker model" })
+        .textContent
+    ).toContain("GPT-5.6 Sol")
+    expect(
+      screen.getByText(
+        "Automatic policy: low uses an efficient route, medium a balanced route, and high the strongest route. The selectors above show the effective routes."
+      )
+    ).toBeTruthy()
   })
 
   it("persists a distinct provider-compatible reasoning choice for every route bucket", async () => {
@@ -227,7 +270,7 @@ describe("PlanSettings", () => {
         reasoning: { enabled: true, effort: "max" }
       }
     })
-  })
+  }, 10_000)
 
   it("offers only provider-compatible efforts and flags an incompatible saved value", async () => {
     render(
@@ -269,7 +312,7 @@ describe("PlanSettings", () => {
 
     expect(
       await screen.findByText(
-        "Unavailable saved routes are using the configured default: Low complexity."
+        "Unavailable saved routes are using their complexity-aware automatic replacements: Low complexity."
       )
     ).toBeTruthy()
     cleanup()

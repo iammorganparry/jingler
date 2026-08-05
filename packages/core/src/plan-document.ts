@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 import { CliKind } from "./cli.js"
 import type { Plan } from "./conversation.js"
 import type { ReasoningEffort, ReasoningSetting } from "./domain.js"
@@ -17,13 +17,40 @@ import type { ReasoningEffort, ReasoningSetting } from "./domain.js"
 export const PlanAcceptanceStatus = Schema.Literal("pending", "passed", "failed", "waived")
 export type PlanAcceptanceStatus = Schema.Schema.Type<typeof PlanAcceptanceStatus>
 
+/** One concrete repository test location and the named cases that prove a criterion. */
+export const PlanTestReference = Schema.Struct({
+  path: Schema.String,
+  cases: Schema.Array(Schema.String)
+})
+export type PlanTestReference = Schema.Schema.Type<typeof PlanTestReference>
+
 export const PlanAcceptance = Schema.Struct({
   id: Schema.String,
   text: Schema.String,
+  /** Missing on legacy plans; decoded to an empty list for safe consumers. */
+  testReferences: Schema.optionalToOptional(
+    Schema.Array(PlanTestReference),
+    Schema.Array(PlanTestReference),
+    {
+      decode: (references) => references.pipe(Option.orElse(() => Option.some([]))),
+      encode: (references) => references
+    }
+  ),
   status: PlanAcceptanceStatus,
   evidence: Schema.NullOr(Schema.String)
 })
 export type PlanAcceptance = Schema.Schema.Type<typeof PlanAcceptance>
+
+/** Durable progress for a planner-authored implementation task. */
+export const PlanTaskStatus = Schema.Literal("pending", "in-progress", "completed", "blocked")
+export type PlanTaskStatus = Schema.Schema.Type<typeof PlanTaskStatus>
+
+export const PlanTask = Schema.Struct({
+  id: Schema.String,
+  text: Schema.String,
+  status: PlanTaskStatus
+})
+export type PlanTask = Schema.Schema.Type<typeof PlanTask>
 
 /**
  * A W3C-style TextQuote anchor: the exact `quote` plus a little `prefix`/`suffix`
@@ -323,6 +350,11 @@ export const PlanPrdStage = Schema.Struct({
   intent: Schema.String,
   /** Ordered approach steps (was the stage's `<h3>Approach</h3>` list). */
   approach: Schema.Array(Schema.String),
+  /** Missing on legacy plans; decoded to an empty list for safe consumers. */
+  tasks: Schema.optionalToOptional(Schema.Array(PlanTask), Schema.Array(PlanTask), {
+    decode: (tasks) => tasks.pipe(Option.orElse(() => Option.some([]))),
+    encode: (tasks) => tasks
+  }),
   /** Repository-relative files the stage touches, with change kind + diff stats. */
   files: Schema.Array(PlanFile),
   /** Embedded flow diagrams. */
@@ -439,6 +471,7 @@ export const planTextProjection = (plan: PlanPrd): string => {
   for (const stage of plan.stages) {
     parts.push(stage.title, stage.intent)
     for (const step of stage.approach) parts.push(step)
+    for (const task of stage.tasks ?? []) parts.push(task.text)
     for (const block of stage.notes) parts.push(planBlockText(block))
     for (const criterion of stage.acceptance) parts.push(criterion.text)
   }

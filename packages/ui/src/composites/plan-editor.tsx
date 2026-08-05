@@ -1,7 +1,9 @@
-import {
-  type PlanPrd,
-  type ExecutionMode,
-  type PlanDocument
+import type {
+  ExecutionMode,
+  PlanAcceptanceStatus,
+  PlanDocument,
+  PlanPrd,
+  PlanTaskStatus
 } from "@jingler/core"
 import type { ReactNode } from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -18,6 +20,35 @@ const asString = (value: unknown): string =>
   typeof value === "string" ? value : ""
 const asRecord = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {}
+const asRecords = (value: unknown): ReadonlyArray<Record<string, unknown>> =>
+  asArray(value)
+    .filter(
+      (item): item is Record<string, unknown> =>
+        item !== null && typeof item === "object" && !Array.isArray(item)
+    )
+const asStrings = (value: unknown): ReadonlyArray<string> =>
+  asArray(value).filter((item): item is string => typeof item === "string")
+
+const TASK_STATUSES: ReadonlySet<string> = new Set([
+  "pending",
+  "in-progress",
+  "completed",
+  "blocked"
+])
+const ACCEPTANCE_STATUSES: ReadonlySet<string> = new Set([
+  "pending",
+  "passed",
+  "failed",
+  "waived"
+])
+const asTaskStatus = (value: unknown): PlanTaskStatus =>
+  typeof value === "string" && TASK_STATUSES.has(value)
+    ? (value as PlanTaskStatus)
+    : "pending"
+const asAcceptanceStatus = (value: unknown): PlanAcceptanceStatus =>
+  typeof value === "string" && ACCEPTANCE_STATUSES.has(value)
+    ? (value as PlanAcceptanceStatus)
+    : "pending"
 
 /**
  * Normalize a parsed plan candidate into a render-safe `PlanPrd`. A partial
@@ -42,10 +73,31 @@ const normalizePlan = (candidate: Record<string, unknown>): PlanPrd =>
         title: asString(s.title),
         intent: asString(s.intent),
         approach: asArray(s.approach),
+        tasks: asRecords(s.tasks).map((task, index) => ({
+          id: asString(task.id) || `task-${index + 1}`,
+          text: asString(task.text),
+          status: asTaskStatus(task.status)
+        })),
         files: asArray(s.files),
-        diagrams: asArray(s.diagrams),
+        diagrams: asRecords(s.diagrams)
+          .map((diagram, index) => ({
+            id: asString(diagram.id) || `diagram-${index + 1}`,
+            source: asString(diagram.source)
+          }))
+          .filter((diagram) => diagram.source.trim().length > 0),
         notes: asArray(s.notes),
-        acceptance: asArray(s.acceptance),
+        acceptance: asRecords(s.acceptance).map((criterion, index) => ({
+          id: asString(criterion.id) || `criterion-${index + 1}`,
+          text: asString(criterion.text),
+          testReferences: asRecords(criterion.testReferences)
+            .map((reference) => ({
+              path: asString(reference.path),
+              cases: asStrings(reference.cases)
+            }))
+            .filter((reference) => reference.path.length > 0),
+          status: asAcceptanceStatus(criterion.status),
+          evidence: typeof criterion.evidence === "string" ? criterion.evidence : null
+        })),
         dependencies: asArray(s.dependencies)
       }
     }),
@@ -305,7 +357,14 @@ export function PlanEditor({
         {page === "architecture" && (
           <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-14">
             {projection ? (
-              <PlanArchitecture prd={projection} className="mx-auto w-full max-w-[760px]" />
+              <PlanArchitecture
+                prd={projection}
+                className="mx-auto w-full max-w-[760px]"
+                onOpenStage={(stageId) => {
+                  setSelectedStepId(stageId)
+                  setPage("main")
+                }}
+              />
             ) : (
               <EmptyPage>No architecture notes yet.</EmptyPage>
             )}

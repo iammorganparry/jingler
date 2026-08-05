@@ -70,7 +70,10 @@ test("opens a path Codex created after the initial workspace listing", async ({ 
   await expect(link).toBeVisible({ timeout: 20_000 })
   await link.click()
   await expect(window.getByRole("button", { name: "Hide preview" })).toBeVisible()
-  await expect(window.getByRole("heading", { name: "Codex-created report" })).toBeVisible({
+  // Markdown assets render in the native preview surface, outside Chromium's
+  // DOM. The dock tab is the observable in-app proof that the created path
+  // opened successfully.
+  await expect(window.getByTitle("reports/codex-created.md", { exact: true })).toBeVisible({
     timeout: 20_000
   })
 })

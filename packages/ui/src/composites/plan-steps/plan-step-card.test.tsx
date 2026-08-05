@@ -1,13 +1,24 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest"
 import type { PlanStepView } from "@jingler/core"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { PlanFileControlsProvider } from "../plan-doc/plan-file-controls.js"
 import { PlanWorkerControlsProvider } from "../plan-doc/plan-worker-controls.js"
 import { PlanStepCard } from "./plan-step-card.js"
 
-afterEach(cleanup)
+const mermaid = vi.hoisted(() => ({
+  initialize: vi.fn(),
+  render: vi.fn(async () => ({ svg: '<svg aria-label="Rendered diagram"></svg>' }))
+}))
+
+vi.mock("mermaid", () => ({ default: mermaid }))
+
+afterEach(() => {
+  cleanup()
+  globalThis.document.documentElement.style.removeProperty("--sb-panel")
+  vi.clearAllMocks()
+})
 
 const step: PlanStepView = {
   id: "01",
@@ -16,6 +27,8 @@ const step: PlanStepView = {
   complexity: "low",
   executionStatus: "running",
   acceptance: [],
+  tasks: [],
+  diagrams: [],
   files: [{ path: "src/auth/token-store.ts", change: "M", added: 2, removed: 1 }],
   approach: [],
   notes: [],
@@ -111,4 +124,100 @@ describe("PlanStepCard file chips", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show less" }))
     expect(screen.queryByText("src/file-14.ts")).toBeNull()
   })
+})
+
+describe("PlanStepCard stage review", () => {
+  it("renders task progress and the owning stage architecture inline", () => {
+    render(
+      <PlanStepCard
+        step={{
+          ...step,
+          tasks: [
+            { id: "task-1", text: "Project the stage data", status: "completed" },
+            { id: "task-2", text: "Render the checklist", status: "in-progress" },
+            { id: "task-3", text: "Verify the layout", status: "blocked" }
+          ],
+          diagrams: [
+            { id: "stage-flow", source: "flowchart LR; Contract-->Card" }
+          ]
+        }}
+      />
+    )
+
+    expect(screen.getByText("1 of 3 completed")).toBeVisible()
+    const taskList = screen.getByRole("list", { name: "Stage tasks" })
+    expect(taskList).toHaveTextContent("Project the stage data")
+    expect(taskList).toHaveTextContent("Render the checklist")
+    expect(taskList).toHaveTextContent("Verify the layout")
+    expect(screen.getByRole("region", { name: "Architecture for Stage one" })).toBeVisible()
+    expect(screen.getByLabelText("Diagram stage-flow")).toBeVisible()
+  })
+
+  it("renders stage diagrams with the token-themed hand-drawn Mermaid look", async () => {
+    globalThis.document.documentElement.style.setProperty("--sb-panel", "rgb(1, 2, 3)")
+    render(
+      <PlanStepCard
+        step={{
+          ...step,
+          diagrams: [{ id: "stage-flow", source: "flowchart LR; Contract-->Card" }]
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(mermaid.initialize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          look: "handDrawn",
+          handDrawnSeed: 1,
+          theme: "base",
+          themeVariables: expect.objectContaining({ primaryColor: "rgb(1, 2, 3)" })
+        })
+      )
+    })
+  })
+})
+
+describe("PlanStepCard test traceability", () => {
+  it("opens a referenced test file and shows its exact named cases", () => {
+    const open = vi.fn()
+    render(
+      <PlanFileControlsProvider
+        knownFiles={new Set(["packages/core/src/plan-view.test.ts"])}
+        open={open}
+      >
+        <PlanStepCard
+          step={{
+            ...step,
+            acceptance: [
+              {
+                id: "01.1",
+                text: "Projection keeps diagram ownership.",
+                testReferences: [
+                  {
+                    path: "packages/core/src/plan-view.test.ts",
+                    cases: [
+                      "keeps every architecture diagram associated with its owning stage",
+                      "returns empty sections and stages for an empty plan"
+                    ]
+                  }
+                ],
+                status: "pending",
+                evidence: null
+              }
+            ]
+          }}
+        />
+      </PlanFileControlsProvider>
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open packages/core/src/plan-view.test.ts" })
+    )
+    expect(open).toHaveBeenCalledWith("packages/core/src/plan-view.test.ts")
+    expect(
+      screen.getByText("keeps every architecture diagram associated with its owning stage")
+    ).toBeVisible()
+    expect(screen.getByText("returns empty sections and stages for an empty plan")).toBeVisible()
+  })
+
 })

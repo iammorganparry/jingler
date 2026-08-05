@@ -238,6 +238,116 @@ test("an orchestrator completes bounded work directly with its auto tools", asyn
   expect(existsSync(planFile)).toBe(false)
 })
 
+test("complexity-aware workers report task progress and reconcile without one-model routing", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: {
+      orchestrator: { cli: "codex", model: "gpt-5.6-sol" }
+    }
+  })
+  const { window, home } = launched
+  await expect(appShell(window)).toBeVisible()
+
+  await window.getByTestId("new-session").click()
+  await window
+    .getByPlaceholder("Leave blank for agent naming")
+    .fill("Complexity-aware task routing")
+  await window.getByRole("button", { name: "Create" }).click()
+  await expect(sessionRow(window, "Complexity-aware task routing")).toBeVisible()
+
+  const sessions = JSON.parse(
+    readFileSync(join(home, "jingler", "sessions.json"), "utf8")
+  )
+  const worktreePath = sessions[0].worktreePath as string
+  const planFile = join(planDirectory(home, worktreePath), "current-plan.json")
+  const planDocument = () => JSON.parse(readFileSync(planFile, "utf8"))
+  const composer = window.getByPlaceholder("Message Codex…")
+  await composer.fill(
+    "[[plan]] [[complexity-routing]] [[worker-hold]] refactor auth to a TokenStore"
+  )
+  await composer.press("Enter")
+  await expect.poll(() => existsSync(planFile), { timeout: 20_000 }).toBe(true)
+
+  const routeStages = ["s_06", "s_routing_medium", "s_04"]
+  await expect
+    .poll(() =>
+      planDocument().plan.stages
+        .filter((stage: { id: string }) => routeStages.includes(stage.id))
+        .map((stage: { complexity: string }) => stage.complexity)
+        .sort()
+    )
+    .toEqual(["high", "low", "medium"])
+  const routedModels = routeStages.map((stageId) =>
+    planDocument().plan.stages.find(
+      (stage: { id: string }) => stage.id === stageId
+    ).assignment.model as string
+  )
+  expect(new Set(routedModels).size).toBeGreaterThan(1)
+  expect(routedModels.every((model) => model === "gpt-5.6-sol")).toBe(false)
+
+  await window.getByRole("button", { name: "Plan Review" }).first().click()
+  await window.getByRole("button", { name: "More plan actions" }).click()
+  await window
+    .getByRole("menuitem", { name: "Approve and auto", exact: true })
+    .click()
+
+  await expect
+    .poll(() => {
+      const stage = planDocument().plan.stages.find(
+        (candidate: { id: string }) => candidate.id === "s_06"
+      )
+      return {
+        task: stage.tasks[0].status,
+        acceptance: stage.acceptance[0].status
+      }
+    }, { timeout: 20_000 })
+    .toEqual({ task: "in-progress", acceptance: "pending" })
+
+  const releaseStage = window.locator('[data-step-id="s_06"]')
+  await expect(
+    releaseStage
+      .getByRole("list", { name: "Stage tasks" })
+      .getByText("In progress", { exact: true })
+  ).toBeVisible()
+  const releaseAgent = planDocument().plan.stages.find(
+    (stage: { id: string }) => stage.id === "s_06"
+  ).assignment.agentId as string
+  await releaseStage
+    .getByRole("button", { name: `Stop worker ${releaseAgent}`, exact: true })
+    .click()
+  await expect
+    .poll(() =>
+      planDocument().plan.stages.find(
+        (stage: { id: string }) => stage.id === "s_06"
+      ).executionStatus
+    )
+    .toBe("interrupted")
+  await expect(
+    window.getByText("needs verification", { exact: true }).first()
+  ).toBeVisible({ timeout: 20_000 })
+  await releaseStage
+    .getByRole("button", { name: `Retry worker ${releaseAgent}`, exact: true })
+    .click()
+
+  await expect(window.getByRole("button", { name: "Plan completed" })).toBeVisible({
+    timeout: 30_000
+  })
+  const completed = planDocument()
+  expect(completed.status).toBe("done")
+  expect(
+    completed.plan.stages.every((stage: {
+      tasks: ReadonlyArray<{ status: string }>
+      acceptance: ReadonlyArray<{ status: string }>
+    }) =>
+      stage.tasks.every((task) => task.status === "completed") &&
+      stage.acceptance.every((criterion) => criterion.status === "passed")
+    )
+  ).toBe(true)
+})
+
 test("a new orchestrator session runs parallel workers and reconciles a mid-run amendment", async ({
   launchApp
 }) => {
@@ -277,13 +387,13 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
         ).workerRouting
     )
     .toMatchObject({
-      default: { cli: "claude", model: "opus" },
+      default: { cli: "claude", model: "sonnet[1m]" },
       low: {
         cli: "codex",
         model: "gpt-5.6-terra",
         reasoning: { enabled: true, effort: "xhigh" }
       },
-      medium: { cli: "claude", model: "opus" },
+      medium: { cli: "claude", model: "sonnet[1m]" },
       high: { cli: "claude", model: "opus" }
     })
   await window.getByRole("button", { name: "Close settings" }).click()
@@ -539,7 +649,7 @@ test("a stopped worker stays interrupted across restart and retries from its che
   ).toContainText("In progress")
   await expect(
     first.window.getByTestId("plan-progress-stage-s_06")
-  ).toContainText("agent-02 · opus")
+  ).toContainText("agent-02 · haiku")
   await first.window.getByTestId("plan-progress-stage-s_06").click()
   await expect(first.window.getByTestId("plan-review-container")).toBeVisible()
 
@@ -610,7 +720,7 @@ test("a stopped worker stays interrupted across restart and retries from its che
     .click()
   await expect(
     reopened.window
-      .getByRole("button", { name: "Retry worker agent-02" })
+      .getByRole("button", { name: "Retry worker agent-02", exact: true })
       .first()
   ).toBeVisible()
   // (The old editable-plan "Synced" indicator was removed with the in-place
@@ -618,7 +728,7 @@ test("a stopped worker stays interrupted across restart and retries from its che
   // the checkpoint retry below verify the plan re-hydrated.)
 
   await reopened.window
-    .getByRole("button", { name: "Retry worker agent-02" })
+    .getByRole("button", { name: "Retry worker agent-02", exact: true })
     .first()
     .click()
   await expect

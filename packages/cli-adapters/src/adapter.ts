@@ -447,7 +447,8 @@ export const scriptedPlanPrd = (
   sessionId: string,
   rev: number,
   holdWorker = false,
-  includeAuditStage = false
+  includeAuditStage = false,
+  includeRoutingStage = false
 ): PlanPrd => {
   const assignment = {
     agentId: "worker-auth",
@@ -461,27 +462,69 @@ export const scriptedPlanPrd = (
     dependencies: ReadonlyArray<string>,
     complexity: "low" | "medium" | "high",
     files: ReadonlyArray<{ path: string; change: "A" | "M" | "D" }>,
-    acceptance: ReadonlyArray<{ id: string; text: string; status: "pending" | "passed" | "failed" | "waived" }>,
+    acceptance: ReadonlyArray<{
+      id: string
+      text: string
+      status: "pending" | "passed" | "failed" | "waived"
+      testReferences?: ReadonlyArray<{ path: string; cases: ReadonlyArray<string> }>
+    }>,
     notes: ReadonlyArray<{ kind: "prose"; id: string; text: string }> = []
   ) => ({
     id,
     title,
     intent: `${title}.`,
     approach: [],
+    tasks: [
+      {
+        id: `${id}.task.1`,
+        text: id === "s_01" ? "Trace the existing token path" : `Implement ${title.toLowerCase()}`,
+        status: "pending" as const
+      },
+      {
+        id: `${id}.task.2`,
+        text: id === "s_01" ? "Document the stage boundary" : `Verify ${title.toLowerCase()}`,
+        status: "pending" as const
+      }
+    ],
     files: files.map((f) => ({ ...f })),
-    diagrams: [],
+    diagrams: id === "s_01"
+      ? [{ id: "audit-flow", source: "flowchart LR\n  Session --> TokenStore" }]
+      : [],
     notes,
-    acceptance: acceptance.map((a) => ({ ...a, evidence: null })),
+    acceptance: acceptance.map((a) => ({
+      ...a,
+      testReferences: a.testReferences?.map((reference) => ({
+        path: reference.path,
+        cases: [...reference.cases]
+      })) ?? [],
+      evidence: null
+    })),
     dependencies: [...dependencies],
     complexity,
     assignment: { ...assignment }
   })
   const stages = [
-    stage("s_01", "Audit session middleware", [], "low", [{ path: "src/auth/memory-store.ts", change: "M" }], [{ id: "s_01.1", text: "The current token read path is documented.", status: "pending" }]),
+    stage("s_01", "Audit session middleware", [], "low", [{ path: "src/auth/memory-store.ts", change: "M" }], [{
+      id: "s_01.1",
+      text: "The current token read path is documented.",
+      status: "pending",
+      testReferences: [{
+        path: "src/auth/session.test.ts",
+        cases: ["keeps stage review traceable"]
+      }]
+    }]),
     stage("s_02", "Create TokenStore module", ["s_01"], "medium", [{ path: "src/auth/token-store.ts", change: "A" }], [{ id: "s_02.1", text: "TokenStore exposes get/set/refresh and is covered by tests.", status: "passed" }]),
     stage("s_03", "Swap MemoryStore to TokenStore", ["s_02"], "medium", [{ path: "src/auth/session.ts", change: "M" }], [{ id: "s_03.1", text: "Session reads route through TokenStore.", status: "pending" }]),
     stage("s_04", "Handle token refresh", ["s_03"], "high", [{ path: "src/auth/refresh.ts", change: "M" }], [{ id: "s_04.1", text: "The refresh decision is specified.", status: "pending" }]),
-    stage("s_05", "Update auth tests", ["s_04"], "medium", [{ path: "src/auth/session.test.ts", change: "M" }], [{ id: "s_05.1", text: `Tests cover the store, the 401 retry${rev > 1 ? ", and the requested audit amendment" : ""}.`, status: "pending" }]),
+    stage("s_05", "Update auth tests", ["s_04"], "medium", [{ path: "src/auth/session.test.ts", change: "M" }], [{
+      id: "s_05.1",
+      text: `Tests cover the store, the 401 retry${rev > 1 ? ", and the requested audit amendment" : ""}.`,
+      status: "pending",
+      testReferences: [{
+        path: "src/auth/session.test.ts",
+        cases: ["refreshes once and replays on a 401"]
+      }]
+    }]),
     stage(
       "s_06",
       "Open PR #482",
@@ -493,6 +536,24 @@ export const scriptedPlanPrd = (
         ? [{ kind: "prose" as const, id: "hold", text: "[[worker-hold]] Wait for an explicit stop before completing the first attempt." }]
         : []
     ),
+    ...(includeRoutingStage
+      ? [stage(
+          "s_routing_medium",
+          "Document worker routing telemetry",
+          [],
+          "medium",
+          [{ path: "src/auth/routing-telemetry.ts", change: "A" }],
+          [{
+            id: "s_routing_medium.1",
+            text: "Worker routing telemetry records the effective model.",
+            status: "pending",
+            testReferences: [{
+              path: "src/auth/routing-telemetry.test.ts",
+              cases: ["records the effective worker model"]
+            }]
+          }]
+        )]
+      : []),
     ...(includeAuditStage
       ? [stage("s_07", "Add independent audit coverage", [], "low", [{ path: "src/auth/audit.test.ts", change: "A" }], [{ id: "s_07.1", text: "Independent audit coverage completes with recorded evidence.", status: "pending" }])]
       : [])
@@ -500,6 +561,15 @@ export const scriptedPlanPrd = (
   return {
     title: `PRD: Refactor auth flow${rev > 1 ? " (revised)" : ""}`,
     sections: [
+      {
+        id: "tldr",
+        title: "TL;DR",
+        blocks: [{
+          kind: "prose",
+          id: "tldr-copy",
+          text: "Move token lifecycle behind TokenStore, guard the refresh path, and verify each stage in place."
+        }]
+      },
       {
         id: "context",
         title: "Context",
@@ -525,10 +595,20 @@ export const scriptedPlanEmission = (
   rev: number,
   holdWorker = false,
   mode: "draft" | "submit" = "submit",
-  includeAuditStage = false
+  includeAuditStage = false,
+  includeRoutingStage = false
 ): string =>
   JSON.stringify(
-    { mode, plan: scriptedPlanPrd(sessionId, rev, holdWorker, includeAuditStage) },
+    {
+      mode,
+      plan: scriptedPlanPrd(
+        sessionId,
+        rev,
+        holdWorker,
+        includeAuditStage,
+        includeRoutingStage
+      )
+    },
     null,
     2
   )
@@ -545,6 +625,11 @@ export const scriptedPlanEmission = (
  * `[[queue-hold]]` parks a test turn so queue affordances can be exercised
  * without borrowing the plan-approval lifecycle.
  */
+const SCRIPTED_TASK_PROTOCOL_PATTERN =
+  /PLAN_TASK stage=(\S+) fingerprint=(\S+) task=<task-id> status=<status>/
+const SCRIPTED_TASK_PATTERN =
+  /^\d+\. \[(pending|in-progress|completed|blocked)\] (\S+) —/gm
+
 export const scriptedRun =
   (delayMs: number): CliAdapterShape["run"] =>
   (sessionId, spec, { emit, canUseTool, askQuestion, proposePlan, registerBackgroundStop, registerTurnSteer }) =>
@@ -637,6 +722,20 @@ export const scriptedRun =
         spec.prompt.includes("[[orchestration-worker]]") ||
         spec.prompt.includes("executing an approved Jingler plan")
       ) {
+        const taskProtocol = SCRIPTED_TASK_PROTOCOL_PATTERN.exec(spec.prompt)
+        const scriptedTasks = [...spec.prompt.matchAll(SCRIPTED_TASK_PATTERN)].map(
+          (match) => ({ status: match[1]!, id: match[2]! })
+        )
+        const openTasks = scriptedTasks.filter(
+          (task) => task.status === "pending" || task.status === "in-progress"
+        )
+        const progressLine = (
+          taskId: string,
+          status: "in-progress" | "completed"
+        ): string | null =>
+          taskProtocol === null
+            ? null
+            : `PLAN_TASK stage=${taskProtocol[1]} fingerprint=${taskProtocol[2]} task=${taskId} status=${status}`
         yield* emit({
           _tag: "Thinking",
           text: "Executing the assigned stage and its verification.",
@@ -644,6 +743,11 @@ export const scriptedRun =
           done: true
         })
         yield* pause
+        const firstTask = openTasks[0]
+        if (firstTask?.status === "pending") {
+          const line = progressLine(firstTask.id, "in-progress")
+          if (line !== null) yield* emit({ _tag: "Assistant", text: line })
+        }
         yield* emit({
           _tag: "ToolStart",
           id: `worker-test-${sessionId}`,
@@ -665,6 +769,14 @@ export const scriptedRun =
           diff: null,
           preview: null
         })
+        for (const [index, task] of openTasks.entries()) {
+          if (index > 0 && task.status === "pending") {
+            const started = progressLine(task.id, "in-progress")
+            if (started !== null) yield* emit({ _tag: "Assistant", text: started })
+          }
+          const completed = progressLine(task.id, "completed")
+          if (completed !== null) yield* emit({ _tag: "Assistant", text: completed })
+        }
         yield* pause
         const criteria =
           /Criteria:\s*([^\n]+)/.exec(spec.prompt)?.[1]
@@ -987,7 +1099,10 @@ export const scriptedRun =
             const source = `\`\`\`json\n${scriptedPlanEmission(
               sessionId,
               rev,
-              spec.prompt.includes("[[worker-hold]]")
+              spec.prompt.includes("[[worker-hold]]"),
+              "submit",
+              false,
+              spec.prompt.includes("[[complexity-routing]]")
             )}\n\`\`\``
             const boundaries = [
               Math.floor(source.length * 0.3),
@@ -1014,7 +1129,9 @@ export const scriptedRun =
             scriptedPlanPrd(
               sessionId,
               rev,
-              spec.prompt.includes("[[worker-hold]]")
+              spec.prompt.includes("[[worker-hold]]"),
+              false,
+              spec.prompt.includes("[[complexity-routing]]")
             )
           )
           if (decision._tag === "Approve") {

@@ -756,16 +756,16 @@ test("Shift+Tab cycles the mode of only the focused pane", async ({ launchApp })
   const pane0 = window.getByTestId("split-pane-0")
   const pane1 = window.getByTestId("split-pane-1")
 
-  // Both composers start on the default mode.
-  await expect(pane0.getByText("accept edits", { exact: true })).toBeVisible()
-  await expect(pane1.getByText("accept edits", { exact: true })).toBeVisible()
+  // Unspecified persisted modes normalize to the current default.
+  await expect(pane0.getByText("auto", { exact: true })).toBeVisible()
+  await expect(pane1.getByText("auto", { exact: true })).toBeVisible()
 
-  // Focus the RIGHT pane's composer, then cycle once: accept-edits → auto.
+  // Focus the RIGHT pane's composer, then cycle once: auto → plan for Claude.
   await pane1.getByPlaceholder("Message Claude…").click()
   await window.keyboard.press("Shift+Tab")
 
   // Only the focused pane moved; the other keeps its mode. Before the fix, both
-  // chips would read "auto" here.
-  await expect(pane1.getByText("auto", { exact: true })).toBeVisible()
-  await expect(pane0.getByText("accept edits", { exact: true })).toBeVisible()
+  // chips would read "plan" here.
+  await expect(pane1.getByText("plan", { exact: true })).toBeVisible()
+  await expect(pane0.getByText("auto", { exact: true })).toBeVisible()
 })

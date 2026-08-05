@@ -16,9 +16,9 @@ import { cn } from "../lib/cn.js"
  *
  * The diagram is themed from the app's live `--sb-*` tokens rather than mermaid's
  * default palette, so it tracks whatever VS Code theme is active. Tokens are read
- * with `getComputedStyle` at render time; every read has a hard fallback because
- * jsdom (component tests) returns "" for custom properties and mermaid rejects an
- * empty theme variable.
+ * with `getComputedStyle` at render time. If a host has not resolved one yet, the
+ * CSS variable reference itself remains the fallback, so diagram colours never
+ * introduce a palette outside the existing `--sb-*` contract.
  *
  * ## Safety
  *
@@ -29,22 +29,22 @@ import { cn } from "../lib/cn.js"
  * one bad fence never blanks the rest of the document.
  */
 
-const cssVar = (name: string, fallback: string): string => {
-  if (typeof document === "undefined") return fallback
+const cssVar = (name: `--sb-${string}`): string => {
+  if (typeof document === "undefined") return `var(${name})`
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  return value.length > 0 ? value : fallback
+  return value.length > 0 ? value : `var(${name})`
 }
 
 /** Map the app's `--sb-*` tokens onto mermaid's `base` theme variables. */
 const themeVariables = (): Record<string, string> => {
-  const panel = cssVar("--sb-panel", "#282c34")
-  const surface = cssVar("--sb-surface", "#2c313a")
-  const sunken = cssVar("--sb-sunken", "#21252b")
-  const line = cssVar("--sb-line-strong", "#3e4451")
-  const text = cssVar("--sb-text-body", "#abb2bf")
-  const blue = cssVar("--sb-blue", "#61afef")
+  const panel = cssVar("--sb-panel")
+  const surface = cssVar("--sb-surface")
+  const sunken = cssVar("--sb-sunken")
+  const line = cssVar("--sb-line-strong")
+  const text = cssVar("--sb-text-body")
+  const blue = cssVar("--sb-blue")
   return {
-    background: cssVar("--sb-canvas", "#21252b"),
+    background: cssVar("--sb-canvas"),
     primaryColor: panel,
     secondaryColor: surface,
     tertiaryColor: sunken,
@@ -114,6 +114,8 @@ export function MermaidDiagram({ source, className }: { source: string; classNam
           startOnLoad: false,
           securityLevel: "strict",
           theme: "base",
+          look: "handDrawn",
+          handDrawnSeed: 1,
           themeVariables: themeVariables()
         })
         // `render` also validates; a syntax error rejects here.
