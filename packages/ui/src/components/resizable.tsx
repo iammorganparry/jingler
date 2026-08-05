@@ -59,27 +59,36 @@ export function useResizableWidth({
  */
 export function ResizeHandle({
   onResize,
+  onResizeStart,
+  onResizeEnd,
   className,
   "aria-label": ariaLabel = "Resize panel"
 }: {
   onResize: (deltaX: number) => void
+  onResizeStart?: () => void
+  onResizeEnd?: () => void
   className?: string
   "aria-label"?: string
 }) {
   const last = React.useRef(0)
   const dragging = React.useRef(false)
   const [active, setActive] = React.useState(false)
+  const resizeCallback = React.useRef(onResize)
+  const resizeEndCallback = React.useRef(onResizeEnd)
+  resizeCallback.current = onResize
+  resizeEndCallback.current = onResizeEnd
 
   React.useEffect(() => {
     const move = (e: PointerEvent) => {
       if (!dragging.current) return
-      onResize(e.clientX - last.current)
+      resizeCallback.current(e.clientX - last.current)
       last.current = e.clientX
     }
     const up = () => {
       if (!dragging.current) return
       dragging.current = false
       setActive(false)
+      resizeEndCallback.current?.()
       document.body.style.cursor = ""
       document.body.style.userSelect = ""
     }
@@ -94,7 +103,7 @@ export function ResizeHandle({
         document.body.style.userSelect = ""
       }
     }
-  }, [onResize])
+  }, [])
 
   return (
     <div
@@ -103,6 +112,7 @@ export function ResizeHandle({
       aria-orientation="vertical"
       onPointerDown={(e) => {
         e.preventDefault()
+        onResizeStart?.()
         dragging.current = true
         last.current = e.clientX
         setActive(true)

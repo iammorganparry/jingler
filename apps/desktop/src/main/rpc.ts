@@ -14,11 +14,12 @@
  */
 import {
   AgentRunner,
+  AppPaths,
   AssetService,
   AuthService,
-  type BrowserControlMcpService,
-  type CliAdapter,
+  BrowserControlMcpService,
   buildOrchestrationGroups,
+  CliAdapter,
   ConfigService,
   claudeTitleGenerator,
   DiscoveryService,
@@ -149,7 +150,6 @@ import {
   MemorySuggestionsView as MemorySuggestionsViewSchema,
   MemoryUiError,
 } from "@jingler/contracts";
-import { AppPaths } from "@jingler/cli-adapters";
 import { FileSystem, Path } from "@effect/platform";
 import type { CommandExecutor } from "@effect/platform";
 import { RpcServer } from "@effect/rpc";
@@ -2388,6 +2388,12 @@ const assetWorktree = (sessionId: string) =>
     return session.worktreePath;
   });
 
+/** `Asset.list` handler — repository files scoped to the session worktree. */
+export const assetList = (input: { sessionId: string }) =>
+  Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
+    AssetService.list(worktree)
+  )
+
 /** `Asset.read` handler — one asset's contents, sandboxed to the session worktree. */
 export const assetRead = (input: { sessionId: string; path: string }) =>
   Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
@@ -4592,6 +4598,7 @@ const HandlersLayer = JinglerRpcs.toLayer({
       b.controlWaitForSelector(selector, timeoutMs),
     ),
 
+  "Asset.list": (input) => assetList(input),
   "Asset.read": (input) => assetRead(input),
   "Asset.reveal": (input) => assetReveal(input),
   "Asset.openPdf": (input) => assetOpenPdf(input),

@@ -3,6 +3,7 @@ import { Undo2, X } from "lucide-react"
 import { Button } from "../components/button.js"
 import { ClaudeGlyph } from "../components/eyebrow.js"
 import { Toggle } from "../components/toggle.js"
+import type { JinglerDiffSide } from "../diff/pierre-selection.js"
 
 /**
  * The inline comment box anchored below a selected diff range. Drafts a comment
@@ -11,37 +12,42 @@ import { Toggle } from "../components/toggle.js"
  */
 export function InlineCommentComposer({
   path,
+  side = "new",
   startLine,
   endLine,
   connected,
   routeTargetSession,
+  initialBody = "",
   onCancel,
   onAddToReview,
   onCommentAndSend,
   onRevert
 }: {
   path: string
+  side?: JinglerDiffSide
   startLine: number
   endLine: number
   connected: boolean
   routeTargetSession: string | null
+  initialBody?: string
   onCancel: () => void
   onAddToReview: (draft: { body: string; routeToAgent: boolean }) => void
   onCommentAndSend: (draft: { body: string; routeToAgent: boolean }) => void
   /** Revert the selected lines (only wired for a session's uncommitted diff). */
   onRevert?: () => void
 }) {
-  const [body, setBody] = React.useState("")
+  const [body, setBody] = React.useState(initialBody)
   const [routeToAgent, setRouteToAgent] = React.useState(routeTargetSession !== null)
   const name = path.split("/").pop() ?? path
   const range = endLine > startLine ? `L${startLine}–${endLine}` : `L${startLine}`
+  const sidedRange = `${side} ${range}`
 
   return (
     <div className="max-w-[560px] overflow-hidden rounded-lg border border-blue/45 bg-panel shadow-[0_12px_30px_-14px_var(--sb-shadow-strong)]">
       <div className="flex items-center gap-2 border-b border-hairline bg-blue/[0.06] px-[11px] py-2">
         <span className="text-[11.5px] font-semibold text-text-bright">Comment on</span>
         <span className="rounded-md bg-blue/[0.14] px-2 py-0.5 font-mono text-[10.5px] text-blue">
-          {name} {range}
+          {name} {sidedRange}
         </span>
         <div className="flex-1" />
         <button

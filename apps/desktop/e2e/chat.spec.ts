@@ -391,16 +391,16 @@ test("a worktree session without a PR shows a Changes tab with the Code Review v
   const rail = window.getByTestId("review-file-rail")
   const search = rail.getByRole("searchbox", { name: "Search changed files" })
   await search.fill("auth")
-  await expect(rail.getByTitle("src/auth.test.ts")).toBeVisible()
-  await expect(rail.getByTitle("README.md")).toHaveCount(0)
+  await expect(rail.locator('[data-item-path="src/auth.test.ts"]')).toBeVisible()
+  await expect(rail.locator('[data-item-path="README.md"]')).toHaveCount(0)
 
   await search.clear()
   await rail.getByRole("combobox", { name: "Filter changed files by type" }).click()
   await window.getByRole("option", { name: "JSON" }).click()
-  await expect(rail.getByTitle("config.json")).toBeVisible()
-  await expect(rail.getByTitle("src/auth.test.ts")).toHaveCount(0)
+  await expect(rail.locator('[data-item-path="config.json"]')).toBeVisible()
+  await expect(rail.locator('[data-item-path="src/auth.test.ts"]')).toHaveCount(0)
 
-  await rail.getByRole("checkbox", { name: "Mark viewed" }).click()
+  await window.getByRole("button", { name: "Mark viewed: config.json" }).click()
   await expect(window.getByRole("button", { name: "Viewed · code collapsed" })).toBeVisible()
 
   await window.getByRole("button", { name: "Focus diff" }).click()

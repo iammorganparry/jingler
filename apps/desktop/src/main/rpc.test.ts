@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -10,6 +11,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   AppPaths,
+  AssetService,
   CliAdapter,
   ConfigService,
   DiscoveryService,
@@ -69,6 +71,7 @@ import { DialogService } from "./dialog.js";
 import {
   chooseReposDir,
   completeDurableGitHubFeedbackReplay,
+  assetList,
   configGet,
   createTerminal,
   executeOrchestration,
@@ -1664,6 +1667,54 @@ describe("RPC handlers", () => {
       expect(patch).toBe("");
     });
   });
+
+  describe("Asset.list", () => {
+    it("resolves only the requested session's validated worktree files", async () => {
+      const now = "2026-07-30T10:00:00.000Z"
+      const worktreePath = join(dir, "asset-worktree")
+      mkdirSync(worktreePath, { recursive: true })
+      execFileSync("git", ["init"], { cwd: worktreePath, stdio: "ignore" })
+      writeFileSync(join(worktreePath, "tracked.md"), "# Tracked\n")
+      execFileSync("git", ["add", "tracked.md"], { cwd: worktreePath, stdio: "ignore" })
+      writeFileSync(join(worktreePath, "fresh.txt"), "new\n")
+
+      mkdirSync(root, { recursive: true })
+      writeFileSync(
+        join(root, "sessions.json"),
+        JSON.stringify([
+          {
+            id: "asset-session",
+            repo: "widget",
+            branch: "jingler/assets",
+            title: "Assets",
+            status: "idle",
+            cli: "claude",
+            diff: { added: 0, removed: 0 },
+            prNumber: null,
+            costUsd: 0,
+            tokens: 0,
+            updatedAt: now,
+            worktreePath,
+            chats: [],
+            activeChatId: null
+          }
+        ])
+      )
+      const layer = Layer.mergeAll(SessionStore.Default, AssetService.Default).pipe(
+        Layer.provideMerge(base)
+      )
+
+      await expect(
+        Effect.runPromise(assetList({ sessionId: "asset-session" }).pipe(Effect.provide(layer)))
+      ).resolves.toEqual([
+        { path: "fresh.txt", status: "untracked" },
+        { path: "tracked.md", status: "added" }
+      ])
+      await expect(
+        Effect.runPromise(assetList({ sessionId: "missing" }).pipe(Effect.provide(layer)))
+      ).rejects.toThrow()
+    })
+  })
 
   describe("Workspace.revert*", () => {
     // Revert on an unknown / worktree-less session must be a safe no-op.

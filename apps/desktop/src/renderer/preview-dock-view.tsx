@@ -23,19 +23,18 @@
  * pushing a 0×0 one, it holds its last good bounds and simply stays there until
  * the app restarts.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { Cause, Option, Runtime } from "effect"
 import type { Session } from "@jingler/core"
 import {
+  AssetBrowser,
+  AssetCanvas,
   AssetError,
-  AssetLoading,
-  AssetTooLarge,
-  AssetUnsupported,
-  AssetView,
   BROWSER_TAB_ID,
-  DiffView,
   PreviewDock,
-  parseUnifiedDiffForPath,
+  parsePierreFileDiffForPath,
+  type AssetCanvasError,
   type PreviewTab
 } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
@@ -88,13 +87,22 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
   const nativeWanted = dock.visible && browsing
 
   const renderTab = useCallback(
-    (tab: PreviewTab, active: boolean) =>
+    (tab: PreviewTab) =>
       tab.kind === "browser" ? (
         <BrowserBody navigation={navigation} session={session} nativeWanted={nativeWanted} />
-      ) : (
-        <AssetTab tabId={tab.id} assets={dock.assets} active={active} dockVisible={dock.visible} />
-      ),
-    [navigation, session, nativeWanted, dock.assets, dock.visible]
+      ) : null,
+    [navigation, session, nativeWanted]
+  )
+  const renderAssetManager = useCallback(
+    (activeTab: PreviewTab | null) => (
+      <AssetManagers
+        activeId={activeTab?.id ?? null}
+        assets={dock.assets}
+        dockVisible={dock.visible}
+        onOpenAsset={dock.openAsset}
+      />
+    ),
+    [dock.assets, dock.openAsset, dock.visible]
   )
 
   return (
@@ -111,6 +119,7 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
       onNavigate={(nextUrl) => setNavigation({ url: nextUrl, source: "operator" })}
       onReload={() => void rpc.browserPreviewReload()}
       renderTab={renderTab}
+      renderAssetManager={renderAssetManager}
     />
   )
 }
@@ -200,81 +209,138 @@ function BrowserBody({
   )
 }
 
-/**
- * An asset tab's body.
- *
- * Fetching is gated on `active` so opening five tabs doesn't read five files —
- * a background tab costs nothing until you look at it. React Query then caches
- * per (session, path), so flipping back to a tab you have already viewed is
- * instant and does not re-read the file.
- */
-function AssetTab({
-  tabId,
+/** One mounted browser per session keeps its Pierre model alive across tab changes. */
+function AssetManagers({
+  activeId,
   assets,
-  active,
-  dockVisible
+  dockVisible,
+  onOpenAsset
 }: {
-  tabId: string
+  activeId: string | null
   assets: PreviewDockPrefs["assets"]
-  active: boolean
-  /** Whether the DOCK itself is showing. A PDF needs both — see `PdfBody`. */
   dockVisible: boolean
+  onOpenAsset: PreviewDockPrefs["openAsset"]
 }) {
-  const asset = assets.find((a) => assetTabId(a.sessionId, a.path) === tabId)
-  const query = useQuery({
-    queryKey: ["asset", asset?.sessionId, asset?.path],
-    queryFn: () => rpc.assetRead(asset?.sessionId ?? "", asset?.path ?? ""),
-    // Dock visibility is part of `enabled`, not just tab focus: an active tab in
-    // a HIDDEN dock renders into a `display:none` div, so with only `active` here
-    // every app focus (`refetchOnWindowFocus`) re-reads the file over RPC — a
-    // 25 MB CSV included — to paint nothing.
-    enabled: active && dockVisible && asset !== undefined,
-    // Agents rewrite files mid-session, so a cached read goes stale the moment
-    // the next turn touches it. Refetching on focus is the cheap approximation
-    // of a worktree watcher, which is deliberately out of scope for v1.
+  const sessionIds = [...new Set(assets.map((asset) => asset.sessionId))]
+  const activeAsset = assets.find(
+    (asset) => assetTabId(asset.sessionId, asset.path) === activeId
+  )
+  if (sessionIds.length === 0) {
+    return <AssetError message="This tab's file is no longer open." />
+  }
+
+  return sessionIds.map((sessionId) => {
+    const active = activeAsset?.sessionId === sessionId
+    return (
+      <div
+        key={sessionId}
+        className={active ? "absolute inset-0 block" : "absolute inset-0 hidden"}
+      >
+        <AssetSessionBrowser
+          sessionId={sessionId}
+          selectedPath={active ? (activeAsset?.path ?? null) : null}
+          active={active}
+          dockVisible={dockVisible}
+          onOpenAsset={onOpenAsset}
+        />
+      </div>
+    )
+  })
+}
+
+function AssetSessionBrowser({
+  sessionId,
+  selectedPath,
+  active,
+  dockVisible,
+  onOpenAsset
+}: {
+  sessionId: string
+  selectedPath: string | null
+  active: boolean
+  dockVisible: boolean
+  onOpenAsset: PreviewDockPrefs["openAsset"]
+}) {
+  const rememberedPath = useRef<string | null>(selectedPath)
+  if (selectedPath !== null) rememberedPath.current = selectedPath
+  const path = selectedPath ?? rememberedPath.current
+  const listQuery = useQuery({
+    queryKey: ["asset-list", sessionId],
+    queryFn: () => rpc.assetList(sessionId),
+    enabled: active && dockVisible,
+    refetchOnWindowFocus: false,
+    retry: false
+  })
+  const listedForPath = useRef(path)
+  useEffect(() => {
+    if (path === null || path === listedForPath.current) return
+    listedForPath.current = path
+    if (active && dockVisible) void listQuery.refetch()
+  }, [active, dockVisible, listQuery.refetch, path])
+  const assetQuery = useQuery({
+    queryKey: ["asset", sessionId, path],
+    queryFn: () => rpc.assetRead(sessionId, path ?? ""),
+    enabled: active && dockVisible && path !== null,
     refetchOnWindowFocus: true,
     retry: false
   })
   const diffQuery = useQuery({
-    queryKey: ["asset-diff", asset?.sessionId],
-    queryFn: () => rpc.sessionsDiff(asset?.sessionId ?? ""),
-    enabled: active && dockVisible && asset !== undefined,
+    queryKey: ["asset-diff", sessionId],
+    queryFn: () => rpc.sessionsDiff(sessionId),
+    enabled: active && dockVisible && path !== null,
     refetchOnWindowFocus: true,
     retry: false
   })
-  const diffRows = useMemo(
+  const fileDiff = useMemo(
     () =>
-      asset !== undefined && diffQuery.data
-        ? parseUnifiedDiffForPath(diffQuery.data, asset.path)
-        : [],
-    [asset, diffQuery.data]
+      path !== null && diffQuery.data
+        ? parsePierreFileDiffForPath(diffQuery.data, path)
+        : null,
+    [diffQuery.data, path]
   )
-  const hasTextDiff = diffRows.some((row) => row.kind === "line")
+  const asset = path === null ? null : { sessionId, path }
+  const canvasError = assetQuery.isError && asset !== null
+    ? assetCanvasError(assetQuery.error, asset)
+    : null
 
-  if (!asset) return <AssetError message="This tab's file is no longer open." />
-  if (query.isPending || diffQuery.isPending) return <AssetLoading />
-  if (query.isError) return <AssetFailure error={query.error} asset={asset} />
-
-  // Changed text files open on their worktree patch. This is the same virtualized,
-  // syntax-highlighted engine as the Changes rail, filtered to the linked file.
-  // Binary or clean assets retain their native file preview below.
-  if (hasTextDiff) {
-    return <DiffView rows={diffRows} className="h-full" />
-  }
-
-  const body = <AssetView payload={query.data} onReveal={() => void reveal(asset)} />
-  // A PDF is not rendered by React at all — `AssetView` draws a hole and
-  // Chromium's own viewer is parked over it, which is why the app ships no
-  // pdf.js. The wrapper exists solely to measure that hole.
-  return query.data.kind === "pdf" ? (
-    // BOTH conditions, for the same reason `BrowserBody` takes `nativeWanted`:
-    // a native overlay is not hidden by hiding a div, so the dock closing has to
-    // be said out loud exactly as a tab switch does.
-    <PdfBody asset={asset} shown={active && dockVisible}>
-      {body}
-    </PdfBody>
-  ) : (
-    body
+  return (
+    <AssetBrowser
+      sessionId={sessionId}
+      entries={listQuery.data ?? []}
+      selectedPath={path}
+      treeLoading={listQuery.isPending}
+      treeError={listQuery.isError ? "Couldn't refresh repository files." : null}
+      onSelectPath={(path) => {
+        void rpc.assetHidePdf()
+        onOpenAsset(sessionId, path)
+      }}
+      renderCanvas={(nativeAvailable) => (
+        <AssetCanvas
+          selectedPath={path}
+          payload={assetQuery.data}
+          fileDiff={fileDiff}
+          loading={
+            path !== null &&
+            (assetQuery.isPending || diffQuery.isPending)
+          }
+          error={canvasError}
+          onReveal={asset === null ? undefined : () => void reveal(asset)}
+          renderPdf={
+            asset === null
+              ? undefined
+              : (placeholder) => (
+                  <PdfBody
+                    key={`${asset.sessionId}:${asset.path}`}
+                    asset={asset}
+                    shown={active && dockVisible && nativeAvailable}
+                  >
+                    {placeholder}
+                  </PdfBody>
+                )
+          }
+        />
+      )}
+    />
   )
 }
 
@@ -312,11 +378,11 @@ function PdfBody({
   // A native overlay is not hidden by hiding a div, so leaving the tab (or the
   // dock closing) has to say so out loud. The unmount case matters most: closing
   // the tab must not strand a PDF painted over the app.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (shown) return
     void rpc.assetHidePdf()
   }, [shown])
-  useEffect(
+  useLayoutEffect(
     () => () => {
       void rpc.assetHidePdf()
     },
@@ -333,30 +399,28 @@ function PdfBody({
 const reveal = (asset: { sessionId: string; path: string }) =>
   rpc.assetReveal(asset.sessionId, asset.path).catch(() => {})
 
-/**
- * Turn a decoded RPC failure back into the right viewer state.
- *
- * The errors arrive as tagged values across the RPC boundary, so this switches
- * on `_tag` rather than sniffing a message string — a rename in
- * `packages/core/src/errors.ts` then fails the build instead of silently
- * degrading every over-cap file to a generic "something went wrong".
- */
-function AssetFailure({ error, asset }: { error: unknown; asset: { sessionId: string; path: string } }) {
-  const onReveal = () => void reveal(asset)
-  const tagged = error as { _tag?: string; size?: number; cap?: number }
-  switch (tagged._tag) {
+/** Normalize decoded tagged RPC failures for the presentational canvas. */
+function assetCanvasError(
+  error: unknown,
+  asset: { sessionId: string; path: string }
+): AssetCanvasError {
+  const failure = Runtime.isFiberFailure(error)
+    ? Option.getOrUndefined(Cause.failureOption(error[Runtime.FiberFailureCauseId]))
+    : error
+  if (typeof failure !== "object" || failure === null || !("_tag" in failure)) {
+    return { type: "error", message: `Couldn't open ${asset.path}.` }
+  }
+  switch (failure._tag) {
     case "AssetTooLargeError":
-      return (
-        <AssetTooLarge
-          path={asset.path}
-          size={tagged.size ?? 0}
-          cap={tagged.cap ?? 0}
-          onReveal={onReveal}
-        />
-      )
+      return {
+        type: "too-large",
+        path: asset.path,
+        size: "size" in failure && typeof failure.size === "number" ? failure.size : 0,
+        cap: "cap" in failure && typeof failure.cap === "number" ? failure.cap : 0
+      }
     case "AssetUnsupportedError":
-      return <AssetUnsupported path={asset.path} onReveal={onReveal} />
+      return { type: "unsupported", path: asset.path }
     default:
-      return <AssetError message={`Couldn't open ${asset.path}.`} onReveal={onReveal} />
+      return { type: "error", message: `Couldn't open ${asset.path}.` }
   }
 }

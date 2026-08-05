@@ -1,17 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react"
-import { useVirtualizer } from "@tanstack/react-virtual"
+import { useMemo } from "react"
 import { FileWarning, FolderOpen, TriangleAlert } from "lucide-react"
 import type { AssetPayload } from "@jingler/core"
-import { toShikiTheme } from "@jingler/themes"
 import { cn } from "../lib/cn.js"
 import { Spinner } from "../components/loading.js"
 import { Markdown } from "../components/markdown.js"
-import { type Token, tokenizeLines } from "../diff/highlight.js"
-import { HighlightedLine } from "../diff/use-highlight.js"
-import { useOptionalThemeTokens, useThemeSyntax } from "../theme-provider.js"
+import { createPierreFileContents } from "../diff/pierre-model.js"
+import { PierreFileView } from "../diff/pierre-provider.js"
 import { CsvTable } from "./csv-table.js"
-
-const LINE_HEIGHT = 20
 
 /**
  * Above this size we refuse to build the table rather than freeze the window.
@@ -26,20 +21,6 @@ const LINE_HEIGHT = 20
  * whole is worse.
  */
 const CSV_PARSE_CAP = 2 * 1024 * 1024
-
-/**
- * Above this many lines a `code`/`text` asset renders as plain monospace instead
- * of going through Shiki.
- *
- * `tokenizeLines` is borrowed from the diff engine, which only ever feeds it
- * hunks of a few hundred lines. A file at the 5 MB code cap is ~100k lines;
- * tokenizing all of them stalls the first paint for seconds AND retains a token
- * array for every line while the virtualizer paints ~50. A few thousand lines
- * stays a fraction of a second with a bounded token footprint, so that is where
- * we stop and fall back to the plain-text path that already exists for a null
- * language.
- */
-const CODE_HIGHLIGHT_MAX_LINES = 5_000
 
 /**
  * The Preview dock's file viewer. Switches on the discriminated
@@ -64,7 +45,7 @@ export function AssetView({
       )
     case "code":
     case "text":
-      return <CodeView text={payload.text} language={payload.language} className={className} />
+      return <AssetSourceFile payload={payload} className={className} />
     case "csv":
       // Guard the synchronous parse: over the cap we offer Finder rather than
       // freezing the renderer for seconds building a table nobody can scroll yet.
@@ -109,126 +90,34 @@ export function AssetView({
 }
 
 /**
- * The active theme in shiki's shape, or null before it has loaded.
- *
- * Optional (not strict) on purpose: Storybook and the test suite mount no theme
- * provider, and both correctly fall back to shiki's bundled One Dark Pro. Kept
- * in step with `useShikiTheme` in the diff engine, which does the same.
+ * Clean source belongs to Pierre File. Its worker-backed highlighter and built-in
+ * virtual window replace the previous Jingler row virtualizer/token hook.
  */
-const useShikiTheme = () => {
-  const raw = useThemeSyntax()
-  const tokens = useOptionalThemeTokens()
-  return useMemo(() => (raw && tokens ? toShikiTheme(raw, tokens) : null), [raw, tokens])
-}
-
-/**
- * Highlight a whole file once and hand each row its own tokens.
- *
- * Reuses the diff engine's `tokenizeLines` — the same shared highlighter
- * singleton, so no second Shiki instance and no second theme parse. A file is
- * one document (unlike a diff's interleaved hunks), which is exactly what
- * `tokenizeLines` already tokenizes.
- *
- * Returns null until the grammar lands, forever for a language we don't bundle,
- * and on any failure — callers then render plain monospace, which is the whole
- * fallback contract.
- */
-const useCodeHighlight = (
-  lines: ReadonlyArray<string>,
-  language: string | null
-): ReadonlyArray<ReadonlyArray<Token>> | null => {
-  const [tokens, setTokens] = useState<ReadonlyArray<ReadonlyArray<Token>> | null>(null)
-  const theme = useShikiTheme()
-  // Past the cap we don't tokenize at all: a 100k-line file would stall the first
-  // paint and hold a token array per line for ~50 painted rows. Null tokens are
-  // the same plain-monospace path a null language already takes.
-  const tooManyLines = lines.length > CODE_HIGHLIGHT_MAX_LINES
-
-  useEffect(() => {
-    if (language === null || tooManyLines) {
-      setTokens(null)
-      return
-    }
-    // `lines` is memoized on the file text by the caller, so its identity is
-    // stable per file — key the effect on it directly instead of joining to a
-    // string and splitting it straight back apart to rebuild the array we already
-    // hold. The grammar loads async and the user can switch files before it
-    // resolves; without the `live` guard a late resolve paints one file's tokens
-    // onto another's.
-    let live = true
-    void tokenizeLines(lines, language, theme).then((result) => {
-      if (live) setTokens(result)
-    })
-    return () => {
-      live = false
-    }
-  }, [lines, language, theme, tooManyLines])
-
-  return tokens
-}
-
-/**
- * A monospace, line-numbered code/text view. Virtualized like the diff so a 5 MB
- * log (the text cap) doesn't mount one element per line, and highlighted through
- * the shared Shiki singleton with a plain-text fallback baked in.
- */
-function CodeView({
-  text,
-  language,
+function AssetSourceFile({
+  payload,
   className
 }: {
-  text: string
-  language: string | null
+  payload: Extract<AssetPayload, { readonly text: string }>
   className?: string
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const lines = useMemo(() => text.split("\n"), [text])
-  const tokens = useCodeHighlight(lines, language)
-
-  const virtualizer = useVirtualizer({
-    count: lines.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => LINE_HEIGHT,
-    overscan: 24
-  })
-
-  const gutterWidth = `${String(lines.length).length + 1}ch`
-  // Mirrors the hook's own cutoff so the file reads as an intentional plain-text
-  // fallback, not a highlighter that silently gave up.
-  const highlightingOff = language !== null && lines.length > CODE_HIGHLIGHT_MAX_LINES
+  const file = useMemo(
+    () =>
+      createPierreFileContents({
+        path: payload.path,
+        contents: payload.text,
+        language: payload.language ?? "text",
+        revision: payload.size
+      }),
+    [payload.language, payload.path, payload.size, payload.text]
+  )
 
   return (
-    <div
-      ref={scrollRef}
-      className={cn("h-full overflow-auto bg-canvas font-mono text-[12px] leading-[20px]", className)}
-    >
-      {highlightingOff && (
-        <div className="pointer-events-none sticky top-0 z-10 flex justify-end px-3 py-1">
-          <span className="rounded bg-sunken px-1.5 py-0.5 text-[10px] text-dim">
-            Syntax highlighting off — file too large
-          </span>
-        </div>
-      )}
-      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-        {virtualizer.getVirtualItems().map((item) => (
-          <div
-            key={item.index}
-            className="absolute inset-x-0 top-0 flex"
-            style={{ height: item.size, transform: `translateY(${item.start}px)` }}
-          >
-            <span
-              className="shrink-0 select-none pr-3 pl-3 text-right tabular-nums text-dim"
-              style={{ width: gutterWidth }}
-            >
-              {item.index + 1}
-            </span>
-            <span className="whitespace-pre pr-4 text-text-body">
-              <HighlightedLine text={lines[item.index] ?? ""} tokens={tokens?.[item.index]} />
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
+    <PierreFileView
+      label={`${payload.path} source`}
+      file={file}
+      className={cn("h-full bg-canvas", className)}
+      options={{ lineNumbers: true, stickyHeader: false }}
+    />
   )
 }
 

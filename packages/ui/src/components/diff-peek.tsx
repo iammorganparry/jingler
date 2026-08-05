@@ -1,52 +1,31 @@
+import { useMemo } from "react"
+import { DiffView } from "../diff/diff-view.js"
+import {
+  normalizeDiffPreviewPatch,
+  parsePierreFileDiffs
+} from "../diff/parse.js"
 import { cn } from "../lib/cn.js"
 
-/**
- * A compact inline unified-diff hunk shown under an `Edit`/`Write` tool card —
- * the "peek" from the design. Each line's FIRST character is the marker: `+`
- * added, `-` removed, ` ` (space) context, `…` a truncation gutter; the rest is
- * the code verbatim. Reading the marker positionally (not by sniffing the code)
- * means a context line that itself starts with `+`/`-` is never mis-tinted.
- */
+/** Compact read-only diff used by tool cards and Markdown `diff` fences. */
 export function DiffPeek({ preview, className }: { preview: string; className?: string }) {
-  const lines = preview.replace(/\n+$/, "").split("\n")
+  const fileDiffs = useMemo(() => {
+    const patch = normalizeDiffPreviewPatch(preview)
+    return patch.length === 0 ? [] : parsePierreFileDiffs(patch)
+  }, [preview])
+  const multiFile = fileDiffs.length > 1
+
   return (
-    <div className={cn("bg-editor font-mono text-[11.5px] leading-[1.85]", className)}>
-      {lines.map((raw, i) => {
-        const marker = raw[0] ?? " "
-        const added = marker === "+"
-        const removed = marker === "-"
-        const gutter = marker === "…"
-        const known = added || removed || gutter || marker === " "
-        const code = known ? raw.slice(1) : raw
-        return (
-          <div
-            key={i}
-            className={cn(
-              "flex px-3",
-              added && "bg-diff-add",
-              removed && "bg-red/[0.13]"
-            )}
-          >
-            <span
-              className={cn(
-                "w-3 shrink-0 select-none text-line-strong",
-                added && "text-green",
-                removed && "text-red"
-              )}
-            >
-              {added ? "+" : removed ? "-" : ""}
-            </span>
-            <span
-              className={cn(
-                "whitespace-pre-wrap",
-                added ? "text-green" : removed ? "text-red" : gutter ? "text-line-strong italic" : "text-muted-foreground"
-              )}
-            >
-              {gutter ? `⋯ ${code}` : code}
-            </span>
-          </div>
-        )
-      })}
-    </div>
+    <DiffView
+      fileDiffs={fileDiffs}
+      label="Diff preview"
+      fill={multiFile}
+      className={cn("bg-editor", multiFile && "h-[360px]", className)}
+      options={{
+        lineNumbers: false,
+        wrap: true,
+        stickyHeader: false,
+        hunkSeparators: "simple"
+      }}
+    />
   )
 }

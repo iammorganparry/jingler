@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { expandHome, runGit } from "./command.js"
+import { expandHome, runGit, runGitRaw } from "./command.js"
 import { failureOf, fakeCommandExecutor, runExit } from "./test-support.js"
 
 /**
@@ -38,6 +38,17 @@ describe("runGit", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag === "Success") expect(exit.value).toBe("deadbeef")
+  })
+
+  it("preserves whitespace and NUL delimiters in raw mode", async () => {
+    const exit = await runExit(
+      runGitRaw(null, ["ls-files", "-z"]),
+      fakeCommandExecutor(() => ({ exitCode: 0, stdout: " leading.txt\0trailing.txt \0" }))
+    )
+    expect(exit).toMatchObject({
+      _tag: "Success",
+      value: " leading.txt\0trailing.txt \0"
+    })
   })
 
   it("fails with a GitError carrying the stderr message on non-zero exit", async () => {

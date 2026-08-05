@@ -7,19 +7,17 @@ import type { SeedSession } from "./fixtures.js"
  * The Code Review tab's renderer footprint, over a changeset far larger than a
  * component test can express.
  *
- * This guards a bug that cost gigabytes. `ReviewDiff` is deliberately
- * non-virtualized — correct when the tab showed one file at a time, and quietly
- * false once the continuous scroll stacked every file. Each line is ~10 React
+ * This guards a bug that cost gigabytes. The former React row renderer mounted
+ * every line once continuous review stacked every file. Each line was ~10 React
  * fibers (row, two gutters, sign, one span per syntax token), so the changeset
  * below mounted about half a million of them and held ~320MB; two panes on a
  * real branch is where the 5GB renderer came from. Worse, none of it was
  * memoized, so every frame of a review-pane resize drag re-rendered the lot at
  * ~35MB of garbage per pass.
  *
- * `DeferredSection` mounts a file's lines only near the viewport, and `DiffLine`
- * is memoized behind stable handlers. Both ceilings below are ~3x the measured
- * post-fix numbers: this is a guard against a regression to "mount everything",
- * not a benchmark, and it must not fail because a row grew a span.
+ * Pierre CodeView now owns file and line virtualization. Both ceilings below
+ * are intentionally generous: this is a guard against a regression to "mount
+ * everything", not a benchmark, and it must not fail because a row grew a span.
  *
  * Heap is read over CDP. `performance.memory` is quantized hard enough in
  * Chromium that it reports the same value all run, which reads as "no leak"
@@ -108,8 +106,11 @@ test("the code review tab holds a large changeset without mounting all of it", a
   // Every line of every file mounted at once is what this guards against, so
   // assert on the DOM directly too — the heap ceiling alone could be met by a
   // smaller row while the "mount everything" bug survived intact.
-  const rowCount = await window.locator("[data-review-line]").count()
+  const rowCount = await window
+    .locator("diffs-container [data-line][data-line-index]")
+    .count()
   console.log(`mounted diff rows          ${rowCount}`)
+  expect(rowCount).toBeGreaterThan(0)
   expect(rowCount).toBeLessThan(FILES * LINES)
 
   // A re-render pass over a mounted diff — what a resize drag does per frame.

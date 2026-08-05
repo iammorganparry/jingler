@@ -63,6 +63,11 @@ export interface PreviewDockProps {
    * DOM can suspend itself instead of unmounting.
    */
   renderTab: (tab: PreviewTab, active: boolean) => ReactNode
+  /**
+   * Optional shared asset surface. Unlike one body per tab, this mounts once and
+   * receives the active asset tab, so repository-tree state survives tab changes.
+   */
+  renderAssetManager?: (activeTab: PreviewTab | null) => ReactNode
 }
 
 // Persisted, clamped dock sizes — one per axis so switching sides keeps both.
@@ -106,6 +111,10 @@ export function PreviewDock(props: PreviewDockProps) {
   }
 
   const browsing = tabs.find((t) => t.id === activeId)?.kind === "browser"
+  const browserTab = tabs.find((tab) => tab.kind === "browser")
+  const activeAssetTab = tabs.find(
+    (tab) => tab.id === activeId && tab.kind === "asset"
+  ) ?? null
 
   return (
     <div
@@ -192,7 +201,26 @@ export function PreviewDock(props: PreviewDockProps) {
 
       {/* Bodies — every tab stays mounted; only the active one is shown. */}
       <div className="relative min-h-0 flex-1">
-        {tabs.map((t) => {
+        {props.renderAssetManager !== undefined ? (
+          <>
+            <div
+              className={cn(
+                "absolute inset-0 bg-white",
+                browsing ? "block" : "hidden"
+              )}
+            >
+              {browserTab === undefined ? null : props.renderTab(browserTab, browsing)}
+            </div>
+            <div
+              className={cn(
+                "absolute inset-0 bg-canvas",
+                browsing ? "hidden" : "block"
+              )}
+            >
+              {props.renderAssetManager(activeAssetTab)}
+            </div>
+          </>
+        ) : tabs.map((t) => {
           const active = t.id === activeId
           return (
             <div

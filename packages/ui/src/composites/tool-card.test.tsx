@@ -1,6 +1,6 @@
 import type { Message, ToolCall as ToolCallModel } from "@jingler/core"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { MessageTurn } from "./message-turn.js"
 
 /**
@@ -8,7 +8,18 @@ import { MessageTurn } from "./message-turn.js"
  * a long worktree path pushes out of view), and what a command actually printed.
  */
 
+beforeAll(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  )
+})
 afterEach(cleanup)
+afterAll(() => vi.unstubAllGlobals())
 
 const tool = (t: Partial<ToolCallModel>): Message => ({
   id: "a0",
@@ -84,7 +95,7 @@ describe("tool card — expanding a call", () => {
     expect(screen.getByText("No output.")).toBeDefined()
   })
 
-  it("leaves an edit's card to its diff peek rather than a rival toggle", () => {
+  it("leaves an edit's card to its diff peek rather than a rival toggle", async () => {
     render(
       <MessageTurn
         message={tool({ name: "Edit", target: "/repo/src/a.ts", preview: "+added a line", diff: { added: 1, removed: 0 } })}
@@ -92,6 +103,9 @@ describe("tool card — expanding a call", () => {
     )
     // The header must not become a toggle: the change is already on show.
     expect(screen.queryByRole("button", { expanded: false })).toBeNull()
-    expect(screen.getByText(/added a line/)).toBeDefined()
+    await waitFor(() => {
+      const pierre = document.querySelector("diffs-container")
+      expect(pierre?.shadowRoot?.textContent).toContain("added a line")
+    })
   })
 })

@@ -84,6 +84,10 @@ const HarnessLayers = Layer.mergeAll(
   ContextManager.Default
 )
 
+const AssetLayer: Layer.Layer<AssetService, never, never> = AssetService.Default.pipe(
+  Layer.provide(NodeContext.layer)
+)
+
 // Later `Layer.provide`s satisfy the requirements of earlier ones, so the leaf
 // dependencies (paths, dialog, Node platform) come last.
 const RpcServicesLayer = RpcServerLive.pipe(
@@ -92,10 +96,16 @@ const RpcServicesLayer = RpcServerLive.pipe(
   Layer.provideMerge(DiscoveryService.Default),
   // AuthService requires SecretStore, satisfied by SecretStoreLive (merged below).
   Layer.provide(AuthService.Default),
-  // Merged into one stage to stay inside `pipe`'s 20-argument limit. Neither
-  // depends on the other — both are leaf FS/git consumers — so the composition
-  // is unchanged by pairing them.
-  Layer.provide(Layer.mergeAll(WorkspaceService.Default, AssetService.Default)),
+  // Merged into one stage to stay inside `pipe`'s 20-argument limit. AssetService
+  // captures the command executor used by its NUL-safe repository listing, so its
+  // platform dependencies are provided at construction. Reusing NodeContext.layer
+  // keeps Effect's memoized platform instance shared with the final app layer.
+  Layer.provide(
+    Layer.mergeAll(
+      WorkspaceService.Default,
+      AssetLayer
+    )
+  ),
   // Before SessionStore so the stores below satisfy the daemon's requirements —
   // a stage is provided-to by everything that follows it.
   // Merged so startup recovery can mark interrupted canonical plan revisions
@@ -121,7 +131,7 @@ const RpcServicesLayer = RpcServerLive.pipe(
   Layer.provideMerge(ThemeService.Default)
 )
 
-const AppLayer = RpcServicesLayer.pipe(
+const AppServicesLayer = RpcServicesLayer.pipe(
   // Merged into one stage purely to stay inside `pipe`'s 20-argument limit;
   // neither depends on the other, so the composition is unchanged.
   Layer.provide(
@@ -169,7 +179,12 @@ const AppLayer = RpcServicesLayer.pipe(
   // exists.
   Layer.provideMerge(ConfigService.Default),
   Layer.provide(GitService.Default),
-  Layer.provide(HarnessCliAdapterLive),
+  Layer.provide(HarnessCliAdapterLive)
+)
+
+// Split from the service graph above so TypeScript does not collapse the input
+// of this deeply nested layer pipeline to `any` at the ManagedRuntime boundary.
+const AppLayer = AppServicesLayer.pipe(
   // DialogService + the browser-control port, merged into ONE stage to stay
   // inside `pipe`'s 20-argument limit. They are peers (no interdependency); the
   // port's PreviewViewService requirement is satisfied by the NEXT stage. The

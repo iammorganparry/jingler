@@ -58,9 +58,10 @@ const decodeStream = (stream: Stream.Stream<Uint8Array, PlatformError>) =>
  * strict operations (worktree add, branch listing) where errors must surface.
  * Captures stderr for the failure message. Pass `cwd` to run in a repo, or null.
  */
-export const runGit = (
+const runGitOutput = (
   cwd: string | null,
-  args: ReadonlyArray<string>
+  args: ReadonlyArray<string>,
+  trim: boolean
 ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -75,7 +76,7 @@ export const runGit = (
         const detail = stderr.trim() || stdout.trim() || `git ${args.join(" ")} exited ${exitCode}`
         return yield* Effect.fail(new GitError({ message: detail }))
       }
-      return stdout.trim()
+      return trim ? stdout.trim() : stdout
     })
   ).pipe(
     Effect.catchAll((error) =>
@@ -84,6 +85,19 @@ export const runGit = (
         : Effect.fail(new GitError({ message: `git ${args.join(" ")} failed`, cause: error }))
     )
   )
+
+export const runGit = (
+  cwd: string | null,
+  args: ReadonlyArray<string>
+): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
+  runGitOutput(cwd, args, true)
+
+/** Preserve NUL-delimited path output, where leading/trailing spaces are data. */
+export const runGitRaw = (
+  cwd: string | null,
+  args: ReadonlyArray<string>
+): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
+  runGitOutput(cwd, args, false)
 
 /** Strict git command with explicit environment additions (values are never rendered in errors). */
 export const runGitWithEnv = (
