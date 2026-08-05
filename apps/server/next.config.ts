@@ -1,5 +1,8 @@
 const nextConfig = {
-  output: "standalone",
+  // Vercel owns function tracing and packaging. Standalone output is only for
+  // self-hosted builds; enabling both leaves source-level TSX imports outside
+  // the deployed function.
+  output: process.env.VERCEL ? undefined : "standalone",
   serverExternalPackages: ["postgres"],
   // TypeScript here is a two-compiler split, forced by the toolchain being TS 7
   // native (the Go compiler), whose JS API the Next/Vercel build tooling can't load:
