@@ -14,7 +14,8 @@ import {
   renderVerifyEmail,
   renderWelcome,
   type RenderedEmail
-} from "./emails/index.tsx"
+// @ts-expect-error -- Vercel must bundle this TSX entrypoint rather than externalize it.
+} from "./emails/index"
 
 let cachedResend: Resend | null | undefined
 const resendClient = (): Resend | null => {
