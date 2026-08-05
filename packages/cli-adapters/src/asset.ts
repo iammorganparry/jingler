@@ -46,8 +46,7 @@
  * so the renderer can throw it away would be the entire cost of the feature
  * for none of its benefit.
  */
-import { Command, CommandExecutor, FileSystem, Path } from "@effect/platform"
-import type { PlatformError } from "@effect/platform/Error"
+import { CommandExecutor, FileSystem, Path } from "@effect/platform"
 import type { AssetFileEntry, AssetFileStatus, AssetKind, AssetPayload } from "@jingler/core"
 import {
   ASSET_SIZE_CAP,
@@ -58,48 +57,13 @@ import {
   extensionToKind,
   extensionToLanguage
 } from "@jingler/core"
-import { Effect, Stream } from "effect"
+import { Effect } from "effect"
+import { runGitRaw } from "./command.js"
 
 // Platform services are captured when the service layer is built. Individual
 // operations therefore have no invocation-time environment requirements.
 type AssetEnv = never
 type AssetListEnv = never
-
-const decodeStream = (stream: Stream.Stream<Uint8Array, PlatformError>) =>
-  stream.pipe(
-    Stream.decodeText(),
-    Stream.runFold("", (output, chunk) => output + chunk)
-  )
-
-/** Raw output is required because `-z` paths may legally begin or end in spaces. */
-const runGitRaw = (
-  executor: CommandExecutor.CommandExecutor,
-  cwd: string,
-  args: ReadonlyArray<string>
-): Effect.Effect<string, GitError> =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const process = yield* executor.start(
-        Command.make("git", ...args).pipe(Command.workingDirectory(cwd))
-      )
-      const [stdout, stderr, exitCode] = yield* Effect.all(
-        [decodeStream(process.stdout), decodeStream(process.stderr), process.exitCode],
-        { concurrency: 3 }
-      )
-      if (exitCode !== 0) {
-        return yield* new GitError({
-          message: stderr.trim() || `git ${args.join(" ")} exited ${exitCode}`
-        })
-      }
-      return stdout
-    })
-  ).pipe(
-    Effect.catchAll((error) =>
-      error instanceof GitError
-        ? Effect.fail(error)
-        : Effect.fail(new GitError({ message: `git ${args.join(" ")} failed`, cause: error }))
-    )
-  )
 
 const nulPaths = (output: string): string[] =>
   output.split("\0").filter((path) => path.length > 0)
@@ -157,6 +121,15 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
     const fs = yield* FileSystem.FileSystem
     const path_ = yield* Path.Path
     const commandExecutor = yield* CommandExecutor.CommandExecutor
+    const gitRaw = (cwd: string, args: ReadonlyArray<string>) =>
+      runGitRaw(cwd, args).pipe(
+        Effect.provideService(CommandExecutor.CommandExecutor, commandExecutor)
+      )
+    let listCache: {
+      readonly root: string
+      readonly fingerprint: string
+      readonly entries: ReadonlyArray<AssetFileEntry>
+    } | null = null
 
     /**
      * Resolve `requested` inside `worktree`, or refuse.
@@ -207,14 +180,14 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
         const { root } = yield* resolveInside(worktree, ".")
         const output = yield* Effect.all(
           {
-            tracked: runGitRaw(commandExecutor, root, ["ls-files", "-z", "--cached"]),
-            untracked: runGitRaw(commandExecutor, root, [
+            tracked: gitRaw(root, ["ls-files", "-z", "--cached"]),
+            untracked: gitRaw(root, [
               "ls-files",
               "-z",
               "--others",
               "--exclude-standard"
             ]),
-            status: runGitRaw(commandExecutor, root, [
+            status: gitRaw(root, [
               "status",
               "--porcelain=v1",
               "-z",
@@ -223,6 +196,10 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
           },
           { concurrency: 3 }
         )
+        const fingerprint = `${output.tracked}\u0001${output.untracked}\u0001${output.status}`
+        if (listCache?.root === root && listCache.fingerprint === fingerprint) {
+          return listCache.entries
+        }
         const statusByPath = parseGitStatus(output.status)
         const requestedPaths = [...nulPaths(output.tracked), ...nulPaths(output.untracked)]
         const validated = yield* Effect.forEach(
@@ -247,7 +224,11 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
         for (const entry of validated) {
           if (entry !== null) byPath.set(entry.path, entry)
         }
-        return [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path))
+        const entries = [...byPath.values()].sort((left, right) =>
+          left.path.localeCompare(right.path)
+        )
+        listCache = { root, fingerprint, entries }
+        return entries
       })
 
     /**

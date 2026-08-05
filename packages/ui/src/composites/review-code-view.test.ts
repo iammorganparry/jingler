@@ -60,6 +60,15 @@ const thread: PrReviewThread = {
 }
 
 describe("review CodeView model", () => {
+  it("does not relabel an unrelated file from a multi-file patch", () => {
+    const [entry] = createReviewCodeFiles(files.slice(0, 1), [
+      { path: files[0]!.path, diff: `${addedPatch}\n${modifiedPatch.replaceAll("session.ts", "other.ts")}` }
+    ])
+
+    expect(entry?.fileDiff.name).toBe(files[0]!.path)
+    expect(entry?.fileDiff.hunks).toEqual([])
+  })
+
   it("keeps status, collapsed viewed files, and persistent annotations in controlled items", () => {
     const entries = createReviewCodeFiles(files, [
       { path: files[0]!.path, diff: modifiedPatch },

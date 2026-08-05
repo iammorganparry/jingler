@@ -7,6 +7,7 @@ import { jinglerDark, toTokens } from "@jingler/themes"
 import { Undo2, X } from "lucide-react"
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type ReactNode
@@ -161,7 +162,7 @@ export function DiffView({
       workers={fill}
     >
       <DiffViewContent
-        key={revision}
+        revision={revision}
         fileDiffs={parsed}
         className={className}
         label={label}
@@ -262,6 +263,7 @@ function useSelectedRangeRenderer(
 }
 
 function DiffViewContent({
+  revision,
   fileDiffs,
   className,
   label,
@@ -269,6 +271,7 @@ function DiffViewContent({
   options,
   actions
 }: {
+  readonly revision: number
   readonly fileDiffs: readonly FileDiffMetadata[]
   readonly className: string | undefined
   readonly label: string
@@ -277,6 +280,7 @@ function DiffViewContent({
   readonly actions: DiffActions | undefined
 }) {
   const state = useDiffSelectionState()
+  useEffect(() => state.clear(), [revision, state.clear])
   const model = usePierreDiffModel(fileDiffs, state.selection)
   const renderAnnotation = useSelectedRangeRenderer(actions, state.body, state.setBody, state.clear)
   return (

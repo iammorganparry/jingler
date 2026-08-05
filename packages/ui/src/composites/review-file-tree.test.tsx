@@ -80,6 +80,11 @@ describe("ReviewFileTree", () => {
     expect(token.dataset.itemGitStatus).toBe("deleted")
     expect(login.tabIndex).toBe(0)
 
+    const scrollTo = vi.mocked(HTMLElement.prototype.scrollTo)
+    scrollTo.mockClear()
+    rendered.rerender(view("src/auth/login.ts", onSelectFile, [...files]))
+    expect(scrollTo).not.toHaveBeenCalled()
+
     fireEvent.keyDown(login, { key: "ArrowDown" })
     await waitFor(() => expect(token.tabIndex).toBe(0))
     fireEvent.keyDown(token, { key: " ", code: "Space", ctrlKey: true })

@@ -268,7 +268,7 @@ function AssetSessionBrowser({
     queryKey: ["asset-list", sessionId],
     queryFn: () => rpc.assetList(sessionId),
     enabled: active && dockVisible,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     retry: false
   })
   const listedForPath = useRef(path)

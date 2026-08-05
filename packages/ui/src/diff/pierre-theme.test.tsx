@@ -80,6 +80,9 @@ describe("Pierre theme adapter", () => {
     expect(adapter.unsafeDiffCSS).toContain("var(--sb-editor)")
     expect(adapter.unsafeDiffCSS).toContain("var(--sb-diff-add-bg)")
     expect(adapter.treeStyles).toMatchObject(PIERRE_TREE_TOKEN_STYLES)
+    expect(PIERRE_TREE_TOKEN_STYLES["--trees-indent-guide-bg-override"]).toBe(
+      "var(--sb-border)"
+    )
     for (const value of Object.values(PIERRE_TREE_TOKEN_STYLES)) {
       expect(value).toMatch(/^var\(--(?:sb-|font-)/)
     }

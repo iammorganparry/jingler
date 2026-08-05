@@ -57,7 +57,7 @@ export const PIERRE_TREE_TOKEN_STYLES: TreeThemeStyles = {
   "--trees-search-bg-override": "var(--sb-sunken)",
   "--trees-search-fg-override": "var(--sb-text)",
   "--trees-scrollbar-thumb-override": "var(--sb-scrollbar)",
-  "--trees-indent-guide-bg-override": "var(--sb-hairline)",
+  "--trees-indent-guide-bg-override": "var(--sb-border)",
   "--trees-git-added-color-override": "var(--sb-green)",
   "--trees-git-deleted-color-override": "var(--sb-red)",
   "--trees-git-ignored-color-override": "var(--sb-dim)",

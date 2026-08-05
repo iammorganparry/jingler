@@ -206,6 +206,7 @@ const useTreeInteractionUpdates = (
   props: PierreFileTreeProps,
   syncingSelection: RefObject<boolean>
 ): void => {
+  const pathsSignature = canonicalPaths(props.paths).join("\0")
   useLayoutEffect(() => {
     if (props.selectedPaths === undefined) return
     const wanted = new Set(props.selectedPaths.map(canonicalPierrePath))
@@ -220,7 +221,7 @@ const useTreeInteractionUpdates = (
     } finally {
       syncingSelection.current = false
     }
-  }, [model, props.paths, props.selectedPaths, syncingSelection])
+  }, [model, pathsSignature, props.selectedPaths, syncingSelection])
 
   useLayoutEffect(() => {
     if (props.focusedPath === undefined) return
@@ -228,7 +229,7 @@ const useTreeInteractionUpdates = (
       focus: true,
       offset: "nearest"
     })
-  }, [model, props.focusedPath, props.paths])
+  }, [model, pathsSignature, props.focusedPath])
 }
 
 /**

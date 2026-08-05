@@ -138,4 +138,31 @@ describe("DiffView Pierre selection", () => {
     expect(actions.onRevertFile).toHaveBeenCalledExactlyOnceWith(path)
     expect(screen.getByRole("toolbar", { name: "File diff actions" })).toBeTruthy()
   })
+
+  it("updates live content without remounting the viewer and clears stale selection", async () => {
+    const actions: DiffActions = {
+      onRevertLines: vi.fn(),
+      onRevertFile: vi.fn(),
+      onComment: vi.fn()
+    }
+    const rendered = render(<DiffView patch={patch} fill={false} actions={actions} />)
+    const original = await waitFor(() => {
+      const element = document.querySelector("diffs-container")
+      expect(element).toBeTruthy()
+      return element
+    })
+    select(await gutter(1, "change-addition"))
+    expect(await screen.findByText("sample.ts new L1")).toBeTruthy()
+
+    rendered.rerender(
+      <DiffView
+        patch={patch.replace("nextValue", "newestValue")}
+        fill={false}
+        actions={actions}
+      />
+    )
+
+    await waitFor(() => expect(screen.queryByText("sample.ts new L1")).toBeNull())
+    expect(document.querySelector("diffs-container")).toBe(original)
+  })
 })

@@ -139,6 +139,7 @@ const countHunkLines = (
   for (let index = start; index < lines.length; index += 1) {
     const line = lines[index] ?? ""
     if (HUNK_SPEC.test(line) || isFileBoundary(lines, index)) break
+    if (line.length === 0 && isFileBoundary(lines, index + 1)) break
     const [oldLine, newLine] = hunkLineContribution(lines, index)
     oldCount += oldLine
     newCount += newLine
@@ -205,6 +206,12 @@ const hunkStart = (
 
 type StructuredPatchStatus = "modified" | "added" | "deleted"
 
+interface StructuredPatchHunk {
+  readonly lines: readonly StructuredDiffLine[]
+  /** A zero-line hunk used to keep truncation notices out of source rows. */
+  readonly context?: string
+}
+
 const structuredHunk = (
   lines: readonly StructuredDiffLine[],
   startLine = 1
@@ -230,7 +237,7 @@ const structuredPatch = ({
 }: {
   readonly path: string
   readonly status: StructuredPatchStatus
-  readonly hunks: readonly (readonly StructuredDiffLine[])[]
+  readonly hunks: readonly StructuredPatchHunk[]
   readonly startLine?: number
 }): string => {
   const path = canonicalPierrePath(inputPath)
@@ -246,7 +253,11 @@ const structuredPatch = ({
     ...metadata,
     `--- ${oldPath}`,
     `+++ ${newPath}`,
-    ...hunks.flatMap((hunk, index) => structuredHunk(hunk, index === 0 ? startLine : 1))
+    ...hunks.flatMap((hunk, index) =>
+      hunk.context === undefined
+        ? structuredHunk(hunk.lines, index === 0 ? startLine : 1)
+        : [`@@ -1,0 +1,0 @@ ${hunk.context}`]
+    )
   ].join("\n")
 }
 
@@ -261,7 +272,7 @@ export const patchFromStructuredLines = ({
   readonly status?: StructuredPatchStatus
   readonly lines: readonly StructuredDiffLine[]
   readonly startLine?: number
-}): string => structuredPatch({ path, status, hunks: [lines], startLine })
+}): string => structuredPatch({ path, status, hunks: [{ lines }], startLine })
 
 const patchStatusFromRow = (
   file: Extract<DiffRow, { kind: "file" }>
@@ -284,7 +295,7 @@ export const patchFromDiffRows = (rows: ReadonlyArray<DiffRow>): string => {
       patches.push(structuredPatch({
         path: file.path,
         status: patchStatusFromRow(file),
-        hunks
+        hunks: hunks.map((hunk) => ({ lines: hunk }))
       }))
     }
     hunks = []
@@ -339,12 +350,27 @@ export const normalizeDiffPreviewPatch = (
     ].join("\n")
   }
 
-  const lines: StructuredDiffLine[] = trimmed.split("\n").map((raw) => {
+  const hunks: StructuredPatchHunk[] = []
+  let lines: StructuredDiffLine[] = []
+  const flushLines = () => {
+    if (lines.length > 0) hunks.push({ lines })
+    lines = []
+  }
+  for (const raw of trimmed.split("\n")) {
     const marker = raw[0]
-    if (marker === "+") return { type: "add", content: raw.slice(1) }
-    if (marker === "-") return { type: "del", content: raw.slice(1) }
-    if (marker === " ") return { type: "normal", content: raw.slice(1) }
-    return { type: "normal", content: raw }
-  })
-  return patchFromStructuredLines({ path, lines })
+    if (marker === "…") {
+      flushLines()
+      hunks.push({ lines: [], context: raw })
+    } else if (marker === "+") {
+      lines.push({ type: "add", content: raw.slice(1) })
+    } else if (marker === "-") {
+      lines.push({ type: "del", content: raw.slice(1) })
+    } else if (marker === " ") {
+      lines.push({ type: "normal", content: raw.slice(1) })
+    } else {
+      lines.push({ type: "normal", content: raw })
+    }
+  }
+  flushLines()
+  return structuredPatch({ path, status: "modified", hunks })
 }

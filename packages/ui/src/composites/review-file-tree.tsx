@@ -1,4 +1,5 @@
 import type { PrFileChange } from "@jingler/core"
+import { useMemo } from "react"
 import { PierreFileTree } from "../components/pierre-file-tree.js"
 import type { JinglerFileStatus } from "../diff/pierre-model.js"
 
@@ -21,16 +22,20 @@ export function ReviewFileTree({
   query,
   onSelectFile
 }: ReviewFileTreeProps) {
-  const filePaths = files.map((file) => file.path)
-  const selectablePaths = new Set(filePaths)
+  const filePaths = useMemo(() => files.map((file) => file.path), [files])
+  const gitStatus = useMemo(
+    () => filePaths.map((path) => ({
+      path,
+      status: statusByPath.get(path) ?? "modified" as const
+    })),
+    [filePaths, statusByPath]
+  )
+  const selectablePaths = useMemo(() => new Set(filePaths), [filePaths])
 
   return (
     <PierreFileTree
       paths={filePaths}
-      gitStatus={filePaths.map((path) => ({
-        path,
-        status: statusByPath.get(path) ?? "modified"
-      }))}
+      gitStatus={gitStatus}
       selectedPaths={activePath === null ? [] : [activePath]}
       focusedPath={activePath ?? undefined}
       searchQuery={query.length === 0 ? null : query}

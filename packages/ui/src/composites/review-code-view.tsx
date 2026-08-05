@@ -68,7 +68,7 @@ const reviewDiffForPath = (path: string, patch: string): FileDiffMetadata => {
     // caller-owned path. Re-key the parsed metadata instead of falling back to
     // a second parser or rendering a misleading empty file.
     const first = parsed[0]
-    if (first !== undefined) {
+    if (parsed.length === 1 && first !== undefined) {
       return {
         ...first,
         name: canonicalPath,

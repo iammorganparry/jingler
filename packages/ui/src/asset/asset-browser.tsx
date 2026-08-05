@@ -46,7 +46,7 @@ export function AssetBrowser({
   const theme = useThemeSyntax()
   const tokens = useOptionalThemeTokens()
   const [state, send] = useMachine(assetBrowserMachine, {
-    input: { storageKey: `jingler.asset.tree-width.${sessionId}` }
+    input: { storageKey: "jingler.asset.tree-width" }
   })
   const constrained = width > 0 && width < ROOMY_MIN_WIDTH
   const sheetOpen = state.matches({ constrained: "open" })
