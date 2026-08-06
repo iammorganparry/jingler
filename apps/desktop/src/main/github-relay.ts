@@ -342,6 +342,26 @@ export class GitHubRelayConnection {
 
   private failProcessing(socket: GitHubRelaySocket, error: unknown): void {
     if (this.socket !== socket) return;
+    // DIAGNOSTIC: the reconnect loop is driven by whatever throws here, and it
+    // was previously visible only as a generic reconnecting toast. Log the full
+    // shape to stdout so `pnpm dev | tee` captures it regardless of 2>&1.
+    try {
+      const detail =
+        error instanceof Error
+          ? `${error.name}: ${error.message}\n${error.stack ?? ""}`
+          : (() => {
+              try {
+                return JSON.stringify(error);
+              } catch {
+                return String(error);
+              }
+            })();
+      console.log(
+        `[relay-diag] delivery failed clientId=${this.options.clientId} cursor=${this.cursor}: ${detail}`,
+      );
+    } catch {
+      // Never let diagnostics throw inside the failure path.
+    }
     this.options.onStatus?.({ mode: "error", error: safeError(error) });
     // Invalidate this socket before closing it. More frames may already be
     // queued behind the failed delivery; none may advance the durable cursor
