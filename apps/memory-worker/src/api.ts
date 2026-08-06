@@ -362,8 +362,11 @@ const dispatchVaultQuery = (
       return jsonResponse(yield* vault.navigation())
     }
     if (isRoute(request, route, "POST", "compiler-context")) {
-      const body = yield* decodeBody(request, Schema.Struct({ claims: Schema.Array(NonEmptyString) }))
-      return jsonResponse(yield* vault.compilerContext(body.claims))
+      const body = yield* decodeBody(request, Schema.Struct({
+        claims: Schema.Array(NonEmptyString),
+        preferredPageId: Schema.optional(NonEmptyString)
+      }))
+      return jsonResponse(yield* vault.compilerContext(body.claims, body.preferredPageId))
     }
     if (isRoute(request, route, "GET", "export")) {
       return jsonResponse(yield* vault.exportVault())

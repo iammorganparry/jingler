@@ -54,6 +54,7 @@ export interface CompilerSource {
 }
 
 export interface CompilerContext {
+  readonly organizationId: string
   readonly source: MemorySource
   readonly claims: ReadonlyArray<string>
   readonly schemaPages: ReadonlyArray<MemoryPage>
@@ -63,6 +64,7 @@ export interface CompilerContext {
 }
 
 export interface CompilerGeneratedProposal {
+  readonly selection: "create" | "update" | "create_and_update" | "no_op"
   readonly changeKind: ProposalChangeKind
   readonly drafts: ReadonlyArray<ProposalSetDraft>
 }
@@ -73,7 +75,7 @@ export interface CompilerModel {
 
 export interface CompilerRepository {
   readSource(sourceId: string): Promise<CompilerSource>
-  readContext?(claims: ReadonlyArray<string>): Promise<{
+  readContext?(claims: ReadonlyArray<string>, preferredPageId?: string): Promise<{
     readonly schemaPages: ReadonlyArray<MemoryPage>
     readonly candidates: ReadonlyArray<CompilerAcceptedPage>
     readonly indexMarkdown: string
@@ -138,6 +140,34 @@ const WORD_PATTERN = /[\p{L}\p{N}][\p{L}\p{N}_-]*/gu
 const SENTENCE_BOUNDARY_PATTERN = /(?<=[.!?])\s+|\n+/u
 const MARKDOWN_HEADING_PATTERN = /^#{1,6}\s+.*$/gm
 const LIST_MARKER_PATTERN = /^[-*]\s+/
+
+export interface CompilerPageIdentity {
+  readonly pageId: string
+  readonly path: string
+}
+
+/**
+ * Compiler-created page identity is scoped by organization and source, never by
+ * a display title. Titles are intentionally cosmetic because settled sessions
+ * normally share the same generic title.
+ */
+export const compilerPageIdentity = (
+  organizationId: string,
+  sourceId: string,
+  title: string
+): CompilerPageIdentity => {
+  const suffix = stableContentHash(`${organizationId}\u0000${sourceId}`).slice(0, 16)
+  const slug = title
+    .normalize("NFKD")
+    .toLocaleLowerCase("en-US")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "learning"
+  return {
+    pageId: `learning-${suffix}`,
+    path: `learnings/${slug}-${suffix}.md`
+  }
+}
 
 const normalizedWords = (value: string): ReadonlySet<string> =>
   new Set(
@@ -211,17 +241,32 @@ const isSemanticallyMechanical = (
 
 export class DeterministicCompilerModel implements CompilerModel {
   async generate(context: CompilerContext): Promise<CompilerGeneratedProposal> {
-    const hasUnmatchedClaim = context.claims.some((claim) =>
+    const identity = compilerPageIdentity(
+      context.organizationId,
+      context.source.id,
+      context.source.title
+    )
+    const owned = context.candidates.find((candidate) => candidate.page.id === identity.pageId)
+    const novelClaims = context.claims.filter((claim) =>
+      context.candidates.every((candidate) => !candidate.page.body.includes(claim))
+    )
+    if (novelClaims.length === 0) {
+      return { selection: "no_op", changeKind: "factual", drafts: [] }
+    }
+    const hasUnmatchedClaim = owned === undefined && novelClaims.some((claim) =>
       context.candidates.every((candidate) => scoreClaimForPage(claim, candidate.page) === 0)
     )
     const existingPageLimit = Math.max(0, MAX_COMPILED_PAGES - (hasUnmatchedClaim ? 1 : 0))
-    const selected = context.candidates.slice(
-      0,
-      Math.min(existingPageLimit, context.claims.length)
-    )
+    const selected = owned === undefined
+      ? context.candidates.slice(0, Math.min(existingPageLimit, novelClaims.length))
+      : [owned]
     const claimsByPage = new Map<string, Array<string>>(selected.map((candidate) => [candidate.page.id, []]))
     const unmatchedClaims: Array<string> = []
-    for (const claim of context.claims) {
+    for (const claim of novelClaims) {
+      if (owned !== undefined) {
+        claimsByPage.get(owned.page.id)!.push(claim)
+        continue
+      }
       const ranked = [...selected].sort(
         (left, right) =>
           scoreClaimForPage(claim, right.page) - scoreClaimForPage(claim, left.page) ||
@@ -270,8 +315,19 @@ export class DeterministicCompilerModel implements CompilerModel {
       ? []
       : [this.newPageDraft(context, unmatchedClaims, citationId)]
     const drafts = [...existingDrafts, ...newPageDrafts]
-    if (drafts.length === 0) throw new CompilerWorkflowError("the source produced no page edits")
-    return { changeKind: "factual", drafts }
+    if (drafts.length === 0) {
+      return { selection: "no_op", changeKind: "factual", drafts: [] }
+    }
+    return {
+      selection:
+        existingDrafts.length > 0 && newPageDrafts.length > 0
+          ? "create_and_update"
+          : newPageDrafts.length > 0
+            ? "create"
+            : "update",
+      changeKind: "factual",
+      drafts
+    }
   }
 
   private newPageDraft(
@@ -279,16 +335,12 @@ export class DeterministicCompilerModel implements CompilerModel {
     claims: ReadonlyArray<string>,
     citationId: string
   ): ProposalSetDraft {
-    const suffix = stableContentHash(context.source.id).slice(0, 12)
     const title = context.source.title.trim() || "Compiled learning"
-    const slug = title
-      .normalize("NFKD")
-      .toLocaleLowerCase("en-US")
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 48) || "learning"
-    const pageId = `learning-${suffix}`
-    const path = `learnings/${slug}-${suffix}.md`
+    const { pageId, path } = compilerPageIdentity(
+      context.organizationId,
+      context.source.id,
+      title
+    )
     const page: MemoryPage = {
       id: pageId,
       path,
@@ -300,7 +352,10 @@ export class DeterministicCompilerModel implements CompilerModel {
       citations: [{ id: citationId, sourceId: context.source.id }],
       relationships: [],
       body: `# ${title}\n\n${claims.map((claim) => `- ${claim} [@${citationId}]`).join("\n")}\n`,
-      metadata: {}
+      metadata: {
+        compilerIdentityVersion: 1,
+        compilerSourceId: context.source.id
+      }
     }
     return {
       pageId,
@@ -314,18 +369,32 @@ export class DeterministicCompilerModel implements CompilerModel {
 
 const readCompilerContext = async (
   repository: CompilerRepository,
+  input: CompilerWorkflowInput,
   source: CompilerSource,
   claims: ReadonlyArray<string>
 ): Promise<CompilerContext> => {
-  const bounded = await repository.readContext?.(claims)
+  const preferredPageId = compilerPageIdentity(
+    input.organizationId,
+    source.source.id,
+    source.source.title
+  ).pageId
+  const bounded = await repository.readContext?.(claims, preferredPageId)
   const [pages, navigation] = bounded === undefined
     ? await Promise.all([repository.listAcceptedPages(), repository.readNavigation()])
     : [bounded.candidates, { indexMarkdown: bounded.indexMarkdown }]
   const isSchemaPage = ({ page }: CompilerAcceptedPage): boolean =>
     page.tags.includes("schema") || page.metadata.kind === "schema" || page.metadata.schema === true
   const schemaPages = bounded?.schemaPages ?? pages.filter(isSchemaPage).map(({ page }) => page)
-  const candidates = selectCompilerCandidates(pages.filter((entry) => !isSchemaPage(entry)), claims)
+  const nonSchemaPages = pages.filter((entry) => !isSchemaPage(entry))
+  const preferred = nonSchemaPages.find((entry) => entry.page.id === preferredPageId)
+  const candidates = [
+    ...(preferred === undefined ? [] : [preferred]),
+    ...selectCompilerCandidates(nonSchemaPages, claims).filter(
+      (entry) => entry.page.id !== preferredPageId
+    )
+  ].slice(0, MAX_COMPILER_CANDIDATES)
   return {
+    organizationId: input.organizationId,
     source: source.source,
     claims,
     schemaPages,
@@ -384,7 +453,7 @@ export const runCompilerWorkflow = async (
   const source = await step.do("01-validate-source", () => validatedCompilerSource(repository, input))
   const claims = await step.do("02-extract-claims", () => claimsForSource(source))
   const context = await step.do("03-read-schema-index-and-candidates", () =>
-    readCompilerContext(repository, source, claims)
+    readCompilerContext(repository, input, source, claims)
   )
   const generated = await step.do("04-generate-bounded-proposal", () => model.generate(context))
   const proposalSetId = `proposal:${input.workflowId}`
@@ -488,13 +557,19 @@ export class DurableObjectCompilerRepository implements CompilerRepository {
     )
   }
 
-  async readContext(claims: ReadonlyArray<string>): Promise<{
+  async readContext(claims: ReadonlyArray<string>, preferredPageId?: string): Promise<{
     readonly schemaPages: ReadonlyArray<MemoryPage>
     readonly candidates: ReadonlyArray<CompilerAcceptedPage>
     readonly indexMarkdown: string
   }> {
     return this.client.request("/internal/memory/compiler-context", VaultCompilerContext, {
-      init: { method: "POST", body: JSON.stringify({ claims }) },
+      init: {
+        method: "POST",
+        body: JSON.stringify({
+          claims,
+          ...(preferredPageId === undefined ? {} : { preferredPageId })
+        })
+      },
       requestError: "vault context request failed",
       invalidResponse: "vault returned invalid compiler context"
     })

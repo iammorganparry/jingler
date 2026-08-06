@@ -21,6 +21,7 @@ import { InMemoryR2Bucket, MemoryR2Store } from "../r2-store.js"
 import { InMemoryVaultState, TeamVault } from "../team-vault.js"
 import {
   runCompilerWorkflow,
+  compilerPageIdentity,
   type CompilerContext,
   type CompilerGeneratedProposal,
   type CompilerModel,
@@ -137,6 +138,7 @@ class FixtureModel implements CompilerModel {
     const alpha = byId.get("alpha")!
     const beta = byId.get("beta")!
     return {
+      selection: "update",
       changeKind: "factual",
       drafts: [
         {
@@ -340,6 +342,39 @@ describe("durable memory compiler workflow", () => {
     expect(await run(vault.listPages())).toEqual([
       expect.objectContaining({ pageId: expect.stringMatching(/^learning-/), revision: 1 })
     ])
+  })
+
+  it("uses organization-and-source identity for generic titles and updates its owned page", async () => {
+    const vault = await run(TeamVault.create(
+      "org-compiler",
+      new InMemoryVaultState(),
+      new InMemoryR2Bucket()
+    ))
+    const first: MemorySource = {
+      ...compilerSource,
+      id: "source-generic-one",
+      title: "Settled Jingler agent session"
+    }
+    const second: MemorySource = {
+      ...compilerSource,
+      id: "source-generic-two",
+      title: "Settled Jingler agent session"
+    }
+    await run(vault.ingestSource(first, "A webhook retry must preserve its delivery key."))
+    await run(vault.ingestSource(second, "A queue retry must preserve its ordering key."))
+    const firstInput = { ...workflowInput, workflowId: "compiler-generic-one", sourceId: first.id }
+    const secondInput = { ...workflowInput, workflowId: "compiler-generic-two", sourceId: second.id }
+    const firstResult = await runCompilerWorkflow(firstInput, new VaultCompilerRepository(vault), new ImmediateStep())
+    const secondResult = await runCompilerWorkflow(secondInput, new VaultCompilerRepository(vault), new ImmediateStep())
+    expect(firstResult.status).toBe("pending_review")
+    expect(secondResult.status).toBe("pending_review")
+    const identities = [first, second].map((source) =>
+      compilerPageIdentity("org-compiler", source.id, source.title).pageId
+    )
+    expect(new Set(identities).size).toBe(2)
+    expect((await run(vault.snapshot())).proposals.map((proposal) => proposal.pageId).sort())
+      .toEqual([...identities].sort())
+
   })
 
   it("creates a cited multi-page pending proposal without moving accepted heads and retries idempotently", async () => {
@@ -636,6 +671,7 @@ describe("durable memory compiler workflow", () => {
       generate: async (context) => {
         const accepted = context.candidates.find((candidate) => candidate.page.id === "alpha")!
         return {
+          selection: "update",
           changeKind: "mechanical",
           drafts: [
             {

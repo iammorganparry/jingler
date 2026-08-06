@@ -1629,10 +1629,14 @@ export class TeamVault {
     })
   }
 
-  compilerContext(claims: ReadonlyArray<string>): Effect.Effect<CompilerVaultContext, MemoryVaultError> {
+  compilerContext(
+    claims: ReadonlyArray<string>,
+    preferredPageId?: string
+  ): Effect.Effect<CompilerVaultContext, MemoryVaultError> {
     return Effect.gen(this, function* () {
       const snapshot = yield* this.state.load()
       const candidateIds = new Set<string>()
+      if (preferredPageId !== undefined) candidateIds.add(preferredPageId)
       for (const claim of claims.slice(0, 32)) {
         for (const pageId of (yield* this.state.searchPageIds(claim, 12)) ?? []) {
           candidateIds.add(pageId)
