@@ -64,18 +64,23 @@ const AssetBase = {
  * `text`). The viewer switches on `kind` and TypeScript narrows the payload
  * with it — no `!` and no "this should never happen" branch.
  */
+export const AssetTextPayload = Schema.Struct({
+  ...AssetBase,
+  kind: TextAssetKind,
+  /**
+   * Shiki language id for the `code` kind, else null. Resolved from the
+   * extension in `extensionToLanguage`; `markdown` and `csv` get their own
+   * renderers and never need one.
+   */
+  language: Schema.NullOr(Schema.String),
+  text: Schema.String,
+  /** Stable digest of the exact bytes returned in `text`. */
+  revision: Schema.String
+})
+export type AssetTextPayload = Schema.Schema.Type<typeof AssetTextPayload>
+
 export const AssetPayload = Schema.Union(
-  Schema.Struct({
-    ...AssetBase,
-    kind: TextAssetKind,
-    /**
-     * Shiki language id for the `code` kind, else null. Resolved from the
-     * extension in `extensionToLanguage`; `markdown` and `csv` get their own
-     * renderers and never need one.
-     */
-    language: Schema.NullOr(Schema.String),
-    text: Schema.String
-  }),
+  AssetTextPayload,
   Schema.Struct({
     ...AssetBase,
     kind: Schema.Literal("image"),
@@ -96,13 +101,25 @@ export const AssetPayload = Schema.Union(
 )
 export type AssetPayload = Schema.Schema.Type<typeof AssetPayload>
 
+/** Compare-and-swap input for editing one existing text asset. */
+export const AssetWriteInput = Schema.Struct({
+  path: Schema.String,
+  text: Schema.String,
+  expectedRevision: Schema.String
+})
+export type AssetWriteInput = Schema.Schema.Type<typeof AssetWriteInput>
+
+/** A successful save returns the freshly read text payload and revision. */
+export const AssetWriteResult = AssetTextPayload
+export type AssetWriteResult = Schema.Schema.Type<typeof AssetWriteResult>
+
 /**
  * Extension → kind. The single source of truth for "can we show this?".
  *
- * Deliberately a closed allow-list: an unknown extension returns null and the
- * path stays inert text in the transcript. Opening arbitrary binaries as
- * "text" would render a screenful of replacement characters and look like a
- * bug, and guessing from content would mean a round trip per candidate path.
+ * Deliberately a closed allow-list: an unknown extension returns null because
+ * this pure helper also runs over transcript strings before any filesystem
+ * validation. AssetService may promote an existing validated UTF-8 file to
+ * `text` after containment, stat, size, and byte checks succeed.
  */
 const KIND_BY_EXT: Readonly<Record<string, AssetKind>> = {
   // ── markdown ──

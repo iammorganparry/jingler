@@ -1387,13 +1387,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             Effect.orElseSucceed(() => null)
           )
 
-          // The app-scoped service exposes one native Preview view, so browser
-          // control is leased exclusively for this run. The scoped lease revokes
-          // its bearer when the run stream completes; a concurrent run continues
-          // normally without the internal browser attachment.
+          // Browser control is exclusive within one repository session but
+          // independent sessions receive isolated native views and may QA in
+          // parallel. The scoped lease revokes its bearer when the run ends.
           const browserAttachment = yield* (
             yield* BrowserControlMcpService
-          ).acquire(`${sessionId}:${chatId}`)
+          ).acquire(sessionId, `${sessionId}:${chatId}`)
           // Jingler owns this pre-turn boundary, so recall is deterministic for
           // every harness (including Codex, which has no context-injecting hook).
           // Pass only the raw operator text: orchestration/persona notes are not

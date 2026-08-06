@@ -81,7 +81,7 @@ export function ConversationPane({
   onRestore,
   onDelete,
   onInitialPromptConsumed,
-  onOpenAsset,
+  onOpenFile,
   paneFocused = true
 }: {
   session: Session
@@ -110,11 +110,11 @@ export function ConversationPane({
   /** Notify once the composer has consumed the one-shot initial prompt. */
   onInitialPromptConsumed?: (sessionId: string) => void
   /**
-   * Open a worktree file in the Preview dock. Supplied by the app; when it is
+   * Open a worktree file in the session's Files tab. Supplied by the app; when it is
    * absent every path in the transcript stays inert text, which is exactly what
    * Storybook and the component tests want.
    */
-  onOpenAsset?: (sessionId: string, path: string) => void
+  onOpenFile?: (sessionId: string, path: string) => void
   /**
    * Whether this is the pane the operator is looking at. Only that pane's
    * composer takes the caret when the conversation opens.
@@ -205,8 +205,8 @@ export function ConversationPane({
   // menu — reusing it is what keeps the false-positive gate free.
   const knownFiles = useMemo(() => new Set(convo.files), [convo.files])
   const openAsset = useCallback(
-    (path: string) => onOpenAsset?.(session.id, path),
-    [onOpenAsset, session.id]
+    (path: string) => onOpenFile?.(session.id, path),
+    [onOpenFile, session.id]
   )
 
   // A ratio, not a fixed plan width: the first split is truly equal within the

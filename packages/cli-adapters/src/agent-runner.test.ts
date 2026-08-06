@@ -59,11 +59,19 @@ const PREVIEW_MCP: BrowserControlMcpAttachment = {
   headers: { Authorization: "Bearer preview-secret" },
   headerEnvironment: { Authorization: "JINGLER_BROWSER_MCP_AUTHORIZATION" }
 }
+const browserAcquireCalls: Array<{ readonly sessionId: string; readonly ownerId: string }> = []
 
 /** Main-only Preview attachment normally owned by the app-scoped listener. */
 const BrowserControlMcpServiceTest = Layer.succeed(
   BrowserControlMcpService,
-  BrowserControlMcpService.of({ acquire: () => Effect.succeed(PREVIEW_MCP) })
+  BrowserControlMcpService.of({
+    acquire: (sessionId, ownerId) =>
+      Effect.sync(() => {
+        browserAcquireCalls.push({ sessionId, ownerId })
+        return PREVIEW_MCP
+      }),
+    revoke: () => Effect.void
+  })
 )
 
 /**
@@ -76,6 +84,7 @@ const BrowserControlMcpServiceTest = Layer.succeed(
 let temp: ReturnType<typeof withTempRoot>
 
 beforeEach(() => {
+  browserAcquireCalls.length = 0
   temp = withTempRoot()
   mkdirSync(temp.root, { recursive: true })
   const now = "2026-07-24T00:00:00.000Z"
@@ -501,6 +510,9 @@ describe("AgentRunner remote MCP attachments", () => {
     )
 
     expect(captured).toHaveLength(1)
+    expect(browserAcquireCalls).toStrictEqual([
+      { sessionId: SESSION, ownerId: `${SESSION}:${SESSION}` }
+    ])
     expect(captured[0]!.remoteMcpServers).toStrictEqual([
       {
         name: "operator-tools",

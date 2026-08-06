@@ -73,7 +73,8 @@ export function AssetCanvas({
       <PierreFileDiffView
         label={`${payload.path} changes`}
         fileDiff={fileDiff}
-        className="h-full"
+        className="h-full min-h-0"
+        scrollable
         options={{ diffStyle: "unified", stickyHeader: false }}
       />
     )

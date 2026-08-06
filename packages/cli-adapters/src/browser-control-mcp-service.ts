@@ -10,7 +10,10 @@ import type { AddressInfo } from "node:net"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { Context, Data, Effect, Layer, Runtime, type Scope } from "effect"
 import { BROWSER_MCP_NAME, buildBrowserControlMcp } from "./browser-control-mcp.js"
-import { BrowserControlPort, type BrowserControlPortShape } from "./browser-control-port.js"
+import {
+  BrowserControlPort,
+  type BrowserControlSessionPortShape
+} from "./browser-control-port.js"
 
 const LOOPBACK_HOST = "127.0.0.1"
 const MCP_PATH = "/mcp"
@@ -104,7 +107,7 @@ export const browserControlMcpRequestRejection = (
 }
 
 interface HandleMcpRequestOptions {
-  readonly browser: BrowserControlPortShape
+  readonly browser: BrowserControlSessionPortShape
   readonly expectedHost: string
   readonly authorization: () => string | null
   readonly request: IncomingMessage
@@ -257,13 +260,17 @@ export interface BrowserControlMcpAttachment {
 
 export interface BrowserControlMcpServiceShape {
   /**
-   * Acquire exclusive browser control for one run. Null means the listener is
-   * unavailable or another run currently owns the single native Preview view.
-   * The bearer is revoked automatically with the caller's Effect scope.
+   * Acquire exclusive browser control for one run in `sessionId`. Null means
+   * the listener is unavailable or another run already owns that session's
+   * native Preview view. Different sessions may hold leases concurrently. The
+   * bearer is revoked automatically with the caller's Effect scope.
    */
   readonly acquire: (
+    sessionId: string,
     ownerId: string
   ) => Effect.Effect<BrowserControlMcpAttachment | null, never, Scope.Scope>
+  /** Immediately revoke an owning session's bearer during deletion. */
+  readonly revoke: (sessionId: string) => Effect.Effect<void>
 }
 
 export class BrowserControlMcpService extends Context.Tag("@jingler/BrowserControlMcpService")<
@@ -272,7 +279,11 @@ export class BrowserControlMcpService extends Context.Tag("@jingler/BrowserContr
 >() {}
 
 export interface BrowserControlMcpServiceOptions {
-  /** Production uses `0` (ephemeral); a fixed port is a test seam for bind failures. */
+  /**
+   * Production uses `0` (ephemeral). A fixed port is only a single-lease test
+   * seam for bind failures; concurrent-session tests must provide an acquirer
+   * that assigns distinct ports.
+   */
   readonly port?: number
   /** In-process test seam; production always uses the scoped Node listener below. */
   readonly acquireListener?: BrowserControlMcpListenerAcquirer
@@ -288,7 +299,7 @@ export interface BrowserControlMcpListener {
 export type BrowserControlMcpServerFactory = (listener: RequestListener) => Server
 
 export type BrowserControlMcpListenerAcquirer = (
-  browser: BrowserControlPortShape,
+  browser: BrowserControlSessionPortShape,
   authorization: () => string | null,
   port: number
 ) => Effect.Effect<BrowserControlMcpListener, BrowserControlMcpStartupError, Scope.Scope>
@@ -397,53 +408,76 @@ export const makeBrowserControlMcpServiceLayer = (
     BrowserControlMcpService,
     Effect.gen(function* () {
       const browser = yield* BrowserControlPort
-      let activeAttachment: BrowserControlMcpAttachment | null = null
-      const listener = yield* (
+      interface LeaseState {
+        attachment: BrowserControlMcpAttachment | null
+      }
+      interface AcquiredLease {
+        readonly attachment: BrowserControlMcpAttachment
+        readonly state: LeaseState
+      }
+      const activeLeases = new Map<string, LeaseState>()
+      const acquireListener =
         options.acquireListener ??
         acquireNodeListener(options.serverFactory ?? nodeServerFactory)
-      )(
-        browser,
-        () => activeAttachment?.headers[AUTH_HEADER] ?? null,
-        options.port ?? 0
-      ).pipe(
-        Effect.catchAll((error) =>
-          Effect.logWarning(error.message).pipe(
-            Effect.as<BrowserControlMcpListener | null>(null)
-          )
-        )
-      )
+
+      const revoke = (sessionId: string): Effect.Effect<void> =>
+        Effect.sync(() => {
+          const active = activeLeases.get(sessionId)
+          if (active !== undefined) active.attachment = null
+          activeLeases.delete(sessionId)
+        })
 
       const acquire = (
+        sessionId: string,
         ownerId: string
       ): Effect.Effect<BrowserControlMcpAttachment | null, never, Scope.Scope> =>
         Effect.acquireRelease(
           Effect.gen(function* () {
-            if (
-              listener === null ||
-              !listener.isAvailable() ||
-              activeAttachment !== null
-            ) {
+            if (activeLeases.has(sessionId)) return null
+
+            // Reserve synchronously before listener startup yields, so two runs
+            // racing inside one session cannot both bind a lease.
+            const state: LeaseState = { attachment: null }
+            activeLeases.set(sessionId, state)
+            const listener = yield* acquireListener(
+              browser.forSession(sessionId),
+              () => state.attachment?.headers[AUTH_HEADER] ?? null,
+              options.port ?? 0
+            )
+            if (!listener.isAvailable()) {
+              activeLeases.delete(sessionId)
               return null
             }
             const attachment = yield* createAttachment(listener.port)
-            activeAttachment = attachment
-            return attachment
+            state.attachment = attachment
+            return { attachment, state } satisfies AcquiredLease
           }).pipe(
             Effect.catchAll((error) =>
               Effect.logWarning(
-                `Browser MCP lease for ${ownerId} could not be created: ${error.message}`
-              ).pipe(Effect.as<BrowserControlMcpAttachment | null>(null))
+                `Browser MCP lease for ${ownerId} in ${sessionId} could not be created: ${error.message}`
+              ).pipe(
+                Effect.tap(() => revoke(sessionId)),
+                Effect.as<AcquiredLease | null>(null)
+              )
             )
           ),
-          (attachment) =>
+          (lease) =>
             Effect.sync(() => {
-              if (attachment !== null && activeAttachment === attachment) {
-                activeAttachment = null
+              if (lease !== null && activeLeases.get(sessionId) === lease.state) {
+                lease.state.attachment = null
+                activeLeases.delete(sessionId)
               }
             })
-        )
+        ).pipe(Effect.map((lease) => lease?.attachment ?? null))
 
-      return BrowserControlMcpService.of({ acquire })
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          for (const state of activeLeases.values()) state.attachment = null
+          activeLeases.clear()
+        })
+      )
+
+      return BrowserControlMcpService.of({ acquire, revoke })
     })
   )
 

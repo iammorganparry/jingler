@@ -7,6 +7,7 @@ import {
   WorkerPoolContextProvider,
   useWorkerPool,
   type CodeViewHandle,
+  type CodeViewCreateEditorOptions,
   type CodeViewItem,
   type DiffLineAnnotation,
   type FileContents,
@@ -15,6 +16,7 @@ import {
   type SelectedLineRange,
   type SupportedLanguages
 } from "@pierre/diffs/react"
+import { Editor as PierreEditorPrimitive } from "@pierre/diffs/editor"
 import {
   createContext,
   useCallback,
@@ -29,12 +31,14 @@ import {
   useOptionalThemeTokens,
   useThemeSyntax
 } from "../theme-provider.js"
+import { cn } from "../lib/cn.js"
 import type {
   PierreAnnotationMetadata,
   PierreAnnotationPayload
 } from "./pierre-annotations.js"
 import {
   createPierreThemeAdapter,
+  PIERRE_HOST_CLASS,
   type PierreThemeAdapter
 } from "./pierre-theme.js"
 import {
@@ -229,6 +233,7 @@ const baseOptions = (
     unsafeCSS: adapter.unsafeDiffCSS,
     disableLineNumbers: options?.lineNumbers === false,
     overflow,
+    diffIndicators: "classic" as const,
     stickyHeader: options?.stickyHeader ?? true,
     collapsed: options?.collapsed ?? false
   }
@@ -271,7 +276,7 @@ export function PierreFileView({
     <section
       aria-label={label}
       data-jingler-pierre-view="file"
-      className={className}
+      className={cn(PIERRE_HOST_CLASS, className)}
       style={style}
     >
       <PierreVirtualizerPrimitive
@@ -305,6 +310,8 @@ export interface PierreFileDiffViewProps
   extends PierreAccessibleViewProps,
     PierreSelectionProps {
   readonly fileDiff: FileDiffMetadata
+  /** Give a height-constrained diff its own virtual vertical scroll window. */
+  readonly scrollable?: boolean
   readonly annotations?: DiffLineAnnotation<PierreAnnotationMetadata>[]
   readonly renderAnnotation?: (payload: PierreAnnotationPayload) => ReactNode
   readonly options?: PierreRenderOptions
@@ -315,6 +322,7 @@ export function PierreFileDiffView({
   className,
   style,
   fileDiff,
+  scrollable = false,
   annotations,
   renderAnnotation,
   options,
@@ -332,36 +340,46 @@ export function PierreFileDiffView({
     },
     [fileDiff.name, onSelectionChange]
   )
+  const primitive = (
+    <PierreFileDiffPrimitive<PierreAnnotationMetadata>
+      fileDiff={fileDiff}
+      lineAnnotations={annotations}
+      selectedLines={selectedRange(selection)}
+      disableWorkerPool={!renderer.workerEnabled}
+      className="jingler-pierre-primitive"
+      options={{
+        ...baseOptions(renderer.theme, options),
+        diffStyle: options?.diffStyle ?? "unified",
+        expandUnchanged: options?.expandUnchanged,
+        collapsedContextThreshold: options?.collapsedContextThreshold,
+        hunkSeparators: options?.hunkSeparators ?? "line-info",
+        enableLineSelection: onSelectionChange !== undefined,
+        controlledSelection: true,
+        onLineSelectionEnd: onSelectionEnd
+      }}
+      renderAnnotation={
+        renderAnnotation === undefined
+          ? undefined
+          : (annotation) => renderAnnotation(annotation.metadata.payload)
+      }
+    />
+  )
 
   return (
     <section
       aria-label={label}
       data-jingler-pierre-view="diff"
-      className={className}
+      className={cn(PIERRE_HOST_CLASS, className)}
       style={style}
     >
-      <PierreFileDiffPrimitive<PierreAnnotationMetadata>
-        fileDiff={fileDiff}
-        lineAnnotations={annotations}
-        selectedLines={selectedRange(selection)}
-        disableWorkerPool={!renderer.workerEnabled}
-        className="jingler-pierre-primitive"
-        options={{
-          ...baseOptions(renderer.theme, options),
-          diffStyle: options?.diffStyle ?? "unified",
-          expandUnchanged: options?.expandUnchanged,
-          collapsedContextThreshold: options?.collapsedContextThreshold,
-          hunkSeparators: options?.hunkSeparators ?? "line-info",
-          enableLineSelection: onSelectionChange !== undefined,
-          controlledSelection: true,
-          onLineSelectionEnd: onSelectionEnd
-        }}
-        renderAnnotation={
-          renderAnnotation === undefined
-            ? undefined
-            : (annotation) => renderAnnotation(annotation.metadata.payload)
-        }
-      />
+      {scrollable ? (
+        <PierreVirtualizerPrimitive
+          className="h-full min-h-0 overflow-auto"
+          contentClassName="min-h-full"
+        >
+          {primitive}
+        </PierreVirtualizerPrimitive>
+      ) : primitive}
     </section>
   )
 }
@@ -387,6 +405,41 @@ export interface PierreCodeViewProps extends PierreAccessibleViewProps {
     item: CodeViewItem<PierreAnnotationMetadata>
   ) => ReactNode
   readonly options?: PierreRenderOptions
+}
+
+/** Jingler-owned value emitted by the beta editor integration. */
+export interface PierreEditorChange {
+  readonly itemId: string
+  readonly path: string
+  readonly contents: string
+}
+
+export interface PierreEditorProps extends PierreCodeViewProps {
+  /**
+   * The item currently in edit mode. `null` completes the active session;
+   * omitted defaults to the first item for a single-file editor.
+   */
+  readonly editingItemId?: string | null
+  /** Fires only when an item's dirty state changes. */
+  readonly onDirtyChange?: (itemId: string, dirty: boolean) => void
+  /** Fires for each editor document change. */
+  readonly onChange?: (change: PierreEditorChange) => void
+  /** Fires when Pierre ends a changed edit session. */
+  readonly onComplete?: (change: PierreEditorChange) => void
+}
+
+interface PierreCodeViewEditorCallbacks {
+  readonly create: (
+    options: CodeViewCreateEditorOptions<PierreAnnotationMetadata>
+  ) => PierreEditorPrimitive<PierreAnnotationMetadata>
+  readonly onChange: (
+    item: CodeViewItem<PierreAnnotationMetadata>,
+    file: FileContents
+  ) => void
+  readonly onComplete: (
+    item: CodeViewItem<PierreAnnotationMetadata>,
+    file: FileContents
+  ) => void
 }
 
 const codeItemPath = (
@@ -456,6 +509,113 @@ export function PierreCodeView({
   renderAnnotation,
   options
 }: PierreCodeViewProps) {
+  return (
+    <PierreCodeViewContent
+      label={label}
+      className={className}
+      style={style}
+      items={items}
+      selection={selection}
+      onSelectionChange={onSelectionChange}
+      scrollRequest={scrollRequest}
+      onActivePathChange={onActivePathChange}
+      renderHeader={renderHeader}
+      renderAnnotation={renderAnnotation}
+      options={options}
+    />
+  )
+}
+
+/**
+ * Editable CodeView adapter. Consumers only see Jingler content/dirty events;
+ * Pierre's beta Editor constructor and lifecycle remain contained here.
+ */
+export function PierreEditor({
+  items,
+  editingItemId,
+  onDirtyChange,
+  onChange,
+  onComplete,
+  ...props
+}: PierreEditorProps) {
+  const dirtyItems = useRef(new Set<string>())
+  const activeItemId =
+    editingItemId === undefined ? (items[0]?.id ?? null) : editingItemId
+  const editableItems = useMemo(
+    () =>
+      items.map((item) => ({
+        ...item,
+        edit: item.id === activeItemId
+      })),
+    [activeItemId, items]
+  )
+  const create = useCallback(
+    (options: CodeViewCreateEditorOptions<PierreAnnotationMetadata>) =>
+      new PierreEditorPrimitive<PierreAnnotationMetadata>(options),
+    []
+  )
+  const toChange = useCallback(
+    (
+      item: CodeViewItem<PierreAnnotationMetadata>,
+      file: FileContents
+    ): PierreEditorChange => ({
+      itemId: item.id,
+      path: file.name,
+      contents: file.contents
+    }),
+    []
+  )
+  const handleChange = useCallback(
+    (item: CodeViewItem<PierreAnnotationMetadata>, file: FileContents) => {
+      if (!dirtyItems.current.has(item.id)) {
+        dirtyItems.current.add(item.id)
+        onDirtyChange?.(item.id, true)
+      }
+      onChange?.(toChange(item, file))
+    },
+    [onChange, onDirtyChange, toChange]
+  )
+  const handleComplete = useCallback(
+    (item: CodeViewItem<PierreAnnotationMetadata>, file: FileContents) => {
+      onComplete?.(toChange(item, file))
+      if (dirtyItems.current.delete(item.id)) {
+        onDirtyChange?.(item.id, false)
+      }
+    },
+    [onComplete, onDirtyChange, toChange]
+  )
+  const editor = useMemo(
+    (): PierreCodeViewEditorCallbacks => ({
+      create,
+      onChange: handleChange,
+      onComplete: handleComplete
+    }),
+    [create, handleChange, handleComplete]
+  )
+
+  return (
+    <PierreCodeViewContent {...props} items={editableItems} editor={editor} />
+  )
+}
+
+interface PierreCodeViewContentProps extends PierreCodeViewProps {
+  readonly editor?: PierreCodeViewEditorCallbacks
+}
+
+function PierreCodeViewContent({
+  label,
+  className,
+  style,
+  items,
+  selection,
+  onSelectionChange,
+  scrollRequest,
+  onActivePathChange,
+  renderHeader,
+  renderAnnotation,
+  options,
+  editor
+}: PierreCodeViewContentProps) {
   const renderer = usePierreRenderer()
   const viewRef = useRef<CodeViewHandle<PierreAnnotationMetadata> | null>(null)
   const lastActivePath = useRef<string | null>(null)
@@ -509,17 +669,20 @@ export function PierreCodeView({
     <section
       aria-label={label}
       data-jingler-pierre-view="code-view"
-      className={className}
+      className={cn(PIERRE_HOST_CLASS, className)}
       style={style}
     >
       <PierreCodeViewPrimitive<PierreAnnotationMetadata>
         ref={viewRef}
         items={items}
+        createEditor={editor?.create}
+        onItemEditChange={editor?.onChange}
+        onItemEditComplete={editor?.onComplete}
         selectedLines={upstreamSelection}
         onSelectedLinesChange={handleSelectionChange}
         onScroll={onActivePathChange === undefined ? undefined : handleScroll}
         disableWorkerPool={!renderer.workerEnabled}
-        className="jingler-pierre-primitive"
+        className="jingler-pierre-primitive jingler-pierre-code-view"
         options={{
           ...baseOptions(renderer.theme, options),
           diffStyle: options?.diffStyle ?? "unified",

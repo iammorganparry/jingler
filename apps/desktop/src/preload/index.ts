@@ -46,6 +46,11 @@ interface AuthCompletePayload {
   readonly error: string | null
 }
 
+interface PreviewEventPayload {
+  readonly sessionId: string
+  readonly url: string
+}
+
 contextBridge.exposeInMainWorld("jingler", {
   /** The active theme's `:root` block, for `main.tsx` to inject pre-paint. */
   initialThemeCss,
@@ -94,8 +99,8 @@ contextBridge.exposeInMainWorld("jingler", {
    * so QA is watchable and the visible address bar stays truthful. Returns an
    * unsubscribe fn.
    */
-  onPreviewReveal: (cb: (url: string) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, url: string) => cb(url)
+  onPreviewReveal: (cb: (payload: PreviewEventPayload) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: PreviewEventPayload) => cb(payload)
     ipcRenderer.on(PREVIEW_REVEAL_CHANNEL, listener)
     return () => ipcRenderer.removeListener(PREVIEW_REVEAL_CHANNEL, listener)
   },
@@ -103,8 +108,8 @@ contextBridge.exposeInMainWorld("jingler", {
    * Subscribe to committed main-frame URL changes from the embedded browser.
    * Unlike a reveal, this only synchronizes chrome and never changes dock focus.
    */
-  onPreviewUrlChanged: (cb: (url: string) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, url: string) => cb(url)
+  onPreviewUrlChanged: (cb: (payload: PreviewEventPayload) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: PreviewEventPayload) => cb(payload)
     ipcRenderer.on(PREVIEW_URL_CHANNEL, listener)
     return () => ipcRenderer.removeListener(PREVIEW_URL_CHANNEL, listener)
   },

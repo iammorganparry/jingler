@@ -22,7 +22,10 @@ export interface AssetBrowserProps {
   readonly selectedPath: string | null
   readonly treeLoading?: boolean
   readonly treeError?: string | null
+  readonly onRetryTree?: () => void
   readonly onSelectPath: (path: string) => void
+  /** Session-owned actions/status rendered beside the selected path. */
+  readonly headerActions?: ReactNode
   /** Native PDFs are disabled while a tree sheet or divider covers/moves the canvas. */
   readonly renderCanvas: (nativeAvailable: boolean) => ReactNode
   readonly className?: string
@@ -38,7 +41,9 @@ export function AssetBrowser({
   selectedPath,
   treeLoading = false,
   treeError = null,
+  onRetryTree,
   onSelectPath,
+  headerActions,
   renderCanvas,
   className
 }: AssetBrowserProps) {
@@ -78,8 +83,17 @@ export function AssetBrowser({
         </div>
       ) : null}
       {treeError !== null ? (
-        <div className="absolute inset-x-3 top-3 rounded border border-line bg-surface px-2.5 py-2 text-[11px] text-red">
-          {treeError}
+        <div className="absolute inset-x-3 top-3 flex items-center gap-2 rounded border border-line bg-surface px-2.5 py-2 text-[11px] text-red">
+          <span className="min-w-0 flex-1">{treeError}</span>
+          {onRetryTree !== undefined ? (
+            <button
+              type="button"
+              onClick={onRetryTree}
+              className="flex-none rounded border border-line px-2 py-1 text-text-body hover:bg-hover"
+            >
+              Retry
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -164,6 +178,9 @@ export function AssetBrowser({
             <span className="min-w-0 truncate font-mono text-[11px] text-text-body">
               {selectedPath ?? "Select a file"}
             </span>
+            {headerActions !== undefined ? (
+              <div className="ml-auto flex flex-none items-center gap-2">{headerActions}</div>
+            ) : null}
           </div>
           <main
             aria-label={selectedPath === null ? "Asset content" : `${selectedPath} content`}

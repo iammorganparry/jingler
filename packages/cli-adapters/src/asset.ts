@@ -47,17 +47,27 @@
  * for none of its benefit.
  */
 import { CommandExecutor, FileSystem, Path } from "@effect/platform"
-import type { AssetFileEntry, AssetFileStatus, AssetKind, AssetPayload } from "@jingler/core"
+import { createHash } from "node:crypto"
+import type {
+  AssetFileEntry,
+  AssetFileStatus,
+  AssetKind,
+  AssetPayload,
+  AssetWriteResult
+} from "@jingler/core"
 import {
   ASSET_SIZE_CAP,
+  AssetBinaryError,
   AssetOutsideWorktreeError,
   AssetTooLargeError,
   AssetUnsupportedError,
+  AssetWriteConflictError,
+  AssetWriteIoError,
   GitError,
   extensionToKind,
   extensionToLanguage
 } from "@jingler/core"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { runGitRaw } from "./command.js"
 
 // Platform services are captured when the service layer is built. Individual
@@ -113,6 +123,19 @@ const MEDIA_TYPE: Readonly<Record<string, string>> = {
 const mediaTypeFor = (path: string): string => {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase()
   return MEDIA_TYPE[ext] ?? "application/octet-stream"
+}
+
+const contentRevision = (bytes: Uint8Array): string =>
+  `sha256:${createHash("sha256").update(bytes).digest("hex")}`
+
+/** Strict UTF-8 plus NUL refusal catches text-shaped binary payloads safely. */
+const decodeEditableText = (bytes: Uint8Array): string | null => {
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+    return text.includes("\0") ? null : text
+  } catch {
+    return null
+  }
 }
 
 export class AssetService extends Effect.Service<AssetService>()("AssetService", {
@@ -268,12 +291,17 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
       requested: string
     ): Effect.Effect<
       AssetPayload,
-      AssetOutsideWorktreeError | AssetTooLargeError | AssetUnsupportedError,
+      | AssetOutsideWorktreeError
+      | AssetBinaryError
+      | AssetTooLargeError
+      | AssetUnsupportedError,
       AssetEnv
     > =>
       Effect.gen(function* () {
-        const kind: AssetKind | null = extensionToKind(requested)
-        if (kind === null) return yield* new AssetUnsupportedError({ path: requested })
+        // Unknown extensions become text only HERE, after the path has a real
+        // existing file to validate. The pure extension helper also sees
+        // transcript strings such as `npm.install` and cannot safely guess.
+        const kind: AssetKind = extensionToKind(requested) ?? "text"
 
         const { root, absolutePath } = yield* resolveInside(worktree, requested)
 
@@ -307,15 +335,175 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
           } as const
         }
 
-        const text = yield* fs.readFileString(absolutePath, "utf8").pipe(
+        const bytes = yield* fs.readFile(absolutePath).pipe(
           Effect.mapError(() => new AssetOutsideWorktreeError({ path: requested, reason: "unreadable" }))
         )
+        const text = decodeEditableText(bytes)
+        if (text === null) return yield* new AssetBinaryError({ path: requested })
         return {
           ...base,
           kind,
           language: kind === "code" ? extensionToLanguage(absolutePath) : null,
-          text
+          text,
+          revision: contentRevision(bytes)
         } as const
+      })
+
+    /**
+     * Atomically replace one existing text file after checking the revision on
+     * an open descriptor. The replacement is written and synced beside the
+     * target, receives the target's mode, then is renamed over it so a crash can
+     * expose either complete version but never a partially overwritten file.
+     *
+     * The check-to-rename window remains advisory with respect to unrelated
+     * processes: a writer that ignores Jingler's expected revision can still
+     * race the final rename. The filesystem offers no portable content-CAS.
+     */
+    const write = (
+      worktree: string,
+      requested: string,
+      text: string,
+      expectedRevision: string
+    ): Effect.Effect<
+      AssetWriteResult,
+      | AssetOutsideWorktreeError
+      | AssetBinaryError
+      | AssetTooLargeError
+      | AssetWriteConflictError
+      | AssetWriteIoError,
+      AssetEnv
+    > =>
+      Effect.gen(function* () {
+        const { absolutePath } = yield* resolveInside(worktree, requested)
+        const info = yield* fs.stat(absolutePath).pipe(
+          Effect.mapError(
+            () =>
+              new AssetOutsideWorktreeError({
+                path: requested,
+                reason: "unreadable"
+              })
+          )
+        )
+        if (info.type !== "File") {
+          return yield* new AssetOutsideWorktreeError({
+            path: requested,
+            reason: "not-a-file"
+          })
+        }
+
+        const kind = extensionToKind(requested) ?? "text"
+        if (kind === "image" || kind === "pdf") {
+          return yield* new AssetBinaryError({ path: requested })
+        }
+        const nextBytes = new TextEncoder().encode(text)
+        if (decodeEditableText(nextBytes) === null) {
+          return yield* new AssetBinaryError({ path: requested })
+        }
+        const cap = ASSET_SIZE_CAP[kind]
+        if (nextBytes.byteLength > cap) {
+          return yield* new AssetTooLargeError({
+            path: requested,
+            size: nextBytes.byteLength,
+            cap
+          })
+        }
+
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const file = yield* fs.open(absolutePath, { flag: "r+" }).pipe(
+              Effect.mapError(
+                () =>
+                  new AssetOutsideWorktreeError({
+                    path: requested,
+                    reason: "unreadable"
+                  })
+              )
+            )
+            const openedInfo = yield* file.stat.pipe(
+              Effect.mapError(
+                () =>
+                  new AssetOutsideWorktreeError({
+                    path: requested,
+                    reason: "unreadable"
+                  })
+              )
+            )
+            if (openedInfo.type !== "File") {
+              return yield* new AssetOutsideWorktreeError({
+                path: requested,
+                reason: "not-a-file"
+              })
+            }
+            const currentSize = Number(openedInfo.size)
+            if (currentSize > cap) {
+              return yield* new AssetTooLargeError({
+                path: requested,
+                size: currentSize,
+                cap
+              })
+            }
+
+            const chunks: Uint8Array[] = []
+            while (true) {
+              const chunk = yield* file.readAlloc(64 * 1024).pipe(
+                Effect.mapError(
+                  () =>
+                    new AssetOutsideWorktreeError({
+                      path: requested,
+                      reason: "unreadable"
+                    })
+                )
+              )
+              if (Option.isNone(chunk)) break
+              chunks.push(chunk.value)
+            }
+            const currentBytes = Buffer.concat(chunks)
+            if (decodeEditableText(currentBytes) === null) {
+              return yield* new AssetBinaryError({ path: requested })
+            }
+            const actualRevision = contentRevision(currentBytes)
+            if (actualRevision !== expectedRevision) {
+              return yield* new AssetWriteConflictError({
+                path: requested,
+                expectedRevision,
+                actualRevision
+              })
+            }
+
+            const writeFailure = () =>
+              new AssetWriteIoError({
+                path: requested,
+                message: "Could not safely replace the file."
+              })
+            const directory = path_.dirname(absolutePath)
+            const replacementPath = yield* fs.makeTempFileScoped({
+              directory,
+              prefix: `.${path_.basename(absolutePath)}.jingler-`
+            }).pipe(Effect.mapError(writeFailure))
+            yield* fs.chmod(replacementPath, openedInfo.mode).pipe(
+              Effect.mapError(writeFailure)
+            )
+            const replacement = yield* fs.open(replacementPath, { flag: "r+" }).pipe(
+              Effect.mapError(writeFailure)
+            )
+            yield* replacement.writeAll(nextBytes).pipe(Effect.mapError(writeFailure))
+            yield* replacement.sync.pipe(Effect.mapError(writeFailure))
+            yield* fs.rename(replacementPath, absolutePath).pipe(
+              Effect.mapError(writeFailure)
+            )
+          })
+        )
+
+        const refreshed = yield* read(worktree, requested).pipe(
+          Effect.catchTag(
+            "AssetUnsupportedError",
+            () => new AssetBinaryError({ path: requested })
+          )
+        )
+        if (refreshed.kind === "image" || refreshed.kind === "pdf") {
+          return yield* new AssetBinaryError({ path: requested })
+        }
+        return refreshed
       })
 
     /**
@@ -326,6 +514,6 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
     const revealPath = (worktree: string, requested: string) =>
       Effect.map(resolveInside(worktree, requested), (r) => r.absolutePath)
 
-    return { list, read, pdfPath, revealPath } as const
+    return { list, read, write, pdfPath, revealPath } as const
   })
 }) {}

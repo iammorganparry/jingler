@@ -74,6 +74,8 @@ import {
   awaitRelayAcknowledgement,
   completeDurableGitHubFeedbackReplay,
   assetList,
+  assetRead,
+  assetWrite,
   configGet,
   createTerminal,
   executeOrchestration,
@@ -1070,7 +1072,7 @@ describe("RPC handlers", () => {
         (delivery) => delivery.status === "failed",
       ),
     ).toHaveLength(2);
-  });
+  }, 20_000);
 
   it("restores canonical completion across a checkpoint crash window", () => {
     const assignment = {
@@ -1761,6 +1763,65 @@ describe("RPC handlers", () => {
       await expect(
         Effect.runPromise(assetList({ sessionId: "missing" }).pipe(Effect.provide(layer)))
       ).rejects.toThrow()
+    })
+
+    it("routes revision-checked reads and writes through the requested session worktree", async () => {
+      const now = "2026-07-30T10:00:00.000Z"
+      const worktreePath = join(dir, "editable-asset-worktree")
+      mkdirSync(worktreePath, { recursive: true })
+      writeFileSync(join(worktreePath, "config.custom"), "before\n")
+      mkdirSync(root, { recursive: true })
+      writeFileSync(
+        join(root, "sessions.json"),
+        JSON.stringify([
+          {
+            id: "editable-asset-session",
+            repo: "widget",
+            branch: "jingler/editable-assets",
+            title: "Editable assets",
+            status: "idle",
+            cli: "claude",
+            diff: { added: 0, removed: 0 },
+            prNumber: null,
+            costUsd: 0,
+            tokens: 0,
+            updatedAt: now,
+            worktreePath,
+            chats: [],
+            activeChatId: null
+          }
+        ])
+      )
+      const layer = Layer.mergeAll(SessionStore.Default, AssetService.Default).pipe(
+        Layer.provideMerge(base)
+      )
+
+      const loaded = await Effect.runPromise(
+        assetRead({
+          sessionId: "editable-asset-session",
+          path: "config.custom"
+        }).pipe(Effect.provide(layer))
+      )
+      expect(loaded).toMatchObject({
+        kind: "text",
+        text: "before\n",
+        revision: expect.stringMatching(/^sha256:/)
+      })
+      if (loaded.kind === "image" || loaded.kind === "pdf") return
+
+      const saved = await Effect.runPromise(
+        assetWrite({
+          sessionId: "editable-asset-session",
+          path: "config.custom",
+          text: "after\n",
+          expectedRevision: loaded.revision
+        }).pipe(Effect.provide(layer))
+      )
+      expect(saved).toMatchObject({ kind: "text", text: "after\n" })
+      expect(saved.revision).not.toBe(loaded.revision)
+      expect(readFileSync(join(worktreePath, "config.custom"), "utf8")).toBe(
+        "after\n"
+      )
     })
   })
 

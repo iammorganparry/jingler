@@ -471,6 +471,28 @@ const navigateBrowserMcp = async (targetUrl) => {
     throw new Error("Browser MCP navigate returned a tool error: " + detail)
   }
   record("browser-mcp:tools/call:navigate")
+  // A real agent commonly reads immediately after navigating. Keep that exact
+  // sequence in the fixture so navigate cannot report success while Chromium
+  // is still exposing the previous document to the next tool call.
+  const readResult = await browserMcpRequest(
+    904,
+    "tools/call",
+    { name: "read_text", arguments: {} },
+    protocolVersion
+  )
+  if (readResult?.isError === true) {
+    throw new Error(
+      "Browser MCP read_text returned a tool error: " +
+        JSON.stringify(readResult.content ?? [])
+    )
+  }
+  const text = Array.isArray(readResult?.content)
+    ? readResult.content
+        .filter((item) => item?.type === "text")
+        .map((item) => item.text)
+        .join(" ")
+    : ""
+  record("browser-mcp:tools/call:read_text:" + text)
 }
 const assertAutoTurnPolicy = (params) => {
   if (params?.approvalPolicy !== "never") {
@@ -481,9 +503,19 @@ const assertAutoTurnPolicy = (params) => {
   }
   record("permissions:auto")
 }
-const completeBrowserMcpTurn = async (targetUrl, params) => {
+const waitForBrowserMcpGate = async () => {
+  const gate = process.env.JINGLER_E2E_BROWSER_MCP_GATE
+  if (!gate) throw new Error("Browser MCP gate path is missing")
+  const deadline = Date.now() + 10000
+  while (!fs.existsSync(gate)) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for Browser MCP gate")
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+const completeBrowserMcpTurn = async (targetUrl, params, gated) => {
   try {
     assertAutoTurnPolicy(params)
+    if (gated) await waitForBrowserMcpGate()
     await navigateBrowserMcp(targetUrl)
     send({
       method: "item/completed",
@@ -574,7 +606,11 @@ process.stdin.on("data", (chunk) => {
         )
         const browserTarget = browserMcpTarget(input)
         if (browserTarget !== null) {
-          void completeBrowserMcpTurn(browserTarget, msg.params)
+          void completeBrowserMcpTurn(
+            browserTarget,
+            msg.params,
+            input.includes("[[browser-control-mcp-gated]]")
+          )
           index = buffer.indexOf("\\n")
           continue
         }
@@ -779,6 +815,8 @@ export interface LaunchedApp {
   readonly opencodeAuthWrites: () => ReadonlyArray<{ id: string; body: { type: string; key: string } }>
   /** Ordered JSON-RPC methods received by the fake Codex app-server. */
   readonly codexCalls: () => ReadonlyArray<string>
+  /** Release a scripted Browser MCP turn held at its explicit test barrier. */
+  readonly releaseBrowserMcp: () => void
   /**
    * Drive a `jingler://` sign-in callback into the running app (the OS would
    * normally do this after the browser flow). Emits the main-process `open-url`.
@@ -1010,6 +1048,7 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
           // real harness (no auth, no network, reproducible).
           JINGLER_SCRIPTED_AGENT: options.scriptedAgent === false ? "0" : "1",
           JINGLER_E2E_CODEX_LOG: join(binDir, "codex-calls.log"),
+          JINGLER_E2E_BROWSER_MCP_GATE: join(binDir, "browser-mcp.release"),
           // Keep the window hidden and off the dock. The suite launches a real
           // Electron app dozens of times, and a visible window steals focus on
           // every launch — which makes running the suite locally (its only home;
@@ -1059,6 +1098,9 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
         if (!existsSync(log)) return []
         return readFileSync(log, "utf8").split("\n").filter((line) => line.length > 0)
       }
+      const releaseBrowserMcp = () => {
+        writeFileSync(join(binDir, "browser-mcp.release"), "released\n")
+      }
 
       return {
         app,
@@ -1074,6 +1116,7 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
         completeGitHubConnection,
         opencodeAuthWrites,
         codexCalls,
+        releaseBrowserMcp,
         githubOperations
       }
     }

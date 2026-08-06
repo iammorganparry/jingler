@@ -816,11 +816,11 @@
 }
 
 /*
- * Pierre integration hosts. Row-level styling lives behind Pierre's shadow
- * roots and is mapped in pierre-theme.ts; this outer contract owns sizing,
- * clipping, and accessible focus without reaching into beta DOM internals.
+ * Pierre integration hosts. Every File, FileDiff, CodeView, and Editor gets the
+ * same Jingler-owned class; row-level styling remains inside pierre-theme.ts's
+ * unsafeCSS boundary. This outer contract only owns sizing, clipping, and focus.
  */
-[data-jingler-pierre-view] {
+.jingler-pierre-host {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -836,6 +836,12 @@
   min-height: 0;
 }
 
+/* CodeView virtualizes against its custom-element host, so that host—not the
+ * clipped React section around it—must own the vertical scroll position. */
+.jingler-pierre-code-view {
+  overflow: auto;
+}
+
 .jingler-pierre-file-tree {
   display: block;
   width: 100%;
@@ -847,7 +853,7 @@
   color: var(--sb-text);
 }
 
-[data-jingler-pierre-view]:focus-visible,
+.jingler-pierre-host:focus-visible,
 .jingler-pierre-file-tree:focus-visible {
   outline: 2px solid var(--sb-ring);
   outline-offset: -2px;

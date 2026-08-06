@@ -42,12 +42,16 @@ interface JinglerBridge {
    * Subscribe to "an agent is driving the embedded browser — reveal the dock".
    * Fires on every BrowserControl op. Returns an unsubscribe fn.
    */
-  readonly onPreviewReveal: (cb: (url: string) => void) => () => void
+  readonly onPreviewReveal: (
+    cb: (payload: { readonly sessionId: string; readonly url: string }) => void
+  ) => () => void
   /**
    * Subscribe to committed main-frame URL changes from the embedded browser.
    * Returns an unsubscribe fn.
    */
-  readonly onPreviewUrlChanged: (cb: (url: string) => void) => () => void
+  readonly onPreviewUrlChanged: (
+    cb: (payload: { readonly sessionId: string; readonly url: string }) => void
+  ) => () => void
   /** Main is waiting to close the window until dirty plan drafts are saved. */
   readonly onPlanFlushRequested: (cb: () => void) => () => void
   /** Complete the close handshake after every live plan actor settles. */

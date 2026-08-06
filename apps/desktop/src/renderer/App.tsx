@@ -60,6 +60,7 @@ import { ConversationPane } from "./conversation-pane.js";
 import { SessionChatTabs } from "./session-chat-tabs.js";
 import { PullRequestPane } from "./pull-request-pane.js";
 import { ReviewPane } from "./review-pane.js";
+import { FileBrowserQuickOpen, FileBrowserView } from "./file-browser-view.js";
 import { TerminalDockView } from "./terminal-dock-view.js";
 import { useTerminalDock } from "./use-terminal-dock.js";
 import { PreviewDockView } from "./preview-dock-view.js";
@@ -77,6 +78,7 @@ import {
 } from "./plan-document-registry.js";
 import { clearDraft } from "./draft-store.js";
 import { clearViewedPaths } from "./viewed-store.js";
+import { disposeFileBrowserActor, openSessionFile } from "./use-file-browser.js";
 import { onSessionUpdate } from "./session-updates.js";
 import { setVisibleSessionIds } from "./active-session.js";
 import { prNotification } from "./notifier.js";
@@ -535,16 +537,11 @@ function AuthedApp({
   const planSessions = usePlanSessions();
   const termDock = useTerminalDock();
   const browserDock = usePreviewDock();
-  // Preview tabs outlive the app, so a deleted session would otherwise reopen as
-  // a "couldn't open" pane on every launch, for ever, until each is closed by
-  // hand. Reconciling here rather than in the machine keeps the machine free of
-  // any opinion about where the session list comes from. `pruneTabs` no-ops on
-  // an empty set, so the first render — before sessions have loaded — cannot
-  // wipe the tabs it is meant to be preserving.
-  const pruneTabs = browserDock.pruneTabs;
+  const sessionsLoaded = state.matches("ready");
   useEffect(() => {
-    pruneTabs(new Set(sessions.map((s) => s.id)));
-  }, [sessions, pruneTabs]);
+    if (!sessionsLoaded) return;
+    browserDock.reconcileSessions(sessions.map((session) => session.id));
+  }, [browserDock.reconcileSessions, sessions, sessionsLoaded]);
   const qc = useQueryClient();
   const { activeId: activeThemeId, catalog: themeCatalog } = useThemeCatalog();
   const connector = useConnectorCenter();
@@ -806,9 +803,11 @@ function AuthedApp({
         ?.chats.map((chat) => chat.id) ?? [];
     await flushPlanDocument(sessionId).catch(() => {});
     await rpc.sessionsDelete(sessionId);
+    browserDock.removeSession(sessionId);
     // Stop the persistent conversation actor for a deleted session (it's kept
     // running across session switches, so it won't be torn down by unmount).
     disposeConversationActor(sessionId);
+    disposeFileBrowserActor(sessionId);
     clearPlanAutoPresentation(sessionId);
     stopPlanDocument(sessionId);
     // Same reasoning for the composer draft — it outlives the pane by design, so
@@ -1472,8 +1471,18 @@ function AuthedApp({
             onRestore={restoreSession}
             onDelete={deleteSession}
             onInitialPromptConsumed={consumeInitialPrompt}
-            onOpenAsset={browserDock.openAsset}
+            onOpenFile={(_sessionId, path) => ctx.onOpenFile(path)}
             paneFocused={ctx.paneFocused ?? true}
+          />
+        )}
+        renderFiles={(session) => <FileBrowserView session={session} />}
+        onOpenFile={openSessionFile}
+        renderFileQuickOpen={(session, ctx) => (
+          <FileBrowserQuickOpen
+            session={session}
+            open={ctx.open}
+            onOpenChange={ctx.onOpenChange}
+            onOpenPath={ctx.onOpenPath}
           />
         )}
         renderChatTabs={(session: Session, onSelectConversation) => (

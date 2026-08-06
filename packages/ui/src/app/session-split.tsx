@@ -33,6 +33,9 @@ export interface SessionSplitProps {
     view: "conversation" | "plan" | "split",
     ctx: ConversationPaneCtx
   ) => ReactNode
+  /** Render one pane's session-native repository browser and editor. */
+  renderFiles?: (session: Session) => ReactNode
+  onOpenFile?: (sessionId: string, path: string) => void
   conversationPane?: ReactNode
   /**
    * Render a session's chat pills into the tab row's `chatSlot`. A render prop
@@ -103,6 +106,8 @@ export function SessionSplit(props: SessionSplitProps) {
       <SessionPane
         session={session}
         renderConversation={props.renderConversation}
+        renderFiles={props.renderFiles}
+        onOpenFile={props.onOpenFile}
         conversationPane={props.conversationPane}
         renderChatTabs={props.renderChatTabs}
         onRenameSession={props.onRenameSession}
@@ -141,20 +146,17 @@ export function SessionSplit(props: SessionSplitProps) {
   // Both docks are mounted HERE, once, outside the pane loop — never inside a
   // pane.
   //
-  // The browser preview drives a single native `WebContentsView` in the main
-  // process and its unmount cleanup calls `browserPreviewClose()`, with the
-  // current URL held in component state. Mounting it inside the focused pane
-  // meant that clicking a different pane — to type in its composer, say —
-  // unmounted it and remounted a fresh one, destroying the view and reopening at
-  // the default URL. You would lose the page, its history and your scroll
-  // position just by clicking the pane next to it.
+  // The browser dock controls a session-keyed native-view registry in main.
+  // Mounting this controller once keeps focused-session reconciliation ordered:
+  // the old session is hidden, the new session's retained view is painted, and
+  // background agent events never mount a second overlay inside another pane.
   //
   // The terminal dock is per-SESSION rather than per-pane, so it stays mounted
   // and simply takes whichever session currently owns it as a prop. Passing a
   // prop re-runs its queries; unmounting it would throw away the xterm buffer.
   const dock = dockSession && props.renderTerminalDock ? props.renderTerminalDock(dockSession) : null
-  // Session-agnostic (it points at localhost), which is exactly why hoisting it
-  // out of the panes costs nothing.
+  // The controller follows the focused pane but each session retains its own
+  // URL, visibility, history, scroll and storage behind that one dock surface.
   const browserDock = props.renderBrowserDock ? props.renderBrowserDock(dockSession) : null
   // Where each dock GOES. The same pure rule the docks apply to their own
   // borders and size (`dock-fit.ts`), evaluated against the same shell width, so

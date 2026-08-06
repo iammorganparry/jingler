@@ -30,6 +30,7 @@ import type { LucideIcon } from "lucide-react"
 import {
   CircleDot,
   FileDiff,
+  FolderTree,
   GitCompareArrows,
   GitPullRequest,
   MessagesSquare,
@@ -51,6 +52,7 @@ export type TabKey = string
 /** The built-in tab ids, as constants rather than scattered string literals. */
 export const BUILTIN_TAB = {
   conversation: "conversation",
+  files: "files",
   issue: "issue",
   plan: "plan",
   pr: "pr",
@@ -217,6 +219,12 @@ export const BUILTIN_TAB_META: Record<
   { label: string; icon: LucideIcon; order: number; blurb?: string }
 > = {
   conversation: { label: "Conversation", icon: MessagesSquare, order: 0 },
+  files: {
+    label: "Files",
+    icon: FolderTree,
+    order: 15,
+    blurb: "Browse, inspect, and edit files in this session's worktree."
+  },
   // Kept for the stub screen and for continuity of the id, but no longer a
   // built-in contribution: the Issue tab ships as the `github-issues` plugin,
   // which claims the same order so the migration is invisible to anyone who was
@@ -273,6 +281,7 @@ export interface BuiltinTabRenderers {
     session: Session,
     ctx: TabRenderContext
   ) => ReactNode
+  readonly files?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly pullRequest?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly review?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly code?: (session: Session, ctx: TabRenderContext) => ReactNode
@@ -308,6 +317,13 @@ export const builtinTabContributions = (
       when: () => true,
       mountGroup: CONVERSATION_GROUP,
       render: renderers.conversation
+    },
+    {
+      id: BUILTIN_TAB.files,
+      ...meta.files,
+      when: ({ session }) => session.worktreePath != null,
+      render: (session, ctx) =>
+        renderers.files?.(session, ctx) ?? renderers.stub("files")
     },
     {
       id: BUILTIN_TAB.plan,

@@ -31,6 +31,21 @@ const session = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession>
   }
 ]
 
+const splitSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [
+  {
+    ...session({ repoPath })[0]!,
+    id: "s_browser_alpha",
+    branch: "jingler/browser-alpha",
+    title: "Browser Alpha"
+  },
+  {
+    ...session({ repoPath })[0]!,
+    id: "s_browser_beta",
+    branch: "jingler/browser-beta",
+    title: "Browser Beta"
+  }
+]
+
 const closeServer = (server: Server): Promise<void> =>
   new Promise((resolve) => {
     server.close(() => resolve())
@@ -119,6 +134,135 @@ test("Codex drives the native Preview browser through jingler-browser", async ({
       )
       .toBe(1)
     expect(requests.filter((path) => path === "/browser-mcp-final")).toHaveLength(1)
+  } finally {
+    await closeServer(targetServer)
+  }
+})
+
+test("a background Codex run updates only its owning session browser", async ({ launchApp }) => {
+  const requests: string[] = []
+  const targetServer = createServer((request, response) => {
+    const path = request.url ?? ""
+    requests.push(path)
+    response.writeHead(200, { "Content-Type": "text/html" })
+    response.end(`<!doctype html><title>${path}</title><h1>${path}</h1>`)
+  })
+  await new Promise<void>((resolve, reject) => {
+    targetServer.once("error", reject)
+    targetServer.listen({ host: "127.0.0.1", port: 0 }, resolve)
+  })
+  const address = targetServer.address()
+  if (address === null || typeof address === "string") {
+    await closeServer(targetServer)
+    throw new Error("Browser isolation target server has no TCP address")
+  }
+    const betaUrl = `http://127.0.0.1:${address.port}/beta-focused`
+  const alphaUrl = `http://127.0.0.1:${address.port}/alpha-background`
+
+  try {
+    const { app, window, releaseBrowserMcp } = await launchApp({
+      configured: true,
+      withRepo: true,
+      sessions: splitSessions,
+      scriptedAgent: false
+    })
+    await expect(appShell(window)).toBeVisible()
+    await window.keyboard.press("Control+Shift+Equal")
+    const alphaPane = window.getByTestId("split-pane-0")
+    const betaPane = window.getByTestId("split-pane-1")
+    await expect(betaPane).toHaveAttribute("data-focused", "true")
+
+    const toggle = window.getByRole("button", { name: "Preview", exact: true })
+    if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click()
+    const previewUrl = window.getByLabel("Preview URL")
+    const betaComposer = betaPane.getByPlaceholder("Message Codex…")
+    await betaComposer.fill(`[[browser-control-mcp=${betaUrl}]] QA Beta concurrently.`)
+    await betaComposer.press("Enter")
+
+    await window.keyboard.press("Control+Shift+Digit1")
+    await expect(alphaPane).toHaveAttribute("data-focused", "true")
+    const alphaComposer = alphaPane.getByPlaceholder("Message Codex…")
+    await alphaComposer.fill(
+      `[[browser-control-mcp=${alphaUrl}]][[browser-control-mcp-gated]] QA Alpha in the background.`
+    )
+    await alphaComposer.press("Enter")
+
+    // The fake harness is held at an explicit barrier until focus has moved, so
+    // Alpha's native view is created deterministically as a background operation.
+    await window.keyboard.press("Control+Shift+Digit2")
+    await expect(betaPane).toHaveAttribute("data-focused", "true")
+    releaseBrowserMcp()
+    await expect(alphaPane.getByText("Codex browser MCP complete.")).toBeVisible({
+      timeout: 20_000
+    })
+    await expect(betaPane.getByText("Codex browser MCP complete.")).toBeVisible({
+      timeout: 20_000
+    })
+    await expect.poll(() => requests.filter((path) => path === "/beta-focused")).toHaveLength(1)
+    await expect.poll(() => requests.filter((path) => path === "/alpha-background")).toHaveLength(1)
+    await expect(previewUrl).toHaveValue(betaUrl)
+    await expect
+      .poll(() =>
+        app.evaluate(({ BrowserWindow }, urls) => {
+          const root = BrowserWindow.getAllWindows()[0]?.contentView
+          return Object.fromEntries(
+            (root?.children ?? [])
+              .map((view) => {
+                const candidate = view as typeof view & {
+                  webContents?: { getURL(): string }
+                }
+                return [candidate.webContents?.getURL() ?? "", view.getVisible()] as const
+              })
+              .filter(([url]) => url === urls.alpha || url === urls.beta)
+          )
+        }, { alpha: alphaUrl, beta: betaUrl })
+      )
+      .toEqual({ [alphaUrl]: false, [betaUrl]: true })
+
+    await window.keyboard.press("Control+Shift+Digit1")
+    await expect(alphaPane).toHaveAttribute("data-focused", "true")
+    await expect(previewUrl).toHaveValue(alphaUrl, { timeout: 10_000 })
+  } finally {
+    await closeServer(targetServer)
+  }
+})
+
+test("navigate resolves only after the new document is readable", async ({ launchApp }) => {
+  const targetServer = createServer((_request, response) => {
+    setTimeout(() => {
+      response.writeHead(200, { "Content-Type": "text/html" })
+      response.end("<!doctype html><title>delayed</title><h1>Delayed document ready</h1>")
+    }, 1_000)
+  })
+  await new Promise<void>((resolve, reject) => {
+    targetServer.once("error", reject)
+    targetServer.listen({ host: "127.0.0.1", port: 0 }, resolve)
+  })
+  const address = targetServer.address()
+  if (address === null || typeof address === "string") {
+    await closeServer(targetServer)
+    throw new Error("Delayed navigation server has no TCP address")
+  }
+  const targetUrl = `http://127.0.0.1:${address.port}/delayed`
+
+  try {
+    const { window, codexCalls } = await launchApp({
+      configured: true,
+      withRepo: true,
+      sessions: session,
+      scriptedAgent: false
+    })
+    await expect(appShell(window)).toBeVisible()
+    const composer = window.getByPlaceholder("Message Codex…")
+    await composer.fill(`[[browser-control-mcp=${targetUrl}]] Read the delayed page.`)
+    await composer.press("Enter")
+    await expect(window.getByText("Codex browser MCP complete.")).toBeVisible({ timeout: 20_000 })
+    await expect.poll(() => codexCalls()).toEqual(
+      expect.arrayContaining([
+        "browser-mcp:tools/call:navigate",
+        "browser-mcp:tools/call:read_text:Delayed document ready"
+      ])
+    )
   } finally {
     await closeServer(targetServer)
   }

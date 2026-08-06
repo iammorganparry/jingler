@@ -1,5 +1,14 @@
 import { execFileSync } from "node:child_process"
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs"
 import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
 import { Effect, Exit, Layer } from "effect"
@@ -60,6 +69,17 @@ const readAsset = (path: string) =>
 const listAssets = () =>
   run(Effect.flatMap(AssetService, (s) => s.list(worktree.dir)))
 
+const writeAsset = (
+  path: string,
+  text: string,
+  expectedRevision: string
+) =>
+  run(
+    Effect.flatMap(AssetService, (s) =>
+      s.write(worktree.dir, path, text, expectedRevision)
+    )
+  )
+
 describe("AssetService.read — containment", () => {
   it("refuses a `..` traversal out of the worktree", async () => {
     const exit = await readAsset(`../${outside.dir.split("/").pop()}/secret.txt`)
@@ -114,6 +134,20 @@ describe("AssetService.read — payloads", () => {
     expect(exit).toMatchObject({ _tag: "Success", value: { kind: "code", language: "typescript" } })
   })
 
+  it("loads a valid UTF-8 file with an unknown extension as editable text", async () => {
+    writeFileSync(join(worktree.dir, "settings.widgetrc"), "feature = true\n")
+    const exit = await readAsset("settings.widgetrc")
+    expect(exit).toMatchObject({
+      _tag: "Success",
+      value: {
+        kind: "text",
+        language: null,
+        text: "feature = true\n",
+        revision: expect.stringMatching(/^sha256:/)
+      }
+    })
+  })
+
   it("base64s an image and names its media type", async () => {
     // A one-pixel PNG, so the assertion is on real bytes rather than a stub.
     const png = Buffer.from(
@@ -149,10 +183,10 @@ describe("AssetService.read — payloads", () => {
 })
 
 describe("AssetService.read — refusals that are not traversals", () => {
-  it("refuses an extension with no viewer rather than showing bytes as text", async () => {
-    writeFileSync(join(worktree.dir, "app.wasm"), "\0\0binary")
+  it("refuses unknown-extension binary data rather than decoding it as text", async () => {
+    writeFileSync(join(worktree.dir, "app.wasm"), Buffer.from([0, 255, 0, 1]))
     const exit = await readAsset("app.wasm")
-    expect(failureTag(exit)).toBe("AssetUnsupportedError")
+    expect(failureTag(exit)).toBe("AssetBinaryError")
   })
 
   it("refuses a file over its kind's cap instead of loading it", async () => {
@@ -174,6 +208,110 @@ describe("AssetService.read — refusals that are not traversals", () => {
       Effect.flatMap(AssetService, (s) => s.read("/nope/not/a/worktree", "a.md"))
     )
     expect(failureTag(exit)).toBe("AssetOutsideWorktreeError")
+  })
+})
+
+describe("AssetService.write — contained compare-and-swap edits", () => {
+  it("saves an existing UTF-8 file and returns its refreshed revision", async () => {
+    const file = join(worktree.dir, "config.unknown")
+    writeFileSync(file, "before\n")
+    const loaded = await readAsset("config.unknown")
+    expect(Exit.isSuccess(loaded)).toBe(true)
+    if (!Exit.isSuccess(loaded) || loaded.value.kind === "image" || loaded.value.kind === "pdf") {
+      return
+    }
+
+    const saved = await writeAsset(
+      "config.unknown",
+      "after\n",
+      loaded.value.revision
+    )
+    expect(saved).toMatchObject({
+      _tag: "Success",
+      value: {
+        path: "config.unknown",
+        kind: "text",
+        text: "after\n"
+      }
+    })
+    if (Exit.isSuccess(saved)) {
+      expect(saved.value.revision).not.toBe(loaded.value.revision)
+    }
+    expect(readFileSync(file, "utf8")).toBe("after\n")
+  })
+
+  it("refuses a stale revision without overwriting the external edit", async () => {
+    const file = join(worktree.dir, "notes.md")
+    writeFileSync(file, "loaded\n")
+    const loaded = await readAsset("notes.md")
+    expect(Exit.isSuccess(loaded)).toBe(true)
+    if (!Exit.isSuccess(loaded) || loaded.value.kind === "image" || loaded.value.kind === "pdf") {
+      return
+    }
+
+    writeFileSync(file, "agent changed this\n")
+    const saved = await writeAsset(
+      "notes.md",
+      "renderer change\n",
+      loaded.value.revision
+    )
+    expect(failureTag(saved)).toBe("AssetWriteConflictError")
+    expect(readFileSync(file, "utf8")).toBe("agent changed this\n")
+  })
+
+  it("atomically replaces content while preserving the file mode", async () => {
+    const file = join(worktree.dir, "script.custom")
+    writeFileSync(file, "before\n")
+    chmodSync(file, 0o640)
+    const before = statSync(file)
+    const loaded = await readAsset("script.custom")
+    expect(Exit.isSuccess(loaded)).toBe(true)
+    if (!Exit.isSuccess(loaded) || loaded.value.kind === "image" || loaded.value.kind === "pdf") {
+      return
+    }
+
+    const saved = await writeAsset(
+      "script.custom",
+      "after\n",
+      loaded.value.revision
+    )
+
+    expect(Exit.isSuccess(saved)).toBe(true)
+    const after = statSync(file)
+    expect(after.ino).not.toBe(before.ino)
+    expect(after.mode & 0o777).toBe(before.mode & 0o777)
+    expect(readFileSync(file, "utf8")).toBe("after\n")
+    expect(readdirSync(worktree.dir).filter((name) => name.includes(".jingler-"))).toEqual([])
+  })
+
+  it("refuses traversal and an escaping symlink at save time", async () => {
+    const outsideFile = join(outside.dir, "secret.txt")
+    const traversal = `../${outside.dir.split("/").pop()}/secret.txt`
+    expect(failureTag(await writeAsset(traversal, "nope", "stale"))).toBe(
+      "AssetOutsideWorktreeError"
+    )
+
+    symlinkSync(outsideFile, join(worktree.dir, "escape.unknown"))
+    expect(
+      failureTag(await writeAsset("escape.unknown", "nope", "stale"))
+    ).toBe("AssetOutsideWorktreeError")
+    expect(readFileSync(outsideFile, "utf8")).toBe("SUPER SECRET")
+  })
+
+  it("refuses binary edits and never creates a missing path", async () => {
+    writeFileSync(
+      join(worktree.dir, "payload.custom"),
+      Buffer.from([0, 255, 0, 1])
+    )
+    expect(
+      failureTag(await writeAsset("payload.custom", "text", "stale"))
+    ).toBe("AssetBinaryError")
+
+    const missing = join(worktree.dir, "new-file.txt")
+    expect(
+      failureTag(await writeAsset("new-file.txt", "new", "stale"))
+    ).toBe("AssetOutsideWorktreeError")
+    expect(existsSync(missing)).toBe(false)
   })
 })
 

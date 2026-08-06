@@ -22,7 +22,10 @@ import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
 /** Browser hosting is independent of context swapping. */
 const BrowserControlMcpServiceTest = Layer.succeed(
   BrowserControlMcpService,
-  BrowserControlMcpService.of({ acquire: () => Effect.succeed(null) })
+  BrowserControlMcpService.of({
+    acquire: () => Effect.succeed(null),
+    revoke: () => Effect.void
+  })
 )
 
 /**

@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, type ReactNode } from "react"
 import { resolveOpenablePath } from "./path-detect.js"
 
 /**
- * How a path buried anywhere in the transcript reaches the Preview dock.
+ * How a path buried anywhere in the transcript reaches the session's Files tab.
  *
  * A context rather than a prop, because the callers are leaves — an inline code
  * span inside Streamdown's own render tree, a tool-call header six components
@@ -15,7 +15,7 @@ import { resolveOpenablePath } from "./path-detect.js"
  * returns null rather than throwing when the context is missing.
  */
 export interface OpenAssetContextValue {
-  /** Open a worktree-relative (or worktree-absolute) path in the Preview dock. */
+  /** Open a worktree-relative (or worktree-absolute) path in Files. */
   open: (path: string) => void
   /**
    * Every tracked file in the session's worktree.

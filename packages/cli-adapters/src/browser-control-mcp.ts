@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
-import type { BrowserControlPortShape } from "./browser-control-port.js"
+import type { BrowserControlSessionPortShape } from "./browser-control-port.js"
 
 /** The MCP server the model sees; tools appear as `mcp__jingler-browser__*`. */
 export const BROWSER_MCP_NAME = "jingler-browser"
@@ -24,7 +24,7 @@ const failed = (cause: unknown) => ({
  * external harnesses reach it through the authenticated, loopback-only
  * Streamable HTTP listener in `browser-control-mcp-service.ts`.
  */
-export const buildBrowserControlMcp = (port: BrowserControlPortShape) => {
+export const buildBrowserControlMcp = (port: BrowserControlSessionPortShape) => {
   const server = new McpServer({
     name: BROWSER_MCP_NAME,
     version: "1.0.0"
