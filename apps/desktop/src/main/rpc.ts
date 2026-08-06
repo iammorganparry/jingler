@@ -2043,6 +2043,22 @@ export const assetRead = (input: { sessionId: string; path: string }) =>
     AssetService.read(worktree, input.path)
   )
 
+/** `Asset.write` handler — revision-guarded replacement in the session worktree. */
+export const assetWrite = (input: {
+  sessionId: string
+  path: string
+  text: string
+  expectedRevision: string
+}) =>
+  Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
+    AssetService.write(
+      worktree,
+      input.path,
+      input.text,
+      input.expectedRevision
+    )
+  )
+
 /**
  * `Asset.reveal` handler — show the file in the OS file manager.
  *
@@ -2074,7 +2090,9 @@ export const assetOpenPdf = (input: {
   Effect.gen(function* () {
     const worktree = yield* assetWorktree(input.sessionId)
     const absolutePath = yield* AssetService.pdfPath(worktree, input.path)
-    yield* Effect.flatMap(PreviewViewService, (v) => v.openFile(absolutePath, input.bounds))
+    yield* Effect.flatMap(PreviewViewService, (v) =>
+      v.openFile(input.sessionId, absolutePath, input.bounds)
+    )
   })
 
 /**
@@ -2929,6 +2947,8 @@ const HandlersLayer = JinglerRpcs.toLayer({
       )
       const runner = yield* AgentRunner
       const orchestration = yield* OrchestrationService
+      const browserControl = yield* BrowserControlMcpService
+      const preview = yield* PreviewViewService
       const chats = [...(session?.chats ?? []), ...(session?.closedChats ?? [])]
       for (const chat of chats) {
         // Deletion is stronger than an ordinary Stop click: do not remove the
@@ -2936,6 +2956,8 @@ const HandlersLayer = JinglerRpcs.toLayer({
         yield* runner.stop(sessionId, chat.id, true)
       }
       yield* orchestration.stopSession(sessionId)
+      yield* browserControl.revoke(sessionId)
+      yield* preview.deleteSession(sessionId)
       yield* BackgroundTaskStore.clear(sessionId)
       yield* SessionStore.remove(sessionId)
       for (const chat of chats) {
@@ -3448,40 +3470,48 @@ const HandlersLayer = JinglerRpcs.toLayer({
 
   // Browser preview — a native WebContentsView over a localhost dev server,
   // driven from the renderer's preview pane (bounds streamed to stay aligned).
-  "BrowserPreview.open": ({ url, bounds }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.openBrowser(url, bounds)),
-  "BrowserPreview.setBounds": ({ bounds }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.setBounds(bounds)),
-  "BrowserPreview.navigate": ({ url }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.navigate(url)),
-  "BrowserPreview.reload": () => Effect.flatMap(PreviewViewService, (b) => b.reload()),
-  "BrowserPreview.setVisible": ({ visible }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.setVisible(visible)),
-  "BrowserPreview.close": () => Effect.flatMap(PreviewViewService, (b) => b.close()),
+  "BrowserPreview.open": ({ sessionId, url, bounds }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.openBrowser(sessionId, url, bounds)),
+  "BrowserPreview.setBounds": ({ sessionId, bounds }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.setBounds(sessionId, bounds)),
+  "BrowserPreview.navigate": ({ sessionId, url }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.navigate(sessionId, url)),
+  "BrowserPreview.reload": ({ sessionId }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.reload(sessionId)),
+  "BrowserPreview.setVisible": ({ sessionId, visible }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.setVisible(sessionId, visible)),
+  "BrowserPreview.close": ({ sessionId }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.close(sessionId)),
 
   // Browser control — the SAME native view, driven by an agent (via the
   // browser-control MCP) so it can QA a preview URL where the operator watches.
   // Each op reveals the dock inside PreviewViewService.
-  "BrowserControl.navigate": ({ url }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.controlNavigate(url)),
-  "BrowserControl.screenshot": () =>
-    Effect.flatMap(PreviewViewService, (b) => b.controlScreenshot()),
-  "BrowserControl.click": ({ selector }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.controlClick(selector)),
-  "BrowserControl.type": ({ selector, text }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.controlType(selector, text)),
-  "BrowserControl.readText": () =>
-    Effect.flatMap(PreviewViewService, (b) => b.controlReadText()),
-  "BrowserControl.evaluate": ({ expression }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.controlEvaluate(expression)),
-  "BrowserControl.waitForSelector": ({ selector, timeoutMs }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.controlWaitForSelector(selector, timeoutMs)),
+  "BrowserControl.navigate": ({ sessionId, url }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlNavigate(sessionId, url)),
+  "BrowserControl.screenshot": ({ sessionId }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlScreenshot(sessionId)),
+  "BrowserControl.click": ({ sessionId, selector }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlClick(sessionId, selector)),
+  "BrowserControl.type": ({ sessionId, selector, text }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlType(sessionId, selector, text)),
+  "BrowserControl.readText": ({ sessionId }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlReadText(sessionId)),
+  "BrowserControl.evaluate": ({ sessionId, expression }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlEvaluate(sessionId, expression)),
+  "BrowserControl.waitForSelector": ({ sessionId, selector, timeoutMs }) =>
+    Effect.flatMap(PreviewViewService, (b) =>
+      b.controlWaitForSelector(sessionId, selector, timeoutMs)
+    ),
 
   "Asset.list": (input) => assetList(input),
   "Asset.read": (input) => assetRead(input),
+  "Asset.write": (input) => assetWrite(input),
   "Asset.reveal": (input) => assetReveal(input),
   "Asset.openPdf": (input) => assetOpenPdf(input),
-  "Asset.hidePdf": () => Effect.flatMap(PreviewViewService, (b) => b.hideFile()),
+  "Asset.setPdfBounds": ({ sessionId, bounds }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.setFileBounds(sessionId, bounds)),
+  "Asset.hidePdf": ({ sessionId }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.hideFile(sessionId)),
 
   // Auth — the sign-in wall. Delegates to AuthService, which bridges the OS
   // keychain (SecretStore) and the BetterAuth backend.

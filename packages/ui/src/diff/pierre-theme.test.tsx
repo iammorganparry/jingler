@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import type { VsCodeTheme } from "@jingler/core"
 import {
   getResolvedOrResolveTheme,
@@ -9,21 +9,51 @@ import {
   jinglerLight,
   toTokens
 } from "@jingler/themes"
-import { afterEach, describe, expect, it } from "vitest"
-import { PierreProvider, usePierreRenderer } from "./pierre-provider.js"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { parsePierreFileDiffs } from "./parse.js"
+import {
+  PierreFileDiffView,
+  PierreProvider,
+  usePierreRenderer
+} from "./pierre-provider.js"
 import {
   createPierreThemeAdapter,
+  JINGLER_PIERRE_VISUAL_CONTRACT,
   PIERRE_DIFF_TOKEN_CSS,
+  PIERRE_HOST_CLASS,
   PIERRE_TREE_TOKEN_STYLES
 } from "./pierre-theme.js"
 
-afterEach(cleanup)
+beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  )
+  Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+    configurable: true,
+    value: vi.fn()
+  })
+})
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 const resolvedTheme = async (name: string): Promise<ThemeRegistrationResolved> =>
   Promise.resolve(getResolvedOrResolveTheme(name))
 
+const THEME_TOKEN_PATTERN = /^var\(--(?:sb-|font-)/
+const CSS_LITERAL_COLOUR_PATTERN = /#[\da-f]{3,8}\b|\brgba?\(/i
+const DARK_THEME_PATTERN = /^dark:/
+const LIGHT_THEME_PATTERN = /^light:/
+
 describe("Pierre theme adapter", () => {
-  it("registers built-in dark and light themes with Jingler syntax grounds", async () => {
+  it("keeps the legacy diff skin legible in dark and light themes", async () => {
     const darkTokens = toTokens(jinglerDark)
     const lightTokens = toTokens(jinglerLight)
     const dark = createPierreThemeAdapter(jinglerDark, darkTokens)
@@ -73,7 +103,7 @@ describe("Pierre theme adapter", () => {
     expect(JSON.stringify(resolved)).toContain("abcdef")
   })
 
-  it("maps every shadow-root styling hook back to live --sb-* tokens", () => {
+  it("maps the legacy diff skin entirely through Jingler theme tokens", () => {
     const adapter = createPierreThemeAdapter(null, toTokens(jinglerLight))
 
     expect(adapter.unsafeDiffCSS).toBe(PIERRE_DIFF_TOKEN_CSS)
@@ -84,7 +114,81 @@ describe("Pierre theme adapter", () => {
       "var(--sb-border)"
     )
     for (const value of Object.values(PIERRE_TREE_TOKEN_STYLES)) {
-      expect(value).toMatch(/^var\(--(?:sb-|font-)/)
+      expect(value).toMatch(THEME_TOKEN_PATTERN)
+    }
+    expect(adapter.unsafeDiffCSS).not.toMatch(CSS_LITERAL_COLOUR_PATTERN)
+  })
+
+  it("restores the legacy Jingler diff typography spacing gutters and add-remove palette on Pierre", () => {
+    const adapter = createPierreThemeAdapter(null, toTokens(jinglerLight))
+
+    expect(adapter.unsafeDiffCSS).toContain("var(--sb-diff-add-bg)")
+    expect(adapter.unsafeDiffCSS).toContain("var(--sb-diff-del-bg)")
+    expect(adapter.unsafeDiffCSS).toContain("--diffs-font-size: calc(11px")
+    expect(adapter.unsafeDiffCSS).toContain("min-height: calc(21px")
+    expect(adapter.unsafeDiffCSS).toContain("height: 34px")
+    expect(adapter.unsafeDiffCSS).toContain("height: 26px")
+    expect(adapter.unsafeDiffCSS).toContain("grid-template-columns: repeat(2, 40px)")
+  })
+
+  it("matches every unsafe selector against Pierre's rendered beta structure", async () => {
+    const patch = [
+      "diff --git a/src/contract.ts b/src/contract.ts",
+      "--- a/src/contract.ts",
+      "+++ b/src/contract.ts",
+      "@@ -1,3 +1,3 @@",
+      "-export const first = oldValue",
+      "+export const first = nextValue",
+      " export const second = stableValue",
+      " export const third = stableValue",
+      "@@ -28,3 +28,3 @@",
+      " export const beforeLast = stableValue",
+      "-export const last = oldValue",
+      "+export const last = nextValue",
+      " export const eof = true",
+      ""
+    ].join("\n")
+    const fileDiff = parsePierreFileDiffs(patch)[0]!
+    const view = render(
+      <PierreProvider
+        theme={jinglerDark}
+        tokens={toTokens(jinglerDark)}
+        workers={false}
+      >
+        <PierreFileDiffView
+          label="Pierre selector contract"
+          fileDiff={fileDiff}
+          selection={{
+            path: fileDiff.name,
+            side: "new",
+            startLine: 1,
+            endSide: "new",
+            endLine: 1
+          }}
+          onSelectionChange={() => {}}
+          options={{ diffStyle: "unified", hunkSeparators: "line-info" }}
+        />
+      </PierreProvider>
+    )
+
+    expect(view.container.firstElementChild?.classList).toContain(
+      PIERRE_HOST_CLASS
+    )
+    const root = await waitFor(() => {
+      const container = view.container.querySelector("diffs-container")
+      expect(container?.shadowRoot).toBeTruthy()
+      return container!.shadowRoot!
+    })
+
+    for (const [name, selector] of Object.entries(
+      JINGLER_PIERRE_VISUAL_CONTRACT.selectors
+    )) {
+      await waitFor(() => {
+        expect(
+          root.querySelector(selector),
+          `Pierre selector contract lost ${name}: ${selector}`
+        ).toBeTruthy()
+      })
     }
   })
 
@@ -104,14 +208,14 @@ describe("Pierre theme adapter", () => {
       </PierreProvider>
     )
     const dark = screen.getByTestId("pierre-theme").textContent
-    expect(dark).toMatch(/^dark:/)
+    expect(dark).toMatch(DARK_THEME_PATTERN)
 
     view.rerender(
       <PierreProvider theme={jinglerLight} tokens={toTokens(jinglerLight)} workers={false}>
         <Probe />
       </PierreProvider>
     )
-    expect(screen.getByTestId("pierre-theme").textContent).toMatch(/^light:/)
+    expect(screen.getByTestId("pierre-theme").textContent).toMatch(LIGHT_THEME_PATTERN)
     expect(screen.getByTestId("pierre-theme").textContent).not.toBe(dark)
   })
 })

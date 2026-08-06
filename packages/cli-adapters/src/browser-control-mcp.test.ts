@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { buildBrowserControlMcp } from "./browser-control-mcp.js"
-import type { BrowserControlPortShape } from "./browser-control-port.js"
+import type { BrowserControlSessionPortShape } from "./browser-control-port.js"
 
 /**
  * The agent-facing surface, exercised over a real (in-memory) MCP client so the
@@ -10,7 +10,9 @@ import type { BrowserControlPortShape } from "./browser-control-port.js"
  * tool drives the port, and that a port failure comes back as an `isError`
  * result the model can read rather than a thrown protocol error.
  */
-const stubPort = (over: Partial<BrowserControlPortShape> = {}): BrowserControlPortShape => ({
+const stubPort = (
+  over: Partial<BrowserControlSessionPortShape> = {}
+): BrowserControlSessionPortShape => ({
   navigate: async () => {},
   screenshot: async () => ({ pngBase64: "AAAA" }),
   click: async () => {},
@@ -21,7 +23,7 @@ const stubPort = (over: Partial<BrowserControlPortShape> = {}): BrowserControlPo
   ...over
 })
 
-const connect = async (port: BrowserControlPortShape): Promise<Client> => {
+const connect = async (port: BrowserControlSessionPortShape): Promise<Client> => {
   const server = buildBrowserControlMcp(port)
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   await server.connect(serverTransport)

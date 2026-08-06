@@ -334,8 +334,13 @@ test("acceptance tests open their referenced file and identify the named case", 
     .getByRole("button", { name: "Open src/auth/session.test.ts", exact: true })
     .click()
 
-  await expect(window.getByRole("button", { name: "Hide preview" })).toBeVisible()
-  await expect(window.getByTitle("src/auth/session.test.ts", { exact: true })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Files", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page"
+  )
+  await expect(window.getByRole("textbox", { name: "src/auth/session.test.ts" })).toContainText(
+    "keeps stage review traceable"
+  )
 })
 
 test("worker task progress streams into the canonical plan review", async ({

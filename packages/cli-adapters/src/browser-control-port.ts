@@ -10,7 +10,7 @@ import { Context } from "effect"
  * Defined here (not in the desktop app) so `AgentRunner` can build the MCP
  * server against the interface without importing the Electron main bundle.
  */
-export interface BrowserControlPortShape {
+export interface BrowserControlSessionPortShape {
   /** Open a URL (http/https) in the in-app browser and reveal the dock. */
   readonly navigate: (url: string) => Promise<void>
   /** PNG screenshot of the current page, base64-encoded. */
@@ -25,6 +25,11 @@ export interface BrowserControlPortShape {
   readonly evaluate: (expression: string) => Promise<{ readonly result: string }>
   /** Resolve once a selector appears, or reject after `timeoutMs`. */
   readonly waitForSelector: (selector: string, timeoutMs: number) => Promise<void>
+}
+
+export interface BrowserControlPortShape {
+  /** Bind every operation to one repository session before it reaches Electron. */
+  readonly forSession: (sessionId: string) => BrowserControlSessionPortShape
 }
 
 export class BrowserControlPort extends Context.Tag("@jingler/BrowserControlPort")<

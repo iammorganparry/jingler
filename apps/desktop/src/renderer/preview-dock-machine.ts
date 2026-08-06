@@ -1,67 +1,40 @@
-/**
- * previewDockMachine — the Preview dock's chrome state: visibility, docked side,
- * and which asset tabs are open.
- *
- * ## Why a machine and not four `useState`s
- *
- * Visibility, side, the open-asset list and the active tab are not independent:
- * opening an asset appends a tab, focuses it AND shows the dock; closing the
- * focused tab has to fall back to a tab that still exists; and three of the four
- * have to be mirrored into localStorage on every change. As plain hooks that
- * meant setters calling setters, and a `write()` next to each one that could be
- * forgotten. Here `visible` is a *state* (`hidden`/`shown`) rather than a
- * boolean, persistence is an entry/transition action, and every rule about what
- * moves together lives in one transition.
- *
- * ## What is persisted, and what deliberately is not
- *
- * Visibility, side and the LIST OF OPEN PATHS go to localStorage. Contents never
- * do: an asset is a file on disk that the agent is probably still editing, so a
- * cached copy would reopen the app showing a version that no longer exists. Tabs
- * restore as paths and re-read on mount.
- *
- * The browser tab is pinned, always first, and never closes — the dock needs a
- * stable identity when no assets are open, and "close the last tab" would
- * otherwise leave a panel of pure chrome.
- *
- * Everything here is renderer state. The browser's actual page, history and
- * scroll live in the main process (its `WebContentsView`); this only says
- * whether and where the dock shows.
- */
+/** Session-scoped browser Preview state with one focused native overlay. */
 import type { DockSide } from "@jingler/ui"
-import { BROWSER_TAB_ID } from "@jingler/ui"
 import { assign, setup } from "xstate"
 
-const VISIBLE_KEY = "jingler.browser.visible"
+export const DEFAULT_PREVIEW_URL = "http://localhost:3000"
+const SESSIONS_KEY = "jingler.browser.sessions.v1"
 const SIDE_KEY = "jingler.browser.side"
-const TABS_KEY = "jingler.preview.tabs"
+const LEGACY_VISIBLE_KEY = "jingler.browser.visible"
+const LEGACY_ASSET_TABS_KEY = "jingler.preview.tabs"
 
-/** An open asset tab, as persisted. Keyed by session so a path is unambiguous. */
-export interface OpenAsset {
-  sessionId: string
-  /** Worktree-relative. Re-read from disk on restore; never cached. */
-  path: string
+export interface PreviewSessionState {
+  readonly url: string
+  readonly visible: boolean
+  readonly source: "operator" | "native"
 }
 
-/**
- * Tab ids join session and path so reopening the same file focuses it. The
- * separator is a SPACE, not `:`: a path legally contains `:`, so `a:b:c` could be
- * (`a`, `b:c`) or (`a:b`, `c`) and two distinct pairs could collide. A session id
- * is a slug (`s_<slug>_<stamp>`) and never contains a space, so splitting at the
- * first space is unambiguous — the join is injective. Ids are only ever compared,
- * never parsed back, and persisted tabs store (sessionId, path) OBJECTS not ids,
- * so this separator never touches the restore path.
- */
-export const assetTabId = (sessionId: string, path: string): string => `${sessionId} ${path}`
-
-// Hidden by default — the preview dock is opt-in (unlike the terminal dock).
-const readVisible = (): boolean => {
-  try {
-    return localStorage.getItem(VISIBLE_KEY) === "true"
-  } catch {
-    return false
-  }
+export interface PreviewDockContext {
+  readonly focusedSessionId: string | null
+  readonly sessions: Readonly<Record<string, PreviewSessionState>>
+  readonly side: DockSide
+  readonly legacyVisible: boolean
 }
+
+export type PreviewDockEvent =
+  | { readonly type: "FOCUS_SESSION"; readonly sessionId: string | null }
+  | { readonly type: "TOGGLE"; readonly sessionId?: string }
+  | { readonly type: "SET_SIDE"; readonly side: DockSide }
+  | { readonly type: "NAVIGATE"; readonly sessionId: string; readonly url: string }
+  | { readonly type: "NATIVE_URL"; readonly sessionId: string; readonly url: string }
+  | { readonly type: "REVEAL_BROWSER"; readonly sessionId: string; readonly url: string }
+  | { readonly type: "REMOVE_SESSION"; readonly sessionId: string }
+
+const defaultSessionState = (visible = false): PreviewSessionState => ({
+  url: DEFAULT_PREVIEW_URL,
+  visible,
+  source: "operator"
+})
 
 const readSide = (): DockSide => {
   try {
@@ -71,27 +44,30 @@ const readSide = (): DockSide => {
   }
 }
 
-/**
- * Restored tabs are validated field by field rather than cast.
- *
- * This value is JSON from localStorage — the one input here that a previous
- * version of the app wrote and this one has to survive. A shape change that
- * `as`-cast would surface as `undefined.split` inside a render, taking the whole
- * dock down; dropping the malformed entries costs an open tab instead.
- */
-const readTabs = (): ReadonlyArray<OpenAsset> => {
+const readLegacyVisible = (): boolean => {
   try {
-    const raw = localStorage.getItem(TABS_KEY)
-    if (!raw) return []
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((entry): ReadonlyArray<OpenAsset> => {
-      if (typeof entry !== "object" || entry === null) return []
-      const { sessionId, path } = entry as Partial<OpenAsset>
-      return typeof sessionId === "string" && typeof path === "string" ? [{ sessionId, path }] : []
-    })
+    return localStorage.getItem(LEGACY_VISIBLE_KEY) === "true"
   } catch {
-    return []
+    return false
+  }
+}
+
+const readSessions = (): Readonly<Record<string, PreviewSessionState>> => {
+  try {
+    const raw = localStorage.getItem(SESSIONS_KEY)
+    if (raw === null) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {}
+    const sessions: Record<string, PreviewSessionState> = {}
+    for (const [sessionId, value] of Object.entries(parsed)) {
+      if (typeof value !== "object" || value === null) continue
+      const url = "url" in value && typeof value.url === "string" ? value.url : DEFAULT_PREVIEW_URL
+      const visible = "visible" in value && value.visible === true
+      sessions[sessionId] = { url, visible, source: "native" }
+    }
+    return sessions
+  } catch {
+    return {}
   }
 }
 
@@ -103,28 +79,35 @@ const write = (key: string, value: string): void => {
   }
 }
 
-export interface PreviewDockContext {
-  /**
-   * What localStorage said at spawn. Read once by the `restoring` guard and then
-   * never again — `hidden`/`shown` is the live answer. A machine's `initial` has
-   * to be static, so restored visibility arrives as context and an `always`.
-   */
-  readonly restoredVisible: boolean
-  readonly side: DockSide
-  readonly assets: ReadonlyArray<OpenAsset>
-  readonly activeId: string
+const persistSessions = (sessions: Readonly<Record<string, PreviewSessionState>>): void => {
+  write(SESSIONS_KEY, JSON.stringify(sessions))
 }
 
-export type PreviewDockEvent =
-  | { type: "TOGGLE" }
-  | { type: "SET_SIDE"; side: DockSide }
-  | { type: "SELECT"; id: string }
-  | { type: "OPEN_ASSET"; sessionId: string; path: string }
-  | { type: "CLOSE"; id: string }
-  | { type: "PRUNE"; liveSessionIds: ReadonlySet<string> }
-  // An agent is driving the browser (BrowserControl.*): show the dock and focus
-  // the Browser tab so the operator watches it happen.
-  | { type: "REVEAL_BROWSER" }
+const initializeStorage = (): void => {
+  try {
+    localStorage.removeItem(LEGACY_ASSET_TABS_KEY)
+    localStorage.removeItem(LEGACY_VISIBLE_KEY)
+  } catch {
+    /* ignore privacy-mode failures */
+  }
+}
+
+const sessionFor = (
+  context: PreviewDockContext,
+  sessionId: string
+): PreviewSessionState =>
+  context.sessions[sessionId] ??
+  defaultSessionState(Object.keys(context.sessions).length === 0 && context.legacyVisible)
+
+const updateSession = (
+  context: PreviewDockContext,
+  sessionId: string,
+  update: (current: PreviewSessionState) => PreviewSessionState
+) => {
+  const sessions = { ...context.sessions, [sessionId]: update(sessionFor(context, sessionId)) }
+  persistSessions(sessions)
+  return sessions
+}
 
 export const previewDockMachine = setup({
   types: {
@@ -132,106 +115,96 @@ export const previewDockMachine = setup({
     events: {} as PreviewDockEvent
   },
   actions: {
-    persistVisible: (_, params: { visible: boolean }) => {
-      write(VISIBLE_KEY, String(params.visible))
-    },
+    focusSession: assign(({ context, event }) => {
+      if (event.type !== "FOCUS_SESSION") return {}
+      if (event.sessionId === null) return { focusedSessionId: null }
+      const sessions = updateSession(context, event.sessionId, (current) => current)
+      return { focusedSessionId: event.sessionId, sessions }
+    }),
+    toggle: assign(({ context, event }) => {
+      if (event.type !== "TOGGLE") return {}
+      const sessionId = event.sessionId ?? context.focusedSessionId
+      if (sessionId === null) return {}
+      return {
+        sessions: updateSession(context, sessionId, (current) => ({
+          ...current,
+          visible: !current.visible
+        }))
+      }
+    }),
     setSide: assign(({ event }) => {
       if (event.type !== "SET_SIDE") return {}
       write(SIDE_KEY, event.side)
       return { side: event.side }
     }),
-    select: assign(({ event }) => (event.type === "SELECT" ? { activeId: event.id } : {})),
-    // Focus the pinned browser tab — the target of every agent QA action.
-    revealBrowser: assign(() => ({ activeId: BROWSER_TAB_ID })),
-    // Reopening an already-open file focuses its tab. Appending a duplicate
-    // would give two tabs with the same title that can never diverge.
-    openAsset: assign(({ context, event }) => {
-      if (event.type !== "OPEN_ASSET") return {}
-      const { sessionId, path } = event
-      const assets = context.assets.some((a) => a.sessionId === sessionId && a.path === path)
-        ? context.assets
-        : [...context.assets, { sessionId, path }]
-      write(TABS_KEY, JSON.stringify(assets))
-      return { assets, activeId: assetTabId(sessionId, path) }
-    }),
-    closeAsset: assign(({ context, event }) => {
-      if (event.type !== "CLOSE") return {}
-      const assets = context.assets.filter((a) => assetTabId(a.sessionId, a.path) !== event.id)
-      write(TABS_KEY, JSON.stringify(assets))
-      // Falling back to the browser rather than to a neighbouring asset: the
-      // browser is the only tab guaranteed to still be there.
+    navigate: assign(({ context, event }) => {
+      if (event.type !== "NAVIGATE") return {}
       return {
-        assets,
-        activeId: context.activeId === event.id ? BROWSER_TAB_ID : context.activeId
+        sessions: updateSession(context, event.sessionId, (current) => ({
+          ...current,
+          url: event.url,
+          source: "operator"
+        }))
       }
     }),
-    // Drop tabs whose session no longer exists — a deleted session's tabs would
-    // otherwise restore forever as error panes. Persistence validates shape, not
-    // liveness, so this reconciles against the live list the app hands in.
-    pruneTabs: assign(({ context, event }) => {
-      if (event.type !== "PRUNE") return {}
-      // No-op on an EMPTY live set: the app hasn't loaded its sessions yet, and
-      // pruning now would wipe every restored tab before the list arrives.
-      if (event.liveSessionIds.size === 0) return {}
-      const assets = context.assets.filter((a) => event.liveSessionIds.has(a.sessionId))
-      if (assets.length === context.assets.length) return {}
-      write(TABS_KEY, JSON.stringify(assets))
-      // If the focused tab belonged to a now-dead session, fall back to the
-      // pinned browser tab — the one tab guaranteed to still be there.
-      const activeSurvives = assets.some((a) => assetTabId(a.sessionId, a.path) === context.activeId)
+    nativeUrl: assign(({ context, event }) => {
+      if (event.type !== "NATIVE_URL" || event.url.length === 0) return {}
       return {
-        assets,
-        activeId: activeSurvives ? context.activeId : BROWSER_TAB_ID
+        sessions: updateSession(context, event.sessionId, (current) => ({
+          ...current,
+          url: event.url,
+          source: "native"
+        }))
+      }
+    }),
+    revealBrowser: assign(({ context, event }) => {
+      if (event.type !== "REVEAL_BROWSER") return {}
+      return {
+        sessions: updateSession(context, event.sessionId, (current) => ({
+          ...current,
+          ...(event.url.length === 0 ? {} : { url: event.url }),
+          visible: true,
+          source: "native"
+        }))
+      }
+    }),
+    removeSession: assign(({ context, event }) => {
+      if (event.type !== "REMOVE_SESSION") return {}
+      const { [event.sessionId]: _removed, ...sessions } = context.sessions
+      persistSessions(sessions)
+      return {
+        sessions,
+        focusedSessionId:
+          context.focusedSessionId === event.sessionId ? null : context.focusedSessionId
       }
     })
-  },
-  guards: {
-    // The pinned browser tab has no close button, but a stray CLOSE for it would
-    // otherwise re-persist an unchanged list and re-enter `shown`.
-    isAssetTab: (_, params: { id: string }) => params.id !== BROWSER_TAB_ID
   }
 }).createMachine({
   id: "previewDock",
-  context: () => ({
-    restoredVisible: readVisible(),
-    side: readSide(),
-    assets: readTabs(),
-    activeId: BROWSER_TAB_ID
-  }),
-  initial: "restoring",
-  // Side, selection and closing are orthogonal to visibility, so they live on
-  // the root and apply in both states.
-  on: {
-    SET_SIDE: { actions: "setSide" },
-    SELECT: { actions: "select" },
-    CLOSE: {
-      guard: { type: "isAssetTab", params: ({ event }) => ({ id: event.id }) },
-      actions: "closeAsset"
-    },
-    // Opening an asset is an explicit request to LOOK at it, so it shows the
-    // dock. Focusing a tab in a hidden panel would look like nothing happened.
-    OPEN_ASSET: { target: ".shown", actions: "openAsset" },
-    // Same as OPEN_ASSET but for the browser: an agent action is a request to
-    // LOOK, so it shows the dock even if the operator had it hidden.
-    REVEAL_BROWSER: { target: ".shown", actions: "revealBrowser" },
-    // Reconcile open tabs against the live session list. Orthogonal to
-    // visibility — pruning a dead tab must not open or close the dock.
-    PRUNE: { actions: "pruneTabs" }
+  context: () => {
+    const sessions = readSessions()
+    const legacyVisible = readLegacyVisible()
+    initializeStorage()
+    return { focusedSessionId: null, sessions, side: readSide(), legacyVisible }
   },
+  initial: "active",
   states: {
-    restoring: {
-      always: [
-        { guard: ({ context }) => context.restoredVisible, target: "shown" },
-        { target: "hidden" }
-      ]
-    },
-    hidden: {
-      entry: { type: "persistVisible", params: { visible: false } },
-      on: { TOGGLE: "shown" }
-    },
-    shown: {
-      entry: { type: "persistVisible", params: { visible: true } },
-      on: { TOGGLE: "hidden" }
+    active: {
+      on: {
+        FOCUS_SESSION: { actions: "focusSession" },
+        TOGGLE: { actions: "toggle" },
+        SET_SIDE: { actions: "setSide" },
+        NAVIGATE: { actions: "navigate" },
+        NATIVE_URL: { actions: "nativeUrl" },
+        REVEAL_BROWSER: { actions: "revealBrowser" },
+        REMOVE_SESSION: { actions: "removeSession" }
+      }
     }
   }
 })
+
+export const previewSessionState = (
+  context: PreviewDockContext,
+  sessionId: string | null
+): PreviewSessionState =>
+  sessionId === null ? defaultSessionState() : sessionFor(context, sessionId)

@@ -7,6 +7,7 @@
 import type {
   AssetFileEntry,
   AssetPayload,
+  AssetWriteResult,
   BackgroundTask,
   AdversarialReview,
   ArchiveReason,
@@ -385,6 +386,14 @@ export const rpc = {
    */
   assetRead: (sessionId: string, path: string): Promise<AssetPayload> =>
     run((c) => c.Asset.read({ sessionId, path })),
+  /** Save one existing text asset only if its loaded revision is still current. */
+  assetWrite: (
+    sessionId: string,
+    path: string,
+    text: string,
+    expectedRevision: string
+  ): Promise<AssetWriteResult> =>
+    run((c) => c.Asset.write({ sessionId, path, text, expectedRevision })),
   assetReveal: (sessionId: string, path: string): Promise<void> =>
     run((c) => c.Asset.reveal({ sessionId, path })),
   /** Park Chromium's PDF viewer over `bounds`. Main resolves the path itself. */
@@ -393,7 +402,12 @@ export const rpc = {
     path: string,
     bounds: { x: number; y: number; width: number; height: number }
   ): Promise<void> => run((c) => c.Asset.openPdf({ sessionId, path, bounds })),
-  assetHidePdf: (): Promise<void> => run((c) => c.Asset.hidePdf()),
+  assetSetPdfBounds: (
+    sessionId: string,
+    bounds: { x: number; y: number; width: number; height: number }
+  ): Promise<void> => run((c) => c.Asset.setPdfBounds({ sessionId, bounds })),
+  assetHidePdf: (sessionId: string): Promise<void> =>
+    run((c) => c.Asset.hidePdf({ sessionId })),
   workspaceRevertFile: (sessionId: string, path: string): Promise<void> =>
     run((c) => c.Workspace.revertFile({ sessionId, path })),
   workspaceRevertLines: (
@@ -834,21 +848,23 @@ export const rpc = {
 
   // ── Browser preview ────────────────────────────────────────────────────────
   /** Show the preview view and load `url` at `bounds` (rejects non-http(s)). */
-  browserPreviewOpen: (url: string, bounds: BrowserBounds): Promise<void> =>
-    run((c) => c.BrowserPreview.open({ url, bounds })),
+  browserPreviewOpen: (sessionId: string, url: string, bounds: BrowserBounds): Promise<void> =>
+    run((c) => c.BrowserPreview.open({ sessionId, url, bounds })),
   /** Keep the native view aligned with the pane's on-screen rect. */
-  browserPreviewSetBounds: (bounds: BrowserBounds): Promise<void> =>
-    run((c) => c.BrowserPreview.setBounds({ bounds })),
+  browserPreviewSetBounds: (sessionId: string, bounds: BrowserBounds): Promise<void> =>
+    run((c) => c.BrowserPreview.setBounds({ sessionId, bounds })),
   /** Navigate the open preview to a new URL (rejects non-http(s)). */
-  browserPreviewNavigate: (url: string): Promise<void> =>
-    run((c) => c.BrowserPreview.navigate({ url })),
+  browserPreviewNavigate: (sessionId: string, url: string): Promise<void> =>
+    run((c) => c.BrowserPreview.navigate({ sessionId, url })),
   /** Reload the current preview page. */
-  browserPreviewReload: (): Promise<void> => run((c) => c.BrowserPreview.reload()),
+  browserPreviewReload: (sessionId: string): Promise<void> =>
+    run((c) => c.BrowserPreview.reload({ sessionId })),
   /** Hide the native view for a tab switch, keeping its page and history alive. */
-  browserPreviewSetVisible: (visible: boolean): Promise<void> =>
-    run((c) => c.BrowserPreview.setVisible({ visible })),
+  browserPreviewSetVisible: (sessionId: string, visible: boolean): Promise<void> =>
+    run((c) => c.BrowserPreview.setVisible({ sessionId, visible })),
   /** Hide + destroy the preview view (pane closed / session switched). */
-  browserPreviewClose: (): Promise<void> => run((c) => c.BrowserPreview.close()),
+  browserPreviewClose: (sessionId: string): Promise<void> =>
+    run((c) => c.BrowserPreview.close({ sessionId })),
 
   // ── Auth ─────────────────────────────────────────────────────────────────
   /** The current authenticated session, or null when signed out. */

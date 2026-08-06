@@ -7,12 +7,13 @@ import { PierreProvider } from "../diff/pierre-provider.js"
 import { AssetCanvas } from "./asset-canvas.js"
 
 const base = { path: "src/main.ts", absolutePath: "/tmp/src/main.ts", size: 20 }
-const code: AssetPayload = {
+const code = {
   ...base,
   kind: "code",
   language: "typescript",
-  text: "export const value = 2\n"
-}
+  text: "export const value = 2\n",
+  revision: "sha256:code"
+} satisfies AssetPayload
 
 const mount = (canvas: React.ReactNode) =>
   render(
@@ -74,7 +75,8 @@ describe("AssetCanvas", () => {
       path: "docs/spec.md",
       kind: "markdown",
       language: null,
-      text: "# Browser spec"
+      text: "# Browser spec",
+      revision: "sha256:markdown"
     }
     const view = mount(
       <AssetCanvas selectedPath={markdown.path} payload={markdown} />

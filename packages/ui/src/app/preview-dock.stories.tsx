@@ -1,6 +1,6 @@
 import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { BROWSER_TAB_ID, PreviewDock, type PreviewTab } from "./preview-dock.js"
+import { PreviewDock } from "./preview-dock.js"
 import type { DockSide } from "./terminal-panel.js"
 
 const meta = {
@@ -12,32 +12,20 @@ const meta = {
     onDockChange: () => {},
     visible: true,
     onToggle: () => {},
-    tabs: [],
-    activeId: BROWSER_TAB_ID,
-    onSelect: () => {},
-    onClose: () => {},
     url: "http://localhost:3000",
     onNavigate: () => {},
     onReload: () => {},
-    renderTab: () => null
+    renderBrowser: () => null
   }
 } satisfies Meta<typeof PreviewDock>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
-const BROWSER_TAB: PreviewTab = { id: BROWSER_TAB_ID, kind: "browser", title: "Browser" }
-
-const ASSET_TABS: ReadonlyArray<PreviewTab> = [
-  { id: "a1", kind: "asset", title: "spec.md", path: "docs/spec.md" },
-  { id: "a2", kind: "asset", title: "results.csv", path: "out/results.csv" },
-  { id: "a3", kind: "asset", title: "chart.png", path: "assets/chart.png" }
-]
-
 /**
  * The browser tab. Its body is a native `WebContentsView` in the real app, which
  * Storybook has no way to mount — so the placeholder stands in and only the
- * chrome (address bar, dock side, tab strip) is exercised here.
+ * chrome (address bar and dock side) is exercised here.
  */
 export const Browser: Story = {
   render: () => {
@@ -50,14 +38,10 @@ export const Browser: Story = {
           onDockChange={setSide}
           visible
           onToggle={() => {}}
-          tabs={[BROWSER_TAB]}
-          activeId={BROWSER_TAB_ID}
-          onSelect={() => {}}
-          onClose={() => {}}
           url={url}
           onNavigate={setUrl}
           onReload={() => {}}
-          renderTab={() => (
+          renderBrowser={() => (
             <div className="absolute inset-0 flex items-center justify-center text-[12px] text-dim">
               Native browser view renders here — loading {url}
             </div>
@@ -69,15 +53,11 @@ export const Browser: Story = {
 }
 
 /**
- * Several assets open alongside the pinned browser tab. Switching tabs here also
- * demonstrates the rule the dock exists to enforce: the address bar belongs to
- * the browser and disappears for an asset, which has a path rather than a URL.
+ * The same internet-only browser dock attached below the session workspace.
  */
-export const WithAssets: Story = {
+export const BottomDocked: Story = {
   render: () => {
     const [side, setSide] = useState<DockSide>("bottom")
-    const [tabs, setTabs] = useState<ReadonlyArray<PreviewTab>>([BROWSER_TAB, ...ASSET_TABS])
-    const [activeId, setActiveId] = useState("a1")
     return (
       <Frame side={side}>
         <PreviewDock
@@ -85,24 +65,12 @@ export const WithAssets: Story = {
           onDockChange={setSide}
           visible
           onToggle={() => {}}
-          tabs={tabs}
-          activeId={activeId}
-          onSelect={setActiveId}
-          onClose={(id) => {
-            setTabs((current) => current.filter((t) => t.id !== id))
-            if (id === activeId) setActiveId(BROWSER_TAB_ID)
-          }}
           url="http://localhost:3000"
           onNavigate={() => {}}
           onReload={() => {}}
-          renderTab={(tab) => (
+          renderBrowser={() => (
             <div className="absolute inset-0 flex items-center justify-center font-mono text-[12px] text-dim">
-              {tab.kind === "browser" ? "Native browser view" : tab.path}
-            </div>
-          )}
-          renderAssetManager={(tab) => (
-            <div className="absolute inset-0 flex items-center justify-center font-mono text-[12px] text-dim">
-              Persistent repository tree + {tab?.path ?? "asset canvas"}
+              Native browser view
             </div>
           )}
         />

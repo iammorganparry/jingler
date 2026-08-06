@@ -19,14 +19,18 @@ export const BrowserControlPortLive = Layer.effect(
     // safe; it rejects with the `BrowserControlError` the op fails with, which
     // the MCP tool handler surfaces to the model.
     return BrowserControlPort.of({
-      navigate: (url) => Effect.runPromise(preview.controlNavigate(url)),
-      screenshot: () => Effect.runPromise(preview.controlScreenshot()),
-      click: (selector) => Effect.runPromise(preview.controlClick(selector)),
-      type: (selector, text) => Effect.runPromise(preview.controlType(selector, text)),
-      readText: () => Effect.runPromise(preview.controlReadText()),
-      evaluate: (expression) => Effect.runPromise(preview.controlEvaluate(expression)),
-      waitForSelector: (selector, timeoutMs) =>
-        Effect.runPromise(preview.controlWaitForSelector(selector, timeoutMs))
+      forSession: (sessionId) => ({
+        navigate: (url) => Effect.runPromise(preview.controlNavigate(sessionId, url)),
+        screenshot: () => Effect.runPromise(preview.controlScreenshot(sessionId)),
+        click: (selector) => Effect.runPromise(preview.controlClick(sessionId, selector)),
+        type: (selector, text) =>
+          Effect.runPromise(preview.controlType(sessionId, selector, text)),
+        readText: () => Effect.runPromise(preview.controlReadText(sessionId)),
+        evaluate: (expression) =>
+          Effect.runPromise(preview.controlEvaluate(sessionId, expression)),
+        waitForSelector: (selector, timeoutMs) =>
+          Effect.runPromise(preview.controlWaitForSelector(sessionId, selector, timeoutMs))
+      })
     })
   })
 )

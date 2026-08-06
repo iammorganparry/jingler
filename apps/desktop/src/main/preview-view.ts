@@ -43,7 +43,7 @@
 import type { BrowserBounds } from "@jingler/core"
 import { BrowserControlError, BrowserPreviewError } from "@jingler/core"
 import { pathToFileURL } from "node:url"
-import { BrowserWindow, WebContentsView } from "electron"
+import { BrowserWindow, session as electronSession, WebContentsView } from "electron"
 import { Context, Duration, Effect, Layer } from "effect"
 
 /** Which tab a native view belongs to. */
@@ -57,7 +57,8 @@ export type PreviewOwner = "browser" | "asset"
  * not (and cannot) stop scripting the page currently loaded; that is bounded by
  * the same trust boundary as every other privileged RPC. See the PR review note.
  */
-const BROWSER_PARTITION = "persist:jingler-browser-preview"
+export const browserPartitionForSession = (sessionId: string): string =>
+  `persist:jingler-browser-preview:${encodeURIComponent(sessionId)}`
 
 /** Hard ceiling on `controlWaitForSelector`, so a bad caller can't pin the RPC. */
 const MAX_WAIT_MS = 30_000
@@ -77,48 +78,53 @@ export const PREVIEW_URL_CHANNEL = "jingler/preview/url"
 
 export interface PreviewViewServiceShape {
   /** Show the browser view and load `url` at `bounds`. Rejects non-http(s) URLs. */
-  readonly openBrowser: (url: string, bounds: BrowserBounds) => Effect.Effect<void, BrowserPreviewError>
+  readonly openBrowser: (sessionId: string, url: string, bounds: BrowserBounds) => Effect.Effect<void, BrowserPreviewError>
   /**
    * Show the asset view over `bounds` with `absolutePath` loaded in Chromium's
    * own viewer. The caller MUST have validated containment first.
    */
-  readonly openFile: (absolutePath: string, bounds: BrowserBounds) => Effect.Effect<void, BrowserPreviewError>
-  /** Track the dock's rect (layout/scroll) for whichever view is visible. */
-  readonly setBounds: (bounds: BrowserBounds) => Effect.Effect<void>
+  readonly openFile: (sessionId: string, absolutePath: string, bounds: BrowserBounds) => Effect.Effect<void, BrowserPreviewError>
+  /** Track the internet dock's rect for the named session. */
+  readonly setBounds: (sessionId: string, bounds: BrowserBounds) => Effect.Effect<void>
+  /** Track a Files PDF placeholder independently from the internet dock. */
+  readonly setFileBounds: (sessionId: string, bounds: BrowserBounds) => Effect.Effect<void>
   /** Navigate the browser view. Rejects non-http(s) URLs. */
-  readonly navigate: (url: string) => Effect.Effect<void, BrowserPreviewError>
+  readonly navigate: (sessionId: string, url: string) => Effect.Effect<void, BrowserPreviewError>
   /** Reload the browser view. No-op when closed. */
-  readonly reload: () => Effect.Effect<void>
+  readonly reload: (sessionId: string) => Effect.Effect<void>
   /**
    * Show or hide the BROWSER view without destroying it — the dock switching to
    * or from the Browser tab. Hiding never discards the page or its history.
    */
-  readonly setVisible: (visible: boolean) => Effect.Effect<void>
-  /** Hide the asset view (the dock switched away from a PDF tab). */
-  readonly hideFile: () => Effect.Effect<void>
-  /** Destroy every view. Idempotent. */
-  readonly close: () => Effect.Effect<void>
-  /** Test/diagnostic seam: which owner is currently painted, if any. */
-  readonly visibleOwner: () => Effect.Effect<PreviewOwner | null>
-
+  readonly setVisible: (sessionId: string, visible: boolean) => Effect.Effect<void>
+  /** Hide the named session's PDF without affecting Preview or split panes. */
+  readonly hideFile: (sessionId: string) => Effect.Effect<void>
+  /** Destroy one session's views but retain its persistent browser partition. */
+  readonly close: (sessionId: string) => Effect.Effect<void>
+  /** Permanently destroy one session's views and clear only its browser partition. */
+  readonly deleteSession: (sessionId: string) => Effect.Effect<void>
+  /** Destroy all browser and asset views during application shutdown. */
+  readonly closeAll: () => Effect.Effect<void>
   // ── Agent QA (BrowserControl.*) ──────────────────────────────────────────────
   // The same browser view, driven by an AGENT rather than the operator. Every op
-  // ensures the view exists and reveals the dock first, so QA happens where the
-  // operator can watch. Errors carry the failing `op`.
+  // ensures the owning session's view exists and notifies the renderer. A
+  // focused owner reveals its dock; a background owner remains hidden. Errors
+  // carry the failing `op`.
   /** Load `url` (http/https only) into the browser and reveal the dock. */
-  readonly controlNavigate: (url: string) => Effect.Effect<void, BrowserControlError>
+  readonly controlNavigate: (sessionId: string, url: string) => Effect.Effect<void, BrowserControlError>
   /** PNG screenshot of the current page, base64-encoded. */
-  readonly controlScreenshot: () => Effect.Effect<{ pngBase64: string }, BrowserControlError>
+  readonly controlScreenshot: (sessionId: string) => Effect.Effect<{ pngBase64: string }, BrowserControlError>
   /** Click the first element matching `selector`; fails if nothing matches. */
-  readonly controlClick: (selector: string) => Effect.Effect<void, BrowserControlError>
+  readonly controlClick: (sessionId: string, selector: string) => Effect.Effect<void, BrowserControlError>
   /** Type `text` into the first element matching `selector`; fails if none. */
-  readonly controlType: (selector: string, text: string) => Effect.Effect<void, BrowserControlError>
+  readonly controlType: (sessionId: string, selector: string, text: string) => Effect.Effect<void, BrowserControlError>
   /** The page's visible text (`document.body.innerText`). */
-  readonly controlReadText: () => Effect.Effect<{ text: string }, BrowserControlError>
+  readonly controlReadText: (sessionId: string) => Effect.Effect<{ text: string }, BrowserControlError>
   /** Evaluate `expression` in the page; returns a string (JSON for non-strings). */
-  readonly controlEvaluate: (expression: string) => Effect.Effect<{ result: string }, BrowserControlError>
+  readonly controlEvaluate: (sessionId: string, expression: string) => Effect.Effect<{ result: string }, BrowserControlError>
   /** Resolve once `selector` appears in the DOM, or fail after `timeoutMs`. */
   readonly controlWaitForSelector: (
+    sessionId: string,
     selector: string,
     timeoutMs: number
   ) => Effect.Effect<void, BrowserControlError>
@@ -157,30 +163,29 @@ export const toRect = (b: BrowserBounds) => ({
   height: Math.max(0, Math.round(b.height))
 })
 
-export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
-  // One view per owner (either may be null), captured in this closure so the
-  // service value is stateful without a class.
-  let browserView: WebContentsView | null = null
-  let assetView: WebContentsView | null = null
-  let visible: PreviewOwner | null = null
+export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.gen(function* () {
+  // Browser WebContents are session resources: each retains its own history,
+  // scroll position and persistent storage partition while only one may paint.
+  const browserViews = new Map<string, WebContentsView>()
+  const assetViews = new Map<string, WebContentsView>()
+  const visibleBrowserSessions = new Set<string>()
+  const visibleAssetSessions = new Set<string>()
+  // `controlNavigate` reveals the dock before its awaited load commits. The
+  // renderer answers that reveal by calling `openBrowser`; without this guard a
+  // still-blank WebContents starts a second load and Electron aborts the first.
+  const controlledNavigations = new Set<string>()
 
   const mainWindow = (): BrowserWindow | null => BrowserWindow.getAllWindows()[0] ?? null
 
-  const viewFor = (owner: PreviewOwner): WebContentsView | null =>
-    owner === "browser" ? browserView : assetView
-
-  /**
-   * The ONLY place that decides what is painted. Passing null hides everything.
-   *
-   * Every caller routes through here rather than flipping its own view's
-   * visibility, because the bug this prevents is not "my view is hidden" — it is
-   * "the OTHER view is still showing", which no single owner is positioned to
-   * notice.
-   */
-  const showOnly = (owner: PreviewOwner | null) => {
-    browserView?.setVisible(owner === "browser")
-    assetView?.setVisible(owner === "asset")
-    visible = owner
+  const setOwnerVisible = (
+    views: Map<string, WebContentsView>,
+    visibleSessions: Set<string>,
+    sessionId: string,
+    wanted: boolean
+  ) => {
+    views.get(sessionId)?.setVisible(wanted)
+    if (wanted) visibleSessions.add(sessionId)
+    else visibleSessions.delete(sessionId)
   }
 
   /** Load a URL, swallowing failures (dev server down, PDF deleted) so the RPC
@@ -189,11 +194,9 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
     view?.webContents.loadURL(url).catch(() => {})
   }
 
-  const ensure = (owner: PreviewOwner): WebContentsView | null => {
+  const createView = (owner: PreviewOwner, sessionId: string | null): WebContentsView | null => {
     const win = mainWindow()
     if (!win) return null
-    const existing = viewFor(owner)
-    if (existing) return existing
     const view = new WebContentsView({
       webPreferences: {
         sandbox: true,
@@ -201,7 +204,9 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
         nodeIntegration: false,
         // Only the browsable view is isolated; the asset view is a file:// PDF
         // in Chromium's viewer with no login state to leak.
-        ...(owner === "browser" ? { partition: BROWSER_PARTITION } : {})
+        ...(owner === "browser" && sessionId !== null
+          ? { partition: browserPartitionForSession(sessionId) }
+          : {})
       }
     })
     view.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
@@ -210,10 +215,10 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
       // followable — a file-origin page that can navigate can walk the disk.
       if (owner === "asset" || !isHttpUrl(url)) event.preventDefault()
     })
-    if (owner === "browser") {
+    if (owner === "browser" && sessionId !== null) {
       const publishUrl = (url: string) => {
         if (isHttpUrl(url)) {
-          mainWindow()?.webContents.send(PREVIEW_URL_CHANNEL, url)
+          mainWindow()?.webContents.send(PREVIEW_URL_CHANNEL, { sessionId, url })
         }
       }
       view.webContents.on("did-navigate", (_event, url) => publishUrl(url))
@@ -222,8 +227,22 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
       })
     }
     win.contentView.addChildView(view)
-    if (owner === "browser") browserView = view
-    else assetView = view
+    return view
+  }
+
+  const ensureBrowser = (sessionId: string): WebContentsView | null => {
+    const existing = browserViews.get(sessionId)
+    if (existing !== undefined) return existing
+    const view = createView("browser", sessionId)
+    if (view !== null) browserViews.set(sessionId, view)
+    return view
+  }
+
+  const ensureAsset = (sessionId: string): WebContentsView | null => {
+    const existing = assetViews.get(sessionId)
+    if (existing !== undefined) return existing
+    const view = createView("asset", sessionId)
+    if (view !== null) assetViews.set(sessionId, view)
     return view
   }
 
@@ -250,42 +269,62 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
   // A view an agent created (dock never opened) has no bounds, so `capturePage`
   // would hand back an empty image. Give a fresh one a real size; the renderer's
   // reveal loop then takes over positioning it against the real dock rect.
-  const ensureBrowserSized = (): WebContentsView | null => {
-    const v = ensure("browser")
+  const ensureBrowserSized = (sessionId: string): WebContentsView | null => {
+    const v = ensureBrowser(sessionId)
     if (v && v.getBounds().width === 0) {
       v.setBounds({ x: 0, y: 0, width: 1280, height: 800 })
     }
     return v
   }
 
-  // Paint the browser AND ask the renderer to open the dock onto it — the whole
-  // point of agent QA is that the operator sees it happen. Navigation listeners
-  // publish the eventual committed URL separately.
-  const reveal = (url: string) => {
-    showOnly("browser")
-    mainWindow()?.webContents.send(PREVIEW_REVEAL_CHANNEL, url)
+  // Reveal is a renderer request, not permission to paint. The focused owning
+  // session will answer with setVisible(true); a background session records the
+  // request without stealing the native overlay.
+  const reveal = (sessionId: string, url: string) => {
+    mainWindow()?.webContents.send(PREVIEW_REVEAL_CHANNEL, { sessionId, url })
   }
 
   const withPage = <A>(
+    sessionId: string,
     op: string,
     f: (wc: WebContentsView["webContents"]) => Promise<A>
   ): Effect.Effect<A, BrowserControlError> =>
     Effect.suspend(() => {
-      const v = ensureBrowserSized()
+      const v = ensureBrowserSized(sessionId)
       if (!v) {
         return Effect.fail(
           new BrowserControlError({ op, message: "No application window to attach the browser to" })
         )
       }
-      reveal(v.webContents.getURL())
+      reveal(sessionId, v.webContents.getURL())
       return Effect.tryPromise({ try: () => f(v.webContents), catch: controlFail(op) })
     })
 
+  const closeAllNow = (): void => {
+    for (const view of browserViews.values()) destroy(view)
+    browserViews.clear()
+    for (const view of assetViews.values()) destroy(view)
+    assetViews.clear()
+    visibleBrowserSessions.clear()
+    visibleAssetSessions.clear()
+  }
+
+  const closeSessionNow = (sessionId: string): void => {
+    destroy(browserViews.get(sessionId) ?? null)
+    destroy(assetViews.get(sessionId) ?? null)
+    browserViews.delete(sessionId)
+    assetViews.delete(sessionId)
+    visibleBrowserSessions.delete(sessionId)
+    visibleAssetSessions.delete(sessionId)
+  }
+
+  yield* Effect.addFinalizer(() => Effect.sync(closeAllNow))
+
   return {
-    openBrowser: (url, bounds) =>
+    openBrowser: (sessionId, url, bounds) =>
       isHttpUrl(url)
         ? Effect.sync(() => {
-            const v = ensure("browser")
+            const v = ensureBrowser(sessionId)
             if (!v) return
             v.setBounds(toRect(bounds))
             // Adopt a page an agent already navigated to (controlNavigate) rather
@@ -294,74 +333,99 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
             // clobbering it here would point every subsequent screenshot/click at
             // the wrong page. A fresh view (getURL empty / about:blank) still loads.
             const current = v.webContents.getURL()
-            if (current === "" || current === "about:blank") load(v, url)
-            showOnly("browser")
+            if (
+              !controlledNavigations.has(sessionId) &&
+              (current === "" || current === "about:blank")
+            ) {
+              load(v, url)
+            }
+            setOwnerVisible(browserViews, visibleBrowserSessions, sessionId, true)
           })
         : rejectBadUrl(url),
 
-    openFile: (absolutePath, bounds) =>
+    openFile: (sessionId, absolutePath, bounds) =>
       Effect.sync(() => {
-        const v = ensure("asset")
+        const v = ensureAsset(sessionId)
         if (!v) return
         v.setBounds(toRect(bounds))
         load(v, fileUrlFor(absolutePath))
-        showOnly("asset")
+        setOwnerVisible(assetViews, visibleAssetSessions, sessionId, true)
       }),
 
-    // Bounds go to the VISIBLE view only. Pushing them to a hidden one is
-    // harmless but pointless, and would resize a PDF every frame the browser is
-    // being dragged.
-    setBounds: (bounds) => Effect.sync(() => {
-      const v = visible ? viewFor(visible) : null
-      v?.setBounds(toRect(bounds))
+    setBounds: (sessionId, bounds) => Effect.sync(() => {
+      if (visibleBrowserSessions.has(sessionId)) {
+        browserViews.get(sessionId)?.setBounds(toRect(bounds))
+      }
     }),
 
-    navigate: (url) =>
-      isHttpUrl(url) ? Effect.sync(() => load(browserView, url)) : rejectBadUrl(url),
-
-    reload: () => Effect.sync(() => browserView?.webContents.reload()),
-
-    setVisible: (wanted) =>
-      Effect.sync(() => {
-        if (wanted) showOnly("browser")
-        else if (visible === "browser") showOnly(null)
-      }),
-
-    hideFile: () => Effect.sync(() => {
-      if (visible === "asset") showOnly(null)
+    setFileBounds: (sessionId, bounds) => Effect.sync(() => {
+      if (visibleAssetSessions.has(sessionId)) {
+        assetViews.get(sessionId)?.setBounds(toRect(bounds))
+      }
     }),
 
-    close: () =>
-      Effect.sync(() => {
-        destroy(browserView)
-        destroy(assetView)
-        browserView = null
-        assetView = null
-        visible = null
-      }),
-
-    visibleOwner: () => Effect.sync(() => visible),
-
-    controlNavigate: (url) =>
+    navigate: (sessionId, url) =>
       isHttpUrl(url)
-        ? Effect.sync(() => {
-            const v = ensureBrowserSized()
-            if (!v) return
-            load(v, url)
-            reveal(url)
+        ? Effect.sync(() => load(browserViews.get(sessionId) ?? null, url))
+        : rejectBadUrl(url),
+
+    reload: (sessionId) =>
+      Effect.sync(() => browserViews.get(sessionId)?.webContents.reload()),
+
+    setVisible: (sessionId, wanted) =>
+      Effect.sync(() => {
+        setOwnerVisible(browserViews, visibleBrowserSessions, sessionId, wanted)
+      }),
+
+    hideFile: (sessionId) => Effect.sync(() => {
+      setOwnerVisible(assetViews, visibleAssetSessions, sessionId, false)
+    }),
+
+    close: (sessionId) => Effect.sync(() => closeSessionNow(sessionId)),
+
+    deleteSession: (sessionId) =>
+      Effect.sync(() => closeSessionNow(sessionId)).pipe(
+        Effect.andThen(
+          Effect.tryPromise(() =>
+            electronSession.fromPartition(browserPartitionForSession(sessionId)).clearStorageData()
+          ).pipe(Effect.catchAll(() => Effect.void))
+        )
+      ),
+
+    closeAll: () => Effect.sync(closeAllNow),
+
+    controlNavigate: (sessionId, url) =>
+      isHttpUrl(url)
+        ? Effect.suspend(() => {
+            const v = ensureBrowserSized(sessionId)
+            if (!v) {
+              return Effect.fail(new BrowserControlError({
+                op: "navigate",
+                message: "No application window to attach the browser to"
+              }))
+            }
+            controlledNavigations.add(sessionId)
+            reveal(sessionId, url)
+            return Effect.tryPromise({
+              try: () => v.webContents.loadURL(url),
+              catch: controlFail("navigate")
+            }).pipe(
+              Effect.tap(() => Effect.sync(() => reveal(sessionId, v.webContents.getURL()))),
+              Effect.ensuring(Effect.sync(() => controlledNavigations.delete(sessionId)))
+            )
           })
         : Effect.fail(
             new BrowserControlError({ op: "navigate", message: `Only http(s) URLs can be opened: ${url}` })
           ),
 
-    controlScreenshot: () =>
-      withPage("screenshot", async (wc) => {
+    controlScreenshot: (sessionId) =>
+      withPage(sessionId, "screenshot", async (wc) => {
         const image = await wc.capturePage()
         return { pngBase64: image.toPNG().toString("base64") }
       }),
 
-    controlClick: (selector) =>
-      withPage("click", async (wc) => {
+    controlClick: (sessionId, selector) =>
+      withPage(sessionId, "click", async (wc) => {
         const hit = await wc.executeJavaScript(
           `(() => { const el = document.querySelector(${JSON.stringify(selector)});` +
             ` if (!el) return false; el.click(); return true; })()`
@@ -369,8 +433,8 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
         if (!hit) throw new Error(`No element matches selector: ${selector}`)
       }),
 
-    controlType: (selector, text) =>
-      withPage("type", async (wc) => {
+    controlType: (sessionId, selector, text) =>
+      withPage(sessionId, "type", async (wc) => {
         // Set the value through the ELEMENT-PROTOTYPE setter, not `el.value = …`.
         // React installs its own `value` setter to track the last value it wrote;
         // assigning directly leaves that tracker equal to the new DOM value, so
@@ -391,14 +455,14 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
         if (!hit) throw new Error(`No element matches selector: ${selector}`)
       }),
 
-    controlReadText: () =>
-      withPage("readText", async (wc) => {
+    controlReadText: (sessionId) =>
+      withPage(sessionId, "readText", async (wc) => {
         const text = await wc.executeJavaScript(`document.body ? document.body.innerText : ""`)
         return { text: typeof text === "string" ? text : String(text ?? "") }
       }),
 
-    controlEvaluate: (expression) =>
-      withPage("evaluate", async (wc) => {
+    controlEvaluate: (sessionId, expression) =>
+      withPage(sessionId, "evaluate", async (wc) => {
         const result = await wc.executeJavaScript(
           `(() => { const __r = (${expression});` +
             ` return typeof __r === "string" ? __r : JSON.stringify(__r); })()`
@@ -406,10 +470,10 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
         return { result: typeof result === "string" ? result : String(result ?? "") }
       }),
 
-    controlWaitForSelector: (selector, timeoutMs) => {
+    controlWaitForSelector: (sessionId, selector, timeoutMs) => {
       // Clamp first: a caller passing 1e12 must not be able to pin the RPC.
       const budget = Math.min(Math.max(Math.trunc(Number(timeoutMs)) || 0, 0), MAX_WAIT_MS)
-      return withPage("waitForSelector", async (wc) => {
+      return withPage(sessionId, "waitForSelector", async (wc) => {
         const found = await wc.executeJavaScript(
           `new Promise((resolve) => {` +
             ` const sel = ${JSON.stringify(selector)};` +
@@ -437,4 +501,4 @@ export const PreviewViewServiceLive = Layer.sync(PreviewViewService, () => {
       )
     }
   }
-})
+}))

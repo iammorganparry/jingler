@@ -1,3 +1,6 @@
+import { execFileSync } from "node:child_process"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
@@ -83,6 +86,80 @@ test("⌘P opens the same palette, and Escape closes it", async ({ launchApp }) 
   // Reopening starts a fresh search rather than resuming the last one.
   await window.keyboard.press("Meta+k")
   await expect(window.getByPlaceholder(PLACEHOLDER)).toHaveValue("")
+})
+
+test("⌘⇧P searches only the focused split pane and opens its file in Files", async ({
+  launchApp
+}) => {
+  const gadgetPath = (reposDir: string) => join(reposDir, "gadget")
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath, reposDir }) => [
+      { ...seededSessions[0]!, worktreePath: repoPath },
+      { ...seededSessions[1]!, repo: "gadget", worktreePath: gadgetPath(reposDir) }
+    ],
+    seed: ({ repoPath, reposDir }) => {
+      writeFileSync(join(repoPath, "alpha-only.custom"), "alpha worktree\n")
+      execFileSync("git", ["add", "-A"], { cwd: repoPath })
+      execFileSync("git", ["commit", "-m", "alpha files", "--no-gpg-sign"], {
+        cwd: repoPath
+      })
+
+      const gadget = gadgetPath(reposDir)
+      mkdirSync(gadget, { recursive: true })
+      execFileSync("git", ["init", "-b", "main"], { cwd: gadget })
+      execFileSync("git", ["config", "user.email", "e2e@jingler.dev"], { cwd: gadget })
+      execFileSync("git", ["config", "user.name", "Jingler E2E"], { cwd: gadget })
+      writeFileSync(join(gadget, "beta-only.custom"), "beta worktree\n")
+      execFileSync("git", ["add", "-A"], { cwd: gadget })
+      execFileSync("git", ["commit", "-m", "beta files", "--no-gpg-sign"], {
+        cwd: gadget
+      })
+    }
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  // Add Beta as the second pane. This chord focuses the pane it creates.
+  await window.keyboard.press("Control+Shift+Equal")
+  await expect(window.getByTestId("split-view")).toHaveAttribute("data-panes", "2")
+  const alphaPane = window.getByTestId("split-pane-0")
+  const betaPane = window.getByTestId("split-pane-1")
+  await expect(betaPane).toHaveAttribute("data-focused", "true")
+
+  await window.keyboard.press("Meta+Shift+p")
+  const picker = window.getByTestId("file-quick-open")
+  await expect(picker).toBeVisible()
+  const input = window.getByPlaceholder("Open a file in Beta session…")
+  await input.fill("btaonly")
+  await expect(window.getByTestId("palette-item-file:beta-only.custom")).toBeVisible({
+    timeout: 15_000
+  })
+  await expect(window.getByTestId("palette-item-file:alpha-only.custom")).toHaveCount(0)
+  await window.keyboard.press("Enter")
+
+  await expect(picker).toBeHidden()
+  await expect(betaPane.getByRole("button", { name: "Files", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page"
+  )
+  await expect(betaPane.getByRole("textbox", { name: "beta-only.custom" })).toContainText(
+    "beta worktree",
+    { timeout: 15_000 }
+  )
+  await expect(alphaPane.getByRole("textbox", { name: "beta-only.custom" })).toHaveCount(0)
+
+  // Focus Alpha without altering the split, then prove Beta's unique path is
+  // not merely ranked lower — it is absent from this picker altogether.
+  await window.keyboard.press("Control+Shift+Digit1")
+  await expect(alphaPane).toHaveAttribute("data-focused", "true")
+  await window.keyboard.press("Meta+Shift+p")
+  await window.getByPlaceholder("Open a file in Alpha session…").fill("beta-only")
+  await expect(window.getByText("No matching files in this session", { exact: true })).toBeVisible({
+    timeout: 15_000
+  })
+  await expect(window.getByTestId("palette-item-file:beta-only.custom")).toHaveCount(0)
+  await window.keyboard.press("Escape")
 })
 
 /**

@@ -24,6 +24,14 @@ beforeEach(() => {
       disconnect() {}
     }
   )
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  )
   Object.defineProperty(HTMLElement.prototype, "scrollTo", {
     configurable: true,
     value: vi.fn()
@@ -137,6 +145,22 @@ describe("DiffView Pierre selection", () => {
     fireEvent.click(screen.getByRole("button", { name: `Revert ${path}` }))
     expect(actions.onRevertFile).toHaveBeenCalledExactlyOnceWith(path)
     expect(screen.getByRole("toolbar", { name: "File diff actions" })).toBeTruthy()
+  })
+
+  it("gives a bounded standalone diff exactly one vertical scroll owner", async () => {
+    render(<DiffView patch={patch} fill />)
+
+    const host = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>(
+        '[data-jingler-pierre-view="diff"]'
+      )
+      expect(element).toBeTruthy()
+      return element!
+    })
+    const scrollOwners = host.querySelectorAll<HTMLElement>(".overflow-auto")
+    expect(scrollOwners).toHaveLength(1)
+    expect(scrollOwners[0]?.classList.contains("h-full")).toBe(true)
+    expect(scrollOwners[0]?.classList.contains("min-h-0")).toBe(true)
   })
 
   it("updates live content without remounting the viewer and clears stale selection", async () => {

@@ -1,4 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
+import { jinglerDark, jinglerLight, toTokens } from "@jingler/themes"
+import { ThemeProvider } from "../theme-provider.js"
 import { DiffView } from "./diff-view.js"
 import type { DiffRow } from "./parse.js"
 import { SEED_PATCH } from "../seed.js"
@@ -17,6 +19,34 @@ export const FromPatch: Story = {
       <DiffView patch={SEED_PATCH} />
     </div>
   )
+}
+
+const legacySkinStory = (
+  theme: typeof jinglerDark,
+  activeId: "jingler-dark" | "jingler-light"
+) => (
+  <ThemeProvider
+    tokens={toTokens(theme)}
+    activeId={activeId}
+    theme={theme}
+    applyToDocument={false}
+  >
+    <div className="h-[500px] w-[680px] overflow-hidden rounded-lg border border-line">
+      <DiffView patch={SEED_PATCH} />
+    </div>
+  </ThemeProvider>
+)
+
+/** Reference state for the restored compact Pierre skin on Jingler Dark. */
+export const LegacySkinDark: Story = {
+  globals: { theme: "jingler-dark" },
+  render: () => legacySkinStory(jinglerDark, "jingler-dark")
+}
+
+/** Same selectors and metrics, with every colour resolved from light tokens. */
+export const LegacySkinLight: Story = {
+  globals: { theme: "jingler-light" },
+  render: () => legacySkinStory(jinglerLight, "jingler-light")
 }
 
 /** Verifies virtualization: 200 files × ~50 lines ≈ 10,000 rows render instantly. */

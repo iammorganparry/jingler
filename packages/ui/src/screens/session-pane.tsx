@@ -42,6 +42,8 @@ export interface ConversationPaneCtx {
    * progress dock deep-links; the inline plan card calls it bare).
    */
   onOpenPlanReview: (stepId?: string) => void
+  /** Open a repository path in this session's Files tab. */
+  onOpenFile: (path: string) => void
   /** Present the first renderable streamed draft using this pane's width. */
   onPlanDraftAvailable?: () => void
   /** The stage Plan Review should open at, until the one-shot target is consumed. */
@@ -90,6 +92,10 @@ export interface SessionPaneProps {
     view: "conversation" | "plan" | "split",
     ctx: ConversationPaneCtx
   ) => ReactNode
+  /** Render the session-native repository browser and editor. */
+  renderFiles?: (session: Session) => ReactNode
+  /** Select a path in the session's persistent file-browser actor. */
+  onOpenFile?: (sessionId: string, path: string) => void
   /**
    * A static conversation pane for stories / standalone use, when no live
    * `renderConversation` is wired. Falls back again to the seeded transcript.
@@ -261,6 +267,10 @@ function SessionPaneBody(props: SessionPaneProps) {
             // its selection.
             if (!ctx.splitOpen) ctx.onSelectTab(BUILTIN_TAB.plan)
           },
+          onOpenFile: (path) => {
+            props.onOpenFile?.(session.id, path)
+            ctx.onSelectTab(BUILTIN_TAB.files)
+          },
           onPlanDraftAvailable: presentPlanDraft,
           planStepId: planStepTarget,
           onPlanStepSelected: () => setTarget(null),
@@ -291,6 +301,7 @@ function SessionPaneBody(props: SessionPaneProps) {
         props.renderReview?.(session, { onConnectGithub: ctx.onConnectGithub }),
       code: (session, ctx) =>
         props.renderCode?.(session, { onConnectGithub: ctx.onConnectGithub }),
+      files: (session) => props.renderFiles?.(session),
       stub: (id) => <BuiltinStubScreen tab={id} />
     }),
     ...(props.tabContributions ?? [])

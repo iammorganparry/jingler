@@ -158,6 +158,7 @@ export * from "./asset/asset-canvas.js"
 export * from "./asset/asset-browser.js"
 export * from "./asset/asset-browser-machine.js"
 export * from "./asset/asset-file-tree.js"
+export * from "./asset/file-quick-open.js"
 export * from "./asset/path-detect.js"
 export * from "./asset/open-asset-context.js"
 

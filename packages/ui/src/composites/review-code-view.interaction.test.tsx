@@ -77,18 +77,24 @@ describe("ReviewCodeView selection", () => {
       </WidthTierValue>
     )
 
-    const container = await waitFor(() => {
-      const element = document.querySelector("diffs-container")
-      expect(element?.shadowRoot).toBeTruthy()
-      return element!
-    })
-    const oldLine = await waitFor(() => {
-      const element = container.shadowRoot?.querySelector<HTMLElement>(
-        '[data-column-number="1"]'
-      )
-      expect(element).toBeTruthy()
-      return element!
-    })
+    const container = await waitFor(
+      () => {
+        const element = document.querySelector("diffs-container")
+        expect(element?.shadowRoot).toBeTruthy()
+        return element!
+      },
+      { timeout: 5_000 }
+    )
+    const oldLine = await waitFor(
+      () => {
+        const element = container.shadowRoot?.querySelector<HTMLElement>(
+          '[data-column-number="1"]'
+        )
+        expect(element).toBeTruthy()
+        return element!
+      },
+      { timeout: 5_000 }
+    )
 
     fireEvent.pointerDown(oldLine, { pointerId: 1, clientX: 10, clientY: 10 })
     fireEvent.pointerUp(document, { pointerId: 1, clientX: 10, clientY: 10 })

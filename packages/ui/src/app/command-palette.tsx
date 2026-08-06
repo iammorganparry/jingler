@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ChevronRight, GitBranch, type LucideIcon, Plug, Zap } from "lucide-react"
+import { ChevronRight, File, GitBranch, type LucideIcon, Plug, Zap } from "lucide-react"
 import {
   CommandDialog,
   CommandEmpty,
@@ -33,7 +33,8 @@ const DEFAULT_ICON: Record<PaletteItemKind, LucideIcon> = {
   session: GitBranch,
   action: Zap,
   tab: ChevronRight,
-  plugin: Plug
+  plugin: Plug,
+  file: File
 }
 
 export const PALETTE_PLACEHOLDER = "Jump to a session or run a command…"
@@ -43,13 +44,15 @@ export function CommandPalette({
   onOpenChange,
   items,
   placeholder = PALETTE_PLACEHOLDER,
-  emptyMessage = "No matching commands"
+  emptyMessage = "No matching commands",
+  testId = "command-palette"
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   items: ReadonlyArray<PaletteItem>
   placeholder?: string
   emptyMessage?: string
+  testId?: string
 }) {
   const [query, setQuery] = React.useState("")
 
@@ -85,7 +88,7 @@ export function CommandPalette({
       // cmdk's ranking, our scoring — one implementation rather than a list we
       // scored and a list cmdk rendered, which can disagree.
       filter={scoreItem}
-      data-testid="command-palette"
+      data-testid={testId}
     >
       <CommandInput placeholder={placeholder} value={query} onValueChange={setQuery} />
       <CommandList>

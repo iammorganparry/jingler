@@ -382,6 +382,7 @@ function PierreDiffRenderer({
       <PierreFileDiffView
         label={label}
         className={className}
+        scrollable={fill}
         fileDiff={fileDiffs[0]!}
         annotations={annotation === null ? undefined : [annotation]}
         selection={selection}

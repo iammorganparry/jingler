@@ -80,6 +80,9 @@ export interface SessionConversationProps {
     view: "conversation" | "plan" | "split",
     ctx: ConversationPaneCtx
   ) => ReactNode
+  /** Render the session-native repository browser and editor. */
+  renderFiles?: (session: Session) => ReactNode
+  onOpenFile?: (sessionId: string, path: string) => void
   /**
    * Render a session's chat pills into the tab row's `chatSlot`. A render prop
    * for the same reason `renderConversation` is: the chat state it drives (RPCs
@@ -252,6 +255,8 @@ export function SessionConversation(props: SessionConversationProps) {
               <span className="text-[12px] text-dim">Nothing on screen — pick a session</span>
             }
             renderConversation={props.renderConversation}
+            renderFiles={props.renderFiles}
+            onOpenFile={props.onOpenFile}
             conversationPane={props.conversationPane}
             renderChatTabs={props.renderChatTabs}
             onRenameSession={props.onRenameSession}

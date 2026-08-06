@@ -496,6 +496,28 @@ const navigateBrowserMcp = async (targetUrl) => {
     throw new Error("Browser MCP navigate returned a tool error: " + detail)
   }
   record("browser-mcp:tools/call:navigate")
+  // A real agent commonly reads immediately after navigating. Keep that exact
+  // sequence in the fixture so navigate cannot report success while Chromium
+  // is still exposing the previous document to the next tool call.
+  const readResult = await browserMcpRequest(
+    904,
+    "tools/call",
+    { name: "read_text", arguments: {} },
+    protocolVersion
+  )
+  if (readResult?.isError === true) {
+    throw new Error(
+      "Browser MCP read_text returned a tool error: " +
+        JSON.stringify(readResult.content ?? [])
+    )
+  }
+  const text = Array.isArray(readResult?.content)
+    ? readResult.content
+        .filter((item) => item?.type === "text")
+        .map((item) => item.text)
+        .join(" ")
+    : ""
+  record("browser-mcp:tools/call:read_text:" + text)
 }
 const assertAutoTurnPolicy = (params) => {
   if (params?.approvalPolicy !== "never") {
@@ -509,6 +531,9 @@ const assertAutoTurnPolicy = (params) => {
 const completeBrowserMcpTurn = async (targetUrl, params) => {
   try {
     assertAutoTurnPolicy(params)
+    // Leave a deterministic window for split-pane specs to move focus after
+    // submitting the turn, proving a background run cannot steal the overlay.
+    await new Promise((resolve) => setTimeout(resolve, 500))
     await navigateBrowserMcp(targetUrl)
     send({
       method: "item/completed",

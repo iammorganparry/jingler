@@ -540,12 +540,12 @@ function ReviewCodeHeader({
     : `${file.viewed ? "Mark not viewed" : "Mark viewed"}: ${file.path}`
   return (
     <div
-      className="flex min-w-0 flex-col bg-panel text-text-body"
+      className="flex min-w-0 flex-col bg-surface text-text-body"
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <div className="flex min-h-11 min-w-0 flex-wrap items-center gap-2 px-3 py-1.5">
+      <div className="flex min-h-8 min-w-0 flex-wrap items-center gap-2 px-3">
         <FileIcon path={file.path} size={13} />
-        <span className="min-w-[8rem] flex-1 truncate font-mono text-[12.5px] text-text-bright">
+        <span className="min-w-[8rem] flex-1 truncate font-mono text-[11px] text-text-bright">
           {file.path}
         </span>
         <DiffStat
@@ -557,7 +557,6 @@ function ReviewCodeHeader({
           <Button
             variant="secondary"
             size="icon"
-            className="size-10"
             title="Deslop — hand this file to the agent for a DRY / cleanup pass"
             onClick={onDeslopFile}
           >
@@ -569,7 +568,7 @@ function ReviewCodeHeader({
           <Button
             variant="danger"
             size="sm"
-            className={cn("min-h-10 gap-1.5", compactActions && "size-10 p-0")}
+            className={cn("gap-1.5", compactActions && "size-7 p-0")}
             onClick={onRevertFile}
           >
             <Undo2 size={13} />
@@ -581,7 +580,7 @@ function ReviewCodeHeader({
           aria-pressed={file.viewed}
           aria-label={viewedLabel}
           onClick={() => onToggleViewed(!file.viewed)}
-          className="flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-[11.5px] text-text transition-[background-color,scale] duration-150 ease-out hover:bg-surface active:scale-[0.96]"
+          className="flex min-h-7 items-center gap-1.5 rounded-lg px-2 text-[11.5px] text-text transition-[background-color,scale] duration-150 ease-out hover:bg-hover active:scale-[0.96]"
         >
           {collapsed ? (
             <EyeOff size={13} />
@@ -602,7 +601,7 @@ function ReviewCodeHeader({
         </button>
       </div>
       {findings.length > 0 && (
-        <div className="flex flex-col gap-2 border-t border-hairline bg-panel/40 px-4 py-3">
+        <div className="flex flex-col gap-2 border-t border-hairline bg-panel px-4 py-3">
           {findings.map((finding) => (
             <ReviewFindingRow
               key={finding.id}

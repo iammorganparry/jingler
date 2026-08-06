@@ -4,6 +4,7 @@ import {
   ArchiveReason,
   AssetFileEntry,
   AssetPayload,
+  AssetWriteResult,
   Attachment,
   AuthProvider,
   AuthSession,
@@ -90,8 +91,10 @@ import {
 } from "@jingler/core"
 import {
   AssetOutsideWorktreeError,
+  AssetBinaryError,
   AssetTooLargeError,
   AssetUnsupportedError,
+  AssetWriteConflictError,
   AuthError,
   BrowserControlError,
   BrowserPreviewError,
@@ -1904,7 +1907,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   // An embedded `WebContentsView` (main process) pointed at a localhost dev
   // server. It renders OUTSIDE the renderer's DOM/CSP, so the renderer drives it
   // through these procedures and streams the pane's on-screen bounds to keep the
-  // native view aligned. There is one preview view (the single window).
+  // native view aligned. Each repository session owns an isolated preview view.
 
   /**
    * Show the preview view and load `url` at `bounds`. Only http/https URLs are
@@ -1913,22 +1916,24 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("BrowserPreview.open", {
     error: BrowserPreviewError,
-    payload: { url: Schema.String, bounds: BrowserBounds }
+    payload: { sessionId: Schema.String, url: Schema.String, bounds: BrowserBounds }
   }),
 
   /** Reposition/resize the view to track the pane's rect (on layout/scroll). No-op if closed. */
   Rpc.make("BrowserPreview.setBounds", {
-    payload: { bounds: BrowserBounds }
+    payload: { sessionId: Schema.String, bounds: BrowserBounds }
   }),
 
   /** Navigate the open view to a new URL. Fails with `BrowserPreviewError` for non-http(s). */
   Rpc.make("BrowserPreview.navigate", {
     error: BrowserPreviewError,
-    payload: { url: Schema.String }
+    payload: { sessionId: Schema.String, url: Schema.String }
   }),
 
   /** Reload the current page. No-op if closed. */
-  Rpc.make("BrowserPreview.reload", {}),
+  Rpc.make("BrowserPreview.reload", {
+    payload: { sessionId: Schema.String }
+  }),
 
   /**
    * Show/hide the native view without destroying it — the Preview dock switching
@@ -1936,11 +1941,13 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    * page, its history and its scroll position with it.
    */
   Rpc.make("BrowserPreview.setVisible", {
-    payload: { visible: Schema.Boolean }
+    payload: { sessionId: Schema.String, visible: Schema.Boolean }
   }),
 
   /** Hide + destroy the view (pane closed or session switched). Idempotent. */
-  Rpc.make("BrowserPreview.close", {}),
+  Rpc.make("BrowserPreview.close", {
+    payload: { sessionId: Schema.String }
+  }),
 
   // ── Browser control (agent QA) ───────────────────────────────────────────────
   // The SAME embedded browser view as BrowserPreview, but driven by an AGENT
@@ -1954,19 +1961,20 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   /** Navigate the browser to `url` (http/https only) and reveal the dock. */
   Rpc.make("BrowserControl.navigate", {
     error: BrowserControlError,
-    payload: { url: Schema.String }
+    payload: { sessionId: Schema.String, url: Schema.String }
   }),
 
   /** A PNG screenshot of the current page, base64-encoded — the agent's eyes. */
   Rpc.make("BrowserControl.screenshot", {
     success: Schema.Struct({ pngBase64: Schema.String }),
-    error: BrowserControlError
+    error: BrowserControlError,
+    payload: { sessionId: Schema.String }
   }),
 
   /** Click the first element matching `selector`. Fails if nothing matches. */
   Rpc.make("BrowserControl.click", {
     error: BrowserControlError,
-    payload: { selector: Schema.String }
+    payload: { sessionId: Schema.String, selector: Schema.String }
   }),
 
   /**
@@ -1975,26 +1983,27 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("BrowserControl.type", {
     error: BrowserControlError,
-    payload: { selector: Schema.String, text: Schema.String }
+    payload: { sessionId: Schema.String, selector: Schema.String, text: Schema.String }
   }),
 
   /** The page's visible text (`document.body.innerText`), for the agent to read. */
   Rpc.make("BrowserControl.readText", {
     success: Schema.Struct({ text: Schema.String }),
-    error: BrowserControlError
+    error: BrowserControlError,
+    payload: { sessionId: Schema.String }
   }),
 
   /** Evaluate `expression` in the page and return its `String(...)` result. */
   Rpc.make("BrowserControl.evaluate", {
     success: Schema.Struct({ result: Schema.String }),
     error: BrowserControlError,
-    payload: { expression: Schema.String }
+    payload: { sessionId: Schema.String, expression: Schema.String }
   }),
 
   /** Resolve once `selector` appears in the DOM, or fail after `timeoutMs`. */
   Rpc.make("BrowserControl.waitForSelector", {
     error: BrowserControlError,
-    payload: { selector: Schema.String, timeoutMs: Schema.Number }
+    payload: { sessionId: Schema.String, selector: Schema.String, timeoutMs: Schema.Number }
   }),
 
   // ── Assets ───────────────────────────────────────────────────────────────────
@@ -2013,11 +2022,30 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     success: AssetPayload,
     error: Schema.Union(
       AssetOutsideWorktreeError,
+      AssetBinaryError,
       AssetTooLargeError,
       AssetUnsupportedError,
       SessionNotFoundError
     ),
     payload: { sessionId: Schema.String, path: Schema.String }
+  }),
+
+  /** Replace one existing UTF-8 text asset if its loaded revision is current. */
+  Rpc.make("Asset.write", {
+    success: AssetWriteResult,
+    error: Schema.Union(
+      AssetOutsideWorktreeError,
+      AssetBinaryError,
+      AssetTooLargeError,
+      AssetWriteConflictError,
+      SessionNotFoundError
+    ),
+    payload: {
+      sessionId: Schema.String,
+      path: Schema.String,
+      text: Schema.String,
+      expectedRevision: Schema.String
+    }
   }),
 
   /** Reveal the asset in the OS file manager. */
@@ -2048,8 +2076,13 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, path: Schema.String, bounds: BrowserBounds }
   }),
 
-  /** Hide the PDF view without destroying it (the dock switched tabs). */
-  Rpc.make("Asset.hidePdf", {}),
+  /** Keep a session-owned PDF aligned with its Files placeholder. */
+  Rpc.make("Asset.setPdfBounds", {
+    payload: { sessionId: Schema.String, bounds: BrowserBounds }
+  }),
+
+  /** Hide only the named session's PDF without affecting Preview or split panes. */
+  Rpc.make("Asset.hidePdf", { payload: { sessionId: Schema.String } }),
 
   // ── Themes ─────────────────────────────────────────────────────────────────
 

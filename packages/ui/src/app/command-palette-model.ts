@@ -28,7 +28,7 @@ import type { Chord } from "./split-shortcuts.js"
  * deliberately does not branch on this to decide what happens, because `run`
  * already knows.
  */
-export type PaletteItemKind = "session" | "action" | "tab" | "plugin"
+export type PaletteItemKind = "session" | "action" | "tab" | "plugin" | "file"
 
 /**
  * One row.
@@ -214,6 +214,7 @@ export const PALETTE_GROUP = {
   sessions: "Sessions",
   actions: "Actions",
   tabs: "Go to tab",
+  files: "Files",
   archived: "Archived sessions"
 } as const
 
@@ -344,4 +345,14 @@ export const matchPaletteChord = (
   if (e.shiftKey || e.altKey) return false
   const key = e.key.toLowerCase()
   return e.code === "KeyK" || key === "k" || e.code === "KeyP" || key === "p"
+}
+
+/** VS Code-style focused-session file picker: ⌘⇧P (Ctrl+Shift+P elsewhere). */
+export const matchFileQuickOpenChord = (
+  e: PaletteChord,
+  isMac: boolean = isMacPlatform()
+): boolean => {
+  if (e.defaultPrevented || e.altKey || !e.shiftKey) return false
+  if (isMac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return false
+  return e.code === "KeyP" || e.key.toLowerCase() === "p"
 }

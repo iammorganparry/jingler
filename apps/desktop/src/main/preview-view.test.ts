@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { fileUrlFor, isHttpUrl, toRect } from "./preview-view.js"
+import {
+  browserPartitionForSession,
+  fileUrlFor,
+  isHttpUrl,
+  toRect
+} from "./preview-view.js"
 
 /**
  * The pure guards behind PreviewViewService — URL validation (the pane only
@@ -43,6 +48,23 @@ describe("toRect", () => {
       width: 0,
       height: 0
     })
+  })
+})
+
+describe("browserPartitionForSession", () => {
+  it("gives each repository session a stable isolated persistent partition", () => {
+    expect(browserPartitionForSession("session-alpha")).toBe(
+      "persist:jingler-browser-preview:session-alpha"
+    )
+    expect(browserPartitionForSession("session-alpha")).not.toBe(
+      browserPartitionForSession("session-beta")
+    )
+  })
+
+  it("encodes session ids instead of letting separators alias partitions", () => {
+    expect(browserPartitionForSession("team/a:b")).toBe(
+      "persist:jingler-browser-preview:team%2Fa%3Ab"
+    )
   })
 })
 

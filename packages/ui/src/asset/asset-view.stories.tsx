@@ -1,7 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { ASSET_SIZE_CAP, type AssetPayload } from "@jingler/core"
-import { jinglerDark, toTokens } from "@jingler/themes"
+import {
+  ASSET_SIZE_CAP,
+  type AssetPayload,
+  type VsCodeTheme
+} from "@jingler/core"
+import { jinglerDark, jinglerLight, toTokens } from "@jingler/themes"
+import { createPierreFileDiff } from "../diff/pierre-model.js"
 import { PierreProvider } from "../diff/pierre-provider.js"
+import { AssetCanvas } from "./asset-canvas.js"
 import { AssetError, AssetLoading, AssetTooLarge, AssetUnsupported, AssetView } from "./asset-view.js"
 
 const meta: Meta<typeof AssetView> = {
@@ -13,8 +19,14 @@ export default meta
 type Story = StoryObj<typeof AssetView>
 
 /** Every story renders inside a fixed dock-sized frame. */
-const Frame = ({ children }: { children: React.ReactNode }) => (
-  <PierreProvider tokens={toTokens(jinglerDark)} workers={false}>
+const Frame = ({
+  children,
+  theme = jinglerDark
+}: {
+  children: React.ReactNode
+  theme?: VsCodeTheme
+}) => (
+  <PierreProvider theme={theme} tokens={toTokens(theme)} workers={false}>
     <div className="h-[520px] w-[640px] overflow-hidden rounded-lg border border-line">{children}</div>
   </PierreProvider>
 )
@@ -27,6 +39,7 @@ export const MarkdownDoc: Story = {
       ...base,
       kind: "markdown",
       language: null,
+      revision: "sha256:markdown-story",
       text: "# Weekly report\n\nAll **green**. A table:\n\n| metric | value |\n| --- | --- |\n| uptime | 99.9% |\n\n```ts\nconst x: number = 1\n```\n"
     }
     return (
@@ -48,6 +61,7 @@ export const Code: Story = {
       absolutePath: "/tmp/values.ts",
       kind: "code",
       language: "typescript",
+      revision: "sha256:code-story",
       text
     }
     return (
@@ -66,6 +80,7 @@ export const PlainText: Story = {
       absolutePath: "/tmp/run.log",
       kind: "text",
       language: null,
+      revision: "sha256:text-story",
       text: "boot ok\nconnecting…\nready\n"
     }
     return (
@@ -74,6 +89,52 @@ export const PlainText: Story = {
       </Frame>
     )
   }
+}
+
+const changedCode: Extract<AssetPayload, { readonly text: string }> = {
+  ...base,
+  path: "src/session.ts",
+  absolutePath: "/tmp/src/session.ts",
+  kind: "code",
+  language: "typescript",
+  revision: "sha256:changed-code-story",
+  text: "export const session = createSession(token)\nexport const ready = true\n"
+}
+
+const changedCodeDiff = createPierreFileDiff({
+  path: changedCode.path,
+  status: "modified",
+  before: "export const session = createSession(cookie)\nexport const ready = true\n",
+  after: changedCode.text,
+  language: "typescript"
+})
+
+/** Real Files-canvas changed source using the shared dark Pierre skin. */
+export const ChangedCodeDark: Story = {
+  globals: { theme: "jingler-dark" },
+  render: () => (
+    <Frame theme={jinglerDark}>
+      <AssetCanvas
+        selectedPath={changedCode.path}
+        payload={changedCode}
+        fileDiff={changedCodeDiff}
+      />
+    </Frame>
+  )
+}
+
+/** The same changed-file preview resolved entirely from Jingler Light tokens. */
+export const ChangedCodeLight: Story = {
+  globals: { theme: "jingler-light" },
+  render: () => (
+    <Frame theme={jinglerLight}>
+      <AssetCanvas
+        selectedPath={changedCode.path}
+        payload={changedCode}
+        fileDiff={changedCodeDiff}
+      />
+    </Frame>
+  )
 }
 
 export const Csv: Story = {
@@ -90,6 +151,7 @@ export const Csv: Story = {
       absolutePath: "/tmp/people.csv",
       kind: "csv",
       language: null,
+      revision: "sha256:csv-story",
       text: `${header}\n${body}`
     }
     return (

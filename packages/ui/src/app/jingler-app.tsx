@@ -58,6 +58,7 @@ import { CommandPalette } from "./command-palette.js"
 import { TitleSearch } from "./title-search.js"
 import {
   matchPaletteChord,
+  matchFileQuickOpenChord,
   PALETTE_GROUP,
   type PaletteItem,
   pluginGroupName,
@@ -65,6 +66,7 @@ import {
 } from "./command-palette-model.js"
 import { SEED_PATCH } from "../seed.js"
 import {
+  BUILTIN_TAB,
   builtinTabContributions,
   type TabContext,
   type TabContribution,
@@ -282,6 +284,19 @@ export interface JinglerAppProps {
     view: "conversation" | "plan" | "split",
     ctx: ConversationPaneCtx
   ) => ReactNode
+  /** Render the session-native repository browser and editor. */
+  renderFiles?: (session: Session) => ReactNode
+  /** Select a repository path in a session's persistent Files state. */
+  onOpenFile?: (sessionId: string, path: string) => void
+  /** Render the focused session's repository quick picker. */
+  renderFileQuickOpen?: (
+    session: Session,
+    ctx: {
+      readonly open: boolean
+      readonly onOpenChange: (open: boolean) => void
+      readonly onOpenPath: (path: string) => void
+    }
+  ) => ReactNode
   /**
    * Render a session's chat pills into the tab row's `chatSlot`. A render prop
    * for the same reason `renderConversation` is: the chat state it drives — the
@@ -426,6 +441,9 @@ export function JinglerApp({
   onVisibleSessionsChange,
   patch = SEED_PATCH,
   renderConversation,
+  renderFiles,
+  onOpenFile,
+  renderFileQuickOpen,
   renderChatTabs,
   planSessions,
   loadBranches = noBranches,
@@ -463,6 +481,7 @@ export function JinglerApp({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ghRechecking, setGhRechecking] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [fileQuickOpenSessionId, setFileQuickOpenSessionId] = useState<string | null>(null)
   /**
    * The palette's half of tab switching. Nonced, and CLEARED once applied.
    *
@@ -551,6 +570,8 @@ export function JinglerApp({
   )
 
   const active = sessions.find((s) => s.id === selected) ?? null
+  const fileQuickOpenSession =
+    sessions.find((session) => session.id === fileQuickOpenSessionId) ?? null
   // `renderConversation` is passed straight down now. It used to be wrapped in a
   // closure that baked in the single active session; each SessionPane calls it
   // with its OWN session, which is what lets the grid render several at once.
@@ -611,6 +632,12 @@ export function JinglerApp({
   // the thing the chord asked for is possible right now.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (matchFileQuickOpenChord(e)) {
+        if (!renderFileQuickOpen || active?.worktreePath == null) return
+        e.preventDefault()
+        setFileQuickOpenSessionId(active.id)
+        return
+      }
       // The palette goes FIRST, and in this listener rather than one of its own.
       // Three window-level keydown handlers racing for the same event is how a
       // chord ends up meaning two things depending on mount order.
@@ -685,7 +712,7 @@ export function JinglerApp({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [onCreateSession, group, split, addNextSessionAsPane])
+  }, [onCreateSession, group, split, addNextSessionAsPane, active, renderFileQuickOpen])
 
   /**
    * Everything the palette can do, as data.
@@ -959,6 +986,8 @@ export function JinglerApp({
         onRestoreSession={onRestoreSession}
         onDeleteSession={onDeleteSession}
         renderConversation={renderConversation}
+        renderFiles={renderFiles}
+        onOpenFile={onOpenFile}
         renderChatTabs={renderChatTabs}
         planSessions={planSessions}
         showEmpty={showEmpty}
@@ -1078,6 +1107,21 @@ export function JinglerApp({
         />
       )}
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} items={paletteItems} />
+      {fileQuickOpenSession && renderFileQuickOpen
+        ? renderFileQuickOpen(fileQuickOpenSession, {
+            open: true,
+            onOpenChange: (open) => {
+              if (!open) setFileQuickOpenSessionId(null)
+            },
+            onOpenPath: () => {
+              setFileQuickOpenSessionId(null)
+              setTabRequest((previous) => ({
+                tabId: BUILTIN_TAB.files,
+                nonce: (previous?.nonce ?? 0) + 1
+              }))
+            }
+          })
+        : null}
     </AppShell>
   )
 }

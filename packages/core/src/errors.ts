@@ -274,3 +274,21 @@ export class AssetUnsupportedError extends Schema.TaggedError<AssetUnsupportedEr
     path: Schema.String
   }
 ) {}
+
+/** Raised when an existing asset is not valid editable UTF-8 text. */
+export class AssetBinaryError extends Schema.TaggedError<AssetBinaryError>()(
+  "AssetBinaryError",
+  {
+    path: Schema.String
+  }
+) {}
+
+/** Raised when an asset changed after the renderer loaded its revision. */
+export class AssetWriteConflictError extends Schema.TaggedError<AssetWriteConflictError>()(
+  "AssetWriteConflictError",
+  {
+    path: Schema.String,
+    expectedRevision: Schema.String,
+    actualRevision: Schema.String
+  }
+) {}

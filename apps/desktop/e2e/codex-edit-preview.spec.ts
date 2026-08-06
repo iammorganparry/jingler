@@ -69,11 +69,14 @@ test("opens a path Codex created after the initial workspace listing", async ({ 
   const link = window.getByTitle(`Open ${absolutePath}`, { exact: true })
   await expect(link).toBeVisible({ timeout: 20_000 })
   await link.click()
-  await expect(window.getByRole("button", { name: "Hide preview" })).toBeVisible()
-  // Markdown assets render in the native preview surface, outside Chromium's
-  // DOM. The dock tab is the observable in-app proof that the created path
-  // opened successfully.
-  await expect(window.getByTitle("reports/codex-created.md", { exact: true })).toBeVisible({
-    timeout: 20_000
-  })
+  await expect(window.getByRole("button", { name: "Files", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page"
+  )
+  // Repository Markdown belongs to Files and renders as a rich document there;
+  // the browser-only Preview dock must not be involved.
+  await expect(window.getByRole("heading", { name: "Codex-created report" })).toBeVisible()
+  await expect(
+    window.locator('[role="treeitem"][data-item-path="reports/codex-created.md"]')
+  ).toHaveAttribute("aria-selected", "true", { timeout: 20_000 })
 })

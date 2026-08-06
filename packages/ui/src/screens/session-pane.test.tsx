@@ -79,6 +79,11 @@ describe("visibleTabs", () => {
     expect(idsFor(session({ id: "b", worktreePath: undefined }))).not.toContain("plan")
   })
 
+  it("shows Files only for worktree-backed sessions", () => {
+    expect(idsFor(session({ id: "a" }))).toContain("files")
+    expect(idsFor(session({ id: "b", worktreePath: undefined }))).not.toContain("files")
+  })
+
   it("swaps Changes for Review once a PR exists", () => {
     expect(idsFor(session({ id: "a" }))).toContain("changes")
     expect(idsFor(session({ id: "a", prNumber: 12 }))).toContain("review")
@@ -88,6 +93,7 @@ describe("visibleTabs", () => {
   it("keeps the built-in order the operator already knows", () => {
     expect(idsFor(session({ id: "a", issueNumber: 7 }), { hasPlan: true })).toEqual([
       "conversation",
+      "files",
       "plan",
       "pr",
       "changes"
@@ -326,6 +332,42 @@ describe("mount groups", () => {
 })
 
 describe("SessionPane", () => {
+  it("renders the Files built-in through the host renderer", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        renderConversation={() => <div>transcript</div>}
+        renderFiles={(s) => <div>files for {s.id}</div>}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Files" }))
+    expect(screen.getByText("files for a")).toBeTruthy()
+  })
+
+  it("routes a transcript file gesture into this session's Files tab", () => {
+    const onOpenFile = vi.fn()
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        renderConversation={(_s, _view, ctx) => (
+          <button type="button" onClick={() => ctx.onOpenFile("src/main.ts")}>
+            open source
+          </button>
+        )}
+        renderFiles={(s) => <div>files for {s.id}</div>}
+        onOpenFile={onOpenFile}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "open source" }))
+
+    expect(onOpenFile).toHaveBeenCalledWith("a", "src/main.ts")
+    expect(screen.getByText("files for a")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Files" }).getAttribute("aria-current")).toBe(
+      "page"
+    )
+  })
+
   it("renders the session it was given, not one looked up from a list", () => {
     render(
       <SessionPane

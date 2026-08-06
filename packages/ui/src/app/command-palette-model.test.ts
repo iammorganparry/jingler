@@ -3,6 +3,7 @@ import {
   fuzzyScore,
   groupPaletteItems,
   itemKeywords,
+  matchFileQuickOpenChord,
   matchPaletteChord,
   PALETTE_GROUP,
   type PaletteItem,
@@ -124,6 +125,29 @@ describe("fuzzyScore", () => {
       // The 's' after the slash is a boundary hit; the one inside "grass" is not.
       expect(fuzzyScore("repo/session", "s")).toBeGreaterThan(fuzzyScore("grasses", "s"))
     })
+  })
+})
+
+describe("matchFileQuickOpenChord", () => {
+  it("matches Cmd+Shift+P on macOS without colliding with the ordinary palette", () => {
+    const event = chord({ key: "P", code: "KeyP", metaKey: true, shiftKey: true })
+    expect(matchFileQuickOpenChord(event, true)).toBe(true)
+    expect(matchPaletteChord(event, true)).toBe(false)
+  })
+
+  it("matches Ctrl+Shift+P off macOS and refuses the other platform modifier", () => {
+    expect(
+      matchFileQuickOpenChord(
+        chord({ key: "P", code: "KeyP", ctrlKey: true, shiftKey: true }),
+        false
+      )
+    ).toBe(true)
+    expect(
+      matchFileQuickOpenChord(
+        chord({ key: "P", code: "KeyP", metaKey: true, shiftKey: true }),
+        false
+      )
+    ).toBe(false)
   })
 })
 
