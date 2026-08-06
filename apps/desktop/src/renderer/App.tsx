@@ -113,6 +113,13 @@ const ARCHIVE_POLL_MS = 60_000;
 /** How long a fetched PR state stays fresh before the sweep will re-fetch it. */
 const PR_STATE_STALE_MS = 5 * 60_000;
 
+/**
+ * How long a relay connection must stay troubled before the "reconnecting"
+ * banner appears. Routine reconnects recover well within this, so they never
+ * surface; a genuine outage outlasts it and does.
+ */
+const RELAY_UNHEALTHY_GRACE_MS = 4_000;
+
 const MEMORY_TABS: ReadonlyArray<{
   readonly id: MemorySubview;
   readonly label: string;
@@ -466,6 +473,12 @@ function AuthedApp({
   const relayStatuses = useRef(
     new Map<string, { mode: string; error: string | null }>(),
   );
+  // A relay socket reconnects routinely — grant refresh, hibernation wake, a
+  // momentary blip — and recovers in well under a second. Surfacing the banner
+  // on the first "reconnecting" cried wolf constantly; only show it once trouble
+  // has persisted past this window, and clear it the instant a session recovers.
+  const relayGraceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const relayBannerVisible = useRef(false);
   const { clis, repos, reposDir, sessions } = state.context;
   // Merged with the built-ins inside `SessionPane`, through the same registry —
   // a plugin tab is not a separate region of the tab bar.
@@ -1012,14 +1025,43 @@ function AuthedApp({
           (candidate) =>
             candidate.mode === "error" || candidate.mode === "reconnecting",
         );
-        setRelayError(
-          unhealthy
-            ? (unhealthy.error ?? "GitHub feedback relay is unavailable")
-            : null,
-        );
+        if (!unhealthy) {
+          // Recovered (or never troubled): drop any pending grace timer and hide.
+          if (relayGraceTimer.current !== null) {
+            clearTimeout(relayGraceTimer.current);
+            relayGraceTimer.current = null;
+          }
+          relayBannerVisible.current = false;
+          setRelayError(null);
+          return;
+        }
+        // Trouble: arm the grace window once (do NOT restart it on every
+        // subsequent "reconnecting", or a genuine loop would keep resetting it
+        // and never surface). Show only if still unhealthy when it elapses.
+        if (!relayBannerVisible.current && relayGraceTimer.current === null) {
+          relayGraceTimer.current = setTimeout(() => {
+            relayGraceTimer.current = null;
+            const stillUnhealthy = [...relayStatuses.current.values()].find(
+              (candidate) =>
+                candidate.mode === "error" || candidate.mode === "reconnecting",
+            );
+            if (stillUnhealthy) {
+              relayBannerVisible.current = true;
+              setRelayError(
+                stillUnhealthy.error ?? "GitHub feedback relay is unavailable",
+              );
+            }
+          }, RELAY_UNHEALTHY_GRACE_MS);
+        }
       },
     );
-    return cancelEvents;
+    return () => {
+      if (relayGraceTimer.current !== null) {
+        clearTimeout(relayGraceTimer.current);
+        relayGraceTimer.current = null;
+      }
+      cancelEvents();
+    };
   }, [connected, feedbackRouter]);
 
   // Continuously resolve the OPEN PR on every live worktree branch. Sessions can
