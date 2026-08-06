@@ -29,6 +29,7 @@ export function TitleBar({
 }) {
   return (
     <div
+      data-testid="title-bar"
       style={drag}
       className="relative flex h-[38px] flex-none items-center gap-3.5 border-b border-hairline bg-panel px-3.5"
     >

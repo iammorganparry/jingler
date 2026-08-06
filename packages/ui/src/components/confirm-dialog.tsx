@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { Button } from "./button.js"
 import {
   Dialog,
@@ -32,10 +32,19 @@ export function ConfirmDialog({
   confirmLabel?: string
   cancelLabel?: string
   tone?: "default" | "danger"
-  onConfirm: () => void
+  onConfirm: () => void | Promise<void>
 }) {
+  const [pending, setPending] = useState(false)
+  const confirm = () => {
+    if (pending) return
+    setPending(true)
+    void Promise.resolve(onConfirm())
+      .then(() => onOpenChange(false))
+      .catch(() => {})
+      .finally(() => setPending(false))
+  }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => !pending && onOpenChange(next)}>
       <DialogContent className="w-[420px]">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
@@ -46,18 +55,17 @@ export function ConfirmDialog({
           </DialogBody>
         )}
         <DialogFooter>
-          <Button variant="secondary" size="sm" onClick={() => onOpenChange(false)}>
+          <Button variant="secondary" size="sm" disabled={pending} onClick={() => onOpenChange(false)}>
             {cancelLabel}
           </Button>
           <Button
             variant={tone === "danger" ? "danger" : "primary"}
             size="sm"
-            onClick={() => {
-              onConfirm()
-              onOpenChange(false)
-            }}
+            disabled={pending}
+            aria-busy={pending}
+            onClick={confirm}
           >
-            {confirmLabel}
+            {pending ? `${confirmLabel}…` : confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

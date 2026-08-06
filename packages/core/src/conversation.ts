@@ -1612,13 +1612,23 @@ const toolActivity = (tool: ToolCall): SessionActivity => {
  */
 export const activityOf = (
   messages: ReadonlyArray<Message>,
-  phase: ActivityPhase
+  phase: ActivityPhase,
+  subagents: ReadonlyArray<Subagent> = []
 ): SessionActivity | null => {
   if (pendingGate(messages) || pendingQuestion(messages) !== null) {
     return { kind: "needs-input", verb: "Needs input", target: null }
   }
   if (pendingPlan(messages) !== null) {
     return { kind: "needs-approval", verb: "Needs approval", target: null }
+  }
+  const activeSubagents = subagents.filter((subagent) => subagent.status === "working")
+  if (activeSubagents.length > 0) {
+    const only = activeSubagents.length === 1 ? activeSubagents[0] : null
+    return {
+      kind: "delegating",
+      verb: "Delegating",
+      target: only ? only.description.trim() || only.name : `${activeSubagents.length} agents`
+    }
   }
   if (phase === "idle") return null
   if (phase === "settling") return { kind: "thinking", verb: "Wrapping up", target: null }

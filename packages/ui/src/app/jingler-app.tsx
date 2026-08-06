@@ -553,6 +553,17 @@ export function JinglerApp({
     const paths = new Set(starredRepos)
     return new Set(repos.filter((r) => paths.has(r.path)).map((r) => r.name))
   }, [repos, starredRepos])
+  const repoOwners = useMemo(() => {
+    const owners: Record<string, string> = {}
+    for (const session of sessions) {
+      const repo = repos.find(
+        (candidate) => candidate.path === session.repoPath || candidate.name === session.repo
+      )
+      const owner = repo?.githubSlug?.split("/")[0]
+      if (owner) owners[session.id] = owner
+    }
+    return owners
+  }, [repos, sessions])
   const toggleStarByName = useCallback(
     (repoName: string) => {
       const repo = repos.find((r) => r.name === repoName)
@@ -1007,6 +1018,7 @@ export function JinglerApp({
         patch={patch}
         liveActivity={liveActivity}
         prStates={prStates}
+        repoOwners={repoOwners}
         liveDiff={liveDiff}
         onNewSession={onCreateSession ? () => setNewOpen(true) : undefined}
         user={user}

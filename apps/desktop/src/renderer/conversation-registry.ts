@@ -83,7 +83,7 @@ const phaseOf = (snap: ConversationSnapshot): ActivityPhase => {
  * only translates machine states into a phase.
  */
 const activityFor = (snap: ConversationSnapshot): SessionActivity | null => {
-  const activity = activityOf(snap.context.messages, phaseOf(snap))
+  const activity = activityOf(snap.context.messages, phaseOf(snap), snap.context.subagents)
   return activity === null
     ? null
     : { ...activity, startedAt: snap.context.runStartedAt ?? undefined }

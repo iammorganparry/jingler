@@ -1002,6 +1002,15 @@ describe("activityOf", () => {
       tool: { id: `t_${name}`, name, target, status, meta: null, diff: null, preview: null }
     })
 
+  const subagent = (id: string, description: string): Subagent => ({
+    id,
+    name: "Explore",
+    description,
+    parentId: null,
+    status: "working",
+    message: assistantMessage(id, "2026-07-11T10:00:00.000Z")
+  })
+
   it("is null when the session is idle", () => {
     expect(activityOf([turn({ _tag: "Text", text: "done" })], "idle")).toBeNull()
   })
@@ -1070,6 +1079,17 @@ describe("activityOf", () => {
     })
   })
 
+  it("keeps the session active while a spawned sub-agent is working", () => {
+    expect(activityOf([], "idle", [subagent("agent-1", "Trace the slow query")])).toStrictEqual({
+      kind: "delegating",
+      verb: "Delegating",
+      target: "Trace the slow query"
+    })
+    expect(
+      activityOf([], "idle", [subagent("agent-1", "one"), subagent("agent-2", "two")])
+    ).toMatchObject({ kind: "delegating", target: "2 agents" })
+  })
+
   it("falls back to an unknown tool's own name rather than 'Thinking'", () => {
     expect(activityOf([turn(tool("mcp__linear__list_issues", null))], "running")).toStrictEqual({
       kind: "running",
@@ -1100,7 +1120,7 @@ describe("activityOf", () => {
         status: "pending"
       }
     })
-    expect(activityOf([gate], "running")).toStrictEqual({
+    expect(activityOf([gate], "running", [subagent("agent-1", "Keep working")])).toStrictEqual({
       kind: "needs-input",
       verb: "Needs input",
       target: null

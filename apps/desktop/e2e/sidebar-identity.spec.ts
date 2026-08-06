@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
@@ -54,7 +55,21 @@ const sessions: ReadonlyArray<SeedSession> = [
 test("sidebar prioritises attention and exposes session identity at a glance", async ({
   launchApp
 }) => {
-  const { window } = await launchApp({ configured: true, sessions })
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: ({ repoPath }) => {
+      execFileSync("git", ["remote", "add", "origin", "git@github.com:acme/widget.git"], {
+        cwd: repoPath
+      })
+    },
+    sessions: ({ repoPath }) =>
+      sessions.map((session) =>
+        session.id === "s_running"
+          ? { ...session, repo: "widget", worktreePath: repoPath }
+          : session
+      )
+  })
   await expect(appShell(window)).toBeVisible()
 
   const attention = window.locator('[data-testid="session-row-s_attention"]').last()
@@ -80,11 +95,18 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
     "title",
     "Local session"
   )
+  await expect(running.getByTitle("Repository: widget")).toHaveAttribute("data-repo-owner", "acme")
+
+  const [appBackground, titleBarBackground] = await Promise.all([
+    window.getByTestId("app-background").evaluate((element) => getComputedStyle(element).backgroundColor),
+    window.getByTestId("title-bar").evaluate((element) => getComputedStyle(element).backgroundColor)
+  ])
+  expect(appBackground).toBe(titleBarBackground)
 
   await running.click()
   await expect(window.getByTestId("conversation-tab")).toHaveAttribute(
     "title",
-    /jingler \/ Liquid glass sidebar/
+    /widget \/ Liquid glass sidebar/
   )
 
   const glass = await window.getByTestId("session-sidebar").evaluate((element) => {
@@ -93,4 +115,13 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
   })
   expect(glass.radius).toBeGreaterThan(0)
   expect(glass.backdrop).toContain("blur")
+
+  await window.getByRole("button", { name: "Collapse sidebar" }).click()
+  const rail = window.getByTestId("session-rail")
+  const railSurface = await rail.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return { radius: Number.parseFloat(style.borderRadius), backdrop: style.backdropFilter }
+  })
+  expect(railSurface.radius).toBeGreaterThan(0)
+  expect(railSurface.backdrop).toContain("blur")
 })

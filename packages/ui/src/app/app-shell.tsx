@@ -25,7 +25,10 @@ export function AppShell({
     // places to forget; doing it here means a new animated component is
     // accessible by default.
     <MotionConfig reducedMotion="user">
-      <div className="flex h-full flex-col overflow-hidden bg-editor text-text">
+      <div
+        data-testid="app-background"
+        className="flex h-full flex-col overflow-hidden bg-panel text-text"
+      >
         <TitleBar title={title} actions={actions} search={search} />
         {/*
           The outermost width boundary: this row is the whole content area, so

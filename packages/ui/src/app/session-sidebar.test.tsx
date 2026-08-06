@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { DEFAULT_FILTERS } from "./session-filters.js"
 import { SessionSidebar } from "./session-sidebar.js"
@@ -37,6 +37,7 @@ describe("SessionSidebar session identity", () => {
             startedAt: Date.now() - 13 * 60_000
           }
         }}
+        repoOwners={{ "cloud-run": "jinglerhq" }}
       />
     )
 
@@ -47,6 +48,53 @@ describe("SessionSidebar session identity", () => {
       "Cloud session"
     )
     expect(screen.getByTitle("Codex harness")).toBeTruthy()
+    expect(screen.getByRole("status", { name: "Running" })).toBeTruthy()
+    expect(screen.getByAltText("j").getAttribute("src")).toContain("github.com/jinglerhq.png")
+  })
+
+  it("disables a row and shows a breathing indicator while archiving", async () => {
+    let finishArchive!: () => void
+    const pendingArchive = new Promise<void>((resolve) => {
+      finishArchive = resolve
+    })
+    const archive = vi.fn(() => pendingArchive)
+    const select = vi.fn()
+    render(
+      <SessionSidebar
+        activeSessionId="pending"
+        onSelect={select}
+        onArchive={archive}
+        sessions={[session({ id: "pending", title: "Pending archive" })]}
+      />
+    )
+
+    fireEvent.click(screen.getByTitle("Archive Pending archive"))
+    const row = screen.getByTestId("session-row-pending")
+    expect(row.getAttribute("aria-busy")).toBe("true")
+    expect(screen.getByRole("status", { name: "Archiving session…" })).toBeTruthy()
+    fireEvent.click(row)
+    expect(select).not.toHaveBeenCalled()
+
+    finishArchive()
+    await waitFor(() =>
+      expect(screen.getByTestId("session-row-pending").getAttribute("aria-busy")).toBe("false")
+    )
+  })
+
+  it("keeps the liquid-glass rounding when collapsed to the rail", () => {
+    window.localStorage.setItem("sb.sidebar.pinned", "0")
+    render(
+      <SessionSidebar
+        activeSessionId={null}
+        onSelect={() => {}}
+        sessions={[session({ id: "rail" })]}
+      />
+    )
+
+    const rail = screen.getByTestId("session-rail")
+    expect(rail.className).toContain("rounded-2xl")
+    expect(rail.className).toContain("backdrop-blur-2xl")
+    localStorage.removeItem("sb.sidebar.pinned")
   })
 })
 

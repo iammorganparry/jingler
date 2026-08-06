@@ -72,16 +72,18 @@ export interface SessionSidebarProps {
   /** Promote or demote a session from the persistent tray. */
   onSetPersistent?: (id: string, persistent: boolean) => void
   /** Archive an active session from its row quick-actions (undoable via restore). */
-  onArchive?: (id: string) => void
+  onArchive?: (id: string) => void | Promise<void>
   /** Restore an archived session from its row quick-actions. */
   onRestore?: (id: string) => void
   /** Permanently delete a session from its row quick-actions (caller confirms). */
-  onDelete?: (id: string) => void
+  onDelete?: (id: string) => void | Promise<void>
   /** Live per-session agent status, overriding the persisted status. */
   /** What each session's agent is doing right now, keyed by id (live). */
   liveActivity?: Record<string, SessionActivity>
   /** Live linked-PR state per session id, badged onto the row (never auto-archives). */
   prStates?: Record<string, SessionPrStatus>
+  /** GitHub owner login per session, used for repository avatars. */
+  repoOwners?: Readonly<Record<string, string>>
   /** Open the New Session dialog (header "+" / ⌘N). */
   onNewSession?: () => void
   /** The signed-in user, shown in the footer account menu. */
@@ -149,6 +151,7 @@ function SidebarBody({
   onDelete,
   liveActivity,
   prStates,
+  repoOwners,
   onNewSession,
   user,
   onOpenUsage,
@@ -321,6 +324,7 @@ function SidebarBody({
       <SessionRow
         key={s.id}
         session={s}
+        repoOwner={repoOwners?.[s.id]}
         activity={liveActivity?.[s.id]}
         prState={prStates?.[s.id]}
         active={s.id === activeSessionId}
@@ -809,7 +813,7 @@ function SessionRail({
     <div
       style={{ width: RAIL_WIDTH }}
       data-testid="session-rail"
-      className="flex flex-none flex-col items-center gap-1 border-r border-hairline bg-panel py-2"
+      className="m-2 mr-0 flex flex-none flex-col items-center gap-1 overflow-hidden rounded-2xl bg-panel/75 py-2 shadow-[0_0_0_1px_var(--sb-line),0_18px_50px_var(--sb-border)] backdrop-blur-2xl"
     >
       <button
         type="button"

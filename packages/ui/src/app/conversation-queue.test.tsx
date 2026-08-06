@@ -19,6 +19,14 @@ const queued = (n: number) =>
 const rows = () => screen.queryAllByText(/^message \d+$/)
 
 describe("ConversationView — queued messages", () => {
+  it("shows the breathing orb only while the agent is running", () => {
+    const view = render(<ConversationView messages={[]} mode="accept-edits" busy={false} />)
+    expect(screen.queryByTestId("chat-thinking-orb")).toBeNull()
+
+    view.rerender(<ConversationView messages={[]} mode="accept-edits" busy />)
+    expect(screen.getByRole("status", { name: "Agent breathing…" })).toBeTruthy()
+  })
+
   it("shows every message while the queue is small", () => {
     render(<ConversationView messages={[]} mode="accept-edits" queued={queued(3)} />)
     expect(rows()).toHaveLength(3)

@@ -25,6 +25,7 @@ import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"
 import { Composer, type ComposerCodeReference } from "../composites/composer.js"
+import { ThinkingOrb } from "../components/loading.js"
 import { QuestionCard } from "../composites/question-card.js"
 import { QueuedMessageRow } from "../composites/queued-message-row.js"
 import { MessageTurn } from "../composites/message-turn.js"
@@ -513,6 +514,11 @@ export function ConversationView({
               )
             })}
           </div>
+          {busy ? (
+            <div className="mx-auto mt-1 flex w-full max-w-[760px] justify-start" data-testid="chat-thinking-orb">
+              <ThinkingOrb />
+            </div>
+          ) : null}
         </div>
 
         {/* Same gutter + centered max-width as the transcript column above. */}

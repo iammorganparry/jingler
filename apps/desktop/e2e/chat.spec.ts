@@ -51,6 +51,25 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   }
 ]
 
+test("shows breathing indicators while the agent is working", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: seededSessions
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  const composer = window.getByPlaceholder("Message Claude…")
+  await composer.fill("Add rate limiting to the refund endpoint.")
+  await composer.press("Enter")
+
+  const row = window.getByTestId("session-row-s_seeded")
+  await expect(
+    window.getByTestId("chat-thinking-orb").getByRole("status", { name: "Agent breathing…" })
+  ).toBeVisible()
+  await expect(row.getByRole("status", { name: /Thinking|Running/ })).toBeVisible()
+})
+
 test("streams a turn, pauses at a HITL gate, and resumes on approval", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,

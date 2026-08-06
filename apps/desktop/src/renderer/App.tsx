@@ -776,18 +776,26 @@ function AuthedApp({
     const session = await rpc.sessionsRestore(sessionId);
     send({ type: "SESSION_UPDATED", session });
   };
-  // Manual archive from the sidebar quick-actions. The store only models a
-  // merged/closed reason, so a hand-archived session records "closed".
-  const archiveSession = async (sessionId: string) => {
-    const session = await rpc.sessionsArchive(sessionId, "closed");
-    send({ type: "SESSION_UPDATED", session });
-  };
   // Delete is destructive (removes the worktree) — confirm first. Holds the
   // session pending confirmation; the ConfirmDialog fires `deleteSession`.
   const [pendingDelete, setPendingDelete] = useState<Session | null>(null);
   const [sessionMutationError, setSessionMutationError] = useState<
     string | null
   >(null);
+  // Manual archive from the sidebar quick-actions. The store only models a
+  // merged/closed reason, so a hand-archived session records "closed".
+  const archiveSession = async (sessionId: string) => {
+    setSessionMutationError(null);
+    try {
+      const session = await rpc.sessionsArchive(sessionId, "closed");
+      send({ type: "SESSION_UPDATED", session });
+    } catch (error) {
+      setSessionMutationError(
+        error instanceof Error ? error.message : "Could not archive the session.",
+      );
+      throw error;
+    }
+  };
   const renameSession = (sessionId: string, title: string) => {
     void rpc
       .sessionsRename(sessionId, title)
@@ -1665,8 +1673,17 @@ function AuthedApp({
         }
         confirmLabel="Delete"
         tone="danger"
-        onConfirm={() => {
-          if (pendingDelete) void deleteSession(pendingDelete.id);
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          setSessionMutationError(null);
+          try {
+            await deleteSession(pendingDelete.id);
+          } catch (error) {
+            setSessionMutationError(
+              error instanceof Error ? error.message : "Could not delete the session.",
+            );
+            throw error;
+          }
         }}
       />
     </>

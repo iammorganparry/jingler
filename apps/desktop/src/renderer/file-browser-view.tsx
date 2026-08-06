@@ -67,6 +67,11 @@ export function FileBrowserView({ session, onSendReference }: FileBrowserViewPro
 
   useEffect(() => setSelection(null), [browser.selectedPath, browser.payload])
 
+  // The actor survives tab switches. Refresh on every Files activation so an
+  // empty/error result captured before a worktree finished appearing cannot
+  // leave a real repository looking permanently blank.
+  useEffect(() => browser.refreshTree(), [browser.refreshTree])
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const root = rootRef.current

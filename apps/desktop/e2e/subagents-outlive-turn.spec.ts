@@ -54,6 +54,9 @@ test("sub-agents outlive the main agent, and talking to it does not kill them", 
   await expect(window.getByRole("button", { name: FIRST_TAB })).toBeVisible({ timeout: 15_000 })
   await expect(window.getByRole("button", { name: SECOND_TAB })).toBeVisible()
   await expect(window.getByText("Delegated to two agents.")).toBeVisible()
+  await expect(
+    window.getByTestId("session-row-s_subagents").getByTitle("Delegating 2 agents")
+  ).toBeVisible()
 
   // The turn is still open — the composer is in its queueing form, not idle. If it
   // were idle here, the turn had settled and the sub-agents were already doomed.

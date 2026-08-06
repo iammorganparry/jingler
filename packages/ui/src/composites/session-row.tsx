@@ -20,7 +20,9 @@ import { relativeTime } from "../lib/relative-time.js"
 import { PrStatusGlyph } from "./pr-glyph.js"
 import { Badge } from "../components/badge.js"
 import { DiffStat } from "../components/diff-stat.js"
+import { ThinkingOrb } from "../components/loading.js"
 import { ProviderIcon, PROVIDER_LABEL } from "../components/provider-icon.js"
+import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { ContextMenu, type ContextMenuItem } from "../components/context-menu.js"
 import { displayStatusLabel, displayStatusTone, statusTextClass } from "../tokens.js"
 
@@ -33,15 +35,21 @@ const compactAge = (startedAt: number, now: number): string => {
   return `${Math.floor(hours / 24)}d`
 }
 
-function RepoMark({ repo }: { readonly repo: string }) {
+function RepoMark({ repo, owner }: { readonly repo: string; readonly owner?: string }) {
   const name = repo.split("/").filter(Boolean).at(-1) ?? repo
   return (
     <span
       title={`Repository: ${repo}`}
-      className="flex size-4 flex-none items-center justify-center rounded-full bg-surface font-mono text-[8px] font-bold uppercase text-text-bright shadow-[0_0_0_1px_var(--sb-line)]"
+      data-repo-owner={owner}
+      className="flex size-4 flex-none items-center justify-center rounded-full font-mono text-[8px] font-bold uppercase text-text-bright shadow-[0_0_0_1px_var(--sb-line)]"
       aria-hidden
     >
-      {name.slice(0, 1)}
+      <Avatar
+        initial={name.slice(0, 1)}
+        src={owner ? githubAvatarUrl(owner, 32) : null}
+        tone="dim"
+        size={16}
+      />
     </span>
   )
 }
@@ -49,6 +57,7 @@ function RepoMark({ repo }: { readonly repo: string }) {
 /** A session row for the sidebar list. Active state gets the blue ring. */
 export function SessionRow({
   session,
+  repoOwner,
   activity,
   prState,
   active = false,
@@ -62,6 +71,8 @@ export function SessionRow({
   className
 }: {
   session: Session
+  /** GitHub owner login resolved from this session's repository origin. */
+  repoOwner?: string
   /**
    * What the agent is doing right now ("Running npm test"). Absent → the row
    * falls back to the persisted `session.status`.
@@ -85,11 +96,11 @@ export function SessionRow({
   /** Promote an active ordinary row into the persistent tray. */
   onSetPersistent?: (id: string, persistent: boolean) => void
   /** Archive an active session (collapses into the Archived group; undoable). */
-  onArchive?: (id: string) => void
+  onArchive?: (id: string) => void | Promise<void>
   /** Restore an archived session back to active. */
   onRestore?: (id: string) => void
   /** Permanently delete a session (the caller confirms first). */
-  onDelete?: (id: string) => void
+  onDelete?: (id: string) => void | Promise<void>
   /**
    * Which grid slot this session currently occupies, or null when it isn't on
    * screen. Drives the numbered badge — the answer to "where did that one go?"
@@ -109,6 +120,7 @@ export function SessionRow({
   // push the branch name out of the row.
   const detail = activity ? activityLabel(activity) : label
   const [draft, setDraft] = useState<string | null>(null)
+  const [pendingAction, setPendingAction] = useState<"archive" | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const activeStartedAt =
     activity?.startedAt ?? (idleStatus(display) ? null : Date.parse(session.updatedAt))
@@ -118,9 +130,17 @@ export function SessionRow({
     return () => window.clearInterval(tick)
   }, [activeStartedAt])
 
+  const runArchive = () => {
+    if (onArchive === undefined || pendingAction !== null) return
+    setPendingAction("archive")
+    void Promise.resolve(onArchive(session.id))
+      .catch(() => {})
+      .finally(() => setPendingAction(null))
+  }
+
   // Quick actions — archive/restore + delete — surfaced on hover and via a
   // right-click context menu. The action set depends on whether it's archived.
-  const actions: ContextMenuItem[] = [
+  const actions: ContextMenuItem[] = pendingAction !== null ? [] : [
     ...(!session.archived && !persistentOf(session) && onSetPersistent
       ? [
           {
@@ -145,7 +165,7 @@ export function SessionRow({
             {
               label: "Archive",
               icon: Archive,
-              onSelect: () => onArchive(session.id)
+              onSelect: runArchive
             }
           ]
         : []),
@@ -162,14 +182,16 @@ export function SessionRow({
       : [])
   ]
 
-  const hoverActions = actions.length > 0 && (
+  const hoverActions = (actions.length > 0 || pendingAction !== null) && (
     <div
       className="absolute right-1.5 top-1.5 z-10 hidden items-center gap-0.5 rounded-md bg-panel/90 group-hover:flex"
       onClick={(e) => e.stopPropagation()}
     >
       {/* Names include the title so icon-only buttons are unambiguous for screen
           readers and never collide with the archived-session banner's controls. */}
-      {session.archived
+      {pendingAction !== null ? (
+        <ThinkingOrb compact label="Archiving session…" className="p-0.5" />
+      ) : session.archived
         ? onRestore && (
             <RowAction
               icon={ArchiveRestore}
@@ -181,10 +203,10 @@ export function SessionRow({
             <RowAction
               icon={Archive}
               label={`Archive ${session.title}`}
-              onClick={() => onArchive(session.id)}
+              onClick={runArchive}
             />
           )}
-      {onDelete && (
+      {onDelete && pendingAction === null && (
         <RowAction
           icon={Trash2}
           label={`Delete ${session.title}`}
@@ -210,7 +232,7 @@ export function SessionRow({
     // Never while renaming: in Chromium a `draggable` ancestor swallows
     // press-and-drag inside a descendant text input, so selecting part of the
     // title would start dragging the row instead.
-    draggable: draft === null,
+    draggable: draft === null && pendingAction === null,
     onDragStart: (e: DragEvent) => {
       e.dataTransfer.setData(SESSION_DND_MIME, session.id)
       e.dataTransfer.effectAllowed = "copyMove"
@@ -252,7 +274,8 @@ export function SessionRow({
       <div
         data-testid={`session-row-${session.id}`}
         {...dragProps}
-        onClick={() => onSelect?.(session.id)}
+        onClick={() => pendingAction === null && onSelect?.(session.id)}
+        aria-busy={pendingAction !== null}
         className={cn(
           "group relative flex cursor-pointer flex-col gap-[6px] rounded-lg border px-2.5 py-2 transition-colors",
           active ? "border-blue/[0.32] bg-surface" : "border-transparent hover:bg-surface/40",
@@ -319,22 +342,27 @@ export function SessionRow({
       <div
         data-testid={`session-row-${session.id}`}
         {...dragProps}
-        onClick={() => onSelect?.(session.id)}
+        onClick={() => pendingAction === null && onSelect?.(session.id)}
+        aria-busy={pendingAction !== null}
         className={cn(
           "group relative flex cursor-pointer flex-col gap-[7px] rounded-lg border px-2.5 py-2 transition-colors",
           active ? "border-blue/[0.32] bg-surface" : "border-transparent hover:bg-surface/40",
           idle && !active && "opacity-55",
+          pendingAction !== null && "cursor-wait opacity-60",
           className
         )}
       >
         {hoverActions}
         <div className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
-          <RepoMark repo={session.repo} />
+          <RepoMark repo={session.repo} owner={repoOwner} />
           <span className="min-w-0 flex-1 truncate font-medium">{session.repo}</span>
           <span
             title={detail}
-            className={cn("flex-none font-medium tabular-nums", statusTextClass[status])}
+            className={cn("flex flex-none items-center gap-1 font-medium tabular-nums", statusTextClass[status])}
           >
+            {display === "thinking" || display === "running" ? (
+              <ThinkingOrb compact label={label} className="[&_svg]:size-3.5" />
+            ) : null}
             {label}
             {age ? ` ${age}` : ""}
           </span>

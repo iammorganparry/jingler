@@ -123,6 +123,8 @@ export interface SessionConversationProps {
   liveActivity?: Record<string, SessionActivity>
   /** Live linked-PR state per session id, badged onto sidebar rows. */
   prStates?: Record<string, SessionPrStatus>
+  /** GitHub owner login per session, used for repository avatars in the sidebar. */
+  repoOwners?: Readonly<Record<string, string>>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
   liveDiff?: Record<string, DiffStat>
   /** Open the New Session dialog. */
@@ -218,7 +220,7 @@ export function SessionConversation(props: SessionConversationProps) {
           }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 bg-canvas">
+    <div className="flex min-h-0 min-w-0 flex-1 bg-panel">
       <SessionSidebar
         sessions={props.sessions}
         activeSessionId={props.activeSessionId}
@@ -237,6 +239,7 @@ export function SessionConversation(props: SessionConversationProps) {
         onDelete={props.onDeleteSession}
         liveActivity={props.liveActivity}
         prStates={props.prStates}
+        repoOwners={props.repoOwners}
         onNewSession={props.onNewSession}
         user={props.user}
         onOpenUsage={props.onOpenUsage}
