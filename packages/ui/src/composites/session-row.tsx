@@ -1,19 +1,50 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { DragEvent, ReactNode } from "react"
 import { motion } from "motion/react"
 import { SPRING } from "../lib/motion.js"
 import { SESSION_DND_MIME } from "../app/split-layout.js"
 import type { SessionPrStatus, Session, SessionActivity } from "@jingler/core"
 import { activityLabel, displayStatusOf, persistentOf } from "@jingler/core"
-import { Archive, ArchiveRestore, GitMerge, Pin, type LucideIcon, Trash2 } from "lucide-react"
+import {
+  Archive,
+  ArchiveRestore,
+  Cloud,
+  GitMerge,
+  Monitor,
+  Pin,
+  type LucideIcon,
+  Trash2
+} from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { PrStatusGlyph } from "./pr-glyph.js"
 import { Badge } from "../components/badge.js"
 import { DiffStat } from "../components/diff-stat.js"
-import { ProviderIcon } from "../components/provider-icon.js"
+import { ProviderIcon, PROVIDER_LABEL } from "../components/provider-icon.js"
 import { ContextMenu, type ContextMenuItem } from "../components/context-menu.js"
 import { displayStatusLabel, displayStatusTone, statusTextClass } from "../tokens.js"
+
+const compactAge = (startedAt: number, now: number): string => {
+  const minutes = Math.max(0, Math.floor((now - startedAt) / 60_000))
+  if (minutes < 1) return "now"
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
+}
+
+function RepoMark({ repo }: { readonly repo: string }) {
+  const name = repo.split("/").filter(Boolean).at(-1) ?? repo
+  return (
+    <span
+      title={`Repository: ${repo}`}
+      className="flex size-4 flex-none items-center justify-center rounded-full bg-surface font-mono text-[8px] font-bold uppercase text-text-bright shadow-[0_0_0_1px_var(--sb-line)]"
+      aria-hidden
+    >
+      {name.slice(0, 1)}
+    </span>
+  )
+}
 
 /** A session row for the sidebar list. Active state gets the blue ring. */
 export function SessionRow({
@@ -78,6 +109,14 @@ export function SessionRow({
   // push the branch name out of the row.
   const detail = activity ? activityLabel(activity) : label
   const [draft, setDraft] = useState<string | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+  const activeStartedAt =
+    activity?.startedAt ?? (idleStatus(display) ? null : Date.parse(session.updatedAt))
+  useEffect(() => {
+    if (activeStartedAt === null || Number.isNaN(activeStartedAt)) return
+    const tick = window.setInterval(() => setNow(Date.now()), 30_000)
+    return () => window.clearInterval(tick)
+  }, [activeStartedAt])
 
   // Quick actions — archive/restore + delete — surfaced on hover and via a
   // right-click context menu. The action set depends on whether it's archived.
@@ -93,10 +132,22 @@ export function SessionRow({
       : []),
     ...(session.archived
       ? onRestore
-        ? [{ label: "Restore", icon: ArchiveRestore, onSelect: () => onRestore(session.id) }]
+        ? [
+            {
+              label: "Restore",
+              icon: ArchiveRestore,
+              onSelect: () => onRestore(session.id)
+            }
+          ]
         : []
       : onArchive
-        ? [{ label: "Archive", icon: Archive, onSelect: () => onArchive(session.id) }]
+        ? [
+            {
+              label: "Archive",
+              icon: Archive,
+              onSelect: () => onArchive(session.id)
+            }
+          ]
         : []),
     ...(onDelete
       ? [
@@ -236,11 +287,11 @@ export function SessionRow({
   // Off the display rollup, not the raw status, so the row that SAYS "Idle" is
   // the row that dims — including a "done" session, which folds to idle.
   const idle = display === "idle"
-  const hasMeta =
-    session.prNumber !== null ||
-    session.issueNumber != null ||
-    session.diff.added > 0 ||
-    session.diff.removed > 0
+  const age =
+    activeStartedAt !== null && !Number.isNaN(activeStartedAt)
+      ? compactAge(activeStartedAt, now)
+      : null
+  const executionLocation = session.executionLocation ?? "local"
   return withMenu(
     // The motion element is a WRAPPER rather than the row itself because
     // `motion.div` claims `onDragStart` for its own pan gesture, whose signature
@@ -265,106 +316,100 @@ export function SessionRow({
       layout
       transition={SPRING}
     >
-    <div
-      data-testid={`session-row-${session.id}`}
-      {...dragProps}
-      onClick={() => onSelect?.(session.id)}
-      className={cn(
-        "group relative flex cursor-pointer flex-col gap-[7px] rounded-lg border px-2.5 py-2 transition-colors",
-        active
-          ? "border-blue/[0.32] bg-surface"
-          : "border-transparent hover:bg-surface/40",
-        idle && !active && "opacity-55",
-        className
-      )}
-    >
-      {hoverActions}
-      <div className="flex items-center gap-2">
-        {/*
-          The leading slot shows the PR, not the agent.
-          
-          Both were candidates and the PR won on scan value: what the agent is
-          doing changes every few seconds and is already spelled out as a WORD on
-          the line below ("Running", "Needs Input"), where it can't be mistaken
-          for anything else. Where a PR stands changes a few times a day and had
-          no at-a-glance representation at all — you had to open the row's third
-          line to find it. Two coloured dots would also have collided: a red
-          activity dot and a red CI glyph mean entirely different things.
-        */}
-        <PrStatusGlyph pr={prState} />
-        {draft !== null ? (
-          <input
-            value={draft}
-            autoFocus
-            onChange={(e) => setDraft(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commit()
-              else if (e.key === "Escape") setDraft(null)
-            }}
-            onBlur={commit}
-            className="flex-1 rounded border border-blue/50 bg-editor px-1 py-px text-[13px] text-text-bright outline-none"
-          />
-        ) : (
-          <span
-            onDoubleClick={(e) => {
-              e.stopPropagation()
-              if (onRename) setDraft(session.title)
-            }}
-            title={onRename ? "Double-click to rename" : undefined}
-            className={cn(
-              "flex-1 truncate text-[13px]",
-              active ? "font-semibold text-text-bright" : "font-medium text-text"
-            )}
-          >
-            {session.title}
-          </span>
+      <div
+        data-testid={`session-row-${session.id}`}
+        {...dragProps}
+        onClick={() => onSelect?.(session.id)}
+        className={cn(
+          "group relative flex cursor-pointer flex-col gap-[7px] rounded-lg border px-2.5 py-2 transition-colors",
+          active ? "border-blue/[0.32] bg-surface" : "border-transparent hover:bg-surface/40",
+          idle && !active && "opacity-55",
+          className
         )}
-        {slotBadge}
-        {/* The harness in use, so it's visible at a glance in the list. */}
-        <ProviderIcon cli={session.cli} size={13} />
-      </div>
-      <div className="flex items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
-        <span className={cn("min-w-0 truncate", active ? "text-blue" : "text-muted-foreground")}>
-          {session.branch}
-        </span>
-        <div className="flex-1" />
-        {/*
-          One of five fixed words, so it needs no width cap and cannot ellipsize —
-          the branch beside it gets all the room the label used to take. `detail`
-          carries what the label dropped, on hover.
-        */}
-        <span title={detail} className={cn("flex-none", statusTextClass[status])}>
-          {label}
-        </span>
-      </div>
-      {hasMeta && (
-        <div className="flex items-center gap-1.5">
+      >
+        {hoverActions}
+        <div className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
+          <RepoMark repo={session.repo} />
+          <span className="min-w-0 flex-1 truncate font-medium">{session.repo}</span>
+          <span
+            title={detail}
+            className={cn("flex-none font-medium tabular-nums", statusTextClass[status])}
+          >
+            {label}
+            {age ? ` ${age}` : ""}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {draft !== null ? (
+            <input
+              value={draft}
+              autoFocus
+              onChange={(e) => setDraft(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commit()
+                else if (e.key === "Escape") setDraft(null)
+              }}
+              onBlur={commit}
+              className="flex-1 rounded border border-blue/50 bg-editor px-1 py-px text-[13px] text-text-bright outline-none"
+            />
+          ) : (
+            <span
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+                if (onRename) setDraft(session.title)
+              }}
+              title={onRename ? "Double-click to rename" : undefined}
+              className={cn(
+                "flex-1 truncate text-[13px]",
+                active ? "font-semibold text-text-bright" : "font-medium text-text"
+              )}
+            >
+              {session.title}
+            </span>
+          )}
+          {slotBadge}
+        </div>
+        <div className="flex items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
+          <span className={cn("min-w-0 truncate", active ? "text-blue" : "text-muted-foreground")}>
+            {session.branch}
+          </span>
           {session.issueNumber != null && (
-            <Badge tone="green" size="sm">
-              ◉ #{session.issueNumber}
-            </Badge>
+            <span className="flex-none text-green">#{session.issueNumber}</span>
           )}
           {session.prNumber !== null && (
-            // The badge is now just the NUMBER — a thing you click and quote.
-            // Its state words moved to the leading glyph, which says the same
-            // thing higher up the row and without spending a line on it.
-            <Badge
-              tone={
-                prState?.state === "merged" ? "purple" : prState?.state === "closed" ? "red" : "neutral"
-              }
-              size="sm"
+            <span
+              className="flex flex-none items-center gap-1"
+              title={`Pull request #${session.prNumber}`}
             >
-              ⑂ #{session.prNumber}
-            </Badge>
+              <PrStatusGlyph pr={prState} />
+              <span>#{session.prNumber}</span>
+            </span>
           )}
-          <DiffStat added={session.diff.added} removed={session.diff.removed} />
+          <div className="flex-1" />
+          {(session.diff.added > 0 || session.diff.removed > 0) && (
+            <DiffStat added={session.diff.added} removed={session.diff.removed} />
+          )}
+          <span
+            data-testid={`session-location-${session.id}`}
+            title={executionLocation === "cloud" ? "Cloud session" : "Local session"}
+            className="flex size-4 flex-none items-center justify-center text-dim"
+          >
+            {executionLocation === "cloud" ? <Cloud size={12} /> : <Monitor size={12} />}
+          </span>
+          <span
+            title={`${PROVIDER_LABEL[session.cli]} harness`}
+            className="flex size-4 flex-none items-center justify-center"
+          >
+            <ProviderIcon cli={session.cli} size={12} />
+          </span>
         </div>
-      )}
-    </div>
+      </div>
     </motion.div>
   )
 }
+
+const idleStatus = (status: ReturnType<typeof displayStatusOf>): boolean => status === "idle"
 
 /** A compact icon button in a row's hover action bar. */
 function RowAction({

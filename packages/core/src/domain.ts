@@ -350,6 +350,11 @@ export const Session = Schema.Struct({
   status: SessionStatus,
   /** Which CLI is driving this session. */
   cli: CliKind,
+  /**
+   * Where the harness process runs. Desktop-created sessions are local; remote
+   * session importers set `cloud`. Optional so older sessions decode as local.
+   */
+  executionLocation: Schema.optional(Schema.Literal("local", "cloud")),
   diff: DiffStat,
   /** Optional linked pull-request number. */
   prNumber: Schema.NullOr(Schema.Number),

@@ -39,15 +39,15 @@ export interface SessionFilters {
 /**
  * Today's behaviour, expressed as a filter set.
  *
- * `status: "active"` and `groupBy: "repo"` are what the sidebar did before this
- * module existed — the menu opens on the layout you already had, so introducing
- * it changes nothing until you touch it.
+ * The default is one attention-ranked recency stream: sessions blocked on the
+ * operator come first, agents working independently follow, and idle sessions
+ * trail; recency breaks ties inside each band.
  */
 export const DEFAULT_FILTERS: SessionFilters = {
   status: "active",
   repo: null,
-  groupBy: "repo",
-  sortBy: "recency"
+  groupBy: "none",
+  sortBy: "status"
 }
 
 export const STATUS_LABEL: Record<StatusFilter, string> = {
@@ -65,7 +65,7 @@ export const GROUP_BY_LABEL: Record<GroupBy, string> = {
 export const SORT_BY_LABEL: Record<SortBy, string> = {
   recency: "Recency",
   name: "Name",
-  status: "Status"
+  status: "Attention"
 }
 
 /**
@@ -216,7 +216,7 @@ export const groupSessions = (
 // Persistence
 // ---------------------------------------------------------------------------
 
-export const FILTERS_STORAGE_KEY = "sb.sidebar.filters.v1"
+export const FILTERS_STORAGE_KEY = "sb.sidebar.filters.v2"
 
 const isStatus = (v: unknown): v is StatusFilter =>
   v === "active" || v === "archived" || v === "all"
@@ -336,7 +336,11 @@ export const sessionFilterAxes = (
       label: "Status",
       value: filters.status,
       options: [
-        { value: "active", label: STATUS_LABEL.active, count: sessions.length - archived },
+        {
+          value: "active",
+          label: STATUS_LABEL.active,
+          count: sessions.length - archived
+        },
         { value: "archived", label: STATUS_LABEL.archived, count: archived },
         { value: "all", label: STATUS_LABEL.all, count: sessions.length }
       ],

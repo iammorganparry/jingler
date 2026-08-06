@@ -339,7 +339,7 @@ function SidebarBody({
     <div
       style={{ width }}
       data-testid="session-sidebar"
-      className="relative flex flex-none flex-col border-r border-hairline bg-panel"
+      className="relative m-2 mr-0 flex flex-none flex-col overflow-hidden rounded-2xl bg-panel/75 shadow-[0_0_0_1px_var(--sb-line),0_18px_50px_var(--sb-border)] backdrop-blur-2xl"
     >
       {/* The width was a hard `w-[266px]` with no way to change it — the only
           fixed column in the app that couldn't be dragged. */}

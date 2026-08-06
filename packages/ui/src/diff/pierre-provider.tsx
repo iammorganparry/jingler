@@ -197,6 +197,8 @@ export interface PierreRenderOptions {
   readonly lineNumbers?: boolean
   readonly wrap?: boolean
   readonly stickyHeader?: boolean
+  /** Hide Pierre's per-file chrome when an enclosing IDE tree owns identity. */
+  readonly disableFileHeader?: boolean
   readonly collapsed?: boolean
   readonly diffStyle?: "unified" | "split"
   readonly expandUnchanged?: boolean
@@ -235,6 +237,7 @@ const baseOptions = (
     overflow,
     diffIndicators: "classic" as const,
     stickyHeader: options?.stickyHeader ?? true,
+    disableFileHeader: options?.disableFileHeader ?? false,
     collapsed: options?.collapsed ?? false
   }
 }

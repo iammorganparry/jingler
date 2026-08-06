@@ -9,6 +9,7 @@ import { assign, fromPromise, raise, setup } from "xstate"
 
 export interface FileBrowserApi {
   readonly list: (sessionId: string) => Promise<ReadonlyArray<AssetFileEntry>>
+  readonly diff: (sessionId: string) => Promise<string>
   readonly read: (sessionId: string, path: string) => Promise<AssetPayload>
   readonly write: (
     sessionId: string,
@@ -23,8 +24,7 @@ export interface FileBrowserInput {
 }
 
 export type FileBrowserPendingDiscard =
-  | { readonly type: "open"; readonly path: string }
-  | { readonly type: "reload" }
+  { readonly type: "open"; readonly path: string } | { readonly type: "reload" }
 
 export type FileBrowserFailure =
   | { readonly type: "binary"; readonly path: string }
@@ -47,12 +47,14 @@ export interface FileBrowserContext {
   readonly sessionId: string
   readonly entries: ReadonlyArray<AssetFileEntry>
   readonly treeError: string | null
+  readonly patch: string | null
+  readonly patchError: string | null
   readonly selectedPath: string | null
   readonly payload: AssetPayload | null
   readonly draft: string | null
   readonly failure: FileBrowserFailure | null
   readonly pendingDiscard: FileBrowserPendingDiscard | null
-  readonly viewMode: "preview" | "edit"
+  readonly viewMode: "diff" | "edit"
 }
 
 export type FileBrowserEvent =
@@ -66,13 +68,14 @@ export type FileBrowserEvent =
   | { readonly type: "CONFIRM_DISCARD" }
   | { readonly type: "CANCEL_DISCARD" }
   | { readonly type: "START_EDIT" }
-  | { readonly type: "SHOW_PREVIEW" }
+  | { readonly type: "SHOW_DIFF" }
 
-const isTextPayload = (payload: AssetPayload): payload is AssetTextPayload =>
-  "text" in payload
+const isTextPayload = (payload: AssetPayload): payload is AssetTextPayload => "text" in payload
 
-const isRichPreview = (payload: AssetPayload): boolean =>
-  payload.kind === "markdown" || payload.kind === "csv"
+const diffFirst = (entries: ReadonlyArray<AssetFileEntry>, path: string): boolean => {
+  const status = entries.find((entry) => entry.path === path)?.status
+  return status === "modified" || status === "added" || status === "deleted" || status === "renamed"
+}
 
 const withOpenedPath = (
   entries: ReadonlyArray<AssetFileEntry>,
@@ -95,10 +98,7 @@ const stringField = (value: object, key: string, fallback: string): string => {
 }
 
 /** Unwrap Effect's renderer RPC rejection and keep its tagged asset details. */
-export const fileBrowserFailure = (
-  error: unknown,
-  fallbackMessage: string
-): FileBrowserFailure => {
+export const fileBrowserFailure = (error: unknown, fallbackMessage: string): FileBrowserFailure => {
   const failure = Runtime.isFiberFailure(error)
     ? Option.getOrUndefined(Cause.failureOption(error[Runtime.FiberFailureCauseId]))
     : error
@@ -148,8 +148,11 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       input: {} as FileBrowserInput
     },
     actors: {
-      listFiles: fromPromise(
-        ({ input }: { input: { readonly sessionId: string } }) => api.list(input.sessionId)
+      listFiles: fromPromise(({ input }: { input: { readonly sessionId: string } }) =>
+        api.list(input.sessionId)
+      ),
+      loadDiff: fromPromise(({ input }: { input: { readonly sessionId: string } }) =>
+        api.diff(input.sessionId)
       ),
       readFile: fromPromise(
         ({ input }: { input: { readonly sessionId: string; readonly path: string } }) =>
@@ -169,7 +172,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       )
     },
     actions: {
-      selectPath: assign(({ event }) =>
+      selectPath: assign(({ context, event }) =>
         event.type === "OPEN"
           ? {
               selectedPath: event.path,
@@ -177,13 +180,17 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
               draft: null,
               failure: null,
               pendingDiscard: null,
-              viewMode: "edit" as const
+              viewMode: diffFirst(context.entries, event.path)
+                ? ("diff" as const)
+                : ("edit" as const)
             }
           : {}
       ),
       queueDiscard: assign(({ event }) => {
         if (event.type === "OPEN") {
-          return { pendingDiscard: { type: "open" as const, path: event.path } }
+          return {
+            pendingDiscard: { type: "open" as const, path: event.path }
+          }
         }
         if (event.type === "RELOAD") {
           return { pendingDiscard: { type: "reload" as const } }
@@ -201,7 +208,10 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
           draft: null,
           failure: null,
           pendingDiscard: null,
-          viewMode: "edit" as const
+          viewMode:
+            nextPath !== null && diffFirst(context.entries, nextPath)
+              ? ("diff" as const)
+              : ("edit" as const)
         }
       }),
       cancelDiscard: assign({ pendingDiscard: null }),
@@ -240,6 +250,8 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       sessionId: input.sessionId,
       entries: [],
       treeError: null,
+      patch: null,
+      patchError: null,
       selectedPath: null,
       payload: null,
       draft: null,
@@ -282,6 +294,32 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
           }
         }
       },
+      changes: {
+        initial: "loading",
+        states: {
+          loading: {
+            invoke: {
+              src: "loadDiff",
+              input: ({ context }) => ({ sessionId: context.sessionId }),
+              onDone: {
+                target: "ready",
+                actions: assign({
+                  patch: ({ event }) => event.output,
+                  patchError: null
+                })
+              },
+              onError: {
+                target: "error",
+                actions: assign({
+                  patchError: () => "Couldn't load file changes."
+                })
+              }
+            }
+          },
+          ready: {},
+          error: {}
+        }
+      },
       document: {
         initial: "idle",
         on: {
@@ -305,7 +343,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
           },
           CANCEL_DISCARD: { actions: "cancelDiscard" },
           START_EDIT: { actions: assign({ viewMode: "edit" }) },
-          SHOW_PREVIEW: { actions: assign({ viewMode: "preview" }) }
+          SHOW_DIFF: { actions: assign({ viewMode: "diff" }) }
         },
         states: {
           idle: {},
@@ -324,12 +362,10 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                     entries: ({ context, event }) =>
                       withOpenedPath(context.entries, event.output.path),
                     payload: ({ event }) => event.output,
-                    draft: ({ event }) =>
-                      isTextPayload(event.output) ? event.output.text : null,
+                    draft: ({ event }) => (isTextPayload(event.output) ? event.output.text : null),
                     failure: null,
                     pendingDiscard: null,
-                    viewMode: ({ event }) =>
-                      isRichPreview(event.output) ? "preview" : "edit"
+                    viewMode: ({ context }) => context.viewMode
                   })
                 },
                 {
@@ -341,7 +377,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                     draft: null,
                     failure: null,
                     pendingDiscard: null,
-                    viewMode: "preview"
+                    viewMode: "edit"
                   })
                 }
               ],
@@ -351,8 +387,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                     fileBrowserFailure(event.error, "Couldn't open file.").type === "binary",
                   target: "binary",
                   actions: assign({
-                    failure: ({ event }) =>
-                      fileBrowserFailure(event.error, "Couldn't open file.")
+                    failure: ({ event }) => fileBrowserFailure(event.error, "Couldn't open file.")
                   })
                 },
                 {
@@ -360,15 +395,13 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                     fileBrowserFailure(event.error, "Couldn't open file.").type === "too-large",
                   target: "tooLarge",
                   actions: assign({
-                    failure: ({ event }) =>
-                      fileBrowserFailure(event.error, "Couldn't open file.")
+                    failure: ({ event }) => fileBrowserFailure(event.error, "Couldn't open file.")
                   })
                 },
                 {
                   target: "loadError",
                   actions: assign({
-                    failure: ({ event }) =>
-                      fileBrowserFailure(event.error, "Couldn't open file.")
+                    failure: ({ event }) => fileBrowserFailure(event.error, "Couldn't open file.")
                   })
                 }
               ]
@@ -462,15 +495,13 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                     fileBrowserFailure(event.error, "Couldn't save file.").type === "conflict",
                   target: "conflict",
                   actions: assign({
-                    failure: ({ event }) =>
-                      fileBrowserFailure(event.error, "Couldn't save file.")
+                    failure: ({ event }) => fileBrowserFailure(event.error, "Couldn't save file.")
                   })
                 },
                 {
                   target: "saveError",
                   actions: assign({
-                    failure: ({ event }) =>
-                      fileBrowserFailure(event.error, "Couldn't save file.")
+                    failure: ({ event }) => fileBrowserFailure(event.error, "Couldn't save file.")
                   })
                 }
               ]

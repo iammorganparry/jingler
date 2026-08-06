@@ -82,8 +82,12 @@ const phaseOf = (snap: ConversationSnapshot): ActivityPhase => {
  * The interesting part lives in `activityOf` (pure, and tested in core) — this
  * only translates machine states into a phase.
  */
-const activityFor = (snap: ConversationSnapshot): SessionActivity | null =>
-  activityOf(snap.context.messages, phaseOf(snap))
+const activityFor = (snap: ConversationSnapshot): SessionActivity | null => {
+  const activity = activityOf(snap.context.messages, phaseOf(snap))
+  return activity === null
+    ? null
+    : { ...activity, startedAt: snap.context.runStartedAt ?? undefined }
+}
 
 const activityPriority = (activity: SessionActivity): number =>
   activity.kind === "needs-input" || activity.kind === "needs-approval" ? 2 : 1

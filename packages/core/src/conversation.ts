@@ -1503,6 +1503,8 @@ export interface SessionActivity {
   readonly verb: string
   /** What it's acting on ("npm test", "session.ts", "#482"), or null. */
   readonly target: string | null
+  /** Epoch ms when the current turn began, for compact sidebar elapsed time. */
+  readonly startedAt?: number
 }
 
 /** Where the conversation machine is — the renderer maps its state onto this. */

@@ -170,6 +170,7 @@ export interface SeedSession {
   readonly title: string
   readonly status: "idle" | "running" | "thinking" | "needs-input" | "done"
   readonly cli: "claude" | "codex" | "cursor" | "opencode"
+  readonly executionLocation?: "local" | "cloud"
   readonly diff: { added: number; removed: number }
   readonly prNumber: number | null
   readonly githubInstallationId?: string

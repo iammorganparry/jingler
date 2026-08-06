@@ -18,18 +18,19 @@ export function AssetFileTree({
 }: AssetFileTreeProps) {
   const paths = useMemo(() => entries.map((entry) => entry.path), [entries])
   const files = useMemo(() => new Set(paths), [paths])
+  const selectedPaths = useMemo(() => (selectedPath === null ? [] : [selectedPath]), [selectedPath])
   return (
     <PierreFileTree
       paths={paths}
       gitStatus={entries}
-      selectedPaths={selectedPath === null ? [] : [selectedPath]}
+      selectedPaths={selectedPaths}
       focusedPath={selectedPath ?? undefined}
       searchable
       initialExpansion={1}
       flattenEmptyDirectories
       density="compact"
       overscan={16}
-      stickyFolders
+      stickyFolders={false}
       ariaLabel="Repository files"
       className={className}
       onSelectionChange={(paths) => {

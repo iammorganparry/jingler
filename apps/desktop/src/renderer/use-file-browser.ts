@@ -15,6 +15,7 @@ export type FileBrowserActor = ActorRefFrom<FileBrowserMachine>
 
 const api: FileBrowserApi = {
   list: rpc.assetList,
+  diff: rpc.sessionsDiff,
   read: rpc.assetRead,
   write: rpc.assetWrite
 }
@@ -23,7 +24,9 @@ const actors = new Map<string, FileBrowserActor>()
 const getFileBrowserActor = (sessionId: string): FileBrowserActor => {
   const existing = actors.get(sessionId)
   if (existing !== undefined) return existing
-  const actor = createActor(createFileBrowserMachine(api), { input: { sessionId } })
+  const actor = createActor(createFileBrowserMachine(api), {
+    input: { sessionId }
+  })
   actor.start()
   actors.set(sessionId, actor)
   return actor
@@ -59,12 +62,14 @@ export interface FileBrowserController {
   readonly entries: ReturnType<FileBrowserActor["getSnapshot"]>["context"]["entries"]
   readonly treeLoading: boolean
   readonly treeError: string | null
+  readonly patch: string | null
+  readonly patchError: string | null
   readonly selectedPath: string | null
   readonly payload: AssetPayload | null
   readonly draft: string | null
   readonly failure: FileBrowserFailure | null
   readonly pendingDiscard: FileBrowserPendingDiscard | null
-  readonly viewMode: "preview" | "edit"
+  readonly viewMode: "diff" | "edit"
   readonly status: FileBrowserStatus
   readonly dirty: boolean
   readonly open: (path: string) => void
@@ -76,7 +81,7 @@ export interface FileBrowserController {
   readonly confirmDiscard: () => void
   readonly cancelDiscard: () => void
   readonly startEdit: () => void
-  readonly showPreview: () => void
+  readonly showDiff: () => void
 }
 
 export function useFileBrowser(sessionId: string): FileBrowserController {
@@ -85,16 +90,13 @@ export function useFileBrowser(sessionId: string): FileBrowserController {
   const open = useCallback((path: string) => actor.send({ type: "OPEN", path }), [actor])
   const edit = useCallback((text: string) => actor.send({ type: "EDIT", text }), [actor])
   const save = useCallback(() => actor.send({ type: "SAVE" }), [actor])
-  const refreshConflict = useCallback(
-    () => actor.send({ type: "REFRESH_CONFLICT" }),
-    [actor]
-  )
+  const refreshConflict = useCallback(() => actor.send({ type: "REFRESH_CONFLICT" }), [actor])
   const reload = useCallback(() => actor.send({ type: "RELOAD" }), [actor])
   const refreshTree = useCallback(() => actor.send({ type: "REFRESH_TREE" }), [actor])
   const confirmDiscard = useCallback(() => actor.send({ type: "CONFIRM_DISCARD" }), [actor])
   const cancelDiscard = useCallback(() => actor.send({ type: "CANCEL_DISCARD" }), [actor])
   const startEdit = useCallback(() => actor.send({ type: "START_EDIT" }), [actor])
-  const showPreview = useCallback(() => actor.send({ type: "SHOW_PREVIEW" }), [actor])
+  const showDiff = useCallback(() => actor.send({ type: "SHOW_DIFF" }), [actor])
 
   const status: FileBrowserStatus = snapshot.matches({ document: "idle" })
     ? "idle"
@@ -129,6 +131,8 @@ export function useFileBrowser(sessionId: string): FileBrowserController {
     entries: snapshot.context.entries,
     treeLoading: snapshot.matches({ tree: "loading" }),
     treeError: snapshot.context.treeError,
+    patch: snapshot.context.patch,
+    patchError: snapshot.context.patchError,
     selectedPath: snapshot.context.selectedPath,
     payload,
     draft: snapshot.context.draft,
@@ -146,6 +150,6 @@ export function useFileBrowser(sessionId: string): FileBrowserController {
     confirmDiscard,
     cancelDiscard,
     startEdit,
-    showPreview
+    showDiff
   }
 }

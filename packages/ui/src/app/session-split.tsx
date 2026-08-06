@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { useCallback, useState, type ReactNode } from "react"
 import type { DiffStat, Session, SessionActivity } from "@jingler/core"
 import type { DockSide } from "./terminal-panel.js"
 import type { Pane, SplitGroup } from "./split-layout.js"
@@ -88,13 +88,23 @@ export interface SessionSplitProps {
  */
 export function SessionSplit(props: SessionSplitProps) {
   const { group, sessions } = props
+  const [activeTabs, setActiveTabs] = useState<Readonly<Record<string, TabKey>>>({})
+  const reportActiveTab = useCallback((sessionId: string, tabId: TabKey) => {
+    setActiveTabs((current) =>
+      current[sessionId] === tabId ? current : { ...current, [sessionId]: tabId }
+    )
+  }, [])
   const panes = group?.panes ?? []
   const single = panes.length <= 1
 
   // The session the per-session docks follow: the focused pane's, falling back to
   // the first pane so closing the focused one never strands them.
-  const dockSessionId = group === null ? null : (group.panes[group.focused]?.sessionId ?? group.panes[0]?.sessionId ?? null)
-  const dockSession = dockSessionId === null ? null : (sessions.find((s) => s.id === dockSessionId) ?? null)
+  const dockSessionId =
+    group === null
+      ? null
+      : (group.panes[group.focused]?.sessionId ?? group.panes[0]?.sessionId ?? null)
+  const dockSession =
+    dockSessionId === null ? null : (sessions.find((s) => s.id === dockSessionId) ?? null)
 
   const renderPane = (pane: Pane, index: number) => {
     const session = sessions.find((s) => s.id === pane.sessionId)
@@ -118,10 +128,9 @@ export function SessionSplit(props: SessionSplitProps) {
         // Identity only where it disambiguates: a group of one needs no chip,
         // and `group` is non-null wherever a pane is being rendered at all.
         pane={single ? undefined : { index, focused: index === (group?.focused ?? 0) }}
-        selectTabRequest={
-          index === (group?.focused ?? 0) ? props.selectTabRequest : undefined
-        }
+        selectTabRequest={index === (group?.focused ?? 0) ? props.selectTabRequest : undefined}
         onTabRequestHandled={props.onTabRequestHandled}
+        onActiveTabChange={reportActiveTab}
         renderPullRequest={props.renderPullRequest}
         tabContributions={props.tabContributions}
         renderReview={props.renderReview}
@@ -133,7 +142,11 @@ export function SessionSplit(props: SessionSplitProps) {
         onClosePane={single || !props.onClosePane ? undefined : () => props.onClosePane?.(index)}
         // Reordering only means something with a neighbour to trade places with;
         // the ends are handled by the reducer refusing to move past them.
-        onMovePaneLeft={single || !props.onMovePane || index === 0 ? undefined : () => props.onMovePane?.(index, -1)}
+        onMovePaneLeft={
+          single || !props.onMovePane || index === 0
+            ? undefined
+            : () => props.onMovePane?.(index, -1)
+        }
         onMovePaneRight={
           single || !props.onMovePane || index === panes.length - 1
             ? undefined
@@ -154,10 +167,12 @@ export function SessionSplit(props: SessionSplitProps) {
   // The terminal dock is per-SESSION rather than per-pane, so it stays mounted
   // and simply takes whichever session currently owns it as a prop. Passing a
   // prop re-runs its queries; unmounting it would throw away the xterm buffer.
-  const dock = dockSession && props.renderTerminalDock ? props.renderTerminalDock(dockSession) : null
+  const dock =
+    dockSession && props.renderTerminalDock ? props.renderTerminalDock(dockSession) : null
   // The controller follows the focused pane but each session retains its own
   // URL, visibility, history, scroll and storage behind that one dock surface.
   const browserDock = props.renderBrowserDock ? props.renderBrowserDock(dockSession) : null
+  const filesFocused = dockSessionId !== null && activeTabs[dockSessionId] === "files"
   // Where each dock GOES. The same pure rule the docks apply to their own
   // borders and size (`dock-fit.ts`), evaluated against the same shell width, so
   // placement and appearance can't disagree — a right-docked panel rendered into
@@ -172,9 +187,16 @@ export function SessionSplit(props: SessionSplitProps) {
     effectiveDock(side, shellWidth)
   )
   const renderDock = (pane: PaneContribution) => (
-    <div key={pane.id} data-testid={`plugin-dock-${pane.id}`} className="flex min-h-0 min-w-0">
+    <div
+      key={pane.id}
+      data-testid={`plugin-dock-${pane.id}`}
+      className={filesFocused ? "hidden" : "flex min-h-0 min-w-0"}
+    >
       {pane.render(dockSession)}
     </div>
+  )
+  const builtInDock = (node: ReactNode) => (
+    <div className={filesFocused ? "hidden" : "contents"}>{node}</div>
   )
 
   // RIGHT-docked panes sit beside the whole split; BOTTOM-docked ones stack under
@@ -192,12 +214,12 @@ export function SessionSplit(props: SessionSplitProps) {
           onResize={props.onResize}
           emptyState={props.emptyState}
         />
-        {termSide === "right" ? dock : null}
-        {browserSide === "right" ? browserDock : null}
+        {termSide === "right" ? builtInDock(dock) : null}
+        {browserSide === "right" ? builtInDock(browserDock) : null}
         {pluginDocks.right.map(renderDock)}
       </div>
-      {termSide === "bottom" ? dock : null}
-      {browserSide === "bottom" ? browserDock : null}
+      {termSide === "bottom" ? builtInDock(dock) : null}
+      {browserSide === "bottom" ? builtInDock(browserDock) : null}
       {pluginDocks.bottom.map(renderDock)}
     </div>
   )
