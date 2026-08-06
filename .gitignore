@@ -45,3 +45,10 @@ release/
 next-env.d.ts
 .vercel
 .env*.local
+
+# Design-sync tooling artifacts. These are generated bundles/exports (~150M),
+# not source; left untracked they flood `git status` and the Files tab tree,
+# which lists untracked files.
+/.design-sync/
+/.ds-sync/
+/ds-bundle/
