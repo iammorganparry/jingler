@@ -59,6 +59,7 @@ export type FileBrowserEvent =
   | { readonly type: "OPEN"; readonly path: string }
   | { readonly type: "EDIT"; readonly text: string }
   | { readonly type: "SAVE" }
+  | { readonly type: "REFRESH_CONFLICT" }
   | { readonly type: "RELOAD" }
   | { readonly type: "REFRESH_TREE" }
   | { readonly type: "RETRY_TREE" }
@@ -201,6 +202,9 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       cancelDiscard: assign({ pendingDiscard: null }),
       editDraft: assign(({ event }) =>
         event.type === "EDIT" ? { draft: event.text, failure: null } : {}
+      ),
+      editConflictedDraft: assign(({ event }) =>
+        event.type === "EDIT" ? { draft: event.text } : {}
       )
     },
     guards: {
@@ -459,7 +463,39 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
           },
           conflict: {
             on: {
-              EDIT: { actions: "editDraft" }
+              EDIT: { actions: "editConflictedDraft" },
+              REFRESH_CONFLICT: "refreshingConflict"
+            }
+          },
+          refreshingConflict: {
+            on: {
+              EDIT: { actions: "editConflictedDraft" }
+            },
+            invoke: {
+              src: "readFile",
+              input: ({ context }) => ({
+                sessionId: context.sessionId,
+                path: context.selectedPath ?? ""
+              }),
+              onDone: [
+                {
+                  guard: ({ event }) => isTextPayload(event.output),
+                  target: "ready.dirty",
+                  actions: assign({
+                    payload: ({ event }) => event.output,
+                    failure: null
+                  })
+                },
+                {
+                  target: "conflict",
+                  actions: assign({
+                    failure: ({ context }) => context.failure
+                  })
+                }
+              ],
+              onError: {
+                target: "conflict"
+              }
             }
           },
           saveError: {

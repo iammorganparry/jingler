@@ -326,8 +326,20 @@ function TextFileEditor({
     <div className="flex h-full min-h-0 flex-col bg-canvas">
       {browser.status === "conflict" ? (
         <Callout tone="red" className="m-2 flex-none">
-          The file changed on disk before this save. Your draft is still here; reload only when
-          you are ready to replace it with the agent's version.
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="min-w-0 flex-1">
+              The file changed on disk before this save. Your draft is still here. Refresh the
+              revision to keep editing and save against the agent's latest version.
+            </span>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={browser.refreshConflict}
+            >
+              Refresh revision
+            </Button>
+          </div>
         </Callout>
       ) : null}
       {browser.status === "error" && browser.failure?.type === "error" ? (

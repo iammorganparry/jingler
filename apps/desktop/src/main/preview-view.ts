@@ -209,6 +209,11 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
           : {})
       }
     })
+    // WebContentsView starts visible. A BrowserControl operation may create and
+    // size a background session's view before the renderer can decide whether
+    // that owner is focused, so attach every native overlay hidden and let the
+    // explicit owner-visibility path be the only way it can paint.
+    view.setVisible(false)
     view.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
     view.webContents.on("will-navigate", (event, url) => {
       // The asset view holds a `file://` document. A PDF's links must not be

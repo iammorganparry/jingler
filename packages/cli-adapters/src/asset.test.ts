@@ -1,5 +1,14 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs"
 import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
 import { Effect, Exit, Layer } from "effect"
@@ -248,6 +257,31 @@ describe("AssetService.write — contained compare-and-swap edits", () => {
     )
     expect(failureTag(saved)).toBe("AssetWriteConflictError")
     expect(readFileSync(file, "utf8")).toBe("agent changed this\n")
+  })
+
+  it("atomically replaces content while preserving the file mode", async () => {
+    const file = join(worktree.dir, "script.custom")
+    writeFileSync(file, "before\n")
+    chmodSync(file, 0o640)
+    const before = statSync(file)
+    const loaded = await readAsset("script.custom")
+    expect(Exit.isSuccess(loaded)).toBe(true)
+    if (!Exit.isSuccess(loaded) || loaded.value.kind === "image" || loaded.value.kind === "pdf") {
+      return
+    }
+
+    const saved = await writeAsset(
+      "script.custom",
+      "after\n",
+      loaded.value.revision
+    )
+
+    expect(Exit.isSuccess(saved)).toBe(true)
+    const after = statSync(file)
+    expect(after.ino).not.toBe(before.ino)
+    expect(after.mode & 0o777).toBe(before.mode & 0o777)
+    expect(readFileSync(file, "utf8")).toBe("after\n")
+    expect(readdirSync(worktree.dir).filter((name) => name.includes(".jingler-"))).toEqual([])
   })
 
   it("refuses traversal and an escaping symlink at save time", async () => {

@@ -349,9 +349,14 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
       })
 
     /**
-     * Replace one existing text file through the descriptor used for the final
-     * revision check. `r+` cannot create a missing path, and writing the open
-     * descriptor preserves the existing inode's mode instead of replacing it.
+     * Atomically replace one existing text file after checking the revision on
+     * an open descriptor. The replacement is written and synced beside the
+     * target, receives the target's mode, then is renamed over it so a crash can
+     * expose either complete version but never a partially overwritten file.
+     *
+     * The check-to-rename window remains advisory with respect to unrelated
+     * processes: a writer that ignores Jingler's expected revision can still
+     * race the final rename. The filesystem offers no portable content-CAS.
      */
     const write = (
       worktree: string,
@@ -463,33 +468,26 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
               })
             }
 
-            yield* file.seek(0, "start")
-            yield* file.writeAll(nextBytes).pipe(
-              Effect.mapError(
-                () =>
-                  new AssetOutsideWorktreeError({
-                    path: requested,
-                    reason: "unreadable"
-                  })
-              )
+            const writeFailure = () =>
+              new AssetOutsideWorktreeError({
+                path: requested,
+                reason: "unreadable"
+              })
+            const directory = path_.dirname(absolutePath)
+            const replacementPath = yield* fs.makeTempFileScoped({
+              directory,
+              prefix: `.${path_.basename(absolutePath)}.jingler-`
+            }).pipe(Effect.mapError(writeFailure))
+            yield* fs.chmod(replacementPath, openedInfo.mode).pipe(
+              Effect.mapError(writeFailure)
             )
-            yield* file.truncate(nextBytes.byteLength).pipe(
-              Effect.mapError(
-                () =>
-                  new AssetOutsideWorktreeError({
-                    path: requested,
-                    reason: "unreadable"
-                  })
-              )
+            const replacement = yield* fs.open(replacementPath, { flag: "r+" }).pipe(
+              Effect.mapError(writeFailure)
             )
-            yield* file.sync.pipe(
-              Effect.mapError(
-                () =>
-                  new AssetOutsideWorktreeError({
-                    path: requested,
-                    reason: "unreadable"
-                  })
-              )
+            yield* replacement.writeAll(nextBytes).pipe(Effect.mapError(writeFailure))
+            yield* replacement.sync.pipe(Effect.mapError(writeFailure))
+            yield* fs.rename(replacementPath, absolutePath).pipe(
+              Effect.mapError(writeFailure)
             )
           })
         )

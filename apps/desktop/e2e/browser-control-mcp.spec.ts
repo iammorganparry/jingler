@@ -160,7 +160,7 @@ test("a background Codex run updates only its owning session browser", async ({ 
   const alphaUrl = `http://127.0.0.1:${address.port}/alpha-background`
 
   try {
-    const { window } = await launchApp({
+    const { app, window } = await launchApp({
       configured: true,
       withRepo: true,
       sessions: splitSessions,
@@ -198,6 +198,23 @@ test("a background Codex run updates only its owning session browser", async ({ 
     await expect.poll(() => requests.filter((path) => path === "/beta-focused")).toHaveLength(1)
     await expect.poll(() => requests.filter((path) => path === "/alpha-background")).toHaveLength(1)
     await expect(previewUrl).toHaveValue(betaUrl)
+    await expect
+      .poll(() =>
+        app.evaluate(({ BrowserWindow }, urls) => {
+          const root = BrowserWindow.getAllWindows()[0]?.contentView
+          return Object.fromEntries(
+            (root?.children ?? [])
+              .map((view) => {
+                const candidate = view as typeof view & {
+                  webContents?: { getURL(): string }
+                }
+                return [candidate.webContents?.getURL() ?? "", view.getVisible()] as const
+              })
+              .filter(([url]) => url === urls.alpha || url === urls.beta)
+          )
+        }, { alpha: alphaUrl, beta: betaUrl })
+      )
+      .toEqual({ [alphaUrl]: false, [betaUrl]: true })
 
     await window.keyboard.press("Control+Shift+Digit1")
     await expect(alphaPane).toHaveAttribute("data-focused", "true")

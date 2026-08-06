@@ -70,6 +70,7 @@ export interface FileBrowserController {
   readonly open: (path: string) => void
   readonly edit: (text: string) => void
   readonly save: () => void
+  readonly refreshConflict: () => void
   readonly reload: () => void
   readonly refreshTree: () => void
   readonly confirmDiscard: () => void
@@ -84,6 +85,10 @@ export function useFileBrowser(sessionId: string): FileBrowserController {
   const open = useCallback((path: string) => actor.send({ type: "OPEN", path }), [actor])
   const edit = useCallback((text: string) => actor.send({ type: "EDIT", text }), [actor])
   const save = useCallback(() => actor.send({ type: "SAVE" }), [actor])
+  const refreshConflict = useCallback(
+    () => actor.send({ type: "REFRESH_CONFLICT" }),
+    [actor]
+  )
   const reload = useCallback(() => actor.send({ type: "RELOAD" }), [actor])
   const refreshTree = useCallback(() => actor.send({ type: "REFRESH_TREE" }), [actor])
   const confirmDiscard = useCallback(() => actor.send({ type: "CONFIRM_DISCARD" }), [actor])
@@ -105,7 +110,8 @@ export function useFileBrowser(sessionId: string): FileBrowserController {
               ? "read-only"
               : snapshot.matches({ document: "saving" })
                 ? "saving"
-                : snapshot.matches({ document: "conflict" })
+                : snapshot.matches({ document: "conflict" }) ||
+                    snapshot.matches({ document: "refreshingConflict" })
                   ? "conflict"
                   : snapshot.matches({ document: "binary" })
                     ? "binary"
@@ -134,6 +140,7 @@ export function useFileBrowser(sessionId: string): FileBrowserController {
     open,
     edit,
     save,
+    refreshConflict,
     reload,
     refreshTree,
     confirmDiscard,

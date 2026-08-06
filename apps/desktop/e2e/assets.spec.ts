@@ -190,7 +190,8 @@ test("edits and saves text, retains drafts across tabs, and preserves conflicts"
   )
 
   // A later agent write wins on disk. The stale user save becomes a visible,
-  // non-destructive conflict and keeps the user's draft until explicit reload.
+  // non-destructive conflict and keeps the user's draft while refreshing the
+  // revision needed for a deliberate follow-up save.
   editor = window.getByRole("textbox", { name: "src/main.ts" })
   await editor.click()
   await editor.press("Meta+a")
@@ -206,12 +207,16 @@ test("edits and saves text, retains drafts across tabs, and preserves conflicts"
     "export const answer = 99\n"
   )
 
-  await window.getByRole("button", { name: "Reload", exact: true }).click()
-  await expect(window.getByText(/Discard your unsaved changes/)).toBeVisible()
-  await window.getByRole("button", { name: "Discard", exact: true }).click()
+  await window.getByRole("button", { name: "Refresh revision", exact: true }).click()
   editor = window.getByRole("textbox", { name: "src/main.ts" })
-  await expect(editor).toContainText("export const answer = 99", { timeout: 15_000 })
+  await expect(editor).toContainText("export const answer = 44", { timeout: 15_000 })
   await expect(window.getByText("Conflict", { exact: true })).toHaveCount(0)
+  await expect(window.getByText("Unsaved", { exact: true })).toBeVisible()
+  await window.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(window.getByText("Saved", { exact: true })).toBeVisible({ timeout: 15_000 })
+  await expect.poll(() => readFileSync(join(repoPath, "src", "main.ts"), "utf8")).toBe(
+    "export const answer = 44\n"
+  )
 })
 
 test("edits UTF-8 files with unknown extensions and refuses binary data", async ({

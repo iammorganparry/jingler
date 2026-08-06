@@ -120,7 +120,7 @@ describe("fileBrowserMachine", () => {
     )
   })
 
-  it("retains the draft on a stale-revision conflict until explicit reload", async () => {
+  it("refreshes a stale revision without discarding the retained draft", async () => {
     const read = vi
       .fn()
       .mockResolvedValueOnce(payload("before", "sha256:before"))
@@ -143,13 +143,17 @@ describe("fileBrowserMachine", () => {
     expect(actor.getSnapshot().context.draft).toBe("my draft")
     expect(actor.getSnapshot().context.failure?.type).toBe("conflict")
 
-    actor.send({ type: "RELOAD" })
-    expect(actor.getSnapshot().context.pendingDiscard).toEqual({ type: "reload" })
-    actor.send({ type: "CONFIRM_DISCARD" })
+    actor.send({ type: "EDIT", text: "my revised draft" })
+    expect(actor.getSnapshot().context.failure?.type).toBe("conflict")
+    actor.send({ type: "REFRESH_CONFLICT" })
     await waitFor(actor, (snapshot) =>
-      snapshot.matches({ document: { ready: "clean" } })
+      snapshot.matches({ document: { ready: "dirty" } })
     )
-    expect(actor.getSnapshot().context.draft).toBe("agent edit")
+    expect(actor.getSnapshot().context.draft).toBe("my revised draft")
+    expect(actor.getSnapshot().context.payload).toEqual(
+      payload("agent edit", "sha256:agent")
+    )
+    expect(actor.getSnapshot().context.failure).toBeNull()
   })
 
   it("surfaces binary reads without manufacturing an editable payload", async () => {
