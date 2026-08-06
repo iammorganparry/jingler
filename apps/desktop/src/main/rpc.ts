@@ -68,6 +68,7 @@ import {
   UsageService,
   WorkspaceService,
 } from "@jingler/cli-adapters";
+import { appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import {
@@ -4848,6 +4849,24 @@ const ServerProtocolLive = Layer.effect(
             `[rpc] server frame failed to serialize (tag=${frame._tag ?? "?"} requestId=${String(frame.requestId ?? "?")}); retrying JSON-normalised`,
             error,
           );
+          // DIAGNOSTIC (temporary): record the offending frame so the culprit RPC
+          // and payload shape are recoverable — this reproduces on bot/automation
+          // PR comments (e.g. Devin). JSON survives values structured-clone
+          // rejects (functions/symbols), so it still names the frame.
+          try {
+            let preview: string;
+            try {
+              preview = JSON.stringify(response) ?? "undefined";
+            } catch (previewError) {
+              preview = `<unstringifiable: ${String(previewError)}>`;
+            }
+            appendFileSync(
+              "/tmp/jingler-relay-diag.log",
+              `[${new Date().toISOString()}] serialize-fail tag=${frame._tag ?? "?"} requestId=${String(frame.requestId ?? "?")} error=${String(error)} frame=${preview.slice(0, 6000)}\n`,
+            );
+          } catch {
+            // diagnostics must never throw
+          }
           try {
             sender?.send(
               RPC_CHANNEL,
