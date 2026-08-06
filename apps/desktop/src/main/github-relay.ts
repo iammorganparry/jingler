@@ -279,8 +279,13 @@ export class GitHubRelayConnection {
         if (!this.current(socket, generation)) return;
         this.handleMessage(socket, generation, message.data);
       });
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         if (!this.current(socket, generation)) return;
+        const closed = event as { code?: unknown; reason?: unknown };
+        relayDiag(
+          `socket.close clientId=${this.options.clientId} cursor=${this.cursor}`,
+          `code=${String(closed?.code)} reason=${String(closed?.reason)}`,
+        );
         this.socket = null;
         this.clearHeartbeat();
         this.scheduleReconnect();
@@ -321,6 +326,10 @@ export class GitHubRelayConnection {
   ): void {
     const message = parseGitHubRelayServerMessage(raw);
     if (!message) {
+      relayDiag(
+        `handleMessage.parseFailed clientId=${this.options.clientId} cursor=${this.cursor}`,
+        typeof raw === "string" ? raw.slice(0, 2000) : String(raw),
+      );
       socket.close(1002, "Invalid relay message");
       return;
     }
