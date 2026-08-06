@@ -4783,10 +4783,54 @@ const ServerProtocolLive = Layer.effect(
         runFork(writeRequest(event.sender.id, data));
       });
 
+      /**
+       * `webContents.send` structured-clones its arguments. A frame carrying a
+       * value the clone algorithm rejects throws `Failed to serialize
+       * arguments` — and, uncaught here, that defect tears down the handler's
+       * stream fiber. For the GitHub relay that is catastrophic: the stream
+       * dies, its finalizer rejects the pending cursor acknowledgement, the
+       * event is never acked, and the relay replays the same frame forever
+       * (the "GitHub feedback relay is unavailable" reconnect loop). Worse, the
+       * only trace was Electron's own stderr line, naming neither the RPC nor
+       * the offending field.
+       *
+       * So we never let a single frame kill the transport: log it with enough
+       * identity to find the culprit, then retry with a JSON-normalised copy.
+       * Frames are JSON-safe by contract, so the round-trip is a no-op for
+       * healthy frames and strips the stray non-cloneable value from a broken
+       * one — the renderer still gets the frame, acks the cursor, and the loop
+       * ends instead of spinning.
+       */
+      const sendServerFrame = (response: FromServerEncoded): void => {
+        try {
+          sender?.send(RPC_CHANNEL, response);
+        } catch (error) {
+          const frame = response as {
+            readonly _tag?: string;
+            readonly requestId?: unknown;
+          };
+          console.error(
+            `[rpc] server frame failed to serialize (tag=${frame._tag ?? "?"} requestId=${String(frame.requestId ?? "?")}); retrying JSON-normalised`,
+            error,
+          );
+          try {
+            sender?.send(
+              RPC_CHANNEL,
+              JSON.parse(JSON.stringify(response)) as FromServerEncoded,
+            );
+          } catch (fallbackError) {
+            console.error(
+              "[rpc] server frame is unrecoverable; dropping it to keep the transport alive",
+              fallbackError,
+            );
+          }
+        }
+      };
+
       return {
         disconnects,
         send: (_clientId: number, response: FromServerEncoded) =>
-          Effect.sync(() => sender?.send(RPC_CHANNEL, response)),
+          Effect.sync(() => sendServerFrame(response)),
         end: (_clientId: number) => Effect.void,
         clientIds: Effect.sync(() => new Set(sender ? [sender.id] : [])),
         initialMessage: Effect.succeed(Option.none()),
