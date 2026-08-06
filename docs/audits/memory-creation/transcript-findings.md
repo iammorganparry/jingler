@@ -1,6 +1,7 @@
 # Recent-session memory creation audit
 
-Audit snapshot: `2026-08-06T12:02:00Z`  
+Audit snapshot: `2026-08-06T12:02:00Z`
+
 Sampling window: `[2026-07-28T00:00:00Z, 2026-08-06T00:00:00Z)`
 
 ## Executive finding

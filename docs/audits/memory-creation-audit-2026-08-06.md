@@ -1,9 +1,9 @@
 # Memory creation audit — 2026-08-06
 
-Plan: `449de134-ebee-4064-8574-3bf0ae274be7`, revision 2
+Plan: `449de134-ebee-4064-8574-3bf0ae274be7`, revision 68
 
 Evidence cut-offs: transcript snapshot `2026-08-06T12:02:00Z`; hosted-state
-reconciliation `2026-08-06T12:25:28.165Z`
+reconciliation `2026-08-06T13:15:06.048Z`
 
 ## Executive conclusion
 
@@ -21,8 +21,8 @@ Jingler has two independent dominant memory-loss points.
    natural, agent-initiated creation. [Transcript evidence][T] [Pipeline evidence][P]
 
 2. **Automatic settled-turn capture reaches the hosted system but cannot compensate.**
-   The hosted organization had 158 settled-session sources: 156 compiler workflows
-   errored, one published, and one was still running at the cut-off. The 0.63% raw
+   The hosted organization had 162 settled-session sources: 160 compiler workflows
+   errored, one published, and one was still running at the cut-off. The 0.62% raw
    session-source publication rate is explained with very high confidence by a
    duplicate-identity collision. Every digest is titled `Settled Jingler agent
    session`; the deterministic compiler copies that title to each unmatched new
@@ -31,10 +31,10 @@ Jingler has two independent dominant memory-loss points.
    outcome split, deployed code path, retry step, and local reproduction all agree.
    [Hosted evidence][H] [Pipeline compiler evidence][PC]
 
-These failures occur before retrieval or graph quality can compound. Only three
-pages were accepted from 160 total sources. The dashboard's recorded zero-result
-search ratio was 80.83%. The accepted pages had 21 page-to-source citation
-occurrences but zero durable page-to-page links, so all three were disconnected as
+These failures occur before retrieval or graph quality can compound. Only seven
+pages were accepted from 168 total sources. The dashboard's recorded zero-result
+search ratio was 83.21%. The accepted pages had 42 page-to-source citation
+occurrences but zero durable page-to-page links, so all seven were disconnected as
 knowledge even though their provenance was intact. This is expected from compiler
 output with `relationships: []` and no wikilinks, not evidence of a missing graph
 index. [Hosted graph evidence][HG] [Pipeline graph evidence][PG]
@@ -56,9 +56,9 @@ their denominators are kept separate, they form one causal funnel:
 | Explicit agent path | 58 labeled candidates in 12 settled transcripts | 0 explicit proposals; 0 workflow polls | Not entered by the cohort | 0 cohort-attributable pages |
 | Exposed subset | 19 candidates after memory exposure | 0 explicit proposals | Not entered | 0 cohort-attributable pages |
 | Pre-exposure subset | 38 candidates without a Jingler tool surface | Proposal impossible in that turn | Not entered | 0 cohort-attributable pages |
-| Automatic session path | 158 hosted settled-session sources | Deterministic compiler invoked | 156 errored, 1 published, 1 running | 1 accepted page at cut-off |
-| Manual proposal-source path | 2 distinct hosted proposal sources | Compiler invoked | 2 published | 2 accepted pages |
-| Accepted graph | 3 accepted pages | Citations extracted | 21 citation occurrences | 0 page-to-page links; 0 connected pages in dashboard semantics |
+| Automatic session path | 162 hosted settled-session sources | Deterministic compiler invoked | 160 errored, 1 published, 1 running | 1 accepted page at cut-off |
+| Manual proposal-source path | 6 distinct hosted proposal sources | Compiler invoked | 6 published | 6 accepted pages |
+| Accepted graph | 7 accepted pages | Citations extracted | 42 citation occurrences | 0 page-to-page links; 0 connected pages in dashboard semantics |
 
 Long sessions are where most reusable knowledge accumulated: the eight ranked-long
 transcripts contained 51 of 58 candidates (87.9%), versus seven in four comparison
@@ -71,14 +71,14 @@ human judgment, not a production classifier. [Transcript cohort][TC]
 
 | Apparent conflict | Resolution |
 | --- | --- |
-| The transcript cohort has zero proposals, while the dashboard records six proposal calls. | The cohort and dashboard cover different scopes and time ranges. Dashboard telemetry counts calls; hosted state exposes only two distinct idempotent manual-proposal sources. Four call events cannot be joined to retries or duplicates. |
+| The transcript cohort has zero proposals, while the dashboard records six proposal calls. | The cohort and dashboard cover different scopes and time ranges. Dashboard telemetry counts calls; hosted state now exposes six manual-proposal sources, but the equality is not a join: telemetry was already six when only two sources existed and did not visibly advance after four audit proposals published. |
 | Current code attaches memory deterministically, while 38 candidates are classified as tool-unavailable. | Attachment is conditional on feature access, billing, organization selection, successful grant/discovery/proxy setup, and rollout timing. Most sampled unavailable turns predate exposure; current code does not retroactively provide a tool. |
 | Automatic capture is working, yet memory creation is sparse. | Capture means a redacted source was stored. Compilation, proposal persistence, publication, and graph linking are separate gates. The hosted source count proves receipt, not accepted memory. |
-| The full graph can mark page nodes non-orphan while the dashboard reports three orphan pages. | The full graph includes source nodes, so citation edges contribute page degree. Dashboard connectivity intentionally omits repository sources and counts page-to-page wikilinks/dependencies. Both projections report zero durable page relationships. |
+| The full graph can mark page nodes non-orphan while the dashboard reports seven orphan pages. | The full graph includes source nodes, so citation edges contribute page degree. Dashboard connectivity intentionally omits repository sources and counts page-to-page wikilinks/dependencies. Both projections report zero durable page relationships. |
 | Focused tests pass, while production compilers fail. | No test executes the production sequence “accept one generic-title session page, then compile a second.” The missing sequence is the specific coverage gap; the local two-page lint reproduction fails as production behavior predicts. |
-| One hosted workflow was still running after another running workflow became errored. | Hosted state was live. The previously running handle joined the 156 errors; a newly arrived source became the one running handle at the frozen cut-off. No later outcome is inferred. |
+| Every deterministic handle resolved, yet one hosted workflow was nonterminal. | Resolution means the handle exists, not that it settled. The frozen source `session-digest:e6de2d90…` remained `running`; it is included in the 168-source partition without an inferred later outcome. |
 
-The 12 transcripts cannot be joined one-for-one to the 158 hosted session sources
+The 12 transcripts cannot be joined one-for-one to the 162 hosted session sources
 with the exposed audit APIs, so this report does not claim that a particular sampled
 candidate became a particular source. The two paths are causally linked by inspected
 code and independently quantified at their own boundaries.
@@ -91,14 +91,14 @@ weaken the diagnosis; it is not evidence currently observed unless noted.
 
 | Rank | Root cause and loss point | Confidence | Supporting evidence | Limiting or falsifying evidence |
 | ---: | --- | --- | --- | --- |
-| 1 | **Generic session identity makes the automatic fallback fail at proposal lint.** | Very high | 156/158 session workflows errored; failed runs reached step `05-lint-and-persist-proposal`; the first generic-title session page and both differently titled manual sources published; code copies the source title; a two-page reproduction raises two duplicate-identity findings. [Transcript capture boundary][T] [Hosted failure diagnosis][HC] [Compiler code audit][PC] | Production exposes only a generic 500, not the underlying lint string. Unsanitized production evidence naming a different validation cause, or continued step-05 failure after unique identity is deployed, would weaken this attribution. |
-| 2 | **Natural creation has no reliable end-of-turn trigger and a materially thin durability policy.** | High | Zero proposals for 58 candidates, including zero for 19 candidates after memory exposure. The injected prompt has no reflection step, examples, or durable-versus-ephemeral rubric; the richer optional skill is not activated. [Transcript tool traces][TT] [Hosted manual-source outcomes][HF] [Creation-policy audit][P] | Thirty-eight candidates had no tool surface, so they cannot establish prompt failure. Two hosted manual proposal sources published, proving that explicit proposal can work when initiated. A controlled prompt-only experiment with unchanged proposal yield would falsify the proposed mechanism. |
+| 1 | **Generic session identity makes the automatic fallback fail at proposal lint.** | Very high | 160/162 session workflows errored; a representative failed run reached and exhausted retries at step `05-lint-and-persist-proposal`; the first generic-title session page and all six differently titled manual sources published; code copies the source title; a two-page reproduction raises two duplicate-identity findings. [Transcript capture boundary][T] [Hosted failure diagnosis][HC] [Compiler code audit][PC] | Production exposes only a generic 500, not the underlying lint string. Unsanitized production evidence naming a different validation cause, or continued step-05 failure after unique identity is deployed, would weaken this attribution. |
+| 2 | **Natural creation has no reliable end-of-turn trigger and a materially thin durability policy.** | High | Zero proposals for 58 candidates, including zero for 19 candidates after memory exposure. The injected prompt has no reflection step, examples, or durable-versus-ephemeral rubric; the richer optional skill is not activated. [Transcript tool traces][TT] [Hosted manual-source outcomes][HF] [Creation-policy audit][P] | Thirty-eight candidates had no tool surface, so they cannot establish prompt failure. Six hosted manual proposal sources published, proving that explicit proposal works when initiated. A controlled prompt-only experiment with unchanged proposal yield would falsify the proposed mechanism. |
 | 3 | **Historical/tool-eligibility gaps removed the explicit creation path for most sampled candidates.** | High for the cohort; medium for current impact | 38/58 candidates were classified tool-unavailable at the exact turn; sampled native logs establish exposure timing. Access also depends on paid membership, selection, discovery, and fail-open proxy setup. [Transcript missed examples][TM] [Hosted source receipt][HF] [Launch-gate audit][PL] | AgentRunner now supports Claude, Codex, and OpenCode per turn once prerequisites hold. A current, eligibility-filtered sample showing the attachment on every turn would make this historical rather than an active cause. No mapped OpenCode cohort exists. |
 | 4 | **Compiler extraction cannot distinguish durable learning from transcript shape and cannot succeed with no work.** | Very high for implementation; medium for production impact | Any deduplicated 12–600 character line can become one of 12 claims; digest labels pass; zero claims errors; there is no no-op. The only accepted session page contains empty labels and progress narration. The strong compiler prompt is constructed but not consumed by the production deterministic model. [Transcript durability rubric][T] [Accepted session page][HA] [Compiler code audit][PC] | Only one accepted automatic page is available for quality judgment. A blinded larger sample could show higher precision than this page suggests, but it would not change the implementation facts. |
 | 5 | **Optional persistence hooks are marker-gated, separately credentialed, and unobservable.** | Very high for implementation; medium for production contribution | Jingler does not install the hooks. They require separate URL/token/org variables and a note, argument, or visible `MEMORY:` marker that normal prompts do not request. The response and workflow handle are discarded. [Transcript capture-behavior example][TM] [Hosted non-joinable proposal telemetry][H] [Hook audit][PH] | The audit cannot enumerate private user hook configurations. A user may have configured explicit notes successfully, but no sampled renderer proposal trace establishes that path. |
 | 6 | **Failure boundaries hide permanent causes and delay detection.** | High | `MemoryLintError` becomes generic `internal_error`; a permanent failure retries six times; capture success means local enqueue; the outbox has no independent timer; proposal-call telemetry cannot be joined to unique sources; scheduled lint has no organizations configured; the stable workflow-ID secret is absent. [Transcript outbox limitation][T] [Production health][HP] [Compiler boundary audit][PC] | These defects amplify time-to-diagnosis rather than directly creating the duplicate. Typed errors alone will not increase yield unless root causes are repaired. |
-| 7 | **Compiler output contains no durable relationship signal.** | Very high | All three accepted pages have empty relationships and no wikilinks; the graph has zero page-to-page edges. Code derives the graph correctly and the compiler always emits `relationships: []`. [Transcript distinction between capture and proposal][T] [Hosted graph][HG] [Graph code audit][PG] | Three pages are a small graph, and valid memories need not all connect. Evidence-backed links generated by a revised compiler would falsify this as an ongoing cause; arbitrary connectivity would not. |
-| 8 | **Existing-page proposals have different settlement semantics from new-page proposals.** | Very high for implementation; unquantified in production | New pages enter a compiler Workflow and inherit its auto-publish/review policy. Existing-page updates create an open direct proposal, return no Workflow handle, and require a privileged review. [Transcript zero-poll baseline][TT] [Hosted review states][H] [Direct-proposal audit][PD] | No hosted existing-page update was observed in this audit, so the resulting accepted-yield loss is not measured. It is a policy mismatch, not an explanation for the 156 session failures. |
+| 7 | **Compiler output contains no durable relationship signal.** | Very high | All seven accepted pages have empty relationships and no wikilinks; the graph has zero page-to-page edges. Code derives the graph correctly and the compiler always emits `relationships: []`. [Transcript distinction between capture and proposal][T] [Hosted graph][HG] [Graph code audit][PG] | Seven pages are still a small graph, and valid memories need not all connect. Evidence-backed links generated by a revised compiler would falsify this as an ongoing cause; arbitrary connectivity would not. |
+| 8 | **Existing-page proposals have different settlement semantics from new-page proposals.** | Very high for implementation; unquantified in production | New pages enter a compiler Workflow and inherit its auto-publish/review policy. Existing-page updates create an open direct proposal, return no Workflow handle, and require a privileged review. [Transcript zero-poll baseline][TT] [Hosted review states][H] [Direct-proposal audit][PD] | No hosted existing-page update was observed in this audit, so the resulting accepted-yield loss is not measured. It is a policy mismatch, not an explanation for the 160 session failures. |
 
 Ranks 1 and 2 are independently sufficient to keep accepted memory sparse: fixing
 only the prompt leaves automatic compilation broken, while fixing only the compiler
@@ -221,15 +221,15 @@ Definitions:
 | Explicit proposal recall | Labeled exposed candidates represented by a standalone submitted proposal / all labeled exposed durable-positive candidates | 0/19 (0%); 0/58 if unavailable turns are included | At least 60% in a weekly blinded sample and at least one proposal from 75% of candidate-positive long sessions; never exceed three proposals per Done |
 | Workflow polling completeness | Returned handles with a recorded terminal poll / returned handles | Cohort has 0/0; optional hook discards every handle | 100% for agent and hook routes |
 | Settled-source delivery | Eligible Done sources visible hosted within 10 minutes / eligible Done sources enqueued | Not historically joinable | At least 99%; zero silent expiry or max-attempt drops |
-| Session compiler error rate | Errored session-source workflows / captured session-source workflows after a fixed settlement window | 156 errors; 1 published; 1 running at cut-off (98.7% of captured session sources errored) | Under 1%; permanent validation failures make one attempt and carry a typed cause |
-| Terminal settlement | Sources in `published`, `no_durable_learning`, `pending_review`, `rejected`, `conflicted`, or typed `failed` within 10 minutes / delivered sources | 159/160 terminal at cut-off, but 156 terminal states were generic errors | At least 99%; no generic `internal_error` for known validation classes |
-| Durable-positive accepted-page yield | Durable-positive sources producing an accepted revision / reviewed durable-positive sources | Not recoverable; raw session publication was 1/158 and the page was low quality | At least 60% during review rollout; remaining outcomes are explicit no-op/reject/conflict, not workflow error |
-| Review precision and rejection | Accept-as-is / reviewed proposals; rejection / reviewed proposals | 3/3 auto-accepted, therefore not an informative quality baseline | At least 85% accept-as-is and at most 15% rejected before expansion; automatic-publication gate is stricter below |
+| Session compiler error rate | Errored session-source workflows / captured session-source workflows after a fixed settlement window | 160 errors; 1 published; 1 running at cut-off (98.8% of captured session sources errored) | Under 1%; permanent validation failures make one attempt and carry a typed cause |
+| Terminal settlement | Sources in `published`, `no_durable_learning`, `pending_review`, `rejected`, `conflicted`, or typed `failed` within 10 minutes / delivered sources | 167/168 platform-terminal at cut-off, but 160 states were generic errors rather than typed explainable outcomes | At least 99%; no generic `internal_error` for known validation classes |
+| Durable-positive accepted-page yield | Durable-positive sources producing an accepted revision / reviewed durable-positive sources | Not recoverable; raw session publication was 1/162 and the page was low quality | At least 60% during review rollout; remaining outcomes are explicit no-op/reject/conflict, not workflow error |
+| Review precision and rejection | Accept-as-is / reviewed proposals; rejection / reviewed proposals | 7/7 auto-accepted, therefore not an informative quality baseline | At least 85% accept-as-is and at most 15% rejected before expansion; automatic-publication gate is stricter below |
 | Sensitive-data escape | Proposed or accepted items containing prohibited credentials, personal data, or private material | No sampled candidate retained credential-bearing setup; semantic classifier coverage is unknown | Zero in shadow, review, and publication samples; any escape stops rollout |
-| Exact and near duplication | Duplicate accepted identities or reviewer-labeled near duplicates / accepted pages | Zero accepted duplicate identities, but 156 workflows are attributed to preventing a duplicate generic identity | Zero exact duplicates; at most 2% near duplicates; zero duplicate-identity workflow failures |
-| Search zero-result rate | Dashboard zero-result searches / recorded searches, segmented by known-memory vs exploratory queries | 0.8083 (80.83%) | At most 60% after 25 high-quality pages and 40% after 100; known-memory test set has at least 90% top-three recall and 100% successful full-page reads |
-| Durable graph connectivity | Pages incident to at least one durable page edge / accepted pages | 0/3; 0 directed links; 3 dashboard orphans | At least 50% after 25 pages and 75% after 100, while sampled edge precision is at least 90% and broken links remain zero |
-| Funnel explainability | Proposal calls and sources joinable to a typed terminal state / proposal calls and sources | Six call events, two distinct manual sources; four events non-joinable | At least 99%; every unexplained delta is alerted and bounded |
+| Exact and near duplication | Duplicate accepted identities or reviewer-labeled near duplicates / accepted pages | Zero accepted duplicate identities, but 160 workflows are attributed to preventing a duplicate generic identity | Zero exact duplicates; at most 2% near duplicates; zero duplicate-identity workflow failures |
+| Search zero-result rate | Dashboard zero-result searches / recorded searches, segmented by known-memory vs exploratory queries | 0.8321 (83.21%) | At most 60% after 25 high-quality pages and 40% after 100; known-memory test set has at least 90% top-three recall and 100% successful full-page reads |
+| Durable graph connectivity | Pages incident to at least one durable page edge / accepted pages | 0/7; 0 directed links; 7 dashboard orphans | At least 50% after 25 pages and 75% after 100, while sampled edge precision is at least 90% and broken links remain zero |
+| Funnel explainability | Proposal calls and sources joinable to a typed terminal state / proposal calls and sources | Six telemetry calls and six manual sources currently have no stable join; the metric did not advance with four later publications | At least 99%; every unexplained delta is alerted and bounded |
 
 Targets are deliberately not “publish every settled session.” A high no-op rate can
 be healthy when a turn contains no reusable learning. Accepted-page yield is judged
@@ -365,14 +365,14 @@ stages are:
   58 candidates, 11 searches, seven navigation reads, and zero reads, proposals, or
   status polls. [Cohort and rubric][TC] [Tool traces][TT] [Missed examples][TM]
 - **H — Hosted evidence:** [Hosted Cloudflare memory-state audit][H] freezes a
-  160-source funnel at `2026-08-06T12:25:28.165Z`, reads all three accepted pages,
+  168-source funnel at `2026-08-06T13:15:06.048Z`, reads all seven accepted pages,
   resolves all deterministic Workflow handles, inspects production configuration,
   and distinguishes citation edges from durable page relationships.
   [Funnel][HF] [Accepted pages][HA] [Failure diagnosis][HC] [Persistence health][HP]
 - **P — Code/policy evidence:** [Memory integration and creation-policy audit][P]
   traces launch, attachment, settlement capture, hooks, compiler, publication,
   indexing, and graph extraction. Focused adapter, server, and Worker suites passed;
-  the loopback-only sandbox failure passed when rerun with loopback permitted.
+  loopback-dependent adapter tests passed with local binding permitted.
   [Launch gates][PL] [Direct proposals][PD] [Hooks][PH] [Compiler][PC]
   [Verification][PV]
 
@@ -416,19 +416,20 @@ The implementation audit recorded these canonical results:
 - AgentRunner memory: four focused tests passed with loopback permitted;
 - memory MCP proxy: four tests passed after removing the inherited sandbox skip;
 - server: 12 files and 102 tests passed, including hook and MCP tests;
-- memory Worker: 11 files and 83 tests passed, including compiler, API, vault,
-  graph, and vector-ingest coverage.
+- memory Worker: five focused files and 47 tests passed, including compiler, API,
+  vault, graph, and vector-ingest coverage.
 
-The exact commands, sandbox-only `EPERM` output, and interrupted non-canonical broad
-run are preserved in [pipeline verification][PV]. No test covers two successive
+The exact commands are preserved in [pipeline verification][PV]. A broader package
+run hit two five-second TeamVault timeouts under parallel load; both tests passed
+alone and the properly targeted 47-test run passed. No test covers two successive
 generic-title session compilations after accepting the first.
 
 ### Residual uncertainty
 
 - The sampled transcripts and hosted sources cannot be joined by the exposed audit
   interfaces; candidate-to-page attribution is intentionally not claimed.
-- Four of six proposal-call telemetry events cannot be assigned to distinct sources,
-  retries, or idempotent duplicates.
+- Proposal-call telemetry cannot be joined to source records: it remained six while
+  manual sources grew from two to six after four audit proposals published.
 - The duplicate-title cause is not present in an unsanitized production exception;
   it is supported by code, exact workflow step, outcome distribution, and local
   reproduction.
@@ -440,7 +441,7 @@ generic-title session compilations after accepting the first.
 
 ## Settled reusable system findings
 
-Four conclusions are sufficiently settled and standalone for shared-memory
+Five conclusions are sufficiently settled and standalone for shared-memory
 proposal after this report is written:
 
 1. Natural Jingler memory creation needs an always-injected, bounded end-of-turn
@@ -448,13 +449,17 @@ proposal after this report is written:
    candidates in the settled audit cohort.
 2. Automatic settled-session compilation currently fails after the first generic
    session page because the shared source title becomes a duplicate page identity;
-   the hosted cut-off observed 156 errored, one published, and one running session
+   the hosted cut-off observed 160 errored, one published, and one running session
    Workflow.
 3. The deterministic compiler uses line shape rather than durability, has no valid
    no-op, does not consume its constructed compiler prompt, and emits no page
    relationships.
 4. Jingler graph citation edges prove provenance but are not durable page-to-page
-   relationships; all three accepted pages had citations and zero durable links.
+   relationships; all seven accepted pages had citations and zero durable links.
+5. Automatic memory publication must remain gated until at least 99% of the funnel
+   is explainable, session compiler errors are under 1%, reviewed proposals are at
+   least 85% accept-as-is, near duplicates are at most 2%, and sensitive-data
+   escapes are zero; a sensitive escape or unexplained delta above 1% stops rollout.
 
 ### Shared-memory publication result
 
@@ -469,11 +474,23 @@ accepted pages and their stable evidence identifiers:
 | Natural creation trigger | `compiler-fnv1a64:28b8e4187955ecbc` / `complete:published` | `learning-fnv1a64:0784` / `revision:proposal:compiler-fnv1a64:28b8e4187955ecbc:page:learning-fnv1a64%3A0784` | `source:proposal-f1eb1509d4db634cfe0e9604423adaca92c8e0d127bec91e44fba2e8f37cb2c1` / `compiler-fnv1a64:0784` |
 | Generic session-title collision | `compiler-fnv1a64:90254587584303bd` / `complete:published` | `learning-fnv1a64:acba` / `revision:proposal:compiler-fnv1a64:90254587584303bd:page:learning-fnv1a64%3Aacba` | `source:proposal-ddae5d76ace5bc62ec4532c2fc57e4c2c10f18884e9c0610541be0888057b0cc` / `compiler-fnv1a64:acba` |
 | Compiler policy gaps | `compiler-fnv1a64:e22781acd8f4ad4b` / `complete:published` | `learning-fnv1a64:3963` / `revision:proposal:compiler-fnv1a64:e22781acd8f4ad4b:page:learning-fnv1a64%3A3963` | `source:proposal-46bc923231e3a6e787cf70d76b579595534f6fdb29907efb1cbcb52841219d62` / `compiler-fnv1a64:3963` |
-| Citation versus durable links | `compiler-fnv1a64:907b62f499e2e2e7` / `complete:published` | `learning-fnv1a64:a8df` / `revision:proposal:compiler-fnv1a64:907b62f499e2e2e7:page:learning-fnv1a64%3Aa8df` | `source:proposal-ee656262ceb16e2dde2f780fd60936e10c50f1b7d180edb22a34cb567de788af` / `compiler-fnv1a64:a8df` |
+| Citation versus durable links | `compiler-fnv1a64:907b62f499e2e7` / `complete:published` | `learning-fnv1a64:a8df` / `revision:proposal:compiler-fnv1a64:907b62f499e2e7:page:learning-fnv1a64%3Aa8df` | `source:proposal-ee656262ceb16e2dde2f780fd60936e10c50f1b7d180edb22a34cb567de788af` / `compiler-fnv1a64:a8df` |
+| Safe automatic-publication gates | `compiler-fnv1a64:7b64f2895ccb796d` / `complete:published` | `learning-fnv1a64:6139` / `revision:proposal:compiler-fnv1a64:7b64f2895ccb796d:page:learning-fnv1a64%3A6139` | `source:proposal-d6c4bc50ceb6823577315c54a65a600f9a6655fc0b5bda717bdb3fa26feaf3dc` / `compiler-fnv1a64:6139` |
 
-These publications happened after the hosted audit's frozen cut-off. They verify the
-explicit manual-proposal path but do not alter the 160-source baseline or the ranked
-root-cause calculations above.
+These four publications happened after the earlier revision-2 hosted cut-off but
+before the refreshed revision-68 snapshot. They are therefore included among the
+current six manual sources and seven accepted pages. They verify the explicit
+manual-proposal path and remain excluded from the 162-source automatic-session
+failure rate.
+
+At `2026-08-06T13:42:45.127Z`, a pre-proposal search found no accepted equivalent
+for the fifth, rollout-policy finding. Its proposal returned Workflow
+`compiler-fnv1a64:7b64f2895ccb796d`; repeated idempotent submission retained that
+same handle, and polling settled at `complete:published`. Exact-title search
+resolved the accepted page and revision shown above, and `memory_read` verified its
+source and citation identifiers. This fifth publication is after the frozen hosted
+cut-off, so it is durable evidence for this synthesis but does not change the
+168-source, seven-page baseline or any rate calculated from it.
 
 [T]: memory-creation/transcript-findings.md
 [TC]: memory-creation/transcript-findings.md#reproducible-cohort

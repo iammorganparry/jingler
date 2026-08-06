@@ -29,7 +29,7 @@ character line as a claim, including digest labels such as `Harness: codex` and
 broad capture is then mostly suppressed by an implementation collision: every
 session digest has the title `Settled Jingler agent session`, the compiler copies
 that title to an unmatched new page, and full-vault lint rejects every later page
-with the duplicate identity. The hosted audit observed 156 errored session
+with the duplicate identity. The hosted audit observed 160 errored session
 workflows, one published session workflow, and one session workflow still running
 at its final cut-off.
 
@@ -49,10 +49,12 @@ was changed.
 
 The production outcomes cited here come from the read-only
 [hosted-state audit](./hosted-findings.md), whose final reconciliation cut-off was
-`2026-08-06T12:25:28.165Z`. The natural proposal observations come from the
+`2026-08-06T13:15:06.048Z`. The natural proposal observations come from the
 [transcript audit](./transcript-findings.md), whose reproducible 12-transcript
 cohort contained 58 durable-learning candidates and zero `memory_propose` or
-`memory_workflow_status` calls.
+`memory_workflow_status` calls. The hosted cohort contains 168 sources: 162
+settled-session digests and six explicit proposals, partitioning into 160 errored,
+seven published, and one running compiler outcome.
 
 Gate labels used below are:
 
@@ -63,6 +65,29 @@ Gate labels used below are:
 - **Settlement-gated** — only a successfully completed turn reaches the gate.
 - **Workflow-gated** — Cloudflare Workflow state, review, lint, or publication
   must settle before accepted memory exists.
+
+### Creation-gate inventory
+
+| Boundary | Classification | Required condition / outcome |
+| --- | --- | --- |
+| Feature and organization eligibility | Deterministic | Hosted memory is enabled; the signed-in user belongs to an eligible paid organization; and the workspace has memory enabled with that exact organization selected. |
+| Grant, discovery, and private proxy | Best-effort | A short-lived organization grant, server discovery, and loopback registration must finish inside the fail-open attachment budget. |
+| Harness tool attachment | Deterministic after attachment | AgentRunner adds `jingler-memory` first and Codex, Claude, or OpenCode translates the normalized server into its native launch configuration. |
+| Main-process recall | Deterministic + best-effort | A non-empty redacted prompt triggers bounded search and accepted-page reads; service failure falls back to tools plus base instructions. |
+| Direct durable-learning decision | Best-effort agent judgment | The model must notice a reusable learning and call `memory_propose`; no end-of-turn reflection enforces this decision. |
+| Optional compatibility hook | Marker-gated + best-effort | A separately configured hook and PAT/org environment must exist, and the turn must supply an explicit note, argument, or visible `MEMORY:` line. |
+| Successful turn settlement | Settlement-gated | Only a `Done` terminal event enters automatic source capture; failed, cancelled, or unsettled turns do not. |
+| Digest construction and redaction | Deterministic | Jingler keeps bounded user/final-assistant prose, excludes tool/protocol data, and applies credential-shape redaction. |
+| Local outbox and delivery | Best-effort | Atomic enqueue succeeds, then a daemon drain must deliver before the five-attempt/seven-day drop boundary. Capture return success means queued, not published. |
+| Source authorization and org scope | Deterministic | The grant needs `propose`, the organization headers must match, and session-source identity must equal its idempotency key. |
+| Durable source ingest | Deterministic | The organization Durable Object and R2 store one immutable same-ID/same-content source; conflicting content is rejected. |
+| Compiler start and source validation | Workflow-gated | A compiler binding exists, the deterministic org/source instance starts, and bounded content passes identity, size, and credential checks. |
+| Claim extraction and draft generation | Deterministic + workflow-gated | At least one 12–600 character line survives; lexical routing creates one to three citation-bearing drafts. There is no successful no-op. |
+| Full-vault proposal lint | Deterministic + workflow-gated | Draft identity, revision, citation, and relationship rules must leave the entire candidate vault valid. The generic session-title collision currently fails here. |
+| Review and publication | Workflow-gated | Default compiler sets auto-publish; review-enabled sets wait for an accept/reject event. Stale heads conflict and publication commits all set revisions together. |
+| Accepted lexical/search projection | Deterministic | The Durable Object commit advances heads, events, FTS5 projection, and projected pages atomically after R2 publication artifacts exist. |
+| Advisory vector projection | Best-effort + workflow-gated | Accepted publication triggers vector reconciliation; failures are swallowed and the daily drift sweep retries. It does not gate accepted memory. |
+| Graph relationship extraction | Deterministic after publication | Graph reads re-derive citation, wikilink/backlink, dependency, and schema edges from accepted evidence; the current compiler emits only citations. |
 
 ## End-to-end launch and recall path
 
@@ -297,7 +322,7 @@ Scheduled lint reports orphaned pages but is read-only and cannot add relationsh
 | Priority | Mismatch | Observable effect |
 | --- | --- | --- |
 | 1 | Natural proposal policy is much weaker in the always-injected prompt than in the optional skill, and there is no end-of-turn reflection. | The sampled settled cohort had 58 conservative durable candidates but zero explicit proposals or workflow polls. Nineteen candidates arose after memory was demonstrably exposed. |
-| 2 | The generic settled-session title becomes every unmatched new page title. | Hosted state had one published session workflow, 156 errored session workflows at step 05, and one session workflow still running at cut-off. Automatic capture did not compensate for missed direct proposals. |
+| 2 | The generic settled-session title becomes every unmatched new page title. | Hosted state had one published session workflow, 160 errored session workflows, and one session workflow still running at cut-off. A representative failure exhausted retries at step 05. Automatic capture did not compensate for missed direct proposals. |
 | 3 | Persist hooks are optional, credentialed separately, marker-gated, and conflict with silent-use wording. | A normal Jingler launch does not deterministically reflect on or submit a selected durable note. Even a successful hook submission is unobserved because its handle is discarded. |
 | 4 | Claim extraction measures sentence shape, not durability, and has no no-op result. | Structural labels and progress narration can publish as memory; the one accepted session page contains empty section labels and 12 transcript-derived lines. Broad low-quality compilation also makes identity collisions more likely. |
 | 5 | The compiler prompt is built but unused by the production deterministic model. | Prompt rules cannot improve selection, merge semantics, title choice, or relationship generation. |
@@ -311,6 +336,23 @@ fails after capture. Tool unavailability remains important for older transcripts
 but it is not the full current explanation because recent sessions with attached
 memory also missed proposals.
 
+## Implementation evidence index
+
+| Segment | Primary implementation evidence |
+| --- | --- |
+| Selection, grant, attachment, recall, digest, and outbox | `packages/cli-adapters/src/memory.ts` |
+| Per-turn launch and `Done` settlement boundary | `packages/cli-adapters/src/agent-runner.ts` |
+| Silent proposal/recall policy | `packages/cli-adapters/src/memory-prompt.ts` |
+| Codex, Claude, and OpenCode MCP translations | `packages/cli-adapters/src/mcp-config.ts`, `claude-adapter.ts`, `codex-app-server-run.ts`, and `opencode-adapter.ts` |
+| Grant-filtered MCP tools and direct proposal routing | `apps/server/src/mcp-memory.ts` |
+| Settled-source authorization and forwarding | `apps/server/src/memory-sources.ts` |
+| Source ingest, Workflow creation/status, and vector trigger | `apps/memory-worker/src/api.ts` |
+| Claim extraction, deterministic drafts, review, and auto-publication | `apps/memory-worker/src/workflows/compiler.ts` |
+| Full-vault proposal validation | `apps/memory-worker/src/proposals.ts` and `packages/memory/src/lint.ts` |
+| R2 artifacts, publication commit, FTS state, and recovery | `apps/memory-worker/src/r2-store.ts` and `team-vault.ts` |
+| Accepted-evidence graph derivation | `packages/memory/src/graph.ts` and `apps/memory-worker/src/graph.ts` |
+| Optional compatibility hooks | `skills/jingler-team-memory/hooks/recall.sh`, `persist.sh`, and `hooks/config/*` |
+
 ## Focused verification
 
 No test or production state was modified. The focused commands exercised attachment,
@@ -320,24 +362,23 @@ compiler review/publication, R2 recovery, vector reconciliation, and graph evide
 | Command | Result |
 | --- | --- |
 | `pnpm exec vitest run packages/cli-adapters/src/turn-prompt.test.ts packages/cli-adapters/src/mcp-inject.test.ts packages/cli-adapters/src/memory.test.ts` | `Test Files 3 passed (3)`; `Tests 38 passed (38)`. |
-| `pnpm exec vitest run packages/cli-adapters/src/agent-runner.test.ts -t "AgentRunner team memory"` inside the restricted sandbox | Expected environment-only failure preserved below: `Test Files 1 failed`; `Tests 1 failed, 3 passed, 73 skipped`. |
-| `pnpm exec vitest run packages/cli-adapters/src/agent-runner.test.ts packages/cli-adapters/src/memory-mcp-proxy.test.ts -t "AgentRunner team memory\|memory MCP proxy"` with loopback binding permitted | `Test Files 1 passed, 1 skipped`; the four `AgentRunner team memory` tests passed. The proxy file remained skipped because the inherited sandbox flag was still set. |
+| `pnpm exec vitest run packages/cli-adapters/src/agent-runner.test.ts -t "AgentRunner team memory"` with loopback binding permitted | `Test Files 1 passed (1)`; `Tests 4 passed, 73 skipped`. |
 | `env -u CODEX_SANDBOX_NETWORK_DISABLED pnpm exec vitest run packages/cli-adapters/src/memory-mcp-proxy.test.ts` with loopback binding permitted | `Test Files 1 passed (1)`; `Tests 4 passed (4)`. |
 | `pnpm --filter @jingler/server test -- src/mcp-memory.test.ts src/memory-hooks.test.ts` | The package script ran the complete server unit suite: `Test Files 12 passed (12)`; `Tests 102 passed (102)`, including all 8 hook and 29 MCP tests. |
-| `pnpm --filter @jingler/memory-worker test -- src/workflows/compiler.test.ts src/api.test.ts src/team-vault.test.ts src/graph.test.ts src/workflows/vector-ingest.test.ts` | The package script ran the complete Worker unit suite: `Test Files 11 passed (11)`; `Tests 83 passed (83)`. |
+| `pnpm exec vitest run apps/memory-worker/src/workflows/compiler.test.ts apps/memory-worker/src/api.test.ts apps/memory-worker/src/team-vault.test.ts apps/memory-worker/src/graph.test.ts apps/memory-worker/src/workflows/vector-ingest.test.ts` | `Test Files 5 passed (5)`; `Tests 47 passed (47)`. |
+| `pnpm exec vitest run apps/memory-worker/src/team-vault.test.ts -t "accepts exactly one concurrent proposal and reports the other as a conflict\|bounds in-memory retrieval metrics to the newest RETRIEVAL_RETENTION rows"` | Isolated follow-up: `Test Files 1 passed (1)`; `Tests 2 passed, 12 skipped`. |
 
-The sandbox-only failure was exact and reproducible: the log reported
-`Memory MCP proxy failed to start: listen EPERM: operation not permitted
-127.0.0.1`, after which the attachment assertion received
-`["jingler-browser"]` instead of `["jingler-memory", "jingler-browser"]`. The same
-four AgentRunner tests passed when loopback binding was permitted, and the proxy's
-four transport/lifecycle tests passed once the sandbox skip flag was removed. This
-is a test-environment restriction, not a product attachment failure.
-
-An earlier broad adapter command was intentionally interrupted with exit `130`
-after the memory, MCP injection, and prompt files had passed because every unrelated
-AgentRunner test incurred the sandbox's one-second failed loopback timeout. The
-clean focused commands above are the verification results used for this audit.
+One broader package-script invocation is preserved as a load-sensitive test-run
+failure: `pnpm --filter @jingler/memory-worker test -- ...` ignored the supplied
+file selectors and ran all 11 Worker files concurrently. It reported `Test Files
+1 failed, 10 passed` and `Tests 2 failed, 81 passed`; both failures were five-second
+timeouts in `TeamVault > accepts exactly one concurrent proposal and reports the
+other as a conflict` and `TeamVault > bounds in-memory retrieval metrics to the
+newest RETRIEVAL_RETENTION rows`. Running those exact two tests alone immediately
+afterward produced `Test Files 1 passed (1)` and `Tests 2 passed, 12 skipped`; the
+properly targeted five-file command above then passed all 47 tests without a timeout
+override. The audited behavior is green, while the full-suite default timeout is a
+separate load-sensitivity signal.
 
 The suites do not contain the production sequence “accept one generic-title session
 page, then compile a second generic-title session source.” Compiler and publication
