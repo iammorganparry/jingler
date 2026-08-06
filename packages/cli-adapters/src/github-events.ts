@@ -279,7 +279,7 @@ export const githubFeedbackInstruction = (event: GitHubRelayEvent): string | nul
     clean(feedback.body, 32_000),
     "</github-feedback>",
     "",
-    "Address this feedback in the current session. Keep the response and any code changes visible in this conversation."
+    "Address this feedback in the current session. Keep the response and any code changes visible in this conversation. Resolve it here only — do NOT post any comment, reply, or acknowledgement back to GitHub (no \"Addressed in …\" replies, no thread resolution). A comment posted to the PR loops back in as new feedback."
   ].join("\n")
 }
 
