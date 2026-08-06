@@ -56,7 +56,6 @@ export interface GitHubConnectionStore {
   }) => Promise<void>
   readonly consumeCallbackState: (input: {
     readonly stateHash: string
-    readonly userId: string
     readonly kinds: ReadonlyArray<GitHubCallbackStateKind>
     readonly at: Date
   }) => Promise<GitHubCallbackStateRecord | null>
@@ -875,8 +874,9 @@ export const createGitHubRoutes = (
   const finishOAuth = async (request: Request): Promise<Response> => {
     const dependencies = resolveDependencies()
     if (!available(dependencies)) return callbackError()
-    const userId = await authenticated(request.headers, dependencies)
-    if (!userId) return callbackError()
+    // No cookie check: GitHub redirects into the OS browser, which holds no
+    // api.jingler.dev session. The state — unguessable, single-use, expiring —
+    // authenticates the callback, and its stored row is the owning user.
     const url = new URL(request.url)
     const state = url.searchParams.get("state")
     const code = url.searchParams.get("code")
@@ -884,13 +884,13 @@ export const createGitHubRoutes = (
     const now = (dependencies.now ?? (() => new Date()))()
     const callbackState = await dependencies.store.consumeCallbackState({
       stateHash: hashGitHubCallbackState(state),
-      userId,
       // GitHub's request_oauth_on_install flow starts from the installation
       // URL and legitimately returns its state to the OAuth callback.
       kinds: ["authorize", "install"],
       at: now
     })
     if (!callbackState) return callbackError()
+    const userId = callbackState.userId
     if (!code || url.searchParams.has("error")) return callbackError()
     try {
       const token = await dependencies.github.exchangeCode(
@@ -936,8 +936,8 @@ export const createGitHubRoutes = (
   const finishSetup = async (request: Request): Promise<Response> => {
     const dependencies = resolveDependencies()
     if (!available(dependencies)) return callbackError()
-    const userId = await authenticated(request.headers, dependencies)
-    if (!userId) return callbackError()
+    // Self-authenticating on the state row — see finishOAuth. The OS browser
+    // that GitHub redirects here carries no api.jingler.dev session cookie.
     const url = new URL(request.url)
     const state = url.searchParams.get("state")
     const installationId = parseInstallationId(url.searchParams.get("installation_id") ?? undefined)
@@ -945,11 +945,11 @@ export const createGitHubRoutes = (
     const now = (dependencies.now ?? (() => new Date()))()
     const callbackState = await dependencies.store.consumeCallbackState({
       stateHash: hashGitHubCallbackState(state),
-      userId,
       kinds: ["install"],
       at: now
     })
     if (!callbackState) return callbackError()
+    const userId = callbackState.userId
     try {
       await refreshConnection(dependencies, userId)
       const installation = await dependencies.store.findInstallationForUser(userId, installationId)

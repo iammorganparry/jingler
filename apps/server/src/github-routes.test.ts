@@ -152,7 +152,6 @@ const harness = (): Harness => {
       const state = states.get(input.stateHash)
       if (
         !state ||
-        state.userId !== input.userId ||
         !input.kinds.includes(state.kind) ||
         state.consumedAt ||
         state.expiresAt <= input.at
@@ -563,48 +562,34 @@ describe("GitHub connection routes", () => {
     expect(cipher.decrypt(persisted.refreshTokenEncrypted!)).toBe("ghr_rotated-secret")
   })
 
-  it("rejects invalid, expired, replayed, and cross-user state without cross-user persistence", async () => {
+  it("authenticates the callback on the state alone, binding it to the state's owner", async () => {
     const value = harness()
+    // Unknown state — nothing to consume.
     expect(
-      (
-        await value.routes.request("/callback?code=oauth-code&state=missing", {
-          headers: asUser("user-1")
-        })
-      ).status
+      (await value.routes.request("/callback?code=oauth-code&state=missing")).status
     ).toBe(400)
 
-    const state = await start(value)
-    expect(
-      (
-        await value.routes.request(`/callback?code=oauth-code&state=${state}`, {
-          headers: asUser("user-2")
-        })
-      ).status
-    ).toBe(400)
+    // The callback carries no session cookie — the OS browser GitHub redirects
+    // has none. The unguessable state is the sole authenticator, and it binds
+    // the connection to its owner (user-1), never to anyone else.
+    const state = await start(value, "/authorize", "user-1")
+    const accepted = await value.routes.request(`/callback?code=oauth-code&state=${state}`)
+    expect(accepted.status).toBe(302)
+    expect(value.authorizations.has("user-1")).toBe(true)
     expect(value.authorizations.has("user-2")).toBe(false)
 
-    const accepted = await value.routes.request(`/callback?code=oauth-code&state=${state}`, {
-      headers: asUser("user-1")
-    })
-    expect(accepted.status).toBe(302)
+    // Single-use: the consumed state cannot be replayed.
     const saveCount = value.getSaveCount()
     expect(
-      (
-        await value.routes.request(`/callback?code=oauth-code&state=${state}`, {
-          headers: asUser("user-1")
-        })
-      ).status
+      (await value.routes.request(`/callback?code=oauth-code&state=${state}`)).status
     ).toBe(400)
     expect(value.getSaveCount()).toBe(saveCount)
 
-    const expired = await start(value)
+    // Expired state is refused.
+    const expired = await start(value, "/authorize", "user-1")
     value.setNow(new Date("2026-08-04T10:11:00Z"))
     expect(
-      (
-        await value.routes.request(`/callback?code=oauth-code&state=${expired}`, {
-          headers: asUser("user-1")
-        })
-      ).status
+      (await value.routes.request(`/callback?code=oauth-code&state=${expired}`)).status
     ).toBe(400)
     expect(value.getSaveCount()).toBe(saveCount)
   })

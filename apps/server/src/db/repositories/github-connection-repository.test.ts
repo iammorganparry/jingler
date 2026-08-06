@@ -113,7 +113,6 @@ describe("GitHubConnectionRepository", () => {
       { "GitHubConnectionRepository.consumeCallbackState": [] },
       GitHubConnectionRepository.consumeCallbackState({
         stateHash: "wrong-or-used",
-        userId: "user-1",
         kinds: ["install"],
         at: new Date("2026-08-04T10:01:00Z")
       })
@@ -124,7 +123,6 @@ describe("GitHubConnectionRepository", () => {
       { "GitHubConnectionRepository.consumeCallbackState": [callbackRow] },
       GitHubConnectionRepository.consumeCallbackState({
         stateHash: "sha256-state",
-        userId: "user-1",
         kinds: ["install"],
         at: new Date("2026-08-04T10:01:00Z")
       })

@@ -205,12 +205,14 @@ const repositoryFor = (database: Database) => {
         .pipe(Effect.asVoid),
 
     /**
-     * The UPDATE is the replay lock. Hash, user, kind, expiry and unused status
-     * are checked in one statement; a second caller receives None.
+     * The UPDATE is the replay lock. Hash, kind, expiry and unused status are
+     * checked in one statement; a second caller receives None. The owning user
+     * is recovered from the returned row, never supplied by the caller: the
+     * GitHub redirect lands in the OS browser, which carries no session cookie,
+     * so the unguessable single-use state is the callback's sole authenticator.
      */
     consumeCallbackState: (input: {
       readonly stateHash: string
-      readonly userId: string
       readonly kinds: ReadonlyArray<GitHubCallbackStateKind>
       readonly at: Date
     }): Effect.Effect<Option.Option<GitHubCallbackStateRecord>, DatabaseError> =>
@@ -222,7 +224,6 @@ const repositoryFor = (database: Database) => {
             .where(
               and(
                 eq(githubCallbackState.stateHash, input.stateHash),
-                eq(githubCallbackState.userId, input.userId),
                 inArray(githubCallbackState.kind, [...input.kinds]),
                 gt(githubCallbackState.expiresAt, input.at),
                 isNull(githubCallbackState.consumedAt)
