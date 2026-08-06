@@ -16,6 +16,11 @@ export type { GitHubRelayEvent, GitHubRelayEventName } from "@jingler/core"
 export type GitHubRelayServerMessage =
   | { readonly type: "hello"; readonly cursor: number; readonly newestCursor: number }
   | { readonly type: "event"; readonly cursor: number; readonly event: GitHubRelayEvent }
+  // A well-formed event envelope whose payload this client cannot decode. The
+  // cursor is known and trustworthy, so the consumer advances past it rather
+  // than closing the socket — a permanently-unparseable frame must not replay
+  // forever. Distinct from `null` (a malformed envelope with no usable cursor).
+  | { readonly type: "event-skip"; readonly cursor: number }
   | { readonly type: "replay-more"; readonly cursor: number }
   | { readonly type: "pong"; readonly at: number }
   | { readonly type: "error"; readonly code: string }
@@ -188,7 +193,9 @@ export const parseGitHubRelayServerMessage = (raw: unknown): GitHubRelayServerMe
   }
   if (candidate.type === "event" && cursor(candidate.cursor)) {
     const event = parseGitHubRelayEvent(candidate.event)
-    return event ? { type: "event", cursor: candidate.cursor, event } : null
+    return event
+      ? { type: "event", cursor: candidate.cursor, event }
+      : { type: "event-skip", cursor: candidate.cursor }
   }
   if (candidate.type === "replay-more" && cursor(candidate.cursor)) {
     return { type: "replay-more", cursor: candidate.cursor }

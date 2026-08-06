@@ -45,9 +45,11 @@ describe("GitHub relay protocol", () => {
       parseGitHubRelayServerMessage(JSON.stringify({ type: "event", cursor: 8, event: event() }))
     ).toEqual({ type: "event", cursor: 8, event: event() })
     expect(parseGitHubRelayServerMessage('{"type":"event","cursor":-1}')).toBeNull()
+    // A valid envelope with an undecodable payload advances rather than bricks;
+    // see the dedicated event-skip test below.
     expect(
       parseGitHubRelayServerMessage({ type: "event", cursor: 1, event: { ...event(), version: 2 } })
-    ).toBeNull()
+    ).toEqual({ type: "event-skip", cursor: 1 })
     expect(parseGitHubRelayServerMessage("not-json")).toBeNull()
   })
 
@@ -72,6 +74,19 @@ describe("GitHub relay protocol", () => {
     expect(
       parseGitHubRelayServerMessage(JSON.stringify({ type: "event", cursor: 9, event: checkRun }))
     ).toEqual({ type: "event", cursor: 9, event: checkRun })
+  })
+
+  it("yields event-skip for a valid envelope with an undecodable payload, null for a malformed one", () => {
+    // Envelope is well-formed (type + cursor) but the event fails to decode:
+    // the consumer must be able to advance past it, so we surface the cursor.
+    expect(
+      parseGitHubRelayServerMessage(
+        JSON.stringify({ type: "event", cursor: 12, event: { ...event(), version: 2 } })
+      )
+    ).toEqual({ type: "event-skip", cursor: 12 })
+    // No usable cursor: nothing to advance to, so it stays null.
+    expect(parseGitHubRelayServerMessage('{"type":"event","cursor":-1}')).toBeNull()
+    expect(parseGitHubRelayServerMessage('{"type":"event"}')).toBeNull()
   })
 
   it("encodes cursor acknowledgement, replay, and heartbeat messages", () => {

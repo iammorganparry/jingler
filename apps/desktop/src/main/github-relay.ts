@@ -319,6 +319,31 @@ export class GitHubRelayConnection {
       this.send(socket, { type: "resume", cursor: message.cursor });
       return;
     }
+    if (message.type === "event-skip") {
+      // A frame this client cannot decode can never be delivered, so replaying
+      // it would loop forever. Advance the durable cursor past it — but loudly,
+      // because a run of these means the relay and this client's event schema
+      // have drifted and someone needs to reconcile them.
+      console.warn(
+        `[relay] skipping an undecodable event at cursor ${message.cursor}; advancing past it. A burst of these signals relay/desktop event-schema drift.`,
+      );
+      this.processing = this.processing
+        .then(async () => {
+          if (!this.current(socket, generation)) return;
+          if (message.cursor <= this.cursor) {
+            this.send(socket, { type: "ack", cursor: this.cursor });
+            return;
+          }
+          await this.options.cursorStore.save(
+            this.options.clientId,
+            message.cursor,
+          );
+          this.cursor = message.cursor;
+          this.send(socket, { type: "ack", cursor: message.cursor });
+        })
+        .catch((error: unknown) => this.failProcessing(socket, error));
+      return;
+    }
 
     this.processing = this.processing
       .then(async () => {
