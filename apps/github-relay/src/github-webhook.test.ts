@@ -102,6 +102,66 @@ describe("GitHub webhook normalization", () => {
     })
   })
 
+  it("routes a bot's submitted review to the agent but ignores a bot's issue comment", async () => {
+    const reviewPayload = (overrides: Record<string, unknown> = {}) => ({
+      action: "submitted",
+      sender: { id: 8, login: "devin-ai-integration[bot]", type: "Bot" },
+      pull_request: {
+        id: 200,
+        number: 42,
+        title: "Improve relay",
+        html_url: "https://github.com/acme/jingler/pull/42",
+        updated_at: "2026-08-05T10:00:00Z",
+        head: { sha: "head" },
+        base: { sha: "base" }
+      },
+      review: {
+        id: 500,
+        body: "This needs a null check.",
+        state: "commented",
+        submitted_at: "2026-08-05T10:00:00Z",
+        ...(overrides.review as Record<string, unknown> | undefined)
+      },
+      ...overrides
+    })
+
+    // A third-party reviewer bot on the review surface reaches the agent.
+    const review = await normalizeGitHubWebhook({
+      deliveryId: "d-bot-review",
+      eventName: "pull_request_review",
+      ourAppId: "424242",
+      payload: githubPayload(reviewPayload())
+    })
+    expect(review).toMatchObject({
+      actionable: true,
+      feedback: { kind: "review", body: "This needs a null check." }
+    })
+
+    // The same bot's build/deploy chatter arrives as an issue_comment — ignored.
+    const noise = await normalizeGitHubWebhook({
+      deliveryId: "d-bot-issue",
+      eventName: "issue_comment",
+      ourAppId: "424242",
+      payload: githubPayload({ sender: { id: 9, login: "vercel[bot]", type: "Bot" } })
+    })
+    expect(noise).toMatchObject({ actionable: false })
+
+    // A review THIS app posted (performed_via_github_app == ourAppId) never loops
+    // back, even though it is on the review surface.
+    const own = await normalizeGitHubWebhook({
+      deliveryId: "d-own-review",
+      eventName: "pull_request_review",
+      ourAppId: "424242",
+      payload: githubPayload(
+        reviewPayload({
+          sender: { id: 8, login: "jingler[bot]", type: "Bot" },
+          review: { performed_via_github_app: { id: 424242 } }
+        })
+      )
+    })
+    expect(own).toMatchObject({ actionable: false })
+  })
+
   it("extracts pull-request routing identity from check run and check suite payloads", async () => {
     for (const [eventName, checkField] of [
       ["check_run", "check_run"],

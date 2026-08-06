@@ -163,7 +163,12 @@ const handleWebhook = async (request: Request, env: Env): Promise<Response> => {
     return json({ accepted: true, ignored: true }, 202)
   }
 
-  const event = await normalizeGitHubWebhook({ deliveryId, eventName, payload })
+  const event = await normalizeGitHubWebhook({
+    deliveryId,
+    eventName,
+    payload,
+    ourAppId: env.GITHUB_APP_ID
+  })
   if (!event) return json({ accepted: true, ignored: true }, 202)
   if (!event.pullRequest) {
     relayTelemetry("ignored_event", {

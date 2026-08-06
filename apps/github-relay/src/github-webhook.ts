@@ -229,6 +229,8 @@ export const normalizeGitHubWebhook = async (input: {
   readonly deliveryId: string
   readonly eventName: string
   readonly payload: unknown
+  /** This GitHub App's numeric id, so its own posts are never re-routed. */
+  readonly ourAppId?: string
 }): Promise<NormalizedGitHubEvent | null> => {
   if (!SUPPORTED_EVENTS.has(input.eventName as SupportedGitHubEvent)) return null
   const event = input.eventName as SupportedGitHubEvent
@@ -263,12 +265,37 @@ export const normalizeGitHubWebhook = async (input: {
   const routePullRequests = event === "status" ? [] : pullRequestsFrom(payload)
   const pullRequest = routePullRequests[0] ?? null
   if (event === "issue_comment" && !pullRequest) return null
-  const human = actorType.toLocaleLowerCase("en-US") === "user"
   const actionableAction =
     (event === "pull_request_review" && action === "submitted") ||
     ((event === "pull_request_review_comment" || event === "issue_comment") &&
       action === "created")
-  const actionable = human && actionableAction && feedback !== null
+  // Which authors' feedback the agent acts on. Humans are trusted on every
+  // surface. Bots are trusted ONLY on the review surface — a submitted review
+  // or an inline diff comment — so a reviewer like Devin reaches the agent while
+  // an issue_comment bot (Vercel deploy notices, CI chatter) stays out. And a
+  // review this very GitHub App posted (Jingler's own "submitReview") must never
+  // route back into the session it came from, so exclude our own app's posts.
+  const human = actorType.toLocaleLowerCase("en-US") === "user"
+  const reviewSurface =
+    event === "pull_request_review" || event === "pull_request_review_comment"
+  const feedbackSource =
+    event === "pull_request_review"
+      ? record(payload.review)
+      : event === "pull_request_review_comment" || event === "issue_comment"
+        ? record(payload.comment)
+        : null
+  const performedViaAppId = identifier(
+    record(feedbackSource?.performed_via_github_app)?.id
+  )
+  const postedByOurApp =
+    input.ourAppId != null &&
+    input.ourAppId.length > 0 &&
+    performedViaAppId === input.ourAppId
+  const actionable =
+    actionableAction &&
+    feedback !== null &&
+    !postedByOurApp &&
+    (human || reviewSurface)
   const occurrence =
     (event === "status"
       ? string(payload.updated_at) ?? string(payload.created_at)
