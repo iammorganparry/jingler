@@ -39,6 +39,14 @@ const DEFAULT_ICON: Record<PaletteItemKind, LucideIcon> = {
 
 export const PALETTE_PLACEHOLDER = "Jump to a session or run a command…"
 
+/**
+ * How many rows the palette mounts at once. cmdk keeps every item in the DOM and
+ * re-scores it per keystroke, so an unbounded file list makes it crawl. Beyond a
+ * few hundred, more rows do not help a fuzzy search — the best matches sort to
+ * the top regardless.
+ */
+const MAX_RENDERED_ITEMS = 150
+
 export function CommandPalette({
   open,
   onOpenChange,
@@ -63,7 +71,26 @@ export function CommandPalette({
     if (!open) setQuery("")
   }, [open])
 
-  const groups = React.useMemo(() => groupPaletteItems(items), [items])
+  // cmdk mounts every item it is given and re-scores them all on each keystroke.
+  // That is fine for a handful of commands but not for a repo's file list, where
+  // thousands of mounted rows make the palette crawl. So we score in JS (cheap)
+  // and mount only the best matches (the DOM is the expensive part). Small lists
+  // fall under the cap and render exactly as before.
+  const groups = React.useMemo(() => {
+    const search = query.trim()
+    if (search.length === 0) {
+      return groupPaletteItems(
+        items.length > MAX_RENDERED_ITEMS ? items.slice(0, MAX_RENDERED_ITEMS) : items
+      )
+    }
+    const ranked = items
+      .map((item) => ({ item, score: scoreItem(item.id, search, [...itemKeywords(item)]) }))
+      .filter((scored) => scored.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, MAX_RENDERED_ITEMS)
+      .map((scored) => scored.item)
+    return groupPaletteItems(ranked)
+  }, [items, query])
 
   /**
    * Close FIRST, then run.

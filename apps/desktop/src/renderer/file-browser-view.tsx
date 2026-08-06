@@ -78,6 +78,7 @@ export function FileBrowserView({ session }: FileBrowserViewProps) {
     <div ref={rootRef} className="h-full min-h-0">
       <AssetBrowser
         sessionId={session.id}
+        repo={session.repo}
         entries={browser.entries}
         selectedPath={browser.selectedPath}
         treeLoading={browser.treeLoading}

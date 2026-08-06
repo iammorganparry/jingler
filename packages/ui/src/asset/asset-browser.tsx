@@ -18,6 +18,8 @@ const FALLBACK_TOKENS = toTokens(jinglerDark)
 
 export interface AssetBrowserProps {
   readonly sessionId: string
+  /** owner/repo the browser is rooted at, shown as persistent header context. */
+  readonly repo?: string
   readonly entries: readonly AssetFileEntry[]
   readonly selectedPath: string | null
   readonly treeLoading?: boolean
@@ -37,6 +39,7 @@ export interface AssetBrowserProps {
  */
 export function AssetBrowser({
   sessionId,
+  repo,
   entries,
   selectedPath,
   treeLoading = false,
@@ -174,6 +177,14 @@ export function AssetBrowser({
               >
                 <Files className="size-3.5" aria-hidden />
               </button>
+            ) : null}
+            {repo !== undefined && repo.length > 0 ? (
+              <span
+                className="flex-none truncate font-mono text-[11px] text-dim"
+                title={repo}
+              >
+                {repo}
+              </span>
             ) : null}
             <span className="min-w-0 truncate font-mono text-[11px] text-text-body">
               {selectedPath ?? "Select a file"}
