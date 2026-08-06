@@ -133,8 +133,19 @@ export function useReview(session: Session): ReviewState {
   const prQuery = useQuery({
     queryKey: ["github", "review", session.id, session.prNumber],
     queryFn: async () => {
-      const [files, diff] = await Promise.all([rpc.githubFiles(session.id), rpc.githubDiff(session.id)])
-      return { files, diff }
+      // Settle independently: the file list and the diff are separate fetches
+      // with separate permission surfaces, and a diff failure must not blank an
+      // otherwise-complete review. (A single Promise.all rejection here showed
+      // "No changes to review" even when 25 files had loaded.)
+      const [filesResult, diffResult] = await Promise.allSettled([
+        rpc.githubFiles(session.id),
+        rpc.githubDiff(session.id)
+      ])
+      if (filesResult.status === "rejected") throw filesResult.reason
+      return {
+        files: filesResult.value,
+        diff: diffResult.status === "fulfilled" ? diffResult.value : ""
+      }
     }
   })
 

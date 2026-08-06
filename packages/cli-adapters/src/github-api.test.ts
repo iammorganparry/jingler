@@ -249,6 +249,25 @@ describe("GitHubApi pagination and large pull requests", () => {
     expect(diff).toContain("diff --git a/src/large-0.ts b/src/large-0.ts")
     expect(diff).toContain("diff --git a/src/large-100.ts b/src/large-100.ts")
   })
+
+  it("reconstructs the diff from files when the aggregate diff is forbidden by contents scope", async () => {
+    // The diff media type needs `contents:read`; a pull_requests-only token 403s
+    // it (repository-access) even when the files endpoint is fully readable.
+    const { client } = makeClient((request) => {
+      if (pathIs(request, "/repos/acme/widget")) return json(repository)
+      if (pathIs(request, "/repos/acme/widget/pulls/9") && request.headers.get("accept")?.includes("diff")) {
+        return json({ message: "Resource not accessible by integration" }, 403)
+      }
+      if (pathIs(request, "/repos/acme/widget/pulls/9/files")) {
+        return json([{ filename: "src/a.ts", patch: "@@ -0,0 +1 @@\n+export const a = 1" }])
+      }
+      throw new Error(`unexpected ${request.method} ${request.url}`)
+    })
+
+    const diff = await client.prDiff("/repo", 9)
+    expect(diff).toContain("diff --git a/src/a.ts b/src/a.ts")
+    expect(diff).toContain("+export const a = 1")
+  })
 })
 
 describe("GitHubApi installation permission scopes", () => {

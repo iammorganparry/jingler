@@ -727,7 +727,18 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         )
         return typeof response.data === "string" ? response.data : ""
       } catch (error) {
-        if (!(error instanceof GitHubApiError) || (error.status !== 406 && error.reason !== "unavailable")) {
+        // The aggregate diff media type additionally needs `contents:read`; a
+        // `pull_requests:read`-only token 404s it (surfaced as repository-access)
+        // even when the repo is fully accessible. The files endpoint below runs
+        // on `pull_requests:read` and carries each file's patch, so reconstruct
+        // from it instead of failing — no `contents` grant required. If the repo
+        // is genuinely out of reach, that call throws in turn.
+        if (
+          !(error instanceof GitHubApiError) ||
+          (error.status !== 406 &&
+            error.reason !== "unavailable" &&
+            error.reason !== "repository-access")
+        ) {
           throw error
         }
         const repository = await resolveRepository(cwd)

@@ -68,7 +68,6 @@ import {
   UsageService,
   WorkspaceService,
 } from "@jingler/cli-adapters";
-import { appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import {
@@ -2509,42 +2508,12 @@ export const setSessionPersistent = (sessionId: string, persistent: boolean) =>
     ),
   );
 
-// DIAGNOSTIC (temporary): the PR review view shows an empty "No changes to
-// review" whether the fetch returned nothing or threw — the error is swallowed
-// by Promise.all in use-review. Log the outcome to a file to tell them apart.
-const prDiag = (where: string, detail: unknown): void => {
-  try {
-    const text =
-      detail instanceof Error
-        ? `${detail.name}: ${detail.message}`
-        : typeof detail === "string"
-          ? detail
-          : JSON.stringify(detail);
-    appendFileSync("/tmp/jingler-pr-diag.log", `[${new Date().toISOString()}] ${where}: ${text}\n`);
-  } catch {
-    // never throw from diagnostics
-  }
-};
-
 /** `Github.files` handler — the PR's changed files (empty without a linked PR). */
 export const githubFiles = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
-    if (!session?.worktreePath || session.prNumber === null) {
-      prDiag("githubFiles.skip", {
-        hasWorktree: Boolean(session?.worktreePath),
-        prNumber: session?.prNumber ?? null,
-      });
-      return [];
-    }
-    prDiag("githubFiles.start", {
-      worktreePath: session.worktreePath,
-      prNumber: session.prNumber,
-    });
-    return yield* GitHubApi.prFiles(session.worktreePath, session.prNumber).pipe(
-      Effect.tap((files) => Effect.sync(() => prDiag("githubFiles.ok", { count: files.length }))),
-      Effect.tapError((error) => Effect.sync(() => prDiag("githubFiles.error", error))),
-    );
+    if (!session?.worktreePath || session.prNumber === null) return [];
+    return yield* GitHubApi.prFiles(session.worktreePath, session.prNumber);
   });
 
 /** `Github.diff` handler — the PR's unified diff (empty without a linked PR). */
@@ -2552,10 +2521,7 @@ export const githubDiff = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
     if (!session?.worktreePath || session.prNumber === null) return "";
-    return yield* GitHubApi.prDiff(session.worktreePath, session.prNumber).pipe(
-      Effect.tap((diff) => Effect.sync(() => prDiag("githubDiff.ok", { length: diff.length }))),
-      Effect.tapError((error) => Effect.sync(() => prDiag("githubDiff.error", error))),
-    );
+    return yield* GitHubApi.prDiff(session.worktreePath, session.prNumber);
   });
 
 /** `Review.get` handler — the stored review for the active PR, or null. */
