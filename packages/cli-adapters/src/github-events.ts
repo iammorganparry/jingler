@@ -126,7 +126,12 @@ export const parseGitHubRelayEvent = (value: unknown): GitHubRelayEvent | null =
   }
   if (
     pr !== null &&
-    (!(((nonEmptyString(pr.id) &&finiteInteger(pr.number) ) &&nonEmptyString(pr.title) ) &&nonEmptyString(pr.url) ) ||
+    // `title` is `Schema.String` in core, not non-empty: check_run/check_suite
+    // webhooks carry no PR title, so the relay legitimately sends "". Rejecting
+    // it here failed every CI event's frame, and one unparseable frame closes
+    // the socket (1002) without advancing the cursor — an endless replay loop.
+    (!((nonEmptyString(pr.id) && finiteInteger(pr.number) && nonEmptyString(pr.url))) ||
+      typeof pr.title !== "string" ||
       typeof pr.headSha !== "string" ||
       typeof pr.baseSha !== "string")
   ) {

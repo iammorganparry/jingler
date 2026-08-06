@@ -5,34 +5,6 @@ import {
 } from "../../../../packages/cli-adapters/src/github-events.js";
 import type { GitHubAppInstallation } from "@jingler/core";
 import WebSocket from "ws";
-import { appendFileSync } from "node:fs";
-
-/**
- * DIAGNOSTIC (temporary): write relay failures to a fixed file, independent of
- * how the dev process pipes stdout/stderr. Every reconnect cause funnels here
- * so the swallowed error becomes readable. Remove with the fix.
- */
-const RELAY_DIAG_FILE = "/tmp/jingler-relay-diag.log";
-const relayDiag = (where: string, detail: unknown): void => {
-  try {
-    const text =
-      detail instanceof Error
-        ? `${detail.name}: ${detail.message}\n${detail.stack ?? ""}`
-        : (() => {
-            try {
-              return typeof detail === "string" ? detail : JSON.stringify(detail);
-            } catch {
-              return String(detail);
-            }
-          })();
-    appendFileSync(
-      RELAY_DIAG_FILE,
-      `[${new Date().toISOString()}] ${where}: ${text}\n`,
-    );
-  } catch {
-    // Diagnostics must never throw inside a failure path.
-  }
-};
 
 export interface GitHubRelayGrant {
   readonly relayUrl: string;
@@ -279,23 +251,14 @@ export class GitHubRelayConnection {
         if (!this.current(socket, generation)) return;
         this.handleMessage(socket, generation, message.data);
       });
-      socket.addEventListener("close", (event) => {
+      socket.addEventListener("close", () => {
         if (!this.current(socket, generation)) return;
-        const closed = event as { code?: unknown; reason?: unknown };
-        relayDiag(
-          `socket.close clientId=${this.options.clientId} cursor=${this.cursor}`,
-          `code=${String(closed?.code)} reason=${String(closed?.reason)}`,
-        );
         this.socket = null;
         this.clearHeartbeat();
         this.scheduleReconnect();
       });
-      socket.addEventListener("error", (event) => {
+      socket.addEventListener("error", () => {
         if (!this.current(socket, generation)) return;
-        relayDiag(
-          `socket.error clientId=${this.options.clientId} cursor=${this.cursor}`,
-          (event as { message?: unknown })?.message ?? "transport error",
-        );
         this.options.onStatus?.({
           mode: "error",
           error: "GitHub relay transport failed",
@@ -310,10 +273,6 @@ export class GitHubRelayConnection {
       });
     } catch (error) {
       if (!this.running || generation !== this.generation) return;
-      relayDiag(
-        `connect.catch clientId=${this.options.clientId} cursor=${this.cursor} reconnecting=${reconnecting}`,
-        error,
-      );
       this.options.onStatus?.({ mode: "error", error: safeError(error) });
       this.scheduleReconnect();
     }
@@ -326,10 +285,6 @@ export class GitHubRelayConnection {
   ): void {
     const message = parseGitHubRelayServerMessage(raw);
     if (!message) {
-      relayDiag(
-        `handleMessage.parseFailed clientId=${this.options.clientId} cursor=${this.cursor}`,
-        typeof raw === "string" ? raw.slice(0, 2000) : String(raw),
-      );
       socket.close(1002, "Invalid relay message");
       return;
     }
@@ -387,10 +342,6 @@ export class GitHubRelayConnection {
 
   private failProcessing(socket: GitHubRelaySocket, error: unknown): void {
     if (this.socket !== socket) return;
-    relayDiag(
-      `failProcessing clientId=${this.options.clientId} cursor=${this.cursor}`,
-      error,
-    );
     this.options.onStatus?.({ mode: "error", error: safeError(error) });
     // Invalidate this socket before closing it. More frames may already be
     // queued behind the failed delivery; none may advance the durable cursor

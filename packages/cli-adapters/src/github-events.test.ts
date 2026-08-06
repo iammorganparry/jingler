@@ -51,6 +51,29 @@ describe("GitHub relay protocol", () => {
     expect(parseGitHubRelayServerMessage("not-json")).toBeNull()
   })
 
+  it("accepts a check event whose pull request carries an empty title", () => {
+    // check_run/check_suite webhooks have no PR title, so the relay sends "".
+    // Rejecting an empty title closed the socket on every CI event and replayed
+    // it forever; the title is `Schema.String` in core, empty included.
+    const checkRun = event({
+      event: "check_run",
+      action: "completed",
+      feedback: null,
+      actionable: false,
+      pullRequest: {
+        id: "300",
+        number: 42,
+        title: "",
+        url: "https://github.com/acme/widget/pull/42",
+        headSha: "head",
+        baseSha: "base"
+      }
+    })
+    expect(
+      parseGitHubRelayServerMessage(JSON.stringify({ type: "event", cursor: 9, event: checkRun }))
+    ).toEqual({ type: "event", cursor: 9, event: checkRun })
+  })
+
   it("encodes cursor acknowledgement, replay, and heartbeat messages", () => {
     expect(encodeGitHubRelayClientMessage({ type: "ack", cursor: 7 })).toBe(
       '{"type":"ack","cursor":7}'
