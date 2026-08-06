@@ -64,7 +64,7 @@ export const InTheSidebar: Story = {
       id,
       title,
       repo: "jingler",
-      branch: `jingler/${id}`,
+      branch: `chore/${id}`,
       status: "idle",
       cli: "claude",
       diff: { added: 42, removed: 8 },

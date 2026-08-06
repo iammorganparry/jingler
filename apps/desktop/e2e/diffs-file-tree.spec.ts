@@ -4,8 +4,8 @@ import { join } from "node:path"
 import type { Page } from "@playwright/test"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
+import { PIERRE_HOST_CLASS, verticalScrollOwner } from "./pierre-helpers.js"
 
-const PIERRE_HOST_CLASS = /jingler-pierre-host/
 
 const seeded = (worktreePath: string): SeedSession => ({
   id: "s_pierre_review",
@@ -104,22 +104,7 @@ test("uses the shared legacy Jingler Pierre skin in Changes and Code Review", as
   await expect(review).toHaveAttribute("data-jingler-pierre-view", "code-view")
   await expect(review).toHaveClass(PIERRE_HOST_CLASS)
 
-  const reviewElements = review.locator("*")
-  const scrollOwnerIndex = await reviewElements.evaluateAll((elements) => {
-    let bestIndex = -1
-    let bestRange = 0
-    for (const [index, element] of elements.entries()) {
-      const range = element.scrollHeight - element.clientHeight
-      const overflowY = getComputedStyle(element).overflowY
-      if (range > bestRange && (overflowY === "auto" || overflowY === "scroll")) {
-        bestIndex = index
-        bestRange = range
-      }
-    }
-    return bestIndex
-  })
-  expect(scrollOwnerIndex).toBeGreaterThanOrEqual(0)
-  const scrollOwner = reviewElements.nth(scrollOwnerIndex)
+  const scrollOwner = await verticalScrollOwner(review)
   const scrollMetrics = await scrollOwner.evaluate((element) => ({
     clientHeight: element.clientHeight,
     scrollHeight: element.scrollHeight,

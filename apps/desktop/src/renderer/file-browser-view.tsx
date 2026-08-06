@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import type { AssetPayload, Session } from "@jingler/core"
 import {
   AssetBrowser,
@@ -58,12 +58,15 @@ export function FileBrowserQuickOpen({
 /** Renderer-owned binding from a session's persistent actor to the Files tab. */
 export function FileBrowserView({ session }: FileBrowserViewProps) {
   const browser = useFileBrowser(session.id)
+  const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const root = rootRef.current
+      if (root === null || !(event.target instanceof Node) || !root.contains(event.target)) return
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
       if (event.code !== "KeyS" && event.key.toLowerCase() !== "s") return
-      if (browser.status !== "dirty") return
+      if (browser.status !== "dirty" && browser.status !== "error") return
       event.preventDefault()
       browser.save()
     }
@@ -72,23 +75,25 @@ export function FileBrowserView({ session }: FileBrowserViewProps) {
   }, [browser.save, browser.status])
 
   return (
-    <AssetBrowser
-      sessionId={session.id}
-      entries={browser.entries}
-      selectedPath={browser.selectedPath}
-      treeLoading={browser.treeLoading}
-      treeError={browser.treeError}
-      onRetryTree={browser.refreshTree}
-      onSelectPath={browser.open}
-      headerActions={<FileActions browser={browser} />}
-      renderCanvas={(nativeAvailable) => (
-        <FileCanvas
-          sessionId={session.id}
-          browser={browser}
-          nativeAvailable={nativeAvailable}
-        />
-      )}
-    />
+    <div ref={rootRef} className="h-full min-h-0">
+      <AssetBrowser
+        sessionId={session.id}
+        entries={browser.entries}
+        selectedPath={browser.selectedPath}
+        treeLoading={browser.treeLoading}
+        treeError={browser.treeError}
+        onRetryTree={browser.refreshTree}
+        onSelectPath={browser.open}
+        headerActions={<FileActions browser={browser} />}
+        renderCanvas={(nativeAvailable) => (
+          <FileCanvas
+            sessionId={session.id}
+            browser={browser}
+            nativeAvailable={nativeAvailable}
+          />
+        )}
+      />
+    </div>
   )
 }
 

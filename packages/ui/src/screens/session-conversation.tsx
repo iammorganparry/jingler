@@ -116,6 +116,8 @@ export interface SessionConversationProps {
   onOpenUsage?: () => void
   /** Open the Settings view (from the sidebar account menu). */
   onOpenSettings?: () => void
+  /** Open Settings directly on GitHub from a repository-access recovery action. */
+  onOpenGithubSettings?: () => void
   /** Sign out (from the sidebar account menu). */
   onSignOut?: () => void
   /**
@@ -263,7 +265,7 @@ export function SessionConversation(props: SessionConversationProps) {
             planSessions={props.planSessions}
             liveActivity={props.liveActivity}
             liveDiff={props.liveDiff}
-            onOpenSettings={props.onOpenSettings}
+            onOpenSettings={props.onOpenGithubSettings ?? props.onOpenSettings}
             renderPullRequest={props.renderPullRequest}
             tabContributions={props.tabContributions}
             paneContributions={props.paneContributions}

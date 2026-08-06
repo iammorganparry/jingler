@@ -18,7 +18,7 @@ const session = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession>
   {
     id: "s_plan_collaboration",
     repo: "widget",
-    branch: "jingler/plan-collaboration",
+    branch: "chore/plan-collaboration",
     title: "Collaborative plan",
     status: "idle",
     cli: "claude",

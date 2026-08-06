@@ -62,6 +62,7 @@ import {
   AssetTooLargeError,
   AssetUnsupportedError,
   AssetWriteConflictError,
+  AssetWriteIoError,
   GitError,
   extensionToKind,
   extensionToLanguage
@@ -368,7 +369,8 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
       | AssetOutsideWorktreeError
       | AssetBinaryError
       | AssetTooLargeError
-      | AssetWriteConflictError,
+      | AssetWriteConflictError
+      | AssetWriteIoError,
       AssetEnv
     > =>
       Effect.gen(function* () {
@@ -469,9 +471,9 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
             }
 
             const writeFailure = () =>
-              new AssetOutsideWorktreeError({
+              new AssetWriteIoError({
                 path: requested,
-                reason: "unreadable"
+                message: "Could not safely replace the file."
               })
             const directory = path_.dirname(absolutePath)
             const replacementPath = yield* fs.makeTempFileScoped({

@@ -88,6 +88,35 @@ describe("previewDockMachine", () => {
     expect(previewSessionState(restored.context, "beta").url).toBe("https://beta.example")
   })
 
+  it("prunes persisted state against the loaded session list", () => {
+    store.set(
+      "jingler.browser.sessions.v1",
+      JSON.stringify({
+        current: { url: "https://current.example", visible: true },
+        deleted: { url: "https://deleted.example", visible: true }
+      })
+    )
+    const actor = start()
+    actor.send({ type: "FOCUS_SESSION", sessionId: "deleted" })
+    actor.send({ type: "RECONCILE_SESSIONS", sessionIds: ["current"] })
+
+    expect(actor.getSnapshot().context.sessions).toEqual({
+      current: {
+        url: "https://current.example",
+        visible: true,
+        source: "native"
+      }
+    })
+    expect(actor.getSnapshot().context.focusedSessionId).toBeNull()
+    expect(JSON.parse(store.get("jingler.browser.sessions.v1") ?? "{}")).toEqual({
+      current: {
+        url: "https://current.example",
+        visible: true,
+        source: "native"
+      }
+    })
+  })
+
   it("migrates the legacy visibility to the first focused session", () => {
     store.set("jingler.browser.visible", "true")
     store.set("jingler.browser.side", "bottom")

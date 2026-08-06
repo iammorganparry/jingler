@@ -272,8 +272,8 @@ describe("failure modes", () => {
   })
 
   it("returns null when the provider has no credentials to give", async () => {
-    // An unauthenticated `gh` is the common case. A plugin should degrade, not
-    // see a stack trace about a binary it never mentioned.
+    // A disconnected provider is a common case. A plugin should degrade, not
+    // see a stack trace about an integration detail it never mentioned.
     const session = await withAuth((auth) => ask(auth, ["repo"]), {
       prompt: async () => true,
       provider: provider({ getToken: () => Effect.succeed(null) })

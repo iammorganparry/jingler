@@ -279,7 +279,11 @@ export class BrowserControlMcpService extends Context.Tag("@jingler/BrowserContr
 >() {}
 
 export interface BrowserControlMcpServiceOptions {
-  /** Production uses `0` (ephemeral); a fixed port is a test seam for bind failures. */
+  /**
+   * Production uses `0` (ephemeral). A fixed port is only a single-lease test
+   * seam for bind failures; concurrent-session tests must provide an acquirer
+   * that assigns distinct ports.
+   */
   readonly port?: number
   /** In-process test seam; production always uses the scoped Node listener below. */
   readonly acquireListener?: BrowserControlMcpListenerAcquirer

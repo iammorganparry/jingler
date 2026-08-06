@@ -68,7 +68,7 @@ export const runShell = (
     const child = spawn(request.command, [...request.args], {
       cwd: request.cwd ?? defaultCwd,
       // Merged over the host's environment rather than replacing it: a plugin
-      // that only wants to add `GH_TOKEN` should not have to reconstruct PATH,
+      // that only wants to add one scoped environment value should not have to reconstruct PATH,
       // and getting PATH wrong is how "command not found" happens for a binary
       // that is plainly installed.
       env: { ...process.env, ...request.env },

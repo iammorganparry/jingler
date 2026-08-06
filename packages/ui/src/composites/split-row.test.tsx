@@ -9,7 +9,7 @@ const session = (id: string, title: string): Session => ({
   id,
   title,
   repo: "jingler",
-  branch: `jingler/${id}`,
+  branch: `chore/${id}`,
   status: "idle",
   cli: "claude",
   diff: { added: 0, removed: 0 },

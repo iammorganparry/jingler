@@ -5,10 +5,12 @@ import type {
   PrReviewThread,
   PrState,
   PrTimelineItem,
+  PublishCheckpoint,
+  PublishStep,
   PullRequest,
   ReviewSubmitKind
 } from "@jingler/core"
-import { GitPullRequest, PanelRight } from "lucide-react"
+import { Check, GitPullRequest, PanelRight } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { relativeTime } from "../lib/relative-time.js"
@@ -113,17 +115,39 @@ const buildFeed = (pr: PullRequest): ReadonlyArray<FeedEntry> => {
   return entries.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
 }
 
+const PUBLISH_PROGRESS: ReadonlyArray<{ readonly step: PublishStep; readonly label: string }> = [
+  { step: "verifying-branch", label: "Verify semantic branch" },
+  { step: "generating-metadata", label: "Prepare commit and pull request" },
+  { step: "staging", label: "Stage session changes" },
+  { step: "committing", label: "Create commit" },
+  { step: "authenticating", label: "Authenticate with GitHub App" },
+  { step: "pushing", label: "Push branch" },
+  { step: "resolving-pr", label: "Find existing pull request" },
+  { step: "creating-pr", label: "Create pull request" },
+  { step: "updating-pr", label: "Update pull request description" },
+  { step: "linking", label: "Link pull request to session" }
+]
+
+const publishStepLabel = (step: PublishStep): string =>
+  PUBLISH_PROGRESS.find((candidate) => candidate.step === step)?.label ?? step
+
 export interface PullRequestViewProps {
   pr: PullRequest | null
   connected: boolean
+  /** Why this repository cannot use GitHub, derived from live installation access. */
+  connectionMessage?: string
+  connectionActionLabel?: string
   busy?: boolean
   /** The authenticated GitHub login — to detect the viewer's own PR (no self-approve). */
   viewerLogin?: string | null
-  /** A failed `gh pr create`, shown in the empty state (e.g. "already exists"). */
-  createError?: string | null
+  /** Authoritative main-process publish progress. */
+  publish?: PublishCheckpoint | null
+  publishing?: boolean
+  branch?: string
   /** The owning session's title, for the "routed to <session>" copy. */
   sessionTitle?: string
   onCreatePr?: () => Promise<void> | void
+  onRetryPublish?: () => void
   onConnectGithub?: () => void
   onSubmitReview?: (input: { body: string; kind: ReviewSubmitKind; routeToAgent: boolean }) => Promise<void> | void
   onSendEntryToAgent?: (entryId: string) => Promise<void> | void
@@ -137,13 +161,13 @@ export interface PullRequestViewProps {
   onMerge?: (method: PrMergeMethod) => void
   /** A merge is in flight — disables the button and shows a spinner. */
   merging?: boolean
-  /** A failed `gh pr merge`, shown beneath the merge button. */
+  /** A failed GitHub API merge, shown beneath the merge button. */
   mergeError?: string | null
   /** Flip a draft PR to ready for review (shown only while the PR is a draft). */
   onMarkReady?: () => void
   /** A mark-ready is in flight — disables the button and shows a spinner. */
   markingReady?: boolean
-  /** A failed `gh pr ready`, shown beneath the button. */
+  /** A failed mark-ready API mutation, shown beneath the button. */
   markReadyError?: string | null
   /** Merge the base into the head — offered only while the branch is behind. */
   onUpdateBranch?: () => void
@@ -161,10 +185,15 @@ export interface PullRequestViewProps {
 export function PullRequestView({
   pr,
   connected,
+  connectionMessage,
+  connectionActionLabel = "Connect GitHub",
   busy = false,
   viewerLogin,
-  createError,
+  publish,
+  publishing = false,
+  branch,
   onCreatePr,
+  onRetryPublish,
   onConnectGithub,
   onSubmitReview,
   onSendEntryToAgent,
@@ -222,17 +251,60 @@ export function PullRequestView({
         {connected ? (
           onCreatePr ? (
             <div className="flex w-full max-w-sm flex-col items-center gap-3">
-              <AsyncButton
+              <Button
                 size="md"
-                icon={<GitPullRequest size={14} />}
-                pendingLabel="Opening…"
-                successLabel="Opened"
-                disabled={busy}
+                disabled={busy || publishing}
                 onClick={() => onCreatePr()}
               >
-                Create pull request
-              </AsyncButton>
-              {createError && <Callout tone="red">{createError}</Callout>}
+                <GitPullRequest size={14} />
+                {publishing
+                  ? "Publishing…"
+                  : publish?.step === "failed"
+                    ? "Try publishing again"
+                    : publish && !["idle", "complete", "no-changes"].includes(publish.step)
+                      ? "Resume publishing"
+                    : "Publish pull request"}
+              </Button>
+              {branch && <p className="text-[11px] text-muted-foreground">Branch: <code>{branch}</code></p>}
+              {publish && publish.step !== "idle" && (
+                <div
+                  aria-live="polite"
+                  className="w-full rounded-lg border border-line bg-surface p-3 text-left text-[11px] text-muted-foreground"
+                >
+                  <p className="font-medium text-text-bright">
+                    {publish.step === "failed"
+                      ? "Publishing stopped"
+                      : publish.step === "no-changes"
+                        ? "Nothing to publish"
+                        : publish.step === "complete" && publish.prNumber !== undefined
+                          ? `Pull request #${publish.prNumber} linked`
+                          : `Current step: ${publishStepLabel(publish.step)}`}
+                  </p>
+                  <ol className="mt-2 flex flex-col gap-1.5">
+                    {PUBLISH_PROGRESS.map(({ step, label }) => {
+                      const done = publish.completed.includes(step)
+                      const active = publish.step === step || publish.resumeFrom === step
+                      return (
+                        <li
+                          key={step}
+                          className={cn("flex items-center gap-2", active && "font-medium text-text-bright")}
+                        >
+                          <span className="flex size-3.5 shrink-0 items-center justify-center">
+                            {done ? <Check size={12} aria-hidden /> : active && publishing ? <Spinner size={12} /> : "·"}
+                          </span>
+                          <span>{label}</span>
+                        </li>
+                      )
+                    })}
+                  </ol>
+                  {publish.error && <Callout tone="red" className="mt-2">{publish.error}</Callout>}
+                  {publish.step === "failed" && onRetryPublish && (
+                    <Button variant="secondary" size="sm" className="mt-3" onClick={onRetryPublish}>
+                      Retry from {publish.resumeFrom ?? "inspection"}
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <Callout tone="blue">
@@ -242,9 +314,11 @@ export function PullRequestView({
           )
         ) : (
           <div className="flex w-full max-w-sm flex-col gap-3">
-            <Callout tone="blue">Connect GitHub to create and review pull requests.</Callout>
+            <Callout tone="blue">
+              {connectionMessage ?? "Connect GitHub to create and review pull requests."}
+            </Callout>
             <Button variant="secondary" className="self-center" onClick={onConnectGithub}>
-              Connect GitHub
+              {connectionActionLabel}
             </Button>
           </div>
         )}

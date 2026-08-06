@@ -18,7 +18,7 @@ const SESSION_COUNT = 9
 const seeded = (index: number): SeedSession => ({
   id: `s_res_${index}`,
   repo: "widget",
-  branch: `jingler/res-${index}`,
+  branch: `chore/res-${index}`,
   title: `Residency ${index}`,
   status: "idle",
   cli: "claude",

@@ -14,7 +14,7 @@ import type { Session } from "@jingler/core"
 export const testSession = (over: Partial<Session> & { id: string }): Session =>
   ({
     repo: "gtm-grid",
-    branch: `jingler/${over.id}`,
+    branch: `chore/${over.id}`,
     title: over.id,
     status: "idle",
     cli: "claude",

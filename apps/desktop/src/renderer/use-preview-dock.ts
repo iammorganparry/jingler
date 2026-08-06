@@ -20,6 +20,7 @@ export interface PreviewDockPrefs {
   readonly setSide: (side: DockSide) => void
   readonly focusSession: (sessionId: string | null) => void
   readonly removeSession: (sessionId: string) => void
+  readonly reconcileSessions: (sessionIds: ReadonlyArray<string>) => void
   readonly forSession: (sessionId: string | null) => PreviewDockSessionPrefs
 }
 
@@ -38,6 +39,10 @@ export function usePreviewDock(): PreviewDockPrefs {
   )
   const removeSession = useCallback(
     (sessionId: string) => send({ type: "REMOVE_SESSION", sessionId }),
+    [send]
+  )
+  const reconcileSessions = useCallback(
+    (sessionIds: ReadonlyArray<string>) => send({ type: "RECONCILE_SESSIONS", sessionIds }),
     [send]
   )
   const forSession = useCallback(
@@ -94,8 +99,18 @@ export function usePreviewDock(): PreviewDockPrefs {
       setSide,
       focusSession,
       removeSession,
+      reconcileSessions,
       forSession
     }),
-    [focused.visible, focusSession, forSession, removeSession, setSide, state.context.side, toggle]
+    [
+      focused.visible,
+      focusSession,
+      forSession,
+      reconcileSessions,
+      removeSession,
+      setSide,
+      state.context.side,
+      toggle
+    ]
   )
 }

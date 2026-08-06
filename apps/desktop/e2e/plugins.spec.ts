@@ -31,7 +31,7 @@ import type { SeedSession } from "./fixtures.js"
 const SESSION: SeedSession = {
   id: "s_plugin_1",
   repo: "widget",
-  branch: "jingler/plugin-session",
+  branch: "chore/plugin-session",
   title: "Plugin session",
   status: "idle",
   cli: "claude",

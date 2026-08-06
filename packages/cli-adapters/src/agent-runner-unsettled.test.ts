@@ -51,7 +51,7 @@ beforeEach(() => {
     JSON.stringify([{
       id: SESSION,
       repo: "widget",
-      branch: "jingler/unsettled",
+      branch: "chore/unsettled",
       title: "Unsettled",
       status: "idle",
       cli: "claude",

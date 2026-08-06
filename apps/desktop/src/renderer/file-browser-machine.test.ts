@@ -120,6 +120,21 @@ describe("fileBrowserMachine", () => {
     )
   })
 
+  it("keeps unchanged edits clean before and after a save", async () => {
+    const { actor } = start()
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+
+    actor.send({ type: "EDIT", text: "before" })
+    expect(actor.getSnapshot().matches({ document: { ready: "clean" } })).toBe(true)
+
+    actor.send({ type: "EDIT", text: "after" })
+    actor.send({ type: "SAVE" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "saved" } }))
+    actor.send({ type: "EDIT", text: "after" })
+    expect(actor.getSnapshot().matches({ document: { ready: "saved" } })).toBe(true)
+  })
+
   it("refreshes a stale revision without discarding the retained draft", async () => {
     const read = vi
       .fn()
@@ -223,6 +238,26 @@ describe("fileBrowserMachine", () => {
     expect(actor.getSnapshot().context.draft).toBe("my draft")
   })
 
+  it("surfaces post-containment write failures as retryable I/O errors", async () => {
+    const write = vi.fn().mockRejectedValue({
+      _tag: "AssetWriteIoError",
+      path: "src/app.ts",
+      message: "Could not safely replace the file."
+    })
+    const { actor } = start({ write })
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+    actor.send({ type: "EDIT", text: "my draft" })
+    actor.send({ type: "SAVE" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: "saveError" }))
+
+    expect(actor.getSnapshot().context.failure).toEqual({
+      type: "error",
+      message: "Could not safely replace the file."
+    })
+    expect(actor.getSnapshot().context.draft).toBe("my draft")
+  })
+
   it("guards dirty file switches and reloads until discard is confirmed", async () => {
     const read = vi.fn((_: string, path: string) =>
       Promise.resolve(
@@ -293,5 +328,28 @@ describe("fileBrowserMachine", () => {
     ])
     expect(actor.getSnapshot().context.treeError).toBeNull()
     expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it("restarts a repository refresh requested while one is already loading", async () => {
+    let resolveFirst: ((entries: ReadonlyArray<{ path: string; status: "clean" }>) => void) | undefined
+    const list = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<ReadonlyArray<{ path: string; status: "clean" }>>((resolve) => {
+            resolveFirst = resolve
+          })
+      )
+      .mockResolvedValueOnce([{ path: "src/fresh.ts", status: "clean" as const }])
+    const { actor } = start({ list })
+
+    actor.send({ type: "REFRESH_TREE" })
+    await waitFor(actor, () => list.mock.calls.length === 2)
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    expect(actor.getSnapshot().context.entries).toEqual([
+      { path: "src/fresh.ts", status: "clean" }
+    ])
+    resolveFirst?.([{ path: "src/stale.ts", status: "clean" }])
   })
 })

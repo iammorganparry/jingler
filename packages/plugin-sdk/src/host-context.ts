@@ -4,7 +4,7 @@
  * ## Where this code runs, and why the surface looks like this
  *
  * The host half is Node, in Jingler's extension host, with the same reach any
- * Node process has: it can spawn `gh`, read the worktree, open sockets. It is
+ * Node process has: it can spawn processes, read the worktree, open sockets. It is
  * NOT a sandbox (see `packages/core/src/plugin.ts` — "What this file is NOT").
  * What IS enforced lives at the two boundaries this file draws:
  *
@@ -92,11 +92,14 @@ export type Deactivate = () => void | Promise<void>
  * ```ts
  * export const activate: Activate = async (ctx) => {
  *   ctx.log.info(`activating for plugin ${ctx.pluginId}`)
- *   const gh = await ctx.authentication.getSession("github", ["repo"])
- *   const me = await ctx.exec("gh", ["api", "user"], {
- *     env: { GH_TOKEN: gh.accessToken },
+ *   const github = await ctx.authentication.getSession("github", [
+ *     "metadata:read",
+ *     "repository:acme/widgets",
+ *   ])
+ *   const me = await fetch(`${github.apiBaseUrl}/user`, {
+ *     headers: { authorization: `Bearer ${github.accessToken}` },
  *   })
- *   ctx.log.info(me.stdout)
+ *   ctx.log.info(JSON.stringify(await me.json()))
  * }
  * ```
  *
@@ -337,6 +340,10 @@ export interface AuthSession {
   readonly scopes: readonly string[]
   /** The secret. Host-only — never send it to the renderer. */
   readonly accessToken: string
+  /** Provider API base URL. GitHub sessions use `https://api.github.com`. */
+  readonly apiBaseUrl?: string
+  /** ISO-8601 expiry for short-lived provider credentials. */
+  readonly expiresAt?: string
   /** ISO-8601 timestamp of when consent was granted. */
   readonly grantedAt: string
 }
@@ -374,10 +381,10 @@ export interface Authentication {
    * @example
    * ```ts
    * // Interactive: prompts on first use, reuses the grant after.
-   * const gh = await ctx.authentication.getSession("github", ["repo"])
+   * const githubSession = await ctx.authentication.getSession("github", ["repository:acme/widget"])
    *
    * // Silent: null when there is no grant yet, never prompts.
-   * const maybe = await ctx.authentication.getSession("github", ["repo"], {
+   * const maybe = await ctx.authentication.getSession("github", ["metadata:read"], {
    *   createIfNone: false,
    * })
    * ```

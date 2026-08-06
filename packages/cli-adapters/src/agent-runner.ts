@@ -5,6 +5,7 @@ import type {
   CliKind,
   ContentPart,
   ExecutionMode,
+  ExternalInstructionIdentity,
   GateDecision,
   Message,
   PermissionMode,
@@ -1120,7 +1121,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       text: string,
       images: ReadonlyArray<Attachment>,
       reasoning: ReasoningSetting | null | undefined,
-      planExecutionId?: string
+      planExecutionId?: string,
+      externalInstruction?: ExternalInstructionIdentity
     ) =>
       Effect.suspend(() =>
         Effect.gen(function* () {
@@ -1510,13 +1512,29 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             }, 0)
           yield* Ref.update(counter, (c) => Math.max(c, priorMax))
           const un = yield* nextId
-          yield* TranscriptStore.append(
-            chatId,
-            userMessage(`u_${chatId}_${un}`, text, now, images)
-          )
           const an = yield* nextId
-          const acc = yield* Ref.make(assistantMessage(`a_${chatId}_${an}`, now))
-          yield* TranscriptStore.append(chatId, yield* Ref.get(acc))
+          const user = userMessage(
+            `u_${chatId}_${un}`,
+            text,
+            now,
+            images,
+            externalInstruction
+          )
+          const assistant = assistantMessage(`a_${chatId}_${an}`, now)
+          const appended = yield* TranscriptStore.appendTurn(
+            chatId,
+            user,
+            assistant,
+            externalInstruction
+          )
+          if (!appended && externalInstruction !== undefined) {
+            return Stream.fromIterable<StreamEvent>([{
+              _tag: "ExternalInstructionAccepted",
+              identity: externalInstruction,
+              duplicate: true
+            }])
+          }
+          const acc = yield* Ref.make(assistant)
           // The exact ```json blocks `saveDraftPlan` captured this turn, scrubbed
           // from the reply on settle (the plan lives in Plan Review, not the chat).
           const savedDraftBlocks = yield* Ref.make<ReadonlyArray<string>>([])
@@ -1530,6 +1548,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const executingPlanId = yield* Ref.make<string | null>(planExecutionId ?? null)
 
           const out = yield* Mailbox.make<StreamEvent>()
+          if (externalInstruction !== undefined) {
+            yield* out.offer({
+              _tag: "ExternalInstructionAccepted",
+              identity: externalInstruction,
+              duplicate: false
+            })
+          }
 
           /**
            * ── Instrumentation: turns that end without settling ────────────────
@@ -2607,13 +2632,24 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       text: string,
       images: ReadonlyArray<Attachment> = [],
       reasoning?: ReasoningSetting | null,
-      planExecutionId?: string
+      planExecutionId?: string,
+      externalInstruction?: ExternalInstructionIdentity
     ): Stream.Stream<StreamEvent, never, PromptEnv> {
       return Stream.unwrapScoped(
         Effect.gen(function* () {
           const lock = yield* chatLock(chatId)
           return yield* lock.withPermits(1)(
             Effect.gen(function* () {
+              if (
+                externalInstruction !== undefined &&
+                (yield* TranscriptStore.hasExternalInstruction(chatId, externalInstruction))
+              ) {
+                return Stream.fromIterable<StreamEvent>([{
+                  _tag: "ExternalInstructionAccepted",
+                  identity: externalInstruction,
+                  duplicate: true
+                }])
+              }
               // Concurrent chats in one session are allowed, but a single chat is
               // single-flight: two runs on ONE chatId would race the `fibers`
               // slot (line ~1503) — run A's fiber orphaned and unstoppable since
@@ -2671,7 +2707,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 text,
                 images,
                 reasoning,
-                planExecutionId
+                planExecutionId,
+                externalInstruction
               ).pipe(
                 Effect.catchAll((error) =>
                   Effect.succeed(

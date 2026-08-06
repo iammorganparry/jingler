@@ -23,11 +23,13 @@ import {
 } from "@jingler/cli-adapters"
 import { app, BrowserWindow, ipcMain, shell } from "electron"
 import { Effect } from "effect"
-import type { AuthCallback } from "./deep-link.js"
+import type { AuthCallback, GitHubCallback } from "./deep-link.js"
 import {
   AUTH_COMPLETE_CHANNEL,
+  GITHUB_COMPLETE_CHANNEL,
   findDeepLinkInArgv,
   parseAuthCallback,
+  parseGitHubCallback,
   registerProtocolClient
 } from "./deep-link.js"
 import { startAuthLoopback } from "./auth-loopback.js"
@@ -154,6 +156,24 @@ if (!gotPrimaryLock) {
       .catch(() => notify(false, "storage"))
   }
 
+  /** GitHub App completion is product integration state, never a sign-in token. */
+  const deliverGitHubCallback = (cb: GitHubCallback): void => {
+    mainWindow?.webContents.send(GITHUB_COMPLETE_CHANNEL, {
+      ok: cb.connected,
+      error: cb.error
+    })
+  }
+
+  const deliverDesktopCallback = (url: string): void => {
+    const github = parseGitHubCallback(url)
+    if (github) {
+      deliverGitHubCallback(github)
+      return
+    }
+    const auth = parseAuthCallback(url)
+    if (auth) deliverAuthCallback(auth)
+  }
+
   const focusMainWindow = (): void => {
     if (!mainWindow) return
     // Deep-link handling focuses the window; under headless e2e that would undo
@@ -166,17 +186,13 @@ if (!gotPrimaryLock) {
   // macOS delivers the deep link as an event, even while running.
   app.on("open-url", (event, url) => {
     event.preventDefault()
-    const cb = parseAuthCallback(url)
-    if (cb) deliverAuthCallback(cb)
+    deliverDesktopCallback(url)
   })
 
   // Windows/Linux deliver it as argv on the second launch.
   app.on("second-instance", (_event, argv) => {
     const link = findDeepLinkInArgv(argv)
-    if (link) {
-      const cb = parseAuthCallback(link)
-      if (cb) deliverAuthCallback(cb)
-    }
+    if (link) deliverDesktopCallback(link)
     focusMainWindow()
   })
 
@@ -185,7 +201,7 @@ if (!gotPrimaryLock) {
   // AuthService via env — it becomes the sign-in `callbackURL`. Packaged builds
   // use the deep link above and never start this listener.
   if (!app.isPackaged) {
-    void startAuthLoopback(deliverAuthCallback)
+    void startAuthLoopback(deliverAuthCallback, deliverGitHubCallback)
       .then((loopback) => {
         process.env.JINGLER_DEV_AUTH_LOOPBACK = loopback.url
       })
@@ -388,8 +404,7 @@ if (!gotPrimaryLock) {
     const coldLink = findDeepLinkInArgv(process.argv)
     if (coldLink) {
       window.webContents.once("did-finish-load", () => {
-        const cb = parseAuthCallback(coldLink)
-        if (cb) deliverAuthCallback(cb)
+        deliverDesktopCallback(coldLink)
       })
     }
 

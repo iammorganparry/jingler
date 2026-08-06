@@ -3,6 +3,7 @@ import { POST as grantMemory } from "../app/api/memory/grant/route.js"
 import { GET as listMemoryOrganizations } from "../app/api/memory/organizations/route.js"
 import { app } from "./app.js"
 import { getSql } from "./db/client.js"
+import { GitHubSessionRouteRepository } from "./db/repositories/github-session-route-repository.js"
 import { runtime } from "./runtime.js"
 
 /**
@@ -127,5 +128,45 @@ describe.skipIf(!RUN)("auth backend (integration, needs Postgres)", () => {
   it("/api/me is 401 without a bearer token", async () => {
     const res = await app.request("/api/me")
     expect(res.status).toBe(401)
+  })
+
+  it("persists an owned session route and its retryable relay outbox atomically", async () => {
+    const sql = getSql()
+    const stamp = Date.now()
+    const userId = `route-user-${stamp}`
+    const at = new Date()
+    await sql`
+      insert into "user" (id, name, email, email_verified, created_at, updated_at)
+      values (${userId}, 'Route Owner', ${`route-${stamp}@example.com`}, true, now(), now())
+    `
+    try {
+      const route = await runtime.runPromise(
+        GitHubSessionRouteRepository.upsertActive({
+          userId,
+          sessionId: `local-session-${stamp}`,
+          relaySessionId: `opaque_session_identifier_${stamp}`,
+          installationId: "99",
+          repositoryId: "301",
+          pullRequestNumber: 42,
+          at
+        })
+      )
+      expect(route).toMatchObject({ userId, state: "active", repositoryId: "301" })
+      const outbox = await sql`
+        select desired_state, relay_session_id, repository_id, pull_request_number
+        from github_session_route_outbox
+        where user_id = ${userId}
+      `
+      expect(outbox).toEqual([
+        expect.objectContaining({
+          desired_state: "active",
+          relay_session_id: route.relaySessionId,
+          repository_id: "301",
+          pull_request_number: 42
+        })
+      ])
+    } finally {
+      await sql`delete from "user" where id = ${userId}`
+    }
   })
 })

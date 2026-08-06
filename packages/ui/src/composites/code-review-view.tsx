@@ -45,6 +45,10 @@ export interface CodeReviewViewProps {
   drafts: readonly ReviewDraft[]
   routeTargetSession: string | null
   connected: boolean
+  /** Live installation-access explanation when GitHub posting is unavailable. */
+  connectionMessage?: string
+  connectionActionLabel?: string
+  /** Which source is shown, and whether each is available. */
   source: ReviewSource
   prAvailable: boolean
   localAvailable: boolean
@@ -85,6 +89,8 @@ export function CodeReviewView({
   drafts,
   routeTargetSession,
   connected,
+  connectionMessage,
+  connectionActionLabel = "Connect GitHub",
   source,
   prAvailable,
   localAvailable,
@@ -331,10 +337,10 @@ export function CodeReviewView({
       {!isLocal && !connected && (
         <div className="flex items-center gap-3 border-b border-hairline px-4 py-2.5">
           <Callout tone="blue" className="flex-1">
-            Connect GitHub to post this review.
+            {connectionMessage ?? "Connect GitHub to post this review."}
           </Callout>
           <Button variant="secondary" size="sm" onClick={onConnectGithub}>
-            Connect GitHub
+            {connectionActionLabel}
           </Button>
         </div>
       )}

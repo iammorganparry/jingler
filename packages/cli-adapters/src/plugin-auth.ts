@@ -4,7 +4,7 @@
  * ## The design this file exists to make real
  *
  * A Jingler manifest has no `permissions: ["github"]` array, and that absence
- * is load-bearing. A coarse flag answers "may this plugin run gh?" when the
+ * is load-bearing. A coarse flag answers "may this plugin access GitHub?" when the
  * question an operator actually has is "which account, with which scopes, and
  * can I take it back?" — and a flag can express none of that.
  *
@@ -52,6 +52,10 @@ const GrantFile = Schema.Struct({ grants: Schema.Array(StoredGrant) })
 export interface ProviderToken {
   readonly accessToken: string
   readonly account?: string
+  /** Provider-specific API base URL; GitHub points at Jingler's grant relay. */
+  readonly apiBaseUrl?: string
+  /** ISO-8601 expiry for short-lived credentials. */
+  readonly expiresAt?: string
 }
 
 /**
@@ -361,7 +365,9 @@ export class PluginAuth extends Effect.Service<PluginAuth>()("@jingler/PluginAut
             accessToken: token.accessToken,
             scopes: request.scopes,
             grantedAt: granted?.grantedAt ?? new Date().toISOString(),
-            ...(token.account ? { account: token.account } : {})
+            ...(token.account ? { account: token.account } : {}),
+            ...(token.apiBaseUrl ? { apiBaseUrl: token.apiBaseUrl } : {}),
+            ...(token.expiresAt ? { expiresAt: token.expiresAt } : {})
           }
         })
     }

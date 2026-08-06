@@ -9,6 +9,19 @@ import { defineConfig } from "vitest/config"
 export default defineConfig({
   test: {
     projects: ["packages/*/vitest.config.ts", "apps/*/vitest.config.ts"],
+    // Cap each project's fork pool. Without this, Vitest sizes every project's
+    // pool to the CPU count — on an 11-core box the suites collectively fork
+    // 30-40 workers, each loading Effect/Electron deps and ballooning to
+    // 100-460 MB, which pins memory and drives the machine into swap. This root
+    // cap is inherited by every project's pool (verified: cap N holds each
+    // project to N workers), so total peak ≈ N × overlapping projects. Keep it
+    // small on memory-constrained machines; raise via VITEST_MAX_WORKERS (CI
+    // can bump it on a bigger box).
+    pool: "forks",
+    minWorkers: 1,
+    maxWorkers: process.env.VITEST_MAX_WORKERS
+      ? Number(process.env.VITEST_MAX_WORKERS)
+      : 2,
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],

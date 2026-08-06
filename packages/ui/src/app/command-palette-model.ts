@@ -347,7 +347,7 @@ export const matchPaletteChord = (
   return e.code === "KeyK" || key === "k" || e.code === "KeyP" || key === "p"
 }
 
-/** VS Code-style focused-session file picker: ⌘⇧P (Ctrl+Shift+P elsewhere). */
+/** Focused-session file picker: ⌘⇧P (Ctrl+Shift+P elsewhere). */
 export const matchFileQuickOpenChord = (
   e: PaletteChord,
   isMac: boolean = isMacPlatform()

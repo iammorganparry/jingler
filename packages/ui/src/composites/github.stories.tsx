@@ -2,6 +2,7 @@ import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type {
   AdversarialReview,
+  CliInfo,
   PrFileChange,
   PullRequest as PullRequestData,
   PrReviewThread,
@@ -11,7 +12,7 @@ import type {
 import { PullRequestView } from "./pull-request-view.js"
 import { CodeReviewView, type ReviewSource } from "./code-review-view.js"
 import { ReviewFindingRow } from "./review-findings.js"
-import { SettingsDialog } from "./settings-dialog.js"
+import { SettingsView } from "./settings-view.js"
 
 const meta: Meta = { title: "GitHub", parameters: { layout: "fullscreen" } }
 export default meta
@@ -554,19 +555,35 @@ export const CodeReview: Story = {
 /** The Settings view — the GitHub integration section (connected). */
 export const Settings: Story = {
   render: () => (
-    <SettingsDialog
-      open
-      ghStatus={{
-        available: true,
-        authenticated: true,
-        login: "iammorganparry",
-        host: "github.com",
-        version: "2.68.1"
-      }}
-      github={{ enabled: true, autoCreatePr: false, autoDetectPr: true }}
-      onRecheck={() => {}}
-      onSaveGithub={() => {}}
-      onClose={() => {}}
-    />
+    <div className="flex h-screen bg-editor">
+      <SettingsView
+        initialSection="github"
+        clis={[] as ReadonlyArray<CliInfo>}
+        githubConnection={{
+          mode: "partial-access",
+          enabled: true,
+          connected: true,
+          user: { id: "1", login: "iammorganparry", name: "Morgan Parry", avatarUrl: null },
+          installations: [{
+            id: "101",
+            account: { id: "2", login: "jingler", type: "Organization", avatarUrl: null },
+            repositorySelection: "selected",
+            permissions: { contents: "write", pull_requests: "write" },
+            status: "active",
+            suspendedAt: null
+          }],
+          lastRefreshedAt: "2026-08-04T09:00:00.000Z",
+          error: null
+        }}
+        onSaveProvider={() => {}}
+        loadModels={async () => []}
+        onGithubManage={() => {}}
+        onGithubRefresh={() => {}}
+        onGithubDisconnect={() => {}}
+        github={{ enabled: true, autoCreatePr: false, autoDetectPr: true }}
+        onSaveGithub={() => {}}
+        onClose={() => {}}
+      />
+    </div>
   )
 }

@@ -11,7 +11,7 @@ const seededSession = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSe
   {
     id: "s_memory_author",
     repo: "widget",
-    branch: "jingler/shared-memory",
+    branch: "chore/shared-memory",
     title: "Capture shared learning",
     status: "idle",
     cli: "claude",

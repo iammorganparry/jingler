@@ -19,7 +19,7 @@ const session = (
   ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [{
     id,
     repo: "widget",
-    branch: `jingler/${id}`,
+    branch: `chore/${id}`,
     title: `${cli} plan`,
     status: "idle",
     cli,

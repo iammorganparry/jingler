@@ -16,7 +16,7 @@ const session = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession>
   {
     id: "s_browser_mcp",
     repo: "widget",
-    branch: "jingler/browser-mcp",
+    branch: "chore/browser-mcp",
     title: "Browser MCP parity",
     status: "idle",
     cli: "codex",
@@ -160,7 +160,7 @@ test("a background Codex run updates only its owning session browser", async ({ 
   const alphaUrl = `http://127.0.0.1:${address.port}/alpha-background`
 
   try {
-    const { app, window } = await launchApp({
+    const { app, window, releaseBrowserMcp } = await launchApp({
       configured: true,
       withRepo: true,
       sessions: splitSessions,
@@ -182,13 +182,16 @@ test("a background Codex run updates only its owning session browser", async ({ 
     await window.keyboard.press("Control+Shift+Digit1")
     await expect(alphaPane).toHaveAttribute("data-focused", "true")
     const alphaComposer = alphaPane.getByPlaceholder("Message Codex…")
-    await alphaComposer.fill(`[[browser-control-mcp=${alphaUrl}]] QA Alpha in the background.`)
+    await alphaComposer.fill(
+      `[[browser-control-mcp=${alphaUrl}]][[browser-control-mcp-gated]] QA Alpha in the background.`
+    )
     await alphaComposer.press("Enter")
 
-    // The fake harness waits briefly before calling MCP, so this focus change
-    // happens first and Alpha is definitively a background agent operation.
+    // The fake harness is held at an explicit barrier until focus has moved, so
+    // Alpha's native view is created deterministically as a background operation.
     await window.keyboard.press("Control+Shift+Digit2")
     await expect(betaPane).toHaveAttribute("data-focused", "true")
+    releaseBrowserMcp()
     await expect(alphaPane.getByText("Codex browser MCP complete.")).toBeVisible({
       timeout: 20_000
     })

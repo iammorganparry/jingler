@@ -5,6 +5,9 @@ import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
+  GitHubFeedbackClaimStatus,
+  GitHubFeedbackOutboxEntry,
+  GitHubRelayEvent,
   IssueAutomations,
   PermissionMode,
   ReasoningEffort,
@@ -14,24 +17,27 @@ import type {
   WorkspaceMode
 } from "@jingler/core"
 import {
-  GhError,
+  GitHubApiError,
   GitError,
+  semanticBranchProposalFromName,
   SessionNotFoundError,
   supportsPlanMode,
   UNTITLED_SESSION,
   workspaceModeOf
 } from "@jingler/core"
 import { Session as SessionSchema } from "@jingler/core"
+import { GitHubFeedbackOutboxEntry as GitHubFeedbackOutboxEntrySchema } from "@jingler/core"
 import { basename } from "node:path"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Effect, Either, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
 import { freeCreativeName } from "./creative-name.js"
-import { GhService } from "./gh.js"
+import { GitHubApi } from "./github-api.js"
 import { GitService } from "./git.js"
 
 const SessionArray = Schema.Array(SessionSchema)
+const GitHubFeedbackOutbox = Schema.Array(GitHubFeedbackOutboxEntrySchema)
 
 type JsonRecord = Record<string, unknown>
 
@@ -221,6 +227,27 @@ export const taskSlug = (input: string): string =>
     // slug never ends in one.
     .replace(/-+$/g, "") || "session"
 
+/**
+ * Publish-readiness for the live branch, including persisted sessions created
+ * before semantic proposals existed. The explicit pending marker is the
+ * durable proof that a fresh task still needs branch creation; metadata absence
+ * alone identifies neither freshness nor an error because historical and PR
+ * sessions intentionally have established non-semantic branches.
+ */
+export const isSessionPublishBranchReady = (
+  session: Pick<
+    Session,
+    "branch" | "semanticBranchPending" | "semanticBranchProposal" | "workspaceMode"
+  >,
+  liveBranch: string | null
+): boolean => {
+  if (workspaceModeOf(session) !== "worktree") return false
+  if (session.semanticBranchPending === true) return false
+  if (liveBranch === null || liveBranch !== session.branch) return false
+  return session.semanticBranchProposal === undefined ||
+    semanticBranchProposalFromName(liveBranch) !== null
+}
+
 type PersistEnv = FileSystem.FileSystem | AppPaths
 
 /**
@@ -344,6 +371,56 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             )
         })
 
+      const outboxFile = (paths: { readonly root: string }): string =>
+        `${paths.root}/github-feedback-outbox.json`
+
+      const readFeedbackOutbox = (): Effect.Effect<
+        ReadonlyArray<GitHubFeedbackOutboxEntry>,
+        never,
+        PersistEnv
+      > =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const paths = yield* AppPaths
+          const file = outboxFile(paths)
+          const raw = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => ""))
+          if (raw.trim().length === 0) return []
+          return yield* Schema.decodeUnknown(Schema.parseJson(GitHubFeedbackOutbox))(raw).pipe(
+            Effect.orElseSucceed(() => [])
+          )
+        })
+
+      const writeFeedbackOutbox = (
+        entries: ReadonlyArray<GitHubFeedbackOutboxEntry>
+      ): Effect.Effect<void, GitError, PersistEnv> =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const paths = yield* AppPaths
+          const file = outboxFile(paths)
+          const temporary = `${file}.${process.pid}.${nextOpId()}.tmp`
+          yield* fs.makeDirectory(paths.root, { recursive: true }).pipe(
+            Effect.mapError(
+              (cause) => new GitError({ message: "Failed to create ~/jingler", cause })
+            )
+          )
+          const encoded = yield* Schema.encode(GitHubFeedbackOutbox)(entries).pipe(
+            Effect.mapError(
+              (cause) => new GitError({ message: "Failed to encode GitHub feedback outbox", cause })
+            )
+          )
+          yield* fs.writeFileString(temporary, JSON.stringify(encoded, null, 2)).pipe(
+            Effect.mapError(
+              (cause) => new GitError({ message: "Failed to persist GitHub feedback outbox", cause })
+            )
+          )
+          yield* fs.rename(temporary, file).pipe(
+            Effect.mapError(
+              (cause) => new GitError({ message: "Failed to persist GitHub feedback outbox", cause })
+            ),
+            Effect.tapError(() => fs.remove(temporary).pipe(Effect.ignore))
+          )
+        })
+
       const list = (): Effect.Effect<ReadonlyArray<Session>, never, PersistEnv> => readAll()
 
       const get = (id: string): Effect.Effect<Session, SessionNotFoundError, PersistEnv> =>
@@ -420,6 +497,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             id,
             repo: input.repoName,
             branch: workspace.branch,
+            ...(workspaceMode === "worktree" ? { semanticBranchPending: true } : {}),
             title,
             autoTitle: explicit.length === 0,
             status: "idle",
@@ -516,7 +594,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
 
           // Refuse if a live session already owns this path — the same guard
           // `createFromPr` and `createFromIssue` carry, and for the same reason:
-          // `createWorktree` reclaims whatever is at the target path with an
+          // `createDetachedWorktree` reclaims whatever is at the target path with an
           // `rm -rf`, so without this a slug collision DELETES a working
           // session's worktree and everything uncommitted in it.
           //
@@ -530,20 +608,15 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               new GitError({ message: "A session already exists for this branch name." })
             )
           }
-          const worktree =
-            explicit.length > 0
-              ? yield* GitService.createWorktree({
-                  repoPath: input.repoPath,
-                  repoName: input.repoName,
-                  slug,
-                  baseBranch: input.baseBranch
-                })
-              : yield* GitService.createDetachedWorktree({
-                  repoPath: input.repoPath,
-                  repoName: input.repoName,
-                  slug,
-                  baseBranch: input.baseBranch
-                })
+          // Every fresh isolated task starts detached at the fresh base. The
+          // first task-understanding/retitle pass proposes a semantic branch and
+          // GitService creates it; a user-supplied title pins display text only.
+          const worktree = yield* GitService.createDetachedWorktree({
+            repoPath: input.repoPath,
+            repoName: input.repoName,
+            slug,
+            baseBranch: input.baseBranch
+          })
           const session = makeSession(worktree, "worktree")
           // `existing` was read above (for the friendly-name collision check).
           // Re-read INSIDE the lock rather than reusing the list read before
@@ -563,9 +636,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
 
       /**
        * Create a session from an *existing* PR. Lands a detached worktree on the
-       * PR's base, then `gh pr checkout`s the PR — so the worktree tracks the PR's
-       * head branch and the agent's commits update that PR directly. `prNumber`
-       * is linked up front, so the sidebar badge + PR/Code-Review tabs light up.
+       * PR's base, resolves the immutable head repository/ref through GitHub,
+       * then fetches and checks it out with ordinary git. The worktree tracks the
+       * PR's fork/branch and agent commits update that PR directly. `prNumber` is
+       * linked up front, so the sidebar badge + PR/Code-Review tabs light up.
        */
       const createFromPr = (
         input: CreateSessionFromPrInput,
@@ -578,9 +652,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         } = {}
       ): Effect.Effect<
         Session,
-        GitError | GhError,
+        GitError | GitHubApiError,
         | GitService
-        | GhService
+        | GitHubApi
         | FileSystem.FileSystem
         | Path.Path
         | CommandExecutor.CommandExecutor
@@ -609,21 +683,13 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             slug,
             baseBranch: input.pr.baseRefName
           })
-          // `gh pr checkout` fetches + switches the worktree onto the PR head
-          // (and configures the fork remote for cross-repo PRs). When the head
-          // branch is ALREADY checked out elsewhere (e.g. you're on it in your
-          // main repo — common in dev), git refuses the switch. If the user has
-          // opted in (the git "share checked-out branches" lever), fall back to a
-          // shared checkout so the PR can still be opened as a session.
-          const checkout = GhService.checkoutPr(worktree.path, input.pr.number)
-          yield* (opts.allowSharedCheckout ?? false)
-            ? checkout.pipe(
-                Effect.catchIf(
-                  (e) => /already checked out|already used by worktree/i.test(e.message),
-                  () => GitService.checkoutBranch(worktree.path, input.pr.headRefName)
-                )
-              )
-            : checkout
+          const repository = yield* GitHubApi.repository(input.repoPath)
+          const head = yield* GitHubApi.prCheckout(input.repoPath, input.pr.number)
+          yield* GitService.checkoutPullRequestHead(
+            worktree.path,
+            head,
+            opts.allowSharedCheckout ?? false
+          )
           // The live branch after checkout is the PR head; fall back to the
           // reported head ref if `rev-parse` can't resolve it.
           const branch = (yield* GitService.branchAt(worktree.path)) ?? input.pr.headRefName
@@ -645,6 +711,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             cli: input.cli,
             diff: { added: 0, removed: 0 },
             prNumber: input.pr.number,
+            githubInstallationId: repository.installationId,
+            githubRepositoryId: repository.id,
             costUsd: 0,
             tokens: 0,
             updatedAt: now,
@@ -677,9 +745,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         })
 
       /**
-       * Create a session from a GitHub issue. Like `create` it forks a FRESH
-       * `jingler/<number>-<slug>` branch off `baseBranch` (the issue number keys
-       * the slug so it's unique per repo and reads well), but it links the issue,
+       * Create a session from a GitHub issue. Like `create` it starts DETACHED
+       * from a fresh `baseBranch` (the issue number still keys the worktree path),
        * enables the chosen automations, and seeds `initialPrompt` from the issue
        * title + body (the composer pre-fills it once; HITL — the user sends it).
        */
@@ -712,7 +779,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               new GitError({ message: "A session already exists for this issue." })
             )
           }
-          const worktree = yield* GitService.createWorktree({
+          const worktree = yield* GitService.createDetachedWorktree({
             repoPath: input.repoPath,
             repoName: input.repoName,
             slug,
@@ -739,6 +806,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             id,
             repo: input.repoName,
             branch: worktree.branch,
+            semanticBranchPending: true,
             // Seed (and pin) the title from the issue.
             title: input.issue.title,
             autoTitle: false,
@@ -1197,9 +1265,30 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       /** Persist an auto-generated title (leaves `autoTitle` untouched). */
       const setTitle = (id: string, title: string) => update(id, (s) => ({ ...s, title }))
 
-      /** Persist the title and live branch after a successful context switch. */
-      const setTitleAndBranch = (id: string, title: string, branch: string) =>
-        update(id, (s) => ({ ...s, title, branch }))
+      /** Persist validated metadata before the git mutation so a retry reuses it. */
+      const setSemanticBranchProposal = (
+        id: string,
+        proposal: NonNullable<Session["semanticBranchProposal"]>
+      ) => update(id, (session) => ({
+        ...session,
+        semanticBranchProposal: proposal,
+        semanticBranchPending: true
+      }))
+
+      /** Persist the validated proposal and live branch after a successful switch. */
+      const setTitleAndBranch = (
+        id: string,
+        title: string,
+        branch: string,
+        semanticBranchProposal?: Session["semanticBranchProposal"]
+      ) =>
+        update(id, (s) => ({
+          ...s,
+          title,
+          branch,
+          ...(semanticBranchProposal === undefined ? {} : { semanticBranchProposal }),
+          semanticBranchPending: false
+        }))
 
       /** Manual rename — pins the title so the agent stops auto-retitling it. */
       const renameTitle = (id: string, title: string) =>
@@ -1236,6 +1325,145 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       /** Link (or clear) the session's pull-request number. */
       const setPrNumber = (id: string, prNumber: number | null) =>
         update(id, (s) => ({ ...s, prNumber }))
+
+      /** Persist immutable GitHub routing identity alongside the linked PR. */
+      const setGitHubLink = (
+        id: string,
+        link: { readonly installationId: string; readonly repositoryId: string; readonly prNumber: number }
+      ) =>
+        update(id, (session) => ({
+          ...session,
+          prNumber: link.prNumber,
+          githubInstallationId: link.installationId,
+          githubRepositoryId: link.repositoryId
+        }))
+
+      /**
+       * Exactly-once claim, validated and persisted atomically before the
+       * renderer dispatches feedback into the conversation actor.
+       */
+      const claimGitHubFeedback = (
+        id: string,
+        input: {
+          readonly installationId: string
+          readonly repositoryId: string
+          readonly prNumber: number
+          readonly deliveryId: string
+          readonly semanticKey: string
+          readonly event: GitHubRelayEvent
+        }
+      ): Effect.Effect<GitHubFeedbackClaimStatus, GitError, PersistEnv> =>
+        atomically(
+          Effect.gen(function* () {
+            const sessions = yield* readAll()
+            const session = sessions.find((candidate) => candidate.id === id)
+            if (
+              !session ||
+              session.archived ||
+              session.githubInstallationId !== input.installationId ||
+              session.githubRepositoryId !== input.repositoryId ||
+              session.prNumber !== input.prNumber ||
+              input.event.installationId !== input.installationId ||
+              input.event.repository.id !== input.repositoryId ||
+              input.event.pullRequest?.number !== input.prNumber
+            ) {
+              return "rejected" as const
+            }
+            const deliveries = session.githubFeedbackDeliveryIds ?? []
+            const semantics = session.githubFeedbackSemanticKeys ?? []
+            if (deliveries.includes(input.deliveryId) || semantics.includes(input.semanticKey)) {
+              return "dispatched" as const
+            }
+            const outbox = yield* readFeedbackOutbox()
+            const existing = outbox.find(
+              (entry) =>
+                entry.event.deliveryId === input.deliveryId ||
+                entry.event.semanticKey === input.semanticKey
+            )
+            if (existing) {
+              return existing.sessionId === id ? existing.status : ("rejected" as const)
+            }
+            yield* writeFeedbackOutbox([
+              ...outbox,
+              {
+                sessionId: id,
+                chatId: session.activeChatId,
+                installationId: input.installationId,
+                repositoryId: input.repositoryId,
+                prNumber: input.prNumber,
+                event: input.event,
+                status: "pending",
+                createdAt: new Date().toISOString(),
+                dispatchedAt: null
+              }
+            ])
+            return "pending" as const
+          })
+        )
+
+      const markGitHubFeedbackDispatched = (
+        id: string,
+        deliveryId: string,
+        semanticKey: string
+      ): Effect.Effect<boolean, GitError, PersistEnv> =>
+        atomically(
+          Effect.gen(function* () {
+            const sessions = yield* readAll()
+            const session = sessions.find((candidate) => candidate.id === id)
+            if (!session) return false
+            const deliveries = session.githubFeedbackDeliveryIds ?? []
+            const semantics = session.githubFeedbackSemanticKeys ?? []
+            if (deliveries.includes(deliveryId) || semantics.includes(semanticKey)) return true
+            const outbox = yield* readFeedbackOutbox()
+            const index = outbox.findIndex(
+              (entry) =>
+                entry.sessionId === id &&
+                (entry.event.deliveryId === deliveryId || entry.event.semanticKey === semanticKey)
+            )
+            if (index < 0) return false
+            const entry = outbox[index]!
+            const updatedOutbox = outbox.map((candidate, candidateIndex) =>
+              candidateIndex === index
+                ? {
+                    ...candidate,
+                    status: "dispatched" as const,
+                    dispatchedAt: candidate.dispatchedAt ?? new Date().toISOString()
+                  }
+                : candidate
+            )
+            const pendingOutbox = updatedOutbox.filter(
+              (candidate) => candidate.status === "pending"
+            )
+            const dispatchedOutbox = updatedOutbox
+              .filter((candidate) => candidate.status === "dispatched")
+              .slice(-2_048)
+            // The outbox status is authoritative. Persist it first so a crash
+            // can only leave a dispatched entry missing its compact ledger, not
+            // a ledger entry that suppresses an undispatched instruction.
+            yield* writeFeedbackOutbox([...pendingOutbox, ...dispatchedOutbox])
+            const maximum = 2_048
+            yield* writeAll(
+              sessions.map((candidate) =>
+                candidate.id === id
+                  ? {
+                      ...candidate,
+                      githubFeedbackDeliveryIds: [...deliveries, entry.event.deliveryId].slice(
+                        -maximum
+                      ),
+                      githubFeedbackSemanticKeys: [...semantics, entry.event.semanticKey].slice(
+                        -maximum
+                      )
+                    }
+                  : candidate
+              )
+            )
+            return true
+          })
+        )
+
+      /** Persist an authoritative publication checkpoint for restart-safe retries. */
+      const setPublishCheckpoint = (id: string, publish: Session["publish"]) =>
+        update(id, (s) => ({ ...s, publish }))
 
       /**
        * Record a worktree that has MOVED — not one that was re-forked.
@@ -1378,11 +1606,16 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setAutoCompact,
         setPersistent,
         setTitle,
+        setSemanticBranchProposal,
         setTitleAndBranch,
         renameTitle,
         setStatus,
         addAllowlist,
         setPrNumber,
+        setGitHubLink,
+        claimGitHubFeedback,
+        markGitHubFeedbackDispatched,
+        setPublishCheckpoint,
         setWorktreePath,
         setIssue,
         clearInitialPrompt,

@@ -7,18 +7,23 @@ import {
   writeFileSync
 } from "node:fs"
 import { basename, join } from "node:path"
-import { Effect, Layer } from "effect"
+import { Cause, Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
+  GitHubRelayEvent,
   Session
 } from "@jingler/core"
-import { workspaceModeOf } from "@jingler/core"
-import { GhService } from "./gh.js"
+import { GitHubApiError, workspaceModeOf } from "@jingler/core"
+import { GitHubApi } from "./github-api.js"
 import { GitService } from "./git.js"
-import { SessionStore, migrateRepoName } from "./sessions.js"
+import {
+  isSessionPublishBranchReady,
+  SessionStore,
+  migrateRepoName
+} from "./sessions.js"
 import {
   failureOf,
   fakeCommandExecutor,
@@ -31,6 +36,42 @@ import type { FakeCommandHandler } from "./test-support.js"
 
 const activeChat = (session: Session) =>
   session.chats.find((chat) => chat.id === session.activeChatId)!
+
+const feedbackEvent = (patch: Partial<GitHubRelayEvent> = {}): GitHubRelayEvent => ({
+  version: 1,
+  deliveryId: "delivery-1",
+  semanticKey: "comment-1",
+  event: "pull_request_review_comment",
+  action: "created",
+  installationId: "installation-1",
+  repository: {
+    id: "repository-1",
+    owner: "acme",
+    name: "trigify-app",
+    fullName: "acme/trigify-app"
+  },
+  pullRequest: {
+    id: "pr-42",
+    number: 42,
+    title: "Feedback target",
+    url: "https://github.test/acme/trigify-app/pull/42",
+    headSha: "head",
+    baseSha: "base"
+  },
+  actor: { id: "reviewer-1", login: "reviewer", type: "User" },
+  feedback: {
+    kind: "review-comment",
+    id: "comment-1",
+    body: "Please address this.",
+    state: null,
+    path: "src/auth.ts",
+    line: 17,
+    side: "RIGHT"
+  },
+  actionable: true,
+  occurredAt: "2026-08-05T09:00:00.000Z",
+  ...patch
+})
 
 /**
  * SessionStore persists sessions to disk and prepares their real Git checkout.
@@ -171,13 +212,13 @@ describe("SessionStore", () => {
     // than to a round number, so raising the cap has to be a deliberate edit
     // here too.
     expect(basename(exit.value.worktreePath!).length).toBeLessThanOrEqual(100 + 1 + 12)
-    // Truncation must not leave a trailing dash on the branch name.
-    expect(exit.value.branch).not.toMatch(/-$/)
+    // Truncation must not leave a trailing dash on the landing-pad path.
+    expect(basename(exit.value.worktreePath!)).not.toMatch(/-$/)
     expect(existsSync(exit.value.worktreePath!)).toBe(true)
   })
 
   /**
-   * `createWorktree` reclaims whatever sits at the target path with an `rm -rf`,
+   * Detached worktree creation reclaims whatever sits at the target path,
    * so a slug collision against a LIVE session would delete that session's
    * worktree and everything uncommitted in it. `createFromPr` and
    * `createFromIssue` already refused that; `create` did not.
@@ -207,7 +248,7 @@ describe("SessionStore", () => {
     expect(existsSync(second.value.worktreePath!)).toBe(true)
   })
 
-  it("creates an idle session with a jingler/<slug> branch and a worktree path", async () => {
+  it("creates an idle session in a detached fresh-base worktree", async () => {
     const exit = await runExit(
       SessionStore.create(input()).pipe(Effect.provide(services)),
       temp.layer
@@ -217,8 +258,8 @@ describe("SessionStore", () => {
     const s = exit.value
     expect(s.status).toBe("idle")
     expect(workspaceModeOf(s)).toBe("worktree")
-    // The slug folds in a unique stamp so auto-named sessions never collide.
-    expect(s.branch).toMatch(/^jingler\/fix-login-bug-[a-z0-9]+$/)
+    expect(s.branch).toBe("main")
+    expect(s.semanticBranchPending).toBe(true)
     expect(s.baseBranch).toBe("main")
     expect(s.worktreePath).toMatch(
       new RegExp(`${join(temp.root, "worktrees", "trigify-app")}/fix-login-bug-[a-z0-9]+$`)
@@ -227,6 +268,14 @@ describe("SessionStore", () => {
     expect(s.autoTitle).toBe(false)
     expect(s.title).toBe("Fix Login Bug!")
     expect(s.diff).toStrictEqual({ added: 0, removed: 0 })
+    expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: s.worktreePath,
+      encoding: "utf-8"
+    }).trim()).toBe("HEAD")
+    expect(execFileSync("git", ["branch", "--list", "jingler/*"], {
+      cwd: repoPath,
+      encoding: "utf-8"
+    }).trim()).toBe("")
   })
 
   it("uses the selected branch in the primary checkout for a direct session", async () => {
@@ -553,6 +602,49 @@ describe("SessionStore", () => {
     expect(reread.value.repo).not.toBe("old-name")
   })
 
+  it("keeps a pre-semantic established branch publishable without synthesizing metadata", async () => {
+    const created = await runExit(
+      SessionStore.create(input({ title: "Historical work" })).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(created._tag).toBe("Success")
+    if (created._tag !== "Success") return
+    const {
+      semanticBranchPending: _pending,
+      semanticBranchProposal: _proposal,
+      workspaceMode: _workspaceMode,
+      ...legacy
+    } = created.value
+    writeFileSync(
+      join(temp.root, "sessions.json"),
+      // Explicit migration fixture: releases before semantic naming persisted
+      // `jingler/*`; established history remains publishable without rename.
+      JSON.stringify([{ ...legacy, branch: "jingler/historical-auth-fix" }])
+    )
+
+    const reread = await runExit(
+      SessionStore.get(created.value.id).pipe(Effect.provide(SessionStore.Default)),
+      temp.layer
+    )
+    expect(reread._tag).toBe("Success")
+    if (reread._tag !== "Success") return
+    expect(reread.value.semanticBranchPending).toBeUndefined()
+    expect(reread.value.semanticBranchProposal).toBeUndefined()
+    expect(isSessionPublishBranchReady(reread.value, "jingler/historical-auth-fix")).toBe(true)
+  })
+
+  it("does not treat a fresh pending or direct session as branch-ready", () => {
+    expect(isSessionPublishBranchReady({
+      branch: "main",
+      semanticBranchPending: true,
+      workspaceMode: "worktree"
+    }, "main")).toBe(false)
+    expect(isSessionPublishBranchReady({
+      branch: "feature/direct",
+      workspaceMode: "direct"
+    }, "feature/direct")).toBe(false)
+  })
+
   it("keeps the native resume id while reasoning changes", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
@@ -583,7 +675,10 @@ describe("SessionStore", () => {
       temp.layer
     )
     expect(exit._tag).toBe("Success")
-    if (exit._tag === "Success") expect(exit.value.branch).toMatch(/^jingler\/session-[a-z0-9]+$/)
+    if (exit._tag === "Success") {
+      expect(basename(exit.value.worktreePath!)).toMatch(/^session-[a-z0-9]+$/)
+      expect(exit.value.branch).toBe("main")
+    }
   })
 
   it("stages an untitled session in a detached friendly-named worktree", async () => {
@@ -713,6 +808,128 @@ describe("SessionStore", () => {
       temp.layer
     )
     expect(cleared._tag === "Success" && cleared.value.prNumber).toBe(null)
+  })
+
+  it("persists publish checkpoints for restart-safe recovery", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Restart publish" }))
+        yield* SessionStore.setPublishCheckpoint(created.id, {
+          step: "failed",
+          completed: ["inspecting", "verifying-branch", "generating-metadata", "staging", "committing"],
+          branch: "fix/restart-publish",
+          commitSha: "abc123",
+          prNumber: 42,
+          error: "connection interrupted",
+          resumeFrom: "updating-pr",
+          updatedAt: "2026-08-05T08:00:00.000Z"
+        })
+        return created.id
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+
+    const recovered = await runExit(
+      SessionStore.get(exit.value).pipe(Effect.provide(SessionStore.Default)),
+      temp.layer
+    )
+    expect(recovered._tag === "Success" && recovered.value.publish).toMatchObject({
+      step: "failed",
+      branch: "fix/restart-publish",
+      commitSha: "abc123",
+      prNumber: 42,
+      resumeFrom: "updating-pr"
+    })
+  })
+
+  it("claims GitHub feedback exactly once for the exact active linked session", async () => {
+    const result = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Feedback target" }))
+        yield* SessionStore.setGitHubLink(created.id, {
+          installationId: "installation-1",
+          repositoryId: "repository-1",
+          prNumber: 42
+        })
+        const claim = (patch: Partial<{
+          installationId: string
+          repositoryId: string
+          prNumber: number
+          deliveryId: string
+          semanticKey: string
+          event: GitHubRelayEvent
+        }> = {}) =>
+          SessionStore.claimGitHubFeedback(created.id, {
+            installationId: "installation-1",
+            repositoryId: "repository-1",
+            prNumber: 42,
+            deliveryId: "delivery-1",
+            semanticKey: "comment-1",
+            event: feedbackEvent(),
+            ...patch
+          })
+
+        const first = yield* claim()
+        const duplicateDelivery = yield* claim({
+          semanticKey: "comment-2",
+          event: feedbackEvent({ semanticKey: "comment-2" })
+        })
+        const duplicateSemantic = yield* claim({
+          deliveryId: "delivery-2",
+          event: feedbackEvent({ deliveryId: "delivery-2" })
+        })
+        const wrongRepository = yield* claim({
+          deliveryId: "delivery-3",
+          semanticKey: "comment-3",
+          repositoryId: "repository-2",
+          event: feedbackEvent({
+            deliveryId: "delivery-3",
+            semanticKey: "comment-3",
+            repository: { ...feedbackEvent().repository, id: "repository-2" }
+          })
+        })
+        const marked = yield* SessionStore.markGitHubFeedbackDispatched(
+          created.id,
+          "delivery-1",
+          "comment-1"
+        )
+        const dispatched = yield* claim()
+        yield* SessionStore.archive(created.id, "closed")
+        const archived = yield* claim({
+          deliveryId: "delivery-4",
+          semanticKey: "comment-4",
+          event: feedbackEvent({ deliveryId: "delivery-4", semanticKey: "comment-4" })
+        })
+        const persisted = yield* SessionStore.get(created.id)
+        return {
+          first,
+          duplicateDelivery,
+          duplicateSemantic,
+          wrongRepository,
+          marked,
+          dispatched,
+          archived,
+          persisted
+        }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    expect(result.value).toMatchObject({
+      first: "pending",
+      duplicateDelivery: "pending",
+      duplicateSemantic: "pending",
+      wrongRepository: "rejected",
+      marked: true,
+      dispatched: "dispatched",
+      archived: "rejected"
+    })
+    expect(result.value.persisted.githubFeedbackDeliveryIds).toEqual(["delivery-1"])
+    expect(result.value.persisted.githubFeedbackSemanticKeys).toEqual(["comment-1"])
   })
 
   it("setMode / setModel persist onto the session across a fresh read", async () => {
@@ -1035,15 +1252,10 @@ describe("SessionStore", () => {
     })
   })
 
-  // `createFromPr` orchestrates real GitService (worktree add) + GhService
-  // (`gh pr checkout`). `gh` isn't available in CI and the fork isn't real, so we
-  // drive both binaries with a fake executor overlaid on the real temp FS: the
-  // worktree dir + sessions.json are real, only the git/gh *processes* are canned.
-  const prServices = Layer.mergeAll(
-  SessionStore.Default,
-  GitService.Default,
-  GhService.Default
-)
+  // `createFromPr` combines API-resolved head metadata with ordinary git.
+  // The worktree and sessions file are real; only the remote API and git
+  // processes are fixtures, so no GitHub CLI can hide in this path.
+  const prServices = Layer.mergeAll(SessionStore.Default, GitService.Default)
 
   const prInput = (over: Partial<CreateSessionFromPrInput["pr"]> = {}): CreateSessionFromPrInput => ({
     repoPath,
@@ -1052,17 +1264,69 @@ describe("SessionStore", () => {
     pr: { number: 482, title: "Fix Auth Refresh", headRefName: "chore/bump", baseRefName: "main", ...over }
   })
 
-  /** Fake git/gh: record the argv, echo `headBranch` for rev-parse. */
+  const apiHead = (headRef = "chore/bump", calls: Array<string> = []) =>
+    Layer.succeed(
+      GitHubApi,
+      {
+        repository: () =>
+          Effect.succeed({
+            id: "repo-301",
+            nodeId: "R_trigify",
+            owner: "acme",
+            name: "trigify-app",
+            fullName: "acme/trigify-app",
+            installationId: "installation-77"
+          }),
+        prCheckout: (_cwd: string, number: number) => {
+          calls.push(`api prCheckout ${number}`)
+          return Effect.succeed({
+            repositoryId: "fork-42",
+            fullName: "contributor/trigify-app",
+            ref: headRef,
+            sha: "abc123",
+            cloneUrl: "https://github.com/contributor/trigify-app.git",
+            sshUrl: "git@github.com:contributor/trigify-app.git"
+          })
+        }
+      } as never
+    )
+
+  const failingApi = Layer.succeed(
+    GitHubApi,
+    {
+      repository: () =>
+        Effect.succeed({
+          id: "repo-301",
+          nodeId: "R_trigify",
+          owner: "acme",
+          name: "trigify-app",
+          fullName: "acme/trigify-app",
+          installationId: "installation-77"
+        }),
+      prCheckout: () =>
+        Effect.fail(
+          new GitHubApiError({
+            reason: "not-found",
+            message: "The pull request no longer exists."
+          })
+        )
+    } as never
+  )
+
+  /** Fake git: record argv and echo `headBranch` for rev-parse. */
   const prExecutor = (headBranch: string, calls: Array<string>): FakeCommandHandler => (cmd, args) => {
     calls.push(`${cmd} ${args.join(" ")}`)
-    if (cmd === "gh") return { stdout: "" }
     if (cmd === "git" && args.includes("rev-parse")) return { stdout: headBranch }
     return { exitCode: 0, stdout: "" }
   }
 
   it("createFromPr checks out the PR head branch and links the PR number", async () => {
     const calls: Array<string> = []
-    const env = Layer.mergeAll(temp.layer, fakeCommandExecutor(prExecutor("chore/bump", calls)))
+    const env = Layer.mergeAll(
+      temp.layer,
+      fakeCommandExecutor(prExecutor("chore/bump", calls)),
+      apiHead("chore/bump", calls)
+    )
     const exit = await runExit(
       SessionStore.createFromPr(prInput(), {
         chatRole: "orchestrator",
@@ -1071,11 +1335,16 @@ describe("SessionStore", () => {
       }).pipe(Effect.provide(prServices)),
       env
     )
-    expect(exit._tag).toBe("Success")
+    expect(
+      exit._tag,
+      exit._tag === "Failure" ? Cause.pretty(exit.cause) : ""
+    ).toBe("Success")
     if (exit._tag !== "Success") return
     const s = exit.value
     expect(s.prNumber).toBe(482)
-    expect(s.branch).toBe("chore/bump") // the live branch after `gh pr checkout`
+    expect(s.githubInstallationId).toBe("installation-77")
+    expect(s.githubRepositoryId).toBe("repo-301")
+    expect(s.branch).toBe("chore/bump")
     expect(s.baseBranch).toBe("main")
     expect(s.title).toBe("Fix Auth Refresh")
     expect(activeChat(s)).toMatchObject({
@@ -1086,15 +1355,18 @@ describe("SessionStore", () => {
     // The slug carries the PR number so same-titled PRs never collide.
     expect(s.worktreePath).toBe(join(temp.root, "worktrees", "trigify-app", "fix-auth-refresh-482"))
 
-    // Sequence: detached worktree → gh pr checkout → resolve the head branch.
+    // Sequence: detached worktree → API metadata → fork fetch → branch resolve.
     const detach = calls.findIndex((c) => c.includes("worktree add --detach"))
-    const checkout = calls.findIndex((c) => c.startsWith("gh pr checkout 482"))
+    const metadata = calls.findIndex((c) => c === "api prCheckout 482")
+    const fetch = calls.findIndex((c) => c.includes("fetch --no-tags jingler-pr-fork-42"))
     const revparse = calls.findIndex(
-      (c, index) => index > checkout && c.includes("rev-parse")
+      (c, index) => index > fetch && c.includes("rev-parse")
     )
     expect(detach).toBeGreaterThanOrEqual(0)
-    expect(checkout).toBeGreaterThan(detach)
-    expect(revparse).toBeGreaterThan(checkout)
+    expect(metadata).toBeGreaterThan(detach)
+    expect(fetch).toBeGreaterThan(metadata)
+    expect(revparse).toBeGreaterThan(fetch)
+    expect(calls.some((c) => c.startsWith("gh "))).toBe(false)
 
     // Persisted across a fresh read.
     const reread = await runExit(
@@ -1105,7 +1377,11 @@ describe("SessionStore", () => {
   })
 
   it("createFromPr gives same-titled PRs DISTINCT worktrees (slug carries the PR number)", async () => {
-    const env = Layer.mergeAll(temp.layer, fakeCommandExecutor(prExecutor("chore/bump", [])))
+    const env = Layer.mergeAll(
+      temp.layer,
+      fakeCommandExecutor(prExecutor("chore/bump", [])),
+      apiHead()
+    )
     // Two different PRs that happen to share a title.
     const first = await runExit(
       SessionStore.createFromPr(prInput({ number: 101, title: "Update deps" })).pipe(Effect.provide(prServices)),
@@ -1128,7 +1404,11 @@ describe("SessionStore", () => {
   it("createFromPr falls back to the PR head ref when HEAD is detached", async () => {
     const calls: Array<string> = []
     // "HEAD" (detached) → branchAt yields null → the reported head ref is used.
-    const env = Layer.mergeAll(temp.layer, fakeCommandExecutor(prExecutor("HEAD", calls)))
+    const env = Layer.mergeAll(
+      temp.layer,
+      fakeCommandExecutor(prExecutor("HEAD", calls)),
+      apiHead("feat/from-fork", calls)
+    )
     const exit = await runExit(
       SessionStore.createFromPr(prInput({ headRefName: "feat/from-fork" })).pipe(
         Effect.provide(prServices)
@@ -1138,24 +1418,28 @@ describe("SessionStore", () => {
     expect(exit._tag === "Success" && exit.value.branch).toBe("feat/from-fork")
   })
 
-  it("createFromPr fails with GhError when `gh pr checkout` fails", async () => {
-    const handler: FakeCommandHandler = (cmd, args) =>
-      cmd === "gh" && args[1] === "checkout" ? { exitCode: 1, stderr: "gh: no such PR" } : { stdout: "" }
-    const env = Layer.mergeAll(temp.layer, fakeCommandExecutor(handler))
+  it("createFromPr preserves a typed API error when metadata lookup fails", async () => {
+    const env = Layer.mergeAll(
+      temp.layer,
+      fakeCommandExecutor(prExecutor("HEAD", [])),
+      failingApi
+    )
     const exit = await runExit(
       SessionStore.createFromPr(prInput()).pipe(Effect.provide(prServices)),
       env
     )
-    expect(failureOf(exit)?._tag).toBe("GhError")
+    expect(failureOf(exit)?._tag).toBe("GitHubApiError")
   })
 
-  // When the PR head branch is already checked out elsewhere, `gh pr checkout`
-  // fails with git's "already checked out" error. The share-checked-out lever
-  // decides whether to fall back to a shared checkout or surface the error.
+  // When the API-resolved branch is already checked out elsewhere, the explicit
+  // sharing preference controls the ordinary-git safeguard.
   const alreadyCheckedOut = (calls: Array<string>): FakeCommandHandler => (cmd, args) => {
     calls.push(`${cmd} ${args.join(" ")}`)
-    if (cmd === "gh" && args[1] === "checkout") {
+    if (cmd === "git" && args.includes("checkout") && !args.includes("--ignore-other-worktrees")) {
       return { exitCode: 1, stderr: "fatal: 'chore/bump' is already checked out at '/repo'" }
+    }
+    if (cmd === "git" && args.includes("show-ref")) {
+      return { stdout: "abc123 refs/heads/chore/bump" }
     }
     if (cmd === "git" && args.includes("rev-parse")) return { stdout: "chore/bump" }
     return { exitCode: 0, stdout: "" }
@@ -1163,7 +1447,11 @@ describe("SessionStore", () => {
 
   it("createFromPr falls back to a shared checkout when allowSharedCheckout is on", async () => {
     const calls: Array<string> = []
-    const env = Layer.mergeAll(temp.layer, fakeCommandExecutor(alreadyCheckedOut(calls)))
+    const env = Layer.mergeAll(
+      temp.layer,
+      fakeCommandExecutor(alreadyCheckedOut(calls)),
+      apiHead("chore/bump", calls)
+    )
     const exit = await runExit(
       SessionStore.createFromPr(prInput(), { allowSharedCheckout: true }).pipe(
         Effect.provide(prServices)
@@ -1172,7 +1460,7 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag === "Success") expect(exit.value.branch).toBe("chore/bump")
-    // It retried with the ignore-other-worktrees checkout after gh failed.
+    // The explicit preference selects the guarded ignore-other-worktrees path.
     expect(calls.some((c) => c.includes("checkout --ignore-other-worktrees chore/bump"))).toBe(true)
   })
 
@@ -1304,7 +1592,7 @@ describe("SessionStore", () => {
     )
     if (created._tag !== "Success") throw new Error("expected session")
     const worktreePath = created.value.worktreePath!
-    const rescueBranch = `jingler/${basename(worktreePath)}`
+    const rescueBranch = `chore/${basename(worktreePath)}`
     writeFileSync(join(worktreePath, "work.ts"), "saved\n")
     execFileSync("git", ["add", "work.ts"], { cwd: worktreePath })
     execFileSync("git", ["commit", "-m", "detached work", "--no-gpg-sign"], {
@@ -1331,20 +1619,24 @@ describe("SessionStore", () => {
 
   it("createFromPr surfaces the error when allowSharedCheckout is off", async () => {
     const calls: Array<string> = []
-    const env = Layer.mergeAll(temp.layer, fakeCommandExecutor(alreadyCheckedOut(calls)))
+    const env = Layer.mergeAll(
+      temp.layer,
+      fakeCommandExecutor(alreadyCheckedOut(calls)),
+      apiHead("chore/bump", calls)
+    )
     const exit = await runExit(
       SessionStore.createFromPr(prInput(), { allowSharedCheckout: false }).pipe(
         Effect.provide(prServices)
       ),
       env
     )
-    expect(failureOf(exit)?._tag).toBe("GhError")
+    expect(failureOf(exit)?._tag).toBe("GitError")
     expect(calls.some((c) => c.includes("--ignore-other-worktrees"))).toBe(false)
   })
 
-  // `createFromIssue` forks a FRESH branch (like `create`) but keys the slug on
+  // `createFromIssue` stages a fresh detached task (like `create`) and keys the slug on
   // the issue number, links the issue, seeds the task, and turns on automations.
-  // No GhService needed — it never touches the network.
+  // No GitHubApi needed — it never touches the network.
   const issueInput = (
     over: Partial<CreateSessionFromIssueInput> = {}
   ): CreateSessionFromIssueInput => ({
@@ -1364,7 +1656,7 @@ describe("SessionStore", () => {
     ...over
   })
 
-  it("createFromIssue forks a jingler/<n>-slug branch, links the issue, seeds the task", async () => {
+  it("createFromIssue starts detached, links the issue, and seeds the task", async () => {
     const exit = await runExit(
       SessionStore.createFromIssue(issueInput(), {
         chatRole: "orchestrator",
@@ -1376,7 +1668,12 @@ describe("SessionStore", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     const s = exit.value
-    expect(s.branch).toBe("jingler/128-refund-route-500s-on-a-stale-token")
+    expect(s.branch).toBe("main")
+    expect(s.semanticBranchPending).toBe(true)
+    expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: s.worktreePath,
+      encoding: "utf-8"
+    }).trim()).toBe("HEAD")
     expect(s.issueNumber).toBe(128)
     expect(s.issueUrl).toBe("https://github.com/acme/api/issues/128")
     expect(s.issueTitle).toBe("Refund route 500s on a stale token")

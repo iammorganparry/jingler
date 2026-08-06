@@ -9,18 +9,19 @@
  * server, or Chromium's built-in PDF viewer, that `default-src 'self'` would
  * otherwise block. Rendering PDFs this way is why the app ships no pdf.js.
  *
- * ## One view per owner, at most one VISIBLE
+ * ## Session-owned views with explicit visibility
  *
- * A native overlay does not participate in CSS stacking, so a view left showing
- * while the dock displays another tab simply paints over it. Every path through
- * this service therefore ends in `showOnly`, which is the single place that
- * decides what is on screen.
+ * Native overlays do not participate in CSS stacking. Each session therefore
+ * owns separate browser and asset views, every new view starts hidden, and only
+ * the renderer's focused-owner visibility messages may let one paint. Background
+ * BrowserControl work can retain history and scroll state without covering the
+ * operator's focused pane.
  *
- * The browser and a PDF get SEPARATE views rather than sharing one. Sharing
+ * A session's browser and PDF get separate views rather than sharing one. Sharing
  * would mean opening a PDF destroys the browser's `WebContents`, and clicking
  * back to Browser would land on a blank default URL with the page, its history
  * and its scroll position gone — the exact failure the tabbed dock exists to
- * avoid. Two idle views is a far smaller cost than that.
+ * avoid. Idle views are destroyed with their owning session.
  *
  * ## Security posture
  *
@@ -99,12 +100,8 @@ export interface PreviewViewServiceShape {
   readonly setVisible: (sessionId: string, visible: boolean) => Effect.Effect<void>
   /** Hide the named session's PDF without affecting Preview or split panes. */
   readonly hideFile: (sessionId: string) => Effect.Effect<void>
-  /** Destroy one session's views but retain its persistent browser partition. */
-  readonly close: (sessionId: string) => Effect.Effect<void>
   /** Permanently destroy one session's views and clear only its browser partition. */
   readonly deleteSession: (sessionId: string) => Effect.Effect<void>
-  /** Destroy all browser and asset views during application shutdown. */
-  readonly closeAll: () => Effect.Effect<void>
   // ── Agent QA (BrowserControl.*) ──────────────────────────────────────────────
   // The same browser view, driven by an AGENT rather than the operator. Every op
   // ensures the owning session's view exists and notifies the renderer. A
@@ -170,6 +167,9 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
   const assetViews = new Map<string, WebContentsView>()
   const visibleBrowserSessions = new Set<string>()
   const visibleAssetSessions = new Set<string>()
+  // Session deletion is terminal. A late BrowserControl RPC from an agent being
+  // torn down must not recreate the deleted session's native overlay.
+  const deletedSessionIds = new Set<string>()
   // `controlNavigate` reveals the dock before its awaited load commits. The
   // renderer answers that reveal by calling `openBrowser`; without this guard a
   // still-blank WebContents starts a second load and Electron aborts the first.
@@ -236,6 +236,7 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
   }
 
   const ensureBrowser = (sessionId: string): WebContentsView | null => {
+    if (deletedSessionIds.has(sessionId)) return null
     const existing = browserViews.get(sessionId)
     if (existing !== undefined) return existing
     const view = createView("browser", sessionId)
@@ -244,6 +245,7 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
   }
 
   const ensureAsset = (sessionId: string): WebContentsView | null => {
+    if (deletedSessionIds.has(sessionId)) return null
     const existing = assetViews.get(sessionId)
     if (existing !== undefined) return existing
     const view = createView("asset", sessionId)
@@ -386,18 +388,17 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
       setOwnerVisible(assetViews, visibleAssetSessions, sessionId, false)
     }),
 
-    close: (sessionId) => Effect.sync(() => closeSessionNow(sessionId)),
-
     deleteSession: (sessionId) =>
-      Effect.sync(() => closeSessionNow(sessionId)).pipe(
+      Effect.sync(() => {
+        deletedSessionIds.add(sessionId)
+        closeSessionNow(sessionId)
+      }).pipe(
         Effect.andThen(
           Effect.tryPromise(() =>
             electronSession.fromPartition(browserPartitionForSession(sessionId)).clearStorageData()
           ).pipe(Effect.catchAll(() => Effect.void))
         )
       ),
-
-    closeAll: () => Effect.sync(closeAllNow),
 
     controlNavigate: (sessionId, url) =>
       isHttpUrl(url)

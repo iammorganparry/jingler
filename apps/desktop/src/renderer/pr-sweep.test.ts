@@ -14,7 +14,7 @@ import { issuesToCloseOnMerge, prsToNotify } from "./pr-sweep.js"
 const session = (over: Partial<Session> & { id: string }): Session =>
   ({
     repo: "r",
-    branch: `jingler/${over.id}`,
+    branch: `chore/${over.id}`,
     title: over.id,
     status: "idle",
     cli: "claude",

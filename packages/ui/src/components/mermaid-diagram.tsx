@@ -113,6 +113,14 @@ export function MermaidDiagram({ source, className }: { source: string; classNam
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: "strict",
+          // On a parse error mermaid REJECTS `render` (caught below → our
+          // `DiagramError` card) but ALSO injects its "Syntax error in text"
+          // bomb SVG straight into `document.body` as a side effect, and never
+          // removes it — an orphaned diagram floats at the bottom of the app
+          // shell, outside every column. This suppresses that DOM injection;
+          // the rejection path is unchanged, so one bad fence still shows the
+          // inline card and nothing leaks to the body.
+          suppressErrorRendering: true,
           theme: "base",
           look: "handDrawn",
           handDrawnSeed: 1,

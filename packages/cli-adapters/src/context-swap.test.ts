@@ -109,7 +109,7 @@ const seed = (over: Partial<Session> = {}) =>
     const session: Session = {
       id: SESSION,
       repo: "trigify-app",
-      branch: "jingler/swap",
+      branch: "chore/swap",
       title: "Swap",
       status: "idle",
       cli: "claude",

@@ -1,4 +1,4 @@
-import type { Message } from "@jingler/core"
+import type { ExternalInstructionIdentity, Message } from "@jingler/core"
 import { Message as MessageSchema } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Schema } from "effect"
@@ -343,6 +343,50 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           yield* writeAll(chatId, [...existing, message])
         })
 
+      const sameExternalInstruction = (
+        message: Message,
+        identity: ExternalInstructionIdentity
+      ): boolean =>
+        message.externalInstruction?.deliveryId === identity.deliveryId ||
+        message.externalInstruction?.semanticKey === identity.semanticKey
+
+      /** Durable idempotency check used before reserving or scheduling a run. */
+      const hasExternalInstruction = (
+        chatId: string,
+        identity: ExternalInstructionIdentity
+      ) =>
+        lock.withPermits(1)(
+          readAll(chatId).pipe(
+            Effect.map((messages) =>
+              messages.some((message) => sameExternalInstruction(message, identity))
+            )
+          )
+        )
+
+      /**
+       * Atomically persist a complete visible turn. External identities are
+       * checked in the same transcript lock/write that appends the pair.
+       */
+      const appendTurn = (
+        chatId: string,
+        user: Message,
+        assistant: Message,
+        identity?: ExternalInstructionIdentity
+      ) =>
+        lock.withPermits(1)(
+          Effect.gen(function* () {
+            const existing = yield* readAll(chatId)
+            if (
+              identity !== undefined &&
+              existing.some((message) => sameExternalInstruction(message, identity))
+            ) {
+              return false
+            }
+            yield* writeAll(chatId, [...existing, user, assistant])
+            return true
+          })
+        )
+
       /** Replace the last message via `fn` (a no-op when the transcript is empty). */
       const patchLast = (chatId: string, fn: (last: Message) => Message) =>
         Effect.gen(function* () {
@@ -374,7 +418,17 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           yield* writeAll(chatId, next)
         })
 
-      return { list, listPage, adoptLegacy, remove, append, patchLast, patchById }
+      return {
+        list,
+        listPage,
+        adoptLegacy,
+        remove,
+        append,
+        appendTurn,
+        hasExternalInstruction,
+        patchLast,
+        patchById
+      }
     }
   }
 ) {}

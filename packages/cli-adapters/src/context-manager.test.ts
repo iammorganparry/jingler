@@ -137,7 +137,7 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
     const session: Session = {
       id: SESSION,
       repo: "trigify-app",
-      branch: "jingler/ctx",
+      branch: "chore/ctx",
       title: "Context",
       status: "idle",
       cli: "claude",

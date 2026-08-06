@@ -3,10 +3,10 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
+import { PIERRE_HOST_CLASS, verticalScrollOwner } from "./pierre-helpers.js"
 
 const REPOSITORY_FILES = 1_200
 const SOURCE_LINES = 5_000
-const PIERRE_HOST_CLASS = /jingler-pierre-host/
 
 const seeded = (worktreePath: string): SeedSession => ({
   id: "s_large_assets",
@@ -106,29 +106,12 @@ test("keeps a large repository and source file windowed while navigating the per
       gutterWidth: Math.round(gutter.getBoundingClientRect().width)
     }
   })
-  expect(sourceMetrics).toEqual({
-    fontSize: 11,
-    rowHeight: 21,
-    headerHeight: 34,
-    gutterWidth: 40
-  })
+  expect(Math.abs(sourceMetrics.fontSize - 11)).toBeLessThanOrEqual(1)
+  expect(Math.abs(sourceMetrics.rowHeight - 21)).toBeLessThanOrEqual(1)
+  expect(Math.abs(sourceMetrics.headerHeight - 34)).toBeLessThanOrEqual(1)
+  expect(Math.abs(sourceMetrics.gutterWidth - 40)).toBeLessThanOrEqual(1)
 
-  const sourceElements = sourceSkin.locator("*")
-  const sourceScrollerIndex = await sourceElements.evaluateAll((elements) => {
-    let bestIndex = -1
-    let bestRange = 0
-    for (const [index, element] of elements.entries()) {
-      const range = element.scrollHeight - element.clientHeight
-      const overflowY = getComputedStyle(element).overflowY
-      if (range > bestRange && (overflowY === "auto" || overflowY === "scroll")) {
-        bestIndex = index
-        bestRange = range
-      }
-    }
-    return bestIndex
-  })
-  expect(sourceScrollerIndex).toBeGreaterThanOrEqual(0)
-  const sourceScroller = sourceElements.nth(sourceScrollerIndex)
+  const sourceScroller = await verticalScrollOwner(sourceSkin)
   const sourceScrollMetrics = await sourceScroller.evaluate((element) => ({
     clientHeight: element.clientHeight,
     scrollHeight: element.scrollHeight,

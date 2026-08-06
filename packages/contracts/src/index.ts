@@ -15,7 +15,10 @@ import {
   CreateSessionFromPrInput,
   CreateSessionInput,
   GateDecision,
-  GhStatus,
+  GitHubAppConnectionStatus,
+  GitHubFeedbackClaimStatus,
+  GitHubRelayStreamMessage,
+  GitHubRelayEvent,
   GitConfig,
   GithubConfig,
   NotificationKind,
@@ -35,6 +38,7 @@ import {
   PluginEvent,
   PluginId,
   ExecutionMode,
+  ExternalInstructionIdentity,
   PermissionMode,
   PlanAnnotationAnchor,
   PlanApprovalResult,
@@ -67,6 +71,7 @@ import {
   PrSummary,
   ProviderConfig,
   ProviderModels,
+  PublishCheckpoint,
   PullRequest,
   QuestionAnswer,
   ClaudeReasoningSetting,
@@ -95,13 +100,14 @@ import {
   AssetTooLargeError,
   AssetUnsupportedError,
   AssetWriteConflictError,
+  AssetWriteIoError,
   AuthError,
   BrowserControlError,
   BrowserPreviewError,
   ConfigError,
   ConnectorError,
   DiscoveryError,
-  GhError,
+  GitHubApiError,
   GitError,
   PluginError,
   PlanConflictError,
@@ -519,11 +525,11 @@ export class JinglerCoreRpcs extends RpcGroup.make(
 
   /**
    * Create a session from an existing PR: land a worktree on the PR's head
-   * branch (`gh pr checkout`), link `prNumber`, persist, and return it.
+   * branch using API-resolved fork metadata and ordinary git, link `prNumber`, persist, and return it.
    */
   Rpc.make("Sessions.createFromPr", {
     success: Session,
-    error: Schema.Union(GitError, GhError),
+    error: Schema.Union(GitError, GitHubApiError),
     payload: CreateSessionFromPrInput
   }),
 
@@ -635,7 +641,11 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Sessions.renameChat", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String, chatId: Schema.String, title: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      title: Schema.String
+    }
   }),
 
   /** Close one chat; closing the last creates a fresh Chat 1 replacement. */
@@ -729,7 +739,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
        * Per-turn override. Null deliberately means native default, which lets a
        * just-cleared composer value win even if its persistence RPC is in flight.
        */
-      reasoning: Schema.optional(Schema.NullOr(ReasoningSetting))
+      reasoning: Schema.optional(Schema.NullOr(ReasoningSetting)),
+      externalInstruction: Schema.optional(ExternalInstructionIdentity)
     }
   }),
 
@@ -755,7 +766,11 @@ export class JinglerCoreRpcs extends RpcGroup.make(
 
   /** Change a session's HITL permission mode (ask / accept-edits / auto / plan). */
   Rpc.make("Agent.setMode", {
-    payload: { sessionId: Schema.String, chatId: Schema.String, mode: PermissionMode }
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      mode: PermissionMode
+    }
   }),
 
   /** Change the current provider's native thinking settings. */
@@ -896,7 +911,11 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    * so there is no reply here that the tab isn't already about to receive.
    */
   Rpc.make("Agent.stopSubagent", {
-    payload: { sessionId: Schema.String, chatId: Schema.String, agentId: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      agentId: Schema.String
+    }
   }),
 
   /**
@@ -1214,9 +1233,54 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { id: Schema.String, autoCompact: Schema.NullOr(Schema.Boolean) }
   }),
 
-  /** Detect the GitHub CLI (`gh`) and its authentication status. */
-  Rpc.make("Gh.status", {
-    success: GhStatus
+  /** Reconcile and return the signed-in user's shared GitHub App connection. */
+  Rpc.make("GitHub.status", {
+    success: GitHubAppConnectionStatus,
+    error: AuthError
+  }),
+
+  /** Create a state-bound GitHub App installation URL for the system browser. */
+  Rpc.make("GitHub.install", {
+    success: Schema.String,
+    error: AuthError
+  }),
+
+  /** Reconcile installations after repository access or suspension changes. */
+  Rpc.make("GitHub.refresh", {
+    success: GitHubAppConnectionStatus,
+    error: AuthError
+  }),
+
+  /** Revoke and remove the product integration without signing out of Jingler. */
+  Rpc.make("GitHub.disconnect", {
+    error: AuthError
+  }),
+
+  /** Verified GitHub webhook deliveries awaiting durable visible routing. */
+  Rpc.make("Github.events", {
+    success: GitHubRelayStreamMessage,
+    stream: true
+  }),
+
+  /** Atomically claim feedback for an exact active linked session. */
+  Rpc.make("Github.claimFeedback", {
+    success: GitHubFeedbackClaimStatus,
+    error: GitError,
+    payload: {
+      operation: Schema.Literal("claim", "mark-dispatched"),
+      sessionId: Schema.String,
+      installationId: Schema.String,
+      repositoryId: Schema.String,
+      prNumber: Schema.Number,
+      deliveryId: Schema.String,
+      semanticKey: Schema.String,
+      event: GitHubRelayEvent
+    }
+  }),
+
+  /** Release a held relay cursor only after visible routing settles. */
+  Rpc.make("Github.ackEvent", {
+    payload: { clientId: Schema.String, cursor: Schema.Number }
   }),
 
   /** Persist the user's GitHub integration preferences. */
@@ -1416,11 +1480,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   /** Compare-and-swap the canonical source after safe MDX validation. */
   Rpc.make("Plan.updateDocument", {
     success: PlanDocument,
-    error: Schema.Union(
-      PlanConflictError,
-      PlanValidationError,
-      PlanPersistenceError
-    ),
+    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1449,11 +1509,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       messageId: Schema.String,
       deliveries: Schema.Array(PlanMentionDelivery)
     }),
-    error: Schema.Union(
-      PlanConflictError,
-      PlanValidationError,
-      PlanPersistenceError
-    ),
+    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1472,11 +1528,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       messageId: Schema.String,
       deliveries: Schema.Array(PlanMentionDelivery)
     }),
-    error: Schema.Union(
-      PlanConflictError,
-      PlanValidationError,
-      PlanPersistenceError
-    ),
+    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1489,11 +1541,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   /** Update delivery state for one message without replacing the thread. */
   Rpc.make("Plan.updateMessageDelivery", {
     success: PlanDocument,
-    error: Schema.Union(
-      PlanConflictError,
-      PlanValidationError,
-      PlanPersistenceError
-    ),
+    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1508,11 +1556,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   /** Resolve or reopen one annotation thread under the canonical revision guard. */
   Rpc.make("Plan.setThreadResolved", {
     success: PlanDocument,
-    error: Schema.Union(
-      PlanConflictError,
-      PlanValidationError,
-      PlanPersistenceError
-    ),
+    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1523,10 +1567,9 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     }
   }),
 
-
   Rpc.make("Review.run", {
     success: AdversarialReview,
-    error: ReviewError,
+    error: Schema.Union(ReviewError, GitHubApiError),
     payload: { sessionId: Schema.String, force: Schema.Boolean }
   }),
 
@@ -1595,23 +1638,23 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   }),
 
   /**
-   * The pull request linked to a session (its `prNumber`), assembled from `gh pr
-   * view`. Null when the session has no worktree or no linked PR. Embeds CI
+   * The pull request linked to a session (its `prNumber`), assembled from the
+   * GitHub REST and GraphQL APIs. Null when the session has no worktree or no linked PR. Embeds CI
    * checks, reviewers, and the review timeline for the Pull Request tab.
    */
   Rpc.make("Github.pr", {
     success: Schema.NullOr(PullRequest),
-    error: GhError,
+    error: GitHubApiError,
     payload: { sessionId: Schema.String }
   }),
 
   /**
    * List open PRs for a repo (for the "new session from a PR" picker). `mine`
-   * filters to the authenticated user; `search` is a free-text query. Never
-   * errors — folds to an empty list.
+   * filters to the authenticated user; `search` is a free-text query.
    */
   Rpc.make("Github.listPrs", {
     success: Schema.Array(PrSummary),
+    error: GitHubApiError,
     payload: {
       repoPath: Schema.String,
       mine: Schema.Boolean,
@@ -1621,11 +1664,11 @@ export class JinglerReviewRpcs extends RpcGroup.make(
 
   /**
    * List open issues for a repo (for the "new session from an issue" picker +
-   * attach dialog). `mine` filters to issues assigned to you. Never errors —
-   * folds to an empty list.
+   * attach dialog). `mine` filters to issues assigned to you.
    */
   Rpc.make("Github.listIssues", {
     success: Schema.Array(IssueSummary),
+    error: GitHubApiError,
     payload: {
       repoPath: Schema.String,
       mine: Schema.Boolean,
@@ -1635,14 +1678,14 @@ export class JinglerReviewRpcs extends RpcGroup.make(
 
   /** Close the session's linked issue (close-on-merge automation). */
   Rpc.make("Github.closeIssue", {
-    error: GhError,
+    error: GitHubApiError,
     payload: { sessionId: Schema.String }
   }),
 
   /** The full linked-issue view model for the session's Issue tab (null if none). */
   Rpc.make("Github.issue", {
     success: Schema.NullOr(Issue),
-    error: GhError,
+    error: GitHubApiError,
     payload: { sessionId: Schema.String }
   }),
 
@@ -1653,18 +1696,21 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Github.prState", {
     success: Schema.NullOr(SessionPrStatus),
+    error: GitHubApiError,
     payload: { sessionId: Schema.String }
   }),
 
   /** The changed files of a session's PR, for the Code Review file list. */
   Rpc.make("Github.files", {
     success: Schema.Array(PrFileChange),
+    error: GitHubApiError,
     payload: { sessionId: Schema.String }
   }),
 
   /** The unified diff of a session's PR vs its base branch. */
   Rpc.make("Github.diff", {
     success: Schema.String,
+    error: GitHubApiError,
     payload: { sessionId: Schema.String }
   }),
 
@@ -1674,29 +1720,32 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Github.detectPr", {
     success: Schema.NullOr(Schema.Number),
+    error: GitHubApiError,
     payload: { sessionId: Schema.String }
   }),
 
-  /** Open a PR from the session's branch and link it; returns the PR number. */
+  /**
+   * Deterministically stage, commit, authenticate, push, create/update a PR,
+   * and link it to the session. Every durable checkpoint is streamed so the UI
+   * can show the authoritative main-process mutation state.
+   */
   Rpc.make("Github.createPr", {
-    success: Schema.Number,
-    error: GhError,
-    payload: {
-      sessionId: Schema.String,
-      title: Schema.String,
-      body: Schema.String,
-      base: Schema.String,
-      draft: Schema.Boolean
-    }
+    success: PublishCheckpoint,
+    stream: true,
+    payload: { sessionId: Schema.String }
   }),
 
   /**
    * Post a top-level comment on the session's PR. `toGithub` gates the actual
-   * `gh pr comment` write (the renderer separately routes the body to the agent).
+   * GitHub API write (the renderer separately routes the body to the agent).
    */
   Rpc.make("Github.comment", {
-    error: GhError,
-    payload: { sessionId: Schema.String, body: Schema.String, toGithub: Schema.Boolean }
+    error: GitHubApiError,
+    payload: {
+      sessionId: Schema.String,
+      body: Schema.String,
+      toGithub: Schema.Boolean
+    }
   }),
 
   /**
@@ -1713,14 +1762,21 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Github.submitReview", {
     success: Schema.Number,
-    error: GhError,
-    payload: { sessionId: Schema.String, comments: Schema.Array(ReviewComment) }
+    error: GitHubApiError,
+    payload: {
+      sessionId: Schema.String,
+      comments: Schema.Array(ReviewComment)
+    }
   }),
 
   /** Submit a review (comment / approve / request-changes) on the session's PR. */
   Rpc.make("Github.review", {
-    error: GhError,
-    payload: { sessionId: Schema.String, kind: ReviewSubmitKind, body: Schema.String }
+    error: GitHubApiError,
+    payload: {
+      sessionId: Schema.String,
+      kind: ReviewSubmitKind,
+      body: Schema.String
+    }
   }),
 
   /**
@@ -1728,8 +1784,12 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    * is the GraphQL node id carried on `PrReviewThread.id`.
    */
   Rpc.make("Github.resolveThread", {
-    error: GhError,
-    payload: { sessionId: Schema.String, threadId: Schema.String, resolved: Schema.Boolean }
+    error: GitHubApiError,
+    payload: {
+      sessionId: Schema.String,
+      threadId: Schema.String,
+      resolved: Schema.Boolean
+    }
   }),
 
   /**
@@ -1737,25 +1797,32 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    * REST numeric id from `PrThreadComment.databaseId` (not the node id).
    */
   Rpc.make("Github.replyToThread", {
-    error: GhError,
-    payload: { sessionId: Schema.String, commentId: Schema.Number, body: Schema.String }
+    error: GitHubApiError,
+    payload: {
+      sessionId: Schema.String,
+      commentId: Schema.Number,
+      body: Schema.String
+    }
   }),
 
   /**
    * Merge the session's linked PR. `method` defaults to a merge commit; surfaces
-   * `GhError` when GitHub rejects the merge (branch protection, conflicts, …).
+   * `GitHubApiError` when GitHub rejects the merge (branch protection, conflicts, …).
    */
   Rpc.make("Github.merge", {
-    error: GhError,
-    payload: { sessionId: Schema.String, method: Schema.optional(PrMergeMethod) }
+    error: GitHubApiError,
+    payload: {
+      sessionId: Schema.String,
+      method: Schema.optional(PrMergeMethod)
+    }
   }),
 
   /**
-   * Flip the session's draft PR to "ready for review" (`gh pr ready`); surfaces
-   * `GhError` when there is no linked PR or GitHub rejects it.
+   * Flip the session's draft PR to "ready for review"; surfaces
+   * `GitHubApiError` when there is no linked PR or GitHub rejects it.
    */
   Rpc.make("Github.markReady", {
-    error: GhError,
+    error: GitHubApiError,
     payload: { sessionId: Schema.String }
   }),
 
@@ -1763,10 +1830,10 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    * Merge the base branch into the PR's head — GitHub's "Update branch", the fix
    * for a `BEHIND` merge state. Updates the REMOTE head only; the session's
    * worktree is deliberately left alone, since the agent may be mid-turn.
-   * Surfaces `GhError` when there is no linked PR or GitHub rejects it.
+   * Surfaces `GitHubApiError` when there is no linked PR or GitHub rejects it.
    */
   Rpc.make("Github.updateBranch", {
-    error: GhError,
+    error: GitHubApiError,
     payload: { sessionId: Schema.String }
   }),
 
@@ -1811,7 +1878,11 @@ export class JinglerReviewRpcs extends RpcGroup.make(
 
   /** Resize a terminal's PTY (drives SIGWINCH so TUIs reflow). No-op if unknown. */
   Rpc.make("Terminal.resize", {
-    payload: { terminalId: Schema.String, cols: Schema.Number, rows: Schema.Number }
+    payload: {
+      terminalId: Schema.String,
+      cols: Schema.Number,
+      rows: Schema.Number
+    }
   }),
 
   /** Kill a terminal's shell (SIGHUP) and drop it. Idempotent. */
@@ -1944,11 +2015,6 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, visible: Schema.Boolean }
   }),
 
-  /** Hide + destroy the view (pane closed or session switched). Idempotent. */
-  Rpc.make("BrowserPreview.close", {
-    payload: { sessionId: Schema.String }
-  }),
-
   // ── Browser control (agent QA) ───────────────────────────────────────────────
   // The SAME embedded browser view as BrowserPreview, but driven by an AGENT
   // rather than the operator — so it can QA a preview URL in the browser the
@@ -2038,6 +2104,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       AssetBinaryError,
       AssetTooLargeError,
       AssetWriteConflictError,
+      AssetWriteIoError,
       SessionNotFoundError
     ),
     payload: {
@@ -2073,7 +2140,11 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       SessionNotFoundError,
       BrowserPreviewError
     ),
-    payload: { sessionId: Schema.String, path: Schema.String, bounds: BrowserBounds }
+    payload: {
+      sessionId: Schema.String,
+      path: Schema.String,
+      bounds: BrowserBounds
+    }
   }),
 
   /** Keep a session-owned PDF aligned with its Files placeholder. */
@@ -2162,7 +2233,9 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Theme.setCustomizations", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: { colors: Schema.Record({ key: Schema.String, value: Schema.String }) }
+    payload: {
+      colors: Schema.Record({ key: Schema.String, value: Schema.String })
+    }
   }),
 
   /**

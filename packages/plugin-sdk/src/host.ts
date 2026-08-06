@@ -16,13 +16,18 @@
  * export const activate: Activate = async (ctx) => {
  *   // No manifest flag grants GitHub access — the plugin asks, and the
  *   // operator consents once for this plugin and these scopes.
- *   const session = await ctx.authentication.getSession("github", ["repo"])
+ *   const session = await ctx.authentication.getSession("github", [
+ *     "pull_requests:read",
+ *     "repository:acme/widgets",
+ *   ])
  *   if (!session) return // declined; degrade quietly rather than throwing
  *
  *   ctx.subscriptions.push(
  *     ctx.commands.register("linear.sync", async () => {
- *       const { stdout } = await ctx.exec("gh", ["pr", "list", "--json", "number"])
- *       return JSON.parse(stdout)
+ *       const response = await fetch(`${session.apiBaseUrl}/repos/acme/widgets/pulls`, {
+ *         headers: { authorization: `Bearer ${session.accessToken}` },
+ *       })
+ *       return response.json()
  *     })
  *   )
  * }

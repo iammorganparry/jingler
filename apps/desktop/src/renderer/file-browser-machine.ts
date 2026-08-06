@@ -125,6 +125,11 @@ export const fileBrowserFailure = (
         expectedRevision: stringField(failure, "expectedRevision", ""),
         actualRevision: stringField(failure, "actualRevision", "")
       }
+    case "AssetWriteIoError":
+      return {
+        type: "error",
+        message: stringField(failure, "message", fallbackMessage)
+      }
     default:
       return { type: "error", message: fallbackMessage }
   }
@@ -247,6 +252,10 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
         initial: "loading",
         states: {
           loading: {
+            on: {
+              REFRESH_TREE: { target: "loading", reenter: true },
+              RETRY_TREE: { target: "loading", reenter: true }
+            },
             invoke: {
               src: "listFiles",
               input: ({ context }) => ({ sessionId: context.sessionId }),
@@ -370,20 +379,26 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
             states: {
               clean: {
                 on: {
-                  EDIT: {
-                    guard: "hasEditablePayload",
-                    target: "dirty",
-                    actions: "editDraft"
-                  }
+                  EDIT: [
+                    { guard: "editMatchesLoaded", actions: "editDraft" },
+                    {
+                      guard: "hasEditablePayload",
+                      target: "dirty",
+                      actions: "editDraft"
+                    }
+                  ]
                 }
               },
               saved: {
                 on: {
-                  EDIT: {
-                    guard: "hasEditablePayload",
-                    target: "dirty",
-                    actions: "editDraft"
-                  }
+                  EDIT: [
+                    { guard: "editMatchesLoaded", actions: "editDraft" },
+                    {
+                      guard: "hasEditablePayload",
+                      target: "dirty",
+                      actions: "editDraft"
+                    }
+                  ]
                 }
               },
               dirty: {

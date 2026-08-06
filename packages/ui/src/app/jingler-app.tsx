@@ -7,7 +7,7 @@ import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
-  GhStatus,
+  GitHubConnection,
   GitConfig,
   GithubConfig,
   NotificationsConfig,
@@ -91,12 +91,14 @@ const TAB_SHAPES = builtinTabContributions({
   stub: () => null
 })
 
-const GH_UNAVAILABLE: GhStatus = {
-  available: false,
-  authenticated: false,
-  login: null,
-  host: null,
-  version: null
+const GITHUB_DISCONNECTED: GitHubConnection = {
+  mode: "disconnected",
+  enabled: true,
+  connected: false,
+  user: null,
+  installations: [],
+  lastRefreshedAt: null,
+  error: null
 }
 
 export interface JinglerAppProps {
@@ -138,8 +140,13 @@ export interface JinglerAppProps {
   onToggleCollapsed?: (repoPath: string) => void | Promise<void>
   /** Preselect this repo (by path) when the New Session dialog opens. */
   defaultRepoPath?: string | null
-  /** GitHub CLI status for the harnesses strip. */
-  ghStatus?: GhStatus
+  /** Live shared GitHub App connection (not the BetterAuth login identity). */
+  githubConnection?: GitHubConnection
+  githubBusy?: boolean
+  onGithubConnect?: () => void
+  onGithubManage?: () => void
+  onGithubRefresh?: () => void
+  onGithubDisconnect?: () => void
   /** What each session's agent is doing right now ("Running npm test"), keyed by id. */
   liveActivity?: Record<string, SessionActivity>
   /** Live linked-PR state per session id, badged onto sidebar rows. */
@@ -188,8 +195,6 @@ export interface JinglerAppProps {
   themes?: ThemesSettingsProps
   /** Everything Settings › Plugins needs. Absent renders the stub. */
   plugins?: PluginsSettingsProps
-  /** Re-run `gh auth status` (the settings "Recheck" button); may be async. */
-  onRecheckGh?: () => Promise<void> | void
   /** Persisted per-CLI provider defaults (Settings · Providers view). */
   providersConfig?: ProvidersConfig | null
   /** Persist one CLI's provider defaults; presence wires the Settings gear. */
@@ -367,7 +372,7 @@ const noBranches = async (): Promise<ReadonlyArray<string>> => []
 
 /**
  * The product shell — the whole Jingler window, data-driven. The desktop
- * renderer feeds it discovered `clis`/`repos`/`ghStatus` and the session list
+ * renderer feeds it discovered `clis`/`repos`, live GitHub App state, and the session list
  * over Effect RPC, plus the callbacks that create real worktrees.
  */
 export function JinglerApp({
@@ -387,7 +392,12 @@ export function JinglerApp({
   collapsedRepos = [],
   onToggleCollapsed,
   defaultRepoPath,
-  ghStatus,
+  githubConnection = GITHUB_DISCONNECTED,
+  githubBusy,
+  onGithubConnect,
+  onGithubManage,
+  onGithubRefresh,
+  onGithubDisconnect,
   liveActivity,
   prStates,
   liveDiff,
@@ -410,7 +420,6 @@ export function JinglerApp({
   onSaveAdhdMode,
   fontScale,
   onSaveFontScale,
-  onRecheckGh,
   providersConfig,
   onSaveProvider,
   planTemplate,
@@ -479,7 +488,7 @@ export function JinglerApp({
   const [usageOpen, setUsageOpen] = useState(false)
   const [usageLoading, setUsageLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [ghRechecking, setGhRechecking] = useState(false)
+  const [settingsSection, setSettingsSection] = useState<"providers" | "github">("providers")
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [fileQuickOpenSessionId, setFileQuickOpenSessionId] = useState<string | null>(null)
   /**
@@ -524,15 +533,9 @@ export function JinglerApp({
     }
   }, [onLoadUsage])
 
-  const handleRecheckGh = useCallback(() => {
-    const result = onRecheckGh?.()
-    if (result && typeof (result as Promise<void>).then === "function") {
-      setGhRechecking(true)
-      void (result as Promise<void>).finally(() => setGhRechecking(false))
-    }
-  }, [onRecheckGh])
-
-  const ghConnected = Boolean(ghStatus?.available && ghStatus?.authenticated)
+  const ghConnected =
+    githubConnection.connected &&
+    githubConnection.installations.some((installation) => installation.status === "active")
 
   // The sidebar groups sessions by repo *name* (Session.repo === Repo.name), so
   // translate the path-keyed stars into the names those groups pin on.
@@ -1003,6 +1006,16 @@ export function JinglerApp({
           onSaveProvider
             ? () => {
                 memory?.onClose()
+                setSettingsSection("providers")
+                setSettingsOpen(true)
+              }
+            : undefined
+        }
+        onOpenGithubSettings={
+          onSaveProvider
+            ? () => {
+                memory?.onClose()
+                setSettingsSection("github")
                 setSettingsOpen(true)
               }
             : undefined
@@ -1021,6 +1034,8 @@ export function JinglerApp({
         settingsView={
           settingsOpen && onSaveProvider ? (
             <SettingsView
+              key={settingsSection}
+              initialSection={settingsSection}
               clis={clis}
               providers={providersConfig}
               onSaveProvider={onSaveProvider}
@@ -1038,11 +1053,14 @@ export function JinglerApp({
               unifiedMcp={unifiedMcp}
               connector={connector}
               injection={injection}
-              ghStatus={ghStatus ?? GH_UNAVAILABLE}
+              githubConnection={githubConnection}
+              githubBusy={githubBusy}
+              onGithubConnect={onGithubConnect}
+              onGithubManage={onGithubManage}
+              onGithubRefresh={onGithubRefresh}
+              onGithubDisconnect={onGithubDisconnect}
               github={githubConfig}
               git={gitConfig}
-              rechecking={ghRechecking}
-              onRecheck={onRecheckGh ? handleRecheckGh : undefined}
               context={contextConfig}
               onSaveContext={onSaveContextConfig}
               contextSessions={contextSessions}

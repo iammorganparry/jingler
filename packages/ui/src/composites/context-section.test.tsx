@@ -5,12 +5,14 @@ import { SettingsView } from "./settings-view.js"
 
 afterEach(cleanup)
 
-const GH_UNAVAILABLE = {
-  available: false,
-  authenticated: false,
-  login: null,
-  host: null,
-  version: null
+const GITHUB_DISCONNECTED = {
+  mode: "disconnected" as const,
+  enabled: true,
+  connected: false,
+  user: null,
+  installations: [],
+  lastRefreshedAt: null,
+  error: null
 }
 
 const cli = (over: Partial<CliInfo>): CliInfo => ({
@@ -50,7 +52,7 @@ const open = (
   render(
     <SettingsView
       clis={CLIS}
-      ghStatus={GH_UNAVAILABLE}
+      githubConnection={GITHUB_DISCONNECTED}
       onSaveProvider={props.onSaveProvider ?? vi.fn()}
       loadModels={async () => []}
       context={props.context ?? null}

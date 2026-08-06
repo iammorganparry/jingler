@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react"
-import type { GhStatus, GitConfig, GithubConfig } from "@jingler/core"
-import { Check, Copy, GitBranch, RefreshCw, Settings } from "lucide-react"
+import type { GitConfig, GithubConfig, GitHubAppConnectionStatus } from "@jingler/core"
+import { GitBranch, RefreshCw, Settings } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { GithubMark } from "../components/github-mark.js"
 import { Button } from "../components/button.js"
-import { Callout } from "../components/callout.js"
 import { StatusDot } from "../components/status-dot.js"
 import { Toggle } from "../components/toggle.js"
 import {
@@ -18,8 +17,6 @@ import {
 
 const DEFAULT_GITHUB: GithubConfig = { enabled: false, autoCreatePr: false, autoDetectPr: true }
 const DEFAULT_GIT: GitConfig = { shareCheckedOutBranches: true }
-
-const LOGIN_CMD = "gh auth login"
 
 const sameGithub = (a: GithubConfig, b: GithubConfig): boolean =>
   a.enabled === b.enabled && a.autoCreatePr === b.autoCreatePr && a.autoDetectPr === b.autoDetectPr
@@ -53,29 +50,25 @@ function ToggleRow({
 }
 
 /**
- * The Settings view. Currently one section — the GitHub integration: read-only
- * `gh` connection status plus the PR preferences. `gh auth login` is interactive
- * and runs in the user's own terminal, so the section offers a copy-command +
- * Recheck rather than an in-app OAuth flow.
+ * Compact Settings dialog for GitHub App connection state and PR preferences.
  */
 export function SettingsDialog({
   open,
-  ghStatus,
+  connection,
   github,
   git,
-  rechecking = false,
-  onRecheck,
+  refreshing = false,
+  onRefresh,
   onSaveGithub,
   onSaveGit,
   onClose
 }: {
   open: boolean
-  ghStatus: GhStatus
+  connection: GitHubAppConnectionStatus
   github?: GithubConfig | null
   git?: GitConfig | null
-  /** A `gh auth status` recheck is in flight. */
-  rechecking?: boolean
-  onRecheck?: () => void
+  refreshing?: boolean
+  onRefresh?: () => void
   onSaveGithub?: (config: GithubConfig) => void
   onSaveGit?: (config: GitConfig) => void
   onClose?: () => void
@@ -84,18 +77,18 @@ export function SettingsDialog({
   const initialGit = git ?? DEFAULT_GIT
   const [draft, setDraft] = useState<GithubConfig>(initial)
   const [gitDraft, setGitDraft] = useState<GitConfig>(initialGit)
-  const [copied, setCopied] = useState(false)
 
   // Re-seed the form from the persisted config each time the view opens.
   useEffect(() => {
     if (open) {
       setDraft(github ?? DEFAULT_GITHUB)
       setGitDraft(git ?? DEFAULT_GIT)
-      setCopied(false)
     }
   }, [open, github, git])
 
-  const connected = ghStatus.available && ghStatus.authenticated
+  const activeInstallation = connection.installations.find((installation) => installation.status === "active")
+  const suspendedInstallation = connection.installations.find((installation) => installation.status === "suspended")
+  const connected = connection.connected && activeInstallation !== undefined
   const githubDirty = !sameGithub(draft, initial)
   const gitDirty = !sameGit(gitDraft, initialGit)
   const dirty = githubDirty || gitDirty
@@ -104,13 +97,6 @@ export function SettingsDialog({
     if (githubDirty) onSaveGithub?.(draft)
     if (gitDirty) onSaveGit?.(gitDraft)
     onClose?.()
-  }
-
-  const copyLogin = () => {
-    void navigator.clipboard?.writeText(LOGIN_CMD).then(() => {
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1600)
-    })
   }
 
   return (
@@ -130,61 +116,31 @@ export function SettingsDialog({
           {/* Connection status */}
           <div className="flex items-center gap-2.5 rounded-lg border border-line bg-sunken px-3 py-2.5">
             <StatusDot
-              tone={connected ? "bg-green" : ghStatus.available ? "bg-yellow" : "bg-line-strong"}
+              tone={connected ? "bg-green" : suspendedInstallation ? "bg-yellow" : "bg-line-strong"}
               size={8}
               glow={connected}
             />
             <div className="flex-1">
               <div className="text-[12.5px] font-medium text-text-body">
                 {connected
-                  ? `Connected as @${ghStatus.login ?? "user"}`
-                  : ghStatus.available
-                    ? "GitHub CLI not authenticated"
-                    : "GitHub CLI not installed"}
+                  ? `Connected as @${connection.user?.login ?? activeInstallation.account.login}`
+                  : suspendedInstallation
+                    ? `Installation for @${suspendedInstallation.account.login} is suspended`
+                    : "GitHub App not connected"}
               </div>
-              {connected && ghStatus.host && (
-                <div className="mt-0.5 font-mono text-[10.5px] text-muted-foreground">
-                  {ghStatus.host}
-                  {ghStatus.version ? ` · gh ${ghStatus.version}` : ""}
+              {activeInstallation && (
+                <div className="mt-0.5 text-[10.5px] text-muted-foreground">
+                  @{activeInstallation.account.login} · {activeInstallation.repositorySelection === "all" ? "All repositories" : "Selected repositories"}
                 </div>
               )}
             </div>
-            {onRecheck && (
-              <Button variant="secondary" size="sm" onClick={onRecheck} disabled={rechecking}>
-                <RefreshCw size={12} className={cn(rechecking && "animate-spin")} />
-                Recheck
+            {onRefresh && (
+              <Button variant="secondary" size="sm" onClick={onRefresh} disabled={refreshing}>
+                <RefreshCw size={12} className={cn(refreshing && "animate-spin")} />
+                Refresh
               </Button>
             )}
           </div>
-
-          {/* Connect instructions when not authenticated */}
-          {!connected && (
-            <Callout tone="blue">
-              {ghStatus.available ? (
-                <>
-                  Sign in from your terminal, then Recheck. Run:
-                  <span className="mt-2 flex items-center gap-2">
-                    <code className="flex-1 rounded-md bg-canvas px-2 py-1 font-mono text-[11.5px] text-text">
-                      {LOGIN_CMD}
-                    </code>
-                    <button
-                      type="button"
-                      onClick={copyLogin}
-                      aria-label="Copy command"
-                      className="flex size-6 items-center justify-center rounded-md border border-line text-muted-foreground transition-colors hover:bg-surface hover:text-text"
-                    >
-                      {copied ? <Check size={12} className="text-green" /> : <Copy size={12} />}
-                    </button>
-                  </span>
-                </>
-              ) : (
-                <>
-                  Install the GitHub CLI (<span className="font-mono text-text">brew install gh</span>
-                  ), then Recheck. Pull-request features need it.
-                </>
-              )}
-            </Callout>
-          )}
 
           {/* Preferences */}
           <div className="divide-y divide-hairline">

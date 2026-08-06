@@ -298,9 +298,8 @@ describe("ReviewService — spec", () => {
   })
 
   /**
-   * `gh pr diff` folds any failure to "". Reviewing "" yields a confident "found
-   * nothing", cached against the real head — so a transient gh hiccup becomes a
-   * permanent false all-clear only a forced re-run can clear.
+   * An empty API diff must not yield a confident "found nothing" cached against
+   * the real head; only a forced re-run could otherwise clear that false result.
    */
   it("refuses an empty diff rather than reporting a false all-clear", async () => {
     const { layer, spawns } = countingStub()

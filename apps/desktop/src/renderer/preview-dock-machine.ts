@@ -29,6 +29,7 @@ export type PreviewDockEvent =
   | { readonly type: "NATIVE_URL"; readonly sessionId: string; readonly url: string }
   | { readonly type: "REVEAL_BROWSER"; readonly sessionId: string; readonly url: string }
   | { readonly type: "REMOVE_SESSION"; readonly sessionId: string }
+  | { readonly type: "RECONCILE_SESSIONS"; readonly sessionIds: ReadonlyArray<string> }
 
 const defaultSessionState = (visible = false): PreviewSessionState => ({
   url: DEFAULT_PREVIEW_URL,
@@ -177,6 +178,21 @@ export const previewDockMachine = setup({
         focusedSessionId:
           context.focusedSessionId === event.sessionId ? null : context.focusedSessionId
       }
+    }),
+    reconcileSessions: assign(({ context, event }) => {
+      if (event.type !== "RECONCILE_SESSIONS") return {}
+      const retained = new Set(event.sessionIds)
+      const sessions = Object.fromEntries(
+        Object.entries(context.sessions).filter(([sessionId]) => retained.has(sessionId))
+      )
+      persistSessions(sessions)
+      return {
+        sessions,
+        focusedSessionId:
+          context.focusedSessionId !== null && retained.has(context.focusedSessionId)
+            ? context.focusedSessionId
+            : null
+      }
     })
   }
 }).createMachine({
@@ -197,7 +213,8 @@ export const previewDockMachine = setup({
         NAVIGATE: { actions: "navigate" },
         NATIVE_URL: { actions: "nativeUrl" },
         REVEAL_BROWSER: { actions: "revealBrowser" },
-        REMOVE_SESSION: { actions: "removeSession" }
+        REMOVE_SESSION: { actions: "removeSession" },
+        RECONCILE_SESSIONS: { actions: "reconcileSessions" }
       }
     }
   }

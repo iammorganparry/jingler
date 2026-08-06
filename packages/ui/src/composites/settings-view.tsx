@@ -2,7 +2,7 @@ import * as React from "react"
 import type {
   CliInfo,
   CliKind,
-  GhStatus,
+  GitHubConnection,
   GitConfig,
   GithubConfig,
   NotificationsConfig,
@@ -500,12 +500,15 @@ export interface SettingsViewProps {
     cli: CliKind
     snapshot: ContextSnapshot
   }>
-  // GitHub section (reused from the old settings modal).
-  ghStatus: GhStatus
+  // Shared GitHub App connection (separate from BetterAuth social sign-in).
+  githubConnection: GitHubConnection
+  githubBusy?: boolean
+  onGithubConnect?: () => void
+  onGithubManage?: () => void
+  onGithubRefresh?: () => void
+  onGithubDisconnect?: () => void
   github?: GithubConfig | null
   git?: GitConfig | null
-  rechecking?: boolean
-  onRecheck?: () => void
   onSaveGithub?: (config: GithubConfig) => void
   onSaveGit?: (config: GitConfig) => void
   /** Desktop-notification prefs; absent means the defaults, not "off". */
@@ -522,6 +525,8 @@ export interface SettingsViewProps {
   onSaveFontScale?: (fontScale: number) => void | Promise<void>
   /** Close the view and return to the active session. */
   onClose?: () => void
+  /** Recovery actions open directly on GitHub; ordinary Settings opens Providers. */
+  initialSection?: "providers" | "github"
 }
 
 /**
@@ -553,11 +558,14 @@ export function SettingsView({
   context,
   onSaveContext,
   contextSessions,
-  ghStatus,
+  githubConnection,
+  githubBusy,
+  onGithubConnect,
+  onGithubManage,
+  onGithubRefresh,
+  onGithubDisconnect,
   github,
   git,
-  rechecking,
-  onRecheck,
   onSaveGithub,
   onSaveGit,
   notifications,
@@ -568,9 +576,10 @@ export function SettingsView({
   onSaveAdhdMode,
   fontScale,
   onSaveFontScale,
-  onClose
+  onClose,
+  initialSection = "providers"
 }: SettingsViewProps) {
-  const [section, setSection] = React.useState<SectionKey>("providers")
+  const [section, setSection] = React.useState<SectionKey>(initialSection)
 
   // Three `flex-none` columns (216 + 328 + detail) is ~544px of chrome before
   // the settings themselves get a pixel. Below `mid` the nav narrows to an icon
@@ -708,12 +717,15 @@ export function SettingsView({
         )
       ) : section === "github" ? (
         <GithubSection
-          ghStatus={ghStatus}
+          connection={githubConnection}
+          busy={githubBusy}
           github={github}
           git={git}
           loadModels={loadModels}
-          rechecking={rechecking}
-          onRecheck={onRecheck}
+          onConnect={onGithubConnect}
+          onManage={onGithubManage}
+          onRefresh={onGithubRefresh}
+          onDisconnect={onGithubDisconnect}
           onSaveGithub={onSaveGithub}
           onSaveGit={onSaveGit}
         />
@@ -1356,7 +1368,13 @@ function ToggleRow({
         <div className="text-[12.5px] font-medium text-text-body">{label}</div>
         <div className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">{description}</div>
       </div>
-      <Toggle checked={checked} disabled={disabled} onCheckedChange={onChange} className="mt-0.5" />
+      <Toggle
+        aria-label={label}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onChange}
+        className="mt-0.5"
+      />
     </div>
   )
 }
@@ -1475,7 +1493,7 @@ function GeneralSection({
         <div className="divide-y divide-hairline">
           <ToggleRow
             label="Run commands while planning"
-            description="Plan mode can't edit files, so its commands only read — git log, ripgrep, gh pr view. Leave this on and planning runs uninterrupted; switch it off to approve each command."
+            description="Plan mode can't edit files, so its commands only read — git history, search, and file inspection. Leave this on and planning runs uninterrupted; switch it off to approve each command."
             checked={planDraft}
             onChange={(next) => {
               setPlanDraft(next)
@@ -1562,21 +1580,27 @@ function GeneralSection({
 }
 
 function GithubSection({
-  ghStatus,
+  connection,
+  busy,
   github,
   git,
-  rechecking,
   loadModels,
-  onRecheck,
+  onConnect,
+  onManage,
+  onRefresh,
+  onDisconnect,
   onSaveGithub,
   onSaveGit
 }: {
-  ghStatus: GhStatus
+  connection: GitHubConnection
+  busy?: boolean
   github?: GithubConfig | null
   git?: GitConfig | null
   loadModels?: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
-  rechecking?: boolean
-  onRecheck?: () => void
+  onConnect?: () => void
+  onManage?: () => void
+  onRefresh?: () => void
+  onDisconnect?: () => void
   onSaveGithub?: (config: GithubConfig) => void
   onSaveGit?: (config: GitConfig) => void
 }) {
@@ -1587,7 +1611,7 @@ function GithubSection({
   React.useEffect(() => setDraft(github ?? DEFAULT_GITHUB), [github])
   React.useEffect(() => setGitDraft(git ?? DEFAULT_GIT), [git])
 
-  const connected = ghStatus.available && ghStatus.authenticated
+  const connected = connection.connected && connection.user !== null
   const reviewCli: CliKind = draft.reviewCli ?? "claude"
   const reviewModel = reviewModelFor(reviewCli, draft.reviewModel)
 
@@ -1634,39 +1658,104 @@ function GithubSection({
 
         <div className="flex items-center gap-2.5 rounded-lg border border-line bg-sunken px-3 py-2.5">
           <StatusDot
-            tone={connected ? "bg-green" : ghStatus.available ? "bg-yellow" : "bg-line-strong"}
+            tone={
+              connection.mode === "connected"
+                ? "bg-green"
+                : connection.mode === "error"
+                  ? "bg-red"
+                  : connection.mode === "disconnected"
+                    ? "bg-line-strong"
+                    : "bg-yellow"
+            }
             size={8}
-            glow={connected}
+            glow={connection.mode === "connected"}
           />
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <div className="text-[12.5px] font-medium text-text-body">
-              {connected
-                ? `Connected as @${ghStatus.login ?? "user"}`
-                : ghStatus.available
-                  ? "GitHub CLI not authenticated"
-                  : "GitHub CLI not installed"}
+              {connection.mode === "connecting"
+                ? "Waiting for GitHub authorization"
+                : connected
+                  ? `Connected as @${connection.user?.login ?? "user"}`
+                  : connection.mode === "error"
+                    ? "GitHub connection needs attention"
+                    : "GitHub is not connected"}
             </div>
-            {connected && ghStatus.host && (
-              <div className="mt-0.5 font-mono text-[10.5px] text-muted-foreground">
-                {ghStatus.host}
-                {ghStatus.version ? ` · gh ${ghStatus.version}` : ""}
+            {connection.user?.name && (
+              <div className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
+                {connection.user.name}
               </div>
             )}
           </div>
-          {onRecheck && (
-            <Button variant="secondary" size="sm" onClick={onRecheck} disabled={rechecking}>
-              Recheck
+        </div>
+
+        {connection.error && <Callout tone="red">{connection.error}</Callout>}
+        {connection.mode === "partial-access" && (
+          <Callout tone="blue">
+            GitHub is connected, but at least one installation is suspended or limited to selected
+            repositories. Manage repository access before using PR features there.
+          </Callout>
+        )}
+        {connection.mode === "suspended" && (
+          <Callout tone="red">
+            Every visible GitHub App installation is suspended. Repair the installation on GitHub,
+            then Refresh.
+          </Callout>
+        )}
+
+        {connection.installations.length > 0 && (
+          <div className="flex flex-col gap-2" aria-label="GitHub installations">
+            {connection.installations.map((installation) => (
+              <div
+                key={installation.id}
+                className="flex items-center gap-2.5 rounded-lg border border-line bg-hover px-3 py-2.5"
+              >
+                <StatusDot
+                  tone={installation.status === "active" ? "bg-green" : "bg-red"}
+                  size={7}
+                  glow={false}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[12px] font-medium text-text-body">
+                    @{installation.account.login}
+                  </div>
+                  <div className="mt-0.5 text-[10.5px] text-muted-foreground">
+                    {installation.status === "suspended"
+                      ? "Suspended"
+                      : installation.repositorySelection === "all"
+                        ? "All repositories"
+                        : "Selected repositories only"}
+                  </div>
+                </div>
+                <span className="font-mono text-[10px] text-dim">{installation.account.type}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          {!connected ? (
+            <Button variant="primary" size="sm" onClick={onConnect} disabled={busy}>
+              Install / Connect GitHub
+            </Button>
+          ) : (
+            <>
+              <Button variant="primary" size="sm" onClick={onManage} disabled={busy}>
+                Manage repositories
+              </Button>
+              <Button variant="secondary" size="sm" onClick={onRefresh} disabled={busy}>
+                Refresh
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onDisconnect} disabled={busy}>
+                Disconnect
+              </Button>
+            </>
+          )}
+          {connection.mode === "connecting" && (
+            <Button variant="secondary" size="sm" onClick={onRefresh}>
+              Cancel / check status
             </Button>
           )}
         </div>
-
-        {!connected && (
-          <Callout tone="blue">
-            Sign in from your terminal with{" "}
-            <span className="font-mono text-text">gh auth login</span>, then Recheck. Pull-request
-            features need it.
-          </Callout>
-        )}
 
         <div className="divide-y divide-hairline">
           <ToggleRow

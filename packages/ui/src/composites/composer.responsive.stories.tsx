@@ -32,7 +32,7 @@ const loaded = {
   mode: "accept-edits" as const,
   onSetMode: () => {},
   allowPlan: true,
-  branch: "jingler/wandering-watt",
+  branch: "chore/wandering-watt",
   skills: [{ name: "/review", description: "Review current changes", source: "skill" as const }],
   onSend: () => {}
 }

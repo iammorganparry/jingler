@@ -44,7 +44,13 @@ export const installPluginHost = (
     getSession: (
       pluginId: string,
       request: { providerId: string; scopes: readonly string[]; createIfNone?: boolean }
-    ) => Promise<{ accessToken: string; account?: string; scopes: readonly string[] } | null>
+    ) => Promise<{
+      accessToken: string
+      account?: string
+      scopes: readonly string[]
+      apiBaseUrl?: string
+      expiresAt?: string
+    } | null>
   }) => HostRequestHandler
 ) =>
   Effect.gen(function* () {

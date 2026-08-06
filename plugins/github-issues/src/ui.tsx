@@ -125,7 +125,11 @@ function IssueTab({ session }: TabProps) {
     setError(null)
 
     void host
-      .invoke<Issue>("github-issues.fetch", { repo: session.repo, issueNumber })
+      .invoke<Issue>("github-issues.fetch", {
+        repo: session.repo,
+        issueNumber,
+        worktreePath: session.worktreePath
+      })
       .then((next) => {
         if (!cancelled) setIssue(next)
       })
@@ -141,7 +145,7 @@ function IssueTab({ session }: TabProps) {
     return () => {
       cancelled = true
     }
-  }, [host, session.repo, issueNumber])
+  }, [host, session.repo, session.worktreePath, issueNumber])
 
   if (loading && !issue) {
     return (

@@ -74,7 +74,13 @@ export const makeHostRequestHandler = (deps: {
   getSession: (
     pluginId: string,
     request: AuthSessionRequestPayload
-  ) => Promise<{ accessToken: string; account?: string; scopes: readonly string[] } | null>
+  ) => Promise<{
+    accessToken: string
+    account?: string
+    scopes: readonly string[]
+    apiBaseUrl?: string
+    expiresAt?: string
+  } | null>
 }) => {
   return async (
     pluginId: string,

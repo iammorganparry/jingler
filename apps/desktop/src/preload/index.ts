@@ -7,6 +7,7 @@ import { contextBridge, ipcRenderer } from "electron"
 
 const RPC_CHANNEL = "jingler/rpc"
 const AUTH_COMPLETE_CHANNEL = "jingler/auth-complete"
+const GITHUB_COMPLETE_CHANNEL = "jingler/github-complete"
 const NOTIFICATION_ACTIVATED_CHANNEL = "jingler/notification-activated"
 const BOOT_THEME_CHANNEL = "jingler/boot-theme"
 // Must match the preview channels in main/preview-view.ts (kept as literals
@@ -73,6 +74,13 @@ contextBridge.exposeInMainWorld("jingler", {
       cb(payload)
     ipcRenderer.on(AUTH_COMPLETE_CHANNEL, listener)
     return () => ipcRenderer.removeListener(AUTH_COMPLETE_CHANNEL, listener)
+  },
+  /** Subscribe to GitHub App callbacks without waking the BetterAuth machine. */
+  onGithubComplete: (cb: (payload: AuthCompletePayload) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: AuthCompletePayload) =>
+      cb(payload)
+    ipcRenderer.on(GITHUB_COMPLETE_CHANNEL, listener)
+    return () => ipcRenderer.removeListener(GITHUB_COMPLETE_CHANNEL, listener)
   },
   /**
    * Subscribe to notification clicks. Main has already focused the window; the

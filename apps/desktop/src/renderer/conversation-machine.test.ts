@@ -227,6 +227,11 @@ const start = () => createActor(conversationMachine, { input: { session } }).sta
 const queuedId = (actor: ReturnType<typeof start>, n: number): string =>
   actor.getSnapshot().context.queued[n]?.id ?? `missing-${n}`
 const idle = "awaitingInput" as const
+const githubIdentity = {
+  source: "github-feedback" as const,
+  deliveryId: "delivery-1",
+  semanticKey: "semantic-1"
+}
 
 beforeEach(() => {
   h.streamCb = null
@@ -382,6 +387,133 @@ describe("conversationMachine — lazy history", () => {
 })
 
 describe("conversationMachine — queue while busy", () => {
+  it("coalesces a busy GitHub replay and resolves both waiters after one durable acceptance", async () => {
+    h.steerStatus = "accepted"
+    const firstAccepted = vi.fn()
+    const replayAccepted = vi.fn()
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "current turn" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({
+      type: "SEND",
+      text: "review feedback",
+      externalInstruction: githubIdentity,
+      onExternalAccepted: firstAccepted
+    })
+    actor.send({
+      type: "SEND",
+      text: "same edited feedback",
+      externalInstruction: { ...githubIdentity, deliveryId: "delivery-2" },
+      onExternalAccepted: replayAccepted
+    })
+    expect(actor.getSnapshot().context.queued).toHaveLength(1)
+    expect(firstAccepted).not.toHaveBeenCalled()
+    expect(replayAccepted).not.toHaveBeenCalled()
+
+    // Neither the automatic ToolEnd flush nor the operator's native Send-now
+    // path may consume external feedback. Both would bypass transcript identity
+    // acceptance and let a crash replay create a second turn.
+    emit({ _tag: "ToolEnd", id: "t-external", status: "success", meta: null, diff: null, preview: null })
+    actor.send({ type: "SEND_NOW", id: queuedId(actor, 0) })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(h.steerCalls).toEqual([])
+    expect(actor.getSnapshot().context.queued).toHaveLength(1)
+    expect(firstAccepted).not.toHaveBeenCalled()
+    expect(replayAccepted).not.toHaveBeenCalled()
+
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    await waitFor(actor, () => h.agentRunCalls.length === 2)
+    const feedbackRuns = h.agentRunCalls.filter((call) => call.text.includes("feedback"))
+    expect(feedbackRuns).toHaveLength(1)
+    expect(feedbackRuns[0]?.options).toMatchObject({ externalInstruction: githubIdentity })
+    expect(h.steerCalls).toEqual([])
+    expect(firstAccepted).not.toHaveBeenCalled()
+    expect(replayAccepted).not.toHaveBeenCalled()
+    emit({
+      _tag: "ExternalInstructionAccepted",
+      identity: githubIdentity,
+      duplicate: false
+    })
+    expect(firstAccepted).toHaveBeenCalledOnce()
+    expect(replayAccepted).toHaveBeenCalledOnce()
+    actor.stop()
+  })
+
+  it("replays a durably accepted external item after a busy restart without steering or duplicating", async () => {
+    h.transcript = [
+      userMessage("u-existing", "review feedback", "2026-08-05T09:00:00.000Z", [], githubIdentity),
+      { ...assistantMessage("a-existing", "2026-08-05T09:00:00.000Z"), streaming: false }
+    ]
+    h.steerStatus = "accepted"
+    const accepted = vi.fn()
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+
+    actor.send({ type: "SEND", text: "current turn after restart" })
+    await waitFor(actor, (s) => s.matches("running"))
+    actor.send({
+      type: "SEND",
+      text: "review feedback",
+      externalInstruction: { ...githubIdentity, deliveryId: "delivery-replayed" },
+      onExternalAccepted: accepted
+    })
+    emit({ _tag: "ToolEnd", id: "t-replay", status: "success", meta: null, diff: null, preview: null })
+    expect(h.steerCalls).toEqual([])
+    expect(actor.getSnapshot().context.queued).toHaveLength(1)
+
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    await waitFor(actor, () => h.agentRunCalls.length === 2)
+    expect(h.agentRunCalls.filter((call) => call.text === "review feedback")).toHaveLength(1)
+    expect(accepted).not.toHaveBeenCalled()
+    emit({
+      _tag: "ExternalInstructionAccepted",
+      identity: githubIdentity,
+      duplicate: true
+    })
+    await waitFor(actor, (s) => s.matches(idle))
+
+    expect(accepted).toHaveBeenCalledOnce()
+    expect(h.steerCalls).toEqual([])
+    expect(
+      actor.getSnapshot().context.messages.filter(
+        (message) => message.externalInstruction?.semanticKey === githubIdentity.semanticKey
+      )
+    ).toHaveLength(1)
+    actor.stop()
+  })
+
+  it("removes an optimistic replay after main reports a fresh-app durable duplicate", async () => {
+    h.transcript = [
+      userMessage("u-existing", "review feedback", "2026-08-05T09:00:00.000Z", [], githubIdentity),
+      { ...assistantMessage("a-existing", "2026-08-05T09:00:00.000Z"), streaming: false }
+    ]
+    const accepted = vi.fn()
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({
+      type: "SEND",
+      text: "review feedback",
+      externalInstruction: githubIdentity,
+      onExternalAccepted: accepted
+    })
+    await waitFor(actor, (s) => s.matches("running"))
+    expect(actor.getSnapshot().context.messages).toHaveLength(4)
+
+    emit({
+      _tag: "ExternalInstructionAccepted",
+      identity: githubIdentity,
+      duplicate: true
+    })
+    await waitFor(actor, (s) => s.matches(idle))
+    expect(accepted).toHaveBeenCalledOnce()
+    expect(actor.getSnapshot().context.messages).toHaveLength(2)
+    expect(actor.getSnapshot().context.messages.filter((message) => message.role === "user"))
+      .toHaveLength(1)
+    actor.stop()
+  })
+
   it("queues a message sent mid-run and replays it once the run completes", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))

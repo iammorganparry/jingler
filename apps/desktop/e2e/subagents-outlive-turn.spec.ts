@@ -21,7 +21,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   {
     id: "s_subagents",
     repo: "widget",
-    branch: "jingler/subagents-outlive",
+    branch: "chore/subagents-outlive",
     title: "Sub-agent session",
     status: "idle",
     cli: "claude",

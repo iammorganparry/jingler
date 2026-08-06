@@ -13,7 +13,7 @@
  */
 import { randomBytes } from "node:crypto"
 import { createServer, type Server } from "node:http"
-import type { AuthCallback } from "./deep-link.js"
+import type { AuthCallback, GitHubCallback } from "./deep-link.js"
 
 export interface AuthLoopback {
   /** The full callback URL — `http://127.0.0.1:<port>/callback?state=<nonce>`. */
@@ -33,6 +33,7 @@ const page = (message: string): string =>
  */
 export const startAuthLoopback = (
   deliver: (callback: AuthCallback) => void,
+  deliverGitHub: (callback: GitHubCallback) => void = () => {},
   createHttpServer: typeof createServer = createServer
 ): Promise<AuthLoopback> =>
   new Promise((resolve, reject) => {
@@ -48,13 +49,25 @@ export const startAuthLoopback = (
         res.writeHead(403, { "content-type": "text/html" }).end(page("Invalid sign-in state."))
         return
       }
+      const github = requestUrl.searchParams.get("github")
       const token = requestUrl.searchParams.get("token")
-      deliver({ token, error: requestUrl.searchParams.get("error") })
+      if (github !== null) {
+        deliverGitHub({
+          connected: github === "connected",
+          error: github === "connected" ? null : (requestUrl.searchParams.get("error") ?? "callback")
+        })
+      } else {
+        deliver({ token, error: requestUrl.searchParams.get("error") })
+      }
       res.writeHead(200, { "content-type": "text/html" }).end(
         page(
-          token
+          github === "connected"
+            ? "GitHub connected. You can close this tab and return to Jingler."
+            : token
             ? "Signed in. You can close this tab and return to Jingler."
-            : "Sign-in failed. You can close this tab and try again in Jingler."
+            : github !== null
+              ? "GitHub connection failed. You can close this tab and try again in Jingler."
+              : "Sign-in failed. You can close this tab and try again in Jingler."
         )
       )
     })

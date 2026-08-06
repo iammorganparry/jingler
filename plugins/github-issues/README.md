@@ -14,7 +14,9 @@ does it do when there is no issue.
 |---|---|
 | A tab that hides itself when irrelevant | `when: "hasIssue"` in `src/manifest.ts` |
 | A host half doing the network work | `src/main.ts` |
-| Consent-gated credentials | `getSession("github", ["repo"])` in `src/main.ts` |
+| Consent-gated credentials | `getSession("github", ["issues:read", "repository:owner/name"])` in `src/main.ts` |
+| GitHub App REST access | Host-side `fetch` with a short-lived installation credential |
+| Legacy folder-only sessions | Host-side `git remote get-url origin` resolution; no GitHub CLI |
 | UI → host over a command | `contributes.commands` + `host.invoke` |
 | Themed components, no hardcoded colour | `@jingler/plugin-sdk/ui` in `src/ui.tsx` |
 | Activating lazily | `activationEvents: ["onTab:github-issues.issue"]` |
@@ -23,9 +25,9 @@ does it do when there is no issue.
 
 Jingler already holds GitHub credentials, and this plugin ships inside the app,
 so handing it a token directly would be easy and invisible. It asks for one
-instead — through the same `getSession("github", ["repo"])` a plugin written this
-afternoon would call, producing the same native consent prompt, recorded in the
-same revocable grant list in Settings › Plugins.
+instead — through the same repository-qualified `getSession("github", …)` a plugin
+written this afternoon would call, producing the same native consent prompt,
+recorded in the same revocable grant list in Settings › Plugins.
 
 That is the only honest test of whether the permission model is real rather than
 decorative, and it is why `src/main.ts` does the boring thing.
@@ -36,8 +38,16 @@ The renderer's CSP does not widen `connect-src`. A plugin's tab therefore has **
 route to the network**, however much code it runs. Everything outbound goes
 through the extension host, which is also where the operator's consent lives.
 
-So: `src/ui.tsx` renders and asks; `src/main.ts` fetches. Not a style preference —
-the UI half physically cannot do the other job.
+So: `src/ui.tsx` renders and asks; `src/main.ts` fetches from GitHub's REST API.
+The host receives a short-lived credential for the matching GitHub App
+installation. The UI receives only the normalized issue, never the credential,
+raw response, or authorization headers. This is not a style preference — the UI
+half physically cannot do the other job.
+
+The plugin does not execute GitHub CLI. The bundled integration therefore works
+on a machine with Git and no `gh` binary. A separately installed third-party
+plugin remains trusted Node code and can choose to launch subprocesses; that is
+outside this provider's supported path.
 
 ## Building and running it
 
@@ -69,7 +79,8 @@ in development that directory is checked-in source, and one click would delete i
 ```
 src/manifest.ts     the manifest, in TypeScript so ids are literal types
 src/ui.tsx          the tab — React, themed, no network
-src/main.ts         the host half — gh, credentials, the fetch
+src/main.ts         the host half — consent, GitHub App REST fetch, normalization
+src/main.test.ts    REST mapping, pagination, endpoint isolation and redaction
 scripts/emit-manifest.mjs   writes jingler.plugin.json from src/manifest.ts
 scripts/install-local.mjs   copies manifest + dist into ~/jingler/plugins
 ```

@@ -183,7 +183,7 @@ test("edits and saves text, retains drafts across tabs, and preserves conflicts"
   await expect(editor).toContainText("export const answer = 43", { timeout: 15_000 })
   await expect(window.getByText("Unsaved", { exact: true })).toBeVisible()
 
-  await window.getByRole("button", { name: "Save", exact: true }).click()
+  await editor.press("Meta+s")
   await expect(window.getByText("Saved", { exact: true })).toBeVisible({ timeout: 15_000 })
   await expect.poll(() => readFileSync(join(repoPath, "src", "main.ts"), "utf8")).toBe(
     "export const answer = 43\n"

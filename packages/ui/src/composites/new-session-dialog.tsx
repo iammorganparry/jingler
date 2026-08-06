@@ -83,17 +83,6 @@ export interface NewSessionDialogProps {
   onCreateFromIssue?: (input: CreateSessionFromIssueInput) => Promise<void>
 }
 
-/** Cosmetic branch-slug preview (the real slug is computed server-side). */
-function kebabTitle(input: string): string {
-  return (
-    input
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 40) || "issue"
-  )
-}
-
 /** One automation row: a label + a right-aligned toggle (issue detail step). */
 function AutomationRow({
   label,
@@ -484,13 +473,13 @@ export function NewSessionDialog({
                   />
                 </div>
 
-                {/* Branch preview */}
+                {/* Branch policy — the first task-understanding pass names it. */}
                 <div className="flex flex-col gap-1.5">
                   <Eyebrow>Branch</Eyebrow>
                   <div className="flex items-center gap-2 rounded-md border border-line bg-sunken px-3 py-2">
                     <GitBranch size={14} className="flex-none text-cyan" />
                     <span className="flex-1 truncate font-mono text-[12.5px] text-text-bright">
-                      jingler/{selectedIssue.number}-{kebabTitle(selectedIssue.title)}
+                      Semantic branch after task understanding
                     </span>
                     <span className="font-mono text-[10px] text-dim">off {base || "base"}</span>
                   </div>

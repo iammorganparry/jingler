@@ -27,6 +27,10 @@ interface JinglerBridge {
   readonly onAuthComplete: (
     cb: (payload: { readonly ok: boolean; readonly error: string | null }) => void
   ) => () => void
+  /** Subscribe to shared GitHub App completions, separately from sign-in. */
+  readonly onGithubComplete: (
+    cb: (payload: { readonly ok: boolean; readonly error: string | null }) => void
+  ) => () => void
   /**
    * Subscribe to notification clicks. Main has already focused the window; the
    * payload names the session to select. Returns an unsubscribe fn.
