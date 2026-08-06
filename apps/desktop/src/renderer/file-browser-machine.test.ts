@@ -45,13 +45,18 @@ const waitFor = (
     }, 5)
     const timeout = setTimeout(() => {
       clearInterval(interval)
-      reject(new Error(`Timed out waiting for file browser state: ${JSON.stringify(actor.getSnapshot().value)}`))
+      reject(
+        new Error(
+          `Timed out waiting for file browser state: ${JSON.stringify(actor.getSnapshot().value)}`
+        )
+      )
     }, 2_000)
   })
 
 const start = (overrides: Partial<FileBrowserApi> = {}) => {
   const api: FileBrowserApi = {
     list: vi.fn().mockResolvedValue([{ path: "src/app.ts", status: "clean" }]),
+    diff: vi.fn().mockResolvedValue(""),
     read: vi.fn().mockResolvedValue(payload("before", "sha256:before")),
     write: vi.fn().mockResolvedValue(payload("after", "sha256:after")),
     ...overrides
@@ -69,9 +74,7 @@ describe("fileBrowserMachine", () => {
     expect(actor.getSnapshot().matches({ document: "idle" })).toBe(true)
 
     await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
-    expect(actor.getSnapshot().context.entries).toEqual([
-      { path: "src/app.ts", status: "clean" }
-    ])
+    expect(actor.getSnapshot().context.entries).toEqual([{ path: "src/app.ts", status: "clean" }])
   })
 
   it("adds a successfully opened agent-created path to a stale initial tree", async () => {
@@ -83,9 +86,7 @@ describe("fileBrowserMachine", () => {
     await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
 
     actor.send({ type: "OPEN", path: "reports/created.md" })
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ document: { ready: "clean" } })
-    )
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
 
     expect(actor.getSnapshot().context.entries).toEqual([
       { path: "reports/created.md", status: "untracked" },
@@ -97,27 +98,16 @@ describe("fileBrowserMachine", () => {
     const write = vi.fn().mockResolvedValue(payload("changed", "sha256:changed"))
     const { actor } = start({ write })
     actor.send({ type: "OPEN", path: "src/app.ts" })
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ document: { ready: "clean" } })
-    )
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
 
     actor.send({ type: "EDIT", text: "changed" })
     expect(actor.getSnapshot().matches({ document: { ready: "dirty" } })).toBe(true)
     actor.send({ type: "SAVE" })
     expect(actor.getSnapshot().matches({ document: "saving" })).toBe(true)
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ document: { ready: "saved" } })
-    )
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "saved" } }))
 
-    expect(write).toHaveBeenCalledWith(
-      "session-a",
-      "src/app.ts",
-      "changed",
-      "sha256:before"
-    )
-    expect(actor.getSnapshot().context.payload).toEqual(
-      payload("changed", "sha256:changed")
-    )
+    expect(write).toHaveBeenCalledWith("session-a", "src/app.ts", "changed", "sha256:before")
+    expect(actor.getSnapshot().context.payload).toEqual(payload("changed", "sha256:changed"))
   })
 
   it("keeps unchanged edits clean before and after a save", async () => {
@@ -148,9 +138,7 @@ describe("fileBrowserMachine", () => {
     })
     const { actor } = start({ read, write })
     actor.send({ type: "OPEN", path: "src/app.ts" })
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ document: { ready: "clean" } })
-    )
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
     actor.send({ type: "EDIT", text: "my draft" })
     actor.send({ type: "SAVE" })
     await waitFor(actor, (snapshot) => snapshot.matches({ document: "conflict" }))
@@ -161,13 +149,9 @@ describe("fileBrowserMachine", () => {
     actor.send({ type: "EDIT", text: "my revised draft" })
     expect(actor.getSnapshot().context.failure?.type).toBe("conflict")
     actor.send({ type: "REFRESH_CONFLICT" })
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ document: { ready: "dirty" } })
-    )
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "dirty" } }))
     expect(actor.getSnapshot().context.draft).toBe("my revised draft")
-    expect(actor.getSnapshot().context.payload).toEqual(
-      payload("agent edit", "sha256:agent")
-    )
+    expect(actor.getSnapshot().context.payload).toEqual(payload("agent edit", "sha256:agent"))
     expect(actor.getSnapshot().context.failure).toBeNull()
   })
 
@@ -197,21 +181,15 @@ describe("fileBrowserMachine", () => {
     )
     const { actor } = start({ write })
     actor.send({ type: "OPEN", path: "src/app.ts" })
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ document: { ready: "clean" } })
-    )
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
 
     actor.send({ type: "EDIT", text: "first edit" })
     actor.send({ type: "SAVE" })
     actor.send({ type: "EDIT", text: "second edit" })
     finishWrite?.(payload("first edit", "sha256:first"))
 
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ document: { ready: "dirty" } })
-    )
-    expect(actor.getSnapshot().context.payload).toEqual(
-      payload("first edit", "sha256:first")
-    )
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "dirty" } }))
+    expect(actor.getSnapshot().context.payload).toEqual(payload("first edit", "sha256:first"))
     expect(actor.getSnapshot().context.draft).toBe("second edit")
   })
 
@@ -222,18 +200,14 @@ describe("fileBrowserMachine", () => {
       .mockResolvedValueOnce(payload("my draft", "sha256:retry"))
     const { actor } = start({ write })
     actor.send({ type: "OPEN", path: "src/app.ts" })
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ document: { ready: "clean" } })
-    )
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
     actor.send({ type: "EDIT", text: "my draft" })
     actor.send({ type: "SAVE" })
     await waitFor(actor, (snapshot) => snapshot.matches({ document: "saveError" }))
 
     expect(actor.getSnapshot().context.draft).toBe("my draft")
     actor.send({ type: "SAVE" })
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ document: { ready: "saved" } })
-    )
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "saved" } }))
     expect(write).toHaveBeenCalledTimes(2)
     expect(actor.getSnapshot().context.draft).toBe("my draft")
   })
@@ -268,9 +242,7 @@ describe("fileBrowserMachine", () => {
     )
     const { actor } = start({ read })
     actor.send({ type: "OPEN", path: "src/app.ts" })
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ document: { ready: "clean" } })
-    )
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
     actor.send({ type: "EDIT", text: "my draft" })
 
     actor.send({ type: "OPEN", path: "src/other.ts" })
@@ -284,28 +256,35 @@ describe("fileBrowserMachine", () => {
     expect(actor.getSnapshot().context.pendingDiscard).toBeNull()
 
     actor.send({ type: "RELOAD" })
-    expect(actor.getSnapshot().context.pendingDiscard).toEqual({ type: "reload" })
+    expect(actor.getSnapshot().context.pendingDiscard).toEqual({
+      type: "reload"
+    })
     actor.send({ type: "CONFIRM_DISCARD" })
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ document: { ready: "clean" } })
-    )
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
     expect(actor.getSnapshot().context.selectedPath).toBe("src/app.ts")
     expect(actor.getSnapshot().context.draft).toBe("disk version")
   })
 
-  it("opens Markdown and CSV in rich preview until editing is requested", async () => {
+  it("opens text-shaped repository files directly in the IDE editor", async () => {
     const { actor } = start({
       read: vi.fn().mockResolvedValue(markdownPayload("# Preview", "sha256:md"))
     })
     actor.send({ type: "OPEN", path: "docs/spec.md" })
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches({ document: { ready: "clean" } })
-    )
-    expect(actor.getSnapshot().context.viewMode).toBe("preview")
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+    expect(actor.getSnapshot().context.viewMode).toBe("edit")
+  })
+
+  it("opens tracked changes diff-first while retaining an explicit editor mode", async () => {
+    const { actor } = start({
+      list: vi.fn().mockResolvedValue([{ path: "src/app.ts", status: "modified" }])
+    })
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    expect(actor.getSnapshot().context.viewMode).toBe("diff")
     actor.send({ type: "START_EDIT" })
     expect(actor.getSnapshot().context.viewMode).toBe("edit")
-    actor.send({ type: "SHOW_PREVIEW" })
-    expect(actor.getSnapshot().context.viewMode).toBe("preview")
+    actor.send({ type: "SHOW_DIFF" })
+    expect(actor.getSnapshot().context.viewMode).toBe("diff")
   })
 
   it("retries a failed repository refresh", async () => {
@@ -314,15 +293,11 @@ describe("fileBrowserMachine", () => {
       .mockRejectedValueOnce(new Error("git busy"))
       .mockResolvedValueOnce([{ path: "src/app.ts", status: "modified" as const }])
     const { actor } = start({ list })
-    await vi.waitFor(() =>
-      expect(actor.getSnapshot().matches({ tree: "error" })).toBe(true)
-    )
+    await vi.waitFor(() => expect(actor.getSnapshot().matches({ tree: "error" })).toBe(true))
 
     actor.send({ type: "RETRY_TREE" })
     expect(actor.getSnapshot().matches({ tree: "loading" })).toBe(true)
-    await vi.waitFor(() =>
-      expect(actor.getSnapshot().matches({ tree: "ready" })).toBe(true)
-    )
+    await vi.waitFor(() => expect(actor.getSnapshot().matches({ tree: "ready" })).toBe(true))
     expect(actor.getSnapshot().context.entries).toEqual([
       { path: "src/app.ts", status: "modified" }
     ])
@@ -331,7 +306,8 @@ describe("fileBrowserMachine", () => {
   })
 
   it("restarts a repository refresh requested while one is already loading", async () => {
-    let resolveFirst: ((entries: ReadonlyArray<{ path: string; status: "clean" }>) => void) | undefined
+    let resolveFirst:
+      ((entries: ReadonlyArray<{ path: string; status: "clean" }>) => void) | undefined
     const list = vi
       .fn()
       .mockImplementationOnce(
@@ -347,9 +323,7 @@ describe("fileBrowserMachine", () => {
     await waitFor(actor, () => list.mock.calls.length === 2)
     await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
 
-    expect(actor.getSnapshot().context.entries).toEqual([
-      { path: "src/fresh.ts", status: "clean" }
-    ])
+    expect(actor.getSnapshot().context.entries).toEqual([{ path: "src/fresh.ts", status: "clean" }])
     resolveFirst?.([{ path: "src/stale.ts", status: "clean" }])
   })
 })

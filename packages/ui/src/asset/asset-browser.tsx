@@ -18,16 +18,12 @@ const FALLBACK_TOKENS = toTokens(jinglerDark)
 
 export interface AssetBrowserProps {
   readonly sessionId: string
-  /** owner/repo the browser is rooted at, shown as persistent header context. */
-  readonly repo?: string
   readonly entries: readonly AssetFileEntry[]
   readonly selectedPath: string | null
   readonly treeLoading?: boolean
   readonly treeError?: string | null
   readonly onRetryTree?: () => void
   readonly onSelectPath: (path: string) => void
-  /** Session-owned actions/status rendered beside the selected path. */
-  readonly headerActions?: ReactNode
   /** Native PDFs are disabled while a tree sheet or divider covers/moves the canvas. */
   readonly renderCanvas: (nativeAvailable: boolean) => ReactNode
   readonly className?: string
@@ -39,14 +35,12 @@ export interface AssetBrowserProps {
  */
 export function AssetBrowser({
   sessionId,
-  repo,
   entries,
   selectedPath,
   treeLoading = false,
   treeError = null,
   onRetryTree,
   onSelectPath,
-  headerActions,
   renderCanvas,
   className
 }: AssetBrowserProps) {
@@ -162,37 +156,21 @@ export function AssetBrowser({
           />
         ) : null}
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex h-8 flex-none items-center gap-2 border-b border-line bg-panel px-2">
-            {!roomy ? (
-              <button
-                type="button"
-                aria-label="Repository files"
-                aria-expanded={sheetOpen}
-                onClick={() => send({ type: "TOGGLE_TREE" })}
-                className={cn(
-                  "flex size-6 items-center justify-center rounded text-dim hover:bg-hover hover:text-text-bright",
-                  sheetOpen && "bg-selection text-text-bright"
-                )}
-              >
-                <Files className="size-3.5" aria-hidden />
-              </button>
-            ) : null}
-            {repo !== undefined && repo.length > 0 ? (
-              <span
-                className="flex-none truncate font-mono text-[11px] text-dim"
-                title={repo}
-              >
-                {repo}
-              </span>
-            ) : null}
-            <span className="min-w-0 truncate font-mono text-[11px] text-text-body">
-              {selectedPath ?? "Select a file"}
-            </span>
-            {headerActions !== undefined ? (
-              <div className="ml-auto flex flex-none items-center gap-2">{headerActions}</div>
-            ) : null}
-          </div>
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          {!roomy ? (
+            <button
+              type="button"
+              aria-label="Repository files"
+              aria-expanded={sheetOpen}
+              onClick={() => send({ type: "TOGGLE_TREE" })}
+              className={cn(
+                "absolute left-2 top-2 z-10 flex size-7 items-center justify-center rounded-md bg-panel/80 text-dim shadow-[0_0_0_1px_var(--sb-line)] backdrop-blur-xl hover:bg-surface hover:text-text-bright",
+                sheetOpen && "bg-selection text-text-bright"
+              )}
+            >
+              <Files className="size-3.5" aria-hidden />
+            </button>
+          ) : null}
           <main
             aria-label={selectedPath === null ? "Asset content" : `${selectedPath} content`}
             data-testid="asset-content-canvas"
@@ -201,7 +179,6 @@ export function AssetBrowser({
             {renderCanvas(nativeAvailable)}
           </main>
         </div>
-
       </section>
     </PierreProvider>
   )

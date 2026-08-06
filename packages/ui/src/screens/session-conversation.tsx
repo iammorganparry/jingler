@@ -1,5 +1,12 @@
 import type { ReactNode } from "react"
-import type { CliInfo, DiffStat, SessionPrStatus, Session, SessionActivity, User } from "@jingler/core"
+import type {
+  CliInfo,
+  DiffStat,
+  SessionPrStatus,
+  Session,
+  SessionActivity,
+  User
+} from "@jingler/core"
 import type { DockSide } from "../app/terminal-panel.js"
 import { SessionSidebar } from "../app/session-sidebar.js"
 import { SessionSplit } from "../app/session-split.js"
@@ -194,10 +201,14 @@ export function SessionConversation(props: SessionConversationProps) {
       ? props.group
       : props.activeSessionId === null
         ? null
-        : { id: "standalone", panes: [{ sessionId: props.activeSessionId, ratio: 1 }], focused: 0 }
+        : {
+            id: "standalone",
+            panes: [{ sessionId: props.activeSessionId, ratio: 1 }],
+            focused: 0
+          }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1">
+    <div className="flex min-h-0 min-w-0 flex-1 bg-canvas">
       <SessionSidebar
         sessions={props.sessions}
         activeSessionId={props.activeSessionId}
@@ -232,7 +243,7 @@ export function SessionConversation(props: SessionConversationProps) {
         onOpenMemory={props.onOpenMemory}
       />
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-editor">
+      <div className="m-2 ml-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-editor shadow-[0_0_0_1px_var(--sb-line),0_18px_50px_var(--sb-border)]">
         {props.memoryView ? (
           props.memoryView
         ) : props.settingsView ? (

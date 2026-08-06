@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type { AssetPayload, Session } from "@jingler/core"
 import {
   AssetBrowser,
@@ -10,13 +10,14 @@ import {
   Callout,
   createPierreCodeViewItem,
   createPierreFileContents,
-  InlineStatus,
+  DiffView,
   FileQuickOpen,
+  parsePierreFileDiffs,
   PierreEditor
 } from "@jingler/ui"
 import type { PierreAnnotationMetadata } from "@jingler/ui"
-import { Eye, FilePenLine, FileWarning, RefreshCw, RotateCcw, Save } from "lucide-react"
-import type { FileBrowserController, FileBrowserStatus } from "./use-file-browser.js"
+import { FileWarning } from "lucide-react"
+import type { FileBrowserController } from "./use-file-browser.js"
 import { useFileBrowser } from "./use-file-browser.js"
 import { useNativeViewBounds } from "./use-native-view-bounds.js"
 import { rpc } from "./rpc-client.js"
@@ -75,104 +76,21 @@ export function FileBrowserView({ session }: FileBrowserViewProps) {
   }, [browser.save, browser.status])
 
   return (
-    <div ref={rootRef} className="h-full min-h-0">
+    <div ref={rootRef} className="h-full min-h-0 min-w-0 w-full">
       <AssetBrowser
         sessionId={session.id}
-        repo={session.repo}
         entries={browser.entries}
         selectedPath={browser.selectedPath}
         treeLoading={browser.treeLoading}
         treeError={browser.treeError}
         onRetryTree={browser.refreshTree}
         onSelectPath={browser.open}
-        headerActions={<FileActions browser={browser} />}
         renderCanvas={(nativeAvailable) => (
-          <FileCanvas
-            sessionId={session.id}
-            browser={browser}
-            nativeAvailable={nativeAvailable}
-          />
+          <FileCanvas sessionId={session.id} browser={browser} nativeAvailable={nativeAvailable} />
         )}
       />
     </div>
   )
-}
-
-function FileActions({ browser }: { readonly browser: FileBrowserController }) {
-  const textPayload = browser.payload !== null && "text" in browser.payload
-  const richPreview =
-    browser.payload?.kind === "markdown" || browser.payload?.kind === "csv"
-  const selected = browser.selectedPath !== null
-  return (
-    <>
-      <FileStatus status={browser.status} dirty={browser.dirty} />
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        onClick={browser.refreshTree}
-        disabled={browser.treeLoading}
-        title="Refresh repository files"
-      >
-        <RefreshCw className="size-3" aria-hidden />
-        Refresh
-      </Button>
-      {richPreview ? (
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={browser.viewMode === "preview" ? browser.startEdit : browser.showPreview}
-          disabled={browser.status === "loading" || browser.status === "saving"}
-        >
-          {browser.viewMode === "preview" ? (
-            <FilePenLine className="size-3" aria-hidden />
-          ) : (
-            <Eye className="size-3" aria-hidden />
-          )}
-          {browser.viewMode === "preview" ? "Edit" : "Preview"}
-        </Button>
-      ) : null}
-      {selected ? (
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={browser.reload}
-          disabled={browser.status === "loading" || browser.status === "saving"}
-          title={browser.dirty ? "Discard this draft and reload from disk" : "Reload from disk"}
-        >
-          <RotateCcw className="size-3" aria-hidden />
-          Reload
-        </Button>
-      ) : null}
-      {textPayload ? (
-        <Button
-          type="button"
-          size="sm"
-          onClick={browser.save}
-          disabled={browser.status !== "dirty" && browser.status !== "error"}
-          title="Save file (⌘S)"
-        >
-          <Save className="size-3" aria-hidden />
-          {browser.status === "saving"
-            ? "Saving…"
-            : browser.status === "error"
-              ? "Retry save"
-              : "Save"}
-        </Button>
-      ) : null}
-    </>
-  )
-}
-
-function FileStatus({ status, dirty }: { readonly status: FileBrowserStatus; readonly dirty: boolean }) {
-  if (status === "saving") return <InlineStatus variant="loading">Saving…</InlineStatus>
-  if (status === "saved") return <InlineStatus variant="success">Saved</InlineStatus>
-  if (status === "conflict") return <InlineStatus variant="error">Conflict</InlineStatus>
-  if (dirty) return <span className="text-[11px] text-yellow">Unsaved</span>
-  if (status === "read-only") return <span className="text-[11px] text-dim">Preview only</span>
-  return null
 }
 
 function FileCanvas({
@@ -185,8 +103,39 @@ function FileCanvas({
   readonly nativeAvailable: boolean
 }) {
   const payload = browser.payload
+  const fileDiff = useMemo(() => {
+    if (browser.patch === null || browser.selectedPath === null) return null
+    try {
+      return (
+        parsePierreFileDiffs(browser.patch).find(
+          (candidate) => candidate.name === browser.selectedPath
+        ) ?? null
+      )
+    } catch {
+      return null
+    }
+  }, [browser.patch, browser.selectedPath])
   if (browser.selectedPath === null) {
     return <AssetCanvas selectedPath={null} />
+  }
+  if (browser.viewMode === "diff") {
+    if (fileDiff !== null) {
+      return (
+        <DiffView
+          fileDiff={fileDiff}
+          label={`${browser.selectedPath} changes`}
+          className="h-full min-h-0"
+          options={{
+            diffStyle: "unified",
+            stickyHeader: false,
+            disableFileHeader: true
+          }}
+        />
+      )
+    }
+    if (browser.patch === null && browser.patchError === null) {
+      return <AssetCanvas selectedPath={browser.selectedPath} loading />
+    }
   }
   if (browser.status === "loading") {
     return <AssetCanvas selectedPath={browser.selectedPath} loading />
@@ -237,11 +186,7 @@ function FileCanvas({
         payload={payload}
         onReveal={() => void rpc.assetReveal(sessionId, payload.path)}
         renderPdf={(placeholder) => (
-          <FilePdfBody
-            sessionId={sessionId}
-            path={payload.path}
-            active={nativeAvailable}
-          >
+          <FilePdfBody sessionId={sessionId} path={payload.path} active={nativeAvailable}>
             {placeholder}
           </FilePdfBody>
         )}
@@ -255,14 +200,7 @@ function FileCanvas({
   const conflictRevision =
     browser.failure?.type === "conflict" ? browser.failure.actualRevision : ""
 
-  const richPreview = payload.kind === "markdown" || payload.kind === "csv"
-  const body = richPreview && browser.viewMode === "preview" ? (
-    <AssetCanvas
-      selectedPath={payload.path}
-      payload={{ ...payload, text: browser.draft }}
-      onReveal={() => void rpc.assetReveal(sessionId, payload.path)}
-    />
-  ) : (
+  const body = (
     <TextFileEditor
       key={`${payload.path}:${payload.revision}:${conflictRevision}`}
       payload={payload}
@@ -271,14 +209,18 @@ function FileCanvas({
     />
   )
 
-  return browser.pendingDiscard === null ? body : (
+  return browser.pendingDiscard === null ? (
+    body
+  ) : (
     <div className="flex h-full min-h-0 flex-col bg-canvas">
       <Callout tone="yellow" className="m-2 flex-none">
         <div className="flex flex-wrap items-center gap-2">
           <span className="min-w-0 flex-1">
-            Discard your unsaved changes and {browser.pendingDiscard.type === "open"
+            Discard your unsaved changes and{" "}
+            {browser.pendingDiscard.type === "open"
               ? `open ${browser.pendingDiscard.path}`
-              : "reload this file"}?
+              : "reload this file"}
+            ?
           </span>
           <Button type="button" variant="secondary" size="sm" onClick={browser.cancelDiscard}>
             Keep editing
@@ -337,12 +279,7 @@ function TextFileEditor({
               The file changed on disk before this save. Your draft is still here. Refresh the
               revision to keep editing and save against the agent's latest version.
             </span>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={browser.refreshConflict}
-            >
+            <Button type="button" variant="secondary" size="sm" onClick={browser.refreshConflict}>
               Refresh revision
             </Button>
           </div>
@@ -360,7 +297,11 @@ function TextFileEditor({
         editingItemId={item.id}
         onChange={({ contents }) => browser.edit(contents)}
         onComplete={({ contents }) => browser.edit(contents)}
-        options={{ lineNumbers: true, stickyHeader: false }}
+        options={{
+          lineNumbers: true,
+          stickyHeader: false,
+          disableFileHeader: true
+        }}
       />
     </div>
   )

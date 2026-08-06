@@ -82,6 +82,8 @@ export interface SessionPaneProps {
   selectTabRequest?: { readonly tabId: TabKey; readonly nonce: number } | null
   /** Told when {@link selectTabRequest} has been applied, so it can be dropped. */
   onTabRequestHandled?: () => void
+  /** Reports this pane's selected view so window-level docks can yield to Files. */
+  onActiveTabChange?: (sessionId: string, tabId: TabKey) => void
   /**
    * The real app's session-keyed pane, rendered for BOTH the Conversation and
    * Plan tabs from the same machine (so switching to Plan never aborts a parked
@@ -195,7 +197,10 @@ function SessionPaneBody(props: SessionPaneProps) {
   // every caller remembering to key correctly. Step ids are per-plan ordinals
   // (s_01, s_02…) that collide across sessions, so an untagged target that
   // survived a re-key would snap to an unrelated same-numbered step.
-  const [target, setTarget] = useState<{ sessionId: string; stepId: string } | null>(null)
+  const [target, setTarget] = useState<{
+    sessionId: string
+    stepId: string
+  } | null>(null)
   const [split, setSplit] = useState(false)
   const roomy = atLeast(useWidthTier(), "wide")
   const presentPlanDraft = useCallback(() => {
@@ -287,20 +292,17 @@ function SessionPaneBody(props: SessionPaneProps) {
         }
         return props.renderConversation(
           session,
-          ctx.activeTabId === BUILTIN_TAB.plan
-            ? "plan"
-            : ctx.splitOpen
-              ? "split"
-              : "conversation",
+          ctx.activeTabId === BUILTIN_TAB.plan ? "plan" : ctx.splitOpen ? "split" : "conversation",
           paneCtx
         )
       },
       pullRequest: (session, ctx) =>
-        props.renderPullRequest?.(session, { onConnectGithub: ctx.onConnectGithub }),
+        props.renderPullRequest?.(session, {
+          onConnectGithub: ctx.onConnectGithub
+        }),
       review: (session, ctx) =>
         props.renderReview?.(session, { onConnectGithub: ctx.onConnectGithub }),
-      code: (session, ctx) =>
-        props.renderCode?.(session, { onConnectGithub: ctx.onConnectGithub }),
+      code: (session, ctx) => props.renderCode?.(session, { onConnectGithub: ctx.onConnectGithub }),
       files: (session) => props.renderFiles?.(session),
       stub: (id) => <BuiltinStubScreen tab={id} />
     }),
@@ -314,6 +316,9 @@ function SessionPaneBody(props: SessionPaneProps) {
   // honest if the built-in set ever changes.
   const activeContribution = tabs.find((c) => c.id === tab) ?? tabs[0]
   const activeTab = activeContribution?.id ?? BUILTIN_TAB.conversation
+  useEffect(() => {
+    props.onActiveTabChange?.(active.id, activeTab)
+  }, [active.id, activeTab, props.onActiveTabChange])
   // Plan Review beside the transcript. Derived, never merely stored: a session
   // with no plan has nothing to split, so the same reasoning that hides the Plan
   // tab collapses the split — otherwise a plan-less session would leave an empty
@@ -360,8 +365,7 @@ function SessionPaneBody(props: SessionPaneProps) {
           // keep Conversation there rather than creating a one-way tab bar.
           .filter(
             (contribution) =>
-              props.renderChatTabs === undefined ||
-              contribution.id !== BUILTIN_TAB.conversation
+              props.renderChatTabs === undefined || contribution.id !== BUILTIN_TAB.conversation
           )
           .map((contribution) => describeTab(contribution, tabCtx))}
         active={activeTab}
@@ -385,19 +389,16 @@ function SessionPaneBody(props: SessionPaneProps) {
         // The title comes from the session rather than from the caller, so the
         // pane identity follows a rename the moment it lands.
         sessionTitle={active.title || UNTITLED_SESSION}
+        repoName={active.repo}
         onRenameTitle={
-          props.onRenameSession
-            ? (title) => props.onRenameSession?.(active.id, title)
-            : undefined
+          props.onRenameSession ? (title) => props.onRenameSession?.(active.id, title) : undefined
         }
         // The chat pills share the tab row, behind a divider. Built by the
         // renderer (RPCs + live activity), threaded in as an opaque node.
         chatSlot={props.renderChatTabs?.(active, () => setTab(BUILTIN_TAB.conversation))}
         // The title comes from the session rather than from the caller, so the
         // chip follows a rename the moment it lands.
-        pane={
-          props.pane ? { ...props.pane, title: active.title || UNTITLED_SESSION } : undefined
-        }
+        pane={props.pane ? { ...props.pane, title: active.title || UNTITLED_SESSION } : undefined}
         onToggleSplit={splitAvailable ? () => setSplit((v) => !v) : undefined}
         splitActive={splitOpen}
         onClosePane={props.onClosePane}

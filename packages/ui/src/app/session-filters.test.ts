@@ -126,12 +126,17 @@ describe("groupSessions", () => {
   })
 
   it("groups by repo in first-seen order", () => {
-    const out = groupSessions(active, DEFAULT_FILTERS, idle)
+    const out = groupSessions(active, { ...DEFAULT_FILTERS, groupBy: "repo" }, idle)
     expect(out.map((g) => g.key)).toStrictEqual(["jingler", "gtm-grid"])
   })
 
   it("floats starred repos to the top without reordering the rest", () => {
-    const out = groupSessions(active, DEFAULT_FILTERS, idle, new Set(["gtm-grid"]))
+    const out = groupSessions(
+      active,
+      { ...DEFAULT_FILTERS, groupBy: "repo" },
+      idle,
+      new Set(["gtm-grid"])
+    )
     expect(out.map((g) => g.key)).toStrictEqual(["gtm-grid", "jingler"])
   })
 
@@ -142,7 +147,11 @@ describe("groupSessions", () => {
   })
 
   it("sorts within each group, not just across the whole list", () => {
-    const out = groupSessions(active, { ...DEFAULT_FILTERS, sortBy: "name" }, idle)
+    const out = groupSessions(
+      active,
+      { ...DEFAULT_FILTERS, groupBy: "repo", sortBy: "name" },
+      idle
+    )
     const jingler = out.find((g) => g.key === "jingler")!
     expect(jingler.sessions.map((x) => x.title)).toStrictEqual(["Alpha", "Charlie"])
   })

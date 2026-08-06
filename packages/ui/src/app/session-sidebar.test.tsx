@@ -12,6 +12,44 @@ const rowOrder = () =>
     el.getAttribute("data-testid")!.replace("session-row-", "")
   )
 
+describe("SessionSidebar session identity", () => {
+  it("shows repository, attention age, PR, execution location, and harness", () => {
+    render(
+      <SessionSidebar
+        activeSessionId="cloud-run"
+        onSelect={() => {}}
+        sessions={[
+          session({
+            id: "cloud-run",
+            repo: "jingler",
+            title: "Liquid glass sidebar",
+            status: "running",
+            cli: "codex",
+            executionLocation: "cloud",
+            prNumber: 5462
+          })
+        ]}
+        liveActivity={{
+          "cloud-run": {
+            kind: "running",
+            verb: "Running",
+            target: "pnpm test",
+            startedAt: Date.now() - 13 * 60_000
+          }
+        }}
+      />
+    )
+
+    expect(screen.getByText("jingler")).toBeTruthy()
+    expect(screen.getByText("Running 13m")).toBeTruthy()
+    expect(screen.getByText("#5462")).toBeTruthy()
+    expect(screen.getByTestId("session-location-cloud-run").getAttribute("title")).toBe(
+      "Cloud session"
+    )
+    expect(screen.getByTitle("Codex harness")).toBeTruthy()
+  })
+})
+
 describe("SessionSidebar archived sessions", () => {
   it("orders archived sessions by when they were ARCHIVED, not last updated", () => {
     // The regression: `sessions` arrives ordered by `updatedAt`. A session whose

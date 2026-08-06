@@ -55,8 +55,16 @@ describe("TabBar at width", () => {
   })
 
   it("shows the session title separately from the Conversation tab", () => {
-    renderAt(1200, { sessionTitle: "feat(signals): account-first resolution" })
+    renderAt(1200, {
+      repoName: "jingler",
+      sessionTitle: "feat(signals): account-first resolution"
+    })
+    expect(screen.getByText("jingler")).toBeTruthy()
+    expect(screen.getByText("/")).toBeTruthy()
     expect(screen.getByText("feat(signals): account-first resolution")).toBeTruthy()
+    expect(screen.getByTestId("conversation-tab").getAttribute("title")).toBe(
+      "jingler / feat(signals): account-first resolution (double-click to rename)"
+    )
     expect(screen.getByTestId("conversation-tab").tagName).toBe("DIV")
     expect(screen.getByRole("button", { name: "Conversation" })).toBeTruthy()
   })

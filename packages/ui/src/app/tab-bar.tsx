@@ -27,7 +27,8 @@ import { Badge } from "../components/badge.js"
 import { StatusDot } from "../components/status-dot.js"
 
 /** The icon-button styling every control in the right-hand cluster shares. */
-const ACTION_CLASS = "flex size-6 flex-none items-center justify-center rounded transition-colors hover:bg-hairline"
+const ACTION_CLASS =
+  "flex size-6 flex-none items-center justify-center rounded transition-colors hover:bg-hairline"
 
 /**
  * The pane's own actions, folded into one button.
@@ -49,11 +50,31 @@ function PaneActionsMenu({
   onMovePaneLeft?: () => void
   onMovePaneRight?: () => void
 }) {
-  const items: Array<{ label: string; icon: LucideIcon; active?: boolean; onSelect: () => void }> = []
+  const items: Array<{
+    label: string
+    icon: LucideIcon
+    active?: boolean
+    onSelect: () => void
+  }> = []
   if (onToggleSplit)
-    items.push({ label: "Split plan beside conversation", icon: PanelRight, active: splitActive, onSelect: onToggleSplit })
-  if (onMovePaneLeft) items.push({ label: "Move pane left", icon: ChevronLeft, onSelect: onMovePaneLeft })
-  if (onMovePaneRight) items.push({ label: "Move pane right", icon: ChevronRight, onSelect: onMovePaneRight })
+    items.push({
+      label: "Split plan beside conversation",
+      icon: PanelRight,
+      active: splitActive,
+      onSelect: onToggleSplit
+    })
+  if (onMovePaneLeft)
+    items.push({
+      label: "Move pane left",
+      icon: ChevronLeft,
+      onSelect: onMovePaneLeft
+    })
+  if (onMovePaneRight)
+    items.push({
+      label: "Move pane right",
+      icon: ChevronRight,
+      onSelect: onMovePaneRight
+    })
 
   // Nothing to collapse — render nothing rather than a button that opens onto an
   // empty menu. A single-pane group with no plan hits this.
@@ -116,7 +137,11 @@ const TITLE_WIDTH: Record<WidthTier, string | null> = {
 }
 
 /** Status tone → dot class. Literal on purpose — see the use site. */
-const DOT_TONE = { yellow: "bg-yellow", blue: "bg-blue", green: "bg-green" } as const
+const DOT_TONE = {
+  yellow: "bg-yellow",
+  blue: "bg-blue",
+  green: "bg-green"
+} as const
 
 /*
  * There is deliberately no `LABEL`/`ICON` lookup here.
@@ -160,6 +185,7 @@ export function TabBar({
   onChange,
   status,
   pane,
+  repoName,
   sessionTitle,
   onRenameTitle,
   chatSlot,
@@ -186,7 +212,11 @@ export function TabBar({
    * shows too. `detail` carries the specifics ("Running npm test -- auth") to
    * the hover title, where they can't grow the pill on every tool call.
    */
-  status?: { label: string; tone: "yellow" | "blue" | "green"; detail?: string }
+  status?: {
+    label: string
+    tone: "yellow" | "blue" | "green"
+    detail?: string
+  }
   /**
    * Which session this pane holds, when that is a question worth answering —
    * i.e. only in a split. A tab bar says what you can look at and never said
@@ -199,6 +229,8 @@ export function TabBar({
    * it and a chip would be a label on the only thing on screen.
    */
   pane?: { index: number; title: string; focused: boolean }
+  /** Repository prefix for the pane identity: `repo / session`. */
+  repoName?: string
   /**
    * The session's name, shown as the pane identity. Distinct from
    * `pane.title` (which is the same string, but only supplied in a split): the
@@ -252,6 +284,7 @@ export function TabBar({
   const collapseActions = !atLeast(tier, "mid")
   const titleWidth = TITLE_WIDTH[tier]
   const title = sessionTitle ?? pane?.title ?? "Conversation"
+  const identity = repoName ? `${repoName} / ${title}` : title
   const canRenameTitle = onRenameTitle !== undefined && titleWidth !== null
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
 
@@ -292,12 +325,12 @@ export function TabBar({
           coverage that reads the active session name.
         */}
         <div
-          aria-label={`Session title: ${title}`}
+          aria-label={`Session title: ${identity}`}
           data-testid={pane ? `pane-chip-${pane.index}` : "conversation-tab"}
           title={
             pane
-              ? `Pane ${pane.index + 1} — ${title} (double-click to rename)`
-              : `${title} (double-click to rename)`
+              ? `Pane ${pane.index + 1} — ${identity} (double-click to rename)`
+              : `${identity} (double-click to rename)`
           }
           tabIndex={canRenameTitle ? 0 : undefined}
           onDoubleClick={beginTitleEdit}
@@ -320,6 +353,14 @@ export function TabBar({
             </Badge>
           ) : (
             <MessagesSquare className="size-3.5 flex-none text-dim" />
+          )}
+          {repoName && titleWidth && (
+            <>
+              <span className="max-w-[92px] truncate text-muted-foreground">{repoName}</span>
+              <span aria-hidden className="text-dim">
+                /
+              </span>
+            </>
           )}
           {titleWidth ? (
             titleDraft !== null ? (
