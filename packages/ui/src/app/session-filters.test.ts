@@ -101,6 +101,30 @@ describe("sortSessions", () => {
     expect(out.map((x) => x.id)).toStrictEqual(["b", "d", "c", "a"])
   })
 
+  it("defaults to visible attention groups instead of one recency stream", () => {
+    const byId: Record<string, SessionDisplayStatus> = {
+      a: "idle",
+      b: "needs-input",
+      c: "running"
+    }
+    const out = groupSessions(
+      SESSIONS.slice(0, 3),
+      DEFAULT_FILTERS,
+      (x) => byId[x.id]!
+    )
+
+    expect(out.map((group) => group.key)).toStrictEqual([
+      "needs-input",
+      "running",
+      "idle"
+    ])
+    expect(out.flatMap((group) => group.sessions.map((item) => item.id))).toStrictEqual([
+      "b",
+      "c",
+      "a"
+    ])
+  })
+
   it("does not mutate its input", () => {
     const input = SESSIONS.slice(0, 3)
     const before = input.map((x) => x.id)

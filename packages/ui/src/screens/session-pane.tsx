@@ -2,7 +2,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import type { DiffStat, Session, SessionActivity, SessionDisplayStatus } from "@jingler/core"
 import { activityLabel, displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
 import { displayStatusLabel } from "../tokens.js"
-import { atLeast, usePaneWidth, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js"
+import { usePaneWidth, WidthTierProvider } from "../hooks/width-tier.js"
 import { ResizeHandle } from "../components/resizable.js"
 import { TabBar } from "../app/tab-bar.js"
 import {
@@ -19,23 +19,27 @@ import { ConversationView } from "../app/conversation-view.js"
 import { SEED_CONVERSATION } from "../seed.js"
 import { BuiltinStubScreen } from "./stub-screen.js"
 import {
-  clampedSessionBrowserRatio,
-  DEFAULT_SESSION_BROWSER_RATIO,
-  resizedSessionBrowserRatio,
-  SESSION_BROWSER_SPLIT_BREAKPOINT,
-  SESSION_BROWSER_SPLIT_HANDLE_WIDTH
-} from "../app/session-browser-split.js"
+  clampedSessionAuxiliaryRatio,
+  DEFAULT_SESSION_AUXILIARY_RATIO,
+  resizedSessionAuxiliaryRatio,
+  SESSION_AUXILIARY_SPLIT_BREAKPOINT,
+  SESSION_AUXILIARY_SPLIT_HANDLE_WIDTH
+} from "../app/session-auxiliary-split.js"
 
-const SESSION_BROWSER_RATIO_KEY = "sb.split.session-browser.ratio"
+const SESSION_AUXILIARY_RATIO_KEY = "sb.split.session-auxiliary.ratio"
+const LEGACY_SESSION_BROWSER_RATIO_KEY = "sb.split.session-browser.ratio"
 
-const initialSessionBrowserRatio = (): number => {
+const initialSessionAuxiliaryRatio = (): number => {
   try {
-    const stored = Number(localStorage.getItem(SESSION_BROWSER_RATIO_KEY))
+    const stored = Number(
+      localStorage.getItem(SESSION_AUXILIARY_RATIO_KEY) ??
+        localStorage.getItem(LEGACY_SESSION_BROWSER_RATIO_KEY)
+    )
     return Number.isFinite(stored) && stored > 0 && stored < 1
       ? stored
-      : DEFAULT_SESSION_BROWSER_RATIO
+      : DEFAULT_SESSION_AUXILIARY_RATIO
   } catch {
-    return DEFAULT_SESSION_BROWSER_RATIO
+    return DEFAULT_SESSION_AUXILIARY_RATIO
   }
 }
 
@@ -240,35 +244,36 @@ function SessionPaneBody(props: SessionPaneProps) {
   } | null>(null)
   const [split, setSplit] = useState(false)
   const paneWidth = usePaneWidth().width
-  const roomy = atLeast(useWidthTier(), "wide")
-  const [browserRatio, setBrowserRatio] = useState(initialSessionBrowserRatio)
-  const effectiveBrowserRatio = clampedSessionBrowserRatio(browserRatio, paneWidth)
-  const adjustBrowserSplit = useCallback(
+  const supportsAuxiliarySplit =
+    paneWidth === 0 || paneWidth >= SESSION_AUXILIARY_SPLIT_BREAKPOINT
+  const [auxiliaryRatio, setAuxiliaryRatio] = useState(initialSessionAuxiliaryRatio)
+  const effectiveAuxiliaryRatio = clampedSessionAuxiliaryRatio(auxiliaryRatio, paneWidth)
+  const adjustAuxiliarySplit = useCallback(
     (deltaX: number) => {
       if (paneWidth <= 0) return
-      const next = resizedSessionBrowserRatio(effectiveBrowserRatio, paneWidth, deltaX)
-      setBrowserRatio(next)
+      const next = resizedSessionAuxiliaryRatio(effectiveAuxiliaryRatio, paneWidth, deltaX)
+      setAuxiliaryRatio(next)
       try {
-        localStorage.setItem(SESSION_BROWSER_RATIO_KEY, String(next))
+        localStorage.setItem(SESSION_AUXILIARY_RATIO_KEY, String(next))
       } catch {
         /* A private/quota-limited renderer still keeps the in-memory ratio. */
       }
     },
-    [effectiveBrowserRatio, paneWidth]
+    [effectiveAuxiliaryRatio, paneWidth]
   )
   const openPlanReview = useCallback(
     (stepId?: string) => {
       setTarget(stepId ? { sessionId: props.session.id, stepId } : null)
-      // On a roomy pane Plan Review defaults beside chat. A narrow pane cannot
-      // preserve both columns' usable minimum, so it keeps the full-width tab.
-      if (roomy) {
+      // Plan follows the same responsive boundary as every other auxiliary
+      // view: two thirds beside chat when there is room, full-width otherwise.
+      if (supportsAuxiliarySplit) {
         setTab(BUILTIN_TAB.conversation)
         setSplit(true)
       } else {
         setTab(BUILTIN_TAB.plan)
       }
     },
-    [props.session.id, roomy]
+    [props.session.id, supportsAuxiliarySplit]
   )
   const presentPlanDraft = useCallback(() => openPlanReview(), [openPlanReview])
 
@@ -407,11 +412,15 @@ function SessionPaneBody(props: SessionPaneProps) {
   const activeContribution = tabs.find((c) => c.id === tab) ?? tabs[0]
   const activeTab = activeContribution?.id ?? BUILTIN_TAB.conversation
   const conversationContribution = tabs.find((c) => c.id === BUILTIN_TAB.conversation)
-  // At 960px, the default thirds yield a 320px chat and a 640px browser. Any
-  // narrower and both stop being useful, so Browser takes the full pane.
-  const browserSplitOpen =
-    activeTab === BUILTIN_TAB.browser &&
-    (paneWidth === 0 || paneWidth >= SESSION_BROWSER_SPLIT_BREAKPOINT)
+  // Every auxiliary view follows the Browser layout: at 960px, the default
+  // thirds yield a 320px chat and a 640px work surface. Any narrower and both
+  // stop being useful, so the selected view takes the full pane. Plan is the one
+  // exception in shape only: its shared conversation subtree already owns an
+  // equivalent two-thirds split and its responsive fallback.
+  const auxiliarySplitOpen =
+    activeTab !== BUILTIN_TAB.conversation &&
+    activeTab !== BUILTIN_TAB.plan &&
+    supportsAuxiliarySplit
   useEffect(() => {
     props.onActiveTabChange?.(active.id, activeTab)
   }, [active.id, activeTab, props.onActiveTabChange])
@@ -420,26 +429,15 @@ function SessionPaneBody(props: SessionPaneProps) {
   // tab collapses the split — otherwise a plan-less session would leave an empty
   // column pinned open with no control on screen to close it.
   //
-  // …and it now also needs ROOM. The plan column has a 360px floor and never
-  // collapsed, so in a 500px pane the transcript beside it was squeezed to about
-  // 35px. Below `wide` the split is simply not offered — the Plan Review tab is
-  // the same screen at full width, one click away, so nothing is lost but the
-  // side-by-side reading the pane couldn't have delivered anyway.
-  //
-  // The hook is HOISTED out of the `&&` chain. Inline as the third operand it
-  // was skipped whenever either of the first two was false, so it ran on some
-  // renders and not others — a Rules of Hooks violation that today's React
-  // happens to tolerate only because `useContext` doesn't occupy a slot in the
-  // hook list. Give `useWidthTier` any internal state (a `useSyncExternalStore`
-  // selector, say) and that becomes "rendered fewer hooks than expected". The
-  // same rule is spelled out in `issue-view.tsx` and `pull-request-view.tsx`;
-  // it applies here too — and `useHookAtTopLevel` now enforces it.
+  // The plan column has a 360px floor. Below the shared 960px auxiliary-view
+  // boundary, Plan Review becomes the full-width tab instead of squeezing chat
+  // into a sliver.
   const splitAvailable =
     activeTab === BUILTIN_TAB.conversation &&
     // The plan tab is now always present; only offer the split once there is an
     // actual plan to show beside the conversation.
     tabCtx.hasPlan &&
-    roomy
+    supportsAuxiliarySplit
   const splitOpen = split && splitAvailable
   // What this session's agent is doing — drives the tab bar's pill.
   const activeActivity = props.liveActivity?.[active.id] ?? null
@@ -523,13 +521,28 @@ function SessionPaneBody(props: SessionPaneProps) {
           session never hands the new session's data to the old subtree.
         */}
         <div
-          key={`${browserSplitOpen ? "browser-split" : (activeContribution?.mountGroup ?? activeTab)}:${active.id}`}
+          key={`${
+            auxiliarySplitOpen
+              ? `auxiliary-split:${activeContribution?.mountGroup ?? activeTab}`
+              : (activeContribution?.mountGroup ?? activeTab)
+          }:${active.id}`}
           className="flex min-h-0 min-w-0 flex-1"
         >
-          {browserSplitOpen ? (
-            <div data-testid="session-browser-split" className="flex min-h-0 min-w-0 flex-1">
+          {auxiliarySplitOpen ? (
+            <div
+              data-testid={
+                activeTab === BUILTIN_TAB.browser
+                  ? "session-browser-split"
+                  : "session-auxiliary-split"
+              }
+              className="flex min-h-0 min-w-0 flex-1"
+            >
               <div
-                data-testid="session-browser-chat"
+                data-testid={
+                  activeTab === BUILTIN_TAB.browser
+                    ? "session-browser-chat"
+                    : "session-auxiliary-chat"
+                }
                 className="flex min-h-0 min-w-0 flex-1 overflow-hidden"
               >
                 {conversationContribution?.render(active, {
@@ -537,11 +550,18 @@ function SessionPaneBody(props: SessionPaneProps) {
                   activeTabId: BUILTIN_TAB.conversation
                 })}
               </div>
-              <ResizeHandle aria-label="Resize session browser" onResize={adjustBrowserSplit} />
+              <ResizeHandle
+                aria-label={`Resize ${activeContribution?.label ?? "session view"}`}
+                onResize={adjustAuxiliarySplit}
+              />
               <div
-                data-testid="session-browser-panel"
+                data-testid={
+                  activeTab === BUILTIN_TAB.browser
+                    ? "session-browser-panel"
+                    : "session-auxiliary-panel"
+                }
                 style={{
-                  width: `calc(${effectiveBrowserRatio * 100}% - ${effectiveBrowserRatio * SESSION_BROWSER_SPLIT_HANDLE_WIDTH}px)`
+                  width: `calc(${effectiveAuxiliaryRatio * 100}% - ${effectiveAuxiliaryRatio * SESSION_AUXILIARY_SPLIT_HANDLE_WIDTH}px)`
                 }}
                 className="flex min-h-0 min-w-0 flex-none overflow-hidden"
               >

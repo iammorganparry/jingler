@@ -432,6 +432,67 @@ describe("SessionPane", () => {
     expect(screen.getByText("files for a")).toBeTruthy()
   })
 
+  it("opens every auxiliary view beside chat when the pane is wide", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        renderConversation={(s) => <div>transcript for {s.id}</div>}
+        renderFiles={(s) => <div>files for {s.id}</div>}
+        renderPullRequest={(s) => <div>pull request for {s.id}</div>}
+        renderCode={(s) => <div>changes for {s.id}</div>}
+        tabContributions={[pluginTab("linear.issues")]}
+      />
+    )
+
+    for (const [tabName, body] of [
+      ["Files", "files for a"],
+      ["Pull Request", "pull request for a"],
+      ["Changes", "changes for a"],
+      ["linear.issues", "linear.issues body"]
+    ]) {
+      fireEvent.click(screen.getByRole("button", { name: tabName }))
+      expect(screen.getByTestId("session-auxiliary-split")).toBeTruthy()
+      expect(screen.getByTestId("session-auxiliary-chat").textContent).toContain(
+        "transcript for a"
+      )
+      expect(screen.getByTestId("session-auxiliary-panel").textContent).toContain(body)
+      expect(
+        screen.getByRole("separator", { name: `Resize ${tabName}` })
+      ).toBeTruthy()
+    }
+  })
+
+  it("gives an auxiliary view the full pane below the responsive breakpoint", async () => {
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({
+        x: 0,
+        y: 0,
+        top: 0,
+        right: 600,
+        bottom: 800,
+        left: 0,
+        width: 600,
+        height: 800,
+        toJSON: () => ({})
+      })
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        renderConversation={(s) => <div>transcript for {s.id}</div>}
+        renderFiles={(s) => <div>files for {s.id}</div>}
+      />
+    )
+
+    await screen.findByRole("button", { name: "Files" })
+    fireEvent.click(screen.getByRole("button", { name: "Files" }))
+
+    expect(screen.queryByTestId("session-auxiliary-split")).toBeNull()
+    expect(screen.getByText("files for a")).toBeTruthy()
+    expect(screen.queryByText("transcript for a")).toBeNull()
+    rect.mockRestore()
+  })
+
   it("routes a Files code reference to Conversation in the same session pane", () => {
     render(
       <SessionPane

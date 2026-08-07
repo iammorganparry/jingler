@@ -39,14 +39,14 @@ export interface SessionFilters {
 /**
  * Today's behaviour, expressed as a filter set.
  *
- * The default is one attention-ranked recency stream: sessions blocked on the
- * operator come first, agents working independently follow, and idle sessions
- * trail; recency breaks ties inside each band.
+ * The default is an attention-grouped list: sessions blocked on the operator
+ * come first, agents working independently follow, and idle sessions trail;
+ * recency orders rows inside each visible group.
  */
 export const DEFAULT_FILTERS: SessionFilters = {
   status: "active",
   repo: null,
-  groupBy: "none",
+  groupBy: "status",
   sortBy: "status"
 }
 
