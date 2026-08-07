@@ -409,6 +409,15 @@ const memoryAccess = () =>
     ),
   );
 
+const memoryRecover = () =>
+  Effect.flatMap(MemoryService, (service) => service.recoverCaptures()).pipe(
+    Effect.flatMap((result) =>
+      result === null
+        ? Effect.fail(memoryUiFailure("Memory recovery requires an enabled organization", 401))
+        : Effect.succeed(result),
+    ),
+  );
+
 const memoryDashboard = (organizationId: string, range: string) =>
   memoryTool(organizationId, "memory_dashboard", { range }).pipe(
     Effect.flatMap((value) =>
@@ -610,6 +619,7 @@ const memoryRpcRequest = (input: {
     | "page"
     | "reviews"
     | "review"
+    | "recover"
     | "export";
   readonly range?: string;
   readonly limit?: number;
@@ -649,6 +659,8 @@ const memoryRpcRequest = (input: {
         );
       }
       return memoryReview(organizationId, input.proposalId, input.action);
+    case "recover":
+      return memoryRecover();
     case "export":
       return memoryExport(organizationId);
   }

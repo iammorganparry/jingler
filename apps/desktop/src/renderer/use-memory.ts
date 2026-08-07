@@ -20,6 +20,7 @@ const layoutIdentity = (graph: object | null): number => {
 
 const memoryMachine = createMemoryMachine({
   access: rpc.memoryAccess,
+  recover: rpc.memoryRecover,
   configure: async (organizationId) => {
     await rpc.memoryConfigure({ enabled: true, organizationId })
     return rpc.memoryAccess()
@@ -109,6 +110,7 @@ export function useMemory() {
   const open = useCallback(() => send({ type: "OPEN" }), [send])
   const close = useCallback(() => send({ type: "CLOSE" }), [send])
   const retry = useCallback(() => send({ type: "RETRY" }), [send])
+  const recover = useCallback(() => send({ type: "RECOVER" }), [send])
   const changeOrganization = useCallback((organizationId: string) => send({ type: "ORGANIZATION.CHANGE", organizationId }), [send])
   const changeRange = useCallback((range: string) => send({ type: "RANGE.CHANGE", range }), [send])
   const navigate = useCallback((target: MemoryDeepLink) => send({ type: "NAVIGATE", target }), [send])
@@ -137,6 +139,7 @@ export function useMemory() {
     loading: snapshot.matches("checking") || snapshot.matches("loading") || snapshot.matches("nodeLoading") || snapshot.matches("edgeLoading") || snapshot.matches("pageLoading") || snapshot.matches("searching"),
     reviewing: snapshot.matches("reviewing"),
     exporting: snapshot.matches("exporting"),
+    recovering: snapshot.matches("recovering"),
     conflict: snapshot.context.reviewResult?.status === "conflict",
     context: snapshot.context,
     positions,
@@ -145,6 +148,7 @@ export function useMemory() {
     open,
     close,
     retry,
+    recover,
     changeOrganization,
     changeRange,
     navigate,

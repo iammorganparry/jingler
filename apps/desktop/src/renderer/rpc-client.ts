@@ -96,6 +96,7 @@ import {
   JinglerCoreRpcs,
   JinglerReviewRpcs,
   MemoryAccess as MemoryAccessSchema,
+  MemoryCaptureRecovery as MemoryCaptureRecoverySchema,
   MemoryDashboardSummary as MemoryDashboardSummarySchema,
   MemoryEdgeEvidence as MemoryEdgeEvidenceSchema,
   MemoryExport as MemoryExportSchema,
@@ -105,6 +106,7 @@ import {
   MemoryReviewResult as MemoryReviewResultSchema,
   MemorySearchResult as MemorySearchResultSchema,
   type MemoryAccess,
+  type MemoryCaptureRecovery,
   type MemoryDashboardSummary,
   type MemoryEdgeEvidence,
   type MemoryExport,
@@ -250,6 +252,10 @@ export const rpc = {
     ),
   memoryConfigure: (memory: MemoryConfig): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setMemory(memory)),
+  memoryRecover: (): Promise<MemoryCaptureRecovery> =>
+    run((c) => c.Memory.request({ operation: "recover" })).then((value) =>
+      decodeMemoryResult(MemoryCaptureRecoverySchema, value)
+    ),
   memoryDashboard: (organizationId: string, range: string): Promise<MemoryDashboardSummary> =>
     run((c) => c.Memory.request({ organizationId, operation: "dashboard", range })).then((value) =>
       decodeMemoryResult(MemoryDashboardSummarySchema, value)

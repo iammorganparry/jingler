@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures.js"
+import { startFakeAuthServer } from "./fake-auth.js"
 
 const HEALTH_FINDINGS = /Health findings/
 const FILTERED_NODE_COUNT = /1\/10000 nodes/
@@ -33,4 +34,32 @@ test("eligible team members open bounded Memory views from the persistent sideba
   await expect(window.getByText(FILTERED_NODE_COUNT)).toBeVisible()
   await window.getByTestId("memory-node-page:alpha").click()
   await expect(window.getByTestId("memory-inspector")).toContainText("page:alpha")
+})
+
+test("a failed Memory workspace stays navigable and recovers queued captures", async ({ launchApp }) => {
+  const fake = await startFakeAuthServer()
+  try {
+    const { window } = await launchApp({
+      authServer: fake,
+      configured: true,
+      config: { memory: { enabled: true, organizationId: "org-e2e" } }
+    })
+    await expect(window.getByTestId("memory-sidebar-item")).toBeVisible()
+
+    fake.setMemoryAvailable(false)
+    await window.getByTestId("memory-sidebar-item").click()
+    const recoveryAlert = window.getByRole("alert")
+    await expect(recoveryAlert).toContainText("unavailable or unauthorized")
+
+    await window.getByRole("button", { name: "Map" }).click()
+    await expect(window.getByRole("button", { name: "Map" })).toHaveAttribute("aria-current", "page")
+    await expect(recoveryAlert).toBeVisible()
+
+    fake.setMemoryAvailable(true)
+    await window.getByRole("button", { name: "Recover memory" }).click()
+    await expect(window.getByTestId("memory-map-canvas")).toBeVisible()
+    await expect(window.getByText("0 queued memory captures recovered.")).toBeVisible()
+  } finally {
+    await fake.close()
+  }
 })

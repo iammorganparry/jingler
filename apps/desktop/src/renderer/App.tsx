@@ -52,6 +52,7 @@ import {
   Download,
   LayoutDashboard,
   Map as MapIcon,
+  RotateCcw,
   Search,
 } from "lucide-react";
 import { appMachine } from "./app-machine.js";
@@ -386,11 +387,36 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
               </button>
             ))}
           </nav>
+          {(context.error !== null || context.recovery !== null) && (
+            <div
+              role="alert"
+              className="flex flex-none items-center justify-between gap-3 border-b border-line bg-surface px-3 py-2"
+            >
+              <p className="min-w-0 text-[10.5px] text-text">
+                {context.error !== null
+                  ? context.error
+                  : context.recovery?.retained
+                    ? `${context.recovery.retained} memory capture${context.recovery.retained === 1 ? "" : "s"} remain safely queued.`
+                    : `${context.recovery?.delivered ?? 0} queued memory capture${context.recovery?.delivered === 1 ? "" : "s"} recovered.`}
+              </p>
+              {context.error !== null && (
+                <button
+                  type="button"
+                  disabled={memory.recovering}
+                  onClick={memory.recover}
+                  className="flex flex-none items-center gap-1.5 rounded-md border border-line bg-sunken px-2.5 py-1.5 text-[10.5px] text-text-bright outline-none hover:bg-panel focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                >
+                  <RotateCcw size={12} className={memory.recovering ? "animate-spin" : undefined} />
+                  {memory.recovering ? "Recovering…" : "Recover memory"}
+                </button>
+              )}
+            </div>
+          )}
           {context.view === "dashboard" && (
             <MemoryDashboard
               summary={context.summary}
               loading={memory.loading}
-              error={context.error}
+              error={null}
               onNavigate={memory.navigate}
               onRetry={memory.retry}
             />
@@ -1136,7 +1162,7 @@ function AuthedApp({
     if (!autoDetect) return;
     for (const id of completed) {
       const session = sessions.find((candidate) => candidate.id === id);
-      if (!session || !canUseGitHubForSession(session)) continue;
+      if (!(session && canUseGitHubForSession(session))) continue;
       void rpc.githubDetectPr(id).then((n) => {
         if (n != null) {
           send({ type: "SESSION_PR_LINKED", sessionId: id, prNumber: n });

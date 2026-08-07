@@ -114,6 +114,13 @@ const reviewFixture: MemoryApi["review"] = async (_organizationId, proposalId) =
 
 const api: MemoryApi = {
   access: vi.fn(async () => access),
+  recover: vi.fn(async () => ({
+    queuedBefore: 0,
+    delivered: 0,
+    retained: 0,
+    discarded: 0,
+    lastFailureStatus: null
+  })),
   configure: vi.fn(async (organizationId: string) => ({
     ...access,
     selectedOrganizationId: organizationId
@@ -236,6 +243,46 @@ describe("memoryMachine", () => {
     await waitFor(actor, (snapshot) => snapshot.matches("ready"))
     expect(failing.configure).toHaveBeenCalledWith("org-b")
     expect(actor.getSnapshot().context.organizationId).toBe("org-b")
+  })
+
+  it("keeps failed views navigable and reloads after durable capture recovery", async () => {
+    let available = false
+    const recoverable: MemoryApi = {
+      ...api,
+      dashboard: vi.fn(async (organizationId: string) => {
+        if (!available) throw new Error("memory unavailable")
+        return summary(organizationId)
+      }),
+      recover: vi.fn(async () => {
+        available = true
+        return {
+          queuedBefore: 2,
+          delivered: 2,
+          retained: 0,
+          discarded: 0,
+          lastFailureStatus: null
+        }
+      })
+    }
+    const actor = createActor(createMemoryMachine(recoverable)).start()
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+    actor.send({ type: "OPEN" })
+    await waitFor(actor, (snapshot) => snapshot.matches("failed"))
+
+    actor.send({ type: "NAVIGATE", target: { view: "map" } })
+    expect(actor.getSnapshot()).toMatchObject({
+      value: "failed",
+      context: { view: "map", error: "memory unavailable" }
+    })
+
+    actor.send({ type: "RECOVER" })
+    await waitFor(actor, (snapshot) => snapshot.matches("ready"))
+    expect(recoverable.recover).toHaveBeenCalledOnce()
+    expect(actor.getSnapshot().context.recovery).toMatchObject({
+      queuedBefore: 2,
+      delivered: 2,
+      retained: 0
+    })
   })
 
   it("runs a search queued while a page is still loading", async () => {

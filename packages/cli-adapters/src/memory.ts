@@ -35,6 +35,7 @@ import { SecretStore } from "./secret-store.js"
 const MEMORY_SERVER_NAME = "jingler-memory"
 const MEMORY_AUTH_ENVIRONMENT = "JINGLER_MEMORY_AUTHORIZATION"
 const DEFAULT_TIMEOUT_MS = 1_500
+const CAPTURE_TIMEOUT_MS = 8_000
 // UI reads (dashboard/graph/export/suggestions) hop through the Next.js server,
 // which budgets MEMORY_REQUEST_TIMEOUT_MS (5s) for its own call to the Worker; a
 // cold Durable Object or a large vault can consume most of it. The desktop must
@@ -53,10 +54,6 @@ const MAX_RECALL_SCOPES = 128
 // eviction path (below) covers server-side revocation and expiry races.
 const GRANT_REFRESH_MARGIN_SECONDS = 30
 const ATTACHMENT_BACKGROUND_REFRESH_SECONDS = 5 * 60
-// A capture that keeps failing to deliver is dropped rather than re-attempted on
-// every drain forever — bounded by attempt count and by age.
-const MAX_CAPTURE_ATTEMPTS = 5
-const MAX_CAPTURE_AGE_SECONDS = 7 * 24 * 60 * 60
 const MCP_TOOL_PREFIX_PATTERN = /^mcp__jingler[-_]memory__/
 const LEADING_SLASH_PATTERN = /^\/+/
 const PRIVATE_KEY_PATTERN = /-----BEGIN [^-\r\n]+-----[\s\S]*?-----END [^-\r\n]+-----/g
@@ -214,6 +211,8 @@ export interface MemoryServiceShape {
   readonly captureSettledSession: (
     input: MemorySessionDigestInput
   ) => Effect.Effect<boolean, never, MemoryServiceEnvironment>
+  /** Retry every locally queued capture without discarding transient failures. */
+  readonly recoverCaptures: () => Effect.Effect<MemoryCaptureRecoveryResult | null, never, MemoryServiceEnvironment>
   /** Resolve renderer-safe eligibility; the grant itself remains in this service. */
   readonly access: () => Effect.Effect<MemoryUiAccess | null, never, MemoryServiceEnvironment>
   /** Perform one stateless MCP tool call without exposing request credentials. */
@@ -257,6 +256,8 @@ export interface MemoryServiceOptions {
   readonly baseUrl?: () => string
   readonly nowSeconds?: () => number
   readonly timeoutMs?: number
+  /** Timeout for the complete desktop -> server -> Worker capture path. */
+  readonly captureTimeoutMs?: number
   /** Timeout for interactive UI reads; defaults to UI_REQUEST_TIMEOUT_MS. */
   readonly uiTimeoutMs?: number
   /** App-lifetime loopback proxy; omitted by pure unit-test service instances. */
@@ -268,6 +269,7 @@ interface MemoryRuntime {
   readonly baseUrl: () => string
   readonly nowSeconds: () => number
   readonly timeoutMs: number
+  readonly captureTimeoutMs: number
   readonly uiTimeoutMs: number
   readonly proxy: MemoryMcpProxy | undefined
   readonly queuedCaptures: Set<string>
@@ -282,7 +284,8 @@ interface MemoryRuntime {
   readonly attachmentRefreshes: Set<string>
   /** Last accepted recall working set per active conversation. */
   readonly recallCache: Map<string, RecallCacheEntry>
-  draining: boolean
+  /** Serializes automatic and user-triggered recovery drains. */
+  readonly drainLock: Effect.Semaphore
 }
 
 interface CachedMemoryAttachment {
@@ -298,10 +301,18 @@ interface MemoryCaptureJob {
   readonly settledAt: string
   readonly content: string
   readonly retrieval: MemoryRetrievalSummary
-  /** Delivery attempts so far; drives the dead-job drop below. */
+  /** Delivery attempts so far; diagnostic only, never a deletion boundary. */
   readonly attempts: number
-  /** Unix seconds the job was first enqueued; drives the max-age drop. */
+  /** Unix seconds the job was first enqueued. */
   readonly firstSeenAt: number
+}
+
+export interface MemoryCaptureRecoveryResult {
+  readonly queuedBefore: number
+  readonly delivered: number
+  readonly retained: number
+  readonly discarded: number
+  readonly lastFailureStatus: number | null
 }
 
 const MemoryCaptureJob = Schema.Struct({
@@ -862,7 +873,7 @@ const postDigest = (options: {
   readonly digestId: string
   readonly input: MemorySessionDigestInput
   readonly content: string
-}): Effect.Effect<boolean> => {
+}): Effect.Effect<{ readonly delivered: boolean; readonly status: number }> => {
   const { runtime, selection, issued, digestId, input, content } = options
   return Effect.tryPromise({
     try: async () => {
@@ -886,13 +897,17 @@ const postDigest = (options: {
             content,
             retrieval: safeRetrieval(input.retrieval)
           }),
-          signal: AbortSignal.timeout(runtime.timeoutMs)
+          signal: AbortSignal.timeout(runtime.captureTimeoutMs)
         }
       )
-      return response.ok
+      return { delivered: response.ok, status: response.status }
     },
     catch: () => new MemoryRequestError({ status: 0 })
-  }).pipe(Effect.orElseSucceed(() => false))
+  }).pipe(
+    Effect.catchAll((error) =>
+      Effect.succeed({ delivered: false, status: error.status })
+    )
+  )
 }
 
 const outboxFile = (paths: AppPathsShape): string =>
@@ -936,9 +951,7 @@ const enqueueCapture = (
   ).pipe(Effect.orElseSucceed(() => "failed" as const))
 
 const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
-  Effect.gen(function* () {
-    if (runtime.draining) return
-    runtime.draining = true
+  runtime.drainLock.withPermits(1)(Effect.gen(function* () {
     // Snapshot under the lock, then send UNLOCKED so a concurrent enqueue is not
     // blocked for the length of the network round-trips.
     const jobs = yield* runtime.outboxLock.withPermits(1)(readOutbox)
@@ -948,6 +961,7 @@ const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
     const sent = new Set<string>()
     const dropped = new Set<string>()
     const retried = new Map<string, number>()
+    let lastFailureStatus: number | null = null
     for (const job of jobs) {
       const selection = { organizationId: job.organizationId, token }
       const outcome = yield* requestGrant(runtime, selection).pipe(
@@ -968,27 +982,26 @@ const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
               settledAt: job.settledAt,
               retrieval: job.retrieval
             }
-          }).pipe(Effect.map((ok) => (ok ? ("sent" as const) : ("failed" as const))))
+          }).pipe(Effect.map((result) => result.delivered
+            ? ({ kind: "sent" as const })
+            : ({ kind: "failed" as const, status: result.status })))
         ),
-        // A 403 on the grant means the user has lost membership of this org —
-        // the job can never succeed, so drop it. Any other transient error is a
-        // retry candidate, bounded by attempts/age below.
-        Effect.catchAll((error) =>
-          Effect.succeed(error.status === 403 ? ("forbidden" as const) : ("failed" as const))
-        )
+        // A 403 while minting the grant means the user has lost membership of
+        // this org, so the job cannot be delivered. Every other failure remains
+        // recoverable regardless of its diagnostic attempt count.
+        Effect.catchAll((error) => Effect.succeed(
+          error.status === 403
+            ? ({ kind: "forbidden" as const })
+            : ({ kind: "failed" as const, status: error.status })
+        ))
       )
-      if (outcome === "sent") {
+      if (outcome.kind === "sent") {
         sent.add(job.id)
-      } else if (outcome === "forbidden") {
+      } else if (outcome.kind === "forbidden") {
         dropped.add(job.id)
       } else {
-        const attempts = job.attempts + 1
-        const firstSeenAt = job.firstSeenAt > 0 ? job.firstSeenAt : now
-        if (attempts >= MAX_CAPTURE_ATTEMPTS || now - firstSeenAt > MAX_CAPTURE_AGE_SECONDS) {
-          dropped.add(job.id)
-        } else {
-          retried.set(job.id, attempts)
-        }
+        lastFailureStatus = outcome.status
+        retried.set(job.id, Math.min(Number.MAX_SAFE_INTEGER, job.attempts + 1))
       }
     }
     // Re-read under the lock so captures enqueued mid-drain are preserved rather
@@ -999,7 +1012,7 @@ const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
         Effect.gen(function* () {
           const current = yield* readOutbox
           const next = current
-            .filter((candidate) => !sent.has(candidate.id) && !dropped.has(candidate.id))
+            .filter((candidate) => !(sent.has(candidate.id) || dropped.has(candidate.id)))
             .map((candidate) => {
               const attempts = retried.get(candidate.id)
               return attempts === undefined
@@ -1014,10 +1027,20 @@ const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
         })
       )
     }
-  }).pipe(
-    Effect.ensuring(Effect.sync(() => { runtime.draining = false })),
-    Effect.ignore
-  )
+    return {
+      queuedBefore: jobs.length,
+      delivered: sent.size,
+      retained: retried.size,
+      discarded: dropped.size,
+      lastFailureStatus
+    } satisfies MemoryCaptureRecoveryResult
+  })).pipe(Effect.orElseSucceed(() => ({
+    queuedBefore: 0,
+    delivered: 0,
+    retained: 0,
+    discarded: 0,
+    lastFailureStatus: 0
+  })))
 
 export const makeMemoryService = (
   options: MemoryServiceOptions = {}
@@ -1027,6 +1050,7 @@ export const makeMemoryService = (
     baseUrl: options.baseUrl ?? configuredBaseUrl,
     nowSeconds: options.nowSeconds ?? (() => Math.floor(Date.now() / 1_000)),
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    captureTimeoutMs: options.captureTimeoutMs ?? CAPTURE_TIMEOUT_MS,
     uiTimeoutMs: options.uiTimeoutMs ?? UI_REQUEST_TIMEOUT_MS,
     proxy: options.proxy,
     queuedCaptures: new Set<string>(),
@@ -1037,7 +1061,7 @@ export const makeMemoryService = (
     attachmentLock: Effect.unsafeMakeSemaphore(1),
     attachmentRefreshes: new Set<string>(),
     recallCache: new Map<string, RecallCacheEntry>(),
-    draining: false
+    drainLock: Effect.unsafeMakeSemaphore(1)
   }
   const attachment = (cli: CliKind, query?: string, recallScope?: string) =>
     cli === "cursor"
@@ -1167,6 +1191,15 @@ export const makeMemoryService = (
       })
     )
 
+  const recoverCaptures = () =>
+    selectedMemory.pipe(
+      Effect.flatMap((selection) =>
+        selection === null
+          ? Effect.succeed(null)
+          : drainCaptureOutbox(runtime, selection.token)
+      )
+    )
+
   const uiRequest = (input: MemoryUiRequest) =>
     selectedMemory.pipe(
       Effect.flatMap((selection) => {
@@ -1194,7 +1227,7 @@ export const makeMemoryService = (
       }
     })
 
-  return { attachment, captureSettledSession, access, uiRequest, suggestions }
+  return { attachment, captureSettledSession, recoverCaptures, access, uiRequest, suggestions }
 }
 
 export class MemoryService extends Effect.Service<MemoryService>()("@jingler/MemoryService", {

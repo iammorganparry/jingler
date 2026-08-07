@@ -144,6 +144,16 @@ export const MemoryAccess = Schema.Struct({
 })
 export type MemoryAccess = Schema.Schema.Type<typeof MemoryAccess>
 
+/** Renderer-safe result of retrying the desktop's durable capture outbox. */
+export const MemoryCaptureRecovery = Schema.Struct({
+  queuedBefore: Schema.Number,
+  delivered: Schema.Number,
+  retained: Schema.Number,
+  discarded: Schema.Number,
+  lastFailureStatus: Schema.NullOr(Schema.Number)
+})
+export type MemoryCaptureRecovery = Schema.Schema.Type<typeof MemoryCaptureRecovery>
+
 export const MemoryDailyGrowth = Schema.Struct({
   day: Schema.String,
   pages: Schema.Number,
@@ -1205,6 +1215,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
         "page",
         "reviews",
         "review",
+        "recover",
         "export"
       ),
       range: Schema.optional(Schema.String),

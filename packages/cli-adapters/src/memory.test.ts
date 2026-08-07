@@ -912,6 +912,53 @@ describe("MemoryService settled-session capture", () => {
     expect(sourcePosts).toBe(1)
   })
 
+  it("retains transient failures beyond the old five-attempt boundary and reports recovery", async () => {
+    const fetchImplementation: typeof fetch = async (input) =>
+      String(input).endsWith("/api/memory/grant")
+        ? Response.json(grantResponse("recover"))
+        : Response.json({ error: "offline" }, { status: 503 })
+    const service = makeMemoryService({
+      fetch: fetchImplementation,
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS
+    })
+    const input: MemorySessionDigestInput = {
+      sessionId: "session-durable-recovery",
+      chatId: "chat-durable-recovery",
+      turnId: "turn-durable-recovery",
+      cli: "codex",
+      userText: "Keep this capture recoverable.",
+      assistantText: "The delivery path is temporarily unavailable.",
+      settledAt: "2026-08-01T12:00:00.000Z",
+      retrieval: EMPTY_MEMORY_RETRIEVAL_SUMMARY
+    }
+
+    const recoveries = await Effect.runPromise(
+      withEnabledMemory(
+        service.captureSettledSession(input).pipe(
+          Effect.zipRight(Effect.forEach(
+            [1, 2, 3, 4, 5],
+            () => service.recoverCaptures(),
+            { concurrency: 1 }
+          ))
+        )
+      ).pipe(Effect.provide(configuredLayer()))
+    )
+
+    expect(recoveries.at(-1)).toMatchObject({
+      queuedBefore: 1,
+      delivered: 0,
+      retained: 1,
+      discarded: 0,
+      lastFailureStatus: 503
+    })
+    const outbox = JSON.parse(
+      readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
+    ) as ReadonlyArray<{ readonly attempts: number }>
+    expect(outbox).toHaveLength(1)
+    expect(outbox[0]?.attempts).toBeGreaterThanOrEqual(5)
+  })
+
   it("drops a capture whose org membership was revoked instead of retrying forever", async () => {
     let grants = 0
     const fetchImplementation: typeof fetch = async (input) => {

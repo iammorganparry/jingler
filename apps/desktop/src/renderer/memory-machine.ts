@@ -1,5 +1,6 @@
 import type {
   MemoryAccess,
+  MemoryCaptureRecovery,
   MemoryDashboardSummary,
   MemoryEdgeEvidence,
   MemoryExport,
@@ -22,6 +23,7 @@ const LAST_VIEW_KEY = "jingler.memory.last-view"
 
 export interface MemoryApi {
   access(): Promise<MemoryAccess>
+  recover(): Promise<MemoryCaptureRecovery>
   configure(organizationId: string): Promise<MemoryAccess>
   dashboard(organizationId: string, range: string): Promise<MemoryDashboardSummary>
   graph(organizationId: string, limit: number): Promise<MemoryGraphView>
@@ -98,6 +100,7 @@ export interface MemoryContext {
   readonly evidence: MemoryEdgeEvidence | null
   readonly reviewResult: MemoryReviewResult | null
   readonly exported: MemoryExport | null
+  readonly recovery: MemoryCaptureRecovery | null
   readonly filters: MemoryMapFilters
   readonly viewport: MemoryViewport
   readonly error: string | null
@@ -113,6 +116,7 @@ export type MemoryEvent =
   | { type: "OPEN" }
   | { type: "CLOSE" }
   | { type: "RETRY" }
+  | { type: "RECOVER" }
   | { type: "ORGANIZATION.CHANGE"; organizationId: string }
   | { type: "RANGE.CHANGE"; range: string }
   | { type: "NAVIGATE"; target: MemoryDeepLink }
@@ -150,6 +154,7 @@ const initialContext = (): MemoryContext => ({
   evidence: null,
   reviewResult: null,
   exported: null,
+  recovery: null,
   filters: DEFAULT_MEMORY_FILTERS,
   viewport: DEFAULT_MEMORY_VIEWPORT,
   error: null,
@@ -238,7 +243,8 @@ export const createMemoryMachine = (api: MemoryApi) =>
       ),
       exportMemory: fromPromise<MemoryExport, { organizationId: string }>(
         ({ input }) => api.export(input.organizationId)
-      )
+      ),
+      recoverMemory: fromPromise(() => api.recover())
     },
     guards: {
       eligible: ({ context }) => context.access?.eligible === true && context.organizationId !== null,
@@ -263,6 +269,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
           evidence: null,
           reviewResult: null,
           exported: null,
+          recovery: null,
           filters: DEFAULT_MEMORY_FILTERS,
           viewport: DEFAULT_MEMORY_VIEWPORT,
           error: null,
@@ -280,6 +287,16 @@ export const createMemoryMachine = (api: MemoryApi) =>
           previousView: context.view,
           filters: linkFilters(context.filters, event.target.filter),
           error: null
+        }
+      }),
+      navigateFailed: assign(({ context, event }) => {
+        if (event.type !== "NAVIGATE") return {}
+        persistView(event.target.view)
+        return {
+          view: event.target.view,
+          page: null,
+          previousView: context.view,
+          filters: linkFilters(context.filters, event.target.filter)
         }
       }),
       setFilters: assign(({ event }) => event.type === "MAP.FILTERS" ? { filters: event.filters } : {}),
@@ -527,11 +544,29 @@ export const createMemoryMachine = (api: MemoryApi) =>
         },
         on: { CLOSE: "closed", "SEARCH.QUERY": { actions: "setSearchQuery" }, "SEARCH.RUN": { actions: "markSearchPending" } }
       },
+      recovering: {
+        invoke: {
+          id: "recoverMemory",
+          src: "recoverMemory",
+          onDone: {
+            target: "loading",
+            actions: assign(({ event }) => ({ recovery: event.output, error: null }))
+          },
+          onError: { target: "failed", actions: "setFailure" }
+        },
+        on: { CLOSE: "closed" }
+      },
       failed: {
         // Route through `configuring` like every other state: a selection made in
         // the error state must be persisted (Config.setMemory) and refresh access,
         // not jump straight to `loading` with stale access and an unsaved choice.
-        on: { CLOSE: "closed", RETRY: "loading", "ORGANIZATION.CHANGE": { target: "configuring", actions: "clearOrganization" } }
+        on: {
+          CLOSE: "closed",
+          RETRY: "loading",
+          RECOVER: "recovering",
+          NAVIGATE: { actions: "navigateFailed" },
+          "ORGANIZATION.CHANGE": { target: "configuring", actions: "clearOrganization" }
+        }
       }
     }
   })
