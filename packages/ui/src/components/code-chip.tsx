@@ -10,29 +10,20 @@ import { FileIcon } from "./file-icon.js"
 export function CodeChip({
   path,
   line,
-  endLine,
   label,
   onRemove,
   className
 }: {
   path: string
   line?: number
-  endLine?: number
   /** Canonical renderer-owned display label for a captured range. */
   label?: string
   onRemove?: () => void
   className?: string
 }) {
   const name = path.split("/").pop() ?? path
-  const range =
-    line === undefined
-      ? undefined
-      : endLine === undefined || line === endLine
-        ? `L${line}`
-        : `L${line}\u2013L${endLine}`
-  const isCapturedRange = endLine !== undefined || label !== undefined
-  const defaultRangeLabel = range === undefined ? path : `${path}:${range}`
-  const displayLabel = isCapturedRange ? (label ?? defaultRangeLabel) : name
+  const isCapturedRange = label !== undefined
+  const displayLabel = label ?? name
   return (
     <span
       title={isCapturedRange ? displayLabel : path}

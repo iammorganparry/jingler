@@ -1122,7 +1122,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       images: ReadonlyArray<Attachment>,
       reasoning: ReasoningSetting | null | undefined,
       planExecutionId?: string,
-      externalInstruction?: ExternalInstructionIdentity
+      externalInstruction?: ExternalInstructionIdentity,
+      displayText?: string
     ) =>
       Effect.suspend(() =>
         Effect.gen(function* () {
@@ -1365,6 +1366,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
+          const operatorText = displayText ?? text
           const promptText = orchestrating
             ? orchestratorTurnPrompt(planApproved, text)
             : text
@@ -1399,7 +1401,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // useful search terms and would dilute a narrow memory query.
           const memoryAttachment = yield* memoryService.attachment(
             cli,
-            text,
+            operatorText,
             `${sessionId}:${chatId}`
           )
           const remoteMcpServers = composeRemoteMcpServers(
@@ -1515,7 +1517,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const an = yield* nextId
           const user = userMessage(
             `u_${chatId}_${un}`,
-            text,
+            operatorText,
             now,
             images,
             externalInstruction
@@ -2633,7 +2635,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       images: ReadonlyArray<Attachment> = [],
       reasoning?: ReasoningSetting | null,
       planExecutionId?: string,
-      externalInstruction?: ExternalInstructionIdentity
+      externalInstruction?: ExternalInstructionIdentity,
+      displayText?: string
     ): Stream.Stream<StreamEvent, never, PromptEnv> {
       return Stream.unwrapScoped(
         Effect.gen(function* () {
@@ -2708,7 +2711,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 images,
                 reasoning,
                 planExecutionId,
-                externalInstruction
+                externalInstruction,
+                displayText
               ).pipe(
                 Effect.catchAll((error) =>
                   Effect.succeed(

@@ -22,7 +22,6 @@ describe("CodeChip", () => {
       <CodeChip
         path="src/parser [new].ts"
         line={12}
-        endLine={12}
         label="src/parser [new].ts:L12"
       />
     )
@@ -36,7 +35,6 @@ describe("CodeChip", () => {
       <CodeChip
         path="src/parser.ts"
         line={12}
-        endLine={15}
         label={"src/parser.ts:L12\u2013L15"}
         onRemove={onRemove}
       />
@@ -46,10 +44,10 @@ describe("CodeChip", () => {
     expect(onRemove).toHaveBeenCalledOnce()
   })
 
-  it("renders captured range order as provided instead of normalizing it", () => {
-    render(<CodeChip path="src/parser.ts" line={15} endLine={12} />)
+  it("renders the canonical captured-range label without re-deriving it", () => {
+    render(<CodeChip path="src/parser.ts" line={15} label="canonical range label" />)
 
-    expect(screen.getByText("src/parser.ts:L15\u2013L12")).toBeDefined()
+    expect(screen.getByText("canonical range label")).toBeDefined()
   })
 
   it("keeps bare @file mentions compact", () => {

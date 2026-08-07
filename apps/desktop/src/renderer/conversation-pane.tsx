@@ -32,8 +32,8 @@ import {
 } from "./conversation-registry.js"
 import { clearDraft, getDraft, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
 import {
-  appendCodeReferencesToPrompt,
-  codeReferenceDisplayLabel
+  codeReferenceDisplayLabel,
+  serializeCodeReferences
 } from "./code-reference.js"
 import { useConversation } from "./use-conversation.js"
 import { useOrchestrationAgents } from "./use-orchestration-agents.js"
@@ -371,7 +371,7 @@ export function ConversationPane({
   const sendPrompt: typeof convo.sendPrompt = (text, images) => {
     // Structured ranges stay out of the editable textarea, but every harness
     // receives the same deterministic plain-text context at the turn boundary.
-    const prompt = appendCodeReferencesToPrompt(text, draft.references)
+    const agentContext = serializeCodeReferences(draft.references)
     if (session.initialPrompt) onInitialPromptConsumed?.(session.id)
     // The turn is on its way to the agent — the draft has served its purpose.
     clearDraft(activeChat.id)
@@ -382,7 +382,7 @@ export function ConversationPane({
         .sessionsRenameChat(session.id, activeChat.id, title)
         .then(publishSessionUpdate)
     }
-    return convo.sendPrompt(prompt, images)
+    return convo.sendPrompt(text, images, agentContext)
   }
 
   const createChat = () => {
@@ -423,7 +423,12 @@ export function ConversationPane({
         if (handoffModel !== null && handoffModel !== convo.model) {
           actor.send({ type: "SET_HARNESS", cli: convo.cli, model: handoffModel })
         }
-        actor.send({ type: "SEND", text: item.text, images: item.images })
+        actor.send({
+          type: "SEND",
+          text: item.text,
+          images: item.images,
+          agentContext: item.agentContext
+        })
         convo.unqueue(id)
       })
       // The chat was never created, so the message is still queued exactly where

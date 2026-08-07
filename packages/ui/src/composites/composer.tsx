@@ -112,7 +112,8 @@ export interface ComposerCodeReference {
   readonly path: string
   readonly startLine: number
   readonly endLine: number
-  readonly label?: string
+  /** Canonical range label produced by the code-reference boundary. */
+  readonly label: string
 }
 
 /** The trigger token (`/…` or `@…`) immediately before the caret, if any. */
@@ -539,7 +540,6 @@ export function Composer({
                 key={`${reference.path}:${reference.startLine}:${reference.endLine}`}
                 path={reference.path}
                 line={reference.startLine}
-                endLine={reference.endLine}
                 label={reference.label}
                 onRemove={() => onCodeReferenceRemove?.(index)}
               />

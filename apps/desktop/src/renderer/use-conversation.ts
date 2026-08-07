@@ -128,7 +128,11 @@ export interface Conversation {
   readonly resumePlan: (planId: string, revision?: number) => void
   /** Live status for the sidebar/tab bar, or null when idle (use persisted). */
   readonly status: SessionStatus | null
-  readonly sendPrompt: (text: string, images?: ReadonlyArray<Attachment>) => void
+  readonly sendPrompt: (
+    text: string,
+    images?: ReadonlyArray<Attachment>,
+    agentContext?: string
+  ) => void
   readonly decideGate: (gateId: string, decision: GateDecision) => void
   readonly setMode: (mode: PermissionMode) => void
   readonly setReasoning: (reasoning?: ReasoningSetting) => void
@@ -232,7 +236,7 @@ export function useConversation(
       send({ type: "APPROVE_PLAN", planId, executionMode, revision }),
     resumePlan: (planId, revision) => send({ type: "RESUME_PLAN", planId, revision }),
     status,
-    sendPrompt: (text, images) => send({ type: "SEND", text, images }),
+    sendPrompt: (text, images, agentContext) => send({ type: "SEND", text, images, agentContext }),
     decideGate: (gateId, decision) => send({ type: "DECIDE_GATE", gateId, decision }),
     answerQuestion: (requestId, answers) => send({ type: "ANSWER_QUESTION", requestId, answers }),
     setMode: (m) => send({ type: "SET_MODE", mode: m }),

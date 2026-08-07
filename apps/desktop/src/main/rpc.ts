@@ -4023,6 +4023,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     sessionId,
     chatId,
     text,
+    displayText,
     images,
     reasoning,
     externalInstruction,
@@ -4039,6 +4040,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
             reasoning,
             undefined,
             externalInstruction,
+            displayText,
           )
           .pipe(
             Stream.tap((event) =>
