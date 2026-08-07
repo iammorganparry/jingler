@@ -77,7 +77,7 @@ export interface FakeMemoryRequest {
   readonly hasSessionId: boolean
   readonly requestId: string | null
   readonly toolArguments: Readonly<Record<string, unknown>> | null
-  readonly assignedInstance: "next-a" | "next-b"
+  readonly assignedInstance: "next-a" | "next-b" | null
 }
 
 export interface FakeMemorySnapshot {
@@ -652,17 +652,39 @@ export const startFakeAuthServer = async (
     }
 
     if (url.pathname === "/api/memory/sources" && req.method === "POST") {
+      const organizationId = typeof req.headers["x-jingler-organization-id"] === "string"
+        ? req.headers["x-jingler-organization-id"]
+        : null
+      requests.push({
+        path: url.pathname,
+        httpMethod: req.method,
+        rpcMethod: null,
+        mcpMethod: null,
+        mcpName: null,
+        toolName: null,
+        organizationId,
+        protocolVersion: null,
+        metadataProtocolVersion: null,
+        hasCookie: req.headers.cookie !== undefined,
+        hasSessionId: req.headers["mcp-session-id"] !== undefined,
+        requestId: null,
+        toolArguments: null,
+        assignedInstance: null
+      })
       if (!memoryAvailable) return json(503, { error: "memory unavailable" })
-      const organizationId = req.headers["x-jingler-organization-id"]
+      const requestedOrganizationId = req.headers["x-jingler-organization-id"]
       const grantOrganization = organizationFromGrant(req.headers.authorization)
-      if (typeof organizationId !== "string" || grantOrganization !== organizationId) return json(401, {})
+      if (
+        typeof requestedOrganizationId !== "string" ||
+        grantOrganization !== requestedOrganizationId
+      ) return json(401, {})
       readJson().then((value) => {
         const body = jsonBody(value)
         const source = jsonBody(body.source)
         const sourceId = typeof source.id === "string" ? source.id : ""
         const content = typeof body.content === "string" ? body.content : ""
         if (sourceId.length === 0 || req.headers["x-idempotency-key"] !== sourceId) return json(400, { error: "invalid digest" })
-        const state = stateFor(organizationId)
+        const state = stateFor(requestedOrganizationId)
         if (CREDENTIAL_PATTERN.test(content)) {
           state.secretRejections += 1
           state.reviewDecisions.push(`source:${sourceId}:secret-rejected`)
@@ -677,7 +699,7 @@ export const startFakeAuthServer = async (
         return json(201, {
           source: { ...source, id: sourceId },
           contentHash: "sha256:e2e-captured",
-          contentKey: `organizations/${organizationId}/sources/blobs/e2e-captured`,
+          contentKey: `organizations/${requestedOrganizationId}/sources/blobs/e2e-captured`,
           workflowId: "compiler-captured-learning"
         })
       })
