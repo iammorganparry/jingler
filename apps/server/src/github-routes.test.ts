@@ -64,6 +64,12 @@ interface Harness {
     readonly permissions?: Readonly<Record<string, "read" | "write">>
     readonly repositories?: ReadonlyArray<string>
   }>
+  readonly getCreatedPullRequests: () => ReadonlyArray<{
+    readonly accessToken: string
+    readonly repository: string
+    readonly head: string
+    readonly base: string
+  }>
   readonly getSessionRelayRegistrations: () => ReadonlyArray<{
     readonly mutationId: string
     readonly state: GitHubSessionRouteState
@@ -107,6 +113,12 @@ const harness = (): Harness => {
   const mintedScopes: Array<{
     readonly permissions?: Readonly<Record<string, "read" | "write">>
     readonly repositories?: ReadonlyArray<string>
+  }> = []
+  const createdPullRequests: Array<{
+    accessToken: string
+    repository: string
+    head: string
+    base: string
   }> = []
   let installations: ReadonlyArray<GitHubApiInstallation> = [githubInstallation()]
   let repositories: ReadonlyArray<GitHubApiRepository> = [{ id: "301", fullName: "acme/widget" }]
@@ -400,6 +412,15 @@ const harness = (): Harness => {
         expiresAt: new Date(now.getTime() + 60 * 60 * 1_000)
       }
     },
+    createPullRequest: async (accessToken, input) => {
+      createdPullRequests.push({
+        accessToken,
+        repository: input.repository,
+        head: input.head,
+        base: input.base
+      })
+      return 1731
+    },
     revokeUserToken: async (token) => {
       revoked.push(token)
     }
@@ -449,6 +470,7 @@ const harness = (): Harness => {
     getPendingRelayMutations: () => relayMutations.size,
     getMintedInstallations: () => mintedInstallations,
     getMintedScopes: () => mintedScopes,
+    getCreatedPullRequests: () => createdPullRequests,
     getSessionRelayRegistrations: () => sessionRelayRegistrations,
     getPendingSessionMutations: () => sessionMutations.size,
     setNow: (value) => {
@@ -565,9 +587,7 @@ describe("GitHub connection routes", () => {
   it("authenticates the callback on the state alone, binding it to the state's owner", async () => {
     const value = harness()
     // Unknown state — nothing to consume.
-    expect(
-      (await value.routes.request("/callback?code=oauth-code&state=missing")).status
-    ).toBe(400)
+    expect((await value.routes.request("/callback?code=oauth-code&state=missing")).status).toBe(400)
 
     // The callback carries no session cookie — the OS browser GitHub redirects
     // has none. The unguessable state is the sole authenticator, and it binds
@@ -580,17 +600,17 @@ describe("GitHub connection routes", () => {
 
     // Single-use: the consumed state cannot be replayed.
     const saveCount = value.getSaveCount()
-    expect(
-      (await value.routes.request(`/callback?code=oauth-code&state=${state}`)).status
-    ).toBe(400)
+    expect((await value.routes.request(`/callback?code=oauth-code&state=${state}`)).status).toBe(
+      400
+    )
     expect(value.getSaveCount()).toBe(saveCount)
 
     // Expired state is refused.
     const expired = await start(value, "/authorize", "user-1")
     value.setNow(new Date("2026-08-04T10:11:00Z"))
-    expect(
-      (await value.routes.request(`/callback?code=oauth-code&state=${expired}`)).status
-    ).toBe(400)
+    expect((await value.routes.request(`/callback?code=oauth-code&state=${expired}`)).status).toBe(
+      400
+    )
     expect(value.getSaveCount()).toBe(saveCount)
   })
 
@@ -838,6 +858,60 @@ describe("GitHub connection routes", () => {
     expect(value.getSaveCount()).toBe(saveCount + 1)
   })
 
+  it("creates pull requests with the connected user token after verifying repository access", async () => {
+    const value = harness()
+    expect((await connect(value)).status).toBe(302)
+
+    const response = await value.routes.request("/pull-requests", {
+      method: "POST",
+      headers: { ...asUser("user-1"), "content-type": "application/json" },
+      body: JSON.stringify({
+        installationId: "99",
+        repository: "acme/widget",
+        title: "Fix publishing",
+        body: "PR body",
+        head: "acme:chore/fix-publishing",
+        base: "main",
+        draft: false
+      })
+    })
+
+    expect(response.status).toBe(201)
+    expect(response.headers.get("cache-control")).toBe("no-store")
+    expect(await response.json()).toEqual({ number: 1731 })
+    expect(value.getCreatedPullRequests()).toEqual([
+      {
+        accessToken: "ghu_user-secret",
+        repository: "acme/widget",
+        head: "acme:chore/fix-publishing",
+        base: "main"
+      }
+    ])
+    expect(value.getMintedInstallations()).toEqual([])
+  })
+
+  it("rejects pull request creation outside the selected installation repositories", async () => {
+    const value = harness()
+    expect((await connect(value)).status).toBe(302)
+
+    const response = await value.routes.request("/pull-requests", {
+      method: "POST",
+      headers: { ...asUser("user-1"), "content-type": "application/json" },
+      body: JSON.stringify({
+        installationId: "99",
+        repository: "acme/other",
+        title: "Not allowed",
+        body: "",
+        head: "acme:chore/not-allowed",
+        base: "main",
+        draft: false
+      })
+    })
+
+    expect(response.status).toBe(403)
+    expect(value.getCreatedPullRequests()).toEqual([])
+  })
+
   it("rejects repository-owner mismatches and permission escalation before minting", async () => {
     const value = harness()
     expect((await connect(value)).status).toBe(302)
@@ -917,7 +991,10 @@ describe("GitHub connection routes", () => {
     const body = (await linked.json()) as {
       route: { relaySessionId: string; sessionId: string; state: string }
     }
-    expect(body.route).toMatchObject({ sessionId: "local-session-1", state: "active" })
+    expect(body.route).toMatchObject({
+      sessionId: "local-session-1",
+      state: "active"
+    })
     expect(value.getSessionRelayRegistrations()).toContainEqual(
       expect.objectContaining({
         state: "active",
@@ -1025,7 +1102,9 @@ describe("GitHub connection routes", () => {
       })
     })
     expect(changed.status).toBe(200)
-    const changedBody = (await changed.json()) as { route: { relaySessionId: string } }
+    const changedBody = (await changed.json()) as {
+      route: { relaySessionId: string }
+    }
     expect(changedBody.route.relaySessionId).not.toBe(relaySessionId)
     expect(value.getSessionRelayRegistrations().slice(-2)).toEqual([
       expect.objectContaining({
@@ -1079,7 +1158,9 @@ describe("GitHub connection routes", () => {
       })
     })
     expect(relinked.status).toBe(200)
-    expect(await relinked.json()).toMatchObject({ route: { sessionId: "local-session-2" } })
+    expect(await relinked.json()).toMatchObject({
+      route: { sessionId: "local-session-2" }
+    })
   })
 
   it("retains a session route mutation until relay Workflow creation recovers", async () => {
@@ -1136,7 +1217,9 @@ describe("GitHub connection routes", () => {
       headers: asUser("user-1")
     })
     expect(archived.status).toBe(200)
-    expect(await archived.json()).toMatchObject({ route: { state: "archived" } })
+    expect(await archived.json()).toMatchObject({
+      route: { state: "archived" }
+    })
     const removed = await value.routes.request(`/session-routes/${relaySessionId}/unlink`, {
       method: "POST",
       headers: asUser("user-1")

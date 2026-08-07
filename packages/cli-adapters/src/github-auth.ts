@@ -19,17 +19,13 @@ const WORKFLOW_DIRECTORY = ".github/workflows/"
 const HTTP_URL_PATTERN = /^https?:\/\//i
 
 /** Minimum GitHub App permissions needed to push the inspected paths. */
-export const githubPushPermissions = (
-  paths: ReadonlyArray<string>
-): ReadonlyArray<string> => {
+export const githubPushPermissions = (paths: ReadonlyArray<string>): ReadonlyArray<string> => {
   const changesWorkflow = paths.some((path) => {
     const slashes = path.replaceAll("\\", "/")
     const normalized = slashes.startsWith("./") ? slashes.slice(2) : slashes
     return normalized.startsWith(WORKFLOW_DIRECTORY)
   })
-  return changesWorkflow
-    ? ["contents:write", "workflows:write"]
-    : ["contents:write"]
+  return changesWorkflow ? ["contents:write", "workflows:write"] : ["contents:write"]
 }
 
 export interface GitHubRelayGrant {
@@ -54,6 +50,16 @@ export interface GitHubInstallationCredential {
   readonly token: string
   readonly installationId: string
   readonly expiresAt: string
+}
+
+export interface GitHubPullRequestCreateInput {
+  readonly installationId: string
+  readonly repository: string
+  readonly title: string
+  readonly body: string
+  readonly head: string
+  readonly base: string
+  readonly draft: boolean
 }
 
 export interface GitHubAuthClient {
@@ -86,14 +92,16 @@ export interface GitHubAuthClient {
     repository: string,
     permissions: ReadonlyArray<string>
   ) => Promise<GitHubInstallationCredential>
+  readonly createPullRequest: (input: GitHubPullRequestCreateInput) => Promise<number>
   readonly credentialsForOwner: (
     owner: string,
     repository: string,
     permissions: ReadonlyArray<string>
   ) => Promise<GitHubInstallationCredential>
-  readonly defaultPluginGrant: (
-    scopes: ReadonlyArray<string>
-  ) => Promise<{ readonly grant: GitHubRelayGrant; readonly account: string } | null>
+  readonly defaultPluginGrant: (scopes: ReadonlyArray<string>) => Promise<{
+    readonly grant: GitHubRelayGrant
+    readonly account: string
+  } | null>
   readonly invalidate: (installationId: string) => void
 }
 
@@ -149,7 +157,8 @@ const errorForStatus = (status: number, retryAt?: string): GitHubApiError => {
   if (status === 422) {
     return new GitHubApiError({
       reason: "validation",
-      message: "GitHub rejected the request. Refresh the pull request and check the submitted values.",
+      message:
+        "GitHub rejected the request. Refresh the pull request and check the submitted values.",
       status
     })
   }
@@ -260,15 +269,15 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
   const credentials = new Map<string, GitHubInstallationCredential>()
   const credentialRequests = new Map<string, Promise<GitHubInstallationCredential>>()
   const installationsByOwner = new Map<string, GitHubAppInstallation>()
-  let statusCache: { readonly value: GitHubAppConnectionStatus; readonly expiresAt: number } | null = null
+  let statusCache: {
+    readonly value: GitHubAppConnectionStatus
+    readonly expiresAt: number
+  } | null = null
   let statusRequest: Promise<GitHubAppConnectionStatus> | null = null
   const credentialKey = (installationId: string, scopes: ReadonlyArray<string>): string =>
     `${installationId}:${[...new Set(scopes)].sort().join(",")}`
 
-  const authenticatedRequest = async (
-    path: string,
-    init: RequestInit = {}
-  ): Promise<Response> => {
+  const authenticatedRequest = async (path: string, init: RequestInit = {}): Promise<Response> => {
     const bearer = await options.bearer()
     if (!bearer) {
       throw new GitHubApiError({
@@ -349,7 +358,9 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
   }
 
   const refresh = async (): Promise<GitHubAppConnectionStatus> => {
-    const response = await authenticatedRequest("/api/github/refresh", { method: "POST" })
+    const response = await authenticatedRequest("/api/github/refresh", {
+      method: "POST"
+    })
     const parsed = parseStatus(await response.json().catch(() => null))
     if (!parsed) {
       throw new GitHubApiError({
@@ -488,9 +499,11 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
   const installationForOwner = async (owner: string): Promise<GitHubAppInstallation> => {
     const normalizedOwner = owner.toLowerCase()
     const cached = installationsByOwner.get(normalizedOwner)
-    const matching = cached ?? (await status()).installations.find(
-      (installation) => installation.account.login.toLowerCase() === normalizedOwner
-    )
+    const matching =
+      cached ??
+      (await status()).installations.find(
+        (installation) => installation.account.login.toLowerCase() === normalizedOwner
+      )
     if (matching?.status === "suspended") {
       throw new GitHubApiError({
         reason: "installation-suspended",
@@ -526,7 +539,10 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
     const scopes = [...new Set([...permissions, `repository:${repository}`])].sort()
     const key = credentialKey(installationId, scopes)
     const cached = credentials.get(key)
-    if (cached && Date.parse(cached.expiresAt) - GRANT_REFRESH_SKEW_SECONDS * 1_000 > now().getTime()) {
+    if (
+      cached &&
+      Date.parse(cached.expiresAt) - GRANT_REFRESH_SKEW_SECONDS * 1_000 > now().getTime()
+    ) {
       return cached
     }
     credentials.delete(key)
@@ -535,13 +551,21 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
     const requestCredential = (async () => {
       const response = await authenticatedRequest("/api/github/installation-credentials", {
         method: "POST",
-        body: JSON.stringify({ installationId, scopes: [...new Set(scopes)].sort() })
+        body: JSON.stringify({
+          installationId,
+          scopes: [...new Set(scopes)].sort()
+        })
       })
       const body = record(await response.json().catch(() => null))
       const token = string(body?.token)
       const returnedId = string(body?.installationId)
       const expiresAt = string(body?.expiresAt)
-      if (!token || returnedId !== installationId || !expiresAt || !Number.isFinite(Date.parse(expiresAt))) {
+      if (
+        !token ||
+        returnedId !== installationId ||
+        !expiresAt ||
+        !Number.isFinite(Date.parse(expiresAt))
+      ) {
         throw new GitHubApiError({
           reason: "unavailable",
           message: "The GitHub connection service returned an invalid installation credential."
@@ -557,6 +581,38 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
     } finally {
       credentialRequests.delete(key)
     }
+  }
+
+  const createPullRequest = async (input: GitHubPullRequestCreateInput): Promise<number> => {
+    if (
+      !/^\d+$/.test(input.installationId) ||
+      !/^[^/\s]+\/[^/\s]+$/.test(input.repository) ||
+      input.title.length === 0 ||
+      input.head.length === 0 ||
+      input.base.length === 0
+    ) {
+      throw new GitHubApiError({
+        reason: "validation",
+        message: "Pull request creation requires a repository, branch, base, and title."
+      })
+    }
+    const response = await authenticatedRequest("/api/github/pull-requests", {
+      method: "POST",
+      body: JSON.stringify(input)
+    })
+    const body = record(await response.json().catch(() => null))
+    const pullRequestNumber = number(body?.number)
+    if (
+      pullRequestNumber === null ||
+      !Number.isSafeInteger(pullRequestNumber) ||
+      pullRequestNumber <= 0
+    ) {
+      throw new GitHubApiError({
+        reason: "unavailable",
+        message: "The GitHub connection service returned an invalid pull request."
+      })
+    }
+    return pullRequestNumber
   }
 
   return {
@@ -576,6 +632,7 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
     archiveSessionRoute,
     unlinkSessionRoute,
     credentialsForInstallation,
+    createPullRequest,
     credentialsForOwner: async (owner, repository, permissions) => {
       if (repository.split("/")[0]?.toLowerCase() !== owner.toLowerCase()) {
         throw new GitHubApiError({
@@ -588,7 +645,9 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
     },
     defaultPluginGrant: async (scopes) => {
       const connection = await status()
-      const active = connection.installations.find((installation) => installation.status === "active")
+      const active = connection.installations.find(
+        (installation) => installation.status === "active"
+      )
       if (!active) {
         const suspended = connection.installations[0]
         if (suspended) {
@@ -667,6 +726,8 @@ export class GitHubAuth extends Effect.Service<GitHubAuth>()("@jingler/GitHubAut
         repository: string,
         permissions: ReadonlyArray<string>
       ) => wrap(() => client.credentialsForInstallation(installationId, repository, permissions)),
+      createPullRequest: (input: GitHubPullRequestCreateInput) =>
+        wrap(() => client.createPullRequest(input)),
       credentialsForOwner: (
         owner: string,
         repository: string,

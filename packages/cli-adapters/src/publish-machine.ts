@@ -214,7 +214,7 @@ export const createPublishMachine = (
     },
     "checking-pr": {
       always: [
-        { guard: "hasPr", target: "updating-pr" },
+        { guard: "hasPr", target: "linking" },
         { target: "resolving-pr" }
       ]
     },
@@ -231,12 +231,12 @@ export const createPublishMachine = (
         onError: { target: "failed", actions: assign({ error: ({ event }) => message(event.error), resumeFrom: () => "resolving-pr" as const }) }
       }
     },
-    prResolved: { always: [{ guard: "hasPr", target: "updating-pr" }, { target: "creating-pr" }] },
+    prResolved: { always: [{ guard: "hasPr", target: "linking" }, { target: "creating-pr" }] },
     "creating-pr": {
       invoke: {
         src: "createPr", input: ({ context }) => context.metadata!,
         onDone: {
-          target: "updating-pr",
+          target: "linking",
           actions: [
             assign({ prNumber: ({ event }) => event.output }),
             { type: "markCompleted", params: { step: "creating-pr" } }
@@ -250,7 +250,7 @@ export const createPublishMachine = (
         src: "updatePr",
         input: ({ context }) => ({ number: context.prNumber!, metadata: context.metadata! }),
         onDone: {
-          target: "linking",
+          target: "complete",
           actions: { type: "markCompleted", params: { step: "updating-pr" } }
         },
         onError: {
@@ -267,7 +267,7 @@ export const createPublishMachine = (
         src: "link",
         input: ({ context }) => context.prNumber!,
         onDone: {
-          target: "complete",
+          target: "updating-pr",
           actions: { type: "markCompleted", params: { step: "linking" } }
         },
         onError: {

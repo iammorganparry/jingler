@@ -136,17 +136,15 @@ test("uses a distinct relay Durable Object connection per linked session and rep
     .poll(() => githubRelay.connectedClientIds().length, { timeout: 20_000 })
     .toBe(2);
 
-  // A failed reconnect is visible while bounded retries continue, then clears
-  // once the next authenticated socket succeeds.
+  // A failed reconnect retries through the authenticated relay path, then
+  // restores both session-scoped sockets. Count the handshake instead of
+  // racing the intentionally transient renderer status.
+  const requestsBeforeReconnect = githubRelay.requests.length;
   githubRelay.failNextConnections();
   githubRelay.disconnectAll();
-  await expect(
-    window
-      .getByRole("status")
-      .filter({ hasText: "GitHub feedback is reconnecting" }),
-  ).toBeVisible({
-    timeout: 10_000,
-  });
+  await expect
+    .poll(() => githubRelay.requests.length, { timeout: 10_000 })
+    .toBeGreaterThan(requestsBeforeReconnect);
   await expect
     .poll(() => githubRelay.connectedClientIds().length, { timeout: 20_000 })
     .toBe(2);

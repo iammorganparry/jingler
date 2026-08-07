@@ -552,6 +552,52 @@ export const startFakeGitHubServer = async (
           });
           return;
         }
+        if (
+          requestUrl.pathname === "/api/github/pull-requests" &&
+          method === "POST"
+        ) {
+          const body = await requestBody(req);
+          const installationId = String(body.installationId ?? "");
+          const repository = String(body.repository ?? "");
+          if (
+            !connected ||
+            installation.status === "suspended" ||
+            installationId !== installation.id ||
+            repository.toLowerCase() !==
+              `${installation.account.login}/widget`.toLowerCase()
+          ) {
+            json(res, 403, { error: "Repository is not accessible" });
+            return;
+          }
+          if (failures.delete("create-pr")) {
+            operations.push("fail create-pr");
+            json(res, 503, {
+              error: "Injected pull request creation failure",
+            });
+            return;
+          }
+          operations.push(`pr create ${String(body.head ?? "")}`);
+          publishedPr = {
+            number: 900,
+            title: String(body.title ?? ""),
+            body: String(body.body ?? ""),
+            head: String(body.head ?? ""),
+            base: String(body.base ?? ""),
+          };
+          const headRefName = publishedPr.head.includes(":")
+            ? publishedPr.head.slice(publishedPr.head.indexOf(":") + 1)
+            : publishedPr.head;
+          prs.push({
+            number: 900,
+            title: publishedPr.title,
+            body: publishedPr.body,
+            headRefName,
+            baseRefName: publishedPr.base,
+            author: { login: options.userLogin ?? "octocat" },
+          });
+          json(res, 201, { number: 900 });
+          return;
+        }
         json(res, 404, { error: "Not found" });
         return;
       }

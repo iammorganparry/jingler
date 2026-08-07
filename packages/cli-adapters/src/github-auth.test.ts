@@ -10,7 +10,12 @@ const STATUS = {
   installations: [
     {
       id: "77",
-      account: { id: "2", login: "acme", type: "Organization", avatarUrl: null },
+      account: {
+        id: "2",
+        login: "acme",
+        type: "Organization",
+        avatarUrl: null
+      },
       repositorySelection: "selected",
       permissions: { contents: "read", pull_requests: "write" },
       status: "active",
@@ -29,20 +34,29 @@ const response = (body: unknown, status = 200): Response =>
 describe("GitHubAuth desktop grants", () => {
   it("owns the connection lifecycle endpoints behind the canonical status schema", async () => {
     const requests: Array<{ path: string; method: string }> = []
-    const refreshed = { ...STATUS, lastRefreshedAt: "2026-08-05T10:00:00.000Z" }
+    const refreshed = {
+      ...STATUS,
+      lastRefreshedAt: "2026-08-05T10:00:00.000Z"
+    }
     const loopback = "http://127.0.0.1:3210/callback"
     const responseForPath = new Map<string, () => Response>([
       ["/api/github/status", () => response(STATUS)],
       [
         "/api/github/install",
-        () => response({ url: "https://github.com/apps/jingler/installations/new" })
+        () =>
+          response({
+            url: "https://github.com/apps/jingler/installations/new"
+          })
       ],
       ["/api/github/refresh", () => response(refreshed)],
       ["/api/github/disconnect", () => new Response(null, { status: 204 })]
     ])
     const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input))
-      requests.push({ path: `${url.pathname}${url.search}`, method: init?.method ?? "GET" })
+      requests.push({
+        path: `${url.pathname}${url.search}`,
+        method: init?.method ?? "GET"
+      })
       return responseForPath.get(url.pathname)?.() ?? response({ error: "not found" }, 404)
     })
     const client = makeGitHubAuthClient({
@@ -52,8 +66,9 @@ describe("GitHubAuth desktop grants", () => {
     })
 
     await expect(client.status()).resolves.toEqual(STATUS)
-    await expect(client.install(loopback))
-      .resolves.toBe("https://github.com/apps/jingler/installations/new")
+    await expect(client.install(loopback)).resolves.toBe(
+      "https://github.com/apps/jingler/installations/new"
+    )
     await expect(client.refresh()).resolves.toEqual(refreshed)
     await expect(client.disconnect()).resolves.toBeUndefined()
     expect(requests).toEqual([
@@ -81,14 +96,16 @@ describe("GitHubAuth desktop grants", () => {
   })
 
   it("adds workflows write only when an inspected workflow path changed", () => {
-    expect(githubPushPermissions(["src/index.ts", "README.md"]))
-      .toEqual(["contents:write"])
-    expect(githubPushPermissions(["./.github/workflows/ci.yml", "src/index.ts"]))
-      .toEqual(["contents:write", "workflows:write"])
-    expect(githubPushPermissions([".github/workflows-old/ci.yml"]))
-      .toEqual(["contents:write"])
-    expect(githubPushPermissions([".github\\workflows\\release.yml"]))
-      .toEqual(["contents:write", "workflows:write"])
+    expect(githubPushPermissions(["src/index.ts", "README.md"])).toEqual(["contents:write"])
+    expect(githubPushPermissions(["./.github/workflows/ci.yml", "src/index.ts"])).toEqual([
+      "contents:write",
+      "workflows:write"
+    ])
+    expect(githubPushPermissions([".github/workflows-old/ci.yml"])).toEqual(["contents:write"])
+    expect(githubPushPermissions([".github\\workflows\\release.yml"])).toEqual([
+      "contents:write",
+      "workflows:write"
+    ])
   })
 
   it("binds grants to installations and refreshes only near expiry", async () => {
@@ -128,7 +145,9 @@ describe("GitHubAuth desktop grants", () => {
     now = new Date("2030-01-01T00:00:31.000Z")
     const refreshed = await client.grantForOwner("acme", ["pull_requests:read"])
     expect(refreshed.grant).toBe("grant-2")
-    expect(fetch.mock.calls.filter(([input]) => String(input).includes("desktop-grant"))).toHaveLength(2)
+    expect(
+      fetch.mock.calls.filter(([input]) => String(input).includes("desktop-grant"))
+    ).toHaveLength(2)
   })
 
   it("registers and grants exactly one opaque relay session", async () => {
@@ -189,7 +208,9 @@ describe("GitHubAuth desktop grants", () => {
       grant: "session-grant"
     })
     expect(await client.grantForSession(route.relaySessionId)).toBe(grant)
-    expect(fetch.mock.calls.filter(([input]) => String(input).includes("session-grant"))).toHaveLength(1)
+    expect(
+      fetch.mock.calls.filter(([input]) => String(input).includes("session-grant"))
+    ).toHaveLength(1)
   })
 
   it("rejects a suspended installation before requesting a grant", async () => {
@@ -224,7 +245,9 @@ describe("GitHubAuth desktop grants", () => {
       fetch,
       baseUrl: () => "https://server.jingler.test"
     })
-    await expect(client.status()).rejects.toMatchObject({ reason: "token-expired" })
+    await expect(client.status()).rejects.toMatchObject({
+      reason: "token-expired"
+    })
     expect(fetch).not.toHaveBeenCalled()
   })
 
@@ -250,14 +273,49 @@ describe("GitHubAuth desktop grants", () => {
     })
 
     const read = await client.credentialsForInstallation("77", "acme/widgets", ["issues:read"])
-    expect(await client.credentialsForInstallation("77", "acme/widgets", ["issues:read"])).toBe(read)
+    expect(await client.credentialsForInstallation("77", "acme/widgets", ["issues:read"])).toBe(
+      read
+    )
     const write = await client.credentialsForInstallation("77", "acme/widgets", ["issues:write"])
 
     expect(write.token).toBe("ghs_token_2")
     expect(bodies).toEqual([
-      { installationId: "77", scopes: ["issues:read", "repository:acme/widgets"] },
-      { installationId: "77", scopes: ["issues:write", "repository:acme/widgets"] }
+      {
+        installationId: "77",
+        scopes: ["issues:read", "repository:acme/widgets"]
+      },
+      {
+        installationId: "77",
+        scopes: ["issues:write", "repository:acme/widgets"]
+      }
     ])
+  })
+
+  it("creates pull requests through the connected user boundary", async () => {
+    const bodies: unknown[] = []
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      if (url.pathname !== "/api/github/pull-requests") return response(STATUS)
+      bodies.push(JSON.parse(String(init?.body)))
+      return response({ number: 1731 }, 201)
+    })
+    const client = makeGitHubAuthClient({
+      bearer: async () => "session",
+      fetch,
+      baseUrl: () => "https://server.jingler.test"
+    })
+    const input = {
+      installationId: "77",
+      repository: "acme/widgets",
+      title: "Fix publishing",
+      body: "PR body",
+      head: "acme:chore/fix-publishing",
+      base: "main",
+      draft: false
+    }
+
+    await expect(client.createPullRequest(input)).resolves.toBe(1731)
+    expect(bodies).toEqual([input])
   })
 
   it("deduplicates status and credential requests across concurrent repository calls", async () => {
@@ -285,11 +343,10 @@ describe("GitHubAuth desktop grants", () => {
       )
     )
 
-    expect(new Set(credentials.map((credential) => credential.token))).toEqual(new Set(["ghs_shared"]))
-    expect(paths).toEqual([
-      "/api/github/status",
-      "/api/github/installation-credentials"
-    ])
+    expect(new Set(credentials.map((credential) => credential.token))).toEqual(
+      new Set(["ghs_shared"])
+    )
+    expect(paths).toEqual(["/api/github/status", "/api/github/installation-credentials"])
   })
 
   it("rejects unqualified or permission-less credential requests locally", async () => {
@@ -300,12 +357,15 @@ describe("GitHubAuth desktop grants", () => {
       baseUrl: () => "https://server.jingler.test"
     })
 
-    await expect(client.credentialsForInstallation("77", "", ["contents:read"]))
-      .rejects.toMatchObject({ reason: "validation" })
-    await expect(client.credentialsForInstallation("77", "acme/widgets", []))
-      .rejects.toMatchObject({ reason: "validation" })
-    await expect(client.credentialsForInstallation("77", "acme/widgets", ["metadata"]))
-      .rejects.toMatchObject({ reason: "validation" })
+    await expect(
+      client.credentialsForInstallation("77", "", ["contents:read"])
+    ).rejects.toMatchObject({ reason: "validation" })
+    await expect(client.credentialsForInstallation("77", "acme/widgets", [])).rejects.toMatchObject(
+      { reason: "validation" }
+    )
+    await expect(
+      client.credentialsForInstallation("77", "acme/widgets", ["metadata"])
+    ).rejects.toMatchObject({ reason: "validation" })
     expect(fetch).not.toHaveBeenCalled()
   })
 })
@@ -331,28 +391,32 @@ describe("plugin GitHub authentication", () => {
         }
       })
     )
-    const github = Layer.succeed(
-      GitHubAuth,
-      {
-        status: () =>
-          Effect.succeed({
-            enabled: true,
-            connected: true,
-            user: { id: "1", login: "octocat", name: null, avatarUrl: null },
-            installations: [{
+    const github = Layer.succeed(GitHubAuth, {
+      status: () =>
+        Effect.succeed({
+          enabled: true,
+          connected: true,
+          user: { id: "1", login: "octocat", name: null, avatarUrl: null },
+          installations: [
+            {
               id: "77",
-              account: { id: "2", login: "acme", type: "Organization", avatarUrl: null },
+              account: {
+                id: "2",
+                login: "acme",
+                type: "Organization",
+                avatarUrl: null
+              },
               repositorySelection: "selected",
               permissions: { issues: "write" },
               status: "active",
               suspendedAt: null
-            }],
-            lastRefreshedAt: "2030-01-01T00:00:00.000Z"
-          }),
-        credentialsForOwner,
-        defaultPluginGrant
-      } as never
-    )
+            }
+          ],
+          lastRefreshedAt: "2030-01-01T00:00:00.000Z"
+        }),
+      credentialsForOwner,
+      defaultPluginGrant
+    } as never)
     const provider = makeGithubAuthProvider((effect) =>
       Effect.runPromise(effect.pipe(Effect.provide(github)))
     )
@@ -372,13 +436,10 @@ describe("plugin GitHub authentication", () => {
 
   it("does not mint a plugin credential without an exact repository and permission", async () => {
     const credentialsForOwner = vi.fn()
-    const github = Layer.succeed(
-      GitHubAuth,
-      {
-        status: () => Effect.succeed(STATUS),
-        credentialsForOwner
-      } as never
-    )
+    const github = Layer.succeed(GitHubAuth, {
+      status: () => Effect.succeed(STATUS),
+      credentialsForOwner
+    } as never)
     const provider = makeGithubAuthProvider((effect) =>
       Effect.runPromise(effect.pipe(Effect.provide(github)))
     )

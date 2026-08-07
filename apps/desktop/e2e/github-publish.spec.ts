@@ -67,6 +67,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   await expect(window.getByText("Publishing stopped")).toBeVisible()
   await expect(window.getByText(/Finish creating the semantic task branch/)).toBeVisible()
   expect(githubServer.operations).toEqual([])
+  await expect.poll(() => sessionsAt(home)[0]?.publish?.step).toBe("failed")
   expect(sessionsAt(home)[0]?.publish).toMatchObject({
     step: "failed",
     resumeFrom: "verifying-branch"
@@ -101,6 +102,10 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   expect(sessionsAt(home)[0]?.publish).toMatchObject({
     resumeFrom: "updating-pr",
     prNumber: 900
+  })
+  expect(githubServer.requests).toContainEqual({
+    method: "POST",
+    path: "/api/github/session-routes"
   })
   expect(git(session.worktreePath, ["log", "-1", "--format=%s"])).toBe(
     "chore: implement deterministic publishing"

@@ -32,6 +32,7 @@ import {
   type GitHubApiInstallation,
   type GitHubApiRepository,
   type GitHubAppClient,
+  GitHubAppError,
   type GitHubTokenCipher,
   type GitHubUserToken
 } from "./github-app.js"
@@ -207,14 +208,12 @@ const repositoryStore: GitHubConnectionStore = {
 }
 
 const sessionRouteStore: GitHubSessionRouteStore = {
-  listByUserId: (userId) =>
-    runtime.runPromise(GitHubSessionRouteRepository.listByUserId(userId)),
+  listByUserId: (userId) => runtime.runPromise(GitHubSessionRouteRepository.listByUserId(userId)),
   findForUser: async (userId, relaySessionId) =>
     Option.getOrNull(
       await runtime.runPromise(GitHubSessionRouteRepository.findForUser(userId, relaySessionId))
     ),
-  upsertActive: (input) =>
-    runtime.runPromise(GitHubSessionRouteRepository.upsertActive(input)),
+  upsertActive: (input) => runtime.runPromise(GitHubSessionRouteRepository.upsertActive(input)),
   setState: async (input) =>
     Option.getOrNull(await runtime.runPromise(GitHubSessionRouteRepository.setState(input))),
   removeAllForUser: async (userId, at) => {
@@ -298,6 +297,7 @@ const unavailableClient: GitHubAppClient = {
   listInstallations: async () => unavailable(),
   listInstallationRepositories: async () => unavailable(),
   createInstallationAccessToken: async () => unavailable(),
+  createPullRequest: async () => unavailable(),
   revokeUserToken: async () => unavailable()
 }
 
@@ -1073,7 +1073,12 @@ export const createGitHubRoutes = (
       readonly installationId: string | null
       readonly repositoryId: string | null
       readonly pullRequestNumber: number | null
-    } = { sessionId: null, installationId: null, repositoryId: null, pullRequestNumber: null }
+    } = {
+      sessionId: null,
+      installationId: null,
+      repositoryId: null,
+      pullRequestNumber: null
+    }
     try {
       const body: unknown = await c.req.json()
       const record =
@@ -1210,12 +1215,8 @@ export const createGitHubRoutes = (
   routes.post("/session-routes/:relaySessionId/archive", (c) =>
     transitionSessionRoute(c, "archived")
   )
-  routes.post("/session-routes/:relaySessionId/unlink", (c) =>
-    transitionSessionRoute(c, "removed")
-  )
-  routes.delete("/session-routes/:relaySessionId", (c) =>
-    transitionSessionRoute(c, "removed")
-  )
+  routes.post("/session-routes/:relaySessionId/unlink", (c) => transitionSessionRoute(c, "removed"))
+  routes.delete("/session-routes/:relaySessionId", (c) => transitionSessionRoute(c, "removed"))
 
   routes.post("/desktop-grant", async (c) => {
     const dependencies = resolveDependencies()
@@ -1322,6 +1323,111 @@ export const createGitHubRoutes = (
       )
     } catch {
       return c.json({ error: "GitHub credential minting failed" }, 502, noStore)
+    }
+  })
+
+  /**
+   * Creates a pull request as the connected GitHub user. Organization rules can
+   * reject installation actors even when the same installation may push and
+   * read the repository, so the user's OAuth token remains server-side here.
+   */
+  routes.post("/pull-requests", async (c) => {
+    const dependencies = resolveDependencies()
+    const userId = await authenticated(c.req.raw.headers, dependencies)
+    if (!userId) return c.json({ error: "Authentication required" }, 401, noStore)
+    if (!available(dependencies)) {
+      return c.json({ error: "GitHub App is not configured" }, 503, noStore)
+    }
+    let input: {
+      installationId: string | null
+      repository: string | null
+      title: string | null
+      body: string | null
+      head: string | null
+      base: string | null
+      draft: boolean | null
+    } = {
+      installationId: null,
+      repository: null,
+      title: null,
+      body: null,
+      head: null,
+      base: null,
+      draft: null
+    }
+    try {
+      const value: unknown = await c.req.json()
+      const record =
+        value && typeof value === "object" && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : {}
+      const text = (candidate: unknown, maximum: number): string | null =>
+        typeof candidate === "string" && candidate.length > 0 && candidate.length <= maximum
+          ? candidate
+          : null
+      input = {
+        installationId: parseInstallationId(
+          typeof record.installationId === "string" ? record.installationId : undefined
+        ),
+        repository: text(record.repository, 200),
+        title: text(record.title, 256),
+        body: typeof record.body === "string" && record.body.length <= 100_000 ? record.body : null,
+        head: text(record.head, 300),
+        base: text(record.base, 300),
+        draft: typeof record.draft === "boolean" ? record.draft : null
+      }
+    } catch {
+      // The uniform validation response below reveals no connection state.
+    }
+    if (
+      !input.installationId ||
+      !input.repository ||
+      !input.title ||
+      input.body === null ||
+      !input.head ||
+      !input.base ||
+      input.draft === null ||
+      !/^[^/\s]+\/[^/\s]+$/.test(input.repository)
+    ) {
+      return c.json({ error: "Valid pull request fields are required" }, 400, noStore)
+    }
+    try {
+      await reconcileIfStale(dependencies, userId)
+      const installation = await dependencies.store.findInstallationForUser(
+        userId,
+        input.installationId
+      )
+      if (!installation || installation.suspendedAt) {
+        return c.json({ error: "Active installation required" }, 403, noStore)
+      }
+      const authorization = await dependencies.store.findAuthorizationByUserId(userId)
+      if (!authorization) return c.json({ error: "GitHub authorization required" }, 403, noStore)
+      const token = await activeUserToken(dependencies, authorization)
+      const repositories = await dependencies.github.listInstallationRepositories(
+        token.accessToken,
+        input.installationId
+      )
+      if (
+        !repositories.some(
+          (repository) => repository.fullName.toLowerCase() === input.repository!.toLowerCase()
+        )
+      ) {
+        return c.json({ error: "Repository is not available to this installation" }, 403, noStore)
+      }
+      const pullRequestNumber = await dependencies.github.createPullRequest(token.accessToken, {
+        repository: input.repository,
+        title: input.title,
+        body: input.body,
+        head: input.head,
+        base: input.base,
+        draft: input.draft
+      })
+      return c.json({ number: pullRequestNumber }, 201, noStore)
+    } catch (error) {
+      if (error instanceof GitHubAppError && error.status === 422) {
+        return c.json({ error: "GitHub rejected the pull request values" }, 422, noStore)
+      }
+      return c.json({ error: "Pull request creation failed" }, 502, noStore)
     }
   })
 

@@ -344,6 +344,20 @@ export function PullRequestView({
         */}
         <div className="flex flex-1 flex-col overflow-auto px-[30px] py-[26px] [scrollbar-gutter:stable_both-edges]">
           <div className="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-[18px]">
+            {publish?.step === "failed" && (
+              <div
+                aria-live="polite"
+                className="w-full rounded-lg border border-line bg-surface p-3 text-left text-[11px] text-muted-foreground"
+              >
+                <p className="font-medium text-text-bright">Publishing stopped</p>
+                {publish.error && <Callout tone="red" className="mt-2">{publish.error}</Callout>}
+                {onRetryPublish && (
+                  <Button variant="secondary" size="sm" className="mt-3" onClick={onRetryPublish}>
+                    Retry from {publish.resumeFrom ?? "inspection"}
+                  </Button>
+                )}
+              </div>
+            )}
           {/* PR header */}
           <div className="flex flex-col gap-[11px]">
             <div className="flex items-center gap-[9px]">

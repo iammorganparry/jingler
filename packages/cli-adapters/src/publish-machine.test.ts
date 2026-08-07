@@ -38,7 +38,7 @@ const operations = (overrides: Partial<PublishOperations> = {}): PublishOperatio
 })
 
 describe("deterministic publish machine", () => {
-  it("commits, pushes, creates, updates, and links in order", async () => {
+  it("commits, pushes, creates, links the relay, and then updates in order", async () => {
     const order: string[] = []
     const ops = operations({
       stage: vi.fn(async () => { order.push("stage") }),
@@ -55,12 +55,34 @@ describe("deterministic publish machine", () => {
 
     expect(result.step).toBe("complete")
     expect(result).toMatchObject({ branch: "feat/deterministic-publish", commitSha: "commit-sha", prNumber: 42 })
-    expect(order).toEqual(["stage", "commit", "authenticate", "push", "resolve", "create", "update", "link"])
+    expect(order).toEqual(["stage", "commit", "authenticate", "push", "resolve", "create", "link", "update"])
     expect(seen.some((value) => value.step === "pushing")).toBe(true)
     expect(result.completed).toEqual([
       "inspecting", "verifying-branch", "generating-metadata", "staging", "committing",
-      "authenticating", "pushing", "resolving-pr", "creating-pr", "updating-pr", "linking"
+      "authenticating", "pushing", "resolving-pr", "creating-pr", "linking", "updating-pr"
     ])
+  })
+
+  it("links the feedback relay before a pull request description update can fail", async () => {
+    const order: string[] = []
+    const ops = operations({
+      resolvePr: vi.fn(async () => 42),
+      link: vi.fn(async () => { order.push("link") }),
+      updatePr: vi.fn(async () => {
+        order.push("update")
+        throw new Error("description update failed")
+      })
+    })
+
+    const result = await runPublishMachine(undefined, ops, async () => undefined)
+
+    expect(result).toMatchObject({
+      step: "failed",
+      resumeFrom: "updating-pr",
+      prNumber: 42
+    })
+    expect(result.completed).toContain("linking")
+    expect(order).toEqual(["link", "update"])
   })
 
   it("reuses persisted metadata and an existing PR after retry", async () => {

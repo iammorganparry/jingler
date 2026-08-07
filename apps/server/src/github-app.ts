@@ -68,6 +68,15 @@ export interface GitHubInstallationAccessToken {
   readonly expiresAt: Date
 }
 
+export interface GitHubPullRequestCreateInput {
+  readonly repository: string
+  readonly title: string
+  readonly body: string
+  readonly head: string
+  readonly base: string
+  readonly draft: boolean
+}
+
 export type GitHubAppFailureCode =
   "invalid-response" | "oauth-rejected" | "api-rejected" | "invalid-private-key" | "invalid-grant"
 
@@ -162,6 +171,10 @@ export interface GitHubAppClient {
       readonly repositories: ReadonlyArray<string>
     }
   ) => Promise<GitHubInstallationAccessToken>
+  readonly createPullRequest: (
+    accessToken: string,
+    input: GitHubPullRequestCreateInput
+  ) => Promise<number>
   readonly revokeUserToken: (accessToken: string) => Promise<void>
 }
 
@@ -351,6 +364,39 @@ export const createGitHubAppClient = (
       const expiry = string(body.expires_at)
       if (!token || !expiry) throw new GitHubAppError("invalid-response")
       return { token, expiresAt: new Date(expiry) }
+    },
+
+    createPullRequest: async (accessToken, input) => {
+      const [owner, repository, extra] = input.repository.split("/")
+      if (!owner || !repository || extra !== undefined) {
+        throw new GitHubAppError("invalid-grant")
+      }
+      const body = await json(
+        `${apiBaseUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/pulls`,
+        {
+          method: "POST",
+          headers: {
+            ...Object.fromEntries(requestHeaders(`Bearer ${accessToken}`).entries()),
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            title: input.title,
+            body: input.body,
+            head: input.head,
+            base: input.base,
+            draft: input.draft
+          })
+        }
+      )
+      const pullRequestNumber = number(body.number)
+      if (
+        pullRequestNumber === null ||
+        !Number.isSafeInteger(pullRequestNumber) ||
+        pullRequestNumber <= 0
+      ) {
+        throw new GitHubAppError("invalid-response")
+      }
+      return pullRequestNumber
     },
 
     revokeUserToken: async (accessToken) => {

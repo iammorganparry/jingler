@@ -2993,7 +2993,11 @@ export const githubEvents = () =>
       const ownedClientIds = new Set<string>();
       const supervisor = new GitHubRelaySupervisor({
         listSessions: async () => {
-          const status = await run(GitHubAuth.status());
+          // Relay supervision is the authorization boundary for live GitHub
+          // delivery. Its ten-second reconciliation must not reuse the
+          // general 30-second UI status cache or revoked/newly-selected
+          // repositories leave sockets in the wrong state for another cycle.
+          const status = await run(GitHubAuth.refresh());
           const routes = await reconcileRelaySessionRoutes(
             listSessions,
             () => run(GitHubAuth.sessionRoutes()),
@@ -3294,15 +3298,22 @@ export const githubPublish = (sessionId: string) =>
                   },
                   resolvePr: (branch) =>
                     run(GitHubApi.prForBranch(cwd, branch)),
-                  createPr: (metadata) =>
-                    run(
-                      GitHubApi.prCreate(cwd, {
+                  createPr: async (metadata) => {
+                    const repository =
+                      repositoryIdentity ??
+                      (await run(GitHubApi.repository(cwd)));
+                    return run(
+                      GitHubAuth.createPullRequest({
+                        installationId: repository.installationId,
+                        repository: repository.fullName,
                         title: metadata.prTitle,
                         body: metadata.prBody,
+                        head: `${repository.fullName.split("/")[0]}:${session.branch}`,
                         base: session.baseBranch ?? "main",
                         draft: false,
                       }),
-                    ),
+                    );
+                  },
                   updatePr: (number, metadata) =>
                     run(
                       GitHubApi.prUpdate(cwd, number, {

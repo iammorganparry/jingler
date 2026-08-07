@@ -1,10 +1,4 @@
-import {
-  createCipheriv,
-  generateKeyPairSync,
-  hkdfSync,
-  randomBytes,
-  verify
-} from "node:crypto"
+import { createCipheriv, generateKeyPairSync, hkdfSync, randomBytes, verify } from "node:crypto"
 import { describe, expect, it, vi } from "vitest"
 import { loadEnv } from "./env.js"
 import {
@@ -106,9 +100,9 @@ describe("GitHub App configuration", () => {
       GITHUB_APP_RELAY_SIGNING_SECRET: "relay-secret-abcdefghijklmnopqrstuvwxyz",
       GITHUB_APP_TOKEN_ENCRYPTION_KEY: "token-encryption-key-v2-abcdefghijk"
     }
-    expect(() =>
-      loadEnv({ ...production, GITHUB_APP_WEBHOOK_SECRET: "too-short" })
-    ).toThrow("at least 32 bytes")
+    expect(() => loadEnv({ ...production, GITHUB_APP_WEBHOOK_SECRET: "too-short" })).toThrow(
+      "at least 32 bytes"
+    )
     expect(() =>
       loadEnv({
         ...production,
@@ -186,9 +180,7 @@ describe("GitHub App cryptography", () => {
       response.claims
     )
     expect(JSON.stringify(response)).not.toMatch(/gh[urs]_/)
-    expect(() => verifyGitHubDesktopGrant(response.grant, "wrong", 101)).toThrow(
-      "invalid-grant"
-    )
+    expect(() => verifyGitHubDesktopGrant(response.grant, "wrong", 101)).toThrow("invalid-grant")
     expect(() => verifyGitHubDesktopGrant(response.grant, config.relaySigningSecret, 400)).toThrow(
       "invalid-grant"
     )
@@ -197,7 +189,10 @@ describe("GitHub App cryptography", () => {
 
 describe("GitHub API client", () => {
   it("rotates user tokens, reconciles installations, and mints installation tokens on demand", async () => {
-    const requests: Array<{ readonly url: string; readonly init: RequestInit }> = []
+    const requests: Array<{
+      readonly url: string
+      readonly init: RequestInit
+    }> = []
     const fetchMock = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
       const url = String(input)
       requests.push({ url, init })
@@ -210,7 +205,12 @@ describe("GitHub API client", () => {
         })
       }
       if (url.endsWith("/user")) {
-        return Response.json({ id: 7, login: "octocat", name: "Octo Cat", avatar_url: null })
+        return Response.json({
+          id: 7,
+          login: "octocat",
+          name: "Octo Cat",
+          avatar_url: null
+        })
       }
       if (url.includes("/user/installations/99/repositories")) {
         return Response.json({
@@ -222,7 +222,12 @@ describe("GitHub API client", () => {
           installations: [
             {
               id: 99,
-              account: { id: 8, login: "acme", type: "Organization", avatar_url: "avatar" },
+              account: {
+                id: 8,
+                login: "acme",
+                type: "Organization",
+                avatar_url: "avatar"
+              },
               repository_selection: "selected",
               permissions: { contents: "read", pull_requests: "write" },
               suspended_at: "2026-08-01T10:00:00.000Z"
@@ -232,7 +237,13 @@ describe("GitHub API client", () => {
       }
       if (url.endsWith("/app")) return Response.json({ slug: "jingler-test" })
       if (url.endsWith("/access_tokens")) {
-        return Response.json({ token: "ghs_installation_secret", expires_at: "2026-08-04T11:00:00Z" })
+        return Response.json({
+          token: "ghs_installation_secret",
+          expires_at: "2026-08-04T11:00:00Z"
+        })
+      }
+      if (url.endsWith("/repos/acme/widget/pulls")) {
+        return Response.json({ number: 1731 }, { status: 201 })
       }
       return new Response(null, { status: 204 })
     })
@@ -249,7 +260,10 @@ describe("GitHub API client", () => {
     })
     expect(String(requests[0]?.init.body)).toContain("grant_type=refresh_token")
 
-    expect(await client.getUser(rotated.accessToken)).toMatchObject({ id: "7", login: "octocat" })
+    expect(await client.getUser(rotated.accessToken)).toMatchObject({
+      id: "7",
+      login: "octocat"
+    })
     expect(await client.listInstallations(rotated.accessToken)).toEqual([
       expect.objectContaining({
         id: "99",
@@ -277,9 +291,32 @@ describe("GitHub API client", () => {
       repositories: ["widgets"]
     })
 
+    const pullRequestNumber = await client.createPullRequest("ghu_connected_user", {
+      repository: "acme/widget",
+      title: "Fix publishing",
+      body: "PR body",
+      head: "acme:chore/fix-publishing",
+      base: "main",
+      draft: false
+    })
+    expect(pullRequestNumber).toBe(1731)
+    expect(requests.at(-1)?.init.headers).toMatchObject({
+      authorization: "Bearer ghu_connected_user"
+    })
+    expect(JSON.parse(String(requests.at(-1)?.init.body))).toEqual({
+      title: "Fix publishing",
+      body: "PR body",
+      head: "acme:chore/fix-publishing",
+      base: "main",
+      draft: false
+    })
+
     const afterNarrowMint = requests.length
     await expect(
-      client.createInstallationAccessToken("99", { permissions: {}, repositories: [] })
+      client.createInstallationAccessToken("99", {
+        permissions: {},
+        repositories: []
+      })
     ).rejects.toMatchObject({ code: "invalid-grant" })
     await expect(
       client.createInstallationAccessToken("99", {
