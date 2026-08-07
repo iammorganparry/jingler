@@ -3197,6 +3197,7 @@ export const githubPublish = (sessionId: string) =>
                 session.id,
                 session.publish,
                 {
+                  knownPrNumber: session.prNumber,
                   inspect: async () => {
                     const inspection = await run(
                       GitService.publishInspection(

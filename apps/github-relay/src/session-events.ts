@@ -37,6 +37,9 @@ type ClientMessage =
 const isCursor = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0
 
+export const retainedCursorFloor = (newestCursor: number, maximumEvents: number): number =>
+  Math.max(0, newestCursor - maximumEvents)
+
 const parseClientMessage = (message: string): ClientMessage | null => {
   try {
     const value: unknown = JSON.parse(message)
@@ -281,15 +284,13 @@ export class SessionEventsObject extends DurableObject<Env> {
     const cutoff = Date.now() - RELAY_POLICY.eventRetentionMs
     let compacted = this.ctx.storage.sql.exec("DELETE FROM events WHERE created_at < ?", cutoff)
       .rowsWritten
-    const count = this.ctx.storage.sql.exec<CountRow>("SELECT COUNT(*) AS count FROM events").one()
-      .count
-    if (count > RELAY_POLICY.maxStoredEvents) {
-      compacted += this.ctx.storage.sql.exec(
-        `DELETE FROM events WHERE cursor IN (
-          SELECT cursor FROM events ORDER BY cursor ASC LIMIT ?
-        )`,
-        count - RELAY_POLICY.maxStoredEvents
-      ).rowsWritten
+    // cursor is the indexed INTEGER PRIMARY KEY. A high-water lookup remains
+    // constant-time as the stream grows; COUNT(*) scanned the entire event log
+    // on every publish and exhausted the free-tier row-read allowance.
+    const cursorFloor = retainedCursorFloor(this.newestCursor(), RELAY_POLICY.maxStoredEvents)
+    if (cursorFloor > 0) {
+      compacted += this.ctx.storage.sql.exec("DELETE FROM events WHERE cursor <= ?", cursorFloor)
+        .rowsWritten
     }
     const staleAcks = this.ctx.storage.sql.exec("DELETE FROM client_acks WHERE seen_at < ?", cutoff)
       .rowsWritten

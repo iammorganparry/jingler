@@ -464,7 +464,6 @@ export class InstallationRoutesObject extends DurableObject<Env> {
       relaySessionId,
       Date.now()
     )
-    this.prune()
   }
 
   private mutationApplied(mutationId: string): boolean {

@@ -117,6 +117,17 @@ describe("deterministic publish machine", () => {
     expect(ops.updatePr).toHaveBeenCalledWith(42, metadata)
   })
 
+  it("uses the session's linked PR before resolving or creating another one", async () => {
+    const ops = operations({ knownPrNumber: 1736 })
+
+    const result = await runPublishMachine(undefined, ops, async () => undefined)
+
+    expect(result).toMatchObject({ step: "complete", prNumber: 1736 })
+    expect(ops.resolvePr).not.toHaveBeenCalled()
+    expect(ops.createPr).not.toHaveBeenCalled()
+    expect(ops.link).toHaveBeenCalledWith(1736)
+  })
+
   it("keeps a durable PR number when branch resolution no longer finds it", async () => {
     const ops = operations({
       inspect: vi.fn(async () => ({

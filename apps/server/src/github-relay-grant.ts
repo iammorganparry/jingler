@@ -12,6 +12,8 @@ export interface GitHubRelayGrantConfig {
   readonly ttlSeconds?: number
 }
 
+export const GITHUB_SESSION_RELAY_GRANT_TTL_SECONDS = 60 * 60
+
 export class GitHubRelayGrantError extends Error {
   constructor() {
     super("GitHub relay grant rejected: invalid-grant")
@@ -120,7 +122,12 @@ export const verifyGitHubRelayGrant = (
   }
 }
 
-/** Mint a five-minute credential scoped to exactly one linked session stream. */
+/**
+ * Mint a credential scoped to exactly one linked session stream. Route
+ * revocation closes its sockets immediately, so a one-hour default avoids
+ * reconnecting every active session twelve times per hour without weakening
+ * the route boundary.
+ */
 export const issueGitHubSessionRelayGrant = (
   input: {
     readonly userId: string
@@ -139,7 +146,7 @@ export const issueGitHubSessionRelayGrant = (
     installationId: input.installationId,
     relaySessionId: input.relaySessionId,
     issuedAt: nowSeconds,
-    expiresAt: nowSeconds + (config.ttlSeconds ?? 300),
+    expiresAt: nowSeconds + (config.ttlSeconds ?? GITHUB_SESSION_RELAY_GRANT_TTL_SECONDS),
     grantId
   }
   const header = encodeJson({ alg: "HS256", typ: "JinglerGitHubGrant", version: 1 })

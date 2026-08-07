@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test"
 import { describe, expect, it } from "vitest"
+import { retainedCursorFloor } from "./session-events.js"
 import { normalizedEvent } from "./test-support.js"
 
 const connect = async (relaySessionId: string, clientId: string, cursor = 0) => {
@@ -36,6 +37,13 @@ const nextMessage = (socket: WebSocket): Promise<Record<string, unknown>> =>
   messages(socket, 1).then(([message]) => message!)
 
 describe("session event persistence", () => {
+  it("computes the retention floor from the indexed cursor without counting the event log", () => {
+    expect(retainedCursorFloor(4_999, 5_000)).toBe(0)
+    expect(retainedCursorFloor(5_000, 5_000)).toBe(0)
+    expect(retainedCursorFloor(5_001, 5_000)).toBe(1)
+    expect(retainedCursorFloor(12_345, 5_000)).toBe(7_345)
+  })
+
   it("uses a distinct event log and cursor stream for every relay session id", async () => {
     const first = env.SESSION_EVENTS.getByName("relay-session-isolation-a")
     const second = env.SESSION_EVENTS.getByName("relay-session-isolation-b")

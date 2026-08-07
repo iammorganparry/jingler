@@ -178,6 +178,19 @@ const handleWebhook = async (request: Request, env: Env): Promise<Response> => {
     })
     return json({ accepted: true, ignored: true, reason: "no_pull_request_route" }, 202)
   }
+  // CI/check and pull-request state webhooks are useful for refreshing a PR
+  // screen, but they are not feedback for an agent. Persisting them once per
+  // linked session made busy repositories dominate the Durable Object budget.
+  // PR screens already refresh from GitHub, so keep the relay for actionable
+  // review/comment feedback only.
+  if (!event.actionable) {
+    relayTelemetry("ignored_event", {
+      installationId: event.installationId,
+      event: event.event,
+      reason: "not_actionable"
+    })
+    return json({ accepted: true, ignored: true, reason: "not_actionable" }, 202)
+  }
   const id = await workflowId("delivery", deliveryId)
   const routes = env.INSTALLATION_ROUTES.getByName(event.installationId)
   const admission = await routes.prepareDeliveryWorkflow(deliveryId, id)

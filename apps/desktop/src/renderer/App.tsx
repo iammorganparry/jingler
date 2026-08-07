@@ -107,6 +107,7 @@ import { useMemory } from "./use-memory.js";
 import { repositoryAccess } from "./github-connection-machine.js";
 import { useGitHubConnection } from "./use-github-connection.js";
 import { GitHubFeedbackRouter } from "./github-feedback.js";
+import { applyRelayHealthUpdate } from "./github-relay-health.js";
 
 /** How often the archive sweep re-checks each linked PR's merged/closed state. */
 const ARCHIVE_POLL_MS = 60_000;
@@ -1024,13 +1025,7 @@ function AuthedApp({
       },
       (status) => {
         const key = status.relaySessionId ?? "relay-supervisor";
-        if (status.mode === "stopped") relayStatuses.current.delete(key);
-        else {
-          relayStatuses.current.set(key, {
-            mode: status.mode,
-            error: status.error,
-          });
-        }
+        applyRelayHealthUpdate(relayStatuses.current, key, status);
         const unhealthy = [...relayStatuses.current.values()].find(
           (candidate) =>
             candidate.mode === "error" || candidate.mode === "reconnecting",

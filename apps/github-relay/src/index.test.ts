@@ -2,14 +2,18 @@ import { env, introspectWorkflow, SELF } from "cloudflare:test"
 import { describe, expect, it } from "vitest"
 import { githubPayload, hmacHex, issueTestRelayGrant } from "./test-support.js"
 
-const signedWebhook = async (deliveryId: string, payload: unknown = githubPayload()): Promise<Response> => {
+const signedWebhook = async (
+  deliveryId: string,
+  payload: unknown = githubPayload(),
+  eventName = "issue_comment"
+): Promise<Response> => {
   const body = JSON.stringify(payload)
   return SELF.fetch("https://relay.test/webhooks/github", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-github-delivery": deliveryId,
-      "x-github-event": "issue_comment",
+      "x-github-event": eventName,
       "x-hub-signature-256": `sha256=${await hmacHex(body, "test-webhook-secret")}`
     },
     body
@@ -120,6 +124,42 @@ describe("GitHub relay HTTP boundary", () => {
       expect(instance).toBeDefined()
       await instance!.waitForStatus("complete")
       await expect(env.SESSION_EVENTS.getByName("relay-session-workflow-1").eventCount()).resolves.toBe(1)
+    } finally {
+      await introspector.dispose()
+    }
+  })
+
+  it("drops non-actionable CI state before creating a delivery Workflow", async () => {
+    const introspector = await introspectWorkflow(env.GITHUB_DELIVERY_WORKFLOW)
+    try {
+      const response = await signedWebhook(
+        "ignored-check-run",
+        githubPayload({
+          action: "completed",
+          check_run: {
+            id: 501,
+            updated_at: "2026-08-07T10:02:00Z",
+            pull_requests: [
+              {
+                id: 200,
+                number: 42,
+                url: "https://api.github.com/repos/acme/jingler/pulls/42",
+                head: { sha: "head" },
+                base: { sha: "base" }
+              }
+            ]
+          }
+        }),
+        "check_run"
+      )
+
+      expect(response.status).toBe(202)
+      await expect(response.json()).resolves.toMatchObject({
+        accepted: true,
+        ignored: true,
+        reason: "not_actionable"
+      })
+      expect(introspector.get()).toHaveLength(0)
     } finally {
       await introspector.dispose()
     }

@@ -475,6 +475,12 @@ describe("GitHubRelaySupervisor", () => {
       await vi.advanceTimersByTimeAsync(100);
       socket.open();
       expect(attempts).toBe(2);
+      expect(statuses).toContainEqual({
+        sessionId: "",
+        relaySessionId: "",
+        installationId: null,
+        mode: "connected",
+      });
       expect(statuses).toContainEqual(
         expect.objectContaining({
           sessionId: "session-a",

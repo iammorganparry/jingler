@@ -534,6 +534,14 @@ export class GitHubRelaySupervisor {
         this.connections.set(target.relaySessionId, { target, connection });
         await connection.start();
       }
+      // Clear a supervisor-level setup error after the next successful route
+      // reconciliation. Per-session connection states remain independent.
+      this.options.onStatus?.({
+        sessionId: "",
+        relaySessionId: "",
+        installationId: null,
+        mode: "connected",
+      });
     } catch (error) {
       if (this.running && generation === this.generation) {
         this.options.onStatus?.({
@@ -549,7 +557,7 @@ export class GitHubRelaySupervisor {
         this.timer = this.setTimer(() => {
           this.timer = null;
           void this.reconcile();
-        }, this.options.refreshMs ?? 10_000);
+        }, this.options.refreshMs ?? 30_000);
       }
     }
   }

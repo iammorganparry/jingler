@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  GITHUB_SESSION_RELAY_GRANT_TTL_SECONDS,
   issueGitHubRelayGrant,
   issueGitHubSessionRelayGrant,
   verifyGitHubSessionRelayGrant,
@@ -81,5 +82,30 @@ describe("GitHub relay grants", () => {
       relaySessionId: "opaque_session_identifier_123"
     })
     expect(JSON.stringify(response)).not.toContain("local-session")
+  })
+
+  it("keeps a session grant alive for one hour by default to limit reconnect churn", () => {
+    const response = issueGitHubSessionRelayGrant(
+      {
+        userId: "user-1",
+        installationId: "99",
+        relaySessionId: "opaque_session_identifier_456"
+      },
+      {
+        relayUrl: config.relayUrl,
+        relaySigningSecret: config.relaySigningSecret
+      },
+      100,
+      "grant-session-hour"
+    )
+
+    expect(response.claims.expiresAt).toBe(100 + GITHUB_SESSION_RELAY_GRANT_TTL_SECONDS)
+    expect(
+      verifyGitHubSessionRelayGrant(
+        response.grant,
+        config.relaySigningSecret,
+        response.claims.expiresAt - 1
+      )
+    ).toEqual(response.claims)
   })
 })

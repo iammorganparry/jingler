@@ -12,6 +12,8 @@ export interface PublishInspection {
 }
 
 export interface PublishOperations {
+  /** Authoritative PR already linked to the session, when one exists. */
+  readonly knownPrNumber?: number | null
   readonly inspect: () => Promise<PublishInspection>
   readonly verifyBranch: (inspection: PublishInspection) => Promise<string>
   readonly generateMetadata: (inspection: PublishInspection) => Promise<PublishMetadata>
@@ -88,7 +90,10 @@ export const createPublishMachine = (
         ? checkpoint.metadata
         : null,
     commitSha: resumable(checkpoint) ? checkpoint?.commitSha ?? null : null,
-    prNumber: resumable(checkpoint) ? checkpoint?.prNumber ?? null : null,
+    prNumber:
+      (resumable(checkpoint) ? checkpoint?.prNumber : undefined) ??
+      operations.knownPrNumber ??
+      null,
     completed: resumable(checkpoint) ? checkpoint?.completed ?? [] : [],
     error: null,
     resumeFrom: null
