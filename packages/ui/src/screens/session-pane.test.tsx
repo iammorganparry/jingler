@@ -344,6 +344,25 @@ describe("SessionPane", () => {
     expect(screen.getByText("files for a")).toBeTruthy()
   })
 
+  it("routes a Files code reference to Conversation in the same session pane", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        renderConversation={(s) => <div>transcript for {s.id}</div>}
+        renderFiles={(s, ctx) => (
+          <button type="button" onClick={ctx.onSelectConversation}>
+            forward reference for {s.id}
+          </button>
+        )}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Files" }))
+    fireEvent.click(screen.getByRole("button", { name: "forward reference for a" }))
+
+    expect(screen.getByText("transcript for a")).toBeTruthy()
+  })
+
   it("routes a transcript file gesture into this session's Files tab", () => {
     const onOpenFile = vi.fn()
     render(
@@ -413,8 +432,8 @@ describe("SessionPane", () => {
       <SessionPane
         session={session({ id: "a", prNumber: 5 })}
         renderConversation={(s) => <div>transcript {s.id}</div>}
-        renderChatTabs={(_session, onSelectConversation) => (
-          <button type="button" onClick={onSelectConversation}>
+        renderChatTabs={(_session, ctx) => (
+          <button type="button" onClick={ctx.onSelectConversation}>
             Active chat
           </button>
         )}

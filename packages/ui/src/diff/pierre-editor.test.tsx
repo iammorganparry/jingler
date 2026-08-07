@@ -21,6 +21,24 @@ interface MockCodeViewProps {
     item: CodeViewItem<PierreAnnotationMetadata>,
     file: FileContents
   ) => void
+  readonly selectedLines?: {
+    readonly id: string
+    readonly range: {
+      readonly start: number
+      readonly end: number
+      readonly side: "additions" | "deletions"
+      readonly endSide: "additions" | "deletions"
+    }
+  } | null
+  readonly onSelectedLinesChange?: (selection: {
+    readonly id: string
+    readonly range: {
+      readonly start: number
+      readonly end: number
+      readonly side: "additions" | "deletions"
+      readonly endSide: "additions" | "deletions"
+    }
+  } | null) => void
 }
 
 const pierre = vi.hoisted<{
@@ -59,7 +77,7 @@ afterEach(() => {
 })
 
 describe("PierreEditor", () => {
-  it("contains the beta editor and translates dirty, change, and completion callbacks", () => {
+  it("contains the beta editor and translates dirty, change, completion, and selection callbacks", () => {
     const item = {
       id: "src/example.ts",
       type: "file",
@@ -72,6 +90,7 @@ describe("PierreEditor", () => {
     const onDirtyChange = vi.fn()
     const onChange = vi.fn()
     const onComplete = vi.fn()
+    const onSelectionChange = vi.fn()
 
     render(
       <PierreProvider tokens={toTokens(jinglerDark)} workers={false}>
@@ -81,6 +100,14 @@ describe("PierreEditor", () => {
           onDirtyChange={onDirtyChange}
           onChange={onChange}
           onComplete={onComplete}
+          selection={{
+            path: item.file.name,
+            side: "new",
+            startLine: 2,
+            endLine: 4,
+            endSide: "new"
+          }}
+          onSelectionChange={onSelectionChange}
         />
       </PierreProvider>
     )
@@ -89,6 +116,23 @@ describe("PierreEditor", () => {
     expect(props).toBeDefined()
     if (props === undefined) return
     expect(props.items[0]).toMatchObject({ id: item.id, edit: true })
+    expect(props.selectedLines).toEqual({
+      id: item.id,
+      range: { start: 2, end: 4, side: "additions", endSide: "additions" }
+    })
+    act(() => {
+      props.onSelectedLinesChange?.({
+        id: item.id,
+        range: { start: 3, end: 5, side: "additions", endSide: "additions" }
+      })
+    })
+    expect(onSelectionChange).toHaveBeenCalledWith({
+      path: item.file.name,
+      side: "new",
+      startLine: 3,
+      endLine: 5,
+      endSide: "new"
+    })
 
     const editorChange = vi.fn()
     expect(props.createEditor?.({ onChange: editorChange })).toBeTruthy()

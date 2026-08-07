@@ -60,6 +60,7 @@ export type FileBrowserStatus =
 
 export interface FileBrowserController {
   readonly entries: ReturnType<FileBrowserActor["getSnapshot"]>["context"]["entries"]
+  readonly openPaths: ReadonlyArray<string>
   readonly treeLoading: boolean
   readonly treeError: string | null
   readonly patch: string | null
@@ -73,6 +74,7 @@ export interface FileBrowserController {
   readonly status: FileBrowserStatus
   readonly dirty: boolean
   readonly open: (path: string) => void
+  readonly close: (path: string) => void
   readonly edit: (text: string) => void
   readonly save: () => void
   readonly refreshConflict: () => void
@@ -88,6 +90,7 @@ export function useFileBrowser(sessionId: string): FileBrowserController {
   const actor = useMemo(() => getFileBrowserActor(sessionId), [sessionId])
   const snapshot = useSelector(actor, (state) => state)
   const open = useCallback((path: string) => actor.send({ type: "OPEN", path }), [actor])
+  const close = useCallback((path: string) => actor.send({ type: "CLOSE", path }), [actor])
   const edit = useCallback((text: string) => actor.send({ type: "EDIT", text }), [actor])
   const save = useCallback(() => actor.send({ type: "SAVE" }), [actor])
   const refreshConflict = useCallback(() => actor.send({ type: "REFRESH_CONFLICT" }), [actor])
@@ -129,6 +132,7 @@ export function useFileBrowser(sessionId: string): FileBrowserController {
 
   return {
     entries: snapshot.context.entries,
+    openPaths: snapshot.context.openPaths,
     treeLoading: snapshot.matches({ tree: "loading" }),
     treeError: snapshot.context.treeError,
     patch: snapshot.context.patch,
@@ -142,6 +146,7 @@ export function useFileBrowser(sessionId: string): FileBrowserController {
     status,
     dirty,
     open,
+    close,
     edit,
     save,
     refreshConflict,

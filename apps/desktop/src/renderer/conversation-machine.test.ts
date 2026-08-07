@@ -540,6 +540,38 @@ describe("conversationMachine — queue while busy", () => {
     actor.stop()
   })
 
+  it("keeps queued reference context hidden from edits and appends it only at dispatch", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    const agentContext = "<repository-code-references>\nsecret context\n</repository-code-references>"
+    actor.send({ type: "SEND", text: "explain this", agentContext })
+    const id = queuedId(actor, 0)
+    expect(actor.getSnapshot().context.queued[0]).toMatchObject({
+      text: "explain this",
+      agentContext
+    })
+
+    actor.send({ type: "EDIT_QUEUED", id, text: "explain this carefully" })
+    expect(actor.getSnapshot().context.queued[0]?.text).toBe("explain this carefully")
+    expect(actor.getSnapshot().context.queued[0]?.agentContext).toBe(agentContext)
+
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    await waitFor(actor, () => h.agentRunCalls.length === 2, { timeout: 3000 })
+    expect(h.agentRunCalls[1]!.text).toBe(`explain this carefully\n\n${agentContext}`)
+    expect(h.agentRunCalls[1]!.options).toMatchObject({ displayText: "explain this carefully" })
+    const visibleUserText = actor.getSnapshot().context.messages
+      .filter((message) => message.role === "user")
+      .at(-1)?.parts
+      .filter((part) => part._tag === "Text")
+      .map((part) => part.text)
+      .join("")
+    expect(visibleUserText).toBe("explain this carefully")
+    actor.stop()
+  })
 
   it("UNQUEUE drops a still-pending queued message", async () => {
     const actor = start()

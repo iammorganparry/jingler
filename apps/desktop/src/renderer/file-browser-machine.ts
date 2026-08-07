@@ -24,7 +24,9 @@ export interface FileBrowserInput {
 }
 
 export type FileBrowserPendingDiscard =
-  { readonly type: "open"; readonly path: string } | { readonly type: "reload" }
+  | { readonly type: "open"; readonly path: string }
+  | { readonly type: "reload" }
+  | { readonly type: "close"; readonly path: string }
 
 export type FileBrowserFailure =
   | { readonly type: "binary"; readonly path: string }
@@ -49,6 +51,7 @@ export interface FileBrowserContext {
   readonly treeError: string | null
   readonly patch: string | null
   readonly patchError: string | null
+  readonly openPaths: ReadonlyArray<string>
   readonly selectedPath: string | null
   readonly payload: AssetPayload | null
   readonly draft: string | null
@@ -59,6 +62,7 @@ export interface FileBrowserContext {
 
 export type FileBrowserEvent =
   | { readonly type: "OPEN"; readonly path: string }
+  | { readonly type: "CLOSE"; readonly path: string }
   | { readonly type: "EDIT"; readonly text: string }
   | { readonly type: "SAVE" }
   | { readonly type: "REFRESH_CONFLICT" }
@@ -86,6 +90,22 @@ const withOpenedPath = (
     : [...entries, { path, status: "untracked" as const }].sort((a, b) =>
         a.path.localeCompare(b.path)
       )
+
+const appendOpenPath = (paths: ReadonlyArray<string>, path: string): ReadonlyArray<string> =>
+  paths.includes(path) ? paths : [...paths, path]
+
+const closeFallback = (
+  paths: ReadonlyArray<string>,
+  path: string
+): { readonly paths: ReadonlyArray<string>; readonly selectedPath: string | null } => {
+  const index = paths.indexOf(path)
+  if (index < 0) return { paths, selectedPath: null }
+  const next = paths.filter((candidate) => candidate !== path)
+  return {
+    paths: next,
+    selectedPath: next[Math.min(index, next.length - 1)] ?? null
+  }
+}
 
 const numberField = (value: object, key: string): number => {
   const field = key in value ? value[key as keyof typeof value] : undefined
@@ -175,6 +195,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       selectPath: assign(({ context, event }) =>
         event.type === "OPEN"
           ? {
+              openPaths: appendOpenPath(context.openPaths, event.path),
               selectedPath: event.path,
               payload: null,
               draft: null,
@@ -195,14 +216,29 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
         if (event.type === "RELOAD") {
           return { pendingDiscard: { type: "reload" as const } }
         }
+        if (event.type === "CLOSE") {
+          return {
+            pendingDiscard: { type: "close" as const, path: event.path }
+          }
+        }
         return {}
       }),
       applyPendingDiscard: assign(({ context }) => {
+        const closing =
+          context.pendingDiscard?.type === "close"
+            ? closeFallback(context.openPaths, context.pendingDiscard.path)
+            : null
         const nextPath =
-          context.pendingDiscard?.type === "open"
-            ? context.pendingDiscard.path
-            : context.selectedPath
+          context.pendingDiscard?.type === "close"
+            ? (closing?.selectedPath ?? null)
+            : context.pendingDiscard?.type === "open"
+              ? context.pendingDiscard.path
+              : context.selectedPath
         return {
+          openPaths:
+            context.pendingDiscard?.type === "open"
+              ? appendOpenPath(context.openPaths, context.pendingDiscard.path)
+              : (closing?.paths ?? context.openPaths),
           selectedPath: nextPath,
           payload: null,
           draft: null,
@@ -210,6 +246,27 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
           pendingDiscard: null,
           viewMode:
             nextPath !== null && diffFirst(context.entries, nextPath)
+              ? ("diff" as const)
+              : ("edit" as const)
+        }
+      }),
+      closeInactivePath: assign(({ context, event }) =>
+        event.type === "CLOSE"
+          ? { openPaths: context.openPaths.filter((path) => path !== event.path) }
+          : {}
+      ),
+      closeAndSelectFallback: assign(({ context, event }) => {
+        if (event.type !== "CLOSE") return {}
+        const next = closeFallback(context.openPaths, event.path)
+        return {
+          openPaths: next.paths,
+          selectedPath: next.selectedPath,
+          payload: null,
+          draft: null,
+          failure: null,
+          pendingDiscard: null,
+          viewMode:
+            next.selectedPath !== null && diffFirst(context.entries, next.selectedPath)
               ? ("diff" as const)
               : ("edit" as const)
         }
@@ -241,7 +298,18 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
         event.output !== null &&
         "text" in event.output &&
         context.draft !== event.output.text,
-      hasPendingDiscard: ({ context }) => context.pendingDiscard !== null
+      hasPendingDiscard: ({ context }) => context.pendingDiscard !== null,
+      opensSelectedPath: ({ context, event }) =>
+        event.type === "OPEN" && event.path === context.selectedPath,
+      closesInactivePath: ({ context, event }) =>
+        event.type === "CLOSE" && event.path !== context.selectedPath,
+      closeHasFallback: ({ context, event }) =>
+        event.type === "CLOSE" &&
+        closeFallback(context.openPaths, event.path).selectedPath !== null,
+      pendingCloseHasFallback: ({ context }) =>
+        context.pendingDiscard?.type === "close" &&
+        closeFallback(context.openPaths, context.pendingDiscard.path).selectedPath !== null,
+      pendingClose: ({ context }) => context.pendingDiscard?.type === "close"
     }
   }).createMachine({
     id: "fileBrowser",
@@ -252,6 +320,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       treeError: null,
       patch: null,
       patchError: null,
+      openPaths: [],
       selectedPath: null,
       payload: null,
       draft: null,
@@ -324,6 +393,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
         initial: "idle",
         on: {
           OPEN: [
+            { guard: "opensSelectedPath" },
             { guard: "hasUnsavedDraft", actions: "queueDiscard" },
             {
               target: ".loading",
@@ -331,16 +401,43 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
               actions: "selectPath"
             }
           ],
+          CLOSE: [
+            { guard: "closesInactivePath", actions: "closeInactivePath" },
+            { guard: "hasUnsavedDraft", actions: "queueDiscard" },
+            {
+              guard: "closeHasFallback",
+              target: ".loading",
+              reenter: true,
+              actions: "closeAndSelectFallback"
+            },
+            {
+              target: ".idle",
+              actions: "closeAndSelectFallback"
+            }
+          ],
           RELOAD: [
             { guard: "hasUnsavedDraft", actions: "queueDiscard" },
             { target: ".loading", reenter: true }
           ],
-          CONFIRM_DISCARD: {
-            guard: "hasPendingDiscard",
-            target: ".loading",
-            reenter: true,
-            actions: "applyPendingDiscard"
-          },
+          CONFIRM_DISCARD: [
+            {
+              guard: "pendingCloseHasFallback",
+              target: ".loading",
+              reenter: true,
+              actions: "applyPendingDiscard"
+            },
+            {
+              guard: "pendingClose",
+              target: ".idle",
+              actions: "applyPendingDiscard"
+            },
+            {
+              guard: "hasPendingDiscard",
+              target: ".loading",
+              reenter: true,
+              actions: "applyPendingDiscard"
+            }
+          ],
           CANCEL_DISCARD: { actions: "cancelDiscard" },
           START_EDIT: { actions: assign({ viewMode: "edit" }) },
           SHOW_DIFF: { actions: assign({ viewMode: "diff" }) }

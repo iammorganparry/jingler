@@ -13,14 +13,16 @@
  */
 import { useSyncExternalStore } from "react"
 import type { Attachment } from "@jingler/core"
+import { deduplicateCodeReferences, type CodeReference } from "./code-reference.js"
 
 export interface Draft {
   readonly text: string
   readonly attachments: ReadonlyArray<Attachment>
+  readonly references: ReadonlyArray<CodeReference>
 }
 
 /** Shared empty snapshot — a stable reference, so `useSyncExternalStore` settles. */
-export const EMPTY_DRAFT: Draft = { text: "", attachments: [] }
+export const EMPTY_DRAFT: Draft = { text: "", attachments: [], references: [] }
 
 const storageKey = (draftId: string): string => `sb.draft.${draftId}`
 
@@ -35,7 +37,8 @@ const notify = (): void => {
   for (const listener of listeners) listener()
 }
 
-const isEmpty = (draft: Draft): boolean => draft.text === "" && draft.attachments.length === 0
+const isEmpty = (draft: Draft): boolean =>
+  draft.text === "" && draft.attachments.length === 0 && draft.references.length === 0
 
 /** Read a persisted draft, tolerating absent/garbage/unavailable storage. */
 const read = (sessionId: string): Draft => {
@@ -47,7 +50,11 @@ const read = (sessionId: string): Draft => {
     if (typeof parsed?.text !== "string") return EMPTY_DRAFT
     const draft: Draft = {
       text: parsed.text,
-      attachments: Array.isArray(parsed.attachments) ? parsed.attachments : []
+      attachments: Array.isArray(parsed.attachments) ? parsed.attachments : [],
+      // Drafts written before code references existed simply omit this field.
+      references: Array.isArray(parsed.references)
+        ? deduplicateCodeReferences(parsed.references)
+        : []
     }
     // Collapse an empty record back to the shared reference, so the "no draft"
     // state has exactly one representation however it got persisted.
@@ -61,15 +68,22 @@ const writeNow = (sessionId: string, draft: Draft): void => {
   try {
     localStorage.setItem(storageKey(sessionId), JSON.stringify(draft))
   } catch {
-    // Base64 image attachments can blow localStorage's ~5MB quota. Never lose the
-    // TEXT over an image: retry without attachments. If even that fails (or
-    // there's no storage at all) the in-memory copy still carries the draft
-    // across session switches — only a reload would drop it.
-    if (draft.text === "") return // nothing worth saving without the attachments
+    // Base64 images and captured source can blow localStorage's ~5MB quota.
+    // Preserve as much structured context as possible, but TEXT is the final
+    // durable tier: a reload must not lose what the operator typed.
+    if (draft.text === "" && draft.references.length === 0) return
     try {
       localStorage.setItem(storageKey(sessionId), JSON.stringify({ ...draft, attachments: [] }))
     } catch {
-      /* memory-only — degraded, but the draft is still live this session */
+      if (draft.text === "") return
+      try {
+        localStorage.setItem(
+          storageKey(sessionId),
+          JSON.stringify({ ...draft, attachments: [], references: [] })
+        )
+      } catch {
+        /* memory-only — degraded, but the draft is still live this session */
+      }
     }
   }
 }
@@ -127,17 +141,21 @@ const subscribe = (listener: () => void): (() => void) => {
   return () => listeners.delete(listener)
 }
 
-/** Replace a session's draft (text and/or attachments); persists + notifies. */
+/** Replace a session's text, attachments, and code references; persists + notifies. */
 export const setDraft = (sessionId: string, draft: Draft): void => {
+  const normalized: Draft = {
+    ...draft,
+    references: deduplicateCodeReferences(draft.references)
+  }
   // An empty draft IS no draft — normalising here keeps storage tidy and keeps
   // `getDraft` returning the shared EMPTY_DRAFT reference.
-  if (isEmpty(draft)) {
+  if (isEmpty(normalized)) {
     clearDraft(sessionId)
     return
   }
   hydrated.add(sessionId)
-  drafts = { ...drafts, [sessionId]: draft }
-  write(sessionId, draft)
+  drafts = { ...drafts, [sessionId]: normalized }
+  write(sessionId, normalized)
   notify()
 }
 
@@ -160,6 +178,15 @@ export const clearDraft = (sessionId: string): void => {
 /** Read a session's draft without subscribing (event handlers, one-shot seeds). */
 export const getDraft = (sessionId: string): Draft => snapshot(sessionId)
 
+/** Add one captured range to a chat draft without disturbing its text or images. */
+export const addDraftCodeReference = (draftId: string, reference: CodeReference): void => {
+  const current = snapshot(draftId)
+  setDraft(draftId, {
+    ...current,
+    references: [...current.references, reference]
+  })
+}
+
 /**
  * Prefill a chat draft from its linked-issue task — at most once per session,
  * ever, and never over existing text.
@@ -178,9 +205,13 @@ export const seedDraftOnce = (
   seeded.add(seedKey)
   const current = snapshot(draftId)
   if (current.text !== "") return
-  // Only the TEXT is empty — carry any attachments through. A draft can hold
-  // images with no words yet, and the seed must not eat them.
-  setDraft(draftId, { text, attachments: current.attachments })
+  // Only the TEXT is empty — carry all structured context through. A draft can
+  // hold images or code ranges with no words yet, and the seed must not eat them.
+  setDraft(draftId, {
+    text,
+    attachments: current.attachments,
+    references: current.references
+  })
 }
 
 /** A chat's live draft (reactive). */

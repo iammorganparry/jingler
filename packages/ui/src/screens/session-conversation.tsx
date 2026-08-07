@@ -88,7 +88,10 @@ export interface SessionConversationProps {
     ctx: ConversationPaneCtx
   ) => ReactNode
   /** Render the session-native repository browser and editor. */
-  renderFiles?: (session: Session) => ReactNode
+  renderFiles?: (
+    session: Session,
+    ctx: { readonly onSelectConversation: () => void }
+  ) => ReactNode
   onOpenFile?: (sessionId: string, path: string) => void
   /**
    * Render a session's chat pills into the tab row's `chatSlot`. A render prop
@@ -96,7 +99,14 @@ export interface SessionConversationProps {
    * + live per-chat activity) lives in the desktop renderer, so building the bar
    * here would drag the RPC client into the component library. Absent in stories.
    */
-  renderChatTabs?: (session: Session, onSelectConversation: () => void) => ReactNode
+  renderChatTabs?: (
+    session: Session,
+    ctx: {
+      readonly activeTabId: TabKey
+      readonly onSelectConversation: () => void
+      readonly onSelectFiles: () => void
+    }
+  ) => ReactNode
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>
   /**

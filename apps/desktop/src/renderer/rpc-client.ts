@@ -855,6 +855,7 @@ export const rpc = {
     onEvent: (event: StreamEvent) => void,
     images: ReadonlyArray<Attachment> = [],
     options: {
+      readonly displayText?: string
       readonly reasoning?: ReasoningSetting | null
       readonly externalInstruction?: ExternalInstructionIdentity
     } = {}

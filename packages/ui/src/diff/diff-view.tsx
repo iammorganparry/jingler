@@ -71,6 +71,10 @@ export interface DiffViewProps {
   options?: PierreRenderOptions
   /** When provided, Pierre selection and annotation actions are enabled. */
   actions?: DiffActions
+  /** Optional controlled Pierre selection for non-review consumers such as Files. */
+  selection?: JinglerLineSelection | null
+  /** Enables line selection without enabling review annotations or actions. */
+  onSelectionChange?: (selection: JinglerLineSelection | null) => void
 }
 
 const inputFileDiffs = ({
@@ -138,7 +142,9 @@ export function DiffView({
   label = "Code changes",
   fill = true,
   options,
-  actions
+  actions,
+  selection,
+  onSelectionChange
 }: DiffViewProps) {
   const theme = useThemeSyntax()
   const tokens = useOptionalThemeTokens()
@@ -169,6 +175,8 @@ export function DiffView({
         fill={fill}
         options={renderOptions}
         actions={actions}
+        selection={selection}
+        onSelectionChange={onSelectionChange}
       />
     </PierreProvider>
   )
@@ -269,7 +277,9 @@ function DiffViewContent({
   label,
   fill,
   options,
-  actions
+  actions,
+  selection,
+  onSelectionChange
 }: {
   readonly revision: number
   readonly fileDiffs: readonly FileDiffMetadata[]
@@ -278,10 +288,23 @@ function DiffViewContent({
   readonly fill: boolean
   readonly options: PierreRenderOptions
   readonly actions: DiffActions | undefined
+  readonly selection: JinglerLineSelection | null | undefined
+  readonly onSelectionChange: ((selection: JinglerLineSelection | null) => void) | undefined
 }) {
   const state = useDiffSelectionState()
   useEffect(() => state.clear(), [revision, state.clear])
-  const model = usePierreDiffModel(fileDiffs, state.selection)
+  useEffect(() => {
+    if (
+      selection !== null &&
+      selection !== undefined &&
+      !fileDiffs.some((candidate) => candidate.name === selection.path)
+    ) {
+      onSelectionChange?.(null)
+    }
+  }, [fileDiffs, onSelectionChange, selection])
+  const activeSelection = actions === undefined ? (selection ?? null) : state.selection
+  const handleSelectionChange = actions === undefined ? onSelectionChange : state.onSelectionChange
+  const model = usePierreDiffModel(fileDiffs, activeSelection)
   const renderAnnotation = useSelectedRangeRenderer(actions, state.body, state.setBody, state.clear)
   return (
     <div
@@ -302,8 +325,8 @@ function DiffViewContent({
         fileDiffs={fileDiffs}
         items={model.items}
         annotation={model.annotation}
-        selection={actions === undefined ? undefined : model.activeSelection}
-        onSelectionChange={actions === undefined ? undefined : state.onSelectionChange}
+        selection={handleSelectionChange === undefined ? undefined : model.activeSelection}
+        onSelectionChange={handleSelectionChange}
         renderAnnotation={actions === undefined ? undefined : renderAnnotation}
         options={options}
       />

@@ -733,6 +733,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       sessionId: Schema.String,
       chatId: Schema.String,
       text: Schema.String,
+      /** Operator-visible text when hidden structured context is appended to `text`. */
+      displayText: Schema.optional(Schema.String),
       /** Images the operator attached as context (optional; omitted → none). */
       images: Schema.optional(Schema.Array(Attachment)),
       /**

@@ -1107,6 +1107,50 @@ describe("AgentRunner image attachments", () => {
   })
 })
 
+describe("AgentRunner hidden prompt context", () => {
+  it("persists display text instead of hidden context from the harness prompt", async () => {
+    const base = Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlMcpServiceTest,
+      InMemorySecretStoreLive,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      PlanStore.Default,
+      makeScriptedCliAdapter(0),
+      DiscoveryService.Default,
+      ContextManager.Default,
+      temp.layer
+    )
+    const fullPrompt = "Explain this\n\n<repository-code-references>hidden</repository-code-references>"
+    const program = Effect.gen(function* () {
+      const runner = yield* AgentRunner
+      yield* runner.setMode(SESSION, "auto")
+      yield* runner.prompt(
+        SESSION,
+        SESSION,
+        fullPrompt,
+        [],
+        undefined,
+        undefined,
+        undefined,
+        "Explain this"
+      ).pipe(Stream.runDrain)
+      return yield* TranscriptStore.list(SESSION)
+    })
+    const transcript = await Effect.runPromise(program.pipe(Effect.provide(base)))
+    const visibleText = transcript[0]?.parts
+      .filter((part) => part._tag === "Text")
+      .map((part) => part.text)
+      .join("")
+
+    expect(visibleText).toBe("Explain this")
+    expect(visibleText).not.toContain("repository-code-references")
+  })
+})
+
 describe("AgentRunner AskUserQuestion", () => {
   it("emits QuestionRequested, resumes on answer, and records it in the transcript", async () => {
     const base = Layer.mergeAll(

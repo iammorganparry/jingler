@@ -247,6 +247,118 @@ test("quick-open fills the session with the repository tree and a changed-file d
   expect(dimensions.height).toBeGreaterThanOrEqual((dimensions.parentHeight ?? 0) - 2)
 })
 
+test("keeps the repository tree visible while opening focusing and closing file tabs", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: seedAssets,
+    sessions: ({ repoPath }) => [session(repoPath)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await filesTab(window).click()
+  await showTree(window)
+  await selectTreePath(window, "src/edit.ts")
+  await expect(window.getByTestId("file-tab-src/edit.ts")).toBeVisible({ timeout: 15_000 })
+  await expect(window.getByRole("textbox", { name: "src/edit.ts" })).toBeVisible()
+
+  await showTree(window)
+  await selectTreePath(window, "docs/spec.md")
+  await expect(window.getByTestId("file-tab-docs/spec.md")).toBeVisible({ timeout: 15_000 })
+  await expect(window.getByTestId("file-tab-src/edit.ts")).toHaveCount(1)
+  await expect(tree(window)).toBeVisible()
+
+  await window.getByRole("button", { name: "src/edit.ts", exact: true }).click()
+  await expect(window.getByRole("textbox", { name: "src/edit.ts" })).toBeVisible({
+    timeout: 15_000
+  })
+  await expect(window.getByTestId("file-tab-src/edit.ts")).toHaveCount(1)
+
+  await window.getByRole("button", { name: "Close src/edit.ts", exact: true }).click()
+  await expect(window.getByTestId("file-tab-src/edit.ts")).toHaveCount(0)
+  await expect(window.getByRole("textbox", { name: "docs/spec.md" })).toBeVisible({
+    timeout: 15_000
+  })
+  await expect(tree(window)).toBeVisible()
+})
+
+test("switches a changed file between diff and edit and saves the edited revision", async ({
+  launchApp
+}) => {
+  const { window, repoPath } = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: seedAssets,
+    sessions: ({ repoPath }) => [session(repoPath)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await filesTab(window).click()
+  await showTree(window)
+  await selectTreePath(window, "src/main.ts")
+
+  const edit = window.getByRole("button", { name: "Edit src/main.ts", exact: true })
+  const diff = window.getByRole("button", { name: "Show diff for src/main.ts", exact: true })
+  await expect(diff).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
+  await expect(window.getByTestId("asset-content-canvas")).toContainText(
+    "export const answer = 43"
+  )
+
+  await edit.click()
+  const editor = window.getByRole("textbox", { name: "src/main.ts" })
+  await expect(editor).toContainText("export const answer = 43", { timeout: 15_000 })
+  await editor.click()
+  await editor.press("Meta+a")
+  await window.keyboard.insertText("export const answer = 44\n")
+  await editor.press("Meta+s")
+  await expect.poll(() => readFileSync(join(repoPath, "src", "main.ts"), "utf8")).toBe(
+    "export const answer = 44\n"
+  )
+
+  await diff.click()
+  await expect(diff).toHaveAttribute("aria-pressed", "true")
+  await expect(window.getByTestId("asset-content-canvas")).toContainText(
+    "export const answer = 43"
+  )
+})
+
+test("forwards selected current-buffer lines to the active chat with Cmd-Shift-J", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: seedAssets,
+    sessions: ({ repoPath }) => [session(repoPath)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await filesTab(window).click()
+  await showTree(window)
+  await selectTreePath(window, "src/edit.ts")
+  const editor = window.getByRole("textbox", { name: "src/edit.ts" })
+  await expect(editor).toBeVisible({ timeout: 15_000 })
+  await editor.click()
+  await editor.press("Meta+a")
+  await window.keyboard.insertText(
+    "export const selected = 1\nexport const unsaved = 2\nexport const ignored = 3\n"
+  )
+
+  const lines = window.locator("diffs-container [data-column-number]")
+  await expect(lines.first()).toBeVisible()
+  await lines.first().click({ position: { x: 6, y: 6 } })
+  await lines.nth(1).click({ modifiers: ["Shift"], position: { x: 6, y: 6 } })
+  await window.keyboard.press("Meta+Shift+j")
+
+  await expect(conversationTab(window)).toHaveAttribute("aria-current", "page")
+  await expect(
+    window.getByRole("button", { name: "Remove src/edit.ts:L1–L2", exact: true })
+  ).toBeVisible()
+  await expect(window.getByPlaceholder("Message Claude…")).toBeFocused()
+})
+
 test("edits UTF-8 files with unknown extensions and refuses binary data", async ({
   launchApp
 }) => {

@@ -161,7 +161,10 @@ export interface ConversationContext {
   readonly catalog: ReadonlyArray<ProviderModels>
   /** The worktree's current unified diff, for the Changes rail. */
   readonly patch: string
+  /** Operator-visible text for the running turn. */
   readonly pendingText: string
+  /** Hidden structured context appended only when the harness is dispatched. */
+  readonly pendingAgentContext: string
   /** Images attached to the turn currently running (sent to the harness). */
   readonly pendingImages: ReadonlyArray<Attachment>
   /** Stable source for the running external turn, when this is not a composer send. */
@@ -270,23 +273,30 @@ export interface QueuedMessage {
    */
   readonly id: string
   readonly text: string
+  /** Structured context stays out of the editable queued-row text. */
+  readonly agentContext: string
   readonly images: ReadonlyArray<Attachment>
   readonly externalInstruction?: ExternalInstructionIdentity
   readonly externalAcceptances: ReadonlyArray<() => void>
 }
 
 /**
- * Relay feedback has a stricter delivery boundary than an ordinary operator
- * correction. Native steering persists a plain user turn, so it cannot
- * atomically accept the relay identity that makes replay idempotent. Keep these
- * items on the queue until they can enter the normal Agent.run path instead.
+ * Some queued turns need the durable Agent.run boundary. Native steering cannot
+ * persist a different operator-visible value from the harness prompt, so hidden
+ * code-reference context must not take that path. Relay feedback also needs
+ * Agent.run to atomically accept the identity that makes replay idempotent.
  *
  * Check both fields defensively. They are created together today, but treating
  * either one as external prevents a future partial mapping from silently
  * resolving an acknowledgement through the non-durable steer path.
  */
-const requiresDurableRunAcceptance = (queued: QueuedMessage): boolean =>
-  queued.externalInstruction !== undefined || queued.externalAcceptances.length > 0
+const requiresFreshTurn = (queued: QueuedMessage): boolean =>
+  queued.agentContext !== "" ||
+  queued.externalInstruction !== undefined ||
+  queued.externalAcceptances.length > 0
+
+const agentPrompt = (text: string, context: string): string =>
+  context === "" ? text : text === "" ? context : `${text}\n\n${context}`
 
 type SteerResult =
   | { readonly status: "accepted"; readonly user: Message; readonly assistant: Message }
@@ -297,6 +307,7 @@ type ConversationEvent =
       type: "SEND"
       text: string
       images?: ReadonlyArray<Attachment>
+      agentContext?: string
       externalInstruction?: ExternalInstructionIdentity
       onExternalAccepted?: () => void
     }
@@ -555,6 +566,7 @@ const agentStream = fromCallback<
     chatId: string
     resumeChatId: string
     text: string
+    displayText: string
     images: ReadonlyArray<Attachment>
     resumePlanId: string | null
     resumePlanRevision: number | null
@@ -572,6 +584,7 @@ const agentStream = fromCallback<
         onEvent
       )
     : rpc.agentRun(input.sessionId, input.chatId, input.text, onEvent, input.images, {
+        displayText: input.displayText,
         reasoning: input.reasoning ?? null,
         ...(input.externalInstruction === null
           ? {}
@@ -644,7 +657,7 @@ const planFeedbackFor = (
   if (plan === null || plan.status !== "proposed") return null
 
   if (event.type === "SEND") {
-    if (event.externalInstruction !== undefined) return null
+    if (event.externalInstruction !== undefined || (event.agentContext ?? "") !== "") return null
     const text = event.text.trim()
     // Plan annotations cannot carry images. Preserve attachment-bearing sends in
     // the ordinary queue instead of silently discarding their visual context.
@@ -656,7 +669,7 @@ const planFeedbackFor = (
   const queued = context.queued.find((item) => item.id === event.id)
   if (
     queued === undefined ||
-    requiresDurableRunAcceptance(queued) ||
+    requiresFreshTurn(queued) ||
     queued.text.trim().length === 0 ||
     queued.images.length > 0
   ) {
@@ -761,13 +774,13 @@ export const conversationMachine = setup({
       if (!supportsSteer(context.cli)) return false
       return (
         context.resumePlanId === null &&
-        !requiresDurableRunAcceptance(context.queued[0]!)
+        !requiresFreshTurn(context.queued[0]!)
       )
     },
     canSteerQueued: ({ context, event }) => {
       if (event.type !== "SEND_NOW" || context.steeringId !== null) return false
       const queued = context.queued.find((item) => item.id === event.id)
-      return queued !== undefined && !requiresDurableRunAcceptance(queued)
+      return queued !== undefined && !requiresFreshTurn(queued)
     },
     canRoutePlanFeedback: ({ context, event }) =>
       planFeedbackFor(context, event) !== null,
@@ -798,11 +811,13 @@ export const conversationMachine = setup({
     appendTurns: assign(({ context, event }) => {
       if (event.type !== "SEND") return {}
       const text = event.text
+      const agentContext = event.agentContext ?? ""
       const images = event.images ?? []
       const now = new Date().toISOString()
       const id = stamp()
       return {
         pendingText: text,
+        pendingAgentContext: agentContext,
         pendingImages: images,
         pendingExternalInstruction: event.externalInstruction ?? null,
         pendingExternalAcceptances:
@@ -848,6 +863,7 @@ export const conversationMachine = setup({
         planDraftPresentationRequested: false,
         planActionError: null,
         pendingText: "",
+        pendingAgentContext: "",
         pendingImages: [],
         pendingExternalInstruction: null,
         pendingExternalAcceptances: [],
@@ -868,14 +884,16 @@ export const conversationMachine = setup({
     enqueue: assign(({ context, event }) => {
       if (event.type !== "SEND") return {}
       const text = event.text.trim()
+      const agentContext = event.agentContext ?? ""
       const images = event.images ?? []
-      if (text.length === 0 && images.length === 0) return {}
+      if (text.length === 0 && images.length === 0 && agentContext === "") return {}
       return {
         queued: [
           ...context.queued,
           {
             id: `q_${stamp()}_${context.queued.length}`,
             text,
+            agentContext,
             images,
             ...(event.externalInstruction === undefined
               ? {}
@@ -932,6 +950,7 @@ export const conversationMachine = setup({
     discardDuplicateExternalTurn: assign(({ context }) => ({
       messages: context.messages.slice(0, -2),
       pendingText: "",
+      pendingAgentContext: "",
       pendingImages: [],
       pendingExternalInstruction: null,
       pendingExternalAcceptances: [],
@@ -953,7 +972,7 @@ export const conversationMachine = setup({
       if (picked === undefined) return {}
       const text = event.text.trim()
       // An emptied message with no images would be sent as a blank turn.
-      if (text.length === 0 && picked.images.length === 0) {
+      if (text.length === 0 && picked.images.length === 0 && picked.agentContext === "") {
         return { queued: context.queued.filter((queued) => queued.id !== event.id) }
       }
       return {
@@ -1106,6 +1125,7 @@ export const conversationMachine = setup({
       return {
         queued: rest,
         pendingText: next.text,
+        pendingAgentContext: next.agentContext,
         pendingImages: next.images,
         pendingExternalInstruction: next.externalInstruction ?? null,
         pendingExternalAcceptances: next.externalAcceptances,
@@ -1766,6 +1786,7 @@ export const conversationMachine = setup({
       catalog: [],
       patch: "",
       pendingText: "",
+      pendingAgentContext: "",
       pendingImages: [],
       pendingExternalInstruction: null,
       pendingExternalAcceptances: [],
@@ -1921,7 +1942,8 @@ export const conversationMachine = setup({
           sessionId: context.session.id,
           chatId: context.chatId,
           resumeChatId: context.sharedPlanChatId ?? context.chatId,
-          text: context.pendingText,
+          text: agentPrompt(context.pendingText, context.pendingAgentContext),
+          displayText: context.pendingText,
           images: context.pendingImages,
           resumePlanId: context.resumePlanId,
           resumePlanRevision: context.resumePlanRevision,
@@ -1965,9 +1987,9 @@ export const conversationMachine = setup({
         SEND_NOW: [
           { guard: "canRoutePlanFeedback", actions: "routePlanFeedback" },
           { guard: "canSteerQueued", actions: "promoteAndSteer" },
-          // External feedback may be prioritised, but it must wait for the live
-          // turn to settle and then dequeue through Agent.run. Steering would
-          // bypass durable identity acceptance and make a crash replay unsafe.
+          // External feedback and hidden reference context may be prioritised,
+          // but both must dequeue through Agent.run. Steering cannot atomically
+          // persist their durable identity / separate operator-visible text.
           { actions: "promoteQueued" }
         ],
         STEER_RESULT: [

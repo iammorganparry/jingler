@@ -24,7 +24,7 @@ import { supportsPlanMode } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"
-import { Composer } from "../composites/composer.js"
+import { Composer, type ComposerCodeReference } from "../composites/composer.js"
 import { QuestionCard } from "../composites/question-card.js"
 import { QueuedMessageRow } from "../composites/queued-message-row.js"
 import { MessageTurn } from "../composites/message-turn.js"
@@ -208,6 +208,9 @@ export interface ConversationViewProps {
   onDraftChange?: (value: string) => void
   draftAttachments?: ReadonlyArray<Attachment>
   onDraftAttachmentsChange?: (attachments: ReadonlyArray<Attachment>) => void
+  draftCodeReferences?: ReadonlyArray<ComposerCodeReference>
+  onDraftCodeReferenceRemove?: (index: number) => void
+  onDraftCodeReferencesClear?: () => void
   /** Put the caret in the composer when this view becomes the one on screen. */
   autoFocusComposer?: boolean
   /** Identity of "the one on screen" — the session id. */
@@ -284,6 +287,9 @@ export function ConversationView({
   onDraftChange,
   draftAttachments,
   onDraftAttachmentsChange,
+  draftCodeReferences,
+  onDraftCodeReferenceRemove,
+  onDraftCodeReferencesClear,
   autoFocusComposer,
   focusKey,
   orchestrator = false,
@@ -655,6 +661,9 @@ export function ConversationView({
                 onValueChange={onDraftChange}
                 attachments={draftAttachments}
                 onAttachmentsChange={onDraftAttachmentsChange}
+                codeReferences={draftCodeReferences}
+                onCodeReferenceRemove={onDraftCodeReferenceRemove}
+                onCodeReferencesClear={onDraftCodeReferencesClear}
                 autoFocus={autoFocusComposer}
                 focusKey={focusKey}
               />

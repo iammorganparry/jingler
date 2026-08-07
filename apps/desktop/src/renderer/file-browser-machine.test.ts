@@ -265,6 +265,114 @@ describe("fileBrowserMachine", () => {
     expect(actor.getSnapshot().context.draft).toBe("disk version")
   })
 
+  it("opens each repository path once and focuses an existing file tab", async () => {
+    const read = vi.fn((_: string, path: string) =>
+      Promise.resolve({
+        ...payload(path, `sha256:${path}`),
+        path,
+        absolutePath: `/worktree/${path}`
+      })
+    )
+    const { actor } = start({ read })
+
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.context.selectedPath === "src/app.ts")
+    actor.send({ type: "OPEN", path: "src/other.ts" })
+    await waitFor(actor, (snapshot) => snapshot.context.selectedPath === "src/other.ts")
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ document: { ready: "clean" } }) &&
+      snapshot.context.selectedPath === "src/app.ts"
+    )
+
+    expect(actor.getSnapshot().context.openPaths).toEqual(["src/app.ts", "src/other.ts"])
+  })
+
+  it("focuses the active dirty file tab without asking to discard its draft", async () => {
+    const { actor } = start()
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+
+    actor.send({ type: "EDIT", text: "export const changed = true\n" })
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+
+    expect(actor.getSnapshot().context.pendingDiscard).toBeNull()
+    expect(actor.getSnapshot().context.draft).toBe("export const changed = true\n")
+    expect(actor.getSnapshot().context.openPaths).toEqual(["src/app.ts"])
+  })
+
+  it("keeps repository entries intact while opening switching and closing files", async () => {
+    const entries = [
+      { path: "src/app.ts", status: "clean" as const },
+      { path: "src/other.ts", status: "modified" as const }
+    ]
+    const read = vi.fn((_: string, path: string) =>
+      Promise.resolve({ ...payload(path, `sha256:${path}`), path })
+    )
+    const { actor } = start({ list: vi.fn().mockResolvedValue(entries), read })
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+    actor.send({ type: "OPEN", path: "src/other.ts" })
+    await waitFor(actor, (snapshot) => snapshot.context.selectedPath === "src/other.ts")
+    actor.send({ type: "CLOSE", path: "src/app.ts" })
+
+    expect(actor.getSnapshot().context.entries).toEqual(entries)
+    expect(actor.getSnapshot().context.openPaths).toEqual(["src/other.ts"])
+  })
+
+  it("closes a clean file tab and selects the adjacent open file", async () => {
+    const read = vi.fn((_: string, path: string) =>
+      Promise.resolve({ ...payload(path, `sha256:${path}`), path })
+    )
+    const { actor } = start({ read })
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+    actor.send({ type: "OPEN", path: "src/other.ts" })
+    await waitFor(actor, (snapshot) => snapshot.context.selectedPath === "src/other.ts")
+
+    actor.send({ type: "CLOSE", path: "src/other.ts" })
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ document: { ready: "clean" } }) &&
+      snapshot.context.selectedPath === "src/app.ts"
+    )
+
+    expect(actor.getSnapshot().context.openPaths).toEqual(["src/app.ts"])
+  })
+
+  it("guards a dirty file-tab close until discard is confirmed", async () => {
+    const { actor } = start()
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+    actor.send({ type: "EDIT", text: "unsaved" })
+
+    actor.send({ type: "CLOSE", path: "src/app.ts" })
+    expect(actor.getSnapshot().context.pendingDiscard).toEqual({
+      type: "close",
+      path: "src/app.ts"
+    })
+    expect(actor.getSnapshot().context.openPaths).toEqual(["src/app.ts"])
+
+    actor.send({ type: "CONFIRM_DISCARD" })
+    expect(actor.getSnapshot().matches({ document: "idle" })).toBe(true)
+    expect(actor.getSnapshot().context.selectedPath).toBeNull()
+    expect(actor.getSnapshot().context.openPaths).toEqual([])
+  })
+
+  it("cancels a dirty file-tab close without losing its draft", async () => {
+    const { actor } = start()
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+    actor.send({ type: "EDIT", text: "unsaved" })
+    actor.send({ type: "CLOSE", path: "src/app.ts" })
+    actor.send({ type: "CANCEL_DISCARD" })
+
+    expect(actor.getSnapshot().context.pendingDiscard).toBeNull()
+    expect(actor.getSnapshot().context.draft).toBe("unsaved")
+    expect(actor.getSnapshot().context.openPaths).toEqual(["src/app.ts"])
+  })
+
   it("opens text-shaped repository files directly in the IDE editor", async () => {
     const { actor } = start({
       read: vi.fn().mockResolvedValue(markdownPayload("# Preview", "sha256:md"))

@@ -34,7 +34,10 @@ export interface SessionSplitProps {
     ctx: ConversationPaneCtx
   ) => ReactNode
   /** Render one pane's session-native repository browser and editor. */
-  renderFiles?: (session: Session) => ReactNode
+  renderFiles?: (
+    session: Session,
+    ctx: { readonly onSelectConversation: () => void }
+  ) => ReactNode
   onOpenFile?: (sessionId: string, path: string) => void
   conversationPane?: ReactNode
   /**
@@ -43,7 +46,14 @@ export interface SessionSplitProps {
    * + live per-chat activity) lives in the desktop renderer, so building the bar
    * here would drag the RPC client into the component library.
    */
-  renderChatTabs?: (session: Session, onSelectConversation: () => void) => ReactNode
+  renderChatTabs?: (
+    session: Session,
+    ctx: {
+      readonly activeTabId: TabKey
+      readonly onSelectConversation: () => void
+      readonly onSelectFiles: () => void
+    }
+  ) => ReactNode
   /** Rename a session from its pane title. */
   onRenameSession?: (id: string, title: string) => void
   planSessions?: ReadonlySet<string>

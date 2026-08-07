@@ -81,6 +81,59 @@ const select = (element: HTMLElement, shiftKey = false): void => {
 }
 
 describe("DiffView Pierre selection", () => {
+  it("reports a controlled line selection without rendering review actions", async () => {
+    const onSelectionChange = vi.fn()
+    render(
+      <DiffView
+        patch={patch}
+        fill={false}
+        selection={null}
+        onSelectionChange={onSelectionChange}
+      />
+    )
+
+    select(await gutter(2, "change-addition"))
+    expect(onSelectionChange).toHaveBeenCalledWith({
+      path,
+      side: "new",
+      startLine: 2,
+      endLine: 2,
+      endSide: "new"
+    })
+    expect(screen.queryByRole("button", { name: "Send to agent" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Revert" })).toBeNull()
+  })
+
+  it("clears a controlled selection when the selected file disappears", () => {
+    const onSelectionChange = vi.fn()
+    const selection = {
+      path,
+      side: "new" as const,
+      startLine: 1,
+      endLine: 1,
+      endSide: "new" as const
+    }
+    const rendered = render(
+      <DiffView
+        patch={patch}
+        fill={false}
+        selection={selection}
+        onSelectionChange={onSelectionChange}
+      />
+    )
+
+    rendered.rerender(
+      <DiffView
+        patch={patch.replaceAll(path, "src/other.ts")}
+        fill={false}
+        selection={selection}
+        onSelectionChange={onSelectionChange}
+      />
+    )
+
+    expect(onSelectionChange).toHaveBeenCalledWith(null)
+  })
+
   it("uses Pierre click and Shift-selection, renders actions as an annotation, and clears them", async () => {
     const actions: DiffActions = {
       onRevertLines: vi.fn(),

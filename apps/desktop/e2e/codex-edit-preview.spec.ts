@@ -73,9 +73,12 @@ test("opens a path Codex created after the initial workspace listing", async ({ 
     "aria-current",
     "page"
   )
-  // Repository Markdown belongs to Files and renders as a rich document there;
-  // the browser-only Preview dock must not be involved.
-  await expect(window.getByRole("heading", { name: "Codex-created report" })).toBeVisible()
+  // Repository Markdown belongs to the editable Files workspace; the
+  // browser-only Preview dock must not be involved.
+  await expect(
+    window.getByRole("textbox", { name: "reports/codex-created.md" })
+  ).toContainText("# Codex-created report")
+  await expect(window.getByTestId("file-tab-reports/codex-created.md")).toBeVisible()
   await expect(
     window.locator('[role="treeitem"][data-item-path="reports/codex-created.md"]')
   ).toHaveAttribute("aria-selected", "true", { timeout: 20_000 })
