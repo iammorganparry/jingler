@@ -264,15 +264,6 @@ export const memoryDashboardSummary: MemoryDashboardSummary = {
     brokenLinks: 4,
     contradictions: 2
   },
-  reviewThroughput: {
-    proposed: 220,
-    accepted: 176,
-    rejected: 28,
-    conflicted: 4,
-    open: 12,
-    acceptanceRatio: 0.8,
-    medianReviewHours: 6.4
-  },
   connectivity: {
     pages: 342,
     directedLinks: 894,
@@ -306,15 +297,6 @@ export const memoryDashboardSummaryLarge: MemoryDashboardSummary = {
   citationCoverage: { citations: 9120, citedPages: 3980, totalPages: 4821, ratio: 0.83 },
   freshness: { fresh: 3120, aging: 1240, stale: 401, unknown: 60 },
   health: { orphanPages: 84, brokenLinks: 61, contradictions: 19 },
-  reviewThroughput: {
-    proposed: 3210,
-    accepted: 2680,
-    rejected: 402,
-    conflicted: 63,
-    open: 128,
-    acceptanceRatio: 0.83,
-    medianReviewHours: 9.1
-  },
   connectivity: { pages: 4821, directedLinks: 18240, connectedPages: 4712, averageDegree: 7.6 },
   retrieval: {
     searches: 41200,
@@ -332,8 +314,7 @@ export const memoryDashboardSummaryLarge: MemoryDashboardSummary = {
 }
 
 /**
- * A young vault whose review timing hasn't accumulated yet — exercises the
- * "no completed review timing" copy path.
+ * A young vault with sparse activity and no latency samples yet.
  */
 export const memoryDashboardSummaryNascent: MemoryDashboardSummary = {
   ...memoryDashboardSummary,
@@ -346,15 +327,6 @@ export const memoryDashboardSummaryNascent: MemoryDashboardSummary = {
   citationCoverage: { citations: 8, citedPages: 5, totalPages: 12, ratio: 0.42 },
   freshness: { fresh: 12, aging: 0, stale: 0, unknown: 0 },
   health: { orphanPages: 1, brokenLinks: 0, contradictions: 0 },
-  reviewThroughput: {
-    proposed: 3,
-    accepted: 0,
-    rejected: 0,
-    conflicted: 0,
-    open: 3,
-    acceptanceRatio: 0,
-    medianReviewHours: null
-  },
   connectivity: { pages: 12, directedLinks: 9, connectedPages: 7, averageDegree: 1.5 },
   retrieval: {
     searches: 24,

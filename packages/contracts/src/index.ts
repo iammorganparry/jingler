@@ -186,15 +186,6 @@ export const MemoryDashboardSummary = Schema.Struct({
     brokenLinks: Schema.Number,
     contradictions: Schema.Number
   }),
-  reviewThroughput: Schema.Struct({
-    proposed: Schema.Number,
-    accepted: Schema.Number,
-    rejected: Schema.Number,
-    conflicted: Schema.Number,
-    open: Schema.Number,
-    acceptanceRatio: Schema.Number,
-    medianReviewHours: Schema.NullOr(Schema.Number)
-  }),
   connectivity: Schema.Struct({
     pages: Schema.Number,
     directedLinks: Schema.Number,

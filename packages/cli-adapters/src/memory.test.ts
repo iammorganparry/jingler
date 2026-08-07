@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { CliKind, MemoryGrantResponse } from "@jingler/core"
 import { MEMORY_MCP_PROTOCOL_VERSION } from "@jingler/core"
@@ -6,15 +6,11 @@ import { Context, Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ConfigService } from "./config.js"
 import {
-  EMPTY_MEMORY_RETRIEVAL_SUMMARY,
   makeMemoryService,
   MemoryService,
   MemoryServiceLive,
-  memoryDigestContent,
-  recordMemoryRetrieval,
   redactMemoryText,
-  type MemoryServiceShape,
-  type MemorySessionDigestInput
+  type MemoryServiceShape
 } from "./memory.js"
 import type {
   MemoryMcpForwarder,
@@ -358,24 +354,10 @@ describe("MemoryService stateless attachment", () => {
       ).pipe(Effect.provide(configuredLayer()))
     )
 
-    expect(attachment?.retrieval).toStrictEqual({
-      searches: 1,
-      reads: 3,
-      navigation: 0,
-      graphReads: 0,
-      proposals: 0
-    })
     expect(attachment?.instructions).toContain("<recalled-memories>")
     expect(attachment?.instructions).toContain("Accepted body for page-one")
     expect(attachment?.instructions).toContain('"revisionId": "revision:page-one:1"')
     expect(attachment?.instructions).not.toContain("page-four")
-    expect(repeated?.retrieval).toStrictEqual({
-      searches: 1,
-      reads: 0,
-      navigation: 0,
-      graphReads: 0,
-      proposals: 0
-    })
     expect(repeated?.instructions).not.toContain("Accepted body for page-one")
     expect(separateConversation?.instructions).toContain("Accepted body for page-one")
 
@@ -682,237 +664,28 @@ describe("MemoryService stateless attachment", () => {
   })
 })
 
-describe("MemoryService settled-session capture", () => {
-  it("enqueues at most one bounded redacted source digest with aggregate-only retrieval data", async () => {
-    const requests: Request[] = []
-    const fetchImplementation: typeof fetch = async (input, init) => {
-      const request = requestOf(input, init)
-      requests.push(request)
-      return request.url.endsWith("/api/memory/grant")
-        ? Response.json(grantResponse("capture"))
-        : Response.json({ accepted: true }, { status: 202 })
-    }
-    const service = makeMemoryService({
-      fetch: fetchImplementation,
-      baseUrl: () => BASE_URL,
-      nowSeconds: () => NOW_SECONDS
-    })
-    const input: MemorySessionDigestInput = {
-      sessionId: "session-sensitive-local-id",
-      chatId: "chat-sensitive-local-id",
-      turnId: "turn-sensitive-local-id",
-      cli: "claude",
-      userText:
-        "Email me at person@example.com; Authorization: Bearer live-bearer and api_key=sk-live123456789 from /Users/private/repo.",
-      assistantText:
-        "Done. mcp-session-id=session-private password=hunter2 https://x.test/?token=query-secret",
+const writeLegacyCaptureOutbox = (
+  overrides: Readonly<Record<string, unknown>> = {}
+): void => {
+  mkdirSync(temp.root, { recursive: true })
+  writeFileSync(
+    join(temp.root, "memory-capture-outbox.json"),
+    `${JSON.stringify([{
+      id: "session-digest:legacy",
+      organizationId: ORGANIZATION_ID,
       settledAt: "2026-08-01T12:00:00.000Z",
-      retrieval: { searches: 2, reads: 3, navigation: 1, graphReads: 4, proposals: 1 }
-    }
+      content: "# Legacy settled session\n\nA pre-upgrade capture.",
+      retrieval: { searches: 1, reads: 2, navigation: 0, graphReads: 0, proposals: 0 },
+      attempts: 5,
+      firstSeenAt: NOW_SECONDS - 60,
+      ...overrides
+    }])}\n`
+  )
+}
 
-    const outcomes = await Effect.runPromise(
-      withEnabledMemory(
-        Effect.all([
-          service.captureSettledSession(input),
-          service.captureSettledSession(input),
-          service.captureSettledSession(input)
-        ], { concurrency: "unbounded" }).pipe(
-          Effect.tap(() => Effect.sleep("20 millis"))
-        )
-      ).pipe(Effect.provide(configuredLayer()))
-    )
-
-    expect(outcomes.filter(Boolean)).toHaveLength(1)
-    const sourceRequests = requests.filter((request) => request.url.endsWith("/api/memory/sources"))
-    expect(sourceRequests).toHaveLength(1)
-    const sourceRequest = sourceRequests[0]!
-    expect(sourceRequest.headers.get("x-idempotency-key")).toMatch(/^session-digest:[a-f0-9]{64}$/)
-    expect(sourceRequest.headers.get("cookie")).toBeNull()
-    expect(sourceRequest.headers.get("mcp-session-id")).toBeNull()
-    const body: unknown = await sourceRequest.json()
-    const serialized = JSON.stringify(body)
-    for (const secret of [
-      "live-bearer",
-      "sk-live123456789",
-      "person@example.com",
-      "session-private",
-      "hunter2",
-      "query-secret",
-      "/Users/private",
-      "session-sensitive-local-id",
-      "chat-sensitive-local-id",
-      "turn-sensitive-local-id"
-    ]) {
-      expect(serialized).not.toContain(secret)
-    }
-    expect(body).toMatchObject({
-      source: { kind: "conversation", title: "Settled Jingler agent session" },
-      retrieval: { searches: 2, reads: 3, navigation: 1, graphReads: 4, proposals: 1 }
-    })
-    expect(serialized).not.toContain("duration")
-    expect(serialized).not.toContain("query")
-    expect(serialized).not.toContain("resultBody")
-  })
-
-  it("serializes concurrent enqueues so no queued capture is lost", async () => {
-    // Grant succeeds but every source POST is 503, so nothing is ever removed
-    // from the outbox — both distinct captures must remain queued. Without the
-    // outbox lock, the two concurrent read+write cycles interleave and one
-    // enqueue clobbers the other with a stale single-element snapshot.
-    const fetchImplementation: typeof fetch = async (input) =>
-      String(input).endsWith("/api/memory/grant")
-        ? Response.json(grantResponse("serialize"))
-        : Response.json({ error: "offline" }, { status: 503 })
-    const service = makeMemoryService({
-      fetch: fetchImplementation,
-      baseUrl: () => BASE_URL,
-      nowSeconds: () => NOW_SECONDS
-    })
-    const inputFor = (suffix: string): MemorySessionDigestInput => ({
-      sessionId: `session-${suffix}`,
-      chatId: `chat-${suffix}`,
-      turnId: `turn-${suffix}`,
-      cli: "claude",
-      userText: `Request ${suffix}.`,
-      assistantText: `Done ${suffix}.`,
-      settledAt: "2026-08-01T12:00:00.000Z",
-      retrieval: EMPTY_MEMORY_RETRIEVAL_SUMMARY
-    })
-
-    await Effect.runPromise(
-      withEnabledMemory(
-        Effect.all(
-          [
-            service.captureSettledSession(inputFor("alpha")),
-            service.captureSettledSession(inputFor("beta"))
-          ],
-          { concurrency: "unbounded" }
-        ).pipe(Effect.tap(() => Effect.sleep("40 millis")))
-      ).pipe(Effect.provide(configuredLayer()))
-    )
-
-    const outbox: unknown = JSON.parse(
-      readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
-    )
-    expect(outbox).toHaveLength(2)
-  })
-
-  it("allows a later retry after a transient capture failure", async () => {
-    let sourceAttempts = 0
-    const fetchImplementation: typeof fetch = async (input) => {
-      if (String(input).endsWith("/api/memory/grant")) {
-        return Response.json(grantResponse("retry"))
-      }
-      if (String(input).endsWith("/api/memory/organizations")) {
-        return Response.json({ organizations: [{
-          id: ORGANIZATION_ID,
-          name: "Paid team",
-          role: "member",
-          privileges: ["read", "propose"]
-        }] })
-      }
-      sourceAttempts += 1
-      return sourceAttempts === 1
-        ? Response.json({ error: "offline" }, { status: 503 })
-        : Response.json({ accepted: true }, { status: 202 })
-    }
-    const service = makeMemoryService({
-      fetch: fetchImplementation,
-      baseUrl: () => BASE_URL,
-      nowSeconds: () => NOW_SECONDS
-    })
-    const input: MemorySessionDigestInput = {
-      sessionId: "session-retry",
-      chatId: "chat-retry",
-      turnId: "turn-retry",
-      cli: "codex",
-      userText: "Remember the retry rule.",
-      assistantText: "Implemented and verified.",
-      settledAt: "2026-08-01T12:00:00.000Z",
-      retrieval: EMPTY_MEMORY_RETRIEVAL_SUMMARY
-    }
-
-    const outcomes = await Effect.runPromise(
-      withEnabledMemory(
-        Effect.all([
-          service.captureSettledSession(input),
-          service.captureSettledSession(input),
-          service.captureSettledSession(input)
-        ], { concurrency: 1 }).pipe(
-          Effect.tap(() => Effect.sleep("30 millis"))
-        )
-      ).pipe(Effect.provide(configuredLayer()))
-    )
-
-    expect(outcomes).toStrictEqual([true, false, false])
-    const restarted = makeMemoryService({
-      fetch: fetchImplementation,
-      baseUrl: () => BASE_URL,
-      nowSeconds: () => NOW_SECONDS
-    })
-    await Effect.runPromise(
-      withEnabledMemory(restarted.access()).pipe(
-        Effect.tap(() => Effect.sleep("30 millis")),
-        Effect.provide(configuredLayer())
-      )
-    )
-    expect(sourceAttempts).toBe(2)
-  })
-
-  it("releases the capture id after a failed enqueue so a later attempt retries", async () => {
-    let sourcePosts = 0
-    const fetchImplementation: typeof fetch = async (input) => {
-      if (String(input).endsWith("/api/memory/grant")) {
-        return Response.json(grantResponse("release"))
-      }
-      sourcePosts += 1
-      return Response.json({ accepted: true }, { status: 202 })
-    }
-    const service = makeMemoryService({
-      fetch: fetchImplementation,
-      baseUrl: () => BASE_URL,
-      nowSeconds: () => NOW_SECONDS
-    })
-    const input: MemorySessionDigestInput = {
-      sessionId: "session-release",
-      chatId: "chat-release",
-      turnId: "turn-release",
-      cli: "claude",
-      userText: "Enqueue must not permanently claim the id on a write failure.",
-      assistantText: "Understood.",
-      settledAt: "2026-08-01T12:00:00.000Z",
-      retrieval: EMPTY_MEMORY_RETRIEVAL_SUMMARY
-    }
-
-    // Force the atomic write to fail: the outbox's temp path is a directory, so
-    // writeFileString to it throws and enqueue reports "failed".
-    const blocker = join(temp.root, "memory-capture-outbox.json.tmp")
-    mkdirSync(temp.root, { recursive: true })
-    mkdirSync(blocker, { recursive: true })
-
-    const first = await Effect.runPromise(
-      withEnabledMemory(
-        service.captureSettledSession(input).pipe(Effect.tap(() => Effect.sleep("20 millis")))
-      ).pipe(Effect.provide(configuredLayer()))
-    )
-    expect(first).toBe(false)
-    // Nothing persisted and nothing delivered on the failed enqueue.
-    expect(existsSync(join(temp.root, "memory-capture-outbox.json"))).toBe(false)
-    expect(sourcePosts).toBe(0)
-
-    // Unblock the write; the same settled turn must be re-attemptable and now
-    // actually deliver (the released claim no longer blocks it).
-    rmSync(blocker, { recursive: true, force: true })
-    const second = await Effect.runPromise(
-      withEnabledMemory(
-        service.captureSettledSession(input).pipe(Effect.tap(() => Effect.sleep("20 millis")))
-      ).pipe(Effect.provide(configuredLayer()))
-    )
-    expect(second).toBe(true)
-    expect(sourcePosts).toBe(1)
-  })
-
-  it("retains transient failures beyond the old five-attempt boundary and reports recovery", async () => {
+describe("MemoryService legacy capture recovery", () => {
+  it("retains transient pre-upgrade captures without an attempt-count deletion boundary", async () => {
+    writeLegacyCaptureOutbox()
     const fetchImplementation: typeof fetch = async (input) =>
       String(input).endsWith("/api/memory/grant")
         ? Response.json(grantResponse("recover"))
@@ -922,30 +695,12 @@ describe("MemoryService settled-session capture", () => {
       baseUrl: () => BASE_URL,
       nowSeconds: () => NOW_SECONDS
     })
-    const input: MemorySessionDigestInput = {
-      sessionId: "session-durable-recovery",
-      chatId: "chat-durable-recovery",
-      turnId: "turn-durable-recovery",
-      cli: "codex",
-      userText: "Keep this capture recoverable.",
-      assistantText: "The delivery path is temporarily unavailable.",
-      settledAt: "2026-08-01T12:00:00.000Z",
-      retrieval: EMPTY_MEMORY_RETRIEVAL_SUMMARY
-    }
 
-    const recoveries = await Effect.runPromise(
-      withEnabledMemory(
-        service.captureSettledSession(input).pipe(
-          Effect.zipRight(Effect.forEach(
-            [1, 2, 3, 4, 5],
-            () => service.recoverCaptures(),
-            { concurrency: 1 }
-          ))
-        )
-      ).pipe(Effect.provide(configuredLayer()))
+    const recovery = await Effect.runPromise(
+      withEnabledMemory(service.recoverCaptures()).pipe(Effect.provide(configuredLayer()))
     )
 
-    expect(recoveries.at(-1)).toMatchObject({
+    expect(recovery).toMatchObject({
       queuedBefore: 1,
       delivered: 0,
       retained: 1,
@@ -956,100 +711,82 @@ describe("MemoryService settled-session capture", () => {
       readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
     ) as ReadonlyArray<{ readonly attempts: number }>
     expect(outbox).toHaveLength(1)
-    expect(outbox[0]?.attempts).toBeGreaterThanOrEqual(5)
+    expect(outbox[0]?.attempts).toBe(6)
   })
 
-  it("drops a capture whose org membership was revoked instead of retrying forever", async () => {
-    let grants = 0
-    const fetchImplementation: typeof fetch = async (input) => {
-      if (String(input).endsWith("/api/memory/grant")) {
-        grants += 1
-        return Response.json({ error: "forbidden" }, { status: 403 })
-      }
-      if (String(input).endsWith("/api/memory/organizations")) {
-        return Response.json({ organizations: [] })
-      }
-      return Response.json({ accepted: true }, { status: 202 })
+  it("delivers and removes a pre-upgrade capture", async () => {
+    writeLegacyCaptureOutbox({ attempts: 0 })
+    const requests: Request[] = []
+    const fetchImplementation: typeof fetch = async (input, init) => {
+      const request = requestOf(input, init)
+      requests.push(request)
+      return request.url.endsWith("/api/memory/grant")
+        ? Response.json(grantResponse("deliver"))
+        : Response.json({ accepted: true }, { status: 202 })
     }
     const service = makeMemoryService({
       fetch: fetchImplementation,
       baseUrl: () => BASE_URL,
       nowSeconds: () => NOW_SECONDS
     })
-    const input: MemorySessionDigestInput = {
-      sessionId: "session-403",
-      chatId: "chat-403",
-      turnId: "turn-403",
-      cli: "codex",
-      userText: "Membership was revoked after this settled.",
-      assistantText: "Recorded.",
-      settledAt: "2026-08-01T12:00:00.000Z",
-      retrieval: EMPTY_MEMORY_RETRIEVAL_SUMMARY
-    }
 
-    await Effect.runPromise(
-      withEnabledMemory(
-        service.captureSettledSession(input).pipe(Effect.tap(() => Effect.sleep("30 millis")))
-      ).pipe(Effect.provide(configuredLayer()))
+    const recovery = await Effect.runPromise(
+      withEnabledMemory(service.recoverCaptures()).pipe(Effect.provide(configuredLayer()))
     )
 
-    // The drain is deliberately forked so capture never blocks a terminal
-    // event. Poll its observable outbox result instead of assuming a 30ms
-    // scheduler window, which is too narrow under the repository-wide suite.
-    await vi.waitFor(() => {
-      const outbox: unknown = JSON.parse(
-        readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
-      )
-      expect(outbox).toHaveLength(0)
+    expect(recovery).toMatchObject({
+      queuedBefore: 1,
+      delivered: 1,
+      retained: 0,
+      discarded: 0,
+      lastFailureStatus: null
     })
-    expect(grants).toBe(1)
-
-    // A second drain finds nothing to do — no further grant round-trips.
-    await Effect.runPromise(
-      withEnabledMemory(service.access()).pipe(
-        Effect.tap(() => Effect.sleep("30 millis")),
-        Effect.provide(configuredLayer())
-      )
+    const sourceRequest = requests.find((request) =>
+      request.url.endsWith("/api/memory/sources")
     )
-    expect(grants).toBe(1)
+    expect(sourceRequest?.headers.get("x-idempotency-key")).toBe(
+      "session-digest:legacy"
+    )
+    expect(await sourceRequest?.json()).toMatchObject({
+      source: {
+        id: "session-digest:legacy",
+        kind: "conversation",
+        retrievedAt: "2026-08-01T12:00:00.000Z"
+      },
+      content: "# Legacy settled session\n\nA pre-upgrade capture.",
+      retrieval: { searches: 1, reads: 2 }
+    })
+    expect(JSON.parse(
+      readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
+    )).toEqual([])
   })
 
-  it("redacts credential shapes, bounds content, and counts only known memory tools", () => {
-    const redacted = redactMemoryText(
-      "Cookie: abc123 refresh_token=refresh-secret\n-----BEGIN PRIVATE KEY-----\nprivate\n-----END PRIVATE KEY-----"
+  it("discards a pre-upgrade capture after organization access is revoked", async () => {
+    writeLegacyCaptureOutbox()
+    const service = makeMemoryService({
+      fetch: async () => Response.json({ error: "forbidden" }, { status: 403 }),
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS
+    })
+
+    const recovery = await Effect.runPromise(
+      withEnabledMemory(service.recoverCaptures()).pipe(Effect.provide(configuredLayer()))
     )
-    expect(redacted).not.toContain("abc123")
-    expect(redacted).not.toContain("refresh-secret")
-    expect(redacted).not.toContain("\nprivate\n")
 
-    const content = memoryDigestContent({
-      sessionId: "s",
-      chatId: "c",
-      turnId: "turn-1",
-      cli: "opencode",
-      userText: "u".repeat(20_000),
-      assistantText: "a".repeat(20_000),
-      settledAt: "2026-08-01T12:00:00.000Z",
-      retrieval: EMPTY_MEMORY_RETRIEVAL_SUMMARY
+    expect(recovery).toMatchObject({
+      queuedBefore: 1,
+      delivered: 0,
+      retained: 0,
+      discarded: 1,
+      lastFailureStatus: null
     })
-    expect(content.length).toBeLessThanOrEqual(8_012)
-    expect(content).toContain("[TRUNCATED]")
-
-    const counted = [
-      "mcp__jingler-memory__memory_search",
-      "memory_read",
-      "memory_graph_neighborhood",
-      "unrelated_tool"
-    ].reduce(recordMemoryRetrieval, EMPTY_MEMORY_RETRIEVAL_SUMMARY)
-    expect(counted).toStrictEqual({
-      searches: 1,
-      reads: 1,
-      navigation: 0,
-      graphReads: 1,
-      proposals: 0
-    })
+    expect(JSON.parse(
+      readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
+    )).toEqual([])
   })
+})
 
+describe("automatic recall redaction", () => {
   it("redacts complete cookie headers, continuation lines, and common token assignments", () => {
     const redacted = redactMemoryText([
       "Cookie: theme=light; session_token=supersecret-value",

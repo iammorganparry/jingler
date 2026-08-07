@@ -5,9 +5,7 @@ import {
   compareText,
   contradictionCount,
   extractCitationReferences,
-  type MemoryAuditEvent,
-  type MemoryPage,
-  type MemoryProposalStatus
+  type MemoryPage
 } from "@jingler/memory"
 import type { MemoryRetrievalSummary } from "@jingler/core"
 
@@ -22,12 +20,6 @@ export interface VaultAnalyticsRevision {
    * on the day it actually entered the vault.
    */
   readonly acceptedAt: string
-}
-
-export interface VaultAnalyticsProposal {
-  readonly id: string
-  readonly createdAt: string
-  readonly status: MemoryProposalStatus
 }
 
 export interface VaultPageHeadActivity {
@@ -52,8 +44,6 @@ export interface VaultAnalyticsInput {
   readonly pages: ReadonlyArray<MemoryPage>
   readonly sourceCount: number
   readonly revisions: ReadonlyArray<VaultAnalyticsRevision>
-  readonly proposals: ReadonlyArray<VaultAnalyticsProposal>
-  readonly events: ReadonlyArray<MemoryAuditEvent>
   readonly heads: ReadonlyArray<VaultPageHeadActivity>
   readonly retrievals: ReadonlyArray<RetrievalMetric>
   readonly sessionRetrievals?: ReadonlyArray<SessionRetrievalMetric>
@@ -91,15 +81,6 @@ export interface VaultDashboardSummary {
     readonly brokenLinks: number
     readonly contradictions: number
   }
-  readonly reviewThroughput: {
-    readonly proposed: number
-    readonly accepted: number
-    readonly rejected: number
-    readonly conflicted: number
-    readonly open: number
-    readonly acceptanceRatio: number
-    readonly medianReviewHours: number | null
-  }
   readonly connectivity: {
     readonly pages: number
     readonly directedLinks: number
@@ -132,8 +113,8 @@ export type DashboardRange = "7d" | "30d" | "90d" | "all"
 const RANGE_DAYS: Readonly<Record<string, number>> = { "7d": 7, "30d": 30, "90d": 90 }
 
 /**
- * Window only the inherently time-series inputs (revisions, proposals, events,
- * retrievals, session retrievals) to `[asOf - range, asOf]`. The current-state
+ * Window only the inherently time-series inputs (revisions, retrievals and
+ * session retrievals) to `[asOf - range, asOf]`. The current-state
  * inputs (pages, heads, sourceCount) are a snapshot and are never windowed, so
  * coverage/freshness/health/connectivity always describe the vault as it stands.
  * `"all"` — or an unparseable range/asOf — returns the input untouched.
@@ -155,8 +136,6 @@ const windowAnalyticsInput = (
   return {
     ...input,
     revisions: input.revisions.filter((revision) => within(revision.acceptedAt)),
-    proposals: input.proposals.filter((proposal) => within(proposal.createdAt)),
-    events: input.events.filter((event) => within(event.occurredAt)),
     retrievals: input.retrievals.filter((metric) => within(metric.occurredAt)),
     ...(input.sessionRetrievals === undefined
       ? {}
@@ -267,25 +246,6 @@ const connectivity = (
   }
 }
 
-const reviewDurations = (
-  proposals: ReadonlyArray<VaultAnalyticsProposal>,
-  events: ReadonlyArray<MemoryAuditEvent>
-): ReadonlyArray<number> => {
-  const proposedAt = new Map(proposals.map((proposal) => [proposal.id, proposal.createdAt]))
-  return events
-    .filter(
-      (event) =>
-        (event.type === "proposal.accepted" || event.type === "proposal.rejected") &&
-        event.proposalId !== undefined
-    )
-    .map((event) => {
-      const createdAt = event.proposalId === undefined ? undefined : proposedAt.get(event.proposalId)
-      return createdAt === undefined ? Number.NaN : Date.parse(event.occurredAt) - Date.parse(createdAt)
-    })
-    .filter((duration) => Number.isFinite(duration) && duration >= 0)
-    .map((duration) => duration / 3_600_000)
-}
-
 export const buildVaultDashboardSummary = (
   rawInput: VaultAnalyticsInput,
   asOf: string,
@@ -294,11 +254,6 @@ export const buildVaultDashboardSummary = (
   const input = windowAnalyticsInput(rawInput, asOf, range)
   const citationsByPage = input.pages.map((page) => extractCitationReferences(page.body).length)
   const links = connectivity(input.pages)
-  const accepted = input.proposals.filter((proposal) => proposal.status === "accepted").length
-  const rejected = input.proposals.filter((proposal) => proposal.status === "rejected").length
-  const conflicted = input.proposals.filter((proposal) => proposal.status === "superseded").length
-  const open = input.proposals.filter((proposal) => proposal.status === "open").length
-  const durations = reviewDurations(input.proposals, input.events)
   const resultCount = input.retrievals.reduce((total, metric) => total + metric.resultCount, 0)
   const zeroResults = input.retrievals.filter((metric) => metric.resultCount === 0).length
   const captured = (input.sessionRetrievals ?? []).reduce<MemoryRetrievalSummary>(
@@ -331,15 +286,6 @@ export const buildVaultDashboardSummary = (
       orphanPages: links.orphanPages,
       brokenLinks: links.brokenLinks,
       contradictions: input.pages.reduce((total, page) => total + contradictionCount(page), 0)
-    },
-    reviewThroughput: {
-      proposed: input.proposals.length,
-      accepted,
-      rejected,
-      conflicted,
-      open,
-      acceptanceRatio: ratio(accepted, accepted + rejected + conflicted),
-      medianReviewHours: median(durations)
     },
     connectivity: {
       pages: input.pages.length,

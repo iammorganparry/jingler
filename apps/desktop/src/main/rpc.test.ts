@@ -1426,7 +1426,6 @@ describe("RPC handlers", () => {
             MemoryService,
             MemoryService.make({
               attachment: () => Effect.succeed(null),
-              captureSettledSession: () => Effect.succeed(false),
               recoverCaptures: () => Effect.succeed(null),
               access: () => Effect.succeed(null),
               uiRequest: () => Effect.succeed(null),
@@ -2806,7 +2805,6 @@ describe("memoryExport", () => {
       MemoryService,
       MemoryService.make({
         attachment: () => Effect.succeed(null),
-        captureSettledSession: () => Effect.succeed(false),
         recoverCaptures: () => Effect.succeed(null),
         access: () => Effect.succeed(null),
         uiRequest: () => {

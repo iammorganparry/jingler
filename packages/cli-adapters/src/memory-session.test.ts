@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import type { SessionSpec } from "./adapter.js"
-import { EMPTY_MEMORY_RETRIEVAL_SUMMARY } from "./memory.js"
 import { attachMemoryToSessionSpec } from "./memory-session.js"
 
 const spec: SessionSpec = {
@@ -24,8 +23,7 @@ describe("attachMemoryToSessionSpec", () => {
         url: "http://127.0.0.1:9000/mcp",
         headers: { authorization: "Bearer scoped" }
       },
-      instructions: "<team-memory>Recall first.</team-memory>",
-      retrieval: EMPTY_MEMORY_RETRIEVAL_SUMMARY
+      instructions: "<team-memory>Recall first.</team-memory>"
     })
 
     expect(enriched.prompt).toBe(

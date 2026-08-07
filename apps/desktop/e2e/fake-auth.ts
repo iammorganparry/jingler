@@ -471,8 +471,6 @@ const rangeScale = (range: string): number => RANGE_SEARCHES[range] ?? RANGE_SEA
 
 const dashboardFor = (state: FakeOrganizationMemory, range = "all"): MemoryDashboardSummary => {
   const added = Math.max(0, state.pages.size - 2)
-  const open = state.proposals.filter((proposal) => proposal.status === "open").length
-  const accepted = state.proposals.filter((proposal) => proposal.status === "accepted").length
   // Derive every windowed retrieval count from the same per-range anchor so the
   // whole block moves together, the way a real time-scoped aggregation would.
   const searches = rangeScale(range)
@@ -483,7 +481,6 @@ const dashboardFor = (state: FakeOrganizationMemory, range = "all"): MemoryDashb
     citationCoverage: { citations: 15_000 + added, citedPages: 9_200 + added, totalPages: 10_000 + added, ratio: 0.92 },
     freshness: { fresh: 8_000 + added, aging: 1_200, stale: 800, unknown: 0 },
     health: { orphanPages: 20, brokenLinks: 4, contradictions: 2 },
-    reviewThroughput: { proposed: 40 + state.proposals.length, accepted: 30 + accepted, rejected: 5, conflicted: state.secretRejections + 1, open, acceptanceRatio: 0.8333, medianReviewHours: 3.5 },
     connectivity: { pages: 10_000 + added, directedLinks: 22_000 + added, connectedPages: 9_980 + added, averageDegree: 4.4 },
     retrieval: {
       searches,

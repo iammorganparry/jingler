@@ -31,7 +31,6 @@ const summary = (organizationId: string): MemoryDashboardSummary => ({
   citationCoverage: { citations: 2, citedPages: 2, totalPages: 2, ratio: 1 },
   freshness: { fresh: 2, aging: 0, stale: 0, unknown: 0 },
   health: { orphanPages: 0, brokenLinks: 0, contradictions: 0 },
-  reviewThroughput: { proposed: 1, accepted: 0, rejected: 0, conflicted: 0, open: 1, acceptanceRatio: 0, medianReviewHours: null },
   connectivity: { pages: 2, directedLinks: 1, connectedPages: 2, averageDegree: 1 },
   retrieval: {
     searches: 1,

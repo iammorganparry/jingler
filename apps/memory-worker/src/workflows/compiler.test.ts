@@ -448,7 +448,6 @@ describe("durable memory compiler workflow", () => {
     )
     const dashboard = await run(vault.dashboard("2026-08-02T00:00:00.000Z"))
     expect(dashboard.growth.revisions).toBe(4)
-    expect(dashboard.reviewThroughput).toMatchObject({ proposed: 2, accepted: 2, open: 0 })
     const after = await run(captureVaultDerivedFingerprints(vault, "2026-08-02T00:00:00.000Z"))
     expect(after).not.toEqual(before)
     const reconciled = await run(reconcileVaultFromR2(vault, "2026-08-02T00:00:00.000Z"))
