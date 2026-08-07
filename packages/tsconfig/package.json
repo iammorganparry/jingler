@@ -1,6 +1,10 @@
 {
   "name": "@jingler/tsconfig",
-  "version": "0.0.0",
+  "version": "2.0.0",
   "private": true,
-  "files": ["base.json", "react.json", "node.json"]
+  "files": [
+    "base.json",
+    "react.json",
+    "node.json"
+  ]
 }

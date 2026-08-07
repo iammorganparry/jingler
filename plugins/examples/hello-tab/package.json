@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "The smallest complete Jingler plugin \u2014 one tab, no host half.",
+  "description": "The smallest complete Jingler plugin — one tab, no host half.",
   "scripts": {
     "build": "vite build && tsx ./scripts/emit-manifest.mjs",
     "typecheck": "tsc --noEmit",
