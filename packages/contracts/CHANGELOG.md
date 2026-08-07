@@ -1,5 +1,11 @@
 # @jingler/contracts
 
+## 2.0.3
+
+### Patch Changes
+
+- @jingler/core@2.0.3
+
 ## 2.0.2
 
 ### Patch Changes

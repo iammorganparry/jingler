@@ -1,5 +1,11 @@
 # @jingler/desktop
 
+## 2.0.3
+
+### Patch Changes
+
+- d0761df: Run release packaging in a cross-platform shell so Windows installers publish successfully.
+
 ## 2.0.2
 
 ### Patch Changes
