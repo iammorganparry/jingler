@@ -105,7 +105,6 @@ export interface MemoryWorkerEnv {
   readonly MEMORY_VECTOR_INGEST?: WorkflowBindingLike<
     import("./workflows/vector-ingest.js").VectorIngestWorkflowInput
   >
-  readonly MEMORY_AUTO_PUBLISH_FIXES?: string
   /**
    * @deprecated Retained only so deployments with the former review gate can
    * report a migration warning. It is ignored: agent memory publication is

@@ -24,9 +24,7 @@ send both a rotating service credential and `X-Jingler-Organization-Id`.
 migration `v1`); `MEMORY_R2` is bucket `jingler-memory`; the cron is `17 3 * * *`.
 
 The daily `17 3 * * *` trigger starts lint only for the comma-separated
-`MEMORY_LINT_ORGANIZATIONS`. `MEMORY_AUTO_PUBLISH_FIXES` is also comma-separated;
-leave it empty unless a reviewed mechanical fix identifier is explicitly safe
-to auto-publish.
+`MEMORY_LINT_ORGANIZATIONS`.
 
 ## Automatic publication migration
 

@@ -217,8 +217,3 @@ export const proposalSetMatches = (
       .map((proposal) => ({ ...proposal, status: "open" }))
       .sort((left, right) => compareText(left.id, right.id))
   ) === canonicalJson([...prepared.proposals].sort((left, right) => compareText(left.id, right.id)))
-
-export const isConfiguredMechanicalFix = (
-  changeKind: ProposalChangeKind,
-  configuredFixes: ReadonlySet<string>
-): boolean => changeKind === "mechanical" && configuredFixes.has("canonical-markdown")

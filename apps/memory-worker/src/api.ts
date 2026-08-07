@@ -221,12 +221,6 @@ const fallbackOnMissing = <A, B>(
 ): Effect.Effect<A | B, MemoryVaultError> =>
   Effect.catchIf(primary, (error) => error.code === "not_found", () => fallback)
 
-const configuredMechanicalFixes = (env: MemoryWorkerEnv): ReadonlyArray<string> =>
-  (env.MEMORY_AUTO_PUBLISH_FIXES ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0)
-
 /** Run the still-Promise-based body decoder as a typed Effect at a vault call site. */
 const decodeBody = <Decoded, Encoded>(
   request: { text(): Promise<string> },
@@ -556,7 +550,6 @@ const startCompilerWorkflow = async (
   await createOrReuseScopedWorkflow(env.MEMORY_COMPILER, env, organizationId, body.workflowId, {
     ...body,
     organizationId,
-    autoPublishFixes: configuredMechanicalFixes(env),
     requireReview: false
   })
   return jsonResponse({ workflowId: body.workflowId, status: "queued" }, 202)
@@ -652,7 +645,6 @@ const startCompilerForSource = async (
     sourceId: source.id,
     requestedBy: "agent:session-capture",
     createdAt: source.retrievedAt ?? new Date().toISOString(),
-    autoPublishFixes: configuredMechanicalFixes(env),
     requireReview: false
   })
   return workflowId

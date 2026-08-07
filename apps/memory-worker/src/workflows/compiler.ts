@@ -1,10 +1,8 @@
 import {
   MemoryPage as MemoryPageSchema,
   MemorySource as MemorySourceSchema,
-  canonicalJson,
   compareText,
   findCredentialShapedContent,
-  parseMemoryPage,
   serializeMemoryMarkdown,
   stableContentHash,
   type MemoryPage,
@@ -16,7 +14,6 @@ import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers"
 import { buildCompilerPrompt } from "../compiler-prompt.js"
 import type { DurableObjectNamespaceLike } from "../env.js"
 import {
-  isConfiguredMechanicalFix,
   NEW_PAGE_BASE_REVISION_ID,
   type CreateProposalSetInput,
   type ProposalChangeKind,
@@ -36,10 +33,8 @@ export interface CompilerWorkflowInput {
   readonly sourceId: string
   readonly requestedBy: string
   readonly createdAt: string
-  readonly autoPublishFixes?: ReadonlyArray<string>
-  // When true, factual changes wait for a human accept before publishing (safe
-  // mechanical fixes still auto-publish). Defaults to false: agents publish
-  // straight to the shared vault and are audited/reverted after the fact.
+  // Historical workflow replays may still carry true and wait for an explicit
+  // review event. Production starters always pass false and publish automatically.
   readonly requireReview?: boolean
 }
 
@@ -216,27 +211,6 @@ const scoreClaimForPage = (claim: string, page: MemoryPage): number => {
   let score = 0
   for (const word of claimWords) if (pageWords.has(word)) score += 1
   return score
-}
-
-const isSemanticallyMechanical = (
-  generated: CompilerGeneratedProposal,
-  context: CompilerContext
-): boolean => {
-  if (generated.changeKind !== "mechanical") return false
-  const acceptedById = new Map(context.candidates.map((candidate) => [candidate.page.id, candidate.page]))
-  return generated.drafts.every((draft) => {
-    const accepted = acceptedById.get(draft.pageId)
-    if (accepted === undefined) return false
-    const candidate = parseMemoryPage(accepted.path, draft.markdown)
-    const citationsWithoutCompilerSource = candidate.citations.filter(
-      (citation) => citation.sourceId !== context.source.id
-    )
-    return (
-      candidate.revision === accepted.revision + 1 &&
-      canonicalJson({ ...candidate, revision: accepted.revision, citations: citationsWithoutCompilerSource }) ===
-        canonicalJson(accepted)
-    )
-  })
 }
 
 export class DeterministicCompilerModel implements CompilerModel {
@@ -468,13 +442,10 @@ export const runCompilerWorkflow = async (
       drafts: generated.drafts
     })
   )
-  const autoPublishMechanical =
-    isConfiguredMechanicalFix(generated.changeKind, new Set(input.autoPublishFixes ?? [])) &&
-    isSemanticallyMechanical(generated, context)
   // Production always auto-publishes agent-selected changes. `requireReview`
   // remains only as a compatibility seam for historical workflow replays and
   // focused tests; no deployment configuration can create new review work.
-  const autoPublish = input.requireReview !== true || autoPublishMechanical
+  const autoPublish = input.requireReview !== true
   if (!autoPublish) {
     if (step.waitForEvent !== undefined) {
       const reviewEvent = await step.waitForEvent<CompilerReviewEvent>("06-await-durable-review", {
