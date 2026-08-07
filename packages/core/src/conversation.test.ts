@@ -685,6 +685,8 @@ describe("Plan flow", () => {
     expect(prompt).toContain(p.summary)
     expect(prompt).toMatch(/implement it now/i)
     expect(prompt.toLowerCase()).toContain("do not re-plan")
+    expect(prompt).toContain("Do not repeat tasks already marked completed")
+    expect(prompt).toContain("PLAN_TASK stage=<stage-id>")
     // Includes the step titles so the resumed (memory-less) harness has the plan.
     expect(prompt).toContain(p.steps[0]!.title)
     if (p.raw) expect(prompt).toContain(p.raw)

@@ -857,6 +857,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     }
   }),
 
+  /** Observe the latest worker activity for a session, independent of selection. */
+  Rpc.make("Agent.watchSessionWorkers", {
+    success: WorkerActivity,
+    stream: true,
+    payload: { sessionId: Schema.String }
+  }),
+
   /** Stop one provider-neutral plan worker without interrupting its siblings. */
   Rpc.make("Agent.stopWorker", {
     payload: {

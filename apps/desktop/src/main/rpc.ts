@@ -4207,6 +4207,10 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ),
   "Agent.watchWorkers": ({ sessionId, planId, chatId }) =>
     watchOrchestrationWorkers(sessionId, planId, chatId),
+  "Agent.watchSessionWorkers": ({ sessionId }) =>
+    Effect.flatMap(OrchestrationService, (service) =>
+      Effect.succeed(service.watchSession(sessionId)),
+    ).pipe(Stream.unwrap),
   "Agent.stopWorker": ({ sessionId, planId, agentId }) =>
     Effect.flatMap(OrchestrationService, (service) =>
       service.stopWorker({ sessionId, planId, agentId }),

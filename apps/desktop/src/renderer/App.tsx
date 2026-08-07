@@ -66,6 +66,7 @@ import { useTerminalDock } from "./use-terminal-dock.js";
 import { PreviewDockView } from "./preview-dock-view.js";
 import { usePreviewDock } from "./use-preview-dock.js";
 import { useSessionActivities } from "./session-activity.js";
+import { useSidebarWorkerActivity } from "./use-sidebar-worker-activity.js";
 import { useSessionDiffs } from "./diff-presence.js";
 import { clearPlanAutoPresentation, usePlanSessions } from "./plan-presence.js";
 import {
@@ -545,6 +546,7 @@ function AuthedApp({
     [],
   );
 
+  useSidebarWorkerActivity(sessions.map((session) => session.id));
   const liveActivity = useSessionActivities();
   const liveDiff = useSessionDiffs();
   const planSessions = usePlanSessions();

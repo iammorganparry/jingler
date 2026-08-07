@@ -538,13 +538,48 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       > =>
         updateMechanical(worktreePath, input.planId, (plan) => {
           const stage = plan.stages.find((candidate) => candidate.id === input.stageId)
+          const task = (stage?.tasks ?? []).find(
+            (candidate) => candidate.id === input.taskId
+          )
           if (
             stage === undefined ||
+            task === undefined ||
             (input.expectedStageFingerprint !== undefined &&
               planStageSemanticFingerprint(stage) !== input.expectedStageFingerprint)
           ) return { plan: null }
+          // Progress is durable and monotonic. A resumed provider can replay old
+          // output from before its checkpoint; that must never turn completed
+          // work back into in-progress work and cause a duplicate execution.
+          if (
+            task.status === input.status ||
+            (task.status === "completed" && input.status !== "completed")
+          ) return { plan: null }
+          const withTask = setPlanTaskStatus(
+            plan,
+            input.stageId,
+            input.taskId,
+            input.status
+          )
+          if (withTask === null) return { plan: null }
+          const updatedStage = withTask.stages.find(
+            (candidate) => candidate.id === input.stageId
+          )
+          if (updatedStage === undefined) return { plan: null }
+          const tasks = updatedStage.tasks ?? []
+          const derivedStatus: PlanStageExecutionStatus =
+            tasks.length > 0 && tasks.every((candidate) => candidate.status === "completed")
+              ? "completed"
+              : tasks.some((candidate) => candidate.status === "blocked")
+                ? "blocked"
+                : tasks.some(
+                    (candidate) =>
+                      candidate.status === "in-progress" ||
+                      candidate.status === "completed"
+                  )
+                  ? "running"
+                  : updatedStage.executionStatus ?? "queued"
           return {
-            plan: setPlanTaskStatus(plan, input.stageId, input.taskId, input.status)
+            plan: setStageExecution(withTask, input.stageId, derivedStatus)
           }
         })
 

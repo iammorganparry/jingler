@@ -1166,6 +1166,37 @@ describe("OrchestrationService", () => {
 })
 
 describe("OrchestrationService worker activity", () => {
+  it("replays worker activity from a session-wide subscription", async () => {
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) => passCurrentStage(spec, context),
+      stop: () => Effect.void
+    }
+    const activities = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* OrchestrationService
+        yield* service.execute(input([stage("01", "agent-a")]))
+        return yield* service
+          .watchSession("session-1")
+          .pipe(Stream.take(6), Stream.runCollect)
+      }).pipe(Effect.provide(layerFor(adapter)))
+    )
+
+    expect([...activities].map((activity) => activity._tag)).toEqual([
+      "Reset",
+      "State",
+      "State",
+      "HarnessEvent",
+      "HarnessEvent",
+      "State"
+    ])
+    expect([...activities][0]).toMatchObject({
+      _tag: "Reset",
+      sessionId: "session-1",
+      planId: "plan-1",
+      workers: [{ worker: { agentId: "agent-a" }, status: "completed" }]
+    })
+  })
+
   it("gives early and late watchers each event exactly once and in order", async () => {
     const adapter: CliAdapterShape = {
       run: (_ownerId, spec, context) => passCurrentStage(spec, context),

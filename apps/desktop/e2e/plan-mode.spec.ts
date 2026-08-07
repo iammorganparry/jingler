@@ -493,6 +493,70 @@ test("restart resumes the exact canonical revision", async ({ launchApp }) => {
   ).toBeVisible({ timeout: 30_000 })
 })
 
+test("restart preserves completed tasks in a partially executed plan", async ({
+  launchApp
+}) => {
+  const first = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session()
+  })
+  await expect(appShell(first.window)).toBeVisible()
+  const composer = first.window.getByPlaceholder(/Message .+…/)
+  await composer.fill(
+    "[[plan]] [[plan-partial-hold]] refactor auth to a TokenStore"
+  )
+  await composer.press("Enter")
+  await first.window.getByRole("button", { name: "Plan Review" }).first().click()
+  await expect(
+    first.window.getByText("Audit session middleware", { exact: true })
+  ).toBeVisible({ timeout: 20_000 })
+  await first.window.getByRole("button", { name: "More plan actions" }).click()
+  await first.window
+    .getByRole("menuitem", { name: "Approve and auto", exact: true })
+    .click()
+
+  const progress = () => {
+    const document = JSON.parse(readFileSync(currentPlanPath(first), "utf8"))
+    return document.plan.stages.map(
+      (stage: {
+        id: string
+        executionStatus: string
+        tasks: ReadonlyArray<{ status: string }>
+      }) => ({
+        id: stage.id,
+        executionStatus: stage.executionStatus,
+        tasks: stage.tasks.map((task) => task.status)
+      })
+    )
+  }
+  await expect.poll(progress, { timeout: 20_000 }).toContainEqual({
+    id: "s_02",
+    executionStatus: "completed",
+    tasks: ["completed", "completed"]
+  })
+  await first.app.close()
+
+  const reopened = await launchApp({
+    home: first.home,
+    reposDir: first.reposDir,
+    userDataDir: first.userDataDir,
+    configured: true,
+    withRepo: true
+  })
+  await expect(appShell(reopened.window)).toBeVisible()
+  const restored = JSON.parse(readFileSync(currentPlanPath(reopened), "utf8"))
+  expect(
+    restored.plan.stages.find((stage: { id: string }) => stage.id === "s_02")
+  ).toMatchObject({
+    executionStatus: "completed",
+    tasks: [
+      { id: "s_02.task.1", status: "completed" },
+      { id: "s_02.task.2", status: "completed" }
+    ]
+  })
+})
+
 test("plan file chips render on the step outline with diff evidence", async ({
   launchApp
 }) => {

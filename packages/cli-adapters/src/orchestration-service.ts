@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto"
 import {
   buildPlanExecutionGraph,
   planBlockText,
   planStageSemanticFingerprint
 } from "@jingler/core"
+import { planTaskProgressFingerprint } from "./plan-task-progress.js"
 
 /** Render a structured stage into a plain-text spec for the worker prompt. */
 const renderStageSpec = (stage: PlanPrdStage): string =>
@@ -431,10 +431,7 @@ const TASK_PROGRESS_LINE_PATTERN =
 
 /** Compact, copy-safe identity for the stage semantics embedded in worker output. */
 const taskProgressFingerprint = (stage: OrchestrationStage): string =>
-  createHash("sha256")
-    .update(planStageSemanticFingerprint(stage))
-    .digest("hex")
-    .slice(0, 24)
+  planTaskProgressFingerprint(stage)
 
 interface ParsedTaskProgress {
   readonly taskId: string
@@ -1027,6 +1024,67 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                   Stream.fromIterable(replay.activities),
                   tail
                 )
+              })
+            )
+          })
+        )
+
+      /**
+       * Observe the latest worker scope for a session without requiring the
+       * renderer to know which plan/chat currently owns it. Sidebar activity is
+       * session-wide and must stay subscribed when another session is selected.
+       */
+      const watchSession = (
+        sessionId: string
+      ): Stream.Stream<WorkerActivity> =>
+        Stream.unwrapScoped(
+          Effect.gen(function* () {
+            const live = yield* activityFor(sessionId)
+            yield* Effect.acquireRelease(
+              Ref.update(live.subscribers, (count) => count + 1),
+              () => Ref.update(live.subscribers, (count) => Math.max(0, count - 1))
+            )
+            return yield* live.gate.withPermits(1)(
+              Effect.gen(function* () {
+                const subscription = yield* PubSub.subscribe(live.hub)
+                const snapshot = yield* Ref.get(live.snapshot)
+                const buffer = yield* Ref.get(live.buffer)
+                const nextSequence = yield* Ref.get(live.nextSequence)
+                const replay = snapshot === null
+                  ? []
+                  : [snapshot, ...buffer.map(({ activity }) => activity)]
+                const lastSeen = yield* Ref.make(nextSequence - 1)
+                const rebuild = live.gate.withPermits(1)(
+                  Effect.gen(function* () {
+                    const latest = yield* Ref.get(live.snapshot)
+                    const buffered = yield* Ref.get(live.buffer)
+                    const sequence = (yield* Ref.get(live.nextSequence)) - 1
+                    return {
+                      activities:
+                        latest === null
+                          ? []
+                          : [latest, ...buffered.map(({ activity }) => activity)],
+                      sequence
+                    }
+                  })
+                )
+                const tail = Stream.fromQueue(subscription).pipe(
+                  Stream.mapEffect((item) =>
+                    Effect.gen(function* () {
+                      const previous = yield* Ref.get(lastSeen)
+                      if (item.sequence <= previous) return []
+                      if (item.sequence === previous + 1) {
+                        yield* Ref.set(lastSeen, item.sequence)
+                        return [item.activity]
+                      }
+                      const rebuilt = yield* rebuild
+                      yield* Ref.set(lastSeen, rebuilt.sequence)
+                      return rebuilt.activities
+                    })
+                  ),
+                  Stream.flatMap(Stream.fromIterable)
+                )
+                return Stream.concat(Stream.fromIterable(replay), tail)
               })
             )
           })
@@ -1946,6 +2004,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
         planParticipants,
         steerPlanParticipant,
         watch,
+        watchSession,
         activityFeedCount
       }
     })

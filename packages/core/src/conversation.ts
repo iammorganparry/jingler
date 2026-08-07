@@ -1772,6 +1772,10 @@ export const resumePlanPrompt = (plan: Plan): string => {
   return [
     "The plan below was approved. Implement it now — make the actual code changes and run what's needed.",
     "Do NOT re-plan or ask to enter plan mode again; proceed with the implementation.",
+    "Continue from the supplied execution checkpoints. Do not repeat tasks already marked completed.",
+    "Whenever a listed task changes state, emit this exact checkpoint line immediately:",
+    "PLAN_TASK stage=<stage-id> fingerprint=<fingerprint> task=<task-id> status=<in-progress|completed|blocked>",
+    "Use only the exact stage, fingerprint, and task ids supplied below. Do not repeat an unchanged status.",
     ...PLAN_EVIDENCE_INSTRUCTIONS,
     "",
     `Plan: ${plan.summary}`,

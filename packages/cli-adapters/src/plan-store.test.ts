@@ -473,6 +473,68 @@ describe("PlanStore canonical document", () => {
     )
   })
 
+  it("derives durable stage progress and never regresses a completed task", async () => {
+    const source: PlanPrd = {
+      ...SOURCE,
+      stages: SOURCE.stages.map((stage) => ({
+        ...stage,
+        executionStatus: "queued" as const,
+        tasks: [
+          { id: "01.task.1", text: "Add the mutation", status: "pending" as const },
+          { id: "01.task.2", text: "Verify persistence", status: "pending" as const }
+        ]
+      }))
+    }
+
+    const result = await run(
+      Effect.gen(function* () {
+        const first = yield* promote(source)
+        const fingerprint = planStageSemanticFingerprint(first.plan.stages[0]!)
+        yield* PlanStore.setTaskStatusLatest(WT, {
+          planId: first.id,
+          stageId: "01",
+          taskId: "01.task.1",
+          status: "completed",
+          expectedStageFingerprint: fingerprint
+        })
+        const afterFirst = yield* PlanStore.readDocument(WT)
+        yield* PlanStore.setTaskStatusLatest(WT, {
+          planId: first.id,
+          stageId: "01",
+          taskId: "01.task.1",
+          status: "in-progress",
+          expectedStageFingerprint: fingerprint
+        })
+        yield* PlanStore.setTaskStatusLatest(WT, {
+          planId: first.id,
+          stageId: "01",
+          taskId: "01.task.2",
+          status: "completed",
+          expectedStageFingerprint: fingerprint
+        })
+        return {
+          afterFirst,
+          restored: yield* PlanStore.readDocument(WT)
+        }
+      })
+    )
+
+    expect(result.afterFirst?.plan.stages[0]).toMatchObject({
+      executionStatus: "running",
+      tasks: [
+        { id: "01.task.1", status: "completed" },
+        { id: "01.task.2", status: "pending" }
+      ]
+    })
+    expect(result.restored?.plan.stages[0]).toMatchObject({
+      executionStatus: "completed",
+      tasks: [
+        { id: "01.task.1", status: "completed" },
+        { id: "01.task.2", status: "completed" }
+      ]
+    })
+  })
+
   it("revision-guards appending, delivery updates, and thread resolution", async () => {
     const result = await run(
       Effect.gen(function* () {

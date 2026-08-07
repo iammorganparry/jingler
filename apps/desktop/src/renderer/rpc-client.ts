@@ -655,6 +655,47 @@ export const rpc = {
       if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   },
+  agentWatchSessionWorkers: (
+    sessionId: string,
+    onActivity: (activity: WorkerActivity) => void,
+    onFailure: (error: unknown) => void
+  ): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then(
+      (client) => {
+        if (cancelled) return
+        const streamFiber = coreRuntime.runFork(
+          client.Agent.watchSessionWorkers({ sessionId }).pipe(
+            Stream.runForEach((activity) => Effect.sync(() => onActivity(activity)))
+          )
+        )
+        fiber = streamFiber
+        coreRuntime.runFork(
+          Fiber.await(streamFiber).pipe(
+            Effect.tap((exit) =>
+              Effect.sync(() => {
+                if (cancelled) return
+                onFailure(
+                  Exit.isFailure(exit)
+                    ? Cause.squash(exit.cause)
+                    : new Error("Session worker activity stream ended unexpectedly.")
+                )
+              })
+            ),
+            Effect.asVoid
+          )
+        )
+      },
+      (error) => {
+        if (!cancelled) onFailure(error)
+      }
+    )
+    return () => {
+      cancelled = true
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
+    }
+  },
   agentSetHarness: (
     sessionId: string,
     chatId: string,

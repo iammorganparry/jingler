@@ -1779,6 +1779,19 @@ describe("AgentRunner plan mode", () => {
         criterion.status === "passed" || criterion.status === "waived"
       )
     ).toBe(true)
+    expect(
+      result.document?.plan.stages.map((stage) => ({
+        id: stage.id,
+        executionStatus: stage.executionStatus,
+        tasks: (stage.tasks ?? []).map((task) => task.status)
+      }))
+    ).toEqual(
+      result.document?.plan.stages.map((stage) => ({
+        id: stage.id,
+        executionStatus: "completed",
+        tasks: (stage.tasks ?? []).map(() => "completed")
+      }))
+    )
     const assistantText = result.transcript
       .flatMap((message) => message.parts)
       .filter((part) => part._tag === "Text")
@@ -1786,6 +1799,7 @@ describe("AgentRunner plan mode", () => {
       .join("\n")
     expect(assistantText).toContain("Steps 2, 3 and 5 are done.")
     expect(assistantText).not.toContain("PLAN_RESULT")
+    expect(assistantText).not.toContain("PLAN_TASK")
   })
 
   it("marks a plan step done when an executed edit touches one of its files", async () => {

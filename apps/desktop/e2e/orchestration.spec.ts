@@ -473,6 +473,19 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
     sessionRow(window, "Provider neutral orchestration").getByTitle("Delegating 2 agents")
   ).toBeVisible()
 
+  // Selection used to own the only worker subscription. Move to another
+  // session while both workers remain live; the original row must stay active.
+  await window.getByTestId("new-session").click()
+  await window
+    .getByPlaceholder("Leave blank for agent naming")
+    .fill("Observe background workers")
+  await window.getByRole("button", { name: "Create" }).click()
+  await expect(sessionRow(window, "Observe background workers")).toBeVisible()
+  await expect(
+    sessionRow(window, "Provider neutral orchestration").getByTitle("Delegating 2 agents")
+  ).toBeVisible()
+  await sessionRow(window, "Provider neutral orchestration").click()
+
   await composer.fill(
     "[[amendment]] add the requested audit coverage without stopping the workers"
   )

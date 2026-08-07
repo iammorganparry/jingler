@@ -1411,6 +1411,7 @@ describe("RPC handlers", () => {
               detail: "No live participant.",
             }),
           watch: () => Stream.empty,
+          watchSession: () => Stream.empty,
           activityFeedCount: () => Effect.succeed(0),
         });
         const discovery = DiscoveryService.make({
@@ -1500,6 +1501,7 @@ describe("RPC handlers", () => {
         calls.push([sessionId, planId, chatId]);
         return Stream.make(activity);
       },
+      watchSession: () => Stream.make(activity),
     });
 
     const received = await Effect.runPromise(

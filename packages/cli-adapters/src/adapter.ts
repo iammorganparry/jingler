@@ -13,6 +13,7 @@ import type {
 } from "@jingler/core"
 import { CliExecError } from "@jingler/core"
 import { Context, Data, Effect, Layer } from "effect"
+import { planTaskProgressFingerprint } from "./plan-task-progress.js"
 
 /** Installed provider/model routes a planning turn may assign to workers. */
 export interface OrchestrationRoute {
@@ -1137,6 +1138,13 @@ export const scriptedRun =
           if (decision._tag === "Approve") {
             yield* emit({ _tag: "Assistant", text: "Plan approved — executing the steps." })
             yield* pause
+            const executionPlan = scriptedPlanPrd(
+              sessionId,
+              rev,
+              spec.prompt.includes("[[worker-hold]]"),
+              false,
+              spec.prompt.includes("[[complexity-routing]]")
+            )
             // Each edit's path matches a plan step's files, so the runner marks that
             // step done — exercising the execution → plan-progress linkage.
             const edits: ReadonlyArray<{ id: string; path: string; preview: string; diff: { added: number; removed: number } }> = [
@@ -1144,14 +1152,35 @@ export const scriptedRun =
               { id: "plan-edit-2", path: "src/auth/session.ts", preview: "-import { MemoryStore } from \"./memory-store.js\"\n+import { TokenStore } from \"./token-store.js\"", diff: { added: 8, removed: 3 } },
               { id: "plan-edit-3", path: "src/auth/session.test.ts", preview: "+it(\"refreshes once and replays on a 401\", () => {\n+  // …\n+})", diff: { added: 24, removed: 2 } }
             ]
-            for (const e of edits) {
+            for (const [editIndex, e] of edits.entries()) {
               yield* emit({ _tag: "ToolStart", id: e.id, name: "Write", target: e.path })
               yield* pause
               yield* emit({ _tag: "ToolEnd", id: e.id, status: "success", meta: null, diff: e.diff, preview: e.preview })
               yield* pause
+              if (
+                editIndex === 0 &&
+                spec.prompt.includes("[[plan-partial-hold]]")
+              ) {
+                const stage = executionPlan.stages.find(
+                  (candidate) => candidate.id === "s_02"
+                )!
+                for (const task of stage.tasks ?? []) {
+                  yield* emit({
+                    _tag: "Assistant",
+                    text: `PLAN_TASK stage=${stage.id} fingerprint=${planTaskProgressFingerprint(stage)} task=${task.id} status=completed\n`
+                  })
+                }
+                yield* Effect.never
+              }
             }
             const evidenceReply = [
               "Steps 2, 3 and 5 are done.",
+              ...executionPlan.stages.flatMap((stage) =>
+                (stage.tasks ?? []).map(
+                  (task) =>
+                    `PLAN_TASK stage=${stage.id} fingerprint=${planTaskProgressFingerprint(stage)} task=${task.id} status=completed`
+                )
+              ),
               ...[
                 "s_01.1",
                 "s_02.1",

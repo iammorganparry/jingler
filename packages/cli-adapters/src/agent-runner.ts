@@ -34,6 +34,7 @@ import {
   isSubagentEvent,
   ORCHESTRATOR_ENABLED_DEFAULT,
   planDocumentToPlan,
+  planStageSemanticFingerprint,
   orchestratorParticipantRoutingId,
   PLAN_AUTO_RUN_DEFAULT,
   subagentParticipantRoutingId,
@@ -66,6 +67,13 @@ import { buildGate, makeApprovals, verdict } from "./approvals.js"
 import { runLifetime } from "./run-lifetime.js"
 import { planNote } from "./plan-prompt.js"
 import { capturePlanEmission, stripPlanJsonBlock } from "./plan-json.js"
+import {
+  planTaskProgressFingerprint,
+  planTaskProgressFromText,
+  planWithExecutionProgress,
+  resumeCanonicalPlanPrompt,
+  stripPlanTaskProgressProtocol
+} from "./plan-task-progress.js"
 import { questionNote } from "./question-prompt.js"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
@@ -800,7 +808,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             ? run === undefined
               ? null
               : yield* run.readPlan(planId)
-            : planDocumentToPlan(canonical.document)
+            : planWithExecutionProgress(canonical.document)
         if (exactPlan === null) {
           return approvalRefused(
             "Approval refused because the plan is no longer available.",
@@ -992,7 +1000,16 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const restore =
             persisted && persisted !== "plan" ? persisted : yield* resolveExecMode(sessionId)
           yield* setMode(sessionId, chatId, restore)
-          return prompt(sessionId, chatId, resumePlanPrompt(plan), [], undefined, plan.id)
+          return prompt(
+            sessionId,
+            chatId,
+            canonical === null
+              ? resumePlanPrompt(plan)
+              : resumeCanonicalPlanPrompt(canonical.document),
+            [],
+            undefined,
+            plan.id
+          )
         })
       )
     }
@@ -1571,6 +1588,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const memoryRetrieval = yield* Ref.make(
             memoryAttachment?.retrieval ?? EMPTY_MEMORY_RETRIEVAL_SUMMARY
           )
+          const persistedTaskMarkers = yield* Ref.make(new Set<string>())
 
           // toolUseId → the file an edit tool is writing, remembered at ToolStart so
           // its ToolEnd can mark the matching plan step done (see markPlanProgress).
@@ -1712,6 +1730,58 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   author: "agent",
                   status: "done"
                 }).pipe(Effect.ignore)
+              }
+            }).pipe(Effect.provide(env), Effect.ignore)
+
+          /**
+           * Persist task checkpoints from accumulated assistant output as soon
+           * as a complete marker arrives. The provider may split one line across
+           * arbitrary deltas, so parsing individual events would lose progress
+           * if the app stopped before the terminal response.
+           */
+          const recordPlanTaskProgress = (text: string): Effect.Effect<void> =>
+            Effect.gen(function* () {
+              if (worktreePath.length === 0) return
+              const activePlanId = yield* Ref.get(executingPlanId)
+              if (activePlanId === null) return
+              const canonical = yield* PlanStore.readDocument(worktreePath)
+              if (canonical === null || canonical.id !== activePlanId) return
+              const seen = yield* Ref.get(persistedTaskMarkers)
+              for (const marker of planTaskProgressFromText(text)) {
+                const key = [
+                  marker.stageId,
+                  marker.stageFingerprint,
+                  marker.taskId,
+                  marker.status
+                ].join("\u0000")
+                if (seen.has(key)) continue
+                const stage = canonical.plan.stages.find(
+                  (candidate) => candidate.id === marker.stageId
+                )
+                if (
+                  stage === undefined ||
+                  planTaskProgressFingerprint(stage) !== marker.stageFingerprint
+                ) continue
+                const persisted = yield* PlanStore.setTaskStatusLatest(
+                  worktreePath,
+                  {
+                    planId: activePlanId,
+                    stageId: marker.stageId,
+                    taskId: marker.taskId,
+                    status: marker.status,
+                    expectedStageFingerprint: planStageSemanticFingerprint(stage)
+                  }
+                ).pipe(Effect.either)
+                if (persisted._tag === "Right") {
+                  yield* Ref.update(
+                    persistedTaskMarkers,
+                    (current) => new Set(current).add(key)
+                  )
+                } else {
+                  yield* Effect.logError(
+                    `Could not persist plan task ${marker.taskId}: ${persisted.left.message}`
+                  )
+                }
               }
             }).pipe(Effect.provide(env), Effect.ignore)
 
@@ -1901,11 +1971,19 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               }
               let next = applyStreamEvent(yield* Ref.get(acc), event)
               let liveAmendmentFeedback: string | null = null
+              if (event._tag === "Assistant") {
+                const accumulatedText = next.parts
+                  .filter((part) => part._tag === "Text")
+                  .map((part) => part.text)
+                  .join("\n")
+                yield* recordPlanTaskProgress(accumulatedText)
+              }
               if (event._tag === "Done") {
                 const settledText = next.parts
                   .filter((part) => part._tag === "Text")
                   .map((part) => part.text)
                   .join("\n")
+                yield* recordPlanTaskProgress(settledText)
                 yield* recordPlanEvidence(settledText)
                 // An approved-plan orchestrator turn may carry a plan amendment.
                 // Apply it (reconciled, no re-approval) and, if it landed, scrub
@@ -1947,7 +2025,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   ...next,
                   parts: next.parts.flatMap((part): ReadonlyArray<ContentPart> => {
                     if (part._tag !== "Text") return [part]
-                    const text = stripPlanResultProtocol(part.text)
+                    const text = stripPlanTaskProgressProtocol(
+                      stripPlanResultProtocol(part.text)
+                    )
                     return text.length === 0 ? [] : [{ ...part, text }]
                   })
                 }
