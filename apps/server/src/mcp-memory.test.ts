@@ -164,6 +164,9 @@ describe("standard MCP client compatibility", () => {
     expect(payload.result.instructions).toBe(MEMORY_MCP_INSTRUCTIONS)
     expect(MEMORY_MCP_INSTRUCTIONS.length).toBeLessThanOrEqual(512)
     expect(MEMORY_MCP_INSTRUCTIONS).toContain("memory_read")
+    expect(MEMORY_MCP_INSTRUCTIONS).toContain(
+      "pageId, revisionId, sourceIds, and citationIds"
+    )
     expect(MEMORY_MCP_INSTRUCTIONS).toContain("memory_workflow_status")
   })
 
