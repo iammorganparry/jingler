@@ -1,6 +1,6 @@
 {
   "name": "@jingler/github-relay",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "type": "module",
   "description": "Verified GitHub webhooks and replayable realtime delivery for Jingler desktops.",

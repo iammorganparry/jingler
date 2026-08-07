@@ -1,5 +1,11 @@
 # @jingler/desktop
 
+## 2.0.1
+
+### Patch Changes
+
+- 7a8a9dc: Prevent electron-builder from traversing the bundled plugin SDK workspace symlink when packaging desktop installers.
+
 ## 2.0.0
 
 ### Minor Changes
