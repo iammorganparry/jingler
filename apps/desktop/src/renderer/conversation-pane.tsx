@@ -31,6 +31,10 @@ import {
   rehomeSharedPlan
 } from "./conversation-registry.js"
 import { clearDraft, getDraft, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
+import {
+  appendCodeReferencesToPrompt,
+  codeReferenceDisplayLabel
+} from "./code-reference.js"
 import { useConversation } from "./use-conversation.js"
 import { useOrchestrationAgents } from "./use-orchestration-agents.js"
 import { usePlanDocument } from "./use-plan-document.js"
@@ -340,6 +344,16 @@ export function ConversationPane({
   // mounted keyed by session id, so switching sessions unmounts it and any local
   // state goes with it. See `draft-store`.
   const draft = useDraft(activeChat.id)
+  const draftCodeReferences = useMemo(
+    () =>
+      draft.references.map((reference) => ({
+        path: reference.path,
+        startLine: reference.startLine,
+        endLine: reference.endLine,
+        label: codeReferenceDisplayLabel(reference)
+      })),
+    [draft.references]
+  )
 
   // The prefilled task is one-shot, but we clear it (backend + app state) only
   // once the user actually SENDS — not on mount. Clearing on mount lost the draft
@@ -354,17 +368,21 @@ export function ConversationPane({
     }
   }, [activeChat.id, session.id, session.initialPrompt])
 
-  const sendPrompt: typeof convo.sendPrompt = (...args) => {
+  const sendPrompt: typeof convo.sendPrompt = (text, images) => {
+    // Structured ranges stay out of the editable textarea, but every harness
+    // receives the same deterministic plain-text context at the turn boundary.
+    const prompt = appendCodeReferencesToPrompt(text, draft.references)
     if (session.initialPrompt) onInitialPromptConsumed?.(session.id)
     // The turn is on its way to the agent — the draft has served its purpose.
     clearDraft(activeChat.id)
-    if (activeChat.title === null && args[0].trim()) {
-      const title = args[0].trim().split("\n")[0]!.slice(0, 48)
+    // Titles reflect the operator's visible message, never the appended context.
+    if (activeChat.title === null && text.trim()) {
+      const title = text.trim().split("\n")[0]!.slice(0, 48)
       void rpc
         .sessionsRenameChat(session.id, activeChat.id, title)
         .then(publishSessionUpdate)
     }
-    return convo.sendPrompt(...args)
+    return convo.sendPrompt(prompt, images)
   }
 
   const createChat = () => {
@@ -836,6 +854,17 @@ export function ConversationPane({
           draftAttachments={draft.attachments}
           onDraftAttachmentsChange={(attachments) =>
             setDraft(activeChat.id, { ...getDraft(activeChat.id), attachments })
+          }
+          draftCodeReferences={draftCodeReferences}
+          onDraftCodeReferenceRemove={(index) => {
+            const current = getDraft(activeChat.id)
+            setDraft(activeChat.id, {
+              ...current,
+              references: current.references.filter((_, currentIndex) => currentIndex !== index)
+            })
+          }}
+          onDraftCodeReferencesClear={() =>
+            setDraft(activeChat.id, { ...getDraft(activeChat.id), references: [] })
           }
           // The Plan face returns early above, so reaching here already means the
           // transcript is on screen — only the focused pane still has to be checked.

@@ -107,6 +107,14 @@ const reasoningLevel = (cli: CliKind | undefined, choice: ReasoningChoice | "off
 type MenuState = { kind: "slash" | "mention"; query: string; start: number }
 const TRAILING_SPACE = /\s$/
 
+/** Display-only projection of the renderer-owned captured code reference. */
+export interface ComposerCodeReference {
+  readonly path: string
+  readonly startLine: number
+  readonly endLine: number
+  readonly label?: string
+}
+
 /** The trigger token (`/…` or `@…`) immediately before the caret, if any. */
 const activeToken = (value: string, caret: number): MenuState | null => {
   const match = value.slice(0, caret).match(/(?:^|\s)([/@])(\S*)$/)
@@ -159,6 +167,9 @@ export function Composer({
   onValueChange,
   attachments: controlledAttachments,
   onAttachmentsChange,
+  codeReferences = [],
+  onCodeReferenceRemove,
+  onCodeReferencesClear,
   className
 }: {
   skills?: ReadonlyArray<Skill>
@@ -183,6 +194,12 @@ export function Composer({
   /** Lift the attachments out too — same reasoning as `value`. */
   attachments?: ReadonlyArray<Attachment>
   onAttachmentsChange?: (attachments: ReadonlyArray<Attachment>) => void
+  /** Captured repository ranges attached as structured draft context. */
+  codeReferences?: ReadonlyArray<ComposerCodeReference>
+  /** Remove one captured range without disturbing text or image attachments. */
+  onCodeReferenceRemove?: (index: number) => void
+  /** Clear every captured range after a composer send. */
+  onCodeReferencesClear?: () => void
   /** The session's current harness (which section of the menu is checked). */
   cli?: CliKind
   /** Current harness model id (shown in the model chip). */
@@ -401,10 +418,12 @@ export function Composer({
 
   const send = () => {
     const text = value.trim()
-    if ((text.length === 0 && attachments.length === 0) || paused) return
+    if ((text.length === 0 && attachments.length === 0 && codeReferences.length === 0) || paused)
+      return
     onSend?.(text, attachments)
     setValue("")
     setAttachments([])
+    onCodeReferencesClear?.()
     setMenu(null)
   }
 
@@ -513,8 +532,18 @@ export function Composer({
           dragging && "border-cyan/60 bg-cyan/5 shadow-none"
         )}
       >
-        {mentions.length > 0 && (
+        {(codeReferences.length > 0 || mentions.length > 0) && (
           <div className="flex flex-wrap gap-1.5">
+            {codeReferences.map((reference, index) => (
+              <CodeChip
+                key={`${reference.path}:${reference.startLine}:${reference.endLine}`}
+                path={reference.path}
+                line={reference.startLine}
+                endLine={reference.endLine}
+                label={reference.label}
+                onRemove={() => onCodeReferenceRemove?.(index)}
+              />
+            ))}
             {mentions.map((path, i) => (
               <CodeChip
                 key={`${path}-${i}`}

@@ -13,14 +13,16 @@
  */
 import { useSyncExternalStore } from "react"
 import type { Attachment } from "@jingler/core"
+import { deduplicateCodeReferences, type CodeReference } from "./code-reference.js"
 
 export interface Draft {
   readonly text: string
   readonly attachments: ReadonlyArray<Attachment>
+  readonly references: ReadonlyArray<CodeReference>
 }
 
 /** Shared empty snapshot — a stable reference, so `useSyncExternalStore` settles. */
-export const EMPTY_DRAFT: Draft = { text: "", attachments: [] }
+export const EMPTY_DRAFT: Draft = { text: "", attachments: [], references: [] }
 
 const storageKey = (draftId: string): string => `sb.draft.${draftId}`
 
@@ -35,7 +37,8 @@ const notify = (): void => {
   for (const listener of listeners) listener()
 }
 
-const isEmpty = (draft: Draft): boolean => draft.text === "" && draft.attachments.length === 0
+const isEmpty = (draft: Draft): boolean =>
+  draft.text === "" && draft.attachments.length === 0 && draft.references.length === 0
 
 /** Read a persisted draft, tolerating absent/garbage/unavailable storage. */
 const read = (sessionId: string): Draft => {
@@ -47,7 +50,11 @@ const read = (sessionId: string): Draft => {
     if (typeof parsed?.text !== "string") return EMPTY_DRAFT
     const draft: Draft = {
       text: parsed.text,
-      attachments: Array.isArray(parsed.attachments) ? parsed.attachments : []
+      attachments: Array.isArray(parsed.attachments) ? parsed.attachments : [],
+      // Drafts written before code references existed simply omit this field.
+      references: Array.isArray(parsed.references)
+        ? deduplicateCodeReferences(parsed.references)
+        : []
     }
     // Collapse an empty record back to the shared reference, so the "no draft"
     // state has exactly one representation however it got persisted.
@@ -65,7 +72,9 @@ const writeNow = (sessionId: string, draft: Draft): void => {
     // TEXT over an image: retry without attachments. If even that fails (or
     // there's no storage at all) the in-memory copy still carries the draft
     // across session switches — only a reload would drop it.
-    if (draft.text === "") return // nothing worth saving without the attachments
+    if (draft.text === "" && draft.references.length === 0) return
+    // References are tiny structured context and remain useful without text, so
+    // quota fallback drops only the base64 image payloads.
     try {
       localStorage.setItem(storageKey(sessionId), JSON.stringify({ ...draft, attachments: [] }))
     } catch {
@@ -127,17 +136,21 @@ const subscribe = (listener: () => void): (() => void) => {
   return () => listeners.delete(listener)
 }
 
-/** Replace a session's draft (text and/or attachments); persists + notifies. */
+/** Replace a session's text, attachments, and code references; persists + notifies. */
 export const setDraft = (sessionId: string, draft: Draft): void => {
+  const normalized: Draft = {
+    ...draft,
+    references: deduplicateCodeReferences(draft.references)
+  }
   // An empty draft IS no draft — normalising here keeps storage tidy and keeps
   // `getDraft` returning the shared EMPTY_DRAFT reference.
-  if (isEmpty(draft)) {
+  if (isEmpty(normalized)) {
     clearDraft(sessionId)
     return
   }
   hydrated.add(sessionId)
-  drafts = { ...drafts, [sessionId]: draft }
-  write(sessionId, draft)
+  drafts = { ...drafts, [sessionId]: normalized }
+  write(sessionId, normalized)
   notify()
 }
 
@@ -178,9 +191,13 @@ export const seedDraftOnce = (
   seeded.add(seedKey)
   const current = snapshot(draftId)
   if (current.text !== "") return
-  // Only the TEXT is empty — carry any attachments through. A draft can hold
-  // images with no words yet, and the seed must not eat them.
-  setDraft(draftId, { text, attachments: current.attachments })
+  // Only the TEXT is empty — carry all structured context through. A draft can
+  // hold images or code ranges with no words yet, and the seed must not eat them.
+  setDraft(draftId, {
+    text,
+    attachments: current.attachments,
+    references: current.references
+  })
 }
 
 /** A chat's live draft (reactive). */

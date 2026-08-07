@@ -3,36 +3,47 @@ import { cn } from "../lib/cn.js"
 import { FileIcon } from "./file-icon.js"
 
 /**
- * A rendered `@file` code reference — the chip form of a mention inserted from
- * the composer's `@` menu. Optional `onRemove` shows a dismiss affordance.
+ * A rendered code reference. Bare `@file` mentions keep the compact basename;
+ * captured source ranges show their full repository path and inclusive lines.
+ * Optional `onRemove` shows a dismiss affordance.
  */
 export function CodeChip({
   path,
   line,
+  endLine,
+  label,
   onRemove,
   className
 }: {
   path: string
   line?: number
+  endLine?: number
+  /** Canonical renderer-owned display label for a captured range. */
+  label?: string
   onRemove?: () => void
   className?: string
 }) {
   const name = path.split("/").pop() ?? path
+  const start = line === undefined ? undefined : Math.min(line, endLine ?? line)
+  const end = line === undefined ? undefined : Math.max(line, endLine ?? line)
+  const range =
+    start === undefined ? undefined : start === end ? `L${start}` : `L${start}\u2013L${end}`
+  const displayLabel = range === undefined ? name : (label ?? `${path}:${range}`)
   return (
     <span
+      title={range === undefined ? path : displayLabel}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-1.5 py-0.5 font-mono text-[11px] text-text-bright",
         className
       )}
     >
       <FileIcon path={path} size={12} />
-      {name}
-      {line !== undefined && <span className="text-dim">:{line}</span>}
+      {displayLabel}
       {onRemove && (
         <button
           type="button"
           onClick={onRemove}
-          aria-label={`Remove ${name}`}
+          aria-label={`Remove ${displayLabel}`}
           className="text-dim hover:text-text"
         >
           <X size={11} />

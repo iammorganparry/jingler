@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Attachment } from "@jingler/core"
+import type { CodeReference } from "./code-reference.js"
 import {
   __flushDrafts,
   __resetDrafts,
@@ -44,6 +45,12 @@ const install = (storage: unknown) => {
 }
 
 const IMAGE: Attachment = { id: "att_1", name: "shot.png", mediaType: "image/png", data: "AAAA" }
+const REFERENCE: CodeReference = {
+  path: "src/parser.ts",
+  startLine: 12,
+  endLine: 15,
+  source: "const parsed = parse(input)\nreturn parsed"
+}
 
 beforeEach(() => {
   __resetDrafts()
@@ -62,23 +69,24 @@ describe("draft-store", () => {
   })
 
   it("keeps drafts separate per session", () => {
-    setDraft("s1", { text: "hello", attachments: [] })
-    setDraft("s2", { text: "world", attachments: [] })
+    setDraft("s1", { text: "hello", attachments: [], references: [] })
+    setDraft("s2", { text: "world", attachments: [], references: [] })
     expect(getDraft("s1").text).toBe("hello")
     expect(getDraft("s2").text).toBe("world")
   })
 
-  it("survives a reload — rehydrates text + attachments from storage", () => {
-    setDraft("s1", { text: "half-typed", attachments: [IMAGE] })
+  it("survives a reload — rehydrates text, attachments, and references from storage", () => {
+    setDraft("s1", { text: "half-typed", attachments: [IMAGE], references: [REFERENCE] })
     reload() // simulate the app restarting; storage persists
 
     const restored = getDraft("s1")
     expect(restored.text).toBe("half-typed")
     expect(restored.attachments).toEqual([IMAGE])
+    expect(restored.references).toEqual([REFERENCE])
   })
 
   it("clears a draft from memory and storage", () => {
-    setDraft("s1", { text: "sent already", attachments: [IMAGE] })
+    setDraft("s1", { text: "sent already", attachments: [IMAGE], references: [REFERENCE] })
     clearDraft("s1")
     expect(getDraft("s1")).toBe(EMPTY_DRAFT)
 
@@ -91,7 +99,7 @@ describe("draft-store", () => {
     const storage = fakeStorage({ failWrites: (v) => v.includes("att_1") })
     install(storage)
 
-    setDraft("s1", { text: "keep me", attachments: [IMAGE] })
+    setDraft("s1", { text: "keep me", attachments: [IMAGE], references: [REFERENCE] })
 
     // In memory the attachment survives (this session still has it)...
     expect(getDraft("s1").attachments).toEqual([IMAGE])
@@ -101,19 +109,22 @@ describe("draft-store", () => {
     const restored = getDraft("s1")
     expect(restored.text).toBe("keep me")
     expect(restored.attachments).toEqual([])
+    expect(restored.references).toEqual([REFERENCE])
   })
 
   it("does not throw when storage is unavailable entirely", () => {
     delete (globalThis as { localStorage?: unknown }).localStorage
 
-    expect(() => setDraft("s1", { text: "no storage", attachments: [] })).not.toThrow()
+    expect(() =>
+      setDraft("s1", { text: "no storage", attachments: [], references: [] })
+    ).not.toThrow()
     expect(getDraft("s1").text).toBe("no storage") // memory-only, still works
     expect(() => clearDraft("s1")).not.toThrow()
   })
 
   it("treats an empty draft as no draft", () => {
-    setDraft("s1", { text: "typing", attachments: [] })
-    setDraft("s1", { text: "", attachments: [] })
+    setDraft("s1", { text: "typing", attachments: [], references: [] })
+    setDraft("s1", { text: "", attachments: [], references: [] })
 
     expect(getDraft("s1")).toBe(EMPTY_DRAFT)
     reload()
@@ -127,7 +138,7 @@ describe("draft-store", () => {
     })
 
     it("never clobbers text the user already typed", () => {
-      setDraft("s1", { text: "my own words", attachments: [] })
+      setDraft("s1", { text: "my own words", attachments: [], references: [] })
       seedDraftOnce("s1", "Fix issue #42")
       expect(getDraft("s1").text).toBe("my own words")
     })
@@ -152,10 +163,14 @@ describe("draft-store", () => {
 
     it("keeps attachments on a draft that has images but no text yet", () => {
       // The text guard alone would overwrite the whole draft, eating the images.
-      setDraft("s1", { text: "", attachments: [IMAGE] })
+      setDraft("s1", { text: "", attachments: [IMAGE], references: [REFERENCE] })
       seedDraftOnce("s1", "Fix issue #42")
 
-      expect(getDraft("s1")).toEqual({ text: "Fix issue #42", attachments: [IMAGE] })
+      expect(getDraft("s1")).toEqual({
+        text: "Fix issue #42",
+        attachments: [IMAGE],
+        references: [REFERENCE]
+      })
     })
   })
 
@@ -165,7 +180,7 @@ describe("draft-store", () => {
       install(storage)
 
       for (const text of ["h", "he", "hel", "hell", "hello"]) {
-        setDraft("s1", { text, attachments: [IMAGE] })
+        setDraft("s1", { text, attachments: [IMAGE], references: [REFERENCE] })
       }
       // Stringifying base64 attachments per keypress is the jank this avoids.
       expect(storage.setItem).not.toHaveBeenCalled()
@@ -178,7 +193,7 @@ describe("draft-store", () => {
     })
 
     it("a pending write cannot resurrect a draft cleared before it lands", () => {
-      setDraft("s1", { text: "about to send", attachments: [] })
+      setDraft("s1", { text: "about to send", attachments: [], references: [] })
       clearDraft("s1")
       __flushDrafts()
 
@@ -193,7 +208,7 @@ describe("draft-store", () => {
     const storage = fakeStorage({ failWrites: (v) => v.includes("att_1") })
     install(storage)
 
-    setDraft("s1", { text: "", attachments: [IMAGE] })
+    setDraft("s1", { text: "", attachments: [IMAGE], references: [] })
     __flushDrafts()
 
     expect(storage.map.has("sb.draft.s1")).toBe(false)
@@ -213,6 +228,58 @@ describe("draft-store", () => {
 
     reload()
     storage.map.set("sb.draft.s1", JSON.stringify({ text: "ok", attachments: "nope" }))
-    expect(getDraft("s1")).toEqual({ text: "ok", attachments: [] })
+    expect(getDraft("s1")).toEqual({ text: "ok", attachments: [], references: [] })
+  })
+
+  it("hydrates older stored drafts that omit references", () => {
+    const storage = fakeStorage()
+    storage.map.set("sb.draft.s1", JSON.stringify({ text: "older draft", attachments: [IMAGE] }))
+    install(storage)
+
+    expect(getDraft("s1")).toEqual({
+      text: "older draft",
+      attachments: [IMAGE],
+      references: []
+    })
+  })
+
+  it("normalizes and deduplicates persisted references", () => {
+    const storage = fakeStorage()
+    storage.map.set(
+      "sb.draft.s1",
+      JSON.stringify({
+        text: "",
+        attachments: [],
+        references: [
+          { ...REFERENCE, path: "./src/parser.ts", startLine: 15, endLine: 12 },
+          REFERENCE,
+          { ...REFERENCE, path: "../../outside.ts" }
+        ]
+      })
+    )
+    install(storage)
+
+    expect(getDraft("s1")).toEqual({ text: "", attachments: [], references: [REFERENCE] })
+  })
+
+  it("treats a reference-only draft as non-empty and persists it", () => {
+    setDraft("s1", { text: "", attachments: [], references: [REFERENCE] })
+    expect(getDraft("s1")).not.toBe(EMPTY_DRAFT)
+
+    reload()
+    expect(getDraft("s1")).toEqual({ text: "", attachments: [], references: [REFERENCE] })
+  })
+
+  it("normalizes and deduplicates references when the draft mutates", () => {
+    setDraft("s1", {
+      text: "",
+      attachments: [],
+      references: [
+        { ...REFERENCE, path: "./src/parser.ts", startLine: 15, endLine: 12 },
+        { ...REFERENCE, source: "duplicate capture" }
+      ]
+    })
+
+    expect(getDraft("s1").references).toEqual([REFERENCE])
   })
 })
