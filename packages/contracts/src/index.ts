@@ -338,40 +338,6 @@ export const MemorySearchResult = Schema.Struct({
 })
 export type MemorySearchResult = Schema.Schema.Type<typeof MemorySearchResult>
 
-export const MemoryReviewPage = Schema.Struct({
-  proposalId: Schema.String,
-  pageId: Schema.String,
-  title: Schema.String,
-  baseRevisionId: Schema.String,
-  summary: Schema.String,
-  markdown: Schema.String
-})
-
-export const MemoryReviewItem = Schema.Struct({
-  id: Schema.String,
-  workflowId: Schema.String,
-  sourceId: Schema.String,
-  proposedBy: Schema.String,
-  createdAt: Schema.String,
-  status: Schema.Literal("open", "accepted", "rejected", "superseded"),
-  changeKind: Schema.Literal("factual", "mechanical"),
-  pages: Schema.Array(MemoryReviewPage)
-})
-export type MemoryReviewItem = Schema.Schema.Type<typeof MemoryReviewItem>
-
-export const MemoryReviewResult = Schema.Struct({
-  status: Schema.Literal("accepted", "rejected", "conflict"),
-  proposalId: Schema.String,
-  conflicts: Schema.Array(
-    Schema.Struct({
-      pageId: Schema.String,
-      expectedBaseRevisionId: Schema.String,
-      currentHeadRevisionId: Schema.String
-    })
-  )
-})
-export type MemoryReviewResult = Schema.Schema.Type<typeof MemoryReviewResult>
-
 export const MemoryExport = Schema.Struct({
   filename: Schema.String,
   saved: Schema.Boolean
@@ -1213,8 +1179,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
         "edgeEvidence",
         "search",
         "page",
-        "reviews",
-        "review",
         "recover",
         "export"
       ),
@@ -1223,9 +1187,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       nodeId: Schema.optional(Schema.String),
       edgeId: Schema.optional(Schema.String),
       query: Schema.optional(Schema.String),
-      pageId: Schema.optional(Schema.String),
-      proposalId: Schema.optional(Schema.String),
-      action: Schema.optional(Schema.Literal("approve", "reject"))
+      pageId: Schema.optional(Schema.String)
     }
   }),
 

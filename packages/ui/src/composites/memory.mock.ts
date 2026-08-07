@@ -5,8 +5,6 @@ import type {
   MemoryGraphNode,
   MemoryGraphView,
   MemoryPageDetail,
-  MemoryReviewItem,
-  MemoryReviewResult,
   MemorySearchResult,
   MemorySuggestion
 } from "@jingler/contracts"
@@ -23,8 +21,7 @@ import type {
  * — so visual snapshots stay stable and the same vault renders identically across
  * every composite. The data models a small-org knowledge base with four topic
  * clusters (billing, infrastructure, auth, onboarding), a handful of health
- * findings, pending proposals (one with a stale-base conflict), and advisory
- * relatedness suggestions with embedding evidence.
+ * findings, and advisory relatedness suggestions with embedding evidence.
  *
  * These fixtures are typed against the real `@jingler/contracts` schemas — no
  * `as`/`as any` casts — so a contract change surfaces here as a type error.
@@ -644,129 +641,3 @@ export const memorySuggestions: ReadonlyArray<MemorySuggestion> = [
     }
   }
 ]
-
-// ---------------------------------------------------------------------------
-// Review inbox (proposals)
-// ---------------------------------------------------------------------------
-
-export const memoryReviews: ReadonlyArray<MemoryReviewItem> = [
-  {
-    id: "proposal-4821",
-    workflowId: "wf-nightly-crawl",
-    sourceId: "source-stripe",
-    proposedBy: "agent-crawler",
-    createdAt: "2026-07-31T08:15:00.000Z",
-    status: "open",
-    changeKind: "factual",
-    pages: [
-      {
-        proposalId: "proposal-4821",
-        pageId: "page-billing-dunning",
-        title: "Dunning & retries",
-        baseRevisionId: "rev-billing-dunning-3",
-        summary: "Update the Smart Retries cadence from 3 attempts over a week to 4 attempts over ten days, per the latest Stripe docs.",
-        markdown: `## Failed payments
-
-- Smart Retries now run **four** attempts across **ten** days (was three over a week).
-+ The final retry is followed by a 48-hour grace window before downgrade.
-
-Citation: Stripe API reference § Smart Retries (updated 2026-07)`
-      },
-      {
-        proposalId: "proposal-4821",
-        pageId: "page-billing-overview",
-        title: "Billing overview",
-        baseRevisionId: "rev-billing-overview-7",
-        summary: "Cross-link the revised dunning cadence from the overview so the two pages stay consistent.",
-        markdown: `## Failed payments
-
-When a charge fails, [[Dunning & retries]] takes over: **four** Smart Retries
-over **ten** days, then a downgrade to the free plan.`
-      }
-    ]
-  },
-  {
-    id: "proposal-4815",
-    workflowId: "wf-manual",
-    sourceId: "source-betterauth",
-    proposedBy: "Wei Chen",
-    createdAt: "2026-07-30T19:44:00.000Z",
-    status: "open",
-    changeKind: "factual",
-    pages: [
-      {
-        proposalId: "proposal-4815",
-        pageId: "page-auth-sessions",
-        title: "Session lifecycle",
-        baseRevisionId: "rev-auth-sessions-6",
-        summary: "Resolve the idle-window contradiction: sessions expire after 30 days idle, matching the auth architecture page.",
-        markdown: `## Expiry
-
-- Idle sessions expire after ~~14~~ **30** days.
-+ Explicit sign-out revokes the token immediately at the session store.
-
-Resolves the open contradiction with [[Auth architecture]].`
-      }
-    ]
-  },
-  {
-    id: "proposal-4809",
-    workflowId: "wf-manual",
-    sourceId: "source-terraform",
-    proposedBy: "Amara Okafor",
-    createdAt: "2026-07-29T13:10:00.000Z",
-    status: "open",
-    changeKind: "mechanical",
-    pages: [
-      {
-        proposalId: "proposal-4809",
-        pageId: "page-infra-incident",
-        title: "Incident runbook",
-        baseRevisionId: "rev-infra-incident-2",
-        summary: "Fix a broken wikilink to the retired paging page and point it at Observability stack.",
-        markdown: `## Escalation
-
-- See ~~[[On-call paging]]~~ [[Observability stack]] for alert routing.`
-      }
-    ]
-  },
-  {
-    id: "proposal-4790",
-    workflowId: "wf-nightly-crawl",
-    sourceId: "source-stripe",
-    proposedBy: "agent-crawler",
-    createdAt: "2026-07-27T02:05:00.000Z",
-    status: "open",
-    changeKind: "factual",
-    pages: [
-      {
-        proposalId: "proposal-4790",
-        pageId: "page-billing-taxes",
-        title: "Tax handling",
-        baseRevisionId: "rev-billing-taxes-1",
-        summary: "Document reverse-charge handling for EU B2B customers using Stripe Tax.",
-        markdown: `## Reverse charge
-
-+ For EU B2B customers with a validated VAT id, Stripe Tax applies a 0% rate and
-+ marks the invoice line as reverse-charge. We surface the note on the PDF.`
-      }
-    ]
-  }
-]
-
-/**
- * A stale-base conflict for the taxes proposal: the page moved ahead (rev-1 →
- * rev-2) while the proposal was still open, so publishing it would clobber the
- * newer head.
- */
-export const memoryReviewConflictResult: MemoryReviewResult = {
-  status: "conflict",
-  proposalId: "proposal-4790",
-  conflicts: [
-    {
-      pageId: "page-billing-taxes",
-      expectedBaseRevisionId: "rev-billing-taxes-1",
-      currentHeadRevisionId: "rev-billing-taxes-2"
-    }
-  ]
-}

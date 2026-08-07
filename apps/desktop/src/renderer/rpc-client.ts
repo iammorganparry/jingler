@@ -102,8 +102,6 @@ import {
   MemoryExport as MemoryExportSchema,
   MemoryGraphView as MemoryGraphViewSchema,
   MemoryPageDetail as MemoryPageDetailSchema,
-  MemoryReviewItem as MemoryReviewItemSchema,
-  MemoryReviewResult as MemoryReviewResultSchema,
   MemorySearchResult as MemorySearchResultSchema,
   type MemoryAccess,
   type MemoryCaptureRecovery,
@@ -112,8 +110,6 @@ import {
   type MemoryExport,
   type MemoryGraphView,
   type MemoryPageDetail,
-  type MemoryReviewItem,
-  type MemoryReviewResult,
   type MemorySearchResult,
   type MemorySuggestionsView
 } from "@jingler/contracts"
@@ -293,23 +289,6 @@ export const rpc = {
     run((c) => c.Memory.request({ organizationId, operation: "page", pageId })).then((value) =>
       decodeMemoryResult(MemoryPageDetailSchema, value)
     ),
-  memoryReviews: (organizationId: string): Promise<ReadonlyArray<MemoryReviewItem>> =>
-    run((c) => c.Memory.request({ organizationId, operation: "reviews" })).then((value) =>
-      decodeMemoryResult(Schema.Array(MemoryReviewItemSchema), value)
-    ),
-  memoryReview: (
-    organizationId: string,
-    proposalId: string,
-    action: "approve" | "reject"
-  ): Promise<MemoryReviewResult> =>
-    run((c) =>
-      c.Memory.request({
-        organizationId,
-        operation: "review",
-        proposalId,
-        action
-      })
-    ).then((value) => decodeMemoryResult(MemoryReviewResultSchema, value)),
   memoryExport: (organizationId: string): Promise<MemoryExport> =>
     run((c) => c.Memory.request({ organizationId, operation: "export" })).then((value) =>
       decodeMemoryResult(MemoryExportSchema, value)
