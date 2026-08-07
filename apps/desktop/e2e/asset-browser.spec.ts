@@ -93,23 +93,22 @@ test("keeps a large repository and source file windowed while navigating the per
   const sourceMetrics = await sourceSkin.locator("diffs-container").evaluate((element) => {
     const root = element.shadowRoot
     if (root === null) throw new Error("Pierre editor shadow root is missing")
-    const header = root.querySelector<HTMLElement>('[data-diffs-header="default"]')
     const line = root.querySelector<HTMLElement>("[data-line]")
     const gutter = root.querySelector<HTMLElement>("[data-column-number]")
-    if (header === null || line === null || gutter === null) {
+    if (line === null || gutter === null) {
       throw new Error("Pierre editor visual-contract node is missing")
     }
     return {
       fontSize: Math.round(Number.parseFloat(getComputedStyle(line).fontSize)),
       rowHeight: Math.round(line.getBoundingClientRect().height),
-      headerHeight: Math.round(header.getBoundingClientRect().height),
-      gutterWidth: Math.round(gutter.getBoundingClientRect().width)
+      gutterWidth: Math.round(gutter.getBoundingClientRect().width),
+      internalHeader: root.querySelector('[data-diffs-header="default"]') !== null
     }
   })
   expect(Math.abs(sourceMetrics.fontSize - 11)).toBeLessThanOrEqual(1)
   expect(Math.abs(sourceMetrics.rowHeight - 21)).toBeLessThanOrEqual(1)
-  expect(Math.abs(sourceMetrics.headerHeight - 34)).toBeLessThanOrEqual(1)
   expect(Math.abs(sourceMetrics.gutterWidth - 40)).toBeLessThanOrEqual(1)
+  expect(sourceMetrics.internalHeader).toBe(false)
 
   const sourceScroller = await verticalScrollOwner(sourceSkin)
   const sourceScrollMetrics = await sourceScroller.evaluate((element) => ({
@@ -205,9 +204,9 @@ test("renders a changed file preview with the legacy Jingler diff skin on Pierre
 
   await expect(appShell(window)).toBeVisible()
   await window.getByTitle("Open src/session.ts").click()
-  // Files intentionally opens changed text in the editor instead of replacing
-  // it with a read-only diff. The editor and diff surfaces share this skin.
-  const preview = window.locator('[data-jingler-pierre-view="code-view"]')
+  // Changed files open diff-first, and use the same Pierre skin as the editable
+  // surface reached through the explicit Edit control.
+  const preview = window.locator('[data-jingler-pierre-view="diff"]')
   await expect(preview).toHaveClass(PIERRE_HOST_CLASS)
   await expect(preview.getByText("export const session = createSession(token)", { exact: true }))
     .toBeVisible({ timeout: 30_000 })
@@ -217,21 +216,20 @@ test("renders a changed file preview with the legacy Jingler diff skin on Pierre
     if (root === null) throw new Error("Pierre changed-preview shadow root is missing")
     const line = root.querySelector<HTMLElement>("[data-line]")
     const gutter = root.querySelector<HTMLElement>("[data-column-number]")
-    const header = root.querySelector<HTMLElement>('[data-diffs-header="default"]')
-    if (line === null || gutter === null || header === null) {
+    if (line === null || gutter === null) {
       throw new Error("Pierre changed-preview visual contract is missing")
     }
     return {
       fontSize: Math.round(Number.parseFloat(getComputedStyle(line).fontSize)),
       rowHeight: Math.round(line.getBoundingClientRect().height),
-      headerHeight: Math.round(header.getBoundingClientRect().height),
-      gutterWidth: Math.round(gutter.getBoundingClientRect().width)
+      gutterWidth: Math.round(gutter.getBoundingClientRect().width),
+      internalHeader: root.querySelector('[data-diffs-header="default"]') !== null
     }
   })
   expect(metrics).toMatchObject({
     fontSize: 11,
-    rowHeight: 21,
-    headerHeight: 34,
-    gutterWidth: 40
+    gutterWidth: 80,
+    internalHeader: false
   })
+  expect(Math.abs(metrics.rowHeight - 19)).toBeLessThanOrEqual(1)
 })

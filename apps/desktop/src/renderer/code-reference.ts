@@ -18,6 +18,7 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const WINDOWS_ABSOLUTE_PATH = /^[A-Za-z]:\//
 const AMBIGUOUS_PATH_CHARACTERS = /\r|\n|\0/
 const BACKTICK_RUN = /`+/g
+const SOURCE_LINE = /[^\r\n]*(?:\r\n|\r|\n|$)/g
 
 /**
  * Make a path repository-relative without interpreting punctuation as syntax.
@@ -71,24 +72,53 @@ export const normalizeCodeReference = (value: unknown): CodeReference | null => 
   }
 }
 
+/** Capture an inclusive one-based range from the current editor buffer verbatim. */
+export const captureCodeReference = (
+  path: string,
+  text: string,
+  startLine: number,
+  endLine: number
+): CodeReference | null => {
+  const start = Math.min(startLine, endLine)
+  const end = Math.max(startLine, endLine)
+  const lines = [...text.matchAll(SOURCE_LINE)]
+    .map((match) => match[0])
+    .filter((line, index, all) => !(index === all.length - 1 && line === ""))
+  if (start < 1 || end > lines.length) return null
+  return normalizeCodeReference({
+    path,
+    startLine: start,
+    endLine: end,
+    source: lines.slice(start - 1, end).join("")
+  })
+}
+
 /** Location identity for deduplication; source is payload, not identity. */
 export const codeReferenceKey = (
   reference: Pick<CodeReference, "path" | "startLine" | "endLine">
 ): string => JSON.stringify([reference.path, reference.startLine, reference.endLine])
 
-/** Normalise, discard invalid entries, and keep the first capture of each range. */
+/**
+ * Normalise and discard invalid entries. A range keeps its first position but
+ * its newest capture, so re-selecting edited code updates the payload sent to
+ * the agent without making the chip jump in the composer.
+ */
 export const deduplicateCodeReferences = (
   references: ReadonlyArray<unknown>
 ): ReadonlyArray<CodeReference> => {
-  const seen = new Set<string>()
+  const positions = new Map<string, number>()
   const result: CodeReference[] = []
   for (const value of references) {
     const reference = normalizeCodeReference(value)
     if (reference === null) continue
     const key = codeReferenceKey(reference)
-    if (seen.has(key)) continue
-    seen.add(key)
-    result.push(reference)
+    const existing = positions.get(key)
+    if (existing === undefined) {
+      positions.set(key, result.length)
+      result.push(reference)
+    } else {
+      result[existing] = reference
+    }
   }
   return result
 }

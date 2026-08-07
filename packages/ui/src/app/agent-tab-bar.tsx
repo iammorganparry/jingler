@@ -1,5 +1,5 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { ChevronRight, History, MessagesSquare, Plus, RotateCcw, X } from "lucide-react"
 import type { SubagentStatus, WorkerLifecycleStatus } from "@jingler/core"
 import { cn } from "../lib/cn.js"
@@ -53,6 +53,8 @@ export interface ChatTabBarProps {
   onRenameChat: (id: string, title: string) => void
   onCloseChat: (id: string) => void
   onReopenChat?: (id: string) => void
+  /** Session-owned tabs rendered beside chats, before the new-chat action. */
+  fileSlot?: ReactNode
 }
 
 export interface AgentTabBarProps {
@@ -275,7 +277,8 @@ export function ChatTabBar({
   onCreateChat,
   onRenameChat,
   onCloseChat,
-  onReopenChat
+  onReopenChat,
+  fileSlot
 }: ChatTabBarProps) {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
@@ -361,6 +364,7 @@ export function ChatTabBar({
           </div>
         )
       })}
+      {fileSlot}
       <button
         type="button"
         aria-label="New chat"

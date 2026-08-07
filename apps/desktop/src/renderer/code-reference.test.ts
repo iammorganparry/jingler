@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   appendCodeReferencesToPrompt,
+  captureCodeReference,
   codeReferenceDisplayLabel,
   deduplicateCodeReferences,
   normalizeCodeReference,
@@ -17,6 +18,15 @@ const reference = (overrides: Partial<CodeReference> = {}): CodeReference => ({
 })
 
 describe("code references", () => {
+  it("normalizes reversed inclusive selections and captures the exact source lines", () => {
+    expect(captureCodeReference("./src/parser.ts", "first\r\nsecond\r\nthird", 3, 2)).toEqual({
+      path: "src/parser.ts",
+      startLine: 2,
+      endLine: 3,
+      source: "second\r\nthird"
+    })
+  })
+
   it("normalizes repository paths and reversed inclusive ranges without changing source", () => {
     const source = "  first\r\nsecond  "
     expect(
@@ -43,7 +53,7 @@ describe("code references", () => {
 })
 
 describe("code reference identity and display", () => {
-  it("deduplicates a normalized path and range while preserving first-seen order", () => {
+  it("keeps first-seen order while replacing a range with its newest captured source", () => {
     expect(
       deduplicateCodeReferences([
         reference({ path: "./src/parser.ts", startLine: 15, endLine: 12 }),
@@ -56,7 +66,7 @@ describe("code reference identity and display", () => {
         })
       ])
     ).toEqual([
-      reference(),
+      reference({ source: "a newer capture of the same location" }),
       reference({
         path: "src/other.ts",
         startLine: 2,
@@ -75,6 +85,16 @@ describe("code reference identity and display", () => {
 })
 
 describe("code reference prompt serialization", () => {
+  it("serializes the newest capture when the same range was selected again", () => {
+    const serialized = serializeCodeReferences([
+      reference({ source: "stale source" }),
+      reference({ source: "fresh source" })
+    ])
+
+    expect(serialized).toContain("fresh source")
+    expect(serialized).not.toContain("stale source")
+  })
+
   it("serializes exact captured source behind a language-neutral collision-safe fence", () => {
     const source = "const markdown = `value`\n```\nkeep trailing spaces  "
     const serialized = serializeCodeReferences([reference({ source })])

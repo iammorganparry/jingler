@@ -76,7 +76,7 @@ import {
   flushPlanDocument,
   stopPlanDocument,
 } from "./plan-document-registry.js";
-import { clearDraft } from "./draft-store.js";
+import { addDraftCodeReference, clearDraft } from "./draft-store.js";
 import { clearViewedPaths } from "./viewed-store.js";
 import { disposeFileBrowserActor, openSessionFile } from "./use-file-browser.js";
 import { onSessionUpdate } from "./session-updates.js";
@@ -1517,7 +1517,15 @@ function AuthedApp({
             paneFocused={ctx.paneFocused ?? true}
           />
         )}
-        renderFiles={(session) => <FileBrowserView session={session} />}
+        renderFiles={(session, ctx) => (
+          <FileBrowserView
+            session={session}
+            onSendReference={(reference) => {
+              addDraftCodeReference(session.activeChatId, reference);
+              ctx.onSelectConversation();
+            }}
+          />
+        )}
         onOpenFile={openSessionFile}
         renderFileQuickOpen={(session, ctx) => (
           <FileBrowserQuickOpen
@@ -1527,10 +1535,12 @@ function AuthedApp({
             onOpenPath={ctx.onOpenPath}
           />
         )}
-        renderChatTabs={(session: Session, onSelectConversation) => (
+        renderChatTabs={(session: Session, ctx) => (
           <SessionChatTabs
             session={session}
-            onSelectConversation={onSelectConversation}
+            filesActive={ctx.activeTabId === "files"}
+            onSelectConversation={ctx.onSelectConversation}
+            onSelectFiles={ctx.onSelectFiles}
           />
         )}
         renderPullRequest={(session, ctx) => {

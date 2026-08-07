@@ -95,7 +95,10 @@ export interface SessionPaneProps {
     ctx: ConversationPaneCtx
   ) => ReactNode
   /** Render the session-native repository browser and editor. */
-  renderFiles?: (session: Session) => ReactNode
+  renderFiles?: (
+    session: Session,
+    ctx: { readonly onSelectConversation: () => void }
+  ) => ReactNode
   /** Select a path in the session's persistent file-browser actor. */
   onOpenFile?: (sessionId: string, path: string) => void
   /**
@@ -110,7 +113,14 @@ export interface SessionPaneProps {
    * per-chat activity — lives in the desktop renderer, so building the bar here
    * would drag the RPC client into the component library. Absent in stories.
    */
-  renderChatTabs?: (session: Session, onSelectConversation: () => void) => ReactNode
+  renderChatTabs?: (
+    session: Session,
+    ctx: {
+      readonly activeTabId: TabKey
+      readonly onSelectConversation: () => void
+      readonly onSelectFiles: () => void
+    }
+  ) => ReactNode
   /** Rename the session from the tab-row title. */
   onRenameSession?: (id: string, title: string) => void
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
@@ -303,7 +313,10 @@ function SessionPaneBody(props: SessionPaneProps) {
       review: (session, ctx) =>
         props.renderReview?.(session, { onConnectGithub: ctx.onConnectGithub }),
       code: (session, ctx) => props.renderCode?.(session, { onConnectGithub: ctx.onConnectGithub }),
-      files: (session) => props.renderFiles?.(session),
+      files: (session, ctx) =>
+        props.renderFiles?.(session, {
+          onSelectConversation: () => ctx.onSelectTab(BUILTIN_TAB.conversation)
+        }),
       stub: (id) => <BuiltinStubScreen tab={id} />
     }),
     ...(props.tabContributions ?? [])
@@ -395,7 +408,11 @@ function SessionPaneBody(props: SessionPaneProps) {
         }
         // The chat pills share the tab row, behind a divider. Built by the
         // renderer (RPCs + live activity), threaded in as an opaque node.
-        chatSlot={props.renderChatTabs?.(active, () => setTab(BUILTIN_TAB.conversation))}
+        chatSlot={props.renderChatTabs?.(active, {
+          activeTabId: activeTab,
+          onSelectConversation: () => setTab(BUILTIN_TAB.conversation),
+          onSelectFiles: () => setTab(BUILTIN_TAB.files)
+        })}
         // The title comes from the session rather than from the caller, so the
         // chip follows a rename the moment it lands.
         pane={props.pane ? { ...props.pane, title: active.title || UNTITLED_SESSION } : undefined}

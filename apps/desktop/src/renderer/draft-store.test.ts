@@ -4,6 +4,7 @@ import type { CodeReference } from "./code-reference.js"
 import {
   __flushDrafts,
   __resetDrafts,
+  addDraftCodeReference,
   clearDraft,
   EMPTY_DRAFT,
   getDraft,
@@ -280,6 +281,27 @@ describe("draft-store", () => {
       ]
     })
 
-    expect(getDraft("s1").references).toEqual([REFERENCE])
+    expect(getDraft("s1").references).toEqual([
+      { ...REFERENCE, source: "duplicate capture" }
+    ])
+  })
+
+  it("re-capturing a range replaces stale source without moving its chip", () => {
+    const other = {
+      ...REFERENCE,
+      path: "src/other.ts",
+      startLine: 2,
+      endLine: 2,
+      source: "other"
+    }
+    setDraft("s1", { text: "explain", attachments: [IMAGE], references: [REFERENCE, other] })
+
+    addDraftCodeReference("s1", { ...REFERENCE, source: "freshly edited source" })
+
+    expect(getDraft("s1")).toEqual({
+      text: "explain",
+      attachments: [IMAGE],
+      references: [{ ...REFERENCE, source: "freshly edited source" }, other]
+    })
   })
 })

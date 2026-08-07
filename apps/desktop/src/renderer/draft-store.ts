@@ -173,6 +173,15 @@ export const clearDraft = (sessionId: string): void => {
 /** Read a session's draft without subscribing (event handlers, one-shot seeds). */
 export const getDraft = (sessionId: string): Draft => snapshot(sessionId)
 
+/** Add one captured range to a chat draft without disturbing its text or images. */
+export const addDraftCodeReference = (draftId: string, reference: CodeReference): void => {
+  const current = snapshot(draftId)
+  setDraft(draftId, {
+    ...current,
+    references: [...current.references, reference]
+  })
+}
+
 /**
  * Prefill a chat draft from its linked-issue task — at most once per session,
  * ever, and never over existing text.

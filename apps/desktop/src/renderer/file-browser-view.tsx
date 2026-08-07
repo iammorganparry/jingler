@@ -16,14 +16,17 @@ import {
   PierreEditor
 } from "@jingler/ui"
 import type { PierreAnnotationMetadata } from "@jingler/ui"
+import type { JinglerLineSelection } from "@jingler/ui"
 import { FileWarning } from "lucide-react"
 import type { FileBrowserController } from "./use-file-browser.js"
 import { useFileBrowser } from "./use-file-browser.js"
 import { useNativeViewBounds } from "./use-native-view-bounds.js"
 import { rpc } from "./rpc-client.js"
+import { captureCodeReference, type CodeReference } from "./code-reference.js"
 
 export interface FileBrowserViewProps {
   readonly session: Session
+  readonly onSendReference?: (reference: CodeReference) => void
 }
 
 export interface FileBrowserQuickOpenProps {
@@ -57,15 +60,39 @@ export function FileBrowserQuickOpen({
 }
 
 /** Renderer-owned binding from a session's persistent actor to the Files tab. */
-export function FileBrowserView({ session }: FileBrowserViewProps) {
+export function FileBrowserView({ session, onSendReference }: FileBrowserViewProps) {
   const browser = useFileBrowser(session.id)
   const rootRef = useRef<HTMLDivElement>(null)
+  const [selection, setSelection] = useState<JinglerLineSelection | null>(null)
+
+  useEffect(() => setSelection(null), [browser.selectedPath, browser.payload])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const root = rootRef.current
       if (root === null || !(event.target instanceof Node) || !root.contains(event.target)) return
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return
+      if (
+        event.shiftKey &&
+        (event.code === "KeyJ" || event.key.toLowerCase() === "j") &&
+        selection !== null &&
+        selection.side === "new" &&
+        selection.endSide === "new" &&
+        browser.selectedPath !== null &&
+        browser.draft !== null
+      ) {
+        const reference = captureCodeReference(
+          browser.selectedPath,
+          browser.draft,
+          selection.startLine,
+          selection.endLine
+        )
+        if (reference === null) return
+        event.preventDefault()
+        onSendReference?.(reference)
+        return
+      }
+      if (event.shiftKey) return
       if (event.code !== "KeyS" && event.key.toLowerCase() !== "s") return
       if (browser.status !== "dirty" && browser.status !== "error") return
       event.preventDefault()
@@ -73,7 +100,7 @@ export function FileBrowserView({ session }: FileBrowserViewProps) {
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [browser.save, browser.status])
+  }, [browser.draft, browser.save, browser.selectedPath, browser.status, onSendReference, selection])
 
   return (
     <div ref={rootRef} className="h-full min-h-0 min-w-0 w-full">
@@ -86,7 +113,13 @@ export function FileBrowserView({ session }: FileBrowserViewProps) {
         onRetryTree={browser.refreshTree}
         onSelectPath={browser.open}
         renderCanvas={(nativeAvailable) => (
-          <FileCanvas sessionId={session.id} browser={browser} nativeAvailable={nativeAvailable} />
+          <FileCanvas
+            sessionId={session.id}
+            browser={browser}
+            nativeAvailable={nativeAvailable}
+            selection={selection}
+            onSelectionChange={setSelection}
+          />
         )}
       />
     </div>
@@ -96,11 +129,15 @@ export function FileBrowserView({ session }: FileBrowserViewProps) {
 function FileCanvas({
   sessionId,
   browser,
-  nativeAvailable
+  nativeAvailable,
+  selection,
+  onSelectionChange
 }: {
   readonly sessionId: string
   readonly browser: FileBrowserController
   readonly nativeAvailable: boolean
+  readonly selection: JinglerLineSelection | null
+  readonly onSelectionChange: (selection: JinglerLineSelection | null) => void
 }) {
   const payload = browser.payload
   const fileDiff = useMemo(() => {
@@ -121,16 +158,23 @@ function FileCanvas({
   if (browser.viewMode === "diff") {
     if (fileDiff !== null) {
       return (
-        <DiffView
-          fileDiff={fileDiff}
-          label={`${browser.selectedPath} changes`}
-          className="h-full min-h-0"
-          options={{
-            diffStyle: "unified",
-            stickyHeader: false,
-            disableFileHeader: true
-          }}
-        />
+        <div className="flex h-full min-h-0 flex-col bg-canvas">
+          <FileModeBar path={browser.selectedPath} mode="diff" browser={browser} />
+          <div className="min-h-0 flex-1">
+            <DiffView
+              fileDiff={fileDiff}
+              label={`${browser.selectedPath} changes`}
+              className="h-full min-h-0"
+              selection={selection}
+              onSelectionChange={onSelectionChange}
+              options={{
+                diffStyle: "unified",
+                stickyHeader: false,
+                disableFileHeader: true
+              }}
+            />
+          </div>
+        </div>
       )
     }
     if (browser.patch === null && browser.patchError === null) {
@@ -200,14 +244,25 @@ function FileCanvas({
   const conflictRevision =
     browser.failure?.type === "conflict" ? browser.failure.actualRevision : ""
 
-  const body = (
+  const editor = (
     <TextFileEditor
       key={`${payload.path}:${payload.revision}:${conflictRevision}`}
       payload={payload}
       initialDraft={browser.draft}
       browser={browser}
+      selection={selection}
+      onSelectionChange={onSelectionChange}
     />
   )
+  const body =
+    fileDiff === null ? (
+      editor
+    ) : (
+      <div className="flex h-full min-h-0 flex-col bg-canvas">
+        <FileModeBar path={browser.selectedPath} mode="edit" browser={browser} />
+        <div className="min-h-0 flex-1">{editor}</div>
+      </div>
+    )
 
   return browser.pendingDiscard === null ? (
     body
@@ -219,7 +274,9 @@ function FileCanvas({
             Discard your unsaved changes and{" "}
             {browser.pendingDiscard.type === "open"
               ? `open ${browser.pendingDiscard.path}`
-              : "reload this file"}
+              : browser.pendingDiscard.type === "close"
+                ? `close ${browser.pendingDiscard.path}`
+                : "reload this file"}
             ?
           </span>
           <Button type="button" variant="secondary" size="sm" onClick={browser.cancelDiscard}>
@@ -231,6 +288,41 @@ function FileCanvas({
         </div>
       </Callout>
       <div className="min-h-0 flex-1">{body}</div>
+    </div>
+  )
+}
+
+function FileModeBar({
+  path,
+  mode,
+  browser
+}: {
+  readonly path: string
+  readonly mode: "diff" | "edit"
+  readonly browser: FileBrowserController
+}) {
+  return (
+    <div className="flex h-8 flex-none items-center justify-end gap-1 border-b border-hairline bg-panel px-2">
+      <Button
+        type="button"
+        variant={mode === "diff" ? "secondary" : "ghost"}
+        size="sm"
+        aria-pressed={mode === "diff"}
+        aria-label={`Show diff for ${path}`}
+        onClick={browser.showDiff}
+      >
+        Diff
+      </Button>
+      <Button
+        type="button"
+        variant={mode === "edit" ? "secondary" : "ghost"}
+        size="sm"
+        aria-pressed={mode === "edit"}
+        aria-label={`Edit ${path}`}
+        onClick={browser.startEdit}
+      >
+        Edit
+      </Button>
     </div>
   )
 }
@@ -247,11 +339,15 @@ function FileCanvas({
 function TextFileEditor({
   payload,
   initialDraft,
-  browser
+  browser,
+  selection,
+  onSelectionChange
 }: {
   readonly payload: Extract<AssetPayload, { readonly text: string }>
   readonly initialDraft: string
   readonly browser: FileBrowserController
+  readonly selection: JinglerLineSelection | null
+  readonly onSelectionChange: (selection: JinglerLineSelection | null) => void
 }) {
   const [items] = useState(() => {
     const file = createPierreFileContents({
@@ -295,6 +391,8 @@ function TextFileEditor({
         className="min-h-0 flex-1 bg-canvas"
         items={items}
         editingItemId={item.id}
+        selection={selection}
+        onSelectionChange={onSelectionChange}
         onChange={({ contents }) => browser.edit(contents)}
         onComplete={({ contents }) => browser.edit(contents)}
         options={{
