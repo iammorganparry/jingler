@@ -28,10 +28,12 @@ export function CodeChip({
   const end = line === undefined ? undefined : Math.max(line, endLine ?? line)
   const range =
     start === undefined ? undefined : start === end ? `L${start}` : `L${start}\u2013L${end}`
-  const displayLabel = range === undefined ? name : (label ?? `${path}:${range}`)
+  const isCapturedRange = endLine !== undefined || label !== undefined
+  const defaultRangeLabel = range === undefined ? path : `${path}:${range}`
+  const displayLabel = isCapturedRange ? (label ?? defaultRangeLabel) : name
   return (
     <span
-      title={range === undefined ? path : displayLabel}
+      title={isCapturedRange ? displayLabel : path}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-1.5 py-0.5 font-mono text-[11px] text-text-bright",
         className
@@ -39,6 +41,7 @@ export function CodeChip({
     >
       <FileIcon path={path} size={12} />
       {displayLabel}
+      {!isCapturedRange && line !== undefined && <span className="text-dim">:{line}</span>}
       {onRemove && (
         <button
           type="button"

@@ -8,8 +8,24 @@ const SEND_BUTTON = /Send/
 afterEach(cleanup)
 
 describe("CodeChip", () => {
-  it("shows a repository path and single inclusive line", () => {
-    render(<CodeChip path="src/parser [new].ts" line={12} />)
+  it("keeps line-only timeline references as basename plus a dim line number", () => {
+    render(<CodeChip path="packages/ui/src/parser [new].ts" line={12} />)
+
+    expect(screen.getByText("parser [new].ts")).toBeDefined()
+    expect(screen.getByText(":12").className).toContain("text-dim")
+    expect(screen.queryByText("packages/ui/src/parser [new].ts:L12")).toBeNull()
+    expect(screen.getByTitle("packages/ui/src/parser [new].ts")).toBeDefined()
+  })
+
+  it("shows a repository path for a captured single-line range", () => {
+    render(
+      <CodeChip
+        path="src/parser [new].ts"
+        line={12}
+        endLine={12}
+        label="src/parser [new].ts:L12"
+      />
+    )
 
     expect(screen.getByText("src/parser [new].ts:L12")).toBeDefined()
   })
