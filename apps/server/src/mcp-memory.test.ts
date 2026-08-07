@@ -167,6 +167,9 @@ describe("standard MCP client compatibility", () => {
     expect(MEMORY_MCP_INSTRUCTIONS).toContain(
       "pageId, revisionId, sourceIds, and citationIds"
     )
+    expect(MEMORY_MCP_INSTRUCTIONS).toContain(
+      "On conflict, re-read and re-propose against the current revision"
+    )
     expect(MEMORY_MCP_INSTRUCTIONS).toContain("memory_workflow_status")
   })
 

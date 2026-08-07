@@ -512,7 +512,7 @@ const STANDARD_MCP_DEFAULT_VERSION = "2025-06-18"
  * deliberately augments, rather than replaces, this portable MCP contract.
  */
 export const MEMORY_MCP_INSTRUCTIONS =
-  "Recall first: memory_search, then memory_read every page you rely on; ground claims with pageId, revisionId, sourceIds, and citationIds. Before finishing substantive work, silently select at most three durable decisions, preferences, gotchas, connections, or hard-won findings. Exclude progress, temporary or documented facts, secrets, and personal data. Dedupe, then memory_propose. Poll returned workflowId with memory_workflow_status until terminal. Requests are stateless; never reuse sessions or cookies."
+  "Recall first: memory_search, then memory_read pages used; ground claims with pageId, revisionId, sourceIds, and citationIds. Before finishing substantive work, silently select up to three durable decisions, preferences, gotchas, connections, or findings. Exclude progress, ephemeral facts, secrets, personal data. Dedupe; memory_propose. On conflict, re-read and re-propose against the current revision. Poll workflowId with memory_workflow_status until terminal. Stateless: never reuse sessions or cookies."
 
 /**
  * Serve a STANDARD MCP client — the harnesses' native codex / opencode / Claude

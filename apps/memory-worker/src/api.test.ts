@@ -570,7 +570,13 @@ describe("memory Worker internal API", () => {
       env
     )
     expect(stale.status).toBe(409)
-    expect(await jsonBody(stale)).toMatchObject({ code: "conflict" })
+    expect(await jsonBody(stale)).toEqual({
+      status: "conflict",
+      proposalId: "proposal-agent-stale",
+      pageId: "shared-slug",
+      expectedBaseRevisionId: "revision-agent-1",
+      currentHeadRevisionId: "revision:proposal-agent-update"
+    })
     const reviewsAfterConflict = await handleMemoryWorkerRequest(
       getRequest("org-a", "/internal/memory/reviews?limit=100"),
       env

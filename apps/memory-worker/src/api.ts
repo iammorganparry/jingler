@@ -69,6 +69,7 @@ const AutoPublishProposalRequest = Schema.Struct({
   reviewerId: NonEmptyString,
   acceptedAt: NonEmptyString
 })
+type AutoPublishProposal = Schema.Schema.Type<typeof AutoPublishProposalRequest>
 
 const ProposalDraftRequest = Schema.Struct({
   pageId: NonEmptyString,
@@ -308,6 +309,46 @@ const dispatchProposalSetRequest = (
     return notFoundResponse()
   })
 
+const autoPublishProposal = (
+  vault: TeamVault,
+  body: AutoPublishProposal
+): Effect.Effect<ApprovalResult, MemoryVaultError> =>
+  Effect.gen(function* () {
+    const created = yield* Effect.either(vault.createProposal({
+      id: body.id,
+      pageId: body.pageId,
+      baseRevisionId: body.baseRevisionId,
+      markdown: body.markdown,
+      proposedBy: body.proposedBy,
+      createdAt: body.createdAt,
+      ...(body.summary === undefined ? {} : { summary: body.summary })
+    }))
+    if (Either.isRight(created)) {
+      return yield* vault.approveProposal(body.id, body.reviewerId, body.acceptedAt)
+    }
+
+    const failure = created.left
+    if (failure.code !== "conflict") return yield* failure
+
+    const collidingProposalExists = yield* vault.getProposal(body.id).pipe(
+      Effect.as(true),
+      Effect.catchIf(
+        (error) => error.code === "not_found",
+        () => Effect.succeed(false)
+      )
+    )
+    if (collidingProposalExists) return yield* failure
+
+    const current = yield* vault.readPage(body.pageId)
+    return {
+      status: "conflict",
+      proposalId: body.id,
+      pageId: body.pageId,
+      expectedBaseRevisionId: body.baseRevisionId,
+      currentHeadRevisionId: current.revision.id
+    }
+  })
+
 const dispatchProposalRequest = (
   request: Request,
   route: ReadonlyArray<string>,
@@ -316,20 +357,7 @@ const dispatchProposalRequest = (
   Effect.gen(function* () {
     if (isRoute(request, route, "POST", "proposals", "auto-publish")) {
       const body = yield* decodeBody(request, AutoPublishProposalRequest)
-      yield* vault.createProposal({
-        id: body.id,
-        pageId: body.pageId,
-        baseRevisionId: body.baseRevisionId,
-        markdown: body.markdown,
-        proposedBy: body.proposedBy,
-        createdAt: body.createdAt,
-        ...(body.summary === undefined ? {} : { summary: body.summary })
-      })
-      const result = yield* vault.approveProposal(
-        body.id,
-        body.reviewerId,
-        body.acceptedAt
-      )
+      const result = yield* autoPublishProposal(vault, body)
       return jsonResponse(result, result.status === "accepted" ? 200 : 409)
     }
     if (isRoute(request, route, "POST", "proposals")) {
