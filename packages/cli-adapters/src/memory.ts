@@ -1164,12 +1164,12 @@ export const makeMemoryService = (
           if (organizations === null) return null
 
           // Engage team memory by DEFAULT. Every downstream hook — MCP attach,
-          // <team-memory> prompt, settled-session capture — is already an
-          // unconditional per-turn call gated only on `memory.enabled` + a selected
-          // org. So the first time an eligible user is seen with exactly ONE org and
-          // no explicit choice yet, enable it and select that org; the agents then
-          // pick it up automatically. An explicit config (even `enabled: false`) is
-          // always respected — this only fills the unset default.
+          // <team-memory> prompt and MCP attachment are unconditional per-turn
+          // boundaries gated only on `memory.enabled` + a selected org. So the
+          // first time an eligible user is seen with exactly ONE org and no
+          // explicit choice yet, enable it and select that org; the agents then
+          // pick it up automatically. An explicit config (even `enabled: false`)
+          // is always respected — this only fills the unset default.
           let selected = config?.memory?.enabled === true
             ? (config.memory.organizationId ?? null)
             : null

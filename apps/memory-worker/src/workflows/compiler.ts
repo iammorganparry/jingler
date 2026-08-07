@@ -471,9 +471,9 @@ export const runCompilerWorkflow = async (
   const autoPublishMechanical =
     isConfiguredMechanicalFix(generated.changeKind, new Set(input.autoPublishFixes ?? [])) &&
     isSemanticallyMechanical(generated, context)
-  // Default trust model: everything auto-publishes to the shared vault. Orgs
-  // that set MEMORY_REQUIRE_REVIEW get the human gate back for factual changes
-  // while safe mechanical fixes still publish without waiting.
+  // Production always auto-publishes agent-selected changes. `requireReview`
+  // remains only as a compatibility seam for historical workflow replays and
+  // focused tests; no deployment configuration can create new review work.
   const autoPublish = input.requireReview !== true || autoPublishMechanical
   if (!autoPublish) {
     if (step.waitForEvent !== undefined) {

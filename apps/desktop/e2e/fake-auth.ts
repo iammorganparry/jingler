@@ -83,6 +83,7 @@ export interface FakeAuthServerOptions {
   readonly paidOrganizationIds?: ReadonlyArray<string>
   readonly unavailable?: boolean
   readonly acceptedLearningOrganizationIds?: ReadonlyArray<string>
+  readonly reviewProposals?: boolean
 }
 
 /**
@@ -394,12 +395,13 @@ const suggestionsFor = (organizationId: string, state: FakeOrganizationMemory) =
 
 const normalizeOptions = (value: string | FakeAuthServerOptions): Required<Omit<FakeAuthServerOptions, "acceptedLearningOrganizationIds">> & { readonly acceptedLearningOrganizationIds: ReadonlyArray<string> } =>
   typeof value === "string"
-    ? { token: value, paidOrganizationIds: DEFAULT_PAID_ORGANIZATIONS, unavailable: false, acceptedLearningOrganizationIds: [] }
+    ? { token: value, paidOrganizationIds: DEFAULT_PAID_ORGANIZATIONS, unavailable: false, acceptedLearningOrganizationIds: [], reviewProposals: true }
     : {
         token: value.token ?? DEFAULT_TOKEN,
         paidOrganizationIds: value.paidOrganizationIds ?? DEFAULT_PAID_ORGANIZATIONS,
         unavailable: value.unavailable ?? false,
-        acceptedLearningOrganizationIds: value.acceptedLearningOrganizationIds ?? []
+        acceptedLearningOrganizationIds: value.acceptedLearningOrganizationIds ?? [],
+        reviewProposals: value.reviewProposals ?? true
       }
 
 export const startFakeAuthServer = async (
@@ -417,7 +419,7 @@ export const startFakeAuthServer = async (
     if (existing !== undefined) return existing
     const state: FakeOrganizationMemory = {
       pages: new Map(basePages(organizationId).map((page) => [page.id, page])),
-      proposals: organizationId === "org-e2e" ? fixedProposals() : [],
+      proposals: organizationId === "org-e2e" && options.reviewProposals ? fixedProposals() : [],
       sourceIds: new Set(),
       secretRejections: 0,
       reviewDecisions: []
@@ -645,6 +647,18 @@ export const startFakeAuthServer = async (
           case "memory_read": {
             const page = typeof args.pageId === "string" ? state.pages.get(args.pageId) : undefined
             data = page === undefined ? {} : pageResponse(page)
+            break
+          }
+          case "memory_propose": {
+            const sourceId = "source:scripted-memory-proposal"
+            state.sourceIds.add(sourceId)
+            for (const page of acceptedLearningPages(sourceId)) state.pages.set(page.id, page)
+            data = {
+              workflowId: "compiler-scripted-memory-proposal",
+              status: "published",
+              proposalId: "proposal:scripted-memory-proposal",
+              proposalIds: ["proposal:scripted-memory-proposal:shared-learning"]
+            }
             break
           }
           case "memory_edge_evidence": {

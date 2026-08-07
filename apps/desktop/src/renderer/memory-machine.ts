@@ -6,8 +6,6 @@ import type {
   MemoryExport,
   MemoryGraphView,
   MemoryPageDetail,
-  MemoryReviewItem,
-  MemoryReviewResult,
   MemorySearchResult,
   MemorySuggestionsView
 } from "@jingler/contracts"
@@ -31,8 +29,6 @@ export interface MemoryApi {
   evidence(organizationId: string, edgeId: string): Promise<MemoryEdgeEvidence>
   search(organizationId: string, query: string, limit: number): Promise<ReadonlyArray<MemorySearchResult>>
   page(organizationId: string, pageId: string): Promise<MemoryPageDetail>
-  reviews(organizationId: string): Promise<ReadonlyArray<MemoryReviewItem>>
-  review(organizationId: string, proposalId: string, action: "approve" | "reject"): Promise<MemoryReviewResult>
   export(organizationId: string): Promise<MemoryExport>
   /** Advisory relatedness suggestions for one page (NON-AUTHORITATIVE). */
   suggestions(organizationId: string, pageId: string, limit: number): Promise<MemorySuggestionsView>
@@ -52,7 +48,7 @@ export const DEFAULT_MEMORY_VIEWPORT: MemoryViewport = { x: 0, y: 0, zoom: 1 }
 const readLastView = (): MemorySubview => {
   try {
     const value = localStorage.getItem(LAST_VIEW_KEY)
-    return value === "map" || value === "wiki" || value === "reviews" || value === "analytics"
+    return value === "map" || value === "wiki" || value === "analytics"
       ? value
       : "dashboard"
   } catch {
@@ -71,7 +67,6 @@ const persistView = (view: MemorySubview): void => {
 interface InitialData {
   readonly summary: MemoryDashboardSummary
   readonly graph: MemoryGraphView
-  readonly reviews: ReadonlyArray<MemoryReviewItem>
   readonly searchResults: ReadonlyArray<MemorySearchResult>
 }
 
@@ -89,16 +84,13 @@ export interface MemoryContext {
   readonly range: string
   readonly summary: MemoryDashboardSummary | null
   readonly graph: MemoryGraphView | null
-  readonly reviews: ReadonlyArray<MemoryReviewItem>
   readonly searchQuery: string
   readonly searchResults: ReadonlyArray<MemorySearchResult>
   readonly selectedNodeId: string | null
   readonly selectedEdgeId: string | null
-  readonly selectedReviewId: string | null
   readonly page: MemoryPageDetail | null
   readonly suggestions: MemorySuggestionsView | null
   readonly evidence: MemoryEdgeEvidence | null
-  readonly reviewResult: MemoryReviewResult | null
   readonly exported: MemoryExport | null
   readonly recovery: MemoryCaptureRecovery | null
   readonly filters: MemoryMapFilters
@@ -106,7 +98,7 @@ export interface MemoryContext {
   readonly error: string | null
   /**
    * A debounced SEARCH.RUN that fired while the machine was busy (a page/node/edge
-   * load, a review, an export). The busy state can't run the query, so it records
+   * load or an export). The busy state can't run the query, so it records
    * this flag and `ready` consumes it on re-entry — otherwise the query is dropped.
    */
   readonly searchPending: boolean
@@ -130,8 +122,6 @@ export type MemoryEvent =
   | { type: "PAGE.BACK" }
   | { type: "SEARCH.QUERY"; query: string }
   | { type: "SEARCH.RUN" }
-  | { type: "REVIEW.SELECT"; proposalId: string }
-  | { type: "REVIEW.DECIDE"; proposalId: string; action: "approve" | "reject" }
   | { type: "EXPORT" }
   | { type: "EXPORT.CLEAR" }
 
@@ -143,16 +133,13 @@ const initialContext = (): MemoryContext => ({
   range: "30d",
   summary: null,
   graph: null,
-  reviews: [],
   searchQuery: "",
   searchResults: [],
   selectedNodeId: null,
   selectedEdgeId: null,
-  selectedReviewId: null,
   page: null,
   suggestions: null,
   evidence: null,
-  reviewResult: null,
   exported: null,
   recovery: null,
   filters: DEFAULT_MEMORY_FILTERS,
@@ -201,15 +188,14 @@ export const createMemoryMachine = (api: MemoryApi) =>
       ),
       loadInitial: fromPromise<InitialData, { organizationId: string; range: string; query: string }>(
         async ({ input }) => {
-          const [summary, graph, reviews, searchResults] = await Promise.all([
+          const [summary, graph, searchResults] = await Promise.all([
             api.dashboard(input.organizationId, input.range),
             api.graph(input.organizationId, 250),
-            api.reviews(input.organizationId),
             input.query.trim() === ""
               ? Promise.resolve([])
               : api.search(input.organizationId, input.query, 50)
           ])
-          return { summary, graph, reviews, searchResults }
+          return { summary, graph, searchResults }
         }
       ),
       loadNode: fromPromise<NodeData, { organizationId: string; nodeId: string }>(
@@ -238,9 +224,6 @@ export const createMemoryMachine = (api: MemoryApi) =>
       search: fromPromise<ReadonlyArray<MemorySearchResult>, { organizationId: string; query: string }>(
         ({ input }) => api.search(input.organizationId, input.query, 50)
       ),
-      decideReview: fromPromise<MemoryReviewResult, { organizationId: string; proposalId: string; action: "approve" | "reject" }>(
-        ({ input }) => api.review(input.organizationId, input.proposalId, input.action)
-      ),
       exportMemory: fromPromise<MemoryExport, { organizationId: string }>(
         ({ input }) => api.export(input.organizationId)
       ),
@@ -258,16 +241,13 @@ export const createMemoryMachine = (api: MemoryApi) =>
           organizationId: event.organizationId,
           summary: null,
           graph: null,
-          reviews: [],
           searchQuery: "",
           searchResults: [],
           selectedNodeId: null,
           selectedEdgeId: null,
-          selectedReviewId: null,
           page: null,
           suggestions: null,
           evidence: null,
-          reviewResult: null,
           exported: null,
           recovery: null,
           filters: DEFAULT_MEMORY_FILTERS,
@@ -314,7 +294,6 @@ export const createMemoryMachine = (api: MemoryApi) =>
       clearSearch: assign(() => ({ searchResults: [] })),
       markSearchPending: assign(() => ({ searchPending: true })),
       consumeSearchPending: assign(() => ({ searchPending: false })),
-      selectReview: assign(({ event }) => event.type === "REVIEW.SELECT" ? { selectedReviewId: event.proposalId, reviewResult: null } : {}),
       clearExport: assign(() => ({ exported: null }))
     }
   }).createMachine({
@@ -381,9 +360,7 @@ export const createMemoryMachine = (api: MemoryApi) =>
             actions: assign(({ event }) => ({
               summary: event.output.summary,
               graph: event.output.graph,
-              reviews: event.output.reviews,
               searchResults: event.output.searchResults,
-              selectedReviewId: event.output.reviews[0]?.id ?? null,
               selectedNodeId: null,
               selectedEdgeId: null,
               page: null,
@@ -435,8 +412,6 @@ export const createMemoryMachine = (api: MemoryApi) =>
             { guard: ({ context }) => context.searchQuery.trim().length > 0, target: "searching" },
             { actions: "clearSearch" }
           ],
-          "REVIEW.SELECT": { actions: "selectReview" },
-          "REVIEW.DECIDE": { target: "reviewing" },
           EXPORT: { target: "exporting" },
           "EXPORT.CLEAR": { actions: "clearExport" }
         }
@@ -488,51 +463,6 @@ export const createMemoryMachine = (api: MemoryApi) =>
           onError: { target: "ready", actions: "setFailure" }
         },
         on: { CLOSE: "closed", "SEARCH.QUERY": { target: "ready", actions: "setSearchQuery" }, "SEARCH.RUN": { actions: "markSearchPending" } }
-      },
-      reviewing: {
-        invoke: {
-          id: "decideReview",
-          src: "decideReview",
-          input: ({ context, event }) => ({
-            organizationId: context.organizationId ?? "",
-            proposalId: event.type === "REVIEW.DECIDE" ? event.proposalId : "",
-            action: event.type === "REVIEW.DECIDE" ? event.action : "reject"
-          }),
-          onDone: [
-            {
-              guard: ({ event }) => event.output.status === "conflict",
-              target: "ready",
-              actions: assign(({ event }) => ({ reviewResult: event.output }))
-            },
-            {
-              guard: ({ event }) => event.output.status === "accepted",
-              target: "loading",
-              actions: assign(({ context, event }) => {
-                return {
-                  reviewResult: event.output,
-                  reviews: context.reviews.map((review) =>
-                    review.id === event.output.proposalId
-                      ? { ...review, status: "accepted" }
-                      : review
-                  )
-                }
-              })
-            },
-            {
-              target: "ready",
-              actions: assign(({ context, event }) => ({
-                reviewResult: event.output,
-                reviews: context.reviews.map((review) =>
-                  review.id === event.output.proposalId
-                    ? { ...review, status: "rejected" }
-                    : review
-                )
-              }))
-            }
-          ],
-          onError: { target: "ready", actions: "setFailure" }
-        },
-        on: { CLOSE: "closed", "SEARCH.QUERY": { actions: "setSearchQuery" }, "SEARCH.RUN": { actions: "markSearchPending" } }
       },
       exporting: {
         invoke: {

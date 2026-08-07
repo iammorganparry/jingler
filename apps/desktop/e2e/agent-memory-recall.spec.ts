@@ -46,7 +46,7 @@ const seededSession = (
 ]
 
 for (const cli of ["claude", "codex"] as const) {
-  test(`${cli} receives and captures accepted memory for an eligible turn`, async ({
+  test(`${cli} receives accepted memory without raw settled-turn capture`, async ({
     launchApp
   }) => {
     const fake = await startFakeAuthServer()
@@ -89,7 +89,7 @@ for (const cli of ["claude", "codex"] as const) {
       )).toBe(true)
       await expect
         .poll(() => fake.memorySnapshot("org-e2e").sourceCount, { timeout: 30_000 })
-        .toBe(1)
+        .toBe(0)
 
       await app.app.close()
     } finally {

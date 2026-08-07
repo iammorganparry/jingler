@@ -8,8 +8,6 @@ export function MemoryAnalytics({ summary }: { summary: MemoryDashboardSummary |
     ["Citation coverage", `${Math.round(summary.citationCoverage.ratio * 100)}%`],
     ["Fresh pages", summary.freshness.fresh],
     ["Stale pages", summary.freshness.stale],
-    ["Open reviews", summary.reviewThroughput.open],
-    ["Conflicts", summary.reviewThroughput.conflicted],
     ["Average degree", summary.connectivity.averageDegree],
     ["Searches", summary.retrieval.searches],
     ["Zero-result searches", summary.retrieval.zeroResultSearches]

@@ -72,14 +72,14 @@ Compile a new memory or create an explicit revision proposal.
 ## Maintainer / review (privilege: review)
 
 ### memory_reviews
-List bounded proposal sets for the private review inbox.
+List bounded historical proposal sets for audit or recovery.
 - Args: `limit` (optional, integer).
-- When to use: Only when the org enabled the human review gate — list proposals awaiting a maintainer.
+- When to use: Audit or settle historical proposal sets; normal agent publication does not queue for review.
 
 ### memory_review
-Approve or reject an explicit proposal handle.
+Resolve an explicit historical proposal handle during recovery.
 - Args: `proposalId` (required, string, non-empty); `action` (required, "approve" | "reject").
-- When to use: Approve or reject a pending proposal (maintainer).
+- When to use: Approve or reject an explicit historical proposal (maintainer recovery path).
 
 ## Schema (privilege: schema)
 

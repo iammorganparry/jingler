@@ -164,11 +164,13 @@ const tools: ReadonlyArray<ToolDefinition> = [
       }
     }
 
+    const occurredAt = new Date().toISOString()
     return {
       organizationId: claims.organizationId,
       requestId,
       method: "POST",
-      path: "/internal/memory/proposals",
+      path: "/internal/memory/proposals/auto-publish",
+      acceptedStatuses: [409],
       body: {
       // The proposal id is derived SERVER-SIDE from the grant subject plus the
       // proposal content — never from a client-supplied header. This removes
@@ -182,13 +184,15 @@ const tools: ReadonlyArray<ToolDefinition> = [
         id: `proposal-${identity}`,
         ...args,
         proposedBy: claims.subject,
-        createdAt: new Date().toISOString()
+        createdAt: occurredAt,
+        reviewerId: "system:memory-agent",
+        acceptedAt: occurredAt
       }
     }
   }),
   defineTool({
     name: "memory_reviews",
-    description: "List bounded proposal sets for the private review inbox.",
+    description: "List bounded historical proposal sets for audit or recovery.",
     privilege: "review"
   }, Schema.Struct({ limit: Schema.optional(limit(100)) }), (args, claims, requestId) =>
     getRequest(claims, requestId, `/internal/memory/reviews?limit=${args.limit ?? 50}`)),
@@ -200,7 +204,7 @@ const tools: ReadonlyArray<ToolDefinition> = [
     getRequest(claims, requestId, `/internal/memory/pages/${encodeURIComponent(args.pageId)}`)),
   defineTool({
     name: "memory_review",
-    description: "Approve or reject an explicit proposal handle.",
+    description: "Resolve an explicit historical proposal handle during recovery.",
     privilege: "review"
   }, Schema.Struct({ proposalId: NonEmptyString, action: Schema.Literal("approve", "reject") }),
   (args, claims, requestId) => {
@@ -508,7 +512,7 @@ const STANDARD_MCP_DEFAULT_VERSION = "2025-06-18"
  * deliberately augments, rather than replaces, this portable MCP contract.
  */
 export const MEMORY_MCP_INSTRUCTIONS =
-  "Recall first: before answering or acting, call memory_search, then memory_read every page you rely on; never treat search snippets or navigation as the page. Cite its pageId, revisionId, sourceIds, and citationIds. When durable knowledge emerges, call memory_propose with baseRevisionId 'new' for a new page or the accepted revision for an update. Retain its workflow handle and poll memory_workflow_status until it settles. Requests are independent; do not create or reuse MCP sessions or cookies."
+  "Recall first with memory_search, then memory_read every page you rely on. Before finishing non-trivial work, silently select at most three durable decisions, preferences, gotchas, connections, or hard-won findings; exclude progress, temporary state, documented facts, credentials, and personal data. Search/read to dedupe, then memory_propose. If it returns a workflowId, poll memory_workflow_status until terminal. Requests are stateless; never reuse sessions or cookies."
 
 /**
  * Serve a STANDARD MCP client — the harnesses' native codex / opencode / Claude

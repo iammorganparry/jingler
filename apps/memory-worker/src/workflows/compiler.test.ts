@@ -167,9 +167,9 @@ class FixtureModel implements CompilerModel {
   }
 }
 
-// The default trust model auto-publishes everything; these fixtures exercise the
-// opt-in review gate (MEMORY_REQUIRE_REVIEW), so factual changes still pause for a
-// human accept. The default auto-accept path is covered by its own test below.
+// Production always auto-publishes. These fixtures retain the workflow's
+// historical replay seam so proposal-set review and conflict recovery remain
+// covered independently of the production publication policy.
 const workflowInput: CompilerWorkflowInput = {
   workflowId: "compiler-fixture",
   organizationId: "org-compiler",

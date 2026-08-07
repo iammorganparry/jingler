@@ -724,6 +724,38 @@ export const scriptedRun =
             }),
           catch: () => null
         }).pipe(Effect.ignore)
+
+        // A deliberate proposal marker lets Electron E2E prove the same
+        // agent-owned publication path a real harness uses after its silent
+        // end-of-turn reflection. The marker belongs only to the deterministic
+        // scripted adapter; production agents decide from the injected policy.
+        if (spec.prompt.includes("[[memory-propose]]")) {
+          yield* Effect.tryPromise({
+            try: () =>
+              fetch(memoryServer.url, {
+                method: "POST",
+                headers: {
+                  ...memoryServer.headers,
+                  "content-type": "application/json",
+                  "mcp-protocol-version": "2026-07-28"
+                },
+                body: JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: `scripted-memory-propose-${sessionId}`,
+                  method: "tools/call",
+                  params: {
+                    name: "memory_propose",
+                    arguments: {
+                      pageId: "shared-learning",
+                      baseRevisionId: "new",
+                      markdown: "Refund retries share one team limiter so bursts cannot multiply across workers."
+                    }
+                  }
+                })
+              }),
+            catch: () => null
+          }).pipe(Effect.ignore)
+        }
       }
 
       // A deterministic busy window for queue E2E. Plan approval used to stand

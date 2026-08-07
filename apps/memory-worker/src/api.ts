@@ -52,7 +52,7 @@ const SourceResponse = Schema.Struct({
   contentKey: Schema.String
 })
 
-const ProposalRequest = Schema.Struct({
+const proposalRequestFields = {
   id: NonEmptyString,
   pageId: NonEmptyString,
   baseRevisionId: NonEmptyString,
@@ -60,6 +60,14 @@ const ProposalRequest = Schema.Struct({
   proposedBy: NonEmptyString,
   createdAt: NonEmptyString,
   summary: Schema.optional(Schema.String)
+}
+
+const ProposalRequest = Schema.Struct(proposalRequestFields)
+
+const AutoPublishProposalRequest = Schema.Struct({
+  ...proposalRequestFields,
+  reviewerId: NonEmptyString,
+  acceptedAt: NonEmptyString
 })
 
 const ProposalDraftRequest = Schema.Struct({
@@ -219,9 +227,6 @@ const configuredMechanicalFixes = (env: MemoryWorkerEnv): ReadonlyArray<string> 
     .map((value) => value.trim())
     .filter((value) => value.length > 0)
 
-// Default trust model is auto-accept; a human review gate is opt-in per deployment.
-const requiresReview = (env: MemoryWorkerEnv): boolean => env.MEMORY_REQUIRE_REVIEW === "true"
-
 /** Run the still-Promise-based body decoder as a typed Effect at a vault call site. */
 const decodeBody = <Decoded, Encoded>(
   request: { text(): Promise<string> },
@@ -315,6 +320,24 @@ const dispatchProposalRequest = (
   vault: TeamVault
 ): Effect.Effect<Response, MemoryVaultError> =>
   Effect.gen(function* () {
+    if (isRoute(request, route, "POST", "proposals", "auto-publish")) {
+      const body = yield* decodeBody(request, AutoPublishProposalRequest)
+      yield* vault.createProposal({
+        id: body.id,
+        pageId: body.pageId,
+        baseRevisionId: body.baseRevisionId,
+        markdown: body.markdown,
+        proposedBy: body.proposedBy,
+        createdAt: body.createdAt,
+        ...(body.summary === undefined ? {} : { summary: body.summary })
+      })
+      const result = yield* vault.approveProposal(
+        body.id,
+        body.reviewerId,
+        body.acceptedAt
+      )
+      return jsonResponse(result, result.status === "accepted" ? 200 : 409)
+    }
     if (isRoute(request, route, "POST", "proposals")) {
       return jsonResponse(yield* vault.createProposal(yield* decodeBody(request, ProposalRequest)), 201)
     }
@@ -534,7 +557,7 @@ const startCompilerWorkflow = async (
     ...body,
     organizationId,
     autoPublishFixes: configuredMechanicalFixes(env),
-    requireReview: requiresReview(env)
+    requireReview: false
   })
   return jsonResponse({ workflowId: body.workflowId, status: "queued" }, 202)
 }
@@ -630,7 +653,7 @@ const startCompilerForSource = async (
     requestedBy: "agent:session-capture",
     createdAt: source.retrievedAt ?? new Date().toISOString(),
     autoPublishFixes: configuredMechanicalFixes(env),
-    requireReview: requiresReview(env)
+    requireReview: false
   })
   return workflowId
 }
@@ -683,6 +706,7 @@ const isAcceptedPublication = (
 ): boolean =>
   response.ok &&
   (isRoute(request, route, "POST", "pages") ||
+    isRoute(request, route, "POST", "proposals", "auto-publish") ||
     (route.length === 3 &&
       (route[0] === "proposals" || route[0] === "proposal-sets") &&
       route[2] === "approve"))

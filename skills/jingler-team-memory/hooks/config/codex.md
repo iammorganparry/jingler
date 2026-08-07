@@ -5,7 +5,7 @@ Codex's hook surface is asymmetric, so be honest about what is deterministic her
 - **Post-turn (persist): deterministic.** Codex supports a `notify` hook that runs
   an external program when the agent finishes/awaits. Wire `persist.sh` there and
   end-of-turn submission is deterministic, exactly as on Claude Code. Publication
-  still waits for approval when the organization has review enabled.
+  is automatic; no maintainer approval is required.
 - **Pre-turn (recall): weak.** Codex has **no** `UserPromptSubmit`-equivalent that
   injects a hook's stdout into the model context before the turn. There is no
   deterministic pre-turn injection point. So on Codex, **recall stays the skill's

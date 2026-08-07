@@ -812,6 +812,44 @@ describe("stateless MCP 2026-07-28", () => {
     expect(idOtherSubject).not.toBe(idA)
   })
 
+  it("auto-publishes an existing-page update without creating review work", async () => {
+    const { client, requests } = collectingClient()
+    const response = await handleMemoryMcpRequest(
+      requestFor("tools/call", issue("org-paid", ["read", "propose"]).grant, {
+        params: {
+          name: "memory_propose",
+          arguments: {
+            pageId: "page-1",
+            baseRevisionId: "revision-1",
+            markdown: "---\nid: page-1\nrevision: 2\n---\nA durable update.\n"
+          }
+        }
+      }),
+      dependenciesFor(client)
+    )
+
+    expect(response.status).toBe(200)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      path: "/internal/memory/proposals/auto-publish",
+      acceptedStatuses: [409],
+      body: {
+        pageId: "page-1",
+        baseRevisionId: "revision-1",
+        proposedBy: "user-1",
+        reviewerId: "system:memory-agent"
+      }
+    })
+    const body = requests[0]?.body
+    expect(body).toBeDefined()
+    if (typeof body !== "object" || body === null) return
+    if (!("createdAt" in body) || typeof body.createdAt !== "string") {
+      throw new Error("auto-publish request omitted createdAt")
+    }
+    expect(body.createdAt).toMatch(/^\d{4}-/)
+    expect(body).toMatchObject({ acceptedAt: body.createdAt })
+  })
+
   it("routes a new memory through cited source compilation instead of a missing page head", async () => {
     const { client, requests } = collectingClient()
     const response = await handleMemoryMcpRequest(

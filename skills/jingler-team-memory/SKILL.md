@@ -56,7 +56,7 @@ not on a plan that enables memory.
 This skill is best-effort — recall and remember only happen if the agent acts on
 them. Where a harness supports lifecycle **hooks**, make them deterministic
 instead: a pre-turn hook injects `<recalled-memories>` every turn and a post-turn
-hook submits marked memories for compilation and any configured review. Wiring for Claude Code (both) and Codex (persist;
+hook submits marked memories for automatic compilation and publication. Wiring for Claude Code (both) and Codex (persist;
 recall stays the skill) is in **[references/hooks.md](references/hooks.md)**.
 
 ## Workflow — recall first, remember after
@@ -80,8 +80,9 @@ compounds instead of being rediscovered.
 
 ### Remember after (when something is worth keeping)
 
-Whenever you learn or decide something a teammate would want later, publish it with
-`memory_propose` — don't wait to be asked:
+Before finishing non-trivial work, silently identify at most three things a
+teammate would want later and publish them with `memory_propose` — don't wait to be
+asked:
 
 - Write **one standalone fact per memory** — future readers have no session context.
   Include the WHY, not just the WHAT.
@@ -89,16 +90,20 @@ Whenever you learn or decide something a teammate would want later, publish it w
   preference; a non-obvious gotcha + root cause; how something connects to something
   else; a hard-won answer to a question that took real effort; a fact about the
   product, process, or people that isn't written down elsewhere.
-- Skip: trivia, anything already in the docs, and ephemeral details (line numbers,
-  temp paths, one-off values).
+- Skip: progress narration, questions, temporary status, review chatter, trivia,
+  anything already in the docs, ephemeral details (line numbers, temp paths,
+  one-off values), credentials, personal data, and claims corrected later in the
+  turn. A valid reflection may find nothing worth storing.
+- Search and read accepted pages before proposing so duplicates are dropped and
+  updates use the current accepted revision.
 - Cite where the memory came from (a file, a PR, a ticket, a conversation) when there
   is a source.
 
-Publishing is **auto-accept by default**: the memory becomes shared knowledge
-immediately, and the vault's versioning + contradiction/health checks let the team
-audit and revert. Some organizations enable a human review gate — there, a proposal
-waits in the review queue until a maintainer accepts it. Either way, propose; don't
-self-censor durable learnings.
+Publishing is **automatic**: the agent owns the quality decision, the memory becomes
+shared knowledge without a human approval queue, and the vault's versioning plus
+contradiction/health checks keep it auditable and reversible. If the response
+includes a `workflowId`, poll it to a terminal result before claiming publication.
+The review tools remain only for auditing or settling historical proposals.
 
 ## Tools — quick selection
 

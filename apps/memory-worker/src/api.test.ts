@@ -445,6 +445,93 @@ describe("memory Worker internal API", () => {
     expect(await jsonBody(response)).toEqual({ error: "memory service failed", code: "internal_error" })
   })
 
+  it("auto-publishes agent updates and leaves no review behind on success or conflict", async () => {
+    const bucket = new InMemoryR2Bucket()
+    const env: MemoryWorkerEnv = {
+      MEMORY_R2: bucket,
+      MEMORY_VAULTS: new TestVaultNamespace(bucket),
+      MEMORY_SERVICE_SECRET: "current-secret"
+    }
+    await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/sources", {
+        source,
+        content: "A stable cited source for the accepted page."
+      }),
+      env
+    )
+    await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/pages", {
+        revisionId: "revision-agent-1",
+        markdown: serializeMemoryMarkdown(page("agent", 1)),
+        actorId: "agent-author",
+        createdAt: "2026-08-01T00:00:00.000Z"
+      }),
+      env
+    )
+
+    const published = await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/proposals/auto-publish", {
+        id: "proposal-agent-update",
+        pageId: "shared-slug",
+        baseRevisionId: "revision-agent-1",
+        markdown: serializeMemoryMarkdown(page("agent-updated", 2)),
+        proposedBy: "agent-author",
+        createdAt: "2026-08-02T00:00:00.000Z",
+        reviewerId: "system:memory-agent",
+        acceptedAt: "2026-08-02T00:00:00.000Z"
+      }),
+      env
+    )
+
+    expect(await jsonBody(published)).toMatchObject({
+      status: "accepted",
+      proposalId: "proposal-agent-update",
+      revisionId: "revision:proposal-agent-update",
+      revision: 2
+    })
+    const detail = await handleMemoryWorkerRequest(
+      getRequest("org-a", "/internal/memory/pages/shared-slug"),
+      env
+    )
+    expect(await jsonBody(detail)).toMatchObject({ page: { revision: 2 } })
+    const reviews = await handleMemoryWorkerRequest(
+      getRequest("org-a", "/internal/memory/reviews?limit=100"),
+      env
+    )
+    expect(await jsonBody(reviews)).toEqual({ reviews: [] })
+    const proposal = await handleMemoryWorkerRequest(
+      getRequest("org-a", "/internal/memory/proposals/proposal-agent-update"),
+      env
+    )
+    expect(await jsonBody(proposal)).toMatchObject({ status: "accepted" })
+
+    const stale = await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/proposals/auto-publish", {
+        id: "proposal-agent-stale",
+        pageId: "shared-slug",
+        baseRevisionId: "revision-agent-1",
+        markdown: serializeMemoryMarkdown(page("agent-stale", 2)),
+        proposedBy: "agent-author",
+        createdAt: "2026-08-03T00:00:00.000Z",
+        reviewerId: "system:memory-agent",
+        acceptedAt: "2026-08-03T00:00:00.000Z"
+      }),
+      env
+    )
+    expect(stale.status).toBe(409)
+    expect(await jsonBody(stale)).toMatchObject({ code: "conflict" })
+    const reviewsAfterConflict = await handleMemoryWorkerRequest(
+      getRequest("org-a", "/internal/memory/reviews?limit=100"),
+      env
+    )
+    expect(await jsonBody(reviewsAfterConflict)).toEqual({ reviews: [] })
+    const staleProposal = await handleMemoryWorkerRequest(
+      getRequest("org-a", "/internal/memory/proposals/proposal-agent-stale"),
+      env
+    )
+    expect(staleProposal.status).toBe(404)
+  })
+
   it("isolates identical page slugs across reads, search, lists, aggregates, and mutations", async () => {
     const bucket = new InMemoryR2Bucket()
     const env: MemoryWorkerEnv = {
