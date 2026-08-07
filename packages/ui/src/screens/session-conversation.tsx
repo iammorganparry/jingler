@@ -60,6 +60,10 @@ export interface SessionConversationProps {
   slotBySession?: ReadonlyMap<string, number>
   /** Manually rename a session (double-click its sidebar title). */
   onRenameSession?: (id: string, title: string) => void
+  /** Toggle the browser belonging to the named session. */
+  onToggleBrowser?: (sessionId: string) => void
+  /** Whether the named session's browser is currently visible. */
+  isBrowserActive?: (sessionId: string) => boolean
   /** Promote or demote a session from the persistent tray. */
   onSetSessionPersistent?: (id: string, persistent: boolean) => void
   /** Archive an active session from the sidebar quick-actions (undoable). */
@@ -92,6 +96,8 @@ export interface SessionConversationProps {
     session: Session,
     ctx: { readonly onSelectConversation: () => void }
   ) => ReactNode
+  /** Render the browser inside its owning session pane. */
+  renderBrowser?: (session: Session) => ReactNode
   onOpenFile?: (sessionId: string, path: string) => void
   /**
    * Render a session's chat pills into the tab row's `chatSlot`. A render prop
@@ -178,13 +184,6 @@ export interface SessionConversationProps {
   renderTerminalDock?: (session: Session) => ReactNode
   /** Which edge the terminal dock attaches to — drives the content column's flow. */
   terminalDockSide?: DockSide
-  /**
-   * Render the preview dock (the desktop app's PreviewDockView).
-   * Docked beside/below the tab body like the terminal dock; absent in stories.
-   */
-  renderBrowserDock?: (session: Session | null) => ReactNode
-  /** Which edge the browser dock attaches to. */
-  browserDockSide?: DockSide
   /** App version, shown in the sidebar footer. */
   version?: string
   /**
@@ -282,10 +281,13 @@ export function SessionConversation(props: SessionConversationProps) {
             }
             renderConversation={props.renderConversation}
             renderFiles={props.renderFiles}
+            renderBrowser={props.renderBrowser}
             onOpenFile={props.onOpenFile}
             conversationPane={props.conversationPane}
             renderChatTabs={props.renderChatTabs}
             onRenameSession={props.onRenameSession}
+            onToggleBrowser={props.onToggleBrowser}
+            isBrowserActive={props.isBrowserActive}
             planSessions={props.planSessions}
             liveActivity={props.liveActivity}
             liveDiff={props.liveDiff}
@@ -297,8 +299,6 @@ export function SessionConversation(props: SessionConversationProps) {
             renderCode={props.renderCode}
             renderTerminalDock={props.renderTerminalDock}
             terminalDockSide={props.terminalDockSide}
-            renderBrowserDock={props.renderBrowserDock}
-            browserDockSide={props.browserDockSide}
             selectTabRequest={props.selectTabRequest}
             onTabRequestHandled={props.onTabRequestHandled}
           />

@@ -91,10 +91,7 @@ test("Codex drives the native Preview browser through jingler-browser", async ({
     })
 
     await expect(appShell(window)).toBeVisible()
-    const previewToggle = window.getByRole("button", { name: "Preview", exact: true })
-    if ((await previewToggle.getAttribute("aria-pressed")) !== "true") {
-      await previewToggle.click()
-    }
+    await window.getByRole("button", { name: "Browser", exact: true }).click()
     const previewUrl = window.getByLabel("Preview URL")
     await previewUrl.fill(initialUrl)
     await previewUrl.press("Enter")
@@ -119,7 +116,10 @@ test("Codex drives the native Preview browser through jingler-browser", async ({
         ])
       )
 
-    await expect(window.getByRole("button", { name: "Hide preview" })).toBeVisible()
+    await expect(window.getByRole("button", { name: "Browser", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page"
+    )
     await expect(previewUrl).toHaveValue(
       `http://127.0.0.1:${address.port}/browser-mcp-final`
     )
@@ -156,7 +156,7 @@ test("a background Codex run updates only its owning session browser", async ({ 
     await closeServer(targetServer)
     throw new Error("Browser isolation target server has no TCP address")
   }
-    const betaUrl = `http://127.0.0.1:${address.port}/beta-focused`
+  const betaUrl = `http://127.0.0.1:${address.port}/beta-focused`
   const alphaUrl = `http://127.0.0.1:${address.port}/alpha-background`
 
   try {
@@ -172,9 +172,6 @@ test("a background Codex run updates only its owning session browser", async ({ 
     const betaPane = window.getByTestId("split-pane-1")
     await expect(betaPane).toHaveAttribute("data-focused", "true")
 
-    const toggle = window.getByRole("button", { name: "Preview", exact: true })
-    if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click()
-    const previewUrl = window.getByLabel("Preview URL")
     const betaComposer = betaPane.getByPlaceholder("Message Codex…")
     await betaComposer.fill(`[[browser-control-mcp=${betaUrl}]] QA Beta concurrently.`)
     await betaComposer.press("Enter")
@@ -192,12 +189,7 @@ test("a background Codex run updates only its owning session browser", async ({ 
     await window.keyboard.press("Control+Shift+Digit2")
     await expect(betaPane).toHaveAttribute("data-focused", "true")
     releaseBrowserMcp()
-    await expect(alphaPane.getByText("Codex browser MCP complete.")).toBeVisible({
-      timeout: 20_000
-    })
-    await expect(betaPane.getByText("Codex browser MCP complete.")).toBeVisible({
-      timeout: 20_000
-    })
+    const previewUrl = betaPane.getByLabel("Preview URL")
     await expect.poll(() => requests.filter((path) => path === "/beta-focused")).toHaveLength(1)
     await expect.poll(() => requests.filter((path) => path === "/alpha-background")).toHaveLength(1)
     await expect(previewUrl).toHaveValue(betaUrl)
@@ -217,11 +209,11 @@ test("a background Codex run updates only its owning session browser", async ({ 
           )
         }, { alpha: alphaUrl, beta: betaUrl })
       )
-      .toEqual({ [alphaUrl]: false, [betaUrl]: true })
+      .toEqual({ [alphaUrl]: true, [betaUrl]: true })
 
     await window.keyboard.press("Control+Shift+Digit1")
     await expect(alphaPane).toHaveAttribute("data-focused", "true")
-    await expect(previewUrl).toHaveValue(alphaUrl, { timeout: 10_000 })
+    await expect(alphaPane.getByLabel("Preview URL")).toHaveValue(alphaUrl, { timeout: 10_000 })
   } finally {
     await closeServer(targetServer)
   }

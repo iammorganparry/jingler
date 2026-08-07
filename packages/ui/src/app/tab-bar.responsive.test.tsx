@@ -147,8 +147,6 @@ describe("TabBar at width", () => {
   it("folds the pane actions into a menu below the mid tier", () => {
     renderAt(420)
     expect(screen.queryByTestId("move-pane-left")).toBeNull()
-    // The split toggle, not the browser one: the preview dock is app-level and
-    // its control now lives in the window title bar, which never collapses.
     expect(screen.queryByLabelText("Split plan beside conversation")).toBeNull()
     expect(screen.getByTestId("pane-actions-menu")).toBeTruthy()
   })

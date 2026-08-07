@@ -1659,10 +1659,9 @@ function AuthedApp({
             onSideChange={termDock.setSide}
           />
         )}
-        browserDockSide={browserDock.side}
-        browserActive={browserDock.visible}
-        onToggleBrowser={browserDock.toggle}
-        renderBrowserDock={(session) => (
+        isBrowserActive={(sessionId) => browserDock.forSession(sessionId).visible}
+        onToggleBrowser={(sessionId) => browserDock.forSession(sessionId).toggle()}
+        renderBrowser={(session) => (
           <PreviewDockView session={session} dock={browserDock} />
         )}
         version={__APP_VERSION__}

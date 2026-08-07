@@ -11,7 +11,8 @@ import type { SeedSession } from "./fixtures.js"
  *  - `$…$` / `$$…$$` render as KaTeX (a `.katex` node), not raw dollar-math;
  *  - an html block defaults to the plain-text Code view and, on opt-in, renders a
  *    sandboxed Preview iframe;
- *  - the browser-preview pane toggles open and its address bar drives navigation.
+ *  - the session-owned Browser tab keeps chat visible when the pane has room,
+ *    then takes the full pane below the responsive boundary.
  *
  * The browser preview is a native `WebContentsView` (out of the DOM, like the
  * xterm canvas in terminal.spec.ts), so we assert on the pane's React chrome
@@ -89,6 +90,7 @@ test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", asyn
   })
 
   await expect(appShell(window)).toBeVisible()
+  await window.setViewportSize({ width: 1500, height: 860 })
 
   // LaTeX: KaTeX mounts a `.katex` node — the raw "$E = mc^2$" is never shown.
   await expect(window.locator(".katex").first()).toBeVisible({ timeout: 10_000 })
@@ -102,18 +104,31 @@ test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", asyn
   await preview.click()
   await expect(window.locator('iframe[title="HTML preview"]')).toBeVisible()
 
-  // Browser pane: open it from the tab-bar control, then navigate. The
+  // Browser pane: open this session's Browser tab, then navigate. The
   // WebContentsView is out-of-DOM, so we assert on the address bar (in DOM).
-  // The toggle lives in the WINDOW TITLE BAR now, not a pane's tab bar; `exact`
-  // avoids matching the dock's own "Hide preview" button, and we open
-  // only if it isn't already (its visibility persists in localStorage across runs).
-  const toggle = window.getByRole("button", { name: "Preview", exact: true })
-  if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click()
+  await window.getByRole("button", { name: "Browser", exact: true }).click()
   const url = window.getByLabel("Preview URL")
   await expect(url).toBeVisible()
+  const split = window.getByTestId("session-browser-split")
+  const browserPanel = window.getByTestId("session-browser-panel")
+  await expect(split).toBeVisible()
+  await expect(window.getByTestId("session-browser-chat").locator(".katex").first()).toBeVisible()
+  const [splitBox, browserBox] = await Promise.all([split.boundingBox(), browserPanel.boundingBox()])
+  expect(splitBox).not.toBeNull()
+  expect(browserBox).not.toBeNull()
+  expect(browserBox!.width / splitBox!.width).toBeGreaterThan(0.62)
+  expect(browserBox!.width / splitBox!.width).toBeLessThan(0.7)
   await url.fill("http://localhost:4321")
   await url.press("Enter")
   await expect(url).toHaveValue("http://localhost:4321")
+
+  // At the app's supported minimum width the session pane is under 960px, so
+  // Browser becomes the sole body instead of squeezing chat into a sliver.
+  await window.setViewportSize({ width: 900, height: 700 })
+  await window.waitForTimeout(120)
+  await expect(split).toHaveCount(0)
+  await expect(url).toBeVisible()
+  await expect(window.locator(".katex")).toHaveCount(0)
 })
 
 test("restores each session's URL, history, scroll, visibility, and cookies", async ({
@@ -147,16 +162,14 @@ test("restores each session's URL, history, scroll, visibility, and cookies", as
       sessions: isolatedSessions
     })
     await expect(appShell(window)).toBeVisible()
-    const toggle = window.getByRole("button", { name: "Preview", exact: true })
-    if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click()
+    await window.getByRole("button", { name: "Browser", exact: true }).click()
     const url = window.getByLabel("Preview URL")
     await url.fill(`${origin}/alpha`)
     await url.press("Enter")
     await expect(url).toHaveValue(`${origin}/alpha-history`, { timeout: 10_000 })
 
     await sessionRow(window, "Preview Beta").click()
-    await expect(toggle).toHaveAttribute("aria-pressed", "false")
-    await toggle.click()
+    await window.getByRole("button", { name: "Browser", exact: true }).click()
     await url.fill(`${origin}/beta`)
     await url.press("Enter")
     await expect(url).toHaveValue(`${origin}/beta-history`, { timeout: 10_000 })
@@ -190,15 +203,12 @@ test("restores each session's URL, history, scroll, visibility, and cookies", as
     )
     expect(pages.every((page) => page.historyLength >= 2)).toBe(true)
 
-    // Visibility is session state too: hiding Beta must not hide Alpha, and
-    // returning to Beta must restore its hidden dock rather than Alpha's state.
-    await toggle.click()
-    await expect(toggle).toHaveAttribute("aria-pressed", "false")
+    // The selected Browser tab is session state too: closing Beta must not
+    // close Alpha, and returning to Beta must keep its browser out of view.
+    await window.getByRole("button", { name: "Chat 1", exact: true }).click()
     await sessionRow(window, "Preview Alpha").click()
-    await expect(toggle).toHaveAttribute("aria-pressed", "true")
     await expect(url).toHaveValue(`${origin}/alpha-history`)
     await sessionRow(window, "Preview Beta").click()
-    await expect(toggle).toHaveAttribute("aria-pressed", "false")
     await expect(url).toBeHidden()
   } finally {
     await closeServer(server)
@@ -231,8 +241,7 @@ test("deleting a session closes its native browser resources", async ({ launchAp
       sessions: isolatedSessions
     })
     await expect(appShell(window)).toBeVisible()
-    const toggle = window.getByRole("button", { name: "Preview", exact: true })
-    if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click()
+    await window.getByRole("button", { name: "Browser", exact: true }).click()
     const url = window.getByLabel("Preview URL")
     await url.fill(`${origin}/owned-by-alpha`)
     await url.press("Enter")
@@ -280,7 +289,7 @@ test("deleting a session closes its native browser resources", async ({ launchAp
   }
 })
 
-test("keeps Preview visible while Files owns PDFs in two split panes", async ({ launchApp }) => {
+test("retains each session browser while Files owns two split panes", async ({ launchApp }) => {
   const server = createServer((_request, response) => {
     response.writeHead(200, { "Content-Type": "text/html" })
     response.end("<!doctype html><title>coexist</title><h1>Preview stays alive</h1>")
@@ -307,8 +316,7 @@ test("keeps Preview visible while Files owns PDFs in two split panes", async ({ 
       }
     })
     await expect(appShell(window)).toBeVisible()
-    const toggle = window.getByRole("button", { name: "Preview", exact: true })
-    if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click()
+    await window.getByRole("button", { name: "Browser", exact: true }).click()
     const url = window.getByLabel("Preview URL")
     await url.fill(origin)
     await url.press("Enter")
@@ -320,10 +328,10 @@ test("keeps Preview visible while Files owns PDFs in two split panes", async ({ 
     // before opening its PDF so the final visible browser is Beta's retained
     // view, not Alpha's deliberately hidden one.
     await expect(betaPane).toHaveAttribute("data-focused", "true")
-    if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click()
-    await expect(url).toBeVisible()
-    await url.fill(origin)
-    await url.press("Enter")
+    await betaPane.getByRole("button", { name: "Browser", exact: true }).click()
+    const betaUrl = betaPane.getByLabel("Preview URL")
+    await betaUrl.fill(origin)
+    await betaUrl.press("Enter")
 
     await window.keyboard.press("Control+Shift+Digit1")
     await expect(alphaPane).toHaveAttribute("data-focused", "true")
@@ -350,30 +358,41 @@ test("keeps Preview visible while Files owns PDFs in two split panes", async ({ 
       "page"
     )
 
+    const visibleNativeUrls = () =>
+      app.evaluate(({ BrowserWindow }, expectedOrigin) => {
+        const root = BrowserWindow.getAllWindows()[0]?.contentView
+        return (root?.children ?? [])
+          .filter((view) => view.getVisible())
+          .map((view) => {
+            const candidate = view as typeof view & {
+              webContents?: { getURL(): string }
+            }
+            return candidate.webContents?.getURL() ?? ""
+          })
+          .filter((loadedUrl) =>
+            loadedUrl.startsWith(expectedOrigin) || loadedUrl.startsWith("file:")
+          )
+      }, origin)
+
     await expect
       .poll(() =>
-        app.evaluate(({ BrowserWindow }, expectedOrigin) => {
-          const root = BrowserWindow.getAllWindows()[0]?.contentView
-          return (root?.children ?? [])
-            .filter((view) => view.getVisible())
-            .map((view) => {
-              const candidate = view as typeof view & {
-                webContents?: { getURL(): string }
-              }
-              return candidate.webContents?.getURL() ?? ""
-            })
-            .filter((loadedUrl) =>
-              loadedUrl.startsWith(expectedOrigin) || loadedUrl.startsWith("file:")
-            )
-        }, origin)
+        visibleNativeUrls()
       )
       .toEqual(
         expect.arrayContaining([
-          expect.stringContaining(origin),
           expect.stringContaining("alpha.pdf"),
           expect.stringContaining("beta.pdf")
         ])
       )
+    expect((await visibleNativeUrls()).some((loadedUrl) => loadedUrl.startsWith(origin))).toBe(false)
+
+    await window.keyboard.press("Control+Shift+Digit1")
+    await alphaPane.getByRole("button", { name: "Browser", exact: true }).click()
+    await expect(alphaPane.getByLabel("Preview URL")).toHaveValue(`${origin}/`)
+
+    await window.keyboard.press("Control+Shift+Digit2")
+    await betaPane.getByRole("button", { name: "Browser", exact: true }).click()
+    await expect(betaPane.getByLabel("Preview URL")).toHaveValue(`${origin}/`)
   } finally {
     await closeServer(server)
   }

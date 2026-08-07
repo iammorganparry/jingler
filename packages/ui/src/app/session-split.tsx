@@ -38,6 +38,7 @@ export interface SessionSplitProps {
     session: Session,
     ctx: { readonly onSelectConversation: () => void }
   ) => ReactNode
+  renderBrowser?: (session: Session) => ReactNode
   onOpenFile?: (sessionId: string, path: string) => void
   conversationPane?: ReactNode
   /**
@@ -56,6 +57,8 @@ export interface SessionSplitProps {
   ) => ReactNode
   /** Rename a session from its pane title. */
   onRenameSession?: (id: string, title: string) => void
+  onToggleBrowser?: (sessionId: string) => void
+  isBrowserActive?: (sessionId: string) => boolean
   planSessions?: ReadonlySet<string>
   liveActivity?: Record<string, SessionActivity>
   liveDiff?: Record<string, DiffStat>
@@ -75,8 +78,6 @@ export interface SessionSplitProps {
   renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   renderTerminalDock?: (session: Session) => ReactNode
   terminalDockSide?: DockSide
-  renderBrowserDock?: (session: Session | null) => ReactNode
-  browserDockSide?: DockSide
   /**
    * A palette request to switch tabs, handed to the FOCUSED pane only.
    *
@@ -90,7 +91,7 @@ export interface SessionSplitProps {
 
 /**
  * The split, wired to real sessions — `SplitView`'s geometry with a live
- * `SessionPane` inside each pane, and the two docks mounted around it.
+ * `SessionPane` inside each pane, and the shared terminal dock mounted around it.
  *
  * The layering is deliberate: `SplitView` knows about panes, ratios and drops and
  * nothing about sessions, which is what let it be approved in Storybook against
@@ -127,10 +128,13 @@ export function SessionSplit(props: SessionSplitProps) {
         session={session}
         renderConversation={props.renderConversation}
         renderFiles={props.renderFiles}
+        renderBrowser={props.renderBrowser}
         onOpenFile={props.onOpenFile}
         conversationPane={props.conversationPane}
         renderChatTabs={props.renderChatTabs}
         onRenameSession={props.onRenameSession}
+        onToggleBrowser={props.onToggleBrowser}
+        isBrowserActive={props.isBrowserActive}
         planSessions={props.planSessions}
         liveActivity={props.liveActivity}
         liveDiff={props.liveDiff}
@@ -145,8 +149,6 @@ export function SessionSplit(props: SessionSplitProps) {
         tabContributions={props.tabContributions}
         renderReview={props.renderReview}
         renderCode={props.renderCode}
-        // The docks are mounted ONCE below, outside the pane loop, so the toggle
-        // is app-level and every pane's copy drives the same dock.
         // No close control in a group of one: there is nothing to close back to,
         // so it would only be a way to blank the app.
         onClosePane={single || !props.onClosePane ? undefined : () => props.onClosePane?.(index)}
@@ -166,22 +168,11 @@ export function SessionSplit(props: SessionSplitProps) {
     )
   }
 
-  // Both docks are mounted HERE, once, outside the pane loop — never inside a
-  // pane.
-  //
-  // The browser dock controls a session-keyed native-view registry in main.
-  // Mounting this controller once keeps focused-session reconciliation ordered:
-  // the old session is hidden, the new session's retained view is painted, and
-  // background agent events never mount a second overlay inside another pane.
-  //
   // The terminal dock is per-SESSION rather than per-pane, so it stays mounted
   // and simply takes whichever session currently owns it as a prop. Passing a
   // prop re-runs its queries; unmounting it would throw away the xterm buffer.
   const dock =
     dockSession && props.renderTerminalDock ? props.renderTerminalDock(dockSession) : null
-  // The controller follows the focused pane but each session retains its own
-  // URL, visibility, history, scroll and storage behind that one dock surface.
-  const browserDock = props.renderBrowserDock ? props.renderBrowserDock(dockSession) : null
   const filesFocused = dockSessionId !== null && activeTabs[dockSessionId] === "files"
   // Where each dock GOES. The same pure rule the docks apply to their own
   // borders and size (`dock-fit.ts`), evaluated against the same shell width, so
@@ -189,7 +180,6 @@ export function SessionSplit(props: SessionSplitProps) {
   // the bottom row would draw a left border across the middle of the window.
   const { width: shellWidth } = usePaneWidth()
   const termSide = effectiveDock(props.terminalDockSide ?? "bottom", shellWidth)
-  const browserSide = effectiveDock(props.browserDockSide ?? "right", shellWidth)
   // Plugin docks go through the SAME placement rule as the built-in ones. A
   // pane that chose its own side could sit at the bottom while drawing a left
   // border across the middle of the window.
@@ -225,11 +215,9 @@ export function SessionSplit(props: SessionSplitProps) {
           emptyState={props.emptyState}
         />
         {termSide === "right" ? builtInDock(dock) : null}
-        {browserSide === "right" ? builtInDock(browserDock) : null}
         {pluginDocks.right.map(renderDock)}
       </div>
       {termSide === "bottom" ? builtInDock(dock) : null}
-      {browserSide === "bottom" ? builtInDock(browserDock) : null}
       {pluginDocks.bottom.map(renderDock)}
     </div>
   )

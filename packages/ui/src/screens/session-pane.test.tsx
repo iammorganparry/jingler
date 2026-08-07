@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { Boxes } from "lucide-react"
 import type { Session } from "@jingler/core"
@@ -226,6 +226,49 @@ describe("plugin tab contributions", () => {
     )
     expect(screen.queryByText("linear.issues body")).toBeNull()
     expect(screen.getByText("transcript")).toBeTruthy()
+  })
+})
+
+describe("session browser tab", () => {
+  it("opens inside its owning session pane and closes back to conversation", () => {
+    const toggled: string[] = []
+    const BrowserHarness = () => {
+      const [open, setOpen] = useState(false)
+      return (
+        <SessionPane
+          session={session({ id: "browser-owner" })}
+          renderConversation={() => <div>owner transcript</div>}
+          renderBrowser={(owner) => <div>browser for {owner.id}</div>}
+          isBrowserActive={() => open}
+          onToggleBrowser={(sessionId) => {
+            toggled.push(sessionId)
+            setOpen((current) => !current)
+          }}
+        />
+      )
+    }
+
+    render(<BrowserHarness />)
+    fireEvent.click(screen.getByRole("button", { name: "Browser" }))
+    expect(screen.getByText("browser for browser-owner")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Conversation" }))
+    expect(screen.getByText("owner transcript")).toBeTruthy()
+    expect(toggled).toEqual(["browser-owner", "browser-owner"])
+  })
+
+  it("opens the owning browser tab when an agent reveals it", () => {
+    const props = {
+      session: session({ id: "agent-owner" }),
+      renderConversation: () => <div>agent transcript</div>,
+      renderBrowser: (owner: Session) => <div>agent browser for {owner.id}</div>,
+      onToggleBrowser: vi.fn(),
+      isBrowserActive: () => false
+    }
+    const { rerender } = render(<SessionPane {...props} />)
+    expect(screen.getByText("agent transcript")).toBeTruthy()
+
+    rerender(<SessionPane {...props} isBrowserActive={() => true} />)
+    expect(screen.getByText("agent browser for agent-owner")).toBeTruthy()
   })
 })
 

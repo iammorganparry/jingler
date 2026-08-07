@@ -62,23 +62,6 @@ export function usePreviewDock(): PreviewDockPrefs {
   )
 
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (
-        event.ctrlKey &&
-        event.shiftKey &&
-        !event.metaKey &&
-        !event.altKey &&
-        (event.key === "B" || event.code === "KeyB")
-      ) {
-        event.preventDefault()
-        toggle()
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [toggle])
-
-  useEffect(() => {
     const stopReveal = window.jingler.onPreviewReveal(({ sessionId, url }) => {
       send({ type: "REVEAL_BROWSER", sessionId, url })
     })

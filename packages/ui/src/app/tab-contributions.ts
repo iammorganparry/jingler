@@ -31,6 +31,7 @@ import {
   CircleDot,
   FileDiff,
   FolderTree,
+  Globe,
   GitCompareArrows,
   GitPullRequest,
   MessagesSquare,
@@ -53,6 +54,7 @@ export type TabKey = string
 export const BUILTIN_TAB = {
   conversation: "conversation",
   files: "files",
+  browser: "browser",
   issue: "issue",
   plan: "plan",
   pr: "pr",
@@ -225,6 +227,12 @@ export const BUILTIN_TAB_META: Record<
     order: 15,
     blurb: "Browse, inspect, and edit files in this session's worktree."
   },
+  browser: {
+    label: "Browser",
+    icon: Globe,
+    order: 17,
+    blurb: "Browse the web inside this session's workspace."
+  },
   // Kept for the stub screen and for continuity of the id, but no longer a
   // built-in contribution: the Issue tab ships as the `github-issues` plugin,
   // which claims the same order so the migration is invisible to anyone who was
@@ -282,6 +290,7 @@ export interface BuiltinTabRenderers {
     ctx: TabRenderContext
   ) => ReactNode
   readonly files?: (session: Session, ctx: TabRenderContext) => ReactNode
+  readonly browser?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly pullRequest?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly review?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly code?: (session: Session, ctx: TabRenderContext) => ReactNode
@@ -324,6 +333,13 @@ export const builtinTabContributions = (
       when: ({ session }) => session.worktreePath != null,
       render: (session, ctx) =>
         renderers.files?.(session, ctx) ?? renderers.stub("files")
+    },
+    {
+      id: BUILTIN_TAB.browser,
+      ...meta.browser,
+      when: () => renderers.browser !== undefined,
+      render: (session, ctx) =>
+        renderers.browser?.(session, ctx) ?? renderers.stub("browser")
     },
     {
       id: BUILTIN_TAB.plan,

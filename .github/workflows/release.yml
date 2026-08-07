@@ -137,7 +137,15 @@ jobs:
         run: pnpm --filter @jingler/desktop run build
 
       - name: Package & publish
-        run: pnpm --filter @jingler/desktop exec electron-builder ${{ matrix.args }} --publish always
+        run: |
+          # An empty CSC_LINK is not equivalent to an absent CSC_LINK for
+          # electron-builder: on macOS it resolves "" to the working directory
+          # and then tries to import that directory as a certificate. Remove the
+          # optional signing variables entirely until signing secrets exist.
+          if [ -z "${CSC_LINK:-}" ]; then
+            unset CSC_LINK CSC_KEY_PASSWORD
+          fi
+          pnpm --filter @jingler/desktop exec electron-builder ${{ matrix.args }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Apple signing/notarization — gated to macOS so the Apple cert is never

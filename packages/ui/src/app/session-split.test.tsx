@@ -194,37 +194,29 @@ describe("dropping a session onto a pane", () => {
 describe("dock mounting", () => {
   const docks = {
     renderTerminalDock: (s: { id: string }) => <div data-testid="terminal-dock">{s.id}</div>,
-    renderBrowserDock: (s: { id: string } | null) => (
-      <div data-testid="browser-dock">{s?.id ?? "none"}</div>
-    ),
+    renderBrowser: (s: { id: string }) => <div data-testid="browser-view">{s.id}</div>,
     onToggleBrowser: vi.fn(),
-    browserActive: true
+    isBrowserActive: () => true
   }
 
-  it("mounts each dock exactly once, however many panes are visible", () => {
-    // The browser preview drives ONE native WebContentsView. Two mounts would
-    // mean two rAF loops writing conflicting bounds to the same native view.
+  it("mounts one browser per owning session and one shared terminal dock", () => {
     renderSplit({ group: groupOf(["a", "b", "c"]), ...docks })
-    expect(screen.getAllByTestId("browser-dock")).toHaveLength(1)
+    expect(screen.getAllByTestId("browser-view")).toHaveLength(3)
     expect(screen.getAllByTestId("terminal-dock")).toHaveLength(1)
   })
 
-  it("mounts the docks OUTSIDE every pane, so a pane click cannot remount them", () => {
-    // The regression this guards: the docks used to live inside the focused
-    // pane, so clicking another pane unmounted the preview — and its unmount
-    // cleanup calls browserPreviewClose(), destroying the view and losing the
-    // page, its history and the URL.
+  it("mounts each browser inside its session pane and the terminal outside", () => {
     renderSplit(docks)
     for (const index of [0, 1]) {
       const pane = screen.getByTestId(`split-pane-${index}`)
-      expect(within(pane).queryByTestId("browser-dock")).toBeNull()
+      expect(within(pane).getByTestId("browser-view")).toBeTruthy()
       expect(within(pane).queryByTestId("terminal-dock")).toBeNull()
     }
   })
 
-  it("keeps the same dock element across a focus change", () => {
+  it("keeps each browser element across a focus change", () => {
     const { rerender } = renderSplit(docks)
-    const before = screen.getByTestId("browser-dock")
+    const before = within(screen.getByTestId("split-pane-0")).getByTestId("browser-view")
     rerender(
       <SessionSplit
         group={groupOf(["a", "b"], 1)}
@@ -233,7 +225,7 @@ describe("dock mounting", () => {
         {...docks}
       />
     )
-    expect(screen.getByTestId("browser-dock")).toBe(before)
+    expect(within(screen.getByTestId("split-pane-0")).getByTestId("browser-view")).toBe(before)
   })
 
   it("points the terminal dock at the FOCUSED pane's session", () => {

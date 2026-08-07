@@ -7,6 +7,8 @@ import { useResizableWidth } from "../components/resizable.js"
 import type { DockSide } from "./terminal-panel.js"
 
 export interface PreviewDockProps {
+  /** Fill a session tab instead of sizing and bordering a window-level dock. */
+  readonly embedded?: boolean
   readonly dock: DockSide
   readonly onDockChange: (side: DockSide) => void
   readonly visible: boolean
@@ -23,7 +25,7 @@ const WIDTH = { key: "jingler.browser.width", initial: 520, min: 320, max: 1000 
 
 /** Internet-only Preview dock. Repository files live in the Files session tab. */
 export function PreviewDock(props: PreviewDockProps) {
-  const { dock: preferredDock, visible, url } = props
+  const { dock: preferredDock, embedded = false, visible, url } = props
   const { width: shellWidth } = usePaneWidth()
   const dock = effectiveDock(preferredDock, shellWidth)
   const isBottom = dock === "bottom"
@@ -54,21 +56,25 @@ export function PreviewDock(props: PreviewDockProps) {
     <div
       aria-label="Browser preview"
       className={cn(
-        "relative flex flex-none flex-col bg-sunken",
-        isBottom ? "border-t border-hairline" : "border-l border-hairline",
+        "relative flex min-h-0 min-w-0 flex-col bg-sunken",
+        embedded
+          ? "flex-1"
+          : cn("flex-none", isBottom ? "border-t border-hairline" : "border-l border-hairline"),
         !visible && "hidden"
       )}
       style={
-        visible
+        visible && !embedded
           ? isBottom
             ? { height: height.width }
             : { width: clampDockWidth(width.width, shellWidth) }
           : undefined
       }
     >
-      <DockResizeEdge orientation={isBottom ? "horizontal" : "vertical"} onResize={onResize} />
+      {!embedded && (
+        <DockResizeEdge orientation={isBottom ? "horizontal" : "vertical"} onResize={onResize} />
+      )}
 
-      <div className="flex h-9 flex-none items-center border-b border-hairline bg-panel px-2">
+      {!embedded && <div className="flex h-9 flex-none items-center border-b border-hairline bg-panel px-2">
         <Globe className="size-3.5 flex-none text-dim" aria-hidden />
         <span className="ml-2 font-mono text-[11.5px] text-text-bright">Browser</span>
         <div className="ml-auto flex items-center gap-0.5">
@@ -92,7 +98,7 @@ export function PreviewDock(props: PreviewDockProps) {
             <X className="size-3.5" />
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="flex h-9 flex-none items-center gap-1.5 border-b border-hairline bg-panel px-2">
         <button

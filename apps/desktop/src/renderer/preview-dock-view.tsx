@@ -15,12 +15,9 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
   const sessionId = session?.id ?? null
   const browser = dock.forSession(sessionId)
 
-  useEffect(() => {
-    dock.focusSession(sessionId)
-  }, [dock.focusSession, sessionId])
-
   return (
     <PreviewDock
+      embedded
       dock={dock.side}
       onDockChange={dock.setSide}
       visible={browser.visible}
@@ -32,9 +29,7 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
       }}
       renderBrowser={(active) => (
         <BrowserBody
-          // Re-arm first-paint measurement when focus moves directly between
-          // two already-visible docks. The native views remain alive in main;
-          // only this renderer-side bounds owner is session-specific.
+          // Each session tab owns its own measurement surface and native view.
           key={sessionId ?? "no-session"}
           browser={browser}
           sessionId={sessionId}

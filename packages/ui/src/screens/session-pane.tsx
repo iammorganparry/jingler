@@ -1,8 +1,9 @@
-import { type ReactNode, useCallback, useEffect, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import type { DiffStat, Session, SessionActivity, SessionDisplayStatus } from "@jingler/core"
 import { activityLabel, displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
 import { displayStatusLabel } from "../tokens.js"
-import { atLeast, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js"
+import { atLeast, usePaneWidth, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js"
+import { ResizeHandle } from "../components/resizable.js"
 import { TabBar } from "../app/tab-bar.js"
 import {
   BUILTIN_TAB,
@@ -17,6 +18,26 @@ import {
 import { ConversationView } from "../app/conversation-view.js"
 import { SEED_CONVERSATION } from "../seed.js"
 import { BuiltinStubScreen } from "./stub-screen.js"
+import {
+  clampedSessionBrowserRatio,
+  DEFAULT_SESSION_BROWSER_RATIO,
+  resizedSessionBrowserRatio,
+  SESSION_BROWSER_SPLIT_BREAKPOINT,
+  SESSION_BROWSER_SPLIT_HANDLE_WIDTH
+} from "../app/session-browser-split.js"
+
+const SESSION_BROWSER_RATIO_KEY = "sb.split.session-browser.ratio"
+
+const initialSessionBrowserRatio = (): number => {
+  try {
+    const stored = Number(localStorage.getItem(SESSION_BROWSER_RATIO_KEY))
+    return Number.isFinite(stored) && stored > 0 && stored < 1
+      ? stored
+      : DEFAULT_SESSION_BROWSER_RATIO
+  } catch {
+    return DEFAULT_SESSION_BROWSER_RATIO
+  }
+}
 
 /**
  * The tab-bar pill's accent per reported state. Blue means "you're needed" and is
@@ -99,6 +120,8 @@ export interface SessionPaneProps {
     session: Session,
     ctx: { readonly onSelectConversation: () => void }
   ) => ReactNode
+  /** Render this session's embedded browser inside its pane. */
+  renderBrowser?: (session: Session) => ReactNode
   /** Select a path in the session's persistent file-browser actor. */
   onOpenFile?: (sessionId: string, path: string) => void
   /**
@@ -123,6 +146,10 @@ export interface SessionPaneProps {
   ) => ReactNode
   /** Rename the session from the tab-row title. */
   onRenameSession?: (id: string, title: string) => void
+  /** Toggle the embedded browser that belongs to this session. */
+  onToggleBrowser?: (sessionId: string) => void
+  /** Read this session's browser visibility without borrowing focused state. */
+  isBrowserActive?: (sessionId: string) => boolean
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>
   /** What each session's agent is doing right now, keyed by id (live). */
@@ -164,8 +191,8 @@ export interface SessionPaneProps {
 /**
  * One session's full workspace: its tab bar and its tab body.
  *
- * Not its docks — the terminal and browser preview are mounted once by
- * `SessionSplit`, outside every pane. See the comment there for why.
+ * The terminal remains a group-level dock. Browser state and presentation are
+ * session-owned, so Browser renders inside this pane instead.
  *
  * Extracted out of `SessionConversation` so the split can mount SEVERAL of these
  * at once. The important consequence of the split is that `tab`, `target` and
@@ -212,7 +239,23 @@ function SessionPaneBody(props: SessionPaneProps) {
     stepId: string
   } | null>(null)
   const [split, setSplit] = useState(false)
+  const paneWidth = usePaneWidth().width
   const roomy = atLeast(useWidthTier(), "wide")
+  const [browserRatio, setBrowserRatio] = useState(initialSessionBrowserRatio)
+  const effectiveBrowserRatio = clampedSessionBrowserRatio(browserRatio, paneWidth)
+  const adjustBrowserSplit = useCallback(
+    (deltaX: number) => {
+      if (paneWidth <= 0) return
+      const next = resizedSessionBrowserRatio(effectiveBrowserRatio, paneWidth, deltaX)
+      setBrowserRatio(next)
+      try {
+        localStorage.setItem(SESSION_BROWSER_RATIO_KEY, String(next))
+      } catch {
+        /* A private/quota-limited renderer still keeps the in-memory ratio. */
+      }
+    },
+    [effectiveBrowserRatio, paneWidth]
+  )
   const openPlanReview = useCallback(
     (stepId?: string) => {
       setTarget(stepId ? { sessionId: props.session.id, stepId } : null)
@@ -257,6 +300,30 @@ function SessionPaneBody(props: SessionPaneProps) {
   }, [tabRequestNonce])
 
   const active = props.session
+  const browserActive = props.isBrowserActive?.(active.id) ?? false
+  const previousBrowserActive = useRef(false)
+  useEffect(() => {
+    if (browserActive && !previousBrowserActive.current && tab !== BUILTIN_TAB.browser) {
+      setTab(BUILTIN_TAB.browser)
+    }
+    if (!browserActive && previousBrowserActive.current && tab === BUILTIN_TAB.browser) {
+      setTab(BUILTIN_TAB.conversation)
+    }
+    previousBrowserActive.current = browserActive
+  }, [browserActive, tab])
+
+  const selectTab = useCallback(
+    (nextTab: TabKey) => {
+      if (nextTab === BUILTIN_TAB.browser && !browserActive) {
+        props.onToggleBrowser?.(active.id)
+      } else if (nextTab !== BUILTIN_TAB.browser && browserActive) {
+        props.onToggleBrowser?.(active.id)
+      }
+      if (nextTab === BUILTIN_TAB.plan) openPlanReview()
+      else setTab(nextTab)
+    },
+    [active.id, browserActive, openPlanReview, props.onToggleBrowser]
+  )
   const planStepTarget = target?.sessionId === active.id ? target.stepId : null
 
   // What every contribution's `when` and `badge` gets to reason about. Assembled
@@ -326,6 +393,7 @@ function SessionPaneBody(props: SessionPaneProps) {
         props.renderFiles?.(session, {
           onSelectConversation: () => ctx.onSelectTab(BUILTIN_TAB.conversation)
         }),
+      browser: (session) => props.renderBrowser?.(session),
       stub: (id) => <BuiltinStubScreen tab={id} />
     }),
     ...(props.tabContributions ?? [])
@@ -338,6 +406,12 @@ function SessionPaneBody(props: SessionPaneProps) {
   // honest if the built-in set ever changes.
   const activeContribution = tabs.find((c) => c.id === tab) ?? tabs[0]
   const activeTab = activeContribution?.id ?? BUILTIN_TAB.conversation
+  const conversationContribution = tabs.find((c) => c.id === BUILTIN_TAB.conversation)
+  // At 960px, the default thirds yield a 320px chat and a 640px browser. Any
+  // narrower and both stop being useful, so Browser takes the full pane.
+  const browserSplitOpen =
+    activeTab === BUILTIN_TAB.browser &&
+    (paneWidth === 0 || paneWidth >= SESSION_BROWSER_SPLIT_BREAKPOINT)
   useEffect(() => {
     props.onActiveTabChange?.(active.id, activeTab)
   }, [active.id, activeTab, props.onActiveTabChange])
@@ -375,7 +449,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     activeTabId: activeTab,
     splitOpen,
     onConnectGithub: connectGithub,
-    onSelectTab: setTab
+    onSelectTab: selectTab
   }
 
   return (
@@ -391,10 +465,7 @@ function SessionPaneBody(props: SessionPaneProps) {
           )
           .map((contribution) => describeTab(contribution, tabCtx))}
         active={activeTab}
-        onChange={(nextTab) => {
-          if (nextTab === BUILTIN_TAB.plan) openPlanReview()
-          else setTab(nextTab)
-        }}
+        onChange={selectTab}
         status={
           activeActivity
             ? {
@@ -422,8 +493,8 @@ function SessionPaneBody(props: SessionPaneProps) {
         // renderer (RPCs + live activity), threaded in as an opaque node.
         chatSlot={props.renderChatTabs?.(active, {
           activeTabId: activeTab,
-          onSelectConversation: () => setTab(BUILTIN_TAB.conversation),
-          onSelectFiles: () => setTab(BUILTIN_TAB.files)
+          onSelectConversation: () => selectTab(BUILTIN_TAB.conversation),
+          onSelectFiles: () => selectTab(BUILTIN_TAB.files)
         })}
         // The title comes from the session rather than from the caller, so the
         // chip follows a rename the moment it lands.
@@ -452,10 +523,34 @@ function SessionPaneBody(props: SessionPaneProps) {
           session never hands the new session's data to the old subtree.
         */}
         <div
-          key={`${activeContribution?.mountGroup ?? activeTab}:${active.id}`}
+          key={`${browserSplitOpen ? "browser-split" : (activeContribution?.mountGroup ?? activeTab)}:${active.id}`}
           className="flex min-h-0 min-w-0 flex-1"
         >
-          {activeContribution?.render(active, renderCtx)}
+          {browserSplitOpen ? (
+            <div data-testid="session-browser-split" className="flex min-h-0 min-w-0 flex-1">
+              <div
+                data-testid="session-browser-chat"
+                className="flex min-h-0 min-w-0 flex-1 overflow-hidden"
+              >
+                {conversationContribution?.render(active, {
+                  ...renderCtx,
+                  activeTabId: BUILTIN_TAB.conversation
+                })}
+              </div>
+              <ResizeHandle aria-label="Resize session browser" onResize={adjustBrowserSplit} />
+              <div
+                data-testid="session-browser-panel"
+                style={{
+                  width: `calc(${effectiveBrowserRatio * 100}% - ${effectiveBrowserRatio * SESSION_BROWSER_SPLIT_HANDLE_WIDTH}px)`
+                }}
+                className="flex min-h-0 min-w-0 flex-none overflow-hidden"
+              >
+                {activeContribution?.render(active, renderCtx)}
+              </div>
+            </div>
+          ) : (
+            activeContribution?.render(active, renderCtx)
+          )}
         </div>
       </div>
     </>

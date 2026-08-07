@@ -31,7 +31,6 @@ import type {
 import { UNTITLED_SESSION } from "@jingler/core"
 import type { DockSide } from "./terminal-panel.js"
 import { AppShell } from "./app-shell.js"
-import { PreviewToggleButton } from "./preview-dock.js"
 import { NewSessionDialog } from "../composites/new-session-dialog.js"
 import { UsageModal } from "../composites/usage-modal.js"
 import { SettingsView } from "../composites/settings-view.js"
@@ -251,18 +250,12 @@ export interface JinglerAppProps {
   onToggleTerminal?: () => void
   /** Whether the terminal dock is currently open (drives the palette's label). */
   terminalActive?: boolean
-  /** Render the preview dock (the desktop app's PreviewDockView). */
-  renderBrowserDock?: (session: Session | null) => ReactNode
-  /** Which edge the preview dock attaches to. */
-  browserDockSide?: DockSide
-  /**
-   * Toggle the preview dock. Rendered in the WINDOW TITLE BAR rather than in a
-   * pane's tab bar: there is one dock and one native browser view for the whole
-   * app, and a copy of the control in each pane implied one per pane.
-   */
-  onToggleBrowser?: () => void
-  /** Whether the preview dock is currently open (highlights the toggle). */
-  browserActive?: boolean
+  /** Render the embedded browser inside its owning session pane. */
+  renderBrowser?: (session: Session) => ReactNode
+  /** Toggle the Browser tab belonging to the named session. */
+  onToggleBrowser?: (sessionId: string) => void
+  /** Whether the named session's Browser tab is currently open. */
+  isBrowserActive?: (sessionId: string) => boolean
   activeSessionId?: string | null
   /**
    * Select a session from OUTSIDE the shell — a notification click, a deep link.
@@ -451,10 +444,9 @@ export function JinglerApp({
   terminalActive,
   pluginCommands,
   onRunPluginCommand,
-  renderBrowserDock,
-  browserDockSide,
+  renderBrowser,
   onToggleBrowser,
-  browserActive,
+  isBrowserActive,
   activeSessionId,
   selectSessionRequest,
   onVisibleSessionsChange,
@@ -686,6 +678,20 @@ export function JinglerApp({
         return
       }
 
+      if (
+        e.ctrlKey &&
+        e.shiftKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        (e.key === "B" || e.code === "KeyB") &&
+        active &&
+        onToggleBrowser
+      ) {
+        e.preventDefault()
+        onToggleBrowser(active.id)
+        return
+      }
+
       const shortcut = matchSplitShortcut(e)
       if (shortcut === null) return
 
@@ -736,7 +742,15 @@ export function JinglerApp({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [onCreateSession, group, split, addNextSessionAsPane, active, renderFileQuickOpen])
+  }, [
+    onCreateSession,
+    onToggleBrowser,
+    group,
+    split,
+    addNextSessionAsPane,
+    active,
+    renderFileQuickOpen
+  ])
 
   /**
    * Everything the palette can do, as data.
@@ -789,9 +803,6 @@ export function JinglerApp({
     // nothing on screen, with no error to read. That is the failure this whole
     // block's gating exists to prevent, arrived at from the other direction.
     //
-    // Show Browser is deliberately NOT gated the same way: the preview dock
-    // points at localhost and `renderBrowserDock` takes a nullable session, so
-    // it opens perfectly well with nothing selected.
     if (onToggleTerminal && active) {
       items.push({
         id: "action:toggle-terminal",
@@ -804,17 +815,17 @@ export function JinglerApp({
       })
     }
 
-    if (onToggleBrowser) {
+    if (onToggleBrowser && active) {
       items.push({
         id: "action:toggle-browser",
         kind: "action",
         // The label names what the chord will DO, not what is currently true —
         // "Browser: on" would leave you working out which way to read it.
-        label: browserActive ? "Hide Browser" : "Show Browser",
+        label: isBrowserActive?.(active.id) ? "Hide Browser" : "Show Browser",
         group: PALETTE_GROUP.actions,
         hint: "⌃⇧B",
         icon: MonitorPlay,
-        run: onToggleBrowser
+        run: () => onToggleBrowser(active.id)
       })
     }
 
@@ -922,7 +933,7 @@ export function JinglerApp({
     onToggleTerminal,
     terminalActive,
     onToggleBrowser,
-    browserActive,
+    isBrowserActive,
     onArchiveSession,
     onRestoreSession,
     onSaveProvider,
@@ -967,11 +978,6 @@ export function JinglerApp({
     <AppShell
       title="Jingler"
       search={<TitleSearch onOpen={() => setPaletteOpen(true)} />}
-      actions={
-        onToggleBrowser ? (
-          <PreviewToggleButton active={browserActive ?? false} onClick={onToggleBrowser} />
-        ) : undefined
-      }
     >
       <SessionConversation
         sessions={sessions}
@@ -1005,12 +1011,15 @@ export function JinglerApp({
         onResizePane={(index, delta) => group && split.resizePane(group.id, index, delta)}
         slotBySession={paneBySession}
         onRenameSession={onRenameSession}
+        onToggleBrowser={onToggleBrowser}
+        isBrowserActive={isBrowserActive}
         onSetSessionPersistent={onSetSessionPersistent}
         onArchiveSession={onArchiveSession}
         onRestoreSession={onRestoreSession}
         onDeleteSession={onDeleteSession}
         renderConversation={renderConversation}
         renderFiles={renderFiles}
+        renderBrowser={renderBrowser}
         onOpenFile={onOpenFile}
         renderChatTabs={renderChatTabs}
         planSessions={planSessions}
@@ -1114,8 +1123,6 @@ export function JinglerApp({
         renderCode={renderCode}
         renderTerminalDock={renderTerminalDock}
         terminalDockSide={terminalDockSide}
-        renderBrowserDock={renderBrowserDock}
-        browserDockSide={browserDockSide}
         selectTabRequest={tabRequest}
         onTabRequestHandled={clearTabRequest}
         version={version}
