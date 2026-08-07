@@ -811,7 +811,16 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         cwd,
         "POST",
         "/repos/{owner}/{repo}/pulls",
-        { title: subject, body, head: currentBranch, base: input.base, draft: input.draft },
+        {
+          title: subject,
+          body,
+          // Installation tokens are repository identities rather than user
+          // identities. Qualify the ref so GitHub resolves the source branch
+          // in the repository owner namespace, matching prForBranch above.
+          head: `${repository.owner}:${currentBranch}`,
+          base: input.base,
+          draft: input.draft
+        },
         ["pull_requests:write"]
       )
       const created = number(response.data.number)

@@ -675,11 +675,16 @@ export const startFakeGitHubServer = async (
           head: String(body.head ?? ""),
           base: String(body.base ?? ""),
         };
+        const headRefName = publishedPr.head.includes(":")
+          ? publishedPr.head.slice(publishedPr.head.indexOf(":") + 1)
+          : publishedPr.head;
         prs.push({
           number: 900,
           title: publishedPr.title,
           body: publishedPr.body,
-          headRefName: publishedPr.head,
+          // GitHub accepts an owner-qualified create payload but returns the
+          // branch-only ref alongside its repository identity.
+          headRefName,
           baseRefName: publishedPr.base,
           author: { login: options.userLogin ?? "octocat" },
         });

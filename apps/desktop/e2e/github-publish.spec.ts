@@ -103,7 +103,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
     prNumber: 900
   })
   expect(git(session.worktreePath, ["log", "-1", "--format=%s"])).toBe(
-    "chore: ship deterministic publish"
+    "chore: implement deterministic publishing"
   )
   expect(git(session.worktreePath, ["rev-list", "--count", "main..HEAD"])).toBe("1")
   expect(githubServer.operations.filter((operation) => operation.startsWith("pr create"))).toHaveLength(1)
@@ -147,7 +147,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   )
   expect(githubServer.publishedPr()).toMatchObject({
     number: 900,
-    head: session.branch,
+    head: `acme:${session.branch}`,
     base: "main",
     title: "Ship deterministic publish"
   })
@@ -252,7 +252,7 @@ test("publishes a migration-era established jingler branch without renaming it",
     "chore: historical publish"
   )
   expect(githubServer.publishedPr()).toMatchObject({
-    head: branch,
+    head: `acme:${branch}`,
     base: "main",
     title: "Publish historical session"
   })

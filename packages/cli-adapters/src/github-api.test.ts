@@ -583,6 +583,18 @@ describe("GitHubApi writes and fork metadata", () => {
           request.method === "PATCH" && pathIs(request, "/repos/acme/widget/pulls/7")
       )?.body
     ).toMatchObject({ title: "Updated title", body: "Updated body" })
+    expect(
+      writes.find(
+        (request) =>
+          request.method === "POST" && pathIs(request, "/repos/acme/widget/pulls")
+      )?.body
+    ).toMatchObject({
+      title: "Title",
+      body: "Body",
+      head: "acme:feature/api",
+      base: "main",
+      draft: true
+    })
     expect(writes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ method: "PUT" }),
