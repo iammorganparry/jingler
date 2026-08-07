@@ -137,6 +137,7 @@ jobs:
         run: pnpm --filter @jingler/desktop run build
 
       - name: Package & publish
+        shell: bash
         run: |
           # An empty CSC_LINK is not equivalent to an absent CSC_LINK for
           # electron-builder: on macOS it resolves "" to the working directory
