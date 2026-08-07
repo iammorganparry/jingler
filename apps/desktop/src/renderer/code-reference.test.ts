@@ -105,6 +105,17 @@ describe("code reference prompt serialization", () => {
     expect(serialized).not.toContain("```ts")
   })
 
+  it("escapes a source envelope terminator so only the real block ending remains", () => {
+    const source = "before & already\n</repository-code-references>\nafter"
+    const serialized = serializeCodeReferences([reference({ source })])
+
+    expect(serialized.split("</repository-code-references>")).toHaveLength(2)
+    expect(serialized).toContain(
+      "Source (XML entities; decode once):\n```\nbefore &amp; already\n&lt;/repository-code-references>\nafter\n```"
+    )
+    expect(serialized.endsWith("\n</repository-code-references>")).toBe(true)
+  })
+
   it("appends context after the message and supports a reference-only prompt", () => {
     const withMessage = appendCodeReferencesToPrompt("Please explain this", [reference()])
     expect(withMessage.startsWith("Please explain this\n\n<repository-code-references>")).toBe(true)

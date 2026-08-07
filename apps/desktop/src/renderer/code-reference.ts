@@ -19,6 +19,8 @@ const WINDOWS_ABSOLUTE_PATH = /^[A-Za-z]:\//
 const AMBIGUOUS_PATH_CHARACTERS = /\r|\n|\0/
 const BACKTICK_RUN = /`+/g
 const SOURCE_LINE = /[^\r\n]*(?:\r\n|\r|\n|$)/g
+const REPOSITORY_REFERENCES_CLOSE = "</repository-code-references>"
+const ESCAPED_REPOSITORY_REFERENCES_CLOSE = "&lt;/repository-code-references>"
 
 /**
  * Make a path repository-relative without interpreting punctuation as syntax.
@@ -142,26 +144,43 @@ const fenceFor = (source: string): string => {
   return "`".repeat(Math.max(3, longest + 1))
 }
 
+const sourceForEnvelope = (
+  source: string
+): { readonly source: string; readonly xmlEscaped: boolean } => {
+  if (!source.includes(REPOSITORY_REFERENCES_CLOSE)) {
+    return { source, xmlEscaped: false }
+  }
+  return {
+    // Escape ampersands first so decoding entities once restores the exact source.
+    source: source
+      .replaceAll("&", "&amp;")
+      .replaceAll(REPOSITORY_REFERENCES_CLOSE, ESCAPED_REPOSITORY_REFERENCES_CLOSE),
+    xmlEscaped: true
+  }
+}
+
 /**
  * Serialize captured ranges into a deterministic, harness-agnostic context block.
  * The fence has no language annotation and grows around backticks in the source.
+ * A reserved envelope terminator is entity-encoded only when it occurs in source.
  */
 export const serializeCodeReferences = (references: ReadonlyArray<unknown>): string => {
   const normalized = deduplicateCodeReferences(references)
   if (normalized.length === 0) return ""
 
   const blocks = normalized.map((reference, index) => {
-    const fence = fenceFor(reference.source)
+    const envelopeSource = sourceForEnvelope(reference.source)
+    const fence = fenceFor(envelopeSource.source)
     const lines =
       reference.startLine === reference.endLine
         ? `${reference.startLine} (inclusive)`
         : `${reference.startLine}-${reference.endLine} (inclusive)`
-    const fencedSource = `${fence}\n${reference.source}${reference.source.endsWith("\n") ? "" : "\n"}${fence}`
+    const fencedSource = `${fence}\n${envelopeSource.source}${envelopeSource.source.endsWith("\n") ? "" : "\n"}${fence}`
     return [
       `Reference ${index + 1}`,
       `Path: ${JSON.stringify(reference.path)}`,
       `Lines: ${lines}`,
-      "Source:",
+      envelopeSource.xmlEscaped ? "Source (XML entities; decode once):" : "Source:",
       fencedSource
     ].join("\n")
   })
@@ -170,7 +189,7 @@ export const serializeCodeReferences = (references: ReadonlyArray<unknown>): str
     "<repository-code-references>",
     "Captured repository excerpts. Line ranges are one-based and inclusive.",
     blocks.join("\n\n"),
-    "</repository-code-references>"
+    REPOSITORY_REFERENCES_CLOSE
   ].join("\n")
 }
 
