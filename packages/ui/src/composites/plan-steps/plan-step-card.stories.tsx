@@ -4,7 +4,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import { PlanStepCard } from "./plan-step-card.js"
 
 /**
- * A single `PlanStepCard` in isolation — the Main-page unit. Header (id + title +
+ * A single `PlanStepCard` in isolation — the Steps-page unit. Header (id + title +
  * complexity + execution status) over three sections: Changes, Tasks, Tests.
  */
 const meta: Meta = { title: "Composites/Plan Step Card" }

@@ -19,6 +19,10 @@ const source = JSON.stringify({
         files: [],
         diagrams: [],
         notes: [],
+        walkthrough: [
+          { kind: "prose", id: "01-why", text: "Keep the document boundary explicit." },
+          { kind: "code", id: "01-code", language: "tsx", code: "<PlanReview document={plan} />" }
+        ],
         acceptance: [
           { id: "01.1", text: "Legacy rails are absent.", status: "pending", evidence: null }
         ],
@@ -47,6 +51,10 @@ const document: PlanDocument = {
         files: [],
         diagrams: [],
         notes: [],
+        walkthrough: [
+          { kind: "prose", id: "01-why", text: "Keep the document boundary explicit." },
+          { kind: "code", id: "01-code", language: "tsx", code: "<PlanReview document={plan} />" }
+        ],
         acceptance: [
           {
             id: "01.1",
@@ -122,7 +130,7 @@ describe("PlanReview", () => {
     expect(screen.getByRole("button", { name: "Composing plan" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull()
 
-    // Once canonical, the Main page presents the digestible step outline and an
+    // Once canonical, the Steps page presents the digestible step outline and an
     // Approve action — with no sync/revision indicator (the plan is read-only).
     view.rerender(
       <PlanReview plan={canonicalPlan} document={{ ...document, id: "plan-stream" }} />
@@ -172,7 +180,7 @@ describe("PlanReview", () => {
     expect(screen.getByText("Still readable")).toBeTruthy()
   })
 
-  it("lands a progress-dock deep link on its step in the Main outline", async () => {
+  it("lands a progress-dock deep link on its step in the Steps outline", async () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView
     const onSelectStep = vi.fn()
@@ -199,22 +207,30 @@ describe("PlanReview", () => {
     expect(screen.queryByLabelText("Resize changes")).toBeNull()
   })
 
-  it("switches between the Main, Architecture and Workflow pages", async () => {
+  it("links Steps to the Walkthrough and keeps Architecture available", async () => {
     render(<PlanReview plan={null} document={document} />)
 
-    // Main page: the step outline.
+    // Steps page: the step outline.
     expect(screen.getByText("Build")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Open walkthrough for Build" }))
+    expect(screen.getByRole("tab", { name: "Walkthrough" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByText("Keep the document boundary explicit.")).toBeTruthy()
+    expect(screen.getByText("<PlanReview document={plan} />")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Open step Build" }))
+    expect(screen.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true")
 
     // Architecture page: the fixture has no prose/diagrams, so its empty state.
     fireEvent.click(screen.getByRole("tab", { name: "Architecture" }))
     expect(await screen.findByText(/No architecture notes yet/)).toBeTruthy()
 
-    // Back to Main.
-    fireEvent.click(screen.getByRole("tab", { name: "Main" }))
+    // Back to Steps.
+    fireEvent.click(screen.getByRole("tab", { name: "Steps" }))
     expect(screen.getByText("Build")).toBeTruthy()
   })
 
-  it("shows TLDR first and jumps from stage architecture to its Main card", async () => {
+  it("shows TLDR first and jumps from stage architecture to its Steps card", async () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView
     const architectureDocument: PlanDocument = {
@@ -248,9 +264,9 @@ describe("PlanReview", () => {
     expect(screen.getByText("Outcome first.")).toBeVisible()
     expect(screen.getByRole("region", { name: "Architecture for Build" })).toBeVisible()
 
-    fireEvent.click(screen.getByRole("button", { name: "Open stage Build in Main" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open stage Build in Steps" }))
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: "Main" })).toHaveAttribute("aria-selected", "true")
+      expect(screen.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true")
       expect(globalThis.document.querySelector('[data-step-id="01"]')).toHaveAttribute("aria-pressed", "true")
     })
     expect(scrollIntoView).toHaveBeenCalled()

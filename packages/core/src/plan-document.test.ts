@@ -53,6 +53,10 @@ describe("plan document schemas", () => {
           status: "pending",
           evidence: null
         }
+      ],
+      walkthrough: [
+        { kind: "prose", id: "why", text: "Keep the worker boundary explicit." },
+        { kind: "code", id: "example", language: "ts", code: "await dispatch(stage)" }
       ]
     })
 
@@ -68,6 +72,7 @@ describe("plan document schemas", () => {
         cases: ["decodes progressable tasks and named test references"]
       }
     ])
+    expect(decoded.right.walkthrough).toHaveLength(2)
     expect(
       Either.isRight(
         Schema.decodeUnknownEither(PlanTask)({ id: "task", text: "Do work", status: "completed" })
@@ -112,6 +117,7 @@ describe("plan document schemas", () => {
     expect(Either.isRight(decoded)).toBe(true)
     if (Either.isLeft(decoded)) return
     expect(decoded.right.plan.stages[0]?.tasks).toEqual([])
+    expect(decoded.right.plan.stages[0]?.walkthrough).toBeUndefined()
     expect(decoded.right.plan.stages[0]?.acceptance[0]?.testReferences).toEqual([])
   })
 

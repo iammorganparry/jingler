@@ -48,6 +48,7 @@ export const planStageSemanticFingerprint = (stage: PlanPrdStage): string =>
       .sort((left, right) => left.path.localeCompare(right.path)),
     diagrams: stage.diagrams.map((diagram) => ({ id: diagram.id, source: diagram.source })),
     notes: stage.notes,
+    walkthrough: stage.walkthrough ?? [],
     acceptance: stage.acceptance.map((criterion) => ({
       id: criterion.id,
       text: criterion.text,

@@ -361,6 +361,12 @@ export const PlanPrdStage = Schema.Struct({
   diagrams: Schema.Array(PlanDiagram),
   /** Any remaining rich prose for the stage body. */
   notes: Schema.Array(PlanBlock),
+  /**
+   * Tutorial-style implementation guidance shared by operators and workers.
+   * Missing on plans authored before walkthroughs. Consumers default it to an
+   * empty list without changing the persisted shape of historical documents.
+   */
+  walkthrough: Schema.optional(Schema.Array(PlanBlock)),
   acceptance: Schema.Array(PlanAcceptance),
   dependencies: Schema.optional(Schema.Array(Schema.String)),
   complexity: Schema.optional(PlanStageComplexity),
@@ -457,6 +463,16 @@ export const planBlockText = (block: PlanBlock): string => {
   }
 }
 
+const planStageTextProjection = (stage: PlanPrdStage): ReadonlyArray<string> => [
+  stage.title,
+  stage.intent,
+  ...stage.approach,
+  ...(stage.tasks ?? []).map((task) => task.text),
+  ...stage.notes.map(planBlockText),
+  ...(stage.walkthrough ?? []).map(planBlockText),
+  ...stage.acceptance.map((criterion) => criterion.text)
+]
+
 /**
  * A deterministic plain-text rendering of a plan, in document order. Comment
  * anchoring resolves against this (per block) instead of rendered DOM text, so
@@ -469,11 +485,7 @@ export const planTextProjection = (plan: PlanPrd): string => {
     for (const block of section.blocks) parts.push(planBlockText(block))
   }
   for (const stage of plan.stages) {
-    parts.push(stage.title, stage.intent)
-    for (const step of stage.approach) parts.push(step)
-    for (const task of stage.tasks ?? []) parts.push(task.text)
-    for (const block of stage.notes) parts.push(planBlockText(block))
-    for (const criterion of stage.acceptance) parts.push(criterion.text)
+    parts.push(...planStageTextProjection(stage))
   }
   return parts.filter((part) => part.length > 0).join("\n\n")
 }

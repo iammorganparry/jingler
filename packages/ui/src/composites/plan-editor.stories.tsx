@@ -5,11 +5,11 @@ import { PlanEditor } from "./plan-editor.js"
 
 /**
  * The integrated plan workspace: a segmented switcher over three read-only pages
- * — **Main** (step outline), **Architecture** (prose + mermaid), **Workflow**
- * (react-flow DAG with per-node Stop/Retry) — plus the floating approve/resume
- * actions. Flip the tabs at the top and click a Workflow node to jump to Main.
+ * — **Steps** (step outline), **Walkthrough** (tutorial guidance), **Architecture**
+ * (prose + mermaid), **Workflow** (react-flow DAG with per-node Stop/Retry) — plus
+ * the floating approve/resume actions.
  */
-const meta: Meta = { title: "Composites/Plan Editor (three pages)" }
+const meta: Meta = { title: "Composites/Plan Editor (four pages)" }
 export default meta
 type Story = StoryObj
 
@@ -31,6 +31,10 @@ const document: PlanDocument = {
         files: [{ path: "packages/ui/src/composites/plan-editor.tsx", change: "M" }],
         diagrams: [],
         notes: [],
+        walkthrough: [
+          { kind: "prose", id: "s_01-why", text: "Keep plan rendering separate from revision writes." },
+          { kind: "code", id: "s_01-code", language: "tsx", code: "<PlanEditor document={document} />" }
+        ],
         acceptance: [{ id: "s_01.1", text: "The outline renders.", status: "pending", evidence: null }]
       }
     ],
@@ -66,7 +70,7 @@ function Harness({ transient }: { transient?: boolean }) {
 }
 
 /** Canonical plan across all three pages. Switch tabs; try Stop/Retry on Workflow. */
-export const ThreePages: Story = { render: () => <Harness /> }
+export const FourPages: Story = { render: () => <Harness /> }
 
-/** Still composing: Main falls back to the read-only document as the plan streams in. */
+/** Still composing: Steps falls back to the read-only document as the plan streams in. */
 export const Streaming: Story = { render: () => <Harness transient /> }

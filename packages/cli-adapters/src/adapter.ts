@@ -11,7 +11,7 @@ import type {
   StreamEvent,
   WorkerRoutingConfig
 } from "@jingler/core"
-import { CliExecError } from "@jingler/core"
+import type { CliExecError } from "@jingler/core"
 import { Context, Data, Effect, Layer } from "effect"
 import { planTaskProgressFingerprint } from "./plan-task-progress.js"
 
@@ -492,6 +492,23 @@ export const scriptedPlanPrd = (
       ? [{ id: "audit-flow", source: "flowchart LR\n  Session --> TokenStore" }]
       : [],
     notes,
+    walkthrough: [
+      {
+        kind: "prose" as const,
+        id: `${id}-walkthrough-rationale`,
+        text: id === "s_01"
+          ? "Start at the session boundary so the refactor preserves the current token semantics before introducing a new store."
+          : `Implement **${title}** behind the existing boundary so callers keep a stable contract.`
+      },
+      {
+        kind: "code" as const,
+        id: `${id}-walkthrough-example`,
+        language: "ts",
+        code: id === "s_01"
+          ? "const token = await tokenStore.get(session.userId)"
+          : `await implementStage("${id}")`
+      }
+    ],
     acceptance: acceptance.map((a) => ({
       ...a,
       testReferences: a.testReferences?.map((reference) => ({

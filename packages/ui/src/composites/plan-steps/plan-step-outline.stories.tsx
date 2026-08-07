@@ -140,7 +140,7 @@ const richPrd = prdWith([
   stage({
     id: "06",
     title: "Render the step outline",
-    intent: "Ship the Main page: one card per step with changes, tasks and tests.",
+    intent: "Ship the Steps page: one card per step with changes, tasks and tests.",
     prose:
       "<p>Compose existing atoms — <code>FileChip</code>, <code>Badge</code>, <code>StatusDot</code> — into a scannable card.</p>",
     files: [
@@ -157,7 +157,7 @@ const richPrd = prdWith([
   }),
   stage({
     id: "07",
-    title: "Cross-link Workflow to Main",
+    title: "Cross-link Workflow to Steps",
     intent: "Selecting a node on the Workflow page scrolls the matching card into view.",
     prose: "<p>Both surfaces key on the stage id, so selection is a shared string.</p>",
     files: [],

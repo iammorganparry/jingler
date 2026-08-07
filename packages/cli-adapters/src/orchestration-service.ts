@@ -20,6 +20,12 @@ const renderStageSpec = (stage: PlanPrdStage): string =>
       ? `Files:\n${stage.files.map((file) => `- ${file.change} ${file.path}`).join("\n")}`
       : "",
     ...stage.notes.map(planBlockText),
+    (stage.walkthrough ?? []).length > 0
+      ? `Implementation walkthrough (use this as implementation guidance):\n${(stage.walkthrough ?? [])
+          .map(planBlockText)
+          .filter((text) => text.length > 0)
+          .join("\n\n")}`
+      : "",
     stage.acceptance.length > 0
       ? `Acceptance:\n${stage.acceptance.map((c) => `- [${c.id}] ${c.text}`).join("\n")}`
       : ""

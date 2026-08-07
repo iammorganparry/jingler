@@ -34,7 +34,7 @@ const session = (
 
 // Plans are structured DTOs (`PlanDocument`); the canonical file is
 // `current-plan.json` (pretty-printed JSON). The document is presented read-only
-// across three pages (Main / Architecture / Workflow) — there is no in-place editor.
+// across four pages (Steps / Walkthrough / Architecture / Workflow) — there is no in-place editor.
 const currentPlanPath = (launched: LaunchedApp): string =>
   join(planDirectory(launched.home, launched.repoPath), "current-plan.json")
 
@@ -109,7 +109,7 @@ const openSettings = async (window: Page): Promise<void> => {
 
 /**
  * Propose the scripted plan and open Plan Review on its canonical revision. The
- * plan is read-only now, so this waits for the Main step outline to render a
+ * plan is read-only now, so this waits for the Steps outline to render a
  * seeded stage title rather than for any editor/sync indicator.
  */
 const proposePlan = async (launched: LaunchedApp): Promise<void> => {
@@ -120,10 +120,10 @@ const proposePlan = async (launched: LaunchedApp): Promise<void> => {
   const review = window.getByRole("button", { name: "Plan Review" }).first()
   await expect(review).toBeVisible({ timeout: 20_000 })
   await review.click()
-  // Main is the step-based outline; a stage's title renders as its card text.
-  await expect(window.getByRole("tab", { name: "Main" })).toBeVisible()
+  // Steps is the step-based outline; a stage's title renders as its card text.
+  await expect(window.getByRole("tab", { name: "Steps" })).toBeVisible()
   await expect(
-    window.getByText("Audit session middleware", { exact: true })
+    window.locator('[data-step-id="s_01"]').getByText("Audit session middleware", { exact: true })
   ).toBeVisible({ timeout: 20_000 })
   await expect.poll(() => existsSync(currentPlanPath(launched))).toBe(true)
   await expect.poll(() => readFileSync(currentPlanPath(launched), "utf8")).toContain(
@@ -232,7 +232,7 @@ test("the preferred orchestrator persists across restart", async ({ launchApp })
   ).toContainText("Codex")
 })
 
-test("the Main, Architecture and Workflow pages each render their surface", async ({
+test("the Steps, Walkthrough, Architecture and Workflow pages each render their surface", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -244,12 +244,29 @@ test("the Main, Architecture and Workflow pages each render their surface", asyn
   await proposePlan(launched)
   const { window } = launched
 
-  // Main: the step outline, one card per stage.
-  await expect(window.getByRole("tab", { name: "Main" })).toHaveAttribute(
+  // Steps: the step outline, one card per stage.
+  await expect(window.getByRole("tab", { name: "Steps" })).toHaveAttribute(
     "aria-selected",
     "true"
   )
-  await expect(window.getByText("Open PR #482", { exact: true })).toBeVisible()
+  await expect(
+    window.locator('[data-step-id="s_06"]').getByText("Open PR #482", { exact: true })
+  ).toBeVisible()
+
+  // Walkthrough: every step exposes rationale and a focused implementation example.
+  await window.getByRole("button", {
+    name: "Open walkthrough for Audit session middleware",
+    exact: true
+  }).click()
+  await expect(window.getByRole("tab", { name: "Walkthrough" })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  )
+  const walkthrough = window.getByRole("region", {
+    name: "Walkthrough for Audit session middleware"
+  })
+  await expect(walkthrough).toContainText("Start at the session boundary")
+  await expect(walkthrough).toContainText("tokenStore.get")
 
   // Architecture: prose sections + stage-owned architecture grouping. The
   // dedicated test below verifies the dynamically loaded hand-drawn SVG.
@@ -267,14 +284,14 @@ test("the Main, Architecture and Workflow pages each render their surface", asyn
     window.getByText("Audit session middleware").first()
   ).toBeVisible()
 
-  // Back to Main leaves the outline in place.
-  await window.getByRole("tab", { name: "Main" }).click()
+  // Back to Steps leaves the outline in place.
+  await window.getByRole("tab", { name: "Steps" }).click()
   await expect(
-    window.getByText("Audit session middleware", { exact: true })
+    window.locator('[data-step-id="s_01"]').getByText("Audit session middleware", { exact: true })
   ).toBeVisible()
 })
 
-test("the Main and Architecture pages keep TLDR and stage architecture connected", async ({
+test("the Steps and Architecture pages keep TLDR and stage architecture connected", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -302,10 +319,10 @@ test("the Main and Architecture pages keep TLDR and stage architecture connected
     architecture.locator('.sb-mermaid [data-look="handDrawn"]').first()
   ).toBeVisible({ timeout: 20_000 })
   await architecture.getByRole("button", {
-    name: "Open stage Audit session middleware in Main"
+    name: "Open stage Audit session middleware in Steps"
   }).click()
 
-  await expect(window.getByRole("tab", { name: "Main" })).toHaveAttribute(
+  await expect(window.getByRole("tab", { name: "Steps" })).toHaveAttribute(
     "aria-selected",
     "true"
   )
@@ -399,7 +416,7 @@ test("worker task progress streams into the canonical plan review", async ({
     .toBe("in-progress")
 })
 
-test("a comment added on a step appears and can be resolved", async ({
+test("a walkthrough comment reaches the durable agent feedback thread", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -411,9 +428,14 @@ test("a comment added on a step appears and can be resolved", async ({
   await proposePlan(launched)
   const { window } = launched
 
-  // The comment layer overlays the Main outline with a per-step affordance.
+  await window.getByRole("tab", { name: "Walkthrough" }).click()
+  await expect(window.getByRole("region", {
+    name: "Walkthrough for Audit session middleware"
+  })).toBeVisible()
+
+  // The walkthrough uses the same durable, stage-scoped feedback path as Steps.
   await window.getByRole("button", { name: "Comment on this step" }).first().click()
-  await window.getByLabel("Add a comment…").fill("Keep rollout sequential.")
+  await window.getByLabel("Add a comment…").fill("Explain why this boundary is preferred.")
   await window.getByRole("button", { name: "Send reply" }).click()
 
   // The new annotation round-trips through the plan file and surfaces as a pin.
@@ -421,10 +443,10 @@ test("a comment added on a step appears and can be resolved", async ({
   await expect(pin).toBeVisible({ timeout: 10_000 })
   await pin.click()
   const thread = window.locator("[data-plan-comment-thread]")
-  await expect(thread.getByText("Keep rollout sequential.")).toBeVisible()
+  await expect(thread.getByText("Explain why this boundary is preferred.")).toBeVisible()
   await expect
     .poll(() => readFileSync(currentPlanPath(launched), "utf8"))
-    .toContain("Keep rollout sequential.")
+    .toContain("Explain why this boundary is preferred.")
 
   await thread.getByRole("button", { name: "Resolve" }).click()
   await expect(thread.getByText("Thread resolved")).toBeVisible()

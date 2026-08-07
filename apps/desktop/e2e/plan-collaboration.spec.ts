@@ -109,7 +109,7 @@ test("streaming plan collaboration survives promotion and reload", async ({
     window.getByText("Audit session middleware", { exact: true }).first()
   ).toBeVisible({ timeout: 20_000 })
 
-  // Promotion swaps in the validated canonical revision — the Main step outline.
+  // Promotion swaps in the validated canonical revision — the Steps outline.
   await expect.poll(() => existsSync(planFile), { timeout: 20_000 }).toBe(true)
   await expect
     .poll(() => readFileSync(planFile, "utf8"))

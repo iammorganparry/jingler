@@ -3,7 +3,7 @@ import { useMemo } from "react"
 import { PlanStepCard } from "./plan-step-card.js"
 
 /**
- * The **Main** surface (design screen 04): a plan's steps as a vertical stack of
+ * The **Steps** surface (design screen 04): a plan's steps as a vertical stack of
  * digestible cards, one per stage, in dependency-topological order.
  *
  * It takes the canonical `PlanPrd` and derives its rows with `toPlanStepViews` —
@@ -20,9 +20,10 @@ export interface PlanStepOutlineProps {
   readonly prd: PlanPrd
   readonly selectedStepId?: string | null
   readonly onSelectStep?: (stepId: string) => void
+  readonly onOpenWalkthrough?: (stepId: string) => void
 }
 
-export function PlanStepOutline({ prd, selectedStepId, onSelectStep }: PlanStepOutlineProps) {
+export function PlanStepOutline({ prd, selectedStepId, onSelectStep, onOpenWalkthrough }: PlanStepOutlineProps) {
   const steps = useMemo(() => toPlanStepViews(prd), [prd])
 
   if (steps.length === 0) {
@@ -41,6 +42,7 @@ export function PlanStepOutline({ prd, selectedStepId, onSelectStep }: PlanStepO
           step={step}
           active={step.id === selectedStepId}
           onSelect={onSelectStep}
+          onOpenWalkthrough={onOpenWalkthrough}
         />
       ))}
     </div>

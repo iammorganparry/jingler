@@ -42,6 +42,8 @@ export interface PlanStepView {
   readonly files: ReadonlyArray<PlanFile>
   /** Remaining rich prose blocks for the stage body. */
   readonly notes: ReadonlyArray<PlanBlock>
+  /** Tutorial-style rationale and implementation examples for this stage. */
+  readonly walkthrough?: ReadonlyArray<PlanBlock>
   /** The assigned worker's agent id, when a worker owns this stage; else null. */
   readonly agentId: string | null
   /** A short "cli · model" worker label, when assigned; else null. */
@@ -110,6 +112,7 @@ const toStepView = (stage: PlanPrdStage): PlanStepView => {
     approach: stage.approach,
     files: stage.files,
     notes: stage.notes,
+    walkthrough: stage.walkthrough ?? [],
     agentId: assignment?.agentId ?? null,
     worker: assignment ? `${assignment.cli} · ${assignment.model}` : null,
     reasoningEffort: assignment?.reasoning?.effort ?? null

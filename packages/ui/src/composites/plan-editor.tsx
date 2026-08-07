@@ -86,6 +86,7 @@ const normalizePlan = (candidate: Record<string, unknown>): PlanPrd =>
           }))
           .filter((diagram) => diagram.source.trim().length > 0),
         notes: asArray(s.notes),
+        walkthrough: asArray(s.walkthrough),
         acceptance: asRecords(s.acceptance).map((criterion, index) => ({
           id: asString(criterion.id) || `criterion-${index + 1}`,
           text: asString(criterion.text),
@@ -138,6 +139,7 @@ const planFromSource = (source: string): PlanPrd | null => {
 import { PlanArchitecture } from "./plan-architecture.js"
 import { PlanFloatingActions } from "./plan-floating-actions.js"
 import { PlanStepOutline } from "./plan-steps/plan-step-outline.js"
+import { PlanWalkthrough } from "./plan-walkthrough.js"
 import { PlanWorkflow } from "./plan-workflow.js"
 
 export type PlanEditorSyncState =
@@ -153,11 +155,12 @@ export type PlanEditorTransientState =
   | "validating"
   | "promoting"
 
-/** The three plan surfaces the operator can switch between. */
-export type PlanPage = "main" | "architecture" | "workflow"
+/** The four plan surfaces the operator can switch between. */
+export type PlanPage = "steps" | "walkthrough" | "architecture" | "workflow"
 
 const PLAN_PAGES: ReadonlyArray<{ value: PlanPage; label: string }> = [
-  { value: "main", label: "Main" },
+  { value: "steps", label: "Steps" },
+  { value: "walkthrough", label: "Walkthrough" },
   { value: "architecture", label: "Architecture" },
   { value: "workflow", label: "Workflow" }
 ]
@@ -187,30 +190,32 @@ export interface PlanEditorProps {
   onOpenFile?: (path: string) => void
   /**
    * The comment overlay (built by the screen from the plan's annotations). It is
-   * rendered above the Main step outline and positions itself off the outline's
+   * rendered above the active commentable page and positions itself off that
    * scroll container, handed back through `onContainerRef`.
    */
   commentLayer?: ReactNode
-  /** Receives the live scroll element of the Main page so the comment layer can anchor to it. */
+  /** Receives the live scroll element of the active commentable page. */
   onContainerRef?: (el: HTMLElement | null) => void
   /** Extra chrome rendered under the page switcher (currently unused seam). */
   pageNav?: ReactNode
 }
 
 /**
- * The plan workspace body. The agent's canonical plan is presented across three
+ * The plan workspace body. The agent's canonical plan is presented across four
  * pages, switched with a segmented control:
  *
- * - **Main** — a step-based outline (`PlanStepOutline`): one digestible card per
+ * - **Steps** — a step-based outline (`PlanStepOutline`): one digestible card per
  *   stage with its changes, tasks and tests. While the plan is still streaming
  *   (or its HTML hasn't parsed to a projection yet) this falls back to the raw
  *   read-only document (`PlanDocView`) so composing plans still render live.
+ * - **Walkthrough** — tutorial guidance, rationale, and code examples for every
+ *   stage, linked directly from its Steps card.
  * - **Architecture** — prose sections + flow diagrams (`PlanArchitecture`).
  * - **Workflow** — the dependency DAG on a react-flow canvas (`PlanWorkflow`);
- *   selecting a node jumps to Main with that step highlighted.
+ *   selecting a node jumps to Steps with that step highlighted.
  *
  * The operator approves / resumes / revises through `PlanFloatingActions`; they
- * no longer edit the prose in place. Comments overlay the Main page.
+ * no longer edit the prose in place. Comments overlay Steps and Walkthrough.
  */
 export function PlanEditor({
   document: doc,
@@ -235,7 +240,7 @@ export function PlanEditor({
   onContainerRef,
   pageNav
 }: PlanEditorProps) {
-  const [page, setPage] = useState<PlanPage>("main")
+  const [page, setPage] = useState<PlanPage>("steps")
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const widthTier = useWidthTier()
@@ -268,21 +273,22 @@ export function PlanEditor({
     [patch]
   )
 
-  // A stage requested by the composer progress dock lands on Main, selected.
+  // A stage requested by the composer progress dock lands on Steps, selected.
   // Defer until the step outline is actually showing — while a plan is still
   // streaming there's no card to select or scroll to, so consuming the target
   // there would silently drop the deep link. It re-fires once the outline mounts.
   useEffect(() => {
     if (targetStageId == null || !showOutline) return
-    setPage("main")
+    setPage("steps")
     setSelectedStepId(targetStageId)
     onTargetStageConsumed?.()
   }, [targetStageId, showOutline, onTargetStageConsumed])
 
-  // Scroll the selected card into view when it changes (e.g. from a Workflow node click).
+  // Scroll the selected stage into view on either linked, step-oriented page.
   useEffect(() => {
-    if (page !== "main" || selectedStepId == null) return
-    const el = bodyRef.current?.querySelector(`[data-step-id="${selectedStepId}"]`)
+    if ((page !== "steps" && page !== "walkthrough") || selectedStepId == null) return
+    const attribute = page === "steps" ? "data-step-id" : "data-walkthrough-step"
+    const el = bodyRef.current?.querySelector(`[${attribute}="${selectedStepId}"]`)
     el?.scrollIntoView({ block: "center", behavior: "smooth" })
   }, [page, selectedStepId, showOutline])
 
@@ -328,7 +334,7 @@ export function PlanEditor({
       </div>
       {pageNav}
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-editor">
-        {page === "main" && (
+        {page === "steps" && (
           <div ref={setContainer} className="relative min-h-0 min-w-0 flex-1 overflow-auto pb-14">
             {showOutline ? (
               <PlanFileControlsProvider
@@ -344,12 +350,34 @@ export function PlanEditor({
                       prd={projection}
                       selectedStepId={selectedStepId}
                       onSelectStep={setSelectedStepId}
+                      onOpenWalkthrough={(stageId) => {
+                        setSelectedStepId(stageId)
+                        setPage("walkthrough")
+                      }}
                     />
                   </div>
                 </PlanWorkerControlsProvider>
               </PlanFileControlsProvider>
             ) : (
               <EmptyPage>{streaming ? "Composing plan…" : "No plan yet."}</EmptyPage>
+            )}
+            {!streaming && commentLayer}
+          </div>
+        )}
+        {page === "walkthrough" && (
+          <div ref={setContainer} className="relative min-h-0 min-w-0 flex-1 overflow-auto pb-14">
+            {projection ? (
+              <PlanWalkthrough
+                prd={projection}
+                selectedStageId={selectedStepId}
+                onOpenStep={(stageId) => {
+                  setSelectedStepId(stageId)
+                  setPage("steps")
+                }}
+                className="mx-auto w-full max-w-[760px]"
+              />
+            ) : (
+              <EmptyPage>No walkthrough yet.</EmptyPage>
             )}
             {!streaming && commentLayer}
           </div>
@@ -362,7 +390,7 @@ export function PlanEditor({
                 className="mx-auto w-full max-w-[760px]"
                 onOpenStage={(stageId) => {
                   setSelectedStepId(stageId)
-                  setPage("main")
+                  setPage("steps")
                 }}
               />
             ) : (
@@ -381,7 +409,7 @@ export function PlanEditor({
                 selectedStageId={selectedStepId}
                 onSelectStage={(stageId) => {
                   setSelectedStepId(stageId)
-                  setPage("main")
+                  setPage("steps")
                 }}
                 onStopWorker={onStopWorker}
                 onRetryWorker={onRetryWorker}

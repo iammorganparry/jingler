@@ -190,7 +190,7 @@ const layout = (graph: PlanWorkflowGraph) => {
  * The plan's execution DAG on a navigable react-flow canvas: one node per stage,
  * coloured by its live `executionStatus`, wired by dependency edges. Clicking a
  * node calls `onSelectStage`; `selectedStageId` reflects back as a highlighted
- * node — the cross-link the Main page and nav shell use to keep the workflow and
+ * node — the cross-link the Steps page and nav shell use to keep the workflow and
  * the step detail in sync. Pan / zoom / fit; nodes are not connectable.
  */
 export function PlanWorkflow({

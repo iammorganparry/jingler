@@ -76,7 +76,7 @@ export const PLAN_JSON_REFORMAT = (diagnostics: string): string =>
     "with these corrected:",
     diagnostics,
     "The block must be exactly { \"mode\": \"draft\"|\"submit\", \"plan\": { … } }.",
-    'Keep the first section titled "TL;DR", every stage\'s detailed tasks and diagrams in its owning stage,',
+    'Keep the first section titled "TL;DR", every stage\'s detailed tasks, walkthrough, and diagrams in its owning stage,',
     "and every acceptance criterion's concrete testReferences."
   ].join("\n")
 
@@ -86,6 +86,7 @@ const STAGE_GRAMMAR = [
   '    "approach": string[], "tasks": [{ "id", "text", "status": "pending" }],',
   '    "files": [{ "path", "change": "A"|"M"|"D" }],',
   '    "diagrams": [{ "id", "source" }], "notes": PlanBlock[],',
+  '    "walkthrough": PlanBlock[],',
   '    "acceptance": [{ "id", "text",',
   '      "testReferences": [{ "path", "cases": string[] }],',
   '      "status": "pending", "evidence": null }],',
@@ -118,6 +119,8 @@ export const planJsonInstructions = (
     'The FIRST section must be titled "TL;DR" and briefly summarize the outcome, approach, and main risk.',
     STAGE_GRAMMAR,
     "Give every stage a detailed tasks list; new or revised tasks must start pending.",
+    "Give every stage a tutorial-style walkthrough with short rationale paragraphs, implementation decisions,",
+    "and focused code examples when code makes the intended approach clearer.",
     'Put every diagram in its owning stage\'s "diagrams" array (use [] when no diagram materially helps).',
     "Give every acceptance criterion concrete testReferences: a repository-relative test path",
     "and the exact named test cases that prove that criterion.",

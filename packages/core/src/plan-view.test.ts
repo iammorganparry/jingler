@@ -88,6 +88,19 @@ describe("toPlanStepViews", () => {
     const [step] = toPlanStepViews(prd([stage("a", [])]))
     expect(step?.files).toEqual([])
   })
+
+  it("projects the canonical walkthrough blocks for implementation guidance", () => {
+    const [step] = toPlanStepViews(prd([stage("a", [], {
+      walkthrough: [
+        { kind: "prose", id: "why", text: "Preserve the boundary." },
+        { kind: "code", id: "how", language: "ts", code: "runBoundary()" }
+      ]
+    })]))
+    expect(step?.walkthrough).toEqual([
+      { kind: "prose", id: "why", text: "Preserve the boundary." },
+      { kind: "code", id: "how", language: "ts", code: "runBoundary()" }
+    ])
+  })
 })
 
 describe("stagesToGraph", () => {

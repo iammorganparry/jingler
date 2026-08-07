@@ -70,7 +70,7 @@ test("a streamed plan opens beside chat, stays read-only, and promotes in place"
     window.getByText("Audit session middleware", { exact: true }).first()
   ).toBeVisible({ timeout: 20_000 })
 
-  // Promotion swaps in the validated canonical revision: the Main step outline
+  // Promotion swaps in the validated canonical revision: the Steps outline
   // takes over (with the stage titles) and the revision becomes approvable.
   await expect
     .poll(() => existsSync(planFile), { timeout: 20_000 })

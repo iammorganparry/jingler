@@ -7,7 +7,7 @@ import type {
   PlanTask
 } from "@jingler/core"
 import { PlanBlocks } from "../plan-doc/plan-blocks.js"
-import { Check, Circle, MinusCircle, RotateCw, Square, X } from "lucide-react"
+import { BookOpen, Check, Circle, MinusCircle, RotateCw, Square, X } from "lucide-react"
 import { Badge } from "../../components/badge.js"
 import { FileChip } from "../../components/file-chip.js"
 import { MermaidDiagram } from "../../components/mermaid-diagram.js"
@@ -102,9 +102,11 @@ export interface PlanStepCardProps {
   readonly active?: boolean
   /** Fired when the card is clicked or activated with the keyboard. */
   readonly onSelect?: (stepId: string) => void
+  /** Opens the tutorial walkthrough at this exact stage. */
+  readonly onOpenWalkthrough?: (stepId: string) => void
 }
 
-export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
+export function PlanStepCard({ step, active, onSelect, onOpenWalkthrough }: PlanStepCardProps) {
   const tasks = step.tasks ?? []
   const diagrams = step.diagrams ?? []
   const completedTasks = tasks.filter((task) => task.status === "completed").length
@@ -176,6 +178,20 @@ export function PlanStepCard({ step, active, onSelect }: PlanStepCardProps) {
           {exec.label}
         </span>
       </div>
+
+      {onOpenWalkthrough && (
+        <button
+          type="button"
+          aria-label={`Open walkthrough for ${step.title}`}
+          onClick={(event) => {
+            event.stopPropagation()
+            onOpenWalkthrough(step.id)
+          }}
+          className="inline-flex w-fit items-center gap-1.5 rounded-md border border-line px-2 py-1 text-[10.5px] font-medium text-blue outline-none transition-colors hover:border-line-strong hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <BookOpen className="size-3" /> View walkthrough
+        </button>
+      )}
 
       {/* Worker assignment — who runs this stage, on what route, and its status.
           Only present once a plan is delegated; a plain plan-mode plan has none. */}

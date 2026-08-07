@@ -21,7 +21,7 @@ import { cn } from "../lib/cn.js"
  *
  * Section-owned diagrams remain in their section block flow. Stage diagrams are
  * rendered separately under a heading and jump link carrying the same stage id
- * as the Main card.
+ * as the Steps card.
  */
 
 function ArchitectureSection({
@@ -98,11 +98,11 @@ export function PlanArchitecture({
             {onOpenStage && (
               <button
                 type="button"
-                aria-label={`Open stage ${stage.title} in Main`}
+                aria-label={`Open stage ${stage.title} in Steps`}
                 onClick={() => onOpenStage(stage.id)}
                 className="flex-none rounded-md border border-line px-2 py-1 text-[10.5px] font-medium text-blue outline-none transition-colors hover:border-line-strong hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
               >
-                Open in Main
+                Open in Steps
               </button>
             )}
           </div>

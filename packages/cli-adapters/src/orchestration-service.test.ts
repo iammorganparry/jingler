@@ -182,6 +182,10 @@ describe("OrchestrationService", () => {
   it("streams ordered task progress and rejects foreign or stale task ids", async () => {
     const currentStage: OrchestrationStage = {
       ...stage("01", "agent-a"),
+      walkthrough: [
+        { kind: "prose", id: "01-why", text: "Keep the execution boundary explicit." },
+        { kind: "code", id: "01-code", language: "ts", code: "await worker.execute(stage)" }
+      ],
       tasks: [
         { id: "01.task.1", text: "Add the protocol", status: "pending" },
         { id: "01.task.2", text: "Verify live updates", status: "pending" }
@@ -195,6 +199,9 @@ describe("OrchestrationService", () => {
     const adapter: CliAdapterShape = {
       run: (_ownerId, spec, context) =>
         Effect.gen(function* () {
+          expect(spec.prompt).toContain("Implementation walkthrough")
+          expect(spec.prompt).toContain("Keep the execution boundary explicit.")
+          expect(spec.prompt).toContain("await worker.execute(stage)")
           const fingerprint = /PLAN_TASK stage=01 fingerprint=(\S+) task=<task-id>/.exec(
             spec.prompt
           )?.[1]
