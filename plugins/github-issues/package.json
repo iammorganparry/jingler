@@ -1,6 +1,6 @@
 {
   "name": "@jingler/plugin-github-issues",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "private": true,
   "type": "module",
   "description": "The GitHub Issues tab, as an official Jingler plugin.",

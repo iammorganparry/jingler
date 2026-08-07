@@ -1,5 +1,11 @@
 # @jingler/plugin-sdk
 
+## 2.0.2
+
+### Patch Changes
+
+- @jingler/ui@2.0.2
+
 ## 2.0.1
 
 ### Patch Changes

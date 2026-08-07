@@ -1,5 +1,11 @@
 # @jingler/desktop
 
+## 2.0.2
+
+### Patch Changes
+
+- 9dddee8: Embed Browser in its owning session with a responsive, resizable chat split.
+
 ## 2.0.1
 
 ### Patch Changes
