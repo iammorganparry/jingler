@@ -46,6 +46,12 @@ describe("CodeChip", () => {
     expect(onRemove).toHaveBeenCalledOnce()
   })
 
+  it("renders captured range order as provided instead of normalizing it", () => {
+    render(<CodeChip path="src/parser.ts" line={15} endLine={12} />)
+
+    expect(screen.getByText("src/parser.ts:L15\u2013L12")).toBeDefined()
+  })
+
   it("keeps bare @file mentions compact", () => {
     render(<CodeChip path="packages/ui/src/index.ts" />)
     expect(screen.getByText("index.ts")).toBeDefined()

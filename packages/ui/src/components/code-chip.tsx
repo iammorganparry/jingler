@@ -24,10 +24,12 @@ export function CodeChip({
   className?: string
 }) {
   const name = path.split("/").pop() ?? path
-  const start = line === undefined ? undefined : Math.min(line, endLine ?? line)
-  const end = line === undefined ? undefined : Math.max(line, endLine ?? line)
   const range =
-    start === undefined ? undefined : start === end ? `L${start}` : `L${start}\u2013L${end}`
+    line === undefined
+      ? undefined
+      : endLine === undefined || line === endLine
+        ? `L${line}`
+        : `L${line}\u2013L${endLine}`
   const isCapturedRange = endLine !== undefined || label !== undefined
   const defaultRangeLabel = range === undefined ? path : `${path}:${range}`
   const displayLabel = isCapturedRange ? (label ?? defaultRangeLabel) : name
