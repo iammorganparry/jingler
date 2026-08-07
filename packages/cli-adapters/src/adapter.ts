@@ -14,6 +14,7 @@ import type {
 import type { CliExecError } from "@jingler/core"
 import { Context, Data, Effect, Layer } from "effect"
 import { planTaskProgressFingerprint } from "./plan-task-progress.js"
+import { isE2eEnv } from "./scripted.js"
 
 /** Installed provider/model routes a planning turn may assign to workers. */
 export interface OrchestrationRoute {
@@ -645,6 +646,8 @@ export const scriptedPlanEmission = (
  * `[[stream-plan]]` adds cumulative live-only snapshots before that promotion.
  * `[[queue-hold]]` parks a test turn so queue affordances can be exercised
  * without borrowing the plan-approval lifecycle.
+ * `[[memory-propose]]` publishes the fixed shared-memory E2E fixture, but only
+ * when the built Electron suite explicitly sets `JINGLER_E2E=1`.
  */
 const SCRIPTED_TASK_PROTOCOL_PATTERN =
   /PLAN_TASK stage=(\S+) fingerprint=(\S+) task=<task-id> status=<status>/
@@ -725,11 +728,11 @@ export const scriptedRun =
           catch: () => null
         }).pipe(Effect.ignore)
 
-        // A deliberate proposal marker lets Electron E2E prove the same
+        // An E2E-only proposal marker lets Electron prove the same
         // agent-owned publication path a real harness uses after its silent
-        // end-of-turn reflection. The marker belongs only to the deterministic
-        // scripted adapter; production agents decide from the injected policy.
-        if (spec.prompt.includes("[[memory-propose]]")) {
+        // end-of-turn reflection. Scripted mode alone is NOT a safe boundary:
+        // it is also the production fallback when no supported CLI is installed.
+        if (isE2eEnv() && spec.prompt.includes("[[memory-propose]]")) {
           yield* Effect.tryPromise({
             try: () =>
               fetch(memoryServer.url, {

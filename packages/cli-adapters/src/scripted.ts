@@ -13,6 +13,14 @@
  * their real login — on every e2e launch.
  */
 const SCRIPTED_ENV = "JINGLER_SCRIPTED_AGENT"
+const E2E_ENV = "JINGLER_E2E"
 
 export const isScriptedEnv = (): boolean =>
   process.env[SCRIPTED_ENV] === "1" || process.env[SCRIPTED_ENV] === "true"
+
+/**
+ * True only for the built Electron end-to-end harness. Scripted mode itself is
+ * not sufficient: production deliberately falls back to the scripted adapter
+ * when no supported CLI is installed.
+ */
+export const isE2eEnv = (): boolean => process.env[E2E_ENV] === "1"
