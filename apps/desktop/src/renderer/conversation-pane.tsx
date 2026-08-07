@@ -371,7 +371,9 @@ export function ConversationPane({
   const sendPrompt: typeof convo.sendPrompt = (text, images) => {
     // Structured ranges stay out of the editable textarea, but every harness
     // receives the same deterministic plain-text context at the turn boundary.
-    const agentContext = serializeCodeReferences(draft.references)
+    // Read the store now rather than using the render snapshot: Files can append
+    // a reference between this pane's last render and the operator pressing send.
+    const agentContext = serializeCodeReferences(getDraft(activeChat.id).references)
     if (session.initialPrompt) onInitialPromptConsumed?.(session.id)
     // The turn is on its way to the agent — the draft has served its purpose.
     clearDraft(activeChat.id)

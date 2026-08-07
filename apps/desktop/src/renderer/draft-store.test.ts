@@ -76,6 +76,18 @@ describe("draft-store", () => {
     expect(getDraft("s2").text).toBe("world")
   })
 
+  it("exposes an out-of-pane reference synchronously to send handlers", () => {
+    setDraft("s1", { text: "review this", attachments: [], references: [] })
+    const renderedDraft = getDraft("s1")
+
+    addDraftCodeReference("s1", REFERENCE)
+
+    // A React event handler may still close over the previous render snapshot,
+    // while the imperative store read must already contain the Files update.
+    expect(renderedDraft.references).toEqual([])
+    expect(getDraft("s1").references).toEqual([REFERENCE])
+  })
+
   it("survives a reload — rehydrates text, attachments, and references from storage", () => {
     setDraft("s1", { text: "half-typed", attachments: [IMAGE], references: [REFERENCE] })
     reload() // simulate the app restarting; storage persists
