@@ -113,6 +113,29 @@ describe("draft-store", () => {
     expect(restored.references).toEqual([REFERENCE])
   })
 
+  it("persists typed text after both attachments and references exceed quota", () => {
+    const storage = fakeStorage({
+      failWrites: (value) => value.includes("att_1") || value.includes('"source":')
+    })
+    install(storage)
+
+    setDraft("s1", { text: "keep these words", attachments: [IMAGE], references: [REFERENCE] })
+
+    // The live session retains every part of the richer draft.
+    expect(getDraft("s1")).toEqual({
+      text: "keep these words",
+      attachments: [IMAGE],
+      references: [REFERENCE]
+    })
+
+    reload()
+    expect(getDraft("s1")).toEqual({
+      text: "keep these words",
+      attachments: [],
+      references: []
+    })
+  })
+
   it("does not throw when storage is unavailable entirely", () => {
     delete (globalThis as { localStorage?: unknown }).localStorage
 

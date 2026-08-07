@@ -68,17 +68,22 @@ const writeNow = (sessionId: string, draft: Draft): void => {
   try {
     localStorage.setItem(storageKey(sessionId), JSON.stringify(draft))
   } catch {
-    // Base64 image attachments can blow localStorage's ~5MB quota. Never lose the
-    // TEXT over an image: retry without attachments. If even that fails (or
-    // there's no storage at all) the in-memory copy still carries the draft
-    // across session switches — only a reload would drop it.
+    // Base64 images and captured source can blow localStorage's ~5MB quota.
+    // Preserve as much structured context as possible, but TEXT is the final
+    // durable tier: a reload must not lose what the operator typed.
     if (draft.text === "" && draft.references.length === 0) return
-    // References are tiny structured context and remain useful without text, so
-    // quota fallback drops only the base64 image payloads.
     try {
       localStorage.setItem(storageKey(sessionId), JSON.stringify({ ...draft, attachments: [] }))
     } catch {
-      /* memory-only — degraded, but the draft is still live this session */
+      if (draft.text === "") return
+      try {
+        localStorage.setItem(
+          storageKey(sessionId),
+          JSON.stringify({ ...draft, attachments: [], references: [] })
+        )
+      } catch {
+        /* memory-only — degraded, but the draft is still live this session */
+      }
     }
   }
 }
