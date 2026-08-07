@@ -131,6 +131,22 @@ export interface CreateProposalInput {
   readonly summary?: string
 }
 
+/**
+ * Proposal ids represent the author + base revision + proposed content. Timestamps
+ * and lifecycle status are observations of an attempt, not identity: a client retry
+ * is allowed to arrive later, and an accepted proposal must remain replayable.
+ */
+const proposalMatchesCreateInput = (
+  existing: MemoryProposal,
+  input: CreateProposalInput
+): boolean =>
+  existing.id === input.id &&
+  existing.pageId === input.pageId &&
+  existing.baseRevisionId === input.baseRevisionId &&
+  existing.markdown === input.markdown &&
+  existing.proposedBy === input.proposedBy &&
+  existing.summary === input.summary
+
 export type ApprovalResult =
   | {
       readonly status: "accepted"
@@ -1001,7 +1017,7 @@ export class TeamVault {
       const decoded = Schema.decodeUnknownSync(MemoryProposalSchema)(proposal)
       const existing = current.proposals.find((candidate) => candidate.id === input.id)
       if (existing !== undefined) {
-        if (canonicalJson(existing) === canonicalJson(decoded)) return existing
+        if (proposalMatchesCreateInput(existing, input)) return existing
         return yield* new MemoryVaultError({ code: "conflict", message: `proposal id ${input.id} already exists`, status: 409 })
       }
       const head = current.heads.find((candidate) => candidate.pageId === input.pageId)

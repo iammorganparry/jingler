@@ -106,6 +106,12 @@ export interface MemoryWorkerEnv {
     import("./workflows/vector-ingest.js").VectorIngestWorkflowInput
   >
   readonly MEMORY_AUTO_PUBLISH_FIXES?: string
+  /**
+   * @deprecated Retained only so deployments with the former review gate can
+   * report a migration warning. It is ignored: agent memory publication is
+   * automatic and historical review endpoints exist only for recovery/audit.
+   */
+  readonly MEMORY_REQUIRE_REVIEW?: string
   readonly MEMORY_LINT_ORGANIZATIONS?: string
   /**
    * Optional explicit allow-list of organizations for the daily vector-ingest drift

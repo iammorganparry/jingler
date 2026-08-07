@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import { serializeMemoryMarkdown, type MemoryPage, type MemorySource } from "@jingler/memory"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { VAULT_ORGANIZATION_HEADER, workflowBindingId, workflowBindingIds } from "./auth.js"
 import {
   createOrReuseScopedWorkflow,
@@ -12,12 +12,13 @@ import type {
   DurableObjectNamespaceLike,
   DurableObjectStubLike,
   MemoryWorkerEnv,
+  R2PutOptionsLike,
   WorkflowBindingLike,
   WorkflowInstanceLike
 } from "./env.js"
 import type { VectorIngestWorkflowInput } from "./workflows/vector-ingest.js"
 import { InMemoryR2Bucket, organizationPrefix } from "./r2-store.js"
-import { memoryWorkerHealthResponse } from "./index.js"
+import memoryWorker, { memoryWorkerHealthResponse } from "./index.js"
 import { InMemoryVaultState, TeamVault } from "./team-vault.js"
 
 // Runs an Effect-returning vault/layer/state method to a Promise at the test boundary.
@@ -57,6 +58,26 @@ class TestVaultNamespace implements DurableObjectNamespaceLike {
         return handleTeamVaultRequest(request, await vault)
       }
     }
+  }
+}
+
+class FailNextRevisionPutBucket extends InMemoryR2Bucket {
+  private failNextRevisionPut = false
+
+  failNextRevisionPutForTest(): void {
+    this.failNextRevisionPut = true
+  }
+
+  override async put(
+    key: string,
+    value: string | ArrayBuffer | ArrayBufferView,
+    options?: R2PutOptionsLike
+  ): Promise<{ readonly key: string } | null> {
+    if (this.failNextRevisionPut && key.includes("/revisions/")) {
+      this.failNextRevisionPut = false
+      throw new Error("transient revision persistence failure")
+    }
+    return super.put(key, value, options)
   }
 }
 
@@ -192,6 +213,36 @@ describe("memory Worker internal API", () => {
       status: "degraded",
       bindings: { lintWorkflow: false }
     })
+  })
+
+  it("warns when the retired manual review gate remains configured", async () => {
+    const bucket = new InMemoryR2Bucket()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    try {
+      const response = await memoryWorker.fetch(
+        new Request("https://memory.test/health"),
+        {
+          MEMORY_R2: bucket,
+          MEMORY_VAULTS: new TestVaultNamespace(bucket),
+          MEMORY_COMPILER: readyWorkflow,
+          MEMORY_LINT: readyWorkflow,
+          MEMORY_SERVICE_SECRET: "secret",
+          MEMORY_REQUIRE_REVIEW: "true"
+        }
+      )
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        warnings: [
+          "MEMORY_REQUIRE_REVIEW is retired and ignored; remove it because agent memory publication is automatic."
+        ]
+      })
+      expect(warn).toHaveBeenCalledWith(
+        "MEMORY_REQUIRE_REVIEW is retired and ignored; remove it because agent memory publication is automatic."
+      )
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it("requires rotating service authentication and an organization scope", async () => {
@@ -530,6 +581,95 @@ describe("memory Worker internal API", () => {
       env
     )
     expect(staleProposal.status).toBe(404)
+  })
+
+  it("retries auto-publication after approval fails and accepts restamped replays", async () => {
+    const bucket = new FailNextRevisionPutBucket()
+    const env: MemoryWorkerEnv = {
+      MEMORY_R2: bucket,
+      MEMORY_VAULTS: new TestVaultNamespace(bucket),
+      MEMORY_SERVICE_SECRET: "current-secret"
+    }
+    await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/sources", {
+        source,
+        content: "A stable cited source for the accepted page."
+      }),
+      env
+    )
+    await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/pages", {
+        revisionId: "revision-retry-1",
+        markdown: serializeMemoryMarkdown(page("retry", 1)),
+        actorId: "agent-author",
+        createdAt: "2026-08-01T00:00:00.000Z"
+      }),
+      env
+    )
+
+    const proposal = {
+      id: "proposal-agent-retry",
+      pageId: "shared-slug",
+      baseRevisionId: "revision-retry-1",
+      markdown: serializeMemoryMarkdown(page("retry-updated", 2)),
+      proposedBy: "agent-author",
+      reviewerId: "system:memory-agent"
+    }
+    bucket.failNextRevisionPutForTest()
+    const interrupted = await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/proposals/auto-publish", {
+        ...proposal,
+        createdAt: "2026-08-02T00:00:00.000Z",
+        acceptedAt: "2026-08-02T00:00:00.000Z"
+      }),
+      env
+    )
+    expect(interrupted.status).toBe(500)
+    expect(await jsonBody(interrupted)).toEqual({
+      error: "memory service failed",
+      code: "internal_error"
+    })
+    const openProposal = await handleMemoryWorkerRequest(
+      getRequest("org-a", "/internal/memory/proposals/proposal-agent-retry"),
+      env
+    )
+    expect(await jsonBody(openProposal)).toMatchObject({ status: "open" })
+
+    const retried = await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/proposals/auto-publish", {
+        ...proposal,
+        createdAt: "2026-08-02T00:01:00.000Z",
+        acceptedAt: "2026-08-02T00:01:00.000Z"
+      }),
+      env
+    )
+    expect(retried.status).toBe(200)
+    const accepted = await jsonBody(retried)
+    expect(accepted).toMatchObject({
+      status: "accepted",
+      proposalId: "proposal-agent-retry",
+      revisionId: "revision:proposal-agent-retry",
+      revision: 2
+    })
+
+    const replayed = await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/proposals/auto-publish", {
+        ...proposal,
+        createdAt: "2026-08-02T00:02:00.000Z",
+        acceptedAt: "2026-08-02T00:02:00.000Z"
+      }),
+      env
+    )
+    expect(replayed.status).toBe(200)
+    expect(await jsonBody(replayed)).toEqual(accepted)
+    const snapshot = await handleMemoryWorkerRequest(
+      getRequest("org-a", "/internal/memory/proposals/proposal-agent-retry"),
+      env
+    )
+    expect(await jsonBody(snapshot)).toMatchObject({
+      status: "accepted",
+      createdAt: "2026-08-02T00:00:00.000Z"
+    })
   })
 
   it("isolates identical page slugs across reads, search, lists, aggregates, and mutations", async () => {

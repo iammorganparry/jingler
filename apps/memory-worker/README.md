@@ -17,7 +17,7 @@ send both a rotating service credential and `X-Jingler-Organization-Id`.
 | --- | --- | --- |
 | `MEMORY_VAULTS` | SQLite Durable Object | Serialized heads, proposals, reviews, FTS5, events, and derived projections for one organization. |
 | `MEMORY_R2` | R2 | Immutable sources, accepted Markdown revisions, and publication commit records. |
-| `MEMORY_COMPILER` | Workflow | class `MemoryCompilerWorkflow` — cited source-to-proposal compilation and durable review wait. |
+| `MEMORY_COMPILER` | Workflow | class `MemoryCompilerWorkflow` — cited source-to-proposal compilation and automatic publication. |
 | `MEMORY_LINT` | Workflow | class `MemoryLintWorkflow` — scheduled vault health reporting. |
 
 `MEMORY_VAULTS` is class `TeamVaultObject` (SQLite DO, `new_sqlite_classes`
@@ -27,6 +27,16 @@ The daily `17 3 * * *` trigger starts lint only for the comma-separated
 `MEMORY_LINT_ORGANIZATIONS`. `MEMORY_AUTO_PUBLISH_FIXES` is also comma-separated;
 leave it empty unless a reviewed mechanical fix identifier is explicitly safe
 to auto-publish.
+
+## Automatic publication migration
+
+Agent-authored memories publish automatically after the agent applies the
+durability, sensitivity, and deduplication policy. The former
+`MEMORY_REQUIRE_REVIEW` deployment gate is retired and ignored; remove it from
+Worker configuration. While it remains set, the Worker logs a deprecation
+warning and reports that warning from `/health`, but it does not restore a
+manual queue. Historical proposal/review endpoints remain available only for
+audit and recovery.
 
 ## Secrets and vars
 
