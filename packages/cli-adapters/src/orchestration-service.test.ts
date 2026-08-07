@@ -130,19 +130,26 @@ describe("orchestrationWorkerMachine", () => {
 })
 
 describe("orchestration graph", () => {
-  it("groups dependency chains under one agent and keeps independent work parallel", () => {
+  it("keeps dependency-linked stages as separate parallel workers, carrying the ordering in dependsOn", () => {
     const result = buildOrchestrationGroups([
       stage("01", "agent-a"),
-      stage("02", "agent-a", { dependsOn: ["01"] }),
-      stage("03", "agent-b")
+      stage("02", "agent-b", { dependsOn: ["01"] }),
+      stage("03", "agent-c")
     ])
 
     expect(result.valid).toBe(true)
     if (!result.valid) return
-    expect(result.groups.map((group) => group.stages.map((item) => item.id))).toEqual([
-      ["01", "02"],
-      ["03"]
+    // Three independent workers — a dependency orders 02 after 01, it does not
+    // merge them; 03 has no prerequisite and runs in parallel with 01.
+    expect(result.groups.map((group) => group.agentId)).toEqual([
+      "agent-a",
+      "agent-b",
+      "agent-c"
     ])
+    const dependsByAgent = new Map(result.groups.map((group) => [group.agentId, group.dependsOn]))
+    expect(dependsByAgent.get("agent-a")).toEqual([])
+    expect(dependsByAgent.get("agent-b")).toEqual(["agent-a"])
+    expect(dependsByAgent.get("agent-c")).toEqual([])
   })
 
   it("serializes declared file overlap and reports conflicting routes", () => {
@@ -512,17 +519,13 @@ describe("OrchestrationService", () => {
     ])
   })
 
-  it("runs dependent stages in order with the same key and resume identity", async () => {
-    const runs: Array<{
-      readonly ownerId: string
-      readonly resumeId: string | null
-      readonly prompt: string
-    }> = []
+  it("starts a dependent stage's worker only after its prerequisite worker completes", async () => {
+    const runs: Array<{ readonly ownerId: string; readonly prompt: string }> = []
     const adapter: CliAdapterShape = {
       run: (ownerId, spec, context) =>
         Effect.gen(function* () {
-          runs.push({ ownerId, resumeId: spec.resumeId, prompt: spec.prompt })
-          yield* context.emit({ _tag: "Started", sessionId: "resume-agent-a" })
+          runs.push({ ownerId, prompt: spec.prompt })
+          yield* context.emit({ _tag: "Started", sessionId: `resume-${ownerId}` })
           yield* context.emit({
             _tag: "Assistant",
             text: `PLAN_RESULT criterion=${spec.prompt.includes("Stage: 01") ? "01.1" : "02.1"} status=passed evidence=targeted test passed`
@@ -536,21 +539,53 @@ describe("OrchestrationService", () => {
       OrchestrationService.execute(
         input([
           stage("01", "agent-a"),
-          stage("02", "agent-a", { dependsOn: ["01"] })
+          stage("02", "agent-b", { dependsOn: ["01"] })
         ])
       ).pipe(Effect.provide(layerFor(adapter)))
     )
 
+    // Separate workers now — the dependency is an ORDERING edge, so agent-b's
+    // stage 02 runs strictly after agent-a's stage 01 completes.
     expect(runs.map((run) => run.ownerId)).toEqual([
       "session:session-1:plan:plan-1:agent:agent-a",
-      "session:session-1:plan:plan-1:agent:agent-a"
+      "session:session-1:plan:plan-1:agent:agent-b"
     ])
-    expect(runs.map((run) => run.resumeId)).toEqual([null, "resume-agent-a"])
     expect(runs[0]?.prompt).toContain("Stage: 01")
     expect(runs[1]?.prompt).toContain("Stage: 02")
-    expect(report.workers[0]?.evidence.map((value) => value.criterionId)).toEqual([
-      "01.1",
-      "02.1"
+    const evidence = report.workers.flatMap((worker) => worker.evidence.map((value) => value.criterionId))
+    expect(evidence.sort()).toEqual(["01.1", "02.1"])
+  })
+
+  it("runs independent stages concurrently on separate workers", async () => {
+    // Both workers signal that they've started, then each waits until BOTH have —
+    // so the run only completes if they were live at the same time. Sequential
+    // execution would deadlock here (the first worker would wait forever), so a
+    // successful run proves the two independent stages ran in parallel.
+    let started = 0
+    let releaseBoth: () => void = () => {}
+    const bothStarted = new Promise<void>((resolve) => {
+      releaseBoth = resolve
+    })
+    const adapter: CliAdapterShape = {
+      run: (_ownerId, spec, context) =>
+        Effect.gen(function* () {
+          started += 1
+          if (started === 2) releaseBoth()
+          yield* Effect.promise(() => bothStarted)
+          yield* passCurrentStage(spec, context)
+        }),
+      stop: () => Effect.void
+    }
+
+    const report = await Effect.runPromise(
+      OrchestrationService.execute(
+        input([stage("01", "agent-a"), stage("02", "agent-b")])
+      ).pipe(Effect.provide(layerFor(adapter)))
+    )
+
+    expect(report.workers.map((worker) => worker.status)).toEqual([
+      "completed",
+      "completed"
     ])
   })
 
@@ -614,9 +649,10 @@ describe("OrchestrationService", () => {
       stop: () => Effect.void
     }
     const serviceLayer = layerFor(adapter)
+    // Separate ordered workers: 01 on agent-a, its dependent 02 on agent-b.
     const stages = [
       stage("01", "agent-a"),
-      stage("02", "agent-a", { dependsOn: ["01"] })
+      stage("02", "agent-b", { dependsOn: ["01"] })
     ]
     const checkpoints = new Map<string, OrchestrationCheckpoint>()
     const callbacks = {
@@ -633,7 +669,7 @@ describe("OrchestrationService", () => {
         input(stages, {
           callbacks,
           checkpoints: [...checkpoints.values()],
-          agentIds: ["agent-a"]
+          agentIds: ["agent-b"]
         })
       )
       const retried = retryReport.workers[0]!
@@ -641,7 +677,7 @@ describe("OrchestrationService", () => {
     }).pipe(Effect.provide(serviceLayer))
 
     const result = await Effect.runPromise(program)
-    expect(result.first.workers[0]?.status).toBe("failed")
+    expect(result.first.workers.find((worker) => worker.agentId === "agent-b")?.status).toBe("failed")
     expect(result.retried.status).toBe("completed")
     expect(result.retried.resumeId).toBe("resume-agent-a")
     expect(calls).toEqual(["01", "02", "02"])
@@ -649,7 +685,7 @@ describe("OrchestrationService", () => {
 
   it("refreshes a dependent stage from the canonical plan at its boundary", async () => {
     const prompts: Array<string> = []
-    const initialSecond = stage("02", "agent-a", { dependsOn: ["01"] })
+    const initialSecond = stage("02", "agent-b", { dependsOn: ["01"] })
     const amendedSecond = {
       ...initialSecond,
       intent: "Complete the user amendment with the existing worker"
@@ -695,7 +731,7 @@ describe("OrchestrationService", () => {
       OrchestrationService.execute(
         input([
           stage("01", "agent-a"),
-          stage("02", "agent-a", { dependsOn: ["01"] })
+          stage("02", "agent-b", { dependsOn: ["01"] })
         ], {
           refreshStage: (_agentId, stageId) =>
             Effect.succeed(stageId === "01" ? stage("01", "agent-a") : null),
@@ -783,7 +819,7 @@ describe("OrchestrationService", () => {
           OrchestrationService.execute(
             input([
               stage("01", "agent-a", { harness }),
-              stage("02", "agent-a", { dependsOn: ["01"], harness }),
+              stage("02", "agent-c", { dependsOn: ["01"], harness }),
               stage("03", "agent-b", { harness })
             ], {
               planId: `plan-${harness}`
@@ -793,6 +829,13 @@ describe("OrchestrationService", () => {
       )
     )
 
+    // Three parallel workers: 02 (agent-c) orders after 01 (agent-a); 03 runs on
+    // its own worker. Identical across every harness.
+    const perHarness = [
+      { agentId: "agent-a", status: "completed", completed: ["01"] },
+      { agentId: "agent-c", status: "completed", completed: ["02"] },
+      { agentId: "agent-b", status: "completed", completed: ["03"] }
+    ]
     expect(
       reports.map((report) =>
         report.workers.map((worker) => ({
@@ -801,20 +844,7 @@ describe("OrchestrationService", () => {
           completed: worker.completedStageIds
         }))
       )
-    ).toEqual([
-      [
-        { agentId: "agent-a", status: "completed", completed: ["01", "02"] },
-        { agentId: "agent-b", status: "completed", completed: ["03"] }
-      ],
-      [
-        { agentId: "agent-a", status: "completed", completed: ["01", "02"] },
-        { agentId: "agent-b", status: "completed", completed: ["03"] }
-      ],
-      [
-        { agentId: "agent-a", status: "completed", completed: ["01", "02"] },
-        { agentId: "agent-b", status: "completed", completed: ["03"] }
-      ]
-    ])
+    ).toEqual([perHarness, perHarness, perHarness])
   })
 
   it.each([
