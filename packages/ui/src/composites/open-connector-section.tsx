@@ -49,13 +49,15 @@ export function OpenConnectorSection({
   const [endpoint, setEndpoint] = React.useState("")
   const [token, setToken] = React.useState("")
   const [enabled, setEnabled] = React.useState(false)
+  const [preferJinglerTools, setPreferJinglerTools] = React.useState(true)
 
   // Seed the local fields once the persisted config arrives. When nothing is saved
   // yet, prefill the endpoint from the environment default so onboarding is one edit.
   React.useEffect(() => {
-    if (config && config.endpoint.length > 0) {
-      setEndpoint(config.endpoint)
+    if (config) {
+      setEndpoint(config.endpoint.length > 0 ? config.endpoint : (defaults?.endpoint ?? ""))
       setEnabled(config.enabled)
+      setPreferJinglerTools(config.preferJinglerTools ?? true)
     } else if (defaults) {
       setEndpoint(defaults.endpoint)
     }
@@ -65,7 +67,13 @@ export function OpenConnectorSection({
 
   const onSave = () =>
     save(
-      { endpoint: endpoint.trim(), enabled, serverName: config?.serverName ?? "open-connector" },
+      {
+        endpoint: endpoint.trim(),
+        enabled,
+        serverName: config?.serverName ?? "open-connector",
+        preferJinglerTools,
+        ...(config?.perCli ? { perCli: config.perCli } : {})
+      },
       token.length > 0 ? token : undefined
     )
 
@@ -131,6 +139,22 @@ export function OpenConnectorSection({
           // Named because it is no longer the only switch on this screen — the
           // per-harness injection rows each carry one too.
           aria-label="Enable the shared MCP server"
+          className="mt-0.5"
+        />
+      </div>
+
+      <div className="flex items-start gap-3">
+        <div className="flex-1">
+          <div className="text-[12.5px] font-medium text-text-body">Prefer Jingler tools</div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">
+            Use OpenConnector and Jingler's visible in-app browser instead of native MCP,
+            Playwright MCP, or browser-use integrations. Turn this off to merge harness tools.
+          </div>
+        </div>
+        <Toggle
+          checked={preferJinglerTools}
+          onCheckedChange={setPreferJinglerTools}
+          aria-label="Prefer Jingler tools over native agent tools"
           className="mt-0.5"
         />
       </div>

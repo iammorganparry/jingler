@@ -52,6 +52,8 @@ export interface TurnNotes {
   readonly adhd?: string | null
   /** Stateless, evidence-first team-memory instructions when attachment succeeded. */
   readonly memory?: string | null
+  /** Managed-tool precedence, including the visible in-app browser. */
+  readonly tools?: string | null
   /** How to ask the operator a question so it actually reaches them. */
   readonly ask?: string | null
   /** How this harness is expected to submit a plan. */
@@ -60,10 +62,19 @@ export interface TurnNotes {
 
 /** The notes, in order, each followed by a blank line. Empty when there are none. */
 const prefixOf = (notes: TurnNotes): string =>
-  [notes.primer, notes.planPointer, notes.adhd, notes.memory, notes.ask, notes.planProtocol]
+  [notes.primer, notes.planPointer, notes.adhd, notes.memory, notes.tools, notes.ask, notes.planProtocol]
     .filter((note): note is string => note !== null && note !== undefined && note !== "")
     .map((note) => `${note}\n\n`)
     .join("")
+
+/** Keep harness-native integrations from silently bypassing Jingler's shared tools. */
+export const managedToolsNote = (): string =>
+  [
+    "<managed-tools>",
+    "Jingler's attached MCP servers are the authoritative tool set for this run. Use OpenConnector providers before any harness-native equivalent.",
+    "For browser interaction use the attached jingler-browser tools, which control the in-app browser visible to the operator. Do not use browser-use, Playwright MCP, or a harness browser plugin. Running the repository's own Playwright test suite as a normal shell command is still allowed when the task requires it.",
+    "</managed-tools>"
+  ].join("\n")
 
 /**
  * Build the prompt text for a turn.

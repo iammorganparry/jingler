@@ -4,6 +4,7 @@ import {
   isCodexSkillInvocation,
   isSlashCommand,
   leadsWithCommand,
+  managedToolsNote,
   planPointerNote
 } from "./turn-prompt.js"
 
@@ -91,6 +92,14 @@ describe("composeTurnPrompt", () => {
     expect(
       composeTurnPrompt("x", { primer: "P", planProtocol: "PROTO" }, { leadWithText: false })
     ).toBe("P\n\nPROTO\n\nx")
+  })
+
+  it("places managed tool precedence before interaction protocols", () => {
+    expect(
+      composeTurnPrompt("browse", { tools: "TOOLS", ask: "ASK" }, { leadWithText: false })
+    ).toBe("TOOLS\n\nASK\n\nbrowse")
+    expect(managedToolsNote()).toContain("jingler-browser")
+    expect(managedToolsNote()).toContain("OpenConnector")
   })
 })
 

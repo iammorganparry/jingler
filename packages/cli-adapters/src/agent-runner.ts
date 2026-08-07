@@ -61,6 +61,7 @@ import { isTerminal, routeOf } from "./turn-events.js"
 import {
   composeTurnPrompt,
   leadsWithCommand,
+  managedToolsNote,
   planPointerNote
 } from "./turn-prompt.js"
 import { buildGate, makeApprovals, verdict } from "./approvals.js"
@@ -1372,6 +1373,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               : undefined
           const resolvedReasoning =
             reasoning === undefined ? providerReasoning : reasoning
+          const preferJinglerTools =
+            workspaceConfig?.openConnector?.preferJinglerTools ?? true
 
           // Resolve every remote MCP source once, here, where the full service
           // context is available — adapters run in `R = never` async code and
@@ -1423,6 +1426,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 planPointer,
                 adhd,
                 memory: memoryAttachment?.instructions ?? null,
+                tools: preferJinglerTools ? managedToolsNote() : null,
                 ask,
                 planProtocol
               },
@@ -1465,7 +1469,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             // after approval, and a permanent flag would keep its sandbox
             // read-only instead of restoring the orchestrator's Auto policy.
             // Each adapter enforces plan mode in its own native vocabulary.
-            remoteMcpServers
+            remoteMcpServers,
+            mcpPolicy: preferJinglerTools ? "managed-only" : "merge"
           }
 
           // Clear the PERSISTED id too, so a crash between here and the harness

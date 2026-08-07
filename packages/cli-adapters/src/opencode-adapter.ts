@@ -10,7 +10,7 @@ import { createPlanDraftStream } from "./plan-draft-stream.js"
 import { stopChild, trackChild } from "./child-registry.js"
 import { requireWorktree } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
-import { opencodeMcpEntries } from "./mcp-config.js"
+import { opencodeMcpEntries, unmanagedOpencodeMcpNames } from "./mcp-config.js"
 
 /**
  * Real opencode harness, driven by `@opencode-ai/sdk`'s CLIENT against a server
@@ -759,6 +759,12 @@ const driveOpencode = async (
   try {
     const url = await waitForServer(proc, signal)
     const client = createOpencodeClient({ baseUrl: url })
+    if (spec.mcpPolicy === "managed-only") {
+      const status = await client.mcp.status({ throwOnError: true })
+      for (const name of unmanagedOpencodeMcpNames(status.data ?? {}, spec.remoteMcpServers)) {
+        await client.mcp.disconnect({ path: { name }, throwOnError: true })
+      }
+    }
     for (const entry of opencodeMcpEntries(spec.remoteMcpServers)) {
       await client.mcp.add({
         body: entry,

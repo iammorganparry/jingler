@@ -1343,6 +1343,9 @@ export const runClaude = (
           prompt: live.iterable,
           options: {
             ...(mcpServers ? { mcpServers } : {}),
+            // Covers project/user config, plugins, and sub-agent frontmatter, so
+            // workers inherit the same managed tool boundary as the orchestrator.
+            strictMcpConfig: spec.mcpPolicy === "managed-only",
             // Never `|| undefined`: an empty cwd makes the SDK inherit the app's
             // working directory, pointing the agent at whatever repo Jingler itself
             // was launched from instead of the session's worktree.

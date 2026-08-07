@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ConnectorsSettings } from "./connectors-settings.js"
 import type { OpenConnectorSectionProps } from "./open-connector-section.js"
@@ -67,6 +67,34 @@ const connector = (over: Partial<ConnectorCenterProps> = {}): ConnectorCenterPro
 })
 
 describe("ConnectorsSettings", () => {
+  it("saves managed tool precedence and preserves per-harness choices", async () => {
+    const save = vi.fn(async () => {})
+    render(
+      <ConnectorsSettings
+        unifiedMcp={unified({
+          config: {
+            endpoint: "http://localhost:8080",
+            enabled: true,
+            serverName: "open-connector",
+            preferJinglerTools: true,
+            perCli: { codex: false }
+          },
+          save
+        })}
+        connector={connector()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("switch", { name: /Prefer Jingler tools/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({ preferJinglerTools: false, perCli: { codex: false } }),
+        undefined
+      )
+    )
+  })
+
   it("probes the instance once when the section opens", () => {
     const test = vi.fn()
     render(<ConnectorsSettings unifiedMcp={unified({ test })} connector={connector()} />)

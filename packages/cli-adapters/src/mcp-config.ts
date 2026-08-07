@@ -1,4 +1,5 @@
 import type { McpServer, McpTransport } from "@jingler/core"
+import { parse } from "smol-toml"
 import type { RemoteMcpServer } from "./adapter.js"
 
 /**
@@ -150,6 +151,59 @@ export const codexMcpOverrides = (
     )
   }
   return overrides
+}
+
+const configRecord = (value: unknown): Record<string, unknown> =>
+  isRecord(value) ? value : {}
+
+const codexKey = (value: string): string =>
+  /^[A-Za-z0-9_-]+$/.test(value) ? value : JSON.stringify(value)
+
+/**
+ * Disable harness-native MCPs and browser plugins discovered in Codex TOML.
+ * Attached names are excluded because the later launch overrides own them.
+ * Malformed/unreadable config documents are ignored; they must never prevent a run.
+ */
+export const codexManagedToolOverrides = (
+  configDocuments: ReadonlyArray<string>,
+  attached: ReadonlyArray<RemoteMcpServer> | null | undefined
+): ReadonlyArray<string> => {
+  const attachedNames = new Set(uniqueRemoteMcpServers(attached).map((entry) => entry.name))
+  const nativeMcpNames = new Set<string>()
+  const nativeBrowserPlugins = new Set<string>()
+  for (const document of configDocuments) {
+    try {
+      const parsed = configRecord(parse(document))
+      for (const name of Object.keys(configRecord(parsed.mcp_servers))) {
+        if (!attachedNames.has(name)) nativeMcpNames.add(name)
+      }
+      for (const name of Object.keys(configRecord(parsed.plugins))) {
+        if (/browser|playwright/i.test(name)) nativeBrowserPlugins.add(name)
+      }
+    } catch {
+      // Codex owns validation of its config. Strict precedence is best-effort if
+      // an unrelated malformed document exists, rather than a launch blocker.
+    }
+  }
+  return [
+    ...[...nativeMcpNames]
+      .sort()
+      .map((name) => `mcp_servers.${codexKey(name)}.enabled=false`),
+    ...[...nativeBrowserPlugins]
+      .sort()
+      .map((name) => `plugins.${codexKey(name)}.enabled=false`)
+  ]
+}
+
+/** Native opencode MCPs to disconnect before registering Jingler's managed set. */
+export const unmanagedOpencodeMcpNames = (
+  status: Readonly<Record<string, unknown>>,
+  attached: ReadonlyArray<RemoteMcpServer> | null | undefined
+): ReadonlyArray<string> => {
+  const managed = new Set(uniqueRemoteMcpServers(attached).map((entry) => entry.name))
+  return Object.keys(status)
+    .filter((name) => !managed.has(name))
+    .sort()
 }
 
 /**

@@ -750,6 +750,12 @@ export const OpenConnectorConfig = Schema.Struct({
     default: () => "open-connector"
   }),
   /**
+   * Make Jingler's managed MCP collection authoritative for agent launches.
+   * Native/user/project MCPs are suppressed by default so a shared provider or
+   * visible browser cannot be shadowed by a harness-specific equivalent.
+   */
+  preferJinglerTools: Schema.optional(Schema.Boolean),
+  /**
    * Per-harness opt-out. A CLI absent from the map defaults to ENABLED (when the
    * master switch is on); only an explicit `false` withholds the server from that
    * harness.
@@ -767,7 +773,8 @@ export type OpenConnectorConfig = Schema.Schema.Type<typeof OpenConnectorConfig>
 export const OPEN_CONNECTOR_DEFAULT: OpenConnectorConfig = {
   endpoint: "",
   enabled: false,
-  serverName: "open-connector"
+  serverName: "open-connector",
+  preferJinglerTools: true
 }
 
 /**

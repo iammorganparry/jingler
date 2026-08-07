@@ -116,6 +116,9 @@ export interface SessionSpec {
    */
   readonly remoteMcpServers?: ReadonlyArray<RemoteMcpServer>
 
+  /** Whether managed attachments replace or merge with harness-native MCP config. */
+  readonly mcpPolicy?: "managed-only" | "merge"
+
   readonly readOnly?: boolean
   /**
    * This agent runs with nobody watching, so apply the protections that implies.

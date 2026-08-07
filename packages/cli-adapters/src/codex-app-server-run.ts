@@ -7,6 +7,9 @@ import type {
 } from "@jingler/core"
 import { CliExecError, resumePlanPrompt } from "@jingler/core"
 import { Effect, Runtime } from "effect"
+import { existsSync, readFileSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import type { AgentContext, PlanDecision, SessionSpec } from "./adapter.js"
 import {
   agentMessageDelta,
@@ -28,7 +31,11 @@ import {
   createCodexAppServerDiagnostics
 } from "./codex-app-server-diagnostics.js"
 import { stageCodexInput, toCodexAppServerInput } from "./codex-input.js"
-import { codexMcpEnvironment, codexMcpOverrides } from "./mcp-config.js"
+import {
+  codexManagedToolOverrides,
+  codexMcpEnvironment,
+  codexMcpOverrides
+} from "./mcp-config.js"
 import { requireWorktree } from "./cwd.js"
 import { capturePlanEmission, type PlanCapture } from "./plan-json.js"
 import { createPlanDraftStream } from "./plan-draft-stream.js"
@@ -488,13 +495,23 @@ export const runCodexAppServer = (
           unattended: spec.unattended ?? false
         })
         try {
+          const codexHome = env.CODEX_HOME ?? join(homedir(), ".codex")
+          const nativeConfigFiles = [join(codexHome, "config.toml"), join(cwd, ".codex", "config.toml")]
+          const nativeConfigDocuments = nativeConfigFiles.flatMap((path) =>
+            existsSync(path) ? [readFileSync(path, "utf8")] : []
+          )
           connection = await startCodexAppServer({
             binPath: spec.binPath,
             env,
             diagnostics,
             // Inline launch overrides keep both authenticated remote entries
             // out of the worktree and Codex's persistent user configuration.
-            configOverrides: codexMcpOverrides(spec.remoteMcpServers)
+            configOverrides: [
+              ...(spec.mcpPolicy === "managed-only"
+                ? codexManagedToolOverrides(nativeConfigDocuments, spec.remoteMcpServers)
+                : []),
+              ...codexMcpOverrides(spec.remoteMcpServers)
+            ]
           })
         } catch (cause) {
           endDiagnostics("run.failed", {

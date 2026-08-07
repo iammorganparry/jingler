@@ -795,6 +795,7 @@ export const openConnectorAutoSetup = () => {
     endpoint: d.endpoint,
     enabled: d.kind === "local",
     serverName: "open-connector",
+    preferJinglerTools: true,
   };
   return openConnectorSet(
     config,

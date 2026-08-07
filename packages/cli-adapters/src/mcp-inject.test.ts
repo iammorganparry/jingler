@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
 import type { RemoteMcpServer } from "./adapter.js"
 import {
+  codexManagedToolOverrides,
   codexMcpEnvironment,
   codexMcpOverrides,
-  opencodeMcpEntries
+  opencodeMcpEntries,
+  unmanagedOpencodeMcpNames
 } from "./mcp-config.js"
 
 /**
@@ -100,6 +102,40 @@ describe("codexMcpOverrides", () => {
     expect(overrides).toContain(
       'shell_environment_policy.filters.JINGLER_BROWSER_MCP_AUTHORIZATION="exclude"'
     )
+  })
+})
+
+describe("managed MCP precedence", () => {
+  it("disables native Codex MCPs and browser plugins without disabling attached replacements", () => {
+    expect(
+      codexManagedToolOverrides(
+        [
+          [
+            "[mcp_servers.playwright]",
+            'command = "playwright-mcp"',
+            "[mcp_servers.open-connector]",
+            'url = "https://native.invalid"',
+            '[plugins."browser@openai-bundled"]',
+            "enabled = true",
+            '[plugins."unrelated@vendor"]',
+            "enabled = true"
+          ].join("\n")
+        ],
+        [OPEN_CONNECTOR, PREVIEW_BROWSER]
+      )
+    ).toStrictEqual([
+      "mcp_servers.playwright.enabled=false",
+      'plugins."browser@openai-bundled".enabled=false'
+    ])
+  })
+
+  it("disconnects only unmanaged opencode MCPs", () => {
+    expect(
+      unmanagedOpencodeMcpNames(
+        { playwright: {}, "open-connector": {}, "jingler-browser": {}, linear: {} },
+        [OPEN_CONNECTOR, PREVIEW_BROWSER]
+      )
+    ).toStrictEqual(["linear", "playwright"])
   })
 })
 
