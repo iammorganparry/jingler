@@ -213,13 +213,21 @@ function SessionPaneBody(props: SessionPaneProps) {
   } | null>(null)
   const [split, setSplit] = useState(false)
   const roomy = atLeast(useWidthTier(), "wide")
-  const presentPlanDraft = useCallback(() => {
-    // One state change per branch: on a roomy conversation the existing tab
-    // stays put and gains the split; on a narrow pane Plan Review becomes the
-    // full-width tab because a 360px plan column would crush the transcript.
-    if (roomy) setSplit(true)
-    else setTab(BUILTIN_TAB.plan)
-  }, [roomy])
+  const openPlanReview = useCallback(
+    (stepId?: string) => {
+      setTarget(stepId ? { sessionId: props.session.id, stepId } : null)
+      // On a roomy pane Plan Review defaults beside chat. A narrow pane cannot
+      // preserve both columns' usable minimum, so it keeps the full-width tab.
+      if (roomy) {
+        setTab(BUILTIN_TAB.conversation)
+        setSplit(true)
+      } else {
+        setTab(BUILTIN_TAB.plan)
+      }
+    },
+    [props.session.id, roomy]
+  )
+  const presentPlanDraft = useCallback(() => openPlanReview(), [openPlanReview])
 
   // An outside request to switch tabs (the command palette). The nonce is the
   // trigger, not the id — see `selectTabRequest`'s docblock. No validation here:
@@ -235,7 +243,8 @@ function SessionPaneBody(props: SessionPaneProps) {
   const onTabRequestHandled = props.onTabRequestHandled
   useEffect(() => {
     if (tabRequestId === undefined) return
-    setTab(tabRequestId)
+    if (tabRequestId === BUILTIN_TAB.plan) openPlanReview()
+    else setTab(tabRequestId)
     onTabRequestHandled?.()
     // Depends on the NONCE alone, deliberately: adding `tabRequestId` would
     // re-fire on a request for a different tab that carried the same nonce, and
@@ -276,11 +285,11 @@ function SessionPaneBody(props: SessionPaneProps) {
       conversation: (session, ctx) => {
         const paneCtx: ConversationPaneCtx = {
           onOpenPlanReview: (stepId) => {
-            setTarget(stepId ? { sessionId: session.id, stepId } : null)
-            // Already split? Plan Review is on screen — switching tabs would
-            // close the transcript the operator just clicked from. Just move
-            // its selection.
-            if (!ctx.splitOpen) ctx.onSelectTab(BUILTIN_TAB.plan)
+            if (ctx.splitOpen) {
+              setTarget(stepId ? { sessionId: session.id, stepId } : null)
+            } else {
+              openPlanReview(stepId)
+            }
           },
           onOpenFile: (path) => {
             props.onOpenFile?.(session.id, path)
@@ -382,7 +391,10 @@ function SessionPaneBody(props: SessionPaneProps) {
           )
           .map((contribution) => describeTab(contribution, tabCtx))}
         active={activeTab}
-        onChange={setTab}
+        onChange={(nextTab) => {
+          if (nextTab === BUILTIN_TAB.plan) openPlanReview()
+          else setTab(nextTab)
+        }}
         status={
           activeActivity
             ? {

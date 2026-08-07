@@ -45,6 +45,7 @@ import {
 import { useBackgroundTasks } from "./use-background-tasks.js"
 import {
   clampedPlanSplitRatio,
+  DEFAULT_PLAN_SPLIT_RATIO,
   PLAN_SPLIT_HANDLE_WIDTH,
   resizedPlanSplitRatio
 } from "./plan-split-ratio.js"
@@ -69,9 +70,11 @@ const PLAN_SPLIT_RATIO_KEY = "sb.split.plan.ratio"
 const initialPlanSplitRatio = (): number => {
   try {
     const stored = Number(localStorage.getItem(PLAN_SPLIT_RATIO_KEY))
-    return Number.isFinite(stored) && stored > 0 && stored < 1 ? stored : 0.5
+    return Number.isFinite(stored) && stored > 0 && stored < 1
+      ? stored
+      : DEFAULT_PLAN_SPLIT_RATIO
   } catch {
-    return 0.5
+    return DEFAULT_PLAN_SPLIT_RATIO
   }
 }
 
@@ -213,8 +216,8 @@ export function ConversationPane({
     [onOpenFile, session.id]
   )
 
-  // A ratio, not a fixed plan width: the first split is truly equal within the
-  // available conversation row and remains equal on different window sizes.
+  // A ratio, not a fixed plan width: the first split gives Plan Review two
+  // thirds and chat one third, then preserves that proportion across window sizes.
   // The operator's raw ratio stays persisted even if a temporarily narrower
   // pane has to clamp it to preserve a 360px floor on both columns.
   const [planSplitRowRef, planSplitRowWidth] = useContainerWidth()

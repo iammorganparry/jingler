@@ -65,7 +65,8 @@ test("streaming plan collaboration survives promotion and reload", async ({
   )
   await composer.press("Enter")
 
-  // The first renderable transient opens beside the live transcript at 50/50.
+  // The first renderable transient opens beside the live transcript with the
+  // plan taking two thirds and chat taking one third.
   // It is a read-only projection, not a canonical plan revision yet.
   const planColumn = window.getByTestId("plan-split-column")
   await expect(planColumn).toBeVisible()
@@ -86,8 +87,8 @@ test("streaming plan collaboration survives promotion and reload", async ({
   ).toBeVisible({ timeout: 20_000 })
 
   const initialRatio = await columnRatio(planColumn)
-  expect(initialRatio).toBeGreaterThan(0.48)
-  expect(initialRatio).toBeLessThan(0.52)
+  expect(initialRatio).toBeGreaterThan(0.64)
+  expect(initialRatio).toBeLessThan(0.69)
 
   // Resize while snapshots are still arriving. Later transient updates and the
   // canonical promotion must preserve this operator-selected ratio.
@@ -96,10 +97,12 @@ test("streaming plan collaboration survives promotion and reload", async ({
   expect(handle).not.toBeNull()
   await window.mouse.move(handle!.x, handle!.y + handle!.height / 2)
   await window.mouse.down()
-  await window.mouse.move(handle!.x - 90, handle!.y + handle!.height / 2)
+  // At this viewport the default already leaves chat at its 360px safety floor,
+  // so resize toward chat rather than asking the plan column to exceed its clamp.
+  await window.mouse.move(handle!.x + 90, handle!.y + handle!.height / 2)
   await window.mouse.up()
   const resizedRatio = await columnRatio(planColumn)
-  expect(resizedRatio).toBeGreaterThan(initialRatio + 0.04)
+  expect(resizedRatio).toBeLessThan(initialRatio - 0.04)
 
   // Composing tolerant-parses the streamed partial DTO into the read-only outline.
   await expect(
@@ -127,13 +130,14 @@ test("streaming plan collaboration survives promotion and reload", async ({
     await columnRatio(window.getByTestId("plan-split-column"))
   ).toBeCloseTo(resizedRatio, 2)
 
-  // Full-width Plan Review presents the read-only outline with the
-  // bottom-centred action surface rather than a fixed toolbar row at the top.
+  // Opening Plan Review from its tab defaults back to the responsive split.
   await splitToggle.click()
   await window
     .getByTestId("view-tab-controls")
     .getByRole("button", { name: "Plan Review", exact: true })
     .click()
+  await expect(window.getByTestId("plan-split-column")).toBeVisible()
+  await expect(window.getByTestId("composer")).toBeVisible()
   const review = window.getByTestId("plan-review-container")
   const floatingActions = window.getByTestId("plan-floating-actions")
   await expect(floatingActions).toBeVisible()

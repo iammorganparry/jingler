@@ -230,6 +230,21 @@ describe("plugin tab contributions", () => {
 })
 
 describe("mount groups", () => {
+  it("opens Plan Review beside chat when the pane is roomy", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        planSessions={new Set(["a"])}
+        renderConversation={(_session, view) => (
+          <span data-testid="plan-presentation">{view}</span>
+        )}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Plan Review" }))
+    expect(screen.getByTestId("plan-presentation").textContent).toBe("split")
+  })
+
   it("opens the first streamed draft beside a roomy conversation", () => {
     render(
       <SessionPane
@@ -277,6 +292,36 @@ describe("mount groups", () => {
 
     await screen.findByRole("button", { name: "stream draft" })
     fireEvent.click(screen.getByRole("button", { name: "stream draft" }))
+    expect(screen.getByTestId("plan-presentation").textContent).toBe("plan")
+    rect.mockRestore()
+  })
+
+  it("opens a manually selected Plan Review full-width when the pane is too narrow", async () => {
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({
+        x: 0,
+        y: 0,
+        top: 0,
+        right: 600,
+        bottom: 800,
+        left: 0,
+        width: 600,
+        height: 800,
+        toJSON: () => ({})
+      })
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        planSessions={new Set(["a"])}
+        renderConversation={(_session, view) => (
+          <span data-testid="plan-presentation">{view}</span>
+        )}
+      />
+    )
+
+    await screen.findByRole("button", { name: "Plan Review" })
+    fireEvent.click(screen.getByRole("button", { name: "Plan Review" }))
     expect(screen.getByTestId("plan-presentation").textContent).toBe("plan")
     rect.mockRestore()
   })
@@ -554,7 +599,7 @@ describe("SessionPane", () => {
     expect(screen.getByText("pr view b")).toBeTruthy()
   })
 
-  it("routes a plan deep-link to the Plan view for its own session", () => {
+  it("routes a plan deep-link to the responsive split for its own session", () => {
     render(
       <SessionPane
         session={session({ id: "a" })}
@@ -570,6 +615,6 @@ describe("SessionPane", () => {
       />
     )
     fireEvent.click(screen.getByText("jump"))
-    expect(screen.getByText("plan:a:s_02")).toBeTruthy()
+    expect(screen.getByText("split:a:s_02")).toBeTruthy()
   })
 })
