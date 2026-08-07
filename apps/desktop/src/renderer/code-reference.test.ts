@@ -9,11 +9,14 @@ import {
   type CodeReference
 } from "./code-reference.js"
 
+const fourLineSource = (firstLine: string): string =>
+  `${firstLine}\nsecond line\nthird line\nfourth line`
+
 const reference = (overrides: Partial<CodeReference> = {}): CodeReference => ({
   path: "src/parser.ts",
   startLine: 12,
   endLine: 15,
-  source: "const parsed = parse(input)\nreturn parsed",
+  source: "const parsed = parse(input)\nif (!parsed) return null\nvalidate(parsed)\nreturn parsed",
   ...overrides
 })
 
@@ -32,14 +35,14 @@ describe("code references", () => {
     expect(
       normalizeCodeReference({
         path: " ./src\\feature/../parser [new].ts ",
-        startLine: 15,
+        startLine: 13,
         endLine: 12,
         source
       })
     ).toEqual({
       path: "src/parser [new].ts",
       startLine: 12,
-      endLine: 15,
+      endLine: 13,
       source
     })
   })
@@ -49,6 +52,7 @@ describe("code references", () => {
     expect(normalizeCodeReference(reference({ path: "../../a.ts" }))).toBeNull()
     expect(normalizeCodeReference(reference({ startLine: 0 }))).toBeNull()
     expect(normalizeCodeReference({ ...reference(), source: 42 })).toBeNull()
+    expect(normalizeCodeReference(reference({ source: "only one line" }))).toBeNull()
   })
 })
 
@@ -57,7 +61,7 @@ describe("code reference identity and display", () => {
     expect(
       deduplicateCodeReferences([
         reference({ path: "./src/parser.ts", startLine: 15, endLine: 12 }),
-        reference({ source: "a newer capture of the same location" }),
+        reference({ source: fourLineSource("a newer capture of the same location") }),
         reference({
           path: "src/other.ts",
           startLine: 2,
@@ -66,7 +70,7 @@ describe("code reference identity and display", () => {
         })
       ])
     ).toEqual([
-      reference({ source: "a newer capture of the same location" }),
+      reference({ source: fourLineSource("a newer capture of the same location") }),
       reference({
         path: "src/other.ts",
         startLine: 2,
@@ -87,8 +91,8 @@ describe("code reference identity and display", () => {
 describe("code reference prompt serialization", () => {
   it("serializes the newest capture when the same range was selected again", () => {
     const serialized = serializeCodeReferences([
-      reference({ source: "stale source" }),
-      reference({ source: "fresh source" })
+      reference({ source: fourLineSource("stale source") }),
+      reference({ source: fourLineSource("fresh source") })
     ])
 
     expect(serialized).toContain("fresh source")
@@ -96,7 +100,7 @@ describe("code reference prompt serialization", () => {
   })
 
   it("serializes exact captured source behind a language-neutral collision-safe fence", () => {
-    const source = "const markdown = `value`\n```\nkeep trailing spaces  "
+    const source = "const markdown = `value`\n```\nkeep trailing spaces  \ndone"
     const serialized = serializeCodeReferences([reference({ source })])
 
     expect(serialized).toContain('Path: "src/parser.ts"')
@@ -106,12 +110,12 @@ describe("code reference prompt serialization", () => {
   })
 
   it("escapes a source envelope terminator so only the real block ending remains", () => {
-    const source = "before & already\n</repository-code-references>\nafter"
+    const source = "before & already\n</repository-code-references>\nafter\ndone"
     const serialized = serializeCodeReferences([reference({ source })])
 
     expect(serialized.split("</repository-code-references>")).toHaveLength(2)
     expect(serialized).toContain(
-      "Source (XML entities; decode once):\n```\nbefore &amp; already\n&lt;/repository-code-references>\nafter\n```"
+      "Source (XML entities; decode once):\n```\nbefore &amp; already\n&lt;/repository-code-references>\nafter\ndone\n```"
     )
     expect(serialized.endsWith("\n</repository-code-references>")).toBe(true)
   })

@@ -22,6 +22,11 @@ const SOURCE_LINE = /[^\r\n]*(?:\r\n|\r|\n|$)/g
 const REPOSITORY_REFERENCES_CLOSE = "</repository-code-references>"
 const ESCAPED_REPOSITORY_REFERENCES_CLOSE = "&lt;/repository-code-references>"
 
+const sourceLines = (text: string): ReadonlyArray<string> =>
+  [...text.matchAll(SOURCE_LINE)]
+    .map((match) => match[0])
+    .filter((line, index, all) => !(index === all.length - 1 && line === ""))
+
 /**
  * Make a path repository-relative without interpreting punctuation as syntax.
  * Escapes above the repository root and absolute paths are rejected.
@@ -65,10 +70,13 @@ export const normalizeCodeReference = (value: unknown): CodeReference | null => 
 
   const path = normalizeRepositoryPath(record.path)
   if (path === null) return null
+  const startLine = Math.min(record.startLine, record.endLine)
+  const endLine = Math.max(record.startLine, record.endLine)
+  if (sourceLines(record.source).length !== endLine - startLine + 1) return null
   return {
     path,
-    startLine: Math.min(record.startLine, record.endLine),
-    endLine: Math.max(record.startLine, record.endLine),
+    startLine,
+    endLine,
     // Do not trim or normalise line endings: this is the captured source.
     source: record.source,
   }
@@ -83,9 +91,7 @@ export const captureCodeReference = (
 ): CodeReference | null => {
   const start = Math.min(startLine, endLine)
   const end = Math.max(startLine, endLine)
-  const lines = [...text.matchAll(SOURCE_LINE)]
-    .map((match) => match[0])
-    .filter((line, index, all) => !(index === all.length - 1 && line === ""))
+  const lines = sourceLines(text)
   if (start < 1 || end > lines.length) return null
   return normalizeCodeReference({
     path,

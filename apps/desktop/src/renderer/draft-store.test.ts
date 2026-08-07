@@ -50,8 +50,11 @@ const REFERENCE: CodeReference = {
   path: "src/parser.ts",
   startLine: 12,
   endLine: 15,
-  source: "const parsed = parse(input)\nreturn parsed"
+  source: "alpha\nbeta\ngamma\ndelta"
 }
+
+const fourLineSource = (firstLine: string): string =>
+  `${firstLine}\nsecond line\nthird line\nfourth line`
 
 beforeEach(() => {
   __resetDrafts()
@@ -312,12 +315,12 @@ describe("draft-store", () => {
       attachments: [],
       references: [
         { ...REFERENCE, path: "./src/parser.ts", startLine: 15, endLine: 12 },
-        { ...REFERENCE, source: "duplicate capture" }
+        { ...REFERENCE, source: fourLineSource("duplicate capture") }
       ]
     })
 
     expect(getDraft("s1").references).toEqual([
-      { ...REFERENCE, source: "duplicate capture" }
+      { ...REFERENCE, source: fourLineSource("duplicate capture") }
     ])
   })
 
@@ -331,12 +334,15 @@ describe("draft-store", () => {
     }
     setDraft("s1", { text: "explain", attachments: [IMAGE], references: [REFERENCE, other] })
 
-    addDraftCodeReference("s1", { ...REFERENCE, source: "freshly edited source" })
+    addDraftCodeReference("s1", {
+      ...REFERENCE,
+      source: fourLineSource("freshly edited source")
+    })
 
     expect(getDraft("s1")).toEqual({
       text: "explain",
       attachments: [IMAGE],
-      references: [{ ...REFERENCE, source: "freshly edited source" }, other]
+      references: [{ ...REFERENCE, source: fourLineSource("freshly edited source") }, other]
     })
   })
 })
