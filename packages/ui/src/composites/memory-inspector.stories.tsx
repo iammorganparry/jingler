@@ -42,7 +42,6 @@ export const PageSelected: Story = {
     node: memoryInspectorNode,
     evidence: null,
     page: memoryPageDetail,
-    pendingProposalCount: 2,
     suggestions: memorySuggestions,
     suggestionsSource: "turbopuffer"
   }

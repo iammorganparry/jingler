@@ -304,7 +304,6 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
               evidence={context.evidence}
               page={context.page}
               loading={memory.loading}
-              pendingProposalCount={0}
               suggestions={context.suggestions?.suggestions ?? []}
               suggestionsSource={context.suggestions?.vectorSource ?? "lexical"}
               onBack={memory.closeInspector}

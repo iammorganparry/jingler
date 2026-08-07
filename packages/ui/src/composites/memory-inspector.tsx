@@ -12,7 +12,6 @@ export interface MemoryInspectorProps {
   evidence: MemoryEdgeEvidence | null
   page: MemoryPageDetail | null
   loading?: boolean
-  pendingProposalCount?: number
   /** Advisory relatedness for the inspected page (NON-AUTHORITATIVE). */
   suggestions?: ReadonlyArray<MemorySuggestion>
   suggestionsSource?: "turbopuffer" | "lexical"
@@ -28,7 +27,6 @@ export function MemoryInspector({
   evidence,
   page,
   loading = false,
-  pendingProposalCount = 0,
   suggestions = [],
   suggestionsSource = "lexical",
   onBack,
@@ -79,7 +77,7 @@ export function MemoryInspector({
             <section className="mt-4 border-t border-hairline pt-4 text-[10.5px] text-muted-foreground">
               <h3 className="m-0 flex items-center gap-2 text-[11px] font-semibold text-text-bright"><Users size={13} /> Provenance and health</h3>
               <p>Revision {page.revision.revision} · {new Date(page.revision.acceptedAt).toLocaleDateString()} · {page.contributors.join(", ")}</p>
-              <p>{page.backlinks.length} backlinks · {page.health.brokenLinks} broken links · {page.health.contradictions} contradictions · {pendingProposalCount} proposals</p>
+              <p>{page.backlinks.length} backlinks · {page.health.brokenLinks} broken links · {page.health.contradictions} contradictions</p>
             </section>
             <MemorySuggestionsPanel
               pageId={page.page.id}
