@@ -138,15 +138,19 @@ calls are injected context, not renderer `Tool` parts. The transcript audit stil
 found that explicit agent behavior was sparse: only one sampled Codex transcript
 made memory calls, and none of the 12 sampled transcripts made a proposal.
 
-## Settled-session capture path
+## Historical settled-session capture path (removed)
+
+This section records the behavior at the audit cutoff. The automatic raw-turn
+capture entry point has since been removed in favor of explicit, agent-authored
+proposals. Only a legacy outbox drain remains so pre-upgrade jobs are not lost.
 
 ### Settlement and digest construction
 
-Capture is **settlement-gated**. `AgentRunner` first applies the terminal event,
-patches the assistant transcript, settles context, and finalizes plan verification.
-Only an adapter `Done` then calls `captureSettledSession`. `Failed`, cancellation,
+Capture was **settlement-gated**. `AgentRunner` first applied the terminal event,
+patched the assistant transcript, settled context, and finalized plan verification.
+Only an adapter `Done` then called `captureSettledSession`. `Failed`, cancellation,
 an interrupted stream, a silent EOF, or an assistant message left `streaming: true`
-does not capture.
+did not capture.
 
 The source contains only:
 

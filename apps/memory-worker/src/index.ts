@@ -101,6 +101,24 @@ const sweepVectorIngest = async (
   )
 }
 
+const RETIRED_REVIEW_GATE_WARNING =
+  "MEMORY_REQUIRE_REVIEW is retired and ignored; remove it because agent memory publication is automatic."
+
+const deprecatedConfigurationWarnings = (
+  env: MemoryWorkerEnv
+): ReadonlyArray<string> =>
+  env.MEMORY_REQUIRE_REVIEW === undefined ? [] : [RETIRED_REVIEW_GATE_WARNING]
+
+let didWarnAboutRetiredReviewGate = false
+
+const warnAboutDeprecatedConfiguration = (env: MemoryWorkerEnv): void => {
+  if (didWarnAboutRetiredReviewGate) return
+  const warnings = deprecatedConfigurationWarnings(env)
+  if (warnings.length === 0) return
+  didWarnAboutRetiredReviewGate = true
+  for (const warning of warnings) console.warn(warning)
+}
+
 export const memoryWorkerHealthResponse = (env: MemoryWorkerEnv): Response =>
   {
     const bindings = {
@@ -110,11 +128,13 @@ export const memoryWorkerHealthResponse = (env: MemoryWorkerEnv): Response =>
       lintWorkflow: env.MEMORY_LINT !== undefined
     }
     const ready = Object.values(bindings).every(Boolean)
+    const warnings = deprecatedConfigurationWarnings(env)
     return Response.json(
       {
       status: ready ? "ok" : "degraded",
       service: "@jingler/memory-worker",
-      bindings
+      bindings,
+      ...(warnings.length === 0 ? {} : { warnings })
     },
       { status: ready ? 200 : 503, headers: { "cache-control": "no-store" } }
     )
@@ -122,6 +142,7 @@ export const memoryWorkerHealthResponse = (env: MemoryWorkerEnv): Response =>
 
 export default {
   fetch(request: Request, env: MemoryWorkerEnv): Promise<Response> {
+    warnAboutDeprecatedConfiguration(env)
     const url = new URL(request.url)
     if (request.method === "GET" && url.pathname === "/health") {
       return Promise.resolve(memoryWorkerHealthResponse(env))
@@ -129,6 +150,7 @@ export default {
     return handleMemoryWorkerRequest(request, env)
   },
   async scheduled(event: ScheduledControllerLike, env: MemoryWorkerEnv): Promise<void> {
+    warnAboutDeprecatedConfiguration(env)
     const asOf = new Date(event.scheduledTime).toISOString()
     const day = asOf.slice(0, 10)
     const [lintOrganizations, vectorOrganizations] = await Promise.all([

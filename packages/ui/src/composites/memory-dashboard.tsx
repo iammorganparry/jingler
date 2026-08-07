@@ -9,7 +9,7 @@ import {
 } from "lucide-react"
 import type { ReactNode } from "react"
 
-export type MemorySubview = "dashboard" | "map" | "wiki" | "reviews" | "analytics"
+export type MemorySubview = "dashboard" | "map" | "wiki" | "analytics"
 
 export interface MemoryDeepLink {
   readonly view: MemorySubview

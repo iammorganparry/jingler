@@ -24,6 +24,13 @@ const harnessMemoryCallCount = (
       request.mcpName === null
   ).length
 
+const sourceIngestRequests = (
+  requests: ReadonlyArray<FakeMemoryRequest>
+): ReadonlyArray<FakeMemoryRequest> =>
+  requests.filter(
+    (request) => request.path === "/api/memory/sources" && request.httpMethod === "POST"
+  )
+
 const seededSession = (
   cli: "claude" | "codex",
   repoPath: string
@@ -46,7 +53,7 @@ const seededSession = (
 ]
 
 for (const cli of ["claude", "codex"] as const) {
-  test(`${cli} receives and captures accepted memory for an eligible turn`, async ({
+  test(`${cli} receives accepted memory without raw settled-turn capture`, async ({
     launchApp
   }) => {
     const fake = await startFakeAuthServer()
@@ -68,6 +75,11 @@ for (const cli of ["claude", "codex"] as const) {
       await expect(app.window.getByText("1 passed", { exact: true })).toBeVisible({
         timeout: 30_000
       })
+      await expect(
+        app.window
+          .getByTestId(`session-row-s_automatic_memory_${cli}`)
+          .getByText("Idle", { exact: true })
+      ).toBeVisible({ timeout: 30_000 })
 
       await expect
         .poll(() => memoryRequestCount(fake.memoryRequests, "memory_search"))
@@ -87,9 +99,7 @@ for (const cli of ["claude", "codex"] as const) {
           request.mcpMethod === null &&
           request.mcpName === null
       )).toBe(true)
-      await expect
-        .poll(() => fake.memorySnapshot("org-e2e").sourceCount, { timeout: 30_000 })
-        .toBe(1)
+      expect(sourceIngestRequests(fake.memoryRequests)).toEqual([])
 
       await app.app.close()
     } finally {

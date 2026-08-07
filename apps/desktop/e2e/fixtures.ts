@@ -1048,6 +1048,10 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
           // Force the deterministic scripted agent so chat e2e never spawns a
           // real harness (no auth, no network, reproducible).
           JINGLER_SCRIPTED_AGENT: options.scriptedAgent === false ? "0" : "1",
+          // A separate boundary for E2E-only scripted markers. Scripted mode is
+          // also a legitimate production fallback when no CLI is installed, so
+          // it must never imply permission to execute test-only side effects.
+          JINGLER_E2E: "1",
           JINGLER_E2E_CODEX_LOG: join(binDir, "codex-calls.log"),
           JINGLER_E2E_BROWSER_MCP_GATE: join(binDir, "browser-mcp.release"),
           // Keep the window hidden and off the dock. The suite launches a real

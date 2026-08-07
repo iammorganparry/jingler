@@ -48,7 +48,6 @@ import type { MemorySubview } from "@jingler/ui";
 import {
   BarChart3,
   BookOpen,
-  ClipboardCheck,
   Download,
   LayoutDashboard,
   Map as MapIcon,
@@ -131,165 +130,11 @@ const MEMORY_TABS: ReadonlyArray<{
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "map", label: "Map", icon: MapIcon },
   { id: "wiki", label: "Wiki", icon: BookOpen },
-  { id: "reviews", label: "Reviews", icon: ClipboardCheck },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
 ];
 
-function MemoryReviewsView({
-  memory,
-}: {
-  memory: ReturnType<typeof useMemory>;
-}) {
-  const { context } = memory;
-  const selected =
-    context.reviews.find((review) => review.id === context.selectedReviewId) ??
-    null;
-  const open = context.reviews.filter((review) => review.status === "open");
-  return (
-    <main className="grid min-h-0 flex-1 grid-cols-[minmax(14rem,0.32fr)_minmax(0,1fr)] bg-editor">
-      <aside className="min-h-0 overflow-y-auto border-r border-hairline bg-panel p-3">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <h2 className="text-xs font-semibold text-text-bright">
-            Review queue
-          </h2>
-          <span className="font-mono text-[10px] text-dim">
-            {open.length} open
-          </span>
-        </div>
-        <div className="space-y-1.5">
-          {context.reviews.map((review) => (
-            <button
-              key={review.id}
-              type="button"
-              onClick={() => memory.selectReview(review.id)}
-              aria-pressed={review.id === context.selectedReviewId}
-              className="w-full rounded-md border border-line bg-sunken p-2 text-left outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring aria-pressed:bg-surface"
-            >
-              <strong className="block truncate font-mono text-[10.5px] text-text-bright">
-                {review.id}
-              </strong>
-              <span className="mt-1 block text-[10px] text-muted-foreground">
-                {review.pages.length} page{review.pages.length === 1 ? "" : "s"}{" "}
-                · {review.changeKind} · {review.status}
-              </span>
-            </button>
-          ))}
-          {context.reviews.length === 0 && (
-            <p className="py-8 text-center text-xs text-muted-foreground">
-              No proposals need review.
-            </p>
-          )}
-        </div>
-      </aside>
-      <section className="min-h-0 overflow-y-auto p-4">
-        {selected === null ? (
-          <div className="grid min-h-full place-items-center text-xs text-muted-foreground">
-            Select a proposal to review.
-          </div>
-        ) : (
-          <div className="mx-auto max-w-4xl">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="font-mono text-sm font-semibold text-text-bright">
-                  {selected.id}
-                </h2>
-                <p className="mt-1 text-[10.5px] text-muted-foreground">
-                  From {selected.sourceId} · proposed by {selected.proposedBy}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={
-                    !memory.canReview ||
-                    memory.reviewing ||
-                    selected.status !== "open"
-                  }
-                  onClick={() => memory.decideReview(selected.id, "reject")}
-                  className="rounded-md border border-line bg-sunken px-3 py-1.5 text-[10.5px] text-text outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                >
-                  Reject all
-                </button>
-                <button
-                  type="button"
-                  disabled={
-                    !memory.canReview ||
-                    memory.reviewing ||
-                    selected.status !== "open"
-                  }
-                  onClick={() => memory.decideReview(selected.id, "approve")}
-                  className="rounded-md border border-line bg-brand px-3 py-1.5 text-[10.5px] font-semibold text-text-bright outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                >
-                  {memory.reviewing ? "Publishing…" : "Accept all"}
-                </button>
-              </div>
-            </div>
-            {memory.conflict && context.reviewResult !== null && (
-              <div
-                role="alert"
-                className="mt-4 rounded-md border border-red bg-sunken p-3 text-xs text-text"
-              >
-                <strong className="text-red">Publication conflict</strong>
-                {context.reviewResult.conflicts.map((conflict) => (
-                  <p
-                    key={`${conflict.pageId}:${conflict.currentHeadRevisionId}`}
-                    className="mt-1 font-mono text-[10.5px] text-muted-foreground"
-                  >
-                    {conflict.pageId}: expected{" "}
-                    {conflict.expectedBaseRevisionId}; current{" "}
-                    {conflict.currentHeadRevisionId}
-                  </p>
-                ))}
-              </div>
-            )}
-            <div
-              role="tablist"
-              aria-label="Proposed pages"
-              className="mt-4 flex flex-wrap gap-1 border-b border-hairline pb-2"
-            >
-              {selected.pages.map((page, index) => (
-                <button
-                  key={page.proposalId}
-                  type="button"
-                  role="tab"
-                  aria-selected={index === 0}
-                  className="rounded-md bg-surface px-2.5 py-1.5 text-[10.5px] text-text-bright"
-                >
-                  {page.title}
-                </button>
-              ))}
-            </div>
-            <div className="mt-3 space-y-3">
-              {selected.pages.map((page) => (
-                <article
-                  key={page.proposalId}
-                  className="rounded-md border border-line bg-panel p-3"
-                >
-                  <h3 className="text-xs font-semibold text-text-bright">
-                    {page.title}
-                  </h3>
-                  <p className="mt-1 text-[10.5px] leading-4 text-muted-foreground">
-                    {page.summary}
-                  </p>
-                  <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-md bg-sunken p-3 font-mono text-[10px] leading-4 text-text">
-                    {page.markdown}
-                  </pre>
-                </article>
-              ))}
-            </div>
-          </div>
-        )}
-      </section>
-    </main>
-  );
-}
-
 function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
   const { context } = memory;
-  const selectedReview = context.reviews.find(
-    (review) => review.id === context.selectedReviewId,
-  );
-  const reviewCount = selectedReview?.pages.length ?? 0;
   return (
     <div
       className="relative flex min-h-0 flex-1 flex-col bg-editor"
@@ -380,10 +225,7 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
                 onClick={() => memory.navigate({ view: id })}
                 className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[10.5px] text-muted-foreground outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring aria-[current=page]:bg-surface aria-[current=page]:text-text-bright"
               >
-                <Icon size={12} />{" "}
-                {id === "reviews"
-                  ? `${label} (${context.reviews.filter((review) => review.status === "open").length})`
-                  : label}
+                <Icon size={12} /> {label}
               </button>
             ))}
           </nav>
@@ -453,7 +295,6 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
               onBack={memory.backFromPage}
             />
           )}
-          {context.view === "reviews" && <MemoryReviewsView memory={memory} />}
           {context.view === "analytics" && (
             <MemoryAnalytics summary={context.summary} />
           )}
@@ -463,7 +304,6 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
               evidence={context.evidence}
               page={context.page}
               loading={memory.loading}
-              pendingProposalCount={reviewCount}
               suggestions={context.suggestions?.suggestions ?? []}
               suggestionsSource={context.suggestions?.vectorSource ?? "lexical"}
               onBack={memory.closeInspector}

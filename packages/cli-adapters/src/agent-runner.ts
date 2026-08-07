@@ -98,12 +98,7 @@ import { branchAt, ensureWorktreeLinked } from "./git.js"
 import { OpenConnectorService } from "./open-connector.js"
 import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
 import { composeRemoteMcpServers, remoteMcpServer } from "./mcp-config.js"
-import {
-  EMPTY_MEMORY_RETRIEVAL_SUMMARY,
-  MemoryService,
-  MemoryServiceLive,
-  recordMemoryRetrieval
-} from "./memory.js"
+import { MemoryService, MemoryServiceLive } from "./memory.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
@@ -1590,9 +1585,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const eventCount = yield* Ref.make(0)
           const lastEvent = yield* Ref.make<string>("<none>")
           const wasInterrupted = yield* Ref.make(false)
-          const memoryRetrieval = yield* Ref.make(
-            memoryAttachment?.retrieval ?? EMPTY_MEMORY_RETRIEVAL_SUMMARY
-          )
           const persistedTaskMarkers = yield* Ref.make(new Set<string>())
 
           // toolUseId → the file an edit tool is writing, remembered at ToolStart so
@@ -1912,11 +1904,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // vanished is a different failure from one that emitted nothing.
               yield* Ref.update(eventCount, (n) => n + 1)
               yield* Ref.set(lastEvent, event._tag)
-              if (event._tag === "ToolStart") {
-                yield* Ref.update(memoryRetrieval, (summary) =>
-                  recordMemoryRetrieval(summary, event.name)
-                )
-              }
               if (event._tag === "SubagentStarted") {
                 const ownerRoutingId = orchestratorParticipantRoutingId(chatId)
                 const routingId = subagentParticipantRoutingId(
@@ -2086,20 +2073,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               if (event._tag === "Done") {
                 yield* ContextManager.settle(chatId).pipe(Effect.ignore)
                 yield* finalizePlanVerification()
-                const settledText = next.parts
-                  .filter((part) => part._tag === "Text")
-                  .map((part) => part.text)
-                  .join("\n")
-                yield* memoryService.captureSettledSession({
-                  sessionId,
-                  chatId,
-                  turnId: next.id,
-                  cli,
-                  userText: text,
-                  assistantText: settledText,
-                  settledAt: new Date().toISOString(),
-                  retrieval: yield* Ref.get(memoryRetrieval)
-                }).pipe(Effect.ignore)
               }
               // Amendment diagnostics are part of the canonical assistant
               // message, so live consumers must receive the same appended text

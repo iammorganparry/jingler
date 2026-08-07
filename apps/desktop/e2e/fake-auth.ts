@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { createServer, type Server } from "node:http"
 import type { AddressInfo } from "node:net"
 import type { MemoryDashboardSummary } from "@jingler/contracts"
@@ -49,9 +50,17 @@ interface FakeProposal {
 interface FakeOrganizationMemory {
   readonly pages: Map<string, FakePage>
   readonly proposals: Array<FakeProposal>
+  readonly workflows: Map<string, FakeMemoryWorkflow>
   readonly sourceIds: Set<string>
   secretRejections: number
   readonly reviewDecisions: Array<string>
+}
+
+interface FakeMemoryWorkflow {
+  readonly id: string
+  readonly sourceId: string
+  readonly page: FakePage
+  status: "queued" | "published"
 }
 
 export interface FakeMemoryRequest {
@@ -60,18 +69,21 @@ export interface FakeMemoryRequest {
   readonly rpcMethod: string | null
   readonly mcpMethod: string | null
   readonly mcpName: string | null
+  readonly toolName: string | null
   readonly organizationId: string | null
   readonly protocolVersion: string | null
   readonly metadataProtocolVersion: string | null
   readonly hasCookie: boolean
   readonly hasSessionId: boolean
   readonly requestId: string | null
-  readonly assignedInstance: "next-a" | "next-b"
+  readonly toolArguments: Readonly<Record<string, unknown>> | null
+  readonly assignedInstance: "next-a" | "next-b" | null
 }
 
 export interface FakeMemorySnapshot {
   readonly organizationId: string
   readonly acceptedPageIds: ReadonlyArray<string>
+  readonly acceptedRevisions: Readonly<Record<string, number>>
   readonly proposalStatuses: Readonly<Record<string, ProposalStatus>>
   readonly sourceCount: number
   readonly secretRejections: number
@@ -83,6 +95,7 @@ export interface FakeAuthServerOptions {
   readonly paidOrganizationIds?: ReadonlyArray<string>
   readonly unavailable?: boolean
   readonly acceptedLearningOrganizationIds?: ReadonlyArray<string>
+  readonly reviewProposals?: boolean
 }
 
 /**
@@ -107,6 +120,146 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const jsonBody = (value: unknown): Record<string, unknown> =>
   isRecord(value) ? value : {}
+
+const MARKDOWN_HEADING_PATTERN = /^#\s+(.+?)\s*$/m
+
+const proposedPage = (
+  pageId: string,
+  markdown: string,
+  sourceId: string,
+  current?: FakePage
+): FakePage => ({
+  id: pageId,
+  path: current?.path ?? `learning/${pageId}.md`,
+  title: MARKDOWN_HEADING_PATTERN.exec(markdown)?.[1]?.trim() ?? current?.title ?? pageId,
+  revision: (current?.revision ?? 0) + 1,
+  body: markdown,
+  aliases: current?.aliases ?? [],
+  tags: current?.tags ?? ["compiled-learning"],
+  citations: [{ id: "agent-proposal", sourceId, locator: "agent memory proposal" }],
+  authorId: "agent:e2e",
+  sourceIds: [...new Set([...(current?.sourceIds ?? []), sourceId])]
+})
+
+const proposalIdentity = (
+  pageId: string,
+  baseRevisionId: string,
+  markdown: string
+): string => createHash("sha256")
+  .update([pageId, baseRevisionId, markdown].join("\u0000"))
+  .digest("hex")
+
+const fakeMemoryProposal = (
+  state: FakeOrganizationMemory,
+  args: Readonly<Record<string, unknown>>
+): Readonly<Record<string, unknown>> => {
+  const pageId = typeof args.pageId === "string" ? args.pageId.trim() : ""
+  const baseRevisionId = typeof args.baseRevisionId === "string"
+    ? args.baseRevisionId.trim()
+    : ""
+  const markdown = typeof args.markdown === "string" ? args.markdown.trim() : ""
+  if (pageId.length === 0 || baseRevisionId.length === 0 || markdown.length === 0) {
+    return {
+      status: "invalid",
+      code: "invalid",
+      message: "memory_propose requires pageId, baseRevisionId, and markdown"
+    }
+  }
+  if (CREDENTIAL_PATTERN.test(markdown)) {
+    state.secretRejections += 1
+    return {
+      status: "conflict",
+      code: "conflict",
+      httpStatus: 409,
+      conflicts: [{
+        pageId,
+        expectedBaseRevisionId: baseRevisionId,
+        currentHeadRevisionId: "lint:credential-shaped-content"
+      }]
+    }
+  }
+
+  const current = state.pages.get(pageId)
+  if (baseRevisionId === "new") {
+    if (current !== undefined) {
+      return {
+        status: "conflict",
+        code: "conflict",
+        httpStatus: 409,
+        conflicts: [{
+          pageId,
+          expectedBaseRevisionId: "new",
+          currentHeadRevisionId: `revision:${pageId}:${current.revision}`
+        }]
+      }
+    }
+    const identity = proposalIdentity(pageId, baseRevisionId, markdown)
+    const sourceId = `source:proposal-${identity}`
+    const workflowId = `compiler-${identity}`
+    state.sourceIds.add(sourceId)
+    if (!state.workflows.has(workflowId)) {
+      state.workflows.set(workflowId, {
+        id: workflowId,
+        sourceId,
+        page: proposedPage(pageId, markdown, sourceId),
+        status: "queued"
+      })
+    }
+    return { workflowId, status: state.workflows.get(workflowId)?.status ?? "queued" }
+  }
+
+  if (current === undefined) {
+    return { status: "not_found", code: "not_found", httpStatus: 404, pageId }
+  }
+  const currentRevisionId = `revision:${pageId}:${current.revision}`
+  if (baseRevisionId !== currentRevisionId) {
+    return {
+      status: "conflict",
+      code: "conflict",
+      httpStatus: 409,
+      conflicts: [{
+        pageId,
+        expectedBaseRevisionId: baseRevisionId,
+        currentHeadRevisionId: currentRevisionId
+      }]
+    }
+  }
+  const identity = proposalIdentity(pageId, baseRevisionId, markdown)
+  const sourceId = `source:proposal-${identity}`
+  state.sourceIds.add(sourceId)
+  state.pages.set(pageId, proposedPage(pageId, markdown, sourceId, current))
+  return {
+    status: "accepted",
+    proposalId: `proposal-${identity}`,
+    revisionId: `revision:proposal-${identity}`,
+    revision: current.revision + 1
+  }
+}
+
+const fakeMemoryWorkflowStatus = (
+  state: FakeOrganizationMemory,
+  args: Readonly<Record<string, unknown>>
+): Readonly<Record<string, unknown>> => {
+  const workflowId = typeof args.workflowId === "string" ? args.workflowId : ""
+  const workflow = state.workflows.get(workflowId)
+  if (workflow === undefined) {
+    return { status: "not_found", code: "not_found", httpStatus: 404, workflowId }
+  }
+  if (workflow.status === "queued") {
+    state.pages.set(workflow.page.id, workflow.page)
+    workflow.status = "published"
+  }
+  return {
+    workflowId,
+    state: "complete",
+    result: {
+      status: "published",
+      workflowId,
+      proposalId: `proposal:${workflowId}`,
+      proposalIds: [`proposal:${workflowId}:${workflow.page.id}`]
+    }
+  }
+}
 
 const basePages = (organizationId: string): ReadonlyArray<FakePage> => {
   const other = organizationId !== "org-e2e"
@@ -318,8 +471,6 @@ const rangeScale = (range: string): number => RANGE_SEARCHES[range] ?? RANGE_SEA
 
 const dashboardFor = (state: FakeOrganizationMemory, range = "all"): MemoryDashboardSummary => {
   const added = Math.max(0, state.pages.size - 2)
-  const open = state.proposals.filter((proposal) => proposal.status === "open").length
-  const accepted = state.proposals.filter((proposal) => proposal.status === "accepted").length
   // Derive every windowed retrieval count from the same per-range anchor so the
   // whole block moves together, the way a real time-scoped aggregation would.
   const searches = rangeScale(range)
@@ -330,7 +481,6 @@ const dashboardFor = (state: FakeOrganizationMemory, range = "all"): MemoryDashb
     citationCoverage: { citations: 15_000 + added, citedPages: 9_200 + added, totalPages: 10_000 + added, ratio: 0.92 },
     freshness: { fresh: 8_000 + added, aging: 1_200, stale: 800, unknown: 0 },
     health: { orphanPages: 20, brokenLinks: 4, contradictions: 2 },
-    reviewThroughput: { proposed: 40 + state.proposals.length, accepted: 30 + accepted, rejected: 5, conflicted: state.secretRejections + 1, open, acceptanceRatio: 0.8333, medianReviewHours: 3.5 },
     connectivity: { pages: 10_000 + added, directedLinks: 22_000 + added, connectedPages: 9_980 + added, averageDegree: 4.4 },
     retrieval: {
       searches,
@@ -394,12 +544,13 @@ const suggestionsFor = (organizationId: string, state: FakeOrganizationMemory) =
 
 const normalizeOptions = (value: string | FakeAuthServerOptions): Required<Omit<FakeAuthServerOptions, "acceptedLearningOrganizationIds">> & { readonly acceptedLearningOrganizationIds: ReadonlyArray<string> } =>
   typeof value === "string"
-    ? { token: value, paidOrganizationIds: DEFAULT_PAID_ORGANIZATIONS, unavailable: false, acceptedLearningOrganizationIds: [] }
+    ? { token: value, paidOrganizationIds: DEFAULT_PAID_ORGANIZATIONS, unavailable: false, acceptedLearningOrganizationIds: [], reviewProposals: true }
     : {
         token: value.token ?? DEFAULT_TOKEN,
         paidOrganizationIds: value.paidOrganizationIds ?? DEFAULT_PAID_ORGANIZATIONS,
         unavailable: value.unavailable ?? false,
-        acceptedLearningOrganizationIds: value.acceptedLearningOrganizationIds ?? []
+        acceptedLearningOrganizationIds: value.acceptedLearningOrganizationIds ?? [],
+        reviewProposals: value.reviewProposals ?? true
       }
 
 export const startFakeAuthServer = async (
@@ -417,7 +568,8 @@ export const startFakeAuthServer = async (
     if (existing !== undefined) return existing
     const state: FakeOrganizationMemory = {
       pages: new Map(basePages(organizationId).map((page) => [page.id, page])),
-      proposals: organizationId === "org-e2e" ? fixedProposals() : [],
+      proposals: organizationId === "org-e2e" && options.reviewProposals ? fixedProposals() : [],
+      workflows: new Map(),
       sourceIds: new Set(),
       secretRejections: 0,
       reviewDecisions: []
@@ -497,17 +649,39 @@ export const startFakeAuthServer = async (
     }
 
     if (url.pathname === "/api/memory/sources" && req.method === "POST") {
+      const organizationId = typeof req.headers["x-jingler-organization-id"] === "string"
+        ? req.headers["x-jingler-organization-id"]
+        : null
+      requests.push({
+        path: url.pathname,
+        httpMethod: req.method,
+        rpcMethod: null,
+        mcpMethod: null,
+        mcpName: null,
+        toolName: null,
+        organizationId,
+        protocolVersion: null,
+        metadataProtocolVersion: null,
+        hasCookie: req.headers.cookie !== undefined,
+        hasSessionId: req.headers["mcp-session-id"] !== undefined,
+        requestId: null,
+        toolArguments: null,
+        assignedInstance: null
+      })
       if (!memoryAvailable) return json(503, { error: "memory unavailable" })
-      const organizationId = req.headers["x-jingler-organization-id"]
+      const requestedOrganizationId = req.headers["x-jingler-organization-id"]
       const grantOrganization = organizationFromGrant(req.headers.authorization)
-      if (typeof organizationId !== "string" || grantOrganization !== organizationId) return json(401, {})
+      if (
+        typeof requestedOrganizationId !== "string" ||
+        grantOrganization !== requestedOrganizationId
+      ) return json(401, {})
       readJson().then((value) => {
         const body = jsonBody(value)
         const source = jsonBody(body.source)
         const sourceId = typeof source.id === "string" ? source.id : ""
         const content = typeof body.content === "string" ? body.content : ""
         if (sourceId.length === 0 || req.headers["x-idempotency-key"] !== sourceId) return json(400, { error: "invalid digest" })
-        const state = stateFor(organizationId)
+        const state = stateFor(requestedOrganizationId)
         if (CREDENTIAL_PATTERN.test(content)) {
           state.secretRejections += 1
           state.reviewDecisions.push(`source:${sourceId}:secret-rejected`)
@@ -522,7 +696,7 @@ export const startFakeAuthServer = async (
         return json(201, {
           source: { ...source, id: sourceId },
           contentHash: "sha256:e2e-captured",
-          contentKey: `organizations/${organizationId}/sources/blobs/e2e-captured`,
+          contentKey: `organizations/${requestedOrganizationId}/sources/blobs/e2e-captured`,
           workflowId: "compiler-captured-learning"
         })
       })
@@ -549,12 +723,16 @@ export const startFakeAuthServer = async (
           rpcMethod,
           mcpMethod,
           mcpName,
+          toolName: rpcMethod === "tools/call" && typeof params.name === "string"
+            ? params.name
+            : null,
           organizationId,
           protocolVersion: typeof req.headers["mcp-protocol-version"] === "string" ? req.headers["mcp-protocol-version"] : null,
           metadataProtocolVersion: typeof metadata["io.modelcontextprotocol/protocolVersion"] === "string" ? metadata["io.modelcontextprotocol/protocolVersion"] : null,
           hasCookie: req.headers.cookie !== undefined,
           hasSessionId: req.headers["mcp-session-id"] !== undefined,
           requestId: typeof body.id === "string" ? body.id : null,
+          toolArguments: rpcMethod === "tools/call" ? { ...jsonBody(params.arguments) } : null,
           assignedInstance
         })
 
@@ -645,6 +823,14 @@ export const startFakeAuthServer = async (
           case "memory_read": {
             const page = typeof args.pageId === "string" ? state.pages.get(args.pageId) : undefined
             data = page === undefined ? {} : pageResponse(page)
+            break
+          }
+          case "memory_propose": {
+            data = fakeMemoryProposal(state, args)
+            break
+          }
+          case "memory_workflow_status": {
+            data = fakeMemoryWorkflowStatus(state, args)
             break
           }
           case "memory_edge_evidence": {
@@ -757,6 +943,9 @@ export const startFakeAuthServer = async (
       return {
         organizationId,
         acceptedPageIds: [...state.pages.keys()].sort(),
+        acceptedRevisions: Object.fromEntries(
+          [...state.pages.values()].map((page) => [page.id, page.revision])
+        ),
         proposalStatuses: Object.fromEntries(state.proposals.map((proposal) => [proposal.id, proposal.status])),
         sourceCount: state.sourceIds.size,
         secretRejections: state.secretRejections,

@@ -6,7 +6,6 @@ MEMORY_WORKFLOW_ID_SECRET=dev-memory-workflow-id-secret-change-me
 
 # Optional comma-separated operational policy.
 MEMORY_LINT_ORGANIZATIONS=org-local
-MEMORY_AUTO_PUBLISH_FIXES=
 
 # Advisory vector layer (relatedness suggestions only). Both keys must be present
 # for the vector path to activate; absent = lexical-only suggestions.

@@ -44,7 +44,6 @@ const CAPTURE_TIMEOUT_MS = 8_000
 // DEFAULT_TIMEOUT_MS stays for the fail-open attachment/capture paths, where a
 // slow hop must never block an agent turn.
 const UI_REQUEST_TIMEOUT_MS = 8_000
-const MAX_DIGEST_CHARACTERS = 8_000
 const AUTOMATIC_RECALL_LIMIT = 3
 const MAX_AUTOMATIC_RECALL_QUERY_CHARACTERS = 2_000
 const MAX_RECALLED_PAGE_CHARACTERS = 4_000
@@ -54,7 +53,6 @@ const MAX_RECALL_SCOPES = 128
 // eviction path (below) covers server-side revocation and expiry races.
 const GRANT_REFRESH_MARGIN_SECONDS = 30
 const ATTACHMENT_BACKGROUND_REFRESH_SECONDS = 5 * 60
-const MCP_TOOL_PREFIX_PATTERN = /^mcp__jingler[-_]memory__/
 const LEADING_SLASH_PATTERN = /^\/+/
 const PRIVATE_KEY_PATTERN = /-----BEGIN [^-\r\n]+-----[\s\S]*?-----END [^-\r\n]+-----/g
 const AUTH_HEADER_PATTERN = /(?:^|\b)(authorization|proxy-authorization|cookie|set-cookie|mcp-session-id)\s*:\s*[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*/gim
@@ -77,16 +75,6 @@ export type MemoryServiceEnvironment =
 export interface MemoryAttachment {
   readonly server: RemoteMcpServer
   readonly instructions: string
-  /** Retrieval already performed by Jingler before the harness starts. */
-  readonly retrieval: MemoryRetrievalSummary
-}
-
-export const EMPTY_MEMORY_RETRIEVAL_SUMMARY: MemoryRetrievalSummary = {
-  searches: 0,
-  reads: 0,
-  navigation: 0,
-  graphReads: 0,
-  proposals: 0
 }
 
 const AutomaticRecallSearchResponse = Schema.Struct({
@@ -115,7 +103,6 @@ type AutomaticRecallPage = Schema.Schema.Type<typeof AutomaticRecallPageResponse
 
 interface AutomaticRecall {
   readonly instructions: string
-  readonly retrieval: MemoryRetrievalSummary
   readonly searchFingerprint: string
   readonly evidenceFingerprint: string
 }
@@ -165,41 +152,6 @@ export const renderRecalledMemories = (
   ].join("\n")
 }
 
-/** Fold a renderer-visible tool name into counters without retaining arguments. */
-export const recordMemoryRetrieval = (
-  summary: MemoryRetrievalSummary,
-  toolName: string
-): MemoryRetrievalSummary => {
-  const name = toolName.toLowerCase().replace(MCP_TOOL_PREFIX_PATTERN, "")
-  switch (name) {
-    case "memory_search":
-      return { ...summary, searches: summary.searches + 1 }
-    case "memory_read":
-      return { ...summary, reads: summary.reads + 1 }
-    case "memory_navigation":
-      return { ...summary, navigation: summary.navigation + 1 }
-    case "memory_graph":
-    case "memory_graph_neighborhood":
-      return { ...summary, graphReads: summary.graphReads + 1 }
-    case "memory_propose":
-      return { ...summary, proposals: summary.proposals + 1 }
-    default:
-      return summary
-  }
-}
-
-export interface MemorySessionDigestInput {
-  readonly sessionId: string
-  readonly chatId: string
-  /** Stable assistant-turn id: the idempotency boundary for one settled run. */
-  readonly turnId: string
-  readonly cli: CliKind
-  readonly userText: string
-  readonly assistantText: string
-  readonly settledAt: string
-  readonly retrieval: MemoryRetrievalSummary
-}
-
 export interface MemoryServiceShape {
   readonly attachment: (
     cli: CliKind,
@@ -208,10 +160,7 @@ export interface MemoryServiceShape {
     /** Stable conversation boundary used to avoid reinjecting unchanged pages. */
     recallScope?: string
   ) => Effect.Effect<MemoryAttachment | null, never, MemoryServiceEnvironment>
-  readonly captureSettledSession: (
-    input: MemorySessionDigestInput
-  ) => Effect.Effect<boolean, never, MemoryServiceEnvironment>
-  /** Retry every locally queued capture without discarding transient failures. */
+  /** Flush capture jobs left by versions that recorded raw settled turns. */
   readonly recoverCaptures: () => Effect.Effect<MemoryCaptureRecoveryResult | null, never, MemoryServiceEnvironment>
   /** Resolve renderer-safe eligibility; the grant itself remains in this service. */
   readonly access: () => Effect.Effect<MemoryUiAccess | null, never, MemoryServiceEnvironment>
@@ -272,8 +221,6 @@ interface MemoryRuntime {
   readonly captureTimeoutMs: number
   readonly uiTimeoutMs: number
   readonly proxy: MemoryMcpProxy | undefined
-  readonly queuedCaptures: Set<string>
-  readonly outboxLock: Effect.Semaphore
   /** One reusable grant per organization; never leaves the main process. */
   readonly grantCache: Map<string, MemoryGrantResponse>
   /** Serializes mint-and-cache so parallel UI requests share one grant. */
@@ -356,11 +303,7 @@ const safeRetrieval = (value: MemoryRetrievalSummary): MemoryRetrievalSummary =>
   proposals: boundedCount(value.proposals)
 })
 
-/**
- * Remove credential-shaped and machine-local material before a conversation can
- * become a durable source. The digest intentionally excludes tool arguments,
- * tool results, images, diagnostics, and protocol/request metadata entirely.
- */
+/** Remove credential-shaped and machine-local material before automatic recall. */
 const stripControlCharacters = (value: string): string =>
   [...value]
     .filter((character) => {
@@ -384,28 +327,8 @@ export const redactMemoryText = (value: string): string =>
       .replace(HOME_PATH_PATTERN, "~")
   )
 
-const clipped = (value: string, maxCharacters: number): string =>
-  value.length <= maxCharacters ? value : `${value.slice(0, maxCharacters)}\n[TRUNCATED]`
-
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex")
-
-export const memoryDigestContent = (input: MemorySessionDigestInput): string => {
-  const user = clipped(redactMemoryText(input.userText).trim(), 3_000)
-  const assistant = clipped(redactMemoryText(input.assistantText).trim(), 4_000)
-  return clipped(
-    [
-      `Harness: ${input.cli}`,
-      "",
-      "User request:",
-      user,
-      "",
-      "Settled outcome:",
-      assistant
-    ].join("\n"),
-    MAX_DIGEST_CHARACTERS
-  )
-}
 
 const requestMetadata = {
   "io.modelcontextprotocol/protocolVersion": MEMORY_MCP_PROTOCOL_VERSION,
@@ -657,10 +580,6 @@ const automaticRecall = (
     ) {
       return {
         instructions: "",
-        retrieval: {
-          ...EMPTY_MEMORY_RETRIEVAL_SUMMARY,
-          searches: 1
-        },
         searchFingerprint,
         evidenceFingerprint: previous.evidenceFingerprint
       }
@@ -696,11 +615,6 @@ const automaticRecall = (
         previous?.evidenceFingerprint === evidenceFingerprint
           ? ""
           : renderRecalledMemories(pages),
-      retrieval: {
-        ...EMPTY_MEMORY_RETRIEVAL_SUMMARY,
-        searches: 1,
-        reads: pages.length
-      },
       searchFingerprint,
       evidenceFingerprint
     }
@@ -745,8 +659,7 @@ const attachmentFrom = (
   return server.pipe(
     Effect.map((resolved) => ({
       server: resolved,
-      instructions: memoryPrompt(),
-      retrieval: EMPTY_MEMORY_RETRIEVAL_SUMMARY
+      instructions: memoryPrompt()
     }))
   )
 }
@@ -866,15 +779,13 @@ const memoryToken = Effect.gen(function* () {
   return token === null || token.length === 0 ? null : token
 })
 
-const postDigest = (options: {
+const postQueuedCapture = (options: {
   readonly runtime: MemoryRuntime
   readonly selection: SelectedMemory
   readonly issued: MemoryGrantResponse
-  readonly digestId: string
-  readonly input: MemorySessionDigestInput
-  readonly content: string
+  readonly job: MemoryCaptureJob
 }): Effect.Effect<{ readonly delivered: boolean; readonly status: number }> => {
-  const { runtime, selection, issued, digestId, input, content } = options
+  const { runtime, selection, issued, job } = options
   return Effect.tryPromise({
     try: async () => {
       const response = await runtime.fetchImplementation(
@@ -883,19 +794,19 @@ const postDigest = (options: {
           method: "POST",
           headers: {
             ...scopedHeaders(issued.grant, selection.organizationId),
-            "x-idempotency-key": digestId
+            "x-idempotency-key": job.id
           },
           body: JSON.stringify({
             source: {
-              id: digestId,
+              id: job.id,
               kind: "conversation",
               title: "Settled Jingler agent session",
-              uri: `jingler://session-digest/${digestId.slice("session-digest:".length)}`,
-              retrievedAt: input.settledAt,
-              contentHash: sha256(content)
+              uri: `jingler://session-digest/${job.id.slice("session-digest:".length)}`,
+              retrievedAt: job.settledAt,
+              contentHash: sha256(job.content)
             },
-            content,
-            retrieval: safeRetrieval(input.retrieval)
+            content: job.content,
+            retrieval: safeRetrieval(job.retrieval)
           }),
           signal: AbortSignal.timeout(runtime.captureTimeoutMs)
         }
@@ -935,26 +846,12 @@ const writeOutbox = (jobs: ReadonlyArray<MemoryCaptureJob>) =>
     yield* fs.rename(temporary, file)
   })
 
-type EnqueueOutcome = "stored" | "duplicate" | "failed"
-
-const enqueueCapture = (
-  runtime: MemoryRuntime,
-  job: MemoryCaptureJob
-) =>
-  runtime.outboxLock.withPermits(1)(
-    Effect.gen(function* () {
-      const jobs = yield* readOutbox
-      if (jobs.some((candidate) => candidate.id === job.id)) return "duplicate" as const
-      yield* writeOutbox([...jobs, job])
-      return "stored" as const
-    })
-  ).pipe(Effect.orElseSucceed(() => "failed" as const))
-
 const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
   runtime.drainLock.withPermits(1)(Effect.gen(function* () {
-    // Snapshot under the lock, then send UNLOCKED so a concurrent enqueue is not
-    // blocked for the length of the network round-trips.
-    const jobs = yield* runtime.outboxLock.withPermits(1)(readOutbox)
+    // New releases never enqueue raw settled turns. This path exists only to
+    // flush durable jobs written by older versions before the capture hook was
+    // removed, and the drain lock serializes every remaining reader/writer.
+    const jobs = yield* readOutbox
     const now = runtime.nowSeconds()
     // Delivered ids to remove, permanently-dead ids to drop, and the bumped
     // attempt counts for ids that should be retried later.
@@ -966,22 +863,11 @@ const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
       const selection = { organizationId: job.organizationId, token }
       const outcome = yield* requestGrant(runtime, selection).pipe(
         Effect.flatMap((issued) =>
-          postDigest({
+          postQueuedCapture({
             runtime,
             selection,
             issued,
-            digestId: job.id,
-            content: job.content,
-            input: {
-              sessionId: job.id,
-              chatId: job.id,
-              turnId: job.id,
-              cli: "codex",
-              userText: "",
-              assistantText: job.content,
-              settledAt: job.settledAt,
-              retrieval: job.retrieval
-            }
+            job
           }).pipe(Effect.map((result) => result.delivered
             ? ({ kind: "sent" as const })
             : ({ kind: "failed" as const, status: result.status })))
@@ -1004,28 +890,22 @@ const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
         retried.set(job.id, Math.min(Number.MAX_SAFE_INTEGER, job.attempts + 1))
       }
     }
-    // Re-read under the lock so captures enqueued mid-drain are preserved rather
-    // than clobbered by a stale snapshot: remove delivered/dropped ids and bump
-    // the attempt count on ids kept for a later retry.
+    // Rewrite only when a legacy job changed state. Transient failures remain
+    // durable regardless of their diagnostic attempt count.
     if (sent.size > 0 || dropped.size > 0 || retried.size > 0) {
-      yield* runtime.outboxLock.withPermits(1)(
-        Effect.gen(function* () {
-          const current = yield* readOutbox
-          const next = current
-            .filter((candidate) => !(sent.has(candidate.id) || dropped.has(candidate.id)))
-            .map((candidate) => {
-              const attempts = retried.get(candidate.id)
-              return attempts === undefined
-                ? candidate
-                : {
-                    ...candidate,
-                    attempts,
-                    firstSeenAt: candidate.firstSeenAt > 0 ? candidate.firstSeenAt : now
-                  }
-            })
-          yield* writeOutbox(next)
+      const next = jobs
+        .filter((candidate) => !(sent.has(candidate.id) || dropped.has(candidate.id)))
+        .map((candidate) => {
+          const attempts = retried.get(candidate.id)
+          return attempts === undefined
+            ? candidate
+            : {
+                ...candidate,
+                attempts,
+                firstSeenAt: candidate.firstSeenAt > 0 ? candidate.firstSeenAt : now
+              }
         })
-      )
+      yield* writeOutbox(next)
     }
     return {
       queuedBefore: jobs.length,
@@ -1053,8 +933,6 @@ export const makeMemoryService = (
     captureTimeoutMs: options.captureTimeoutMs ?? CAPTURE_TIMEOUT_MS,
     uiTimeoutMs: options.uiTimeoutMs ?? UI_REQUEST_TIMEOUT_MS,
     proxy: options.proxy,
-    queuedCaptures: new Set<string>(),
-    outboxLock: Effect.unsafeMakeSemaphore(1),
     grantCache: new Map<string, MemoryGrantResponse>(),
     grantLock: Effect.unsafeMakeSemaphore(1),
     attachmentCache: new Map<string, CachedMemoryAttachment>(),
@@ -1094,8 +972,7 @@ export const makeMemoryService = (
                       ...cached.attachment,
                       instructions: recalled.instructions.length === 0
                         ? cached.attachment.instructions
-                        : `${cached.attachment.instructions}\n${recalled.instructions}`,
-                      retrieval: recalled.retrieval
+                        : `${cached.attachment.instructions}\n${recalled.instructions}`
                     }
                   }),
                   Effect.orElseSucceed(() => cached.attachment)
@@ -1104,42 +981,6 @@ export const makeMemoryService = (
             )
           })
       )
-  const captureSettledSession = (input: MemorySessionDigestInput) =>
-    selectedMemory.pipe(
-      Effect.flatMap((selection) =>
-        selection === null
-          ? Effect.succeed(false)
-          : Effect.gen(function* () {
-              const id = `session-digest:${sha256(`${selection.organizationId}\u0000${input.sessionId}\u0000${input.chatId}\u0000${input.turnId}`)}`
-              const claimed = yield* Effect.sync(() => {
-                if (runtime.queuedCaptures.has(id)) return false
-                runtime.queuedCaptures.add(id)
-                return true
-              })
-              if (!claimed) return false
-              const enqueued = yield* enqueueCapture(runtime, {
-                id,
-                organizationId: selection.organizationId,
-                settledAt: input.settledAt,
-                content: memoryDigestContent(input),
-                retrieval: safeRetrieval(input.retrieval),
-                attempts: 0,
-                firstSeenAt: runtime.nowSeconds()
-              })
-              // A transient write failure persisted nothing, so release the
-              // in-memory claim — otherwise this settled turn could never be
-              // captured again for the lifetime of the process.
-              if (enqueued === "failed") {
-                yield* Effect.sync(() => runtime.queuedCaptures.delete(id))
-                return false
-              }
-              if (enqueued === "duplicate") return false
-              yield* drainCaptureOutbox(runtime, selection.token).pipe(Effect.forkDaemon)
-              return true
-            })
-      )
-    )
-
   const access = () =>
     Effect.all([memoryToken, ConfigService.get().pipe(Effect.orElseSucceed(() => null))]).pipe(
       Effect.flatMap(([token, config]) => {
@@ -1164,12 +1005,12 @@ export const makeMemoryService = (
           if (organizations === null) return null
 
           // Engage team memory by DEFAULT. Every downstream hook — MCP attach,
-          // <team-memory> prompt, settled-session capture — is already an
-          // unconditional per-turn call gated only on `memory.enabled` + a selected
-          // org. So the first time an eligible user is seen with exactly ONE org and
-          // no explicit choice yet, enable it and select that org; the agents then
-          // pick it up automatically. An explicit config (even `enabled: false`) is
-          // always respected — this only fills the unset default.
+          // <team-memory> prompt and MCP attachment are unconditional per-turn
+          // boundaries gated only on `memory.enabled` + a selected org. So the
+          // first time an eligible user is seen with exactly ONE org and no
+          // explicit choice yet, enable it and select that org; the agents then
+          // pick it up automatically. An explicit config (even `enabled: false`)
+          // is always respected — this only fills the unset default.
           let selected = config?.memory?.enabled === true
             ? (config.memory.organizationId ?? null)
             : null
@@ -1227,7 +1068,7 @@ export const makeMemoryService = (
       }
     })
 
-  return { attachment, captureSettledSession, recoverCaptures, access, uiRequest, suggestions }
+  return { attachment, recoverCaptures, access, uiRequest, suggestions }
 }
 
 export class MemoryService extends Effect.Service<MemoryService>()("@jingler/MemoryService", {

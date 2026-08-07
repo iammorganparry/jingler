@@ -52,7 +52,7 @@ const SourceResponse = Schema.Struct({
   contentKey: Schema.String
 })
 
-const ProposalRequest = Schema.Struct({
+const proposalRequestFields = {
   id: NonEmptyString,
   pageId: NonEmptyString,
   baseRevisionId: NonEmptyString,
@@ -60,7 +60,16 @@ const ProposalRequest = Schema.Struct({
   proposedBy: NonEmptyString,
   createdAt: NonEmptyString,
   summary: Schema.optional(Schema.String)
+}
+
+const ProposalRequest = Schema.Struct(proposalRequestFields)
+
+const AutoPublishProposalRequest = Schema.Struct({
+  ...proposalRequestFields,
+  reviewerId: NonEmptyString,
+  acceptedAt: NonEmptyString
 })
+type AutoPublishProposal = Schema.Schema.Type<typeof AutoPublishProposalRequest>
 
 const ProposalDraftRequest = Schema.Struct({
   pageId: NonEmptyString,
@@ -213,15 +222,6 @@ const fallbackOnMissing = <A, B>(
 ): Effect.Effect<A | B, MemoryVaultError> =>
   Effect.catchIf(primary, (error) => error.code === "not_found", () => fallback)
 
-const configuredMechanicalFixes = (env: MemoryWorkerEnv): ReadonlyArray<string> =>
-  (env.MEMORY_AUTO_PUBLISH_FIXES ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0)
-
-// Default trust model is auto-accept; a human review gate is opt-in per deployment.
-const requiresReview = (env: MemoryWorkerEnv): boolean => env.MEMORY_REQUIRE_REVIEW === "true"
-
 /** Run the still-Promise-based body decoder as a typed Effect at a vault call site. */
 const decodeBody = <Decoded, Encoded>(
   request: { text(): Promise<string> },
@@ -309,12 +309,57 @@ const dispatchProposalSetRequest = (
     return notFoundResponse()
   })
 
+const autoPublishProposal = (
+  vault: TeamVault,
+  body: AutoPublishProposal
+): Effect.Effect<ApprovalResult, MemoryVaultError> =>
+  Effect.gen(function* () {
+    const created = yield* Effect.either(vault.createProposal({
+      id: body.id,
+      pageId: body.pageId,
+      baseRevisionId: body.baseRevisionId,
+      markdown: body.markdown,
+      proposedBy: body.proposedBy,
+      createdAt: body.createdAt,
+      ...(body.summary === undefined ? {} : { summary: body.summary })
+    }))
+    if (Either.isRight(created)) {
+      return yield* vault.approveProposal(body.id, body.reviewerId, body.acceptedAt)
+    }
+
+    const failure = created.left
+    if (failure.code !== "conflict") return yield* failure
+
+    const collidingProposalExists = yield* vault.getProposal(body.id).pipe(
+      Effect.as(true),
+      Effect.catchIf(
+        (error) => error.code === "not_found",
+        () => Effect.succeed(false)
+      )
+    )
+    if (collidingProposalExists) return yield* failure
+
+    const current = yield* vault.readPage(body.pageId)
+    return {
+      status: "conflict",
+      proposalId: body.id,
+      pageId: body.pageId,
+      expectedBaseRevisionId: body.baseRevisionId,
+      currentHeadRevisionId: current.revision.id
+    }
+  })
+
 const dispatchProposalRequest = (
   request: Request,
   route: ReadonlyArray<string>,
   vault: TeamVault
 ): Effect.Effect<Response, MemoryVaultError> =>
   Effect.gen(function* () {
+    if (isRoute(request, route, "POST", "proposals", "auto-publish")) {
+      const body = yield* decodeBody(request, AutoPublishProposalRequest)
+      const result = yield* autoPublishProposal(vault, body)
+      return jsonResponse(result, result.status === "accepted" ? 200 : 409)
+    }
     if (isRoute(request, route, "POST", "proposals")) {
       return jsonResponse(yield* vault.createProposal(yield* decodeBody(request, ProposalRequest)), 201)
     }
@@ -533,8 +578,7 @@ const startCompilerWorkflow = async (
   await createOrReuseScopedWorkflow(env.MEMORY_COMPILER, env, organizationId, body.workflowId, {
     ...body,
     organizationId,
-    autoPublishFixes: configuredMechanicalFixes(env),
-    requireReview: requiresReview(env)
+    requireReview: false
   })
   return jsonResponse({ workflowId: body.workflowId, status: "queued" }, 202)
 }
@@ -629,8 +673,7 @@ const startCompilerForSource = async (
     sourceId: source.id,
     requestedBy: "agent:session-capture",
     createdAt: source.retrievedAt ?? new Date().toISOString(),
-    autoPublishFixes: configuredMechanicalFixes(env),
-    requireReview: requiresReview(env)
+    requireReview: false
   })
   return workflowId
 }
@@ -683,6 +726,7 @@ const isAcceptedPublication = (
 ): boolean =>
   response.ok &&
   (isRoute(request, route, "POST", "pages") ||
+    isRoute(request, route, "POST", "proposals", "auto-publish") ||
     (route.length === 3 &&
       (route[0] === "proposals" || route[0] === "proposal-sets") &&
       route[2] === "approve"))

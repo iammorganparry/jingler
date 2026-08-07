@@ -642,7 +642,7 @@ describe("AgentRunner team memory", () => {
     makeInMemorySecretStore("jingler-user-token")
   )
 
-  it("injects memory instructions and enqueues one source only after Done", async () => {
+  it("injects bounded agent reflection and never captures the raw settled turn", async () => {
     const requests: Request[] = []
     installMemoryFetch(requests)
     const captured: SessionSpec[] = []
@@ -698,86 +698,15 @@ describe("AgentRunner team memory", () => {
     ])
     expect(captured[0]?.prompt).toContain("memory_navigation")
     expect(captured[0]?.prompt).toContain("memory_workflow_status")
+    expect(captured[0]?.prompt).toContain("at most three standalone decisions")
+    expect(captured[0]?.prompt).toContain("Exclude progress narration")
     expect(captured[0]?.prompt).toContain("Initial recall completed with no accepted matches")
-    await vi.waitFor(() => {
-      expect(requests.filter((request) => request.url.endsWith("/api/memory/sources"))).toHaveLength(1)
-    })
-    const sourceRequests = requests.filter((request) => request.url.endsWith("/api/memory/sources"))
-    const sourceBody = JSON.stringify(await sourceRequests[0]!.json())
-    expect(sourceBody).not.toContain("private-user-value")
-    expect(sourceBody).not.toContain("private-value")
-    // One deterministic pre-turn search plus the scripted agent's own search.
-    expect(sourceBody).toContain('"searches":2')
+    expect(requests.some((request) => request.url.endsWith("/api/memory/sources"))).toBe(false)
     expect(JSON.stringify(transcript)).not.toContain("memory-grant-value")
     expect(JSON.stringify(transcript)).not.toContain("jingler-user-token")
     expect(readFileSync(join(temp.root, "sessions.json"), "utf8")).not.toContain(
       "memory-grant-value"
     )
-  })
-
-  it("persists failed delivery without blocking the terminal event", async () => {
-    let grantRequests = 0
-    let terminalObserved = false
-    const fetchImplementation: typeof fetch = async (input) => {
-      const url = String(input)
-      if (url.endsWith("/api/memory/grant")) {
-        grantRequests += 1
-        return grantRequests === 1
-          ? Response.json(memoryGrant())
-          : Response.json({ error: "offline" }, { status: 503 })
-      }
-      if (url.endsWith("/api/mcp")) {
-        return Response.json({
-          jsonrpc: "2.0",
-          id: "discover",
-          result: { resultType: "complete" }
-        })
-      }
-      throw new Error(`Unexpected request: ${url}`)
-    }
-    vi.stubGlobal("fetch", fetchImplementation)
-    const adapter = Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
-        run: (_sessionId, _spec, ctx) =>
-          ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }),
-        stop: () => Effect.void
-      })
-    )
-    const base = Layer.mergeAll(
-      AgentRunner.Default,
-      OpenConnectorService.Default,
-      BrowserControlMcpServiceTest,
-      signedInSecrets,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      adapter,
-      DiscoveryService.Default,
-      ContextManager.Default,
-      temp.layer
-    )
-
-    const run = Effect.runPromise(
-      Effect.gen(function* () {
-        yield* ConfigService.setMemory({ enabled: true, organizationId: "org-team" })
-        const runner = yield* AgentRunner
-        yield* runner.prompt(SESSION, SESSION, "settle without waiting").pipe(
-          Stream.runForEach((event) =>
-            Effect.sync(() => {
-              if (event._tag === "Done") terminalObserved = true
-            })
-          )
-        )
-      }).pipe(Effect.provide(base))
-    )
-    await expect(run).resolves.toBeUndefined()
-    const outbox = readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
-    expect(outbox).toContain('"organizationId":"org-team"')
-    expect(outbox).toContain("settle without waiting")
-    expect(terminalObserved).toBe(true)
   })
 
   it("publishes no source for a failed turn", async () => {

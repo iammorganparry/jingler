@@ -105,12 +105,10 @@ export interface MemoryWorkerEnv {
   readonly MEMORY_VECTOR_INGEST?: WorkflowBindingLike<
     import("./workflows/vector-ingest.js").VectorIngestWorkflowInput
   >
-  readonly MEMORY_AUTO_PUBLISH_FIXES?: string
   /**
-   * When "true", factual memory changes wait for a human accept in the review
-   * queue before publishing (safe mechanical fixes still auto-publish). Unset or
-   * anything else = the default trust model: agents publish straight to the
-   * shared vault and are audited/reverted after the fact.
+   * @deprecated Retained only so deployments with the former review gate can
+   * report a migration warning. It is ignored: agent memory publication is
+   * automatic and historical review endpoints exist only for recovery/audit.
    */
   readonly MEMORY_REQUIRE_REVIEW?: string
   readonly MEMORY_LINT_ORGANIZATIONS?: string

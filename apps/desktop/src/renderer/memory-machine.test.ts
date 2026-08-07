@@ -3,8 +3,7 @@ import type {
   MemoryDashboardSummary,
   MemoryGraphNode,
   MemoryGraphView,
-  MemoryPageDetail,
-  MemoryReviewItem
+  MemoryPageDetail
 } from "@jingler/contracts"
 import { createActor, waitFor } from "xstate"
 import { describe, expect, it, vi } from "vitest"
@@ -32,7 +31,6 @@ const summary = (organizationId: string): MemoryDashboardSummary => ({
   citationCoverage: { citations: 2, citedPages: 2, totalPages: 2, ratio: 1 },
   freshness: { fresh: 2, aging: 0, stale: 0, unknown: 0 },
   health: { orphanPages: 0, brokenLinks: 0, contradictions: 0 },
-  reviewThroughput: { proposed: 1, accepted: 0, rejected: 0, conflicted: 0, open: 1, acceptanceRatio: 0, medianReviewHours: null },
   connectivity: { pages: 2, directedLinks: 1, connectedPages: 2, averageDegree: 1 },
   retrieval: {
     searches: 1,
@@ -73,17 +71,6 @@ const page = (pageId: string): MemoryPageDetail => ({
   health: { brokenLinks: 0, contradictions: 0, orphan: false }
 })
 
-const review: MemoryReviewItem = {
-  id: "proposal:set:1",
-  workflowId: "workflow:1",
-  sourceId: "source:1",
-  proposedBy: "agent:1",
-  createdAt: "2026-08-01T00:00:00.000Z",
-  status: "open",
-  changeKind: "factual",
-  pages: [{ proposalId: "proposal:1", pageId: "page:1", title: "One", baseRevisionId: "revision:1", summary: "Update", markdown: "# One" }]
-}
-
 const evidenceFixture: MemoryApi["evidence"] = async (organizationId, edgeId) => {
   const edge = graph(organizationId).edges[0]
   if (edge === undefined) throw new Error("edge fixture missing")
@@ -99,18 +86,6 @@ const evidenceFixture: MemoryApi["evidence"] = async (organizationId, edgeId) =>
     }
   }
 }
-
-const reviewFixture: MemoryApi["review"] = async (_organizationId, proposalId) => ({
-  status: "conflict",
-  proposalId,
-  conflicts: [
-    {
-      pageId: "page:1",
-      expectedBaseRevisionId: "revision:1",
-      currentHeadRevisionId: "revision:2"
-    }
-  ]
-})
 
 const api: MemoryApi = {
   access: vi.fn(async () => access),
@@ -139,8 +114,6 @@ const api: MemoryApi = {
     }
   ]),
   page: vi.fn(async (_organizationId: string, pageId: string) => page(pageId)),
-  reviews: vi.fn(async () => [review]),
-  review: vi.fn(reviewFixture),
   export: vi.fn(async (organizationId: string) => ({ filename: `${organizationId}.zip`, saved: true })),
   suggestions: vi.fn(async () => ({ version: 1 as const, vectorSource: "lexical" as const, suggestions: [] }))
 }
@@ -175,15 +148,12 @@ describe("memoryMachine", () => {
       organizationId: "org-b",
       summary: null,
       graph: null,
-      reviews: [],
       searchQuery: "",
       searchResults: [],
       selectedNodeId: null,
       selectedEdgeId: null,
-      selectedReviewId: null,
       page: null,
       evidence: null,
-      reviewResult: null,
       exported: null,
       filters: DEFAULT_MEMORY_FILTERS,
       viewport: DEFAULT_MEMORY_VIEWPORT
@@ -206,14 +176,11 @@ describe("memoryMachine", () => {
     expect(actor.getSnapshot().context).toMatchObject({ view: "map", viewport: { x: 42, y: -8, zoom: 1.8 }, selectedNodeId: "page:org-a:one", filters: { freshness: "stale" } })
   })
 
-  it("loads exact edge evidence and keeps conflicts interactive", async () => {
+  it("loads exact edge evidence and expands graph neighborhoods", async () => {
     const actor = await startReady()
     actor.send({ type: "MAP.SELECT_EDGE", edgeId: "edge:org-a" })
     await waitFor(actor, (snapshot) => snapshot.matches("ready"))
     expect(actor.getSnapshot().context.evidence?.evidence.raw).toBe("[[edge:org-a]]")
-    actor.send({ type: "REVIEW.DECIDE", proposalId: review.id, action: "approve" })
-    await waitFor(actor, (snapshot) => snapshot.matches("ready") && snapshot.context.reviewResult?.status === "conflict")
-    expect(actor.getSnapshot().context.reviewResult?.conflicts[0]?.currentHeadRevisionId).toBe("revision:2")
     actor.send({ type: "NAVIGATE", target: { view: "map" } })
     actor.send({ type: "MAP.EXPAND", nodeId: "page:org-a:two" })
     await waitFor(actor, (snapshot) => snapshot.matches("ready"))

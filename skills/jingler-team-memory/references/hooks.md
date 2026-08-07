@@ -36,8 +36,7 @@ the in-turn judgment layer that decides *what* is worth marking for persist.
   passed as an argument is recognized as payload and is never itself submitted.
   No candidate → no network call. This keeps the
   *timing* deterministic without spamming the vault. Submission starts the
-  compiler; organizations with review enabled publish only after a maintainer
-  accepts the resulting proposal.
+  compiler and publishes automatically when it settles successfully.
 
 Both scripts are POSIX `sh`, need only `curl` (use `jq` if present, degrade
 without it), read auth from `JINGLER_MEMORY_URL` / `JINGLER_MEMORY_TOKEN` /

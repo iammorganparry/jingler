@@ -167,9 +167,9 @@ class FixtureModel implements CompilerModel {
   }
 }
 
-// The default trust model auto-publishes everything; these fixtures exercise the
-// opt-in review gate (MEMORY_REQUIRE_REVIEW), so factual changes still pause for a
-// human accept. The default auto-accept path is covered by its own test below.
+// Production always auto-publishes. These fixtures retain the workflow's
+// historical replay seam so proposal-set review and conflict recovery remain
+// covered independently of the production publication policy.
 const workflowInput: CompilerWorkflowInput = {
   workflowId: "compiler-fixture",
   organizationId: "org-compiler",
@@ -448,7 +448,6 @@ describe("durable memory compiler workflow", () => {
     )
     const dashboard = await run(vault.dashboard("2026-08-02T00:00:00.000Z"))
     expect(dashboard.growth.revisions).toBe(4)
-    expect(dashboard.reviewThroughput).toMatchObject({ proposed: 2, accepted: 2, open: 0 })
     const after = await run(captureVaultDerivedFingerprints(vault, "2026-08-02T00:00:00.000Z"))
     expect(after).not.toEqual(before)
     const reconciled = await run(reconcileVaultFromR2(vault, "2026-08-02T00:00:00.000Z"))
@@ -647,56 +646,5 @@ describe("durable memory compiler workflow", () => {
       state: "complete",
       result: { status: "accepted", proposalId: workflow.proposalId }
     })
-  })
-
-  it("auto-publishes only configured changes that are mechanically equivalent", async () => {
-    const unsafeVault = await seedVault()
-    const unsafeModel: CompilerModel = {
-      generate: async (context) => ({
-        ...(await new FixtureModel().generate(context)),
-        changeKind: "mechanical"
-      })
-    }
-    const unsafe = await runCompilerWorkflow(
-      { ...workflowInput, workflowId: "compiler-unsafe-mechanical", autoPublishFixes: ["canonical-markdown"] },
-      new VaultCompilerRepository(unsafeVault),
-      new ImmediateStep(),
-      unsafeModel
-    )
-    expect(unsafe.status).toBe("pending_review")
-    expect((await run(unsafeVault.listPages())).map((head) => head.revision)).toEqual([1, 1])
-
-    const safeVault = await seedVault()
-    const safeModel: CompilerModel = {
-      generate: async (context) => {
-        const accepted = context.candidates.find((candidate) => candidate.page.id === "alpha")!
-        return {
-          selection: "update",
-          changeKind: "mechanical",
-          drafts: [
-            {
-              pageId: accepted.page.id,
-              baseRevisionId: accepted.revisionId,
-              markdown: serializeMemoryMarkdown({
-                ...accepted.page,
-                revision: accepted.page.revision + 1,
-                citations: [
-                  ...accepted.page.citations,
-                  { id: "alpha-session", sourceId: compilerSource.id }
-                ]
-              })
-            }
-          ]
-        }
-      }
-    }
-    const safe = await runCompilerWorkflow(
-      { ...workflowInput, workflowId: "compiler-safe-mechanical", autoPublishFixes: ["canonical-markdown"] },
-      new VaultCompilerRepository(safeVault),
-      new ImmediateStep(),
-      safeModel
-    )
-    expect(safe.status).toBe("published")
-    expect((await run(safeVault.readPage("alpha"))).page.revision).toBe(2)
   })
 })

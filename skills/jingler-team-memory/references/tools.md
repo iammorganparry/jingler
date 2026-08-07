@@ -60,26 +60,26 @@ Read advisory 'related pages' relatedness suggestions. These are hints only, nev
 ### memory_workflow_status
 Poll a proposal or publication workflow by its explicit handle.
 - Args: `workflowId` (required, string, non-empty).
-- When to use: After proposing, poll the returned handle to see whether it published or is awaiting review.
+- When to use: After proposing, poll the returned handle until it publishes or returns a typed terminal failure; queued/running states are not terminal.
 
 ## Contribution (privilege: propose)
 
 ### memory_propose
 Compile a new memory or create an explicit revision proposal.
 - Args: `pageId` (required, string, non-empty); `baseRevisionId` (required, string, non-empty); `markdown` (required, string, non-empty).
-- When to use: Publish anything worth remembering (any domain). baseRevisionId is 'new' for a new page, or a memory_read revisionId to update one. Idempotent by identity+content.
+- When to use: Publish anything worth remembering (any domain). baseRevisionId is 'new' for a new page, or a memory_read revisionId to update one. Retry with the same page, base, and content to reuse its durable identity; a stale accepted revision returns a conflict.
 
 ## Maintainer / review (privilege: review)
 
 ### memory_reviews
-List bounded proposal sets for the private review inbox.
+List bounded historical proposal sets for audit or recovery.
 - Args: `limit` (optional, integer).
-- When to use: Only when the org enabled the human review gate — list proposals awaiting a maintainer.
+- When to use: Audit or settle historical proposal sets; normal agent publication does not queue for review.
 
 ### memory_review
-Approve or reject an explicit proposal handle.
+Resolve an explicit historical proposal handle during recovery.
 - Args: `proposalId` (required, string, non-empty); `action` (required, "approve" | "reject").
-- When to use: Approve or reject a pending proposal (maintainer).
+- When to use: Approve or reject an explicit historical proposal (maintainer recovery path).
 
 ## Schema (privilege: schema)
 

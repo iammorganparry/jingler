@@ -165,7 +165,7 @@ For an end-to-end agent check, ask it to do all four operations in one turn:
 2. `memory_read` the returned `pageId` and report the page/revision/source/citation ids.
 3. `memory_propose` one harmless, durable setup note with `baseRevisionId: "new"`.
 4. Poll the returned handle with `memory_workflow_status` until it settles, then
-   search and read the published page (or report that it awaits configured review).
+   search and read the published page (or report its typed terminal failure).
 
 This tests retrieval and creation, rather than only tool discovery. Remove or
 supersede the setup note afterward if it is not useful team knowledge.

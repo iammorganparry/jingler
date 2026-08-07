@@ -169,13 +169,14 @@ aggregate missed-explicit-persistence rate is **58/58 (100%)**: 29/29 for Codex
 and 29/29 for Claude. This is not a claim that automatic settled-session capture
 lost all 58; historical delivery cannot be reconstructed from the drained outbox.
 
-## Automatic recall and capture are not proposals
+## Automatic recall and historical capture are not proposals
 
 Jingler's pre-turn path performs bounded recall in the main process and may inject
 `<recalled-memories>`. Those calls are intentionally absent from the visible
-agent tool trace. After a successful settled turn, `captureSettledSession` writes
-a redacted conversation digest to an outbox and submits it as a source. The
-compiler may later create review material from that source.
+agent tool trace. At the audit cutoff, a successful settled turn wrote a redacted
+conversation digest to an outbox and submitted it as a source. That capture entry
+point has since been removed; the remaining drain exists only for pre-upgrade
+outbox files.
 
 An explicit agent proposal is different: it must produce a renderer-visible
 `memory_propose` Tool part and, when a workflow handle is returned, one or more

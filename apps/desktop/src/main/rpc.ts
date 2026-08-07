@@ -151,7 +151,6 @@ import {
   MemoryEdgeEvidence as MemoryEdgeEvidenceSchema,
   MemoryGraphView as MemoryGraphViewSchema,
   MemoryPageDetail as MemoryPageDetailSchema,
-  MemoryReviewResult as MemoryReviewResultSchema,
   MemorySuggestionsView as MemorySuggestionsViewSchema,
   MemoryUiError,
 } from "@jingler/contracts";
@@ -291,43 +290,6 @@ const MemoryBackendPage = Schema.Struct({
   sourceIds: Schema.Array(Schema.String),
   citationIds: Schema.Array(Schema.String),
   backlinks: Schema.Array(Schema.String),
-});
-
-const MemoryBackendReviews = Schema.Struct({
-  reviews: Schema.Array(
-    Schema.Struct({
-      id: Schema.String,
-      workflowId: Schema.String,
-      sourceId: Schema.String,
-      proposedBy: Schema.String,
-      createdAt: Schema.String,
-      status: Schema.Literal("open", "accepted", "rejected", "superseded"),
-      changeKind: Schema.Literal("factual", "mechanical"),
-      pages: Schema.Array(
-        Schema.Struct({
-          id: Schema.String,
-          pageId: Schema.String,
-          baseRevisionId: Schema.String,
-          markdown: Schema.String,
-          summary: Schema.optional(Schema.String),
-        }),
-      ),
-    }),
-  ),
-});
-
-const MemoryBackendReviewResult = Schema.Struct({
-  status: Schema.Literal("accepted", "rejected", "conflict"),
-  conflicts: Schema.optionalWith(
-    Schema.Array(
-      Schema.Struct({
-        pageId: Schema.String,
-        expectedBaseRevisionId: Schema.String,
-        currentHeadRevisionId: Schema.String,
-      }),
-    ),
-    { default: () => [] },
-  ),
 });
 
 const MemoryBackendSuggestions = Schema.Struct({
@@ -535,58 +497,6 @@ const memoryPage = (organizationId: string, pageId: string) =>
     }),
   );
 
-const memoryReviews = (organizationId: string) =>
-  memoryTool(organizationId, "memory_reviews", { limit: 100 }).pipe(
-    Effect.flatMap((value) =>
-      decodeMemory(
-        MemoryBackendReviews,
-        value,
-        "Memory review response was invalid",
-      ),
-    ),
-    Effect.map((response) =>
-      response.reviews.map((review) => ({
-        id: review.id,
-        workflowId: review.workflowId,
-        sourceId: review.sourceId,
-        proposedBy: review.proposedBy,
-        createdAt: review.createdAt,
-        status: review.status,
-        changeKind: review.changeKind,
-        pages: review.pages.map((page) => ({
-          proposalId: page.id,
-          pageId: page.pageId,
-          title: page.pageId,
-          baseRevisionId: page.baseRevisionId,
-          summary: page.summary ?? "Proposed memory update",
-          markdown: page.markdown,
-        })),
-      })),
-    ),
-  );
-
-const memoryReview = (
-  organizationId: string,
-  proposalId: string,
-  action: "approve" | "reject",
-) =>
-  memoryTool(organizationId, "memory_review", { proposalId, action }).pipe(
-    Effect.flatMap((value) =>
-      decodeMemory(
-        MemoryBackendReviewResult,
-        value,
-        "Memory review response was invalid",
-      ),
-    ),
-    Effect.flatMap(({ status, conflicts }) =>
-      decodeMemory(
-        MemoryReviewResultSchema,
-        { status, proposalId, conflicts },
-        "Memory review result was invalid",
-      ),
-    ),
-  );
-
 export const memoryExport = (organizationId: string) =>
   Effect.gen(function* () {
     const filename = `jingler-memory-${organizationId}.zip`;
@@ -617,8 +527,6 @@ const memoryRpcRequest = (input: {
     | "edgeEvidence"
     | "search"
     | "page"
-    | "reviews"
-    | "review"
     | "recover"
     | "export";
   readonly range?: string;
@@ -627,8 +535,6 @@ const memoryRpcRequest = (input: {
   readonly edgeId?: string;
   readonly query?: string;
   readonly pageId?: string;
-  readonly proposalId?: string;
-  readonly action?: "approve" | "reject";
 }) => {
   const organizationId = input.organizationId ?? "";
   switch (input.operation) {
@@ -650,15 +556,6 @@ const memoryRpcRequest = (input: {
       return memorySearch(organizationId, input.query ?? "", input.limit ?? 50);
     case "page":
       return memoryPage(organizationId, input.pageId ?? "");
-    case "reviews":
-      return memoryReviews(organizationId);
-    case "review":
-      if (!(input.proposalId && input.action)) {
-        return Effect.fail(
-          memoryUiFailure("Memory review request was incomplete"),
-        );
-      }
-      return memoryReview(organizationId, input.proposalId, input.action);
     case "recover":
       return memoryRecover();
     case "export":

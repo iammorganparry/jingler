@@ -15,7 +15,6 @@ const summary: MemoryDashboardSummary = {
   citationCoverage: { citations: 20, citedPages: 10, totalPages: 12, ratio: 10 / 12 },
   freshness: { fresh: 8, aging: 2, stale: 2, unknown: 0 },
   health: { orphanPages: 1, brokenLinks: 2, contradictions: 1 },
-  reviewThroughput: { proposed: 4, accepted: 2, rejected: 0, conflicted: 1, open: 1, acceptanceRatio: 2 / 3, medianReviewHours: 4 },
   connectivity: { pages: 12, directedLinks: 20, connectedPages: 11, averageDegree: 3.3 },
   retrieval: {
     searches: 9,

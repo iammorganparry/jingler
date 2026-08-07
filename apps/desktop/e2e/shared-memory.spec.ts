@@ -3,9 +3,7 @@ import { appShell, expect, test } from "./fixtures.js"
 import { startFakeAuthServer } from "./fake-auth.js"
 
 const REVIEWS = /^Reviews/
-const CAPTURED_PROPOSAL = /proposal:captured-learning/
-const STALE_PROPOSAL = /proposal:stale/
-const SECRET_PROPOSAL = /proposal:secret/
+const COMPILER_WORKFLOW = /^compiler-[0-9a-f]{64}$/
 
 const seededSession = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [
   {
@@ -26,7 +24,7 @@ const seededSession = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSe
 ]
 
 test("accepted session learning reaches a teammate but never another organization", async ({ launchApp }) => {
-  const fake = await startFakeAuthServer()
+  const fake = await startFakeAuthServer({ reviewProposals: false })
   try {
     const author = await launchApp({
       authServer: fake,
@@ -38,29 +36,22 @@ test("accepted session learning reaches a teammate but never another organizatio
     await expect(appShell(author.window)).toBeVisible()
 
     const composer = author.window.getByPlaceholder("Message Claude…")
-    await composer.fill("Capture the reusable refund limiter approach for the team.")
+    await composer.fill("[[memory-propose]] Capture the reusable refund limiter approach for the team.")
     await composer.press("Enter")
 
-    // The settled turn creates one redacted source and a pending proposal. It is
-    // not searchable until a reviewer accepts the multi-page publication.
+    // The agent deliberately proposes the durable fact through its attached MCP
+    // tool. Publication is automatic: no human review queue is involved.
     await expect.poll(() => fake.memorySnapshot("org-e2e").sourceCount, { timeout: 30_000 }).toBe(1)
-    await author.window.getByTestId("memory-sidebar-item").click()
-    const search = author.window.getByPlaceholder("Search memory")
-    await search.fill("refund rate limiting")
-    await expect(author.window.getByText("No accepted pages matched.")).toBeVisible()
-
-    await author.window.getByRole("button", { name: REVIEWS }).click()
-    const captured = author.window.getByRole("button", { name: CAPTURED_PROPOSAL })
-    await expect(captured).toBeVisible()
-    await captured.click()
-    await expect(author.window.getByRole("tab")).toHaveCount(2)
-    await author.window.getByRole("button", { name: "Accept all" }).click()
     await expect.poll(
-      () => fake.memorySnapshot("org-e2e").proposalStatuses["proposal:captured-learning"]
-    ).toBe("accepted")
-    expect(fake.memorySnapshot("org-e2e").acceptedPageIds).toEqual(
-      expect.arrayContaining(["shared-learning", "shared-checklist"])
-    )
+      () => fake.memorySnapshot("org-e2e").acceptedPageIds
+    ).toEqual(expect.arrayContaining(["shared-learning"]))
+    await author.window.getByTestId("memory-sidebar-item").click()
+    await expect(author.window.getByRole("button", { name: REVIEWS })).toHaveCount(0)
+    const search = author.window.getByPlaceholder("Search memory")
+    // This phrase exists only in the submitted Markdown, so finding the page
+    // proves the fake compiled the tool payload instead of returning a fixture.
+    await search.fill("bursts cannot multiply")
+    await expect(author.window.getByText("Refund rate limiting", { exact: true })).toBeVisible()
 
     // Agent attachment discovered the server independently; UI reads are
     // separate POSTs that can land on either simulated Next.js instance.
@@ -84,6 +75,18 @@ test("accepted session learning reaches a teammate but never another organizatio
       expect(request.hasCookie).toBe(false)
       expect(request.hasSessionId).toBe(false)
     }
+    const proposalRequest = mcpTraffic.find((request) => request.toolName === "memory_propose")
+    expect(proposalRequest?.toolArguments).toEqual({
+      pageId: "shared-learning",
+      baseRevisionId: "new",
+      markdown: "# Refund rate limiting\n\nRefund retries share one team limiter so bursts cannot multiply across workers."
+    })
+    const workflowRequest = mcpTraffic.find(
+      (request) => request.toolName === "memory_workflow_status"
+    )
+    expect(workflowRequest?.toolArguments).toMatchObject({
+      workflowId: expect.stringMatching(COMPILER_WORKFLOW)
+    })
 
     await author.app.close()
 
@@ -93,7 +96,7 @@ test("accepted session learning reaches a teammate but never another organizatio
       config: { memory: { enabled: true, organizationId: "org-e2e" } }
     })
     await teammate.window.getByTestId("memory-sidebar-item").click()
-    await teammate.window.getByPlaceholder("Search memory").fill("refund rate limiting")
+    await teammate.window.getByPlaceholder("Search memory").fill("bursts cannot multiply")
     await expect(teammate.window.getByText("Refund rate limiting", { exact: true })).toBeVisible()
     await teammate.window.getByRole("button", { name: "Map" }).click()
     await expect(teammate.window.getByTestId("memory-node-page:shared-learning")).toBeVisible()
@@ -105,7 +108,7 @@ test("accepted session learning reaches a teammate but never another organizatio
       config: { memory: { enabled: true, organizationId: "org-other" } }
     })
     await outsider.window.getByTestId("memory-sidebar-item").click()
-    await outsider.window.getByPlaceholder("Search memory").fill("refund rate limiting")
+    await outsider.window.getByPlaceholder("Search memory").fill("bursts cannot multiply")
     await expect(outsider.window.getByText("No accepted pages matched.")).toBeVisible()
     await outsider.window.getByRole("button", { name: "Map" }).click()
     await expect(outsider.window.getByTestId("memory-node-page:shared-learning")).toHaveCount(0)
@@ -115,30 +118,57 @@ test("accepted session learning reaches a teammate but never another organizatio
   }
 })
 
-test("review lint conflicts, paid-team enforcement, and memory outage all fail safely", async ({ launchApp }) => {
+test("a stale agent proposal surfaces its conflict without overwriting accepted memory", async ({ launchApp }) => {
+  const fake = await startFakeAuthServer({ reviewProposals: false })
+  try {
+    const author = await launchApp({
+      authServer: fake,
+      configured: true,
+      withRepo: true,
+      sessions: seededSession,
+      config: { memory: { enabled: true, organizationId: "org-e2e" } }
+    })
+    await expect(appShell(author.window)).toBeVisible()
+
+    const composer = author.window.getByPlaceholder("Message Claude…")
+    await composer.fill("[[memory-propose-conflict]] Try to replace alpha from its stale revision.")
+    await composer.press("Enter")
+
+    await expect(author.window.getByText(
+      "Memory proposal conflict for alpha: expected revision:alpha:1; current revision:alpha:2.",
+      { exact: true }
+    )).toBeVisible({ timeout: 30_000 })
+    expect(fake.memorySnapshot("org-e2e").acceptedRevisions.alpha).toBe(2)
+    expect(fake.memorySnapshot("org-e2e").sourceCount).toBe(0)
+
+    const proposalRequest = fake.memoryRequests.find(
+      (request) => request.toolName === "memory_propose"
+    )
+    expect(proposalRequest?.toolArguments).toEqual({
+      pageId: "alpha",
+      baseRevisionId: "revision:alpha:1",
+      markdown: "# Alpha memory\n\nA stale update must never overwrite revision two."
+    })
+  } finally {
+    await fake.close()
+  }
+})
+
+test("historical proposals never surface a queue, and access failures remain safe", async ({ launchApp }) => {
   const fake = await startFakeAuthServer()
   try {
-    const reviewer = await launchApp({
+    const member = await launchApp({
       authServer: fake,
       configured: true,
       config: { memory: { enabled: true, organizationId: "org-e2e" } }
     })
-    await reviewer.window.getByTestId("memory-sidebar-item").click()
-    await reviewer.window.getByRole("button", { name: REVIEWS }).click()
-
-    await reviewer.window.getByRole("button", { name: STALE_PROPOSAL }).click()
-    await reviewer.window.getByRole("button", { name: "Accept all" }).click()
-    const staleConflict = reviewer.window.getByRole("alert")
-    await expect(staleConflict).toContainText("Publication conflict")
-    await expect(staleConflict).toContainText("revision:alpha:2")
-
-    await reviewer.window.getByRole("button", { name: SECRET_PROPOSAL }).click()
-    await reviewer.window.getByRole("button", { name: "Accept all" }).click()
-    const secretConflict = reviewer.window.getByRole("alert")
-    await expect(secretConflict).toContainText("credential-shaped-content")
-    expect(fake.memorySnapshot("org-e2e").secretRejections).toBe(1)
-    expect(fake.memorySnapshot("org-e2e").acceptedPageIds).not.toContain("secret-page")
-    await reviewer.app.close()
+    await member.window.getByTestId("memory-sidebar-item").click()
+    await expect(member.window.getByRole("button", { name: REVIEWS })).toHaveCount(0)
+    expect(fake.memorySnapshot("org-e2e").proposalStatuses).toMatchObject({
+      "proposal:stale": "open",
+      "proposal:secret": "open"
+    })
+    await member.app.close()
 
     const freeMember = await launchApp({
       authServer: fake,

@@ -14,6 +14,7 @@ import type {
 import type { CliExecError } from "@jingler/core"
 import { Context, Data, Effect, Layer } from "effect"
 import { planTaskProgressFingerprint } from "./plan-task-progress.js"
+import { isE2eEnv } from "./scripted.js"
 
 /** Installed provider/model routes a planning turn may assign to workers. */
 export interface OrchestrationRoute {
@@ -645,11 +646,72 @@ export const scriptedPlanEmission = (
  * `[[stream-plan]]` adds cumulative live-only snapshots before that promotion.
  * `[[queue-hold]]` parks a test turn so queue affordances can be exercised
  * without borrowing the plan-approval lifecycle.
+ * `[[memory-propose]]` publishes the fixed shared-memory E2E fixture, but only
+ * when the built Electron suite explicitly sets `JINGLER_E2E=1`.
+ * `[[memory-propose-conflict]]` submits a stale accepted-page revision through
+ * the same E2E-only path so the harness-facing conflict remains observable.
  */
 const SCRIPTED_TASK_PROTOCOL_PATTERN =
   /PLAN_TASK stage=(\S+) fingerprint=(\S+) task=<task-id> status=<status>/
 const SCRIPTED_TASK_PATTERN =
   /^\d+\. \[(pending|in-progress|completed|blocked)\] (\S+) —/gm
+const SCRIPTED_MEMORY_PROTOCOL = "2026-07-28"
+const SCRIPTED_MEMORY_PROPOSE_MARKER = "[[memory-propose]]"
+const SCRIPTED_MEMORY_CONFLICT_MARKER = "[[memory-propose-conflict]]"
+const SCRIPTED_MEMORY_MARKDOWN = [
+  "# Refund rate limiting",
+  "",
+  "Refund retries share one team limiter so bursts cannot multiply across workers."
+].join("\n")
+
+const isJsonRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const callScriptedMemoryTool = async (
+  server: RemoteMcpServer,
+  id: string,
+  name: "memory_navigation" | "memory_propose" | "memory_workflow_status",
+  args: Readonly<Record<string, unknown>>
+): Promise<Record<string, unknown> | null> => {
+  const response = await fetch(server.url, {
+    method: "POST",
+    headers: {
+      ...server.headers,
+      "content-type": "application/json",
+      "mcp-protocol-version": SCRIPTED_MEMORY_PROTOCOL
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id,
+      method: "tools/call",
+      params: { name, arguments: args }
+    })
+  })
+  const payload: unknown = await response.json()
+  if (!isJsonRecord(payload)) return null
+  const result = payload.result
+  if (!isJsonRecord(result)) return null
+  const structuredContent = result.structuredContent
+  if (!isJsonRecord(structuredContent)) return null
+  const data = structuredContent.data
+  return isJsonRecord(data) ? data : null
+}
+
+const scriptedMemoryConflictText = (
+  data: Readonly<Record<string, unknown>> | null
+): string | null => {
+  if (data?.status !== "conflict" || !Array.isArray(data.conflicts)) return null
+  const conflict = data.conflicts.find(isJsonRecord)
+  if (conflict === undefined) return "Memory proposal conflicted."
+  const pageId = typeof conflict.pageId === "string" ? conflict.pageId : "unknown page"
+  const expected = typeof conflict.expectedBaseRevisionId === "string"
+    ? conflict.expectedBaseRevisionId
+    : "unknown base"
+  const current = typeof conflict.currentHeadRevisionId === "string"
+    ? conflict.currentHeadRevisionId
+    : "unknown head"
+  return `Memory proposal conflict for ${pageId}: expected ${expected}; current ${current}.`
+}
 
 export const scriptedRun =
   (delayMs: number): CliAdapterShape["run"] =>
@@ -705,25 +767,60 @@ export const scriptedRun =
       if (memoryServer !== undefined) {
         yield* Effect.tryPromise({
           try: () =>
-            fetch(memoryServer.url, {
-              method: "POST",
-              headers: {
-                ...memoryServer.headers,
-                "content-type": "application/json",
-                "mcp-protocol-version": "2026-07-28"
-              },
-              body: JSON.stringify({
-                jsonrpc: "2.0",
-                id: `scripted-memory-${sessionId}`,
-                method: "tools/call",
-                params: {
-                  name: "memory_navigation",
-                  arguments: {}
-                }
-              })
-            }),
+            callScriptedMemoryTool(
+              memoryServer,
+              `scripted-memory-${sessionId}`,
+              "memory_navigation",
+              {}
+            ),
           catch: () => null
         }).pipe(Effect.ignore)
+
+        // An E2E-only proposal marker lets Electron prove the same
+        // agent-owned publication path a real harness uses after its silent
+        // end-of-turn reflection. Scripted mode alone is NOT a safe boundary:
+        // it is also the production fallback when no supported CLI is installed.
+        const memoryConflict = spec.prompt.includes(SCRIPTED_MEMORY_CONFLICT_MARKER)
+        const memoryProposal = spec.prompt.includes(SCRIPTED_MEMORY_PROPOSE_MARKER)
+        if (isE2eEnv() && (memoryProposal || memoryConflict)) {
+          const proposalData = yield* Effect.tryPromise({
+            try: () => callScriptedMemoryTool(
+              memoryServer,
+              `scripted-memory-propose-${sessionId}`,
+              "memory_propose",
+              memoryConflict
+                ? {
+                    pageId: "alpha",
+                    baseRevisionId: "revision:alpha:1",
+                    markdown: "# Alpha memory\n\nA stale update must never overwrite revision two."
+                  }
+                : {
+                    pageId: "shared-learning",
+                    baseRevisionId: "new",
+                    markdown: SCRIPTED_MEMORY_MARKDOWN
+                  }
+            ),
+            catch: () => null
+          }).pipe(Effect.catchAll(() => Effect.succeed(null)))
+
+          const conflictText = scriptedMemoryConflictText(proposalData)
+          if (conflictText !== null) yield* emit({ _tag: "Assistant", text: conflictText })
+
+          const workflowId = typeof proposalData?.workflowId === "string"
+            ? proposalData.workflowId
+            : null
+          if (workflowId !== null) {
+            yield* Effect.tryPromise({
+              try: () => callScriptedMemoryTool(
+                memoryServer,
+                `scripted-memory-workflow-${sessionId}`,
+                "memory_workflow_status",
+                { workflowId }
+              ),
+              catch: () => null
+            }).pipe(Effect.ignore)
+          }
+        }
       }
 
       // A deterministic busy window for queue E2E. Plan approval used to stand

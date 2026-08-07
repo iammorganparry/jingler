@@ -9,8 +9,8 @@ memory deterministic instead of best-effort:
   `<recalled-memories>` block with stable evidence ids every turn — no reliance
   on the model choosing to search or on unverified snippets.
 - **`Stop`** runs after the assistant finishes a turn. `persist.sh` uses it to
-  submit anything the turn marked as worth keeping for compilation and any
-  configured review (see gating below).
+  submit anything the turn marked as worth keeping for automatic compilation and
+  publication (see gating below).
 
 ## 1. Set the three environment variables
 
@@ -76,8 +76,8 @@ candidate, in this precedence:
    dev Postgres to avoid clashing with a host 5432.` Each such line becomes one
    memory (max 5/turn). No marker → nothing is submitted.
 
-Submission starts the compiler. If human review is enabled, the memory becomes
-searchable only after a maintainer accepts its proposal.
+Submission starts the compiler and publishes automatically when compilation
+settles successfully; no maintainer approval is required.
 
 This mirrors how the model would decide to call `memory_propose`, but makes the
 *timing* deterministic: the harness always checks at end-of-turn.

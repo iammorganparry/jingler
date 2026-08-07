@@ -33,6 +33,7 @@ test("Memory map restores explicit navigation state and clears it at an organiza
     await expect(inspector).toContainText("page:alpha")
     await expect(inspector).toContainText("Citations (1)")
     await expect(inspector).toContainText("Revision 2")
+    await expect(inspector).not.toContainText("proposals")
     await first.window.getByRole("button", { name: "Close inspector" }).click()
 
     const edge = first.window.getByTestId("memory-edge-edge:org-e2e:alpha-beta")

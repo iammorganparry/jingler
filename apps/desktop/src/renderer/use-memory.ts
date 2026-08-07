@@ -31,8 +31,6 @@ const memoryMachine = createMemoryMachine({
   evidence: rpc.memoryEdgeEvidence,
   search: rpc.memorySearch,
   page: rpc.memoryPage,
-  reviews: rpc.memoryReviews,
-  review: rpc.memoryReview,
   export: rpc.memoryExport,
   suggestions: rpc.memorySuggestions
 })
@@ -123,28 +121,19 @@ export function useMemory() {
   const openPage = useCallback((pageId: string) => send({ type: "PAGE.OPEN", pageId }), [send])
   const backFromPage = useCallback(() => send({ type: "PAGE.BACK" }), [send])
   const setQuery = useCallback((query: string) => send({ type: "SEARCH.QUERY", query }), [send])
-  const selectReview = useCallback((proposalId: string) => send({ type: "REVIEW.SELECT", proposalId }), [send])
-  const decideReview = useCallback((proposalId: string, action: "approve" | "reject") => send({ type: "REVIEW.DECIDE", proposalId, action }), [send])
   const requestExport = useCallback(() => send({ type: "EXPORT" }), [send])
 
   const selectedNode = graph?.nodes.find((node) => node.id === snapshot.context.selectedNodeId) ?? null
-  const canReview =
-    snapshot.context.access?.organizations
-      .find((organization) => organization.id === snapshot.context.organizationId)
-      ?.privileges.includes("review") ?? false
 
   return {
     active: !(snapshot.matches("checking") || snapshot.matches("closed")),
     eligible: snapshot.context.access?.eligible ?? false,
     loading: snapshot.matches("checking") || snapshot.matches("loading") || snapshot.matches("nodeLoading") || snapshot.matches("edgeLoading") || snapshot.matches("pageLoading") || snapshot.matches("searching"),
-    reviewing: snapshot.matches("reviewing"),
     exporting: snapshot.matches("exporting"),
     recovering: snapshot.matches("recovering"),
-    conflict: snapshot.context.reviewResult?.status === "conflict",
     context: snapshot.context,
     positions,
     selectedNode,
-    canReview,
     open,
     close,
     retry,
@@ -161,8 +150,6 @@ export function useMemory() {
     openPage,
     backFromPage,
     setQuery,
-    selectReview,
-    decideReview,
     requestExport
   }
 }

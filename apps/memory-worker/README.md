@@ -17,16 +17,24 @@ send both a rotating service credential and `X-Jingler-Organization-Id`.
 | --- | --- | --- |
 | `MEMORY_VAULTS` | SQLite Durable Object | Serialized heads, proposals, reviews, FTS5, events, and derived projections for one organization. |
 | `MEMORY_R2` | R2 | Immutable sources, accepted Markdown revisions, and publication commit records. |
-| `MEMORY_COMPILER` | Workflow | class `MemoryCompilerWorkflow` — cited source-to-proposal compilation and durable review wait. |
+| `MEMORY_COMPILER` | Workflow | class `MemoryCompilerWorkflow` — cited source-to-proposal compilation and automatic publication. |
 | `MEMORY_LINT` | Workflow | class `MemoryLintWorkflow` — scheduled vault health reporting. |
 
 `MEMORY_VAULTS` is class `TeamVaultObject` (SQLite DO, `new_sqlite_classes`
 migration `v1`); `MEMORY_R2` is bucket `jingler-memory`; the cron is `17 3 * * *`.
 
 The daily `17 3 * * *` trigger starts lint only for the comma-separated
-`MEMORY_LINT_ORGANIZATIONS`. `MEMORY_AUTO_PUBLISH_FIXES` is also comma-separated;
-leave it empty unless a reviewed mechanical fix identifier is explicitly safe
-to auto-publish.
+`MEMORY_LINT_ORGANIZATIONS`.
+
+## Automatic publication migration
+
+Agent-authored memories publish automatically after the agent applies the
+durability, sensitivity, and deduplication policy. The former
+`MEMORY_REQUIRE_REVIEW` deployment gate is retired and ignored; remove it from
+Worker configuration. While it remains set, the Worker logs a deprecation
+warning and reports that warning from `/health`, but it does not restore a
+manual queue. Historical proposal/review endpoints remain available only for
+audit and recovery.
 
 ## Secrets and vars
 
@@ -82,13 +90,21 @@ Copy `.dev.vars.example` to `.dev.vars` for local Wrangler work. Never commit
 `.dev.vars`.
 
 ```bash
-pnpm dlx wrangler dev --config apps/memory-worker/wrangler.jsonc
+pnpm --filter @jingler/memory-worker exec wrangler dev
 curl http://127.0.0.1:8787/health
-pnpm dlx wrangler deploy --config apps/memory-worker/wrangler.jsonc
+pnpm --filter @jingler/memory-worker deploy:dry
+pnpm --filter @jingler/memory-worker deploy
 ```
 
+A successful `CI` run for a push to `main` automatically deploys the exact
+tested revision through `.github/workflows/deploy-workers.yml`. Configure
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub Actions repository
+secrets, using a least-privilege token scoped to the owning Cloudflare account.
+The workflow does not create or rotate the Worker runtime secrets documented
+above; the deploy command remains available for manual recovery.
+
 The health response reports only binding presence. Vault routes remain private.
-Run `pnpm --filter @jingler/memory-worker test` before deployment.
+Run `pnpm --filter @jingler/memory-worker test` before a manual deployment.
 
 ## Limits and definitions
 
