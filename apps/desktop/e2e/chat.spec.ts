@@ -67,6 +67,8 @@ test("shows breathing indicators while the agent is working", async ({ launchApp
   await expect(
     window.getByTestId("chat-thinking-orb").getByRole("status", { name: "Agent breathing…" })
   ).toBeVisible()
+  await expect(window.getByTestId("chat-thinking-orb")).not.toContainText("Agent breathing")
+  await expect(window.getByLabel("Working")).toHaveCount(0)
   await expect(row.getByRole("status", { name: /Thinking|Running/ })).toBeVisible()
 })
 

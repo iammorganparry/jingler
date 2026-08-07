@@ -14,6 +14,16 @@ const recalledRequests = (
     (request) => request.mcpName === "memory_search" || request.mcpName === "memory_read"
   )
 
+const harnessMemoryCallCount = (
+  requests: ReadonlyArray<FakeMemoryRequest>
+): number =>
+  requests.filter(
+    (request) =>
+      request.rpcMethod === "tools/call" &&
+      request.mcpMethod === null &&
+      request.mcpName === null
+  ).length
+
 const seededSession = (
   cli: "claude" | "codex",
   repoPath: string
@@ -87,3 +97,50 @@ for (const cli of ["claude", "codex"] as const) {
     }
   })
 }
+
+test("orchestration workers automatically inherit the team-memory tool", async ({
+  launchApp
+}) => {
+  const fake = await startFakeAuthServer()
+  try {
+    const app = await launchApp({
+      authServer: fake,
+      configured: true,
+      withRepo: true,
+      config: {
+        memory: { enabled: true, organizationId: "org-e2e" },
+        orchestrator: { cli: "codex", model: "gpt-5.6-sol" }
+      }
+    })
+
+    await expect(appShell(app.window)).toBeVisible()
+    await app.window.getByTestId("new-session").click()
+    await app.window
+      .getByPlaceholder("Leave blank for agent naming")
+      .fill("Memory-enabled workers")
+    await app.window.getByRole("button", { name: "Create" }).click()
+    const composer = app.window.getByPlaceholder("Message Codex…")
+    await composer.fill("[[plan]] refactor auth to a TokenStore")
+    await composer.press("Enter")
+    await app.window.getByRole("button", { name: "Plan Review" }).first().click()
+    await app.window.getByRole("button", { name: "More plan actions" }).click()
+    await app.window
+      .getByRole("menuitem", { name: "Approve and auto", exact: true })
+      .click()
+
+    // The main orchestrator makes the first harness-side MCP call. Every count
+    // after that is a separately launched plan worker receiving the same tool.
+    await expect
+      .poll(() => harnessMemoryCallCount(fake.memoryRequests), { timeout: 30_000 })
+      .toBeGreaterThan(1)
+    await expect
+      .poll(() => memoryRequestCount(fake.memoryRequests, "memory_search"), {
+        timeout: 30_000
+      })
+      .toBeGreaterThan(1)
+
+    await app.app.close()
+  } finally {
+    await fake.close()
+  }
+})

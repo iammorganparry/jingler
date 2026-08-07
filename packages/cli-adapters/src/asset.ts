@@ -241,7 +241,11 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
                 status: statusByPath.get(requested) ?? "clean"
               } satisfies AssetFileEntry
             }),
-          { concurrency: 32 }
+          // Real repositories routinely contain 5k+ tracked files. Each path
+          // still goes through the same realpath + regular-file checks, but a
+          // wider bounded fan-out keeps that security pass interactive instead
+          // of making Files look permanently empty for ten seconds or more.
+          { concurrency: 128 }
         )
         const byPath = new Map<string, AssetFileEntry>()
         for (const entry of validated) {

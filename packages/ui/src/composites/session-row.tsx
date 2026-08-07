@@ -361,7 +361,7 @@ export function SessionRow({
             className={cn("flex flex-none items-center gap-1 font-medium tabular-nums", statusTextClass[status])}
           >
             {display === "thinking" || display === "running" ? (
-              <ThinkingOrb compact label={label} className="[&_svg]:size-3.5" />
+              <ThinkingOrb compact label={label} />
             ) : null}
             {label}
             {age ? ` ${age}` : ""}

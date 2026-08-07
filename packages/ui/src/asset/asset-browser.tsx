@@ -74,7 +74,7 @@ export function AssetBrowser({
         className="h-full"
       />
       {treeLoading && entries.length === 0 ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 bg-panel/90 text-[11px] text-dim">
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 bg-panel/90 text-[11px] text-dim">
           <Spinner size={12} />
           Loading files…
         </div>

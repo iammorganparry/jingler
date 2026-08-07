@@ -49,17 +49,6 @@ const PATH_TOOLS: ReadonlySet<string> = new Set([
 const pathOf = (tool: ToolCallModel): string | null =>
   tool.target && PATH_TOOLS.has(tool.name) ? tool.target : null
 
-/** A pulsing dots indicator shown while an assistant turn is still streaming. */
-function Working() {
-  return (
-    <div className="flex items-center gap-1.5 py-1" aria-label="Working">
-      <span className="size-1.5 animate-pulse-dot rounded-full bg-blue/70" />
-      <span className="size-1.5 animate-pulse-dot rounded-full bg-blue/70 [animation-delay:0.2s]" />
-      <span className="size-1.5 animate-pulse-dot rounded-full bg-blue/70 [animation-delay:0.4s]" />
-    </div>
-  )
-}
-
 /** Lines of a diff hunk shown before the "Show all" affordance kicks in. */
 const HUNK_PREVIEW_LINES = 12
 
@@ -330,8 +319,6 @@ export function MessageTurn({
         <Eyebrow>You</Eyebrow>
       )}
       {renderParts(message.parts, isAssistant, { onDecideGate, onApprovePlan, onResumePlan, onOpenPlanReview })}
-      {/* Signal the agent is still working (before/while content streams in). */}
-      {isAssistant && message.streaming && <Working />}
     </div>
   )
 }

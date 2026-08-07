@@ -71,7 +71,7 @@ const EMAIL_PATTERN = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g
 const HOME_PATH_PATTERN = /\/(?:Users|home)\/[^/\s]+/g
 const REDACTED_VALUE = "[REDACTED]"
 
-type MemoryServiceEnvironment =
+export type MemoryServiceEnvironment =
   | ConfigService
   | SecretStore
   | FileSystem.FileSystem

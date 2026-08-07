@@ -1,8 +1,13 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { ConversationView } from "./conversation-view.js"
 
 afterEach(cleanup)
+let canvasContext: { mockRestore: () => void }
+beforeAll(() => {
+  canvasContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => null)
+})
+afterAll(() => canvasContext.mockRestore())
 
 /**
  * The queued-message list sits between the transcript and the composer, so its
@@ -24,7 +29,9 @@ describe("ConversationView — queued messages", () => {
     expect(screen.queryByTestId("chat-thinking-orb")).toBeNull()
 
     view.rerender(<ConversationView messages={[]} mode="accept-edits" busy />)
-    expect(screen.getByRole("status", { name: "Agent breathing…" })).toBeTruthy()
+    const orb = screen.getByRole("status", { name: "Agent breathing…" })
+    expect(orb.textContent).toBe("")
+    expect(orb.querySelector("canvas")?.style.width).toBe("20px")
   })
 
   it("shows every message while the queue is small", () => {

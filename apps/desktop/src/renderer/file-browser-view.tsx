@@ -64,13 +64,22 @@ export function FileBrowserView({ session, onSendReference }: FileBrowserViewPro
   const browser = useFileBrowser(session.id)
   const rootRef = useRef<HTMLDivElement>(null)
   const [selection, setSelection] = useState<JinglerLineSelection | null>(null)
+  const activated = useRef(false)
 
   useEffect(() => setSelection(null), [browser.selectedPath, browser.payload])
 
   // The actor survives tab switches. Refresh on every Files activation so an
   // empty/error result captured before a worktree finished appearing cannot
   // leave a real repository looking permanently blank.
-  useEffect(() => browser.refreshTree(), [browser.refreshTree])
+  useEffect(() => {
+    if (activated.current) return
+    activated.current = true
+    // `useFileBrowser` starts a fresh actor in `tree.loading`. Re-entering that
+    // state here cancelled the first full-repository scan and immediately ran
+    // the same expensive request twice. Existing actors are refreshed when the
+    // Files tab is reopened; new actors are allowed to finish their first load.
+    if (!browser.treeLoading) browser.refreshTree()
+  }, [browser.refreshTree, browser.treeLoading])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

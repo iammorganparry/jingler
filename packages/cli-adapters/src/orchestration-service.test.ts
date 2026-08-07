@@ -90,7 +90,7 @@ const input = (
   producingChatId: "chat-1",
   planRevision: 7,
   stages,
-  makeSessionSpec: sessionSpec,
+  makeSessionSpec: (request) => Effect.succeed(sessionSpec(request)),
   ...overrides
 })
 

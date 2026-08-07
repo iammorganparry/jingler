@@ -1,11 +1,16 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { DEFAULT_FILTERS } from "./session-filters.js"
 import { SessionSidebar } from "./session-sidebar.js"
 import type { SplitGroup } from "./split-layout.js"
 import { testSession as session } from "../test-support.js"
 
 afterEach(cleanup)
+let canvasContext: { mockRestore: () => void }
+beforeAll(() => {
+  canvasContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => null)
+})
+afterAll(() => canvasContext.mockRestore())
 
 const rowOrder = () =>
   Array.from(document.querySelectorAll("[data-testid^='session-row-']")).map((el) =>
@@ -81,7 +86,7 @@ describe("SessionSidebar session identity", () => {
     )
   })
 
-  it("keeps the liquid-glass rounding when collapsed to the rail", () => {
+  it("keeps the collapsed rail integrated with the app background", () => {
     window.localStorage.setItem("sb.sidebar.pinned", "0")
     render(
       <SessionSidebar
@@ -92,8 +97,9 @@ describe("SessionSidebar session identity", () => {
     )
 
     const rail = screen.getByTestId("session-rail")
-    expect(rail.className).toContain("rounded-2xl")
-    expect(rail.className).toContain("backdrop-blur-2xl")
+    expect(rail.className).not.toContain("rounded-2xl")
+    expect(rail.className).not.toContain("backdrop-blur-2xl")
+    expect(rail.className).not.toContain("bg-panel")
     localStorage.removeItem("sb.sidebar.pinned")
   })
 })

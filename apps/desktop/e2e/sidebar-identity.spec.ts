@@ -109,19 +109,33 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
     /widget \/ Liquid glass sidebar/
   )
 
-  const glass = await window.getByTestId("session-sidebar").evaluate((element) => {
+  const sidebarSurface = await window.getByTestId("session-sidebar").evaluate((element) => {
     const style = getComputedStyle(element)
-    return { radius: Number.parseFloat(style.borderRadius), backdrop: style.backdropFilter }
+    return {
+      radius: Number.parseFloat(style.borderRadius),
+      backdrop: style.backdropFilter,
+      background: style.backgroundColor
+    }
   })
-  expect(glass.radius).toBeGreaterThan(0)
-  expect(glass.backdrop).toContain("blur")
+  expect(sidebarSurface.radius).toBe(0)
+  expect(sidebarSurface.backdrop).toBe("none")
+  expect(sidebarSurface.background).toBe("rgba(0, 0, 0, 0)")
+  await expect(window.getByRole("separator", { name: "Resize sidebar" })).toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)"
+  )
 
   await window.getByRole("button", { name: "Collapse sidebar" }).click()
   const rail = window.getByTestId("session-rail")
   const railSurface = await rail.evaluate((element) => {
     const style = getComputedStyle(element)
-    return { radius: Number.parseFloat(style.borderRadius), backdrop: style.backdropFilter }
+    return {
+      radius: Number.parseFloat(style.borderRadius),
+      backdrop: style.backdropFilter,
+      background: style.backgroundColor
+    }
   })
-  expect(railSurface.radius).toBeGreaterThan(0)
-  expect(railSurface.backdrop).toContain("blur")
+  expect(railSurface.radius).toBe(0)
+  expect(railSurface.backdrop).toBe("none")
+  expect(railSurface.background).toBe("rgba(0, 0, 0, 0)")
 })

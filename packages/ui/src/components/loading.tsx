@@ -1,13 +1,5 @@
+import { ThinkingOrb as BreathingOrb } from "thinking-orbs"
 import { cn } from "../lib/cn.js"
-
-const ORB_DOTS = Array.from({ length: 12 }, (_, index) => {
-  const angle = (index / 12) * Math.PI * 2 - Math.PI / 2
-  return {
-    cx: 12 + Math.cos(angle) * 8,
-    cy: 12 + Math.sin(angle) * 8,
-    opacity: 0.24 + (index / 11) * 0.76
-  }
-})
 
 /** Dotted breathing orbit used wherever a live agent is between visible output. */
 export function ThinkingOrb({
@@ -19,37 +11,14 @@ export function ThinkingOrb({
   label?: string
   className?: string
 }) {
-  const orbit = (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden
-      className="size-5 flex-none text-muted-foreground [animation:var(--animate-spin-orb)] motion-reduce:animate-none"
-    >
-      {ORB_DOTS.map((dot, index) => (
-        <circle key={index} cx={dot.cx} cy={dot.cy} r="1.15" fill="currentColor" opacity={dot.opacity} />
-      ))}
-    </svg>
-  )
-
-  if (compact) {
-    return (
-      <span role="status" aria-label={label} title={label} className={cn("inline-flex", className)}>
-        {orbit}
-      </span>
-    )
-  }
-
   return (
     <span
       role="status"
       aria-label={label}
-      className={cn(
-        "inline-flex items-center gap-2.5 rounded-full bg-sunken px-4 py-2 text-[13px] text-muted-foreground shadow-[0_0_0_1px_var(--sb-line)]",
-        className
-      )}
+      title={compact ? label : undefined}
+      className={cn("inline-flex items-center justify-center", className)}
     >
-      {orbit}
-      <span>{label}</span>
+      <BreathingOrb state="breathing" size={20} theme="auto" aria-hidden />
     </span>
   )
 }

@@ -467,6 +467,11 @@ test("a new orchestrator session runs parallel workers and reconciles a mid-run 
     .getByRole("button", { name: WORKER_RELEASE_TAB })
   await expect(workerAuthTab).toBeVisible()
   await expect(workerReleaseTab).toBeVisible()
+  // The orchestrator's planning turn has settled, but its plan workers have not.
+  // Their independent feed must keep the owning session visibly active.
+  await expect(
+    sessionRow(window, "Provider neutral orchestration").getByTitle("Delegating 2 agents")
+  ).toBeVisible()
 
   await composer.fill(
     "[[amendment]] add the requested audit coverage without stopping the workers"

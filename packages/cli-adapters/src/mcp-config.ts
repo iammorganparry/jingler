@@ -59,6 +59,26 @@ export const remoteMcpServer = (
           : { headerEnvironment: entry.launch.headerEnvironment })
       }
 
+/**
+ * Compose agent launch attachments in stable priority order.
+ *
+ * Keeping the first occurrence makes duplicate inputs deterministic. Callers
+ * put Jingler-owned attachments first so an operator connector cannot shadow a
+ * credential-bound internal service by claiming its reserved name.
+ */
+export const composeRemoteMcpServers = (
+  ...entries: ReadonlyArray<RemoteMcpServer | null>
+): ReadonlyArray<RemoteMcpServer> => {
+  const names = new Set<string>()
+  const attachments: RemoteMcpServer[] = []
+  for (const entry of entries) {
+    if (entry === null || names.has(entry.name)) continue
+    names.add(entry.name)
+    attachments.push(entry)
+  }
+  return attachments
+}
+
 export const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v)
 

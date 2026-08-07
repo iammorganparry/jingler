@@ -1421,6 +1421,17 @@ describe("RPC handlers", () => {
           PlanStore.Default,
           Layer.succeed(OrchestrationService, orchestration),
           Layer.succeed(DiscoveryService, discovery),
+          Layer.succeed(
+            MemoryService,
+            MemoryService.make({
+              attachment: () => Effect.succeed(null),
+              captureSettledSession: () => Effect.succeed(false),
+              access: () => Effect.succeed(null),
+              uiRequest: () => Effect.succeed(null),
+              suggestions: () => Effect.succeed(null),
+            }),
+          ),
+          InMemorySecretStoreLive,
           fakeCommandExecutor(() => ({ exitCode: 0, stdout: "" })),
         ).pipe(Layer.provideMerge(base));
 

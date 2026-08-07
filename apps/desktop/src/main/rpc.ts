@@ -19,7 +19,7 @@ import {
   AuthService,
   BrowserControlMcpService,
   buildOrchestrationGroups,
-  CliAdapter,
+  type CliAdapter,
   ConfigService,
   claudeTitleGenerator,
   DiscoveryService,
@@ -32,12 +32,14 @@ import {
   GitService,
   ModelsService,
   MemoryService,
+  type MemoryServiceEnvironment,
+  attachMemoryToSessionSpec,
   OpenConnectorService,
   OpenConnectorApi,
   OrchestrationPersistenceError,
   OrchestrationService,
   recoverOrchestrationCheckpoints,
-  SecretStore,
+  type SecretStore,
   SecretStoreUnavailable,
   planDraftPost,
   billingPath,
@@ -641,7 +643,7 @@ const memoryRpcRequest = (input: {
     case "reviews":
       return memoryReviews(organizationId);
     case "review":
-      if (!input.proposalId || !input.action) {
+      if (!(input.proposalId && input.action)) {
         return Effect.fail(
           memoryUiFailure("Memory review request was incomplete"),
         );
@@ -1141,6 +1143,7 @@ type LivePlanDispatchRequirements =
   | AppPaths
   | FileSystem.FileSystem
   | OrchestrationService
+  | MemoryService
   | Path.Path
   | PlanStore
   | SessionStore;
@@ -1795,6 +1798,8 @@ export const executeOrchestration = (
   OrchestrationExecutionReport | null,
   never,
   | OrchestrationService
+  | MemoryService
+  | MemoryServiceEnvironment
   | SessionStore
   | DiscoveryService
   | PlanStore
@@ -1814,6 +1819,8 @@ export const executeOrchestration = (
     );
     const binByCli = new Map(clis.map((cli) => [cli.kind, cli.binPath]));
     const service = yield* OrchestrationService;
+    const memory = yield* MemoryService;
+    const memoryEnvironment = yield* Effect.context<MemoryServiceEnvironment>();
     const store = yield* PlanStore;
     const persistence = yield* Effect.context<
       FileSystem.FileSystem | Path.Path | AppPaths
@@ -1843,17 +1850,27 @@ export const executeOrchestration = (
           checkpoints: currentCheckpoints,
           maxConcurrency: 4,
           ...(agentIds === undefined ? {} : { agentIds }),
-          makeSessionSpec: ({ group, prompt, resumeId }) =>
-            workerSessionSpecForAssignment(group.assignment, {
-              repo: session.repo,
-              branch: session.branch,
-              cwd: worktreePath,
-              prompt,
-              images: [],
-              binPath: binByCli.get(group.assignment.cli) ?? null,
-              mode: "auto",
-              resumeId,
-            }),
+          makeSessionSpec: ({ ownerId, group, prompt, resumeId }) =>
+            memory
+              .attachment(group.assignment.cli, prompt, ownerId)
+              .pipe(
+                Effect.provide(memoryEnvironment),
+                Effect.map((attachment) =>
+                  attachMemoryToSessionSpec(
+                    workerSessionSpecForAssignment(group.assignment, {
+                      repo: session.repo,
+                      branch: session.branch,
+                      cwd: worktreePath,
+                      prompt,
+                      images: [],
+                      binPath: binByCli.get(group.assignment.cli) ?? null,
+                      mode: "auto",
+                      resumeId,
+                    }),
+                    attachment,
+                  ),
+                ),
+              ),
           refreshStage: (_agentId, stageId) =>
             store
               .readDocument(worktreePath, session.id, session.activeChatId)

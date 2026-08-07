@@ -335,7 +335,9 @@ export interface OrchestrationExecuteInput {
   readonly maxConcurrency?: number
   /** Run only these logical workers, used by durable per-worker retry. */
   readonly agentIds?: ReadonlyArray<string>
-  readonly makeSessionSpec: (request: OrchestrationSessionSpecRequest) => SessionSpec
+  readonly makeSessionSpec: (
+    request: OrchestrationSessionSpecRequest
+  ) => Effect.Effect<SessionSpec>
   /**
    * Re-read a stage from the latest canonical revision at its execution
    * boundary. This lets an in-flight worker pick up orchestrator amendments
@@ -1287,7 +1289,7 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                   { discard: true }
                 )
               const prompt = workerPrompt(input, group, latestStage)
-              const requested = input.makeSessionSpec({
+              const requested = yield* input.makeSessionSpec({
                 ownerId,
                 group,
                 stage: latestStage,
@@ -1298,7 +1300,6 @@ export class OrchestrationService extends Effect.Service<OrchestrationService>()
                 ...requested,
                 cli: group.assignment.cli,
                 model: group.assignment.model,
-                prompt,
                 resumeId,
                 fresh: resumeId === null ? requested.fresh : false,
                 unattended: true

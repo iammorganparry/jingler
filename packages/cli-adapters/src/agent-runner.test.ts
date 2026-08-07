@@ -35,11 +35,11 @@ import {
 import { OpenConnectorService } from "./open-connector.js"
 import {
   AgentRunner,
-  composeRemoteMcpServers,
   isContextOverflowFailure,
   orchestratorAmendmentOutcomeText,
   planEvidenceFromText
 } from "./agent-runner.js"
+import { composeRemoteMcpServers } from "./mcp-config.js"
 import { ContextManager } from "./context-manager.js"
 import { DiscoveryService } from "./discovery.js"
 import { SessionStore } from "./sessions.js"

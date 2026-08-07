@@ -359,6 +359,31 @@ test("forwards selected current-buffer lines to the active chat with Cmd-Shift-J
   await expect(window.getByPlaceholder("Message Claude…")).toBeFocused()
 })
 
+test("loads a real large repository tree without leaving Files blank", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: ({ repoPath }) => {
+      for (let directory = 0; directory < 56; directory += 1) {
+        const root = join(repoPath, "packages", `group-${directory}`)
+        mkdirSync(root, { recursive: true })
+        for (let file = 0; file < 100; file += 1) {
+          writeFileSync(join(root, `file-${file}.ts`), `export const value = ${file}\n`)
+        }
+      }
+    },
+    sessions: ({ repoPath }) => [session(repoPath)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await filesTab(window).click()
+  await expect(window.getByText("Loading files…")).toBeVisible()
+  await expect(
+    tree(window).getByRole("treeitem", { name: "packages", exact: true })
+  ).toBeVisible({ timeout: 15_000 })
+  await expect(window.getByText("Loading files…")).toHaveCount(0)
+})
+
 test("edits UTF-8 files with unknown extensions and refuses binary data", async ({
   launchApp
 }) => {

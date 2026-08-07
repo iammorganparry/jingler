@@ -12,26 +12,71 @@ import { useSyncExternalStore } from "react"
 import type { SessionActivity } from "@jingler/core"
 
 let activities: Record<string, SessionActivity> = {}
+let conversationActivities: Record<string, SessionActivity> = {}
+let orchestrationActivities: Record<string, SessionActivity> = {}
 const listeners = new Set<() => void>()
 
 const same = (a: SessionActivity | undefined, b: SessionActivity): boolean =>
   a?.kind === b.kind && a.verb === b.verb && a.target === b.target
 
-/** Set (or clear, with `null`) a session's live activity; notifies subscribers. */
-export const setSessionActivity = (id: string, activity: SessionActivity | null): void => {
-  if (activity === null) {
-    if (!(id in activities)) return
-    const next = { ...activities }
-    delete next[id]
-    activities = next
+const priority = (activity: SessionActivity): number => {
+  if (activity.kind === "needs-input" || activity.kind === "needs-approval") return 3
+  if (activity.kind === "delegating") return 2
+  return 1
+}
+
+/** Combine independent live producers without letting background work hide a gate. */
+export const selectSessionActivity = (
+  conversation: SessionActivity | undefined,
+  orchestration: SessionActivity | undefined
+): SessionActivity | null => {
+  if (conversation === undefined) return orchestration ?? null
+  if (orchestration === undefined) return conversation
+  return priority(orchestration) > priority(conversation) ? orchestration : conversation
+}
+
+const publish = (id: string): void => {
+  const previous = activities[id]
+  const next = selectSessionActivity(
+    conversationActivities[id],
+    orchestrationActivities[id]
+  )
+  if (next === null) {
+    if (previous === undefined) return
+    const remaining = { ...activities }
+    delete remaining[id]
+    activities = remaining
   } else {
-    // Value-compare, not identity: the registry rebuilds the activity object on
-    // EVERY snapshot, so an identity check would notify on every streamed token.
-    if (same(activities[id], activity)) return
-    activities = { ...activities, [id]: activity }
+    if (same(previous, next)) return
+    activities = { ...activities, [id]: next }
   }
   for (const listener of listeners) listener()
 }
+
+const setSource = (
+  source: "conversation" | "orchestration",
+  id: string,
+  activity: SessionActivity | null
+): void => {
+  const current = source === "conversation" ? conversationActivities : orchestrationActivities
+  const next = { ...current }
+  if (activity === null) delete next[id]
+  else next[id] = activity
+  if (source === "conversation") conversationActivities = next
+  else orchestrationActivities = next
+  publish(id)
+}
+
+/** Set (or clear, with `null`) a session's live activity; notifies subscribers. */
+export const setSessionActivity = (id: string, activity: SessionActivity | null): void => {
+  setSource("conversation", id, activity)
+}
+
+/** Publish plan-worker activity independently from the main conversation actor. */
+export const setSessionOrchestrationActivity = (
+  id: string,
+  activity: SessionActivity | null
+): void => setSource("orchestration", id, activity)
 
 const subscribe = (listener: () => void): (() => void) => {
   listeners.add(listener)

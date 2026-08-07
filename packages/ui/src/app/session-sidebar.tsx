@@ -343,7 +343,7 @@ function SidebarBody({
     <div
       style={{ width }}
       data-testid="session-sidebar"
-      className="relative m-2 mr-0 flex flex-none flex-col overflow-hidden rounded-2xl bg-panel/75 shadow-[0_0_0_1px_var(--sb-line),0_18px_50px_var(--sb-border)] backdrop-blur-2xl"
+      className="relative flex flex-none flex-col overflow-hidden"
     >
       {/* The width was a hard `w-[266px]` with no way to change it — the only
           fixed column in the app that couldn't be dragged. */}
@@ -351,7 +351,7 @@ function SidebarBody({
         <ResizeHandle
           onResize={onResize}
           aria-label="Resize sidebar"
-          className="absolute inset-y-0 right-0"
+          className="absolute inset-y-0 right-0 bg-transparent"
         />
       )}
       {/*
@@ -813,7 +813,7 @@ function SessionRail({
     <div
       style={{ width: RAIL_WIDTH }}
       data-testid="session-rail"
-      className="m-2 mr-0 flex flex-none flex-col items-center gap-1 overflow-hidden rounded-2xl bg-panel/75 py-2 shadow-[0_0_0_1px_var(--sb-line),0_18px_50px_var(--sb-border)] backdrop-blur-2xl"
+      className="flex flex-none flex-col items-center gap-1 overflow-hidden py-2"
     >
       <button
         type="button"

@@ -1,6 +1,7 @@
 import type {
   PlanDocument,
   PlanParticipant,
+  SessionActivity,
   WorkerActivity
 } from "@jingler/core"
 import { useMachine } from "@xstate/react"
@@ -11,6 +12,7 @@ import {
   type OrchestrationAgentsScope
 } from "./orchestration-agents-machine.js"
 import { rpc } from "./rpc-client.js"
+import { setSessionOrchestrationActivity } from "./session-activity.js"
 
 const subscribe = (
   scope: OrchestrationAgentsScope,
@@ -32,6 +34,22 @@ export interface OrchestrationAgentsState {
   readonly planId: string | null
   readonly agents: ReadonlyArray<OrchestrationAgent>
   readonly participants: ReadonlyArray<PlanParticipant>
+}
+
+/** Sidebar rollup for workers that outlive the orchestrator's own turn. */
+export const orchestrationSessionActivity = (
+  agents: ReadonlyArray<OrchestrationAgent>
+): SessionActivity | null => {
+  const active = agents.filter(
+    (agent) => agent.status === "queued" || agent.status === "running"
+  )
+  if (active.length === 0) return null
+  const only = active.length === 1 ? active[0] : null
+  return {
+    kind: "delegating",
+    verb: "Delegating",
+    target: only?.statusMessage?.trim() || only?.id || `${active.length} agents`
+  }
 }
 
 /**
@@ -70,9 +88,24 @@ export function useOrchestrationAgents(
     owned.planId === scope.planId &&
     owned.chatId === scope.chatId
 
+  const agents = current ? snapshot.context.agents : []
+  const sidebarActivity = useMemo(
+    () => orchestrationSessionActivity(agents),
+    [agents]
+  )
+
+  useEffect(() => {
+    setSessionOrchestrationActivity(sessionId, sidebarActivity)
+  }, [sessionId, sidebarActivity])
+
+  useEffect(
+    () => () => setSessionOrchestrationActivity(sessionId, null),
+    [sessionId]
+  )
+
   return {
     planId: scope?.planId ?? null,
-    agents: current ? snapshot.context.agents : [],
+    agents,
     participants: current ? snapshot.context.participants : []
   }
 }
