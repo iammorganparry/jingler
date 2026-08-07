@@ -26,15 +26,15 @@ class CheckpointStep {
   }
 }
 
-const prepareRoute = async (relaySessionId: string) => {
-  const routes = env.INSTALLATION_ROUTES.getByName("99")
-  await routes.setOwner("user-1", "active", "99", 1, `owner-${relaySessionId}`)
+const prepareRoute = async (relaySessionId: string, installationId: string) => {
+  const routes = env.INSTALLATION_ROUTES.getByName(installationId)
+  await routes.setOwner("user-1", "active", installationId, 1, `owner-${relaySessionId}`)
   await routes.applySessionRoute({
     mutationId: `route-${relaySessionId}`,
     generation: 1,
     state: "active",
     userId: "user-1",
-    installationId: "99",
+    installationId,
     repositoryId: "10",
     pullRequestNumber: 42,
     relaySessionId
@@ -44,8 +44,13 @@ const prepareRoute = async (relaySessionId: string) => {
 describe("GitHubDeliveryWorkflow", () => {
   it("resumes from its last successful step after an injected failure", async () => {
     const relaySessionId = "relay-session-retry-0001"
-    await prepareRoute(relaySessionId)
-    const event = normalizedEvent({ deliveryId: "workflow-retry-delivery", semanticKey: "retry" })
+    const installationId = "9901"
+    await prepareRoute(relaySessionId, installationId)
+    const event = normalizedEvent({
+      deliveryId: "workflow-retry-delivery",
+      semanticKey: "retry",
+      installationId
+    })
     const step = new CheckpointStep()
     step.failOnceAt = "persist to current owning session"
 
@@ -62,8 +67,13 @@ describe("GitHubDeliveryWorkflow", () => {
 
   it("deduplicates restarted and retried delivery Workflow instances", async () => {
     const relaySessionId = "relay-session-restart-0001"
-    await prepareRoute(relaySessionId)
-    const event = normalizedEvent({ deliveryId: "workflow-restart-delivery", semanticKey: "restart" })
+    const installationId = "9902"
+    await prepareRoute(relaySessionId, installationId)
+    const event = normalizedEvent({
+      deliveryId: "workflow-restart-delivery",
+      semanticKey: "restart",
+      installationId
+    })
 
     await expect(
       runGitHubDelivery(env, event, new CheckpointStep().asWorkflowStep())
@@ -78,15 +88,20 @@ describe("GitHubDeliveryWorkflow", () => {
     await expect(
       runGitHubDelivery(
         env,
-        normalizedEvent({ deliveryId: "workflow-zero-route", pullRequest: null }),
+        normalizedEvent({
+          deliveryId: "workflow-zero-route",
+          installationId: "9903",
+          pullRequest: null
+        }),
         new CheckpointStep().asWorkflowStep()
       )
     ).resolves.toEqual({ duplicate: false, routedSessions: 0, relaySessionId: null })
   })
 
   it("releases admission when route registration still lags after Workflow retries", async () => {
-    const event = normalizedEvent({ deliveryId: "workflow-registration-lag" })
-    const routes = env.INSTALLATION_ROUTES.getByName("99")
+    const installationId = "9904"
+    const event = normalizedEvent({ deliveryId: "workflow-registration-lag", installationId })
+    const routes = env.INSTALLATION_ROUTES.getByName(installationId)
     await routes.prepareDeliveryWorkflow(event.deliveryId, "delivery-registration-lag")
     await routes.confirmDeliveryWorkflow(event.deliveryId)
     await expect(
@@ -103,9 +118,14 @@ describe("GitHubDeliveryWorkflow", () => {
 
   it("revalidates an archived route at the atomic session append boundary", async () => {
     const relaySessionId = "relay-session-stale-route"
-    await prepareRoute(relaySessionId)
-    const event = normalizedEvent({ deliveryId: "workflow-stale-route", semanticKey: "stale" })
-    const routes = env.INSTALLATION_ROUTES.getByName("99")
+    const installationId = "9905"
+    await prepareRoute(relaySessionId, installationId)
+    const event = normalizedEvent({
+      deliveryId: "workflow-stale-route",
+      semanticKey: "stale",
+      installationId
+    })
+    const routes = env.INSTALLATION_ROUTES.getByName(installationId)
     const step = {
       do: async (name: string, _config: unknown, callback: () => Promise<unknown>) => {
         if (name === "persist to current owning session") {
@@ -114,7 +134,7 @@ describe("GitHubDeliveryWorkflow", () => {
             generation: 2,
             state: "archived",
             userId: "user-1",
-            installationId: "99",
+            installationId,
             repositoryId: "10",
             pullRequestNumber: 42,
             relaySessionId
@@ -130,14 +150,15 @@ describe("GitHubDeliveryWorkflow", () => {
   })
 
   it("fans a multi-PR check event into each linked session object", async () => {
-    await prepareRoute("relay-session-check-a")
-    const routes = env.INSTALLATION_ROUTES.getByName("99")
+    const installationId = "9906"
+    await prepareRoute("relay-session-check-a", installationId)
+    const routes = env.INSTALLATION_ROUTES.getByName(installationId)
     await routes.applySessionRoute({
       mutationId: "route-relay-session-check-b",
       generation: 1,
       state: "active",
       userId: "user-1",
-      installationId: "99",
+      installationId,
       repositoryId: "10",
       pullRequestNumber: 43,
       relaySessionId: "relay-session-check-b"
@@ -146,6 +167,7 @@ describe("GitHubDeliveryWorkflow", () => {
     const event = normalizedEvent({
       deliveryId: "workflow-multi-pr-check",
       semanticKey: "multi-pr-check",
+      installationId,
       event: "check_run",
       actionable: false,
       routePullRequests: [firstPullRequest, { ...firstPullRequest, id: "201", number: 43 }]

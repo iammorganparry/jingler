@@ -120,7 +120,7 @@ describe("GitHub relay HTTP boundary", () => {
       expect(firstBody.workflowId).toBe(duplicateBody.workflowId)
       expect(firstBody.duplicate).toBe(false)
       expect(duplicateBody.duplicate).toBe(true)
-      const [instance] = introspector.get()
+      const [instance] = await introspector.get()
       expect(instance).toBeDefined()
       await instance!.waitForStatus("complete")
       await expect(env.SESSION_EVENTS.getByName("relay-session-workflow-1").eventCount()).resolves.toBe(1)
@@ -159,7 +159,7 @@ describe("GitHub relay HTTP boundary", () => {
         ignored: true,
         reason: "not_actionable"
       })
-      expect(introspector.get()).toHaveLength(0)
+      await expect(introspector.get()).resolves.toHaveLength(0)
     } finally {
       await introspector.dispose()
     }
@@ -186,7 +186,7 @@ describe("GitHub relay HTTP boundary", () => {
     })
     expect(response.status).toBe(202)
     try {
-      const [instance] = introspector.get()
+      const [instance] = await introspector.get()
       expect(instance).toBeDefined()
       await instance!.waitForStatus("complete")
       await expect(env.INSTALLATION_ROUTES.getByName("99").resolveRoute("10", 44)).resolves.toMatchObject({
@@ -221,7 +221,7 @@ describe("session-scoped websocket delivery", () => {
     try {
       const eventMessage = nextMessage(socket)
       await signedWebhook("socket-delivery")
-      const [instance] = introspector.get()
+      const [instance] = await introspector.get()
       expect(instance).toBeDefined()
       await instance!.waitForStatus("complete")
       await expect(eventMessage).resolves.toMatchObject({

@@ -20,7 +20,7 @@ export interface GitHubRelayCursorStore {
 export interface GitHubRelaySocket {
   readonly readyState: number;
   addEventListener(
-    type: "open" | "message" | "close" | "error",
+    type: "open" | "message" | "close" | "error" | "pong",
     listener: (event: {
       readonly data?: unknown;
       readonly code?: number;
@@ -29,6 +29,8 @@ export interface GitHubRelaySocket {
     options?: { once?: boolean },
   ): void;
   send(value: string): void;
+  /** WebSocket protocol ping; Cloudflare answers without waking a hibernating DO. */
+  ping(): void;
   close(code?: number, reason?: string): void;
 }
 
@@ -60,6 +62,7 @@ export const dialGitHubRelay: GitHubRelaySocketDialer = ({ url, headers }) => {
       }
     },
     send: (value) => socket.send(value),
+    ping: () => socket.ping(),
     close: (code, reason) => socket.close(code, reason),
   };
 };
@@ -86,6 +89,7 @@ export interface GitHubRelayConnectionOptions {
   readonly reconnectBaseMs?: number;
   readonly reconnectMaximumMs?: number;
   readonly random?: () => number;
+  readonly retryCoordinator?: GitHubRelayRetryCoordinator;
   readonly setTimer?: (
     callback: () => void,
     delay: number,
@@ -112,6 +116,7 @@ export interface GitHubRelaySupervisorOptions {
   readonly createConnection: (
     target: GitHubRelaySessionTarget,
     onStatus: (status: GitHubRelayConnectionStatus) => void,
+    retryCoordinator: GitHubRelayRetryCoordinator,
   ) => GitHubRelayConnection | Promise<GitHubRelayConnection>;
   readonly onStatus?: (status: GitHubRelaySupervisorStatus) => void;
   readonly refreshMs?: number;
@@ -139,6 +144,26 @@ export const installationCanRouteRepository = (
 };
 
 const OPEN = 1;
+
+/** Spreads reconnects across sessions when the shared relay is unavailable. */
+export class GitHubRelayRetryCoordinator {
+  private failures = 0;
+  private nextAllowedAt = 0;
+
+  constructor(private readonly now: () => number = Date.now) {}
+
+  delay(candidateMs: number): number {
+    const sharedDelay = Math.min(5 * 60_000, 1_000 * 2 ** Math.min(this.failures, 9));
+    this.failures += 1;
+    this.nextAllowedAt = Math.max(this.nextAllowedAt, this.now() + sharedDelay);
+    return Math.max(candidateMs, this.nextAllowedAt - this.now());
+  }
+
+  recovered(): void {
+    this.failures = 0;
+    this.nextAllowedAt = 0;
+  }
+}
 
 const relayEventsUrl = (
   relayUrl: string,
@@ -244,12 +269,19 @@ export class GitHubRelayConnection {
       socket.addEventListener("open", () => {
         if (!this.current(socket, generation)) return;
         this.attempts = 0;
+        this.options.retryCoordinator?.recovered();
         this.options.onStatus?.({ mode: "connected" });
         this.scheduleHeartbeat(socket, generation);
       });
       socket.addEventListener("message", (message) => {
         if (!this.current(socket, generation)) return;
         this.handleMessage(socket, generation, message.data);
+      });
+      socket.addEventListener("pong", () => {
+        if (!this.current(socket, generation)) return;
+        if (this.pongTimer) this.clearTimer(this.pongTimer);
+        this.pongTimer = null;
+        this.scheduleHeartbeat(socket, generation);
       });
       socket.addEventListener("close", () => {
         if (!this.current(socket, generation)) return;
@@ -399,7 +431,7 @@ export class GitHubRelayConnection {
     this.heartbeatTimer = this.setTimer(() => {
       this.heartbeatTimer = null;
       if (!this.current(socket, generation)) return;
-      this.send(socket, { type: "ping" });
+      socket.ping();
       this.pongTimer = this.setTimer(() => {
         this.pongTimer = null;
         if (this.current(socket, generation))
@@ -411,13 +443,18 @@ export class GitHubRelayConnection {
   private scheduleReconnect(): void {
     if (!this.running || this.retryTimer) return;
     const base = this.options.reconnectBaseMs ?? 500;
-    const maximum = this.options.reconnectMaximumMs ?? 30_000;
+    // A prolonged relay outage must not turn every linked session into a
+    // 30-second request loop. Five minutes still recovers without user action
+    // while bounding a full-day outage to 288 dials per session.
+    const maximum = this.options.reconnectMaximumMs ?? 5 * 60_000;
     const exponential = Math.min(
       maximum,
       base * 2 ** Math.min(this.attempts, 10),
     );
     this.attempts += 1;
     const jitter = 0.75 + (this.options.random ?? Math.random)() * 0.5;
+    const delay = this.options.retryCoordinator?.delay(Math.round(exponential * jitter)) ??
+      Math.round(exponential * jitter);
     this.retryTimer = this.setTimer(
       () => {
         this.retryTimer = null;
@@ -425,7 +462,7 @@ export class GitHubRelayConnection {
           this.options.onStatus?.({ mode: "error", error: safeError(error) });
         });
       },
-      Math.round(exponential * jitter),
+      delay,
     );
   }
 
@@ -472,6 +509,7 @@ export class GitHubRelaySupervisor {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private generation = 0;
+  private readonly retryCoordinator = new GitHubRelayRetryCoordinator();
 
   constructor(private readonly options: GitHubRelaySupervisorOptions) {
     this.setTimer = options.setTimer ?? setTimeout;
@@ -526,6 +564,7 @@ export class GitHubRelaySupervisor {
           (status) => {
             this.options.onStatus?.({ ...target, ...status });
           },
+          this.retryCoordinator,
         );
         if (!this.running || generation !== this.generation) {
           connection.stop();
@@ -557,7 +596,7 @@ export class GitHubRelaySupervisor {
         this.timer = this.setTimer(() => {
           this.timer = null;
           void this.reconcile();
-        }, this.options.refreshMs ?? 30_000);
+        }, this.options.refreshMs ?? 5 * 60_000);
       }
     }
   }

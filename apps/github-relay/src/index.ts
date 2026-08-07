@@ -173,7 +173,7 @@ const handleWebhook = async (request: Request, env: Env): Promise<Response> => {
   if (!event.pullRequest) {
     relayTelemetry("ignored_event", {
       installationId: event.installationId,
-      event: event.event,
+      githubEvent: event.event,
       reason: "no_pull_request_route"
     })
     return json({ accepted: true, ignored: true, reason: "no_pull_request_route" }, 202)
@@ -186,7 +186,7 @@ const handleWebhook = async (request: Request, env: Env): Promise<Response> => {
   if (!event.actionable) {
     relayTelemetry("ignored_event", {
       installationId: event.installationId,
-      event: event.event,
+      githubEvent: event.event,
       reason: "not_actionable"
     })
     return json({ accepted: true, ignored: true, reason: "not_actionable" }, 202)
@@ -394,7 +394,11 @@ export default {
         message: "GitHub relay request failed",
         method: request.method,
         path: url.pathname,
-        error: error instanceof Error ? error.name : "UnknownError"
+        error: error instanceof Error ? error.name : "UnknownError",
+        detail:
+          error instanceof Error && error.message
+            ? error.message.replace(/[\r\n]/g, " ").slice(0, 500)
+            : "No error detail"
       })
       return json({ error: "Relay unavailable" }, 503)
     }

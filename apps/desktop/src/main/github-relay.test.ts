@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { GitHubRelayEvent } from "../../../../packages/cli-adapters/src/github-events.js";
 import {
   GitHubRelayConnection,
+  GitHubRelayRetryCoordinator,
   GitHubRelaySupervisor,
   installationCanRouteRepository,
   type GitHubRelaySupervisorStatus,
@@ -55,6 +56,7 @@ describe("installationCanRouteRepository", () => {
 class FakeSocket implements GitHubRelaySocket {
   readyState = 0;
   readonly sent: string[] = [];
+  pings = 0;
   readonly closes: Array<{ code?: number; reason?: string }> = [];
   private readonly listeners = new Map<
     string,
@@ -68,7 +70,7 @@ class FakeSocket implements GitHubRelaySocket {
   >();
 
   addEventListener(
-    type: "open" | "message" | "close" | "error",
+    type: "open" | "message" | "close" | "error" | "pong",
     listener: (event: {
       readonly data?: unknown;
       readonly code?: number;
@@ -80,6 +82,10 @@ class FakeSocket implements GitHubRelaySocket {
 
   send(value: string): void {
     this.sent.push(value);
+  }
+
+  ping(): void {
+    this.pings += 1;
   }
 
   close(code?: number, reason?: string): void {
@@ -101,6 +107,10 @@ class FakeSocket implements GitHubRelaySocket {
   closed(): void {
     this.readyState = 3;
     this.emit("close");
+  }
+
+  pong(): void {
+    this.emit("pong");
   }
 
   private emit(type: string): void {
@@ -341,7 +351,8 @@ describe("GitHubRelayConnection", () => {
       await connection.start();
       socket.open();
       await vi.advanceTimersByTimeAsync(100);
-      expect(socket.sent).toContain('{"type":"ping"}');
+      expect(socket.pings).toBe(1);
+      expect(socket.sent).not.toContain('{"type":"ping"}');
       await vi.advanceTimersByTimeAsync(49);
       expect(socket.closes).toEqual([]);
       await vi.advanceTimersByTimeAsync(1);
@@ -356,7 +367,44 @@ describe("GitHubRelayConnection", () => {
   });
 });
 
+describe("GitHubRelayRetryCoordinator", () => {
+  it("spreads failures across session connections and resets after recovery", () => {
+    let now = 1_000;
+    const coordinator = new GitHubRelayRetryCoordinator(() => now);
+    expect(coordinator.delay(500)).toBe(1_000);
+    expect(coordinator.delay(500)).toBe(2_000);
+    now += 2_000;
+    coordinator.recovered();
+    expect(coordinator.delay(500)).toBe(1_000);
+  });
+});
+
 describe("GitHubRelaySupervisor", () => {
+  it("does not poll persisted route topology more than once every five minutes by default", async () => {
+    vi.useFakeTimers();
+    try {
+      let reads = 0;
+      const supervisor = new GitHubRelaySupervisor({
+        listSessions: async () => {
+          reads += 1;
+          return [];
+        },
+        createConnection: () => {
+          throw new Error("No connection expected");
+        },
+      });
+      await supervisor.start();
+      expect(reads).toBe(1);
+      await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+      expect(reads).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(reads).toBe(2);
+      supervisor.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reconciles linked session additions and removals without restart", async () => {
     vi.useFakeTimers();
     try {

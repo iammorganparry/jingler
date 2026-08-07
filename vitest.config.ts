@@ -8,7 +8,15 @@ import { defineConfig } from "vitest/config"
  */
 export default defineConfig({
   test: {
-    projects: ["packages/*/vitest.config.ts", "apps/*/vitest.config.ts"],
+    // The Cloudflare relay intentionally runs on Vitest 4, required by the
+    // current Workers pool. Keep it out of this Vitest 3 project graph; the
+    // root `test` script invokes that package in a second, isolated process.
+    projects: [
+      "packages/*/vitest.config.ts",
+      "apps/desktop/vitest.config.ts",
+      "apps/memory-worker/vitest.config.ts",
+      "apps/server/vitest.config.ts"
+    ],
     // Cap each project's fork pool. Without this, Vitest sizes every project's
     // pool to the CPU count — on an 11-core box the suites collectively fork
     // 30-40 workers, each loading Effect/Electron deps and ballooning to

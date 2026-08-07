@@ -24,9 +24,9 @@ export interface SessionRoute {
   readonly relaySessionId: string
 }
 
-interface CountRow {
+interface ExistsRow {
   readonly [key: string]: SqlStorageValue
-  readonly count: number
+  readonly present: number
 }
 
 interface RouteRow {
@@ -103,6 +103,8 @@ export class InstallationRoutesObject extends DurableObject<Env> {
         );
         CREATE INDEX IF NOT EXISTS session_routes_user_status
           ON session_routes(user_id, status);
+        CREATE INDEX IF NOT EXISTS session_routes_status_updated_at
+          ON session_routes(status, updated_at);
         CREATE TABLE IF NOT EXISTS session_generations (
           relay_session_id TEXT PRIMARY KEY,
           generation INTEGER NOT NULL,
@@ -112,6 +114,7 @@ export class InstallationRoutesObject extends DurableObject<Env> {
           mutation_id TEXT PRIMARY KEY,
           created_at INTEGER NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS mutations_created_at ON mutations(created_at);
         CREATE TABLE IF NOT EXISTS deliveries (
           delivery_id TEXT PRIMARY KEY,
           relay_session_id TEXT,
@@ -125,6 +128,9 @@ export class InstallationRoutesObject extends DurableObject<Env> {
           attempt INTEGER NOT NULL DEFAULT 0,
           created_at INTEGER NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS workflow_starts_created_at ON workflow_starts(created_at);
+        CREATE INDEX IF NOT EXISTS session_generations_updated_at
+          ON session_generations(updated_at);
       `)
       // v1 objects stored only the delivery id and timestamp. Keep the namespace
       // migration in place and extend those existing SQLite databases in situ.
@@ -181,7 +187,13 @@ export class InstallationRoutesObject extends DurableObject<Env> {
       )
     }
     const closedSockets =
-      state === "active" ? 0 : await this.closeSessionSockets(routes, "Installation unavailable")
+      state === "active"
+        ? 0
+        : await this.closeSessionSockets(
+            routes,
+            "Installation unavailable",
+            state === "removed"
+          )
     this.recordMutation(mutationId)
     relayTelemetry("installation_registration", { installationId, state, closedSockets })
     return { applied: true, closedSockets }
@@ -213,7 +225,9 @@ export class InstallationRoutesObject extends DurableObject<Env> {
     if (state === "removed") {
       this.ctx.storage.sql.exec("UPDATE session_routes SET status = 'removed', updated_at = ?", Date.now())
     }
-    if (state !== "active") await this.closeSessionSockets(routes, "Installation unavailable")
+    if (state !== "active") {
+      await this.closeSessionSockets(routes, "Installation unavailable", state === "removed")
+    }
     this.recordMutation(mutationId)
     relayTelemetry("installation_lifecycle", {
       installationId,
@@ -251,7 +265,7 @@ export class InstallationRoutesObject extends DurableObject<Env> {
     }
     let closedSockets = 0
     if (existing && existing.relay_session_id !== mutation.relaySessionId) {
-      closedSockets += await this.env.SESSION_EVENTS.getByName(existing.relay_session_id).closeSockets(
+      closedSockets += await this.env.SESSION_EVENTS.getByName(existing.relay_session_id).retire(
         "Session route replaced"
       )
     }
@@ -297,9 +311,11 @@ export class InstallationRoutesObject extends DurableObject<Env> {
       Date.now()
     )
     if (mutation.state !== "active") {
-      closedSockets += await this.env.SESSION_EVENTS.getByName(mutation.relaySessionId).closeSockets(
-        "Session route inactive"
-      )
+      const events = this.env.SESSION_EVENTS.getByName(mutation.relaySessionId)
+      closedSockets +=
+        mutation.state === "removed"
+          ? await events.retire("Session route removed")
+          : await events.closeSockets("Session route archived")
     }
     this.recordMutation(mutation.mutationId)
     this.prune()
@@ -326,29 +342,32 @@ export class InstallationRoutesObject extends DurableObject<Env> {
   } | null> {
     const pullRequests = event.routePullRequests ?? (event.pullRequest ? [event.pullRequest] : [])
     if (pullRequests.length === 0) return null
-    return this.ctx.blockConcurrencyWhile(async () => {
-      const routes = pullRequests.flatMap((pullRequest) => {
-        const route = this.currentRoute(event.repository.id, pullRequest.number)
-        return route ? [{ route, pullRequest }] : []
-      })
-      if (routes.length === 0) return null
-      const publications = await Promise.all(
-        routes.map(({ route, pullRequest }) => {
-          const routedEvent: NormalizedGitHubEvent = {
-            ...event,
-            pullRequest,
-            routePullRequests: undefined
-          }
-          return this.env.SESSION_EVENTS.getByName(route.relaySessionId).publish(routedEvent)
-        })
-      )
-      await this.completeDelivery(event.deliveryId, routes[0]!.route.relaySessionId)
-      return {
-        routedSessions: routes.length,
-        insertedSessions: publications.filter(({ inserted }) => inserted).length,
-        relaySessionIds: routes.map(({ route }) => route.relaySessionId)
-      }
+    const routes = pullRequests.flatMap((pullRequest) => {
+      const route = this.currentRoute(event.repository.id, pullRequest.number)
+      return route ? [{ route, pullRequest }] : []
     })
+    if (routes.length === 0) return null
+    let insertedSessions = 0
+    // Durable Object RPC is external I/O. Keep it outside blockConcurrencyWhile
+    // and sequence the small fan-out so one installation cannot exceed the
+    // Worker runtime's simultaneous outgoing-connection budget.
+    for (const { route, pullRequest } of routes) {
+      const routedEvent: NormalizedGitHubEvent = {
+        ...event,
+        pullRequest,
+        routePullRequests: undefined
+      }
+      const publication = await this.env.SESSION_EVENTS.getByName(route.relaySessionId).publish(
+        routedEvent
+      )
+      if (publication.inserted) insertedSessions += 1
+    }
+    await this.completeDelivery(event.deliveryId, routes[0]!.route.relaySessionId)
+    return {
+      routedSessions: routes.length,
+      insertedSessions,
+      relaySessionIds: routes.map(({ route }) => route.relaySessionId)
+    }
   }
 
   private currentRoute(repositoryId: string, pullRequestNumber: number): SessionRoute | null {
@@ -378,16 +397,17 @@ export class InstallationRoutesObject extends DurableObject<Env> {
   async ownsSession(userId: string, relaySessionId: string): Promise<boolean> {
     return (
       this.ctx.storage.sql
-        .exec<CountRow>(
-          `SELECT COUNT(*) AS count FROM session_routes r
+        .exec<ExistsRow>(
+          `SELECT 1 AS present FROM session_routes r
            JOIN owners o ON o.user_id = r.user_id
            JOIN installation_state i ON i.singleton = 1
            WHERE r.user_id = ? AND r.relay_session_id = ?
-             AND r.status = 'active' AND o.status = 'active' AND i.status = 'active'`,
+             AND r.status = 'active' AND o.status = 'active' AND i.status = 'active'
+           LIMIT 1`,
           userId,
           relaySessionId
         )
-        .one().count === 1
+        .toArray()[0]?.present === 1
     )
   }
 
@@ -469,8 +489,8 @@ export class InstallationRoutesObject extends DurableObject<Env> {
   private mutationApplied(mutationId: string): boolean {
     return (
       this.ctx.storage.sql
-        .exec<CountRow>("SELECT COUNT(*) AS count FROM mutations WHERE mutation_id = ?", mutationId)
-        .one().count > 0
+        .exec<ExistsRow>("SELECT 1 AS present FROM mutations WHERE mutation_id = ? LIMIT 1", mutationId)
+        .toArray()[0]?.present === 1
     )
   }
 
@@ -501,38 +521,51 @@ export class InstallationRoutesObject extends DurableObject<Env> {
       .toArray()
   }
 
-  private async closeSessionSockets(routes: readonly RouteRow[], reason: string): Promise<number> {
+  private async closeSessionSockets(
+    routes: readonly RouteRow[],
+    reason: string,
+    retire = false
+  ): Promise<number> {
     const uniqueSessionIds = [...new Set(routes.map((route) => route.relay_session_id))]
-    const closed = await Promise.all(
-      uniqueSessionIds.map((sessionId) =>
-        this.env.SESSION_EVENTS.getByName(sessionId).closeSockets(reason)
-      )
-    )
-    return closed.reduce((total, count) => total + count, 0)
+    let closed = 0
+    for (const sessionId of uniqueSessionIds) {
+      const events = this.env.SESSION_EVENTS.getByName(sessionId)
+      closed += retire ? await events.retire(reason) : await events.closeSockets(reason)
+    }
+    return closed
   }
 
   private prune(): void {
     const cutoff = Date.now() - RELAY_POLICY.eventRetentionMs
-    this.ctx.storage.sql.exec("DELETE FROM deliveries WHERE created_at < ?", cutoff)
-    this.ctx.storage.sql.exec("DELETE FROM mutations WHERE created_at < ?", cutoff)
-    this.ctx.storage.sql.exec("DELETE FROM workflow_starts WHERE created_at < ?", cutoff)
-    this.ctx.storage.sql.exec(
+    const deliveries = this.ctx.storage.sql.exec("DELETE FROM deliveries WHERE created_at < ?", cutoff)
+    const mutations = this.ctx.storage.sql.exec("DELETE FROM mutations WHERE created_at < ?", cutoff)
+    const workflowStarts = this.ctx.storage.sql.exec(
+      "DELETE FROM workflow_starts WHERE created_at < ?",
+      cutoff
+    )
+    const generations = this.ctx.storage.sql.exec(
       `DELETE FROM session_generations
        WHERE updated_at < ? AND relay_session_id NOT IN (SELECT relay_session_id FROM session_routes)`,
       cutoff
     )
-    const count = this.ctx.storage.sql
-      .exec<CountRow>("SELECT COUNT(*) AS count FROM session_routes")
-      .one().count
-    if (count > RELAY_POLICY.maxRoutesPerInstallation) {
-      this.ctx.storage.sql.exec(
-        `DELETE FROM session_routes WHERE relay_session_id IN (
-          SELECT relay_session_id FROM session_routes
-          WHERE status != 'active' AND updated_at < ? ORDER BY updated_at ASC LIMIT ?
-        )`,
-        cutoff,
-        count - RELAY_POLICY.maxRoutesPerInstallation
-      )
+    const routes = this.ctx.storage.sql.exec(
+      "DELETE FROM session_routes WHERE status != 'active' AND updated_at < ?",
+      cutoff
+    )
+    const rowsRead =
+      deliveries.rowsRead +
+      mutations.rowsRead +
+      workflowStarts.rowsRead +
+      generations.rowsRead +
+      routes.rowsRead
+    const rowsWritten =
+      deliveries.rowsWritten +
+      mutations.rowsWritten +
+      workflowStarts.rowsWritten +
+      generations.rowsWritten +
+      routes.rowsWritten
+    if (rowsWritten > 0) {
+      relayTelemetry("sql_retention", { object: "installation-routes", rowsRead, rowsWritten })
     }
   }
 }

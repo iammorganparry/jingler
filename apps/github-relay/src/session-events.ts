@@ -88,6 +88,7 @@ export class SessionEventsObject extends DurableObject<Env> {
           cursor INTEGER NOT NULL,
           seen_at INTEGER NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS client_acks_seen_at ON client_acks(seen_at);
       `)
     })
   }
@@ -123,6 +124,20 @@ export class SessionEventsObject extends DurableObject<Env> {
       closed += 1
     }
     await this.scheduleExpiryAlarm()
+    return closed
+  }
+
+  /** Permanently remove an unlinked/replaced stream while retaining its schema. */
+  async retire(reason = "Session route removed"): Promise<number> {
+    const closed = await this.closeSockets(reason)
+    const events = this.ctx.storage.sql.exec("DELETE FROM events")
+    const acknowledgements = this.ctx.storage.sql.exec("DELETE FROM client_acks")
+    await this.ctx.storage.deleteAlarm()
+    relayTelemetry("session_stream_retired", {
+      closedSockets: closed,
+      rowsRead: events.rowsRead + acknowledgements.rowsRead,
+      rowsWritten: events.rowsWritten + acknowledgements.rowsWritten
+    })
     return closed
   }
 
@@ -232,17 +247,17 @@ export class SessionEventsObject extends DurableObject<Env> {
   }
 
   private replay(socket: WebSocket, cursor: number): void {
-    const rows = this.ctx.storage.sql
-      .exec<StoredEventRow>(
+    const query = this.ctx.storage.sql.exec<StoredEventRow>(
         `SELECT cursor, payload FROM events WHERE cursor > ? ORDER BY cursor ASC LIMIT ?`,
         cursor,
         RELAY_POLICY.maxReplayEvents + 1
       )
-      .toArray()
+    const rows = query.toArray()
     const replayRows = rows.slice(0, RELAY_POLICY.maxReplayEvents)
     relayTelemetry("replay_depth", {
       replayDepth: replayRows.length,
-      hasMore: rows.length > RELAY_POLICY.maxReplayEvents
+      hasMore: rows.length > RELAY_POLICY.maxReplayEvents,
+      rowsRead: query.rowsRead
     })
     for (const row of replayRows) {
       safeSend(socket, {
@@ -282,20 +297,34 @@ export class SessionEventsObject extends DurableObject<Env> {
 
   private prune(): void {
     const cutoff = Date.now() - RELAY_POLICY.eventRetentionMs
-    let compacted = this.ctx.storage.sql.exec("DELETE FROM events WHERE created_at < ?", cutoff)
-      .rowsWritten
+    const expiredEvents = this.ctx.storage.sql.exec("DELETE FROM events WHERE created_at < ?", cutoff)
+    let compacted = expiredEvents.rowsWritten
+    let rowsRead = expiredEvents.rowsRead
     // cursor is the indexed INTEGER PRIMARY KEY. A high-water lookup remains
     // constant-time as the stream grows; COUNT(*) scanned the entire event log
     // on every publish and exhausted the free-tier row-read allowance.
     const cursorFloor = retainedCursorFloor(this.newestCursor(), RELAY_POLICY.maxStoredEvents)
     if (cursorFloor > 0) {
-      compacted += this.ctx.storage.sql.exec("DELETE FROM events WHERE cursor <= ?", cursorFloor)
-        .rowsWritten
+      const overflowEvents = this.ctx.storage.sql.exec(
+        "DELETE FROM events WHERE cursor <= ?",
+        cursorFloor
+      )
+      compacted += overflowEvents.rowsWritten
+      rowsRead += overflowEvents.rowsRead
     }
-    const staleAcks = this.ctx.storage.sql.exec("DELETE FROM client_acks WHERE seen_at < ?", cutoff)
-      .rowsWritten
+    const acknowledgements = this.ctx.storage.sql.exec(
+      "DELETE FROM client_acks WHERE seen_at < ?",
+      cutoff
+    )
+    const staleAcks = acknowledgements.rowsWritten
+    rowsRead += acknowledgements.rowsRead
     if (compacted > 0 || staleAcks > 0) {
-      relayTelemetry("retention_compaction", { compactedEvents: compacted, staleAcks })
+      relayTelemetry("retention_compaction", {
+        compactedEvents: compacted,
+        staleAcks,
+        rowsRead,
+        rowsWritten: compacted + staleAcks
+      })
     }
   }
 }

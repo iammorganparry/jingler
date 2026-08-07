@@ -41,8 +41,10 @@ import { runtime } from "./runtime.js"
 
 const STATE_TTL_MS = 10 * 60 * 1_000
 const TOKEN_REFRESH_SKEW_MS = 60 * 1_000
+// Sensitive credential/grant operations revalidate stale access; the desktop
+// supervisor now uses the persisted status endpoint and does not trigger this.
 const RECONCILE_TTL_MS = 60 * 1_000
-const STATUS_CACHE_TTL_MS = 15 * 1_000
+const STATUS_CACHE_TTL_MS = 60 * 1_000
 
 export interface GitHubConnectionStore {
   readonly createCallbackState: (input: {
@@ -978,7 +980,6 @@ export const createGitHubRoutes = (
       )
     }
     try {
-      await flushGitHubRelayOutbox(dependencies)
       return c.json(await readStatus(dependencies, userId), 200, noStore)
     } catch {
       return c.json({ error: "GitHub refresh failed" }, 502, noStore)
@@ -1010,7 +1011,6 @@ export const createGitHubRoutes = (
       return c.json({ error: "GitHub App is not configured" }, 503, noStore)
     }
     try {
-      await flushGitHubRelayOutbox(dependencies)
       await refreshConnection(dependencies, userId)
       return c.json(await readStatus(dependencies, userId), 200, noStore)
     } catch {
@@ -1056,7 +1056,6 @@ export const createGitHubRoutes = (
     const dependencies = resolveDependencies()
     const userId = await authenticated(c.req.raw.headers, dependencies)
     if (!userId) return c.json({ error: "Authentication required" }, 401, noStore)
-    await flushGitHubSessionRouteOutbox(dependencies)
     const routeRows = await dependencies.sessionRoutes.listByUserId(userId)
     return c.json({ routes: routeRows.map(sessionRouteView) }, 200, noStore)
   })

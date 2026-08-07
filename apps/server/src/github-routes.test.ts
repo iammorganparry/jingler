@@ -784,7 +784,7 @@ describe("GitHub connection routes", () => {
     })
   })
 
-  it("deletes local authorization before retrying an unavailable relay revocation", async () => {
+  it("leaves an unavailable relay revocation for the scheduled outbox drain", async () => {
     const value = harness()
     expect((await connect(value)).status).toBe(302)
     value.setRelayAvailable(false)
@@ -803,14 +803,10 @@ describe("GitHub connection routes", () => {
     })
     expect(status.status).toBe(200)
     expect(await status.json()).toMatchObject({ connected: false })
-    expect(value.getPendingRelayMutations()).toBe(0)
-    expect(value.getRelayRegistrations()).toContainEqual({
-      mutationId: "relay-user-1-99",
-      userId: "user-1",
-      installationId: "99",
-      state: "removed",
-      generation: 1
-    })
+    expect(value.getPendingRelayMutations()).toBe(1)
+    expect(value.getRelayRegistrations()).not.toContainEqual(
+      expect.objectContaining({ mutationId: "relay-user-1-99", state: "removed" })
+    )
   })
 
   it("mints installation credentials only for an active installation owned by the signed-in user", async () => {
@@ -1163,7 +1159,7 @@ describe("GitHub connection routes", () => {
     })
   })
 
-  it("retains a session route mutation until relay Workflow creation recovers", async () => {
+  it("keeps read-only route listing free of relay outbox side effects", async () => {
     const value = harness()
     expect((await connect(value)).status).toBe(302)
     value.setRelayAvailable(false)
@@ -1185,8 +1181,8 @@ describe("GitHub connection routes", () => {
       headers: asUser("user-1")
     })
     expect(listed.status).toBe(200)
-    expect(value.getPendingSessionMutations()).toBe(0)
-    expect(value.getSessionRelayRegistrations()).toHaveLength(1)
+    expect(value.getPendingSessionMutations()).toBe(1)
+    expect(value.getSessionRelayRegistrations()).toHaveLength(0)
   })
 
   it("archives and unlinks only the authenticated user's session route", async () => {

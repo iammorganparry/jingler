@@ -167,17 +167,17 @@ Configure only these repository permissions:
 | Workflows | Read and write |
 
 Leave Actions, Administration, Members, Secrets, and all organization/account
-permissions at **No access**. Subscribe to these webhook events:
+permissions at **No access**. Subscribe only to these webhook events:
 
-- Check run
-- Check suite
 - Installation
-- Installation repositories
 - Issue comment
-- Pull request
 - Pull request review
 - Pull request review comment
-- Status
+
+The PR screen reads checks and pull-request state through scoped GitHub API
+requests. Subscribing Check run, Check suite, Pull request, or Status as well
+would duplicate those reads and wake the relay for events it intentionally
+discards.
 
 Jingler narrows each installation token again when it mints it. Reads request
 only the endpoint permission they need (`pull_requests:read`, `issues:read`,

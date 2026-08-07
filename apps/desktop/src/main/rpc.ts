@@ -2994,11 +2994,10 @@ export const githubEvents = () =>
       const ownedClientIds = new Set<string>();
       const supervisor = new GitHubRelaySupervisor({
         listSessions: async () => {
-          // Relay supervision is the authorization boundary for live GitHub
-          // delivery. Its ten-second reconciliation must not reuse the
-          // general 30-second UI status cache or revoked/newly-selected
-          // repositories leave sockets in the wrong state for another cycle.
-          const status = await run(GitHubAuth.refresh());
+          // Read the persisted topology. Explicit GitHub refreshes and webhook
+          // lifecycle mutations maintain it; a relay supervisor tick must not
+          // fan out into GitHub API calls for every linked session.
+          const status = await run(GitHubAuth.status());
           const routes = await reconcileRelaySessionRoutes(
             listSessions,
             () => run(GitHubAuth.sessionRoutes()),
@@ -3030,7 +3029,7 @@ export const githubEvents = () =>
               installationId: route.installationId,
             }));
         },
-        createConnection: async (target, onStatus) => {
+        createConnection: async (target, onStatus, retryCoordinator) => {
           const clientId = await run(
             GitHubEventStore.clientId(target.relaySessionId),
           );
@@ -3045,6 +3044,7 @@ export const githubEvents = () =>
             },
             dial: dialGitHubRelay,
             onStatus,
+            retryCoordinator,
             onEvent: async (event, cursor) => {
               const session = await run(SessionStore.get(target.sessionId));
               if (!linkedRelaySession(session)) {

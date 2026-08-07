@@ -32,9 +32,9 @@ The webhook body is capped at 2 MiB and its HMAC is verified over the exact raw
 bytes before JSON parsing. GitHub delivery IDs and content-derived semantic keys
 deduplicate retries and unchanged comment edits.
 
-Check run and check suite events use GitHub's embedded pull-request identity for
-routing. Commit status payloads do not carry a pull-request number, so they are
-acknowledged as ignored instead of guessing a session from a mutable SHA.
+The relay persists only actionable human review/comment feedback. PR state and
+CI/check data are fetched by the PR screen and must not be subscribed as relay
+webhooks; doing both duplicates traffic without improving freshness.
 
 ## Routing and retention
 
@@ -65,15 +65,14 @@ unlink, or transfer from racing a stale Workflow checkpoint.
 
 - Event and delivery-deduplication retention: 7 days.
 - Maximum stored events per session: 5,000.
-- Maximum durable session routes per installation: 10,000.
 - Replay page: 500 events. A `replay-more` frame supplies the cursor for the
   next `resume` request.
 - Client acknowledgements are persisted by stable `clientId`; reconnecting with
   a stale local cursor resumes from the greater persisted cursor.
 
 The Durable Object stores each socket's grant expiry in its hibernation
-attachment and closes the socket at that timestamp. Reconnection always obtains
-a fresh server grant. Explicit disconnect commits local authorization deletion
+attachment and closes the socket at that timestamp. Reconnection reuses the
+cached session grant until its one-hour expiry. Explicit disconnect commits local authorization deletion
 and an idempotent `removed` outbox mutation before the relay call is attempted.
 Reconciled session changes affect only the matching opaque session route;
 verified GitHub installation `suspend` and `deleted` webhooks affect every
@@ -87,12 +86,13 @@ Server frames are JSON:
 { "type": "replay-more", "cursor": 512 }
 ```
 
-Client frames are `ack`, `resume`, or `ping`:
+Client data frames are `ack` or `resume`; liveness uses WebSocket protocol
+ping/pong so Cloudflare can respond without waking a hibernating Durable Object.
+The JSON `ping` frame remains accepted for older desktop versions.
 
 ```json
 { "type": "ack", "cursor": 13 }
 { "type": "resume", "cursor": 512 }
-{ "type": "ping" }
 ```
 
 ## Local development
@@ -185,9 +185,8 @@ zone-specific ID in this file. Configure the production GitHub App with:
 - Setup URL: `https://api.jingler.dev/api/github/setup`
 - Webhook URL: `https://github-relay.jingler.dev/webhooks/github`
 
-The App should subscribe only to Check run, Check suite, Installation,
-Installation repositories, Issue comment, Pull request, Pull request review,
-Pull request review comment, and Status events. Repository permissions are
+The App should subscribe only to Installation, Issue comment, Pull request
+review, and Pull request review comment events. Repository permissions are
 documented in the [server registration guide](../server/README.md#github-app-registration).
 
 ## Operations and recovery
@@ -196,13 +195,12 @@ Cloudflare observability is enabled in `wrangler.jsonc`. Monitor at least:
 
 - `invalid_signature` by `source`, rejected oversized bodies, and delivery IDs
   that repeatedly fail before acknowledgement;
-- `delivery_lag`, `routing_count`, `zero_route_delivery`, and
+- `routing_count`, `zero_route_delivery`, and
   `delivery_deduplicated` without logging the normalized event body;
-- `socket_connected`, `socket_reconnected`, `replay_depth`, and replay
-  acknowledgement lag by installation/cursor only;
+- `replay_depth` and its `rowsRead` value by cursor only;
 - `installation_registration`, `installation_lifecycle`,
   `revocation_completed`, and server outbox retry age;
-- `ignored_event`, `retention_compaction`, and events dropped at the retention
+- `ignored_event`, `retention_compaction`, `sql_retention`, and events dropped at the retention
   boundary;
 - Durable Object exceptions, storage growth, and alarm/compaction failures.
 
