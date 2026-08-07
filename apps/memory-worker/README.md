@@ -92,13 +92,21 @@ Copy `.dev.vars.example` to `.dev.vars` for local Wrangler work. Never commit
 `.dev.vars`.
 
 ```bash
-pnpm dlx wrangler dev --config apps/memory-worker/wrangler.jsonc
+pnpm --filter @jingler/memory-worker exec wrangler dev
 curl http://127.0.0.1:8787/health
-pnpm dlx wrangler deploy --config apps/memory-worker/wrangler.jsonc
+pnpm --filter @jingler/memory-worker deploy:dry
+pnpm --filter @jingler/memory-worker deploy
 ```
 
+A successful `CI` run for a push to `main` automatically deploys the exact
+tested revision through `.github/workflows/deploy-workers.yml`. Configure
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub Actions repository
+secrets, using a least-privilege token scoped to the owning Cloudflare account.
+The workflow does not create or rotate the Worker runtime secrets documented
+above; the deploy command remains available for manual recovery.
+
 The health response reports only binding presence. Vault routes remain private.
-Run `pnpm --filter @jingler/memory-worker test` before deployment.
+Run `pnpm --filter @jingler/memory-worker test` before a manual deployment.
 
 ## Limits and definitions
 

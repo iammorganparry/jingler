@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "types": "wrangler types",
+    "deploy": "wrangler deploy",
     "deploy:dry": "wrangler deploy --dry-run",
     "clean": "rimraf dist .wrangler .turbo *.tsbuildinfo"
   },

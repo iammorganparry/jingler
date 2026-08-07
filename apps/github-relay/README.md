@@ -150,6 +150,12 @@ record tokens, webhook bodies, authorization headers, or feedback text.
 
 ## Deployment
 
+A successful `CI` run for a push to `main` automatically deploys the exact
+tested revision through `.github/workflows/deploy-workers.yml`. The repository
+must provide `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub Actions
+secrets; keep the token least-privileged and scoped to the owning Cloudflare
+account. Runtime secrets below are managed separately and are not changed by CD.
+
 Generate binding types and validate the bundle:
 
 ```sh
@@ -172,7 +178,8 @@ server's independent GitHub OAuth-token encryption keys. Rotate the GitHub webho
 updating the GitHub App and Worker together, then verify deliveries in GitHub's
 Recent Deliveries page.
 
-Deploy with `wrangler deploy`. A rollback may restore the previous Worker
+For manual recovery, deploy with `pnpm --filter @jingler/github-relay deploy`.
+A rollback may restore the previous Worker
 version without changing Durable Object storage. The `v2` migration renames
 `UserEventsObject` to `SessionEventsObject`; it preserves existing SQLite
 storage while all new event streams are addressed by opaque session ids.

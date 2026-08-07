@@ -14,7 +14,7 @@ the coding CLIs already installed on your machine and keeps its desktop state in
 - Review plans, diffs, agent activity, and pull requests without leaving the session.
 - Start work from a new branch, an existing GitHub pull request, or a GitHub issue.
 - Use built-in terminals, browser previews, themes, MCP servers, and agent skills.
-- Give paid teams a cited, review-gated shared Memory wiki with private lexical search, analytics, and an explicit-evidence mind map.
+- Give paid teams a cited, agent-managed shared Memory wiki with private lexical search, analytics, and an explicit-evidence mind map.
 
 ## Requirements
 
@@ -153,6 +153,25 @@ GitHub App registration, Vercel configuration, and credential rotation are
 documented in [apps/server/README.md](apps/server/README.md#github-app-registration).
 Webhook relay deployment, replay, and incident recovery are documented in
 [apps/github-relay/README.md](apps/github-relay/README.md).
+
+## Continuous deployment
+
+Every successful `CI` run for a push to `main` deploys the exact tested commit
+to both Cloudflare Workers through
+[`.github/workflows/deploy-workers.yml`](.github/workflows/deploy-workers.yml).
+Failed or pull-request CI runs never deploy, and production deploys are
+serialized so a newer merge cannot cancel a Worker migration already in flight.
+
+Configure these GitHub Actions repository secrets before merging a Worker
+change:
+
+- `CLOUDFLARE_API_TOKEN` — a least-privilege token scoped to this account with
+  permission to edit the deployed Workers and their declared resources.
+- `CLOUDFLARE_ACCOUNT_ID` — the Cloudflare account that owns both Workers.
+
+Worker runtime secrets remain managed separately with `wrangler secret put`;
+the deployment workflow neither creates nor rotates them. Manual deployment and
+recovery instructions live in each Worker's README.
 
 ## GitHub and branch migration
 
