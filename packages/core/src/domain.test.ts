@@ -8,6 +8,8 @@ import {
   type CliKind,
   CreateSessionInput,
   defaultModeFor,
+  Environment,
+  executionTargetOf,
   GitHubRelayDelivery,
   GitHubSessionRelayGrantResponse,
   GitHubSessionRoute,
@@ -48,7 +50,9 @@ describe("GitHub session relay schemas", () => {
   }
 
   it("decodes one opaque relay route for an exact local session", () => {
-    expect(Schema.decodeUnknownSync(GitHubSessionRoute)(route)).toStrictEqual(route)
+    expect(Schema.decodeUnknownSync(GitHubSessionRoute)(route)).toStrictEqual(
+      route
+    )
   })
 
   it("requires session-scoped claims for a relay grant", () => {
@@ -84,7 +88,12 @@ describe("GitHub session relay schemas", () => {
         event: "pull_request_review_comment",
         action: "created",
         installationId: route.installationId,
-        repository: { id: route.repositoryId, owner: "owner", name: "repo", fullName: "owner/repo" },
+        repository: {
+          id: route.repositoryId,
+          owner: "owner",
+          name: "repo",
+          fullName: "owner/repo"
+        },
         pullRequest: {
           id: "pr-one",
           number: route.pullRequestNumber,
@@ -109,8 +118,35 @@ describe("GitHub session relay schemas", () => {
     }
     expect(Either.isRight(decode(GitHubRelayDelivery, delivery))).toBe(true)
     expect(
-      Either.isLeft(decode(GitHubRelayDelivery, { ...delivery, sessionId: undefined }))
+      Either.isLeft(
+        decode(GitHubRelayDelivery, { ...delivery, sessionId: undefined })
+      )
     ).toBe(true)
+  })
+})
+
+describe("Environment", () => {
+  it("rejects credentials embedded in persisted environment metadata", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Environment)(
+        {
+          id: "device-1",
+          name: "clive.local",
+          platform: { os: "darwin", arch: "arm64" },
+          capabilities: {
+            version: 1,
+            capabilities: [],
+            harnesses: ["codex"],
+            maxConcurrentSessions: 1
+          },
+          state: "online",
+          agentVersion: null,
+          lastSeenAt: null,
+          relayGrant: "must-not-cross-renderer"
+        },
+        { onExcessProperty: "error" }
+      )
+    ).toThrow()
   })
 })
 
@@ -137,7 +173,10 @@ describe("WorkspaceConfig", () => {
   })
 
   it("round-trips through encode → decode unchanged", () => {
-    const config: WorkspaceConfig = { reposDir: "/repos", createdAt: "2026-07-11T10:00:00.000Z" }
+    const config: WorkspaceConfig = {
+      reposDir: "/repos",
+      createdAt: "2026-07-11T10:00:00.000Z"
+    }
     const roundTripped = Schema.decodeUnknownSync(WorkspaceConfig)(
       Schema.encodeSync(WorkspaceConfig)(config)
     )
@@ -182,7 +221,6 @@ describe("WorkspaceConfig", () => {
     expect(JSON.stringify(roundTripped)).not.toContain("bearer")
     expect(JSON.stringify(roundTripped)).not.toContain("grant")
   })
-
 })
 
 describe("GithubConfig", () => {
@@ -247,7 +285,8 @@ describe("AdversarialReview", () => {
         endLine: null,
         severity: "critical",
         title: "Token compared with ==",
-        rationale: "Timing-unsafe comparison lets an attacker probe the token byte by byte.",
+        rationale:
+          "Timing-unsafe comparison lets an attacker probe the token byte by byte.",
         suggestion: "Use timingSafeEqual.",
         resolvedBy: null
       }
@@ -275,7 +314,12 @@ describe("AdversarialReview", () => {
     const { routedAt, postedAt, postError, ...legacy } = review
     const result = decode(AdversarialReview, legacy)
     expect(result).toStrictEqual(
-      Either.right({ ...legacy, routedAt: null, postedAt: null, postError: null })
+      Either.right({
+        ...legacy,
+        routedAt: null,
+        postedAt: null,
+        postError: null
+      })
     )
   })
 
@@ -303,7 +347,9 @@ describe("AdversarialReview", () => {
   it("accepts a finding not anchored to a file", () => {
     const result = decode(AdversarialReview, {
       ...review,
-      findings: [{ ...review.findings[0], path: null, line: null, suggestion: null }]
+      findings: [
+        { ...review.findings[0], path: null, line: null, suggestion: null }
+      ]
     })
     expect(Either.isRight(result)).toBe(true)
   })
@@ -348,6 +394,18 @@ describe("Session", () => {
     expect(workspaceModeOf(decoded)).toBe("worktree")
   })
 
+  it("decodes a legacy session without environmentId as local", () => {
+    const decoded = Schema.decodeUnknownSync(Session)(base)
+    expect(executionTargetOf(decoded)).toEqual({ kind: "local" })
+  })
+
+  it("round-trips a remote session environment identity", () => {
+    const remote = { ...base, environmentId: "device_clive", executionLocation: "cloud" as const }
+    const decoded = Schema.decodeUnknownSync(Session)(Schema.encodeSync(Session)(remote))
+    expect(decoded.environmentId).toBe("device_clive")
+    expect(executionTargetOf(decoded)).toEqual({ kind: "remote", environmentId: "device_clive" })
+  })
+
   it("round-trips the optional workspace and persistence fields when present", () => {
     const withWorktree: Session = {
       ...base,
@@ -364,11 +422,15 @@ describe("Session", () => {
   })
 
   it("rejects an unknown status", () => {
-    expect(Either.isLeft(decode(Session, { ...base, status: "exploding" }))).toBe(true)
+    expect(
+      Either.isLeft(decode(Session, { ...base, status: "exploding" }))
+    ).toBe(true)
   })
 
   it("rejects an unknown cli kind", () => {
-    expect(Either.isLeft(decode(Session, { ...base, cli: "copilot" }))).toBe(true)
+    expect(Either.isLeft(decode(Session, { ...base, cli: "copilot" }))).toBe(
+      true
+    )
   })
 })
 
@@ -416,7 +478,10 @@ describe("resolveOrchestratorPreference", () => {
       },
       catalog
     )
-    expect(resolution?.preference).toStrictEqual({ cli: "claude", model: "sonnet" })
+    expect(resolution?.preference).toStrictEqual({
+      cli: "claude",
+      model: "sonnet"
+    })
     expect(resolution?.isFallback).toBe(true)
     expect(resolution?.fallbackReason).toContain("opencode/missing")
   })
@@ -445,10 +510,9 @@ describe("resolveOrchestratorPreference", () => {
 
   it("never chooses an installed harness that cannot plan", () => {
     expect(
-      resolveOrchestratorPreference(
-        null,
-        [{ cli: "cursor", models: [{ id: "auto" }] }]
-      )
+      resolveOrchestratorPreference(null, [
+        { cli: "cursor", models: [{ id: "auto" }] }
+      ])
     ).toBeNull()
   })
 
@@ -500,7 +564,8 @@ describe("CreateSessionInput", () => {
       baseBranch: "main"
     })
     expect(Either.isRight(result)).toBe(true)
-    if (Either.isRight(result)) expect(result.right.useWorktree ?? true).toBe(true)
+    if (Either.isRight(result))
+      expect(result.right.useWorktree ?? true).toBe(true)
   })
 
   it("decodes an explicit direct-checkout request", () => {
@@ -548,7 +613,8 @@ describe("supportsPlanMode", () => {
   })
 
   it("classifies every CliKind, so a new harness cannot be forgotten", () => {
-    for (const cli of CLI_KINDS) expect(typeof supportsPlanMode(cli)).toBe("boolean")
+    for (const cli of CLI_KINDS)
+      expect(typeof supportsPlanMode(cli)).toBe("boolean")
   })
 })
 
@@ -570,7 +636,8 @@ describe("supportsSteer", () => {
   })
 
   it("classifies every CliKind, so a new harness cannot be forgotten", () => {
-    for (const cli of CLI_KINDS) expect(typeof supportsSteer(cli)).toBe("boolean")
+    for (const cli of CLI_KINDS)
+      expect(typeof supportsSteer(cli)).toBe("boolean")
   })
 })
 
@@ -582,7 +649,8 @@ describe("supportsAutoMode", () => {
   })
 
   it("classifies every CliKind, so a new harness cannot be forgotten", () => {
-    for (const cli of CLI_KINDS) expect(typeof supportsAutoMode(cli)).toBe("boolean")
+    for (const cli of CLI_KINDS)
+      expect(typeof supportsAutoMode(cli)).toBe("boolean")
   })
 })
 
@@ -620,7 +688,9 @@ describe("newSessionCli", () => {
   })
 
   it("falls back to the first available when nothing is configured", () => {
-    expect(newSessionCli([cli("claude", true), cli("codex", true)], null)).toBe("claude")
+    expect(newSessionCli([cli("claude", true), cli("codex", true)], null)).toBe(
+      "claude"
+    )
   })
 
   it("falls back when the configured harness is no longer installed", () => {

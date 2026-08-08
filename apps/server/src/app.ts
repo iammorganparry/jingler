@@ -11,6 +11,7 @@ import { getAuth } from "./auth.js"
 import { UserRepository } from "./db/repositories/user-repository.js"
 import { env } from "./env.js"
 import { createGitHubRoutes, isLoopbackRedirect, withQuery } from "./github-routes.js"
+import { createDeviceRoutes } from "./device-routes.js"
 import { proxyGitHubWebhook } from "./github-webhook-proxy.js"
 import { runtime } from "./runtime.js"
 
@@ -42,6 +43,9 @@ app.on(["GET", "POST"], "/api/auth/*", (c) => getAuth().handler(c.req.raw))
 
 /** Product GitHub App connection; intentionally outside BetterAuth's routes. */
 app.route("/api/github", createGitHubRoutes())
+
+/** Remote-device control. BetterAuth remains the desktop identity provider. */
+app.route("/api/devices", createDeviceRoutes())
 
 /**
  * The signed-in user's profile. BetterAuth validates the bearer session; the user

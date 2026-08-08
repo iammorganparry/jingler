@@ -1731,6 +1731,41 @@ describe("SessionStore", () => {
     expect(unlinked.issueNumber).toBeUndefined()
     expect(unlinked.automations).toBeUndefined()
   })
+
+  it("mirrors remote session metadata without treating remote paths as local worktrees", async () => {
+    const result = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Remote mirror" }))
+        const remote: Session = {
+          ...created,
+          environmentId: "device-clive",
+          worktreePath: "/remote/clive/jingler/worktrees/remote-mirror"
+        }
+        yield* SessionStore.upsertRemote(remote)
+        return yield* SessionStore.get(remote.id)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    expect(result.value.environmentId).toBe("device-clive")
+    expect(result.value.worktreePath).toBe("/remote/clive/jingler/worktrees/remote-mirror")
+  })
+
+  it("forgets a remote mirror without deleting a desktop path", async () => {
+    const result = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Forget mirror" }))
+        yield* SessionStore.upsertRemote({ ...created, environmentId: "device-clive" })
+        yield* SessionStore.forgetRemote(created.id)
+        return yield* SessionStore.list()
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    expect(result.value).toHaveLength(0)
+  })
 })
 
 /**

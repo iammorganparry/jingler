@@ -495,6 +495,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             workspaceMode: WorkspaceMode
           ): Session => ({
             id,
+            ...(input.environmentId === undefined ? {} : { environmentId: input.environmentId }),
             repo: input.repoName,
             branch: workspace.branch,
             ...(workspaceMode === "worktree" ? { semanticBranchPending: true } : {}),
@@ -704,6 +705,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const providerKey = reasoningKey(input.cli)
           const session: Session = {
             id,
+            ...(input.environmentId === undefined ? {} : { environmentId: input.environmentId }),
             repo: input.repoName,
             branch,
             title: input.pr.title,
@@ -804,6 +806,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             // same issue can't collide with the old session's persisted data; the
             // worktree slug stays deterministic for the one-session-per-issue guard.
             id,
+            ...(input.environmentId === undefined ? {} : { environmentId: input.environmentId }),
             repo: input.repoName,
             branch: worktree.branch,
             semanticBranchPending: true,
@@ -1262,6 +1265,29 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           })
         )
 
+      /** Persist the execution target for a session that the caller has proved pristine. */
+      const setEnvironment = (
+        id: string,
+        environmentId: string | undefined
+      ): Effect.Effect<Session, GitError | SessionNotFoundError, PersistEnv> =>
+        atomically(
+          Effect.gen(function* () {
+            const all = yield* readAll()
+            const current = all.find((session) => session.id === id)
+            if (current === undefined) {
+              return yield* Effect.fail(new SessionNotFoundError({ sessionId: id }))
+            }
+            const updated: Session = {
+              ...current,
+              environmentId,
+              executionLocation: environmentId === undefined ? "local" : "cloud",
+              updatedAt: new Date().toISOString()
+            }
+            yield* writeAll(all.map((session) => (session.id === id ? updated : session)))
+            return updated
+          })
+        )
+
       /** Persist an auto-generated title (leaves `autoTitle` untouched). */
       const setTitle = (id: string, title: string) => update(id, (s) => ({ ...s, title }))
 
@@ -1581,6 +1607,34 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           )
         })
 
+      /** Mirror remote metadata without ever treating its paths as desktop paths. */
+      const upsertRemote = (session: Session): Effect.Effect<Session, GitError, PersistEnv> =>
+        atomically(
+          Effect.gen(function* () {
+            if (!session.environmentId) {
+              return yield* Effect.fail(new GitError({
+                message: "Remote session metadata is missing its environment identity"
+              }))
+            }
+            const current = yield* readAll()
+            const index = current.findIndex((candidate) => candidate.id === session.id)
+            const next = [...current]
+            if (index === -1) next.push(session)
+            else next[index] = session
+            yield* writeAll(next)
+            return session
+          })
+        )
+
+      /** Remove only the desktop mirror; remote cleanup is owned by the device. */
+      const forgetRemote = (id: string): Effect.Effect<void, GitError, PersistEnv> =>
+        atomically(
+          Effect.gen(function* () {
+            const current = yield* readAll()
+            yield* writeAll(current.filter((session) => session.id !== id))
+          })
+        )
+
       return {
         list,
         get,
@@ -1605,6 +1659,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setChatContextTokens,
         setAutoCompact,
         setPersistent,
+        setEnvironment,
         setTitle,
         setSemanticBranchProposal,
         setTitleAndBranch,
@@ -1621,6 +1676,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         clearInitialPrompt,
         archive,
         restore,
+        upsertRemote,
+        forgetRemote,
         remove
       }
     }

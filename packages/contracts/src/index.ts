@@ -38,6 +38,11 @@ import {
   PluginEvent,
   PluginId,
   ExecutionMode,
+  Environment,
+  EnvironmentDiscovery,
+  PairLinkEnvironmentInput,
+  PairSshEnvironmentInput,
+  SshHost,
   ExternalInstructionIdentity,
   PermissionMode,
   PlanAnnotationAnchor,
@@ -105,6 +110,8 @@ import {
   BrowserControlError,
   BrowserPreviewError,
   ConfigError,
+  EnvironmentError,
+  EnvironmentHandoffError,
   ConnectorError,
   DiscoveryError,
   GitHubApiError,
@@ -135,7 +142,9 @@ export const MemoryOrganizationSummary = Schema.Struct({
   role: MemoryOrganizationRole,
   privileges: Schema.Array(MemoryPrivilege)
 })
-export type MemoryOrganizationSummary = Schema.Schema.Type<typeof MemoryOrganizationSummary>
+export type MemoryOrganizationSummary = Schema.Schema.Type<
+  typeof MemoryOrganizationSummary
+>
 
 export const MemoryAccess = Schema.Struct({
   eligible: Schema.Boolean,
@@ -152,7 +161,9 @@ export const MemoryCaptureRecovery = Schema.Struct({
   discarded: Schema.Number,
   lastFailureStatus: Schema.NullOr(Schema.Number)
 })
-export type MemoryCaptureRecovery = Schema.Schema.Type<typeof MemoryCaptureRecovery>
+export type MemoryCaptureRecovery = Schema.Schema.Type<
+  typeof MemoryCaptureRecovery
+>
 
 export const MemoryDailyGrowth = Schema.Struct({
   day: Schema.String,
@@ -206,7 +217,9 @@ export const MemoryDashboardSummary = Schema.Struct({
     p95DurationMs: Schema.NullOr(Schema.Number)
   })
 })
-export type MemoryDashboardSummary = Schema.Schema.Type<typeof MemoryDashboardSummary>
+export type MemoryDashboardSummary = Schema.Schema.Type<
+  typeof MemoryDashboardSummary
+>
 
 export const MemoryGraphNode = Schema.Struct({
   id: Schema.String,
@@ -344,7 +357,9 @@ export type MemoryExport = Schema.Schema.Type<typeof MemoryExport>
  * Evidence fields are flattened and optional so either method decodes robustly.
  */
 export const MemorySuggestionMethod = Schema.Literal("lexical", "embedding")
-export type MemorySuggestionMethod = Schema.Schema.Type<typeof MemorySuggestionMethod>
+export type MemorySuggestionMethod = Schema.Schema.Type<
+  typeof MemorySuggestionMethod
+>
 
 export const MemorySuggestionEvidence = Schema.Struct({
   method: MemorySuggestionMethod,
@@ -356,7 +371,9 @@ export const MemorySuggestionEvidence = Schema.Struct({
   model: Schema.optional(Schema.String),
   neighborRank: Schema.optional(Schema.Number)
 })
-export type MemorySuggestionEvidence = Schema.Schema.Type<typeof MemorySuggestionEvidence>
+export type MemorySuggestionEvidence = Schema.Schema.Type<
+  typeof MemorySuggestionEvidence
+>
 
 export const MemorySuggestion = Schema.Struct({
   sourceId: Schema.String,
@@ -376,12 +393,17 @@ export const MemorySuggestionsView = Schema.Struct({
   vectorSource: Schema.Literal("turbopuffer", "lexical"),
   suggestions: Schema.Array(MemorySuggestion)
 })
-export type MemorySuggestionsView = Schema.Schema.Type<typeof MemorySuggestionsView>
+export type MemorySuggestionsView = Schema.Schema.Type<
+  typeof MemorySuggestionsView
+>
 
-export class MemoryUiError extends Schema.TaggedError<MemoryUiError>()("MemoryUiError", {
-  message: Schema.String,
-  status: Schema.Number
-}) {}
+export class MemoryUiError extends Schema.TaggedError<MemoryUiError>()(
+  "MemoryUiError",
+  {
+    message: Schema.String,
+    status: Schema.Number
+  }
+) {}
 
 /**
  * Kept as a small group so the renderer can construct this client separately
@@ -392,7 +414,11 @@ export class MemoryUiError extends Schema.TaggedError<MemoryUiError>()("MemoryUi
 export class AssetListRpcs extends RpcGroup.make(
   Rpc.make("Asset.list", {
     success: Schema.Array(AssetFileEntry),
-    error: Schema.Union(AssetOutsideWorktreeError, GitError, SessionNotFoundError),
+    error: Schema.Union(
+      AssetOutsideWorktreeError,
+      GitError,
+      SessionNotFoundError
+    ),
     payload: { sessionId: Schema.String }
   })
 ) {}
@@ -421,6 +447,56 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     error: DiscoveryError
   }),
 
+  Rpc.make("Environment.list", {
+    success: Schema.Array(Environment),
+    error: EnvironmentError
+  }),
+
+  Rpc.make("Environment.refresh", {
+    success: Schema.Array(Environment),
+    error: EnvironmentError
+  }),
+
+  /** Safe, versioned repository/harness catalogue announced by one paired device. */
+  Rpc.make("Environment.discovery", {
+    success: EnvironmentDiscovery,
+    error: EnvironmentError,
+    payload: { deviceId: Schema.String }
+  }),
+
+  Rpc.make("Environment.watch", {
+    success: Schema.Array(Environment),
+    error: EnvironmentError,
+    stream: true
+  }),
+
+  Rpc.make("Environment.suggestHosts", {
+    success: Schema.Array(SshHost)
+  }),
+
+  Rpc.make("Environment.pairLink", {
+    success: Environment,
+    error: EnvironmentError,
+    payload: PairLinkEnvironmentInput
+  }),
+
+  Rpc.make("Environment.pairSsh", {
+    success: Environment,
+    error: EnvironmentError,
+    payload: PairSshEnvironmentInput
+  }),
+
+  Rpc.make("Environment.rename", {
+    success: Environment,
+    error: EnvironmentError,
+    payload: { deviceId: Schema.String, name: Schema.String }
+  }),
+
+  Rpc.make("Environment.revoke", {
+    error: EnvironmentError,
+    payload: { deviceId: Schema.String }
+  }),
+
   /** Read the persisted app config (null `reposDir` means first-run setup is pending). */
   Rpc.make("Config.get", {
     success: Schema.NullOr(WorkspaceConfig)
@@ -444,14 +520,14 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Workspace.branches", {
     success: Schema.Array(Schema.String),
     error: GitError,
-    payload: { repoPath: Schema.String }
+    payload: { repoPath: Schema.String, environmentId: Schema.optional(Schema.String) }
   }),
 
   /** List a repo's tracked files (for the `@` code-reference menu). */
   Rpc.make("Workspace.files", {
     success: Schema.Array(Schema.String),
     error: GitError,
-    payload: { repoPath: Schema.String }
+    payload: { repoPath: Schema.String, environmentId: Schema.optional(Schema.String) }
   }),
 
   /** Discard ALL uncommitted changes to a file in a session's worktree. */
@@ -582,6 +658,26 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: Session,
     error: GitError,
     payload: { sessionId: Schema.String, persistent: Schema.Boolean }
+  }),
+
+  /** Change a pristine session's execution device. Sessions with work require continuation. */
+  Rpc.make("Sessions.setEnvironment", {
+    success: Session,
+    error: Schema.Union(GitError, SessionNotFoundError, EnvironmentError, EnvironmentHandoffError),
+    payload: {
+      sessionId: Schema.String,
+      environmentId: Schema.optional(Schema.String)
+    }
+  }),
+
+  /** Create a new session on another device while preserving the source session. */
+  Rpc.make("Sessions.continueOnEnvironment", {
+    success: Session,
+    error: Schema.Union(GitError, SessionNotFoundError, EnvironmentError, EnvironmentHandoffError),
+    payload: {
+      sessionId: Schema.String,
+      environmentId: Schema.optional(Schema.String)
+    }
   }),
 
   /** Permanently delete a session and remove its worktree. Irreversible. */
@@ -1052,7 +1148,9 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       provider: Schema.String,
       clientId: Schema.String,
       clientSecret: Schema.String,
-      extra: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String }))
+      extra: Schema.optional(
+        Schema.Record({ key: Schema.String, value: Schema.String })
+      )
     }
   }),
 
@@ -1320,7 +1418,9 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     // The usable range lives in the contract, not only the service — the schema
     // is the single source of truth, so every client is bounded before main runs.
     payload: Schema.Struct({
-      fontScale: Schema.Number.pipe(Schema.between(FONT_SCALE_RANGE.min, FONT_SCALE_RANGE.max))
+      fontScale: Schema.Number.pipe(
+        Schema.between(FONT_SCALE_RANGE.min, FONT_SCALE_RANGE.max)
+      )
     })
   }),
 
@@ -1412,7 +1512,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
 
 /** Review, preview, theme, and plugin half of the renderer RPC client. */
 export class JinglerReviewRpcs extends RpcGroup.make(
-
   /**
    * Run an adversarial review of the session's linked PR: a reviewer agent runs
    * READ-ONLY in the session's worktree, on the configured review model (Fable by
@@ -1453,7 +1552,11 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   /** Compare-and-swap the canonical source after safe MDX validation. */
   Rpc.make("Plan.updateDocument", {
     success: PlanDocument,
-    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError
+    ),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1482,7 +1585,11 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       messageId: Schema.String,
       deliveries: Schema.Array(PlanMentionDelivery)
     }),
-    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError
+    ),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1501,7 +1608,11 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       messageId: Schema.String,
       deliveries: Schema.Array(PlanMentionDelivery)
     }),
-    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError
+    ),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1514,7 +1625,11 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   /** Update delivery state for one message without replacing the thread. */
   Rpc.make("Plan.updateMessageDelivery", {
     success: PlanDocument,
-    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError
+    ),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1529,7 +1644,11 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   /** Resolve or reopen one annotation thread under the canonical revision guard. */
   Rpc.make("Plan.setThreadResolved", {
     success: PlanDocument,
-    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError
+    ),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1630,6 +1749,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     error: GitHubApiError,
     payload: {
       repoPath: Schema.String,
+      githubSlug: Schema.optional(Schema.String),
       mine: Schema.Boolean,
       search: Schema.String
     }
@@ -1644,6 +1764,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     error: GitHubApiError,
     payload: {
       repoPath: Schema.String,
+      githubSlug: Schema.optional(Schema.String),
       mine: Schema.Boolean,
       search: Schema.String
     }
@@ -1960,7 +2081,11 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("BrowserPreview.open", {
     error: BrowserPreviewError,
-    payload: { sessionId: Schema.String, url: Schema.String, bounds: BrowserBounds }
+    payload: {
+      sessionId: Schema.String,
+      url: Schema.String,
+      bounds: BrowserBounds
+    }
   }),
 
   /** Reposition/resize the view to track the pane's rect (on layout/scroll). No-op if closed. */
@@ -2022,7 +2147,11 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("BrowserControl.type", {
     error: BrowserControlError,
-    payload: { sessionId: Schema.String, selector: Schema.String, text: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      selector: Schema.String,
+      text: Schema.String
+    }
   }),
 
   /** The page's visible text (`document.body.innerText`), for the agent to read. */
@@ -2042,7 +2171,11 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   /** Resolve once `selector` appears in the DOM, or fail after `timeoutMs`. */
   Rpc.make("BrowserControl.waitForSelector", {
     error: BrowserControlError,
-    payload: { sessionId: Schema.String, selector: Schema.String, timeoutMs: Schema.Number }
+    payload: {
+      sessionId: Schema.String,
+      selector: Schema.String,
+      timeoutMs: Schema.Number
+    }
   }),
 
   // ── Assets ───────────────────────────────────────────────────────────────────
@@ -2455,4 +2588,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
 ) {}
 
 /** The complete server contract; split clients still share this one IPC surface. */
-export const JinglerRpcs = JinglerCoreRpcs.merge(JinglerReviewRpcs, AssetListRpcs)
+export const JinglerRpcs = JinglerCoreRpcs.merge(
+  JinglerReviewRpcs,
+  AssetListRpcs
+)

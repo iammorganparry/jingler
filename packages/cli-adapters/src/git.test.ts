@@ -701,6 +701,42 @@ describe("GitService.pushWithInstallationToken", () => {
   })
 })
 
+describe("GitService.pushConfigured", () => {
+  let temp: ReturnType<typeof withTempRoot>
+  let repos: ReturnType<typeof mkTemp>
+
+  beforeEach(() => {
+    temp = withTempRoot()
+    repos = mkTemp("jingler-device-push-")
+  })
+  afterEach(() => {
+    temp.cleanup()
+    repos.cleanup()
+  })
+
+  it("pushes through the device origin without accepting a desktop token", async () => {
+    const dir = initGitRepo(join(repos.dir, "widget"))
+    const target = join(repos.dir, "remote.git")
+    execFileSync("git", ["init", "--bare", target])
+    execFileSync("git", ["remote", "add", "origin", target], { cwd: dir })
+    execFileSync("git", ["switch", "-c", "feat/device-publish"], { cwd: dir })
+    writeFileSync(join(dir, "device.ts"), "export const device = true\n")
+    execFileSync("git", ["add", "device.ts"], { cwd: dir })
+    execFileSync("git", ["commit", "-m", "feat: device publish", "--no-gpg-sign"], { cwd: dir })
+
+    const exit = await runExit(
+      GitService.pushConfigured(dir, "feat/device-publish").pipe(Effect.provide(GitService.Default)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    expect(execFileSync("git", ["rev-parse", "refs/heads/feat/device-publish"], {
+      cwd: target,
+      encoding: "utf8"
+    }).trim()).toBe(execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).trim())
+  })
+})
+
 /**
  * `commitsSince` feeds review-finding attribution: the first commit touching a
  * finding's file is credited with fixing it. So the two things worth asserting

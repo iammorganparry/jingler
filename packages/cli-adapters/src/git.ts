@@ -603,10 +603,33 @@ export class GitService extends Effect.Service<GitService>()(
           Effect.catchAll(() => Effect.succeed(true))
         )
 
+      const remoteUrl = (cwd: string) =>
+        gitLine(cwd, "remote", "get-url", "origin")
+
       const commit = (cwd: string, message: string) =>
         runGit(cwd, ["commit", "--message", message]).pipe(
           Effect.zipRight(gitLine(cwd, "rev-parse", "HEAD")),
           Effect.flatMap((sha) => sha ? Effect.succeed(sha) : Effect.fail(new GitError({ message: "Git did not return the new commit SHA." })))
+        )
+
+      /**
+       * Push with the credentials already configured on the execution device.
+       * This is intentionally non-interactive and never accepts a brokered
+       * desktop token; remote environments own their Git credential boundary.
+       */
+      const pushConfigured = (cwd: string, branch: string) =>
+        runGit(cwd, ["check-ref-format", "--branch", branch]).pipe(
+          Effect.zipRight(
+            runGitWithEnv(
+              cwd,
+              [
+                "-c", "core.hooksPath=/dev/null",
+                "push", "--set-upstream", "origin", `HEAD:refs/heads/${branch}`
+              ],
+              { GIT_TERMINAL_PROMPT: "0", GITHUB_TOKEN: "", GH_TOKEN: "" }
+            )
+          ),
+          Effect.asVoid
         )
 
       /**
@@ -910,7 +933,9 @@ export class GitService extends Effect.Service<GitService>()(
         publishInspection,
         stageAll,
         hasStagedChanges,
+        remoteUrl,
         commit,
+        pushConfigured,
         pushWithInstallationToken,
         checkoutBranch,
         checkoutPullRequestHead,

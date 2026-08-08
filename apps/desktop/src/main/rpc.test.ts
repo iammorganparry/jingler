@@ -18,6 +18,7 @@ import {
   GitHubApi,
   GitService,
   InMemorySecretStoreLive,
+  SecretStore,
   MemoryService,
   ModelsService,
   OrchestrationService,
@@ -100,6 +101,8 @@ import {
   reviewMarkRouted,
   reviewReconcile,
   reviewRun,
+  rendererSafeEnvironment,
+  storeRemoteSessionKey,
   restoredOrchestrationSnapshot,
   setReasoning,
   setSessionPersistent,
@@ -114,6 +117,40 @@ import {
   withoutAttachmentData,
   workspaceRevertLines,
 } from "./rpc.js";
+
+describe("environment RPC security boundary", () => {
+  it("returns environment metadata without relay grants or device secrets", async () => {
+    const value = {
+      id: "device-1",
+      name: "clive.local",
+      platform: { os: "darwin", arch: "arm64" },
+      capabilities: {
+        version: 1,
+        capabilities: [],
+        harnesses: ["codex"],
+        maxConcurrentSessions: 1,
+      },
+      state: "online",
+      agentVersion: null,
+      lastSeenAt: null,
+      relayGrant: "secret",
+    };
+    const result = await Effect.runPromise(
+      Effect.either(rendererSafeEnvironment(value)),
+    );
+    expect(Either.isLeft(result)).toBe(true);
+  });
+
+  it("stores remote session keys through the encrypted secret store", async () => {
+    const program = Effect.gen(function* () {
+      yield* storeRemoteSessionKey("session-1", "key-material");
+      return yield* (yield* SecretStore).getDeviceSecrets;
+    });
+    await expect(
+      Effect.runPromise(program.pipe(Effect.provide(InMemorySecretStoreLive))),
+    ).resolves.toContain("key-material");
+  });
+});
 
 describe("relay acknowledgement lifetime", () => {
   it("keeps delivered feedback pending beyond the former timeout until the renderer acknowledges it", async () => {
@@ -145,11 +182,12 @@ describe("relay acknowledgement lifetime", () => {
       },
     };
     let settled = false;
-    const acknowledgement = awaitRelayAcknowledgement(delivery, () => undefined).finally(
-      () => {
-        settled = true;
-      },
-    );
+    const acknowledgement = awaitRelayAcknowledgement(
+      delivery,
+      () => undefined,
+    ).finally(() => {
+      settled = true;
+    });
 
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(settled).toBe(false);
@@ -1733,15 +1771,18 @@ describe("RPC handlers", () => {
 
   describe("Asset.list", () => {
     it("resolves only the requested session's validated worktree files", async () => {
-      const now = "2026-07-30T10:00:00.000Z"
-      const worktreePath = join(dir, "asset-worktree")
-      mkdirSync(worktreePath, { recursive: true })
-      execFileSync("git", ["init"], { cwd: worktreePath, stdio: "ignore" })
-      writeFileSync(join(worktreePath, "tracked.md"), "# Tracked\n")
-      execFileSync("git", ["add", "tracked.md"], { cwd: worktreePath, stdio: "ignore" })
-      writeFileSync(join(worktreePath, "fresh.txt"), "new\n")
+      const now = "2026-07-30T10:00:00.000Z";
+      const worktreePath = join(dir, "asset-worktree");
+      mkdirSync(worktreePath, { recursive: true });
+      execFileSync("git", ["init"], { cwd: worktreePath, stdio: "ignore" });
+      writeFileSync(join(worktreePath, "tracked.md"), "# Tracked\n");
+      execFileSync("git", ["add", "tracked.md"], {
+        cwd: worktreePath,
+        stdio: "ignore",
+      });
+      writeFileSync(join(worktreePath, "fresh.txt"), "new\n");
 
-      mkdirSync(root, { recursive: true })
+      mkdirSync(root, { recursive: true });
       writeFileSync(
         join(root, "sessions.json"),
         JSON.stringify([
@@ -1759,31 +1800,36 @@ describe("RPC handlers", () => {
             updatedAt: now,
             worktreePath,
             chats: [],
-            activeChatId: null
-          }
-        ])
-      )
-      const layer = Layer.mergeAll(SessionStore.Default, AssetService.Default).pipe(
-        Layer.provideMerge(base)
-      )
+            activeChatId: null,
+          },
+        ]),
+      );
+      const layer = Layer.mergeAll(
+        SessionStore.Default,
+        AssetService.Default,
+      ).pipe(Layer.provideMerge(base));
 
       await expect(
-        Effect.runPromise(assetList({ sessionId: "asset-session" }).pipe(Effect.provide(layer)))
+        Effect.runPromise(
+          assetList({ sessionId: "asset-session" }).pipe(Effect.provide(layer)),
+        ),
       ).resolves.toEqual([
         { path: "fresh.txt", status: "untracked" },
-        { path: "tracked.md", status: "added" }
-      ])
+        { path: "tracked.md", status: "added" },
+      ]);
       await expect(
-        Effect.runPromise(assetList({ sessionId: "missing" }).pipe(Effect.provide(layer)))
-      ).rejects.toThrow()
-    })
+        Effect.runPromise(
+          assetList({ sessionId: "missing" }).pipe(Effect.provide(layer)),
+        ),
+      ).rejects.toThrow();
+    });
 
     it("routes revision-checked reads and writes through the requested session worktree", async () => {
-      const now = "2026-07-30T10:00:00.000Z"
-      const worktreePath = join(dir, "editable-asset-worktree")
-      mkdirSync(worktreePath, { recursive: true })
-      writeFileSync(join(worktreePath, "config.custom"), "before\n")
-      mkdirSync(root, { recursive: true })
+      const now = "2026-07-30T10:00:00.000Z";
+      const worktreePath = join(dir, "editable-asset-worktree");
+      mkdirSync(worktreePath, { recursive: true });
+      writeFileSync(join(worktreePath, "config.custom"), "before\n");
+      mkdirSync(root, { recursive: true });
       writeFileSync(
         join(root, "sessions.json"),
         JSON.stringify([
@@ -1801,42 +1847,43 @@ describe("RPC handlers", () => {
             updatedAt: now,
             worktreePath,
             chats: [],
-            activeChatId: null
-          }
-        ])
-      )
-      const layer = Layer.mergeAll(SessionStore.Default, AssetService.Default).pipe(
-        Layer.provideMerge(base)
-      )
+            activeChatId: null,
+          },
+        ]),
+      );
+      const layer = Layer.mergeAll(
+        SessionStore.Default,
+        AssetService.Default,
+      ).pipe(Layer.provideMerge(base));
 
       const loaded = await Effect.runPromise(
         assetRead({
           sessionId: "editable-asset-session",
-          path: "config.custom"
-        }).pipe(Effect.provide(layer))
-      )
+          path: "config.custom",
+        }).pipe(Effect.provide(layer)),
+      );
       expect(loaded).toMatchObject({
         kind: "text",
         text: "before\n",
-        revision: expect.stringMatching(/^sha256:/)
-      })
-      if (loaded.kind === "image" || loaded.kind === "pdf") return
+        revision: expect.stringMatching(/^sha256:/),
+      });
+      if (loaded.kind === "image" || loaded.kind === "pdf") return;
 
       const saved = await Effect.runPromise(
         assetWrite({
           sessionId: "editable-asset-session",
           path: "config.custom",
           text: "after\n",
-          expectedRevision: loaded.revision
-        }).pipe(Effect.provide(layer))
-      )
-      expect(saved).toMatchObject({ kind: "text", text: "after\n" })
-      expect(saved.revision).not.toBe(loaded.revision)
+          expectedRevision: loaded.revision,
+        }).pipe(Effect.provide(layer)),
+      );
+      expect(saved).toMatchObject({ kind: "text", text: "after\n" });
+      expect(saved.revision).not.toBe(loaded.revision);
       expect(readFileSync(join(worktreePath, "config.custom"), "utf8")).toBe(
-        "after\n"
-      )
-    })
-  })
+        "after\n",
+      );
+    });
+  });
 
   describe("Workspace.revert*", () => {
     // Revert on an unknown / worktree-less session must be a safe no-op.

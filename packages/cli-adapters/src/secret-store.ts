@@ -11,7 +11,9 @@
  */
 import { Context, Data, Effect, Layer, Ref } from "effect"
 
-export class SecretStoreUnavailable extends Data.TaggedError("SecretStoreUnavailable")<{
+export class SecretStoreUnavailable extends Data.TaggedError(
+  "SecretStoreUnavailable"
+)<{
   readonly message: string
 }> {}
 
@@ -29,9 +31,17 @@ export interface SecretStoreShape {
    */
   readonly getOpenConnectorToken: Effect.Effect<string | null>
   /** Persist the OpenConnector token as ciphertext. Fails if the OS vault is unavailable. */
-  readonly setOpenConnectorToken: (token: string) => Effect.Effect<void, SecretStoreUnavailable>
+  readonly setOpenConnectorToken: (
+    token: string
+  ) => Effect.Effect<void, SecretStoreUnavailable>
   /** Remove the stored OpenConnector token (idempotent). */
   readonly clearOpenConnectorToken: Effect.Effect<void>
+  /** Opaque encrypted JSON for device/session key material; never exposed through renderer RPC. */
+  readonly getDeviceSecrets: Effect.Effect<string | null>
+  readonly setDeviceSecrets: (
+    value: string
+  ) => Effect.Effect<void, SecretStoreUnavailable>
+  readonly clearDeviceSecrets: Effect.Effect<void>
 }
 
 export class SecretStore extends Context.Tag("@jingler/SecretStore")<
@@ -47,15 +57,22 @@ export const makeInMemorySecretStore = (
   Effect.gen(function* () {
     const ref = yield* Ref.make<string | null>(initial)
     const ocRef = yield* Ref.make<string | null>(initialOpenConnector)
+    const deviceRef = yield* Ref.make<string | null>(null)
     return {
       get: Ref.get(ref),
       set: (token: string) => Ref.set(ref, token),
       clear: Ref.set(ref, null),
       getOpenConnectorToken: Ref.get(ocRef),
       setOpenConnectorToken: (token: string) => Ref.set(ocRef, token),
-      clearOpenConnectorToken: Ref.set(ocRef, null)
+      clearOpenConnectorToken: Ref.set(ocRef, null),
+      getDeviceSecrets: Ref.get(deviceRef),
+      setDeviceSecrets: (value: string) => Ref.set(deviceRef, value),
+      clearDeviceSecrets: Ref.set(deviceRef, null)
     }
   })
 
 /** An in-memory `SecretStore` layer, signed out by default. */
-export const InMemorySecretStoreLive = Layer.effect(SecretStore, makeInMemorySecretStore())
+export const InMemorySecretStoreLive = Layer.effect(
+  SecretStore,
+  makeInMemorySecretStore()
+)

@@ -23,6 +23,9 @@ import {
   ConfigService,
   claudeTitleGenerator,
   DiscoveryService,
+  EnvironmentService,
+  RemoteSessionService,
+  routeSessionOperation,
   fetchOpencodeProviders,
   filterVisible,
   GitHubApi,
@@ -39,7 +42,7 @@ import {
   OrchestrationPersistenceError,
   OrchestrationService,
   recoverOrchestrationCheckpoints,
-  type SecretStore,
+  SecretStore,
   SecretStoreUnavailable,
   planDraftPost,
   billingPath,
@@ -56,6 +59,8 @@ import {
   ReviewService,
   ReviewStore,
   SessionStore,
+  setSessionEnvironment,
+  continueSessionOnEnvironment,
   ContextManager,
   setOpencodeAuth,
   SkillsService,
@@ -94,6 +99,13 @@ import {
   PluginError,
   SessionNotFoundError,
   workspaceModeOf,
+  Environment as EnvironmentSchema,
+  EnvironmentHandoffError,
+  StreamEvent as StreamEventSchema,
+  Message as MessageSchema,
+  Session as SessionSchema,
+  PublishCheckpoint as PublishCheckpointSchema,
+  RemotePublishPrepared as RemotePublishPreparedSchema,
 } from "@jingler/core";
 import type {
   BrowserBounds,
@@ -167,6 +179,7 @@ import {
   Mailbox,
   Option,
   Runtime,
+  Schedule,
   Schema,
   Stream,
 } from "effect";
@@ -193,6 +206,25 @@ export const RPC_CHANNEL = "jingler/rpc";
  */
 export const configGet = () =>
   ConfigService.get().pipe(Effect.orElseSucceed(() => null));
+
+/** Strict renderer boundary: unknown credential fields are rejected, not stripped silently. */
+export const rendererSafeEnvironment = (value: unknown) =>
+  Schema.decodeUnknown(EnvironmentSchema)(value, { onExcessProperty: "error" });
+
+/** Main-only encrypted persistence for the session keys introduced by remote execution. */
+export const storeRemoteSessionKey = (sessionId: string, key: string) =>
+  Effect.gen(function* () {
+    const secrets = yield* SecretStore;
+    const current = yield* secrets.getDeviceSecrets;
+    const parsed = current
+      ? yield* Effect.try(
+          () => JSON.parse(current) as Record<string, string>,
+        ).pipe(Effect.orElseSucceed(() => ({}) as Record<string, string>))
+      : {};
+    yield* secrets.setDeviceSecrets(
+      JSON.stringify({ ...parsed, [sessionId]: key }),
+    );
+  });
 
 const githubConnectionError = (error: GitHubApiError): AuthError =>
   new AuthError({ message: error.message });
@@ -375,7 +407,12 @@ const memoryRecover = () =>
   Effect.flatMap(MemoryService, (service) => service.recoverCaptures()).pipe(
     Effect.flatMap((result) =>
       result === null
-        ? Effect.fail(memoryUiFailure("Memory recovery requires an enabled organization", 401))
+        ? Effect.fail(
+            memoryUiFailure(
+              "Memory recovery requires an enabled organization",
+              401,
+            ),
+          )
         : Effect.succeed(result),
     ),
   );
@@ -1761,26 +1798,24 @@ export const executeOrchestration = (
           maxConcurrency: 4,
           ...(agentIds === undefined ? {} : { agentIds }),
           makeSessionSpec: ({ ownerId, group, prompt, resumeId }) =>
-            memory
-              .attachment(group.assignment.cli, prompt, ownerId)
-              .pipe(
-                Effect.provide(memoryEnvironment),
-                Effect.map((attachment) =>
-                  attachMemoryToSessionSpec(
-                    workerSessionSpecForAssignment(group.assignment, {
-                      repo: session.repo,
-                      branch: session.branch,
-                      cwd: worktreePath,
-                      prompt,
-                      images: [],
-                      binPath: binByCli.get(group.assignment.cli) ?? null,
-                      mode: "auto",
-                      resumeId,
-                    }),
-                    attachment,
-                  ),
+            memory.attachment(group.assignment.cli, prompt, ownerId).pipe(
+              Effect.provide(memoryEnvironment),
+              Effect.map((attachment) =>
+                attachMemoryToSessionSpec(
+                  workerSessionSpecForAssignment(group.assignment, {
+                    repo: session.repo,
+                    branch: session.branch,
+                    cwd: worktreePath,
+                    prompt,
+                    images: [],
+                    binPath: binByCli.get(group.assignment.cli) ?? null,
+                    mode: "auto",
+                    resumeId,
+                  }),
+                  attachment,
                 ),
               ),
+            ),
           refreshStage: (_agentId, stageId) =>
             store
               .readDocument(worktreePath, session.id, session.activeChatId)
@@ -2044,6 +2079,35 @@ export const createSession = (input: CreateSessionInput) =>
     );
   });
 
+/** Provision on the selected device and mirror only the returned metadata locally. */
+export const createSessionRouted = (input: CreateSessionInput) =>
+  input.environmentId === undefined
+    ? createSession(input)
+    : Effect.gen(function* () {
+        const environmentId = input.environmentId!;
+        const remote = yield* RemoteSessionService;
+        const sessions = yield* SessionStore;
+        const value = yield* remote.requestOnEnvironment(
+          environmentId,
+          "Sessions.create",
+          input,
+        ).pipe(
+          Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
+        );
+        const created = yield* Schema.decodeUnknown(SessionSchema)(value).pipe(
+          Effect.mapError((cause) => new GitError({
+            message: "The remote device returned invalid session metadata",
+            cause,
+          })),
+        );
+        if (created.environmentId !== environmentId) {
+          return yield* Effect.fail(new GitError({
+            message: "The remote device returned a session for a different environment",
+          }));
+        }
+        return yield* sessions.upsertRemote(created);
+      });
+
 /**
  * Every model a harness offers — the WHOLE catalogue, deliberately uncurated.
  *
@@ -2146,6 +2210,145 @@ export const createSessionFromIssue = (input: CreateSessionFromIssueInput) =>
     );
   });
 
+const provisionRemoteSession = (
+  environmentId: string,
+  operation: "Sessions.createFromPr" | "Sessions.createFromIssue",
+  input: CreateSessionFromPrInput | CreateSessionFromIssueInput,
+) =>
+  Effect.gen(function* () {
+    const remote = yield* RemoteSessionService;
+    const sessions = yield* SessionStore;
+    const value = yield* remote.requestOnEnvironment(environmentId, operation, input).pipe(
+      Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
+    );
+    const created = yield* Schema.decodeUnknown(SessionSchema)(value).pipe(
+      Effect.mapError((cause) => new GitError({
+        message: "The remote device returned invalid session metadata",
+        cause,
+      })),
+    );
+    if (created.environmentId !== environmentId) {
+      return yield* Effect.fail(new GitError({
+        message: "The remote device returned a session for a different environment",
+      }));
+    }
+    return yield* sessions.upsertRemote(created);
+  });
+
+export const createSessionFromPrRouted = (input: CreateSessionFromPrInput) =>
+  input.environmentId === undefined
+    ? createSessionFromPr(input)
+    : provisionRemoteSession(input.environmentId, "Sessions.createFromPr", input);
+
+export const createSessionFromIssueRouted = (input: CreateSessionFromIssueInput) =>
+  input.environmentId === undefined
+    ? createSessionFromIssue(input)
+    : provisionRemoteSession(input.environmentId, "Sessions.createFromIssue", input);
+
+export const setEnvironment = (
+  sessionId: string,
+  environmentId: string | undefined,
+) =>
+  Effect.gen(function* () {
+    const sessions = yield* SessionStore;
+    const environments = yield* EnvironmentService;
+    const session = yield* sessions.get(sessionId);
+    return yield* setSessionEnvironment(
+      session,
+      environmentId,
+      {
+        environments: () => environments.list,
+        persist: (id, target) => sessions.setEnvironment(id, target),
+        continueSession: (source, target) =>
+          Effect.fail(new EnvironmentHandoffError({
+            reason: "unavailable",
+            message: "The target device did not admit a continuation workspace.",
+            sessionId: source.id,
+            ...(target === undefined ? {} : { environmentId: target }),
+          })),
+      },
+    );
+  });
+
+export const continueOnEnvironment = (
+  sessionId: string,
+  environmentId: string | undefined,
+) =>
+  Effect.gen(function* () {
+    const sessions = yield* SessionStore;
+    const environments = yield* EnvironmentService;
+    const remote = yield* RemoteSessionService;
+    const session = yield* sessions.get(sessionId);
+    return yield* continueSessionOnEnvironment(
+      session,
+      environmentId,
+      {
+        environments: () => environments.list,
+        persist: (id, target) => sessions.setEnvironment(id, target),
+        continueSession: (source, target) => Effect.gen(function* () {
+          if (target === undefined) {
+            if (!source.repoPath) {
+              return yield* Effect.fail(new EnvironmentHandoffError({
+                reason: "unavailable",
+                message: "The source session has no canonical repository path.",
+                sessionId: source.id,
+              }));
+            }
+            return yield* createSession({
+              repoPath: source.repoPath,
+              repoName: source.repo,
+              cli: source.cli,
+              baseBranch: source.branch,
+              title: `${source.title} continuation`,
+            }).pipe(
+              Effect.mapError(() => new EnvironmentHandoffError({
+                reason: "unavailable",
+                message: "The desktop could not provision the continuation workspace.",
+                sessionId: source.id,
+              })),
+            );
+          }
+          const value = yield* remote.requestOnEnvironment(
+            target,
+            "Sessions.continueOnEnvironment",
+            { sourceSession: source },
+          ).pipe(
+            Effect.mapError(() => new EnvironmentHandoffError({
+              reason: "unavailable",
+              message: "The target device did not admit a continuation workspace.",
+              sessionId: source.id,
+              environmentId: target,
+            })),
+          );
+          const created = yield* Schema.decodeUnknown(SessionSchema)(value).pipe(
+            Effect.mapError(() => new EnvironmentHandoffError({
+              reason: "unavailable",
+              message: "The target device returned invalid continuation metadata.",
+              sessionId: source.id,
+              environmentId: target,
+            })),
+          );
+          if (created.environmentId !== target) {
+            return yield* Effect.fail(new EnvironmentHandoffError({
+              reason: "unavailable",
+              message: "The remote device returned a continuation for a different environment.",
+              sessionId: source.id,
+              environmentId: target,
+            }));
+          }
+          return yield* sessions.upsertRemote(created).pipe(
+            Effect.mapError(() => new EnvironmentHandoffError({
+              reason: "unavailable",
+              message: "The desktop could not persist the remote continuation.",
+              sessionId: source.id,
+              environmentId: target,
+            })),
+          );
+        }),
+      },
+    );
+  });
+
 /** `Sessions.linkIssue` handler — attach an issue (+ automations) to a live session. */
 export const linkIssue = (input: {
   sessionId: string;
@@ -2219,8 +2422,8 @@ const assetWorktree = (sessionId: string) =>
 /** `Asset.list` handler — repository files scoped to the session worktree. */
 export const assetList = (input: { sessionId: string }) =>
   Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
-    AssetService.list(worktree)
-  )
+    AssetService.list(worktree),
+  );
 
 /** `Asset.read` handler — one asset's contents, sandboxed to the session worktree. */
 export const assetRead = (input: { sessionId: string; path: string }) =>
@@ -2230,19 +2433,19 @@ export const assetRead = (input: { sessionId: string; path: string }) =>
 
 /** `Asset.write` handler — revision-guarded replacement in the session worktree. */
 export const assetWrite = (input: {
-  sessionId: string
-  path: string
-  text: string
-  expectedRevision: string
+  sessionId: string;
+  path: string;
+  text: string;
+  expectedRevision: string;
 }) =>
   Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
     AssetService.write(
       worktree,
       input.path,
       input.text,
-      input.expectedRevision
-    )
-  )
+      input.expectedRevision,
+    ),
+  );
 
 /**
  * `Asset.reveal` handler — show the file in the OS file manager.
@@ -2391,6 +2594,33 @@ export const archiveSession = (
         Effect.ignore,
       );
     return yield* SessionStore.get(sessionId);
+  }).pipe(
+    Effect.catchTag("SessionNotFoundError", () =>
+      Effect.fail(new GitError({ message: "Session not found" })),
+    ),
+  );
+
+export const archiveSessionRouted = (
+  sessionId: string,
+  reason: "merged" | "closed",
+) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(sessionId);
+    const remote = yield* RemoteSessionService;
+    return yield* routeSessionOperation(
+      session,
+      "Sessions.archive",
+      { reason },
+      { execute: () => archiveSession(sessionId, reason) },
+      {
+        execute: () => remote.request(session, "Sessions.archive", { reason }).pipe(
+          Effect.flatMap(Schema.decodeUnknown(SessionSchema)),
+          Effect.flatMap(SessionStore.upsertRemote),
+          Effect.mapError((cause) =>
+            new GitError({ message: "Could not archive the remote session", cause })),
+        )
+      },
+    );
   }).pipe(
     Effect.catchTag("SessionNotFoundError", () =>
       Effect.fail(new GitError({ message: "Session not found" })),
@@ -3282,6 +3512,124 @@ export const githubPublish = (sessionId: string) =>
     }),
   );
 
+export const githubPublishRouted = (sessionId: string) =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId);
+      const remote = yield* RemoteSessionService;
+      return yield* routeSessionOperation(
+        session,
+        "Github.createPr",
+        {},
+        { execute: () => Effect.succeed(githubPublish(sessionId)) },
+        {
+          execute: () => Effect.succeed(Stream.unwrap(
+            Effect.gen(function* () {
+              const remoteResult = <A, I>(
+                operation: string,
+                payload: unknown,
+                schema: Schema.Schema<A, I>,
+              ) => remote.execute(session, operation, payload).pipe(
+                Stream.runCollect,
+                Effect.flatMap((events) => {
+                  const terminal = Array.from(events).at(-1);
+                  if (!terminal || terminal.kind === "failed") {
+                    const message = terminal?.payload && typeof terminal.payload === "object" &&
+                      "message" in terminal.payload && typeof terminal.payload.message === "string"
+                      ? terminal.payload.message
+                      : `Remote ${operation} failed.`;
+                    return Effect.fail(new Error(message));
+                  }
+                  if (terminal.kind !== "complete") {
+                    return Effect.fail(new Error(`Remote ${operation} did not complete.`));
+                  }
+                  return Schema.decodeUnknown(schema)(terminal.payload).pipe(
+                    Effect.mapError(() => new Error(`Remote ${operation} returned an invalid result.`)),
+                  );
+                }),
+              );
+
+              const prepared = yield* remoteResult(
+                "Github.preparePublish",
+                {},
+                RemotePublishPreparedSchema,
+              );
+              const existing = prepared.existingPrNumber ?? (
+                yield* GitHubApi.prForBranchBySlug(prepared.githubSlug, prepared.branch)
+              );
+              const prNumber = existing ?? (
+                yield* GitHubApi.prCreateBySlug(prepared.githubSlug, prepared.branch, {
+                  title: prepared.prTitle,
+                  body: prepared.prBody,
+                  base: prepared.baseBranch,
+                  draft: false,
+                })
+              );
+              if (existing !== null) {
+                yield* GitHubApi.prUpdateBySlug(prepared.githubSlug, existing, {
+                  title: prepared.prTitle,
+                  body: prepared.prBody,
+                });
+              }
+              yield* remoteResult(
+                "Github.completePublish",
+                { prNumber },
+                SessionSchema,
+              );
+              yield* SessionStore.setPrNumber(session.id, prNumber);
+              const now = new Date().toISOString();
+              return Stream.fromIterable<PublishCheckpoint>([
+                {
+                  step: "pushing",
+                  completed: ["inspecting", "verifying-branch", "generating-metadata", "staging", "committing"],
+                  metadata: {
+                    commitMessage: prepared.commitMessage,
+                    prTitle: prepared.prTitle,
+                    prBody: prepared.prBody,
+                  },
+                  branch: prepared.branch,
+                  commitSha: prepared.commitSha,
+                  updatedAt: now,
+                },
+                {
+                  step: "complete",
+                  completed: ["inspecting", "verifying-branch", "generating-metadata", "staging", "committing", "pushing", "resolving-pr", existing === null ? "creating-pr" : "updating-pr", "linking", "complete"],
+                  metadata: {
+                    commitMessage: prepared.commitMessage,
+                    prTitle: prepared.prTitle,
+                    prBody: prepared.prBody,
+                  },
+                  branch: prepared.branch,
+                  commitSha: prepared.commitSha,
+                  prNumber,
+                  updatedAt: now,
+                },
+              ]);
+            }).pipe(
+              Effect.catchAll((error) => Effect.succeed(Stream.make({
+                step: "failed" as const,
+                completed: [],
+                error: "message" in error && typeof error.message === "string"
+                  ? error.message
+                  : "Remote publishing failed.",
+                updatedAt: new Date().toISOString(),
+              }))),
+            )
+          ))
+        },
+      );
+    }).pipe(
+      Effect.catchAll((error) => Effect.succeed(Stream.make({
+        step: "failed" as const,
+        completed: [],
+        error: "message" in error && typeof error.message === "string"
+          ? error.message
+          : "Publishing failed.",
+        updatedAt: new Date().toISOString(),
+      })))
+    )
+  );
+
 /**
  * `Github.comment` handler — post a top-level PR comment when `toGithub`. The
  * renderer separately feeds the body to the agent (`Agent.run`), so this only
@@ -3772,18 +4120,47 @@ let failGitHubFeedbackMarkOnce =
 const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Billing.paths": () => billingPaths,
   "Discovery.list": () => DiscoveryService.list(),
+  "Environment.list": () => EnvironmentService.list,
+  "Environment.refresh": () => EnvironmentService.refresh,
+  "Environment.discovery": ({ deviceId }) => EnvironmentService.discovery(deviceId),
+  "Environment.watch": () =>
+    Stream.repeatEffectWithSchedule(
+      EnvironmentService.list,
+      Schedule.spaced("10 seconds"),
+    ),
+  "Environment.suggestHosts": () =>
+    EnvironmentService.suggestHosts().pipe(
+      Effect.map((hosts) => hosts.map((host) => ({ ...host }))),
+    ),
+  "Environment.pairLink": (input) => EnvironmentService.pairLink(input),
+  "Environment.pairSsh": (input) => EnvironmentService.pairSsh(input),
+  "Environment.rename": ({ deviceId, name }) =>
+    EnvironmentService.rename(deviceId, name),
+  "Environment.revoke": ({ deviceId }) => EnvironmentService.revoke(deviceId),
   "Config.get": configGet,
   "Setup.chooseReposDir": chooseReposDir,
   "Workspace.repos": () => WorkspaceService.listRepos(),
-  "Workspace.branches": ({ repoPath }) => WorkspaceService.branches(repoPath),
-  "Workspace.files": ({ repoPath }) => WorkspaceService.files(repoPath),
+  "Workspace.branches": ({ repoPath, environmentId }) =>
+    environmentId
+      ? RemoteSessionService.requestOnEnvironment(environmentId, "Workspace.branches", { repoPath }).pipe(
+          Effect.flatMap(Schema.decodeUnknown(Schema.Array(Schema.String))),
+          Effect.mapError((cause) => new GitError({ message: "Could not list remote branches", cause })),
+        )
+      : WorkspaceService.branches(repoPath),
+  "Workspace.files": ({ repoPath, environmentId }) =>
+    environmentId
+      ? RemoteSessionService.requestOnEnvironment(environmentId, "Workspace.files", { repoPath }).pipe(
+          Effect.flatMap(Schema.decodeUnknown(Schema.Array(Schema.String))),
+          Effect.mapError((cause) => new GitError({ message: "Could not list remote files", cause })),
+        )
+      : WorkspaceService.files(repoPath),
   "Workspace.revertFile": (input) => workspaceRevertFile(input),
   "Workspace.revertLines": (input) => workspaceRevertLines(input),
   "Sessions.list": () => SessionStore.list(),
   "Sessions.get": ({ id }) => SessionStore.get(id),
-  "Sessions.create": (input) => createSession(input),
-  "Sessions.createFromPr": (input) => createSessionFromPr(input),
-  "Sessions.createFromIssue": (input) => createSessionFromIssue(input),
+  "Sessions.create": (input) => createSessionRouted(input),
+  "Sessions.createFromPr": (input) => createSessionFromPrRouted(input),
+  "Sessions.createFromIssue": (input) => createSessionFromIssueRouted(input),
   "Sessions.linkIssue": (input) => linkIssue(input),
   "Sessions.unlinkIssue": ({ sessionId }) => unlinkIssue(sessionId),
   "Sessions.clearInitialPrompt": ({ sessionId }) =>
@@ -3792,7 +4169,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       return yield* SessionStore.get(sessionId);
     }),
   "Sessions.archive": ({ sessionId, reason }) =>
-    archiveSession(sessionId, reason),
+    archiveSessionRouted(sessionId, reason),
   "Sessions.restore": ({ sessionId }) => restoreSession(sessionId),
   "Sessions.retitle": ({ sessionId }) =>
     retitleSession(sessionId, claudeTitleGenerator),
@@ -3801,11 +4178,26 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     setSessionStatus(sessionId, status),
   "Sessions.setPersistent": ({ sessionId, persistent }) =>
     setSessionPersistent(sessionId, persistent),
+  "Sessions.setEnvironment": ({ sessionId, environmentId }) =>
+    setEnvironment(sessionId, environmentId),
+  "Sessions.continueOnEnvironment": ({ sessionId, environmentId }) =>
+    continueOnEnvironment(sessionId, environmentId),
   "Sessions.delete": ({ sessionId }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId).pipe(
         Effect.orElseSucceed(() => null),
       );
+      if (session?.environmentId) {
+        const remote = yield* RemoteSessionService;
+        yield* remote.request(session, "Sessions.delete", {}).pipe(
+          Effect.mapError((cause) => new GitError({
+            message: "Could not delete the remote session",
+            cause,
+          })),
+        );
+        yield* SessionStore.forgetRemote(sessionId);
+        return;
+      }
       const relayRoute = yield* GitHubAuth.sessionRoutes().pipe(
         Effect.map(
           (routes) =>
@@ -3916,18 +4308,41 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Sessions.transcriptPage": ({ sessionId, chatId, before, limit }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId);
-      if (!session.chats.some((chat) => chat.id === chatId)) {
-        return { messages: [], hasMore: false };
-      }
-      if (chatId === `c_${session.id}_1`) {
-        yield* TranscriptStore.adoptLegacy(sessionId, chatId);
-      }
-      const page = yield* TranscriptStore.listPage(chatId, { before, limit });
-      return {
-        messages: withoutAttachmentData(page.messages),
-        hasMore: page.hasMore,
-        ...(page.cursor === undefined ? {} : { cursor: page.cursor }),
-      };
+      const remote = yield* RemoteSessionService;
+      return yield* routeSessionOperation(
+        session,
+        "Sessions.transcriptPage",
+        { chatId, before, limit },
+        {
+          execute: () => Effect.gen(function* () {
+            if (!session.chats.some((chat) => chat.id === chatId)) {
+              return { messages: [], hasMore: false };
+            }
+            if (chatId === `c_${session.id}_1`) {
+              yield* TranscriptStore.adoptLegacy(sessionId, chatId);
+            }
+            const page = yield* TranscriptStore.listPage(chatId, { before, limit });
+            return {
+              messages: withoutAttachmentData(page.messages),
+              hasMore: page.hasMore,
+              ...(page.cursor === undefined ? {} : { cursor: page.cursor }),
+            };
+          })
+        },
+        {
+          execute: () => remote.request(session, "Sessions.transcriptPage", {
+            chatId,
+            before,
+            limit,
+          }).pipe(
+            Effect.flatMap(Schema.decodeUnknown(Schema.Struct({
+              messages: Schema.Array(MessageSchema),
+              hasMore: Schema.Boolean,
+              cursor: Schema.optional(Schema.String),
+            }))),
+          )
+        },
+      );
     }).pipe(
       Effect.orElseSucceed(() => ({
         messages: [],
@@ -3955,7 +4370,22 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       }
       return null;
     }).pipe(Effect.orElseSucceed(() => null)),
-  "Sessions.diff": ({ id }) => sessionDiff(id),
+  "Sessions.diff": ({ id }) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(id);
+      const remote = yield* RemoteSessionService;
+      return yield* routeSessionOperation(
+        session,
+        "Sessions.diff",
+        {},
+        { execute: () => sessionDiff(id) },
+        {
+          execute: () => remote.request(session, "Sessions.diff", {}).pipe(
+            Effect.flatMap(Schema.decodeUnknown(Schema.String)),
+          )
+        },
+      );
+    }).pipe(Effect.orElseSucceed(() => "")),
   // The streaming agent seam: unwrap the runner's `Stream<StreamEvent>` so the
   // renderer subscribes to normalized events, harness-agnostic.
   "Agent.run": ({
@@ -3968,50 +4398,119 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     externalInstruction,
   }) =>
     Stream.unwrap(
-      Effect.map(AgentRunner, (runner) => {
-        let amendmentApplied = false;
-        return runner
-          .prompt(
-            sessionId,
-            chatId,
-            text,
-            images ?? [],
-            reasoning,
-            undefined,
-            externalInstruction,
-            displayText,
-          )
-          .pipe(
-            Stream.tap((event) =>
-              Effect.sync(() => {
-                if (event._tag === "PlanUpdated") amendmentApplied = true;
-              }),
-            ),
-            // `PlanUpdated` is the observable applied-amendment tag. Only that
-            // outcome can have requeued work; not-present, invalid, and conflict
-            // turns must not probe or dispatch orchestration after settling.
-            Stream.concat(
-              Stream.drain(
-                Stream.fromEffect(
-                  Effect.suspend(() =>
-                    amendmentApplied
-                      ? dispatchPendingOrchestration(sessionId, chatId)
-                      : Effect.void,
+      Effect.gen(function* () {
+        const session = yield* SessionStore.get(sessionId);
+        const runner = yield* AgentRunner;
+        const remote = yield* RemoteSessionService;
+        return yield* routeSessionOperation(
+          session,
+          "Agent.run",
+          { chatId, text, displayText, images, reasoning, externalInstruction },
+          {
+            execute: () => Effect.sync(() => {
+              let amendmentApplied = false;
+              return runner
+                .prompt(
+                  sessionId,
+                  chatId,
+                  text,
+                  images ?? [],
+                  reasoning,
+                  undefined,
+                  externalInstruction,
+                  displayText,
+                )
+                .pipe(
+                  Stream.tap((event) =>
+                    Effect.sync(() => {
+                      if (event._tag === "PlanUpdated") amendmentApplied = true;
+                    }),
                   ),
+                  Stream.concat(
+                    Stream.drain(
+                      Stream.fromEffect(
+                        Effect.suspend(() =>
+                          amendmentApplied
+                            ? dispatchPendingOrchestration(sessionId, chatId)
+                            : Effect.void,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+            })
+          },
+          {
+            execute: () => Effect.succeed(
+              remote.execute(session, "Agent.run", {
+                chatId,
+                text,
+                displayText,
+                images,
+                reasoning,
+                externalInstruction
+              }).pipe(
+                Stream.filter((event) => event.kind !== "complete"),
+                Stream.mapEffect((event) =>
+                  event.kind === "failed"
+                    ? Effect.succeed<StreamEvent>({
+                        _tag: "Failed",
+                        message:
+                          event.payload && typeof event.payload === "object" &&
+                          "message" in event.payload && typeof event.payload.message === "string"
+                            ? event.payload.message
+                            : "The remote operation failed."
+                      })
+                    : Schema.decodeUnknown(StreamEventSchema)(event.payload).pipe(
+                        Effect.orElseSucceed((): StreamEvent => ({
+                          _tag: "Failed",
+                          message: "The remote device returned an invalid agent event."
+                        }))
+                      )
                 ),
-              ),
-            ),
-          );
-      }),
+                Stream.catchAll((error) => Stream.make({
+                  _tag: "Failed" as const,
+                  message: error.message
+                }))
+              )
+            )
+          }
+        );
+      }).pipe(
+        Effect.catchAll((error) => Effect.succeed(Stream.make({
+          _tag: "Failed" as const,
+          message: "message" in error && typeof error.message === "string"
+            ? error.message
+            : "The session could not be started."
+        })))
+      ),
     ),
   "Agent.decideGate": ({ sessionId, chatId, gateId, decision }) =>
-    Effect.flatMap(AgentRunner, (runner) =>
-      runner.decideGate(sessionId, chatId, gateId, decision),
-    ),
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId);
+      const runner = yield* AgentRunner;
+      const remote = yield* RemoteSessionService;
+      return yield* routeSessionOperation(
+        session,
+        "Agent.decideGate",
+        { chatId, gateId, decision },
+        { execute: () => runner.decideGate(sessionId, chatId, gateId, decision) },
+        { execute: () => remote.request(session, "Agent.decideGate", { chatId, gateId, decision }).pipe(Effect.asVoid, Effect.orDie) },
+      );
+    }).pipe(Effect.orDie),
   "Agent.answerQuestion": ({ sessionId, chatId, requestId, answers }) =>
-    Effect.flatMap(AgentRunner, (runner) =>
-      runner.answerQuestion(sessionId, chatId, requestId, answers),
-    ),
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId);
+      const runner = yield* AgentRunner;
+      const remote = yield* RemoteSessionService;
+      return yield* routeSessionOperation(
+        session,
+        "Agent.answerQuestion",
+        { chatId, requestId, answers },
+        { execute: () => runner.answerQuestion(sessionId, chatId, requestId, answers) },
+        { execute: () => remote.request(session, "Agent.answerQuestion", { chatId, requestId, answers }).pipe(Effect.asVoid, Effect.orDie) },
+      );
+    }).pipe(Effect.orDie),
   "Agent.setMode": ({ sessionId, chatId, mode }) =>
     Effect.flatMap(AgentRunner, (runner) =>
       runner.setMode(sessionId, chatId, mode),
@@ -4144,16 +4643,46 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       Effect.andThen(SessionStore.get(sessionId)),
     ),
   "Agent.stop": ({ sessionId, chatId }) =>
-    Effect.flatMap(AgentRunner, (runner) => runner.stop(sessionId, chatId)),
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId);
+      const runner = yield* AgentRunner;
+      const remote = yield* RemoteSessionService;
+      return yield* routeSessionOperation(
+        session,
+        "Agent.stop",
+        { chatId },
+        { execute: () => runner.stop(sessionId, chatId) },
+        { execute: () => remote.request(session, "Agent.stop", { chatId }).pipe(Effect.asVoid, Effect.orDie) },
+      );
+    }).pipe(Effect.orDie),
   // Not `AgentRunner.stop` scoped smaller: that halts the whole turn. A
   // sub-agent is killed through the run's own per-task handle, which is what
   // `BackgroundTaskStore` holds.
   "Agent.stopSubagent": ({ sessionId, chatId, agentId }) =>
     BackgroundTaskStore.stopHandled(sessionId, chatId, agentId),
   "Agent.steer": ({ sessionId, chatId, text, images }) =>
-    Effect.flatMap(AgentRunner, (runner) =>
-      runner.steer(sessionId, chatId, text, images),
-    ),
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId);
+      const runner = yield* AgentRunner;
+      const remote = yield* RemoteSessionService;
+      return yield* routeSessionOperation(
+        session,
+        "Agent.steer",
+        { chatId, text, images },
+        { execute: () => runner.steer(sessionId, chatId, text, images) },
+        {
+          execute: () => remote.request(session, "Agent.steer", { chatId, text, images }).pipe(
+            Effect.flatMap((value) => Schema.decodeUnknown(
+              Schema.Union(
+                Schema.Struct({ status: Schema.Literal("accepted"), user: MessageSchema, assistant: MessageSchema }),
+                Schema.Struct({ status: Schema.Literal("deferred", "unsupported") })
+              )
+            )(value)),
+            Effect.orDie
+          )
+        },
+      );
+    }).pipe(Effect.orDie),
   "Skills.list": ({ sessionId }) => skillsList(sessionId),
   "OpenConnector.get": () => openConnectorGet(),
   "OpenConnector.set": ({ config, token }) => openConnectorSet(config, token),
@@ -4300,10 +4829,14 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
 const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Github.pr": ({ sessionId }) => githubPr(sessionId),
   "Github.prState": ({ sessionId }) => githubPrState(sessionId),
-  "Github.listPrs": ({ repoPath, mine, search }) =>
-    GitHubApi.listPrs(repoPath, { mine, search }),
-  "Github.listIssues": ({ repoPath, mine, search }) =>
-    GitHubApi.listIssues(repoPath, { mine, search }),
+  "Github.listPrs": ({ repoPath, githubSlug, mine, search }) =>
+    githubSlug
+      ? GitHubApi.listPrsBySlug(githubSlug, { mine, search })
+      : GitHubApi.listPrs(repoPath, { mine, search }),
+  "Github.listIssues": ({ repoPath, githubSlug, mine, search }) =>
+    githubSlug
+      ? GitHubApi.listIssuesBySlug(githubSlug, { mine, search })
+      : GitHubApi.listIssues(repoPath, { mine, search }),
   "Github.closeIssue": ({ sessionId }) => githubCloseIssue(sessionId),
   "Github.issue": ({ sessionId }) => githubIssue(sessionId),
   "Github.files": ({ sessionId }) => githubFiles(sessionId),
@@ -4393,7 +4926,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Review.get": ({ sessionId }) => reviewGet(sessionId),
   "Review.markRouted": ({ sessionId }) => reviewMarkRouted(sessionId),
   "Review.reconcile": ({ sessionId }) => reviewReconcile(sessionId),
-  "Github.createPr": ({ sessionId }) => githubPublish(sessionId),
+  "Github.createPr": ({ sessionId }) => githubPublishRouted(sessionId),
   "Github.comment": (input) => githubComment(input),
   "Github.review": (input) => githubReview(input),
   "Github.submitReview": (input) => githubSubmitReview(input),
@@ -4430,7 +4963,9 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   // Browser preview — a native WebContentsView over a localhost dev server,
   // driven from the renderer's preview pane (bounds streamed to stay aligned).
   "BrowserPreview.open": ({ sessionId, url, bounds }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.openBrowser(sessionId, url, bounds)),
+    Effect.flatMap(PreviewViewService, (b) =>
+      b.openBrowser(sessionId, url, bounds),
+    ),
   "BrowserPreview.setBounds": ({ sessionId, bounds }) =>
     Effect.flatMap(PreviewViewService, (b) => b.setBounds(sessionId, bounds)),
   "BrowserPreview.navigate": ({ sessionId, url }) =>
@@ -4443,20 +4978,28 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   // browser-control MCP) so it can QA a preview URL where the operator watches.
   // Each op reveals the dock inside PreviewViewService.
   "BrowserControl.navigate": ({ sessionId, url }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.controlNavigate(sessionId, url)),
+    Effect.flatMap(PreviewViewService, (b) =>
+      b.controlNavigate(sessionId, url),
+    ),
   "BrowserControl.screenshot": ({ sessionId }) =>
     Effect.flatMap(PreviewViewService, (b) => b.controlScreenshot(sessionId)),
   "BrowserControl.click": ({ sessionId, selector }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.controlClick(sessionId, selector)),
+    Effect.flatMap(PreviewViewService, (b) =>
+      b.controlClick(sessionId, selector),
+    ),
   "BrowserControl.type": ({ sessionId, selector, text }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.controlType(sessionId, selector, text)),
+    Effect.flatMap(PreviewViewService, (b) =>
+      b.controlType(sessionId, selector, text),
+    ),
   "BrowserControl.readText": ({ sessionId }) =>
     Effect.flatMap(PreviewViewService, (b) => b.controlReadText(sessionId)),
   "BrowserControl.evaluate": ({ sessionId, expression }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.controlEvaluate(sessionId, expression)),
+    Effect.flatMap(PreviewViewService, (b) =>
+      b.controlEvaluate(sessionId, expression),
+    ),
   "BrowserControl.waitForSelector": ({ sessionId, selector, timeoutMs }) =>
     Effect.flatMap(PreviewViewService, (b) =>
-      b.controlWaitForSelector(sessionId, selector, timeoutMs)
+      b.controlWaitForSelector(sessionId, selector, timeoutMs),
     ),
 
   "Asset.read": (input) => assetRead(input),
@@ -4464,7 +5007,9 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Asset.reveal": (input) => assetReveal(input),
   "Asset.openPdf": (input) => assetOpenPdf(input),
   "Asset.setPdfBounds": ({ sessionId, bounds }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.setFileBounds(sessionId, bounds)),
+    Effect.flatMap(PreviewViewService, (b) =>
+      b.setFileBounds(sessionId, bounds),
+    ),
   "Asset.hidePdf": ({ sessionId }) =>
     Effect.flatMap(PreviewViewService, (b) => b.hideFile(sessionId)),
 
@@ -4875,6 +5420,7 @@ export type RpcServerRequirements =
   | ContextManager
   | DialogService
   | DiscoveryService
+  | EnvironmentService
   | FileSystem.FileSystem
   | GitHubApi
   | GitHubAuth
@@ -4893,6 +5439,7 @@ export type RpcServerRequirements =
   | PreviewViewService
   | ReviewService
   | ReviewStore
+  | RemoteSessionService
   | SecretStore
   | SessionStore
   | SkillsService

@@ -132,6 +132,39 @@ export function ConversationPane({
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
   const convo = useConversation(session, activeChat.id)
+  const environmentQuery = useQuery({
+    queryKey: ["environments"],
+    queryFn: rpc.environmentsList,
+    staleTime: 10_000
+  })
+  const [continuationEnvironmentId, setContinuationEnvironmentId] = useState<
+    string | undefined | null
+  >(null)
+  const continueEnvironmentMutation = useMutation({
+    mutationFn: (environmentId?: string) =>
+      rpc.sessionsContinueOnEnvironment(session.id, environmentId),
+    onSuccess: (continued) => {
+      setContinuationEnvironmentId(null)
+      publishSessionUpdate(continued)
+    }
+  })
+  const environmentMutation = useMutation({
+    mutationFn: (environmentId?: string) =>
+      rpc.sessionsSetEnvironment(session.id, environmentId),
+    onSuccess: publishSessionUpdate,
+    onError: (error, environmentId) => {
+      if (
+        error !== null &&
+        typeof error === "object" &&
+        "_tag" in error &&
+        error._tag === "EnvironmentHandoffError" &&
+        "reason" in error &&
+        error.reason === "has-work"
+      ) {
+        setContinuationEnvironmentId(environmentId)
+      }
+    }
+  })
   const handledPlanDraftPresentation = useRef(0)
   useEffect(() => {
     if (
@@ -786,6 +819,32 @@ export function ConversationPane({
           </button>
         </div>
       )}
+      {continuationEnvironmentId !== null && (
+        <div
+          role="alert"
+          className="flex flex-none items-center gap-2 border-b border-yellow/30 bg-yellow/[0.06] px-3 py-2 text-[11px] text-fg"
+        >
+          <span className="min-w-0 flex-1">
+            This session already has work. Continue it as a new session on the selected environment?
+          </span>
+          <button
+            type="button"
+            onClick={() => continueEnvironmentMutation.mutate(continuationEnvironmentId)}
+            disabled={continueEnvironmentMutation.isPending}
+            className="flex-none rounded border border-border px-2 py-1 outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          >
+            Continue there
+          </button>
+          <button
+            type="button"
+            aria-label="Cancel environment continuation"
+            onClick={() => setContinuationEnvironmentId(null)}
+            className="flex-none rounded px-1 outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {activeAgentTranscript !== null ? (
         <AgentView agent={activeAgentTranscript} />
       ) : (
@@ -801,6 +860,10 @@ export function ConversationPane({
           paused={convo.paused}
           branch={session.branch}
           repo={session.repo}
+          environments={environmentQuery.data ?? []}
+          environmentId={session.environmentId}
+          environmentPending={environmentMutation.isPending}
+          onSetEnvironment={(environmentId) => environmentMutation.mutate(environmentId)}
           busy={convo.busy}
           tokens={convo.tokens}
           contextTriggerAt={contextQuery.data?.triggerAt ?? null}

@@ -5,6 +5,8 @@ import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
+  Environment,
+  EnvironmentDiscovery,
   IssueSummary,
   PrSummary,
   Repo
@@ -47,6 +49,8 @@ export interface NewSessionDialogProps {
   onClose: () => void
   /** Repos to choose from (already scanned). */
   repos: ReadonlyArray<Repo>
+  environments?: ReadonlyArray<Environment>
+  loadEnvironmentDiscovery?: (environmentId: string) => Promise<EnvironmentDiscovery>
   /** Absolute paths of starred repos — surfaced first, above "All repos". */
   starredRepos?: ReadonlyArray<string>
   /** Toggle a repo's starred state (by path); presence wires the row star button. */
@@ -61,7 +65,7 @@ export interface NewSessionDialogProps {
    */
   defaultCli?: CliKind | null
   /** Load the branches for a repo (to populate the base-branch select). */
-  loadBranches: (repoPath: string) => Promise<ReadonlyArray<string>>
+  loadBranches: (repoPath: string, environmentId?: string) => Promise<ReadonlyArray<string>>
   /** Submit — performs the real worktree creation upstream (throws on failure). */
   onCreate: (input: CreateSessionInput) => Promise<void>
   /**
@@ -112,6 +116,8 @@ export function NewSessionDialog({
   open,
   onClose,
   repos,
+  environments = [],
+  loadEnvironmentDiscovery,
   starredRepos = [],
   onToggleStar,
   defaultRepoPath,
@@ -134,6 +140,8 @@ export function NewSessionDialog({
   // tear down and rebuild it mid-edit.
   const deps: NewSessionDeps = {
     repos,
+    environments,
+    loadEnvironmentDiscovery,
     defaultRepoPath,
     availableClis,
     defaultCli,
@@ -152,6 +160,8 @@ export function NewSessionDialog({
   const [state, send] = useMachine(newSessionMachine, { input: { getDeps } })
   const {
     mode,
+    environmentId,
+    repos: selectableRepos,
     repoPath,
     title,
     cli,
@@ -267,9 +277,24 @@ export function NewSessionDialog({
 
             {/* Repo */}
             <div className="flex flex-col gap-1.5">
+              <Eyebrow>Environment</Eyebrow>
+              <Select value={environmentId ?? "__local__"} onValueChange={(value) => send({ type: "SET_ENVIRONMENT", environmentId: value === "__local__" ? null : value })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__local__">Local</SelectItem>
+                  {environments.map((environment) => (
+                    <SelectItem key={environment.id} value={environment.id} disabled={environment.state !== "online" || !environment.capabilities.harnesses.includes(cli as CliKind)}>
+                      {environment.name}{environment.state === "online" ? "" : ` · ${environment.state}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
               <Eyebrow>Repo</Eyebrow>
               <RepoPicker
-                repos={repos}
+                repos={selectableRepos}
                 value={repoPath}
                 onChange={(v) => send({ type: "SET_REPO", repoPath: v })}
                 starredRepos={starredRepos}
@@ -449,7 +474,7 @@ export function NewSessionDialog({
                       {selectedIssue.title}
                     </div>
                     <div className="font-mono text-[11px] text-dim">
-                      {repos.find((r) => r.path === repoPath)?.name}{" "}
+                      {selectableRepos.find((r) => r.path === repoPath)?.name}{" "}
                       <span className="text-muted-foreground">#{selectedIssue.number}</span>
                     </div>
                   </div>

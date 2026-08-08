@@ -98,6 +98,10 @@ export interface ConversationViewProps {
   branch?: string
   /** Repository backing the session, shown at the composer's bottom-left. */
   repo?: string
+  environments?: ReadonlyArray<import("@jingler/core").Environment>
+  environmentId?: string
+  environmentPending?: boolean
+  onSetEnvironment?: (environmentId?: string) => void
   /** Current harness model id + every installed harness's models (model chip). */
   model?: string
   catalog?: ReadonlyArray<ProviderModels>
@@ -249,6 +253,10 @@ export function ConversationView({
   paused = false,
   branch,
   repo,
+  environments,
+  environmentId,
+  environmentPending,
+  onSetEnvironment,
   model,
   catalog = [],
   onSetHarness,
@@ -645,6 +653,10 @@ export function ConversationView({
                 paused={paused}
                 branch={branch}
                 repo={repo}
+                environments={environments}
+                environmentId={environmentId}
+                environmentPending={environmentPending}
+                onSetEnvironment={onSetEnvironment}
                 busy={busy}
                 cli={cli}
                 model={model}
