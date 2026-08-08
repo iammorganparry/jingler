@@ -87,6 +87,8 @@ export interface ConversationPaneCtx {
 export interface SessionPaneProps {
   /** The session this pane shows. A pane only exists for a filled grid slot. */
   session: Session
+  /** Restore the view this session last owned when its pane is mounted again. */
+  initialTab?: TabKey
   /**
    * Switch tabs from OUTSIDE the pane — today, the command palette.
    *
@@ -230,7 +232,7 @@ export function SessionPane(props: SessionPaneProps) {
 }
 
 function SessionPaneBody(props: SessionPaneProps) {
-  const [tab, setTab] = useState<TabKey>("conversation")
+  const [tab, setTab] = useState<TabKey>(() => props.initialTab ?? BUILTIN_TAB.conversation)
   // A pending deep link into Plan Review (set when the composer dock jumps to
   // a step). One-shot: Plan Review reports its own selection back and we drop it,
   // so a later manual pick isn't overridden by a stale target.

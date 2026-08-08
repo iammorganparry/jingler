@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import type { Page } from "@playwright/test"
-import { appShell, expect, test } from "./fixtures.js"
+import { appShell, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 const session = (worktreePath: string): SeedSession => ({
@@ -20,6 +20,14 @@ const session = (worktreePath: string): SeedSession => ({
   worktreePath,
   mode: "auto",
   model: "gpt-5.6-sol"
+})
+
+const otherSession = (worktreePath: string): SeedSession => ({
+  ...session(worktreePath),
+  id: "s_file_browser_other",
+  branch: "jingler/file-browser-other",
+  title: "Other file browser session",
+  updatedAt: "2026-08-07T00:00:00.000Z"
 })
 
 const seedRepository = ({ repoPath }: { repoPath: string }): void => {
@@ -199,9 +207,36 @@ test("shows a previously existing large worktree before repository search", asyn
   await expect.poll(async () => {
     const editorBox = await editorSurface.boundingBox()
     const lineBox = await finalLine.boundingBox()
-    if (editorBox === null || lineBox === null) return Number.POSITIVE_INFINITY
-    return lineBox.y + lineBox.height - (editorBox.y + editorBox.height)
-  }).toBeLessThanOrEqual(0)
+    if (editorBox === null || lineBox === null) return Number.NEGATIVE_INFINITY
+    return editorBox.y + editorBox.height - (lineBox.y + lineBox.height)
+  }).toBeGreaterThanOrEqual(24)
+
+  // This is the real repository file that exposed the clipped final line in
+  // the wide Files pane. Keep it explicit so a virtual-scroll-only fixture
+  // cannot mask the editor's actual bottom boundary.
+  await selectTreePath(window, "packages/plugin-sdk/src/ui.ts")
+  const uiEditor = window.getByRole("region", {
+    name: "packages/plugin-sdk/src/ui.ts editor"
+  })
+  const uiEditorSurface = uiEditor.locator(".jingler-pierre-code-view")
+  const uiEditorFooter = uiEditorSurface.locator(
+    "[data-jingler-pierre-code-view-footer]"
+  )
+  await expect(uiEditorFooter).toBeVisible()
+  await expect.poll(async () => (await uiEditorFooter.boundingBox())?.height ?? 0)
+    .toBeGreaterThanOrEqual(64)
+  await uiEditorSurface.evaluate((node) => {
+    node.scrollTop = node.scrollHeight
+    node.dispatchEvent(new Event("scroll", { bubbles: true }))
+  })
+  const uiFinalLine = uiEditorSurface.locator('[data-column-number="84"]')
+  await expect(uiFinalLine).toBeVisible()
+  await expect.poll(async () => {
+    const editorBox = await uiEditorSurface.boundingBox()
+    const lineBox = await uiFinalLine.boundingBox()
+    if (editorBox === null || lineBox === null) return Number.NEGATIVE_INFINITY
+    return editorBox.y + editorBox.height - (lineBox.y + lineBox.height)
+  }).toBeGreaterThanOrEqual(24)
 
   await window.getByRole("button", { name: "Chat 1", exact: true }).click()
   await filesTab(window).click()
@@ -287,10 +322,11 @@ test("follows the selected chat agent through edited and newly created files", a
     configured: true,
     withRepo: true,
     seed: seedRepository,
-    sessions: ({ repoPath }) => [session(repoPath)]
+    sessions: ({ repoPath }) => [session(repoPath), otherSession(repoPath)]
   })
 
   await expect(appShell(window)).toBeVisible()
+  await sessionRow(window, "File browser IDE").click()
   const composerFollow = window
     .getByTestId("composer")
     .getByRole("button", { name: "Follow agent", exact: true })
@@ -306,6 +342,13 @@ test("follows the selected chat agent through edited and newly created files", a
   await expect(workspaceFollow).toHaveAttribute("aria-pressed", "true")
   await expect(workspaceFollow).toHaveClass(/is-active/)
   await expect(workspaceFollow.locator("svg")).toHaveClass(/lucide-mouse-pointer-2/)
+
+  await sessionRow(window, "Other file browser session").click()
+  await expect(window.getByText("Other file browser session", { exact: true }).last()).toBeVisible()
+  await sessionRow(window, "File browser IDE").click()
+  await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
+  await expect(window.getByTestId("session-auxiliary-split")).toBeVisible()
+  await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 
   // Prove the initial repository scan has settled before creating this file.
   // The scripted agent then reports the mutation only after the file exists,

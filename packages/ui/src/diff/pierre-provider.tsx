@@ -244,9 +244,17 @@ const baseOptions = (
 
 const CODE_VIEW_LAYOUT = {
   paddingTop: 8,
-  paddingBottom: 48,
+  paddingBottom: 0,
   gap: 8
 } as const
+
+const renderCodeViewFooter = () => (
+  <div
+    aria-hidden="true"
+    className="h-16"
+    data-jingler-pierre-code-view-footer
+  />
+)
 
 export interface PierreFileViewProps
   extends PierreAccessibleViewProps,
@@ -703,6 +711,7 @@ function PierreCodeViewContent({
           controlledSelection: true,
           stickyHeaders: options?.stickyHeader ?? true
         }}
+        renderCodeViewFooter={renderCodeViewFooter}
         renderCustomHeader={renderHeader}
         renderAnnotation={
           renderAnnotation === undefined

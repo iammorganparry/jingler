@@ -86,6 +86,36 @@ describe("SessionSplit panes", () => {
     fireEvent.mouseDown(screen.getByText("transcript b"))
     expect(onFocusPane).toHaveBeenCalledWith(1)
   })
+
+  it("restores each session's selected workspace after switching away and back", () => {
+    const { rerender } = renderSplit({
+      group: groupOf(["a"]),
+      renderFiles: (s) => <div>files {s.id}</div>
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Files" }))
+    expect(screen.getByText("files a")).toBeTruthy()
+
+    rerender(
+      <SessionSplit
+        group={groupOf(["b"])}
+        sessions={sessions}
+        renderConversation={(s) => <div>transcript {s.id}</div>}
+        renderFiles={(s) => <div>files {s.id}</div>}
+      />
+    )
+    expect(screen.getByText("transcript b")).toBeTruthy()
+
+    rerender(
+      <SessionSplit
+        group={groupOf(["a"])}
+        sessions={sessions}
+        renderConversation={(s) => <div>transcript {s.id}</div>}
+        renderFiles={(s) => <div>files {s.id}</div>}
+      />
+    )
+    expect(screen.getByText("files a")).toBeTruthy()
+  })
 })
 
 /**
