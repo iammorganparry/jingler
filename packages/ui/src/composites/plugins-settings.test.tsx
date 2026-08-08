@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { CircleDot } from "lucide-react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { LoadedPlugin, PluginCatalog } from "@jingler/core"
 import { PluginsSettings } from "./plugins-settings.js"
@@ -34,6 +35,17 @@ describe("PluginsSettings", () => {
     expect(screen.getByTestId("plugin-row-hello-tab")).toBeTruthy()
     expect(screen.getByText("Hello Tab")).toBeTruthy()
     expect(screen.getByText("1.0.0")).toBeTruthy()
+  })
+
+  it("uses the renderer-resolved plugin mark in its configuration row", () => {
+    render(
+      <PluginsSettings
+        catalog={catalog()}
+        pluginIcons={{ "hello-tab": CircleDot }}
+        {...base}
+      />
+    )
+    expect(document.querySelector(".lucide-circle-dot")).toBeTruthy()
   })
 
   it("says plainly when a plugin runs no background process", () => {
@@ -131,6 +143,147 @@ describe("PluginsSettings", () => {
     // The one place an operator is deciding whether to trust a folder.
     render(<PluginsSettings catalog={catalog()} {...base} />)
     expect(screen.getByText(/same access as Jingler itself/)).toBeTruthy()
+  })
+
+  it("renders an unconfigured secret as an empty password field and saves it write-only", async () => {
+    const onSetSecret = vi.fn(async () => undefined)
+    const withSecret = plugin({
+      manifest: {
+        ...plugin().manifest,
+        contributes: {
+          settings: [
+            {
+              id: "hello-tab.api-key",
+              label: "Personal API key",
+              type: "secret",
+              placeholder: "lin_api_…",
+              documentationUrl: "https://linear.app/settings/api"
+            }
+          ]
+        }
+      }
+    } as Partial<LoadedPlugin>)
+
+    render(
+      <PluginsSettings
+        catalog={{ plugins: [withSecret], failed: [] }}
+        {...base}
+        settings={{
+          "hello-tab": { values: {}, secrets: { "hello-tab.api-key": false } }
+        }}
+        onSetSecret={onSetSecret}
+        onClearSecret={async () => undefined}
+      />
+    )
+
+    const input = screen.getByLabelText("Personal API key") as HTMLInputElement
+    expect(input.type).toBe("password")
+    expect(input.value).toBe("")
+    expect(input.placeholder).toBe("lin_api_…")
+
+    fireEvent.change(input, { target: { value: "lin_api_new" } })
+    fireEvent.click(screen.getByText("Save"))
+    await waitFor(() =>
+      expect(onSetSecret).toHaveBeenCalledWith(
+        "hello-tab",
+        "hello-tab.api-key",
+        "lin_api_new"
+      )
+    )
+  })
+
+  it("shows only masked configured state, then offers Replace and Remove", async () => {
+    const onSetSecret = vi.fn(async () => undefined)
+    const onClearSecret = vi.fn(async () => undefined)
+    const withSecret = plugin({
+      manifest: {
+        ...plugin().manifest,
+        contributes: {
+          settings: [
+            {
+              id: "hello-tab.api-key",
+              label: "Personal API key",
+              type: "secret",
+              description: "Stored securely."
+            }
+          ]
+        }
+      }
+    } as Partial<LoadedPlugin>)
+
+    const { container } = render(
+      <PluginsSettings
+        catalog={{ plugins: [withSecret], failed: [] }}
+        {...base}
+        settings={{
+          "hello-tab": { values: {}, secrets: { "hello-tab.api-key": true } }
+        }}
+        onSetSecret={onSetSecret}
+        onClearSecret={onClearSecret}
+      />
+    )
+
+    const masked = screen.getByLabelText("Personal API key") as HTMLInputElement
+    expect(masked.type).toBe("password")
+    expect(masked.value).toBe("configured")
+    expect(container.textContent).not.toContain("lin_api_saved")
+    expect(screen.getByText("Replace")).toBeTruthy()
+    expect(screen.getByText("Remove")).toBeTruthy()
+
+    fireEvent.click(screen.getByText("Replace"))
+    const replacement = screen.getByLabelText("Personal API key") as HTMLInputElement
+    expect(replacement.value).toBe("")
+    fireEvent.change(replacement, { target: { value: "replacement" } })
+    fireEvent.click(screen.getByText("Save"))
+    await waitFor(() =>
+      expect(onSetSecret).toHaveBeenCalledWith(
+        "hello-tab",
+        "hello-tab.api-key",
+        "replacement"
+      )
+    )
+
+    fireEvent.click(screen.getByText("Remove"))
+    expect(onClearSecret).toHaveBeenCalledWith("hello-tab", "hello-tab.api-key")
+  })
+
+  it("renders and saves an ordinary manifest-declared setting", () => {
+    const onSetSetting = vi.fn(async () => undefined)
+    const withSetting = plugin({
+      manifest: {
+        ...plugin().manifest,
+        contributes: {
+          settings: [
+            {
+              id: "hello-tab.team",
+              label: "Team",
+              type: "string"
+            }
+          ]
+        }
+      }
+    } as Partial<LoadedPlugin>)
+
+    render(
+      <PluginsSettings
+        catalog={{ plugins: [withSetting], failed: [] }}
+        {...base}
+        settings={{
+          "hello-tab": { values: { "hello-tab.team": "Platform" }, secrets: {} }
+        }}
+        onSetSetting={onSetSetting}
+      />
+    )
+
+    const input = screen.getByLabelText("Team") as HTMLInputElement
+    expect(input.value).toBe("Platform")
+    fireEvent.change(input, { target: { value: "Product" } })
+    fireEvent.click(screen.getByText("Save"))
+    expect(onSetSetting).toHaveBeenCalledWith(
+      "hello-tab",
+      "hello-tab.team",
+      "Product"
+    )
   })
 })
 

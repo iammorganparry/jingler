@@ -34,6 +34,7 @@ import {
   ACTIVATE_TIMEOUT_MS,
   HOST_READY_TIMEOUT_MS,
   type FromHostMessage,
+  type IssueProviderMethod,
   type ToHostMessage
 } from "./plugin-host-protocol.js"
 
@@ -265,6 +266,7 @@ export class PluginHostRuntime {
         this.events.onActivationFailed?.(message.pluginId, message.message)
         break
       case "invoke-result":
+      case "issue-provider-result":
         this.settle(message.requestId, message.ok, message.value, message.message)
         break
       case "event":
@@ -414,7 +416,8 @@ export class PluginHostRuntime {
       requestId,
       pluginId: manifest.id,
       entry: `${plugin.dir}/${manifest.main}`,
-      declaredCommands: (manifest.contributes?.commands ?? []).map((c) => c.id)
+      declaredCommands: (manifest.contributes?.commands ?? []).map((c) => c.id),
+      declaredIssueProviders: (manifest.contributes?.issueProviders ?? []).map((p) => p.id)
     })
 
     // A plugin awaiting a network call it will never get must not hold the
@@ -457,6 +460,24 @@ export class PluginHostRuntime {
       pluginId: plugin.manifest.id,
       commandId,
       arg
+    })
+  }
+
+  /** Dispatch one normalized issue-provider operation through the supervised host. */
+  async invokeIssueProvider(
+    plugin: LoadedPlugin,
+    providerId: string,
+    method: IssueProviderMethod,
+    input: unknown
+  ): Promise<unknown> {
+    await this.activate(plugin)
+    return await this.send<unknown>({
+      kind: "issue-provider-invoke",
+      requestId: this.id(),
+      pluginId: plugin.manifest.id,
+      providerId,
+      method,
+      input
     })
   }
 

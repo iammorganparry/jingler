@@ -365,13 +365,20 @@ describe("GitHubApi installation permission scopes", () => {
     })
 
     await expect(client.listIssues("/repo", { mine: true, search: "" })).resolves.toEqual([
-      expect.objectContaining({ number: 10, title: "Assigned issue" })
+      expect.objectContaining({
+        providerId: "github",
+        id: "10",
+        identifier: "#10",
+        title: "Assigned issue"
+      })
     ])
     await expect(client.issueView("/repo", 10)).resolves.toMatchObject({
-      number: 10,
+      providerId: "github",
+      id: "10",
+      identifier: "#10",
       comments: [
         expect.objectContaining({
-          author: expect.objectContaining({ login: "maintainer" }),
+          author: expect.objectContaining({ name: "maintainer" }),
           body: "Issue context"
         })
       ]

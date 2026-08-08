@@ -1,6 +1,7 @@
 export * from "./command.js"
 export * from "./app-paths.js"
 export * from "./secret-store.js"
+export * from "./plugin-secret-store.js"
 export * from "./auth.js"
 export * from "./discovery.js"
 export * from "./config.js"

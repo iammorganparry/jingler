@@ -46,7 +46,7 @@ The messages you will actually hit:
 | `its UI module exports no default` | Your entry is missing `export default definePlugin(...)`. |
 | `declares the tab "x" but its UI module exports no matching view` | The manifest and the `views` map disagree. |
 | `declares the pane "x" but its UI module exports no matching pane component` | Panes go in the **`panes`** key of `definePlugin`, not `views`. |
-| `… declared but not honoured by this build` | Real, and deliberate. Some manifest fields validate against the schema and are consumed by nothing, so the loader refuses the plugin rather than letting you ship a declaration that silently does nothing. The message names the field. It covers `contributes.keybindings`, `contributes.settings`, `contributes.authenticationProviders`, `capabilities.untrustedRepos` and `activationEvents: repoContains` — remove whichever it names. |
+| `… declared but not honoured by this build` | Real, and deliberate. Some manifest fields validate against the schema and are consumed by nothing, so the loader refuses the plugin rather than letting you ship a declaration that silently does nothing. The message names the field. It covers `contributes.keybindings`, `contributes.authenticationProviders`, `capabilities.untrustedRepos` and `activationEvents: repoContains` — remove whichever it names. |
 | `needs plugin API v<n>` | Your manifest's `apiVersion` is newer than this Jingler implements. Update the app, or install a build of the plugin made for its generation. Checked before your module is imported, which is why you get this instead of a stack trace. |
 | `entry-missing` (in "Could not be read") | The manifest names a `ui`/`main` file that is not on disk. Almost always a forgotten `pnpm build`. |
 

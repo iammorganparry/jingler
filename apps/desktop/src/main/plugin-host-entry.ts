@@ -36,6 +36,11 @@ import type {
   AuthSession,
   Disposable,
   HostContext,
+  IssueAddCommentRequest,
+  IssueCreateRequest,
+  IssueGetRequest,
+  IssueListRequest,
+  IssueProvider,
   PluginStorage
 } from "@jingler/plugin-sdk/host"
 
@@ -78,7 +83,9 @@ const ask = <T>(pluginId: string, op: HostOp, payload: unknown): Promise<T> =>
 interface LivePlugin {
   readonly pluginId: string
   readonly declaredCommands: ReadonlySet<string>
+  readonly declaredIssueProviders: ReadonlySet<string>
   readonly commands: Map<string, (input?: unknown) => unknown | Promise<unknown>>
+  readonly issueProviders: Map<string, IssueProvider>
   readonly subscriptions: Disposable[]
   readonly deactivate?: () => void | Promise<void>
 }
@@ -109,6 +116,34 @@ const storageFor = (pluginId: string): PluginStorage => ({
 const buildContext = (plugin: LivePlugin): HostContext => ({
   pluginId: plugin.pluginId,
   storage: storageFor(plugin.pluginId),
+  settings: {
+    getSecret: (settingId: string) =>
+      ask<string | null>(plugin.pluginId, "settings.getSecret", { settingId }).then(
+        (value) => value ?? undefined
+      )
+  },
+  issues: {
+    registerProvider: (provider) => {
+      if (!plugin.declaredIssueProviders.has(provider.id)) {
+        throw new Error(
+          `Plugin "${plugin.pluginId}" tried to register the issue provider "${provider.id}", which its manifest does not contribute. Add it to contributes.issueProviders.`
+        )
+      }
+      if (plugin.issueProviders.has(provider.id)) {
+        throw new Error(
+          `Plugin "${plugin.pluginId}" registered the issue provider "${provider.id}" more than once.`
+        )
+      }
+      plugin.issueProviders.set(provider.id, provider)
+      return {
+        dispose: () => {
+          if (plugin.issueProviders.get(provider.id) === provider) {
+            plugin.issueProviders.delete(provider.id)
+          }
+        }
+      }
+    }
+  },
   subscriptions: plugin.subscriptions,
 
   commands: {
@@ -203,6 +238,63 @@ const buildContext = (plugin: LivePlugin): HostContext => ({
 const messageOf = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause)
 
+const recordOf = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value))
+    : null
+
+const repositoryOf = (value: unknown): IssueListRequest["repository"] => {
+  const repository = recordOf(value)
+  if (typeof repository?.name !== "string" || typeof repository.path !== "string") {
+    throw new Error("Issue provider request has an invalid repository context.")
+  }
+  return { name: repository.name, path: repository.path }
+}
+
+const issueListRequestOf = (value: unknown): IssueListRequest => {
+  const request = recordOf(value)
+  if (typeof request?.search !== "string" || typeof request.mine !== "boolean") {
+    throw new Error("Issue provider list request is invalid.")
+  }
+  return {
+    repository: repositoryOf(request.repository),
+    search: request.search,
+    mine: request.mine
+  }
+}
+
+const issueGetRequestOf = (value: unknown): IssueGetRequest => {
+  const request = recordOf(value)
+  if (typeof request?.issueId !== "string") {
+    throw new Error("Issue provider get request is invalid.")
+  }
+  return { repository: repositoryOf(request.repository), issueId: request.issueId }
+}
+
+const issueCreateRequestOf = (value: unknown): IssueCreateRequest => {
+  const request = recordOf(value)
+  if (typeof request?.title !== "string" || typeof request.body !== "string") {
+    throw new Error("Issue provider create request is invalid.")
+  }
+  return {
+    repository: repositoryOf(request.repository),
+    title: request.title,
+    body: request.body
+  }
+}
+
+const issueAddCommentRequestOf = (value: unknown): IssueAddCommentRequest => {
+  const request = recordOf(value)
+  if (typeof request?.issueId !== "string" || typeof request.body !== "string") {
+    throw new Error("Issue provider comment request is invalid.")
+  }
+  return {
+    repository: repositoryOf(request.repository),
+    issueId: request.issueId,
+    body: request.body
+  }
+}
+
 // ── Message handling ─────────────────────────────────────────────────────────
 
 const activate = async (message: Extract<ToHostMessage, { kind: "activate" }>) => {
@@ -236,7 +328,7 @@ const activate = async (message: Extract<ToHostMessage, { kind: "activate" }>) =
 const runActivation = async (
   message: Extract<ToHostMessage, { kind: "activate" }>
 ): Promise<void> => {
-  const { pluginId, entry, declaredCommands } = message
+  const { pluginId, entry, declaredCommands, declaredIssueProviders } = message
 
   if (live.has(pluginId)) {
     // Already activated. Idempotent rather than an error: several activation
@@ -248,7 +340,9 @@ const runActivation = async (
   const plugin: LivePlugin = {
     pluginId,
     declaredCommands: new Set(declaredCommands),
+    declaredIssueProviders: new Set(declaredIssueProviders),
     commands: new Map(),
+    issueProviders: new Map(),
     subscriptions: []
   }
 
@@ -268,6 +362,14 @@ const runActivation = async (
 
     live.set(pluginId, { ...plugin, deactivate: module.deactivate })
     await module.activate(buildContext(plugin))
+    const missingProvider = [...plugin.declaredIssueProviders].find(
+      (providerId) => !plugin.issueProviders.has(providerId)
+    )
+    if (missingProvider) {
+      throw new Error(
+        `Plugin "${pluginId}" declares the issue provider "${missingProvider}" but activate() did not register it with issues.registerProvider.`
+      )
+    }
   } catch (cause) {
     // Dropped from `live` so a later activation event can try again — a plugin
     // that failed because a file was mid-save should not stay dead until the
@@ -336,6 +438,47 @@ const invoke = async (message: Extract<ToHostMessage, { kind: "invoke" }>) => {
   }
 }
 
+const invokeIssueProvider = async (
+  message: Extract<ToHostMessage, { kind: "issue-provider-invoke" }>
+) => {
+  const { requestId, pluginId, providerId, method, input } = message
+  const provider = live.get(pluginId)?.issueProviders.get(providerId)
+  if (!provider) {
+    send({
+      kind: "issue-provider-result",
+      requestId,
+      ok: false,
+      message: live.has(pluginId)
+        ? `Issue provider "${providerId}" is not registered by plugin "${pluginId}".`
+        : `Plugin "${pluginId}" is not activated.`
+    })
+    return
+  }
+
+  try {
+    const value = await (() => {
+      switch (method) {
+        case "listIssues":
+          return provider.listIssues(issueListRequestOf(input))
+        case "getIssue":
+          return provider.getIssue(issueGetRequestOf(input))
+        case "createIssue":
+          return provider.createIssue(issueCreateRequestOf(input))
+        case "addComment":
+          return provider.addComment(issueAddCommentRequestOf(input))
+      }
+    })()
+    send({ kind: "issue-provider-result", requestId, ok: true, value })
+  } catch (cause) {
+    send({
+      kind: "issue-provider-result",
+      requestId,
+      ok: false,
+      message: messageOf(cause)
+    })
+  }
+}
+
 process.parentPort.on("message", ({ data }) => {
   switch (data.kind) {
     case "activate":
@@ -346,6 +489,9 @@ process.parentPort.on("message", ({ data }) => {
       break
     case "invoke":
       void invoke(data)
+      break
+    case "issue-provider-invoke":
+      void invokeIssueProvider(data)
       break
     case "host-reply": {
       const waiting = pending.get(data.requestId)

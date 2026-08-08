@@ -26,7 +26,7 @@
  */
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import type { PluginCatalog } from "@jingler/core"
+import type { IssueProviderDescriptor, PluginCatalog } from "@jingler/core"
 import type { PaneContribution, PluginPaletteCommand, TabContribution } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
 import {
@@ -52,6 +52,8 @@ interface PluginRegistryValue {
    * that dispatch into nothing.
    */
   readonly commands: ReadonlyArray<PluginPaletteCommand>
+  /** Enabled host-backed issue providers available to session creation. */
+  readonly issueProviders: ReadonlyArray<IssueProviderDescriptor>
   /** Plugins that failed to load, for Settings to show verbatim. */
   readonly errors: ReadonlyArray<PluginLoadError>
   /** The last catalog from disk, including manifests that failed to decode. */
@@ -62,6 +64,7 @@ const EMPTY: PluginRegistryValue = {
   tabs: [],
   panes: [],
   commands: [],
+  issueProviders: [],
   errors: [],
   catalog: null
 }
@@ -107,12 +110,20 @@ export function PluginProvider({ children }: { children: ReactNode }) {
     refetchOnWindowFocus: false
   })
 
+  const { data: issueProviders = [] } = useQuery({
+    queryKey: ["plugin-issue-providers"] as const,
+    queryFn: () => rpc.pluginsIssueProviders(),
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchOnWindowFocus: false
+  })
+
   useEffect(
     () =>
       rpc.pluginsWatch((next) => {
         // Seed rather than invalidate: the stream already carries the whole
         // catalog, so invalidating would round-trip for a payload we hold.
         queryClient.setQueryData(pluginCatalogKey, next)
+        void queryClient.invalidateQueries({ queryKey: ["plugin-issue-providers"] })
       }),
     [queryClient]
   )
@@ -261,6 +272,7 @@ export function PluginProvider({ children }: { children: ReactNode }) {
       tabs,
       panes,
       commands,
+      issueProviders,
       // Manifests that never decoded are failures too, and the operator should
       // see them in the same list as modules that failed to import.
       errors: [
@@ -274,7 +286,7 @@ export function PluginProvider({ children }: { children: ReactNode }) {
       // have used would be worse than an empty list.
       catalog: catalog ?? null
     }
-  }, [loaded, catalog])
+  }, [loaded, catalog, issueProviders])
 
   return (
     <PluginRegistryContext.Provider value={value}>
@@ -294,6 +306,10 @@ export const usePluginPanes = (): ReadonlyArray<PaneContribution> =>
 /** Every command a loaded plugin contributed, for the command palette. */
 export const usePluginCommands = (): ReadonlyArray<PluginPaletteCommand> =>
   useContext(PluginRegistryContext).commands
+
+/** Enabled issue-provider descriptors, with network operations kept in host RPCs. */
+export const useIssueProviders = (): ReadonlyArray<IssueProviderDescriptor> =>
+  useContext(PluginRegistryContext).issueProviders
 
 /** Plugins that failed to load — manifest or module — for Settings. */
 export const usePluginErrors = (): ReadonlyArray<PluginLoadError> =>

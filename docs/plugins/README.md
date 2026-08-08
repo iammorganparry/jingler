@@ -20,7 +20,7 @@ plugin that declares one** and says so in Settings › Plugins.
 | `extensionDependencies` | Works |
 | `apiVersion` | Works — a too-old Jingler refuses you by name |
 | `contributes.keybindings` | **Refused** — validated, dispatched by nothing |
-| `contributes.settings` | **Refused** — same |
+| `contributes.settings` | Works — generated controls; secrets are host-only |
 | `contributes.authenticationProviders` | **Refused** — `registerProvider` is not implemented |
 | `capabilities.untrustedRepos` | **Refused** — see below |
 | `activationEvents: repoContains:…` | **Refused** — needs a repo scanner nothing implements |

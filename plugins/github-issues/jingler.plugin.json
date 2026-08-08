@@ -16,7 +16,9 @@
         "label": "Issue",
         "icon": "CircleDot",
         "order": 10,
-        "when": "hasIssue"
+        "when": {
+          "issueProvider": "github"
+        }
       }
     ],
     "commands": [

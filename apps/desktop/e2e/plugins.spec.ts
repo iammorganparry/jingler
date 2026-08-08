@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
@@ -107,7 +107,12 @@ export default definePlugin(
 /** Write a plugin into the launched app's throwaway home. */
 const seedPlugin = async (
   home: string,
-  opts: { id?: string; ui?: string; manifest?: Record<string, unknown> } = {}
+  opts: {
+    id?: string
+    ui?: string
+    main?: string
+    manifest?: Record<string, unknown>
+  } = {}
 ) => {
   const id = opts.id ?? "e2e-tab"
   const dir = join(home, "jingler", "plugins", id)
@@ -118,6 +123,9 @@ const seedPlugin = async (
     "utf8"
   )
   await writeFile(join(dir, "dist", "ui.js"), opts.ui ?? UI_MODULE, "utf8")
+  if (opts.main !== undefined) {
+    await writeFile(join(dir, "dist", "main.js"), opts.main, "utf8")
+  }
   return dir
 }
 
@@ -239,6 +247,75 @@ test("Settings lists the plugin, and disabling it removes the tab", async ({ lau
   await expect(window.getByRole("button", { name: "E2E" })).toHaveCount(0, { timeout: 15_000 })
 })
 
+test("Settings saves, masks, replaces and removes a manifest-declared plugin secret", async ({
+  launchApp
+}) => {
+  const { window, home } = await launchApp({ configured: true })
+  const secret = "lin_api_e2e_should_not_be_rendered_after_save"
+  await seedPlugin(home, {
+    manifest: {
+      id: "e2e-tab",
+      name: "E2E Tab",
+      version: "1.0.0",
+      contributes: {
+        settings: [
+          {
+            id: "e2e-tab.api-key",
+            label: "Personal API key",
+            type: "secret",
+            placeholder: "lin_api_…",
+            validation: {
+              pattern: "^lin_api_",
+              message: "Linear keys start with lin_api_."
+            }
+          }
+        ]
+      }
+    }
+  })
+  await openPluginSettings(window)
+
+  const row = window.getByTestId("plugin-row-e2e-tab")
+  await expect(row).toBeVisible({ timeout: 15_000 })
+  const input = row.getByLabel("Personal API key")
+  await expect(input).toHaveAttribute("type", "password")
+  await expect(input).toHaveValue("")
+  await input.fill(secret)
+  await row.getByRole("button", { name: "Save" }).click()
+
+  await expect(row.getByRole("button", { name: "Replace" })).toBeVisible()
+  await expect(row.getByRole("button", { name: "Remove" })).toBeVisible()
+  await expect(row.getByLabel("Personal API key")).toHaveValue("configured")
+  await expect(row).not.toContainText(secret)
+
+  // E2e deliberately selects the plaintext implementation inside its throwaway
+  // home; this observes main-process persistence without relying on a keychain.
+  const secretsFile = join(home, "jingler", "plugin-secrets.enc")
+  await expect
+    .poll(async () => await readFile(secretsFile, "utf8"))
+    .toContain(secret)
+
+  await row.getByRole("button", { name: "Replace" }).click()
+  await expect(row.getByLabel("Personal API key")).toHaveValue("")
+  await row.getByRole("button", { name: "Cancel" }).click()
+  await expect(row.getByRole("button", { name: "Replace" })).toBeVisible()
+
+  await row.getByRole("button", { name: "Remove" }).click()
+  await expect(row.getByRole("button", { name: "Save" })).toBeVisible()
+  await expect.poll(async () => await readFile(secretsFile, "utf8")).not.toContain(secret)
+
+  const uninstallSecret = "lin_api_removed_with_plugin"
+  await row.getByLabel("Personal API key").fill(uninstallSecret)
+  await row.getByRole("button", { name: "Save" }).click()
+  await expect(row.getByRole("button", { name: "Replace" })).toBeVisible()
+  await row.getByTestId("plugin-uninstall-e2e-tab").click()
+  await row.getByTestId("plugin-uninstall-confirm-e2e-tab").click()
+  await expect(row).toHaveCount(0, { timeout: 15_000 })
+  await expect
+    .poll(async () => await readFile(secretsFile, "utf8"))
+    .not.toContain(uninstallSecret)
+})
+
 test("a plugin whose manifest will not decode is reported, not silently absent", async ({
   launchApp
 }) => {
@@ -318,7 +395,12 @@ test("a plugin with a host half activates and answers an invoke", async ({ launc
       activationEvents: ["onTab:e2e-tab.main"],
       contributes: {
         tabs: [{ id: "e2e-tab.main", label: "E2E", icon: "Boxes", when: "always" }],
-        commands: [{ id: "e2e-tab.ping", title: "Ping" }]
+        commands: [{ id: "e2e-tab.ping", title: "Ping" }],
+        settings: [{
+          id: "e2e-tab.api-key",
+          label: "Personal API key",
+          type: "secret"
+        }]
       }
     }),
     ui: `
@@ -348,7 +430,8 @@ export default definePlugin(
     id: "e2e-tab", name: "E2E Tab", version: "1.0.0", ui: "dist/ui.js", main: "dist/main.js",
     contributes: {
       tabs: [{ id: "e2e-tab.main", label: "E2E", when: "always" }],
-      commands: [{ id: "e2e-tab.ping", title: "Ping" }]
+      commands: [{ id: "e2e-tab.ping", title: "Ping" }],
+      settings: [{ id: "e2e-tab.api-key", label: "Personal API key", type: "secret" }]
     }
   },
   { views: { "e2e-tab.main": Tab } }
@@ -361,12 +444,25 @@ export default definePlugin(
     join(home, "jingler", "plugins", "e2e-tab", "dist", "main.js"),
     `export const activate = (ctx) => {
   ctx.subscriptions.push(
-    ctx.commands.register("e2e-tab.ping", async (arg) => (arg?.n ?? 0) + 1)
+    ctx.commands.register("e2e-tab.ping", async (arg) => {
+      const apiKey = await ctx.settings.getSecret("e2e-tab.api-key")
+      return apiKey === "lin_api_host_e2e" ? (arg?.n ?? 0) + 1 : -1
+    })
   )
 }
 `,
     "utf8"
   )
+
+  // Configure through the renderer's write-only control, then prove the actual
+  // utilityProcess can resolve it through its owning HostContext.
+  await openPluginSettings(window)
+  const settingsRow = window.getByTestId("plugin-row-e2e-tab")
+  await expect(settingsRow).toBeVisible({ timeout: 15_000 })
+  await settingsRow.getByLabel("Personal API key").fill("lin_api_host_e2e")
+  await settingsRow.getByRole("button", { name: "Save" }).click()
+  await expect(settingsRow.getByRole("button", { name: "Replace" })).toBeVisible()
+  await window.getByRole("button", { name: "Close settings" }).click()
 
   await openSession(window)
   await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })
@@ -1357,6 +1453,145 @@ export default definePlugin(
     timeout: 20_000
   })
   await expect(window.getByTestId("plugin-pane-error-pane-plugin")).toHaveCount(0)
+})
+
+const seedIssueProviderPlugin = (home: string) => {
+  const providerManifest = {
+    id: "e2e-linear",
+    name: "E2E Linear",
+    version: "1.0.0",
+    ui: "dist/ui.js",
+    main: "dist/main.js",
+    contributes: {
+      issueProviders: [{ id: "linear", label: "E2E Linear" }],
+      tabs: [
+        {
+          id: "e2e-linear.issue",
+          label: "Linear issue",
+          when: { issueProvider: "linear", includeUnlinked: true }
+        }
+      ]
+    }
+  }
+  return seedPlugin(home, {
+    id: "e2e-linear",
+    manifest: providerManifest,
+    ui: `
+import { jsx } from "react/jsx-runtime"
+import { definePlugin, useSession } from "@jingler/plugin-sdk"
+
+function IssueTab() {
+  const session = useSession()
+  const issue = session.linkedIssue
+  return jsx("div", {
+    "data-testid": "e2e-linear-issue",
+    children: issue ? issue.providerId + ":" + issue.identifier : "unlinked"
+  })
+}
+
+export default definePlugin(
+  ${JSON.stringify(providerManifest)},
+  { views: { "e2e-linear.issue": IssueTab } }
+)
+`,
+    main: `
+const issue = {
+  providerId: "linear",
+  id: "issue-uuid-123",
+  identifier: "ENG-123",
+  url: "https://linear.app/acme/issue/ENG-123",
+  title: "Retry failed payments",
+  labels: [{ name: "bug", color: "5E6AD2" }],
+  state: "open",
+  body: "Retry a failed payment after refreshing its token.",
+  author: { id: "user-1", name: "Morgan", avatarUrl: null },
+  assignees: [],
+  updatedAt: "2026-08-08T12:00:00.000Z"
+}
+
+export const activate = (ctx) => {
+  ctx.subscriptions.push(ctx.issues.registerProvider({
+    id: "linear",
+    listIssues: async ({ search }) =>
+      issue.title.toLowerCase().includes(search.toLowerCase()) ? [issue] : [],
+    getIssue: async ({ issueId }) =>
+      issueId === issue.id
+        ? { ...issue, createdAt: "2026-08-01T12:00:00.000Z", comments: [] }
+        : null,
+    createIssue: async ({ title, body }) => ({
+      ...issue,
+      title,
+      body,
+      createdAt: "2026-08-08T12:00:00.000Z",
+      comments: []
+    }),
+    addComment: async ({ body }) => ({
+      id: "comment-1",
+      author: issue.author,
+      body,
+      createdAt: "2026-08-08T12:01:00.000Z",
+      url: issue.url + "#comment-1"
+    })
+  }))
+}
+`
+  })
+}
+
+test("a plugin issue provider creates a linked session with its badge and tab", async ({
+  launchApp
+}) => {
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    githubApp: { connected: true, userLogin: "e2e-user", issues: [] }
+  })
+
+  await seedIssueProviderPlugin(home)
+
+  // Wait for the real filesystem watcher to load both plugin halves before
+  // opening the dialog whose provider list is derived from that catalog.
+  await openPluginSettings(window)
+  await expect(window.getByTestId("plugin-row-e2e-linear")).toBeVisible({ timeout: 15_000 })
+  await window.getByRole("button", { name: "Close settings" }).click()
+
+  await window.getByTestId("new-session").click()
+  await window.getByRole("tab", { name: "From issue" }).click()
+
+  // GitHub plus the seeded provider forces the selector path under review.
+  await window.getByLabel("Issue provider").click()
+  await window.getByRole("option", { name: "E2E Linear" }).click()
+  await expect(window.getByText("Retry failed payments", { exact: true })).toBeVisible({
+    timeout: 20_000
+  })
+  await window.getByText("Retry failed payments", { exact: true }).click()
+  await window.getByRole("button", { name: "Start on ENG-123" }).click()
+  await window.getByRole("button", { name: "Create session" }).click()
+
+  await expect(window.getByRole("heading", { name: "New session" })).toBeHidden()
+  const row = window.locator("[data-testid^='session-row-']").filter({
+    hasText: "Retry failed payments"
+  })
+  await expect(row.getByLabel("Linked issue ENG-123")).toBeVisible()
+
+  // Only the owning provider's tab survives the linked-provider condition.
+  await expect(window.getByRole("button", { name: "Linear issue" })).toBeVisible({
+    timeout: 15_000
+  })
+  await expect(window.getByRole("button", { name: "Issue", exact: true })).toHaveCount(0)
+  await window.getByRole("button", { name: "Linear issue" }).click()
+  await expect(window.getByTestId("e2e-linear-issue")).toHaveText("linear:ENG-123")
+
+  const persisted = JSON.parse(
+    await readFile(join(home, "jingler", "sessions.json"), "utf8")
+  )
+  expect(persisted[0]).toMatchObject({
+    linkedIssue: {
+      providerId: "linear",
+      id: "issue-uuid-123",
+      identifier: "ENG-123"
+    }
+  })
 })
 
 test("a plugin can unlink the session's issue, and the app sees it", async ({ launchApp }) => {

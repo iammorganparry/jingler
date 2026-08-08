@@ -50,6 +50,10 @@ import { BrowserControlPortLive } from "./browser-control-port-live.js"
 import { DialogServiceLive } from "./dialog.js"
 import { RpcServerLive } from "./rpc.js"
 import { PlaintextSecretStoreLive, SecretStoreLive } from "./secret-store.js"
+import {
+  PlaintextPluginSecretStoreLive,
+  PluginSecretStoreLive
+} from "./plugin-secret-store.js"
 
 // e2e selects a plaintext file store (no OS keychain prompts under Playwright);
 // every real build uses the keychain-backed store.
@@ -57,6 +61,10 @@ const SecretStoreLayer =
   process.env.JINGLER_SECRET_STORE === "memory"
     ? PlaintextSecretStoreLive
     : SecretStoreLive
+const PluginSecretStoreLayer =
+  process.env.JINGLER_SECRET_STORE === "memory"
+    ? PlaintextPluginSecretStoreLive
+    : PluginSecretStoreLive
 
 /**
  * The per-session JSON stores under `~/jingler`. Independent peers — each needs
@@ -166,6 +174,7 @@ const AppServicesLayer = RpcServicesLayer.pipe(
       // native consent prompt and the built-in github provider into it at
       // startup, so the RPC handlers must reach that same instance.
       PluginAuth.Default,
+      PluginSecretStoreLayer,
       // And PluginRegistry, because the host's consent flow looks a plugin's
       // display name up from the catalog before prompting — the operator picked
       // it by name in Settings, so the prompt has to say the name.

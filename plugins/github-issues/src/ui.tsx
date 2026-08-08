@@ -116,7 +116,9 @@ function IssueTab({ session }: TabProps) {
   const [loading, setLoading] = useState(true)
   const [unlinking, setUnlinking] = useState(false)
 
-  const issueNumber = session.issueNumber
+  const linkedIssue = session.linkedIssue
+  const issueNumber =
+    linkedIssue?.providerId === "github" ? Number(linkedIssue.id) : undefined
 
   useEffect(() => {
     if (issueNumber == null) return

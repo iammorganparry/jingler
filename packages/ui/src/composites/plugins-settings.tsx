@@ -21,6 +21,7 @@
  * is somewhere obvious. It is the section below the list.
  */
 import { useState } from "react"
+import { useMachine } from "@xstate/react"
 import {
   AlertTriangle,
   Boxes,
@@ -29,10 +30,19 @@ import {
   Plus,
   Trash2
 } from "lucide-react"
-import type { AuthSessionInfo, LoadedPlugin, PluginCatalog } from "@jingler/core"
+import type { LucideIcon } from "lucide-react"
+import type {
+  AuthSessionInfo,
+  LoadedPlugin,
+  PluginCatalog,
+  PluginSettingValue,
+  PluginSettingsSnapshot,
+  SettingContribution
+} from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { Badge } from "../components/badge.js"
 import { Toggle } from "../components/toggle.js"
+import { pluginSecretSettingMachine } from "./plugin-secret-setting-machine.js"
 
 export interface PluginsSettingsProps {
   /** Everything under `~/jingler/plugins`, including what failed to decode. */
@@ -47,6 +57,8 @@ export interface PluginsSettingsProps {
    * is knowable by the process that reads the directory.
    */
   loadErrors?: ReadonlyArray<{ readonly id: string; readonly message: string }>
+  /** Renderer-resolved plugin marks; invalid or missing assets are omitted. */
+  pluginIcons?: Readonly<Record<string, LucideIcon | undefined>>
   /**
    * Why the operator's last action failed, if it did.
    *
@@ -70,6 +82,15 @@ export interface PluginsSettingsProps {
   /** Credentials plugins currently hold. */
   authSessions?: ReadonlyArray<AuthSessionInfo>
   onRevokeAuth?: (pluginId: string, providerId: string) => void | Promise<void>
+  /** Renderer-safe snapshots: ordinary values plus secret configured booleans. */
+  settings?: Readonly<Record<string, PluginSettingsSnapshot | undefined>>
+  onSetSetting?: (
+    pluginId: string,
+    settingId: string,
+    value: PluginSettingValue
+  ) => Promise<void>
+  onSetSecret?: (pluginId: string, settingId: string, value: string) => Promise<void>
+  onClearSecret?: (pluginId: string, settingId: string) => Promise<void>
 }
 
 const contributionCount = (plugin: LoadedPlugin): number => {
@@ -83,22 +104,239 @@ const contributionCount = (plugin: LoadedPlugin): number => {
   )
 }
 
+const fieldClass =
+  "h-8 min-w-0 rounded border border-line bg-panel px-2.5 text-[12px] text-text outline-none placeholder:text-dim focus:border-blue/50 focus:ring-2 focus:ring-ring/40"
+
+const buttonClass =
+  "rounded border border-line px-2.5 py-1.5 text-[11.5px] text-text-body transition-colors hover:border-blue hover:text-text-bright disabled:cursor-not-allowed disabled:opacity-50"
+
+const SettingHelp = ({ setting }: { setting: SettingContribution }) => (
+  <>
+    {setting.description && (
+      <p className="mt-0.5 text-[11.5px] leading-[1.45] text-dim">
+        {setting.description}
+      </p>
+    )}
+    {setting.documentationUrl && (
+      <a
+        href={setting.documentationUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-1 inline-block text-[11.5px] text-blue hover:underline"
+      >
+        Documentation
+      </a>
+    )}
+  </>
+)
+
+function OrdinarySettingControl({
+  pluginId,
+  setting,
+  value,
+  onSave
+}: {
+  pluginId: string
+  setting: SettingContribution
+  value: PluginSettingValue | null
+  onSave: NonNullable<PluginsSettingsProps["onSetSetting"]>
+}) {
+  const [draft, setDraft] = useState<PluginSettingValue>(
+    value ?? (setting.type === "boolean" ? false : setting.type === "number" ? 0 : "")
+  )
+  const stringDraft = String(draft)
+  const patternValid =
+    !setting.validation || new RegExp(setting.validation.pattern).test(stringDraft)
+  const valid =
+    patternValid &&
+    (setting.type !== "number" ||
+      (typeof draft === "number" && Number.isFinite(draft)))
+
+  return (
+    <div data-testid={`plugin-setting-${setting.id}`} className="grid gap-2 sm:grid-cols-[1fr_240px_auto] sm:items-start">
+      <div className="min-w-0">
+        <label htmlFor={`plugin-setting-input-${setting.id}`} className="text-[12px] font-medium text-text">
+          {setting.label}
+        </label>
+        <SettingHelp setting={setting} />
+      </div>
+      {setting.type === "boolean" ? (
+        <div className="flex h-8 items-center">
+          <Toggle
+            checked={Boolean(draft)}
+            onCheckedChange={setDraft}
+            aria-label={setting.label}
+          />
+        </div>
+      ) : setting.type === "enum" ? (
+        <select
+          id={`plugin-setting-input-${setting.id}`}
+          aria-label={setting.label}
+          value={stringDraft}
+          onChange={(event) => setDraft(event.currentTarget.value)}
+          className={fieldClass}
+        >
+          {(setting.options ?? []).map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          id={`plugin-setting-input-${setting.id}`}
+          aria-label={setting.label}
+          type={setting.type === "number" ? "number" : "text"}
+          value={stringDraft}
+          placeholder={setting.placeholder}
+          pattern={setting.validation?.pattern}
+          title={setting.validation?.message}
+          onChange={(event) =>
+            setDraft(
+              setting.type === "number"
+                ? event.currentTarget.valueAsNumber
+                : event.currentTarget.value
+            )
+          }
+          className={fieldClass}
+        />
+      )}
+      <button
+        type="button"
+        disabled={!valid}
+        onClick={() => void onSave(pluginId, setting.id, draft)}
+        className={buttonClass}
+      >
+        Save
+      </button>
+    </div>
+  )
+}
+
+function SecretSettingControl({
+  pluginId,
+  setting,
+  configured,
+  onSave,
+  onClear
+}: {
+  pluginId: string
+  setting: SettingContribution
+  configured: boolean
+  onSave: NonNullable<PluginsSettingsProps["onSetSecret"]>
+  onClear: NonNullable<PluginsSettingsProps["onClearSecret"]>
+}) {
+  const [snapshot, send] = useMachine(pluginSecretSettingMachine, {
+    input: {
+      configured,
+      save: (value) => onSave(pluginId, setting.id, value),
+      clear: () => onClear(pluginId, setting.id)
+    }
+  })
+  const { draft } = snapshot.context
+  const editing = snapshot.matches("editing") || snapshot.matches("saving")
+  const busy = snapshot.matches("saving") || snapshot.matches("removing")
+  const valid =
+    draft.length > 0 &&
+    (!setting.validation || new RegExp(setting.validation.pattern).test(draft))
+
+  return (
+    <div data-testid={`plugin-setting-${setting.id}`} className="grid gap-2 sm:grid-cols-[1fr_240px_auto] sm:items-start">
+      <div className="min-w-0">
+        <label htmlFor={`plugin-setting-input-${setting.id}`} className="text-[12px] font-medium text-text">
+          {setting.label}
+        </label>
+        <SettingHelp setting={setting} />
+      </div>
+      {editing ? (
+        <input
+          id={`plugin-setting-input-${setting.id}`}
+          aria-label={setting.label}
+          type="password"
+          autoComplete="off"
+          value={draft}
+          placeholder={setting.placeholder}
+          pattern={setting.validation?.pattern}
+          title={setting.validation?.message}
+          disabled={busy}
+          onChange={(event) => send({ type: "CHANGE", value: event.currentTarget.value })}
+          className={fieldClass}
+        />
+      ) : (
+        <input
+          id={`plugin-setting-input-${setting.id}`}
+          aria-label={setting.label}
+          type="password"
+          value="configured"
+          readOnly
+          className={fieldClass}
+        />
+      )}
+      <div className="flex items-center gap-1.5">
+        {editing ? (
+          <>
+            <button type="button" disabled={!valid || busy} onClick={() => send({ type: "SAVE" })} className={buttonClass}>
+              {snapshot.matches("saving") ? "Saving…" : "Save"}
+            </button>
+            {configured && (
+              <button
+                type="button"
+                onClick={() => {
+                  send({ type: "CANCEL" })
+                }}
+                className={buttonClass}
+              >
+                Cancel
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <button type="button" disabled={busy} onClick={() => send({ type: "REPLACE" })} className={buttonClass}>
+              Replace
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => send({ type: "REMOVE" })}
+              className="text-[11.5px] text-dim transition-colors hover:text-red"
+            >
+              Remove
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function Row({
   plugin,
   loadError,
   onSetEnabled,
   onUninstall,
-  onReveal
+  onReveal,
+  settings,
+  onSetSetting,
+  onSetSecret,
+  onClearSecret,
+  pluginIcon
 }: {
   plugin: LoadedPlugin
   loadError?: string
   onSetEnabled: PluginsSettingsProps["onSetEnabled"]
   onUninstall: PluginsSettingsProps["onUninstall"]
   onReveal: PluginsSettingsProps["onReveal"]
+  settings?: PluginSettingsSnapshot
+  onSetSetting?: PluginsSettingsProps["onSetSetting"]
+  onSetSecret?: PluginsSettingsProps["onSetSecret"]
+  onClearSecret?: PluginsSettingsProps["onClearSecret"]
+  pluginIcon?: LucideIcon
 }) {
   const [confirming, setConfirming] = useState(false)
   const { manifest } = plugin
   const broken = loadError ?? plugin.activationError
+  const PluginIcon = pluginIcon ?? Boxes
 
   return (
     <li
@@ -106,7 +344,7 @@ function Row({
       className="flex flex-col gap-2 border-b border-hairline px-3 py-3 last:border-b-0"
     >
       <div className="flex items-start gap-3">
-        <Boxes
+        <PluginIcon
           size={16}
           className={cn("mt-0.5 flex-none", plugin.enabled ? "text-blue" : "text-line")}
         />
@@ -171,6 +409,31 @@ function Row({
         </div>
       )}
 
+      {(manifest.contributes?.settings?.length ?? 0) > 0 && (
+        <div className="ml-7 flex flex-col gap-3 border-t border-hairline pt-3">
+          {manifest.contributes?.settings?.map((setting) =>
+            setting.type === "secret" && onSetSecret && onClearSecret ? (
+              <SecretSettingControl
+                key={`${setting.id}:${settings?.secrets[setting.id] ?? false}`}
+                pluginId={manifest.id}
+                setting={setting}
+                configured={settings?.secrets[setting.id] ?? false}
+                onSave={onSetSecret}
+                onClear={onClearSecret}
+              />
+            ) : setting.type !== "secret" && onSetSetting ? (
+              <OrdinarySettingControl
+                key={`${setting.id}:${String(settings?.values[setting.id] ?? "")}`}
+                pluginId={manifest.id}
+                setting={setting}
+                value={settings?.values[setting.id] ?? null}
+                onSave={onSetSetting}
+              />
+            ) : null
+          )}
+        </div>
+      )}
+
       <div className="ml-7 flex items-center gap-3 text-[11.5px]">
         <button
           type="button"
@@ -217,6 +480,7 @@ function Row({
 export function PluginsSettings({
   catalog,
   loadErrors = [],
+  pluginIcons = {},
   actionError = null,
   onDismissActionError,
   onSetEnabled,
@@ -224,7 +488,11 @@ export function PluginsSettings({
   onReveal,
   onInstallFromFolder,
   authSessions = [],
-  onRevokeAuth
+  onRevokeAuth,
+  settings = {},
+  onSetSetting,
+  onSetSecret,
+  onClearSecret
 }: PluginsSettingsProps) {
   const plugins = catalog?.plugins ?? []
   const undecodable = catalog?.failed ?? []
@@ -302,9 +570,14 @@ export function PluginsSettings({
               key={plugin.manifest.id}
               plugin={plugin}
               loadError={errorFor.get(plugin.manifest.id)}
+              pluginIcon={pluginIcons[plugin.manifest.id]}
               onSetEnabled={onSetEnabled}
               onUninstall={onUninstall}
               onReveal={onReveal}
+              settings={settings[plugin.manifest.id]}
+              onSetSetting={onSetSetting}
+              onSetSecret={onSetSecret}
+              onClearSecret={onClearSecret}
             />
           ))}
         </ul>

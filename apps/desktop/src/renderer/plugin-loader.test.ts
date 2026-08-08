@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest"
 import * as Icons from "lucide-react"
-import type { LoadedPlugin } from "@jingler/core"
-import { loadPluginUi, loadPlugins, pluginModuleUrl, resolveIcon } from "./plugin-loader.js"
+import type { LoadedPlugin, TabVisibility } from "@jingler/core"
+import {
+  loadPluginUi,
+  loadPlugins,
+  pluginAssetUrl,
+  pluginModuleUrl,
+  resolveIcon
+} from "./plugin-loader.js"
 
 /**
  * The loader's job is not loading — it is refusing, precisely.
@@ -43,6 +49,25 @@ describe("pluginModuleUrl", () => {
 
   it("tolerates a leading ./ in the manifest's ui path", () => {
     expect(pluginModuleUrl(plugin({ ui: "./dist/ui.js" }))).toContain("hello/dist/ui.js")
+  })
+})
+
+describe("pluginAssetUrl", () => {
+  it("addresses a relative SVG through the owning plugin's confined scheme", () => {
+    expect(pluginAssetUrl(plugin(), "dist/assets/linear mark.svg")).toBe(
+      "jingler-plugin://hello/dist/assets/linear%20mark.svg?v=1.0.0"
+    )
+  })
+
+  it.each([
+    "https://example.com/linear.svg",
+    "/tmp/linear.svg",
+    "../linear.svg",
+    "dist/../../linear.svg",
+    "%2e%2e/linear.svg",
+    "dist/linear.png"
+  ])("refuses remote, escaping, absolute, or non-SVG artwork: %s", (asset) => {
+    expect(pluginAssetUrl(plugin(), asset)).toBeNull()
   })
 })
 
@@ -180,7 +205,7 @@ describe("loadPluginUi", () => {
   })
 
   describe("manifest visibility maps to a predicate", () => {
-    const withWhen = async (when: string) => {
+    const withWhen = async (when: TabVisibility) => {
       const result = await loadPluginUi(
         plugin({
           contributes: { tabs: [{ id: "hello.greeting", label: "Hello", when }] }
@@ -209,7 +234,41 @@ describe("loadPluginUi", () => {
     it("hasIssue", async () => {
       const when = await withWhen("hasIssue")
       expect(when(session({ issueNumber: 9 }))).toBe(true)
+      expect(
+        when(
+          session({
+            linkedIssue: {
+              providerId: "linear",
+              id: "issue-1",
+              identifier: "ENG-1",
+              url: "https://linear.app/acme/issue/ENG-1",
+              title: "Provider-neutral issue",
+              labels: []
+            }
+          })
+        )
+      ).toBe(true)
       expect(when(session())).toBe(false)
+    })
+
+    it("matches only the linked provider and optionally includes unlinked sessions", async () => {
+      const github = await withWhen({ issueProvider: "github" })
+      const linear = await withWhen({ issueProvider: "linear", includeUnlinked: true })
+      const githubSession = session({
+        linkedIssue: {
+          providerId: "github",
+          id: "9",
+          identifier: "#9",
+          url: "https://github.com/acme/widget/issues/9",
+          title: "Legacy-compatible issue",
+          labels: []
+        }
+      })
+
+      expect(github(githubSession)).toBe(true)
+      expect(linear(githubSession)).toBe(false)
+      expect(github(session())).toBe(false)
+      expect(linear(session())).toBe(true)
     })
 
     it("defaults to always", async () => {
@@ -253,7 +312,6 @@ describe("panes", () => {
 describe("declarations this build cannot honour", () => {
   it.each([
     ["keybindings", { keybindings: [{ command: "hello.greeting", key: "ctrl+shift+h" }] }],
-    ["settings", { settings: [{ id: "hello.opt", label: "Opt", type: "boolean" }] }],
     [
       "authenticationProviders",
       { authenticationProviders: [{ id: "hello.gh", label: "GitHub" }] }
@@ -271,6 +329,47 @@ describe("declarations this build cannot honour", () => {
     if (result.ok) return
     expect(result.error.message).toContain(name)
     expect(result.error.message).toContain("declared but not honoured")
+  })
+
+  it("loads a manifest that declares generated settings", async () => {
+    const result = await loadPluginUi(
+      plugin({
+        contributes: {
+          tabs: [{ id: "hello.greeting", label: "Hello" }],
+          settings: [
+            {
+              id: "hello.api-key",
+              label: "Personal API key",
+              type: "secret",
+              placeholder: "key_…"
+            }
+          ]
+        }
+      } as Partial<LoadedPlugin["manifest"]>),
+      async () => ({ default: { views: { "hello.greeting": View } } })
+    )
+
+    expect(result.ok).toBe(true)
+  })
+
+  it("loads a host-backed issue provider and refuses one with no main entry", async () => {
+    const contribution = { issueProviders: [{ id: "linear", label: "Linear" }] }
+    const valid = await loadPluginUi(
+      plugin({ main: "dist/main.js", contributes: contribution }),
+      async () => {
+        throw new Error("host-only providers do not import renderer code")
+      }
+    )
+    expect(valid.ok).toBe(true)
+
+    const missingHost = await loadPluginUi(
+      plugin({ ui: undefined, contributes: contribution }),
+      async () => ({ default: { views: {} } })
+    )
+    expect(missingHost.ok).toBe(false)
+    if (missingHost.ok) return
+    expect(missingHost.error.message).toContain("issue provider")
+    expect(missingHost.error.message).toContain("no `main` entry")
   })
 
   it("fails loudly on capabilities.untrustedRepos, because it is a safety claim", async () => {

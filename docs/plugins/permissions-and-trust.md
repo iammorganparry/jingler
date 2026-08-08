@@ -30,6 +30,7 @@ about what each one buys is more useful than a reassuring summary.
 | Path confinement + `realpath` | The protocol handler from serving files outside the plugins root, including via symlink |
 | Lazy activation | Your startup time, and your CPU. Not your data |
 | Consent-gated credentials | **This one is real.** See below |
+| Secret settings | Keeps stored values out of renderer state and readable plugin JSON; the owning host resolves them |
 
 The honest summary: the process boundary protects *Jingler* from plugins, and
 the credential boundary protects *your accounts* from plugins. Neither protects
@@ -86,6 +87,20 @@ A granted token lives in the extension host. `AuthSessionInfo` — the shape eve
 `Plugins.*` RPC returns — has no token field at all, so there is no route by
 which a log line, a crash report or a devtools inspection in the renderer can
 leak one.
+
+### Secret settings never reach the renderer
+
+Manifest settings with `type: "secret"` follow the same renderer boundary. The
+generated control can set, replace or remove a value, but reads back only a
+configured boolean. Ciphertext is stored in a dedicated plugin-namespaced
+document, separate from ordinary plugin storage and from Jingler's own bearer
+tokens. Only the owning host context can call
+`ctx.settings.getSecret("plugin-id.setting-id")`; uninstall clears that
+plugin's namespace.
+
+This is a supported-API boundary, not a sandbox around hostile Node code. Do not
+copy the returned value into `ctx.storage`, return it from a command, log it or
+include it in an error.
 
 ### GitHub credentials
 

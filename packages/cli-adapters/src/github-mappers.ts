@@ -365,15 +365,25 @@ export const mapPrSummary = (raw: unknown): PrSummary => {
 export const mapIssueSummary = (raw: unknown): IssueSummary => {
   const issue = jsonRecord(raw)
   const author = jsonRecord(issue.author ?? issue.user)
+  const number = integer(issue.number) ?? 0
+  const actor = {
+    id: text(author.id) ?? text(author.login) ?? "unknown",
+    name: text(author.login) ?? "unknown",
+    avatarUrl: avatarOf(author)
+  }
   return {
-    number: integer(issue.number) ?? 0,
+    providerId: "github",
+    id: String(number),
+    identifier: `#${number}`,
     title: text(issue.title) ?? "",
     url: text(field(issue, "url", "html_url")) ?? "",
     body: text(issue.body) ?? "",
     labels: labelsOf(issue.labels),
-    author: { login: text(author.login) ?? "unknown", avatarUrl: avatarOf(author) },
+    state: text(issue.state)?.toUpperCase() === "CLOSED" ? "closed" : "open",
+    author: actor,
     assignees: rows(issue.assignees).map((assignee) => ({
-      login: text(assignee.login) ?? "unknown",
+      id: text(assignee.id) ?? text(assignee.login) ?? "unknown",
+      name: text(assignee.login) ?? "unknown",
       avatarUrl: avatarOf(assignee)
     })),
     updatedAt: text(field(issue, "updatedAt", "updated_at")) ?? ""
@@ -383,23 +393,39 @@ export const mapIssueSummary = (raw: unknown): IssueSummary => {
 export const mapIssue = (raw: unknown): Issue => {
   const issue = jsonRecord(raw)
   const author = jsonRecord(issue.author ?? issue.user)
+  const number = integer(issue.number) ?? 0
   return {
-    number: integer(issue.number) ?? 0,
+    providerId: "github",
+    id: String(number),
+    identifier: `#${number}`,
     title: text(issue.title) ?? "",
     url: text(field(issue, "url", "html_url")) ?? "",
     state: text(issue.state)?.toUpperCase() === "CLOSED" ? "closed" : "open",
     body: text(issue.body) ?? "",
-    author: { login: text(author.login) ?? "unknown", avatarUrl: avatarOf(author) },
+    author: {
+      id: text(author.id) ?? text(author.login) ?? "unknown",
+      name: text(author.login) ?? "unknown",
+      avatarUrl: avatarOf(author)
+    },
     assignees: rows(issue.assignees).map((assignee) => ({
-      login: text(assignee.login) ?? "unknown",
+      id: text(assignee.id) ?? text(assignee.login) ?? "unknown",
+      name: text(assignee.login) ?? "unknown",
       avatarUrl: avatarOf(assignee)
     })),
     labels: labelsOf(issue.labels),
+    updatedAt: text(field(issue, "updatedAt", "updated_at")) ?? "",
     createdAt: text(field(issue, "createdAt", "created_at")) ?? "",
     comments: rows(issue.comments).map((comment) => {
       const commentAuthor = jsonRecord(comment.author ?? comment.user)
       return {
-        author: { login: text(commentAuthor.login) ?? "unknown", avatarUrl: avatarOf(commentAuthor) },
+        id:
+          text(comment.id) ??
+          String(integer(comment.id) ?? text(field(comment, "createdAt", "created_at")) ?? "unknown"),
+        author: {
+          id: text(commentAuthor.id) ?? text(commentAuthor.login) ?? "unknown",
+          name: text(commentAuthor.login) ?? "unknown",
+          avatarUrl: avatarOf(commentAuthor)
+        },
         body: text(comment.body) ?? "",
         createdAt: text(field(comment, "createdAt", "created_at")) ?? ""
       }

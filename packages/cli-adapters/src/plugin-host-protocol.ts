@@ -60,6 +60,8 @@ export type ToHostMessage =
       readonly entry: string
       /** Command ids the manifest declares, so the host can reject undeclared ones. */
       readonly declaredCommands: ReadonlyArray<string>
+      /** Issue-provider ids the manifest declares, so registration is enforceable. */
+      readonly declaredIssueProviders: ReadonlyArray<string>
     }
   | { readonly kind: "deactivate"; readonly requestId: string; readonly pluginId: string }
   | {
@@ -68,6 +70,14 @@ export type ToHostMessage =
       readonly pluginId: string
       readonly commandId: string
       readonly arg?: unknown
+    }
+  | {
+      readonly kind: "issue-provider-invoke"
+      readonly requestId: string
+      readonly pluginId: string
+      readonly providerId: string
+      readonly method: IssueProviderMethod
+      readonly input: unknown
     }
   /** A reply to something the HOST asked main for. */
   | {
@@ -90,6 +100,13 @@ export type FromHostMessage =
   | { readonly kind: "deactivated"; readonly requestId: string; readonly pluginId: string }
   | {
       readonly kind: "invoke-result"
+      readonly requestId: string
+      readonly ok: boolean
+      readonly value?: unknown
+      readonly message?: string
+    }
+  | {
+      readonly kind: "issue-provider-result"
       readonly requestId: string
       readonly ok: boolean
       readonly value?: unknown
@@ -131,6 +148,7 @@ export type HostOp =
   | "storage.set"
   | "storage.delete"
   | "storage.keys"
+  | "settings.getSecret"
   | "exec"
   | "auth.getSession"
 
@@ -155,6 +173,13 @@ export interface AuthSessionRequestPayload {
   readonly scopes: ReadonlyArray<string>
   readonly createIfNone?: boolean
 }
+
+/** Operations every manifest-declared issue provider must implement. */
+export type IssueProviderMethod =
+  | "listIssues"
+  | "getIssue"
+  | "createIssue"
+  | "addComment"
 
 /** The channel name the utilityProcess uses. One channel, tagged messages. */
 export const PLUGIN_HOST_CHANNEL = "jingler/plugin-host"

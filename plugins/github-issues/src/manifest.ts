@@ -42,7 +42,7 @@ export const manifest = defineManifest({
         // Sorts where the built-in Issue tab used to, so the migration is
         // invisible to anyone who was already using it.
         order: 10,
-        when: "hasIssue"
+        when: { issueProvider: "github" }
       }
     ],
     commands: [

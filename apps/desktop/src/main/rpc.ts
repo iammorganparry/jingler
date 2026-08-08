@@ -52,7 +52,10 @@ import {
   METERED_ENV_KEYS,
   PlanStore,
   PluginRegistry,
+  PluginSecretStore,
+  type PluginSecretStoreUnavailable,
   PluginHost,
+  type PluginHostRuntime,
   PluginAuth,
   planReviewPost,
   retitleSession,
@@ -86,6 +89,10 @@ import {
   defaultModeFor,
   GitHubApiError,
   GitError,
+  IssueComment,
+  IssueDetail,
+  IssueSummary,
+  issueReferenceOf,
   parsePlanThreadReply,
   PlanConflictError,
   PlanPersistenceError,
@@ -119,7 +126,6 @@ import type {
   CreateSessionFromPrInput,
   CreateSessionInput,
   IssueAutomations,
-  IssueSummary,
   Message,
   PlanCommentMentionDelivery,
   PlanCommentMessageDeliveryState,
@@ -128,6 +134,10 @@ import type {
   PlanParticipant,
   PlanStageAssignment,
   PluginCatalog,
+  LoadedPlugin,
+  PluginSettingValue,
+  PluginSettingsSnapshot,
+  SettingContribution,
   PrMergeMethod,
   PublishCheckpoint,
   ProviderConfig,
@@ -2395,14 +2405,18 @@ export const removeRemoteSessionMirror = <A, E1, R1, E2, R2>(
 export const linkIssue = (input: {
   sessionId: string;
   issue: IssueSummary;
-  automations: IssueAutomations;
+  automations?: IssueAutomations;
 }) =>
   Effect.gen(function* () {
     yield* SessionStore.setIssue(input.sessionId, {
-      number: input.issue.number,
-      url: input.issue.url,
-      title: input.issue.title,
-      labels: input.issue.labels.map((l) => ({ name: l.name, color: l.color })),
+      reference: {
+        providerId: input.issue.providerId,
+        id: input.issue.id,
+        identifier: input.issue.identifier,
+        url: input.issue.url,
+        title: input.issue.title,
+        labels: input.issue.labels,
+      },
       automations: input.automations,
     });
     return yield* SessionStore.get(input.sessionId);
@@ -2422,7 +2436,9 @@ export const unlinkIssue = (sessionId: string) =>
 export const githubCloseIssue = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
-    if (!session?.worktreePath || session.issueNumber == null) {
+    const issue = session ? issueReferenceOf(session) : undefined;
+    const issueNumber = issue?.providerId === "github" ? Number(issue.id) : Number.NaN;
+    if (!session?.worktreePath || !Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
       return yield* Effect.fail(
         new GitHubApiError({
           reason: "validation",
@@ -2430,17 +2446,19 @@ export const githubCloseIssue = (sessionId: string) =>
         }),
       );
     }
-    yield* GitHubApi.closeIssue(session.worktreePath, session.issueNumber);
+    yield* GitHubApi.closeIssue(session.worktreePath, issueNumber);
   });
 
 /** `Github.issue` handler — the full linked-issue view model for the Issue tab. */
 export const githubIssue = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
-    if (!session?.worktreePath || session.issueNumber == null) return null;
+    const issue = session ? issueReferenceOf(session) : undefined;
+    const issueNumber = issue?.providerId === "github" ? Number(issue.id) : Number.NaN;
+    if (!session?.worktreePath || !Number.isSafeInteger(issueNumber) || issueNumber <= 0) return null;
     return yield* GitHubApi.issueView(
       session.worktreePath,
-      session.issueNumber,
+      issueNumber,
     );
   });
 
@@ -4031,7 +4049,7 @@ const deactivateQuietly = (pluginId: string) =>
     Effect.catchAll(() => Effect.void),
   );
 
-const pluginById = (pluginId: string) =>
+const installedPluginById = (pluginId: string) =>
   Effect.flatMap(cachedCatalog, (catalog) => {
     const found = catalog.plugins.find((p) => p.manifest.id === pluginId);
     if (!found) {
@@ -4042,31 +4060,90 @@ const pluginById = (pluginId: string) =>
         }),
       );
     }
-    if (!found.enabled) {
+    return Effect.succeed(found);
+  });
+
+const enabledPluginById = (pluginId: string) =>
+  Effect.flatMap(installedPluginById(pluginId), (plugin) => {
+    if (!plugin.enabled) {
       // A disabled plugin runs no code, and that has to include commands the
       // renderer still remembers — otherwise the Settings switch is advisory.
       return Effect.fail(
         new PluginError({ pluginId, reason: `"${pluginId}" is disabled` }),
       );
     }
-    return Effect.succeed(found);
+    return Effect.succeed(plugin);
   });
 
-/**
- * The uniform refusal for anything that needs a running extension host.
- *
- * Phrased as a capability the app does not have YET rather than as a fault of
- * the plugin, because that is what the operator will read in a toast. It also
- * keeps every unimplemented plugin path failing identically, so the renderer's
- * error handling is written against one shape instead of four.
- */
-const notYetHosted = (pluginId: string, verb: string) =>
-  Effect.fail(
-    new PluginError({
-      pluginId,
-      reason: `Cannot ${verb} "${pluginId}" — the plugin extension host is not running in this build.`,
-    }),
+const declaredSetting = (pluginId: string, settingId: string) =>
+  Effect.flatMap(installedPluginById(pluginId), (plugin) => {
+    const setting = (plugin.manifest.contributes?.settings ?? []).find(
+      (candidate) => candidate.id === settingId,
+    );
+    return setting
+      ? Effect.succeed(setting)
+      : Effect.fail(
+          new PluginError({
+            pluginId,
+            reason: `"${settingId}" is not a setting declared by this plugin`,
+          }),
+        );
+  });
+
+const declaredSecretSetting = (pluginId: string, settingId: string) =>
+  Effect.flatMap(declaredSetting(pluginId, settingId), (setting) =>
+    setting.type === "secret"
+      ? Effect.succeed(setting)
+      : Effect.fail(
+          new PluginError({
+            pluginId,
+            reason: `"${settingId}" is not a secret setting`,
+          }),
+        ),
   );
+
+/** Reserved inside ordinary plugin storage; plugin UI may read it, never secrets. */
+const PLUGIN_SETTING_STORAGE_PREFIX = "$settings/";
+const pluginSettingStorageKey = (settingId: string) =>
+  `${PLUGIN_SETTING_STORAGE_PREFIX}${settingId}`;
+
+const settingValidationFailure = (
+  setting: SettingContribution,
+  value: unknown,
+): string | null => {
+  const wrongType =
+    (setting.type === "number" && typeof value !== "number") ||
+    (setting.type === "boolean" && typeof value !== "boolean") ||
+    ((setting.type === "string" ||
+      setting.type === "enum" ||
+      setting.type === "secret") &&
+      typeof value !== "string");
+  if (wrongType) return `"${setting.id}" expects a ${setting.type} value`;
+
+  if (
+    setting.type === "enum" &&
+    typeof value === "string" &&
+    setting.options !== undefined &&
+    !setting.options.includes(value)
+  ) {
+    return `"${setting.id}" must be one of its declared options`;
+  }
+
+  if (
+    setting.validation &&
+    typeof value === "string" &&
+    !new RegExp(setting.validation.pattern).test(value)
+  ) {
+    return setting.validation.message ?? `"${setting.id}" has an invalid value`;
+  }
+  return null;
+};
+
+const validPersistedSettingValue = (
+  setting: SettingContribution,
+  value: unknown,
+): value is PluginSettingValue =>
+  setting.type !== "secret" && settingValidationFailure(setting, value) === null;
 
 /** Where one plugin's private key/value blob lives. Confined by construction. */
 const pluginStorageFile = (pluginId: string) =>
@@ -4200,6 +4277,294 @@ export const pluginStorageKeys = (pluginId: string) =>
     Effect.map((all) => Object.keys(all)),
     Effect.orElseSucceed(() => [] as Array<string>),
   );
+
+/** Remove generated ordinary settings while preserving unrelated plugin data. */
+const clearPluginSettings = (pluginId: string) =>
+  withStorageLock(
+    pluginId,
+    Effect.flatMap(pluginStorageRead(pluginId), (all) => {
+      const remaining = Object.fromEntries(
+        Object.entries(all).filter(
+          ([key]) => !key.startsWith(PLUGIN_SETTING_STORAGE_PREFIX),
+        ),
+      );
+      return Object.keys(remaining).length === Object.keys(all).length
+        ? Effect.void
+        : pluginStorageWrite(pluginId, remaining);
+    }),
+  );
+
+const pluginSettingsGet = (pluginId: string) =>
+  Effect.gen(function* () {
+    const plugin = yield* installedPluginById(pluginId);
+    const settings = plugin.manifest.contributes?.settings ?? [];
+    const pluginSecrets = yield* PluginSecretStore;
+
+    const values = yield* Effect.forEach(
+      settings.filter((setting) => setting.type !== "secret"),
+      (setting) =>
+        Effect.map(
+          pluginStorageGet(pluginId, pluginSettingStorageKey(setting.id)),
+          (stored): readonly [string, PluginSettingValue | null] => {
+            if (validPersistedSettingValue(setting, stored)) {
+              return [setting.id, stored];
+            }
+            return validPersistedSettingValue(setting, setting.default)
+              ? [setting.id, setting.default]
+              : [setting.id, null];
+          },
+        ),
+      { concurrency: "unbounded" },
+    );
+    const secrets = yield* Effect.forEach(
+      settings.filter((setting) => setting.type === "secret"),
+      (setting) =>
+        Effect.map(
+          pluginSecrets.status(pluginId, setting.id),
+          (configured): readonly [string, boolean] => [setting.id, configured],
+        ),
+      { concurrency: "unbounded" },
+    );
+
+    return {
+      values: Object.fromEntries(values),
+      secrets: Object.fromEntries(secrets),
+    } satisfies PluginSettingsSnapshot;
+  });
+
+const pluginSettingSet = (
+  pluginId: string,
+  settingId: string,
+  value: PluginSettingValue,
+) =>
+  Effect.gen(function* () {
+    const setting = yield* declaredSetting(pluginId, settingId);
+    if (setting.type === "secret") {
+      return yield* Effect.fail(
+        new PluginError({
+          pluginId,
+          reason: `"${settingId}" is secret and must be saved through secure settings`,
+        }),
+      );
+    }
+    const failure = settingValidationFailure(setting, value);
+    if (failure) {
+      return yield* Effect.fail(new PluginError({ pluginId, reason: failure }));
+    }
+    yield* pluginStorageSet(pluginId, pluginSettingStorageKey(settingId), value);
+  });
+
+const mapPluginSecretStoreError =
+  (
+    pluginId: string,
+    reason: (cause: PluginSecretStoreUnavailable) => string,
+  ) =>
+  <A, R>(effect: Effect.Effect<A, PluginSecretStoreUnavailable, R>) =>
+    effect.pipe(
+      Effect.mapError(
+        (cause) =>
+          new PluginError({ pluginId, reason: reason(cause), cause }),
+      ),
+    );
+
+const pluginSecretSet = (pluginId: string, settingId: string, value: string) =>
+  Effect.gen(function* () {
+    const setting = yield* declaredSecretSetting(pluginId, settingId);
+    if (value.length === 0) {
+      return yield* Effect.fail(
+        new PluginError({
+          pluginId,
+          reason: `"${settingId}" cannot be empty; use Remove to clear it`,
+        }),
+      );
+    }
+    const failure = settingValidationFailure(setting, value);
+    if (failure) {
+      return yield* Effect.fail(new PluginError({ pluginId, reason: failure }));
+    }
+    const pluginSecrets = yield* PluginSecretStore;
+    yield* pluginSecrets.set(pluginId, settingId, value).pipe(
+      mapPluginSecretStoreError(
+        pluginId,
+        (cause) =>
+          `Could not save "${setting.label}" securely: ${cause.message}`,
+      ),
+    );
+  });
+
+const pluginSecretClear = (pluginId: string, settingId: string) =>
+  Effect.gen(function* () {
+    const setting = yield* declaredSecretSetting(pluginId, settingId);
+    const pluginSecrets = yield* PluginSecretStore;
+    yield* pluginSecrets.clear(pluginId, settingId).pipe(
+      mapPluginSecretStoreError(
+        pluginId,
+        (cause) => `Could not remove "${setting.label}": ${cause.message}`,
+      ),
+    );
+  });
+
+/**
+ * Host-only secret read. The caller supplies the plugin id from its bound host
+ * context; this repeats manifest validation before touching the secret store so
+ * a plugin cannot use the supported API to read another plugin's namespace or
+ * an undeclared key.
+ */
+export const pluginSecretGetForHost = (pluginId: string, settingId: string) =>
+  Effect.gen(function* () {
+    yield* declaredSecretSetting(pluginId, settingId);
+    const pluginSecrets = yield* PluginSecretStore;
+    return yield* pluginSecrets.get(pluginId, settingId);
+  });
+
+const clearPluginConfiguration = (pluginId: string) =>
+  Effect.gen(function* () {
+    yield* clearPluginSettings(pluginId).pipe(
+      Effect.mapError(
+        (cause) =>
+          new PluginError({
+            pluginId,
+            reason: `The plugin remains installed because its ordinary settings could not be cleared: ${cause.reason}`,
+            cause,
+          }),
+      ),
+    );
+    const pluginSecrets = yield* PluginSecretStore;
+    yield* pluginSecrets.clearPlugin(pluginId).pipe(
+      mapPluginSecretStoreError(
+        pluginId,
+        (cause) =>
+          `The plugin remains installed because its encrypted settings could not be cleared: ${cause.message}`,
+      ),
+    );
+  });
+
+export const uninstallPlugin = (pluginId: string) =>
+  Effect.gen(function* () {
+    // Validate the target without mutating it. Cleanup must not revoke a
+    // bundled plugin's credentials only to have the registry refuse deletion.
+    const paths = yield* AppPaths;
+    const pluginDir = yield* PluginRegistry.dirFor(pluginId);
+    if (dirname(resolve(pluginDir)) !== resolve(paths.pluginsDir)) {
+      return yield* Effect.fail(
+        new PluginError({
+          pluginId,
+          reason:
+            "That plugin ships with Jingler and cannot be uninstalled. Disable it instead.",
+        }),
+      );
+    }
+    // Stop it BEFORE touching credentials or its directory. A host half whose
+    // `deactivate` touches its own files should still find them there.
+    yield* deactivateQuietly(pluginId);
+    yield* PluginAuth.revokeAll(pluginId).pipe(
+      Effect.mapError(
+        (cause) =>
+          new PluginError({
+            pluginId,
+            reason: `The plugin remains installed because its authorization grants could not be revoked: ${cause.reason}`,
+            cause,
+          }),
+      ),
+    );
+    yield* clearPluginConfiguration(pluginId);
+    // Directory removal is deliberately last. If credential cleanup fails,
+    // the plugin stays visible in Settings so the operator can retry rather
+    // than leaving secrets orphaned behind an uninstalled plugin id.
+    yield* PluginRegistry.uninstall(pluginId);
+  });
+
+const pluginHostOperation = <A>(
+  pluginId: string,
+  run: (host: PluginHostRuntime, plugin: LoadedPlugin) => Promise<A>,
+) =>
+  Effect.gen(function* () {
+    const host = yield* PluginHost.get();
+    const plugin = yield* enabledPluginById(pluginId);
+    return yield* Effect.tryPromise({
+      try: () => run(host, plugin),
+      catch: (cause) =>
+        cause instanceof PluginError
+          ? cause
+          : new PluginError({ pluginId, reason: String(cause) }),
+    });
+  });
+
+const issueProviderDescriptors = () =>
+  Effect.map(cachedCatalog, (catalog) =>
+    catalog.plugins
+      .filter((plugin) => plugin.enabled && plugin.manifest.main !== undefined)
+      .flatMap((plugin) =>
+        (plugin.manifest.contributes?.issueProviders ?? []).map((provider) => ({
+          pluginId: plugin.manifest.id,
+          id: provider.id,
+          label: provider.label,
+        })),
+      ),
+  );
+
+const enabledIssueProvider = (providerId: string) =>
+  Effect.flatMap(cachedCatalog, (catalog) => {
+    const matches = catalog.plugins.flatMap((plugin) =>
+      plugin.enabled && plugin.manifest.main !== undefined
+        ? (plugin.manifest.contributes?.issueProviders ?? [])
+            .filter((provider) => provider.id === providerId)
+            .map((provider) => ({ plugin, provider }))
+        : [],
+    );
+    if (matches.length === 1) return Effect.succeed(matches[0]!);
+    return Effect.fail(
+      new PluginError({
+        pluginId: matches[0]?.plugin.manifest.id ?? "<issue-provider>",
+        reason:
+          matches.length === 0
+            ? `no enabled issue provider with id "${providerId}" is installed`
+            : `more than one enabled plugin declares the issue provider "${providerId}"`,
+      }),
+    );
+  });
+
+/** Return the first provider identity that does not belong to the routed provider. */
+export const mismatchedIssueProviderId = (
+  providerId: string,
+  returnedProviderIds: ReadonlyArray<string>,
+): string | undefined => returnedProviderIds.find((id) => id !== providerId);
+
+const issueProviderOperation = <A, I>(
+  providerId: string,
+  method: "listIssues" | "getIssue" | "createIssue" | "addComment",
+  input: unknown,
+  schema: Schema.Schema<A, I>,
+  providerIdsOf?: (value: A) => ReadonlyArray<string>,
+) =>
+  Effect.gen(function* () {
+    const { plugin } = yield* enabledIssueProvider(providerId);
+    const raw = yield* pluginHostOperation(plugin.manifest.id, (host, loaded) =>
+      host.invokeIssueProvider(loaded, providerId, method, input),
+    );
+    const decoded = yield* Schema.decodeUnknown(schema)(raw).pipe(
+      Effect.mapError(
+        (cause) =>
+          new PluginError({
+            pluginId: plugin.manifest.id,
+            reason: `issue provider "${providerId}" returned invalid normalized data: ${String(cause)}`,
+          }),
+      ),
+    );
+    const mismatched = mismatchedIssueProviderId(
+      providerId,
+      providerIdsOf?.(decoded) ?? [],
+    );
+    if (mismatched) {
+      return yield* Effect.fail(
+        new PluginError({
+          pluginId: plugin.manifest.id,
+          reason: `issue provider "${providerId}" returned data owned by "${mismatched}"`,
+        }),
+      );
+    }
+    return decoded;
+  });
 
 /**
  * Handlers for every procedure in the group. Each one delegates straight to an
@@ -5164,13 +5529,8 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
     ),
 
   // ── Plugins ────────────────────────────────────────────────────────────────
-  // The registry half is live; the extension-host half is not. Everything that
-  // needs a running plugin process — command dispatch, the event stream, auth
-  // grants — is stubbed HERE rather than left out of the layer, because
-  // `toLayer` demands a total handler map: an omission is a compile error, not
-  // a missing feature. Each stub fails with the same `PluginError` the real
-  // implementation will, so the renderer's error path is exercised from day one
-  // instead of being written blind against a handler that never failed.
+  // Registry, settings and extension-host operations share this handler group;
+  // `toLayer` keeps the RPC contract exhaustive at compile time.
 
   "Plugins.list": () => PluginRegistry.list(),
 
@@ -5181,7 +5541,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
     Stream.unwrap(
       Effect.map(PluginRegistry, (p) =>
         // Every emission means the directory changed, so the resolution cache
-        // `pluginById` keeps is stale by definition.
+        // used by plugin resolution is stale by definition.
         p.watch().pipe(Stream.tap(() => Effect.sync(invalidatePluginCatalog))),
       ),
     ),
@@ -5211,15 +5571,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
    * gesture there is, and the one they would most expect to stick.
    */
   "Plugins.uninstall": ({ pluginId }) =>
-    Effect.gen(function* () {
-      // Stop it BEFORE deleting its directory. A host half whose `deactivate`
-      // touches its own files should find them there, and an uninstall that
-      // leaves code running against a directory that no longer exists is a
-      // stranger failure than one that stops it first.
-      yield* deactivateQuietly(pluginId);
-      yield* PluginRegistry.uninstall(pluginId);
-      yield* PluginAuth.revokeAll(pluginId);
-    }),
+    uninstallPlugin(pluginId),
 
   "Plugins.installFromFolder": ({ sourcePath }) =>
     PluginRegistry.installFromFolder(sourcePath),
@@ -5262,6 +5614,64 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
 
   "Plugins.storageKeys": ({ pluginId }) => pluginStorageKeys(pluginId),
 
+  "Plugins.settingsGet": ({ pluginId }) => pluginSettingsGet(pluginId),
+
+  "Plugins.settingSet": ({ pluginId, settingId, value }) =>
+    pluginSettingSet(pluginId, settingId, value),
+
+  "Plugins.secretSet": ({ pluginId, settingId, value }) =>
+    pluginSecretSet(pluginId, settingId, value),
+
+  "Plugins.secretClear": ({ pluginId, settingId }) =>
+    pluginSecretClear(pluginId, settingId),
+
+  "Plugins.issueProviders": () => issueProviderDescriptors(),
+
+  "Plugins.issueProviderList": ({ providerId, repository, search, mine }) =>
+    issueProviderOperation(
+      providerId,
+      "listIssues",
+      { repository, search, mine },
+      Schema.Array(IssueSummary),
+      (issues) => issues.map((issue) => issue.providerId),
+    ),
+
+  "Plugins.issueProviderGet": ({ providerId, repository, issueId }) =>
+    issueProviderOperation(
+      providerId,
+      "getIssue",
+      { repository, issueId },
+      Schema.NullOr(IssueDetail),
+      (issue) => (issue ? [issue.providerId] : []),
+    ),
+
+  "Plugins.issueProviderCreate": ({
+    providerId,
+    repository,
+    title,
+    body,
+  }) =>
+    issueProviderOperation(
+      providerId,
+      "createIssue",
+      { repository, title, body },
+      IssueDetail,
+      (issue) => [issue.providerId],
+    ),
+
+  "Plugins.issueProviderAddComment": ({
+    providerId,
+    repository,
+    issueId,
+    body,
+  }) =>
+    issueProviderOperation(
+      providerId,
+      "addComment",
+      { repository, issueId, body },
+      IssueComment,
+    ),
+
   "Plugins.authSessions": () => PluginAuth.list(),
 
   // An empty stream, not a failure: the renderer subscribes at startup and must
@@ -5269,55 +5679,22 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Plugins.events": () => Stream.empty,
 
   "Plugins.invoke": ({ pluginId, commandId, arg }) =>
-    Effect.gen(function* () {
-      const host = yield* PluginHost.get();
-      const plugin = yield* pluginById(pluginId);
-      return yield* Effect.tryPromise({
-        try: () => host.invoke(plugin, commandId, arg),
-        catch: (cause) =>
-          cause instanceof PluginError
-            ? cause
-            : new PluginError({ pluginId, reason: String(cause) }),
-      });
-    }),
+    pluginHostOperation(pluginId, (host, plugin) =>
+      host.invoke(plugin, commandId, arg),
+    ),
 
   "Plugins.activate": ({ pluginId }) =>
-    Effect.gen(function* () {
-      const host = yield* PluginHost.get();
-      const plugin = yield* pluginById(pluginId);
-      // A disabled plugin must not be woken by an event. The renderer stops
-      // rendering its tabs when it is disabled, so it should not reach here — but
-      // `onStartupFinished` dispatch iterates the catalog, and "disabled" has to
-      // mean "runs no code" at every entry point rather than most of them.
-      if (!plugin.enabled) return;
-      yield* Effect.tryPromise({
-        try: () => host.activate(plugin),
-        catch: (cause) =>
-          cause instanceof PluginError
-            ? cause
-            : new PluginError({ pluginId, reason: String(cause) }),
-      });
-    }),
+    pluginHostOperation(pluginId, (host, plugin) => host.activate(plugin)),
 
   "Plugins.reload": ({ pluginId }) =>
-    Effect.gen(function* () {
-      const host = yield* PluginHost.get();
-      const plugin = yield* pluginById(pluginId);
-      yield* Effect.tryPromise({
-        try: () => host.reload(plugin),
-        catch: (cause) =>
-          cause instanceof PluginError
-            ? cause
-            : new PluginError({ pluginId, reason: String(cause) }),
-      });
-    }),
+    pluginHostOperation(pluginId, (host, plugin) => host.reload(plugin)),
   /**
    * Grant from the renderer — used by Settings to pre-authorise, and by the
    * e2e suite. The plugin-driven path goes through the extension host instead.
    */
   "Plugins.authGrant": ({ pluginId, providerId, scopes }) =>
     Effect.gen(function* () {
-      const plugin = yield* pluginById(pluginId);
+      const plugin = yield* enabledPluginById(pluginId);
       const session = yield* PluginAuth.getSession({
         pluginId,
         pluginName: plugin.manifest.name,
@@ -5537,6 +5914,7 @@ export type RpcServerRequirements =
   | PluginAuth
   | PluginHost
   | PluginRegistry
+  | PluginSecretStore
   | PreviewViewService
   | ReviewService
   | ReviewStore

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import type {
   Chat,
   ChatRole,
@@ -9,6 +10,7 @@ import type {
   GitHubFeedbackOutboxEntry,
   GitHubRelayEvent,
   IssueAutomations,
+  IssueReference,
   PermissionMode,
   ReasoningEffort,
   ReasoningSetting,
@@ -19,6 +21,7 @@ import type {
 import {
   GitHubApiError,
   GitError,
+  issueReferenceOf,
   semanticBranchProposalFromName,
   SessionNotFoundError,
   supportsPlanMode,
@@ -203,6 +206,28 @@ export const migrateRepoName = (value: unknown): unknown => {
 }
 
 /**
+ * Migrate historical GitHub aliases only when a session file is next written.
+ * Reads remain side-effect free; every ordinary mutation naturally upgrades the
+ * full document because SessionStore persists the session array atomically.
+ */
+export const migrateSessionIssue = (session: Session): Session => {
+  const linkedIssue = issueReferenceOf(session)
+  const {
+    issueNumber: _issueNumber,
+    issueUrl: _issueUrl,
+    issueTitle: _issueTitle,
+    issueLabels: _issueLabels,
+    automations,
+    ...current
+  } = session
+  return {
+    ...current,
+    ...(linkedIssue ? { linkedIssue } : {}),
+    ...(linkedIssue?.providerId === "github" && automations ? { automations } : {})
+  }
+}
+
+/**
  * The longest slug we will put on disk.
  *
  * A slug becomes a DIRECTORY NAME (`~/jingler/worktrees/<repo>/<slug>`) and a
@@ -226,6 +251,39 @@ export const taskSlug = (input: string): string =>
     // Truncation can land mid-word and leave a trailing dash; trim again so the
     // slug never ends in one.
     .replace(/-+$/g, "") || "session"
+
+/** Keep the opaque issue identity intact when a human-readable slug collides. */
+const disambiguateIssueSlug = (
+  slug: string,
+  issue: Pick<IssueReference, "providerId" | "id">
+): string => {
+  const suffix = createHash("sha256")
+    .update(issue.providerId)
+    .update("\0")
+    .update(issue.id)
+    .digest("hex")
+    .slice(0, 12)
+  const prefix = slug.slice(0, MAX_SLUG - suffix.length - 1).replace(/-+$/g, "")
+  return `${prefix || "issue"}-${suffix}`
+}
+
+const sessionBelongsToRepository = (
+  session: Session,
+  repository: { readonly path: string; readonly name: string }
+): boolean =>
+  session.repoPath === undefined
+    ? session.repo === repository.name
+    : session.repoPath === repository.path
+
+const sessionLinksIssue = (
+  session: Session,
+  repository: { readonly path: string; readonly name: string },
+  issue: Pick<IssueReference, "providerId" | "id">
+): boolean => {
+  if (!sessionBelongsToRepository(session, repository)) return false
+  const linked = issueReferenceOf(session)
+  return linked?.providerId === issue.providerId && linked.id === issue.id
+}
 
 /**
  * Publish-readiness for the live branch, including persisted sessions created
@@ -337,7 +395,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           yield* fs
             .makeDirectory(paths.root, { recursive: true })
             .pipe(Effect.mapError((cause) => new GitError({ message: "Failed to create ~/jingler", cause })))
-          const encoded = yield* Schema.encode(SessionArray)(sessions).pipe(
+          const encoded = yield* Schema.encode(SessionArray)(sessions.map(migrateSessionIssue)).pipe(
             Effect.mapError((cause) => new GitError({ message: "Failed to encode sessions", cause }))
           )
           // Write-then-RENAME, never write in place.
@@ -747,9 +805,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         })
 
       /**
-       * Create a session from a GitHub issue. Like `create` it starts DETACHED
-       * from a fresh `baseBranch` (the issue number still keys the worktree path),
-       * enables the chosen automations, and seeds `initialPrompt` from the issue
+       * Create a session from a normalized issue. Like `create` it starts DETACHED
+       * from a fresh `baseBranch` (the provider identifier keys the worktree path),
+       * retains GitHub automations when supplied, and seeds `initialPrompt` from the issue
        * title + body (the composer pre-fills it once; HITL — the user sends it).
        */
       const createFromIssue = (
@@ -772,15 +830,31 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         Effect.gen(function* () {
           const now = yield* Effect.sync(() => new Date().toISOString())
           const stamp = yield* Effect.sync(() => Date.now().toString(36))
-          const slug = `${input.issue.number}-${taskSlug(input.issue.title)}`
-          // Guard: one session per issue worktree (the slug is deterministic).
-          const worktreePath = yield* GitService.worktreePathFor(input.repoName, slug)
+          const baseSlug = taskSlug(
+            `${input.issue.providerId}-${input.issue.identifier}-${input.issue.title}`
+          )
           const prior = yield* readAll()
-          if (prior.some((s) => s.worktreePath === worktreePath)) {
+          const repository = { path: input.repoPath, name: input.repoName }
+          if (
+            prior.some((session) =>
+              sessionLinksIssue(session, repository, input.issue)
+            )
+          ) {
             return yield* Effect.fail(
               new GitError({ message: "A session already exists for this issue." })
             )
           }
+          const baseWorktreePath = yield* GitService.worktreePathFor(
+            input.repoName,
+            baseSlug
+          )
+          const slug = prior.some(
+            (session) =>
+              sessionBelongsToRepository(session, repository) &&
+              session.worktreePath === baseWorktreePath
+          )
+            ? disambiguateIssueSlug(baseSlug, input.issue)
+            : baseSlug
           const worktree = yield* GitService.createDetachedWorktree({
             repoPath: input.repoPath,
             repoName: input.repoName,
@@ -817,11 +891,17 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             cli: input.cli,
             diff: { added: 0, removed: 0 },
             prNumber: null,
-            issueNumber: input.issue.number,
-            issueUrl: input.issue.url,
-            issueTitle: input.issue.title,
-            issueLabels: input.issue.labels.map((l) => ({ name: l.name, color: l.color })),
-            automations: input.automations,
+            linkedIssue: {
+              providerId: input.issue.providerId,
+              id: input.issue.id,
+              identifier: input.issue.identifier,
+              url: input.issue.url,
+              title: input.issue.title,
+              labels: input.issue.labels
+            },
+            ...(input.issue.providerId === "github" && input.automations
+              ? { automations: input.automations }
+              : {}),
             ...(task.length > 0 ? { initialPrompt: task } : {}),
             costUsd: 0,
             tokens: 0,
@@ -1502,36 +1582,33 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const setWorktreePath = (id: string, worktreePath: string) =>
         update(id, (s) => ({ ...s, worktreePath }))
 
-      /** Link (or, with `null`, unlink) a GitHub issue on a live session. */
+      /** Link (or, with `null`, unlink) a normalized issue on a live session. */
       const setIssue = (
         id: string,
         issue: {
-          number: number
-          url: string
-          title: string
-          labels: ReadonlyArray<{ name: string; color: string | null }>
-          automations: IssueAutomations
+          reference: IssueReference
+          automations?: IssueAutomations
         } | null
       ) =>
-        update(id, (s) =>
-          issue
-            ? {
-                ...s,
-                issueNumber: issue.number,
-                issueUrl: issue.url,
-                issueTitle: issue.title,
-                issueLabels: issue.labels,
-                automations: issue.automations
-              }
-            : {
-                ...s,
-                issueNumber: undefined,
-                issueUrl: undefined,
-                issueTitle: undefined,
-                issueLabels: undefined,
-                automations: undefined
-              }
-        )
+        update(id, (s) => {
+          const {
+            issueNumber: _issueNumber,
+            issueUrl: _issueUrl,
+            issueTitle: _issueTitle,
+            issueLabels: _issueLabels,
+            automations: _automations,
+            linkedIssue: _linkedIssue,
+            ...current
+          } = s
+          if (!issue) return current
+          return {
+            ...current,
+            linkedIssue: issue.reference,
+            ...(issue.reference.providerId === "github" && issue.automations
+              ? { automations: issue.automations }
+              : {})
+          }
+        })
 
       /** Clear the one-shot `initialPrompt` once the composer has consumed it. */
       const clearInitialPrompt = (id: string) =>

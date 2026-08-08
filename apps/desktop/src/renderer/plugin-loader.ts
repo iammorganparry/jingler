@@ -29,8 +29,13 @@
  * advisory, since a module could register whatever it liked at import time.
  */
 import { createElement, type ComponentType } from "react"
-import { PLUGIN_API_VERSION } from "@jingler/core"
-import type { LoadedPlugin, Session } from "@jingler/core"
+import { issueReferenceOf, PLUGIN_API_VERSION } from "@jingler/core"
+import type {
+  LoadedPlugin,
+  PluginIcon as PluginIconDeclaration,
+  Session,
+  TabVisibility
+} from "@jingler/core"
 import { useSession, type SessionSnapshot } from "@jingler/plugin-sdk"
 import {
   PLUGIN_TAB_ORDER,
@@ -41,6 +46,7 @@ import {
 import type { LucideIcon } from "lucide-react"
 import * as Icons from "lucide-react"
 import { Boxes } from "lucide-react"
+import { createPluginAssetIcon } from "./plugin-asset-icon.js"
 
 /** What a plugin's UI module must default-export. */
 export interface PluginModule {
@@ -89,6 +95,7 @@ export const toSessionSnapshot = (session: Session): SessionSnapshot => ({
   cli: session.cli,
   prNumber: session.prNumber ?? null,
   ...(session.issueNumber != null ? { issueNumber: session.issueNumber } : {}),
+  ...(issueReferenceOf(session) ? { linkedIssue: issueReferenceOf(session) } : {}),
   ...(session.worktreePath != null ? { worktreePath: session.worktreePath } : {})
 })
 
@@ -123,6 +130,44 @@ export const resolveIcon = (name: string | undefined): LucideIcon => {
   return isComponent(found) ? (found as LucideIcon) : Boxes
 }
 
+/** Resolve only a relative SVG path; the custom protocol performs the filesystem confinement. */
+export const pluginAssetUrl = (plugin: LoadedPlugin, asset: string): string | null => {
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(asset)
+  } catch {
+    return null
+  }
+  if (
+    decoded.length === 0 ||
+    decoded.startsWith("/") ||
+    decoded.includes("\\") ||
+    decoded.includes(":") ||
+    decoded.includes("?") ||
+    decoded.includes("#") ||
+    decoded.includes("\0") ||
+    !decoded.toLowerCase().endsWith(".svg")
+  ) {
+    return null
+  }
+  const segments = decoded.replace(/^\.\//, "").split("/")
+  if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
+    return null
+  }
+  const path = segments.map(encodeURIComponent).join("/")
+  return `jingler-plugin://${plugin.manifest.id}/${path}?v=${encodeURIComponent(plugin.manifest.version)}`
+}
+
+/** Resolve either supported icon declaration, always returning a safe visible fallback. */
+export const resolvePluginIcon = (
+  plugin: LoadedPlugin,
+  icon: PluginIconDeclaration | undefined
+): LucideIcon => {
+  if (typeof icon !== "object") return resolveIcon(icon)
+  const src = pluginAssetUrl(plugin, icon.asset)
+  return src ? createPluginAssetIcon(src) : Boxes
+}
+
 /**
  * Is this value something React can render as a component?
  *
@@ -139,15 +184,23 @@ const isComponent = (value: unknown): boolean =>
 
 /** The manifest's coarse visibility literal, as a predicate over a session. */
 const visibilityPredicate = (
-  when: string | undefined
+  when: TabVisibility | undefined
 ): ((ctx: TabContext) => boolean) => {
+  if (typeof when === "object") {
+    return ({ session }) => {
+      const issue = issueReferenceOf(session)
+      return issue
+        ? issue.providerId === when.issueProvider
+        : when.includeUnlinked === true
+    }
+  }
   switch (when) {
     case "hasPr":
       return ({ session }) => session.prNumber != null
     case "hasWorktree":
       return ({ session }) => session.worktreePath != null
     case "hasIssue":
-      return ({ session }) => session.issueNumber != null
+      return ({ session }) => issueReferenceOf(session) != null
     default:
       return () => true
   }
@@ -233,7 +286,7 @@ export const loadPluginUi = async (
 
   const declaredPanes = manifest.contributes?.panes ?? []
 
-  // Four manifest fields are accepted by the schema and consumed by no code.
+  // Manifest fields accepted by the schema and consumed by no code.
   // Rather than let a plugin declare one and watch it never happen — the exact
   // "silently absent" failure this loader exists to prevent — say so at load
   // time, in Settings, where the author will see it.
@@ -248,12 +301,11 @@ export const loadPluginUi = async (
   // most carefully is the one most misled. A load error is the only honest
   // answer available until the gating exists.
   //
-  // `resolveKeybindings` and the settings form exist and are tested; what is
-  // missing is the app-level dispatch to hook them to. `registerProvider` throws
-  // for the same reason. Each entry here comes out the moment its half lands.
+  // `resolveKeybindings` exists and is tested; what is missing is the app-level
+  // dispatch to hook it up. `registerProvider` throws for the same reason. Each
+  // entry here comes out the moment its half lands.
   const unsupported = [
     (manifest.contributes?.keybindings?.length ?? 0) > 0 ? "contributes.keybindings" : null,
-    (manifest.contributes?.settings?.length ?? 0) > 0 ? "contributes.settings" : null,
     (manifest.contributes?.authenticationProviders?.length ?? 0) > 0
       ? "contributes.authenticationProviders"
       : null,
@@ -301,12 +353,13 @@ export const loadPluginUi = async (
   // started. The author sees their command listed and would reasonably conclude
   // the handler is at fault.
   const declaredCommands = manifest.contributes?.commands ?? []
-  if (!manifest.main && declaredCommands.length > 0) {
+  const declaredIssueProviders = manifest.contributes?.issueProviders ?? []
+  if (!manifest.main && (declaredCommands.length > 0 || declaredIssueProviders.length > 0)) {
     return {
       ok: false,
       error: {
         id: manifest.id,
-        message: `declares ${declaredCommands.length} command(s) but no \`main\` entry, so nothing could handle them. Add \`main: "dist/main.js"\` to the manifest.`
+        message: `declares ${declaredCommands.length} command(s) and ${declaredIssueProviders.length} issue provider(s) but no \`main\` entry, so nothing could handle them. Add \`main: "dist/main.js"\` to the manifest.`
       }
     }
   }
@@ -365,7 +418,7 @@ export const loadPluginUi = async (
     tabs.push({
       id: declared.id,
       label: declared.label,
-      icon: resolveIcon(declared.icon),
+      icon: resolvePluginIcon(plugin, declared.icon),
       order: declared.order ?? PLUGIN_TAB_ORDER,
       when: visibilityPredicate(declared.when),
       // The session comes from context, not from this argument. `PluginTabHost`

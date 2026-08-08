@@ -7,6 +7,7 @@ import type {
   CreateSessionInput,
   Environment,
   EnvironmentDiscovery,
+  IssueProviderDescriptor,
   IssueSummary,
   PrSummary,
   Repo
@@ -83,6 +84,14 @@ export interface NewSessionDialogProps {
     repoPath: string,
     opts: { mine: boolean; search: string }
   ) => Promise<ReadonlyArray<IssueSummary>>
+  /** Enabled plugin-backed issue providers shown in the provider selector. */
+  issueProviders?: ReadonlyArray<IssueProviderDescriptor>
+  /** Search one plugin-backed provider through the desktop host RPC. */
+  loadProviderIssues?: (
+    providerId: string,
+    repoPath: string,
+    opts: { mine: boolean; search: string }
+  ) => Promise<ReadonlyArray<IssueSummary>>
   /** Submit a "from issue" session (forks a fresh branch + links the issue). */
   onCreateFromIssue?: (input: CreateSessionFromIssueInput) => Promise<void>
 }
@@ -128,13 +137,27 @@ export function NewSessionDialog({
   loadPrs,
   onCreateFromPr,
   loadIssues,
+  issueProviders = [],
+  loadProviderIssues,
   onCreateFromIssue
 }: NewSessionDialogProps) {
   // `startableClis` drops `jingler` as well as the uninstalled: the
   // orchestrator drives harnesses, it is not one you can start a session on.
   const availableClis = React.useMemo(() => startableClis(clis), [clis])
   const canFromPr = Boolean(loadPrs && onCreateFromPr)
-  const canFromIssue = Boolean(loadIssues && onCreateFromIssue)
+  const availableIssueProviders = React.useMemo(
+    () => [
+      ...(loadIssues
+        ? [{ pluginId: "github-issues", id: "github", label: "GitHub" }]
+        : []),
+      ...issueProviders.filter((provider) => !(loadIssues && provider.id === "github"))
+    ],
+    [issueProviders, loadIssues]
+  )
+  const canFromIssue = Boolean(
+    onCreateFromIssue &&
+      (loadIssues || (availableIssueProviders.length > 0 && loadProviderIssues))
+  )
 
   // The machine reads live deps through a stable getter so changing props never
   // tear down and rebuild it mid-edit.
@@ -148,6 +171,8 @@ export function NewSessionDialog({
     loadBranches,
     loadPrs,
     loadIssues,
+    issueProviders: availableIssueProviders,
+    loadProviderIssues,
     onCreate,
     onCreateFromPr,
     onCreateFromIssue,
@@ -172,6 +197,7 @@ export function NewSessionDialog({
     mine,
     prs,
     selectedPr,
+    issueProviderId,
     issues,
     selectedIssue,
     issueStep,
@@ -448,6 +474,28 @@ export function NewSessionDialog({
             {/* Issue picker (from-issue mode · list step) */}
             {isIssueList && (
               <div className="flex flex-col gap-2">
+                {availableIssueProviders.length > 1 && (
+                  <div className="flex flex-col gap-1.5">
+                    <Eyebrow>Provider</Eyebrow>
+                    <Select
+                      value={issueProviderId}
+                      onValueChange={(providerId) =>
+                        send({ type: "SET_ISSUE_PROVIDER", providerId })
+                      }
+                    >
+                      <SelectTrigger aria-label="Issue provider">
+                        <SelectValue placeholder="Select a provider" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableIssueProviders.map((provider) => (
+                          <SelectItem key={`${provider.pluginId}:${provider.id}`} value={provider.id}>
+                            {provider.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <Eyebrow className="flex-1">Open issue</Eyebrow>
                   <label className="flex cursor-pointer items-center gap-2 text-[11.5px] text-muted-foreground">
@@ -466,7 +514,7 @@ export function NewSessionDialog({
                 />
                 <IssuePickerList
                   issues={issues}
-                  selected={selectedIssue?.number ?? null}
+                  selected={selectedIssue?.id ?? null}
                   onSelect={(issue) => send({ type: "SELECT_ISSUE", issue })}
                   loading={loadingIssues}
                 />
@@ -490,7 +538,7 @@ export function NewSessionDialog({
                     </div>
                     <div className="font-mono text-[11px] text-dim">
                       {selectableRepos.find((r) => r.path === repoPath)?.name}{" "}
-                      <span className="text-muted-foreground">#{selectedIssue.number}</span>
+                      <span className="text-muted-foreground">{selectedIssue.identifier}</span>
                     </div>
                   </div>
                 </div>
@@ -534,38 +582,42 @@ export function NewSessionDialog({
                     ))}
                     {selectedIssue.assignees[0] && (
                       <span className="text-[11px] text-muted-foreground">
-                        @{selectedIssue.assignees[0].login}
+                        {selectedIssue.assignees[0].name}
                       </span>
                     )}
                   </div>
                 )}
 
                 {/* Automations */}
-                <div className="overflow-hidden rounded-md border border-line">
-                  <AutomationRow
-                    label={
-                      <>
-                        Post progress comments back to{" "}
-                        <span className="font-mono text-[11px] text-text">#{selectedIssue.number}</span>
-                      </>
-                    }
-                    checked={automations.progressComments}
-                    onChange={(v) => send({ type: "SET_AUTOMATION", key: "progressComments", value: v })}
-                  />
-                  <div className="border-t border-hairline" />
-                  <AutomationRow
-                    label={
-                      <>
-                        Close the issue when the PR merges{" "}
-                        <span className="font-mono text-[10.5px] text-dim">
-                          (Closes #{selectedIssue.number})
-                        </span>
-                      </>
-                    }
-                    checked={automations.closeOnMerge}
-                    onChange={(v) => send({ type: "SET_AUTOMATION", key: "closeOnMerge", value: v })}
-                  />
-                </div>
+                {selectedIssue.providerId === "github" && (
+                  <div className="overflow-hidden rounded-md border border-line">
+                    <AutomationRow
+                      label={
+                        <>
+                          Post progress comments back to{" "}
+                          <span className="font-mono text-[11px] text-text">
+                            {selectedIssue.identifier}
+                          </span>
+                        </>
+                      }
+                      checked={automations.progressComments}
+                      onChange={(v) => send({ type: "SET_AUTOMATION", key: "progressComments", value: v })}
+                    />
+                    <div className="border-t border-hairline" />
+                    <AutomationRow
+                      label={
+                        <>
+                          Close the issue when the PR merges{" "}
+                          <span className="font-mono text-[10.5px] text-dim">
+                            (Closes {selectedIssue.identifier})
+                          </span>
+                        </>
+                      }
+                      checked={automations.closeOnMerge}
+                      onChange={(v) => send({ type: "SET_AUTOMATION", key: "closeOnMerge", value: v })}
+                    />
+                  </div>
+                )}
               </div>
             )}
 
@@ -604,7 +656,7 @@ export function NewSessionDialog({
               ? "Creating…"
               : isIssueList
                 ? selectedIssue
-                  ? `Start on #${selectedIssue.number}`
+                  ? `Start on ${selectedIssue.identifier}`
                   : "Select an issue"
                 : isIssueDetail
                   ? "Create session"

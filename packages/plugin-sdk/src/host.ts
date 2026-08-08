@@ -46,7 +46,24 @@ export type {
   AuthSession,
   Authentication,
   AuthProvider,
+  HostIssues,
+  IssueAddCommentRequest,
+  IssueCreateRequest,
+  IssueGetRequest,
+  IssueListRequest,
+  IssueProvider,
+  IssueRepositoryContext,
   Logger
 } from "./host-context.js"
 
-export type { Disposable, PluginStorage, SessionSnapshot } from "./common.js"
+export type {
+  Disposable,
+  IssueActor,
+  IssueComment,
+  IssueDetail,
+  IssueLabel,
+  IssueReference,
+  IssueSummary,
+  PluginStorage,
+  SessionSnapshot
+} from "./common.js"

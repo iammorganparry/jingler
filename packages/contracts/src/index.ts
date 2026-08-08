@@ -25,6 +25,9 @@ import {
   NotificationsConfig,
   Issue,
   IssueAutomations,
+  IssueComment,
+  IssueDetail,
+  IssueProviderDescriptor,
   IssueSummary,
   ContextConfig,
   ContextSnapshot,
@@ -37,6 +40,9 @@ import {
   PluginCatalog,
   PluginEvent,
   PluginId,
+  ContributionId,
+  PluginSettingValue,
+  PluginSettingsSnapshot,
   ExecutionMode,
   Environment,
   EnvironmentDiscovery,
@@ -586,7 +592,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       issue: IssueSummary,
-      automations: IssueAutomations
+      automations: Schema.optional(IssueAutomations)
     }
   }),
 
@@ -2551,6 +2557,95 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Plugins.storageKeys", {
     success: Schema.Array(Schema.String),
     payload: { pluginId: PluginId }
+  }),
+
+  /**
+   * Generated settings state for one plugin. Ordinary values are returned in
+   * `values`; secret settings cross the renderer boundary only as configured
+   * booleans in `secrets`.
+   */
+  Rpc.make("Plugins.settingsGet", {
+    success: PluginSettingsSnapshot,
+    error: PluginError,
+    payload: { pluginId: PluginId }
+  }),
+
+  /** Persist a manifest-declared ordinary setting after main-process validation. */
+  Rpc.make("Plugins.settingSet", {
+    error: PluginError,
+    payload: {
+      pluginId: PluginId,
+      settingId: ContributionId,
+      value: PluginSettingValue
+    }
+  }),
+
+  /** Store or replace a secret. No success payload contains the submitted value. */
+  Rpc.make("Plugins.secretSet", {
+    error: PluginError,
+    payload: {
+      pluginId: PluginId,
+      settingId: ContributionId,
+      value: Schema.String
+    }
+  }),
+
+  /** Remove a secret setting without reading it back through the renderer. */
+  Rpc.make("Plugins.secretClear", {
+    error: PluginError,
+    payload: { pluginId: PluginId, settingId: ContributionId }
+  }),
+
+  /** Enabled manifest-declared providers available to the new-session flow. */
+  Rpc.make("Plugins.issueProviders", {
+    success: Schema.Array(IssueProviderDescriptor)
+  }),
+
+  /** Search normalized issues through the owning plugin's supervised host. */
+  Rpc.make("Plugins.issueProviderList", {
+    success: Schema.Array(IssueSummary),
+    error: PluginError,
+    payload: {
+      providerId: Schema.String,
+      repository: Schema.Struct({ name: Schema.String, path: Schema.String }),
+      search: Schema.String,
+      mine: Schema.Boolean
+    }
+  }),
+
+  /** Read one normalized issue through the owning plugin's supervised host. */
+  Rpc.make("Plugins.issueProviderGet", {
+    success: Schema.NullOr(IssueDetail),
+    error: PluginError,
+    payload: {
+      providerId: Schema.String,
+      repository: Schema.Struct({ name: Schema.String, path: Schema.String }),
+      issueId: Schema.String
+    }
+  }),
+
+  /** Create an issue without exposing provider credentials or raw responses. */
+  Rpc.make("Plugins.issueProviderCreate", {
+    success: IssueDetail,
+    error: PluginError,
+    payload: {
+      providerId: Schema.String,
+      repository: Schema.Struct({ name: Schema.String, path: Schema.String }),
+      title: Schema.String,
+      body: Schema.String
+    }
+  }),
+
+  /** Add a normalized issue comment through the provider's host half. */
+  Rpc.make("Plugins.issueProviderAddComment", {
+    success: IssueComment,
+    error: PluginError,
+    payload: {
+      providerId: Schema.String,
+      repository: Schema.Struct({ name: Schema.String, path: Schema.String }),
+      issueId: Schema.String,
+      body: Schema.String
+    }
   }),
 
   /**

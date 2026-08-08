@@ -39,6 +39,53 @@
  * @see HostEvent — carries a `SessionSnapshot` as sessions open and close.
  * @see TabProps — a tab component receives the current snapshot as a prop.
  */
+/** A provider-neutral label attached to an issue. */
+export interface IssueLabel {
+  readonly name: string
+  readonly color: string | null
+}
+
+/** The durable issue identity exposed to plugin UI and host events. */
+export interface IssueReference {
+  readonly providerId: string
+  readonly id: string
+  readonly identifier: string
+  readonly url: string
+  readonly title: string
+  readonly labels: readonly IssueLabel[]
+}
+
+/** A normalized issue author or assignee. */
+export interface IssueActor {
+  readonly id: string
+  readonly name: string
+  readonly avatarUrl: string | null
+}
+
+/** A normalized issue list item returned by an issue provider. */
+export interface IssueSummary extends IssueReference {
+  readonly state: "open" | "closed"
+  readonly body: string
+  readonly author: IssueActor | null
+  readonly assignees: readonly IssueActor[]
+  readonly updatedAt: string
+}
+
+/** A normalized issue comment. */
+export interface IssueComment {
+  readonly id: string
+  readonly author: IssueActor | null
+  readonly body: string
+  readonly createdAt: string
+  readonly url?: string
+}
+
+/** A normalized rich issue payload. */
+export interface IssueDetail extends IssueSummary {
+  readonly createdAt: string
+  readonly comments: readonly IssueComment[]
+}
+
 export interface SessionSnapshot {
   /** Stable id for the session, unique for the lifetime of the window. */
   readonly id: string
@@ -54,6 +101,8 @@ export interface SessionSnapshot {
   readonly prNumber: number | null
   /** The linked GitHub issue number, when one drove the session. */
   readonly issueNumber?: number
+  /** The provider-neutral issue identity linked to this session. */
+  readonly linkedIssue?: IssueReference
   /** Absolute path to the session's isolated git worktree, when one exists. */
   readonly worktreePath?: string
 }

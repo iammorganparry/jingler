@@ -18,6 +18,8 @@ import type {
   BrowserBounds,
   LoadedPlugin,
   PluginCatalog,
+  PluginSettingValue,
+  PluginSettingsSnapshot,
   CliInfo,
   CliKind,
   CreateSessionFromIssueInput,
@@ -41,6 +43,9 @@ import type {
   GithubConfig,
   Issue,
   IssueAutomations,
+  IssueComment,
+  IssueDetail,
+  IssueProviderDescriptor,
   IssueSummary,
   McpInjectionTarget,
   McpServerStatus,
@@ -409,9 +414,8 @@ export const rpc = {
   sessionsLinkIssue: (
     sessionId: string,
     issue: IssueSummary,
-    automations: IssueAutomations
-  ): Promise<Session> =>
-    run((c) => c.Sessions.linkIssue({ sessionId, issue, automations })),
+    automations?: IssueAutomations
+  ): Promise<Session> => run((c) => c.Sessions.linkIssue({ sessionId, issue, automations })),
   sessionsUnlinkIssue: (sessionId: string): Promise<Session> =>
     run((c) => c.Sessions.unlinkIssue({ sessionId })),
   sessionsClearInitialPrompt: (sessionId: string): Promise<Session> =>
@@ -1431,6 +1435,55 @@ export const rpc = {
 
   pluginsStorageKeys: (pluginId: string): Promise<ReadonlyArray<string>> =>
     run((c) => c.Plugins.storageKeys({ pluginId })),
+
+  pluginsSettingsGet: (pluginId: string): Promise<PluginSettingsSnapshot> =>
+    run((c) => c.Plugins.settingsGet({ pluginId })),
+
+  pluginsSettingSet: (
+    pluginId: string,
+    settingId: string,
+    value: PluginSettingValue
+  ): Promise<void> => run((c) => c.Plugins.settingSet({ pluginId, settingId, value })),
+
+  pluginsSecretSet: (
+    pluginId: string,
+    settingId: string,
+    value: string
+  ): Promise<void> => run((c) => c.Plugins.secretSet({ pluginId, settingId, value })),
+
+  pluginsSecretClear: (pluginId: string, settingId: string): Promise<void> =>
+    run((c) => c.Plugins.secretClear({ pluginId, settingId })),
+
+  pluginsIssueProviders: (): Promise<ReadonlyArray<IssueProviderDescriptor>> =>
+    run((c) => c.Plugins.issueProviders()),
+
+  pluginsIssueProviderList: (input: {
+    providerId: string
+    repository: { name: string; path: string }
+    search: string
+    mine: boolean
+  }): Promise<ReadonlyArray<IssueSummary>> =>
+    run((c) => c.Plugins.issueProviderList(input)),
+
+  pluginsIssueProviderGet: (input: {
+    providerId: string
+    repository: { name: string; path: string }
+    issueId: string
+  }): Promise<IssueDetail | null> => run((c) => c.Plugins.issueProviderGet(input)),
+
+  pluginsIssueProviderCreate: (input: {
+    providerId: string
+    repository: { name: string; path: string }
+    title: string
+    body: string
+  }): Promise<IssueDetail> => run((c) => c.Plugins.issueProviderCreate(input)),
+
+  pluginsIssueProviderAddComment: (input: {
+    providerId: string
+    repository: { name: string; path: string }
+    issueId: string
+    body: string
+  }): Promise<IssueComment> => run((c) => c.Plugins.issueProviderAddComment(input)),
 
   pluginsInvoke: (
     pluginId: string,

@@ -332,6 +332,30 @@ export const IssueAutomations = Schema.Struct({
 })
 export type IssueAutomations = Schema.Schema.Type<typeof IssueAutomations>
 
+/** A provider-neutral label attached to an issue. */
+export const IssueLabel = Schema.Struct({
+  name: Schema.String,
+  /** Provider colour metadata, without a leading `#`, when one exists. */
+  color: Schema.NullOr(Schema.String)
+})
+export type IssueLabel = Schema.Schema.Type<typeof IssueLabel>
+
+const IssueReferenceFields = {
+  /** Stable manifest-declared provider id, e.g. `github` or `linear`. */
+  providerId: Schema.String,
+  /** Provider-owned opaque id. Consumers must never parse this value. */
+  id: Schema.String,
+  /** Human-readable provider identifier, e.g. `#128` or `ENG-123`. */
+  identifier: Schema.String,
+  url: Schema.String,
+  title: Schema.String,
+  labels: Schema.Array(IssueLabel)
+}
+
+/** The durable provider-neutral issue identity persisted on a session. */
+export const IssueReference = Schema.Struct(IssueReferenceFields)
+export type IssueReference = Schema.Schema.Type<typeof IssueReference>
+
 /** A single agent session shown in the sidebar and opened in the main pane. */
 /** One isolated conversation inside a session's shared worktree. */
 export const ChatRole = Schema.Literal("direct", "orchestrator")
@@ -478,6 +502,8 @@ export const Session = Schema.Struct({
       })
     )
   ),
+  /** Provider-neutral linked issue identity written by current Jingler versions. */
+  linkedIssue: Schema.optional(IssueReference),
   /** Issue automation prefs (progress comments / close-on-merge). */
   automations: Schema.optional(IssueAutomations),
   /**
@@ -578,6 +604,31 @@ export const Session = Schema.Struct({
   archivedAt: Schema.optional(Schema.String)
 })
 export type Session = Schema.Schema.Type<typeof Session>
+
+/**
+ * Resolve the current provider-neutral issue link without rewriting legacy data.
+ *
+ * Sessions written before issue providers persisted four GitHub-specific fields.
+ * Reads adapt those fields in memory so old sessions keep their badge, title and
+ * link; the session store migrates the durable shape only when it next writes.
+ */
+export const issueReferenceOf = (
+  session: Pick<
+    Session,
+    "linkedIssue" | "issueNumber" | "issueUrl" | "issueTitle" | "issueLabels"
+  >
+): IssueReference | undefined => {
+  if (session.linkedIssue) return session.linkedIssue
+  if (session.issueNumber == null) return undefined
+  return {
+    providerId: "github",
+    id: String(session.issueNumber),
+    identifier: `#${session.issueNumber}`,
+    url: session.issueUrl ?? "",
+    title: session.issueTitle ?? `Issue #${session.issueNumber}`,
+    labels: session.issueLabels ?? []
+  }
+}
 
 /** A missing environment id is deliberately the local desktop. */
 export const executionTargetOf = (
@@ -1779,50 +1830,55 @@ export const PrSummary = Schema.Struct({
 })
 export type PrSummary = Schema.Schema.Type<typeof PrSummary>
 
-/**
- * A lightweight open-issue list-item for the "new session from an issue" picker
- * and the attach-issue dialog. Mirrors
- * `PrSummary`; `body` seeds the prefilled task.
- */
-export const IssueSummary = Schema.Struct({
-  number: Schema.Number,
-  title: Schema.String,
-  /** Issue web URL (for "Open ⧉"). */
-  url: Schema.String,
-  /** Issue body (markdown) — seeds the composer's prefilled task. */
-  body: Schema.String,
-  labels: Schema.Array(PrLabel),
-  author: GithubUser,
-  assignees: Schema.Array(GithubUser),
-  /** ISO-8601 last-updated timestamp (for the relative "2h ago" label). */
-  updatedAt: Schema.String
+/** A provider-neutral person reference used by issue metadata. */
+export const IssueActor = Schema.Struct({
+  /** Provider-owned opaque id. */
+  id: Schema.String,
+  /** Display name or handle suitable for UI. */
+  name: Schema.String,
+  avatarUrl: Schema.NullOr(Schema.String)
 })
+export type IssueActor = Schema.Schema.Type<typeof IssueActor>
+
+const IssueSummaryFields = {
+  ...IssueReferenceFields,
+  /** Normalized lifecycle state; provider-specific states stay in the host. */
+  state: Schema.Literal("open", "closed"),
+  /** Markdown body used to seed the session task. */
+  body: Schema.String,
+  author: Schema.NullOr(IssueActor),
+  assignees: Schema.Array(IssueActor),
+  /** ISO-8601 last-updated timestamp. */
+  updatedAt: Schema.String
+}
+
+/** A normalized issue list item returned by any issue provider. */
+export const IssueSummary = Schema.Struct(IssueSummaryFields)
 export type IssueSummary = Schema.Schema.Type<typeof IssueSummary>
 
-/** A comment on a GitHub issue (for the Issue tab's rich view). */
+/** A normalized comment on an issue. */
 export const IssueComment = Schema.Struct({
-  author: GithubUser,
+  /** Provider-owned opaque id. */
+  id: Schema.String,
+  author: Schema.NullOr(IssueActor),
   body: Schema.String,
-  createdAt: Schema.String
+  createdAt: Schema.String,
+  url: Schema.optional(Schema.String)
 })
 export type IssueComment = Schema.Schema.Type<typeof IssueComment>
 
-/**
- * The full GitHub issue view model for the Issue tab. Read-only.
- */
-export const Issue = Schema.Struct({
-  number: Schema.Number,
-  title: Schema.String,
-  url: Schema.String,
-  state: Schema.Literal("open", "closed"),
-  body: Schema.String,
-  author: GithubUser,
-  assignees: Schema.Array(GithubUser),
-  labels: Schema.Array(PrLabel),
+/** The normalized rich issue payload returned by any issue provider. */
+export const IssueDetail = Schema.Struct({
+  ...IssueSummaryFields,
   createdAt: Schema.String,
   comments: Schema.Array(IssueComment)
 })
-export type Issue = Schema.Schema.Type<typeof Issue>
+export type IssueDetail = Schema.Schema.Type<typeof IssueDetail>
+
+/** @deprecated Use {@link IssueDetail}. */
+export const Issue = IssueDetail
+/** @deprecated Use {@link IssueDetail}. */
+export type Issue = IssueDetail
 
 /**
  * A pending inline review comment anchored to a file + line — the payload the
@@ -2038,7 +2094,7 @@ export type CreateSessionFromPrInput = Schema.Schema.Type<
 >
 
 /**
- * Parameters for creating a session from a GitHub issue. Unlike
+ * Parameters for creating a session from a provider-normalized issue. Unlike
  * `CreateSessionFromPrInput` (which checks out an existing PR branch), this
  * starts detached from `baseBranch` like a blank session,
  * links the issue, and seeds the task from the issue title + body.
@@ -2055,20 +2111,14 @@ export const CreateSessionFromIssueInput = Schema.Struct({
   /** The branch to fork the worktree from. */
   baseBranch: Schema.String,
   /** The issue to link + seed the task from. */
-  issue: Schema.Struct({
-    number: Schema.Number,
-    title: Schema.String,
-    url: Schema.String,
-    body: Schema.String,
-    labels: Schema.Array(PrLabel)
-  }),
+  issue: IssueSummary,
   /**
    * The (editable) task to seed the composer with — prefilled from the issue in
    * the dialog. Empty falls back to the issue title + body.
    */
   task: Schema.String,
-  /** Automations to enable on the new session. */
-  automations: IssueAutomations
+  /** GitHub-only automations. Other providers omit this field. */
+  automations: Schema.optional(IssueAutomations)
 })
 export type CreateSessionFromIssueInput = Schema.Schema.Type<
   typeof CreateSessionFromIssueInput

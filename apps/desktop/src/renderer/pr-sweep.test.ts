@@ -38,6 +38,38 @@ describe("issuesToCloseOnMerge", () => {
     expect(issuesToCloseOnMerge({ a: "merged" }, [optedIn("a")], none)).toStrictEqual(["a"])
   })
 
+  it("closes a provider-neutral GitHub link written by current sessions", () => {
+    const current = session({
+      id: "a",
+      linkedIssue: {
+        providerId: "github",
+        id: "7",
+        identifier: "#7",
+        url: "https://github.com/acme/widget/issues/7",
+        title: "Current link",
+        labels: []
+      },
+      automations: { progressComments: false, closeOnMerge: true }
+    })
+    expect(issuesToCloseOnMerge({ a: "merged" }, [current], none)).toStrictEqual(["a"])
+  })
+
+  it("never sends a non-GitHub issue to the GitHub close automation", () => {
+    const linear = session({
+      id: "a",
+      linkedIssue: {
+        providerId: "linear",
+        id: "opaque-id",
+        identifier: "ENG-7",
+        url: "https://linear.app/acme/issue/ENG-7",
+        title: "Linear link",
+        labels: []
+      },
+      automations: { progressComments: false, closeOnMerge: true }
+    })
+    expect(issuesToCloseOnMerge({ a: "merged" }, [linear], none)).toStrictEqual([])
+  })
+
   it("does not close anything while the PR is still open or a draft", () => {
     const sessions = [optedIn("a")]
     expect(issuesToCloseOnMerge({ a: "open" }, sessions, none)).toStrictEqual([])
