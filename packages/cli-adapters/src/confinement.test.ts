@@ -12,8 +12,8 @@ describe("escapingPath", () => {
   it("catches the read that actually happened", () => {
     // A planning proposer inferred this path from the operator's user-level
     // CLAUDE.md and read 403 lines of an unrelated private repository.
-    expect(escapingPath(CWD, { file_path: "/Users/someone/repos/clive/README.md" })).toBe(
-      "/Users/someone/repos/clive/README.md"
+    expect(escapingPath(CWD, { file_path: "/Users/someone/repos/buildbox/README.md" })).toBe(
+      "/Users/someone/repos/buildbox/README.md"
     )
   })
 

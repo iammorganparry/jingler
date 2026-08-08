@@ -1380,19 +1380,12 @@ function AuthedApp({
           dialog: {
             open: environmentDialogOpen,
             state: String(environmentController.snapshot.value) as
-              | "choosing"
               | "discovering"
               | "configuring"
-              | "linking"
               | "claiming"
               | "connected"
               | "failed",
-            method: environmentController.snapshot.context.method,
             values: {
-              backendUrl: environmentController.snapshot.context.backendUrl,
-              pendingDeviceId:
-                environmentController.snapshot.context.pendingDeviceId,
-              pairingCode: environmentController.snapshot.context.pairingCode,
               host: environmentController.snapshot.context.host,
             },
             hosts: environmentController.snapshot.context.hosts,
@@ -1402,8 +1395,6 @@ function AuthedApp({
               environmentController.send({ type: "CANCEL" });
               setEnvironmentDialogOpen(false);
             },
-            onChoose: (method) =>
-              environmentController.send({ type: "CHOOSE", method }),
             onEdit: (field, value) =>
               environmentController.send({ type: "EDIT", field, value }),
             onSelectHost: (host) =>

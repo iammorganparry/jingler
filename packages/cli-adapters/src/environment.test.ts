@@ -13,8 +13,8 @@ import { makeInMemorySecretStore, SecretStore } from "./secret-store.js"
 
 const device: RemoteDevice = {
   version: 1,
-  deviceId: "device_clive",
-  displayName: "clive.local",
+  deviceId: "device_buildbox",
+  displayName: "buildbox",
   platform: { os: "darwin", arch: "arm64" },
   publicKey: {
     algorithm: "Ed25519",
@@ -80,8 +80,8 @@ afterEach(() => {
 describe("environment metadata", () => {
   it("maps registry presence to a renderer-safe environment", () => {
     expect(environmentFromRemoteDevice(device)).toMatchObject({
-      id: "device_clive",
-      name: "clive.local",
+      id: "device_buildbox",
+      name: "buildbox",
       state: "online",
       agentVersion: "2.0.3",
       lastSeenAt: 200
@@ -160,7 +160,7 @@ describe("environment device API", () => {
 
     const environment = await Effect.runPromise(
       EnvironmentService.pairSsh({
-        host: "clive.local",
+        host: "buildbox",
         username: "morgan",
         port: 22
       }).pipe(Effect.provide(layer))
@@ -168,7 +168,7 @@ describe("environment device API", () => {
 
     expect(bootstrapCalls).toStrictEqual([
       {
-        host: "clive.local",
+        host: "buildbox",
         username: "morgan",
         port: 22,
         relayUrl: "https://relay.test"
@@ -176,7 +176,7 @@ describe("environment device API", () => {
     ])
     expect(installCalls).toStrictEqual([
       {
-        host: "clive.local",
+        host: "buildbox",
         username: "morgan",
         port: 22,
         relayUrl: "https://relay.test",
@@ -186,7 +186,7 @@ describe("environment device API", () => {
     ])
     expect(activateCalls).toStrictEqual([
       {
-        host: "clive.local",
+        host: "buildbox",
         username: "morgan",
         port: 22,
         relayUrl: "https://relay.test",
@@ -209,7 +209,7 @@ describe("environment device API", () => {
     })
 
     await Effect.runPromise(
-      EnvironmentService.pairSsh({ host: "clive.local" }).pipe(Effect.provide(layer))
+      EnvironmentService.pairSsh({ host: "buildbox" }).pipe(Effect.provide(layer))
     )
 
     expect(install).not.toHaveBeenCalled()

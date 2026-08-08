@@ -7,8 +7,8 @@ import { WebSocket, WebSocketServer } from "ws"
 
 const TOKEN = "e2e-token"
 const SUBJECT = "u_e2e"
-const DEVICE_ID = "device_clive_abcdefgh"
-const PENDING_ID = "pending_clive_abcdefgh"
+const DEVICE_ID = "device_buildbox_abcdefgh"
+const PENDING_ID = "pending_buildbox_abcdefgh"
 const PAIRING_CODE = "CL1VE2E3".replace("1", "J")
 
 type Registration = {
@@ -102,7 +102,7 @@ export const startFakeDeviceRelay = async (
     return {
       version: 1,
       deviceId: DEVICE_ID,
-      displayName: registration?.displayName ?? "clive.local",
+      displayName: registration?.displayName ?? "buildbox",
       platform: registration?.platform ?? { os: "darwin", arch: "arm64" },
       publicKey: registration?.publicKey,
       ...(registration?.encryptionPublicKey

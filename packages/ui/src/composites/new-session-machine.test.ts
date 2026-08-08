@@ -102,8 +102,8 @@ const remoteRepo = {
 const remoteDeps = (created: CreateSessionInput[] = []): NewSessionDeps => ({
   ...makeDeps(created),
   environments: [{
-    id: "device-clive",
-    name: "clive.local",
+    id: "device-buildbox",
+    name: "buildbox",
     platform: { os: "darwin", arch: "arm64" },
     capabilities: { version: 1, capabilities: ["session.start"], harnesses: ["claude"], maxConcurrentSessions: 2 },
     state: "online",
@@ -112,7 +112,7 @@ const remoteDeps = (created: CreateSessionInput[] = []): NewSessionDeps => ({
   }],
   loadEnvironmentDiscovery: async () => ({
     version: 1,
-    deviceId: "device-clive",
+    deviceId: "device-buildbox",
     discovery: {
       version: 1,
       agentVersion: "2.0.3",
@@ -123,7 +123,7 @@ const remoteDeps = (created: CreateSessionInput[] = []): NewSessionDeps => ({
     updatedAt: 1
   }),
   loadBranches: async (_repoPath, environmentId) =>
-    environmentId === "device-clive" ? remoteRepo.branches : ["main"]
+    environmentId === "device-buildbox" ? remoteRepo.branches : ["main"]
 })
 
 describe("newSessionMachine remote environments", () => {
@@ -131,7 +131,7 @@ describe("newSessionMachine remote environments", () => {
     const deps = remoteDeps()
     const actor = createActor(newSessionMachine, { input: { getDeps: () => deps } }).start()
     actor.send({ type: "OPEN" })
-    actor.send({ type: "SET_ENVIRONMENT", environmentId: "device-clive" })
+    actor.send({ type: "SET_ENVIRONMENT", environmentId: "device-buildbox" })
     await waitFor(actor, (state) => state.context.repoPath === remoteRepo.path && state.context.base === "main")
     expect(actor.getSnapshot().context.repos[0]).toMatchObject({
       path: remoteRepo.path,
@@ -148,15 +148,15 @@ describe("newSessionMachine remote environments", () => {
       loadEnvironmentDiscovery: async () => {
         attempts += 1
         if (attempts < 3) {
-          return { version: 1, deviceId: "device-clive", discovery: null, updatedAt: null }
+          return { version: 1, deviceId: "device-buildbox", discovery: null, updatedAt: null }
         }
-        const ready = await remoteDeps().loadEnvironmentDiscovery!("device-clive")
+        const ready = await remoteDeps().loadEnvironmentDiscovery!("device-buildbox")
         return ready
       }
     }
     const actor = createActor(newSessionMachine, { input: { getDeps: () => deps } }).start()
     actor.send({ type: "OPEN" })
-    actor.send({ type: "SET_ENVIRONMENT", environmentId: "device-clive" })
+    actor.send({ type: "SET_ENVIRONMENT", environmentId: "device-buildbox" })
     await waitFor(actor, (state) => state.context.repoPath === remoteRepo.path && state.context.base === "main")
     expect(attempts).toBe(3)
     expect(actor.getSnapshot().context.cli).toBe("claude")
@@ -168,7 +168,7 @@ describe("newSessionMachine remote environments", () => {
     const actor = createActor(newSessionMachine, { input: { getDeps: () => deps } }).start()
     actor.send({ type: "OPEN" })
     await waitFor(actor, (state) => state.context.repoPath === "/repos/widget")
-    actor.send({ type: "SET_ENVIRONMENT", environmentId: "device-clive" })
+    actor.send({ type: "SET_ENVIRONMENT", environmentId: "device-buildbox" })
     await waitFor(actor, (state) => state.context.repoPath === remoteRepo.path)
     expect(actor.getSnapshot().context.repoPath).not.toBe("/repos/widget")
     actor.stop()
@@ -198,7 +198,7 @@ describe("newSessionMachine remote environments", () => {
     const run = async (mode: "blank" | "pr" | "issue") => {
       const actor = createActor(newSessionMachine, { input: { getDeps: () => deps } }).start()
       actor.send({ type: "OPEN" })
-      actor.send({ type: "SET_ENVIRONMENT", environmentId: "device-clive" })
+      actor.send({ type: "SET_ENVIRONMENT", environmentId: "device-buildbox" })
       await waitFor(actor, (state) => state.context.base === "main")
       actor.send({ type: "SET_MODE", mode })
       if (mode === "pr") actor.send({ type: "SELECT_PR", pr })
@@ -213,8 +213,8 @@ describe("newSessionMachine remote environments", () => {
     await run("blank")
     await run("pr")
     await run("issue")
-    expect(blank[0]?.environmentId).toBe("device-clive")
-    expect(prs[0]?.environmentId).toBe("device-clive")
-    expect(issues[0]?.environmentId).toBe("device-clive")
+    expect(blank[0]?.environmentId).toBe("device-buildbox")
+    expect(prs[0]?.environmentId).toBe("device-buildbox")
+    expect(issues[0]?.environmentId).toBe("device-buildbox")
   })
 })

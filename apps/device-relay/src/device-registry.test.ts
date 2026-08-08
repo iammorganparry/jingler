@@ -423,10 +423,10 @@ describe("device challenges, key rotation, and revocation", () => {
       keys.publicKey
     )
     await expect(
-      paired.registry.renameDevice(paired.claim.deviceId, "Clive mini", 201)
+      paired.registry.renameDevice(paired.claim.deviceId, "Build machine", 201)
     ).resolves.toMatchObject({
       deviceId: paired.claim.deviceId,
-      displayName: "Clive mini",
+      displayName: "Build machine",
       generation: 1,
       state: "active"
     })
@@ -435,7 +435,7 @@ describe("device challenges, key rotation, and revocation", () => {
       listed.devices.find((device) => device.deviceId === paired.claim.deviceId)
     ).toMatchObject({
       deviceId: paired.claim.deviceId,
-      displayName: "Clive mini",
+      displayName: "Build machine",
       generation: 1
     })
   })

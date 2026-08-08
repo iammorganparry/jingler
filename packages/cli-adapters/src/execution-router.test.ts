@@ -18,7 +18,7 @@ describe("ExecutionRouter", () => {
     await expect(Effect.runPromise(routeSessionOperation(session(), "run", {}, local, remote))).resolves.toBe("local")
   })
   it("routes remote sessions only to their paired environment", async () => {
-    await expect(Effect.runPromise(routeSessionOperation(session("clive"), "run", {}, local, remote))).resolves.toBe("remote")
+    await expect(Effect.runPromise(routeSessionOperation(session("buildbox"), "run", {}, local, remote))).resolves.toBe("remote")
   })
   it("fails an unavailable remote environment without local fallback", async () => {
     let localCalls = 0

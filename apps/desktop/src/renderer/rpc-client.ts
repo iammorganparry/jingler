@@ -25,7 +25,6 @@ import type {
   CreateSessionInput,
   ExecutionMode,
   Environment,
-  PairLinkEnvironmentInput,
   PairSshEnvironmentInput,
   SshHost,
   ExternalInstructionIdentity,
@@ -390,9 +389,6 @@ export const rpc = {
   },
   environmentsSuggestHosts: (): Promise<ReadonlyArray<SshHost>> =>
     run((c) => c.Environment.suggestHosts()),
-  environmentsPairLink: (
-    input: PairLinkEnvironmentInput
-  ): Promise<Environment> => run((c) => c.Environment.pairLink(input)),
   environmentsPairSsh: (input: PairSshEnvironmentInput): Promise<Environment> =>
     run((c) => c.Environment.pairSsh(input)),
   environmentsRename: (deviceId: string, name: string): Promise<Environment> =>

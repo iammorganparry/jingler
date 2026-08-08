@@ -239,7 +239,7 @@ describe("device server routes", () => {
         body: JSON.stringify({
           version: 1,
           deviceId: device.deviceId,
-          displayName: "Clive mini"
+          displayName: "Build machine"
         })
       })
     )
@@ -248,7 +248,7 @@ describe("device server routes", () => {
     expect(value.calls[0]?.url).toBe(
       `${relayUrl}/v1/devices/${device.deviceId}/rename`
     )
-    expect(value.calls[0]?.body).toContain("Clive mini")
+    expect(value.calls[0]?.body).toContain("Build machine")
     expect(
       verifyDeviceGrant(
         relayGrant(value.calls[0]!),

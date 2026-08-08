@@ -131,7 +131,7 @@ describe("Environment", () => {
       Schema.decodeUnknownSync(Environment)(
         {
           id: "device-1",
-          name: "clive.local",
+          name: "buildbox",
           platform: { os: "darwin", arch: "arm64" },
           capabilities: {
             version: 1,
@@ -400,10 +400,10 @@ describe("Session", () => {
   })
 
   it("round-trips a remote session environment identity", () => {
-    const remote = { ...base, environmentId: "device_clive", executionLocation: "cloud" as const }
+    const remote = { ...base, environmentId: "device_buildbox", executionLocation: "cloud" as const }
     const decoded = Schema.decodeUnknownSync(Session)(Schema.encodeSync(Session)(remote))
-    expect(decoded.environmentId).toBe("device_clive")
-    expect(executionTargetOf(decoded)).toEqual({ kind: "remote", environmentId: "device_clive" })
+    expect(decoded.environmentId).toBe("device_buildbox")
+    expect(executionTargetOf(decoded)).toEqual({ kind: "remote", environmentId: "device_buildbox" })
   })
 
   it("round-trips the optional workspace and persistence fields when present", () => {

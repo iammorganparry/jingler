@@ -2,7 +2,6 @@ import type {
   DeviceRelayGrantResponse,
   Environment,
   EnvironmentDiscovery,
-  PairLinkEnvironmentInput,
   PairSshEnvironmentInput,
   PairingClaimResponse,
   RemoteDevice
@@ -147,34 +146,6 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
           })
         }) as Effect.Effect<PairingClaimResponse, EnvironmentError>
 
-      const pairLink = (input: PairLinkEnvironmentInput) =>
-        Effect.gen(function* () {
-          let provided: URL
-          let expected: URL
-          try {
-            provided = new URL(input.backendUrl)
-            expected = new URL(authBaseUrl())
-          } catch {
-            return yield* Effect.fail(
-              new EnvironmentError({
-                reason: "invalid-input",
-                message: "Enter a valid backend URL."
-              })
-            )
-          }
-          if (provided.origin !== expected.origin) {
-            return yield* Effect.fail(
-              new EnvironmentError({
-                reason: "invalid-input",
-                message: "The pairing link must use this Jingler account server."
-              })
-            )
-          }
-          return environmentFromRemoteDevice(
-            (yield* claim(input.pendingDeviceId, input.pairingCode)).device
-          )
-        })
-
       const pairSsh = (input: PairSshEnvironmentInput) => {
         const connection = {
           host: input.host,
@@ -278,7 +249,6 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
         discovery,
         refresh: list,
         suggestHosts: bootstrap.discoverHosts,
-        pairLink,
         pairSsh,
         rename,
         revoke

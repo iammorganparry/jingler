@@ -40,7 +40,6 @@ import {
   ExecutionMode,
   Environment,
   EnvironmentDiscovery,
-  PairLinkEnvironmentInput,
   PairSshEnvironmentInput,
   SshHost,
   ExternalInstructionIdentity,
@@ -472,12 +471,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
 
   Rpc.make("Environment.suggestHosts", {
     success: Schema.Array(SshHost)
-  }),
-
-  Rpc.make("Environment.pairLink", {
-    success: Environment,
-    error: EnvironmentError,
-    payload: PairLinkEnvironmentInput
   }),
 
   Rpc.make("Environment.pairSsh", {

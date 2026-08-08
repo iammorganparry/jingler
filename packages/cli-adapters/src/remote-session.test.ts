@@ -16,25 +16,25 @@ afterEach(async () => {
 describe("RemoteSessionService envelopes", () => {
   it("derives the same key without sending it through the relay", () => {
     const device = generateKeyPairSync("x25519"); const jwk = device.publicKey.export({ format: "jwk" }); if (!jwk.x) throw new Error("missing x")
-    const desktop = establishDesktopSessionKey({ subject: "user", deviceId: "clive", sessionId: "session", devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: jwk.x } })
-    const deviceKey = deriveDeviceSessionKey(desktop.offer, (remote) => new Uint8Array(diffieHellman({ privateKey: device.privateKey, publicKey: createPublicKey({ key: { kty: "OKP", crv: "X25519", x: remote.value }, format: "jwk" }) })), { subject: "user", deviceId: "clive", sessionId: "session" })
+    const desktop = establishDesktopSessionKey({ subject: "user", deviceId: "buildbox", sessionId: "session", devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: jwk.x } })
+    const deviceKey = deriveDeviceSessionKey(desktop.offer, (remote) => new Uint8Array(diffieHellman({ privateKey: device.privateKey, publicKey: createPublicKey({ key: { kty: "OKP", crv: "X25519", x: remote.value }, format: "jwk" }) })), { subject: "user", deviceId: "buildbox", sessionId: "session" })
     expect(Buffer.from(deviceKey)).toEqual(Buffer.from(desktop.key))
   })
   it("rejects a session-key offer for the wrong device", () => {
     const device = generateKeyPairSync("x25519"); const jwk = device.publicKey.export({ format: "jwk" }); if (!jwk.x) throw new Error("missing x")
-    const desktop = establishDesktopSessionKey({ subject: "user", deviceId: "clive", sessionId: "session", devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: jwk.x } })
+    const desktop = establishDesktopSessionKey({ subject: "user", deviceId: "buildbox", sessionId: "session", devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: jwk.x } })
     expect(() => deriveDeviceSessionKey(desktop.offer, () => randomBytes(32), { subject: "user", deviceId: "other", sessionId: "session" })).toThrow("resource mismatch")
   })
   it("restores the same derived key after a desktop process restart", () => {
     const device = generateKeyPairSync("x25519"); const jwk = device.publicKey.export({ format: "jwk" }); if (!jwk.x) throw new Error("missing x")
-    const desktop = establishDesktopSessionKey({ subject: "user", deviceId: "clive", sessionId: "session", devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: jwk.x } })
+    const desktop = establishDesktopSessionKey({ subject: "user", deviceId: "buildbox", sessionId: "session", devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: jwk.x } })
     const restored = restoreDesktopSessionKey({ offer: desktop.offer, privateKey: desktop.privateKey, devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: jwk.x } })
     expect(Buffer.from(restored)).toEqual(Buffer.from(desktop.key))
   })
   it("rejects restored state with the wrong device key", () => {
     const device = generateKeyPairSync("x25519"); const other = generateKeyPairSync("x25519")
     const jwk = device.publicKey.export({ format: "jwk" }); const otherJwk = other.publicKey.export({ format: "jwk" }); if (!jwk.x || !otherJwk.x) throw new Error("missing x")
-    const desktop = establishDesktopSessionKey({ subject: "user", deviceId: "clive", sessionId: "session", devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: jwk.x } })
+    const desktop = establishDesktopSessionKey({ subject: "user", deviceId: "buildbox", sessionId: "session", devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: jwk.x } })
     const wrong = restoreDesktopSessionKey({ offer: desktop.offer, privateKey: desktop.privateKey, devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: otherJwk.x } })
     expect(Buffer.from(wrong)).not.toEqual(Buffer.from(desktop.key))
   })
@@ -53,23 +53,23 @@ describe("RemoteSessionService envelopes", () => {
     expect(decoded).toEqual(event)
   })
   it("reuses one bounded request channel per environment", () => {
-    const first = requestSessionIdForEnvironment("device_clive", "desktop_one_abcdefgh")
-    expect(requestSessionIdForEnvironment("device_clive", "desktop_one_abcdefgh")).toBe(first)
+    const first = requestSessionIdForEnvironment("device_buildbox", "desktop_one_abcdefgh")
+    expect(requestSessionIdForEnvironment("device_buildbox", "desktop_one_abcdefgh")).toBe(first)
     expect(requestSessionIdForEnvironment("device_other", "desktop_one_abcdefgh")).not.toBe(first)
-    expect(requestSessionIdForEnvironment("device_clive", "desktop_two_abcdefgh")).not.toBe(first)
+    expect(requestSessionIdForEnvironment("device_buildbox", "desktop_two_abcdefgh")).not.toBe(first)
     expect(first).toMatch(/^request_[A-Za-z0-9_-]{24}$/)
   })
   it("persists a desktop request namespace across service restarts", async () => {
     const secrets = await Effect.runPromise(makeInMemorySecretStore())
     const first = await Effect.runPromise(
-      makeRemoteSessionStateRepository(secrets).requestSessionId("device_clive")
+      makeRemoteSessionStateRepository(secrets).requestSessionId("device_buildbox")
     )
     const restored = await Effect.runPromise(
-      makeRemoteSessionStateRepository(secrets).requestSessionId("device_clive")
+      makeRemoteSessionStateRepository(secrets).requestSessionId("device_buildbox")
     )
     const cleanInstall = await Effect.runPromise(
       makeRemoteSessionStateRepository(await Effect.runPromise(makeInMemorySecretStore()))
-        .requestSessionId("device_clive")
+        .requestSessionId("device_buildbox")
     )
     expect(restored).toBe(first)
     expect(cleanInstall).not.toBe(first)
@@ -103,11 +103,11 @@ describe("RemoteSessionService envelopes", () => {
   it("restores key inputs sequences cursors and pending command after process restart", async () => {
     const secrets = await Effect.runPromise(makeInMemorySecretStore())
     const device = generateKeyPairSync("x25519"); const jwk = device.publicKey.export({ format: "jwk" }); if (!jwk.x) throw new Error("missing x")
-    const established = establishDesktopSessionKey({ subject: "user", deviceId: "clive", sessionId: "session", devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: jwk.x } })
+    const established = establishDesktopSessionKey({ subject: "user", deviceId: "buildbox", sessionId: "session", devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: jwk.x } })
     const command = { version: 1 as const, commandId: "command_1", sessionId: "session", operation: "run", payload: { prompt: "hi" } }
     const envelope = encryptRemotePayload(established.key, "session", 4, "desktop", command, 1)
     const state = {
-      version: 1 as const, sessionId: "session", deviceId: "clive", subject: "user",
+      version: 1 as const, sessionId: "session", deviceId: "buildbox", subject: "user",
       devicePublicKey: { algorithm: "X25519" as const, encoding: "base64url" as const, value: jwk.x },
       offer: established.offer, ephemeralPrivateKey: established.privateKey,
       nextOutgoingSequence: 5, acknowledgedDeviceSequence: 7,
@@ -143,7 +143,7 @@ describe("RemoteSessionService envelopes", () => {
       const key = deriveDeviceSessionKey(
         offer,
         (remote) => new Uint8Array(diffieHellman({ privateKey: deviceKeys.privateKey, publicKey: createPublicKey({ key: { kty: "OKP", crv: "X25519", x: remote.value }, format: "jwk" }) })),
-        { subject: "user_subject", deviceId: "device_clive", sessionId: "session_restart_abcdefgh" }
+        { subject: "user_subject", deviceId: "device_buildbox", sessionId: "session_restart_abcdefgh" }
       )
       if (connections === 2) {
         const resumedCommandId = received[0]?.commandId
@@ -174,7 +174,7 @@ describe("RemoteSessionService envelopes", () => {
     const secrets = await Effect.runPromise(makeInMemorySecretStore())
     let grants = 0
     const fakeDevice: RemoteDevice = {
-      version: 1, deviceId: "device_clive", displayName: "clive.local",
+      version: 1, deviceId: "device_buildbox", displayName: "buildbox",
       platform: { os: "darwin", arch: "arm64" },
       publicKey: { algorithm: "Ed25519", encoding: "base64url", value: "A".repeat(43) },
       encryptionPublicKey: { algorithm: "X25519", encoding: "base64url", value: deviceEncryptionPublicKey },
@@ -193,13 +193,12 @@ describe("RemoteSessionService envelopes", () => {
         const response: DeviceRelayGrantResponse = {
           version: 1, relayUrl, grant: `grant_${grants}_abcdefghijklmnop`,
           claims: { version: 1, issuer: "jingler", audience: "session-tunnel",
-            subject: "user_subject", deviceId: "device_clive", sessionId: "session_restart_abcdefgh",
+            subject: "user_subject", deviceId: "device_buildbox", sessionId: "session_restart_abcdefgh",
             deviceGeneration: 1, issuedAt: 1, expiresAt: 9999999999, grantId: `grant_${grants}_abcdefghijklmnop` }
         }
         return Effect.succeed(response)
       },
       discovery: () => Effect.never,
-      pairLink: () => Effect.never,
       pairSsh: () => Effect.never,
       rename: () => Effect.never,
       revoke: () => Effect.never
@@ -213,7 +212,7 @@ describe("RemoteSessionService envelopes", () => {
     const events = await Effect.runPromise(Effect.gen(function* () {
       const remote = yield* RemoteSessionService
       return yield* remote.execute(
-        { id: "session_restart_abcdefgh", environmentId: "device_clive" },
+        { id: "session_restart_abcdefgh", environmentId: "device_buildbox" },
         "run",
         { prompt: "hello" }
       ).pipe(Stream.runCollect)
@@ -244,7 +243,7 @@ describe("RemoteSessionService envelopes", () => {
       const key = deriveDeviceSessionKey(offer, (remote) => new Uint8Array(diffieHellman({
         privateKey: deviceKeys.privateKey,
         publicKey: createPublicKey({ key: { kty: "OKP", crv: "X25519", x: remote.value }, format: "jwk" })
-      })), { subject: "user_subject", deviceId: "device_clive", sessionId: "session_concurrent_abcdefgh" })
+      })), { subject: "user_subject", deviceId: "device_buildbox", sessionId: "session_concurrent_abcdefgh" })
       let runCommandId: string | undefined
       let eventSequence = 0
       socket.on("message", (raw) => {
@@ -276,7 +275,7 @@ describe("RemoteSessionService envelopes", () => {
     })
     const secrets = await Effect.runPromise(makeInMemorySecretStore())
     const fakeDevice: RemoteDevice = {
-      version: 1, deviceId: "device_clive", displayName: "clive.local",
+      version: 1, deviceId: "device_buildbox", displayName: "buildbox",
       platform: { os: "darwin", arch: "arm64" },
       publicKey: { algorithm: "Ed25519", encoding: "base64url", value: "A".repeat(43) },
       encryptionPublicKey: { algorithm: "X25519", encoding: "base64url", value: encryptionJwk.x },
@@ -291,10 +290,10 @@ describe("RemoteSessionService envelopes", () => {
       sessionGrant: (_deviceId: string, sessionId: string) => Effect.succeed({
         version: 1 as const, relayUrl, grant: "grant_concurrent_abcdefghijklmnop",
         claims: { version: 1 as const, issuer: "jingler" as const, audience: "session-tunnel" as const,
-          subject: "user_subject", deviceId: "device_clive", sessionId,
+          subject: "user_subject", deviceId: "device_buildbox", sessionId,
           deviceGeneration: 1, issuedAt: 1, expiresAt: 9999999999, grantId: "grant_concurrent_abcdefghijklmnop" }
       }),
-      discovery: () => Effect.never, pairLink: () => Effect.never, pairSsh: () => Effect.never,
+      discovery: () => Effect.never, pairSsh: () => Effect.never,
       rename: () => Effect.never, revoke: () => Effect.never
     }
     const services = RemoteSessionService.Default.pipe(Layer.provide(Layer.mergeAll(
@@ -302,7 +301,7 @@ describe("RemoteSessionService envelopes", () => {
     )))
     const result = await Effect.runPromise(Effect.gen(function* () {
       const remote = yield* RemoteSessionService
-      const session = { id: "session_concurrent_abcdefgh", environmentId: "device_clive" }
+      const session = { id: "session_concurrent_abcdefgh", environmentId: "device_buildbox" }
       const run = yield* Effect.fork(remote.request(session, "Agent.run", { prompt: "hello" }))
       yield* Effect.sleep(10)
       const stopped = yield* remote.request(session, "Agent.stop", null)

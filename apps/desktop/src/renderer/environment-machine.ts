@@ -1,6 +1,5 @@
 import type {
   Environment,
-  PairLinkEnvironmentInput,
   PairSshEnvironmentInput,
   SshHost
 } from "@jingler/core"
@@ -8,32 +7,18 @@ import { assign, fromPromise, setup } from "xstate"
 
 export interface EnvironmentMachineApi {
   suggestHosts: () => Promise<ReadonlyArray<SshHost>>
-  pairLink: (input: PairLinkEnvironmentInput) => Promise<Environment>
   pairSsh: (input: PairSshEnvironmentInput) => Promise<Environment>
 }
 
 export interface EnvironmentContext {
-  method: "remote-link" | "ssh" | null
   hosts: ReadonlyArray<SshHost>
-  backendUrl: string
-  pendingDeviceId: string
-  pairingCode: string
   host: string
   environment: Environment | null
   error: string | null
 }
 
 type EnvironmentEvent =
-  | { type: "CHOOSE"; method: "remote-link" | "ssh" }
-  | {
-      type: "EDIT"
-      field:
-        | "backendUrl"
-        | "pendingDeviceId"
-        | "pairingCode"
-        | "host"
-      value: string
-    }
+  | { type: "EDIT"; field: "host"; value: string }
   | { type: "SELECT_HOST"; host: SshHost }
   | { type: "SUBMIT" }
   | { type: "RETRY" }
@@ -53,35 +38,18 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
     },
     actors: {
       discover: fromPromise(() => api.suggestHosts()),
-      pair: fromPromise(({ input }: { input: EnvironmentContext }) => {
-        if (input.method === "ssh") {
-          return api.pairSsh({ host: input.host })
-        }
-        return api.pairLink({
-          backendUrl: input.backendUrl.trim(),
-          pendingDeviceId: input.pendingDeviceId.trim(),
-          pairingCode: input.pairingCode.trim().toUpperCase()
-        })
-      })
+      pair: fromPromise(({ input }: { input: EnvironmentContext }) =>
+        api.pairSsh({ host: input.host.trim() })
+      )
     },
     guards: {
-      canSubmit: ({ context }) =>
-        context.method === "ssh"
-          ? context.host.trim().length > 0
-          : context.method === "remote-link" &&
-            context.backendUrl.trim().length > 0 &&
-            context.pendingDeviceId.trim().length > 0 &&
-            context.pairingCode.trim().length > 0
+      canSubmit: ({ context }) => context.host.trim().length > 0
     }
   }).createMachine({
     id: "environment",
-    initial: "choosing",
+    initial: "discovering",
     context: {
-      method: null,
       hosts: [],
-      backendUrl: "",
-      pendingDeviceId: "",
-      pairingCode: "",
       host: "",
       environment: null,
       error: null
@@ -102,30 +70,15 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
         }))
       },
       CANCEL: {
-        target: ".choosing",
-        actions: assign({ method: null, error: null })
+        actions: assign({ error: null })
       },
       RESET: {
-        target: ".choosing",
-        actions: assign({ method: null, error: null, environment: null })
+        target: ".discovering",
+        reenter: true,
+        actions: assign({ host: "", error: null, environment: null })
       }
     },
     states: {
-      choosing: {
-        on: {
-          CHOOSE: [
-            {
-              guard: ({ event }) => event.method === "ssh",
-              target: "discovering",
-              actions: assign({ method: "ssh", error: null })
-            },
-            {
-              target: "linking",
-              actions: assign({ method: "remote-link", error: null })
-            }
-          ]
-        }
-      },
       discovering: {
         invoke: {
           src: "discover",
@@ -142,7 +95,6 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
       configuring: {
         on: { SUBMIT: { guard: "canSubmit", target: "claiming" } }
       },
-      linking: { on: { SUBMIT: { guard: "canSubmit", target: "claiming" } } },
       claiming: {
         invoke: {
           src: "pair",
@@ -163,13 +115,7 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
       connected: {},
       failed: {
         on: {
-          RETRY: [
-            {
-              guard: ({ context }) => context.method === "ssh",
-              target: "configuring"
-            },
-            { target: "linking" }
-          ]
+          RETRY: { target: "configuring" }
         }
       }
     }

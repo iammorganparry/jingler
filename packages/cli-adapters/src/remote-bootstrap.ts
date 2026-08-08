@@ -235,6 +235,9 @@ const pairingCommand = (relayUrl: string | undefined): string => {
   return `jingler-device pair --json --relay ${quoteRemoteArgument(checked)}`
 }
 
+const sshAuthenticationMessage = (host: string): string =>
+  `SSH authentication failed for ${host}. Make sure ssh ${host} works without a password and that its Host entry in ~/.ssh/config sets the correct User and IdentityFile.`
+
 const executeBootstrap = (
   input: BootstrapSshInput,
   remoteAgentCommand: string,
@@ -281,7 +284,7 @@ const executeBootstrap = (
         throw new SshBootstrapError({
           kind: authentication ? "authentication" : incompatible ? "incompatible" : "connection",
           message: authentication
-            ? "SSH authentication failed. Verify this host alias works in Terminal and sets User in ~/.ssh/config."
+            ? sshAuthenticationMessage(input.host)
             : incompatible
               ? "The remote Jingler device agent is missing or incompatible"
               : "Could not start the remote Jingler device agent"
@@ -398,10 +401,11 @@ export const installAndBootstrapRemoteDevice = (
         })
     })
     if (upload.exitCode !== 0) {
+      const authentication = /permission denied|authentication failed|publickey/iu.test(upload.stderr)
       return yield* Effect.fail(
         new SshBootstrapError({
-          kind: /permission denied|publickey/iu.test(upload.stderr) ? "authentication" : "connection",
-          message: "Device agent upload failed"
+          kind: authentication ? "authentication" : "connection",
+          message: authentication ? sshAuthenticationMessage(input.host) : "Device agent upload failed"
         })
       )
     }
@@ -505,11 +509,12 @@ export const activateRemoteDevice = (
         })
     })
     if (result.exitCode !== 0) {
+      const authentication = /permission denied|authentication failed|publickey/iu.test(result.stderr)
       return yield* Effect.fail(
         new SshBootstrapError({
-          kind: /permission denied|publickey/iu.test(result.stderr) ? "authentication" : "connection",
-          message: /permission denied|publickey/iu.test(result.stderr)
-            ? "SSH authentication failed"
+          kind: authentication ? "authentication" : "connection",
+          message: authentication
+            ? sshAuthenticationMessage(input.host)
             : "Could not activate the remote Jingler device agent"
         })
       )

@@ -23,16 +23,16 @@ describe("SessionSidebar session identity", () => {
       <SessionSidebar
         activeSessionId="remote"
         onSelect={() => {}}
-        sessions={[session({ id: "remote", environmentId: "device-clive" })]}
+        sessions={[session({ id: "remote", environmentId: "device-buildbox" })]}
         environments={[{
-          id: "device-clive", name: "clive.local", platform: { os: "darwin", arch: "arm64" },
+          id: "device-buildbox", name: "buildbox", platform: { os: "darwin", arch: "arm64" },
           capabilities: { version: 1, capabilities: ["session.start"], harnesses: ["claude"], maxConcurrentSessions: 4 },
           state: "offline", agentVersion: "2.0.3", lastSeenAt: 1
         }]}
       />
     )
-    expect(screen.getByTestId("session-environment-remote").textContent).toBe("clive.local · offline")
-    expect(screen.getByTestId("session-location-remote").getAttribute("title")).toBe("Environment: clive.local · offline")
+    expect(screen.getByTestId("session-environment-remote").textContent).toBe("buildbox · offline")
+    expect(screen.getByTestId("session-location-remote").getAttribute("title")).toBe("Environment: buildbox · offline")
   })
   it("shows repository, attention age, PR, execution location, and harness", () => {
     render(

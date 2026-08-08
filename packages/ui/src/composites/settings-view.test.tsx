@@ -6,7 +6,7 @@ import { DevicesSection } from "./settings-view.js"
 
 const base: Environment = {
   id: "device-1",
-  name: "clive.local",
+  name: "buildbox",
   platform: { os: "darwin", arch: "arm64" },
   capabilities: {
     version: 1,
@@ -20,17 +20,12 @@ const base: Environment = {
 }
 const dialog = {
   open: false,
-  state: "choosing" as const,
-  method: null,
+  state: "configuring" as const,
   values: {
-    backendUrl: "",
-    pendingDeviceId: "",
-    pairingCode: "",
     host: ""
   },
   hosts: [],
   onClose: vi.fn(),
-  onChoose: vi.fn(),
   onEdit: vi.fn(),
   onSelectHost: vi.fn(),
   onSubmit: vi.fn(),
@@ -95,7 +90,7 @@ describe("Devices settings", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Rename" }))
     const input = screen.getByRole("textbox", { name: "Environment name" })
-    expect((input as HTMLInputElement).value).toBe("clive.local")
+    expect((input as HTMLInputElement).value).toBe("buildbox")
     fireEvent.change(input, { target: { value: "Build mini" } })
     fireEvent.click(screen.getByRole("button", { name: "Rename" }))
 
