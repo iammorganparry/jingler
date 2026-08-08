@@ -1,24 +1,16 @@
 import {
   planDocumentToPlan,
   planStageSemanticFingerprint,
+  planTaskProgressRecords,
   resumePlanPrompt,
+  stripPlanTaskProgressProtocol,
   type Plan,
   type PlanDocument,
-  type PlanTaskStatus
+  type PlanTaskProgressRecord
 } from "@jingler/core"
 import { createHash } from "node:crypto"
 
-export type PersistedPlanTaskStatus = Exclude<PlanTaskStatus, "pending">
-
-export interface PlanTaskProgressMarker {
-  readonly stageId: string
-  readonly stageFingerprint: string
-  readonly taskId: string
-  readonly status: PersistedPlanTaskStatus
-}
-
-const TASK_MARKER =
-  /^PLAN_TASK stage=(\S+) fingerprint=(\S+) task=(\S+) status=(in-progress|completed|blocked)$/gm
+export type PlanTaskProgressMarker = PlanTaskProgressRecord
 
 /** Compact, copy-safe identity for one stage's immutable semantics. */
 export const planTaskProgressFingerprint = (
@@ -32,30 +24,10 @@ export const planTaskProgressFingerprint = (
 /** Parse the provider-neutral task checkpoint protocol from accumulated output. */
 export const planTaskProgressFromText = (
   text: string
-): ReadonlyArray<PlanTaskProgressMarker> =>
-  [...text.matchAll(TASK_MARKER)].map((match) => ({
-    stageId: match[1]!,
-    stageFingerprint: match[2]!,
-    taskId: match[3]!,
-    status: match[4]! as PersistedPlanTaskStatus
-  }))
+): ReadonlyArray<PlanTaskProgressMarker> => planTaskProgressRecords(text)
 
 /** Hide task checkpoint markers from the user-facing assistant response. */
-export const stripPlanTaskProgressProtocol = (text: string): string => {
-  const protocol = "PLAN_TASK"
-  return text
-    .split(/\r?\n/)
-    .filter((line) => {
-      const trimmed = line.trimStart()
-      return !(
-        trimmed.startsWith(protocol) ||
-        (trimmed.startsWith("PLAN_") && protocol.startsWith(trimmed))
-      )
-    })
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trimEnd()
-}
+export { stripPlanTaskProgressProtocol }
 
 /**
  * Add exact durable checkpoints to the compatibility plan handed to a direct

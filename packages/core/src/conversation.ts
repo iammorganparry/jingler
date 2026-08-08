@@ -300,6 +300,14 @@ export type SessionPlanArtifact = Schema.Schema.Type<typeof SessionPlanArtifact>
 export const TextPart = Schema.TaggedStruct("Text", { text: Schema.String })
 export type TextPart = Schema.Schema.Type<typeof TextPart>
 
+/** A machine checkpoint rendered as a compact chat chip, never raw protocol. */
+export const PlanTaskProgressPart = Schema.TaggedStruct("PlanTaskProgress", {
+  stageId: Schema.String,
+  taskId: Schema.String,
+  status: Schema.Literal("in-progress", "completed", "blocked")
+})
+export type PlanTaskProgressPart = Schema.Schema.Type<typeof PlanTaskProgressPart>
+
 /**
  * An image the operator attached as context for a prompt. `data` is the raw
  * bytes base64-encoded (no `data:` prefix) so it round-trips through JSON/RPC and
@@ -436,6 +444,7 @@ export type ContextPart = Schema.Schema.Type<typeof ContextPart>
 /** One ordered piece of a turn — text, an image, thinking, a tool card, a gate, a question, a plan, or a compaction marker. */
 export const ContentPart = Schema.Union(
   TextPart,
+  PlanTaskProgressPart,
   ImagePart,
   ThinkingPart,
   ToolPart,

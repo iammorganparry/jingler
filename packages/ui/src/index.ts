@@ -121,11 +121,12 @@ export * from "./composites/memory-inspector.js"
 export * from "./composites/memory-suggestions.js"
 export * from "./composites/memory-analytics.js"
 export * from "./composites/memory-browser.js"
-// Three-page plan surfaces: step outline (Main), architecture, workflow DAG
+// Plan surfaces: compact steps, cohesive implementation guide, workflow DAG
 export * from "./composites/plan-steps/plan-step-outline.js"
 export * from "./composites/plan-steps/plan-step-card.js"
 export * from "./composites/plan-architecture.js"
 export * from "./composites/plan-walkthrough.js"
+export * from "./composites/plan-guide.js"
 export * from "./composites/plan-workflow.js"
 // Read-only sanitized HTML plan document view
 export * from "./composites/plan-doc/plan-blocks.js"

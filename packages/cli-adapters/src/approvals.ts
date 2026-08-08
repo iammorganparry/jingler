@@ -69,6 +69,14 @@ export const isAllowlisted = (
 
 const basename = (target: string | null): string => target?.split("/").pop() ?? "file"
 
+/** Jingler's managed memory server is trusted infrastructure, not an operator action. */
+export const isJinglerMemoryRequest = (req: PermissionRequest): boolean => {
+  const tool = req.tool.toLowerCase()
+  const name = tool.split("__").pop() ?? tool
+  return name.startsWith("memory_") &&
+    (tool === name || tool.includes("jingler-memory") || tool.includes("jingler_memory"))
+}
+
 /**
  * Decide whether a requested action runs (`"allow"`) or must pause for the
  * operator (`"gate"`), from the chat's HITL mode + allowlist:
@@ -80,9 +88,14 @@ export const verdict = (
   mode: PermissionMode,
   allow: ReadonlySet<string>,
   req: PermissionRequest,
-  planAutoRun: boolean = PLAN_AUTO_RUN_DEFAULT
+  planAutoRun: boolean = PLAN_AUTO_RUN_DEFAULT,
+  jinglerMode: boolean = false
 ): "allow" | "gate" => {
   if (mode === "auto") return "allow"
+  // The memory server is bundled and scoped by Jingler itself. Asking the
+  // operator again inside Jingler mode can strand both the lead and unattended
+  // workers, so every memory operation bypasses the generic harness gate.
+  if (jinglerMode && isJinglerMemoryRequest(req)) return "allow"
   if (isAllowlisted(allow, req.command)) return "allow"
   // Planning is a read-only phase: the harness refuses edits outright, so the
   // only thing left to approve is a command that cannot change the tree. Running
