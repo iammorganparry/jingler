@@ -69,6 +69,8 @@ export interface ConversationPaneCtx {
   onOpenPlanReview: (stepId?: string) => void
   /** Open a repository path in this session's Files tab. */
   onOpenFile: (path: string) => void
+  /** Present the Files workspace without requiring a path to be selected. */
+  onSelectFiles: () => void
   /** Present the first renderable streamed draft using this pane's width. */
   onPlanDraftAvailable?: () => void
   /** The stage Plan Review should open at, until the one-shot target is consumed. */
@@ -244,6 +246,7 @@ function SessionPaneBody(props: SessionPaneProps) {
   } | null>(null)
   const [split, setSplit] = useState(false)
   const paneWidth = usePaneWidth().width
+  const hasPlan = props.planSessions?.has(props.session.id) ?? false
   const supportsAuxiliarySplit =
     paneWidth === 0 || paneWidth >= SESSION_AUXILIARY_SPLIT_BREAKPOINT
   const [auxiliaryRatio, setAuxiliaryRatio] = useState(initialSessionAuxiliaryRatio)
@@ -266,14 +269,14 @@ function SessionPaneBody(props: SessionPaneProps) {
       setTarget(stepId ? { sessionId: props.session.id, stepId } : null)
       // Plan follows the same responsive boundary as every other auxiliary
       // view: two thirds beside chat when there is room, full-width otherwise.
-      if (supportsAuxiliarySplit) {
+      if (supportsAuxiliarySplit && hasPlan) {
         setTab(BUILTIN_TAB.conversation)
         setSplit(true)
       } else {
         setTab(BUILTIN_TAB.plan)
       }
     },
-    [props.session.id, supportsAuxiliarySplit]
+    [props.session.id, supportsAuxiliarySplit, hasPlan]
   )
   const presentPlanDraft = useCallback(() => openPlanReview(), [openPlanReview])
 
@@ -337,7 +340,7 @@ function SessionPaneBody(props: SessionPaneProps) {
   // per render.
   const tabCtx: TabContext = {
     session: active,
-    hasPlan: props.planSessions?.has(active.id) ?? false,
+    hasPlan,
     diff: props.liveDiff?.[active.id] ?? null
   }
   const connectGithub = props.onOpenSettings ?? (() => {})
@@ -367,6 +370,7 @@ function SessionPaneBody(props: SessionPaneProps) {
             props.onOpenFile?.(session.id, path)
             ctx.onSelectTab(BUILTIN_TAB.files)
           },
+          onSelectFiles: () => ctx.onSelectTab(BUILTIN_TAB.files),
           onPlanDraftAvailable: presentPlanDraft,
           planStepId: planStepTarget,
           onPlanStepSelected: () => setTarget(null),

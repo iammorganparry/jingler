@@ -47,6 +47,7 @@ export interface PlanReviewProps {
   onOpenFile?: (path: string) => void
   /** One-shot stable stage id requested by the composer progress dock. */
   selectedStepId?: string | null
+  revisionTarget?: { readonly stageId: string | null } | null
   /** @deprecated Split panes render the same responsive document editor. */
   compact?: boolean
   /** Called after the requested stage has been scrolled into view. */
@@ -120,6 +121,7 @@ function PlanReviewBody(props: PlanReviewProps) {
     onStopWorker,
     onRetryWorker,
     selectedStepId,
+    revisionTarget,
     onSelectStep,
     patch,
     knownFiles,
@@ -215,6 +217,7 @@ function PlanReviewBody(props: PlanReviewProps) {
           onStopWorker={onStopWorker}
           onRetryWorker={onRetryWorker}
           targetStageId={selectedStepId}
+          revisionTarget={revisionTarget}
           onTargetStageConsumed={
             selectedStepId ? () => onSelectStep?.(selectedStepId) : undefined
           }

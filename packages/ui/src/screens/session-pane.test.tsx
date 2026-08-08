@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { useEffect, useState } from "react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Boxes } from "lucide-react"
 import type { Session } from "@jingler/core"
 import { SessionPane } from "./session-pane.js"
@@ -12,6 +12,7 @@ import {
 } from "../app/tab-contributions.js"
 import { testSession as session } from "../test-support.js"
 
+beforeEach(() => localStorage.clear())
 afterEach(cleanup)
 
 /** The built-ins with inert bodies — these tests are about which tabs, not what's in them. */
@@ -42,6 +43,24 @@ const pluginTab = (
   render: () => <div>{id} body</div>,
   ...over
 })
+
+const mockPaneWidth = (width: number) =>
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    x: 0,
+    y: 0,
+    top: 0,
+    right: width,
+    bottom: 800,
+    left: 0,
+    width,
+    height: 800,
+    toJSON: () => ({})
+  })
+
+const auxiliaryPanelPercent = (): number => {
+  const style = screen.getByTestId("session-auxiliary-panel").getAttribute("style") ?? ""
+  return Number(/calc\(([\d.]+)%/.exec(style)?.[1] ?? Number.NaN)
+}
 
 describe("visibleTabs", () => {
   it("shows only Conversation for a bare session", () => {
@@ -288,6 +307,21 @@ describe("mount groups", () => {
     expect(screen.getByTestId("plan-presentation").textContent).toBe("split")
   })
 
+  it("opens empty Plan Review full-width so a roomy pane can start its first plan", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        planSessions={new Set()}
+        renderConversation={(_session, view) => (
+          <span data-testid="plan-presentation">{view}</span>
+        )}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Plan Review" }))
+    expect(screen.getByTestId("plan-presentation").textContent).toBe("plan")
+  })
+
   it("opens the first streamed draft beside a roomy conversation", () => {
     render(
       <SessionPane
@@ -307,19 +341,7 @@ describe("mount groups", () => {
   })
 
   it("opens streamed Plan Review full-width when the pane is too narrow", async () => {
-    const rect = vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockReturnValue({
-        x: 0,
-        y: 0,
-        top: 0,
-        right: 600,
-        bottom: 800,
-        left: 0,
-        width: 600,
-        height: 800,
-        toJSON: () => ({})
-      })
+    const rect = mockPaneWidth(600)
     render(
       <SessionPane
         session={session({ id: "a" })}
@@ -340,19 +362,7 @@ describe("mount groups", () => {
   })
 
   it("opens a manually selected Plan Review full-width when the pane is too narrow", async () => {
-    const rect = vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockReturnValue({
-        x: 0,
-        y: 0,
-        top: 0,
-        right: 600,
-        bottom: 800,
-        left: 0,
-        width: 600,
-        height: 800,
-        toJSON: () => ({})
-      })
+    const rect = mockPaneWidth(600)
     render(
       <SessionPane
         session={session({ id: "a" })}
@@ -432,6 +442,30 @@ describe("SessionPane", () => {
     expect(screen.getByText("files for a")).toBeTruthy()
   })
 
+  it("opens Files beside chat with the default two-thirds workspace", async () => {
+    const rect = mockPaneWidth(1_200)
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        renderConversation={(s) => <div>transcript for {s.id}</div>}
+        renderFiles={(s) => <div>files for {s.id}</div>}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Files" }))
+
+    expect(screen.getByTestId("session-auxiliary-chat").textContent).toContain(
+      "transcript for a"
+    )
+    expect(screen.getByTestId("session-auxiliary-panel").textContent).toContain(
+      "files for a"
+    )
+    await waitFor(() => {
+      expect(auxiliaryPanelPercent()).toBeCloseTo((2 / 3) * 100, 3)
+    })
+    rect.mockRestore()
+  })
+
   it("opens every auxiliary view beside chat when the pane is wide", () => {
     render(
       <SessionPane
@@ -462,20 +496,44 @@ describe("SessionPane", () => {
     }
   })
 
-  it("gives an auxiliary view the full pane below the responsive breakpoint", async () => {
-    const rect = vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockReturnValue({
-        x: 0,
-        y: 0,
-        top: 0,
-        right: 600,
-        bottom: 800,
-        left: 0,
-        width: 600,
-        height: 800,
-        toJSON: () => ({})
-      })
+  it("persists a resized Files workspace ratio", async () => {
+    const rect = mockPaneWidth(1_200)
+    const first = render(
+      <SessionPane
+        session={session({ id: "a" })}
+        renderConversation={() => <div>transcript</div>}
+        renderFiles={() => <div>files</div>}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Files" }))
+    const divider = screen.getByRole("separator", { name: "Resize Files" })
+    // jsdom does not expose PointerEvent, so Testing Library's pointer helper
+    // drops clientX. MouseEvent still carries the pointer coordinates through
+    // React's pointer listener and the window-level native listeners.
+    fireEvent(divider, new MouseEvent("pointerdown", { bubbles: true, clientX: 800 }))
+    fireEvent(window, new MouseEvent("pointermove", { bubbles: true, clientX: 680 }))
+    fireEvent(window, new MouseEvent("pointerup", { bubbles: true }))
+
+    const persisted = Number(localStorage.getItem("sb.split.session-auxiliary.ratio"))
+    expect(persisted).toBeGreaterThan(2 / 3)
+    first.unmount()
+
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        renderConversation={() => <div>transcript</div>}
+        renderFiles={() => <div>files</div>}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Files" }))
+    await waitFor(() => {
+      expect(auxiliaryPanelPercent()).toBeCloseTo(persisted * 100, 3)
+    })
+    rect.mockRestore()
+  })
+
+  it("gives Files the full pane below the responsive breakpoint", async () => {
+    const rect = mockPaneWidth(600)
     render(
       <SessionPane
         session={session({ id: "a" })}

@@ -5,11 +5,11 @@ import { PlanEditor } from "./plan-editor.js"
 
 /**
  * The integrated plan workspace: a segmented switcher over three read-only pages
- * — **Steps** (step outline), **Walkthrough** (tutorial guidance), **Architecture**
- * (prose + mermaid), **Workflow** (react-flow DAG with per-node Stop/Retry) — plus
+ * — **Steps** (compact checklist), **Guide** (rationale, call paths, architecture),
+ * **Workflow** (react-flow DAG with per-node Stop/Retry) — plus
  * the floating approve/resume actions.
  */
-const meta: Meta = { title: "Composites/Plan Editor (four pages)" }
+const meta: Meta = { title: "Composites/Plan Editor (three pages)" }
 export default meta
 type Story = StoryObj
 

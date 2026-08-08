@@ -1449,6 +1449,7 @@ function AuthedApp({
             onDelete={deleteSession}
             onInitialPromptConsumed={consumeInitialPrompt}
             onOpenFile={(_sessionId, path) => ctx.onOpenFile(path)}
+            onSelectFiles={ctx.onSelectFiles}
             paneFocused={ctx.paneFocused ?? true}
           />
         )}

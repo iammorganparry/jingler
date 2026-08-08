@@ -43,6 +43,7 @@ import {
   shouldRecoverPendingPlanMessage
 } from "./plan-thread-dispatch.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
+import { useFileBrowser } from "./use-file-browser.js"
 import {
   clampedPlanSplitRatio,
   DEFAULT_PLAN_SPLIT_RATIO,
@@ -95,6 +96,7 @@ export function ConversationPane({
   onInitialPromptConsumed,
   onOpenFile,
   environments,
+  onSelectFiles,
   paneFocused = true
 }: {
   session: Session
@@ -130,6 +132,8 @@ export function ConversationPane({
    * Storybook and the component tests want.
    */
   onOpenFile?: (sessionId: string, path: string) => void
+  /** Present Files beside the conversation when follow mode is enabled here. */
+  onSelectFiles?: () => void
   /**
    * Whether this is the pane the operator is looking at. Only that pane's
    * composer takes the caret when the conversation opens.
@@ -164,6 +168,18 @@ export function ConversationPane({
       }
     }
   })
+  const fileBrowser = useFileBrowser(session.id)
+  const toggleFollowAgent = useCallback(
+    (enabled: boolean) => {
+      if (enabled) {
+        fileBrowser.enableFollow()
+        onSelectFiles?.()
+      } else {
+        fileBrowser.disableFollow()
+      }
+    },
+    [fileBrowser.disableFollow, fileBrowser.enableFollow, onSelectFiles]
+  )
   const handledPlanDraftPresentation = useRef(0)
   useEffect(() => {
     if (
@@ -654,6 +670,7 @@ export function ConversationPane({
       knownFiles={knownFiles}
       onOpenFile={openAsset}
       selectedStepId={planStepId}
+      revisionTarget={canonicalPlan.revisionTarget}
       onSelectStep={onPlanStepSelected}
       onApprove={(executionMode) =>
         planId &&
@@ -662,10 +679,16 @@ export function ConversationPane({
       onResume={() =>
         planId && convo.resumePlan(planId, canonicalPlan.document?.revision)
       }
-      onRevise={() => planId && convo.revisePlan(planId)}
+      onRevise={() => {
+        if (!planId) return
+        canonicalPlan.beginRevision(null)
+        convo.revisePlan(planId)
+      }}
       onComment={(stepId, body) => planId && convo.commentPlanStep(planId, stepId, body)}
       onAddComment={(target, body) => {
-        if (planId) convo.commentPlanStep(planId, target.stageId ?? "", body, target.anchor)
+        if (!planId) return
+        canonicalPlan.beginRevision(target.stageId ?? null)
+        convo.commentPlanStep(planId, target.stageId ?? "", body, target.anchor)
       }}
       onStartDraft={canonicalPlan.startDraft}
       onSendToAgent={() => {
@@ -992,6 +1015,8 @@ export function ConversationPane({
           jinglerMode={jinglerMode}
           jinglerModePending={jinglerModeMutation.isPending}
           onToggleJinglerMode={toggleJinglerMode}
+          followAgent={fileBrowser.followEnabled}
+          onToggleFollowAgent={toggleFollowAgent}
           archived={
             session.archived
               ? {

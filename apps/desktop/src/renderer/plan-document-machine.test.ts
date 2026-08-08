@@ -77,6 +77,29 @@ describe("planDocumentMachine", () => {
     actor.stop()
   })
 
+  it("keeps a targeted revision transaction visible until a newer document arrives", async () => {
+    const watched: { listener?: (document: PlanDocument) => void } = {}
+    const actor = start(async () => document(3), (next) => {
+      watched.listener = next
+      return () => {}
+    })
+    await waitFor(actor, (snapshot) => snapshot.matches("clean"))
+
+    actor.send({ type: "REVISION_STARTED", stageId: "s_02" })
+    expect(actor.getSnapshot().matches("revising")).toBe(true)
+    expect(actor.getSnapshot().context.revisionTarget).toStrictEqual({
+      baseRevision: 3,
+      stageId: "s_02"
+    })
+
+    watched.listener?.(document(3, "Same"))
+    expect(actor.getSnapshot().matches("revising")).toBe(true)
+    watched.listener?.(document(4, "Revised"))
+    await waitFor(actor, (snapshot) => snapshot.matches("clean"))
+    expect(actor.getSnapshot().context.revisionTarget).toBeNull()
+    actor.stop()
+  })
+
   it("surfaces a load failure and retries it", async () => {
     let attempt = 0
     const actor = start(async () => {

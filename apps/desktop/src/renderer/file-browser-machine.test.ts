@@ -288,6 +288,141 @@ describe("fileBrowserMachine", () => {
     expect(actor.getSnapshot().context.openPaths).toEqual(["src/app.ts", "src/other.ts"])
   })
 
+  it("follows an existing agent edit target when follow mode is enabled", async () => {
+    const read = vi.fn((_: string, path: string) =>
+      Promise.resolve({ ...payload(path, `sha256:${path}`), path })
+    )
+    const { actor } = start({
+      list: vi.fn().mockResolvedValue([
+        { path: "src/app.ts", status: "clean" as const },
+        { path: "src/other.ts", status: "clean" as const }
+      ]),
+      read
+    })
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    actor.send({ type: "ENABLE_FOLLOW" })
+    actor.send({
+      type: "AGENT_TARGET",
+      path: "src/other.ts",
+      eventId: "edit-1",
+      completed: false
+    })
+    await waitFor(actor, (snapshot) => snapshot.context.selectedPath === "src/other.ts")
+
+    expect(actor.getSnapshot().matches({ follow: "enabled" })).toBe(true)
+    expect(actor.getSnapshot().context.openPaths).toEqual(["src/other.ts"])
+  })
+
+  it("refreshes the tree and follows a newly created agent file", async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([{ path: "src/app.ts", status: "clean" as const }])
+      .mockResolvedValueOnce([
+        { path: "src/app.ts", status: "clean" as const },
+        { path: "src/created.ts", status: "untracked" as const }
+      ])
+    const read = vi.fn((_: string, path: string) =>
+      Promise.resolve({ ...payload("created", "sha256:created"), path })
+    )
+    const { actor } = start({ list, read })
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    actor.send({ type: "ENABLE_FOLLOW" })
+    actor.send({
+      type: "AGENT_TARGET",
+      path: "src/created.ts",
+      eventId: "write-1",
+      completed: true
+    })
+    await waitFor(actor, (snapshot) => snapshot.context.selectedPath === "src/created.ts")
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(actor.getSnapshot().context.openPaths).toEqual(["src/created.ts"])
+  })
+
+  it("continues to the latest agent target after the current file finishes loading", async () => {
+    let resolveFirstRead: ((value: AssetPayload) => void) | undefined
+    const firstRead = new Promise<AssetPayload>((resolve) => {
+      resolveFirstRead = resolve
+    })
+    const read = vi
+      .fn()
+      .mockReturnValueOnce(firstRead)
+      .mockImplementation((_: string, path: string) =>
+        Promise.resolve({ ...payload(path, `sha256:${path}`), path })
+      )
+    const { actor } = start({
+      list: vi.fn().mockResolvedValue([
+        { path: "src/app.ts", status: "clean" as const },
+        { path: "src/other.ts", status: "clean" as const }
+      ]),
+      read
+    })
+
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: "loading" }))
+    actor.send({ type: "ENABLE_FOLLOW" })
+    actor.send({
+      type: "AGENT_TARGET",
+      path: "src/other.ts",
+      eventId: "edit-during-read",
+      completed: false
+    })
+
+    resolveFirstRead?.(payload("before", "sha256:before"))
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ document: { ready: "clean" } }) &&
+      snapshot.context.selectedPath === "src/other.ts"
+    )
+
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(actor.getSnapshot().context.openPaths).toEqual(["src/app.ts", "src/other.ts"])
+  })
+
+  it("disables follow after user-originated file navigation", async () => {
+    const read = vi.fn((_: string, path: string) =>
+      Promise.resolve({ ...payload(path, `sha256:${path}`), path })
+    )
+    const { actor } = start({ read })
+    actor.send({ type: "ENABLE_FOLLOW" })
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.context.selectedPath === "src/app.ts")
+
+    expect(actor.getSnapshot().matches({ follow: "disabled" })).toBe(true)
+    actor.send({
+      type: "AGENT_TARGET",
+      path: "src/other.ts",
+      eventId: "edit-2",
+      completed: false
+    })
+    expect(actor.getSnapshot().context.selectedPath).toBe("src/app.ts")
+  })
+
+  it("retains a dirty user draft when the followed agent moves to another file", async () => {
+    const list = vi.fn().mockResolvedValue([
+      { path: "src/app.ts", status: "clean" as const },
+      { path: "src/other.ts", status: "clean" as const }
+    ])
+    const { actor } = start({ list })
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+    actor.send({ type: "EDIT", text: "my unsaved draft" })
+    actor.send({ type: "ENABLE_FOLLOW" })
+    actor.send({
+      type: "AGENT_TARGET",
+      path: "src/other.ts",
+      eventId: "edit-3",
+      completed: false
+    })
+
+    expect(actor.getSnapshot().context.selectedPath).toBe("src/app.ts")
+    expect(actor.getSnapshot().context.draft).toBe("my unsaved draft")
+    expect(actor.getSnapshot().context.pendingAgentTarget?.path).toBe("src/other.ts")
+    expect(actor.getSnapshot().context.pendingDiscard).toBeNull()
+  })
+
   it("focuses the active dirty file tab without asking to discard its draft", async () => {
     const { actor } = start()
     actor.send({ type: "OPEN", path: "src/app.ts" })
@@ -411,6 +546,107 @@ describe("fileBrowserMachine", () => {
     ])
     expect(actor.getSnapshot().context.treeError).toBeNull()
     expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it("queues one repository refresh when the Files view activates during initial loading", async () => {
+    let resolveInitial:
+      ((entries: ReadonlyArray<{ path: string; status: "clean" }>) => void) | undefined
+    const list = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<ReadonlyArray<{ path: string; status: "clean" }>>((resolve) => {
+            resolveInitial = resolve
+          })
+      )
+      .mockResolvedValueOnce([{ path: "src/created.ts", status: "clean" as const }])
+    const { actor } = start({ list })
+
+    actor.send({ type: "VIEW_ACTIVATED" })
+    actor.send({ type: "VIEW_ACTIVATED" })
+    expect(list).toHaveBeenCalledTimes(1)
+
+    resolveInitial?.([])
+    await waitFor(actor, () => list.mock.calls.length === 2)
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(actor.getSnapshot().context.entries).toEqual([
+      { path: "src/created.ts", status: "clean" }
+    ])
+  })
+
+  it("does not rescan a non-empty repository after activation overlaps initial loading", async () => {
+    let resolveInitial:
+      | ((entries: ReadonlyArray<{ path: string; status: "clean" }>) => void)
+      | undefined
+    const list = vi.fn(
+      () =>
+        new Promise<ReadonlyArray<{ path: string; status: "clean" }>>((resolve) => {
+          resolveInitial = resolve
+        })
+    )
+    const { actor } = start({ list })
+
+    actor.send({ type: "VIEW_ACTIVATED" })
+    resolveInitial?.([{ path: "src/app.ts", status: "clean" }])
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    expect(actor.getSnapshot().context.entries).toEqual([
+      { path: "src/app.ts", status: "clean" }
+    ])
+    expect(list).toHaveBeenCalledTimes(1)
+  })
+
+  it("refreshes a settled repository on later Files activations without clearing visible entries", async () => {
+    let resolveRefresh:
+      ((entries: ReadonlyArray<{ path: string; status: "modified" }>) => void) | undefined
+    const originalEntries = [{ path: "src/app.ts", status: "clean" as const }]
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce(originalEntries)
+      .mockImplementationOnce(
+        () =>
+          new Promise<ReadonlyArray<{ path: string; status: "modified" }>>((resolve) => {
+            resolveRefresh = resolve
+          })
+      )
+    const { actor } = start({ list })
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    actor.send({ type: "VIEW_ACTIVATED" })
+
+    expect(actor.getSnapshot().matches({ tree: "loading" })).toBe(true)
+    expect(actor.getSnapshot().context.entries).toEqual(originalEntries)
+
+    resolveRefresh?.([{ path: "src/app.ts", status: "modified" }])
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+    expect(actor.getSnapshot().context.entries).toEqual([
+      { path: "src/app.ts", status: "modified" }
+    ])
+  })
+
+  it("surfaces a queued refresh failure and recovers on a later Files activation", async () => {
+    const list = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("worktree not ready"))
+      .mockRejectedValueOnce(new Error("worktree still not ready"))
+      .mockResolvedValueOnce([{ path: "src/recovered.ts", status: "clean" as const }])
+    const { actor } = start({ list })
+
+    actor.send({ type: "VIEW_ACTIVATED" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "error" }))
+
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(actor.getSnapshot().context.treeError).toBe("Couldn't refresh repository files.")
+    actor.send({ type: "VIEW_ACTIVATED" })
+    expect(actor.getSnapshot().matches({ tree: "loading" })).toBe(true)
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    expect(actor.getSnapshot().context.entries).toEqual([
+      { path: "src/recovered.ts", status: "clean" }
+    ])
+    expect(actor.getSnapshot().context.treeError).toBeNull()
   })
 
   it("restarts a repository refresh requested while one is already loading", async () => {

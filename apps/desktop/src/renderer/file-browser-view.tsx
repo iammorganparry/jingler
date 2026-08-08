@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type { AssetPayload, Session } from "@jingler/core"
 import {
   AssetBrowser,
@@ -8,6 +8,7 @@ import {
   AssetUnsupported,
   Button,
   Callout,
+  ContextMenu,
   createPierreCodeViewItem,
   createPierreFileContents,
   DiffView,
@@ -17,12 +18,16 @@ import {
 } from "@jingler/ui"
 import type { PierreAnnotationMetadata } from "@jingler/ui"
 import type { JinglerLineSelection } from "@jingler/ui"
-import { FileWarning } from "lucide-react"
+import { FileWarning, MessageSquarePlus, Radio } from "lucide-react"
 import type { FileBrowserController } from "./use-file-browser.js"
 import { useFileBrowser } from "./use-file-browser.js"
 import { useNativeViewBounds } from "./use-native-view-bounds.js"
 import { rpc } from "./rpc-client.js"
 import { captureCodeReference, type CodeReference } from "./code-reference.js"
+import {
+  normalizeAgentFileTarget,
+  useAgentFileActivity
+} from "./agent-file-activity.js"
 
 export interface FileBrowserViewProps {
   readonly session: Session
@@ -62,6 +67,7 @@ export function FileBrowserQuickOpen({
 /** Renderer-owned binding from a session's persistent actor to the Files tab. */
 export function FileBrowserView({ session, onSendReference }: FileBrowserViewProps) {
   const browser = useFileBrowser(session.id)
+  const agentFileActivity = useAgentFileActivity(session.id, session.activeChatId)
   const rootRef = useRef<HTMLDivElement>(null)
   const [selection, setSelection] = useState<JinglerLineSelection | null>(null)
   const activated = useRef(false)
@@ -74,12 +80,57 @@ export function FileBrowserView({ session, onSendReference }: FileBrowserViewPro
   useEffect(() => {
     if (activated.current) return
     activated.current = true
-    // `useFileBrowser` starts a fresh actor in `tree.loading`. Re-entering that
-    // state here cancelled the first full-repository scan and immediately ran
-    // the same expensive request twice. Existing actors are refreshed when the
-    // Files tab is reopened; new actors are allowed to finish their first load.
-    if (!browser.treeLoading) browser.refreshTree()
-  }, [browser.refreshTree, browser.treeLoading])
+    browser.activate()
+  }, [browser.activate])
+
+  const sendSelectionToChat = useCallback(() => {
+    if (
+      selection === null ||
+      selection.side !== "new" ||
+      selection.endSide !== "new" ||
+      browser.selectedPath === null ||
+      browser.draft === null
+    ) {
+      return
+    }
+    const reference = captureCodeReference(
+      browser.selectedPath,
+      browser.draft,
+      selection.startLine,
+      selection.endLine
+    )
+    if (reference !== null) onSendReference?.(reference)
+  }, [browser.draft, browser.selectedPath, onSendReference, selection])
+
+  const canSendSelection =
+    onSendReference !== undefined &&
+    selection !== null &&
+    selection.side === "new" &&
+    selection.endSide === "new" &&
+    browser.selectedPath !== null &&
+    browser.draft !== null
+
+  const normalizedAgentTarget = useMemo(
+    () =>
+      agentFileActivity === null
+        ? null
+        : normalizeAgentFileTarget(agentFileActivity.path, session.worktreePath),
+    [agentFileActivity, session.worktreePath]
+  )
+
+  useEffect(() => {
+    if (!browser.followEnabled || agentFileActivity === null || normalizedAgentTarget === null) return
+    browser.followAgentTarget(
+      normalizedAgentTarget,
+      agentFileActivity.eventId,
+      agentFileActivity.phase === "completed"
+    )
+  }, [
+    agentFileActivity,
+    browser.followAgentTarget,
+    browser.followEnabled,
+    normalizedAgentTarget
+  ])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -87,23 +138,12 @@ export function FileBrowserView({ session, onSendReference }: FileBrowserViewPro
       if (root === null || !(event.target instanceof Node) || !root.contains(event.target)) return
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return
       if (
-        event.shiftKey &&
+        !event.shiftKey &&
         (event.code === "KeyJ" || event.key.toLowerCase() === "j") &&
-        selection !== null &&
-        selection.side === "new" &&
-        selection.endSide === "new" &&
-        browser.selectedPath !== null &&
-        browser.draft !== null
+        canSendSelection
       ) {
-        const reference = captureCodeReference(
-          browser.selectedPath,
-          browser.draft,
-          selection.startLine,
-          selection.endLine
-        )
-        if (reference === null) return
         event.preventDefault()
-        onSendReference?.(reference)
+        sendSelectionToChat()
         return
       }
       if (event.shiftKey) return
@@ -114,7 +154,7 @@ export function FileBrowserView({ session, onSendReference }: FileBrowserViewPro
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [browser.draft, browser.save, browser.selectedPath, browser.status, onSendReference, selection])
+  }, [browser.save, browser.status, canSendSelection, sendSelectionToChat])
 
   return (
     <div ref={rootRef} className="h-full min-h-0 min-w-0 w-full">
@@ -124,6 +164,29 @@ export function FileBrowserView({ session, onSendReference }: FileBrowserViewPro
         selectedPath={browser.selectedPath}
         treeLoading={browser.treeLoading}
         treeError={browser.treeError}
+        toolbar={
+          <div className="ml-auto flex min-w-0 items-center gap-2">
+            {browser.agentTargetPath !== null ? (
+              <span
+                className="max-w-48 truncate font-mono text-[10.5px] text-dim"
+                title={browser.agentTargetPath}
+              >
+                {browser.agentTargetPath}
+              </span>
+            ) : null}
+            <Button
+              type="button"
+              variant={browser.followEnabled ? "secondary" : "ghost"}
+              size="sm"
+              aria-pressed={browser.followEnabled}
+              onClick={browser.followEnabled ? browser.disableFollow : browser.enableFollow}
+              title="Follow files edited by the active chat's agent"
+            >
+              <Radio className="size-3" aria-hidden />
+              Follow agent
+            </Button>
+          </div>
+        }
         onRetryTree={browser.refreshTree}
         onSelectPath={browser.open}
         renderCanvas={(nativeAvailable) => (
@@ -133,6 +196,8 @@ export function FileBrowserView({ session, onSendReference }: FileBrowserViewPro
             nativeAvailable={nativeAvailable}
             selection={selection}
             onSelectionChange={setSelection}
+            canSendSelection={canSendSelection}
+            onSendSelection={sendSelectionToChat}
           />
         )}
       />
@@ -145,13 +210,17 @@ function FileCanvas({
   browser,
   nativeAvailable,
   selection,
-  onSelectionChange
+  onSelectionChange,
+  canSendSelection,
+  onSendSelection
 }: {
   readonly sessionId: string
   readonly browser: FileBrowserController
   readonly nativeAvailable: boolean
   readonly selection: JinglerLineSelection | null
   readonly onSelectionChange: (selection: JinglerLineSelection | null) => void
+  readonly canSendSelection: boolean
+  readonly onSendSelection: () => void
 }) {
   const payload = browser.payload
   const fileDiff = useMemo(() => {
@@ -174,20 +243,22 @@ function FileCanvas({
       return (
         <div className="flex h-full min-h-0 flex-col bg-canvas">
           <FileModeBar path={browser.selectedPath} mode="diff" browser={browser} />
-          <div className="min-h-0 flex-1">
-            <DiffView
-              fileDiff={fileDiff}
-              label={`${browser.selectedPath} changes`}
-              className="h-full min-h-0"
-              selection={selection}
-              onSelectionChange={onSelectionChange}
-              options={{
-                diffStyle: "unified",
-                stickyHeader: false,
-                disableFileHeader: true
-              }}
-            />
-          </div>
+          <SelectionContextMenu enabled={canSendSelection} onSelect={onSendSelection}>
+            <div className="min-h-0 flex-1">
+              <DiffView
+                fileDiff={fileDiff}
+                label={`${browser.selectedPath} changes`}
+                className="h-full min-h-0"
+                selection={selection}
+                onSelectionChange={onSelectionChange}
+                options={{
+                  diffStyle: "unified",
+                  stickyHeader: false,
+                  disableFileHeader: true
+                }}
+              />
+            </div>
+          </SelectionContextMenu>
         </div>
       )
     }
@@ -259,14 +330,16 @@ function FileCanvas({
     browser.failure?.type === "conflict" ? browser.failure.actualRevision : ""
 
   const editor = (
-    <TextFileEditor
-      key={`${payload.path}:${payload.revision}:${conflictRevision}`}
-      payload={payload}
-      initialDraft={browser.draft}
-      browser={browser}
-      selection={selection}
-      onSelectionChange={onSelectionChange}
-    />
+    <SelectionContextMenu enabled={canSendSelection} onSelect={onSendSelection}>
+      <TextFileEditor
+        key={`${payload.path}:${payload.revision}:${conflictRevision}`}
+        payload={payload}
+        initialDraft={browser.draft}
+        browser={browser}
+        selection={selection}
+        onSelectionChange={onSelectionChange}
+      />
+    </SelectionContextMenu>
   )
   const body =
     fileDiff === null ? (
@@ -303,6 +376,32 @@ function FileCanvas({
       </Callout>
       <div className="min-h-0 flex-1">{body}</div>
     </div>
+  )
+}
+
+function SelectionContextMenu({
+  enabled,
+  onSelect,
+  children
+}: {
+  readonly enabled: boolean
+  readonly onSelect: () => void
+  readonly children: ReactNode
+}) {
+  if (!enabled) return children
+  return (
+    <ContextMenu
+      items={[
+        {
+          id: "add-selection-to-chat",
+          label: "Add selection to chat",
+          icon: MessageSquarePlus,
+          onSelect
+        }
+      ]}
+    >
+      <div className="contents">{children}</div>
+    </ContextMenu>
   )
 }
 

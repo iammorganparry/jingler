@@ -1467,22 +1467,33 @@ export const conversationMachine = setup({
     // The runner echoes a `PlanUpdated` so the authoritative state reconciles.
     optimisticPlanComment: assign(({ context, event }) => {
       if (event.type !== "COMMENT_PLAN_STEP") return {}
-      void rpc.agentCommentPlanStep(
-        context.session.id,
-        event.planId,
-        event.stepId,
-        event.body,
-        event.anchor
-      )
+      void rpc
+        .agentCommentPlanStep(
+          context.session.id,
+          event.planId,
+          event.stepId,
+          event.body,
+          event.anchor
+        )
+        .then(() => rpc.agentRevisePlan(context.session.id, event.planId))
+        .catch(() => {})
       const comment: PlanComment = {
         id: `pc_local_${stamp()}`,
         stepId: event.stepId,
         body: event.body,
         author: "user",
         createdAt: new Date().toISOString(),
-        routed: false
+        routed: true
       }
-      return { messages: context.messages.map((m) => addPlanComment(m, event.planId, comment)) }
+      return {
+        messages: context.messages.map((message) =>
+          setPlanStatus(
+            addPlanComment(message, event.planId, comment),
+            event.planId,
+            "revising"
+          )
+        )
+      }
     }),
     optimisticPlanRevise: assign(({ context, event }) => {
       if (event.type !== "REVISE_PLAN") return {}

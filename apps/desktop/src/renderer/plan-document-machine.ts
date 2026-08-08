@@ -11,10 +11,12 @@ export interface PlanDocumentContext extends PlanDocumentInput {
   readonly document: PlanDocument | null
   readonly draft: string
   readonly error: string | null
+  readonly revisionTarget: { readonly baseRevision: number; readonly stageId: string | null } | null
 }
 
 export type PlanDocumentEvent =
   | { readonly type: "RETRY" }
+  | { readonly type: "REVISION_STARTED"; readonly stageId: string | null }
   | { readonly type: "REMOTE"; readonly document: PlanDocument }
 
 const messageFrom = (event: unknown): string => {
@@ -78,6 +80,17 @@ export const planDocumentMachine = setup({
           }
         : {}
     ),
+    beginRevision: assign(({ context, event }) =>
+      event.type === "REVISION_STARTED"
+        ? {
+            revisionTarget: {
+              baseRevision: context.document?.revision ?? 0,
+              stageId: event.stageId
+            }
+          }
+        : {}
+    ),
+    clearRevision: assign(() => ({ revisionTarget: null })),
     rememberError: assign(({ event }) => ({ error: messageFrom(event) }))
   }
 }).createMachine({
@@ -87,7 +100,8 @@ export const planDocumentMachine = setup({
     ...input,
     document: null,
     draft: "",
-    error: null
+    error: null,
+    revisionTarget: null
   }),
   invoke: {
     src: "watchDocument",
@@ -110,7 +124,21 @@ export const planDocumentMachine = setup({
     },
     clean: {
       on: {
+        REVISION_STARTED: { target: "revising", actions: "beginRevision" },
         REMOTE: { guard: "remoteAdvances", actions: "applyRemote" }
+      }
+    },
+    revising: {
+      after: {
+        90000: { target: "clean", actions: "clearRevision" }
+      },
+      on: {
+        REVISION_STARTED: { actions: "beginRevision" },
+        REMOTE: {
+          guard: "remoteAdvances",
+          target: "clean",
+          actions: ["applyRemote", "clearRevision"]
+        }
       }
     },
     error: {

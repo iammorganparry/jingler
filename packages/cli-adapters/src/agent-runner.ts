@@ -31,10 +31,12 @@ import {
   defaultModel,
   findApprovedPlan,
   isBackgroundTaskEvent,
+  isFileMutationTool,
   isSubagentEvent,
   ORCHESTRATOR_ENABLED_DEFAULT,
   planDocumentToPlan,
   planStageSemanticFingerprint,
+  planTaskProtocolTokens,
   orchestratorParticipantRoutingId,
   PLAN_AUTO_RUN_DEFAULT,
   subagentParticipantRoutingId,
@@ -72,8 +74,7 @@ import {
   planTaskProgressFingerprint,
   planTaskProgressFromText,
   planWithExecutionProgress,
-  resumeCanonicalPlanPrompt,
-  stripPlanTaskProgressProtocol
+  resumeCanonicalPlanPrompt
 } from "./plan-task-progress.js"
 import { questionNote } from "./question-prompt.js"
 import { AppPaths } from "./app-paths.js"
@@ -119,9 +120,6 @@ import {
   releaseSessionRun,
   reserveSessionRun
 } from "./run-coordinator.js"
-
-/** Tools that write to disk — a successful one advances the matching plan step. */
-const EDIT_TOOLS = new Set(["Write", "Edit", "Update", "MultiEdit", "NotebookEdit"])
 
 const approvalAccepted: PlanApprovalResult = { status: "accepted" }
 const approvalRefused = (
@@ -2017,10 +2015,19 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   ...next,
                   parts: next.parts.flatMap((part): ReadonlyArray<ContentPart> => {
                     if (part._tag !== "Text") return [part]
-                    const text = stripPlanTaskProgressProtocol(
-                      stripPlanResultProtocol(part.text)
+                    return planTaskProtocolTokens(stripPlanResultProtocol(part.text)).flatMap(
+                      (token): ReadonlyArray<ContentPart> =>
+                        token.kind === "progress"
+                          ? [{
+                              _tag: "PlanTaskProgress",
+                              stageId: token.progress.stageId,
+                              taskId: token.progress.taskId,
+                              status: token.progress.status
+                            }]
+                          : token.text.length === 0
+                            ? []
+                            : [{ ...part, text: token.text }]
                     )
-                    return text.length === 0 ? [] : [{ ...part, text }]
                   })
                 }
               }
@@ -2062,7 +2069,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 )
               }
               // Remember an edit's target path so its ToolEnd can tie back to a step.
-              if (event._tag === "ToolStart" && EDIT_TOOLS.has(event.name) && event.target) {
+              if (event._tag === "ToolStart" && isFileMutationTool(event.name) && event.target) {
                 yield* Ref.update(editTargets, (m) => new Map(m).set(event.id, event.target!))
               }
               // Canonical plan writes must land BEFORE the event is offered.
@@ -2131,7 +2138,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // Re-read the live mode each call so an in-run change (e.g. a plan
               // approval restoring the exec mode) takes effect on this same turn.
               const liveMode = (yield* Ref.get(modes)).get(chatId) ?? mode
-              if (verdict(liveMode, allow, req, planAutoRun) === "allow") return "allow" as const
+              if (verdict(liveMode, allow, req, planAutoRun, orchestrating) === "allow") {
+                return "allow" as const
+              }
               const gn = yield* nextId
               const gateId = `g_${sessionId}_${gn}`
               const gate = buildGate(gateId, req)
