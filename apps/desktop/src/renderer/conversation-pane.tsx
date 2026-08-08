@@ -7,7 +7,7 @@
  */
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import type { ReasoningSetting, Session } from "@jingler/core"
+import type { Environment, ReasoningSetting, Session } from "@jingler/core"
 import { agentChildren, agentPath, clampFontScale } from "@jingler/core"
 import {
   AgentTabBar,
@@ -50,6 +50,11 @@ import {
   resizedPlanSplitRatio
 } from "./plan-split-ratio.js"
 import { claimPlanAutoPresentation } from "./plan-presence.js"
+import {
+  rpcFailureMessage,
+  rpcFailureReason,
+  rpcFailureTag
+} from "./rpc-failure.js"
 
 const workerTabId = (planId: string, agentId: string): string =>
   `worker:${planId.length}:${planId}${agentId}`
@@ -89,9 +94,12 @@ export function ConversationPane({
   onDelete,
   onInitialPromptConsumed,
   onOpenFile,
+  environments,
   paneFocused = true
 }: {
   session: Session
+  /** Live paired-device catalogue owned by the app-level environment controller. */
+  environments: ReadonlyArray<Environment>
   /**
    * Which face of the session to show: the transcript, the Plan Review, or both
    * side by side. `split` renders the SAME Plan Review beside the transcript
@@ -132,11 +140,6 @@ export function ConversationPane({
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
   const convo = useConversation(session, activeChat.id)
-  const environmentQuery = useQuery({
-    queryKey: ["environments"],
-    queryFn: rpc.environmentsList,
-    staleTime: 10_000
-  })
   const [continuationEnvironmentId, setContinuationEnvironmentId] = useState<
     string | undefined | null
   >(null)
@@ -154,12 +157,8 @@ export function ConversationPane({
     onSuccess: publishSessionUpdate,
     onError: (error, environmentId) => {
       if (
-        error !== null &&
-        typeof error === "object" &&
-        "_tag" in error &&
-        error._tag === "EnvironmentHandoffError" &&
-        "reason" in error &&
-        error.reason === "has-work"
+        rpcFailureTag(error) === "EnvironmentHandoffError" &&
+        rpcFailureReason(error) === "has-work"
       ) {
         setContinuationEnvironmentId(environmentId)
       }
@@ -845,6 +844,52 @@ export function ConversationPane({
           </button>
         </div>
       )}
+      {environmentMutation.error !== null &&
+        !(
+          rpcFailureTag(environmentMutation.error) === "EnvironmentHandoffError" &&
+          rpcFailureReason(environmentMutation.error) === "has-work"
+        ) && (
+          <div
+            role="alert"
+            className="flex flex-none items-center gap-2 border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red"
+          >
+            <span className="min-w-0 flex-1">
+              {rpcFailureMessage(
+                environmentMutation.error,
+                "Could not update the session environment."
+              )}
+            </span>
+            <button
+              type="button"
+              aria-label="Dismiss environment error"
+              onClick={() => environmentMutation.reset()}
+              className="flex-none rounded px-1 text-red outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              ×
+            </button>
+          </div>
+        )}
+      {continueEnvironmentMutation.error !== null && (
+        <div
+          role="alert"
+          className="flex flex-none items-center gap-2 border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red"
+        >
+          <span className="min-w-0 flex-1">
+            {rpcFailureMessage(
+              continueEnvironmentMutation.error,
+              "Could not continue the session on that environment."
+            )}
+          </span>
+          <button
+            type="button"
+            aria-label="Dismiss environment continuation error"
+            onClick={() => continueEnvironmentMutation.reset()}
+            className="flex-none rounded px-1 text-red outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {activeAgentTranscript !== null ? (
         <AgentView agent={activeAgentTranscript} />
       ) : (
@@ -860,7 +905,7 @@ export function ConversationPane({
           paused={convo.paused}
           branch={session.branch}
           repo={session.repo}
-          environments={environmentQuery.data ?? []}
+          environments={environments}
           environmentId={session.environmentId}
           environmentPending={environmentMutation.isPending}
           onSetEnvironment={(environmentId) => environmentMutation.mutate(environmentId)}

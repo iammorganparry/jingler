@@ -57,6 +57,14 @@ import { reasoningEffortsFor } from "../lib/reasoning-options.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "../components/dialog.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { GithubMark } from "../components/github-mark.js"
 import { ProviderIcon, PROVIDER_LABEL } from "../components/provider-icon.js"
@@ -81,6 +89,7 @@ import type { ConnectorCenterProps } from "./connector-center.js"
 import type { OpenConnectorSectionProps } from "./open-connector-section.js"
 import type { InjectionTargetsProps } from "./injection-targets.js"
 import { ProviderCard } from "./provider-card.js"
+import { Input } from "../components/input.js"
 import {
   EnvironmentDialog,
   type EnvironmentDialogProps
@@ -855,6 +864,33 @@ export function DevicesSection({
   onRename,
   onRevoke
 }: NonNullable<SettingsViewProps["devices"]>) {
+  const [renameTarget, setRenameTarget] = React.useState<Environment | null>(
+    null
+  )
+  const [renameValue, setRenameValue] = React.useState("")
+  const [renamePending, setRenamePending] = React.useState(false)
+
+  const openRename = (environment: Environment): void => {
+    setRenameTarget(environment)
+    setRenameValue(environment.name)
+  }
+
+  const closeRename = (): void => {
+    if (renamePending) return
+    setRenameTarget(null)
+  }
+
+  const submitRename = async (): Promise<void> => {
+    if (!(renameTarget && renameValue.trim()) || renamePending) return
+    setRenamePending(true)
+    try {
+      await onRename(renameTarget.id, renameValue.trim())
+      setRenameTarget(null)
+    } finally {
+      setRenamePending(false)
+    }
+  }
+
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
@@ -932,13 +968,7 @@ export function DevicesSection({
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => {
-                    const name = window.prompt(
-                      "Rename environment",
-                      environment.name
-                    )
-                    if (name?.trim()) void onRename(environment.id, name)
-                  }}
+                  onClick={() => openRename(environment)}
                 >
                   Rename
                 </Button>
@@ -962,6 +992,53 @@ export function DevicesSection({
         </div>
       </div>
       <EnvironmentDialog {...dialog} />
+      <Dialog
+        open={renameTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) closeRename()
+        }}
+      >
+        <DialogContent className="w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Rename environment</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <label
+              htmlFor="environment-rename-name"
+              className="flex flex-col gap-2 text-[11px] font-medium text-muted-foreground"
+            >
+              Name
+              <Input
+                id="environment-rename-name"
+                aria-label="Environment name"
+                value={renameValue}
+                onChange={(event) => setRenameValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void submitRename()
+                }}
+                disabled={renamePending}
+              />
+            </label>
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={closeRename}
+              disabled={renamePending}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => void submitRename()}
+              disabled={!renameValue.trim() || renamePending}
+            >
+              {renamePending ? "Renaming…" : "Rename"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -2270,6 +2270,43 @@ export const setEnvironment = (
     );
   });
 
+interface ContinuationRepository {
+  readonly name: string;
+  readonly path: string;
+  readonly defaultBranch: string | null;
+  readonly githubSlug: string | null;
+}
+
+/** Match repository identity across machines without ever reusing an absolute path. */
+export const selectContinuationRepository = (
+  source: Pick<ContinuationRepository, "name" | "githubSlug">,
+  candidates: ReadonlyArray<ContinuationRepository>,
+): ContinuationRepository | null => {
+  const slug = source.githubSlug?.toLocaleLowerCase();
+  if (slug) {
+    const bySlug = candidates.find(
+      (candidate) => candidate.githubSlug?.toLocaleLowerCase() === slug,
+    );
+    if (bySlug) return bySlug;
+  }
+  const name = source.name.toLocaleLowerCase();
+  return candidates.find(
+    (candidate) => candidate.name.toLocaleLowerCase() === name,
+  ) ?? null;
+};
+
+const continuationRepositories = (
+  environments: EnvironmentService,
+  environmentId: string | undefined,
+) => Effect.gen(function* () {
+  if (environmentId === undefined) {
+    const repositories = yield* WorkspaceService.listRepos();
+    return repositories satisfies ReadonlyArray<ContinuationRepository>;
+  }
+  const result = yield* environments.discovery(environmentId);
+  return (result.discovery?.repositories ?? []) satisfies ReadonlyArray<ContinuationRepository>;
+});
+
 export const continueOnEnvironment = (
   sessionId: string,
   environmentId: string | undefined,
@@ -2286,19 +2323,51 @@ export const continueOnEnvironment = (
         environments: () => environments.list,
         persist: (id, target) => sessions.setEnvironment(id, target),
         continueSession: (source, target) => Effect.gen(function* () {
+          const sourceRepositories = yield* continuationRepositories(
+            environments,
+            source.environmentId,
+          ).pipe(Effect.orElseSucceed(() => []));
+          const sourceRepository = sourceRepositories.find(
+            (candidate) => candidate.path === source.repoPath,
+          ) ?? sourceRepositories.find(
+            (candidate) => candidate.name === source.repo,
+          );
+          const sourceIdentity = {
+            name: sourceRepository?.name ?? source.repo,
+            githubSlug: sourceRepository?.githubSlug ?? null,
+          };
+          const targetRepositories = yield* continuationRepositories(
+            environments,
+            target,
+          ).pipe(
+            Effect.mapError(() => new EnvironmentHandoffError({
+              reason: "unavailable",
+              message: "The target environment could not list its repositories.",
+              sessionId: source.id,
+              ...(target === undefined ? {} : { environmentId: target }),
+            })),
+          );
+          const targetRepository = selectContinuationRepository(
+            sourceIdentity,
+            targetRepositories,
+          );
+          if (targetRepository === null) {
+            return yield* Effect.fail(new EnvironmentHandoffError({
+              reason: "unavailable",
+              message: `${sourceIdentity.githubSlug ?? sourceIdentity.name} is not available on the target environment.`,
+              sessionId: source.id,
+              ...(target === undefined ? {} : { environmentId: target }),
+            }));
+          }
+          const targetBaseBranch = source.baseBranch
+            ?? targetRepository.defaultBranch
+            ?? source.branch;
           if (target === undefined) {
-            if (!source.repoPath) {
-              return yield* Effect.fail(new EnvironmentHandoffError({
-                reason: "unavailable",
-                message: "The source session has no canonical repository path.",
-                sessionId: source.id,
-              }));
-            }
             return yield* createSession({
-              repoPath: source.repoPath,
-              repoName: source.repo,
+              repoPath: targetRepository.path,
+              repoName: targetRepository.name,
               cli: source.cli,
-              baseBranch: source.branch,
+              baseBranch: targetBaseBranch,
               title: `${source.title} continuation`,
             }).pipe(
               Effect.mapError(() => new EnvironmentHandoffError({
@@ -2311,7 +2380,17 @@ export const continueOnEnvironment = (
           const value = yield* remote.requestOnEnvironment(
             target,
             "Sessions.continueOnEnvironment",
-            { sourceSession: source },
+            {
+              sourceSession: {
+                ...source,
+                title: `${source.title} continuation`,
+                environmentId: target,
+                repo: targetRepository.name,
+                repoPath: targetRepository.path,
+                worktreePath: undefined,
+                baseBranch: targetBaseBranch,
+              },
+            },
           ).pipe(
             Effect.mapError(() => new EnvironmentHandoffError({
               reason: "unavailable",
@@ -2348,6 +2427,12 @@ export const continueOnEnvironment = (
       },
     );
   });
+
+/** A remote cleanup failure must not strand the desktop's local mirror forever. */
+export const removeRemoteSessionMirror = <A, E1, R1, E2, R2>(
+  removeRemote: Effect.Effect<A, E1, R1>,
+  forgetLocal: Effect.Effect<void, E2, R2>,
+) => removeRemote.pipe(Effect.ignore, Effect.zipRight(forgetLocal));
 
 /** `Sessions.linkIssue` handler — attach an issue (+ automations) to a live session. */
 export const linkIssue = (input: {
@@ -4189,13 +4274,13 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       );
       if (session?.environmentId) {
         const remote = yield* RemoteSessionService;
-        yield* remote.request(session, "Sessions.delete", {}).pipe(
-          Effect.mapError((cause) => new GitError({
-            message: "Could not delete the remote session",
-            cause,
-          })),
+        yield* removeRemoteSessionMirror(
+          remote.request(session, "Sessions.delete", {}),
+          remote.forget(sessionId).pipe(
+            Effect.ignore,
+            Effect.zipRight(SessionStore.forgetRemote(sessionId)),
+          ),
         );
-        yield* SessionStore.forgetRemote(sessionId);
         return;
       }
       const relayRoute = yield* GitHubAuth.sessionRoutes().pipe(

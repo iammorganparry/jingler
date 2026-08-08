@@ -1,10 +1,6 @@
 import type { DeviceRelayGrantResponse, RemoteDeviceDiscovery } from "@jingler/core"
 import { describe, expect, it } from "vitest"
-import {
-  type ControlConnectionDependencies,
-  type ControlSocket,
-  runControlConnection
-} from "./control-connection.js"
+import { type ControlConnectionDependencies, type ControlSocket, runControlConnection } from "./control-connection.js"
 
 const discovery: RemoteDeviceDiscovery = {
   version: 1,
@@ -37,11 +33,7 @@ const grant = (id: number): DeviceRelayGrantResponse => ({
   }
 })
 
-const socket = (
-  code: number,
-  reason: string,
-  sent: Array<string>
-): ControlSocket => ({
+const socket = (code: number, reason: string, sent: Array<string>): ControlSocket => ({
   send: (message) => sent.push(message),
   close: () => undefined,
   onMessage: () => () => undefined,
@@ -89,10 +81,7 @@ describe("device control connection", () => {
     await runControlConnection(dependencies, controller.signal)
     expect(sent).toHaveLength(2)
     for (const messages of sent) {
-      expect(messages.map((message) => JSON.parse(message).type)).toStrictEqual([
-        "announce",
-        "ping"
-      ])
+      expect(messages.map((message) => JSON.parse(message).type)).toStrictEqual(["announce", "ping"])
       expect(JSON.parse(messages[0] ?? "{}").discovery).toStrictEqual(discovery)
     }
   })
@@ -114,5 +103,34 @@ describe("device control connection", () => {
     expect(result).toBe("revoked")
     expect(refreshes).toBe(1)
     expect(sleeps).toBe(0)
+  })
+
+  it("aborts an in-flight grant refresh when the daemon stops", async () => {
+    const controller = new AbortController()
+    let receivedAbort = false
+    const running = runControlConnection(
+      {
+        refreshGrant: (signal) => {
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                receivedAbort = true
+                reject(new Error("aborted"))
+              },
+              { once: true }
+            )
+          })
+        },
+        discover: async () => discovery,
+        connect: async () => socket(1000, "stopped", []),
+        sleep: async () => undefined
+      },
+      controller.signal
+    )
+    await Promise.resolve()
+    controller.abort()
+    await expect(running).resolves.toBe("stopped")
+    expect(receivedAbort).toBe(true)
   })
 })

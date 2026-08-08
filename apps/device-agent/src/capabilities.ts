@@ -1,4 +1,5 @@
-import { arch, platform } from "node:os"
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
+import { homedir, arch, platform } from "node:os"
 import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
 import { AppPaths, type AppPathsShape } from "@jingler/cli-adapters/app-paths"
@@ -18,6 +19,47 @@ export interface CapabilitySources {
   readonly repositories: () => Effect.Effect<ReadonlyArray<Repo>, unknown>
   readonly branches: (repoPath: string) => Effect.Effect<ReadonlyArray<string>, unknown>
   readonly platform: () => { readonly os: string; readonly arch: string }
+}
+
+/** Seed a fresh headless install from conventional checkout roots. */
+export const ensureDeviceWorkspaceConfig = async (
+  jinglerRoot: string,
+  home = homedir(),
+  configuredReposDir = process.env.JINGLER_REPOS_DIR
+): Promise<void> => {
+  const configFile = join(jinglerRoot, "config.json")
+  try {
+    await readFile(configFile)
+    return
+  } catch {
+    // A missing config is the fresh-device case. Never replace an existing file.
+  }
+  const candidates = [
+    ...(configuredReposDir ? [configuredReposDir] : []),
+    join(home, "repos"),
+    join(home, "Developer"),
+    join(home, "Projects")
+  ]
+  let reposDir: string | null = null
+  for (const candidate of candidates) {
+    try {
+      if ((await stat(candidate)).isDirectory()) {
+        reposDir = candidate
+        break
+      }
+    } catch {
+      // Try the next conventional root.
+    }
+  }
+  if (!reposDir) return
+  await mkdir(jinglerRoot, { recursive: true, mode: 0o700 })
+  await writeFile(
+    configFile,
+    `${JSON.stringify({ reposDir, createdAt: new Date().toISOString() }, null, 2)}\n`,
+    { mode: 0o600, flag: "wx" }
+  ).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "EEXIST") throw error
+  })
 }
 
 export const discoverDeviceCapabilities = (
@@ -53,7 +95,10 @@ export const discoverDeviceCapabilities = (
         harnesses: harnesses.filter((item) => item.available).map((item) => item.kind),
         maxConcurrentSessions: 4
       },
-      repositories: remoteRepositories
+      repositories: remoteRepositories.filter(
+        (repository) =>
+          repository.defaultBranch !== "HEAD" && repository.branches.length > 0
+      )
     }
   })
 
@@ -84,14 +129,18 @@ export const discoverLiveDeviceCapabilities = (
     NodeContext.layer,
     Layer.succeed(AppPaths, appPaths(jinglerRoot))
   )
-  return discoverDeviceCapabilities(
-    {
-      harnesses: () => DiscoveryService.list().pipe(Effect.provide(layer)),
-      repositories: () => WorkspaceService.listRepos().pipe(Effect.provide(layer)),
-      branches: (repoPath) =>
-        WorkspaceService.branches(repoPath).pipe(Effect.provide(layer)),
-      platform: () => ({ os: platform(), arch: arch() })
-    },
-    agentVersion
+  return Effect.promise(() => ensureDeviceWorkspaceConfig(jinglerRoot)).pipe(
+    Effect.flatMap(() =>
+      discoverDeviceCapabilities(
+        {
+          harnesses: () => DiscoveryService.list().pipe(Effect.provide(layer)),
+          repositories: () => WorkspaceService.listRepos().pipe(Effect.provide(layer)),
+          branches: (repoPath) =>
+            WorkspaceService.branches(repoPath).pipe(Effect.provide(layer)),
+          platform: () => ({ os: platform(), arch: arch() })
+        },
+        agentVersion
+      )
+    )
   )
 }

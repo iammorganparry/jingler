@@ -100,6 +100,7 @@ describe("encrypted session tunnel", () => {
     await expect(secondAccepted).resolves.toMatchObject({ type: "envelope-result", status: "inserted" })
 
     const acknowledged = nextMessage(device)
+    const peerAcknowledged = nextMessage(desktop)
     device.send(
       JSON.stringify({
         type: "ack",
@@ -112,6 +113,7 @@ describe("encrypted session tunnel", () => {
       })
     )
     await expect(acknowledged).resolves.toMatchObject({ type: "acknowledged", sequence: 1 })
+    await expect(peerAcknowledged).resolves.toMatchObject({ type: "peer-acknowledged", sequence: 1 })
     await expect(tunnel.storedSequences("desktop")).resolves.toEqual([2])
 
     const fullyAcknowledged = nextMessage(device)

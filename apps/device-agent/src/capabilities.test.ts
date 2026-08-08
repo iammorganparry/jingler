@@ -1,7 +1,7 @@
 import type { CliInfo, Repo } from "@jingler/core"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
-import { discoverDeviceCapabilities } from "./capabilities.js"
+import { discoverDeviceCapabilities, ensureDeviceWorkspaceConfig } from "./capabilities.js"
 
 const cli = (kind: CliInfo["kind"], available: boolean): CliInfo => ({
   kind,
@@ -23,6 +23,17 @@ const repo: Repo = {
 }
 
 describe("device capabilities", () => {
+  it("seeds a fresh device from the conventional repos directory", async () => {
+    const home = mkdtempSync(join(tmpdir(), "jingler-device-home-"))
+    const root = join(home, "jingler")
+    mkdirSync(join(home, "repos"), { recursive: true })
+
+    await ensureDeviceWorkspaceConfig(root, home)
+
+    expect(JSON.parse(readFileSync(join(root, "config.json"), "utf8"))).toMatchObject({
+      reposDir: join(home, "repos")
+    })
+  })
   it("discovers installed harnesses repositories and branches", async () => {
     const result = await Effect.runPromise(
       discoverDeviceCapabilities(
@@ -57,6 +68,27 @@ describe("device capabilities", () => {
         "2.0.3"
       )
     )
-    expect(result.repositories[0]?.branches).toStrictEqual([])
+    expect(result.repositories).toStrictEqual([])
+  })
+
+  it("excludes an unborn repository that cannot create a worktree", async () => {
+    const result = await Effect.runPromise(
+      discoverDeviceCapabilities(
+        {
+          harnesses: () => Effect.succeed([cli("claude", true)]),
+          repositories: () =>
+            Effect.succeed([
+              { ...repo, defaultBranch: "HEAD", currentBranch: "HEAD" }
+            ]),
+          branches: () => Effect.succeed([]),
+          platform: () => ({ os: "darwin", arch: "arm64" })
+        },
+        "2.0.3"
+      )
+    )
+    expect(result.repositories).toStrictEqual([])
   })
 })
+import { mkdtempSync, mkdirSync, readFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"

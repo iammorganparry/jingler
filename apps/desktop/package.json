@@ -19,9 +19,10 @@
     "e2e:fast": "SKIP_E2E_BUILD=1 playwright test",
     "e2e:report": "playwright show-report",
     "build:bundled-plugins": "node ./scripts/build-bundled-plugins.mjs",
-    "dist": "pnpm run build:bundled-plugins && electron-vite build && electron-builder --dir",
-    "electron:pack": "pnpm run build:bundled-plugins && electron-vite build && electron-builder",
-    "electron:publish": "pnpm run build:bundled-plugins && electron-vite build && electron-builder --publish always",
+    "build:device-agent": "pnpm --filter @jingler/device-agent build",
+    "dist": "pnpm run build:bundled-plugins && pnpm run build:device-agent && electron-vite build && electron-builder --dir",
+    "electron:pack": "pnpm run build:bundled-plugins && pnpm run build:device-agent && electron-vite build && electron-builder",
+    "electron:publish": "pnpm run build:bundled-plugins && pnpm run build:device-agent && electron-vite build && electron-builder --publish always",
     "clean": "rimraf out dist release .turbo *.tsbuildinfo"
   },
   "dependencies": {

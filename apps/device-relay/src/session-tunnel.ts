@@ -325,6 +325,9 @@ export class SessionTunnelObject extends DurableObject<Env> {
           message.acknowledgement.acknowledgedSequence
         )
         safeSend(socket, { type: "acknowledged", sequence: acknowledged })
+        for (const peer of this.ctx.getWebSockets(`endpoint:${opposite(attachment.endpoint)}`)) {
+          safeSend(peer, { type: "peer-acknowledged", sequence: acknowledged })
+        }
         return
       }
       case "envelope": {

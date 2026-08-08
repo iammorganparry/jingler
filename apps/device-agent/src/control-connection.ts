@@ -1,8 +1,4 @@
-import type {
-  DeviceChallenge,
-  DeviceRelayGrantResponse,
-  RemoteDeviceDiscovery
-} from "@jingler/core"
+import type { DeviceChallenge, DeviceRelayGrantResponse, RemoteDeviceDiscovery } from "@jingler/core"
 import {
   DeviceChallenge as DeviceChallengeSchema,
   DeviceRelayGrantResponse as DeviceRelayGrantResponseSchema
@@ -31,18 +27,19 @@ export interface ControlSocket {
 }
 
 export interface ControlConnectionDependencies {
-  readonly refreshGrant: () => Promise<DeviceRelayGrantResponse>
-  readonly connect: (url: string, grant: string) => Promise<ControlSocket>
+  readonly refreshGrant: (signal: AbortSignal) => Promise<DeviceRelayGrantResponse>
+  readonly connect: (url: string, grant: string, signal: AbortSignal) => Promise<ControlSocket>
   readonly discover: () => Promise<RemoteDeviceDiscovery>
   readonly sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>
-  readonly handleSessionRequest?: (request: { readonly relayUrl: string; readonly sessionId: string; readonly grant: string; readonly keyOffer: unknown }) => Promise<void>
+  readonly handleSessionRequest?: (request: {
+    readonly relayUrl: string
+    readonly sessionId: string
+    readonly grant: string
+    readonly keyOffer: unknown
+  }) => Promise<void>
 }
 
-const requestJson = async <A, I>(
-  url: string,
-  init: RequestInit,
-  schema: Schema.Schema<A, I>
-): Promise<A> => {
+const requestJson = async <A, I>(url: string, init: RequestInit, schema: Schema.Schema<A, I>): Promise<A> => {
   const response = await fetch(url, init)
   if (!response.ok) {
     throw new DeviceControlError({
@@ -51,46 +48,60 @@ const requestJson = async <A, I>(
     })
   }
   try {
-    return Schema.decodeUnknownSync(schema)(await response.json(), { onExcessProperty: "error" })
+    return Schema.decodeUnknownSync(schema)(await response.json(), {
+      onExcessProperty: "error"
+    })
   } catch (cause) {
-    throw new DeviceControlError({ message: "Invalid device API response", cause })
+    throw new DeviceControlError({
+      message: "Invalid device API response",
+      cause
+    })
   }
 }
 
-const apiUrl = (serverUrl: string, path: string): string =>
-  `${serverUrl.replace(/\/$/u, "")}/api/devices${path}`
+const apiUrl = (serverUrl: string, path: string): string => `${serverUrl.replace(/\/$/u, "")}/api/devices${path}`
 
-export const createDeviceGrantRefresher = (
-  enrollment: DeviceEnrollment,
-  identity: DeviceIdentity
-): (() => Promise<DeviceRelayGrantResponse>) => async () => {
-  const challenge = await requestJson(
-    apiUrl(enrollment.serverUrl, "/challenges"),
-    {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({
-        version: 1,
-        subject: enrollment.subject,
-        deviceId: enrollment.deviceId
-      })
-    },
-    DeviceChallengeSchema
-  )
-  return requestJson(
-    apiUrl(enrollment.serverUrl, "/challenges/exchange"),
-    {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({
-        version: 1,
-        challenge: challenge satisfies DeviceChallenge,
-        signature: identity.signChallenge(challenge)
-      })
-    },
-    DeviceRelayGrantResponseSchema
-  )
-}
+export const createDeviceGrantRefresher =
+  (
+    enrollment: DeviceEnrollment,
+    identity: DeviceIdentity
+  ): ((signal: AbortSignal) => Promise<DeviceRelayGrantResponse>) =>
+  async (signal) => {
+    const challenge = await requestJson(
+      apiUrl(enrollment.serverUrl, "/challenges"),
+      {
+        method: "POST",
+        signal,
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json"
+        },
+        body: JSON.stringify({
+          version: 1,
+          subject: enrollment.subject,
+          deviceId: enrollment.deviceId
+        })
+      },
+      DeviceChallengeSchema
+    )
+    return requestJson(
+      apiUrl(enrollment.serverUrl, "/challenges/exchange"),
+      {
+        method: "POST",
+        signal,
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json"
+        },
+        body: JSON.stringify({
+          version: 1,
+          challenge: challenge satisfies DeviceChallenge,
+          signature: identity.signChallenge(challenge)
+        })
+      },
+      DeviceRelayGrantResponseSchema
+    )
+  }
 
 const websocketUrl = (relayUrl: string): string => {
   const url = new URL("/v1/device-connect", relayUrl)
@@ -98,27 +109,55 @@ const websocketUrl = (relayUrl: string): string => {
   return url.toString()
 }
 
-export const connectDeviceWebSocket = (
-  relayUrl: string,
-  grant: string
-): Promise<ControlSocket> =>
+export const connectDeviceWebSocket = (relayUrl: string, grant: string, signal: AbortSignal): Promise<ControlSocket> =>
   new Promise((resolve, reject) => {
     const socket = new WebSocket(websocketUrl(relayUrl), {
       headers: { authorization: `Bearer ${grant}` }
     })
+    let settled = false
+    const cleanupAdmission = () => {
+      socket.off("error", fail)
+      signal.removeEventListener("abort", abort)
+    }
     const fail = (cause: Error) => {
-      socket.close()
-      reject(new DeviceControlError({ message: "Device relay connection failed", cause }))
+      if (settled) return
+      settled = true
+      cleanupAdmission()
+      socket.terminate()
+      reject(
+        new DeviceControlError({
+          message: "Device relay connection failed",
+          cause
+        })
+      )
+    }
+    const abort = () => {
+      if (settled) return
+      settled = true
+      cleanupAdmission()
+      socket.terminate()
+      reject(new DeviceControlError({ message: "Device relay connection stopped" }))
+    }
+    if (signal.aborted) {
+      abort()
+      return
     }
     socket.once("error", fail)
+    signal.addEventListener("abort", abort, { once: true })
     socket.once("open", () => {
-      socket.off("error", fail)
+      if (settled) return
+      settled = true
+      cleanupAdmission()
       resolve({
         send: (message) => socket.send(message),
         close: () => socket.close(),
         onMessage: (handler) => {
           const listener = (data: WebSocket.RawData) => {
-            try { handler(JSON.parse(data.toString("utf8"))) } catch { /* ignore malformed relay messages */ }
+            try {
+              handler(JSON.parse(data.toString("utf8")))
+            } catch {
+              /* ignore malformed relay messages */
+            }
           }
           socket.on("message", listener)
           return () => socket.off("message", listener)
@@ -165,18 +204,31 @@ export const runControlConnection = async (
     try {
       // Never reuse a relay grant: every admission, including reconnect, proves
       // possession again and receives a fresh, short-lived device-only grant.
-      const refreshed = await dependencies.refreshGrant()
+      const refreshed = await dependencies.refreshGrant(signal)
       if (signal.aborted) break
       const discovery = await dependencies.discover()
-      socket = await dependencies.connect(refreshed.relayUrl, refreshed.grant)
+      if (signal.aborted) break
+      socket = await dependencies.connect(refreshed.relayUrl, refreshed.grant, signal)
       const stopMessages = socket.onMessage((message) => {
         if (!dependencies.handleSessionRequest || !message || typeof message !== "object") return
         const request = message as Record<string, unknown>
-        if (request.type !== "session-request" || typeof request.sessionId !== "string" || typeof request.grant !== "string") return
-        void dependencies.handleSessionRequest({ relayUrl: refreshed.relayUrl, sessionId: request.sessionId, grant: request.grant, keyOffer: request.keyOffer }).catch(() => {
-          // The control socket remains healthy; a failed session tunnel is
-          // independently retried by the desktop with a fresh scoped grant.
-        })
+        if (
+          request.type !== "session-request" ||
+          typeof request.sessionId !== "string" ||
+          typeof request.grant !== "string"
+        )
+          return
+        void dependencies
+          .handleSessionRequest({
+            relayUrl: refreshed.relayUrl,
+            sessionId: request.sessionId,
+            grant: request.grant,
+            keyOffer: request.keyOffer
+          })
+          .catch(() => {
+            // The control socket remains healthy; a failed session tunnel is
+            // independently retried by the desktop with a fresh scoped grant.
+          })
       })
       socket.send(JSON.stringify({ type: "announce", discovery }))
       socket.send(JSON.stringify({ type: "ping" }))
@@ -185,13 +237,10 @@ export const runControlConnection = async (
       stopMessages()
       if (closed.code === 4003 || /revoked/iu.test(closed.reason)) return "revoked"
     } catch (error) {
-      if (
-        error instanceof DeviceControlError &&
-        (error.status === 403 || /revoked/iu.test(error.message))
-      ) {
+      if (error instanceof DeviceControlError && (error.status === 403 || /revoked/iu.test(error.message))) {
         return "revoked"
       }
-      failures += 1
+      if (!signal.aborted) failures += 1
     } finally {
       socket?.close()
     }

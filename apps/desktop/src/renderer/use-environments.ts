@@ -19,7 +19,10 @@ export const useEnvironments = () => {
     }),
     []
   )
-  const [snapshot, send] = useMachine(createEnvironmentMachine(api))
+  // XState treats a new machine object as a new actor. Recreating it during
+  // render makes useMachine replace the actor and immediately render again.
+  const machine = useMemo(() => createEnvironmentMachine(api), [api])
+  const [snapshot, send] = useMachine(machine)
   const refresh = useCallback(async () => {
     setLoading(true)
     try {

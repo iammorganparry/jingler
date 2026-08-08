@@ -134,6 +134,7 @@ import {
   Scope,
   Stream
 } from "effect"
+import { unwrapRpcFailure } from "./rpc-failure.js"
 
 /**
  * A custom `RpcClient.Protocol` bound to the preload bridge. `send` ships a
@@ -204,16 +205,18 @@ const assetListClientPromise = assetListRuntime.runPromise(
 const run = <A>(
   f: (client: Awaited<typeof clientPromise>) => Effect.Effect<A, unknown>
 ): Promise<A> =>
-  clientPromise.then((client) => coreRuntime.runPromise(f(client)))
+  clientPromise
+    .then((client) => coreRuntime.runPromise(f(client)))
+    .catch((error) => Promise.reject(unwrapRpcFailure(error)))
 
 const runAssetList = <A>(
   f: (
     client: Awaited<typeof assetListClientPromise>
   ) => Effect.Effect<A, unknown>
 ): Promise<A> =>
-  assetListClientPromise.then((client) =>
-    assetListRuntime.runPromise(f(client))
-  )
+  assetListClientPromise
+    .then((client) => assetListRuntime.runPromise(f(client)))
+    .catch((error) => Promise.reject(unwrapRpcFailure(error)))
 
 const decodeMemoryResult = <A, I>(
   schema: Schema.Schema<A, I>,

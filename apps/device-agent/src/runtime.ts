@@ -41,7 +41,7 @@ export const deviceAgentPaths = (): DeviceAgentPaths => {
   }
 }
 
-const persistEnrollment = async (
+export const persistEnrollment = async (
   paths: DeviceAgentPaths,
   enrollment: DeviceEnrollment
 ): Promise<void> => {
@@ -108,6 +108,28 @@ export interface ServeDeviceInput {
   readonly sessionExecutor?: SessionCommandExecutor
 }
 
+/** Own every detached session fiber so daemon shutdown also closes session sockets. */
+export class DeviceSessionTasks {
+  readonly #controllers = new Set<AbortController>()
+  readonly #tasks = new Set<Promise<void>>()
+
+  run(effect: Effect.Effect<void, unknown>): Promise<void> {
+    const controller = new AbortController()
+    this.#controllers.add(controller)
+    const task = Effect.runPromise(effect, { signal: controller.signal }).finally(() => {
+      this.#controllers.delete(controller)
+      this.#tasks.delete(task)
+    })
+    this.#tasks.add(task)
+    return task
+  }
+
+  async stop(): Promise<void> {
+    for (const controller of this.#controllers) controller.abort()
+    await Promise.allSettled([...this.#tasks])
+  }
+}
+
 export const serveDevice = async (
   input: ServeDeviceInput,
   paths = deviceAgentPaths()
@@ -127,28 +149,33 @@ export const serveDevice = async (
   const executor: SessionCommandExecutor =
     input.sessionExecutor ?? makeLiveDeviceSessionCommandExecutor(paths.jinglerRoot)
   const sessionHandlers = new Map<string, SessionCommandHandler>()
-  return runControlConnection(
-    {
-      refreshGrant: createDeviceGrantRefresher(enrollment, identity),
-      connect: connectDeviceWebSocket,
-      discover: () =>
-        Effect.runPromise(
-          discoverLiveDeviceCapabilities(paths.jinglerRoot, DEVICE_AGENT_VERSION)
-        ),
-      sleep: abortableSleep,
-      handleSessionRequest: async (request) => {
-        const handler = sessionHandlers.get(request.sessionId) ?? new SessionCommandHandler(
-          join(paths.deviceDir, "sessions", `${request.sessionId}.json`),
-          executor
-        )
-        sessionHandlers.set(request.sessionId, handler)
-        await Effect.runPromise(
-          runDeviceSessionTunnel(request, enrollment, identity, handler)
-        )
-      }
-    },
-    input.signal
-  )
+  const sessionTasks = new DeviceSessionTasks()
+  try {
+    return await runControlConnection(
+      {
+        refreshGrant: createDeviceGrantRefresher(enrollment, identity),
+        connect: connectDeviceWebSocket,
+        discover: () =>
+          Effect.runPromise(
+            discoverLiveDeviceCapabilities(paths.jinglerRoot, DEVICE_AGENT_VERSION)
+          ),
+        sleep: abortableSleep,
+        handleSessionRequest: (request) => {
+          const handler = sessionHandlers.get(request.sessionId) ?? new SessionCommandHandler(
+            join(paths.deviceDir, "sessions", `${request.sessionId}.json`),
+            executor
+          )
+          sessionHandlers.set(request.sessionId, handler)
+          return sessionTasks.run(
+            runDeviceSessionTunnel(request, enrollment, identity, handler)
+          )
+        }
+      },
+      input.signal
+    )
+  } finally {
+    await sessionTasks.stop()
+  }
 }
 
 export const deviceStatus = async (paths = deviceAgentPaths()) => {

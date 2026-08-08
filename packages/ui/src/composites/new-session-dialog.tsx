@@ -323,10 +323,11 @@ export function NewSessionDialog({
               the orchestrator is a per-turn mode on a session, not a harness to
               start one on.
             */}
-            {availableClis.length === 0 ? (
+            {cli === "" ? (
               <Callout tone="yellow">
-                No coding CLI found. Install Claude Code, Codex, Cursor or opencode, then
-                reopen this dialog.
+                {environmentId === null
+                  ? "No coding CLI found. Install Claude Code, Codex, Cursor or opencode, then reopen this dialog."
+                  : "This device has not reported a compatible coding CLI. Install one on the device, then refresh its capabilities."}
               </Callout>
             ) : (
               <span className="flex items-center gap-1.5 text-[10.5px] text-dim">

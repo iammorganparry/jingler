@@ -102,6 +102,8 @@ import {
   reviewReconcile,
   reviewRun,
   rendererSafeEnvironment,
+  removeRemoteSessionMirror,
+  selectContinuationRepository,
   storeRemoteSessionKey,
   restoredOrchestrationSnapshot,
   setReasoning,
@@ -117,6 +119,36 @@ import {
   withoutAttachmentData,
   workspaceRevertLines,
 } from "./rpc.js";
+
+describe("remote session environment lifecycle", () => {
+  it("matches a continuation repository by GitHub identity before folder name", () => {
+    const repository = selectContinuationRepository(
+      { name: "renamed-source", githubSlug: "Acme/App" },
+      [
+        { name: "different", path: "/srv/app", defaultBranch: "main", githubSlug: "acme/app" },
+        { name: "renamed-source", path: "/srv/wrong", defaultBranch: "main", githubSlug: "acme/other" },
+      ],
+    );
+    expect(repository?.path).toBe("/srv/app");
+  });
+
+  it("falls back to repository name when neither machine has a GitHub slug", () => {
+    const repository = selectContinuationRepository(
+      { name: "Jingler", githubSlug: null },
+      [{ name: "jingler", path: "/Users/clive/jingler", defaultBranch: "main", githubSlug: null }],
+    );
+    expect(repository?.path).toBe("/Users/clive/jingler");
+  });
+
+  it("removes a remote session mirror when the device is offline", async () => {
+    let forgotten = false;
+    await Effect.runPromise(removeRemoteSessionMirror(
+      Effect.fail(new Error("device offline")),
+      Effect.sync(() => { forgotten = true; }),
+    ));
+    expect(forgotten).toBe(true);
+  });
+});
 
 describe("environment RPC security boundary", () => {
   it("returns environment metadata without relay grants or device secrets", async () => {

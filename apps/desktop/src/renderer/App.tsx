@@ -1439,6 +1439,7 @@ function AuthedApp({
         renderConversation={(session: Session, view, ctx) => (
           <ConversationPane
             session={session}
+            environments={environmentController.environments}
             view={view}
             onOpenPlanReview={ctx.onOpenPlanReview}
             onPlanDraftAvailable={ctx.onPlanDraftAvailable}

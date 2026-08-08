@@ -1,4 +1,13 @@
-import { deviceAgentPaths, deviceStatus, registerPendingDevice, revokeLocalDevice, rotateLocalDeviceKey, serveDevice } from "./runtime.js"
+import {
+  deviceAgentPaths,
+  deviceStatus,
+  persistEnrollment,
+  registerPendingDevice,
+  revokeLocalDevice,
+  rotateLocalDeviceKey,
+  serveDevice
+} from "./runtime.js"
+import { installDeviceService, removeDeviceService } from "./device-service.js"
 
 const args = process.argv.slice(2)
 const command = args[0]
@@ -13,9 +22,7 @@ const print = (value: unknown): void => {
 }
 
 const usage = (): never => {
-  process.stderr.write(
-    "Usage: jingler-device <pair|serve|status|rotate-key|revoke-local> [options]\n"
-  )
+  process.stderr.write("Usage: jingler-device <pair|serve|install-service|status|rotate-key|revoke-local> [options]\n")
   process.exit(2)
 }
 
@@ -37,7 +44,30 @@ const main = async (): Promise<void> => {
         serverUrl: option("--server"),
         signal: controller.signal
       })
-      if (result === "revoked") process.exitCode = 3
+      if (result === "revoked") {
+        await revokeLocalDevice()
+        await removeDeviceService()
+      }
+      // Some harness adapters own long-lived Node handles (for example an
+      // embedded callback server). At this point the control connection and
+      // every tracked session task have settled, so do not let those adapter
+      // handles keep a revoked or stopped daemon orphaned under launchd.
+      process.exit(0)
+      return
+    }
+    case "install-service": {
+      const subject = option("--subject")
+      const deviceId = option("--device-id")
+      const serverUrl = option("--server")
+      if (!subject || !deviceId || !serverUrl) {
+        throw new Error("install-service requires --subject, --device-id and --server")
+      }
+      await persistEnrollment(deviceAgentPaths(), { subject, deviceId, serverUrl })
+      print(
+        await installDeviceService({
+          ...(process.env.JINGLER_HOME ? { jinglerHome: process.env.JINGLER_HOME } : {})
+        })
+      )
       return
     }
     case "status":
@@ -47,6 +77,7 @@ const main = async (): Promise<void> => {
       print({ version: 1, publicKey: await rotateLocalDeviceKey() })
       return
     case "revoke-local":
+      await removeDeviceService()
       await revokeLocalDevice()
       print({ version: 1, state: "unpaired" })
       return

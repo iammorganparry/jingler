@@ -1,5 +1,4 @@
 import type {
-  DeviceListResponse,
   DeviceRelayGrantResponse,
   Environment,
   EnvironmentDiscovery,
@@ -21,18 +20,22 @@ import { Effect, Schema } from "effect"
 import { RemoteBootstrapService } from "./remote-bootstrap.js"
 import { SecretStore } from "./secret-store.js"
 
-const authBaseUrl = (): string =>
-  process.env.JINGLER_AUTH_URL ?? "http://localhost:9100"
+const authBaseUrl = (): string => process.env.JINGLER_AUTH_URL ?? "http://localhost:9100"
 const relayUrl = (): string | undefined => process.env.JINGLER_DEVICE_RELAY_URL
+const deviceAgentBundlePath = (): string | undefined => process.env.JINGLER_DEVICE_AGENT_BUNDLE
+const DEVICE_API_ROOT = "/api/devices"
 
-export const environmentFromRemoteDevice = (
-  device: RemoteDevice
-): Environment => ({
+export const environmentFromRemoteDevice = (device: RemoteDevice): Environment => ({
   id: device.deviceId,
   name: device.displayName,
   platform: device.platform,
   capabilities: device.capabilities,
-  state: device.state === "revoked" ? "revoked" : device.presence.state,
+  state:
+    device.state === "revoked"
+      ? "revoked"
+      : !device.capabilities.capabilities.includes("session.start")
+        ? "incompatible"
+        : device.presence.state,
   agentVersion: null,
   lastSeenAt: device.presence.lastSeenAt
 })
@@ -82,8 +85,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
                   ...(init?.body ? { "content-type": "application/json" } : {})
                 }
               }),
-            catch: () =>
-              environmentError(503, "The device service is unavailable.")
+            catch: () => environmentError(503, "The device service is unavailable.")
           })
           if (!response.ok) {
             return yield* Effect.fail(
@@ -92,37 +94,32 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
           }
           const body = yield* Effect.tryPromise({
             try: () => response.json(),
-            catch: () =>
-              environmentError(
-                502,
-                "The device service returned an invalid response."
-              )
+            catch: () => environmentError(502, "The device service returned an invalid response.")
           })
           return yield* Schema.decodeUnknown(schema)(body).pipe(
             Effect.mapError(() =>
-              environmentError(
-                502,
-                "The device service returned an invalid response."
-              )
+              environmentError(502, "The device service returned an invalid response.")
             )
           )
         })
 
       const list = Effect.gen(function* () {
-        const response = yield* request("/devices", DeviceListResponseSchema)
+        const response = yield* request(DEVICE_API_ROOT, DeviceListResponseSchema)
         return response.devices.map(environmentFromRemoteDevice)
       })
 
       const device = (deviceId: string) =>
-        request("/devices", DeviceListResponseSchema).pipe(
+        request(DEVICE_API_ROOT, DeviceListResponseSchema).pipe(
           Effect.flatMap((response) => {
             const found = response.devices.find((candidate) => candidate.deviceId === deviceId)
             return found
               ? Effect.succeed(found)
-              : Effect.fail(new EnvironmentError({
-                  reason: "not-found",
-                  message: "The selected device is no longer paired."
-                }))
+              : Effect.fail(
+                  new EnvironmentError({
+                    reason: "not-found",
+                    message: "The selected device is no longer paired."
+                  })
+                )
           })
         )
 
@@ -130,7 +127,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
         deviceId: string,
         sessionId: string
       ): Effect.Effect<DeviceRelayGrantResponse, EnvironmentError> =>
-        request("/devices/grants", DeviceRelayGrantResponseSchema, {
+        request(`${DEVICE_API_ROOT}/grants`, DeviceRelayGrantResponseSchema, {
           method: "POST",
           body: JSON.stringify({
             version: REMOTE_PROTOCOL_VERSION,
@@ -141,18 +138,14 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
         })
 
       const claim = (pendingDeviceId: string, pairingCode: string) =>
-        request("/devices/pairing/claim", PairingClaimResponseSchema, {
+        request(`${DEVICE_API_ROOT}/pairing/claim`, PairingClaimResponseSchema, {
           method: "POST",
           body: JSON.stringify({
             version: REMOTE_PROTOCOL_VERSION,
             pendingDeviceId,
             pairingCode
           })
-        }).pipe(
-          Effect.map((result: PairingClaimResponse) =>
-            environmentFromRemoteDevice(result.device)
-          )
-        )
+        }) as Effect.Effect<PairingClaimResponse, EnvironmentError>
 
       const pairLink = (input: PairLinkEnvironmentInput) =>
         Effect.gen(function* () {
@@ -173,37 +166,65 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
             return yield* Effect.fail(
               new EnvironmentError({
                 reason: "invalid-input",
-                message:
-                  "The pairing link must use this Jingler account server."
+                message: "The pairing link must use this Jingler account server."
               })
             )
           }
-          return yield* claim(input.pendingDeviceId, input.pairingCode)
+          return environmentFromRemoteDevice(
+            (yield* claim(input.pendingDeviceId, input.pairingCode)).device
+          )
         })
 
-      const pairSsh = (input: PairSshEnvironmentInput) =>
-        bootstrap
-          .bootstrap({
-            host: input.host,
-            ...(input.username === undefined
-              ? {}
-              : { username: input.username }),
-            ...(input.port === undefined ? {} : { port: input.port }),
-            ...(relayUrl() === undefined ? {} : { relayUrl: relayUrl() })
-          })
+      const pairSsh = (input: PairSshEnvironmentInput) => {
+        const connection = {
+          host: input.host,
+          ...(input.username === undefined ? {} : { username: input.username }),
+          ...(input.port === undefined ? {} : { port: input.port }),
+          ...(relayUrl() === undefined ? {} : { relayUrl: relayUrl() })
+        }
+        return bootstrap
+          .bootstrap(connection)
+          .pipe(
+            Effect.catchAll((error) => {
+              const agentBundlePath = deviceAgentBundlePath()
+              return error.kind === "incompatible" && agentBundlePath
+                ? bootstrap.installAndBootstrap({
+                    ...connection,
+                    agentBundlePath
+                  })
+                : Effect.fail(error)
+            })
+          )
           .pipe(
             Effect.mapError(
               (error) =>
                 new EnvironmentError({
-                  reason:
-                    error.kind === "incompatible" ? "incompatible" : "ssh",
+                  reason: error.kind === "incompatible" ? "incompatible" : "ssh",
                   message: error.message
                 })
             ),
-            Effect.flatMap((pending) =>
-              claim(pending.pendingDeviceId, pending.pairingCode)
+            Effect.flatMap((pending) => claim(pending.pendingDeviceId, pending.pairingCode)),
+            Effect.flatMap((claimed) =>
+              bootstrap
+                .activate({
+                  ...connection,
+                  subject: claimed.subject,
+                  deviceId: claimed.device.deviceId,
+                  serverUrl: authBaseUrl()
+                })
+                .pipe(
+                  Effect.mapError(
+                    (error) =>
+                      new EnvironmentError({
+                        reason: error.kind === "incompatible" ? "incompatible" : "ssh",
+                        message: error.message
+                      })
+                  ),
+                  Effect.as(environmentFromRemoteDevice(claimed.device))
+                )
             )
           )
+      }
 
       const rename = (deviceId: string, name: string) =>
         Effect.gen(function* () {
@@ -217,7 +238,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
             )
           }
           const result = yield* request(
-            `/devices/${encodeURIComponent(deviceId)}/rename`,
+            `${DEVICE_API_ROOT}/${encodeURIComponent(deviceId)}/rename`,
             Schema.Struct({
               version: Schema.Literal(1),
               device: Schema.Unknown
@@ -231,30 +252,24 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
               })
             }
           )
-          const device = yield* Schema.decodeUnknown(RemoteDeviceSchema)(
-            result.device
-          ).pipe(
+          const device = yield* Schema.decodeUnknown(RemoteDeviceSchema)(result.device).pipe(
             Effect.mapError(() =>
-              environmentError(
-                502,
-                "The device service returned an invalid response."
-              )
+              environmentError(502, "The device service returned an invalid response.")
             )
           )
           return environmentFromRemoteDevice(device)
         })
 
       const revoke = (deviceId: string) =>
-        request(
-          `/devices/${encodeURIComponent(deviceId)}/revoke`,
-          Schema.Unknown,
-          {
-            method: "POST"
-          }
-        ).pipe(Effect.asVoid)
+        request(`${DEVICE_API_ROOT}/${encodeURIComponent(deviceId)}/revoke`, Schema.Unknown, {
+          method: "POST"
+        }).pipe(Effect.asVoid)
 
       const discovery = (deviceId: string): Effect.Effect<EnvironmentDiscovery, EnvironmentError> =>
-        request(`/devices/${encodeURIComponent(deviceId)}/discovery`, EnvironmentDiscoverySchema)
+        request(
+          `${DEVICE_API_ROOT}/${encodeURIComponent(deviceId)}/discovery`,
+          EnvironmentDiscoverySchema
+        )
 
       return {
         list,

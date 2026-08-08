@@ -96,6 +96,10 @@ export interface FakeAuthServerOptions {
   readonly unavailable?: boolean
   readonly acceptedLearningOrganizationIds?: ReadonlyArray<string>
   readonly reviewProposals?: boolean
+  /** Forward production `/api/devices` desktop routes to the hermetic device relay. */
+  readonly deviceRelayUrl?: string
+  readonly listenHost?: string
+  readonly publicHost?: string
 }
 
 /**
@@ -542,15 +546,18 @@ const suggestionsFor = (organizationId: string, state: FakeOrganizationMemory) =
   return { version: 1 as const, vectorSource: "lexical" as const, suggestions }
 }
 
-const normalizeOptions = (value: string | FakeAuthServerOptions): Required<Omit<FakeAuthServerOptions, "acceptedLearningOrganizationIds">> & { readonly acceptedLearningOrganizationIds: ReadonlyArray<string> } =>
+const normalizeOptions = (value: string | FakeAuthServerOptions): Required<Omit<FakeAuthServerOptions, "acceptedLearningOrganizationIds" | "deviceRelayUrl">> & { readonly acceptedLearningOrganizationIds: ReadonlyArray<string>; readonly deviceRelayUrl?: string } =>
   typeof value === "string"
-    ? { token: value, paidOrganizationIds: DEFAULT_PAID_ORGANIZATIONS, unavailable: false, acceptedLearningOrganizationIds: [], reviewProposals: true }
+    ? { token: value, paidOrganizationIds: DEFAULT_PAID_ORGANIZATIONS, unavailable: false, acceptedLearningOrganizationIds: [], reviewProposals: true, listenHost: "127.0.0.1", publicHost: "127.0.0.1" }
     : {
         token: value.token ?? DEFAULT_TOKEN,
         paidOrganizationIds: value.paidOrganizationIds ?? DEFAULT_PAID_ORGANIZATIONS,
         unavailable: value.unavailable ?? false,
         acceptedLearningOrganizationIds: value.acceptedLearningOrganizationIds ?? [],
-        reviewProposals: value.reviewProposals ?? true
+        reviewProposals: value.reviewProposals ?? true,
+        listenHost: value.listenHost ?? "127.0.0.1",
+        publicHost: value.publicHost ?? "127.0.0.1",
+        ...(value.deviceRelayUrl ? { deviceRelayUrl: value.deviceRelayUrl } : {})
       }
 
 export const startFakeAuthServer = async (
@@ -608,6 +615,23 @@ export const startFakeAuthServer = async (
           }
         })
       })
+
+    if (options.deviceRelayUrl && url.pathname.startsWith("/api/devices")) {
+      void (async () => {
+        const body = req.method === "GET" ? undefined : JSON.stringify(await readJson())
+        const forwarded = await fetch(`${options.deviceRelayUrl}${url.pathname}${url.search}`, {
+          method: req.method,
+          headers: {
+            ...(typeof req.headers.authorization === "string" ? { authorization: req.headers.authorization } : {}),
+            ...(body ? { "content-type": "application/json" } : {})
+          },
+          ...(body ? { body } : {})
+        })
+        res.writeHead(forwarded.status, { "content-type": forwarded.headers.get("content-type") ?? "application/json" })
+        res.end(await forwarded.text())
+      })().catch(() => json(502, { error: "device relay unavailable" }))
+      return
+    }
 
     if (url.pathname === "/api/memory/organizations" && req.method === "GET") {
       if (!memoryAvailable) return json(503, { error: "memory unavailable" })
@@ -926,11 +950,11 @@ export const startFakeAuthServer = async (
     return json(404, {})
   })
 
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  await new Promise<void>((resolve) => server.listen(0, options.listenHost, resolve))
   const { port } = server.address() as AddressInfo
 
   return {
-    url: `http://127.0.0.1:${port}`,
+    url: `http://${options.publicHost}:${port}`,
     token: options.token,
     get sentEmails() {
       return sentEmails

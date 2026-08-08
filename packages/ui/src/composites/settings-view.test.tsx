@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { Environment } from "@jingler/core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { DevicesSection } from "./settings-view.js"
@@ -79,5 +79,30 @@ describe("Devices settings", () => {
     expect(revoke).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Revoke" }))
     expect(revoke).toHaveBeenCalledWith("device-1")
+  })
+
+  it("renames an environment through the supported dialog", async () => {
+    const rename = vi.fn()
+    render(
+      <DevicesSection
+        environments={[base]}
+        loading={false}
+        dialog={dialog}
+        onOpen={vi.fn()}
+        onRefresh={vi.fn()}
+        onRename={rename}
+        onRevoke={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }))
+    const input = screen.getByRole("textbox", { name: "Environment name" })
+    expect((input as HTMLInputElement).value).toBe("clive.local")
+    fireEvent.change(input, { target: { value: "Build mini" } })
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }))
+
+    await waitFor(() =>
+      expect(rename).toHaveBeenCalledWith("device-1", "Build mini")
+    )
   })
 })

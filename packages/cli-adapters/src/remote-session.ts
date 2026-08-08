@@ -1,7 +1,7 @@
-import { createCipheriv, createDecipheriv, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from "node:crypto"
+import { createCipheriv, createDecipheriv, createHash, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from "node:crypto"
 import type { DeviceEncryptionPublicKey, EncryptedTunnelEnvelope, RemoteSessionCommand, RemoteSessionEvent, RemoteSessionKeyOffer, Session } from "@jingler/core"
 import { EncryptedTunnelEnvelope as EncryptedTunnelEnvelopeSchema, RemoteSessionEvent as RemoteSessionEventSchema } from "@jingler/core"
-import { Chunk, Data, Effect, Either, Queue, Schema, Stream } from "effect"
+import { Chunk, Data, Deferred, Effect, Either, Queue, Schema, Stream } from "effect"
 import WebSocket from "ws"
 import { EnvironmentService } from "./environment.js"
 import { SecretStore, type SecretStoreShape } from "./secret-store.js"
@@ -122,6 +122,10 @@ export interface RemoteTunnel {
   readonly send: (envelope: EncryptedTunnelEnvelope) => Effect.Effect<void, RemoteSessionError>
   readonly events: Stream.Stream<EncryptedTunnelEnvelope, RemoteSessionError>
   readonly acknowledge: (sequence: number) => Effect.Effect<void, RemoteSessionError>
+  /** Relay notice that the opposite endpoint has acknowledged our envelopes. */
+  readonly peerAcknowledgements: Stream.Stream<number, RemoteSessionError>
+  /** Relay-persisted sender cursor; prevents resending accepted envelopes after pruning. */
+  readonly nextOutgoingSequence: Effect.Effect<number, RemoteSessionError>
   readonly isOpen: () => boolean
 }
 
@@ -154,11 +158,17 @@ export const openRemoteTunnel = (
 ): Effect.Effect<RemoteTunnel & { readonly close: Effect.Effect<void> }, RemoteSessionError> =>
   Effect.gen(function* () {
     const envelopes = yield* Queue.unbounded<EncryptedTunnelEnvelope>()
+    const peerAcknowledgements = yield* Queue.unbounded<number>()
+    const relayNextSequence = yield* Deferred.make<number, RemoteSessionError>()
+    let currentNextOutgoingSequence = 0
     const pendingWrites = new Map<number, { readonly resolve: () => void; readonly reject: (cause: RemoteSessionError) => void }>()
+    const earlyMessages: WebSocket.RawData[] = []
+    const captureEarlyMessage = (data: WebSocket.RawData) => earlyMessages.push(data)
     const socket = yield* Effect.async<WebSocket, RemoteSessionError>((resume) => {
       const candidate = new WebSocket(tunnelUrl(input), {
         headers: { authorization: `Bearer ${input.grant}` }
       })
+      candidate.on("message", captureEarlyMessage)
       const onError = (cause: Error) => {
         candidate.close()
         resume(Effect.fail(new RemoteSessionError({ message: "Remote tunnel connection failed.", cause })))
@@ -170,20 +180,43 @@ export const openRemoteTunnel = (
       })
       return Effect.sync(() => candidate.close())
     })
-    socket.on("message", (data) => {
+    const handleMessage = (data: WebSocket.RawData) => {
       try {
         const value: unknown = JSON.parse(data.toString("utf8"))
+        if (value && typeof value === "object" && (value as { type?: unknown }).type === "hello") {
+          const nextSequence = (value as { nextSequence?: unknown }).nextSequence
+          if (typeof nextSequence === "number" && Number.isInteger(nextSequence) && nextSequence > 0) {
+            currentNextOutgoingSequence = nextSequence
+            void Effect.runPromise(Deferred.succeed(relayNextSequence, nextSequence))
+          }
+          return
+        }
         if (value && typeof value === "object" && (value as { type?: unknown }).type === "envelope-result") {
           const result = value as { sequence?: unknown; status?: unknown }
           if (typeof result.sequence === "number") {
             const pending = pendingWrites.get(result.sequence)
             if (pending && (result.status === "inserted" || result.status === "duplicate")) {
+              currentNextOutgoingSequence = Math.max(currentNextOutgoingSequence, result.sequence + 1)
               pendingWrites.delete(result.sequence)
               pending.resolve()
             } else if (pending) {
               pendingWrites.delete(result.sequence)
               pending.reject(new RemoteSessionError({ message: `Relay rejected sequence ${result.sequence}: ${String(result.status)}.` }))
             }
+          }
+          return
+        }
+        if (value && typeof value === "object" && (value as { type?: unknown }).type === "peer-acknowledged") {
+          const sequence = (value as { sequence?: unknown }).sequence
+          if (typeof sequence === "number" && Number.isSafeInteger(sequence) && sequence >= 0) {
+            void Effect.runPromise(Queue.offer(peerAcknowledgements, sequence))
+          }
+          return
+        }
+        if (value && typeof value === "object" && (value as { type?: unknown }).type === "replay-more") {
+          const sequence = (value as { sequence?: unknown }).sequence
+          if (typeof sequence === "number" && Number.isSafeInteger(sequence) && sequence >= 0 && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "resume", acknowledgedSequence: sequence }))
           }
           return
         }
@@ -196,12 +229,17 @@ export const openRemoteTunnel = (
       } catch {
         // Relay control frames and malformed values cannot become application events.
       }
-    })
+    }
+    socket.off("message", captureEarlyMessage)
+    socket.on("message", handleMessage)
+    for (const data of earlyMessages) handleMessage(data)
     socket.once("close", () => {
       const error = new RemoteSessionError({ message: "Remote tunnel closed." })
+      void Effect.runPromise(Deferred.fail(relayNextSequence, error))
       for (const pending of pendingWrites.values()) pending.reject(error)
       pendingWrites.clear()
       void Effect.runPromise(Queue.shutdown(envelopes))
+      void Effect.runPromise(Queue.shutdown(peerAcknowledgements))
     })
     const sendJson = (value: unknown) =>
       Effect.try({
@@ -227,6 +265,7 @@ export const openRemoteTunnel = (
         return Effect.sync(() => pendingWrites.delete(envelope.sequence))
       }),
       events: Stream.fromQueue(envelopes),
+      peerAcknowledgements: Stream.fromQueue(peerAcknowledgements),
       acknowledge: (acknowledgedSequence) => sendJson({
         type: "ack",
         acknowledgement: {
@@ -236,6 +275,9 @@ export const openRemoteTunnel = (
           acknowledgedSequence
         }
       }),
+      nextOutgoingSequence: Deferred.await(relayNextSequence).pipe(
+        Effect.map(() => currentNextOutgoingSequence)
+      ),
       isOpen: () => socket.readyState === WebSocket.OPEN,
       close: Effect.sync(() => socket.close(1000, "Tunnel closed"))
     }
@@ -251,14 +293,15 @@ export interface DesktopRemoteSessionState {
   readonly ephemeralPrivateKey: string
   readonly nextOutgoingSequence: number
   readonly acknowledgedDeviceSequence: number
-  readonly pendingCommand: null | {
+  readonly pendingCommands: Readonly<Record<string, {
     readonly command: RemoteSessionCommand
     readonly envelope: EncryptedTunnelEnvelope
-  }
+  }>>
 }
 
 interface DeviceSecretDocument {
   readonly remoteSessions?: Readonly<Record<string, DesktopRemoteSessionState>>
+  readonly remoteRequestNamespace?: string
   readonly [key: string]: unknown
 }
 
@@ -291,6 +334,9 @@ const isRemoteSessionState = (value: unknown): value is DesktopRemoteSessionStat
 export interface RemoteSessionStateRepository {
   readonly get: (sessionId: string) => Effect.Effect<DesktopRemoteSessionState | null, RemoteSessionError>
   readonly put: (state: DesktopRemoteSessionState) => Effect.Effect<void, RemoteSessionError>
+  readonly update: (sessionId: string, update: (state: DesktopRemoteSessionState) => DesktopRemoteSessionState) => Effect.Effect<DesktopRemoteSessionState, RemoteSessionError>
+  readonly remove: (sessionId: string) => Effect.Effect<void, RemoteSessionError>
+  readonly requestSessionId: (environmentId: string) => Effect.Effect<string, RemoteSessionError>
 }
 
 /** Serialises read/modify/write so independent remote sessions cannot clobber one another. */
@@ -311,7 +357,17 @@ export const makeRemoteSessionStateRepository = (
     get: (sessionId) => transact(async () => {
       const document = decodeSecretDocument(await Effect.runPromise(secrets.getDeviceSecrets))
       const candidate = document.remoteSessions?.[sessionId]
-      return isRemoteSessionState(candidate) ? candidate : null
+      if (!isRemoteSessionState(candidate)) return null
+      const legacy = Object.fromEntries(Object.entries(candidate)).pendingCommand
+      return {
+        ...candidate,
+        pendingCommands: candidate.pendingCommands ?? (
+          legacy && typeof legacy === "object" && "command" in legacy &&
+          (legacy as { command?: { commandId?: unknown } }).command?.commandId
+            ? { [String((legacy as { command: { commandId: string } }).command.commandId)]: legacy as { command: RemoteSessionCommand; envelope: EncryptedTunnelEnvelope } }
+            : {}
+        )
+      }
     }),
     put: (state) => transact(async () => {
       const document = decodeSecretDocument(await Effect.runPromise(secrets.getDeviceSecrets))
@@ -319,6 +375,41 @@ export const makeRemoteSessionStateRepository = (
         ...document,
         remoteSessions: { ...document.remoteSessions, [state.sessionId]: state }
       })))
+    }),
+    update: (sessionId, update) => transact(async () => {
+      const document = decodeSecretDocument(await Effect.runPromise(secrets.getDeviceSecrets))
+      const candidate = document.remoteSessions?.[sessionId]
+      if (!isRemoteSessionState(candidate)) throw new Error(`Remote session state ${sessionId} is unavailable.`)
+      const normalized = {
+        ...candidate,
+        pendingCommands: candidate.pendingCommands ?? {}
+      }
+      const next = update(normalized)
+      await Effect.runPromise(secrets.setDeviceSecrets(JSON.stringify({
+        ...document,
+        remoteSessions: { ...document.remoteSessions, [sessionId]: next }
+      })))
+      return next
+    }),
+    remove: (sessionId) => transact(async () => {
+      const document = decodeSecretDocument(await Effect.runPromise(secrets.getDeviceSecrets))
+      const remoteSessions = { ...document.remoteSessions }
+      delete remoteSessions[sessionId]
+      await Effect.runPromise(secrets.setDeviceSecrets(JSON.stringify({ ...document, remoteSessions })))
+    }),
+    requestSessionId: (environmentId) => transact(async () => {
+      const document = decodeSecretDocument(await Effect.runPromise(secrets.getDeviceSecrets))
+      const namespace = typeof document.remoteRequestNamespace === "string" &&
+        /^[A-Za-z0-9_-]{16,64}$/u.test(document.remoteRequestNamespace)
+        ? document.remoteRequestNamespace
+        : randomBytes(18).toString("base64url")
+      if (namespace !== document.remoteRequestNamespace) {
+        await Effect.runPromise(secrets.setDeviceSecrets(JSON.stringify({
+          ...document,
+          remoteRequestNamespace: namespace
+        })))
+      }
+      return requestSessionIdForEnvironment(environmentId, namespace)
     })
   }
 }
@@ -326,8 +417,20 @@ export const makeRemoteSessionStateRepository = (
 interface ActiveRemoteSession {
   readonly key: Uint8Array
   readonly tunnel: RemoteTunnel & { readonly close: Effect.Effect<void> }
+  readonly subscribers: Map<string, Queue.Queue<Output>>
+  readonly backlog: Map<string, RemoteSessionEvent[]>
 }
 type RemoteSessionResource = Pick<Session, "id" | "environmentId">
+
+export const requestSessionIdForEnvironment = (
+  environmentId: string,
+  desktopNamespace: string
+): string =>
+  `request_${createHash("sha256").update(`${desktopNamespace}:${environmentId}`).digest("base64url").slice(0, 24)}`
+
+type Output =
+  | { readonly _tag: "event"; readonly event: RemoteSessionEvent }
+  | { readonly _tag: "error"; readonly error: RemoteSessionError }
 
 /** Main-process owner of encrypted remote tunnels. It never falls back locally. */
 export class RemoteSessionService extends Effect.Service<RemoteSessionService>()(
@@ -339,6 +442,72 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
       const secrets = yield* SecretStore
       const states = makeRemoteSessionStateRepository(secrets)
       const active = new Map<string, Promise<ActiveRemoteSession>>()
+      const claimedPendingCommandIds = new Set<string>()
+
+      const consumeConnection = (sessionId: string, connection: ActiveRemoteSession) =>
+        connection.tunnel.events.pipe(
+          Stream.filter((envelope) => envelope.sender === "device"),
+          Stream.runForEach((envelope) => Effect.gen(function* () {
+            const current = yield* states.get(sessionId)
+            if (!current) return yield* Effect.fail(new RemoteSessionError({ message: "Remote session key state is unavailable." }))
+            if (envelope.sequence <= current.acknowledgedDeviceSequence) {
+              yield* connection.tunnel.acknowledge(current.acknowledgedDeviceSequence)
+              return
+            }
+            if (envelope.sequence !== current.acknowledgedDeviceSequence + 1) {
+              return yield* Effect.fail(new RemoteSessionError({ message: `Remote event sequence gap: expected ${current.acknowledgedDeviceSequence + 1}, received ${envelope.sequence}.` }))
+            }
+            const event = yield* Effect.try({
+              try: () => decryptRemotePayload(connection.key, envelope, RemoteSessionEventSchema),
+              catch: (cause) => cause instanceof RemoteSessionError
+                ? cause
+                : new RemoteSessionError({ message: "Invalid remote event.", cause })
+            })
+            const terminal = event.kind === "complete" || event.kind === "failed"
+            if (terminal) claimedPendingCommandIds.delete(event.commandId)
+            yield* states.update(sessionId, (state) => {
+              if (!terminal || !(event.commandId in state.pendingCommands)) {
+                return { ...state, acknowledgedDeviceSequence: envelope.sequence }
+              }
+              const pendingCommands = { ...state.pendingCommands }
+              delete pendingCommands[event.commandId]
+              return { ...state, acknowledgedDeviceSequence: envelope.sequence, pendingCommands }
+            })
+            yield* connection.tunnel.acknowledge(envelope.sequence)
+            const subscriber = connection.subscribers.get(event.commandId)
+            if (subscriber) {
+              yield* Queue.offer(subscriber, { _tag: "event", event })
+              if (terminal) {
+                connection.subscribers.delete(event.commandId)
+                yield* Queue.shutdown(subscriber)
+                if (connection.subscribers.size === 0) yield* connection.tunnel.close
+              }
+            } else {
+              const queued = connection.backlog.get(event.commandId) ?? []
+              queued.push(event)
+              connection.backlog.set(event.commandId, queued)
+            }
+          })),
+          Effect.matchEffect({
+            onFailure: (error) => Effect.gen(function* () {
+              active.delete(sessionId)
+              for (const subscriber of connection.subscribers.values()) {
+                yield* Queue.offer(subscriber, { _tag: "error", error })
+                yield* Queue.shutdown(subscriber)
+              }
+              connection.subscribers.clear()
+            }),
+            onSuccess: () => Effect.gen(function* () {
+              const error = new RemoteSessionError({ message: "Remote tunnel closed." })
+              active.delete(sessionId)
+              for (const subscriber of connection.subscribers.values()) {
+                yield* Queue.offer(subscriber, { _tag: "error", error })
+                yield* Queue.shutdown(subscriber)
+              }
+              connection.subscribers.clear()
+            })
+          })
+        )
 
       const establish = (session: RemoteSessionResource): Effect.Effect<ActiveRemoteSession, RemoteSessionError> =>
         Effect.tryPromise({
@@ -388,7 +557,7 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
                         ephemeralPrivateKey: established.privateKey,
                         nextOutgoingSequence: 1,
                         acknowledgedDeviceSequence: 0,
-                        pendingCommand: null
+                        pendingCommands: {}
                       }
                     })()
                 yield* states.put(state)
@@ -405,7 +574,14 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
                   acknowledgedSequence: state.acknowledgedDeviceSequence,
                   keyOffer: state.offer
                 })
-                return { key, tunnel }
+                const connection: ActiveRemoteSession = {
+                  key,
+                  tunnel,
+                  subscribers: new Map(),
+                  backlog: new Map()
+                }
+                void Effect.runPromise(consumeConnection(session.id, connection))
+                return connection
               })
             )
             active.set(session.id, pending)
@@ -427,9 +603,6 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
         payload: unknown,
         key: Uint8Array
       ) => Effect.gen(function* () {
-        const state = yield* states.get(session.id)
-        if (!state) return yield* Effect.fail(new RemoteSessionError({ message: "Remote session key state is unavailable." }))
-        if (state.pendingCommand) return state.pendingCommand
         const command: RemoteSessionCommand = {
           version: 1,
           commandId: randomBytes(18).toString("base64url"),
@@ -437,22 +610,39 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
           operation,
           payload
         }
-        const pendingCommand = {
-          command,
-          envelope: encryptRemotePayload(key, session.id, state.nextOutgoingSequence, "desktop", command)
-        }
-        yield* states.put({ ...state, pendingCommand })
+        let pendingCommand: DesktopRemoteSessionState["pendingCommands"][string] | undefined
+        yield* states.update(session.id, (state) => {
+          const recoverable = Object.values(state.pendingCommands).find((pending) =>
+            !claimedPendingCommandIds.has(pending.command.commandId) &&
+            pending.command.operation === operation &&
+            JSON.stringify(pending.command.payload) === JSON.stringify(payload)
+          )
+          if (recoverable) {
+            claimedPendingCommandIds.add(recoverable.command.commandId)
+            pendingCommand = recoverable
+            return state
+          }
+          pendingCommand = {
+            command,
+            envelope: encryptRemotePayload(key, session.id, state.nextOutgoingSequence, "desktop", command)
+          }
+          claimedPendingCommandIds.add(command.commandId)
+          return {
+            ...state,
+            nextOutgoingSequence: state.nextOutgoingSequence + 1,
+            pendingCommands: { ...state.pendingCommands, [command.commandId]: pendingCommand }
+          }
+        })
+        if (!pendingCommand) return yield* Effect.fail(new RemoteSessionError({ message: "Could not persist the remote command." }))
         return pendingCommand
       })
-
-      type Output =
-        | { readonly _tag: "event"; readonly event: RemoteSessionEvent }
-        | { readonly _tag: "error"; readonly error: RemoteSessionError }
 
       const execute = (session: RemoteSessionResource, operation: string, payload: unknown) =>
         Stream.unwrapScoped(
           Effect.gen(function* () {
             const output = yield* Queue.unbounded<Output>()
+            let pending: DesktopRemoteSessionState["pendingCommands"][string] | undefined
+            let currentConnection: ActiveRemoteSession | undefined
             yield* Effect.forkScoped(
               Effect.gen(function* () {
                 let terminal = false
@@ -467,11 +657,39 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
                     continue
                   }
                   const connection = established.right
-                  const pending = yield* prepareCommand(session, operation, payload, connection.key)
-                  const beforeSend = yield* states.get(session.id)
-                  if (!beforeSend) return yield* Effect.fail(new RemoteSessionError({ message: "Remote session key state is unavailable." }))
-                  const sent = yield* connection.tunnel.send(pending.envelope).pipe(Effect.either)
+                  currentConnection = connection
+                  pending ??= yield* prepareCommand(session, operation, payload, connection.key)
+                  const subscription = yield* Queue.unbounded<Output>()
+                  connection.subscribers.set(pending.command.commandId, subscription)
+                  const backlogged = connection.backlog.get(pending.command.commandId) ?? []
+                  for (const event of backlogged) {
+                    yield* Queue.offer(subscription, { _tag: "event", event })
+                  }
+                  connection.backlog.delete(pending.command.commandId)
+                  if (backlogged.some((event) => event.kind === "complete" || event.kind === "failed")) {
+                    connection.subscribers.delete(pending.command.commandId)
+                    yield* Queue.shutdown(subscription)
+                  }
+                  let relayNext = yield* connection.tunnel.nextOutgoingSequence
+                  // A later control command may allocate its sequence while the
+                  // preceding run envelope is still awaiting relay acceptance.
+                  // Wait for that short admission window without serialising the
+                  // commands' terminal results.
+                  for (let wait = 0; pending.envelope.sequence > relayNext && wait < 200; wait += 1) {
+                    yield* Effect.sleep(5)
+                    relayNext = yield* connection.tunnel.nextOutgoingSequence
+                  }
+                  if (pending.envelope.sequence > relayNext) {
+                    connection.subscribers.delete(pending.command.commandId)
+                    return yield* Effect.fail(new RemoteSessionError({
+                      message: `Remote command sequence gap: relay expects ${relayNext}, local state has ${pending.envelope.sequence}.`
+                    }))
+                  }
+                  const sent = pending.envelope.sequence < relayNext
+                    ? Either.right(undefined)
+                    : yield* connection.tunnel.send(pending.envelope).pipe(Effect.either)
                   if (Either.isLeft(sent)) {
+                    connection.subscribers.delete(pending.command.commandId)
                     active.delete(session.id)
                     yield* connection.tunnel.close
                     failures += 1
@@ -479,42 +697,17 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
                     yield* Effect.sleep(Math.min(2_000, 50 * 2 ** failures))
                     continue
                   }
-                  if (beforeSend.nextOutgoingSequence === pending.envelope.sequence) {
-                    yield* states.put({ ...beforeSend, nextOutgoingSequence: pending.envelope.sequence + 1 })
-                  }
-                  const ended = yield* connection.tunnel.events.pipe(
-                    Stream.filter((envelope) => envelope.sender === "device"),
-                    Stream.runForEach((envelope) => Effect.gen(function* () {
-                      const current = yield* states.get(session.id)
-                      if (!current) return yield* Effect.fail(new RemoteSessionError({ message: "Remote session key state is unavailable." }))
-                      if (envelope.sequence <= current.acknowledgedDeviceSequence) {
-                        yield* connection.tunnel.acknowledge(current.acknowledgedDeviceSequence)
-                        return
-                      }
-                      if (envelope.sequence !== current.acknowledgedDeviceSequence + 1) {
-                        return yield* Effect.fail(new RemoteSessionError({ message: `Remote event sequence gap: expected ${current.acknowledgedDeviceSequence + 1}, received ${envelope.sequence}.` }))
-                      }
-                      const event = yield* Effect.try({
-                        try: () => decryptRemotePayload(connection.key, envelope, RemoteSessionEventSchema),
-                        catch: (cause) => cause instanceof RemoteSessionError
-                          ? cause
-                          : new RemoteSessionError({ message: "Invalid remote event.", cause })
-                      })
-                      const isTerminal = event.commandId === pending.command.commandId &&
-                        (event.kind === "complete" || event.kind === "failed")
-                      yield* states.put({
-                        ...current,
-                        acknowledgedDeviceSequence: envelope.sequence,
-                        pendingCommand: isTerminal ? null : current.pendingCommand
-                      })
-                      yield* connection.tunnel.acknowledge(envelope.sequence)
-                      if (event.commandId === pending.command.commandId) {
-                        yield* Queue.offer(output, { _tag: "event", event })
-                        terminal = isTerminal
-                        if (isTerminal) yield* connection.tunnel.close
-                      }
-                    }))).pipe(Effect.either)
+                  const ended = yield* Stream.fromQueue(subscription).pipe(
+                    Stream.runForEach((item) => item._tag === "error"
+                      ? Effect.fail(item.error)
+                      : Effect.gen(function* () {
+                          yield* Queue.offer(output, item)
+                          terminal = item.event.kind === "complete" || item.event.kind === "failed"
+                        })),
+                    Effect.either
+                  )
                   if (Either.isLeft(ended)) {
+                    connection.subscribers.delete(pending.command.commandId)
                     active.delete(session.id)
                     yield* connection.tunnel.close
                     failures += 1
@@ -528,6 +721,12 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
                 }
               }).pipe(
                 Effect.catchAll((error) => Queue.offer(output, { _tag: "error", error })),
+                Effect.ensuring(Effect.sync(() => {
+                  if (pending) {
+                    claimedPendingCommandIds.delete(pending.command.commandId)
+                    currentConnection?.subscribers.delete(pending.command.commandId)
+                  }
+                })),
                 Effect.ensuring(Queue.shutdown(output))
               )
             )
@@ -563,16 +762,29 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
         environmentId: string,
         operation: string,
         payload: unknown
-      ) => request(
-        {
-          id: `request_${randomBytes(18).toString("base64url")}`,
-          environmentId
-        },
-        operation,
-        payload
-      )
+      ) => {
+        // One bounded request tunnel per environment avoids permanently allocating
+        // a secret-store entry, active connection, relay object, and device ledger
+        // for every discovery call while retaining reconnect/exactly-once semantics.
+        return states.requestSessionId(environmentId).pipe(
+          Effect.flatMap((requestId) => request({ id: requestId, environmentId }, operation, payload))
+        )
+      }
 
-      return { execute, request, requestOnEnvironment } as const
+      const forget = (sessionId: string): Effect.Effect<void, RemoteSessionError> =>
+        Effect.gen(function* () {
+          const connection = active.get(sessionId)
+          active.delete(sessionId)
+          if (connection) {
+            yield* Effect.tryPromise({
+              try: async () => Effect.runPromise((await connection).tunnel.close),
+              catch: (cause) => new RemoteSessionError({ message: "Could not close the remote session tunnel.", cause })
+            }).pipe(Effect.catchAll(() => Effect.void))
+          }
+          yield* states.remove(sessionId)
+        })
+
+      return { execute, request, requestOnEnvironment, forget } as const
     })
   }
 ) {}

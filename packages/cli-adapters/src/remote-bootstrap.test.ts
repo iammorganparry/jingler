@@ -1,6 +1,8 @@
+import { spawnSync } from "node:child_process"
 import { Effect, Exit } from "effect"
 import { describe, expect, it } from "vitest"
 import {
+  activateRemoteDevice,
   bootstrapRemoteDevice,
   installAndBootstrapRemoteDevice,
   parseSshHostSuggestions,
@@ -33,7 +35,13 @@ describe("remote agent installation", () => {
     const processRunner: SshProcessRunner = {
       run: async (binary, args, options) => {
         calls.push({ binary, args, options })
-        return results.shift() ?? { exitCode: 1, stdout: "", stderr: "unexpected call" }
+        return (
+          results.shift() ?? {
+            exitCode: 1,
+            stdout: "",
+            stderr: "unexpected call"
+          }
+        )
       }
     }
     const result = await Effect.runPromise(
@@ -49,8 +57,50 @@ describe("remote agent installation", () => {
     )
     expect(result).toStrictEqual(pairing)
     expect(calls).toHaveLength(2)
-    expect(calls[0]).toMatchObject({ binary: "scp", options: { shell: false } })
-    expect(calls[1]).toMatchObject({ binary: "ssh", options: { shell: false } })
+    expect(calls[0]).toMatchObject({
+      binary: "scp",
+      options: { shell: false }
+    })
+    expect(calls[1]).toMatchObject({
+      binary: "ssh",
+      options: { shell: false }
+    })
+    expect(calls[1]).toMatchObject({
+      args: expect.arrayContaining([expect.stringContaining('"${SHELL:-/bin/sh}" -lic')])
+    })
+    expect(calls[1]).toMatchObject({
+      args: expect.arrayContaining([
+        expect.stringMatching(/nodejs\.org\/dist\/v22\.22\.0[\s\S]*runtime\/bin\/node/u)
+      ])
+    })
+    const remoteCommand = (calls[1] as { args: ReadonlyArray<string> }).args.at(-1)
+    expect(remoteCommand).toBeDefined()
+    expect(spawnSync("sh", ["-n", "-c", remoteCommand ?? ""]).status).toBe(0)
+  })
+
+  it("activates the claimed daemon through the remote login shell", async () => {
+    const calls: Array<unknown> = []
+    await Effect.runPromise(
+      activateRemoteDevice(
+        {
+          host: "mac",
+          username: "clivetrigify",
+          subject: "user-one",
+          deviceId: "device-one",
+          serverUrl: "https://api.jingler.dev"
+        },
+        runner({ exitCode: 0, stdout: "", stderr: "" }, calls)
+      )
+    )
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({
+      binary: "ssh",
+      args: expect.arrayContaining([
+        "clivetrigify@mac",
+        expect.stringMatching(/install-service.*--subject.*user-one.*--device-id.*device-one/u)
+      ]),
+      options: { shell: false }
+    })
   })
 })
 
@@ -60,12 +110,7 @@ describe("remote bootstrap", () => {
       "Host clive.local\n  User morgan\n  Port 2222\nHost mac\n  HostName 192.168.1.12\n",
       "buildbox ssh-ed25519 AAAA\n[staging.local]:2200 ssh-ed25519 BBBB\n"
     )
-    expect(result.map((host) => host.alias)).toStrictEqual([
-      "buildbox",
-      "clive.local",
-      "mac",
-      "staging.local"
-    ])
+    expect(result.map((host) => host.alias)).toStrictEqual(["buildbox", "clive.local", "mac", "staging.local"])
     expect(result.find((host) => host.alias === "clive.local")).toMatchObject({
       username: "morgan",
       port: 2222
@@ -132,13 +177,27 @@ describe("remote bootstrap", () => {
     const auth = await Effect.runPromiseExit(
       bootstrapRemoteDevice(
         { host: "clive.local" },
-        runner({ exitCode: 255, stdout: "", stderr: "Permission denied (publickey)." }, [])
+        runner(
+          {
+            exitCode: 255,
+            stdout: "",
+            stderr: "Permission denied (publickey)."
+          },
+          []
+        )
       )
     )
     const incompatible = await Effect.runPromiseExit(
       bootstrapRemoteDevice(
         { host: "clive.local" },
-        runner({ exitCode: 127, stdout: "", stderr: "jingler-device: command not found" }, [])
+        runner(
+          {
+            exitCode: 127,
+            stdout: "",
+            stderr: "jingler-device: command not found"
+          },
+          []
+        )
       )
     )
     expect(Exit.isFailure(auth) && auth.cause.toString()).toContain("authentication")
@@ -150,7 +209,11 @@ describe("remote bootstrap", () => {
       bootstrapRemoteDevice(
         { host: "clive.local" },
         runner(
-          { exitCode: 0, stdout: `starting agent\n${JSON.stringify(pairing)}\n`, stderr: "" },
+          {
+            exitCode: 0,
+            stdout: `starting agent\n${JSON.stringify(pairing)}\n`,
+            stderr: ""
+          },
           []
         )
       )

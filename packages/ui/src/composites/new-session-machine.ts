@@ -24,6 +24,8 @@ export interface IssueAutomationsForm {
 
 /** How long typing in the PR / issue search box settles before a fetch fires. */
 const SEARCH_DEBOUNCE_MS = 250
+const DISCOVERY_RETRY_MS = 100
+const DISCOVERY_ATTEMPTS = 30
 
 /** Compose the prefilled task from an issue (title + body). */
 const composeTask = (issue: IssueSummary | null): string =>
@@ -79,6 +81,8 @@ export interface NewSessionContext {
   /** Blank sessions default to an isolated linked worktree on every open. */
   useWorktree: boolean
   branches: ReadonlyArray<string>
+  /** Branches already announced by a remote device, keyed by its repo path. */
+  branchCatalog: Readonly<Record<string, ReadonlyArray<string>>>
   search: string
   mine: boolean
   prs: ReadonlyArray<PrSummary>
@@ -163,8 +167,12 @@ export const newSessionMachine = setup({
   },
   actors: {
     loadBranches: fromPromise(
-      ({ input }: { input: { fn: NewSessionDeps["loadBranches"]; repoPath: string; environmentId: string | null } }) =>
-        input.repoPath ? input.fn(input.repoPath, input.environmentId ?? undefined) : Promise.resolve([])
+      ({ input }: { input: { fn: NewSessionDeps["loadBranches"]; repoPath: string; environmentId: string | null; cached?: ReadonlyArray<string> } }) =>
+        input.repoPath
+          ? input.cached !== undefined
+            ? Promise.resolve(input.cached)
+            : input.fn(input.repoPath, input.environmentId ?? undefined)
+          : Promise.resolve([])
     ),
     loadPrs: fromPromise(
       ({
@@ -187,17 +195,36 @@ export const newSessionMachine = setup({
           : Promise.resolve([])
     ),
     loadEnvironment: fromPromise(async ({ input }: { input: { environmentId: string | null; deps: NewSessionDeps } }) => {
-      if (input.environmentId === null) return input.deps.repos
-      if (!input.deps.loadEnvironmentDiscovery) return []
-      const result = await input.deps.loadEnvironmentDiscovery(input.environmentId)
-      return (result.discovery?.repositories ?? []).map((repo) => ({
-        name: repo.name,
-        path: repo.path,
-        defaultBranch: repo.defaultBranch,
-        currentBranch: repo.currentBranch,
-        remoteUrl: null,
-        githubSlug: repo.githubSlug
-      }))
+      if (input.environmentId === null) {
+        return { repos: input.deps.repos, harnesses: null, branchCatalog: {} }
+      }
+      if (!input.deps.loadEnvironmentDiscovery) {
+        throw new Error("Remote discovery is unavailable.")
+      }
+      // Presence can become online a fraction before the device's first
+      // capability announcement is committed. Treat null as "not ready" and
+      // wait briefly instead of freezing the form with an empty repository list.
+      for (let attempt = 0; attempt < DISCOVERY_ATTEMPTS; attempt += 1) {
+        const result = await input.deps.loadEnvironmentDiscovery(input.environmentId)
+        if (result.discovery !== null) {
+          return {
+            repos: result.discovery.repositories.map((repo) => ({
+              name: repo.name,
+              path: repo.path,
+              defaultBranch: repo.defaultBranch,
+              currentBranch: repo.currentBranch,
+              remoteUrl: null,
+              githubSlug: repo.githubSlug
+            })),
+            harnesses: result.discovery.capabilities.harnesses,
+            branchCatalog: Object.fromEntries(
+              result.discovery.repositories.map((repo) => [repo.path, repo.branches])
+            )
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, DISCOVERY_RETRY_MS))
+      }
+      throw new Error("The device is online but has not reported its repositories and harnesses yet.")
     }),
     submit: fromPromise(({ input }: { input: { run: () => Promise<void> } }) => input.run())
   },
@@ -223,6 +250,7 @@ export const newSessionMachine = setup({
         base: "",
         useWorktree: true,
         branches: [] as ReadonlyArray<string>,
+        branchCatalog: {},
         search: "",
         mine: false,
         prs: [] as ReadonlyArray<PrSummary>,
@@ -266,6 +294,7 @@ export const newSessionMachine = setup({
     base: "",
     useWorktree: true,
     branches: [],
+    branchCatalog: {},
     search: "",
     mine: false,
     prs: [],
@@ -361,7 +390,12 @@ export const newSessionMachine = setup({
         loading: {
           invoke: {
             src: "loadBranches",
-            input: ({ context }) => ({ fn: context.getDeps().loadBranches, repoPath: context.repoPath, environmentId: context.environmentId }),
+            input: ({ context }) => ({
+              fn: context.getDeps().loadBranches,
+              repoPath: context.repoPath,
+              environmentId: context.environmentId,
+              cached: context.branchCatalog[context.repoPath]
+            }),
             onDone: { target: "idle", actions: "applyBranches" },
             onError: { target: "idle", actions: "clearBranches" }
           }
@@ -431,13 +465,33 @@ export const newSessionMachine = setup({
             onDone: {
               target: "idle",
               actions: [assign({
-                repos: ({ event }) => event.output,
-                repoPath: ({ event }) => event.output[0]?.path ?? "",
+                repos: ({ event }) => event.output.repos,
+                repoPath: ({ event }) => event.output.repos[0]?.path ?? "",
+                cli: ({ context, event }) => {
+                  if (event.output.harnesses === null) return context.cli
+                  const preferred = context.getDeps().defaultCli
+                  return preferred !== null && preferred !== undefined && event.output.harnesses.includes(preferred)
+                    ? preferred
+                    : (event.output.harnesses[0] ?? "")
+                },
+                branchCatalog: ({ event }) => event.output.branchCatalog,
                 branches: [],
-                base: ""
+                base: "",
+                error: null
               }), raise({ type: "LOAD_BRANCHES" })]
             },
-            onError: { target: "idle", actions: assign({ repos: [], repoPath: "", branches: [], base: "" }) }
+            onError: {
+              target: "idle",
+              actions: assign({
+                repos: [],
+                repoPath: "",
+                branches: [],
+                branchCatalog: {},
+                base: "",
+                cli: "",
+                error: ({ event }) => errorText(event.error, "Could not load this device's repositories.")
+              })
+            }
           }
         }
       }

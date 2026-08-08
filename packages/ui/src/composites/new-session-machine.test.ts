@@ -140,6 +140,29 @@ describe("newSessionMachine remote environments", () => {
     actor.stop()
   })
 
+  it("waits for the first capability announcement and selects a remote harness", async () => {
+    let attempts = 0
+    const deps: NewSessionDeps = {
+      ...remoteDeps(),
+      defaultCli: "codex",
+      loadEnvironmentDiscovery: async () => {
+        attempts += 1
+        if (attempts < 3) {
+          return { version: 1, deviceId: "device-clive", discovery: null, updatedAt: null }
+        }
+        const ready = await remoteDeps().loadEnvironmentDiscovery!("device-clive")
+        return ready
+      }
+    }
+    const actor = createActor(newSessionMachine, { input: { getDeps: () => deps } }).start()
+    actor.send({ type: "OPEN" })
+    actor.send({ type: "SET_ENVIRONMENT", environmentId: "device-clive" })
+    await waitFor(actor, (state) => state.context.repoPath === remoteRepo.path && state.context.base === "main")
+    expect(attempts).toBe(3)
+    expect(actor.getSnapshot().context.cli).toBe("claude")
+    actor.stop()
+  })
+
   it("clears stale repository state when environment changes", async () => {
     const deps = remoteDeps()
     const actor = createActor(newSessionMachine, { input: { getDeps: () => deps } }).start()

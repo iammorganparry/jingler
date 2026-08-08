@@ -21,11 +21,10 @@ import {
   type FakeGitHubOptions,
   type FakeGitHubServer
 } from "./fake-github.js"
-import {
-  startFakeGitHubRelay,
-  type FakeGitHubRelay
-} from "./fake-github-relay.js"
-import { MAIN_ENTRY } from "./global-setup.js"
+import { startFakeGitHubRelay, type FakeGitHubRelay } from "./fake-github-relay.js"
+import { startFakeDeviceRelay, type FakeDeviceRelay } from "./fake-device-relay.js"
+import { installFakeSshHost } from "./fake-ssh-host.js"
+import { DEVICE_AGENT_ENTRY, MAIN_ENTRY } from "./global-setup.js"
 import { FALLBACK_MODELS } from "@jingler/core"
 
 /**
@@ -47,31 +46,18 @@ export const DEFAULT_CLAUDE_MODEL = CLAUDE_MODELS[0]!.label
  * because ids are the stable half of the catalogue, and from index 1 onwards so it
  * stays distinct from the default even if Sonnet is ever promoted to first.
  */
-export const ALT_CLAUDE_MODEL = CLAUDE_MODELS.slice(1).find((m) =>
-  m.id.startsWith("sonnet")
-)!.label
+export const ALT_CLAUDE_MODEL = CLAUDE_MODELS.slice(1).find((m) => m.id.startsWith("sonnet"))!.label
 
 /** Match PlanStore's collision-proof directory for one physical checkout. */
-export const planDirectory = (
-  home: string,
-  worktreePath: string
-): string => {
+export const planDirectory = (home: string, worktreePath: string): string => {
   let canonical: string
   try {
     canonical = realpathSync(worktreePath)
   } catch {
     canonical = resolve(worktreePath)
   }
-  const suffix = createHash("sha256")
-    .update(canonical)
-    .digest("hex")
-    .slice(0, 12)
-  return join(
-    home,
-    "jingler",
-    ".jingler",
-    `${basename(canonical)}-${suffix}`
-  )
+  const suffix = createHash("sha256").update(canonical).digest("hex").slice(0, 12)
+  return join(home, "jingler", ".jingler", `${basename(canonical)}-${suffix}`)
 }
 
 /**
@@ -171,6 +157,7 @@ export interface SeedSession {
   readonly status: "idle" | "running" | "thinking" | "needs-input" | "done"
   readonly cli: "claude" | "codex" | "cursor" | "opencode"
   readonly executionLocation?: "local" | "cloud"
+  readonly environmentId?: string
   readonly diff: { added: number; removed: number }
   readonly prNumber: number | null
   readonly githubInstallationId?: string
@@ -273,6 +260,22 @@ export interface LaunchOptions {
   readonly githubRelay?: FakeGitHubRelay
   /** Test-only process flags for forcing a precise persistence/crash boundary. */
   readonly e2eEnv?: Readonly<Record<string, string>>
+  /**
+   * Start the hermetic clive.local relay + real bundled device-agent process.
+   * No user SSH files, credentials, ports, or home directories are consulted.
+   */
+  readonly remoteEnvironment?: boolean
+  /**
+   * Opt-in physical-host QA. The app still uses the offline auth/relay fixture,
+   * but SSH, the uploaded bundle, discovery, and session execution happen on
+   * the named machine. Never set this in routine or CI runs.
+   */
+  readonly realRemoteEnvironment?: {
+    readonly host: string
+    readonly username: string
+    readonly identityFile: string
+    readonly relayHost: string
+  }
 
   /**
    * Install a deterministic fake `opencode` on PATH so discovery, the version
@@ -808,12 +811,17 @@ export interface LaunchedApp {
   readonly githubServer: FakeGitHubServer
   /** Authenticated reconnectable websocket relay used by realtime-feedback specs. */
   readonly githubRelay: FakeGitHubRelay
+  /** Present only for a launch using the hermetic remote-environment fixture. */
+  readonly deviceRelay?: FakeDeviceRelay
   /**
    * Keys the fake opencode was asked to store, in the order it was asked. The
    * point of the assertion is WHERE a key lands: opencode's own credential
    * store, never Jingler's SecretStore.
    */
-  readonly opencodeAuthWrites: () => ReadonlyArray<{ id: string; body: { type: string; key: string } }>
+  readonly opencodeAuthWrites: () => ReadonlyArray<{
+    id: string
+    body: { type: string; key: string }
+  }>
   /** Ordered JSON-RPC methods received by the fake Codex app-server. */
   readonly codexCalls: () => ReadonlyArray<string>
   /** Release a scripted Browser MCP turn held at its explicit test barrier. */
@@ -843,7 +851,9 @@ const initRepo = (dir: string): void => {
   git(dir, ["commit", "-m", "init", "--no-gpg-sign"])
 }
 
-export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promise<LaunchedApp> }>({
+export const test = base.extend<{
+  launchApp: (options?: LaunchOptions) => Promise<LaunchedApp>
+}>({
   // The first argument is Playwright's fixture bag, which this fixture uses none
   // of — but it has to be there for `use` to be the second parameter.
   // biome-ignore lint/correctness/noEmptyPattern: required by Playwright's signature
@@ -968,9 +978,80 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
       installVersionOnlyHarness(binDir, "claude", "2.0.0 (Claude Code)")
       installFakeCodex(binDir)
 
+      let deviceRelay: FakeDeviceRelay | undefined
+      if (options.remoteEnvironment || options.realRemoteEnvironment) {
+        const deviceHome = mkdtempSync(join(tmpdir(), "jingler-e2e-device-"))
+        cleanups.push(() => rmSync(deviceHome, { recursive: true, force: true }))
+        const deviceRepo = join(deviceHome, "repos", "widget")
+        initRepo(deviceRepo)
+        mkdirSync(join(deviceHome, "jingler"), { recursive: true })
+        writeFileSync(
+          join(deviceHome, "jingler", "config.json"),
+          JSON.stringify(
+            {
+              reposDir: join(deviceHome, "repos"),
+              createdAt: "2026-08-08T00:00:00.000Z"
+            },
+            null,
+            2
+          )
+        )
+        deviceRelay = await startFakeDeviceRelay({
+          deviceAgentBundle: DEVICE_AGENT_ENTRY,
+          deviceHome,
+          deviceBinDir: binDir,
+          spawnAgentOnClaim: options.realRemoteEnvironment === undefined,
+          ...(options.realRemoteEnvironment
+            ? { listenHost: "0.0.0.0", publicHost: options.realRemoteEnvironment.relayHost }
+            : {})
+        })
+        cleanups.push(() => {
+          deviceRelay?.close().catch(() => {})
+        })
+        if (options.realRemoteEnvironment) {
+          const target = options.realRemoteEnvironment
+          const sshDir = join(home, ".ssh")
+          mkdirSync(sshDir, { recursive: true, mode: 0o700 })
+          const quotedIdentity = target.identityFile.replaceAll('"', '\\"')
+          writeFileSync(
+            join(sshDir, "config"),
+            `Host ${target.host}\n  HostName ${target.host}\n  User ${target.username}\n  IdentityFile "${quotedIdentity}"\n  IdentitiesOnly yes\n`,
+            { mode: 0o600 }
+          )
+          const hostKeys = execFileSync("/usr/bin/ssh-keyscan", ["-T", "5", target.host], {
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"]
+          })
+          writeFileSync(join(sshDir, "known_hosts"), hostKeys, { mode: 0o600 })
+
+        } else {
+          installFakeSshHost({
+            binDir,
+            desktopHome: home,
+            deviceHome,
+            deviceAgentBundle: DEVICE_AGENT_ENTRY,
+            relayUrl: deviceRelay.url
+          })
+        }
+      }
+
       // Offline auth backend. Signed-in by default: seed the token file that the
       // e2e plaintext SecretStore reads, so the app boots past the wall.
-      const authServer = options.authServer ?? await startFakeAuthServer()
+      const authServer =
+        options.authServer ??
+        (await startFakeAuthServer(
+          deviceRelay
+            ? {
+                deviceRelayUrl: deviceRelay.url,
+                ...(options.realRemoteEnvironment
+                  ? {
+                      listenHost: "0.0.0.0",
+                      publicHost: options.realRemoteEnvironment.relayHost
+                    }
+                  : {})
+              }
+            : {}
+        ))
       if (options.authServer === undefined) {
         cleanups.push(() => {
           authServer.close().catch(() => {})
@@ -979,24 +1060,26 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
       const signedIn = options.signedIn ?? true
       if (signedIn) {
         mkdirSync(jinglerDir, { recursive: true })
-        writeFileSync(join(jinglerDir, "auth.enc"), authServer.token)
+        writeFileSync(join(jinglerDir, "auth.enc"), deviceRelay?.token ?? authServer.token)
       }
 
-      const githubRelay = options.githubRelay ?? await startFakeGitHubRelay()
+      const githubRelay = options.githubRelay ?? (await startFakeGitHubRelay())
       if (options.githubRelay === undefined) {
         cleanups.push(() => {
           githubRelay.close().catch(() => {})
         })
       }
 
-      const githubServer = options.githubServer ?? await startFakeGitHubServer(authServer.token, {
-        ...options.githubApp,
-        relayUrl: githubRelay.url,
-        relayGrant: githubRelay.grant,
-        // A native App fixture normally resolves PR heads from the repository
-        // created for this launch. Callers can still supply a fork checkout.
-        ...(repoPath && options.githubApp?.cloneUrl === undefined ? { cloneUrl: repoPath } : {})
-      })
+      const githubServer =
+        options.githubServer ??
+        (await startFakeGitHubServer(authServer.token, {
+          ...options.githubApp,
+          relayUrl: githubRelay.url,
+          relayGrant: githubRelay.grant,
+          // A native App fixture normally resolves PR heads from the repository
+          // created for this launch. Callers can still supply a fork checkout.
+          ...(repoPath && options.githubApp?.cloneUrl === undefined ? { cloneUrl: repoPath } : {})
+        }))
       if (options.githubServer === undefined) {
         cleanups.push(() => {
           githubServer.close().catch(() => {})
@@ -1011,7 +1094,8 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
       // preview leaked into later tests forever: at the 1320px default window the
       // extra rail squeezed the Plan Review step spec to zero width, and its
       // assertions failed on an element that was rendered but had no box.
-      const userDataDir = options.userDataDir ?? mkdtempSync(join(tmpdir(), "jingler-e2e-userdata-"))
+      const userDataDir =
+        options.userDataDir ?? mkdtempSync(join(tmpdir(), "jingler-e2e-userdata-"))
       // Only the launch that CREATED the profile tears it down, or a restart
       // would delete the directory its predecessor is still cleaning up.
       if (!options.userDataDir) {
@@ -1042,6 +1126,13 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
           // Auth: talk to the offline fake backend, and store the token as a plain
           // file (no OS keychain prompts under headless Playwright).
           JINGLER_AUTH_URL: authServer.url,
+          ...(deviceRelay
+            ? {
+                JINGLER_DEVICE_RELAY_URL: deviceRelay.url,
+                JINGLER_SSH_DIR: join(home, ".ssh"),
+                JINGLER_E2E_SSH_LOG: join(home, "ssh-invocations.jsonl")
+              }
+            : {}),
           JINGLER_GITHUB_URL: githubServer.url,
           JINGLER_GITHUB_API_URL: githubServer.url,
           JINGLER_SECRET_STORE: "memory",
@@ -1064,16 +1155,19 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
         }
       })
       apps.push(app)
+      app.on("window", (page) => {
+        page.on("pageerror", (error) => console.error("E2E_RENDERER_ERROR", error))
+        page.on("console", (message) => {
+          if (message.type() === "error") console.error("E2E_RENDERER_CONSOLE", message.text())
+        })
+      })
       const window = await app.firstWindow()
       await window.waitForLoadState("domcontentloaded")
 
       const completeDeepLinkSignIn = async () => {
-        await app.evaluate(
-          ({ app: electronApp }, url) => {
-            electronApp.emit("open-url", { preventDefault() {} }, url)
-          },
-          `jingler://auth/callback?token=${authServer.token}`
-        )
+        await app.evaluate(({ app: electronApp }, url) => {
+          electronApp.emit("open-url", { preventDefault() {} }, url)
+        }, `jingler://auth/callback?token=${authServer.token}`)
       }
 
       const completeGitHubConnection = async () => {
@@ -1093,7 +1187,13 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
         return readFileSync(log, "utf8")
           .split("\n")
           .filter((l) => l.length > 0)
-          .map((l) => JSON.parse(l) as { id: string; body: { type: string; key: string } })
+          .map(
+            (l) =>
+              JSON.parse(l) as {
+                id: string
+                body: { type: string; key: string }
+              }
+          )
       }
 
       const githubOperations = () => [...githubServer.operations]
@@ -1101,7 +1201,9 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
       const codexCalls = () => {
         const log = join(home, "bin", "codex-calls.log")
         if (!existsSync(log)) return []
-        return readFileSync(log, "utf8").split("\n").filter((line) => line.length > 0)
+        return readFileSync(log, "utf8")
+          .split("\n")
+          .filter((line) => line.length > 0)
       }
       const releaseBrowserMcp = () => {
         writeFileSync(join(binDir, "browser-mcp.release"), "released\n")
@@ -1117,6 +1219,7 @@ export const test = base.extend<{ launchApp: (options?: LaunchOptions) => Promis
         authServer,
         githubServer,
         githubRelay,
+        ...(deviceRelay ? { deviceRelay } : {}),
         completeDeepLinkSignIn,
         completeGitHubConnection,
         opencodeAuthWrites,
