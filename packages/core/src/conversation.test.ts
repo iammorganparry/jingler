@@ -1085,38 +1085,43 @@ describe("activityOf", () => {
 
   it("derives full-path file activity for edit, write, update, and multi-edit tools", () => {
     expect(
-      agentFileActivityOf([turn(tool("Edit", "packages/core/src/conversation.ts"))])
+      agentFileActivityOf(
+        [turn(tool("Edit", "packages/core/src/conversation.ts"))],
+        "running"
+      )
     ).toEqual({
       eventId: "t_Edit",
       path: "packages/core/src/conversation.ts",
       phase: "editing"
     })
     expect(
-      agentFileActivityOf([turn(tool("Write", "src/new-file.ts", "success"))])
+      agentFileActivityOf([turn(tool("Write", "src/new-file.ts", "success"))], "settling")
     ).toEqual({
       eventId: "t_Write",
       path: "src/new-file.ts",
       phase: "completed"
     })
     expect(
-      agentFileActivityOf([turn(tool("Update", "src/updated-file.ts", "success"))])
+      agentFileActivityOf(
+        [turn(tool("Update", "src/updated-file.ts", "success"))],
+        "settling"
+      )
     ).toEqual({
       eventId: "t_Update",
       path: "src/updated-file.ts",
       phase: "completed"
     })
-    expect(agentFileActivityOf([turn(tool("MultiEdit", "src/multi.ts"))])).toEqual({
-      eventId: "t_MultiEdit",
-      path: "src/multi.ts",
-      phase: "editing"
-    })
+    expect(
+      agentFileActivityOf([turn(tool("MultiEdit", "src/multi.ts"))], "running")
+    ).toEqual({ eventId: "t_MultiEdit", path: "src/multi.ts", phase: "editing" })
   })
 
   it("keeps following a running edit when a later parallel read starts", () => {
     expect(
-      agentFileActivityOf([
-        turn(tool("Edit", "src/active.ts"), tool("Read", "src/context.ts"))
-      ])
+      agentFileActivityOf(
+        [turn(tool("Edit", "src/active.ts"), tool("Read", "src/context.ts"))],
+        "running"
+      )
     ).toEqual({
       eventId: "t_Edit",
       path: "src/active.ts",
@@ -1133,9 +1138,21 @@ describe("activityOf", () => {
     ).toBeNull()
   })
 
+  it("does not replay a completed mutation from an earlier assistant turn", () => {
+    expect(
+      agentFileActivityOf(
+        [
+          turn(tool("Edit", "src/old.ts", "success")),
+          turn({ _tag: "Text", text: "Starting a new task" })
+        ],
+        "running"
+      )
+    ).toBeNull()
+  })
+
   it("ignores non-mutation tools when deriving agent file activity", () => {
-    expect(agentFileActivityOf([turn(tool("Read", "src/a.ts"))])).toBeNull()
-    expect(agentFileActivityOf([turn(tool("Bash", "pnpm test"))])).toBeNull()
+    expect(agentFileActivityOf([turn(tool("Read", "src/a.ts"))], "running")).toBeNull()
+    expect(agentFileActivityOf([turn(tool("Bash", "pnpm test"))], "running")).toBeNull()
   })
 
   it("names sub-agent spawns as delegating", () => {

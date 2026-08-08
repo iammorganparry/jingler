@@ -1582,14 +1582,16 @@ const runningTool = (messages: ReadonlyArray<Message>): ToolCall | null =>
  */
 export const agentFileActivityOf = (
   messages: ReadonlyArray<Message>,
-  phase: ActivityPhase = "running"
+  phase: ActivityPhase
 ): AgentFileActivity | null => {
   if (phase === "idle") return null
+  const currentTurn = messages.at(-1)
+  if (currentTurn?.role !== "assistant") return null
   const tool =
     lastTool(
-      messages,
+      [currentTurn],
       (candidate) => candidate.status === "running" && isFileMutationTool(candidate.name)
-    ) ?? lastTool(messages, (candidate) => isFileMutationTool(candidate.name))
+    ) ?? lastTool([currentTurn], (candidate) => isFileMutationTool(candidate.name))
   if (
     tool === null ||
     tool.target === null ||
