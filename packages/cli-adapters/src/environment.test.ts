@@ -27,6 +27,7 @@ const device: RemoteDevice = {
     harnesses: ["codex"],
     maxConcurrentSessions: 2
   },
+  agentVersion: "2.0.3",
   state: "active",
   generation: 3,
   createdAt: 100,
@@ -82,6 +83,7 @@ describe("environment metadata", () => {
       id: "device_clive",
       name: "clive.local",
       state: "online",
+      agentVersion: "2.0.3",
       lastSeenAt: 200
     })
   })

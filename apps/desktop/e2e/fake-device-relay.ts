@@ -117,6 +117,10 @@ export const startFakeDeviceRelay = async (
               maxConcurrentSessions: 1
             }
           : registration?.capabilities,
+      agentVersion:
+        discovery && typeof discovery.agentVersion === "string"
+          ? discovery.agentVersion
+          : null,
       state: "active",
       generation: 1,
       createdAt: now() - 10,
@@ -166,7 +170,11 @@ export const startFakeDeviceRelay = async (
         return json(response, 409, { error: "invalid claim" })
       paired = true
       forcedState = null
-      state = options.spawnAgentOnClaim === false ? "offline" : "online"
+      // Pairing only starts the daemon. Do not advertise it as online until its
+      // control WebSocket is actually established: otherwise a desktop can open
+      // a session tunnel in this window, the relay drops the session-request,
+      // and session creation waits forever.
+      state = "offline"
       claimCount += 1
       mkdirSync(join(options.deviceHome, "jingler"), { recursive: true })
       if (options.spawnAgentOnClaim !== false)
@@ -421,9 +429,18 @@ export const startFakeDeviceRelay = async (
       if (next !== "online") control?.close(1012, next)
     },
     close: async () => {
-      agent?.kill("SIGTERM")
       for (const client of sockets.clients) client.close()
       await new Promise<void>((resolve) => server.close(() => resolve()))
+      if (agent && agent.exitCode === null) {
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(resolve, 2_000)
+          agent!.once("exit", () => {
+            clearTimeout(timeout)
+            resolve()
+          })
+          agent!.kill("SIGTERM")
+        })
+      }
     }
   }
 }

@@ -5,7 +5,9 @@ import type {
 } from "@jingler/core"
 import {
   DeviceRelayGrantClaims as DeviceRelayGrantClaimsSchema,
-  REMOTE_GRANT_MAX_TTL_SECONDS
+  REMOTE_GRANT_MAX_TTL_SECONDS,
+  deviceRelayGrantWindowRejection,
+  isValidDeviceRelayGrantScope
 } from "@jingler/core"
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import { Schema } from "effect"
@@ -43,23 +45,6 @@ const safeEqual = (left: string, right: string): boolean => {
   return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes)
 }
 
-const validScope = (input: IssueDeviceGrantInput): boolean => {
-  switch (input.audience) {
-    case "device-control":
-      return input.sessionId === null && input.deviceGeneration === null
-    case "device-challenge":
-      return input.deviceId !== null && input.sessionId === null && input.deviceGeneration === null
-    case "device-connect":
-      return (
-        input.deviceId !== null && input.sessionId === null && input.deviceGeneration !== null
-      )
-    case "session-tunnel":
-      return (
-        input.deviceId !== null && input.sessionId !== null && input.deviceGeneration !== null
-      )
-  }
-}
-
 export const issueDeviceGrant = (
   input: IssueDeviceGrantInput,
   config: DeviceGrantConfig,
@@ -67,7 +52,7 @@ export const issueDeviceGrant = (
   grantId: string = randomUUID()
 ): DeviceRelayGrantResponse => {
   if (
-    !validScope(input) ||
+    !isValidDeviceRelayGrantScope(input) ||
     !Number.isSafeInteger(config.ttlSeconds) ||
     config.ttlSeconds <= 0 ||
     config.ttlSeconds > REMOTE_GRANT_MAX_TTL_SECONDS
@@ -122,10 +107,8 @@ export const verifyDeviceGrant = (
     )
     if (
       claims.audience !== expectedAudience ||
-      claims.expiresAt <= nowSeconds ||
-      claims.expiresAt - claims.issuedAt > REMOTE_GRANT_MAX_TTL_SECONDS ||
-      claims.issuedAt > nowSeconds + 60 ||
-      !validScope(claims)
+      deviceRelayGrantWindowRejection(claims, nowSeconds) !== null ||
+      !isValidDeviceRelayGrantScope(claims)
     ) {
       throw new DeviceGrantError()
     }

@@ -10,7 +10,6 @@ export interface EnvironmentMachineApi {
   suggestHosts: () => Promise<ReadonlyArray<SshHost>>
   pairLink: (input: PairLinkEnvironmentInput) => Promise<Environment>
   pairSsh: (input: PairSshEnvironmentInput) => Promise<Environment>
-  revoke: (deviceId: string) => Promise<void>
 }
 
 export interface EnvironmentContext {
@@ -44,7 +43,6 @@ type EnvironmentEvent =
   | { type: "RETRY" }
   | { type: "RESET" }
   | { type: "CANCEL" }
-  | { type: "REVOKE" }
 
 const messageOf = (error: unknown): string =>
   typeof error === "object" && error !== null && "message" in error
@@ -74,10 +72,7 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
           pendingDeviceId: input.pendingDeviceId.trim(),
           pairingCode: input.pairingCode.trim().toUpperCase()
         })
-      }),
-      revoke: fromPromise(({ input }: { input: { deviceId: string } }) =>
-        api.revoke(input.deviceId)
-      )
+      })
     },
     guards: {
       canSubmit: ({ context }) =>
@@ -178,28 +173,7 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
           }
         }
       },
-      connected: {
-        on: {
-          REVOKE: {
-            target: "revoking",
-            guard: ({ context }) => context.environment !== null
-          }
-        }
-      },
-      revoking: {
-        invoke: {
-          src: "revoke",
-          input: ({ context }) => ({ deviceId: context.environment?.id ?? "" }),
-          onDone: {
-            target: "choosing",
-            actions: assign({ environment: null, method: null })
-          },
-          onError: {
-            target: "failed",
-            actions: assign({ error: ({ event }) => messageOf(event.error) })
-          }
-        }
-      },
+      connected: {},
       failed: {
         on: {
           RETRY: [

@@ -72,8 +72,12 @@ test("uses the shared legacy Jingler Pierre skin in Changes and Code Review", as
   await expect(appShell(window)).toBeVisible()
   await sessionRow(window, "Pierre review session").click()
   const closeTerminal = window.getByRole("button", { name: "Close zsh" })
-  if (await closeTerminal.isVisible()) await closeTerminal.click()
+  if (await closeTerminal.isVisible()) {
+    await closeTerminal.click()
+    await expect(closeTerminal).toBeHidden()
+  }
   await window.getByRole("button", { name: "Changes" }).first().click()
+  await expect(window.getByRole("region", { name: "Code review changes" })).toBeVisible()
   await openFileRail(window)
 
   const tree = window.locator(

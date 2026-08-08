@@ -14,8 +14,7 @@ export const useEnvironments = () => {
     () => ({
       suggestHosts: rpc.environmentsSuggestHosts,
       pairLink: rpc.environmentsPairLink,
-      pairSsh: rpc.environmentsPairSsh,
-      revoke: rpc.environmentsRevoke
+      pairSsh: rpc.environmentsPairSsh
     }),
     []
   )

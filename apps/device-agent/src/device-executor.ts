@@ -30,6 +30,7 @@ import {
   CreateSessionInput,
   ExternalInstructionIdentity,
   GateDecision,
+  Message,
   QuestionAnswer,
   ReasoningSetting,
   RemotePublishCompleteInput,
@@ -115,6 +116,25 @@ const TranscriptPagePayload = Schema.Struct({
   before: Schema.optional(Schema.String),
   limit: Schema.optional(Schema.Number)
 })
+const TranscriptPageResult = Schema.Struct({
+  messages: Schema.Array(Message),
+  hasMore: Schema.Boolean,
+  cursor: Schema.optional(Schema.String)
+})
+
+const stripTranscriptAttachmentData = (
+  page: Schema.Schema.Type<typeof TranscriptPageResult>
+): Schema.Schema.Type<typeof TranscriptPageResult> => ({
+  ...page,
+  messages: page.messages.map((message) => ({
+    ...message,
+    parts: message.parts.map((part) =>
+      part._tag === "Image"
+        ? { ...part, attachment: { ...part.attachment, data: "" } }
+        : part
+    )
+  }))
+})
 const ArchivePayload = Schema.Struct({ reason: ArchiveReason })
 const RepoPathPayload = Schema.Struct({ repoPath: Schema.optional(Schema.String) })
 const ContinuationPayload = Schema.Struct({ sourceSession: Session })
@@ -184,8 +204,14 @@ export const makeDeviceSessionCommandExecutor = (
         return services.steer(command.sessionId, decodePayload(command, SteerPayload))
       case "Agent.stop":
         return services.stop(command.sessionId, decodePayload(command, ChatIdPayload).chatId)
-      case "Sessions.transcriptPage":
-        return services.transcriptPage(decodePayload(command, TranscriptPagePayload))
+      case "Sessions.transcriptPage": {
+        const page = await services.transcriptPage(
+          decodePayload(command, TranscriptPagePayload)
+        )
+        return stripTranscriptAttachmentData(
+          decodePayload(command, TranscriptPageResult, page)
+        )
+      }
       case "Sessions.diff":
         payloadRecord(command)
         return services.diff(command.sessionId)

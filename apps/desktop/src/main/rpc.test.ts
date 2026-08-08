@@ -18,7 +18,6 @@ import {
   GitHubApi,
   GitService,
   InMemorySecretStoreLive,
-  SecretStore,
   MemoryService,
   ModelsService,
   OrchestrationService,
@@ -101,10 +100,8 @@ import {
   reviewMarkRouted,
   reviewReconcile,
   reviewRun,
-  rendererSafeEnvironment,
   removeRemoteSessionMirror,
   selectContinuationRepository,
-  storeRemoteSessionKey,
   restoredOrchestrationSnapshot,
   setReasoning,
   setSessionPersistent,
@@ -147,40 +144,6 @@ describe("remote session environment lifecycle", () => {
       Effect.sync(() => { forgotten = true; }),
     ));
     expect(forgotten).toBe(true);
-  });
-});
-
-describe("environment RPC security boundary", () => {
-  it("returns environment metadata without relay grants or device secrets", async () => {
-    const value = {
-      id: "device-1",
-      name: "clive.local",
-      platform: { os: "darwin", arch: "arm64" },
-      capabilities: {
-        version: 1,
-        capabilities: [],
-        harnesses: ["codex"],
-        maxConcurrentSessions: 1,
-      },
-      state: "online",
-      agentVersion: null,
-      lastSeenAt: null,
-      relayGrant: "secret",
-    };
-    const result = await Effect.runPromise(
-      Effect.either(rendererSafeEnvironment(value)),
-    );
-    expect(Either.isLeft(result)).toBe(true);
-  });
-
-  it("stores remote session keys through the encrypted secret store", async () => {
-    const program = Effect.gen(function* () {
-      yield* storeRemoteSessionKey("session-1", "key-material");
-      return yield* (yield* SecretStore).getDeviceSecrets;
-    });
-    await expect(
-      Effect.runPromise(program.pipe(Effect.provide(InMemorySecretStoreLive))),
-    ).resolves.toContain("key-material");
   });
 });
 

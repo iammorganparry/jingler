@@ -1037,6 +1037,15 @@ export class DeviceRegistryObject extends DurableObject<Env> {
   }
 
   private deviceFromRow(row: DeviceRow): RemoteDevice {
+    const discoveryRow = this.ctx.storage.sql
+      .exec<DiscoveryRow>(
+        "SELECT discovery_json, updated_at FROM device_discovery WHERE device_id = ?",
+        row.device_id
+      )
+      .toArray()[0]
+    const agentVersion = discoveryRow
+      ? decodeJson(RemoteDeviceDiscoverySchema, discoveryRow.discovery_json).agentVersion
+      : null
     const presence =
       this.ctx.storage.sql
         .exec<PresenceRow>(
@@ -1063,6 +1072,7 @@ export class DeviceRegistryObject extends DurableObject<Env> {
         RemoteDeviceCapabilitiesSchema,
         row.capabilities_json
       ),
+      agentVersion,
       state: row.state,
       generation: row.generation,
       createdAt: row.created_at,

@@ -130,6 +130,10 @@ export const RemoteDevice = Schema.Struct({
   publicKey: DevicePublicKey,
   encryptionPublicKey: Schema.optional(DeviceEncryptionPublicKey),
   capabilities: RemoteDeviceCapabilities,
+  /** Absent when talking to an older relay; null until the first discovery announcement. */
+  agentVersion: Schema.optional(
+    Schema.NullOr(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64)))
+  ),
   state: RemoteDeviceState,
   generation: Generation,
   createdAt: EpochSeconds,
@@ -297,6 +301,45 @@ export const DeviceRelayGrantClaims = Schema.Struct({
 export type DeviceRelayGrantClaims = Schema.Schema.Type<
   typeof DeviceRelayGrantClaims
 >
+
+type DeviceRelayGrantScope = Pick<
+  DeviceRelayGrantClaims,
+  "audience" | "deviceId" | "sessionId" | "deviceGeneration"
+>
+
+/** Shared authorization matrix used by both the Node issuer and Worker verifier. */
+export const isValidDeviceRelayGrantScope = (
+  claims: DeviceRelayGrantScope
+): boolean => {
+  switch (claims.audience) {
+    case "device-control":
+      return claims.sessionId === null && claims.deviceGeneration === null
+    case "device-challenge":
+      return claims.deviceId !== null && claims.sessionId === null && claims.deviceGeneration === null
+    case "device-connect":
+      return claims.deviceId !== null && claims.sessionId === null && claims.deviceGeneration !== null
+    case "session-tunnel":
+      return claims.deviceId !== null && claims.sessionId !== null && claims.deviceGeneration !== null
+  }
+}
+
+export type DeviceRelayGrantWindowRejection =
+  | "expired"
+  | "overlong"
+  | "future-issued"
+
+/** Shared lifetime checks; signature verification remains runtime-specific. */
+export const deviceRelayGrantWindowRejection = (
+  claims: Pick<DeviceRelayGrantClaims, "issuedAt" | "expiresAt">,
+  nowSeconds: number
+): DeviceRelayGrantWindowRejection | null =>
+  claims.expiresAt <= nowSeconds
+    ? "expired"
+    : claims.expiresAt - claims.issuedAt > REMOTE_GRANT_MAX_TTL_SECONDS
+      ? "overlong"
+      : claims.issuedAt > nowSeconds + 60
+        ? "future-issued"
+        : null
 
 export const DeviceRelayGrantRequest = Schema.Struct({
   version: Schema.Literal(REMOTE_PROTOCOL_VERSION),

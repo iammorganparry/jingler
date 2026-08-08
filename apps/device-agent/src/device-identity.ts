@@ -241,16 +241,8 @@ export const rotateDeviceIdentity = (
   Effect.tryPromise({
     try: async () => {
       await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-      const next = `${path}.next`
       const stored = createStored()
-      await writeFile(next, `${JSON.stringify(stored)}\n`, { mode: 0o600, flag: "wx" })
-      try {
-        await rename(next, path)
-        await chmod(path, 0o600)
-      } catch (error) {
-        await rm(next, { force: true })
-        throw error
-      }
+      await replaceStored(path, stored)
       return identityFromStored(stored)
     },
     catch: (cause) => new DeviceIdentityError({ message: "Failed to rotate device identity", cause })

@@ -1,7 +1,8 @@
 import type { DeviceRelayGrantAudience, DeviceRelayGrantClaims } from "@jingler/core"
 import {
   DeviceRelayGrantClaims as DeviceRelayGrantClaimsSchema,
-  REMOTE_GRANT_MAX_TTL_SECONDS
+  deviceRelayGrantWindowRejection,
+  isValidDeviceRelayGrantScope
 } from "@jingler/core"
 import { Either, Schema } from "effect"
 
@@ -40,29 +41,6 @@ const hmacKey = (secret: string): Promise<CryptoKey> =>
     false,
     ["verify"]
   )
-
-const validScope = (claims: DeviceRelayGrantClaims): boolean => {
-  switch (claims.audience) {
-    case "device-control":
-      return claims.sessionId === null && claims.deviceGeneration === null
-    case "device-challenge":
-      return (
-        claims.deviceId !== null && claims.sessionId === null && claims.deviceGeneration === null
-      )
-    case "device-connect":
-      return (
-        claims.deviceId !== null &&
-        claims.sessionId === null &&
-        claims.deviceGeneration !== null
-      )
-    case "session-tunnel":
-      return (
-        claims.deviceId !== null &&
-        claims.sessionId !== null &&
-        claims.deviceGeneration !== null
-      )
-  }
-}
 
 export const verifyDeviceRelayGrant = async (
   grant: string | null,
@@ -106,12 +84,9 @@ export const verifyDeviceRelayGrant = async (
     if (Either.isLeft(decoded)) return { ok: false, reason: "invalid-claims" }
     const claims = decoded.right
     if (claims.audience !== audience) return { ok: false, reason: "wrong-audience" }
-    if (claims.expiresAt <= nowSeconds) return { ok: false, reason: "expired" }
-    if (claims.expiresAt - claims.issuedAt > REMOTE_GRANT_MAX_TTL_SECONDS) {
-      return { ok: false, reason: "overlong" }
-    }
-    if (claims.issuedAt > nowSeconds + 60) return { ok: false, reason: "future-issued" }
-    if (!validScope(claims)) return { ok: false, reason: "invalid-scope" }
+    const windowRejection = deviceRelayGrantWindowRejection(claims, nowSeconds)
+    if (windowRejection) return { ok: false, reason: windowRejection }
+    if (!isValidDeviceRelayGrantScope(claims)) return { ok: false, reason: "invalid-scope" }
     return { ok: true, claims }
   } catch {
     return { ok: false, reason: "malformed" }

@@ -3,6 +3,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { appShell, expect, openSessionByTitle, test } from "./fixtures.js";
 
+const refreshGitHubAccess = async (window: import("@playwright/test").Page) => {
+  await window.getByRole("button", { name: "Account menu" }).click();
+  await window.getByRole("menuitem", { name: "Settings" }).click();
+  await window.getByRole("button", { name: /GitHub/ }).click();
+  await window.getByRole("button", { name: "Refresh", exact: true }).click();
+  await window.getByRole("button", { name: "Close settings" }).click();
+};
+
 const feedback = (
   deliveryId: string,
   semanticKey: string,
@@ -106,15 +114,19 @@ test("uses a distinct relay Durable Object connection per linked session and rep
   await expect.poll(() => githubRelay.connectedClientIds().length).toBe(2);
   expect(new Set(githubRelay.connectedClientIds()).size).toBe(2);
 
-  // Removing the selected repository immediately tears down both session
-  // streams; restoring the immutable repository id reconciles them in place.
+  // Refreshing after a selected repository is removed immediately tears down
+  // both session streams; restoring the immutable repository id reconciles them
+  // in place. The relay's background poll is intentionally low frequency, so
+  // this drives the same explicit Refresh action the settings UI documents.
   launched.githubServer.setInstallation({ repositories: [] });
+  await refreshGitHubAccess(window);
   await expect
     .poll(() => githubRelay.connectedClientIds().length, { timeout: 20_000 })
     .toBe(0);
   launched.githubServer.setInstallation({
     repositories: [{ id: "301", fullName: "acme/widget" }],
   });
+  await refreshGitHubAccess(window);
   await expect
     .poll(() => githubRelay.connectedClientIds().length, { timeout: 20_000 })
     .toBe(2);
@@ -125,6 +137,7 @@ test("uses a distinct relay Durable Object connection per linked session and rep
     status: "suspended",
     suspendedAt: "2026-08-05T09:01:00.000Z",
   });
+  await refreshGitHubAccess(window);
   await expect
     .poll(() => githubRelay.connectedClientIds().length, { timeout: 20_000 })
     .toBe(0);
@@ -132,6 +145,7 @@ test("uses a distinct relay Durable Object connection per linked session and rep
     status: "active",
     suspendedAt: null,
   });
+  await refreshGitHubAccess(window);
   await expect
     .poll(() => githubRelay.connectedClientIds().length, { timeout: 20_000 })
     .toBe(2);

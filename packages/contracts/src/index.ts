@@ -781,6 +781,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   /** The session worktree's unified working diff, for the Changes rail. */
   Rpc.make("Sessions.diff", {
     success: Schema.String,
+    error: GitError,
     payload: { id: Schema.String }
   }),
 
@@ -811,6 +812,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
 
   /** Resolve a pending HITL approval gate (allow / deny / always). */
   Rpc.make("Agent.decideGate", {
+    error: GitError,
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,
@@ -821,6 +823,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
 
   /** Submit answers to a pending AskUserQuestion group, resuming the agent. */
   Rpc.make("Agent.answerQuestion", {
+    error: GitError,
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,
@@ -967,6 +970,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
 
   /** Stop a running agent (denies any pending gate). */
   Rpc.make("Agent.stop", {
+    error: GitError,
     payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
@@ -1005,6 +1009,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
         status: Schema.Literal("deferred", "unsupported")
       })
     ),
+    error: GitError,
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,

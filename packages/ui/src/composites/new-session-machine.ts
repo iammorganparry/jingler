@@ -450,14 +450,7 @@ export const newSessionMachine = setup({
     environmentLoad: {
       initial: "idle",
       states: {
-        idle: {
-          on: {
-            SET_ENVIRONMENT: {
-              target: "loading",
-              actions: assign({ environmentId: ({ event }) => event.environmentId })
-            }
-          }
-        },
+        idle: {},
         loading: {
           invoke: {
             src: "loadEnvironment",

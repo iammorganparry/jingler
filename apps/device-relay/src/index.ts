@@ -110,6 +110,11 @@ const handlePendingRegistration = async (
   request: Request,
   env: Env
 ): Promise<Response> => {
+  const clientKey = request.headers.get("cf-connecting-ip") ?? "unknown"
+  const allowed = await env.UNAUTHENTICATED_RATE_LIMITER.limit({
+    key: `pending:${clientKey}`
+  })
+  if (!allowed.success) return json({ error: "Too many pairing attempts" }, 429)
   const registration = await decodedBody(
     request,
     PendingDeviceRegistrationRequest
@@ -284,6 +289,11 @@ const handleChallengeCreation = async (
   const claims = await grant(request, env, "device-challenge")
   if (!claims?.deviceId)
     return json({ error: "Invalid device-challenge grant" }, 401)
+  const clientKey = request.headers.get("x-jingler-client-key") ?? "unknown"
+  const allowed = await env.UNAUTHENTICATED_RATE_LIMITER.limit({
+    key: `challenge:${clientKey}`
+  })
+  if (!allowed.success) return json({ error: "Too many challenge attempts" }, 429)
   const input = await decodedBody(request, DeviceChallengeRequest)
   if (
     !input ||

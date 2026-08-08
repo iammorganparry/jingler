@@ -53,6 +53,7 @@ import {
 import { claimPlanAutoPresentation } from "./plan-presence.js"
 import {
   rpcFailureMessage,
+  rpcFailureNumber,
   rpcFailureReason,
   rpcFailureTag
 } from "./rpc-failure.js"
@@ -748,14 +749,31 @@ export function ConversationPane({
       onSetThreadResolved={async (annotationId, resolved) => {
         const document = canonicalPlan.document
         if (document === null) return
-        await rpc.planSetThreadResolved({
-          sessionId: session.id,
-          planId: document.id,
-          baseRevision: document.revision,
-          annotationId,
-          resolved,
-          author: "user"
-        })
+        const setResolved = (baseRevision: number) =>
+          rpc.planSetThreadResolved({
+            sessionId: session.id,
+            planId: document.id,
+            baseRevision,
+            annotationId,
+            resolved,
+            author: "user"
+          })
+        try {
+          await setResolved(document.revision)
+        } catch (error) {
+          const latestRevision = rpcFailureNumber(error, "latestRevision")
+          if (
+            rpcFailureTag(error) !== "PlanConflictError" ||
+            latestRevision === undefined
+          ) {
+            throw error
+          }
+          // Setting a thread's resolved state is idempotent. Plan.watch can
+          // briefly lag the mutation response, so retry this one safe write at
+          // the server-provided canonical revision instead of surfacing a
+          // conflict for a revision the user never edited directly.
+          await setResolved(latestRevision)
+        }
       }}
     />
   )

@@ -3,6 +3,7 @@ import { Effect, Runtime } from "effect"
 import { describe, expect, it } from "vitest"
 import {
   rpcFailureMessage,
+  rpcFailureNumber,
   rpcFailureReason,
   rpcFailureTag,
   unwrapRpcFailure
@@ -24,5 +25,14 @@ describe("renderer RPC failures", () => {
     expect(rpcFailureMessage(null, "Could not update the environment.")).toBe(
       "Could not update the environment."
     )
+  })
+
+  it("recovers numeric conflict metadata from a FiberFailure rejection", async () => {
+    const rejected = await Effect.runPromise(
+      Effect.fail({ _tag: "PlanConflictError", latestRevision: 7 })
+    ).catch((error) => error)
+
+    expect(rpcFailureNumber(rejected, "latestRevision")).toBe(7)
+    expect(rpcFailureNumber(rejected, "missing")).toBeUndefined()
   })
 })

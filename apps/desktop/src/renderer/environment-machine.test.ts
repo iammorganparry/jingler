@@ -29,8 +29,7 @@ const api = () => ({
     }
   ]),
   pairLink: vi.fn(async () => environment),
-  pairSsh: vi.fn(async () => environment),
-  revoke: vi.fn(async () => undefined)
+  pairSsh: vi.fn(async () => environment)
 })
 
 describe("environment machine", () => {
@@ -90,22 +89,5 @@ describe("environment machine", () => {
     actor.send({ type: "CANCEL" })
     expect(actor.getSnapshot().matches("choosing")).toBe(true)
     expect(services.pairLink).not.toHaveBeenCalled()
-  })
-
-  it("removes a revoked device from selectable environments", async () => {
-    const services = api()
-    const actor = createActor(createEnvironmentMachine(services)).start()
-    actor.send({ type: "CHOOSE", method: "remote-link" })
-    for (const [field, value] of [
-      ["backendUrl", "http://localhost:9100"],
-      ["pendingDeviceId", "pending_1"],
-      ["pairingCode", "ABCDEFGH"]
-    ] as const)
-      actor.send({ type: "EDIT", field, value })
-    actor.send({ type: "SUBMIT" })
-    await waitFor(actor, (snapshot) => snapshot.matches("connected"))
-    actor.send({ type: "REVOKE" })
-    await waitFor(actor, (snapshot) => snapshot.matches("choosing"))
-    expect(actor.getSnapshot().context.environment).toBeNull()
   })
 })

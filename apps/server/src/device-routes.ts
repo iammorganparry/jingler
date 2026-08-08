@@ -113,13 +113,17 @@ const relayRequest = (
   path: string,
   grant: string,
   method: "GET" | "POST",
-  body?: unknown
+  body?: unknown,
+  extraHeaders?: Readonly<Record<string, string>>
 ): Promise<Response> => {
   const headers = new Headers({
     accept: "application/json",
     authorization: `Bearer ${grant}`
   })
   if (body !== undefined) headers.set("content-type", "application/json")
+  for (const [name, value] of Object.entries(extraHeaders ?? {})) {
+    headers.set(name, value)
+  }
   return dependencies.relayFetch(relayUrl(dependencies.relayUrl, path), {
     method,
     headers,
@@ -290,13 +294,18 @@ export const createDeviceRoutes = (
       sessionId: null,
       deviceGeneration: null
     })
+    const clientKey =
+      context.req.header("cf-connecting-ip") ??
+      context.req.header("x-forwarded-for")?.split(",", 1)[0]?.trim() ??
+      "unknown"
     return forward(
       await relayRequest(
         dependencies,
         "/v1/device-challenges",
         challengeGrant.grant,
         "POST",
-        input satisfies DeviceChallengeRequestValue
+        input satisfies DeviceChallengeRequestValue,
+        { "x-jingler-client-key": clientKey.slice(0, 128) }
       ).catch(() => json({ error: "Device relay unavailable" }, 502))
     )
   })

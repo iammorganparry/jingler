@@ -146,6 +146,39 @@ describe("device session command executor", () => {
     expect(dependencies.remove).toHaveBeenCalledWith("session_1")
   })
 
+  it("strips attachment bytes from remote transcript pages", async () => {
+    const dependencies: DeviceExecutorServices = {
+      ...services(),
+      transcriptPage: vi.fn(async () => ({
+      messages: [{
+        id: "message_1",
+        role: "user",
+        streaming: false,
+        createdAt: "2026-08-08T00:00:00.000Z",
+        parts: [{
+          _tag: "Image",
+          attachment: {
+            id: "attachment_1",
+            name: "screen.png",
+            mediaType: "image/png",
+            data: "large-base64-payload"
+          }
+        }]
+      }],
+      hasMore: false
+      }))
+    }
+
+    const result = await makeDeviceSessionCommandExecutor(dependencies).execute(
+      command("Sessions.transcriptPage", { chatId: "chat_1", limit: 50 }),
+      async () => undefined
+    )
+
+    expect(result).toMatchObject({
+      messages: [{ parts: [{ attachment: { data: "" } }] }]
+    })
+  })
+
   it("fails unsupported operations with a typed device error", async () => {
     const executor = makeDeviceSessionCommandExecutor(services())
     await expect(

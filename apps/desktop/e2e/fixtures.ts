@@ -858,7 +858,7 @@ export const test = base.extend<{
   // of — but it has to be there for `use` to be the second parameter.
   // biome-ignore lint/correctness/noEmptyPattern: required by Playwright's signature
   launchApp: async ({}, use) => {
-    const cleanups: Array<() => void> = []
+    const cleanups: Array<() => void | Promise<void>> = []
     const apps: ElectronApplication[] = []
 
     const launch = async (options: LaunchOptions = {}): Promise<LaunchedApp> => {
@@ -1005,9 +1005,7 @@ export const test = base.extend<{
             ? { listenHost: "0.0.0.0", publicHost: options.realRemoteEnvironment.relayHost }
             : {})
         })
-        cleanups.push(() => {
-          deviceRelay?.close().catch(() => {})
-        })
+        cleanups.push(() => deviceRelay?.close())
         if (options.realRemoteEnvironment) {
           const target = options.realRemoteEnvironment
           const sshDir = join(home, ".ssh")
@@ -1232,7 +1230,12 @@ export const test = base.extend<{
     await use(launch)
 
     for (const app of apps) await app.close().catch(() => {})
-    for (const cleanup of cleanups) cleanup()
+    // Tear dependent resources down before deleting the directories they may
+    // still be writing. In particular, the remote device agent must exit before
+    // its temporary home is removed.
+    for (const cleanup of cleanups.reverse()) {
+      await Promise.resolve(cleanup()).catch(() => {})
+    }
   }
 })
 

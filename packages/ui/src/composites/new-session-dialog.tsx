@@ -282,11 +282,25 @@ export function NewSessionDialog({
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__local__">Local</SelectItem>
-                  {environments.map((environment) => (
-                    <SelectItem key={environment.id} value={environment.id} disabled={environment.state !== "online" || !environment.capabilities.harnesses.includes(cli as CliKind)}>
-                      {environment.name}{environment.state === "online" ? "" : ` · ${environment.state}`}
-                    </SelectItem>
-                  ))}
+                  {environments.map((environment) => {
+                    const switchesHarness =
+                      environment.state === "online" &&
+                      !environment.capabilities.harnesses.includes(cli as CliKind)
+                    return (
+                      <SelectItem
+                        key={environment.id}
+                        value={environment.id}
+                        disabled={environment.state !== "online"}
+                      >
+                        {environment.name}
+                        {environment.state !== "online"
+                          ? ` · ${environment.state}`
+                          : switchesHarness
+                            ? ` · uses ${environment.capabilities.harnesses[0] ?? "no supported harness"}`
+                            : ""}
+                      </SelectItem>
+                    )
+                  })}
                 </SelectContent>
               </Select>
             </div>

@@ -254,7 +254,9 @@ describe("pending device pairing", () => {
 
   it("returns versioned discovery only from the owning user registry", async () => {
     const keys = await keyPair()
-    const paired = await claimDevice("discovery_abcdefghijkl", "user-one", keys.publicKey)
+    const owner = "discovery-owner"
+    const outsider = "discovery-outsider"
+    const paired = await claimDevice("discovery_abcdefghijkl", owner, keys.publicKey)
     await runInDurableObject(paired.registry, async (_instance, state) => {
       state.storage.sql.exec(
         "INSERT INTO device_discovery (device_id, discovery_json, updated_at) VALUES (?, ?, ?)",
@@ -275,7 +277,10 @@ describe("pending device pairing", () => {
       updatedAt: 150,
       discovery: { agentVersion: "2.0.3", repositories: [{ path: "/srv/app" }] }
     })
-    await expect(env.DEVICE_REGISTRY.getByName("user:user-two").getDiscovery(paired.claim.deviceId)).resolves.toBeNull()
+    await expect(paired.registry.listDevices()).resolves.toMatchObject({
+      devices: [{ deviceId: paired.claim.deviceId, agentVersion: "2.0.3" }]
+    })
+    await expect(env.DEVICE_REGISTRY.getByName(`user:${outsider}`).getDiscovery(paired.claim.deviceId)).resolves.toBeNull()
   })
 })
 

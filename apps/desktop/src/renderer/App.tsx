@@ -742,6 +742,26 @@ function AuthedApp({
     github.connection.installations.some(
       (installation) => installation.status === "active",
     );
+  // A manual GitHub refresh can revoke one repository while leaving the overall
+  // account connected. Restart the main-process relay stream whenever that
+  // authorization topology changes so its supervisor immediately closes routes
+  // that are no longer permitted instead of waiting for its low-frequency
+  // background reconciliation.
+  const githubRelayAuthorizationVersion = useMemo(
+    () =>
+      github.connection.installations
+        .map((installation) =>
+          [
+            installation.id,
+            installation.status,
+            installation.repositorySelection,
+            ...(installation.repositories ?? []).map((repository) => repository.id).sort(),
+          ].join(":"),
+        )
+        .sort()
+        .join("|"),
+    [github.connection.installations],
+  );
   const autoDetect = connected && (githubConfig?.autoDetectPr ?? true);
   const autoCreate =
     connected &&
@@ -944,7 +964,7 @@ function AuthedApp({
       }
       cancelEvents();
     };
-  }, [connected, feedbackRouter]);
+  }, [connected, feedbackRouter, githubRelayAuthorizationVersion]);
 
   // Continuously resolve the OPEN PR on every live worktree branch. Sessions can
   // outlive a merged PR and open a replacement, so linked sessions stay in the

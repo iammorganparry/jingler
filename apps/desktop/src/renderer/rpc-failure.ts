@@ -23,6 +23,18 @@ export const rpcFailureReason = (error: unknown): string | undefined => {
     : undefined
 }
 
+export const rpcFailureNumber = (
+  error: unknown,
+  field: string
+): number | undefined => {
+  const failure = unwrapRpcFailure(error)
+  if (typeof failure !== "object" || failure === null || !(field in failure)) {
+    return undefined
+  }
+  const value = failure[field as keyof typeof failure]
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
 export const rpcFailureMessage = (
   error: unknown,
   fallback: string

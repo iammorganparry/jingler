@@ -36,7 +36,7 @@ export const environmentFromRemoteDevice = (device: RemoteDevice): Environment =
       : !device.capabilities.capabilities.includes("session.start")
         ? "incompatible"
         : device.presence.state,
-  agentVersion: null,
+  agentVersion: device.agentVersion ?? null,
   lastSeenAt: device.presence.lastSeenAt
 })
 

@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { appShell, expect, test } from "./fixtures.js"
+import { appShell, expect, sessionRow, test } from "./fixtures.js"
 
 /**
  * Proves the built app's GitHub surface against HTTP with no `gh` executable on
@@ -51,7 +51,9 @@ test("GitHub App API browses and checks out a fork PR without GitHub CLI", async
   await expect(window.getByText("Fix auth refresh race")).toBeVisible()
   await window.getByText("Fix auth refresh race").click()
   await window.getByRole("button", { name: "Create" }).click()
-  await expect(window.getByText("⑂ #482")).toBeVisible()
+  const createdRow = sessionRow(window, "Fix auth refresh race")
+  await expect(createdRow.getByTitle("Pull request open")).toBeVisible()
+  await expect(createdRow.getByText("#482", { exact: true })).toBeVisible()
 
   const worktreePath = join(
     home,
@@ -130,7 +132,9 @@ test("GitHub App API lists and opens an issue without GitHub CLI", async ({ laun
   await window.getByText("Refund route 500s on a stale token").click()
   await window.getByRole("button", { name: "Start on #128" }).click()
   await window.getByRole("button", { name: "Create session" }).click()
-  await expect(window.getByText("◉ #128")).toBeVisible()
+  await expect(
+    sessionRow(window, "Refund route 500s on a stale token").getByText("#128", { exact: true })
+  ).toBeVisible()
 
   const persisted = JSON.parse(
     readFileSync(join(home, "jingler", "sessions.json"), "utf8")

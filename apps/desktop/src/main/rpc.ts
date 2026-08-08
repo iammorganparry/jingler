@@ -207,25 +207,6 @@ export const RPC_CHANNEL = "jingler/rpc";
 export const configGet = () =>
   ConfigService.get().pipe(Effect.orElseSucceed(() => null));
 
-/** Strict renderer boundary: unknown credential fields are rejected, not stripped silently. */
-export const rendererSafeEnvironment = (value: unknown) =>
-  Schema.decodeUnknown(EnvironmentSchema)(value, { onExcessProperty: "error" });
-
-/** Main-only encrypted persistence for the session keys introduced by remote execution. */
-export const storeRemoteSessionKey = (sessionId: string, key: string) =>
-  Effect.gen(function* () {
-    const secrets = yield* SecretStore;
-    const current = yield* secrets.getDeviceSecrets;
-    const parsed = current
-      ? yield* Effect.try(
-          () => JSON.parse(current) as Record<string, string>,
-        ).pipe(Effect.orElseSucceed(() => ({}) as Record<string, string>))
-      : {};
-    yield* secrets.setDeviceSecrets(
-      JSON.stringify({ ...parsed, [sessionId]: key }),
-    );
-  });
-
 const githubConnectionError = (error: GitHubApiError): AuthError =>
   new AuthError({ message: error.message });
 
@@ -2083,30 +2064,7 @@ export const createSession = (input: CreateSessionInput) =>
 export const createSessionRouted = (input: CreateSessionInput) =>
   input.environmentId === undefined
     ? createSession(input)
-    : Effect.gen(function* () {
-        const environmentId = input.environmentId!;
-        const remote = yield* RemoteSessionService;
-        const sessions = yield* SessionStore;
-        const value = yield* remote.requestOnEnvironment(
-          environmentId,
-          "Sessions.create",
-          input,
-        ).pipe(
-          Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
-        );
-        const created = yield* Schema.decodeUnknown(SessionSchema)(value).pipe(
-          Effect.mapError((cause) => new GitError({
-            message: "The remote device returned invalid session metadata",
-            cause,
-          })),
-        );
-        if (created.environmentId !== environmentId) {
-          return yield* Effect.fail(new GitError({
-            message: "The remote device returned a session for a different environment",
-          }));
-        }
-        return yield* sessions.upsertRemote(created);
-      });
+    : provisionRemoteSession(input.environmentId, "Sessions.create", input);
 
 /**
  * Every model a harness offers — the WHOLE catalogue, deliberately uncurated.
@@ -2212,8 +2170,8 @@ export const createSessionFromIssue = (input: CreateSessionFromIssueInput) =>
 
 const provisionRemoteSession = (
   environmentId: string,
-  operation: "Sessions.createFromPr" | "Sessions.createFromIssue",
-  input: CreateSessionFromPrInput | CreateSessionFromIssueInput,
+  operation: "Sessions.create" | "Sessions.createFromPr" | "Sessions.createFromIssue",
+  input: CreateSessionInput | CreateSessionFromPrInput | CreateSessionFromIssueInput,
 ) =>
   Effect.gen(function* () {
     const remote = yield* RemoteSessionService;
@@ -3608,8 +3566,13 @@ export const githubPublishRouted = (sessionId: string) =>
         {},
         { execute: () => Effect.succeed(githubPublish(sessionId)) },
         {
-          execute: () => Effect.succeed(Stream.unwrap(
-            Effect.gen(function* () {
+          execute: () => Effect.succeed(Stream.concat(
+            Stream.make({
+              step: "inspecting",
+              completed: [],
+              updatedAt: new Date().toISOString(),
+            } satisfies PublishCheckpoint),
+            Stream.unwrap(Effect.gen(function* () {
               const remoteResult = <A, I>(
                 operation: string,
                 payload: unknown,
@@ -3699,7 +3662,7 @@ export const githubPublishRouted = (sessionId: string) =>
                   : "Remote publishing failed.",
                 updatedAt: new Date().toISOString(),
               }))),
-            )
+            ))
           ))
         },
       );
@@ -4210,7 +4173,11 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Environment.discovery": ({ deviceId }) => EnvironmentService.discovery(deviceId),
   "Environment.watch": () =>
     Stream.repeatEffectWithSchedule(
-      EnvironmentService.list,
+      EnvironmentService.list.pipe(
+        // Presence polling is long-lived. A token refresh or brief relay outage
+        // pauses updates rather than permanently terminating the subscription.
+        Effect.retry(Schedule.exponential("1 second")),
+      ),
       Schedule.spaced("10 seconds"),
     ),
   "Environment.suggestHosts": () =>
@@ -4470,7 +4437,13 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           )
         },
       );
-    }).pipe(Effect.orElseSucceed(() => "")),
+    }).pipe(
+      Effect.mapError((cause) =>
+        cause instanceof GitError
+          ? cause
+          : new GitError({ message: "Could not load the session diff", cause }),
+      ),
+    ),
   // The streaming agent seam: unwrap the runner's `Stream<StreamEvent>` so the
   // renderer subscribes to normalized events, harness-agnostic.
   "Agent.run": ({
@@ -4580,9 +4553,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         "Agent.decideGate",
         { chatId, gateId, decision },
         { execute: () => runner.decideGate(sessionId, chatId, gateId, decision) },
-        { execute: () => remote.request(session, "Agent.decideGate", { chatId, gateId, decision }).pipe(Effect.asVoid, Effect.orDie) },
+        { execute: () => remote.request(session, "Agent.decideGate", { chatId, gateId, decision }).pipe(Effect.asVoid) },
       );
-    }).pipe(Effect.orDie),
+    }).pipe(Effect.mapError((cause) => new GitError({ message: "Could not submit the approval decision", cause }))),
   "Agent.answerQuestion": ({ sessionId, chatId, requestId, answers }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId);
@@ -4593,9 +4566,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         "Agent.answerQuestion",
         { chatId, requestId, answers },
         { execute: () => runner.answerQuestion(sessionId, chatId, requestId, answers) },
-        { execute: () => remote.request(session, "Agent.answerQuestion", { chatId, requestId, answers }).pipe(Effect.asVoid, Effect.orDie) },
+        { execute: () => remote.request(session, "Agent.answerQuestion", { chatId, requestId, answers }).pipe(Effect.asVoid) },
       );
-    }).pipe(Effect.orDie),
+    }).pipe(Effect.mapError((cause) => new GitError({ message: "Could not submit the answer", cause }))),
   "Agent.setMode": ({ sessionId, chatId, mode }) =>
     Effect.flatMap(AgentRunner, (runner) =>
       runner.setMode(sessionId, chatId, mode),
@@ -4737,9 +4710,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         "Agent.stop",
         { chatId },
         { execute: () => runner.stop(sessionId, chatId) },
-        { execute: () => remote.request(session, "Agent.stop", { chatId }).pipe(Effect.asVoid, Effect.orDie) },
+        { execute: () => remote.request(session, "Agent.stop", { chatId }).pipe(Effect.asVoid) },
       );
-    }).pipe(Effect.orDie),
+    }).pipe(Effect.mapError((cause) => new GitError({ message: "Could not stop the agent", cause }))),
   // Not `AgentRunner.stop` scoped smaller: that halts the whole turn. A
   // sub-agent is killed through the run's own per-task handle, which is what
   // `BackgroundTaskStore` holds.
@@ -4762,12 +4735,11 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
                 Schema.Struct({ status: Schema.Literal("accepted"), user: MessageSchema, assistant: MessageSchema }),
                 Schema.Struct({ status: Schema.Literal("deferred", "unsupported") })
               )
-            )(value)),
-            Effect.orDie
+            )(value))
           )
         },
       );
-    }).pipe(Effect.orDie),
+    }).pipe(Effect.mapError((cause) => new GitError({ message: "Could not steer the agent", cause }))),
   "Skills.list": ({ sessionId }) => skillsList(sessionId),
   "OpenConnector.get": () => openConnectorGet(),
   "OpenConnector.set": ({ config, token }) => openConnectorSet(config, token),
