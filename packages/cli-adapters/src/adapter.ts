@@ -513,6 +513,18 @@ export const scriptedPlanPrd = (
           : `await implementStage("${id}")`
       }
     ],
+    callPathDiff: id === "s_01"
+      ? {
+          before: [
+            { symbol: "readSession", path: "src/auth/session.ts" },
+            { symbol: "MemoryStore.get", path: "src/auth/memory-store.ts" }
+          ],
+          after: [
+            { symbol: "readSession", path: "src/auth/session.ts" },
+            { symbol: "TokenStore.get", path: "src/auth/token-store.ts" }
+          ]
+        }
+      : undefined,
     acceptance: acceptance.map((a) => ({
       ...a,
       testReferences: a.testReferences?.map((reference) => ({

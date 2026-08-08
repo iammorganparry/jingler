@@ -66,6 +66,10 @@ export function usePlanDocument(sessionId: string) {
   // Reload after a load failure; the plan is read-only, so there is no save to
   // retry — only the initial `Plan.current` fetch.
   const retry = useCallback(() => actor.send({ type: "RETRY" }), [actor])
+  const beginRevision = useCallback(
+    (stageId: string | null) => actor.send({ type: "REVISION_STARTED", stageId }),
+    [actor]
+  )
 
   // The plan document is read-only. Its only remaining sync states are the
   // initial load, the loaded/`clean` steady state (kept in step with remote
@@ -82,6 +86,8 @@ export function usePlanDocument(sessionId: string) {
     error: snapshot.context.error,
     state,
     retry,
+    beginRevision,
+    revisionTarget: snapshot.context.revisionTarget,
     startDraft,
     synced: snapshot.matches("clean"),
     canApprove: snapshot.matches("clean") && snapshot.context.document !== null

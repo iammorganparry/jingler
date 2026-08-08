@@ -57,7 +57,17 @@ describe("plan document schemas", () => {
       walkthrough: [
         { kind: "prose", id: "why", text: "Keep the worker boundary explicit." },
         { kind: "code", id: "example", language: "ts", code: "await dispatch(stage)" }
-      ]
+      ],
+      callPathDiff: {
+        before: [
+          { symbol: "Session.read", path: "src/session.ts" },
+          { symbol: "MemoryStore.get", path: "src/memory-store.ts" }
+        ],
+        after: [
+          { symbol: "Session.read", path: "src/session.ts" },
+          { symbol: "TokenStore.get", path: "src/token-store.ts" }
+        ]
+      }
     })
 
     expect(Either.isRight(decoded)).toBe(true)
@@ -73,6 +83,7 @@ describe("plan document schemas", () => {
       }
     ])
     expect(decoded.right.walkthrough).toHaveLength(2)
+    expect(decoded.right.callPathDiff?.after[1]?.symbol).toBe("TokenStore.get")
     expect(
       Either.isRight(
         Schema.decodeUnknownEither(PlanTask)({ id: "task", text: "Do work", status: "completed" })

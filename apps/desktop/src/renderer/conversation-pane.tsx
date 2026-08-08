@@ -622,6 +622,7 @@ export function ConversationPane({
       knownFiles={knownFiles}
       onOpenFile={openAsset}
       selectedStepId={planStepId}
+      revisionTarget={canonicalPlan.revisionTarget}
       onSelectStep={onPlanStepSelected}
       onApprove={(executionMode) =>
         planId &&
@@ -630,10 +631,16 @@ export function ConversationPane({
       onResume={() =>
         planId && convo.resumePlan(planId, canonicalPlan.document?.revision)
       }
-      onRevise={() => planId && convo.revisePlan(planId)}
+      onRevise={() => {
+        if (!planId) return
+        canonicalPlan.beginRevision(null)
+        convo.revisePlan(planId)
+      }}
       onComment={(stepId, body) => planId && convo.commentPlanStep(planId, stepId, body)}
       onAddComment={(target, body) => {
-        if (planId) convo.commentPlanStep(planId, target.stageId ?? "", body, target.anchor)
+        if (!planId) return
+        canonicalPlan.beginRevision(target.stageId ?? null)
+        convo.commentPlanStep(planId, target.stageId ?? "", body, target.anchor)
       }}
       onStartDraft={canonicalPlan.startDraft}
       onSendToAgent={() => {

@@ -127,7 +127,7 @@ describe("PlanStepCard file chips", () => {
 })
 
 describe("PlanStepCard stage review", () => {
-  it("renders task progress and the owning stage architecture inline", () => {
+  it("renders task progress without prose or architecture duplicated from Guide", () => {
     render(
       <PlanStepCard
         step={{
@@ -149,31 +149,7 @@ describe("PlanStepCard stage review", () => {
     expect(taskList).toHaveTextContent("Project the stage data")
     expect(taskList).toHaveTextContent("Render the checklist")
     expect(taskList).toHaveTextContent("Verify the layout")
-    expect(screen.getByRole("region", { name: "Architecture for Stage one" })).toBeVisible()
-    expect(screen.getByLabelText("Diagram stage-flow")).toBeVisible()
-  })
-
-  it("renders stage diagrams with the token-themed hand-drawn Mermaid look", async () => {
-    globalThis.document.documentElement.style.setProperty("--sb-panel", "rgb(1, 2, 3)")
-    render(
-      <PlanStepCard
-        step={{
-          ...step,
-          diagrams: [{ id: "stage-flow", source: "flowchart LR; Contract-->Card" }]
-        }}
-      />
-    )
-
-    await waitFor(() => {
-      expect(mermaid.initialize).toHaveBeenCalledWith(
-        expect.objectContaining({
-          look: "handDrawn",
-          handDrawnSeed: 1,
-          theme: "base",
-          themeVariables: expect.objectContaining({ primaryColor: "rgb(1, 2, 3)" })
-        })
-      )
-    })
+    expect(screen.queryByRole("region", { name: "Architecture for Stage one" })).toBeNull()
   })
 })
 

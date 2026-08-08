@@ -207,30 +207,29 @@ describe("PlanReview", () => {
     expect(screen.queryByLabelText("Resize changes")).toBeNull()
   })
 
-  it("links Steps to the Walkthrough and keeps Architecture available", async () => {
+  it("links compact Steps to the cohesive Guide", async () => {
     render(<PlanReview plan={null} document={document} />)
 
     // Steps page: the step outline.
     expect(screen.getByText("Build")).toBeTruthy()
 
-    fireEvent.click(screen.getByRole("button", { name: "Open walkthrough for Build" }))
-    expect(screen.getByRole("tab", { name: "Walkthrough" })).toHaveAttribute("aria-selected", "true")
+    fireEvent.click(screen.getByRole("button", { name: "Open guide for Build" }))
+    expect(screen.getByRole("tab", { name: "Guide" })).toHaveAttribute("aria-selected", "true")
     expect(screen.getByText("Keep the document boundary explicit.")).toBeTruthy()
     expect(screen.getByText("<PlanReview document={plan} />")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "Open step Build" }))
     expect(screen.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true")
 
-    // Architecture page: the fixture has no prose/diagrams, so its empty state.
-    fireEvent.click(screen.getByRole("tab", { name: "Architecture" }))
-    expect(await screen.findByText(/No architecture notes yet/)).toBeTruthy()
+    expect(screen.queryByRole("tab", { name: "Architecture" })).toBeNull()
+    expect(screen.queryByRole("tab", { name: "Walkthrough" })).toBeNull()
 
     // Back to Steps.
     fireEvent.click(screen.getByRole("tab", { name: "Steps" }))
     expect(screen.getByText("Build")).toBeTruthy()
   })
 
-  it("shows TLDR first and jumps from stage architecture to its Steps card", async () => {
+  it("shows TLDR first and jumps from a Guide stage to its Steps card", async () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView
     const architectureDocument: PlanDocument = {
@@ -257,14 +256,14 @@ describe("PlanReview", () => {
     }
 
     render(<PlanReview plan={null} document={architectureDocument} />)
-    fireEvent.click(screen.getByRole("tab", { name: "Architecture" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Guide" }))
 
     const headings = screen.getAllByRole("heading", { level: 2 })
     expect(headings[0]).toHaveTextContent("TL;DR")
     expect(screen.getByText("Outcome first.")).toBeVisible()
-    expect(screen.getByRole("region", { name: "Architecture for Build" })).toBeVisible()
+    expect(screen.getByRole("region", { name: "Guide for Build" })).toBeVisible()
 
-    fireEvent.click(screen.getByRole("button", { name: "Open stage Build in Steps" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open step Build" }))
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true")
       expect(globalThis.document.querySelector('[data-step-id="01"]')).toHaveAttribute("aria-pressed", "true")

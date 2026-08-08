@@ -57,11 +57,14 @@ describe("orchestratorNote", () => {
     expect(note).toContain("never")
   })
 
-  it("uses the canonical plan for progress instead of narrating it", () => {
+  it("keeps the plan authoritative while remaining conversational and steerable", () => {
     const note = orchestratorNote().toLowerCase()
     expect(note).toContain("canonical plan as the progress interface")
     expect(note).toContain("update the plan instead of repeating it in chat")
-    expect(note).toContain("required decision or blocker")
+    expect(note).toContain("acknowledge it immediately")
+    expect(note).toContain("what changed")
+    expect(note).toContain("brief, useful updates")
+    expect(note).not.toContain("intermediate prose to a required decision or blocker")
   })
 
   it("carries no progress-counter phrasing and names no skill", () => {

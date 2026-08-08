@@ -2,6 +2,7 @@ import { buildPlanExecutionGraph } from "./plan-execution.js"
 import type {
   PlanAcceptance,
   PlanBlock,
+  PlanCallPathDiff,
   PlanDiagram,
   PlanFile,
   PlanPrd,
@@ -44,6 +45,8 @@ export interface PlanStepView {
   readonly notes: ReadonlyArray<PlanBlock>
   /** Tutorial-style rationale and implementation examples for this stage. */
   readonly walkthrough?: ReadonlyArray<PlanBlock>
+  /** Before/after runtime path, rendered in Guide rather than the checklist. */
+  readonly callPathDiff?: PlanCallPathDiff
   /** The assigned worker's agent id, when a worker owns this stage; else null. */
   readonly agentId: string | null
   /** A short "cli · model" worker label, when assigned; else null. */
@@ -113,6 +116,7 @@ const toStepView = (stage: PlanPrdStage): PlanStepView => {
     files: stage.files,
     notes: stage.notes,
     walkthrough: stage.walkthrough ?? [],
+    callPathDiff: stage.callPathDiff,
     agentId: assignment?.agentId ?? null,
     worker: assignment ? `${assignment.cli} · ${assignment.model}` : null,
     reasoningEffort: assignment?.reasoning?.effort ?? null
