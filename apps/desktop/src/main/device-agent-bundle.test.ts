@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { resolveDeviceAgentBundlePath } from "./device-agent-bundle.js"
 
@@ -22,5 +24,15 @@ describe("device agent bundle path", () => {
         "/repo/apps/desktop/out/main"
       )
     ).toBe("/repo/apps/device-agent/dist/jingler-device.mjs")
+  })
+
+  it("builds the workspace device agent before starting the desktop dev server", () => {
+    const packageJson = JSON.parse(
+      readFileSync(join(import.meta.dirname, "../../package.json"), "utf8")
+    ) as { scripts?: Record<string, string> }
+
+    expect(packageJson.scripts?.dev).toBe(
+      "pnpm run build:device-agent && electron-vite dev"
+    )
   })
 })
