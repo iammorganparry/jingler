@@ -1083,7 +1083,7 @@ describe("activityOf", () => {
     })
   })
 
-  it("derives full-path file activity for edit, write, and update tools", () => {
+  it("derives full-path file activity for edit, write, update, and multi-edit tools", () => {
     expect(
       agentFileActivityOf([turn(tool("Edit", "packages/core/src/conversation.ts"))])
     ).toEqual({
@@ -1104,6 +1104,11 @@ describe("activityOf", () => {
       eventId: "t_Update",
       path: "src/updated-file.ts",
       phase: "completed"
+    })
+    expect(agentFileActivityOf([turn(tool("MultiEdit", "src/multi.ts"))])).toEqual({
+      eventId: "t_MultiEdit",
+      path: "src/multi.ts",
+      phase: "editing"
     })
   })
 
