@@ -70,18 +70,13 @@ export function FileBrowserView({ session, onSendReference }: FileBrowserViewPro
   const agentFileActivity = useAgentFileActivity(session.id, session.activeChatId)
   const rootRef = useRef<HTMLDivElement>(null)
   const [selection, setSelection] = useState<JinglerLineSelection | null>(null)
-  const activated = useRef(false)
 
   useEffect(() => setSelection(null), [browser.selectedPath, browser.payload])
 
   // The actor survives tab switches. Refresh on every Files activation so an
   // empty/error result captured before a worktree finished appearing cannot
   // leave a real repository looking permanently blank.
-  useEffect(() => {
-    if (activated.current) return
-    activated.current = true
-    browser.activate()
-  }, [browser.activate])
+  useEffect(() => browser.activate(), [browser.activate])
 
   const sendSelectionToChat = useCallback(() => {
     if (

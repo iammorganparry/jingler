@@ -351,6 +351,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       worktreeChanged: ({ context, event }) =>
         event.type === "SYNC_WORKTREE" &&
         context.worktreePath !== event.worktreePath,
+      treeEmpty: ({ context }) => context.entries.length === 0,
       hasEditablePayload: ({ context }) =>
         context.payload !== null && isTextPayload(context.payload),
       editMatchesLoaded: ({ context, event }) =>
@@ -418,12 +419,6 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       agentTargetPath: null,
       pendingAgentTarget: null
     }),
-    on: {
-      SYNC_WORKTREE: {
-        guard: "worktreeChanged",
-        actions: ["syncWorktree", raise({ type: "REFRESH_TREE" })]
-      }
-    },
     states: {
       follow: {
         initial: "disabled",
@@ -446,6 +441,12 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
         states: {
           loading: {
             on: {
+              SYNC_WORKTREE: {
+                guard: "worktreeChanged",
+                target: "loading",
+                reenter: true,
+                actions: "syncWorktree"
+              },
               VIEW_ACTIVATED: {
                 actions: assign({ treeRefreshQueued: true })
               },
@@ -517,6 +518,14 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
           },
           ready: {
             on: {
+              SYNC_WORKTREE: [
+                {
+                  guard: "worktreeChanged",
+                  target: "loading",
+                  actions: "syncWorktree"
+                },
+                { guard: "treeEmpty", target: "loading" }
+              ],
               VIEW_ACTIVATED: "loading",
               REFRESH_TREE: "loading",
               RETRY_TREE: "loading"
@@ -524,6 +533,14 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
           },
           error: {
             on: {
+              SYNC_WORKTREE: [
+                {
+                  guard: "worktreeChanged",
+                  target: "loading",
+                  actions: "syncWorktree"
+                },
+                { guard: "treeEmpty", target: "loading" }
+              ],
               VIEW_ACTIVATED: "loading",
               REFRESH_TREE: "loading",
               RETRY_TREE: "loading"

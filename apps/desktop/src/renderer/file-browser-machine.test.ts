@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   createFileBrowserMachine,
   type FileBrowserApi,
+  type FileBrowserInput,
   type FileBrowserMachine
 } from "./file-browser-machine.js"
 
@@ -53,7 +54,10 @@ const waitFor = (
     }, 2_000)
   })
 
-const start = (overrides: Partial<FileBrowserApi> = {}) => {
+const start = (
+  overrides: Partial<FileBrowserApi> = {},
+  input: FileBrowserInput = { sessionId: "session-a" }
+) => {
   const api: FileBrowserApi = {
     list: vi.fn().mockResolvedValue([{ path: "src/app.ts", status: "clean" }]),
     diff: vi.fn().mockResolvedValue(""),
@@ -62,7 +66,7 @@ const start = (overrides: Partial<FileBrowserApi> = {}) => {
     ...overrides
   }
   const actor = createActor(createFileBrowserMachine(api), {
-    input: { sessionId: "session-a" }
+    input
   }).start()
   return { actor, api }
 }
@@ -94,6 +98,26 @@ describe("fileBrowserMachine", () => {
     expect(actor.getSnapshot().context.entries).toEqual([
       { path: "src/recovered.ts", status: "clean" }
     ])
+  })
+
+  it("recovers a settled empty actor for an existing session worktree", async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ path: "src/recovered.ts", status: "clean" as const }])
+    const { actor } = start(
+      { list },
+      { sessionId: "session-a", worktreePath: "/existing-worktree" }
+    )
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    actor.send({ type: "SYNC_WORKTREE", worktreePath: "/existing-worktree" })
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ tree: "ready" }) && snapshot.context.entries.length > 0
+    )
+
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(list).toHaveBeenLastCalledWith("session-a", "/existing-worktree")
   })
 
   it("adds a successfully opened agent-created path to a stale initial tree", async () => {

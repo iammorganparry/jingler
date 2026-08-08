@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import type { Page } from "@playwright/test"
 import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
@@ -41,6 +41,8 @@ const seedRepository = ({ repoPath }: { repoPath: string }): void => {
 
 const filesTab = (window: Page) =>
   window.getByRole("button", { name: "Files", exact: true })
+
+const projectRoot = resolve(import.meta.dirname, "../../..")
 
 const selectTreePath = async (window: Page, path: string): Promise<void> => {
   const tree = window.locator(
@@ -151,6 +153,49 @@ test("opens the session repository beside chat and edits a file through Pierre",
   await expect(window.getByRole("textbox", { name: "src/config.ts" })).toContainText(
     "export const mode = 'modern'"
   )
+})
+
+test("shows a previously existing large worktree before repository search", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    sessions: [session(projectRoot)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await filesTab(window).click()
+  const tree = window.locator(
+    '[data-jingler-pierre-file-tree][aria-label="Repository files"]'
+  )
+  await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
+    timeout: 20_000
+  })
+  await expect(tree.locator('[data-file-tree-search-input]')).toHaveValue("")
+})
+
+test("shows a previously existing large worktree while its agent is running", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    sessions: [session(projectRoot)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  const composer = window.getByPlaceholder("Message Codex…")
+  await composer.fill("[[queue-hold]] keep this existing session busy")
+  await composer.press("Enter")
+  await expect(window.getByText("Holding the active turn for queue actions.")).toBeVisible({
+    timeout: 15_000
+  })
+  await filesTab(window).click()
+  const tree = window.locator(
+    '[data-jingler-pierre-file-tree][aria-label="Repository files"]'
+  )
+  await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
+    timeout: 20_000
+  })
 })
 
 test("adds selected code to the active chat from the editor context menu", async ({

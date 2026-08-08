@@ -135,6 +135,9 @@ describe("AssetFileTree", () => {
       expect(element?.shadowRoot).toBeTruthy()
       return element!
     })
+    await waitFor(() => {
+      expect(host.shadowRoot!.querySelectorAll('[role="treeitem"]').length).toBeGreaterThan(0)
+    })
     const focused = await waitFor(() => {
       const element = host.shadowRoot!.querySelector<HTMLElement>('[tabindex="0"]')
       expect(element).toBeTruthy()
