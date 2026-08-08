@@ -58,10 +58,11 @@ describe("environment machine", () => {
     const actor = createActor(createEnvironmentMachine(services)).start()
     actor.send({ type: "CHOOSE", method: "ssh" })
     await waitFor(actor, (snapshot) => snapshot.matches("configuring"))
-    actor.send({ type: "EDIT", field: "host", value: "clive.local" })
+    actor.send({ type: "SELECT_HOST", host: (await services.suggestHosts())[0]! })
     actor.send({ type: "SUBMIT" })
     await waitFor(actor, (snapshot) => snapshot.matches("connected"))
     expect(services.pairSsh).toHaveBeenCalledTimes(1)
+    expect(services.pairSsh).toHaveBeenCalledWith({ host: "clive.local" })
   })
 
   it("returns an expired code failure to editable input", async () => {

@@ -14,9 +14,7 @@ const props: EnvironmentDialogProps = {
     backendUrl: "",
     pendingDeviceId: "",
     pairingCode: "",
-    host: "",
-    username: "",
-    port: "22"
+    host: ""
   },
   hosts: [
     {
@@ -48,6 +46,11 @@ describe("EnvironmentDialog", () => {
     render(<EnvironmentDialog {...props} method="ssh" state="configuring" />)
     fireEvent.click(screen.getByText("clive.local"))
     expect(props.onSelectHost).toHaveBeenCalledWith(props.hosts[0])
+    expect(screen.queryByLabelText("Username")).toBeNull()
+    expect(screen.queryByLabelText("Port")).toBeNull()
+    expect(
+      screen.getByText(/Uses this alias exactly as your terminal does/)
+    ).toBeTruthy()
   })
   it("disables submission until the selected method is valid", () => {
     const view = render(

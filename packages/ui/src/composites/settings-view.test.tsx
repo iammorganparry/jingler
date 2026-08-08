@@ -26,9 +26,7 @@ const dialog = {
     backendUrl: "",
     pendingDeviceId: "",
     pairingCode: "",
-    host: "",
-    username: "",
-    port: "22"
+    host: ""
   },
   hosts: [],
   onClose: vi.fn(),

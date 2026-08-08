@@ -59,6 +59,7 @@ describe("remote agent installation", () => {
     expect(calls).toHaveLength(2)
     expect(calls[0]).toMatchObject({
       binary: "scp",
+      args: expect.not.arrayContaining(["-P"]),
       options: { shell: false }
     })
     expect(calls[1]).toMatchObject({
@@ -101,6 +102,7 @@ describe("remote agent installation", () => {
       ]),
       options: { shell: false }
     })
+    expect(calls[0]).toMatchObject({ args: expect.not.arrayContaining(["-p"]) })
   })
 })
 
@@ -154,6 +156,30 @@ describe("remote bootstrap", () => {
           "-p",
           "2222",
           "morgan@clive.local",
+          "jingler-device pair --json"
+        ],
+        options: { shell: false }
+      }
+    ])
+  })
+
+  it("passes configured aliases through without overriding SSH user or port", async () => {
+    const calls: Array<unknown> = []
+    await Effect.runPromise(
+      bootstrapRemoteDevice(
+        { host: "mac" },
+        runner({ exitCode: 0, stdout: `${JSON.stringify(pairing)}\n`, stderr: "" }, calls)
+      )
+    )
+    expect(calls).toStrictEqual([
+      {
+        binary: "ssh",
+        args: [
+          "-o",
+          "BatchMode=yes",
+          "-o",
+          "ConnectTimeout=10",
+          "mac",
           "jingler-device pair --json"
         ],
         options: { shell: false }

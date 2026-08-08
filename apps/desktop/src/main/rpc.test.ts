@@ -1747,7 +1747,7 @@ describe("RPC handlers", () => {
   });
 
   describe("Sessions.diff", () => {
-    // An unknown session (or one without a worktree) yields no diff, not an error.
+    // An unknown session (or one without a worktree) has no diff to load.
     it("returns an empty diff for an unknown session", async () => {
       const patch = await Effect.runPromise(
         sessionDiff("nope").pipe(
@@ -1761,6 +1761,46 @@ describe("RPC handlers", () => {
         ),
       );
       expect(patch).toBe("");
+    });
+
+    it("surfaces git failures instead of reporting no changes", async () => {
+      mkdirSync(root, { recursive: true });
+      writeFileSync(
+        join(root, "sessions.json"),
+        JSON.stringify([
+          {
+            id: "broken-worktree",
+            repo: "widget",
+            branch: "feature",
+            title: "Broken worktree",
+            status: "idle",
+            cli: "codex",
+            diff: { added: 0, removed: 0 },
+            prNumber: null,
+            costUsd: 0,
+            tokens: 0,
+            updatedAt: "2026-08-08T10:00:00.000Z",
+            worktreePath: join(dir, "missing-worktree"),
+            chats: [],
+            activeChatId: null,
+          },
+        ]),
+      );
+
+      const error = await Effect.runPromise(
+        sessionDiff("broken-worktree").pipe(
+          Effect.flip,
+          Effect.provide(
+            Layer.mergeAll(
+              base,
+              SessionStore.Default,
+              WorkspaceService.Default,
+            ),
+          ),
+        ),
+      );
+
+      expect(error).toBeInstanceOf(GitError);
     });
   });
 

@@ -1394,8 +1394,6 @@ function AuthedApp({
                 environmentController.snapshot.context.pendingDeviceId,
               pairingCode: environmentController.snapshot.context.pairingCode,
               host: environmentController.snapshot.context.host,
-              username: environmentController.snapshot.context.username,
-              port: environmentController.snapshot.context.port,
             },
             hosts: environmentController.snapshot.context.hosts,
             environment: environmentController.snapshot.context.environment,

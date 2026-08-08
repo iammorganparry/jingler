@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { loadOrCreateDeviceIdentity } from "./device-identity.js"
+import { loadOrCreateDeviceIdentity, rotateDeviceIdentity } from "./device-identity.js"
 
 describe("device identity", () => {
   let root = ""
@@ -36,6 +36,18 @@ describe("device identity", () => {
     expect(second.sign(new TextEncoder().encode("same challenge"))).toBe(
       first.sign(new TextEncoder().encode("same challenge"))
     )
+  })
+
+  it("rotates when a stale fixed-name next file exists", async () => {
+    const first = await Effect.runPromise(loadOrCreateDeviceIdentity(identityPath))
+    await writeFile(`${identityPath}.next`, "stale rotation data", { mode: 0o600 })
+
+    const rotated = await Effect.runPromise(rotateDeviceIdentity(identityPath))
+    const reloaded = await Effect.runPromise(loadOrCreateDeviceIdentity(identityPath))
+
+    expect(rotated.publicKey).not.toStrictEqual(first.publicKey)
+    expect(reloaded.publicKey).toStrictEqual(rotated.publicKey)
+    expect(await readFile(`${identityPath}.next`, "utf8")).toBe("stale rotation data")
   })
 
   it("adds encryption material without replacing a legacy signing identity", async () => {

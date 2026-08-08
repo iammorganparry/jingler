@@ -19,8 +19,6 @@ export interface EnvironmentContext {
   pendingDeviceId: string
   pairingCode: string
   host: string
-  username: string
-  port: string
   environment: Environment | null
   error: string | null
 }
@@ -34,8 +32,6 @@ type EnvironmentEvent =
         | "pendingDeviceId"
         | "pairingCode"
         | "host"
-        | "username"
-        | "port"
       value: string
     }
   | { type: "SELECT_HOST"; host: SshHost }
@@ -59,13 +55,7 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
       discover: fromPromise(() => api.suggestHosts()),
       pair: fromPromise(({ input }: { input: EnvironmentContext }) => {
         if (input.method === "ssh") {
-          return api.pairSsh({
-            host: input.host,
-            ...(input.username.trim()
-              ? { username: input.username.trim() }
-              : {}),
-            ...(input.port.trim() ? { port: Number(input.port) } : {})
-          })
+          return api.pairSsh({ host: input.host })
         }
         return api.pairLink({
           backendUrl: input.backendUrl.trim(),
@@ -77,8 +67,7 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
     guards: {
       canSubmit: ({ context }) =>
         context.method === "ssh"
-          ? context.host.trim().length > 0 &&
-            (!context.port.trim() || /^\d{1,5}$/u.test(context.port))
+          ? context.host.trim().length > 0
           : context.method === "remote-link" &&
             context.backendUrl.trim().length > 0 &&
             context.pendingDeviceId.trim().length > 0 &&
@@ -94,8 +83,6 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
       pendingDeviceId: "",
       pairingCode: "",
       host: "",
-      username: "",
-      port: "22",
       environment: null,
       error: null
     },
@@ -109,9 +96,9 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
       },
       SELECT_HOST: {
         actions: assign(({ event }) => ({
-          host: event.host.alias,
-          username: event.host.username ?? "",
-          port: String(event.host.port)
+          // OpenSSH remains authoritative for User, HostName, Port,
+          // identities, proxies, and agent configuration.
+          host: event.host.alias
         }))
       },
       CANCEL: {
