@@ -94,6 +94,15 @@ describe("vault dashboard analytics", () => {
       citationCoverage: { citations: 1, citedPages: 1, totalPages: 3, ratio: 0.3333 },
       freshness: { fresh: 1, aging: 1, stale: 1, unknown: 0 },
       health: { orphanPages: 1, brokenLinks: 1, contradictions: 2 },
+      reviewThroughput: {
+        proposed: 0,
+        accepted: 0,
+        rejected: 0,
+        conflicted: 0,
+        open: 0,
+        acceptanceRatio: 0,
+        medianReviewHours: null
+      },
       connectivity: { pages: 3, directedLinks: 1, connectedPages: 2, averageDegree: 0.6667 },
       retrieval: {
         searches: 5,
