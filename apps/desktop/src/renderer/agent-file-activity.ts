@@ -78,6 +78,8 @@ export const useAgentFileActivity = (
 
 const WINDOWS_ABSOLUTE = /^[A-Za-z]:\//
 const LINE_SUFFIX = /:\d+(?::\d+)?$/
+const withoutMacPrivateAlias = (path: string): string =>
+  path.startsWith("/private/") ? path.slice("/private".length) : path
 
 /** Convert a tool target to a contained, repository-relative path. */
 export const normalizeAgentFileTarget = (
@@ -92,10 +94,12 @@ export const normalizeAgentFileTarget = (
   if (absolute) {
     if (!root) return null
     const windows = WINDOWS_ABSOLUTE.test(root)
-    const candidateForCompare = windows ? raw.toLocaleLowerCase() : raw
-    const rootForCompare = windows ? root.toLocaleLowerCase() : root
+    const canonicalRaw = windows ? raw : withoutMacPrivateAlias(raw)
+    const canonicalRoot = windows ? root : withoutMacPrivateAlias(root)
+    const candidateForCompare = windows ? canonicalRaw.toLowerCase() : canonicalRaw
+    const rootForCompare = windows ? canonicalRoot.toLowerCase() : canonicalRoot
     if (!candidateForCompare.startsWith(`${rootForCompare}/`)) return null
-    relative = raw.slice(root.length + 1)
+    relative = canonicalRaw.slice(canonicalRoot.length + 1)
   }
 
   const parts: string[] = []

@@ -999,7 +999,11 @@ describe("activityOf", () => {
     parts
   })
 
-  const tool = (name: string, target: string | null, status: "running" | "success" = "running") =>
+  const tool = (
+    name: string,
+    target: string | null,
+    status: "running" | "success" | "error" = "running"
+  ) =>
     ({
       _tag: "Tool" as const,
       tool: { id: `t_${name}`, name, target, status, meta: null, diff: null, preview: null }
@@ -1074,7 +1078,7 @@ describe("activityOf", () => {
     expect(activityOf([turn(tool("Edit", "src/auth/session.ts"))], "running")?.kind).toBe("editing")
   })
 
-  it("derives full-path file activity for edit and write tools", () => {
+  it("derives full-path file activity for edit, write, and update tools", () => {
     expect(
       agentFileActivityOf([turn(tool("Edit", "packages/core/src/conversation.ts"))])
     ).toEqual({
@@ -1089,6 +1093,34 @@ describe("activityOf", () => {
       path: "src/new-file.ts",
       phase: "completed"
     })
+    expect(
+      agentFileActivityOf([turn(tool("Update", "src/updated-file.ts", "success"))])
+    ).toEqual({
+      eventId: "t_Update",
+      path: "src/updated-file.ts",
+      phase: "completed"
+    })
+  })
+
+  it("keeps following a running edit when a later parallel read starts", () => {
+    expect(
+      agentFileActivityOf([
+        turn(tool("Edit", "src/active.ts"), tool("Read", "src/context.ts"))
+      ])
+    ).toEqual({
+      eventId: "t_Edit",
+      path: "src/active.ts",
+      phase: "editing"
+    })
+  })
+
+  it("does not replay completed or failed mutations after the run becomes idle", () => {
+    expect(
+      agentFileActivityOf([turn(tool("Write", "src/old.ts", "success"))], "idle")
+    ).toBeNull()
+    expect(
+      agentFileActivityOf([turn(tool("Edit", "src/failed.ts", "error"))], "running")
+    ).toBeNull()
   })
 
   it("ignores non-mutation tools when deriving agent file activity", () => {

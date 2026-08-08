@@ -44,6 +44,24 @@ const pluginTab = (
   ...over
 })
 
+const mockPaneWidth = (width: number) =>
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    x: 0,
+    y: 0,
+    top: 0,
+    right: width,
+    bottom: 800,
+    left: 0,
+    width,
+    height: 800,
+    toJSON: () => ({})
+  })
+
+const auxiliaryPanelPercent = (): number => {
+  const style = screen.getByTestId("session-auxiliary-panel").getAttribute("style") ?? ""
+  return Number(/calc\(([\d.]+)%/.exec(style)?.[1] ?? Number.NaN)
+}
+
 describe("visibleTabs", () => {
   it("shows only Conversation for a bare session", () => {
     expect(idsFor(session({ id: "a", worktreePath: undefined }))).toEqual([
@@ -308,19 +326,7 @@ describe("mount groups", () => {
   })
 
   it("opens streamed Plan Review full-width when the pane is too narrow", async () => {
-    const rect = vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockReturnValue({
-        x: 0,
-        y: 0,
-        top: 0,
-        right: 600,
-        bottom: 800,
-        left: 0,
-        width: 600,
-        height: 800,
-        toJSON: () => ({})
-      })
+    const rect = mockPaneWidth(600)
     render(
       <SessionPane
         session={session({ id: "a" })}
@@ -341,19 +347,7 @@ describe("mount groups", () => {
   })
 
   it("opens a manually selected Plan Review full-width when the pane is too narrow", async () => {
-    const rect = vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockReturnValue({
-        x: 0,
-        y: 0,
-        top: 0,
-        right: 600,
-        bottom: 800,
-        left: 0,
-        width: 600,
-        height: 800,
-        toJSON: () => ({})
-      })
+    const rect = mockPaneWidth(600)
     render(
       <SessionPane
         session={session({ id: "a" })}
@@ -434,19 +428,7 @@ describe("SessionPane", () => {
   })
 
   it("opens Files beside chat with the default two-thirds workspace", async () => {
-    const rect = vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockReturnValue({
-        x: 0,
-        y: 0,
-        top: 0,
-        right: 1_200,
-        bottom: 800,
-        left: 0,
-        width: 1_200,
-        height: 800,
-        toJSON: () => ({})
-      })
+    const rect = mockPaneWidth(1_200)
     render(
       <SessionPane
         session={session({ id: "a" })}
@@ -464,9 +446,7 @@ describe("SessionPane", () => {
       "files for a"
     )
     await waitFor(() => {
-      expect(screen.getByTestId("session-auxiliary-panel").getAttribute("style")).toContain(
-        "66.6667%"
-      )
+      expect(auxiliaryPanelPercent()).toBeCloseTo((2 / 3) * 100, 3)
     })
     rect.mockRestore()
   })
@@ -502,19 +482,7 @@ describe("SessionPane", () => {
   })
 
   it("persists a resized Files workspace ratio", async () => {
-    const rect = vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockReturnValue({
-        x: 0,
-        y: 0,
-        top: 0,
-        right: 1_200,
-        bottom: 800,
-        left: 0,
-        width: 1_200,
-        height: 800,
-        toJSON: () => ({})
-      })
+    const rect = mockPaneWidth(1_200)
     const first = render(
       <SessionPane
         session={session({ id: "a" })}
@@ -544,27 +512,13 @@ describe("SessionPane", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: "Files" }))
     await waitFor(() => {
-      const style = screen.getByTestId("session-auxiliary-panel").getAttribute("style") ?? ""
-      const renderedPercent = Number(style.slice(style.indexOf("calc(") + 5, style.indexOf("%")))
-      expect(renderedPercent).toBeCloseTo(persisted * 100, 3)
+      expect(auxiliaryPanelPercent()).toBeCloseTo(persisted * 100, 3)
     })
     rect.mockRestore()
   })
 
   it("gives Files the full pane below the responsive breakpoint", async () => {
-    const rect = vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockReturnValue({
-        x: 0,
-        y: 0,
-        top: 0,
-        right: 600,
-        bottom: 800,
-        left: 0,
-        width: 600,
-        height: 800,
-        toJSON: () => ({})
-      })
+    const rect = mockPaneWidth(600)
     render(
       <SessionPane
         session={session({ id: "a" })}

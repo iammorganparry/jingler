@@ -31,6 +31,7 @@ import {
   defaultModel,
   findApprovedPlan,
   isBackgroundTaskEvent,
+  isFileMutationTool,
   isSubagentEvent,
   ORCHESTRATOR_ENABLED_DEFAULT,
   planDocumentToPlan,
@@ -119,9 +120,6 @@ import {
   releaseSessionRun,
   reserveSessionRun
 } from "./run-coordinator.js"
-
-/** Tools that write to disk — a successful one advances the matching plan step. */
-const EDIT_TOOLS = new Set(["Write", "Edit", "Update", "MultiEdit", "NotebookEdit"])
 
 const approvalAccepted: PlanApprovalResult = { status: "accepted" }
 const approvalRefused = (
@@ -2062,7 +2060,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 )
               }
               // Remember an edit's target path so its ToolEnd can tie back to a step.
-              if (event._tag === "ToolStart" && EDIT_TOOLS.has(event.name) && event.target) {
+              if (event._tag === "ToolStart" && isFileMutationTool(event.name) && event.target) {
                 yield* Ref.update(editTargets, (m) => new Map(m).set(event.id, event.target!))
               }
               // Canonical plan writes must land BEFORE the event is offered.

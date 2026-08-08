@@ -1522,6 +1522,9 @@ const EDIT_TOOLS = new Set(["Edit", "Write", "Update", "NotebookEdit", "MultiEdi
 const WEB_TOOLS = new Set(["WebFetch", "WebSearch"])
 const SUBAGENT_TOOLS = new Set(["Task", "Agent"])
 
+/** One shared mutation-tool classification for adapters, activity, and plan progress. */
+export const isFileMutationTool = (name: string): boolean => EDIT_TOOLS.has(name)
+
 /**
  * A `gh` command that BLOCKS watching a PR's CI. Deliberately narrow: it must be
  * an actual watch, not any `gh pr`/`gh run` subcommand. `gh pr create` and
@@ -1551,29 +1554,24 @@ const basename = (path: string): string => path.split("/").filter(Boolean).pop()
 const shortCommand = (command: string): string =>
   command.split("\n")[0]!.replace(/\s+/g, " ").trim()
 
-/** The tool call still in flight (the LAST one marked running), or null. */
-const runningTool = (messages: ReadonlyArray<Message>): ToolCall | null => {
+/** The last tool card in transcript order that satisfies `predicate`. */
+const lastTool = (
+  messages: ReadonlyArray<Message>,
+  predicate: (tool: ToolCall) => boolean
+): ToolCall | null => {
   for (let i = messages.length - 1; i >= 0; i--) {
     const parts = messages[i]!.parts
     for (let j = parts.length - 1; j >= 0; j--) {
       const part = parts[j]!
-      if (part._tag === "Tool" && part.tool.status === "running") return part.tool
+      if (part._tag === "Tool" && predicate(part.tool)) return part.tool
     }
   }
   return null
 }
 
-/** The last tool card in transcript order, regardless of whether it settled. */
-const latestTool = (messages: ReadonlyArray<Message>): ToolCall | null => {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const parts = messages[i]!.parts
-    for (let j = parts.length - 1; j >= 0; j -= 1) {
-      const part = parts[j]!
-      if (part._tag === "Tool") return part.tool
-    }
-  }
-  return null
-}
+/** The tool call still in flight (the LAST one marked running), or null. */
+const runningTool = (messages: ReadonlyArray<Message>): ToolCall | null =>
+  lastTool(messages, (tool) => tool.status === "running")
 
 /**
  * Derive the mutation target that an opt-in file browser may follow.
@@ -1583,12 +1581,17 @@ const latestTool = (messages: ReadonlyArray<Message>): ToolCall | null => {
  * names. Failed mutations and non-file tools are not navigation instructions.
  */
 export const agentFileActivityOf = (
-  messages: ReadonlyArray<Message>
+  messages: ReadonlyArray<Message>,
+  phase: ActivityPhase = "running"
 ): AgentFileActivity | null => {
-  const tool = latestTool(messages)
+  if (phase === "idle") return null
+  const tool =
+    lastTool(
+      messages,
+      (candidate) => candidate.status === "running" && isFileMutationTool(candidate.name)
+    ) ?? lastTool(messages, (candidate) => isFileMutationTool(candidate.name))
   if (
     tool === null ||
-    !EDIT_TOOLS.has(tool.name) ||
     tool.target === null ||
     tool.target.trim() === "" ||
     tool.status === "error"
@@ -1636,7 +1639,7 @@ const toolActivity = (tool: ToolCall): SessionActivity => {
       target: target ? basename(target) : null
     }
   }
-  if (EDIT_TOOLS.has(tool.name)) {
+  if (isFileMutationTool(tool.name)) {
     return {
       kind: "editing",
       verb: "Editing",

@@ -23,6 +23,7 @@ describe("agent file activity", () => {
       path: "src/a.ts",
       phase: "editing"
     })
+    const editingSequence = getAgentFileActivity("s1", "c1")?.sequence
     publishAgentFileActivity("s1", "c1", {
       eventId: "edit-1",
       path: "src/a.ts",
@@ -38,7 +39,7 @@ describe("agent file activity", () => {
     expect(getAgentFileActivity("s1", "c1")).toMatchObject({
       eventId: "edit-1",
       phase: "completed",
-      sequence: 2
+      sequence: (editingSequence ?? 0) + 1
     })
     unsubscribe()
   })
@@ -82,6 +83,24 @@ describe("normalizeAgentFileTarget", () => {
   it("normalizes contained absolute and repository-relative agent targets", () => {
     expect(normalizeAgentFileTarget("./src/a.ts:12:4", "/work/repo")).toBe("src/a.ts")
     expect(normalizeAgentFileTarget("/work/repo/src/a.ts", "/work/repo")).toBe("src/a.ts")
+  })
+
+  it("normalizes macOS private aliases and case-insensitive Windows roots", () => {
+    expect(
+      normalizeAgentFileTarget(
+        "/private/Users/operator/worktree/src/a.ts",
+        "/Users/operator/worktree"
+      )
+    ).toBe("src/a.ts")
+    expect(
+      normalizeAgentFileTarget(
+        "/Users/operator/worktree/src/b.ts",
+        "/private/Users/operator/worktree"
+      )
+    ).toBe("src/b.ts")
+    expect(normalizeAgentFileTarget("c:\\WORK\\repo\\src\\a.ts", "C:\\work\\repo")).toBe(
+      "src/a.ts"
+    )
   })
 
   it("rejects traversal and targets outside the session worktree", () => {

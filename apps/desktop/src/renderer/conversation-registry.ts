@@ -180,9 +180,12 @@ const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
 
   broadcastSharedPlan(key, snap)
   publishChatActivity(session.id, chatId, activity)
+  const phase = phaseOf(snap)
   const fileActivities = [
-    agentFileActivityOf(snap.context.messages),
-    ...snap.context.subagents.map((subagent) => agentFileActivityOf([subagent.message]))
+    agentFileActivityOf(snap.context.messages, phase),
+    ...snap.context.subagents.map((subagent) =>
+      agentFileActivityOf([subagent.message], phase)
+    )
   ].filter((candidate) => candidate !== null)
   const activeFile =
     fileActivities.findLast((candidate) => candidate.phase === "editing") ??
