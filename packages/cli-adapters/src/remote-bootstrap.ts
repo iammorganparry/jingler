@@ -402,10 +402,18 @@ export const installAndBootstrapRemoteDevice = (
     })
     if (upload.exitCode !== 0) {
       const authentication = /permission denied|authentication failed|publickey/iu.test(upload.stderr)
+      const missingLocalBundle =
+        /stat local [^\r\n]*: (?:no such file or directory|not a regular file)/iu.test(
+          upload.stderr
+        )
       return yield* Effect.fail(
         new SshBootstrapError({
           kind: authentication ? "authentication" : "connection",
-          message: authentication ? sshAuthenticationMessage(input.host) : "Device agent upload failed"
+          message: authentication
+            ? sshAuthenticationMessage(input.host)
+            : missingLocalBundle
+              ? "The bundled device agent is missing; rebuild and restart Jingler"
+              : "Device agent upload failed"
         })
       )
     }

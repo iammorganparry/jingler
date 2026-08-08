@@ -141,6 +141,34 @@ describe("remote agent installation", () => {
       "User and IdentityFile"
     )
   })
+
+  it("explains when the local device-agent bundle is missing", async () => {
+    const upload = await Effect.runPromiseExit(
+      installAndBootstrapRemoteDevice(
+        {
+          host: "buildbox",
+          relayUrl: "https://relay.example.test",
+          agentBundlePath: "/repo/apps/device-agent/dist/jingler-device.mjs"
+        },
+        runner(
+          {
+            exitCode: 1,
+            stdout: "",
+            stderr:
+              'scp: stat local "/repo/apps/device-agent/dist/jingler-device.mjs": No such file or directory\n'
+          },
+          []
+        )
+      )
+    )
+
+    expect(Exit.isFailure(upload) && upload.cause.toString()).toContain(
+      "The bundled device agent is missing"
+    )
+    expect(Exit.isFailure(upload) && upload.cause.toString()).toContain(
+      "rebuild and restart Jingler"
+    )
+  })
 })
 
 describe("remote bootstrap", () => {
