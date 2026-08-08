@@ -24,7 +24,17 @@
       "description": "namespaced as <pluginId>.<local>, e.g. linear.issues",
       "pattern": "^[a-z0-9][a-z0-9-]*\\.[a-z0-9][a-z0-9-]*$"
     },
+    "PluginSvgAssetPath": {
+      "type": "string",
+      "description": "plugin-relative SVG path without traversal or URL syntax",
+      "pattern": "^(?:\\.\\/)?(?!\\.{1,2}(?:\\/|$))(?!.*\\/\\.{1,2}(?:\\/|$))(?!.*%(?:2e|2f|5c))(?!.*[:\\\\?#\\0])[^/]+(?:\\/[^/]+)*\\.svg$"
+    },
     "AuthProviderId": {
+      "type": "string",
+      "description": "a string matching the pattern ^[a-z0-9][a-z0-9-]*$",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "IssueProviderId": {
       "type": "string",
       "description": "a string matching the pattern ^[a-z0-9][a-z0-9-]*$",
       "pattern": "^[a-z0-9][a-z0-9-]*$"
@@ -147,18 +157,60 @@
                 "type": "string"
               },
               "icon": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "asset",
+                      "monochrome"
+                    ],
+                    "properties": {
+                      "asset": {
+                        "$ref": "#/$defs/PluginSvgAssetPath"
+                      },
+                      "monochrome": {
+                        "type": "boolean",
+                        "enum": [
+                          true
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
               },
               "order": {
                 "type": "number"
               },
               "when": {
-                "type": "string",
-                "enum": [
-                  "always",
-                  "hasPr",
-                  "hasWorktree",
-                  "hasIssue"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "always",
+                      "hasPr",
+                      "hasWorktree",
+                      "hasIssue"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "issueProvider"
+                    ],
+                    "properties": {
+                      "issueProvider": {
+                        "$ref": "#/$defs/PluginId"
+                      },
+                      "includeUnlinked": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
                 ]
               }
             },
@@ -267,10 +319,32 @@
                   "string",
                   "number",
                   "boolean",
-                  "enum"
+                  "enum",
+                  "secret"
                 ]
               },
               "description": {
+                "type": "string"
+              },
+              "placeholder": {
+                "type": "string"
+              },
+              "validation": {
+                "type": "object",
+                "required": [
+                  "pattern"
+                ],
+                "properties": {
+                  "pattern": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "documentationUrl": {
                 "type": "string"
               },
               "default": {
@@ -307,6 +381,28 @@
                 "items": {
                   "type": "string"
                 }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "issueProviders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/IssueProviderId"
+              },
+              "label": {
+                "type": "string",
+                "description": "a string at least 1 character(s) long",
+                "title": "minLength(1)",
+                "minLength": 1
               }
             },
             "additionalProperties": false

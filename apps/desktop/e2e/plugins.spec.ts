@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
@@ -239,6 +239,75 @@ test("Settings lists the plugin, and disabling it removes the tab", async ({ lau
   await expect(window.getByRole("button", { name: "E2E" })).toHaveCount(0, { timeout: 15_000 })
 })
 
+test("Settings saves, masks, replaces and removes a manifest-declared plugin secret", async ({
+  launchApp
+}) => {
+  const { window, home } = await launchApp({ configured: true })
+  const secret = "lin_api_e2e_should_not_be_rendered_after_save"
+  await seedPlugin(home, {
+    manifest: {
+      id: "e2e-tab",
+      name: "E2E Tab",
+      version: "1.0.0",
+      contributes: {
+        settings: [
+          {
+            id: "e2e-tab.api-key",
+            label: "Personal API key",
+            type: "secret",
+            placeholder: "lin_api_…",
+            validation: {
+              pattern: "^lin_api_",
+              message: "Linear keys start with lin_api_."
+            }
+          }
+        ]
+      }
+    }
+  })
+  await openPluginSettings(window)
+
+  const row = window.getByTestId("plugin-row-e2e-tab")
+  await expect(row).toBeVisible({ timeout: 15_000 })
+  const input = row.getByLabel("Personal API key")
+  await expect(input).toHaveAttribute("type", "password")
+  await expect(input).toHaveValue("")
+  await input.fill(secret)
+  await row.getByRole("button", { name: "Save" }).click()
+
+  await expect(row.getByRole("button", { name: "Replace" })).toBeVisible()
+  await expect(row.getByRole("button", { name: "Remove" })).toBeVisible()
+  await expect(row.getByLabel("Personal API key")).toHaveValue("configured")
+  await expect(row).not.toContainText(secret)
+
+  // E2e deliberately selects the plaintext implementation inside its throwaway
+  // home; this observes main-process persistence without relying on a keychain.
+  const secretsFile = join(home, "jingler", "plugin-secrets.enc")
+  await expect
+    .poll(async () => await readFile(secretsFile, "utf8"))
+    .toContain(secret)
+
+  await row.getByRole("button", { name: "Replace" }).click()
+  await expect(row.getByLabel("Personal API key")).toHaveValue("")
+  await row.getByRole("button", { name: "Cancel" }).click()
+  await expect(row.getByRole("button", { name: "Replace" })).toBeVisible()
+
+  await row.getByRole("button", { name: "Remove" }).click()
+  await expect(row.getByRole("button", { name: "Save" })).toBeVisible()
+  await expect.poll(async () => await readFile(secretsFile, "utf8")).not.toContain(secret)
+
+  const uninstallSecret = "lin_api_removed_with_plugin"
+  await row.getByLabel("Personal API key").fill(uninstallSecret)
+  await row.getByRole("button", { name: "Save" }).click()
+  await expect(row.getByRole("button", { name: "Replace" })).toBeVisible()
+  await row.getByTestId("plugin-uninstall-e2e-tab").click()
+  await row.getByTestId("plugin-uninstall-confirm-e2e-tab").click()
+  await expect(row).toHaveCount(0, { timeout: 15_000 })
+  await expect
+    .poll(async () => await readFile(secretsFile, "utf8"))
+    .not.toContain(uninstallSecret)
+})
+
 test("a plugin whose manifest will not decode is reported, not silently absent", async ({
   launchApp
 }) => {
@@ -318,7 +387,12 @@ test("a plugin with a host half activates and answers an invoke", async ({ launc
       activationEvents: ["onTab:e2e-tab.main"],
       contributes: {
         tabs: [{ id: "e2e-tab.main", label: "E2E", icon: "Boxes", when: "always" }],
-        commands: [{ id: "e2e-tab.ping", title: "Ping" }]
+        commands: [{ id: "e2e-tab.ping", title: "Ping" }],
+        settings: [{
+          id: "e2e-tab.api-key",
+          label: "Personal API key",
+          type: "secret"
+        }]
       }
     }),
     ui: `
@@ -348,7 +422,8 @@ export default definePlugin(
     id: "e2e-tab", name: "E2E Tab", version: "1.0.0", ui: "dist/ui.js", main: "dist/main.js",
     contributes: {
       tabs: [{ id: "e2e-tab.main", label: "E2E", when: "always" }],
-      commands: [{ id: "e2e-tab.ping", title: "Ping" }]
+      commands: [{ id: "e2e-tab.ping", title: "Ping" }],
+      settings: [{ id: "e2e-tab.api-key", label: "Personal API key", type: "secret" }]
     }
   },
   { views: { "e2e-tab.main": Tab } }
@@ -361,12 +436,25 @@ export default definePlugin(
     join(home, "jingler", "plugins", "e2e-tab", "dist", "main.js"),
     `export const activate = (ctx) => {
   ctx.subscriptions.push(
-    ctx.commands.register("e2e-tab.ping", async (arg) => (arg?.n ?? 0) + 1)
+    ctx.commands.register("e2e-tab.ping", async (arg) => {
+      const apiKey = await ctx.settings.getSecret("e2e-tab.api-key")
+      return apiKey === "lin_api_host_e2e" ? (arg?.n ?? 0) + 1 : -1
+    })
   )
 }
 `,
     "utf8"
   )
+
+  // Configure through the renderer's write-only control, then prove the actual
+  // utilityProcess can resolve it through its owning HostContext.
+  await openPluginSettings(window)
+  const settingsRow = window.getByTestId("plugin-row-e2e-tab")
+  await expect(settingsRow).toBeVisible({ timeout: 15_000 })
+  await settingsRow.getByLabel("Personal API key").fill("lin_api_host_e2e")
+  await settingsRow.getByRole("button", { name: "Save" }).click()
+  await expect(settingsRow.getByRole("button", { name: "Replace" })).toBeVisible()
+  await window.getByRole("button", { name: "Close settings" }).click()
 
   await openSession(window)
   await expect(window.getByRole("button", { name: "E2E" })).toBeVisible({ timeout: 15_000 })

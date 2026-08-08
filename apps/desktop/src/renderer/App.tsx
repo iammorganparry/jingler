@@ -98,6 +98,7 @@ import { useOpenConnector } from "./use-open-connector.js";
 import { useInjectionTargets } from "./use-injection-targets.js";
 import {
   PluginProvider,
+  useIssueProviders,
   usePluginCommands,
   usePluginPanes,
   usePluginTabs,
@@ -353,6 +354,7 @@ function AuthedApp({
   const pluginTabs = usePluginTabs();
   const pluginPanes = usePluginPanes();
   const pluginCommands = usePluginCommands();
+  const issueProviders = useIssueProviders();
   const plugins = usePlugins();
   const memory = useMemory();
 
@@ -1369,9 +1371,18 @@ function AuthedApp({
         loadPrs={connected ? rpc.githubListPrs : undefined}
         onCreateSessionFromPr={connected ? createSessionFromPr : undefined}
         loadIssues={connected ? rpc.githubListIssues : undefined}
-        onCreateSessionFromIssue={
-          connected ? createSessionFromIssue : undefined
+        issueProviders={issueProviders}
+        loadProviderIssues={(providerId, repoPath, options) =>
+          rpc.pluginsIssueProviderList({
+            providerId,
+            repository: {
+              name: repos.find((repo) => repo.path === repoPath)?.name ?? repoPath,
+              path: repoPath,
+            },
+            ...options,
+          })
         }
+        onCreateSessionFromIssue={createSessionFromIssue}
         planSessions={planSessions}
         renderConversation={(session: Session, view, ctx) => (
           <ConversationPane

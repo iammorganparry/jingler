@@ -155,6 +155,7 @@ describe("activation", () => {
     // The host refuses registrations outside this list, which is what keeps the
     // manifest — the thing shown in Settings — the actual contract.
     expect(message.declaredCommands).toEqual(["linear.sync"])
+    expect(message.declaredIssueProviders).toEqual([])
 
     procs[0]!.emit({ kind: "activated", requestId: message.requestId, pluginId: "linear" })
     await p
@@ -237,6 +238,84 @@ describe("invoke", () => {
       message: "rate limited"
     })
     await expect(result).rejects.toThrow(/rate limited/)
+  })
+})
+
+describe("issue providers", () => {
+  it("activates the declaring plugin and routes a provider operation", async () => {
+    const { runtime, procs } = setup()
+    const p = plugin({
+      contributes: {
+        issueProviders: [{ id: "linear", label: "Linear" }]
+      }
+    })
+    const result = runtime.invokeIssueProvider(p, "linear", "listIssues", {
+      repository: { name: "jingler", path: "/repos/jingler" },
+      search: "retry",
+      mine: true
+    })
+    await tick()
+    procs[0]!.ready()
+    await tick()
+
+    const activate = procs[0]!.sent.find((message) => message.kind === "activate")
+    if (activate?.kind !== "activate") throw new Error("expected activate")
+    expect(activate.declaredIssueProviders).toEqual(["linear"])
+    procs[0]!.emit({
+      kind: "activated",
+      requestId: activate.requestId,
+      pluginId: "linear"
+    })
+    await tick()
+
+    const invoke = procs[0]!.sent.find(
+      (message) => message.kind === "issue-provider-invoke"
+    )
+    if (invoke?.kind !== "issue-provider-invoke") {
+      throw new Error("expected issue provider invoke")
+    }
+    expect(invoke).toMatchObject({
+      pluginId: "linear",
+      providerId: "linear",
+      method: "listIssues",
+      input: {
+        repository: { name: "jingler", path: "/repos/jingler" },
+        search: "retry",
+        mine: true
+      }
+    })
+    procs[0]!.emit({
+      kind: "issue-provider-result",
+      requestId: invoke.requestId,
+      ok: true,
+      value: [{ identifier: "ENG-123" }]
+    })
+    await expect(result).resolves.toEqual([{ identifier: "ENG-123" }])
+  })
+
+  it("settles an issue-provider request when the host exits", async () => {
+    const { runtime, procs } = setup()
+    const p = plugin({
+      contributes: { issueProviders: [{ id: "linear", label: "Linear" }] }
+    })
+    const result = runtime.invokeIssueProvider(p, "linear", "getIssue", {
+      repository: { name: "jingler", path: "/repos/jingler" },
+      issueId: "issue-1"
+    })
+    await tick()
+    procs[0]!.ready()
+    await tick()
+    const activate = procs[0]!.sent.find((message) => message.kind === "activate")
+    if (activate?.kind !== "activate") throw new Error("expected activate")
+    procs[0]!.emit({
+      kind: "activated",
+      requestId: activate.requestId,
+      pluginId: "linear"
+    })
+    await tick()
+
+    procs[0]!.crash()
+    await expect(result).rejects.toThrow(/exited while this call was in flight/)
   })
 })
 

@@ -139,27 +139,79 @@ export type ExtensionKind = Schema.Schema.Type<typeof ExtensionKind>
  * A plugin needing finer control ships a `when` function in its UI module; this
  * field is the cheap pre-filter that decides whether the module is even asked.
  */
-export const TabVisibility = Schema.Literal(
-  "always",
-  "hasPr",
-  "hasWorktree",
-  "hasIssue"
+export const IssueProviderTabVisibility = Schema.Struct({
+  /** Stable provider id persisted in the linked issue reference. */
+  issueProvider: PluginId,
+  /** Whether this provider's tab may offer create/link UI before an issue is linked. */
+  includeUnlinked: Schema.optional(Schema.Boolean)
+})
+export type IssueProviderTabVisibility = Schema.Schema.Type<
+  typeof IssueProviderTabVisibility
+>
+
+export const TabVisibility = Schema.Union(
+  Schema.Literal("always", "hasPr", "hasWorktree", "hasIssue"),
+  IssueProviderTabVisibility
 )
 export type TabVisibility = Schema.Schema.Type<typeof TabVisibility>
 
 /**
  * A tab in a session pane, beside Conversation, Changes and the rest.
  *
- * `icon` is a lucide icon name resolved host-side rather than an image path or
- * a component: the tab bar renders at one size in one colour taken from the
- * active theme, and letting a plugin supply artwork would mean plugin tabs are
- * the only ones that stop matching when the operator switches theme.
+ * `icon` is either a lucide name or a plugin-owned monochrome SVG. Asset paths
+ * are resolved through the confined plugin protocol and masks inherit the
+ * tab's current foreground colour.
  */
+export const PluginAssetIcon = Schema.Struct({
+  /** Plugin-relative SVG path, e.g. `dist/assets/linear-mark.svg`. */
+  asset: Schema.String.pipe(
+    Schema.pattern(
+      /^(?:\.\/)?(?!\.{1,2}(?:\/|$))(?!.*\/\.{1,2}(?:\/|$))(?!.*%(?:2e|2f|5c))(?!.*[:\\?#\0])[^/]+(?:\/[^/]+)*\.svg$/i,
+      {
+        identifier: "PluginSvgAssetPath",
+        description: "plugin-relative SVG path without traversal or URL syntax"
+      }
+    ),
+    Schema.filter((asset) => {
+      let decoded: string
+      try {
+        decoded = decodeURIComponent(asset)
+      } catch {
+        return "plugin artwork must use a valid encoded relative SVG path"
+      }
+      if (
+        decoded.length === 0 ||
+        decoded.startsWith("/") ||
+        decoded.includes("\\") ||
+        decoded.includes(":") ||
+        decoded.includes("?") ||
+        decoded.includes("#") ||
+        decoded.includes("\0") ||
+        !decoded.toLowerCase().endsWith(".svg")
+      ) {
+        return "plugin artwork must be a plugin-relative SVG path"
+      }
+      const segments = decoded.replace(/^\.\//, "").split("/")
+      return segments.some(
+        (segment) => segment.length === 0 || segment === "." || segment === ".."
+      )
+        ? "plugin artwork must not escape the plugin directory"
+        : true
+    })
+  ),
+  /** Only monochrome masks are supported so artwork remains theme-safe. */
+  monochrome: Schema.Literal(true)
+})
+export type PluginAssetIcon = Schema.Schema.Type<typeof PluginAssetIcon>
+
+export const PluginIcon = Schema.Union(Schema.String, PluginAssetIcon)
+export type PluginIcon = Schema.Schema.Type<typeof PluginIcon>
+
 export const TabContribution = Schema.Struct({
   id: ContributionId,
   label: Schema.String,
-  /** A lucide icon name, e.g. `GitPullRequest`. Unknown names fall back. */
-  icon: Schema.optional(Schema.String),
+  /** A lucide name or plugin-relative monochrome SVG. Invalid assets fall back. */
+  icon: Schema.optional(PluginIcon),
   /** Lower sorts earlier. Built-ins occupy 0–99; plugins default to 100. */
   order: Schema.optional(Schema.Number),
   when: Schema.optional(TabVisibility)
@@ -219,8 +271,27 @@ export type KeybindingContribution = Schema.Schema.Type<
 >
 
 /** The value shape a contributed setting holds. */
-export const SettingType = Schema.Literal("string", "number", "boolean", "enum")
+export const SettingType = Schema.Literal(
+  "string",
+  "number",
+  "boolean",
+  "enum",
+  "secret"
+)
 export type SettingType = Schema.Schema.Type<typeof SettingType>
+
+/**
+ * Optional client-side validation for text-like settings.
+ *
+ * The pattern is manifest metadata, not an authorization boundary: main repeats
+ * validation before persisting a value. `message` lets the generated form say
+ * what shape is expected without exposing the submitted value in an error.
+ */
+export const SettingValidation = Schema.Struct({
+  pattern: Schema.String,
+  message: Schema.optional(Schema.String)
+})
+export type SettingValidation = Schema.Schema.Type<typeof SettingValidation>
 
 /**
  * A setting rendered into Settings as a generated form row.
@@ -234,11 +305,42 @@ export const SettingContribution = Schema.Struct({
   label: Schema.String,
   type: SettingType,
   description: Schema.optional(Schema.String),
+  /** Safe example text shown only while the generated input is empty. */
+  placeholder: Schema.optional(Schema.String),
+  validation: Schema.optional(SettingValidation),
+  /** Optional help link rendered beside the generated control. */
+  documentationUrl: Schema.optional(Schema.String),
   default: Schema.optional(Schema.Unknown),
   /** Required when `type` is `enum`; ignored otherwise. */
   options: Schema.optional(Schema.Array(Schema.String))
 })
 export type SettingContribution = Schema.Schema.Type<typeof SettingContribution>
+
+/** The JSON-safe values ordinary generated settings can persist. */
+export const PluginSettingValue = Schema.Union(
+  Schema.String,
+  Schema.Number,
+  Schema.Boolean
+)
+export type PluginSettingValue = Schema.Schema.Type<typeof PluginSettingValue>
+
+/**
+ * Renderer-visible settings state for one plugin.
+ *
+ * Secret entries are represented only by booleans. Keeping them in a separate
+ * property makes it impossible for a future UI to accidentally treat a secret
+ * as an ordinary value and render it in an input.
+ */
+export const PluginSettingsSnapshot = Schema.Struct({
+  values: Schema.Record({
+    key: Schema.String,
+    value: Schema.NullOr(PluginSettingValue)
+  }),
+  secrets: Schema.Record({ key: Schema.String, value: Schema.Boolean })
+})
+export type PluginSettingsSnapshot = Schema.Schema.Type<
+  typeof PluginSettingsSnapshot
+>
 
 /**
  * An authentication provider the plugin itself implements.
@@ -266,6 +368,28 @@ export type AuthProviderContribution = Schema.Schema.Type<
   typeof AuthProviderContribution
 >
 
+/** An issue provider implemented by this plugin's supervised host half. */
+export const IssueProviderContribution = Schema.Struct({
+  /** Bare stable provider id persisted in `IssueReference.providerId`. */
+  id: Schema.String.pipe(
+    Schema.pattern(/^[a-z0-9][a-z0-9-]*$/, { identifier: "IssueProviderId" })
+  ),
+  label: Schema.String.pipe(Schema.minLength(1))
+})
+export type IssueProviderContribution = Schema.Schema.Type<
+  typeof IssueProviderContribution
+>
+
+/** Renderer-safe descriptor for one enabled manifest-declared issue provider. */
+export const IssueProviderDescriptor = Schema.Struct({
+  pluginId: PluginId,
+  id: Schema.String,
+  label: Schema.String
+})
+export type IssueProviderDescriptor = Schema.Schema.Type<
+  typeof IssueProviderDescriptor
+>
+
 /** Everything a plugin can add to the app. */
 export const PluginContributes = Schema.Struct({
   tabs: Schema.optional(Schema.Array(TabContribution)),
@@ -275,7 +399,8 @@ export const PluginContributes = Schema.Struct({
   settings: Schema.optional(Schema.Array(SettingContribution)),
   authenticationProviders: Schema.optional(
     Schema.Array(AuthProviderContribution)
-  )
+  ),
+  issueProviders: Schema.optional(Schema.Array(IssueProviderContribution))
 })
 export type PluginContributes = Schema.Schema.Type<typeof PluginContributes>
 
@@ -448,6 +573,19 @@ export const PluginManifest = PluginManifestFields.pipe(
     )
     if (orphan) {
       return `keybinding "${orphan.key}" targets "${orphan.command}", which this plugin does not contribute`
+    }
+
+    const invalidPattern = (m.contributes?.settings ?? []).find((setting) => {
+      if (!setting.validation) return false
+      try {
+        new RegExp(setting.validation.pattern)
+        return false
+      } catch {
+        return true
+      }
+    })
+    if (invalidPattern) {
+      return `setting "${invalidPattern.id}" has an invalid validation pattern`
     }
 
     return true

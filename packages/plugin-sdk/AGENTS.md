@@ -75,7 +75,19 @@ export const manifest = defineManifest({
   activationEvents: ["onTab:linear.issues"],
   contributes: {
     tabs: [{ id: "linear.issues", label: "Issues", icon: "CircleDot" }],
-    commands: [{ id: "linear.sync", title: "Sync Linear" }]
+    commands: [{ id: "linear.sync", title: "Sync Linear" }],
+    settings: [{
+      id: "linear.api-key",
+      label: "Personal API key",
+      type: "secret",
+      description: "Create a key in Linear Security & access settings.",
+      placeholder: "lin_api_…",
+      validation: {
+        pattern: "^lin_api_",
+        message: "Linear keys start with lin_api_."
+      },
+      documentationUrl: "https://linear.app/settings/api"
+    }]
   }
 })
 ```
@@ -126,17 +138,18 @@ export const activate: Activate = async (ctx) => {
     ctx.commands.register("linear.sync", async (arg) => {
       const { repo } = arg as { repo: string }
 
-      // Credentials are requested, not declared. The operator sees a prompt
-      // naming this plugin and these scopes, and can revoke later in Settings.
-      // Prompting is the default, so this resolves to a session or REJECTS if
-      // the operator declines — no null check needed on the happy path.
-      const session = await ctx.authentication.getSession("github", ["repo"])
+      // Secret settings are configured by the operator. Only this host context
+      // can resolve the value; the UI half sees configured/not-configured only.
+      const apiKey = await ctx.settings.getSecret("linear.api-key")
+      if (!apiKey) {
+        throw new Error("Configure the Linear API key in Settings → Plugins.")
+      }
 
       // Plain `fetch` — the host half is Node, with no CSP in the way. It is
       // the UI half that cannot reach the network, which is why this call
       // lives here rather than in the tab component.
       const res = await fetch(`https://api.example.com/issues?repo=${repo}`, {
-        headers: { authorization: `Bearer ${session.accessToken}` }
+        headers: { authorization: apiKey }
       })
       return (await res.json()) as Issue[]
     })
@@ -242,7 +255,6 @@ The manifest schema is VS Code's, so it validates several things Jingler does no
 yet honour. Declaring one is a **load failure**, not a silent no-op:
 
 - `contributes.keybindings`
-- `contributes.settings`
 - `contributes.authenticationProviders`
 - `capabilities.untrustedRepos`
 - `activationEvents: ["repoContains:…"]` — the other three events work; see [Activation](#activation)
@@ -403,6 +415,35 @@ await ctx.storage.set("lastSync", Date.now())
 
 All methods are async on both sides. The UI half's calls cross an IPC boundary.
 
+## Secure settings
+
+Declare API keys and similar credentials as `type: "secret"` under
+`contributes.settings`. Jingler renders the control; plugin-authored renderer UI
+never receives the stored value:
+
+```ts
+settings: [{
+  id: "linear.api-key",
+  label: "Personal API key",
+  type: "secret",
+  placeholder: "lin_api_…",
+  validation: { pattern: "^lin_api_", message: "Linear keys start with lin_api_." }
+}]
+```
+
+Read it only from the owning host half, at request time:
+
+```ts
+const apiKey = await ctx.settings.getSecret("linear.api-key")
+if (!apiKey) throw new Error("Configure the Linear API key in Settings → Plugins.")
+```
+
+Do not copy it into `ctx.storage`, return it from a command, include it in an
+error, or cache it in renderer state. Ordinary plugin storage is readable JSON
+and shared with renderer code; secret settings live in a separate encrypted
+document and are cleared when the plugin is uninstalled. The renderer receives
+only a configured boolean, which is why Replace starts with an empty field.
+
 ## Editor support
 
 Add `$schema` to your `jingler.plugin.json` for validation and completion in
@@ -482,7 +523,7 @@ or copies it to `~/jingler/plugins/<id>/`. No signing, no auto-update, no sandbo
 4. Every contribution id starts with your plugin id
 5. `version` bumped since the last load
 6. A declined `getSession` is handled — it rejects unless you pass `createIfNone: false`
-7. No `keybindings`, `settings`, `authenticationProviders` or `capabilities.untrustedRepos`
+7. No `keybindings`, `authenticationProviders` or `capabilities.untrustedRepos`
 8. If your manifest declares `main`, your build config passes `main` too
 
 ## Where to look next

@@ -1645,11 +1645,17 @@ describe("SessionStore", () => {
     cli: "claude",
     baseBranch: "main",
     issue: {
-      number: 128,
+      providerId: "github",
+      id: "128",
+      identifier: "#128",
       title: "Refund route 500s on a stale token",
       url: "https://github.com/acme/api/issues/128",
       body: "Fix the refund route.",
-      labels: [{ name: "bug", color: "e06c75" }]
+      labels: [{ name: "bug", color: "e06c75" }],
+      state: "open",
+      author: { id: "octocat", name: "octocat", avatarUrl: null },
+      assignees: [],
+      updatedAt: "2026-08-08T10:00:00.000Z"
     },
     task: "",
     automations: { progressComments: true, closeOnMerge: true },
@@ -1674,10 +1680,15 @@ describe("SessionStore", () => {
       cwd: s.worktreePath,
       encoding: "utf-8"
     }).trim()).toBe("HEAD")
-    expect(s.issueNumber).toBe(128)
-    expect(s.issueUrl).toBe("https://github.com/acme/api/issues/128")
-    expect(s.issueTitle).toBe("Refund route 500s on a stale token")
-    expect(s.issueLabels).toStrictEqual([{ name: "bug", color: "e06c75" }])
+    expect(s.linkedIssue).toStrictEqual({
+      providerId: "github",
+      id: "128",
+      identifier: "#128",
+      url: "https://github.com/acme/api/issues/128",
+      title: "Refund route 500s on a stale token",
+      labels: [{ name: "bug", color: "e06c75" }]
+    })
+    expect(s.issueNumber).toBeUndefined()
     expect(s.automations).toStrictEqual({ progressComments: true, closeOnMerge: true })
     // Title pinned from the issue; task falls back to title + body.
     expect(s.title).toBe("Refund route 500s on a stale token")
@@ -1728,8 +1739,75 @@ describe("SessionStore", () => {
     if (result._tag !== "Success") return
     const { cleared, unlinked } = result.value
     expect(cleared.initialPrompt).toBeUndefined()
-    expect(unlinked.issueNumber).toBeUndefined()
+    expect(unlinked.linkedIssue).toBeUndefined()
     expect(unlinked.automations).toBeUndefined()
+  })
+
+  it("retains automations only for GitHub issues", async () => {
+    const linear = issueInput({
+      issue: {
+        ...issueInput().issue,
+        providerId: "linear",
+        id: "opaque-linear-id",
+        identifier: "ENG-123",
+        url: "https://linear.app/acme/issue/ENG-123"
+      }
+    })
+    const result = await runExit(
+      SessionStore.createFromIssue(linear).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    expect(result.value.linkedIssue?.providerId).toBe("linear")
+    expect(result.value.automations).toBeUndefined()
+  })
+
+  it("migrates historical GitHub issue aliases on the next ordinary write", async () => {
+    const created = await runExit(
+      SessionStore.createFromIssue(issueInput()).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(created._tag).toBe("Success")
+    if (created._tag !== "Success") return
+
+    const sessionsFile = join(temp.root, "sessions.json")
+    const persisted = JSON.parse(readFileSync(sessionsFile, "utf-8")) as Array<
+      Record<string, unknown>
+    >
+    const historical = persisted[0]!
+    delete historical.linkedIssue
+    historical.issueNumber = 128
+    historical.issueUrl = "https://github.com/acme/api/issues/128"
+    historical.issueTitle = "Refund route 500s on a stale token"
+    historical.issueLabels = [{ name: "bug", color: "e06c75" }]
+    writeFileSync(sessionsFile, JSON.stringify(persisted))
+
+    const beforeWrite = await runExit(
+      SessionStore.get(created.value.id).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(
+      beforeWrite._tag === "Success" && beforeWrite.value.linkedIssue
+    ).toBeUndefined()
+
+    await runExit(
+      SessionStore.setTitle(created.value.id, "Pinned title").pipe(Effect.provide(services)),
+      temp.layer
+    )
+    const migrated = JSON.parse(readFileSync(sessionsFile, "utf-8")) as Array<
+      Record<string, unknown>
+    >
+    expect(migrated[0]?.linkedIssue).toStrictEqual({
+      providerId: "github",
+      id: "128",
+      identifier: "#128",
+      url: "https://github.com/acme/api/issues/128",
+      title: "Refund route 500s on a stale token",
+      labels: [{ name: "bug", color: "e06c75" }]
+    })
+    expect(migrated[0]).not.toHaveProperty("issueNumber")
+    expect(migrated[0]).not.toHaveProperty("issueUrl")
   })
 })
 

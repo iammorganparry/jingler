@@ -23,9 +23,26 @@
  * @see HostContext — the object passed to {@link Activate}.
  * @see Authentication — the consent-gated door to accounts.
  */
-import type { Disposable, PluginStorage, SessionSnapshot } from "./common.js"
+import type {
+  Disposable,
+  IssueComment,
+  IssueDetail,
+  IssueSummary,
+  PluginStorage,
+  SessionSnapshot
+} from "./common.js"
 
-export type { Disposable, PluginStorage, SessionSnapshot } from "./common.js"
+export type {
+  Disposable,
+  IssueActor,
+  IssueComment,
+  IssueDetail,
+  IssueLabel,
+  IssueReference,
+  IssueSummary,
+  PluginStorage,
+  SessionSnapshot
+} from "./common.js"
 
 // ── The entry points ─────────────────────────────────────────────────────────
 
@@ -115,6 +132,10 @@ export interface HostContext {
    * UI half sees through {@link usePluginStorage}.
    */
   readonly storage: PluginStorage
+  /** Read-only access to this plugin's manifest-declared secure settings. */
+  readonly settings: HostSettings
+  /** Register this plugin's manifest-declared issue providers. */
+  readonly issues: HostIssues
   /** The consent-gated door to accounts, and where a plugin registers a provider. */
   readonly authentication: Authentication
   /** Register handlers for the commands the manifest contributes. */
@@ -142,6 +163,65 @@ export interface HostContext {
    * when the plugin deactivates. The idiomatic home for every registration.
    */
   readonly subscriptions: Disposable[]
+}
+
+/**
+ * Secure configuration declared by this plugin's manifest.
+ *
+ * There is intentionally no setter and no enumeration API here. The operator
+ * writes secrets through Settings, the renderer sees only configured state,
+ * and the owning host resolves one declared id at the moment it needs it.
+ */
+export interface HostSettings {
+  /**
+   * Return this plugin's configured secret, or undefined when it is unset.
+   * Rejects when `settingId` is undeclared or is an ordinary setting.
+   */
+  getSecret(settingId: string): Promise<string | undefined>
+}
+
+/** The selected repository supplied alongside provider operations. */
+export interface IssueRepositoryContext {
+  readonly name: string
+  readonly path: string
+}
+
+export interface IssueListRequest {
+  readonly repository: IssueRepositoryContext
+  readonly search: string
+  readonly mine: boolean
+}
+
+export interface IssueGetRequest {
+  readonly repository: IssueRepositoryContext
+  readonly issueId: string
+}
+
+export interface IssueCreateRequest {
+  readonly repository: IssueRepositoryContext
+  readonly title: string
+  readonly body: string
+}
+
+export interface IssueAddCommentRequest {
+  readonly repository: IssueRepositoryContext
+  readonly issueId: string
+  readonly body: string
+}
+
+/** A provider implemented entirely inside a plugin's supervised host half. */
+export interface IssueProvider {
+  readonly id: string
+  listIssues(request: IssueListRequest): Promise<readonly IssueSummary[]>
+  getIssue(request: IssueGetRequest): Promise<IssueDetail | null>
+  createIssue(request: IssueCreateRequest): Promise<IssueDetail>
+  addComment(request: IssueAddCommentRequest): Promise<IssueComment>
+}
+
+/** Manifest-backed issue-provider registrations for this plugin. */
+export interface HostIssues {
+  /** Register one declared provider until its returned handle is disposed. */
+  registerProvider(provider: IssueProvider): Disposable
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────

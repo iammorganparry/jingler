@@ -1,7 +1,7 @@
 import type { IssueSummary } from "@jingler/core"
 import { CircleDot } from "lucide-react"
 import { cn } from "../lib/cn.js"
-import { Avatar, githubAvatarUrl } from "../components/avatar.js"
+import { Avatar } from "../components/avatar.js"
 import { Badge } from "../components/badge.js"
 import { Spinner } from "../components/loading.js"
 import { relativeTime } from "../lib/relative-time.js"
@@ -9,7 +9,7 @@ import { relativeTime } from "../lib/relative-time.js"
 /**
  * The scrollable open-issue results list for the "new session from an issue"
  * picker + the attach-issue dialog. Pure presentational — props in, `onSelect`
- * out. Each row mirrors the design: a green circle-dot · title · #number, with
+ * out. Each row mirrors the design: a green circle-dot · title · identifier, with
  * label chips + assignee beneath.
  */
 export function IssuePickerList({
@@ -19,8 +19,8 @@ export function IssuePickerList({
   loading = false
 }: {
   issues: ReadonlyArray<IssueSummary>
-  /** The selected issue number, or null. */
-  selected: number | null
+  /** The selected provider-owned issue id, or null. */
+  selected: string | null
   onSelect: (issue: IssueSummary) => void
   loading?: boolean
 }) {
@@ -47,11 +47,11 @@ export function IssuePickerList({
   return (
     <div className="flex max-h-[248px] flex-col gap-[5px] overflow-auto pr-1">
       {issues.map((issue) => {
-        const on = issue.number === selected
+        const on = issue.id === selected
         const assignee = issue.assignees[0]
         return (
           <button
-            key={issue.number}
+            key={`${issue.providerId}:${issue.id}`}
             type="button"
             onClick={() => onSelect(issue)}
             aria-pressed={on}
@@ -70,7 +70,7 @@ export function IssuePickerList({
               >
                 {issue.title}
               </span>
-              <span className="font-mono text-[11px] text-dim">#{issue.number}</span>
+              <span className="font-mono text-[11px] text-dim">{issue.identifier}</span>
             </div>
             {(issue.labels.length > 0 || assignee) && (
               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pl-6 font-mono text-[10.5px] text-muted-foreground">
@@ -81,11 +81,11 @@ export function IssuePickerList({
                 {assignee && (
                   <span className="flex items-center gap-1.5 text-dim">
                     <Avatar
-                      initial={(assignee.login[0] ?? "?").toUpperCase()}
-                      src={githubAvatarUrl(assignee.login, 32)}
+                      initial={(assignee.name[0] ?? "?").toUpperCase()}
+                      src={assignee.avatarUrl}
                       size={15}
                     />
-                    {assignee.login}
+                    {assignee.name}
                   </span>
                 )}
                 {issue.updatedAt && <span className="text-line">·</span>}

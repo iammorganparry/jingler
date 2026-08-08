@@ -86,6 +86,7 @@ import {
   modelsCatalog,
   modelsList,
   mergeCanonicalOrchestrationCheckpoints,
+  mismatchedIssueProviderId,
   newSessionOrchestrator,
   orchestrationStagesCompleted,
   planAppendMessage,
@@ -114,6 +115,13 @@ import {
   withoutAttachmentData,
   workspaceRevertLines,
 } from "./rpc.js";
+
+describe("issue provider identity", () => {
+  it("accepts only data owned by the routed provider", () => {
+    expect(mismatchedIssueProviderId("linear", ["linear", "linear"])).toBeUndefined();
+    expect(mismatchedIssueProviderId("linear", ["linear", "github"])).toBe("github");
+  });
+});
 
 describe("relay acknowledgement lifetime", () => {
   it("keeps delivered feedback pending beyond the former timeout until the renderer acknowledges it", async () => {

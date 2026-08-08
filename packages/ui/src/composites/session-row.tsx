@@ -4,7 +4,7 @@ import { motion } from "motion/react"
 import { SPRING } from "../lib/motion.js"
 import { SESSION_DND_MIME } from "../app/split-layout.js"
 import type { SessionPrStatus, Session, SessionActivity } from "@jingler/core"
-import { activityLabel, displayStatusOf, persistentOf } from "@jingler/core"
+import { activityLabel, displayStatusOf, issueReferenceOf, persistentOf } from "@jingler/core"
 import {
   Archive,
   ArchiveRestore,
@@ -114,6 +114,7 @@ export function SessionRow({
   const display = displayStatusOf(activity, session.status)
   const status = displayStatusTone[display]
   const label = displayStatusLabel[display]
+  const linkedIssue = issueReferenceOf(session)
   // The detail the label no longer shows ("Running npm test -- auth") survives on
   // hover. It's genuinely useful when you want it, and it was the reason the
   // label used to be unbounded — a title attribute gives it a home that can't
@@ -402,8 +403,14 @@ export function SessionRow({
           <span className={cn("min-w-0 truncate", active ? "text-blue" : "text-muted-foreground")}>
             {session.branch}
           </span>
-          {session.issueNumber != null && (
-            <span className="flex-none text-green">#{session.issueNumber}</span>
+          {linkedIssue && (
+            <span
+              className="flex-none text-green"
+              aria-label={`Linked issue ${linkedIssue.identifier}`}
+              title={`${linkedIssue.identifier}: ${linkedIssue.title}`}
+            >
+              {linkedIssue.identifier}
+            </span>
           )}
           {session.prNumber !== null && (
             <span

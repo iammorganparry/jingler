@@ -11,7 +11,7 @@
  * authoritative answer is the next catalog emission from disk.
  */
 import { useCallback, useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PluginsSettingsProps } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
 import {
@@ -19,8 +19,10 @@ import {
   usePluginCatalog,
   usePluginErrors
 } from "./plugin-registry.js"
+import { resolvePluginIcon } from "./plugin-loader.js"
 
 const authSessionsKey = ["plugin-auth-sessions"] as const
+const pluginSettingsKey = (pluginId: string) => ["plugin-settings", pluginId] as const
 
 /**
  * The operator-facing sentence from a failed RPC.
@@ -74,10 +76,40 @@ export function usePlugins(): PluginsSettingsProps {
     }
   }
 
+  const reportingWithRejection = async <A>(run: () => Promise<A>): Promise<A> => {
+    setActionError(null)
+    try {
+      return await run()
+    } catch (cause) {
+      setActionError(reasonOf(cause))
+      throw cause
+    }
+  }
+
   const { data: authSessions = [] } = useQuery({
     queryKey: authSessionsKey,
     queryFn: () => rpc.pluginsAuthSessions()
   })
+
+  const plugins = catalog?.plugins ?? []
+  const settingQueries = useQueries({
+    queries: plugins.map((plugin) => ({
+      queryKey: pluginSettingsKey(plugin.manifest.id),
+      queryFn: () => rpc.pluginsSettingsGet(plugin.manifest.id)
+    }))
+  })
+  const settings = Object.fromEntries(
+    plugins.map((plugin, index) => [
+      plugin.manifest.id,
+      settingQueries[index]?.data
+    ])
+  )
+  const pluginIcons = Object.fromEntries(
+    plugins.map((plugin) => [
+      plugin.manifest.id,
+      resolvePluginIcon(plugin, plugin.manifest.contributes?.tabs?.[0]?.icon)
+    ])
+  )
 
   // The watcher re-emits the catalog whenever the directory changes, which
   // covers enable/disable (it rewrites config.json) and uninstall (it removes a
@@ -116,10 +148,47 @@ export function usePlugins(): PluginsSettingsProps {
     }
   })
 
+  const settingSet = useMutation({
+    mutationFn: ({
+      pluginId,
+      settingId,
+      value
+    }: {
+      pluginId: string
+      settingId: string
+      value: Parameters<typeof rpc.pluginsSettingSet>[2]
+    }) => rpc.pluginsSettingSet(pluginId, settingId, value),
+    onSuccess: (_result, { pluginId }) =>
+      queryClient.invalidateQueries({ queryKey: pluginSettingsKey(pluginId) })
+  })
+
+  const secretSet = useMutation({
+    mutationFn: ({
+      pluginId,
+      settingId,
+      value
+    }: {
+      pluginId: string
+      settingId: string
+      value: string
+    }) => rpc.pluginsSecretSet(pluginId, settingId, value),
+    onSuccess: (_result, { pluginId }) =>
+      queryClient.invalidateQueries({ queryKey: pluginSettingsKey(pluginId) })
+  })
+
+  const secretClear = useMutation({
+    mutationFn: ({ pluginId, settingId }: { pluginId: string; settingId: string }) =>
+      rpc.pluginsSecretClear(pluginId, settingId),
+    onSuccess: (_result, { pluginId }) =>
+      queryClient.invalidateQueries({ queryKey: pluginSettingsKey(pluginId) })
+  })
+
   return {
     catalog,
     loadErrors,
+    pluginIcons,
     authSessions,
+    settings,
     actionError,
     onDismissActionError: dismiss,
     onSetEnabled: (pluginId, enabled) =>
@@ -128,6 +197,16 @@ export function usePlugins(): PluginsSettingsProps {
     onInstallFromFolder: reporting(() => installFromPicker.mutateAsync()),
     onReveal: (pluginId) => reporting(() => rpc.pluginsReveal(pluginId))(),
     onRevokeAuth: (pluginId, providerId) =>
-      reporting(() => revokeAuth.mutateAsync({ pluginId, providerId }))()
+      reporting(() => revokeAuth.mutateAsync({ pluginId, providerId }))(),
+    onSetSetting: (pluginId, settingId, value) =>
+      reporting(() => settingSet.mutateAsync({ pluginId, settingId, value }))(),
+    onSetSecret: (pluginId, settingId, value) =>
+      reportingWithRejection(() =>
+        secretSet.mutateAsync({ pluginId, settingId, value })
+      ),
+    onClearSecret: (pluginId, settingId) =>
+      reportingWithRejection(() =>
+        secretClear.mutateAsync({ pluginId, settingId })
+      ).then(() => undefined)
   }
 }

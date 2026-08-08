@@ -153,6 +153,136 @@ describe("PluginManifest", () => {
     expect(Either.isRight(result)).toBe(true)
   })
 
+  it("accepts a secret setting with generated-form metadata", () => {
+    const result = decode({
+      ...HELLO,
+      contributes: {
+        ...HELLO.contributes,
+        settings: [
+          {
+            id: "hello.api-key",
+            label: "Personal API key",
+            type: "secret",
+            description: "Create a key in the provider's security settings.",
+            placeholder: "key_…",
+            validation: {
+              pattern: "^key_",
+              message: "The key must start with key_."
+            },
+            documentationUrl: "https://example.com/settings/api-keys"
+          }
+        ]
+      }
+    })
+
+    expect(Either.isRight(result)).toBe(true)
+    if (Either.isLeft(result)) return
+    expect(result.right.contributes?.settings?.[0]).toMatchObject({
+      type: "secret",
+      placeholder: "key_…",
+      validation: { pattern: "^key_" },
+      documentationUrl: "https://example.com/settings/api-keys"
+    })
+  })
+
+  it("accepts a stable issue-provider contribution", () => {
+    const decoded = Schema.decodeUnknownSync(PluginManifest)({
+      id: "linear",
+      name: "Linear",
+      version: "1.0.0",
+      contributes: {
+        issueProviders: [{ id: "linear", label: "Linear" }]
+      }
+    })
+    expect(decoded.contributes?.issueProviders).toStrictEqual([
+      { id: "linear", label: "Linear" }
+    ])
+  })
+
+  it("accepts provider-aware tab visibility with an unlinked state", () => {
+    const decoded = Schema.decodeUnknownSync(PluginManifest)({
+      ...HELLO,
+      contributes: {
+        tabs: [
+          {
+            id: "hello.greeting",
+            label: "Issue",
+            when: { issueProvider: "linear", includeUnlinked: true }
+          }
+        ]
+      }
+    })
+
+    expect(decoded.contributes?.tabs?.[0]?.when).toStrictEqual({
+      issueProvider: "linear",
+      includeUnlinked: true
+    })
+  })
+
+  it("accepts a plugin-relative monochrome SVG icon descriptor", () => {
+    const decoded = Schema.decodeUnknownSync(PluginManifest)({
+      ...HELLO,
+      contributes: {
+        tabs: [
+          {
+            id: "hello.greeting",
+            label: "Issue",
+            icon: { asset: "dist/assets/linear-mark.svg", monochrome: true }
+          }
+        ]
+      }
+    })
+
+    expect(decoded.contributes?.tabs?.[0]?.icon).toStrictEqual({
+      asset: "dist/assets/linear-mark.svg",
+      monochrome: true
+    })
+  })
+
+  it.each([
+    "https://example.com/linear.svg",
+    "/tmp/linear.svg",
+    "../linear.svg",
+    "dist/../../linear.svg",
+    "%2e%2e/linear.svg",
+    "dist/linear.png"
+  ])("rejects remote and escaping icon asset paths: %s", (asset) => {
+    expect(() =>
+      Schema.decodeUnknownSync(PluginManifest)({
+        ...HELLO,
+        contributes: {
+          tabs: [
+            {
+              id: "hello.greeting",
+              label: "Issue",
+              icon: { asset, monochrome: true }
+            }
+          ]
+        }
+      })
+    ).toThrow()
+  })
+
+  it("rejects an invalid setting validation pattern at manifest load time", () => {
+    const message = errorOf({
+      ...HELLO,
+      contributes: {
+        ...HELLO.contributes,
+        settings: [
+          {
+            id: "hello.api-key",
+            label: "Personal API key",
+            type: "secret",
+            validation: { pattern: "[" }
+          }
+        ]
+      }
+    })
+
+    expect(message).toContain("hello.api-key")
+    expect(message).toContain("invalid validation pattern")
+  })
+
   it("has no permission field that could grant blanket git or gh access", () => {
     // The whole point of the auth-provider model: coarse capability flags are
     // not expressible, so they cannot creep back in via an unknown-key passthrough.

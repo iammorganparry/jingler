@@ -12,6 +12,9 @@ import {
   GitHubSessionRelayGrantResponse,
   GitHubSessionRoute,
   GithubConfig,
+  IssueDetail,
+  IssueReference,
+  issueReferenceOf,
   persistentOf,
   Repo,
   Session,
@@ -363,12 +366,95 @@ describe("Session", () => {
     expect(roundTripped).toStrictEqual(withWorktree)
   })
 
+  it("round-trips a provider-neutral linked issue", () => {
+    const linkedIssue = Schema.decodeUnknownSync(IssueReference)({
+      providerId: "linear",
+      id: "issue-opaque-123",
+      identifier: "ENG-123",
+      url: "https://linear.app/acme/issue/ENG-123",
+      title: "Retry failed jobs",
+      labels: [{ name: "Bug", color: "ef4444" }]
+    })
+    const decoded = Schema.decodeUnknownSync(Session)({ ...base, linkedIssue })
+    expect(decoded.linkedIssue).toStrictEqual(linkedIssue)
+  })
+
+  it("adapts historical GitHub issue fields without eagerly rewriting the session", () => {
+    const legacy = Schema.decodeUnknownSync(Session)({
+      ...base,
+      issueNumber: 128,
+      issueUrl: "https://github.com/acme/widgets/issues/128",
+      issueTitle: "Retry failed jobs",
+      issueLabels: [{ name: "bug", color: "ef4444" }]
+    })
+
+    expect(legacy.linkedIssue).toBeUndefined()
+    expect(issueReferenceOf(legacy)).toStrictEqual({
+      providerId: "github",
+      id: "128",
+      identifier: "#128",
+      url: "https://github.com/acme/widgets/issues/128",
+      title: "Retry failed jobs",
+      labels: [{ name: "bug", color: "ef4444" }]
+    })
+    expect(legacy.linkedIssue).toBeUndefined()
+  })
+
+  it("prefers the durable provider-neutral link over historical aliases", () => {
+    const linkedIssue: IssueReference = {
+      providerId: "linear",
+      id: "opaque",
+      identifier: "ENG-123",
+      url: "https://linear.app/acme/issue/ENG-123",
+      title: "Retry failed jobs",
+      labels: []
+    }
+    expect(
+      issueReferenceOf({
+        linkedIssue,
+        issueNumber: 128,
+        issueUrl: "https://github.com/acme/widgets/issues/128",
+        issueTitle: "Old",
+        issueLabels: []
+      })
+    ).toBe(linkedIssue)
+  })
+
   it("rejects an unknown status", () => {
     expect(Either.isLeft(decode(Session, { ...base, status: "exploding" }))).toBe(true)
   })
 
   it("rejects an unknown cli kind", () => {
     expect(Either.isLeft(decode(Session, { ...base, cli: "copilot" }))).toBe(true)
+  })
+})
+
+describe("provider-neutral issue schemas", () => {
+  it("decodes normalized Linear issue detail without GitHub-only fields", () => {
+    const issue = Schema.decodeUnknownSync(IssueDetail)({
+      providerId: "linear",
+      id: "opaque-issue-id",
+      identifier: "ENG-123",
+      url: "https://linear.app/acme/issue/ENG-123",
+      title: "Retry failed jobs",
+      labels: [{ name: "Bug", color: "ef4444" }],
+      state: "open",
+      body: "Retries currently stop after one attempt.",
+      author: { id: "user-1", name: "Morgan", avatarUrl: null },
+      assignees: [],
+      updatedAt: "2026-08-08T10:00:00.000Z",
+      createdAt: "2026-08-07T10:00:00.000Z",
+      comments: [
+        {
+          id: "comment-1",
+          author: null,
+          body: "Imported comment",
+          createdAt: "2026-08-08T09:00:00.000Z"
+        }
+      ]
+    })
+    expect(issue.identifier).toBe("ENG-123")
+    expect("number" in issue).toBe(false)
   })
 })
 

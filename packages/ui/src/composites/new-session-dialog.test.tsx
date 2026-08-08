@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import type { NewSessionDialogProps } from "./new-session-dialog.js"
 import { NewSessionDialog } from "./new-session-dialog.js"
@@ -78,5 +78,43 @@ describe("NewSessionDialog workspace choice", () => {
         .getByRole("switch", { name: "Use isolated worktree" })
         .getAttribute("aria-checked")
     ).toBe("true")
+  })
+})
+
+describe("NewSessionDialog issue providers", () => {
+  it("selects Linear as the issue source", async () => {
+    const loadProviderIssues = vi.fn(async () => [])
+    render(
+      <NewSessionDialog
+        {...props}
+        issueProviders={[{ pluginId: "linear", id: "linear", label: "Linear" }]}
+        loadProviderIssues={loadProviderIssues}
+        onCreateFromIssue={async () => {}}
+      />
+    )
+
+    fireEvent.click(screen.getByText("From issue"))
+
+    await waitFor(() => expect(loadProviderIssues).toHaveBeenCalledWith(
+      "linear",
+      "/repos/widget",
+      { mine: false, search: "" }
+    ))
+  })
+
+  it("shows an actionable configuration error for an unconfigured provider", async () => {
+    render(
+      <NewSessionDialog
+        {...props}
+        issueProviders={[{ pluginId: "linear", id: "linear", label: "Linear" }]}
+        loadProviderIssues={async () => {
+          throw new Error("Configure the Linear API key in Settings → Plugins.")
+        }}
+        onCreateFromIssue={async () => {}}
+      />
+    )
+
+    fireEvent.click(screen.getByText("From issue"))
+    expect(await screen.findByText(/Configure the Linear API key/)).toBeDefined()
   })
 })

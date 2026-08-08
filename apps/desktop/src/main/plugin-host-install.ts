@@ -22,7 +22,13 @@ import {
   type HostProcess,
   type HostRequestHandler
 } from "@jingler/cli-adapters"
-import { pluginStorageDelete, pluginStorageGet, pluginStorageKeys, pluginStorageSet } from "./rpc.js"
+import {
+  pluginSecretGetForHost,
+  pluginStorageDelete,
+  pluginStorageGet,
+  pluginStorageKeys,
+  pluginStorageSet
+} from "./rpc.js"
 import { runtime as appRuntime } from "./runtime.js"
 
 /**
@@ -40,6 +46,7 @@ export const installPluginHost = (
     storageSet: (pluginId: string, key: string, value: unknown) => Promise<void>
     storageDelete: (pluginId: string, key: string) => Promise<void>
     storageKeys: (pluginId: string) => Promise<ReadonlyArray<string>>
+    getSecret: (pluginId: string, settingId: string) => Promise<string | null>
     defaultCwd: () => string | undefined
     getSession: (
       pluginId: string,
@@ -64,6 +71,8 @@ export const installPluginHost = (
       storageDelete: (pluginId, key) =>
         appRuntime.runPromise(pluginStorageDelete(pluginId, key)),
       storageKeys: (pluginId) => appRuntime.runPromise(pluginStorageKeys(pluginId)),
+      getSecret: (pluginId, settingId) =>
+        appRuntime.runPromise(pluginSecretGetForHost(pluginId, settingId)),
       // No default. `exec` with no `cwd` runs in the host process's own
       // directory, and the SDK now says so.
       //

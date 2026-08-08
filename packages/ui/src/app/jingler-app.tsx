@@ -14,6 +14,7 @@ import type {
   OrchestratorPreference,
   DiffStat,
   IssueSummary,
+  IssueProviderDescriptor,
   ModelOption,
   OpencodeProviderInfo,
   SessionPrStatus,
@@ -347,7 +348,15 @@ export interface JinglerAppProps {
     repoPath: string,
     opts: { mine: boolean; search: string }
   ) => Promise<ReadonlyArray<IssueSummary>>
-  /** Create a session from a GitHub issue (forks a fresh branch, links it) and return it. */
+  /** Enabled plugin-backed issue providers shown beside the built-in GitHub provider. */
+  issueProviders?: ReadonlyArray<IssueProviderDescriptor>
+  /** List normalized issues through a plugin-backed provider. */
+  loadProviderIssues?: (
+    providerId: string,
+    repoPath: string,
+    opts: { mine: boolean; search: string }
+  ) => Promise<ReadonlyArray<IssueSummary>>
+  /** Create a session from a normalized issue (forks a fresh branch, links it) and return it. */
   onCreateSessionFromIssue?: (input: CreateSessionFromIssueInput) => Promise<Session>
   /**
    * Commands contributed by loaded plugins, for the palette.
@@ -467,6 +476,8 @@ export function JinglerApp({
   loadPrs,
   onCreateSessionFromPr,
   loadIssues,
+  issueProviders,
+  loadProviderIssues,
   onCreateSessionFromIssue,
   version,
   memory
@@ -1142,6 +1153,8 @@ export function JinglerApp({
           loadPrs={loadPrs}
           onCreateFromPr={onCreateSessionFromPr ? handleCreateFromPr : undefined}
           loadIssues={loadIssues}
+          issueProviders={issueProviders}
+          loadProviderIssues={loadProviderIssues}
           onCreateFromIssue={onCreateSessionFromIssue ? handleCreateFromIssue : undefined}
         />
       )}

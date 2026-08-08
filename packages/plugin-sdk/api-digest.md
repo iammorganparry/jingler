@@ -219,6 +219,7 @@ interface ManifestInput {
     readonly tabs?: readonly TabDeclaration[]
     readonly panes?: readonly PaneDeclaration[]
     readonly commands?: readonly CommandDeclaration[]
+    readonly settings?: readonly SettingDeclaration[]
   }
 }
 ```
@@ -258,6 +259,26 @@ interface CommandDeclaration {
 }
 ```
 
+### `SettingDeclaration`
+
+```ts
+interface SettingDeclaration {
+  readonly id: string
+  readonly label: string
+  readonly type: "string" | "number" | "boolean" | "enum" | "secret"
+  readonly description?: string
+  readonly placeholder?: string
+  readonly validation?: { readonly pattern: string; readonly message?: string }
+  readonly documentationUrl?: string
+  readonly default?: unknown
+  readonly options?: readonly string[]
+}
+```
+
+Jingler generates the control in Settings › Plugins. A `secret` value is never
+returned to the renderer: the renderer receives configured state only, while the
+owning host reads it through `ctx.settings.getSecret`.
+
 ### `ActivationEvent`
 
 ```ts
@@ -288,6 +309,7 @@ type TabVisibility = "always" | "hasPr" | "hasWorktree" | "hasIssue"
 type TabIdsOf<M>        // union of tab ids a manifest declares
 type PaneIdsOf<M>       // union of dock-pane ids a manifest declares
 type CommandIdsOf<M>    // union of command ids a manifest declares
+type SettingIdsOf<M>    // union of generated-setting ids a manifest declares
 type IdOf<M>            // the plugin's own id, as a literal
 type ContributionId<M>  // `${IdOf<M>}.${string}`
 type Plugin<M>          // { manifest, views, panes }
@@ -313,6 +335,7 @@ Export `activate` from your `main` entry. Called when an activation event fires.
 interface HostContext {
   readonly pluginId: string
   readonly storage: PluginStorage
+  readonly settings: HostSettings
   readonly authentication: Authentication
   readonly commands: HostCommands
   readonly events: HostEvents
@@ -332,6 +355,20 @@ order, on deactivate.
 There is no `ctx.http`. The host half is Node — use global `fetch`. `exec` is
 preferred over `node:child_process` so the host can observe it and, in an
 untrusted repo, refuse it.
+
+### `HostSettings`
+
+```ts
+interface HostSettings {
+  getSecret(settingId: string): Promise<string | undefined>
+}
+```
+
+Read-only and scoped to the owning plugin. The operator writes secrets through
+the generated Settings control; there is no renderer read API, enumeration API,
+or host setter. `undefined` means it has not been configured. Keep the returned
+value in the host call that needs it—never return it from a command or copy it to
+ordinary plugin storage.
 
 ### `Authentication`
 

@@ -36,9 +36,28 @@ import type { SessionSnapshot } from "./common.js"
 // ── What a manifest looks like, in TypeScript ────────────────────────────────
 
 /** When a tab should appear. Mirrors `TabVisibility` in `@jingler/core`. */
-export type TabVisibility = "always" | "hasPr" | "hasWorktree" | "hasIssue"
+export type TabVisibility =
+  | "always"
+  | "hasPr"
+  | "hasWorktree"
+  | "hasIssue"
+  | {
+      /** Stable provider id persisted in the linked issue reference. */
+      readonly issueProvider: string
+      /** Show while unlinked so the tab can offer create/link controls. */
+      readonly includeUnlinked?: boolean
+    }
 
 /** One tab a plugin adds to the session pane. */
+export type PluginIcon =
+  | string
+  | {
+      /** Plugin-relative SVG path, e.g. `dist/assets/linear-mark.svg`. */
+      readonly asset: string
+      /** Artwork is rendered as a current-colour mask. */
+      readonly monochrome: true
+    }
+
 export interface TabDeclaration {
   /**
    * Namespaced `<pluginId>.<local>`, e.g. `linear.issues`.
@@ -50,8 +69,8 @@ export interface TabDeclaration {
   readonly id: string
   /** The tab bar label, e.g. `"Issues"`. */
   readonly label: string
-  /** A lucide icon name, e.g. `"CircleDot"`. Unknown names fall back to a box. */
-  readonly icon?: string
+  /** A lucide name or plugin-relative monochrome SVG. Invalid assets fall back. */
+  readonly icon?: PluginIcon
   /** Lower sorts earlier. Built-ins occupy 0–99; plugins default to 100. */
   readonly order?: number
   /** Which sessions get this tab. Defaults to `"always"`. */
@@ -73,6 +92,32 @@ export interface PaneDeclaration {
   readonly icon?: string
   readonly slot: "right" | "bottom"
   readonly defaultSize?: number
+}
+
+/** Validation metadata for a generated text or secret input. */
+export interface SettingValidationDeclaration {
+  readonly pattern: string
+  readonly message?: string
+}
+
+/** One generated control in Settings › Plugins. */
+export interface SettingDeclaration {
+  readonly id: string
+  readonly label: string
+  readonly type: "string" | "number" | "boolean" | "enum" | "secret"
+  readonly description?: string
+  readonly placeholder?: string
+  readonly validation?: SettingValidationDeclaration
+  readonly documentationUrl?: string
+  readonly default?: unknown
+  readonly options?: readonly string[]
+}
+
+/** One supervised issue provider implemented by the plugin's host half. */
+export interface IssueProviderDeclaration {
+  /** Bare stable id persisted in linked sessions, e.g. `linear`. */
+  readonly id: string
+  readonly label: string
 }
 
 /**
@@ -118,6 +163,8 @@ export interface ManifestInput {
     readonly tabs?: readonly TabDeclaration[]
     readonly panes?: readonly PaneDeclaration[]
     readonly commands?: readonly CommandDeclaration[]
+    readonly settings?: readonly SettingDeclaration[]
+    readonly issueProviders?: readonly IssueProviderDeclaration[]
   }
 }
 
@@ -150,6 +197,15 @@ export type CommandIdsOf<M> = M extends {
     : never
   : never
 
+/** The generated-setting ids a manifest declares, as a union of string literals. */
+export type SettingIdsOf<M> = M extends {
+  contributes?: { settings?: infer S }
+}
+  ? S extends readonly { readonly id: infer Id }[]
+    ? Id & string
+    : never
+  : never
+
 /** A plugin's own id, as a literal. */
 export type IdOf<M> = M extends { readonly id: infer Id extends string } ? Id : never
 
@@ -172,9 +228,9 @@ export type ContributionId<M> = `${IdOf<M>}.${string}`
  * text contains the required prefix.
  */
 type NamespaceCheck<M> =
-  [TabIdsOf<M> | PaneIdsOf<M> | CommandIdsOf<M>] extends [never]
+  [TabIdsOf<M> | PaneIdsOf<M> | CommandIdsOf<M> | SettingIdsOf<M>] extends [never]
     ? unknown
-    : TabIdsOf<M> | PaneIdsOf<M> | CommandIdsOf<M> extends ContributionId<M>
+    : TabIdsOf<M> | PaneIdsOf<M> | CommandIdsOf<M> | SettingIdsOf<M> extends ContributionId<M>
       ? unknown
       : {
           readonly __jingler_error: `every contribution id must start with "${IdOf<M>}."`

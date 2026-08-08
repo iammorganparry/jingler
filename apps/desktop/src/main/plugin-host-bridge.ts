@@ -68,6 +68,8 @@ export const makeHostRequestHandler = (deps: {
   storageSet: (pluginId: string, key: string, value: unknown) => Promise<void>
   storageDelete: (pluginId: string, key: string) => Promise<void>
   storageKeys: (pluginId: string) => Promise<ReadonlyArray<string>>
+  /** Resolve only the requesting plugin's declared secret setting. */
+  getSecret: (pluginId: string, settingId: string) => Promise<string | null>
   /** The worktree an `exec` with no `cwd` should run in. */
   defaultCwd: () => string | undefined
   /** Resolve a credential grant, prompting the operator if there is none yet. */
@@ -104,6 +106,15 @@ export const makeHostRequestHandler = (deps: {
       }
       case "storage.keys":
         return { ok: true, value: await deps.storageKeys(pluginId) }
+
+      case "settings.getSecret": {
+        const { settingId } = payload as { settingId: string }
+        try {
+          return { ok: true, value: await deps.getSecret(pluginId, settingId) }
+        } catch (cause) {
+          return refuse(cause instanceof Error ? cause.message : String(cause))
+        }
+      }
 
       case "exec": {
         const request = payload as ExecRequest

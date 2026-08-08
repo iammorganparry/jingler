@@ -20,11 +20,12 @@ import {
   type CommandIdsOf,
   type ContributionId,
   type IdOf,
+  type SettingIdsOf,
   type TabIdsOf,
   type TabProps
 } from "./define.js"
-import type { HostContext } from "./host.js"
-import type { PluginStorage, SessionSnapshot } from "./common.js"
+import type { HostContext, IssueProvider } from "./host.js"
+import type { Disposable, IssueReference, PluginStorage, SessionSnapshot } from "./common.js"
 
 const View: ComponentType<TabProps> = () => null
 
@@ -38,10 +39,23 @@ const manifest = defineManifest({
   activationEvents: ["onTab:linear.issues"],
   contributes: {
     tabs: [
-      { id: "linear.issues", label: "Issues", icon: "CircleDot" },
+      {
+        id: "linear.issues",
+        label: "Issues",
+        icon: { asset: "dist/assets/linear-mark.svg", monochrome: true }
+      },
       { id: "linear.cycles", label: "Cycles" }
     ],
-    commands: [{ id: "linear.sync", title: "Sync Linear" }]
+    commands: [{ id: "linear.sync", title: "Sync Linear" }],
+    settings: [
+      {
+        id: "linear.api-key",
+        label: "Personal API key",
+        type: "secret",
+        placeholder: "lin_api_…"
+      }
+    ],
+    issueProviders: [{ id: "linear", label: "Linear" }]
   }
 })
 
@@ -50,6 +64,7 @@ const manifest = defineManifest({
 expectTypeOf<IdOf<typeof manifest>>().toEqualTypeOf<"linear">()
 expectTypeOf<TabIdsOf<typeof manifest>>().toEqualTypeOf<"linear.issues" | "linear.cycles">()
 expectTypeOf<CommandIdsOf<typeof manifest>>().toEqualTypeOf<"linear.sync">()
+expectTypeOf<SettingIdsOf<typeof manifest>>().toEqualTypeOf<"linear.api-key">()
 expectTypeOf<ContributionId<typeof manifest>>().toEqualTypeOf<`linear.${string}`>()
 
 // Not `string`. If this ever passes, autocomplete is dead and so is every check.
@@ -121,6 +136,17 @@ defineManifest({
   contributes: { commands: [{ id: "other.sync", title: "Sync" }] }
 })
 
+// Secure settings are contribution ids too; another plugin's namespace is not legal.
+// @ts-expect-error setting ids must start with "linear."
+defineManifest({
+  id: "linear",
+  name: "Linear",
+  version: "1.0.0",
+  contributes: {
+    settings: [{ id: "other.api-key", label: "API key", type: "secret" }]
+  }
+})
+
 // A plugin contributing nothing is legal — a host-only plugin has no views.
 const hostOnly = defineManifest({
   id: "watcher",
@@ -154,10 +180,17 @@ expectTypeOf<TabProps["pluginId"]>().toEqualTypeOf<string>()
 // `SessionSnapshot` is the deliberately small subset a plugin may couple to. If
 // Jingler's internal `Session` ever leaks in here, this catches it.
 expectTypeOf<SessionSnapshot["prNumber"]>().toEqualTypeOf<number | null>()
+expectTypeOf<SessionSnapshot["linkedIssue"]>().toEqualTypeOf<IssueReference | undefined>()
 expectTypeOf<SessionSnapshot>().not.toBeAny()
 
 expectTypeOf<HostContext>().not.toBeAny()
 expectTypeOf<HostContext["storage"]>().toEqualTypeOf<PluginStorage>()
+expectTypeOf<HostContext["settings"]["getSecret"]>().toEqualTypeOf<
+  (settingId: string) => Promise<string | undefined>
+>()
+expectTypeOf<HostContext["issues"]["registerProvider"]>().toEqualTypeOf<
+  (provider: IssueProvider) => Disposable
+>()
 
 // Storage reads are typed by the caller's expectation, and async on both sides.
 expectTypeOf<PluginStorage["get"]>().returns.resolves.not.toBeAny()

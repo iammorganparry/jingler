@@ -4,6 +4,7 @@ import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
+  IssueProviderDescriptor,
   IssueSummary,
   PrSummary,
   Repo
@@ -53,6 +54,13 @@ export interface NewSessionDeps {
     repoPath: string,
     opts: { mine: boolean; search: string }
   ) => Promise<ReadonlyArray<IssueSummary>>
+  /** Enabled plugin-backed providers available beside the built-in GitHub path. */
+  issueProviders?: ReadonlyArray<IssueProviderDescriptor>
+  loadProviderIssues?: (
+    providerId: string,
+    repoPath: string,
+    opts: { mine: boolean; search: string }
+  ) => Promise<ReadonlyArray<IssueSummary>>
   onCreate: (input: CreateSessionInput) => Promise<void>
   onCreateFromPr?: (input: CreateSessionFromPrInput) => Promise<void>
   onCreateFromIssue?: (input: CreateSessionFromIssueInput) => Promise<void>
@@ -77,6 +85,7 @@ export interface NewSessionContext {
   mine: boolean
   prs: ReadonlyArray<PrSummary>
   selectedPr: PrSummary | null
+  issueProviderId: string
   issues: ReadonlyArray<IssueSummary>
   selectedIssue: IssueSummary | null
   /** Issue-mode two-step: pick an issue (`list`) then prefill + confirm (`detail`). */
@@ -97,6 +106,7 @@ export type NewSessionEvent =
   | { type: "SET_SEARCH"; search: string }
   | { type: "SET_MINE"; mine: boolean }
   | { type: "SELECT_PR"; pr: PrSummary }
+  | { type: "SET_ISSUE_PROVIDER"; providerId: string }
   | { type: "SELECT_ISSUE"; issue: IssueSummary }
   | { type: "ADVANCE" }
   | { type: "BACK" }
@@ -173,11 +183,23 @@ export const newSessionMachine = setup({
       ({
         input
       }: {
-        input: { fn: NewSessionDeps["loadIssues"]; repoPath: string; mine: boolean; search: string }
+        input: {
+          github: NewSessionDeps["loadIssues"]
+          plugin: NewSessionDeps["loadProviderIssues"]
+          providerId: string
+          repoPath: string
+          mine: boolean
+          search: string
+        }
       }) =>
-        input.fn && input.repoPath
-          ? input.fn(input.repoPath, { mine: input.mine, search: input.search })
-          : Promise.resolve([])
+        input.repoPath && input.providerId === "github" && input.github
+          ? input.github(input.repoPath, { mine: input.mine, search: input.search })
+          : input.repoPath && input.providerId && input.plugin
+            ? input.plugin(input.providerId, input.repoPath, {
+                mine: input.mine,
+                search: input.search
+              })
+            : Promise.resolve([])
     ),
     submit: fromPromise(({ input }: { input: { run: () => Promise<void> } }) => input.run())
   },
@@ -205,6 +227,8 @@ export const newSessionMachine = setup({
         mine: false,
         prs: [] as ReadonlyArray<PrSummary>,
         selectedPr: null,
+        issueProviderId:
+          (deps.loadIssues ? "github" : deps.issueProviders?.[0]?.id) ?? "",
         issues: [] as ReadonlyArray<IssueSummary>,
         selectedIssue: null,
         issueStep: "list" as const,
@@ -223,9 +247,17 @@ export const newSessionMachine = setup({
     }),
     clearPrs: assign({ prs: [] }),
     applyIssues: assign({
-      issues: ({ event }) => (event as unknown as { output: ReadonlyArray<IssueSummary> }).output
+      issues: ({ event }) => (event as unknown as { output: ReadonlyArray<IssueSummary> }).output,
+      error: null
     }),
-    clearIssues: assign({ issues: [] }),
+    setIssueLoadError: assign({
+      issues: [],
+      error: ({ event }) =>
+        errorText(
+          (event as unknown as { error: unknown }).error,
+          "This issue provider could not load issues. Check its configuration and retry."
+        )
+    }),
     setError: assign({
       error: ({ event }) =>
         errorText((event as unknown as { error: unknown }).error, "Failed to create session.")
@@ -246,6 +278,7 @@ export const newSessionMachine = setup({
     mine: false,
     prs: [],
     selectedPr: null,
+    issueProviderId: "",
     issues: [],
     selectedIssue: null,
     issueStep: "list",
@@ -296,15 +329,11 @@ export const newSessionMachine = setup({
                     repoName: repo.name,
                     cli: context.cli,
                     baseBranch: context.base,
-                    issue: {
-                      number: issue.number,
-                      title: issue.title,
-                      url: issue.url,
-                      body: issue.body,
-                      labels: issue.labels
-                    },
+                    issue,
                     task: context.task,
-                    automations: context.automations
+                    ...(issue.providerId === "github"
+                      ? { automations: context.automations }
+                      : {})
                   })
                 }
                 const title = context.title.trim()
@@ -373,13 +402,15 @@ export const newSessionMachine = setup({
           invoke: {
             src: "loadIssues",
             input: ({ context }) => ({
-              fn: context.getDeps().loadIssues,
+              github: context.getDeps().loadIssues,
+              plugin: context.getDeps().loadProviderIssues,
+              providerId: context.issueProviderId,
               repoPath: context.repoPath,
               mine: context.mine,
               search: context.search
             }),
             onDone: { target: "idle", actions: "applyIssues" },
-            onError: { target: "idle", actions: "clearIssues" }
+            onError: { target: "idle", actions: "setIssueLoadError" }
           }
         }
       }
@@ -440,6 +471,18 @@ export const newSessionMachine = setup({
       ]
     },
     SELECT_PR: { actions: assign({ selectedPr: ({ event }) => event.pr }) },
+    SET_ISSUE_PROVIDER: {
+      actions: [
+        assign({
+          issueProviderId: ({ event }) => event.providerId,
+          issues: [],
+          selectedIssue: null,
+          issueStep: "list",
+          error: null
+        }),
+        raise({ type: "RELOAD_ISSUES" })
+      ]
+    },
     SELECT_ISSUE: { actions: assign({ selectedIssue: ({ event }) => event.issue }) },
     // Advance to the prefill/automations step and seed the editable task.
     ADVANCE: {
