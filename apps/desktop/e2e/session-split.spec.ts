@@ -229,6 +229,9 @@ test("a session in ANOTHER group moves into this split rather than duplicating",
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
+  // Three panes require enough room for three minimum pane widths after the
+  // sidebar. Make that geometry explicit instead of relying on fixture width.
+  await window.setViewportSize({ width: 1600, height: 900 })
   await expect(sessionRow(window, "Alpha session")).toBeVisible()
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
@@ -415,6 +418,7 @@ test("Separate all tabs flies every pane out to its own row", async ({ launchApp
 
 test("the split and its sessions survive a real app restart", async ({ launchApp }) => {
   const first = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
+  await first.window.setViewportSize({ width: 1600, height: 900 })
   await expect(sessionRow(first.window, "Alpha session")).toBeVisible()
 
   await dragTo(first.window, "session-row-s_beta", "split-pane-0", "after")

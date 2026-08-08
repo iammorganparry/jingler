@@ -197,11 +197,18 @@ export const appMachine = setup({
             )
           }))
         },
-        // Replace a session with its updated record (archive / restore).
+        // Upsert a session written outside this machine. Most callers replace an
+        // existing record, while cross-environment continuation publishes a new
+        // session through the same one-way update channel.
         SESSION_UPDATED: {
-          actions: assign(({ context, event }) => ({
-            sessions: context.sessions.map((s) => (s.id === event.session.id ? event.session : s))
-          }))
+          actions: assign(({ context, event }) => {
+            const exists = context.sessions.some((session) => session.id === event.session.id)
+            return {
+              sessions: exists
+                ? context.sessions.map((session) => session.id === event.session.id ? event.session : session)
+                : [...context.sessions, event.session]
+            }
+          })
         },
         // Drop a permanently-deleted session from the list.
         SESSION_DELETED: {

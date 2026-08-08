@@ -171,6 +171,40 @@ describe("AssetBrowser", () => {
     expect(screen.getByTestId("native-available").textContent).toBe("true")
   })
 
+  it("keeps the roomy repository tree in a full-height flex column", async () => {
+    const observers: Array<(entries: unknown[]) => void> = []
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: (entries: unknown[]) => void) {
+          observers.push(callback)
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    )
+    render(
+      <AssetBrowser
+        sessionId="s-roomy"
+        entries={[{ path: "src/app.ts", status: "clean" }]}
+        selectedPath={null}
+        onSelectPath={() => {}}
+        renderCanvas={() => <div>canvas</div>}
+      />
+    )
+
+    for (const observer of observers) {
+      observer([{ borderBoxSize: [{ inlineSize: 700 }], contentRect: { width: 700 } }])
+    }
+
+    const repository = await screen.findByRole("complementary", {
+      name: "Repository browser"
+    })
+    expect(repository.className).toContain("flex")
+    expect(repository.className).toContain("flex-col")
+  })
+
   it("uses a focusable sheet when the canvas cannot keep a readable width", async () => {
     const observers: Array<(entries: unknown[]) => void> = []
     vi.stubGlobal(

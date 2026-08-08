@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs"
+import { createHash } from "node:crypto"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
@@ -62,13 +63,17 @@ describe("renderer CSP", () => {
     expect(directive("img-src")).toContain("blob:")
   })
 
-  it("keeps script-src to 'self' plus the local plugin scheme, and nothing else", () => {
+  it("pins the import map and otherwise keeps script-src local", () => {
     // Plugin UI is ES modules the renderer imports, so `script-src` had to give
     // exactly one inch: the `jingler-plugin:` scheme, which the main process
     // serves ONLY from `~/jingler/plugins`. Pinned as an exact string so that
     // widening it to a remote origin — the one thing an agent harness must
     // never do — cannot happen without deleting this assertion first.
-    expect(directive("script-src")).toBe("script-src 'self' jingler-plugin:")
+    const importmap = /<script type="importmap">([\s\S]*?)<\/script>/.exec(html)?.[1] ?? ""
+    const importmapHash = createHash("sha256").update(importmap).digest("base64")
+    expect(directive("script-src")).toBe(
+      `script-src 'self' 'sha256-${importmapHash}' jingler-plugin:`
+    )
     expect(directive("default-src")).toBe("default-src 'self'")
   })
 

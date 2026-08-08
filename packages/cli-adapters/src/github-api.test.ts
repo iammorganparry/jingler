@@ -271,6 +271,65 @@ describe("GitHubApi pagination and large pull requests", () => {
 })
 
 describe("GitHubApi installation permission scopes", () => {
+  it("lists pull requests by canonical slug without reading a remote device path", async () => {
+    const remoteUrl = vi.fn(async () => {
+      throw new Error("desktop must not inspect the remote path")
+    })
+    const { client } = makeClient(
+      (request) => {
+        if (pathIs(request, "/repos/acme/widget")) return json(repository)
+        if (pathIs(request, "/repos/acme/widget/pulls")) {
+          return json([{ number: 7, title: "Remote PR", body: "", user: { login: "octocat" }, head: { ref: "feature" }, base: { ref: "main" } }])
+        }
+        throw new Error(`unexpected ${request.method} ${request.url}`)
+      },
+      { remoteUrl }
+    )
+
+    await expect(client.listPrsBySlug("acme/widget", { mine: false, search: "" }))
+      .resolves.toEqual([expect.objectContaining({ number: 7, title: "Remote PR" })])
+    expect(remoteUrl).not.toHaveBeenCalled()
+  })
+
+  it("creates and updates a remote pull request by slug without reading a device path", async () => {
+    const remoteUrl = vi.fn(async () => {
+      throw new Error("desktop must not inspect the remote path")
+    })
+    const { client, seen } = makeClient(
+      (request) => {
+        if (pathIs(request, "/repos/acme/widget")) return json(repository)
+        if (pathIs(request, "/repos/acme/widget/pulls") && request.method === "POST") {
+          return json({ number: 91 })
+        }
+        if (pathIs(request, "/repos/acme/widget/pulls/91") && request.method === "PATCH") {
+          return json({ number: 91 })
+        }
+        throw new Error(`unexpected ${request.method} ${request.url}`)
+      },
+      { remoteUrl }
+    )
+
+    await expect(client.prCreateBySlug("acme/widget", "feat/device", {
+      title: "Remote title",
+      body: "Remote body",
+      base: "main",
+      draft: false
+    })).resolves.toBe(91)
+    await client.prUpdateBySlug("acme/widget", 91, {
+      title: "Updated remote title",
+      body: "Updated remote body"
+    })
+
+    expect(remoteUrl).not.toHaveBeenCalled()
+    expect(seen.find((request) => request.method === "POST")?.body).toMatchObject({
+      head: "acme:feat/device",
+      base: "main"
+    })
+    expect(seen.find((request) => request.method === "PATCH")?.body).toMatchObject({
+      title: "Updated remote title"
+    })
+  })
+
   it("uses connection identity for mine filters and requests endpoint-specific permissions", async () => {
     const { client, seen, credentialRequests } = makeClient((request) => {
       if (pathIs(request, "/repos/acme/widget")) return json(repository)

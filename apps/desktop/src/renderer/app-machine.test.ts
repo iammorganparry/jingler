@@ -27,6 +27,41 @@ const unconfigured = () =>
   })
 
 describe("appMachine first-run coordination", () => {
+  it("adds a newly-published continuation session to the ready session list", async () => {
+    const configured = appMachine.provide({
+      actors: {
+        initialLoad: fromPromise<InitialData>(async () => ({
+          configured: true,
+          clis: [],
+          repos: [],
+          sessions: []
+        }))
+      }
+    })
+    const actor = createActor(configured).start()
+    await waitFor(actor, (snapshot) => snapshot.matches("ready"))
+    const continuation = {
+      id: "session-continuation",
+      repo: "widget",
+      branch: "main",
+      title: "Local session continuation",
+      status: "idle",
+      cli: "codex",
+      diff: { added: 0, removed: 0 },
+      prNumber: null,
+      costUsd: 0,
+      tokens: 0,
+      updatedAt: "2026-08-08T08:00:00.000Z",
+      chats: [],
+      activeChatId: "chat-1"
+    } as Session
+
+    actor.send({ type: "SESSION_UPDATED", session: continuation })
+
+    expect(actor.getSnapshot().context.sessions).toContainEqual(continuation)
+    actor.stop()
+  })
+
   it("coordinates workspace selection, an explicit GitHub step, and skip", async () => {
     const actor = createActor(unconfigured()).start()
     await waitFor(actor, (snapshot) => snapshot.matches({ setup: { workspace: "idle" } }))

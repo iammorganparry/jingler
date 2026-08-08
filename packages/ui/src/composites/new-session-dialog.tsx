@@ -5,6 +5,8 @@ import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
+  Environment,
+  EnvironmentDiscovery,
   IssueProviderDescriptor,
   IssueSummary,
   PrSummary,
@@ -48,6 +50,8 @@ export interface NewSessionDialogProps {
   onClose: () => void
   /** Repos to choose from (already scanned). */
   repos: ReadonlyArray<Repo>
+  environments?: ReadonlyArray<Environment>
+  loadEnvironmentDiscovery?: (environmentId: string) => Promise<EnvironmentDiscovery>
   /** Absolute paths of starred repos — surfaced first, above "All repos". */
   starredRepos?: ReadonlyArray<string>
   /** Toggle a repo's starred state (by path); presence wires the row star button. */
@@ -62,7 +66,7 @@ export interface NewSessionDialogProps {
    */
   defaultCli?: CliKind | null
   /** Load the branches for a repo (to populate the base-branch select). */
-  loadBranches: (repoPath: string) => Promise<ReadonlyArray<string>>
+  loadBranches: (repoPath: string, environmentId?: string) => Promise<ReadonlyArray<string>>
   /** Submit — performs the real worktree creation upstream (throws on failure). */
   onCreate: (input: CreateSessionInput) => Promise<void>
   /**
@@ -121,6 +125,8 @@ export function NewSessionDialog({
   open,
   onClose,
   repos,
+  environments = [],
+  loadEnvironmentDiscovery,
   starredRepos = [],
   onToggleStar,
   defaultRepoPath,
@@ -157,6 +163,8 @@ export function NewSessionDialog({
   // tear down and rebuild it mid-edit.
   const deps: NewSessionDeps = {
     repos,
+    environments,
+    loadEnvironmentDiscovery,
     defaultRepoPath,
     availableClis,
     defaultCli,
@@ -177,6 +185,8 @@ export function NewSessionDialog({
   const [state, send] = useMachine(newSessionMachine, { input: { getDeps } })
   const {
     mode,
+    environmentId,
+    repos: selectableRepos,
     repoPath,
     title,
     cli,
@@ -293,9 +303,38 @@ export function NewSessionDialog({
 
             {/* Repo */}
             <div className="flex flex-col gap-1.5">
+              <Eyebrow>Environment</Eyebrow>
+              <Select value={environmentId ?? "__local__"} onValueChange={(value) => send({ type: "SET_ENVIRONMENT", environmentId: value === "__local__" ? null : value })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__local__">Local</SelectItem>
+                  {environments.map((environment) => {
+                    const switchesHarness =
+                      environment.state === "online" &&
+                      !environment.capabilities.harnesses.includes(cli as CliKind)
+                    return (
+                      <SelectItem
+                        key={environment.id}
+                        value={environment.id}
+                        disabled={environment.state !== "online"}
+                      >
+                        {environment.name}
+                        {environment.state !== "online"
+                          ? ` · ${environment.state}`
+                          : switchesHarness
+                            ? ` · uses ${environment.capabilities.harnesses[0] ?? "no supported harness"}`
+                            : ""}
+                      </SelectItem>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
               <Eyebrow>Repo</Eyebrow>
               <RepoPicker
-                repos={repos}
+                repos={selectableRepos}
                 value={repoPath}
                 onChange={(v) => send({ type: "SET_REPO", repoPath: v })}
                 starredRepos={starredRepos}
@@ -324,10 +363,11 @@ export function NewSessionDialog({
               the orchestrator is a per-turn mode on a session, not a harness to
               start one on.
             */}
-            {availableClis.length === 0 ? (
+            {cli === "" ? (
               <Callout tone="yellow">
-                No coding CLI found. Install Claude Code, Codex, Cursor or opencode, then
-                reopen this dialog.
+                {environmentId === null
+                  ? "No coding CLI found. Install Claude Code, Codex, Cursor or opencode, then reopen this dialog."
+                  : "This device has not reported a compatible coding CLI. Install one on the device, then refresh its capabilities."}
               </Callout>
             ) : (
               <span className="flex items-center gap-1.5 text-[10.5px] text-dim">
@@ -497,7 +537,7 @@ export function NewSessionDialog({
                       {selectedIssue.title}
                     </div>
                     <div className="font-mono text-[11px] text-dim">
-                      {repos.find((r) => r.path === repoPath)?.name}{" "}
+                      {selectableRepos.find((r) => r.path === repoPath)?.name}{" "}
                       <span className="text-muted-foreground">{selectedIssue.identifier}</span>
                     </div>
                   </div>

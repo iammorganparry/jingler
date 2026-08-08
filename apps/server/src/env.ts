@@ -1,3 +1,5 @@
+import { REMOTE_GRANT_MAX_TTL_SECONDS } from "@jingler/core"
+
 /**
  * Central environment access for the auth server. Read once at module load.
  *
@@ -130,6 +132,7 @@ export const loadEnv = (environment: Environment = process.env) => {
   const nodeEnv = optional(environment, "NODE_ENV", "development")
   const memoryEnabled = enabled(environment, "MEMORY_ENABLED")
   const githubAppEnabled = enabled(environment, "GITHUB_APP_ENABLED", false)
+  const deviceRelayEnabled = enabled(environment, "DEVICE_RELAY_ENABLED", false)
   const authSecret = secret(environment, "BETTER_AUTH_SECRET", "dev-insecure-secret-change-me")
   const cronSecret = secret(environment, "CRON_SECRET", "dev-cron-secret-change-me")
   if (nodeEnv === "production" && Buffer.byteLength(cronSecret, "utf8") < 32) {
@@ -161,6 +164,41 @@ export const loadEnv = (environment: Environment = process.env) => {
   if (githubAppConfigured) {
     httpUrl(githubAppRelayUrl, "GITHUB_APP_RELAY_URL", nodeEnv === "production")
     validateGitHubSecrets(environment)
+  }
+  const deviceRelayConfigured = featureConfiguration(
+    environment,
+    "DEVICE_RELAY",
+    deviceRelayEnabled,
+    ["DEVICE_RELAY_URL", "DEVICE_RELAY_SIGNING_SECRET"]
+  )
+  const deviceRelayUrl = prodUrl(
+    environment,
+    "DEVICE_RELAY_URL",
+    "http://localhost:9300",
+    { require: deviceRelayEnabled }
+  )
+  if (deviceRelayConfigured) {
+    httpUrl(deviceRelayUrl, "DEVICE_RELAY_URL", nodeEnv === "production")
+    const signingSecret = optional(environment, "DEVICE_RELAY_SIGNING_SECRET")
+    if (nodeEnv === "production" && Buffer.byteLength(signingSecret, "utf8") < 32) {
+      throw new Error("DEVICE_RELAY_SIGNING_SECRET must contain at least 32 bytes in production")
+    }
+    if (signingSecret === authSecret) {
+      throw new Error("DEVICE_RELAY_SIGNING_SECRET and BETTER_AUTH_SECRET must be distinct")
+    }
+  }
+  const deviceRelayGrantTtlSeconds = positiveNumber(
+    environment,
+    "DEVICE_RELAY_GRANT_TTL_SECONDS",
+    300
+  )
+  if (
+    !Number.isSafeInteger(deviceRelayGrantTtlSeconds) ||
+    deviceRelayGrantTtlSeconds > REMOTE_GRANT_MAX_TTL_SECONDS
+  ) {
+    throw new Error(
+      `DEVICE_RELAY_GRANT_TTL_SECONDS must be an integer no greater than ${REMOTE_GRANT_MAX_TTL_SECONDS}`
+    )
   }
   return {
     nodeEnv,
@@ -195,6 +233,16 @@ export const loadEnv = (environment: Environment = process.env) => {
       environment,
       "GITHUB_APP_TOKEN_ENCRYPTION_PREVIOUS_KEY"
     ),
+    /** Dedicated remote-device relay. Disabled until both deployment values are configured. */
+    deviceRelayEnabled,
+    deviceRelayConfigured,
+    deviceRelayUrl,
+    deviceRelaySigningSecret: optional(
+      environment,
+      "DEVICE_RELAY_SIGNING_SECRET",
+      "dev-device-relay-signing-secret-change-me"
+    ),
+    deviceRelayGrantTtlSeconds,
     googleClientId: optional(environment, "GOOGLE_CLIENT_ID"),
     googleClientSecret: optional(environment, "GOOGLE_CLIENT_SECRET"),
     resendApiKey: optional(environment, "RESEND_API_KEY"),

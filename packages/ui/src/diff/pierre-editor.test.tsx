@@ -39,6 +39,14 @@ interface MockCodeViewProps {
       readonly endSide: "additions" | "deletions"
     }
   } | null) => void
+  readonly options?: {
+    readonly layout?: {
+      readonly paddingTop: number
+      readonly paddingBottom: number
+      readonly gap: number
+    }
+  }
+  readonly renderCodeViewFooter?: () => ReactNode
 }
 
 const pierre = vi.hoisted<{
@@ -49,7 +57,11 @@ const pierre = vi.hoisted<{
 vi.mock("@pierre/diffs/react", () => ({
   CodeView: (props: MockCodeViewProps) => {
     pierre.codeViewProps = props
-    return <div data-testid="mock-pierre-code-view" />
+    return (
+      <div data-testid="mock-pierre-code-view">
+        {props.renderCodeViewFooter?.()}
+      </div>
+    )
   },
   File: () => null,
   FileDiff: () => null,
@@ -116,6 +128,14 @@ describe("PierreEditor", () => {
     expect(props).toBeDefined()
     if (props === undefined) return
     expect(props.items[0]).toMatchObject({ id: item.id, edit: true })
+    expect(props.options?.layout).toEqual({
+      paddingTop: 8,
+      paddingBottom: 0,
+      gap: 8
+    })
+    expect(
+      document.querySelector("[data-jingler-pierre-code-view-footer]")
+    ).not.toBeNull()
     expect(props.selectedLines).toEqual({
       id: item.id,
       range: { start: 2, end: 4, side: "additions", endSide: "additions" }

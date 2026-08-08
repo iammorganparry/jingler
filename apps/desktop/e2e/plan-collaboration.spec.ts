@@ -172,6 +172,26 @@ test("streaming plan collaboration survives promotion and reload", async ({
   await marker.click()
   const thread = window.locator("[data-plan-comment-thread]")
   const reply = thread.getByLabel("Reply to this thread…")
+  const reopen = thread.getByRole("button", { name: "Reopen" })
+  // The create-comment revision and this UI step race legitimately: if the
+  // scripted planner has already incorporated it, the routed annotation is
+  // resolved; otherwise its reply composer is still open. Normalize both valid
+  // states before exercising the distinct mention-delivery path.
+  await expect
+    .poll(async () => (await reopen.count()) + (await reply.count()))
+    .toBeGreaterThan(0)
+  if (await reopen.isVisible()) {
+    await reopen.click()
+    // A revision refresh may dismiss the anchored popover. If it does, reopen
+    // the marker on the new revision; otherwise continue in the updated thread.
+    await expect
+      .poll(async () =>
+        (await reply.count()) > 0 || (await thread.count()) === 0
+      )
+      .toBe(true)
+    if ((await thread.count()) === 0) await marker.click()
+  }
+  await expect(reply).toBeVisible()
   await reply.fill("Confirming with @")
   const mentions = window.getByRole("listbox", { name: "Mention an agent" })
   await expect(mentions.getByText("Sub-agent · Active")).toBeVisible()

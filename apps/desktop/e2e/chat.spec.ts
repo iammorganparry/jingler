@@ -119,9 +119,10 @@ test("streams a turn, pauses at a HITL gate, and resumes on approval", async ({ 
   // "Searching the web"), which made the two surfaces disagree and let the pill
   // grow with every tool call; that detail lives on the pill's hover title now.
   //
-  // Each is still scoped to its surface and matched exactly — an unscoped matcher
-  // would prove neither.
-  await expect(row.getByText("Needs Input", { exact: true })).toBeVisible()
+  // Each is still scoped to its surface — an unscoped matcher would prove
+  // neither. The sidebar appends a live age ("Needs Input now", then "1m"), so
+  // match the stable status prefix rather than freezing the timestamp.
+  await expect(row.getByText(/^Needs Input\b/)).toBeVisible()
   await expect(
     window.getByTestId("session-tab-bar").getByText("Needs Input", { exact: true })
   ).toBeVisible()
@@ -959,16 +960,16 @@ test("a merged PR badges its linked session but never archives it", async ({ lau
 
   // Waiting on the merge signal is what proves the PR-state poll actually ran —
   // without it, "was not archived" would pass trivially by asserting before the
-  // sweep. The row no longer spells the state out in text: the number is a badge
-  // (`⑂ #500`) and the state moved to the leading glyph, whose title is the only
-  // place the word "merged" still appears.
-  await expect(window.getByTitle("Pull request merged")).toBeVisible({ timeout: 15_000 })
-  await expect(window.getByText("⑂ #500")).toBeVisible()
+  // sweep. Scope the accessible state and number to this row so the assertion
+  // does not depend on whichever icon renders the badge.
+  const shippedRow = sessionRow(window, "Old shipped work")
+  await expect(shippedRow.getByTitle("Pull request merged")).toBeVisible({ timeout: 15_000 })
+  await expect(shippedRow.getByText("#500", { exact: true })).toBeVisible()
 
   // Still an ACTIVE session — which, now that archived is a hidden-by-default
   // filter, means simply: still listed. That is a stronger check than the old
   // "no Archived group" one, which would pass even if the session had vanished.
-  await expect(sessionRow(window, "Old shipped work")).toBeVisible()
+  await expect(shippedRow).toBeVisible()
 })
 
 /**
@@ -1006,8 +1007,8 @@ test("a running adversarial review reports its phase and appears in the agent ta
   // runs, so an unconditional toggle opens it whenever the last run left it shut.
   // `exact` also matters — otherwise this matches "Hide preview" too.
   // The control is in the window title bar now, not this pane's tab bar.
-  const preview = window.getByRole("button", { name: "Preview", exact: true })
-  if ((await preview.getAttribute("aria-pressed")) === "true") await preview.click()
+  const browser = window.getByRole("button", { name: "Browser", exact: true })
+  if ((await browser.getAttribute("aria-pressed")) === "true") await browser.click()
 
   await window.getByRole("button", { name: "Pull Request" }).click()
   const runButton = window.getByRole("button", { name: /Adversarial review/ })

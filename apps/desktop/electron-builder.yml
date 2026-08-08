@@ -57,6 +57,11 @@ extraResources:
       - jingler.plugin.json
       - dist/**
       - "!dist/**/*.map"
+  # Standalone Node 22 bundle copied to a paired host during SSH bootstrap.
+  # Keeping it outside app.asar lets Electron main stream the exact shipped
+  # bytes to the host without unpacking or executing them locally.
+  - from: ../device-agent/dist/jingler-device.mjs
+    to: device-agent/jingler-device.mjs
 
 # The one native module — @homebridge/node-pty-prebuilt-multiarch — must live
 # OUTSIDE the asar so its `.node` binary can be dlopen'd at runtime (asar-packed

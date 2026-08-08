@@ -8,7 +8,10 @@ import { Cause, Option, Runtime } from "effect"
 import { assign, fromPromise, raise, setup } from "xstate"
 
 export interface FileBrowserApi {
-  readonly list: (sessionId: string) => Promise<ReadonlyArray<AssetFileEntry>>
+  readonly list: (
+    sessionId: string,
+    worktreePath?: string
+  ) => Promise<ReadonlyArray<AssetFileEntry>>
   readonly diff: (sessionId: string) => Promise<string>
   readonly read: (sessionId: string, path: string) => Promise<AssetPayload>
   readonly write: (
@@ -21,6 +24,7 @@ export interface FileBrowserApi {
 
 export interface FileBrowserInput {
   readonly sessionId: string
+  readonly worktreePath?: string
 }
 
 export type FileBrowserPendingDiscard =
@@ -47,6 +51,7 @@ export type FileBrowserFailure =
 
 export interface FileBrowserContext {
   readonly sessionId: string
+  readonly worktreePath?: string
   readonly entries: ReadonlyArray<AssetFileEntry>
   readonly treeError: string | null
   readonly treeRefreshQueued: boolean
@@ -70,6 +75,7 @@ export interface FileBrowserContext {
 
 export type FileBrowserEvent =
   | { readonly type: "VIEW_ACTIVATED" }
+  | { readonly type: "SYNC_WORKTREE"; readonly worktreePath: string }
   | { readonly type: "OPEN"; readonly path: string }
   | { readonly type: "CLOSE"; readonly path: string }
   | { readonly type: "EDIT"; readonly text: string }
@@ -108,6 +114,12 @@ const withOpenedPath = (
     : [...entries, { path, status: "untracked" as const }].sort((a, b) =>
         a.path.localeCompare(b.path)
       )
+
+const refreshedEntries = (
+  current: ReadonlyArray<AssetFileEntry>,
+  next: ReadonlyArray<AssetFileEntry>
+): ReadonlyArray<AssetFileEntry> =>
+  next.length === 0 && current.length > 0 ? current : next
 
 const appendOpenPath = (paths: ReadonlyArray<string>, path: string): ReadonlyArray<string> =>
   paths.includes(path) ? paths : [...paths, path]
@@ -186,8 +198,12 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       input: {} as FileBrowserInput
     },
     actors: {
-      listFiles: fromPromise(({ input }: { input: { readonly sessionId: string } }) =>
-        api.list(input.sessionId)
+      listFiles: fromPromise(
+        ({
+          input
+        }: {
+          input: { readonly sessionId: string; readonly worktreePath?: string }
+        }) => api.list(input.sessionId, input.worktreePath)
       ),
       loadDiff: fromPromise(({ input }: { input: { readonly sessionId: string } }) =>
         api.diff(input.sessionId)
@@ -210,6 +226,11 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       )
     },
     actions: {
+      syncWorktree: assign(({ event }) =>
+        event.type === "SYNC_WORKTREE"
+          ? { worktreePath: event.worktreePath }
+          : {}
+      ),
       selectPath: assign(({ context, event }) =>
         event.type === "OPEN"
           ? {
@@ -333,6 +354,10 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       )
     },
     guards: {
+      worktreeChanged: ({ context, event }) =>
+        event.type === "SYNC_WORKTREE" &&
+        context.worktreePath !== event.worktreePath,
+      treeEmpty: ({ context }) => context.entries.length === 0,
       hasEditablePayload: ({ context }) =>
         context.payload !== null && isTextPayload(context.payload),
       editMatchesLoaded: ({ context, event }) =>
@@ -384,6 +409,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
     type: "parallel",
     context: ({ input }) => ({
       sessionId: input.sessionId,
+      ...(input.worktreePath === undefined ? {} : { worktreePath: input.worktreePath }),
       entries: [],
       treeError: null,
       treeRefreshQueued: false,
@@ -421,6 +447,12 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
         states: {
           loading: {
             on: {
+              SYNC_WORKTREE: {
+                guard: "worktreeChanged",
+                target: "loading",
+                reenter: true,
+                actions: "syncWorktree"
+              },
               VIEW_ACTIVATED: {
                 actions: assign({ treeRefreshQueued: true })
               },
@@ -437,7 +469,12 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
             },
             invoke: {
               src: "listFiles",
-              input: ({ context }) => ({ sessionId: context.sessionId }),
+              input: ({ context }) => ({
+                sessionId: context.sessionId,
+                ...(context.worktreePath === undefined
+                  ? {}
+                  : { worktreePath: context.worktreePath })
+              }),
               onDone: [
                 {
                   // A view activation can overlap the actor's speculative first
@@ -450,7 +487,8 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                   reenter: true,
                   actions: [
                     assign({
-                      entries: ({ event }) => event.output,
+                      entries: ({ context, event }) =>
+                        refreshedEntries(context.entries, event.output),
                       treeError: null,
                       treeRefreshQueued: false
                     }),
@@ -461,7 +499,8 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                   target: "ready",
                   actions: [
                     assign({
-                      entries: ({ event }) => event.output,
+                      entries: ({ context, event }) =>
+                        refreshedEntries(context.entries, event.output),
                       treeError: null,
                       treeRefreshQueued: false
                     }),
@@ -487,6 +526,14 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
           },
           ready: {
             on: {
+              SYNC_WORKTREE: [
+                {
+                  guard: "worktreeChanged",
+                  target: "loading",
+                  actions: "syncWorktree"
+                },
+                { guard: "treeEmpty", target: "loading" }
+              ],
               VIEW_ACTIVATED: "loading",
               REFRESH_TREE: "loading",
               RETRY_TREE: "loading"
@@ -494,6 +541,14 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
           },
           error: {
             on: {
+              SYNC_WORKTREE: [
+                {
+                  guard: "worktreeChanged",
+                  target: "loading",
+                  actions: "syncWorktree"
+                },
+                { guard: "treeEmpty", target: "loading" }
+              ],
               VIEW_ACTIVATED: "loading",
               REFRESH_TREE: "loading",
               RETRY_TREE: "loading"

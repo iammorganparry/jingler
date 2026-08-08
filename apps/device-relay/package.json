@@ -1,0 +1,31 @@
+{
+  "name": "@jingler/device-relay",
+  "version": "2.0.3",
+  "private": true,
+  "type": "module",
+  "description": "Per-user device identity coordination and encrypted remote-session tunnels.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "wrangler dev --port 9300",
+    "pretypecheck": "wrangler types",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "types": "wrangler types",
+    "deploy": "wrangler deploy",
+    "deploy:dry": "wrangler deploy --dry-run",
+    "clean": "rimraf dist .wrangler .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@jingler/core": "workspace:*",
+    "effect": "^3.21.4"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.20.3",
+    "@jingler/tsconfig": "workspace:*",
+    "rimraf": "^6.0.1",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.120.0"
+  }
+}

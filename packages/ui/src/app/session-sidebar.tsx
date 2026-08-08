@@ -1,5 +1,5 @@
 import * as React from "react"
-import type { SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@jingler/core"
+import type { Environment, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@jingler/core"
 import { displayStatusOf, persistentOf, UNTITLED_SESSION } from "@jingler/core"
 import {
   ChevronRight,
@@ -43,6 +43,7 @@ import {
 
 export interface SessionSidebarProps {
   sessions: ReadonlyArray<Session>
+  environments?: ReadonlyArray<Environment>
   activeSessionId: string | null
   /**
    * Which pane each on-screen session occupies, for the numbered badges. Absent
@@ -135,6 +136,7 @@ function SidebarBody({
   width,
   onResize,
   sessions,
+  environments = [],
   activeSessionId,
   slotBySession,
   splitGroups,
@@ -324,6 +326,7 @@ function SidebarBody({
       <SessionRow
         key={s.id}
         session={s}
+        environment={environments.find((environment) => environment.id === s.environmentId)}
         repoOwner={repoOwners?.[s.id]}
         activity={liveActivity?.[s.id]}
         prState={prStates?.[s.id]}

@@ -126,6 +126,7 @@ export function SessionSplit(props: SessionSplitProps) {
     return (
       <SessionPane
         session={session}
+        initialTab={activeTabs[session.id]}
         renderConversation={props.renderConversation}
         renderFiles={props.renderFiles}
         renderBrowser={props.renderBrowser}

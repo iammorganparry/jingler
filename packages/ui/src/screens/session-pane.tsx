@@ -87,6 +87,8 @@ export interface ConversationPaneCtx {
 export interface SessionPaneProps {
   /** The session this pane shows. A pane only exists for a filled grid slot. */
   session: Session
+  /** Restore the view this session last owned when its pane is mounted again. */
+  initialTab?: TabKey
   /**
    * Switch tabs from OUTSIDE the pane — today, the command palette.
    *
@@ -230,7 +232,7 @@ export function SessionPane(props: SessionPaneProps) {
 }
 
 function SessionPaneBody(props: SessionPaneProps) {
-  const [tab, setTab] = useState<TabKey>("conversation")
+  const [tab, setTab] = useState<TabKey>(() => props.initialTab ?? BUILTIN_TAB.conversation)
   // A pending deep link into Plan Review (set when the composer dock jumps to
   // a step). One-shot: Plan Review reports its own selection back and we drop it,
   // so a later manual pick isn't overridden by a stale target.
@@ -245,6 +247,10 @@ function SessionPaneBody(props: SessionPaneProps) {
     stepId: string
   } | null>(null)
   const [split, setSplit] = useState(false)
+  // Promotion into the canonical plan index trails the first renderable draft.
+  // Remember that draft per session so the split can open during that gap
+  // without making an unrelated session look as though it has a plan.
+  const [draftPlanSessionId, setDraftPlanSessionId] = useState<string | null>(null)
   const paneWidth = usePaneWidth().width
   const hasPlan = props.planSessions?.has(props.session.id) ?? false
   const supportsAuxiliarySplit =
@@ -278,7 +284,19 @@ function SessionPaneBody(props: SessionPaneProps) {
     },
     [props.session.id, supportsAuxiliarySplit, hasPlan]
   )
-  const presentPlanDraft = useCallback(() => openPlanReview(), [openPlanReview])
+  const presentPlanDraft = useCallback(() => {
+    setTarget(null)
+    setDraftPlanSessionId(props.session.id)
+    // A streamed draft is already a renderable plan even before promotion adds
+    // the session to `planSessions`. Requiring `hasPlan` here races the short
+    // composing phase and strands the promoted plan in the full-width tab.
+    if (supportsAuxiliarySplit) {
+      setTab(BUILTIN_TAB.conversation)
+      setSplit(true)
+    } else {
+      setTab(BUILTIN_TAB.plan)
+    }
+  }, [props.session.id, supportsAuxiliarySplit])
 
   // An outside request to switch tabs (the command palette). The nonce is the
   // trigger, not the id — see `selectTabRequest`'s docblock. No validation here:
@@ -440,7 +458,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     activeTab === BUILTIN_TAB.conversation &&
     // The plan tab is now always present; only offer the split once there is an
     // actual plan to show beside the conversation.
-    tabCtx.hasPlan &&
+    (tabCtx.hasPlan || draftPlanSessionId === active.id) &&
     supportsAuxiliarySplit
   const splitOpen = split && splitAvailable
   // What this session's agent is doing — drives the tab bar's pill.

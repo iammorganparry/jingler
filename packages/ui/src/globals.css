@@ -840,6 +840,7 @@
  * clipped React section around it—must own the vertical scroll position. */
 .jingler-pierre-code-view {
   overflow: auto;
+  background: var(--sb-sunken);
 }
 
 .jingler-pierre-file-tree {

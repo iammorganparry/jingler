@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import type {
   Attachment,
   CliKind,
+  Environment,
   PermissionMode,
   ProviderModels,
   ReasoningEffort,
@@ -22,8 +23,8 @@ import {
   FolderGit2,
   GitBranch,
   ImagePlus,
+  MousePointer2,
   Plus,
-  Radio,
   Sparkles,
   Square
 } from "lucide-react"
@@ -153,6 +154,10 @@ export function Composer({
   onStop,
   branch,
   repo,
+  environments = [],
+  environmentId,
+  environmentPending = false,
+  onSetEnvironment,
   cli,
   model,
   catalog = [],
@@ -193,6 +198,10 @@ export function Composer({
   branch?: string
   /** Repository name backing this session — shown at the composer's bottom-left. */
   repo?: string
+  environments?: ReadonlyArray<Environment>
+  environmentId?: string
+  environmentPending?: boolean
+  onSetEnvironment?: (environmentId?: string) => void
   /** Seed the draft once on mount (e.g. a task prefilled from a linked issue). */
   initialValue?: string
   /**
@@ -695,11 +704,12 @@ export function Composer({
             </DropdownMenuPortal>
           </DropdownMenuRoot>
           {onToggleFollowAgent !== undefined && (
-            <Button
+            <button
               type="button"
-              variant={followAgent ? "secondary" : "ghost"}
-              size="icon"
-              className="size-8 flex-none"
+              className={cn(
+                "jingler-mode-toggle inline-flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors active:scale-[0.96]",
+                followAgent ? "is-active" : "text-muted-foreground hover:text-text"
+              )}
               aria-label="Follow agent"
               aria-pressed={followAgent}
               title={
@@ -709,8 +719,12 @@ export function Composer({
               }
               onClick={() => onToggleFollowAgent(!followAgent)}
             >
-              <Radio size={15} aria-hidden />
-            </Button>
+              <MousePointer2
+                size={15}
+                aria-hidden
+                className="jingler-mode-toggle__mark"
+              />
+            </button>
           )}
           {showJinglerToggle && (
             <button
@@ -736,6 +750,23 @@ export function Composer({
               />
               <span className="jingler-mode-toggle__label">Jingler</span>
             </button>
+          )}
+          {onSetEnvironment && (
+            <ChipMenu
+              value={environmentId ?? "__local__"}
+              options={[
+                { value: "__local__", label: "Local" },
+                ...environments.map((environment) => ({
+                  value: environment.id,
+                  label: `${environment.name}${environment.state === "online" ? "" : ` · ${environment.state}`}`
+                }))
+              ]}
+              onSelect={(value) => onSetEnvironment(value === "__local__" ? undefined : value)}
+              disabled={busy || environmentPending}
+              appearance="quiet"
+              ariaLabel="Execution environment"
+              className="max-w-[150px]"
+            />
           )}
           {modelValue.length > 0 && (
           <ChipMenu

@@ -118,10 +118,10 @@ export function AssetBrowser({
         <aside
           aria-label="Repository browser"
           className={cn(
-            "min-h-0 flex-none border-r border-line bg-panel",
+            "flex min-h-0 flex-none flex-col border-r border-line bg-panel",
             roomy
               ? "relative"
-              : "absolute inset-y-0 left-0 z-30 flex w-[min(320px,calc(100%-48px))] flex-col shadow-xl",
+              : "absolute inset-y-0 left-0 z-30 w-[min(320px,calc(100%-48px))] shadow-xl",
             !roomy && !sheetOpen && "hidden"
           )}
           style={roomy ? { width: state.context.treeWidth } : undefined}

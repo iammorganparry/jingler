@@ -13,14 +13,22 @@ describe("Composer agent follow control", () => {
 
     const follow = screen.getByRole("button", { name: "Follow agent" })
     expect(follow.getAttribute("aria-pressed")).toBe("false")
+    expect(follow.className).toContain("jingler-mode-toggle")
+    expect(follow.className).not.toContain("is-active")
+    expect(follow.querySelector("svg")?.getAttribute("class")).toContain(
+      "jingler-mode-toggle__mark"
+    )
+    expect(follow.querySelector("svg")?.getAttribute("class")).toContain(
+      "lucide-mouse-pointer-2"
+    )
 
     fireEvent.click(follow)
     expect(onToggleFollowAgent).toHaveBeenCalledWith(true)
 
     rerender(<Composer followAgent onToggleFollowAgent={onToggleFollowAgent} />)
-    expect(screen.getByRole("button", { name: "Follow agent" }).getAttribute("aria-pressed")).toBe(
-      "true"
-    )
+    const selectedFollow = screen.getByRole("button", { name: "Follow agent" })
+    expect(selectedFollow.getAttribute("aria-pressed")).toBe("true")
+    expect(selectedFollow.className).toContain("is-active")
   })
 
   it("omits the control when the host does not provide follow mode", () => {

@@ -18,7 +18,7 @@ import {
 } from "@jingler/ui"
 import type { PierreAnnotationMetadata } from "@jingler/ui"
 import type { JinglerLineSelection } from "@jingler/ui"
-import { FileWarning, MessageSquarePlus, Radio } from "lucide-react"
+import { FileWarning, MessageSquarePlus, MousePointer2 } from "lucide-react"
 import type { FileBrowserController } from "./use-file-browser.js"
 import { useFileBrowser } from "./use-file-browser.js"
 import { useNativeViewBounds } from "./use-native-view-bounds.js"
@@ -47,7 +47,7 @@ export function FileBrowserQuickOpen({
   onOpenChange,
   onOpenPath
 }: FileBrowserQuickOpenProps) {
-  const browser = useFileBrowser(session.id)
+  const browser = useFileBrowser(session.id, session.worktreePath)
   return (
     <FileQuickOpen
       open={open}
@@ -66,22 +66,17 @@ export function FileBrowserQuickOpen({
 
 /** Renderer-owned binding from a session's persistent actor to the Files tab. */
 export function FileBrowserView({ session, onSendReference }: FileBrowserViewProps) {
-  const browser = useFileBrowser(session.id)
+  const browser = useFileBrowser(session.id, session.worktreePath)
   const agentFileActivity = useAgentFileActivity(session.id, session.activeChatId)
   const rootRef = useRef<HTMLDivElement>(null)
   const [selection, setSelection] = useState<JinglerLineSelection | null>(null)
-  const activated = useRef(false)
 
   useEffect(() => setSelection(null), [browser.selectedPath, browser.payload])
 
   // The actor survives tab switches. Refresh on every Files activation so an
   // empty/error result captured before a worktree finished appearing cannot
   // leave a real repository looking permanently blank.
-  useEffect(() => {
-    if (activated.current) return
-    activated.current = true
-    browser.activate()
-  }, [browser.activate])
+  useEffect(() => browser.activate(), [browser.activate])
 
   const sendSelectionToChat = useCallback(() => {
     if (
@@ -174,17 +169,24 @@ export function FileBrowserView({ session, onSendReference }: FileBrowserViewPro
                 {browser.agentTargetPath}
               </span>
             ) : null}
-            <Button
+            <button
               type="button"
-              variant={browser.followEnabled ? "secondary" : "ghost"}
-              size="sm"
+              className={[
+                "jingler-mode-toggle inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium outline-none transition-colors active:scale-[0.96]",
+                browser.followEnabled
+                  ? "is-active"
+                  : "text-muted-foreground hover:text-text"
+              ].join(" ")}
               aria-pressed={browser.followEnabled}
               onClick={browser.followEnabled ? browser.disableFollow : browser.enableFollow}
               title="Follow files edited by the active chat's agent"
             >
-              <Radio className="size-3" aria-hidden />
-              Follow agent
-            </Button>
+              <MousePointer2
+                className="jingler-mode-toggle__mark size-3"
+                aria-hidden
+              />
+              <span className="jingler-mode-toggle__label">Follow agent</span>
+            </button>
           </div>
         }
         onRetryTree={browser.refreshTree}

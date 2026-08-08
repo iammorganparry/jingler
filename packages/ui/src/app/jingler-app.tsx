@@ -1,4 +1,10 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState
+} from "react"
 import type {
   ContextConfig,
   ContextSnapshot,
@@ -13,6 +19,8 @@ import type {
   NotificationsConfig,
   OrchestratorPreference,
   DiffStat,
+  Environment,
+  EnvironmentDiscovery,
   IssueSummary,
   IssueProviderDescriptor,
   ModelOption,
@@ -34,14 +42,20 @@ import type { DockSide } from "./terminal-panel.js"
 import { AppShell } from "./app-shell.js"
 import { NewSessionDialog } from "../composites/new-session-dialog.js"
 import { UsageModal } from "../composites/usage-modal.js"
-import { SettingsView } from "../composites/settings-view.js"
+import {
+  SettingsView,
+  type SettingsViewProps
+} from "../composites/settings-view.js"
 import type { ConnectorCenterProps } from "../composites/connector-center.js"
 import type { InjectionTargetsProps } from "../composites/injection-targets.js"
 import type { OpenConnectorSectionProps } from "../composites/open-connector-section.js"
 import type { ThemesSettingsProps } from "../composites/themes-settings.js"
 import type { PluginsSettingsProps } from "../composites/plugins-settings.js"
 import type { PaneContribution } from "./pane-contributions.js"
-import { type ConversationPaneCtx, SessionConversation } from "../screens/session-conversation.js"
+import {
+  type ConversationPaneCtx,
+  SessionConversation
+} from "../screens/session-conversation.js"
 import { useSplitLayout } from "./use-split-layout.js"
 import { MAX_PANES } from "./split-layout.js"
 import { matchSplitShortcut } from "./split-shortcuts.js"
@@ -117,9 +131,7 @@ export interface JinglerAppProps {
   ) => Promise<void> | void
   /** Complexity-based concrete routes for implementation workers. */
   workerRouting?: WorkerRoutingConfig | null
-  onSaveWorkerRouting?: (
-    routing: WorkerRoutingConfig
-  ) => Promise<void> | void
+  onSaveWorkerRouting?: (routing: WorkerRoutingConfig) => Promise<void> | void
   sessions: ReadonlyArray<Session>
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
@@ -177,7 +189,9 @@ export interface JinglerAppProps {
   onSaveGitConfig?: (config: GitConfig) => Promise<void> | void
   /** Desktop-notification prefs; absent means the defaults, not "off". */
   notificationsConfig?: NotificationsConfig | null
-  onSaveNotificationsConfig?: (config: NotificationsConfig) => Promise<void> | void
+  onSaveNotificationsConfig?: (
+    config: NotificationsConfig
+  ) => Promise<void> | void
   /** Whether plan mode runs its read-only commands unattended; absent means on. */
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => Promise<void> | void
@@ -195,10 +209,14 @@ export interface JinglerAppProps {
   themes?: ThemesSettingsProps
   /** Everything Settings › Plugins needs. Absent renders the stub. */
   plugins?: PluginsSettingsProps
+  devices?: SettingsViewProps["devices"]
   /** Persisted per-CLI provider defaults (Settings · Providers view). */
   providersConfig?: ProvidersConfig | null
   /** Persist one CLI's provider defaults; presence wires the Settings gear. */
-  onSaveProvider?: (cli: CliKind, config: ProviderConfig) => Promise<void> | void
+  onSaveProvider?: (
+    cli: CliKind,
+    config: ProviderConfig
+  ) => Promise<void> | void
   planTemplate?: PlanTemplateConfig | null
   onSavePlanTemplate?: (template: PlanTemplateConfig) => void
   /** Load the selectable models for a CLI (Settings · Providers). */
@@ -214,7 +232,10 @@ export interface JinglerAppProps {
   /** Per-harness injection readout (Settings → Connectors). */
   injection?: InjectionTargetsProps
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
-  renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  renderPullRequest?: (
+    session: Session,
+    ctx: { onConnectGithub: () => void }
+  ) => ReactNode
   /**
    * Tabs contributed by plugins.
    *
@@ -232,9 +253,15 @@ export interface JinglerAppProps {
    */
   paneContributions?: ReadonlyArray<PaneContribution>
   /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */
-  renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  renderReview?: (
+    session: Session,
+    ctx: { onConnectGithub: () => void }
+  ) => ReactNode
   /** Render the Changes tab — the Code Review view over the local worktree diff. */
-  renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  renderCode?: (
+    session: Session,
+    ctx: { onConnectGithub: () => void }
+  ) => ReactNode
   /** Render the Issue tab — the rich linked-issue view. */
   /** Render the per-session terminal dock (desktop app's live TerminalDock). */
   renderTerminalDock?: (session: Session) => ReactNode
@@ -264,7 +291,10 @@ export interface JinglerAppProps {
    * otherwise, so a plain prop would fight the operator's own clicks. Ignored
    * when null.
    */
-  selectSessionRequest?: { readonly sessionId: string; readonly nonce: number } | null
+  selectSessionRequest?: {
+    readonly sessionId: string
+    readonly nonce: number
+  } | null
   /**
    * Notified whenever the set of ON-SCREEN sessions changes. A set rather than a
    * single id because the grid shows several at once, and the desktop suppresses
@@ -317,7 +347,9 @@ export interface JinglerAppProps {
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>
   /** Load branch names for a repo (New Session base picker). */
-  loadBranches?: (repoPath: string) => Promise<ReadonlyArray<string>>
+  loadBranches?: (repoPath: string, environmentId?: string) => Promise<ReadonlyArray<string>>
+  environments?: ReadonlyArray<Environment>
+  loadEnvironmentDiscovery?: (environmentId: string) => Promise<EnvironmentDiscovery>
   /** Create a session (forks a real worktree) and return it. */
   onCreateSession?: (input: CreateSessionInput) => Promise<Session>
   /** Manually rename a session (double-click its sidebar title) — pins the name. */
@@ -337,7 +369,10 @@ export interface JinglerAppProps {
    * List open PRs for a repo (the New Session "From PR" picker). Presence wires
    * the `Blank | From PR` toggle; absent (e.g. GitHub not connected) hides it.
    */
-  loadPrs?: (repoPath: string, opts: { mine: boolean; search: string }) => Promise<ReadonlyArray<PrSummary>>
+  loadPrs?: (
+    repoPath: string,
+    opts: { mine: boolean; search: string }
+  ) => Promise<ReadonlyArray<PrSummary>>
   /** Create a session from an existing PR (checks out its head branch) and return it. */
   onCreateSessionFromPr?: (input: CreateSessionFromPrInput) => Promise<Session>
   /**
@@ -429,6 +464,7 @@ export function JinglerApp({
   adhdMode,
   themes,
   plugins,
+  devices,
   onSaveAdhdMode,
   fontScale,
   onSaveFontScale,
@@ -467,6 +503,8 @@ export function JinglerApp({
   renderChatTabs,
   planSessions,
   loadBranches = noBranches,
+  environments = [],
+  loadEnvironmentDiscovery,
   onCreateSession,
   onRenameSession,
   onSetSessionPersistent,
@@ -486,7 +524,10 @@ export function JinglerApp({
   // pane's session IS the old "selected" — every existing call site below still
   // reads `selected` / calls `setSelected` and behaves as it always did when the
   // group has one pane.
-  const split = useSplitLayout(sessions, activeSessionId ?? sessions[0]?.id ?? null)
+  const split = useSplitLayout(
+    sessions,
+    activeSessionId ?? sessions[0]?.id ?? null
+  )
   const selected = split.activeSessionId
   const setSelected = split.selectSession
   const selectSession = useCallback(
@@ -501,9 +542,13 @@ export function JinglerApp({
   const [usageOpen, setUsageOpen] = useState(false)
   const [usageLoading, setUsageLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsSection, setSettingsSection] = useState<"providers" | "github">("providers")
+  const [settingsSection, setSettingsSection] = useState<
+    "providers" | "github"
+  >("providers")
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [fileQuickOpenSessionId, setFileQuickOpenSessionId] = useState<string | null>(null)
+  const [fileQuickOpenSessionId, setFileQuickOpenSessionId] = useState<
+    string | null
+  >(null)
   /**
    * The palette's half of tab switching. Nonced, and CLEARED once applied.
    *
@@ -513,7 +558,10 @@ export function JinglerApp({
    * session switch, so a request left standing would be replayed onto the next
    * session you opened, and onto whichever pane you focused next in a split.
    */
-  const [tabRequest, setTabRequest] = useState<{ tabId: TabKey; nonce: number } | null>(null)
+  const [tabRequest, setTabRequest] = useState<{
+    tabId: TabKey
+    nonce: number
+  } | null>(null)
   const clearTabRequest = useCallback(() => setTabRequest(null), [])
 
   // An outside request to jump to a session (notification click). Keyed on the
@@ -548,7 +596,9 @@ export function JinglerApp({
 
   const ghConnected =
     githubConnection.connected &&
-    githubConnection.installations.some((installation) => installation.status === "active")
+    githubConnection.installations.some(
+      (installation) => installation.status === "active"
+    )
 
   // The sidebar groups sessions by repo *name* (Session.repo === Repo.name), so
   // translate the path-keyed stars into the names those groups pin on.
@@ -560,7 +610,8 @@ export function JinglerApp({
     const owners: Record<string, string> = {}
     for (const session of sessions) {
       const repo = repos.find(
-        (candidate) => candidate.path === session.repoPath || candidate.name === session.repo
+        (candidate) =>
+          candidate.path === session.repoPath || candidate.name === session.repo
       )
       const owner = repo?.githubSlug?.split("/")[0]
       if (owner) owners[session.id] = owner
@@ -581,13 +632,10 @@ export function JinglerApp({
   // Archived GROUP it collapsed — archived is a filter now, not a place. A stale
   // `__archived__` left in a persisted `collapsedRepos` matches no repo path and
   // is simply ignored, so no migration is needed.
-  const collapsedRepoNames = useMemo(
-    () => {
-      const paths = new Set(collapsedRepos)
-      return new Set(repos.filter((r) => paths.has(r.path)).map((r) => r.name))
-    },
-    [repos, collapsedRepos]
-  )
+  const collapsedRepoNames = useMemo(() => {
+    const paths = new Set(collapsedRepos)
+    return new Set(repos.filter((r) => paths.has(r.path)).map((r) => r.name))
+  }, [repos, collapsedRepos])
   const toggleCollapsedByName = useCallback(
     (repoName: string) => {
       const repo = repos.find((r) => r.name === repoName)
@@ -645,7 +693,9 @@ export function JinglerApp({
    */
   const addNextSessionAsPane = useCallback((): boolean => {
     if (!group || group.panes.length >= MAX_PANES) return false
-    const next = sessions.find((s) => !(s.archived || split.visibleSessionIds.has(s.id)))
+    const next = sessions.find(
+      (s) => !(s.archived || split.visibleSessionIds.has(s.id))
+    )
     if (!next) return false
     splitActiveWith(next.id, group.panes.length)
     return true
@@ -683,7 +733,12 @@ export function JinglerApp({
       // every action. Leaving ⌘F bound to nothing would have been a regression
       // paid for by whoever had learnt it, and binding it to a second, narrower
       // search would be two implementations over one index.
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "f"
+      ) {
         e.preventDefault()
         setPaletteOpen(true)
         return
@@ -904,14 +959,21 @@ export function JinglerApp({
         hasPlan: planSessions?.has(active.id) ?? false,
         diff: liveDiff?.[active.id] ?? null
       }
-      for (const tab of visibleTabs(tabCtx, [...TAB_SHAPES, ...(tabContributions ?? [])])) {
+      for (const tab of visibleTabs(tabCtx, [
+        ...TAB_SHAPES,
+        ...(tabContributions ?? [])
+      ])) {
         items.push({
           id: `tab:${tab.id}`,
           kind: "tab",
           label: `Go to ${tab.label}`,
           group: PALETTE_GROUP.tabs,
           icon: tab.icon,
-          run: () => setTabRequest((prev) => ({ tabId: tab.id, nonce: (prev?.nonce ?? 0) + 1 }))
+          run: () =>
+            setTabRequest((prev) => ({
+              tabId: tab.id,
+              nonce: (prev?.nonce ?? 0) + 1
+            }))
         })
       }
     }
@@ -992,6 +1054,7 @@ export function JinglerApp({
     >
       <SessionConversation
         sessions={sessions}
+        environments={environments}
         clis={clis}
         activeSessionId={selected}
         onSelectSession={selectSession}
@@ -1017,9 +1080,13 @@ export function JinglerApp({
         }}
         onClosePane={(index) => group && split.closePane(group.id, index)}
         onCloseGroupPane={split.closePane}
-        onMovePane={(index, direction) => group && split.movePane(group.id, index, direction)}
+        onMovePane={(index, direction) =>
+          group && split.movePane(group.id, index, direction)
+        }
         onSeparateAll={split.separateAll}
-        onResizePane={(index, delta) => group && split.resizePane(group.id, index, delta)}
+        onResizePane={(index, delta) =>
+          group && split.resizePane(group.id, index, delta)
+        }
         slotBySession={paneBySession}
         onRenameSession={onRenameSession}
         onToggleBrowser={onToggleBrowser}
@@ -1118,6 +1185,7 @@ export function JinglerApp({
               onSaveFontScale={onSaveFontScale}
               themes={themes}
               plugins={plugins}
+              devices={devices}
               onClose={() => setSettingsOpen(false)}
             />
           ) : undefined
@@ -1126,7 +1194,9 @@ export function JinglerApp({
         starredRepoNames={starredRepoNames}
         onToggleStar={onToggleStar ? toggleStarByName : undefined}
         collapsedRepoNames={collapsedRepoNames}
-        onToggleCollapsed={onToggleCollapsed ? toggleCollapsedByName : undefined}
+        onToggleCollapsed={
+          onToggleCollapsed ? toggleCollapsedByName : undefined
+        }
         renderPullRequest={renderPullRequest}
         tabContributions={tabContributions}
         paneContributions={paneContributions}
@@ -1143,6 +1213,8 @@ export function JinglerApp({
           open={newOpen}
           onClose={() => setNewOpen(false)}
           repos={repos}
+          environments={environments}
+          loadEnvironmentDiscovery={loadEnvironmentDiscovery}
           starredRepos={starredRepos}
           onToggleStar={onToggleStar}
           defaultRepoPath={defaultRepoPath}
@@ -1151,11 +1223,15 @@ export function JinglerApp({
           loadBranches={loadBranches}
           onCreate={handleCreate}
           loadPrs={loadPrs}
-          onCreateFromPr={onCreateSessionFromPr ? handleCreateFromPr : undefined}
+          onCreateFromPr={
+            onCreateSessionFromPr ? handleCreateFromPr : undefined
+          }
           loadIssues={loadIssues}
           issueProviders={issueProviders}
           loadProviderIssues={loadProviderIssues}
-          onCreateFromIssue={onCreateSessionFromIssue ? handleCreateFromIssue : undefined}
+          onCreateFromIssue={
+            onCreateSessionFromIssue ? handleCreateFromIssue : undefined
+          }
         />
       )}
       {onLoadUsage && (
@@ -1166,7 +1242,11 @@ export function JinglerApp({
           onClose={() => setUsageOpen(false)}
         />
       )}
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} items={paletteItems} />
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        items={paletteItems}
+      />
       {fileQuickOpenSession && renderFileQuickOpen
         ? renderFileQuickOpen(fileQuickOpenSession, {
             open: true,

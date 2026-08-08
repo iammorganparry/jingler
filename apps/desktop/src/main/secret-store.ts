@@ -7,7 +7,11 @@
  * back to plaintext.
  */
 import { FileSystem } from "@effect/platform"
-import { AppPaths, SecretStore, SecretStoreUnavailable } from "@jingler/cli-adapters"
+import {
+  AppPaths,
+  SecretStore,
+  SecretStoreUnavailable
+} from "@jingler/cli-adapters"
 import { Effect, Layer } from "effect"
 import { safeStorage } from "electron"
 
@@ -27,27 +31,33 @@ export const PlaintextSecretStoreLive = Layer.effect(
     // SEPARATE files (`authFile` vs `openConnectorFile`) but share identical logic,
     // so a fix lands once and can't drift between them.
     const slot = (path: string) => ({
-      get: fs
-        .readFileString(path)
-        .pipe(
-          Effect.map((raw) => (raw.trim().length > 0 ? raw.trim() : null)),
-          Effect.orElseSucceed(() => null)
-        ),
+      get: fs.readFileString(path).pipe(
+        Effect.map((raw) => (raw.trim().length > 0 ? raw.trim() : null)),
+        Effect.orElseSucceed(() => null)
+      ),
       set: (token: string) =>
         fs
           .writeFileString(path, token)
-          .pipe(Effect.mapError(() => new SecretStoreUnavailable({ message: "e2e write failed" }))),
+          .pipe(
+            Effect.mapError(
+              () => new SecretStoreUnavailable({ message: "e2e write failed" })
+            )
+          ),
       clear: fs.remove(path).pipe(Effect.ignore)
     })
     const auth = slot(paths.authFile)
     const openConnector = slot(paths.openConnectorFile)
+    const deviceSecrets = slot(`${paths.authFile}.devices`)
     return {
       get: auth.get,
       set: auth.set,
       clear: auth.clear,
       getOpenConnectorToken: openConnector.get,
       setOpenConnectorToken: openConnector.set,
-      clearOpenConnectorToken: openConnector.clear
+      clearOpenConnectorToken: openConnector.clear,
+      getDeviceSecrets: deviceSecrets.get,
+      setDeviceSecrets: deviceSecrets.set,
+      clearDeviceSecrets: deviceSecrets.clear
     }
   })
 )
@@ -62,37 +72,48 @@ export const SecretStoreLive = Layer.effect(
     // (say) the decrypt error path lands once instead of drifting between them.
     const slot = (path: string) => ({
       get: Effect.gen(function* () {
-        const exists = yield* fs.exists(path).pipe(Effect.orElseSucceed(() => false))
+        const exists = yield* fs
+          .exists(path)
+          .pipe(Effect.orElseSucceed(() => false))
         if (!exists || !safeStorage.isEncryptionAvailable()) return null
-        const bytes = yield* fs.readFile(path).pipe(Effect.orElseSucceed(() => null))
+        const bytes = yield* fs
+          .readFile(path)
+          .pipe(Effect.orElseSucceed(() => null))
         if (!bytes) return null
-        return yield* Effect.try(() => safeStorage.decryptString(Buffer.from(bytes))).pipe(
-          Effect.orElseSucceed(() => null)
-        )
+        return yield* Effect.try(() =>
+          safeStorage.decryptString(Buffer.from(bytes))
+        ).pipe(Effect.orElseSucceed(() => null))
       }),
       set: (token: string) =>
         safeStorage.isEncryptionAvailable()
-          ? fs
-              .writeFile(path, safeStorage.encryptString(token))
-              .pipe(
-                Effect.mapError(
-                  () => new SecretStoreUnavailable({ message: "failed to write encrypted token" })
-                )
+          ? fs.writeFile(path, safeStorage.encryptString(token)).pipe(
+              Effect.mapError(
+                () =>
+                  new SecretStoreUnavailable({
+                    message: "failed to write encrypted token"
+                  })
               )
+            )
           : Effect.fail(
-              new SecretStoreUnavailable({ message: "OS encryption is unavailable on this host" })
+              new SecretStoreUnavailable({
+                message: "OS encryption is unavailable on this host"
+              })
             ),
       clear: fs.remove(path).pipe(Effect.ignore)
     })
     const auth = slot(paths.authFile)
     const openConnector = slot(paths.openConnectorFile)
+    const deviceSecrets = slot(`${paths.authFile}.devices`)
     return {
       get: auth.get,
       set: auth.set,
       clear: auth.clear,
       getOpenConnectorToken: openConnector.get,
       setOpenConnectorToken: openConnector.set,
-      clearOpenConnectorToken: openConnector.clear
+      clearOpenConnectorToken: openConnector.clear,
+      getDeviceSecrets: deviceSecrets.get,
+      setDeviceSecrets: deviceSecrets.set,
+      clearDeviceSecrets: deviceSecrets.clear
     }
   })
 )

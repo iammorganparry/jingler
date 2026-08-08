@@ -1,0 +1,4 @@
+{
+  "extends": "@jingler/tsconfig/node.json",
+  "include": ["src"]
+}

@@ -258,9 +258,11 @@ test("creating a session from a PR checks out its head branch and links the PR",
   await create.click()
 
   // Wait for creation to complete: the dialog closes and the new session's PR
-  // badge (`⑂ #482`, only in the sidebar) appears. Only then is the worktree on disk.
+  // identity appears in the sidebar. Only then is the worktree on disk.
   await expect(window.getByRole("heading", { name: "New session" })).toBeHidden()
-  await expect(window.getByText("⑂ #482")).toBeVisible()
+  const createdRow = sessionRow(window, "Fix auth refresh race")
+  await expect(createdRow.getByTitle("Pull request open")).toBeVisible()
+  await expect(createdRow.getByText("#482", { exact: true })).toBeVisible()
 
   // Real outcome: the worktree is on the PR's head branch (not a jingler/ fork).
   // The from-PR slug carries the PR number, so same-titled PRs never collide.
@@ -343,9 +345,11 @@ test("creating a session from an issue forks a linked branch and seeds the task"
   await expect(create).toBeEnabled()
   await create.click()
 
-  // The dialog closes and the sidebar shows the linked-issue badge (◉ #128).
+  // The dialog closes and the sidebar shows the linked issue number.
   await expect(window.getByRole("heading", { name: "New session" })).toBeHidden()
-  await expect(window.getByText("◉ #128")).toBeVisible()
+  await expect(
+    sessionRow(window, "Refund route 500s on a stale token").getByText("#128", { exact: true })
+  ).toBeVisible()
 
   // The composer is prefilled (HITL) with the task derived from the issue.
   await expect(window.getByPlaceholder("Message Claude…")).toHaveValue(/Fix the refund route/)

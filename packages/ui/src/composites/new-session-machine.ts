@@ -4,6 +4,8 @@ import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
+  Environment,
+  EnvironmentDiscovery,
   IssueProviderDescriptor,
   IssueSummary,
   PrSummary,
@@ -23,6 +25,8 @@ export interface IssueAutomationsForm {
 
 /** How long typing in the PR / issue search box settles before a fetch fires. */
 const SEARCH_DEBOUNCE_MS = 250
+const DISCOVERY_RETRY_MS = 100
+const DISCOVERY_ATTEMPTS = 30
 
 /** Compose the prefilled task from an issue (title + body). */
 const composeTask = (issue: IssueSummary | null): string =>
@@ -36,6 +40,8 @@ const composeTask = (issue: IssueSummary | null): string =>
  */
 export interface NewSessionDeps {
   repos: ReadonlyArray<Repo>
+  environments?: ReadonlyArray<Environment>
+  loadEnvironmentDiscovery?: (environmentId: string) => Promise<EnvironmentDiscovery>
   /** Preselect this repo (by path) on open; falls back to the first repo. */
   defaultRepoPath?: string | null
   /** Discovered CLIs; `newSessionCli` picks from the startable ones. */
@@ -45,14 +51,14 @@ export interface NewSessionDeps {
    * it resolves this once on open and reports it read-only.
    */
   defaultCli?: CliKind | null
-  loadBranches: (repoPath: string) => Promise<ReadonlyArray<string>>
+  loadBranches: (repoPath: string, environmentId?: string) => Promise<ReadonlyArray<string>>
   loadPrs?: (
     repoPath: string,
-    opts: { mine: boolean; search: string }
+    opts: { mine: boolean; search: string; githubSlug?: string }
   ) => Promise<ReadonlyArray<PrSummary>>
   loadIssues?: (
     repoPath: string,
-    opts: { mine: boolean; search: string }
+    opts: { mine: boolean; search: string; githubSlug?: string }
   ) => Promise<ReadonlyArray<IssueSummary>>
   /** Enabled plugin-backed providers available beside the built-in GitHub path. */
   issueProviders?: ReadonlyArray<IssueProviderDescriptor>
@@ -74,6 +80,8 @@ export interface NewSessionInput {
 export interface NewSessionContext {
   getDeps: () => NewSessionDeps
   mode: NewSessionMode
+  environmentId: string | null
+  repos: ReadonlyArray<Repo>
   repoPath: string
   title: string
   cli: CliKind | ""
@@ -81,6 +89,8 @@ export interface NewSessionContext {
   /** Blank sessions default to an isolated linked worktree on every open. */
   useWorktree: boolean
   branches: ReadonlyArray<string>
+  /** Branches already announced by a remote device, keyed by its repo path. */
+  branchCatalog: Readonly<Record<string, ReadonlyArray<string>>>
   search: string
   mine: boolean
   prs: ReadonlyArray<PrSummary>
@@ -99,6 +109,7 @@ export interface NewSessionContext {
 export type NewSessionEvent =
   | { type: "OPEN" }
   | { type: "SET_MODE"; mode: NewSessionMode }
+  | { type: "SET_ENVIRONMENT"; environmentId: string | null }
   | { type: "SET_REPO"; repoPath: string }
   | { type: "SET_TITLE"; title: string }
   | { type: "SET_BASE"; base: string }
@@ -118,7 +129,7 @@ export type NewSessionEvent =
   | { type: "RELOAD_ISSUES" }
 
 const repoFor = (ctx: NewSessionContext): Repo | undefined =>
-  ctx.getDeps().repos.find((r) => r.path === ctx.repoPath)
+  ctx.repos.find((r) => r.path === ctx.repoPath)
 
 /**
  * Preferred default base branch for a repo (default → current → first → none).
@@ -166,17 +177,21 @@ export const newSessionMachine = setup({
   },
   actors: {
     loadBranches: fromPromise(
-      ({ input }: { input: { fn: NewSessionDeps["loadBranches"]; repoPath: string } }) =>
-        input.repoPath ? input.fn(input.repoPath) : Promise.resolve([])
+      ({ input }: { input: { fn: NewSessionDeps["loadBranches"]; repoPath: string; environmentId: string | null; cached?: ReadonlyArray<string> } }) =>
+        input.repoPath
+          ? input.cached !== undefined
+            ? Promise.resolve(input.cached)
+            : input.fn(input.repoPath, input.environmentId ?? undefined)
+          : Promise.resolve([])
     ),
     loadPrs: fromPromise(
       ({
         input
       }: {
-        input: { fn: NewSessionDeps["loadPrs"]; repoPath: string; mine: boolean; search: string }
+        input: { fn: NewSessionDeps["loadPrs"]; repoPath: string; githubSlug?: string; mine: boolean; search: string }
       }) =>
         input.fn && input.repoPath
-          ? input.fn(input.repoPath, { mine: input.mine, search: input.search })
+          ? input.fn(input.repoPath, { mine: input.mine, search: input.search, ...(input.githubSlug ? { githubSlug: input.githubSlug } : {}) })
           : Promise.resolve([])
     ),
     loadIssues: fromPromise(
@@ -188,12 +203,17 @@ export const newSessionMachine = setup({
           plugin: NewSessionDeps["loadProviderIssues"]
           providerId: string
           repoPath: string
+          githubSlug?: string
           mine: boolean
           search: string
         }
       }) =>
         input.repoPath && input.providerId === "github" && input.github
-          ? input.github(input.repoPath, { mine: input.mine, search: input.search })
+          ? input.github(input.repoPath, {
+              mine: input.mine,
+              search: input.search,
+              ...(input.githubSlug ? { githubSlug: input.githubSlug } : {})
+            })
           : input.repoPath && input.providerId && input.plugin
             ? input.plugin(input.providerId, input.repoPath, {
                 mine: input.mine,
@@ -201,6 +221,38 @@ export const newSessionMachine = setup({
               })
             : Promise.resolve([])
     ),
+    loadEnvironment: fromPromise(async ({ input }: { input: { environmentId: string | null; deps: NewSessionDeps } }) => {
+      if (input.environmentId === null) {
+        return { repos: input.deps.repos, harnesses: null, branchCatalog: {} }
+      }
+      if (!input.deps.loadEnvironmentDiscovery) {
+        throw new Error("Remote discovery is unavailable.")
+      }
+      // Presence can become online a fraction before the device's first
+      // capability announcement is committed. Treat null as "not ready" and
+      // wait briefly instead of freezing the form with an empty repository list.
+      for (let attempt = 0; attempt < DISCOVERY_ATTEMPTS; attempt += 1) {
+        const result = await input.deps.loadEnvironmentDiscovery(input.environmentId)
+        if (result.discovery !== null) {
+          return {
+            repos: result.discovery.repositories.map((repo) => ({
+              name: repo.name,
+              path: repo.path,
+              defaultBranch: repo.defaultBranch,
+              currentBranch: repo.currentBranch,
+              remoteUrl: null,
+              githubSlug: repo.githubSlug
+            })),
+            harnesses: result.discovery.capabilities.harnesses,
+            branchCatalog: Object.fromEntries(
+              result.discovery.repositories.map((repo) => [repo.path, repo.branches])
+            )
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, DISCOVERY_RETRY_MS))
+      }
+      throw new Error("The device is online but has not reported its repositories and harnesses yet.")
+    }),
     submit: fromPromise(({ input }: { input: { run: () => Promise<void> } }) => input.run())
   },
   actions: {
@@ -214,6 +266,8 @@ export const newSessionMachine = setup({
       const first = preferred ?? deps.repos[0]
       return {
         mode: "blank" as NewSessionMode,
+        environmentId: null,
+        repos: deps.repos,
         repoPath: first?.path ?? "",
         title: "",
         // Not a form field any more: the harness comes from Settings, falling
@@ -223,6 +277,7 @@ export const newSessionMachine = setup({
         base: "",
         useWorktree: true,
         branches: [] as ReadonlyArray<string>,
+        branchCatalog: {},
         search: "",
         mine: false,
         prs: [] as ReadonlyArray<PrSummary>,
@@ -268,12 +323,15 @@ export const newSessionMachine = setup({
   context: ({ input }) => ({
     getDeps: input.getDeps,
     mode: "blank",
+    environmentId: null,
+    repos: [],
     repoPath: "",
     title: "",
     cli: "",
     base: "",
     useWorktree: true,
     branches: [],
+    branchCatalog: {},
     search: "",
     mine: false,
     prs: [],
@@ -307,7 +365,8 @@ export const newSessionMachine = setup({
                   if (!context.selectedPr || !deps.onCreateFromPr) {
                     return Promise.reject(new Error("Select a pull request."))
                   }
-                  return deps.onCreateFromPr({
+                return deps.onCreateFromPr({
+                    ...(context.environmentId === null ? {} : { environmentId: context.environmentId }),
                     repoPath: repo.path,
                     repoName: repo.name,
                     cli: context.cli,
@@ -325,6 +384,7 @@ export const newSessionMachine = setup({
                     return Promise.reject(new Error("Select an issue."))
                   }
                   return deps.onCreateFromIssue({
+                    ...(context.environmentId === null ? {} : { environmentId: context.environmentId }),
                     repoPath: repo.path,
                     repoName: repo.name,
                     cli: context.cli,
@@ -338,6 +398,7 @@ export const newSessionMachine = setup({
                 }
                 const title = context.title.trim()
                 return deps.onCreate({
+                  ...(context.environmentId === null ? {} : { environmentId: context.environmentId }),
                   repoPath: repo.path,
                   repoName: repo.name,
                   // Omit when blank → the session is auto-named (title is optional).
@@ -363,7 +424,12 @@ export const newSessionMachine = setup({
         loading: {
           invoke: {
             src: "loadBranches",
-            input: ({ context }) => ({ fn: context.getDeps().loadBranches, repoPath: context.repoPath }),
+            input: ({ context }) => ({
+              fn: context.getDeps().loadBranches,
+              repoPath: context.repoPath,
+              environmentId: context.environmentId,
+              cached: context.branchCatalog[context.repoPath]
+            }),
             onDone: { target: "idle", actions: "applyBranches" },
             onError: { target: "idle", actions: "clearBranches" }
           }
@@ -383,6 +449,7 @@ export const newSessionMachine = setup({
             input: ({ context }) => ({
               fn: context.getDeps().loadPrs,
               repoPath: context.repoPath,
+              githubSlug: context.repos.find((repo) => repo.path === context.repoPath)?.githubSlug ?? undefined,
               mine: context.mine,
               search: context.search
             }),
@@ -406,11 +473,54 @@ export const newSessionMachine = setup({
               plugin: context.getDeps().loadProviderIssues,
               providerId: context.issueProviderId,
               repoPath: context.repoPath,
+              githubSlug: context.repos.find((repo) => repo.path === context.repoPath)?.githubSlug ?? undefined,
               mine: context.mine,
               search: context.search
             }),
             onDone: { target: "idle", actions: "applyIssues" },
             onError: { target: "idle", actions: "setIssueLoadError" }
+          }
+        }
+      }
+    },
+    environmentLoad: {
+      initial: "idle",
+      states: {
+        idle: {},
+        loading: {
+          invoke: {
+            src: "loadEnvironment",
+            input: ({ context }) => ({ environmentId: context.environmentId, deps: context.getDeps() }),
+            onDone: {
+              target: "idle",
+              actions: [assign({
+                repos: ({ event }) => event.output.repos,
+                repoPath: ({ event }) => event.output.repos[0]?.path ?? "",
+                cli: ({ context, event }) => {
+                  if (event.output.harnesses === null) return context.cli
+                  const preferred = context.getDeps().defaultCli
+                  return preferred !== null && preferred !== undefined && event.output.harnesses.includes(preferred)
+                    ? preferred
+                    : (event.output.harnesses[0] ?? "")
+                },
+                branchCatalog: ({ event }) => event.output.branchCatalog,
+                branches: [],
+                base: "",
+                error: null
+              }), raise({ type: "LOAD_BRANCHES" })]
+            },
+            onError: {
+              target: "idle",
+              actions: assign({
+                repos: [],
+                repoPath: "",
+                branches: [],
+                branchCatalog: {},
+                base: "",
+                cli: "",
+                error: ({ event }) => errorText(event.error, "Could not load this device's repositories.")
+              })
+            }
           }
         }
       }
@@ -436,6 +546,10 @@ export const newSessionMachine = setup({
         raise({ type: "RELOAD_PRS" }),
         raise({ type: "RELOAD_ISSUES" })
       ]
+    },
+    SET_ENVIRONMENT: {
+      actions: assign({ environmentId: ({ event }) => event.environmentId }),
+      target: ".environmentLoad.loading"
     },
     SET_REPO: {
       actions: [

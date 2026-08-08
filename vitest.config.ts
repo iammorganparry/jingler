@@ -14,6 +14,7 @@ export default defineConfig({
     projects: [
       "packages/*/vitest.config.ts",
       "apps/desktop/vitest.config.ts",
+      "apps/device-agent/vitest.config.ts",
       "apps/memory-worker/vitest.config.ts",
       "apps/server/vitest.config.ts"
     ],

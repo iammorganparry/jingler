@@ -56,6 +56,8 @@ Copy `apps/server/.env.example` → `apps/server/.env` for local dev; the server
 - `packages/core` — domain types and errors, expressed as **Effect `Schema`** (`CliKind`, `Session`, `AuthSession`, tagged errors). No runtime logic.
 - `packages/contracts` — the **RPC contract** (`JinglerRpcs`, an `@effect/rpc` `RpcGroup`). The single source of truth for every desktop main↔renderer call.
 - `apps/github-relay` — the Cloudflare Worker that verifies raw GitHub App webhooks, resolves durable installation/repository/PR ownership, and fans resumable review events out through one Durable Object per linked Jingler session.
+- `apps/device-relay` — the Cloudflare Worker for paired-device identity, presence, revocation, and per-session encrypted replay Durable Objects.
+- `apps/device-agent` — the bundled headless runtime installed or started on a paired machine; it owns device keys and executes typed operations using that host's Git/harness setup.
 - `packages/cli-adapters` — the desktop **backend logic** as **Effect services** (`Effect.Service`): `SessionStore`, `AgentRunner`, `WorkspaceService` (git/worktrees), `TerminalService`, `GitHubApi`, `GitHubAuth`, `AuthService`, `DiscoveryService`, etc. These run in the Electron **main** process.
 - `packages/themes` — the **theme engine**: nine vendored VS Code themes, the fold from a VS Code theme JSON to Jingler's `ThemeTokens`, and the colour maths. Pure — no Effect, no filesystem, no React — because main, `cli-adapters` and the renderer all import it.
 - `packages/ui` — React component library (Tailwind, **themeable** — One Dark Pro is the default and the fallback, Storybook). Consumed by the renderer.
@@ -213,6 +215,23 @@ is synchronized through an idempotent server outbox.
 Registration, permissions, encryption-key rotation, relay deployment,
 monitoring, replay recovery, live cloudflared smoke, and rollback are maintained
 in `apps/server/README.md` and `apps/github-relay/README.md`.
+
+### Remote environment boundary
+
+BetterAuth authenticates the desktop user; it is not copied to a paired device.
+`EnvironmentService` obtains short-lived scoped grants in Electron main, while
+the device agent proves its independent Ed25519 identity and keeps all private
+keys on the remote host. Each remote session derives an endpoint-only encryption
+key and uses a dedicated `SessionTunnelObject`; relay storage is ciphertext and
+cursor metadata only. `ExecutionRouter` must never fall a remote session back to
+local execution.
+
+SSH is an optional bootstrap transport using the operator's existing config,
+agent, and host-key policy. Routine control and session traffic are outbound
+WebSockets. Environment changes are persisted session state: the composer and
+sidebar must reflect the same value, active turns cannot move, and sessions with
+work use an explicit continuation. See `docs/remote-environments.md` and the
+device relay/agent READMEs for operations and recovery.
 
 ## Conventions & gotchas
 

@@ -42,6 +42,7 @@ import { nativeConsentPrompt } from "./plugin-consent.js"
 import { bootBackgroundColor, registerBootThemeChannel, resolveBootTheme } from "./boot-theme.js"
 import { runtime } from "./runtime.js"
 import { initAutoUpdater } from "./updater.js"
+import { resolveDeviceAgentBundlePath } from "./device-agent-bundle.js"
 
 /** The single renderer window (kept so deep-link callbacks can reach + focus it). */
 let mainWindow: BrowserWindow | null = null
@@ -423,6 +424,11 @@ if (!gotPrimaryLock) {
 
   app.whenReady().then(async () => {
     enableCodexDiagnostics()
+    process.env.JINGLER_DEVICE_AGENT_BUNDLE ??= resolveDeviceAgentBundlePath(
+      app.isPackaged,
+      process.resourcesPath,
+      import.meta.dirname
+    )
     // Now that the subsystem is up, attach the handler that actually serves
     // plugin files (and the runtime shims) out of `~/jingler/plugins`.
     registerPluginProtocolHandler()

@@ -32,7 +32,7 @@ export function SessionChatTabs({
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
   const chatActivities = useChatActivities(session.id)
-  const files = useFileBrowser(session.id)
+  const files = useFileBrowser(session.id, session.worktreePath)
 
   const createChat = () => {
     void rpc.sessionsCreateChat(session.id).then(publishSessionUpdate)

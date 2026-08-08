@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import type { Page } from "@playwright/test"
-import { appShell, expect, test } from "./fixtures.js"
+import { appShell, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 const session = (worktreePath: string): SeedSession => ({
@@ -20,6 +20,14 @@ const session = (worktreePath: string): SeedSession => ({
   worktreePath,
   mode: "auto",
   model: "gpt-5.6-sol"
+})
+
+const otherSession = (worktreePath: string): SeedSession => ({
+  ...session(worktreePath),
+  id: "s_file_browser_other",
+  branch: "jingler/file-browser-other",
+  title: "Other file browser session",
+  updatedAt: "2026-08-07T00:00:00.000Z"
 })
 
 const seedRepository = ({ repoPath }: { repoPath: string }): void => {
@@ -41,6 +49,8 @@ const seedRepository = ({ repoPath }: { repoPath: string }): void => {
 
 const filesTab = (window: Page) =>
   window.getByRole("button", { name: "Files", exact: true })
+
+const projectRoot = resolve(import.meta.dirname, "../../..")
 
 const selectTreePath = async (window: Page, path: string): Promise<void> => {
   const tree = window.locator(
@@ -75,6 +85,11 @@ test("opens the session repository beside chat and edits a file through Pierre",
 
   await expect(appShell(window)).toBeVisible()
   await filesTab(window).click()
+  await expect(
+    window.locator(
+      '[data-jingler-pierre-file-tree][aria-label="Repository files"] [role="treeitem"]'
+    ).first()
+  ).toBeVisible({ timeout: 15_000 })
   const split = window.getByTestId("session-auxiliary-split")
   const chat = window.getByTestId("session-auxiliary-chat")
   await expect(split).toBeVisible()
@@ -148,6 +163,112 @@ test("opens the session repository beside chat and edits a file through Pierre",
   )
 })
 
+test("shows a previously existing large worktree before repository search", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    sessions: [session(projectRoot)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await window.setViewportSize({ width: 1320, height: 860 })
+  await filesTab(window).click()
+  const tree = window.locator(
+    '[data-jingler-pierre-file-tree][aria-label="Repository files"]'
+  )
+  await expect.poll(async () => (await tree.boundingBox())?.height ?? 0).toBeGreaterThan(400)
+  await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
+    timeout: 20_000
+  })
+  await expect(tree.locator('[data-file-tree-search-input]')).toHaveValue("")
+
+  await selectTreePath(window, "scripts/generate-brand-icons.py")
+  const editor = window.getByRole("region", {
+    name: "scripts/generate-brand-icons.py editor"
+  })
+  await expect(editor).toBeVisible()
+  const editorSurface = editor.locator(".jingler-pierre-code-view")
+  await expect.poll(async () => editorSurface.evaluate((node) => {
+    return getComputedStyle(node).backgroundColor
+  })).not.toBe("rgba(0, 0, 0, 0)")
+  await expect.poll(async () => {
+    const editorBox = await editor.boundingBox()
+    const canvasBox = await window.getByTestId("asset-content-canvas").boundingBox()
+    return Math.abs((editorBox?.height ?? 0) - (canvasBox?.height ?? 0))
+  }).toBeLessThan(1)
+
+  await editorSurface.evaluate((node) => {
+    node.scrollTop = node.scrollHeight
+    node.dispatchEvent(new Event("scroll", { bubbles: true }))
+  })
+  const finalLine = editorSurface.locator('[data-column-number="146"]')
+  await expect(finalLine).toBeVisible()
+  await expect.poll(async () => {
+    const editorBox = await editorSurface.boundingBox()
+    const lineBox = await finalLine.boundingBox()
+    if (editorBox === null || lineBox === null) return Number.NEGATIVE_INFINITY
+    return editorBox.y + editorBox.height - (lineBox.y + lineBox.height)
+  }).toBeGreaterThanOrEqual(24)
+
+  // This is the real repository file that exposed the clipped final line in
+  // the wide Files pane. Keep it explicit so a virtual-scroll-only fixture
+  // cannot mask the editor's actual bottom boundary.
+  await selectTreePath(window, "packages/plugin-sdk/src/ui.ts")
+  const uiEditor = window.getByRole("region", {
+    name: "packages/plugin-sdk/src/ui.ts editor"
+  })
+  const uiEditorSurface = uiEditor.locator(".jingler-pierre-code-view")
+  const uiEditorFooter = uiEditorSurface.locator(
+    "[data-jingler-pierre-code-view-footer]"
+  )
+  await expect(uiEditorFooter).toBeVisible()
+  await expect.poll(async () => (await uiEditorFooter.boundingBox())?.height ?? 0)
+    .toBeGreaterThanOrEqual(64)
+  await uiEditorSurface.evaluate((node) => {
+    node.scrollTop = node.scrollHeight
+    node.dispatchEvent(new Event("scroll", { bubbles: true }))
+  })
+  const uiFinalLine = uiEditorSurface.locator('[data-column-number="84"]')
+  await expect(uiFinalLine).toBeVisible()
+  await expect.poll(async () => {
+    const editorBox = await uiEditorSurface.boundingBox()
+    const lineBox = await uiFinalLine.boundingBox()
+    if (editorBox === null || lineBox === null) return Number.NEGATIVE_INFINITY
+    return editorBox.y + editorBox.height - (lineBox.y + lineBox.height)
+  }).toBeGreaterThanOrEqual(24)
+
+  await window.getByRole("button", { name: "Chat 1", exact: true }).click()
+  await filesTab(window).click()
+  await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
+    timeout: 20_000
+  })
+})
+
+test("shows a previously existing large worktree while its agent is running", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    sessions: [session(projectRoot)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  const composer = window.getByPlaceholder("Message Codex…")
+  await composer.fill("[[queue-hold]] keep this existing session busy")
+  await composer.press("Enter")
+  await expect(window.getByText("Holding the active turn for queue actions.")).toBeVisible({
+    timeout: 15_000
+  })
+  await filesTab(window).click()
+  const tree = window.locator(
+    '[data-jingler-pierre-file-tree][aria-label="Repository files"]'
+  )
+  await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
+    timeout: 20_000
+  })
+})
+
 test("adds selected code to the active chat from the editor context menu", async ({
   launchApp
 }) => {
@@ -201,16 +322,32 @@ test("follows the selected chat agent through edited and newly created files", a
     configured: true,
     withRepo: true,
     seed: seedRepository,
-    sessions: ({ repoPath }) => [session(repoPath)]
+    sessions: ({ repoPath }) => [session(repoPath), otherSession(repoPath)]
   })
 
   await expect(appShell(window)).toBeVisible()
+  await sessionRow(window, "File browser IDE").click()
   const composerFollow = window
     .getByTestId("composer")
     .getByRole("button", { name: "Follow agent", exact: true })
   await composerFollow.click()
   await expect(window.getByTestId("session-auxiliary-split")).toBeVisible()
   await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
+  await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
+  await expect(composerFollow).toHaveClass(/is-active/)
+  await expect(composerFollow.locator("svg")).toHaveClass(/lucide-mouse-pointer-2/)
+  const workspaceFollow = window
+    .getByTestId("asset-browser")
+    .getByRole("button", { name: "Follow agent", exact: true })
+  await expect(workspaceFollow).toHaveAttribute("aria-pressed", "true")
+  await expect(workspaceFollow).toHaveClass(/is-active/)
+  await expect(workspaceFollow.locator("svg")).toHaveClass(/lucide-mouse-pointer-2/)
+
+  await sessionRow(window, "Other file browser session").click()
+  await expect(window.getByText("Other file browser session", { exact: true }).last()).toBeVisible()
+  await sessionRow(window, "File browser IDE").click()
+  await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
+  await expect(window.getByTestId("session-auxiliary-split")).toBeVisible()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 
   // Prove the initial repository scan has settled before creating this file.
@@ -247,4 +384,36 @@ test("follows the selected chat agent through edited and newly created files", a
 
   await selectTreePath(window, "src/other.ts")
   await expect(composerFollow).toHaveAttribute("aria-pressed", "false")
+})
+
+test("follows a nested sub-agent edit for the selected chat", async ({ launchApp }) => {
+  const { window, repoPath } = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: seedRepository,
+    sessions: ({ repoPath }) => [session(repoPath)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  writeFileSync(join(repoPath, "src", "delegated.ts"), "export const delegated = true\n")
+
+  const composerFollow = window
+    .getByTestId("composer")
+    .getByRole("button", { name: "Follow agent", exact: true })
+  await composerFollow.click()
+  await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
+
+  const composer = window.getByPlaceholder("Message Codex…")
+  await composer.fill("[[subagent-edit-preview]] Delegate this file update.")
+  await composer.press("Enter")
+
+  await expect(window.getByRole("textbox", { name: "src/delegated.ts" })).toBeVisible({
+    timeout: 20_000
+  })
+  await expect(
+    window
+      .getByTestId("file-tab-src/delegated.ts")
+      .getByRole("button", { name: "src/delegated.ts", exact: true })
+  ).toHaveAttribute("aria-current", "page")
+  await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 })

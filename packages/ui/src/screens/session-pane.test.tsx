@@ -326,7 +326,9 @@ describe("mount groups", () => {
     render(
       <SessionPane
         session={session({ id: "a" })}
-        planSessions={new Set(["a"])}
+        // Promotion has not happened yet, so the canonical plan index does not
+        // include the session when its first renderable draft arrives.
+        planSessions={new Set()}
         renderConversation={(_session, view, ctx) => (
           <div>
             <button onClick={ctx.onPlanDraftAvailable}>stream draft</button>
