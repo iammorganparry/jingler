@@ -1076,6 +1076,11 @@ describe("activityOf", () => {
       { kind: "reading", verb: "Reading", target: "conversation.ts" }
     )
     expect(activityOf([turn(tool("Edit", "src/auth/session.ts"))], "running")?.kind).toBe("editing")
+    expect(activityOf([turn(tool("Update", "src/auth/session.ts"))], "running")).toStrictEqual({
+      kind: "editing",
+      verb: "Editing",
+      target: "session.ts"
+    })
   })
 
   it("derives full-path file activity for edit, write, and update tools", () => {
