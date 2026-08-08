@@ -261,7 +261,7 @@ export interface LaunchOptions {
   /** Test-only process flags for forcing a precise persistence/crash boundary. */
   readonly e2eEnv?: Readonly<Record<string, string>>
   /**
-   * Start the hermetic clive.local relay + real bundled device-agent process.
+   * Start the hermetic buildbox relay + real bundled device-agent process.
    * No user SSH files, credentials, ports, or home directories are consulted.
    */
   readonly remoteEnvironment?: boolean

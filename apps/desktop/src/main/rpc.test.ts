@@ -132,9 +132,9 @@ describe("remote session environment lifecycle", () => {
   it("falls back to repository name when neither machine has a GitHub slug", () => {
     const repository = selectContinuationRepository(
       { name: "Jingler", githubSlug: null },
-      [{ name: "jingler", path: "/Users/clive/jingler", defaultBranch: "main", githubSlug: null }],
+      [{ name: "jingler", path: "/Users/buildbox/jingler", defaultBranch: "main", githubSlug: null }],
     );
-    expect(repository?.path).toBe("/Users/clive/jingler");
+    expect(repository?.path).toBe("/Users/buildbox/jingler");
   });
 
   it("removes a remote session mirror when the device is offline", async () => {

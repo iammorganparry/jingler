@@ -1,7 +1,7 @@
 # Remote environments
 
 Remote environments let a signed-in desktop run Jingler sessions on another
-machine such as `clive.local` without logging Jingler into that machine over SSH.
+machine such as `buildbox` without logging Jingler into that machine over SSH.
 BetterAuth remains the user identity authority; the paired machine receives its
 own revocable asymmetric identity.
 
@@ -52,7 +52,7 @@ agent bundle. The production variables are:
 | Server/relay | `DEVICE_RELAY_SIGNING_SECRET` | Shared grant-signing key |
 
 The Electron e2e is hermetic: it creates throwaway desktop/device homes, a fake
-`clive.local` SSH transport, local auth/relay servers, and a real bundled device
+`buildbox` SSH transport, local auth/relay servers, and a real bundled device
 agent with the scripted harness. It never reads the developer's SSH files or
 credentials.
 

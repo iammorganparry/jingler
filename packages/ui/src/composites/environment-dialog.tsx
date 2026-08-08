@@ -68,7 +68,7 @@ export function EnvironmentDialog(props: EnvironmentDialogProps) {
                     onChange={(event) =>
                       props.onEdit("host", event.currentTarget.value)
                     }
-                    placeholder="clive.local"
+                    placeholder="buildbox"
                   />
                 </label>
                 <p className="text-[11px] leading-relaxed text-muted-foreground">

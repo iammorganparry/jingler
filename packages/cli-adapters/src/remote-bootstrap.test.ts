@@ -47,7 +47,7 @@ describe("remote agent installation", () => {
     const result = await Effect.runPromise(
       installAndBootstrapRemoteDevice(
         {
-          host: "clive.local",
+          host: "buildbox",
           username: "morgan",
           relayUrl: "https://relay.example.test",
           agentBundlePath: "/Applications/Jingler/device-agent/jingler-device.mjs"
@@ -85,7 +85,7 @@ describe("remote agent installation", () => {
       activateRemoteDevice(
         {
           host: "mac",
-          username: "clivetrigify",
+          username: "builder",
           subject: "user-one",
           deviceId: "device-one",
           serverUrl: "https://api.jingler.dev"
@@ -97,7 +97,7 @@ describe("remote agent installation", () => {
     expect(calls[0]).toMatchObject({
       binary: "ssh",
       args: expect.arrayContaining([
-        "clivetrigify@mac",
+        "builder@mac",
         expect.stringMatching(/install-service.*--subject.*user-one.*--device-id.*device-one/u)
       ]),
       options: { shell: false }
@@ -110,7 +110,7 @@ describe("remote agent installation", () => {
     const upload = await Effect.runPromiseExit(
       installAndBootstrapRemoteDevice(
         {
-          host: "clive.local",
+          host: "buildbox",
           relayUrl: "https://relay.example.test",
           agentBundlePath: "/Applications/Jingler/device-agent/jingler-device.mjs"
         },
@@ -120,7 +120,7 @@ describe("remote agent installation", () => {
     const activation = await Effect.runPromiseExit(
       activateRemoteDevice(
         {
-          host: "clive.local",
+          host: "buildbox",
           subject: "user-one",
           deviceId: "device-one",
           serverUrl: "https://api.jingler.dev"
@@ -129,13 +129,13 @@ describe("remote agent installation", () => {
       )
     )
     expect(Exit.isFailure(upload) && upload.cause.toString()).toContain(
-      "ssh clive.local works without a password"
+      "ssh buildbox works without a password"
     )
     expect(Exit.isFailure(upload) && upload.cause.toString()).toContain(
       "User and IdentityFile"
     )
     expect(Exit.isFailure(activation) && activation.cause.toString()).toContain(
-      "ssh clive.local works without a password"
+      "ssh buildbox works without a password"
     )
     expect(Exit.isFailure(activation) && activation.cause.toString()).toContain(
       "User and IdentityFile"
@@ -146,11 +146,11 @@ describe("remote agent installation", () => {
 describe("remote bootstrap", () => {
   it("discovers concrete aliases from SSH config and known hosts", () => {
     const result = parseSshHostSuggestions(
-      "Host clive.local\n  User morgan\n  Port 2222\nHost mac\n  HostName 192.168.1.12\n",
-      "buildbox ssh-ed25519 AAAA\n[staging.local]:2200 ssh-ed25519 BBBB\n"
+      "Host buildbox\n  User morgan\n  Port 2222\nHost mac\n  HostName 192.168.1.12\n",
+      "edgebox ssh-ed25519 AAAA\n[staging.local]:2200 ssh-ed25519 BBBB\n"
     )
-    expect(result.map((host) => host.alias)).toStrictEqual(["buildbox", "clive.local", "mac", "staging.local"])
-    expect(result.find((host) => host.alias === "clive.local")).toMatchObject({
+    expect(result.map((host) => host.alias)).toStrictEqual(["buildbox", "edgebox", "mac", "staging.local"])
+    expect(result.find((host) => host.alias === "buildbox")).toMatchObject({
       username: "morgan",
       port: 2222
     })
@@ -158,16 +158,16 @@ describe("remote bootstrap", () => {
 
   it("excludes wildcard aliases and github.com", () => {
     const result = parseSshHostSuggestions(
-      "Host *\nHost *.internal\nHost github.com\nHost github.com-mipstudios\n  HostName github.com\nHost clive.local\n",
+      "Host *\nHost *.internal\nHost github.com\nHost github.com-mipstudios\n  HostName github.com\nHost buildbox\n",
       "github.com ssh-ed25519 AAAA\n|1|hashed|entry ssh-ed25519 BBBB\n"
     )
-    expect(result.map((host) => host.alias)).toStrictEqual(["clive.local"])
+    expect(result.map((host) => host.alias)).toStrictEqual(["buildbox"])
   })
 
   it("deduplicates aliases across SSH sources", () => {
     const result = parseSshHostSuggestions(
-      "Host clive.local\n  User morgan\n",
-      "clive.local ssh-ed25519 AAAA\nCLIVE.LOCAL ssh-ed25519 BBBB\n"
+      "Host buildbox\n  User morgan\n",
+      "buildbox ssh-ed25519 AAAA\nBUILDBOX ssh-ed25519 BBBB\n"
     )
     expect(result).toHaveLength(1)
     expect(result[0]?.source).toBe("config")
@@ -177,7 +177,7 @@ describe("remote bootstrap", () => {
     const calls: Array<unknown> = []
     const result = await Effect.runPromise(
       bootstrapRemoteDevice(
-        { host: "clive.local", username: "morgan", port: 2222 },
+        { host: "buildbox", username: "morgan", port: 2222 },
         runner({ exitCode: 0, stdout: `${JSON.stringify(pairing)}\n`, stderr: "" }, calls)
       )
     )
@@ -192,7 +192,7 @@ describe("remote bootstrap", () => {
           "ConnectTimeout=10",
           "-p",
           "2222",
-          "morgan@clive.local",
+          "morgan@buildbox",
           "jingler-device pair --json"
         ],
         options: { shell: false }
@@ -228,7 +228,7 @@ describe("remote bootstrap", () => {
     const calls: Array<unknown> = []
     const exit = await Effect.runPromiseExit(
       bootstrapRemoteDevice(
-        { host: "clive.local; touch /tmp/owned" },
+        { host: "buildbox; touch /tmp/owned" },
         runner({ exitCode: 0, stdout: `${JSON.stringify(pairing)}\n`, stderr: "" }, calls)
       )
     )
@@ -239,7 +239,7 @@ describe("remote bootstrap", () => {
   it("maps SSH authentication and compatibility failures", async () => {
     const auth = await Effect.runPromiseExit(
       bootstrapRemoteDevice(
-        { host: "clive.local" },
+        { host: "buildbox" },
         runner(
           {
             exitCode: 255,
@@ -252,7 +252,7 @@ describe("remote bootstrap", () => {
     )
     const incompatible = await Effect.runPromiseExit(
       bootstrapRemoteDevice(
-        { host: "clive.local" },
+        { host: "buildbox" },
         runner(
           {
             exitCode: 127,
@@ -265,7 +265,7 @@ describe("remote bootstrap", () => {
     )
     expect(Exit.isFailure(auth) && auth.cause.toString()).toContain("authentication")
     expect(Exit.isFailure(auth) && auth.cause.toString()).toContain(
-      "ssh clive.local works without a password"
+      "ssh buildbox works without a password"
     )
     expect(Exit.isFailure(incompatible) && incompatible.cause.toString()).toContain("incompatible")
   })
@@ -273,7 +273,7 @@ describe("remote bootstrap", () => {
   it("returns the device pairing result from a successful bootstrap", async () => {
     const result = await Effect.runPromise(
       bootstrapRemoteDevice(
-        { host: "clive.local" },
+        { host: "buildbox" },
         runner(
           {
             exitCode: 0,

@@ -14,8 +14,8 @@ const props: EnvironmentDialogProps = {
   },
   hosts: [
     {
-      alias: "clive.local",
-      hostname: "clive.local",
+      alias: "buildbox",
+      hostname: "buildbox",
       username: null,
       port: 22,
       source: "config"
@@ -38,9 +38,9 @@ describe("EnvironmentDialog", () => {
     expect(screen.queryByLabelText("Device ID")).toBeNull()
     expect(screen.queryByLabelText("Pairing code")).toBeNull()
   })
-  it("renders suggested SSH hosts and selects clive.local", () => {
+  it("renders suggested SSH hosts and selects buildbox", () => {
     render(<EnvironmentDialog {...props} />)
-    fireEvent.click(screen.getByText("clive.local"))
+    fireEvent.click(screen.getByText("buildbox"))
     expect(props.onSelectHost).toHaveBeenCalledWith(props.hosts[0])
     expect(screen.queryByLabelText("Username")).toBeNull()
     expect(screen.queryByLabelText("Port")).toBeNull()
@@ -60,7 +60,7 @@ describe("EnvironmentDialog", () => {
     view.rerender(
       <EnvironmentDialog
         {...props}
-        values={{ ...props.values, host: "clive.local" }}
+        values={{ ...props.values, host: "buildbox" }}
       />
     )
     expect(

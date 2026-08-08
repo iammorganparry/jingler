@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from "vitest"
 import { createEnvironmentMachine } from "./environment-machine.js"
 
 const environment: Environment = {
-  id: "device_clive",
-  name: "clive.local",
+  id: "device_buildbox",
+  name: "buildbox",
   platform: { os: "darwin", arch: "arm64" },
   capabilities: {
     version: 1,
@@ -21,8 +21,8 @@ const environment: Environment = {
 const api = () => ({
   suggestHosts: vi.fn(async () => [
     {
-      alias: "clive.local",
-      hostname: "clive.local",
+      alias: "buildbox",
+      hostname: "buildbox",
       username: "morgan",
       port: 22,
       source: "config" as const
@@ -37,7 +37,7 @@ describe("environment machine", () => {
     const actor = createActor(createEnvironmentMachine(services)).start()
     await waitFor(actor, (snapshot) => snapshot.matches("configuring"))
     expect(services.suggestHosts).toHaveBeenCalledTimes(1)
-    expect(actor.getSnapshot().context.hosts[0]?.alias).toBe("clive.local")
+    expect(actor.getSnapshot().context.hosts[0]?.alias).toBe("buildbox")
   })
 
   it("pairs an SSH environment once", async () => {
@@ -48,7 +48,7 @@ describe("environment machine", () => {
     actor.send({ type: "SUBMIT" })
     await waitFor(actor, (snapshot) => snapshot.matches("connected"))
     expect(services.pairSsh).toHaveBeenCalledTimes(1)
-    expect(services.pairSsh).toHaveBeenCalledWith({ host: "clive.local" })
+    expect(services.pairSsh).toHaveBeenCalledWith({ host: "buildbox" })
   })
 
   it("returns an SSH failure to editable host configuration", async () => {
@@ -56,12 +56,12 @@ describe("environment machine", () => {
     services.pairSsh.mockRejectedValueOnce(new Error("SSH authentication failed"))
     const actor = createActor(createEnvironmentMachine(services)).start()
     await waitFor(actor, (snapshot) => snapshot.matches("configuring"))
-    actor.send({ type: "EDIT", field: "host", value: "clive.local" })
+    actor.send({ type: "EDIT", field: "host", value: "buildbox" })
     actor.send({ type: "SUBMIT" })
     await waitFor(actor, (snapshot) => snapshot.matches("failed"))
     actor.send({ type: "RETRY" })
     expect(actor.getSnapshot().matches("configuring")).toBe(true)
-    expect(actor.getSnapshot().context.host).toBe("clive.local")
+    expect(actor.getSnapshot().context.host).toBe("buildbox")
   })
 
   it("cancels without starting bootstrap", async () => {
