@@ -440,7 +440,12 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
               input: ({ context }) => ({ sessionId: context.sessionId }),
               onDone: [
                 {
-                  guard: ({ context }) => context.treeRefreshQueued,
+                  // A view activation can overlap the actor's speculative first
+                  // scan. Retry only when that scan found nothing: a non-empty
+                  // inventory is already useful and walking the whole repository
+                  // again would add cost without changing the visible result.
+                  guard: ({ context, event }) =>
+                    context.treeRefreshQueued && event.output.length === 0,
                   target: "loading",
                   reenter: true,
                   actions: [
@@ -457,7 +462,8 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                   actions: [
                     assign({
                       entries: ({ event }) => event.output,
-                      treeError: null
+                      treeError: null,
+                      treeRefreshQueued: false
                     }),
                     raise({ type: "TRY_PENDING_AGENT_TARGET" })
                   ]

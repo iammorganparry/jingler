@@ -576,6 +576,28 @@ describe("fileBrowserMachine", () => {
     ])
   })
 
+  it("does not rescan a non-empty repository after activation overlaps initial loading", async () => {
+    let resolveInitial:
+      | ((entries: ReadonlyArray<{ path: string; status: "clean" }>) => void)
+      | undefined
+    const list = vi.fn(
+      () =>
+        new Promise<ReadonlyArray<{ path: string; status: "clean" }>>((resolve) => {
+          resolveInitial = resolve
+        })
+    )
+    const { actor } = start({ list })
+
+    actor.send({ type: "VIEW_ACTIVATED" })
+    resolveInitial?.([{ path: "src/app.ts", status: "clean" }])
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    expect(actor.getSnapshot().context.entries).toEqual([
+      { path: "src/app.ts", status: "clean" }
+    ])
+    expect(list).toHaveBeenCalledTimes(1)
+  })
+
   it("refreshes a settled repository on later Files activations without clearing visible entries", async () => {
     let resolveRefresh:
       ((entries: ReadonlyArray<{ path: string; status: "modified" }>) => void) | undefined
