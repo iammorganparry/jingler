@@ -79,13 +79,22 @@ export interface GitHubApiClient {
   readonly repository: (cwd: string) => Promise<GitHubRepository>
   readonly rateLimit: () => GitHubRateLimit | null
   readonly prForBranch: (cwd: string, branch: string) => Promise<number | null>
+  readonly prForBranchBySlug: (slug: string, branch: string) => Promise<number | null>
   readonly prForWorktree: (cwd: string) => Promise<number | null>
   readonly listPrs: (
     cwd: string,
     options: { readonly mine: boolean; readonly search: string }
   ) => Promise<ReadonlyArray<PrSummary>>
+  readonly listPrsBySlug: (
+    slug: string,
+    options: { readonly mine: boolean; readonly search: string }
+  ) => Promise<ReadonlyArray<PrSummary>>
   readonly listIssues: (
     cwd: string,
+    options: { readonly mine: boolean; readonly search: string }
+  ) => Promise<ReadonlyArray<IssueSummary>>
+  readonly listIssuesBySlug: (
+    slug: string,
     options: { readonly mine: boolean; readonly search: string }
   ) => Promise<ReadonlyArray<IssueSummary>>
   readonly issueView: (cwd: string, number: number) => Promise<Issue | null>
@@ -99,7 +108,13 @@ export interface GitHubApiClient {
     cwd: string,
     input: { readonly title: string; readonly body: string; readonly base: string; readonly draft: boolean }
   ) => Promise<number>
+  readonly prCreateBySlug: (
+    slug: string,
+    branch: string,
+    input: { readonly title: string; readonly body: string; readonly base: string; readonly draft: boolean }
+  ) => Promise<number>
   readonly prUpdate: (cwd: string, number: number, input: { readonly title: string; readonly body: string }) => Promise<void>
+  readonly prUpdateBySlug: (slug: string, number: number, input: { readonly title: string; readonly body: string }) => Promise<void>
   readonly prComment: (cwd: string, number: number, body: string) => Promise<void>
   readonly prReviewComments: (
     cwd: string,
@@ -336,6 +351,7 @@ const READY_MUTATION = `mutation($id:ID!){
 
 export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiClient => {
   const repositoryCache = new Map<string, { readonly remote: string; readonly repository: GitHubRepository }>()
+  const slugRepositoryCache = new Map<string, GitHubRepository>()
   let latestRateLimit: GitHubRateLimit | null = null
 
   const call = async <A>(
@@ -365,7 +381,52 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
     }
   }
 
+  const resolveSlug = async (slug: string): Promise<GitHubRepository> => {
+    const normalized = slug.trim().replace(/^\/+|\/+$/gu, "")
+    const parts = normalized.split("/")
+    if (parts.length !== 2 || parts.some((part) => !/^[A-Za-z0-9_.-]+$/u.test(part))) {
+      throw new GitHubApiError({
+        reason: "not-found",
+        message: "The repository identity is not a valid owner/name slug."
+      })
+    }
+    const cached = slugRepositoryCache.get(normalized.toLowerCase())
+    if (cached) return cached
+    const [owner, repo] = parts as [string, string]
+    const grant = await options.auth.credentialsForOwner(owner, normalized, ["contents:read"])
+    const { data } = await call<Record<string, unknown>>(
+      grant,
+      "GET",
+      "/repos/{owner}/{repo}",
+      { owner, repo },
+      normalized
+    )
+    const id = number(data.id)
+    const nodeId = text(data.node_id)
+    const fullName = text(data.full_name)
+    if (id === null || !nodeId || !fullName || !fullName.includes("/")) {
+      throw new GitHubApiError({
+        reason: "unavailable",
+        message: "GitHub returned invalid repository metadata.",
+        repository: normalized,
+        installationId: grant.installationId
+      })
+    }
+    const [resolvedOwner, ...nameParts] = fullName.split("/")
+    const repository: GitHubRepository = {
+      id: String(id),
+      nodeId,
+      owner: resolvedOwner!,
+      name: nameParts.join("/"),
+      fullName,
+      installationId: grant.installationId
+    }
+    slugRepositoryCache.set(normalized.toLowerCase(), repository)
+    return repository
+  }
+
   const resolveRepository = async (cwd: string): Promise<GitHubRepository> => {
+    if (cwd.startsWith("github-slug:")) return resolveSlug(cwd.slice("github-slug:".length))
     const remote = await options.remoteUrl(cwd)
     if (!remote) {
       throw new GitHubApiError({
@@ -574,6 +635,7 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
     repository: resolveRepository,
     rateLimit: () => latestRateLimit,
     prForBranch,
+    prForBranchBySlug: (slug, branch) => prForBranch(`github-slug:${slug}`, branch),
     prForWorktree: async (cwd) => {
       const current = await options.branch(cwd)
       return current ? prForBranch(cwd, current) : null
@@ -601,6 +663,8 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         })
         .map(mapPrSummary)
     },
+    listPrsBySlug: (slug, listOptions) =>
+      client.listPrs(`github-slug:${slug}`, listOptions),
     listIssues: async (cwd, listOptions) => {
       const issues = await paginate(
         cwd,
@@ -630,6 +694,8 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         })
         .map(mapIssueSummary)
     },
+    listIssuesBySlug: (slug, listOptions) =>
+      client.listIssues(`github-slug:${slug}`, listOptions),
     issueView: async (cwd, issueNumber) => {
       try {
         const [issue, comments] = await Promise.all([
@@ -833,6 +899,32 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
       }
       return created
     },
+    prCreateBySlug: async (slug, branch, input) => {
+      const cwd = `github-slug:${slug}`
+      const repository = await resolveRepository(cwd)
+      const response = await repositoryCall<Record<string, unknown>>(
+        cwd,
+        "POST",
+        "/repos/{owner}/{repo}/pulls",
+        {
+          title: input.title,
+          body: input.body,
+          head: `${repository.owner}:${branch}`,
+          base: input.base,
+          draft: input.draft
+        },
+        ["pull_requests:write"]
+      )
+      const created = number(response.data.number)
+      if (created === null) {
+        throw new GitHubApiError({
+          reason: "unavailable",
+          message: "The pull request was created but GitHub did not return its number.",
+          repository: repository.fullName
+        })
+      }
+      return created
+    },
     prUpdate: async (cwd, pullNumber, input) => {
       await repositoryCall(
         cwd,
@@ -842,6 +934,8 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         ["pull_requests:write"]
       )
     },
+    prUpdateBySlug: (slug, pullNumber, input) =>
+      client.prUpdate(`github-slug:${slug}`, pullNumber, input),
     prComment: async (cwd, pullNumber, body) => {
       await repositoryCall(
         cwd,
@@ -992,11 +1086,17 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
       repository: (cwd: string) => wrap(() => client.repository(cwd)),
       rateLimit: () => Effect.sync(client.rateLimit),
       prForBranch: (cwd: string, branch: string) => wrap(() => client.prForBranch(cwd, branch)),
+      prForBranchBySlug: (slug: string, branch: string) =>
+        wrap(() => client.prForBranchBySlug(slug, branch)),
       prForWorktree: (cwd: string) => wrap(() => client.prForWorktree(cwd)),
       listPrs: (cwd: string, options: { readonly mine: boolean; readonly search: string }) =>
         wrap(() => client.listPrs(cwd, options)),
+      listPrsBySlug: (slug: string, options: { readonly mine: boolean; readonly search: string }) =>
+        wrap(() => client.listPrsBySlug(slug, options)),
       listIssues: (cwd: string, options: { readonly mine: boolean; readonly search: string }) =>
         wrap(() => client.listIssues(cwd, options)),
+      listIssuesBySlug: (slug: string, options: { readonly mine: boolean; readonly search: string }) =>
+        wrap(() => client.listIssuesBySlug(slug, options)),
       issueView: (cwd: string, number: number) => wrap(() => client.issueView(cwd, number)),
       prState: (cwd: string, number: number) => wrap(() => client.prState(cwd, number)),
       prHeadSha: (cwd: string, number: number) => wrap(() => client.prHeadSha(cwd, number)),
@@ -1006,8 +1106,18 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
       prCheckout: (cwd: string, number: number) => wrap(() => client.prCheckout(cwd, number)),
       prCreate: (cwd: string, input: Parameters<GitHubApiClient["prCreate"]>[1]) =>
         wrap(() => client.prCreate(cwd, input)),
+      prCreateBySlug: (
+        slug: string,
+        branch: string,
+        input: Parameters<GitHubApiClient["prCreateBySlug"]>[2]
+      ) => wrap(() => client.prCreateBySlug(slug, branch, input)),
       prUpdate: (cwd: string, number: number, input: Parameters<GitHubApiClient["prUpdate"]>[2]) =>
         wrap(() => client.prUpdate(cwd, number, input)),
+      prUpdateBySlug: (
+        slug: string,
+        number: number,
+        input: Parameters<GitHubApiClient["prUpdateBySlug"]>[2]
+      ) => wrap(() => client.prUpdateBySlug(slug, number, input)),
       prComment: (cwd: string, number: number, body: string) =>
         wrap(() => client.prComment(cwd, number, body)),
       prReviewComments: (

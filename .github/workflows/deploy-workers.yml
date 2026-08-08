@@ -30,6 +30,8 @@ jobs:
             package: "@jingler/github-relay"
           - name: Memory worker
             package: "@jingler/memory-worker"
+          - name: Device relay
+            package: "@jingler/device-relay"
 
     steps:
       - name: Check out the tested revision

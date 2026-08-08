@@ -59,6 +59,13 @@ test("groups sessions by the repo's CURRENT directory name, not the one stored a
 
   await showSessions(window, "Active")
 
+  // Repository headings are only present in the explicit repository grouping;
+  // the product default groups by attention status.
+  await window.getByTestId("session-filter-menu").click()
+  await window.getByRole("menuitem", { name: /^Group by/ }).click()
+  await window.getByRole("menuitem", { name: /^Repository$/ }).click()
+  await window.keyboard.press("Escape")
+
   // Both sessions are present …
   await expect(sessionRow(window, "Created before the rename")).toBeVisible()
   await expect(sessionRow(window, "Created after the rename")).toBeVisible()
