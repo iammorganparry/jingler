@@ -109,3 +109,33 @@ describe("tool card — expanding a call", () => {
     })
   })
 })
+
+describe("plan task progress — protocol stays out of chat", () => {
+  it("renders adjacent task markers as compact chips beside the remaining prose", () => {
+    const message: Message = {
+      id: "a-progress",
+      role: "assistant",
+      streaming: true,
+      createdAt: "2026-08-08T10:00:00.000Z",
+      parts: [
+        {
+          _tag: "Text",
+          text:
+            "PLAN_TASK stage=S1 fingerprint=secret task=S1-T3 status=completed" +
+            "PLAN_TASK stage=S1 fingerprint=secret task=S1-T4 status=in-progress" +
+            "The registry tests now cover replay rejection."
+        }
+      ]
+    }
+
+    render(<MessageTurn message={message} />)
+
+    expect(screen.getByText("S1-T3")).toBeDefined()
+    expect(screen.getByText("Completed")).toBeDefined()
+    expect(screen.getByText("S1-T4")).toBeDefined()
+    expect(screen.getByText("In progress")).toBeDefined()
+    expect(screen.getByText("The registry tests now cover replay rejection.")).toBeDefined()
+    expect(screen.queryByText(/PLAN_TASK/)).toBeNull()
+    expect(screen.queryByText(/secret/)).toBeNull()
+  })
+})

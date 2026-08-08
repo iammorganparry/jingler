@@ -111,6 +111,8 @@ const renderPart = (part: ContentPart): string | null => {
         .join("\n")
       return `- PLAN: ${part.plan.summary}\n${steps}`
     }
+    case "PlanTaskProgress":
+      return `- PLAN TASK ${part.stageId}/${part.taskId}: ${part.status}`
   }
 }
 

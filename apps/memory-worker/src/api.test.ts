@@ -322,6 +322,33 @@ describe("memory Worker internal API", () => {
     expect(serialized).not.toContain("current-secret")
   })
 
+  it("keeps the version 1 dashboard compatible with released desktop decoders", async () => {
+    const bucket = new InMemoryR2Bucket()
+    const env: MemoryWorkerEnv = {
+      MEMORY_R2: bucket,
+      MEMORY_VAULTS: new TestVaultNamespace(bucket),
+      MEMORY_SERVICE_SECRET: "current-secret"
+    }
+
+    const dashboard = await handleMemoryWorkerRequest(
+      getRequest("org-dashboard-v1", "/internal/memory/analytics?asOf=2026-08-01T01:00:00.000Z"),
+      env
+    )
+
+    expect(await jsonBody(dashboard)).toMatchObject({
+      version: 1,
+      reviewThroughput: {
+        proposed: 0,
+        accepted: 0,
+        rejected: 0,
+        conflicted: 0,
+        open: 0,
+        acceptanceRatio: 0,
+        medianReviewHours: null
+      }
+    })
+  })
+
   it("rejects malformed request bodies through the endpoint schema", async () => {
     const bucket = new InMemoryR2Bucket()
     const response = await handleMemoryWorkerRequest(

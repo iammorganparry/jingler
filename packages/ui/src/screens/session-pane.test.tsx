@@ -307,11 +307,28 @@ describe("mount groups", () => {
     expect(screen.getByTestId("plan-presentation").textContent).toBe("split")
   })
 
+  it("opens empty Plan Review full-width so a roomy pane can start its first plan", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        planSessions={new Set()}
+        renderConversation={(_session, view) => (
+          <span data-testid="plan-presentation">{view}</span>
+        )}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Plan Review" }))
+    expect(screen.getByTestId("plan-presentation").textContent).toBe("plan")
+  })
+
   it("opens the first streamed draft beside a roomy conversation", () => {
     render(
       <SessionPane
         session={session({ id: "a" })}
-        planSessions={new Set(["a"])}
+        // Promotion has not happened yet, so the canonical plan index does not
+        // include the session when its first renderable draft arrives.
+        planSessions={new Set()}
         renderConversation={(_session, view, ctx) => (
           <div>
             <button onClick={ctx.onPlanDraftAvailable}>stream draft</button>

@@ -6,11 +6,9 @@ import type {
   PlanStepView,
   PlanTask
 } from "@jingler/core"
-import { PlanBlocks } from "../plan-doc/plan-blocks.js"
 import { BookOpen, Check, Circle, MinusCircle, RotateCw, Square, X } from "lucide-react"
 import { Badge } from "../../components/badge.js"
 import { FileChip } from "../../components/file-chip.js"
-import { MermaidDiagram } from "../../components/mermaid-diagram.js"
 import { StatusDot } from "../../components/status-dot.js"
 import { cn } from "../../lib/cn.js"
 import { usePlanFileControls } from "../plan-doc/plan-file-controls.js"
@@ -25,9 +23,9 @@ const RETRYABLE: ReadonlySet<PlanStageExecutionStatus> = new Set(["failed", "int
  * built entirely from `PlanStepView` — the pure `@jingler/core` projection — so
  * the whole outline is testable without a live plan document.
  *
- * A card carries four scannable sections: **Changes** (declared files), **Tasks**
- * (durable checklist progress plus approach prose), the stage's own
- * **Architecture**, and **Tests** (criteria, evidence, and linked named cases).
+ * A card carries three scannable sections: **Changes** (declared files), **Tasks**
+ * (durable checklist progress only), and **Tests** (criteria and evidence).
+ * Explanatory prose and architecture live once in the cohesive Guide surface.
  *
  * Selection is the whole card: clicking (or activating with the keyboard) calls
  * `onSelect(step.id)`, and `active` paints the selected state. A stable
@@ -89,29 +87,20 @@ const CHANGE_BORDER: Record<PlanStepView["files"][number]["change"], string | un
  */
 const MAX_VISIBLE_FILES = 12
 
-/**
- * Sanitize the stage body and drop blocks that are already surfaced elsewhere on
- * the card: the `<ul data-files>` declaration (rendered as `FileChip`s in the
- * Changes section), the `[data-acceptance]` criteria (the Tests section), the
- * `[data-assignment]` worker metadata, and any embedded mermaid diagrams (an
- * Architecture-surface concern). Mirrors `plan-architecture`'s `sectionProse`.
- */
 export interface PlanStepCardProps {
   readonly step: PlanStepView
   /** Renders the selected state and marks the card current. */
   readonly active?: boolean
+  readonly revising?: boolean
   /** Fired when the card is clicked or activated with the keyboard. */
   readonly onSelect?: (stepId: string) => void
-  /** Opens the tutorial walkthrough at this exact stage. */
-  readonly onOpenWalkthrough?: (stepId: string) => void
+  /** Opens the cohesive implementation guide at this exact stage. */
+  readonly onOpenGuide?: (stepId: string) => void
 }
 
-export function PlanStepCard({ step, active, onSelect, onOpenWalkthrough }: PlanStepCardProps) {
+export function PlanStepCard({ step, active, revising, onSelect, onOpenGuide }: PlanStepCardProps) {
   const tasks = step.tasks ?? []
-  const diagrams = step.diagrams ?? []
   const completedTasks = tasks.filter((task) => task.status === "completed").length
-  const hasNotes = step.notes.length > 0
-  const hasApproach = step.approach.length > 0
   // Live worktree evidence + open handler come from the plan file-controls
   // context (provided around the outline), so chips open the asset and show
   // live +/- while there's uncommitted work — falling back to declared counts.
@@ -147,7 +136,7 @@ export function PlanStepCard({ step, active, onSelect, onOpenWalkthrough }: Plan
         }
       }}
       className={cn(
-        "group flex cursor-pointer flex-col gap-3.5 rounded-lg border bg-panel px-4 py-3.5 text-left",
+        "group relative flex cursor-pointer flex-col gap-3.5 overflow-hidden rounded-lg border bg-panel px-4 py-3.5 text-left",
         "transition-[background-color,border-color] duration-150 ease-out outline-none",
         "focus-visible:ring-2 focus-visible:ring-ring",
         active
@@ -155,6 +144,17 @@ export function PlanStepCard({ step, active, onSelect, onOpenWalkthrough }: Plan
           : "border-hairline hover:border-line-strong hover:bg-surface/50"
       )}
     >
+      {revising && (
+        <div
+          role="status"
+          aria-label={`Revising ${step.title}`}
+          className="absolute inset-0 z-10 flex animate-pulse flex-col justify-center gap-2 bg-panel/90 px-5"
+        >
+          <span className="text-[11px] font-medium text-blue">Revising this step…</span>
+          <span className="h-2 w-4/5 rounded bg-line" />
+          <span className="h-2 w-3/5 rounded bg-line" />
+        </div>
+      )}
       {/* Header: step id marker + title, complexity chip, execution status */}
       <div className="flex items-start gap-2.5">
         <span className="mt-px flex-none font-mono text-[10px] tabular-nums text-muted-foreground">
@@ -179,17 +179,17 @@ export function PlanStepCard({ step, active, onSelect, onOpenWalkthrough }: Plan
         </span>
       </div>
 
-      {onOpenWalkthrough && (
+      {onOpenGuide && (
         <button
           type="button"
-          aria-label={`Open walkthrough for ${step.title}`}
+          aria-label={`Open guide for ${step.title}`}
           onClick={(event) => {
             event.stopPropagation()
-            onOpenWalkthrough(step.id)
+            onOpenGuide(step.id)
           }}
           className="inline-flex w-fit items-center gap-1.5 rounded-md border border-line px-2 py-1 text-[10.5px] font-medium text-blue outline-none transition-colors hover:border-line-strong hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <BookOpen className="size-3" /> View walkthrough
+          <BookOpen className="size-3" /> View guide
         </button>
       )}
 
@@ -286,7 +286,7 @@ export function PlanStepCard({ step, active, onSelect, onOpenWalkthrough }: Plan
         )}
       </CardSection>
 
-      {/* Tasks: intent + approach + prose blocks */}
+      {/* Tasks: durable checklist status only; prose belongs in Guide. */}
       <CardSection title="Tasks">
         {tasks.length > 0 && (
           <>
@@ -322,46 +322,10 @@ export function PlanStepCard({ step, active, onSelect, onOpenWalkthrough }: Plan
             </ol>
           </>
         )}
-        {step.intent.trim().length > 0 && (
-          <p className="m-0 text-[12.5px] leading-[1.55] text-text-body">{step.intent}</p>
-        )}
-        {hasApproach && (
-          <ol className="m-0 pl-4 text-[12.5px] leading-[1.6] text-text-body">
-            {step.approach.map((item, index) => (
-              <li key={index}>{item}</li>
-            ))}
-          </ol>
-        )}
-        {hasNotes && (
-          <PlanBlocks blocks={step.notes} className="sb-md text-[12.5px] leading-[1.6] text-text-body" />
-        )}
-        {tasks.length === 0 && step.intent.trim().length === 0 && !hasApproach && !hasNotes && (
+        {tasks.length === 0 && (
           <EmptyNote>No task detail yet.</EmptyNote>
         )}
       </CardSection>
-
-      {diagrams.length > 0 && (
-        <section
-          aria-label={`Architecture for ${step.title}`}
-          className="flex flex-col gap-1.5"
-        >
-          <h4 className="m-0 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">
-            Architecture
-          </h4>
-          <div className="flex flex-col gap-2">
-            {diagrams.map((diagram) => (
-              <div
-                key={diagram.id}
-                role="img"
-                aria-label={`Diagram ${diagram.id}`}
-                className="overflow-hidden rounded-md border border-line bg-surface/40 px-2 py-1"
-              >
-                <MermaidDiagram source={diagram.source} className="my-2" />
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       {/* Tests: acceptance criteria */}
       <CardSection title="Tests" count={step.acceptance.length}>

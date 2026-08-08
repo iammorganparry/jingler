@@ -12,7 +12,7 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "test": "vitest run && pnpm --filter @jingler/github-relay test",
+    "test": "vitest run && pnpm --filter @jingler/github-relay test && pnpm --filter @jingler/device-relay test",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "biome lint .",

@@ -119,9 +119,10 @@ test("streams a turn, pauses at a HITL gate, and resumes on approval", async ({ 
   // "Searching the web"), which made the two surfaces disagree and let the pill
   // grow with every tool call; that detail lives on the pill's hover title now.
   //
-  // Each is still scoped to its surface and matched exactly — an unscoped matcher
-  // would prove neither.
-  await expect(row.getByText("Needs Input", { exact: true })).toBeVisible()
+  // Each is still scoped to its surface — an unscoped matcher would prove
+  // neither. The sidebar appends a live age ("Needs Input now", then "1m"), so
+  // match the stable status prefix rather than freezing the timestamp.
+  await expect(row.getByText(/^Needs Input\b/)).toBeVisible()
   await expect(
     window.getByTestId("session-tab-bar").getByText("Needs Input", { exact: true })
   ).toBeVisible()
@@ -747,6 +748,36 @@ test("an orphaned pending gate settles on load (its dead buttons disappear)", as
   await expect(window.getByRole("button", { name: "Deny" })).toHaveCount(0)
 })
 
+test("PLAN_TASK protocol renders as status chips without leaking markers or fingerprints", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: seededSessions,
+    transcripts: {
+      s_seeded: [
+        {
+          id: "a_progress",
+          role: "assistant",
+          streaming: false,
+          createdAt: "2026-08-08T00:00:00.000Z",
+          parts: [{
+            _tag: "Text",
+            text: "PLAN_TASK stage=S1 fingerprint=secret-fingerprint task=S1-T3 status=completedPLAN_TASK stage=S1 fingerprint=secret-fingerprint task=S1-T4 status=in-progressMoving to the per-session tunnel."
+          }]
+        }
+      ]
+    }
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await expect(window.getByLabel("S1-T3: Completed")).toBeVisible()
+  await expect(window.getByLabel("S1-T4: In progress")).toBeVisible()
+  await expect(window.getByText("Moving to the per-session tunnel.")).toBeVisible()
+  await expect(window.getByText(/PLAN_TASK|secret-fingerprint/)).toHaveCount(0)
+})
+
 test("an archived session shows in the Archived group, read-only, and restores", async ({
   launchApp
 }) => {
@@ -929,16 +960,16 @@ test("a merged PR badges its linked session but never archives it", async ({ lau
 
   // Waiting on the merge signal is what proves the PR-state poll actually ran —
   // without it, "was not archived" would pass trivially by asserting before the
-  // sweep. The row no longer spells the state out in text: the number is a badge
-  // (`⑂ #500`) and the state moved to the leading glyph, whose title is the only
-  // place the word "merged" still appears.
-  await expect(window.getByTitle("Pull request merged")).toBeVisible({ timeout: 15_000 })
-  await expect(window.getByText("⑂ #500")).toBeVisible()
+  // sweep. Scope the accessible state and number to this row so the assertion
+  // does not depend on whichever icon renders the badge.
+  const shippedRow = sessionRow(window, "Old shipped work")
+  await expect(shippedRow.getByTitle("Pull request merged")).toBeVisible({ timeout: 15_000 })
+  await expect(shippedRow.getByText("#500", { exact: true })).toBeVisible()
 
   // Still an ACTIVE session — which, now that archived is a hidden-by-default
   // filter, means simply: still listed. That is a stronger check than the old
   // "no Archived group" one, which would pass even if the session had vanished.
-  await expect(sessionRow(window, "Old shipped work")).toBeVisible()
+  await expect(shippedRow).toBeVisible()
 })
 
 /**
@@ -976,8 +1007,8 @@ test("a running adversarial review reports its phase and appears in the agent ta
   // runs, so an unconditional toggle opens it whenever the last run left it shut.
   // `exact` also matters — otherwise this matches "Hide preview" too.
   // The control is in the window title bar now, not this pane's tab bar.
-  const preview = window.getByRole("button", { name: "Preview", exact: true })
-  if ((await preview.getAttribute("aria-pressed")) === "true") await preview.click()
+  const browser = window.getByRole("button", { name: "Browser", exact: true })
+  if ((await browser.getAttribute("aria-pressed")) === "true") await browser.click()
 
   await window.getByRole("button", { name: "Pull Request" }).click()
   const runButton = window.getByRole("button", { name: /Adversarial review/ })

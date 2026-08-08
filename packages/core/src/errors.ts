@@ -63,6 +63,34 @@ export class ConfigError extends Schema.TaggedError<ConfigError>()(
   }
 ) {}
 
+/** Renderer-safe failure from pairing or managing an execution environment. */
+export class EnvironmentError extends Schema.TaggedError<EnvironmentError>()(
+  "EnvironmentError",
+  {
+    reason: Schema.Literal(
+      "authentication",
+      "unavailable",
+      "invalid-input",
+      "expired-code",
+      "ssh",
+      "not-found",
+      "incompatible"
+    ),
+    message: Schema.String
+  }
+) {}
+
+/** A requested session environment cannot safely accept the operation. */
+export class EnvironmentHandoffError extends Schema.TaggedError<EnvironmentHandoffError>()(
+  "EnvironmentHandoffError",
+  {
+    reason: Schema.Literal("busy", "has-work", "unavailable", "incompatible"),
+    message: Schema.String,
+    sessionId: Schema.String,
+    environmentId: Schema.optional(Schema.String)
+  }
+) {}
+
 /**
  * Raised when a call to the self-hosted OpenConnector instance fails — not
  * configured (no endpoint/token), unreachable, or a non-OK response. A
@@ -81,13 +109,10 @@ export class ConnectorError extends Schema.TaggedError<ConnectorError>()(
  * Raised when a git operation (branch lookup, `worktree add`, repo scan) fails.
  * A `Schema.TaggedError` — it is the error channel for the worktree/branch RPCs.
  */
-export class GitError extends Schema.TaggedError<GitError>()(
-  "GitError",
-  {
-    message: Schema.String,
-    cause: Schema.optional(Schema.Unknown)
-  }
-) {}
+export class GitError extends Schema.TaggedError<GitError>()("GitError", {
+  message: Schema.String,
+  cause: Schema.optional(Schema.Unknown)
+}) {}
 
 /**
  * A typed failure from the GitHub App API boundary.
@@ -225,14 +250,11 @@ export class BrowserControlError extends Schema.TaggedError<BrowserControlError>
  * Note that LISTING never uses this channel: one broken file must not empty the
  * picker, so `ThemeCatalog.skipped` reports per-file failures inline instead.
  */
-export class ThemeError extends Schema.TaggedError<ThemeError>()(
-  "ThemeError",
-  {
-    message: Schema.String,
-    themeId: Schema.optional(Schema.String),
-    cause: Schema.optional(Schema.String)
-  }
-) {}
+export class ThemeError extends Schema.TaggedError<ThemeError>()("ThemeError", {
+  message: Schema.String,
+  themeId: Schema.optional(Schema.String),
+  cause: Schema.optional(Schema.String)
+}) {}
 
 /**
  * Raised when a requested asset path resolves OUTSIDE the session's worktree.
@@ -253,7 +275,12 @@ export class AssetOutsideWorktreeError extends Schema.TaggedError<AssetOutsideWo
     /** The path as requested — worktree-relative, or whatever was asked for. */
     path: Schema.String,
     /** Why it was refused: no worktree, escaped the root, or not a regular file. */
-    reason: Schema.Literal("no-worktree", "escapes-root", "not-a-file", "unreadable")
+    reason: Schema.Literal(
+      "no-worktree",
+      "escapes-root",
+      "not-a-file",
+      "unreadable"
+    )
   }
 ) {}
 

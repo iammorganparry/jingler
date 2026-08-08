@@ -1775,6 +1775,11 @@ describe("AgentRunner plan mode", () => {
     expect(assistantText).toContain("Steps 2, 3 and 5 are done.")
     expect(assistantText).not.toContain("PLAN_RESULT")
     expect(assistantText).not.toContain("PLAN_TASK")
+    expect(
+      result.transcript
+        .flatMap((message) => message.parts)
+        .filter((part) => part._tag === "PlanTaskProgress").length
+    ).toBeGreaterThan(0)
   })
 
   it("marks a plan step done when an executed edit touches one of its files", async () => {

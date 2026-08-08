@@ -79,7 +79,10 @@ import {
 } from "./plan-document-registry.js";
 import { addDraftCodeReference, clearDraft } from "./draft-store.js";
 import { clearViewedPaths } from "./viewed-store.js";
-import { disposeFileBrowserActor, openSessionFile } from "./use-file-browser.js";
+import {
+  disposeFileBrowserActor,
+  openSessionFile,
+} from "./use-file-browser.js";
 import { onSessionUpdate } from "./session-updates.js";
 import { setVisibleSessionIds } from "./active-session.js";
 import { prNotification } from "./notifier.js";
@@ -96,6 +99,7 @@ import { themeCatalogKey, useTheme } from "./use-theme.js";
 import { useConnectorCenter } from "./use-connector-center.js";
 import { useOpenConnector } from "./use-open-connector.js";
 import { useInjectionTargets } from "./use-injection-targets.js";
+import { useEnvironments } from "./use-environments.js";
 import {
   PluginProvider,
   usePluginCommands,
@@ -248,7 +252,10 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
                   onClick={memory.recover}
                   className="flex flex-none items-center gap-1.5 rounded-md border border-line bg-sunken px-2.5 py-1.5 text-[10.5px] text-text-bright outline-none hover:bg-panel focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                 >
-                  <RotateCcw size={12} className={memory.recovering ? "animate-spin" : undefined} />
+                  <RotateCcw
+                    size={12}
+                    className={memory.recovering ? "animate-spin" : undefined}
+                  />
                   {memory.recovering ? "Recovering…" : "Recover memory"}
                 </button>
               )}
@@ -429,6 +436,8 @@ function AuthedApp({
   const connector = useConnectorCenter();
   const unifiedMcp = useOpenConnector();
   const injectionTargets = useInjectionTargets(unifiedMcp.config);
+  const environmentController = useEnvironments();
+  const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false);
 
   // Renderer-side rpc reads, via react-query.
   const configQuery = useQuery({
@@ -660,7 +669,9 @@ function AuthedApp({
       send({ type: "SESSION_UPDATED", session });
     } catch (error) {
       setSessionMutationError(
-        error instanceof Error ? error.message : "Could not archive the session.",
+        error instanceof Error
+          ? error.message
+          : "Could not archive the session.",
       );
       throw error;
     }
@@ -731,6 +742,26 @@ function AuthedApp({
     github.connection.installations.some(
       (installation) => installation.status === "active",
     );
+  // A manual GitHub refresh can revoke one repository while leaving the overall
+  // account connected. Restart the main-process relay stream whenever that
+  // authorization topology changes so its supervisor immediately closes routes
+  // that are no longer permitted instead of waiting for its low-frequency
+  // background reconciliation.
+  const githubRelayAuthorizationVersion = useMemo(
+    () =>
+      github.connection.installations
+        .map((installation) =>
+          [
+            installation.id,
+            installation.status,
+            installation.repositorySelection,
+            ...(installation.repositories ?? []).map((repository) => repository.id).sort(),
+          ].join(":"),
+        )
+        .sort()
+        .join("|"),
+    [github.connection.installations],
+  );
   const autoDetect = connected && (githubConfig?.autoDetectPr ?? true);
   const autoCreate =
     connected &&
@@ -933,7 +964,7 @@ function AuthedApp({
       }
       cancelEvents();
     };
-  }, [connected, feedbackRouter]);
+  }, [connected, feedbackRouter, githubRelayAuthorizationVersion]);
 
   // Continuously resolve the OPEN PR on every live worktree branch. Sessions can
   // outlive a merged PR and open a replacement, so linked sessions stay in the
@@ -1335,6 +1366,54 @@ function AuthedApp({
         onSaveFontScale={saveFontScale}
         themes={themeSettings}
         plugins={plugins}
+        devices={{
+          environments: environmentController.environments,
+          loading: environmentController.loading,
+          error: environmentController.error,
+          onOpen: () => {
+            environmentController.send({ type: "RESET" });
+            setEnvironmentDialogOpen(true);
+          },
+          onRefresh: environmentController.refresh,
+          onRename: environmentController.rename,
+          onRevoke: environmentController.revoke,
+          dialog: {
+            open: environmentDialogOpen,
+            state: String(environmentController.snapshot.value) as
+              | "choosing"
+              | "discovering"
+              | "configuring"
+              | "linking"
+              | "claiming"
+              | "connected"
+              | "failed",
+            method: environmentController.snapshot.context.method,
+            values: {
+              backendUrl: environmentController.snapshot.context.backendUrl,
+              pendingDeviceId:
+                environmentController.snapshot.context.pendingDeviceId,
+              pairingCode: environmentController.snapshot.context.pairingCode,
+              host: environmentController.snapshot.context.host,
+              username: environmentController.snapshot.context.username,
+              port: environmentController.snapshot.context.port,
+            },
+            hosts: environmentController.snapshot.context.hosts,
+            environment: environmentController.snapshot.context.environment,
+            error: environmentController.snapshot.context.error,
+            onClose: () => {
+              environmentController.send({ type: "CANCEL" });
+              setEnvironmentDialogOpen(false);
+            },
+            onChoose: (method) =>
+              environmentController.send({ type: "CHOOSE", method }),
+            onEdit: (field, value) =>
+              environmentController.send({ type: "EDIT", field, value }),
+            onSelectHost: (host) =>
+              environmentController.send({ type: "SELECT_HOST", host }),
+            onSubmit: () => environmentController.send({ type: "SUBMIT" }),
+            onRetry: () => environmentController.send({ type: "RETRY" }),
+          },
+        }}
         providersConfig={providersConfig}
         onSaveProvider={saveProvider}
         defaultCli={defaultCli}
@@ -1357,7 +1436,11 @@ function AuthedApp({
           onToggle: injectionTargets.setEnabled,
         }}
         connector={connector}
-        loadBranches={rpc.workspaceBranches}
+        environments={environmentController.environments}
+        loadEnvironmentDiscovery={rpc.environmentsDiscovery}
+        loadBranches={async (repoPath, environmentId) => {
+          return rpc.workspaceBranches(repoPath, environmentId)
+        }}
         onCreateSession={createSession}
         onRenameSession={renameSession}
         onSetSessionPersistent={setSessionPersistent}
@@ -1376,6 +1459,7 @@ function AuthedApp({
         renderConversation={(session: Session, view, ctx) => (
           <ConversationPane
             session={session}
+            environments={environmentController.environments}
             view={view}
             onOpenPlanReview={ctx.onOpenPlanReview}
             onPlanDraftAvailable={ctx.onPlanDraftAvailable}
@@ -1500,8 +1584,12 @@ function AuthedApp({
             onSideChange={termDock.setSide}
           />
         )}
-        isBrowserActive={(sessionId) => browserDock.forSession(sessionId).visible}
-        onToggleBrowser={(sessionId) => browserDock.forSession(sessionId).toggle()}
+        isBrowserActive={(sessionId) =>
+          browserDock.forSession(sessionId).visible
+        }
+        onToggleBrowser={(sessionId) =>
+          browserDock.forSession(sessionId).toggle()
+        }
         renderBrowser={(session) => (
           <PreviewDockView session={session} dock={browserDock} />
         )}
@@ -1543,7 +1631,9 @@ function AuthedApp({
             await deleteSession(pendingDelete.id);
           } catch (error) {
             setSessionMutationError(
-              error instanceof Error ? error.message : "Could not delete the session.",
+              error instanceof Error
+                ? error.message
+                : "Could not delete the session.",
             );
             throw error;
           }

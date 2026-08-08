@@ -1,7 +1,7 @@
 import { type ReactNode, useState } from "react"
-import { stripPlanResultProtocol } from "@jingler/core"
+import { planTaskProtocolTokens, stripPlanResultProtocol } from "@jingler/core"
 import type { CliKind, ContentPart, ExecutionMode, GateDecision, Message, ToolCall as ToolCallModel } from "@jingler/core"
-import { ChevronDown, ChevronRight } from "lucide-react"
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { AttachmentThumb } from "../components/attachment-thumb.js"
 import { Eyebrow } from "../components/eyebrow.js"
@@ -24,6 +24,7 @@ const COLLAPSE_MIN = 3
 
 type ToolPart = Extract<ContentPart, { _tag: "Tool" }>
 type ImagePart = Extract<ContentPart, { _tag: "Image" }>
+type PlanTaskProgressPart = Extract<ContentPart, { _tag: "PlanTaskProgress" }>
 
 /** An attached image on a user turn — a read-only transcript thumbnail. */
 const IMAGE_THUMB = "h-[80px] w-[132px]"
@@ -51,6 +52,64 @@ const pathOf = (tool: ToolCallModel): string | null =>
 
 /** Lines of a diff hunk shown before the "Show all" affordance kicks in. */
 const HUNK_PREVIEW_LINES = 12
+
+const TASK_PROGRESS_META = {
+  "in-progress": { label: "In progress", Icon: LoaderCircle, tone: "text-blue border-blue/30 bg-blue/10" },
+  completed: { label: "Completed", Icon: CheckCircle2, tone: "text-green border-green/30 bg-green/10" },
+  blocked: { label: "Blocked", Icon: AlertCircle, tone: "text-yellow border-yellow/30 bg-yellow/10" }
+} as const
+
+function PlanTaskProgressChip({ progress }: { progress: Omit<PlanTaskProgressPart, "_tag"> }) {
+  const meta = TASK_PROGRESS_META[progress.status]
+  const { Icon } = meta
+  return (
+    <span
+      data-plan-task-progress={progress.taskId}
+      aria-label={`${progress.taskId}: ${meta.label}`}
+      className={cn(
+        "inline-flex w-fit items-center gap-1.5 rounded-full border px-2 py-1 font-mono text-[10.5px]",
+        meta.tone
+      )}
+    >
+      <Icon className={cn("size-3", progress.status === "in-progress" && "animate-spin")} />
+      <span>{progress.taskId}</span>
+      <span className="font-sans font-medium">{meta.label}</span>
+    </span>
+  )
+}
+
+function ProtocolText({ text, markdown }: { text: string; markdown: boolean }) {
+  const tokens = planTaskProtocolTokens(markdown ? stripPlanResultProtocol(text) : text)
+  const hasProgress = tokens.some((token) => token.kind === "progress")
+  if (!hasProgress) {
+    const visible = tokens.map((token) => token.kind === "text" ? token.text : "").join("")
+    if (visible.length === 0) return null
+    return markdown ? (
+      <Markdown className={WIDTH}>{visible}</Markdown>
+    ) : (
+      <p className={`m-0 ${WIDTH} whitespace-pre-wrap text-[calc(14.5px*var(--sb-font-scale,1))] leading-[1.65] text-text-body`}>
+        {visible}
+      </p>
+    )
+  }
+  return (
+    <div className={cn(WIDTH, "flex flex-col gap-2")}>
+      {tokens.map((token, index) =>
+        token.kind === "progress" ? (
+          <PlanTaskProgressChip key={`progress-${index}`} progress={token.progress} />
+        ) : token.text.trim().length > 0 ? (
+          markdown ? (
+            <Markdown key={`text-${index}`} className={WIDTH}>{token.text}</Markdown>
+          ) : (
+            <p key={`text-${index}`} className="m-0 whitespace-pre-wrap text-[calc(14.5px*var(--sb-font-scale,1))] leading-[1.65] text-text-body">
+              {token.text}
+            </p>
+          )
+        ) : null
+      )}
+    </div>
+  )
+}
 
 function ToolCardView({ tool }: { tool: ToolCallModel }) {
   const [expanded, setExpanded] = useState(false)
@@ -157,16 +216,10 @@ function PartView({
 }) {
   switch (part._tag) {
     case "Text": {
-      const text = markdown ? stripPlanResultProtocol(part.text) : part.text
-      if (text.length === 0) return null
-      return markdown ? (
-        <Markdown className={WIDTH}>{text}</Markdown>
-      ) : (
-        <p className={`m-0 ${WIDTH} whitespace-pre-wrap text-[calc(14.5px*var(--sb-font-scale,1))] leading-[1.65] text-text-body`}>
-          {text}
-        </p>
-      )
+      return <ProtocolText text={part.text} markdown={markdown} />
     }
+    case "PlanTaskProgress":
+      return <PlanTaskProgressChip progress={part} />
     case "Image":
       // Images are normally grouped into a row (see renderParts); this covers a
       // lone image part rendered directly.

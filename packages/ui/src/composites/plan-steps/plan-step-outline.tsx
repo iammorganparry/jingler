@@ -11,19 +11,20 @@ import { PlanStepCard } from "./plan-step-card.js"
  * the view. A composing/streaming plan (stages still arriving from the planner)
  * needs no special branch: the projection simply yields the stages that exist so
  * far, and the outline renders those cards, growing as more land. Each projected
- * row carries its stage-owned tasks and diagrams intact into `PlanStepCard`.
+ * row carries its durable task status into `PlanStepCard`.
  * Selection is lifted: `selectedStepId` drives the active card and
  * `onSelectStep` reports clicks back up, using the same stage id the Workflow
- * and Architecture surfaces key on.
+ * and Guide surfaces key on.
  */
 export interface PlanStepOutlineProps {
   readonly prd: PlanPrd
   readonly selectedStepId?: string | null
   readonly onSelectStep?: (stepId: string) => void
-  readonly onOpenWalkthrough?: (stepId: string) => void
+  readonly onOpenGuide?: (stepId: string) => void
+  readonly revisingStageId?: string | null
 }
 
-export function PlanStepOutline({ prd, selectedStepId, onSelectStep, onOpenWalkthrough }: PlanStepOutlineProps) {
+export function PlanStepOutline({ prd, selectedStepId, onSelectStep, onOpenGuide, revisingStageId }: PlanStepOutlineProps) {
   const steps = useMemo(() => toPlanStepViews(prd), [prd])
 
   if (steps.length === 0) {
@@ -41,8 +42,9 @@ export function PlanStepOutline({ prd, selectedStepId, onSelectStep, onOpenWalkt
           key={step.id}
           step={step}
           active={step.id === selectedStepId}
+          revising={step.id === revisingStageId}
           onSelect={onSelectStep}
-          onOpenWalkthrough={onOpenWalkthrough}
+          onOpenGuide={onOpenGuide}
         />
       ))}
     </div>

@@ -59,6 +59,62 @@ export const CliInfo = Schema.Struct({
 })
 export type CliInfo = Schema.Schema.Type<typeof CliInfo>
 
+// ── Environments ────────────────────────────────────────────────────────────
+
+export const EnvironmentConnectionState = Schema.Literal(
+  "online",
+  "offline",
+  "incompatible",
+  "revoked"
+)
+export type EnvironmentConnectionState = Schema.Schema.Type<
+  typeof EnvironmentConnectionState
+>
+
+/** Renderer-safe metadata for one execution device. No grant or key can inhabit this shape. */
+export const Environment = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  platform: Schema.Struct({ os: Schema.String, arch: Schema.String }),
+  capabilities: Schema.Struct({
+    version: Schema.Number,
+    capabilities: Schema.Array(Schema.String),
+    harnesses: Schema.Array(CliKind),
+    maxConcurrentSessions: Schema.Number
+  }),
+  state: EnvironmentConnectionState,
+  agentVersion: Schema.NullOr(Schema.String),
+  lastSeenAt: Schema.NullOr(Schema.Number)
+})
+export type Environment = Schema.Schema.Type<typeof Environment>
+
+export const SshHost = Schema.Struct({
+  alias: Schema.String,
+  hostname: Schema.String,
+  username: Schema.NullOr(Schema.String),
+  port: Schema.Number,
+  source: Schema.Literal("config", "known-hosts")
+})
+export type SshHost = Schema.Schema.Type<typeof SshHost>
+
+export const PairLinkEnvironmentInput = Schema.Struct({
+  backendUrl: Schema.String,
+  pendingDeviceId: Schema.String,
+  pairingCode: Schema.String
+})
+export type PairLinkEnvironmentInput = Schema.Schema.Type<
+  typeof PairLinkEnvironmentInput
+>
+
+export const PairSshEnvironmentInput = Schema.Struct({
+  host: Schema.String,
+  username: Schema.optional(Schema.String),
+  port: Schema.optional(Schema.Number)
+})
+export type PairSshEnvironmentInput = Schema.Schema.Type<
+  typeof PairSshEnvironmentInput
+>
+
 /** Which account an installed harness run is charged to. */
 export const HarnessBilling = Schema.Struct({
   cli: CliKind,
@@ -68,8 +124,9 @@ export const HarnessBilling = Schema.Struct({
 export type HarnessBilling = Schema.Schema.Type<typeof HarnessBilling>
 
 /** Harnesses a session can be started on. */
-export const startableClis = (clis: ReadonlyArray<CliInfo>): ReadonlyArray<CliInfo> =>
-  clis.filter((c) => c.available)
+export const startableClis = (
+  clis: ReadonlyArray<CliInfo>
+): ReadonlyArray<CliInfo> => clis.filter((c) => c.available)
 
 /**
  * Which harness a NEW session runs on: the configured default when it is still
@@ -91,7 +148,13 @@ export const newSessionCli = (
 // ── Sessions ─────────────────────────────────────────────────────────────────
 
 /** Lifecycle status of an agent session, mirrored in the sidebar pills. */
-export const SessionStatus = Schema.Literal("thinking", "running", "needs-input", "idle", "done")
+export const SessionStatus = Schema.Literal(
+  "thinking",
+  "running",
+  "needs-input",
+  "idle",
+  "done"
+)
 export type SessionStatus = Schema.Schema.Type<typeof SessionStatus>
 
 /**
@@ -104,7 +167,9 @@ export type SessionStatus = Schema.Schema.Type<typeof SessionStatus>
  * remember. Live, in-flight state is `SessionActivity`, which is never persisted.
  */
 export const SettledSessionStatus = Schema.Literal("idle", "needs-input")
-export type SettledSessionStatus = Schema.Schema.Type<typeof SettledSessionStatus>
+export type SettledSessionStatus = Schema.Schema.Type<
+  typeof SettledSessionStatus
+>
 
 /** Added / removed line counts for a session's working diff. */
 export const DiffStat = Schema.Struct({
@@ -121,16 +186,37 @@ export type DiffStat = Schema.Schema.Type<typeof DiffStat>
  * - `plan` — read-only planning: the agent designs a plan for review and cannot
  *   edit or run commands until the operator approves it (see `supportsPlanMode`).
  */
-export const PermissionMode = Schema.Literal("ask", "accept-edits", "auto", "plan")
+export const PermissionMode = Schema.Literal(
+  "ask",
+  "accept-edits",
+  "auto",
+  "plan"
+)
 export type PermissionMode = Schema.Schema.Type<typeof PermissionMode>
 
 /** Claude's provider-native adaptive-thinking effort values. */
-export const ClaudeReasoningEffort = Schema.Literal("low", "medium", "high", "xhigh", "max")
-export type ClaudeReasoningEffort = Schema.Schema.Type<typeof ClaudeReasoningEffort>
+export const ClaudeReasoningEffort = Schema.Literal(
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max"
+)
+export type ClaudeReasoningEffort = Schema.Schema.Type<
+  typeof ClaudeReasoningEffort
+>
 
 /** Codex's provider-native model reasoning effort values. */
-export const CodexReasoningEffort = Schema.Literal("minimal", "low", "medium", "high", "xhigh")
-export type CodexReasoningEffort = Schema.Schema.Type<typeof CodexReasoningEffort>
+export const CodexReasoningEffort = Schema.Literal(
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh"
+)
+export type CodexReasoningEffort = Schema.Schema.Type<
+  typeof CodexReasoningEffort
+>
 
 /**
  * Provider-native effort values accepted at the shared adapter boundary.
@@ -139,7 +225,14 @@ export type CodexReasoningEffort = Schema.Schema.Type<typeof CodexReasoningEffor
  * it independently, and treating "off" as the bottom rung made it possible to
  * send incompatible combinations such as disabled thinking with maximum effort.
  */
-export const ReasoningEffort = Schema.Literal("minimal", "low", "medium", "high", "xhigh", "max")
+export const ReasoningEffort = Schema.Literal(
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max"
+)
 export type ReasoningEffort = Schema.Schema.Type<typeof ReasoningEffort>
 
 export const ReasoningSetting = Schema.Struct({
@@ -152,13 +245,17 @@ export const ClaudeReasoningSetting = Schema.Struct({
   enabled: Schema.Boolean,
   effort: Schema.optional(ClaudeReasoningEffort)
 })
-export type ClaudeReasoningSetting = Schema.Schema.Type<typeof ClaudeReasoningSetting>
+export type ClaudeReasoningSetting = Schema.Schema.Type<
+  typeof ClaudeReasoningSetting
+>
 
 export const CodexReasoningSetting = Schema.Struct({
   enabled: Schema.Boolean,
   effort: Schema.optional(CodexReasoningEffort)
 })
-export type CodexReasoningSetting = Schema.Schema.Type<typeof CodexReasoningSetting>
+export type CodexReasoningSetting = Schema.Schema.Type<
+  typeof CodexReasoningSetting
+>
 
 export const SessionReasoning = Schema.Struct({
   claude: Schema.optional(ReasoningSetting),
@@ -201,7 +298,8 @@ export const supportsPlanMode = (cli: CliKind): boolean =>
  * KILL the running turn at every tool boundary, turning "your message will be
  * picked up shortly" into "your agent keeps getting interrupted".
  */
-export const supportsSteer = (cli: CliKind): boolean => cli === "claude" || cli === "codex"
+export const supportsSteer = (cli: CliKind): boolean =>
+  cli === "claude" || cli === "codex"
 
 /**
  * Whether a harness can run in fully-autonomous `auto` mode — no sandbox, no
@@ -225,7 +323,10 @@ export const supportsAutoMode = (cli: CliKind): boolean =>
  * for "what does a new session default to", so creation and the runtime fallback
  * cannot drift.
  */
-export const defaultModeFor = (cli: CliKind, configuredDefault?: PermissionMode): PermissionMode =>
+export const defaultModeFor = (
+  cli: CliKind,
+  configuredDefault?: PermissionMode
+): PermissionMode =>
   configuredDefault ?? (supportsAutoMode(cli) ? "auto" : "accept-edits")
 
 /**
@@ -273,7 +374,8 @@ export type Chat = Schema.Schema.Type<typeof Chat>
 export type ChatId = Chat["id"]
 
 /** Backward-compatible semantic role for a persisted chat. */
-export const chatRoleOf = (chat: Pick<Chat, "role">): ChatRole => chat.role ?? "direct"
+export const chatRoleOf = (chat: Pick<Chat, "role">): ChatRole =>
+  chat.role ?? "direct"
 
 /** How a session uses its repository checkout. */
 export const WorkspaceMode = Schema.Literal("worktree", "direct")
@@ -322,6 +424,8 @@ export type PublishCheckpoint = Schema.Schema.Type<typeof PublishCheckpoint>
 
 export const Session = Schema.Struct({
   id: Schema.String,
+  /** Stable paired-device identity. Absent means this desktop (legacy-safe). */
+  environmentId: Schema.optional(Schema.String),
   /** owner/repo, e.g. "trigify/api". */
   repo: Schema.String,
   branch: Schema.String,
@@ -451,7 +555,10 @@ export const Session = Schema.Struct({
   allowlist: Schema.optional(Schema.Array(Schema.String)),
   model: Schema.optional(Schema.String),
   reasoningEffort: Schema.optional(
-    Schema.Union(ReasoningEffort, Schema.Literal("off", "think", "think-hard", "ultrathink"))
+    Schema.Union(
+      ReasoningEffort,
+      Schema.Literal("off", "think", "think-hard", "ultrathink")
+    )
   ),
   /**
    * Per-session auto-compaction override. Absent = follow the global setting.
@@ -481,9 +588,18 @@ export const Session = Schema.Struct({
 })
 export type Session = Schema.Schema.Type<typeof Session>
 
+/** A missing environment id is deliberately the local desktop. */
+export const executionTargetOf = (
+  session: Pick<Session, "environmentId">
+): { readonly kind: "local" } | { readonly kind: "remote"; readonly environmentId: string } =>
+  session.environmentId === undefined
+    ? { kind: "local" }
+    : { kind: "remote", environmentId: session.environmentId }
+
 /** Backward-compatible workspace ownership for persisted sessions. */
-export const workspaceModeOf = (session: Pick<Session, "workspaceMode">): WorkspaceMode =>
-  session.workspaceMode ?? "worktree"
+export const workspaceModeOf = (
+  session: Pick<Session, "workspaceMode">
+): WorkspaceMode => session.workspaceMode ?? "worktree"
 
 /** Backward-compatible persistence status for persisted sessions. */
 export const persistentOf = (session: Pick<Session, "persistent">): boolean =>
@@ -539,7 +655,12 @@ export type GitConfig = Schema.Schema.Type<typeof GitConfig>
  * is deliberately not among them — a notification per tool call would train the
  * operator to ignore the channel entirely.
  */
-export const NotificationKind = Schema.Literal("needs-input", "done", "failed", "pr")
+export const NotificationKind = Schema.Literal(
+  "needs-input",
+  "done",
+  "failed",
+  "pr"
+)
 export type NotificationKind = Schema.Schema.Type<typeof NotificationKind>
 
 /**
@@ -652,7 +773,9 @@ export const OrchestratorPreference = Schema.Struct({
   cli: CliKind,
   model: Schema.String
 })
-export type OrchestratorPreference = Schema.Schema.Type<typeof OrchestratorPreference>
+export type OrchestratorPreference = Schema.Schema.Type<
+  typeof OrchestratorPreference
+>
 
 /** The effective route plus enough information for Settings to name a fallback. */
 export const OrchestratorResolution = Schema.Struct({
@@ -660,7 +783,9 @@ export const OrchestratorResolution = Schema.Struct({
   isFallback: Schema.Boolean,
   fallbackReason: Schema.optional(Schema.String)
 })
-export type OrchestratorResolution = Schema.Schema.Type<typeof OrchestratorResolution>
+export type OrchestratorResolution = Schema.Schema.Type<
+  typeof OrchestratorResolution
+>
 
 /**
  * Where an opencode provider's credential came from. opencode resolves providers
@@ -673,8 +798,15 @@ export type OrchestratorResolution = Schema.Schema.Type<typeof OrchestratorResol
  * Surfaced in Settings so it's obvious what is Jingler's doing and what is the
  * user's own — we never overwrite a credential we didn't put there.
  */
-export const OpencodeProviderSource = Schema.Literal("env", "config", "custom", "api")
-export type OpencodeProviderSource = Schema.Schema.Type<typeof OpencodeProviderSource>
+export const OpencodeProviderSource = Schema.Literal(
+  "env",
+  "config",
+  "custom",
+  "api"
+)
+export type OpencodeProviderSource = Schema.Schema.Type<
+  typeof OpencodeProviderSource
+>
 
 /** One provider opencode resolves for the user — a row in Settings · Providers. */
 export const OpencodeProviderInfo = Schema.Struct({
@@ -689,7 +821,9 @@ export const OpencodeProviderInfo = Schema.Struct({
   /** How many models it resolves — 0 means "integration present, no key". */
   modelCount: Schema.Number
 })
-export type OpencodeProviderInfo = Schema.Schema.Type<typeof OpencodeProviderInfo>
+export type OpencodeProviderInfo = Schema.Schema.Type<
+  typeof OpencodeProviderInfo
+>
 
 /**
  * Per-CLI provider defaults, keyed by `CliKind`. Partial — a config only carries
@@ -712,7 +846,9 @@ export const ContextConfig = Schema.Struct({
   /** Master switch. Off returns the app to exactly its pre-feature behaviour. */
   auto: Schema.Boolean,
   /** Working-set budget in tokens, constrained to the usable quality band. */
-  budgetTokens: Schema.Number.pipe(Schema.between(BUDGET_RANGE.min, BUDGET_RANGE.max))
+  budgetTokens: Schema.Number.pipe(
+    Schema.between(BUDGET_RANGE.min, BUDGET_RANGE.max)
+  )
 })
 export type ContextConfig = Schema.Schema.Type<typeof ContextConfig>
 
@@ -765,7 +901,9 @@ export const OpenConnectorConfig = Schema.Struct({
    * mandatory), which defeats the "absent ⇒ enabled" default. Lookups still pass a
    * `CliKind`, so the looser key costs no call-site safety.
    */
-  perCli: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Boolean }))
+  perCli: Schema.optional(
+    Schema.Record({ key: Schema.String, value: Schema.Boolean })
+  )
 })
 export type OpenConnectorConfig = Schema.Schema.Type<typeof OpenConnectorConfig>
 
@@ -815,7 +953,9 @@ export const OpenConnectorDefaults = Schema.Struct({
   /** True when the build ships a known token the app can auto-fill (dev only). */
   hasDevToken: Schema.Boolean
 })
-export type OpenConnectorDefaults = Schema.Schema.Type<typeof OpenConnectorDefaults>
+export type OpenConnectorDefaults = Schema.Schema.Type<
+  typeof OpenConnectorDefaults
+>
 
 /**
  * Persisted app configuration, stored at `~/jingler/config.json`. `reposDir` is
@@ -978,7 +1118,8 @@ export type WorkspaceConfig = Schema.Schema.Type<typeof WorkspaceConfig>
  * behaviour.
  */
 export const resolveOrchestratorPreference = (
-  config: Pick<WorkspaceConfig, "orchestrator" | "providers"> | null | undefined,
+  config:
+    Pick<WorkspaceConfig, "orchestrator" | "providers"> | null | undefined,
   catalog: ReadonlyArray<{
     readonly cli: CliKind
     readonly models: ReadonlyArray<{ readonly id: string }>
@@ -994,7 +1135,9 @@ export const resolveOrchestratorPreference = (
   const exactProvider = preferred
     ? planning.find((provider) => provider.cli === preferred.cli)
     : undefined
-  const exactModel = exactProvider?.models.find((model) => model.id === preferred?.model)
+  const exactModel = exactProvider?.models.find(
+    (model) => model.id === preferred?.model
+  )
   if (preferred && exactModel) {
     return {
       preference: preferred,
@@ -1006,7 +1149,8 @@ export const resolveOrchestratorPreference = (
   if (!provider) return null
   const configuredModel = config?.providers?.[provider.cli]?.defaultModel
   const model =
-    provider.models.find((candidate) => candidate.id === configuredModel) ?? provider.models[0]
+    provider.models.find((candidate) => candidate.id === configuredModel) ??
+    provider.models[0]
   if (!model) return null
 
   const preference = { cli: provider.cli, model: model.id }
@@ -1089,7 +1233,12 @@ export const PrState = Schema.Literal("open", "closed", "merged", "draft")
 export type PrState = Schema.Schema.Type<typeof PrState>
 
 /** Normalized CI check status (mapped from GitHub checks and commit statuses). */
-export const PrCheckStatus = Schema.Literal("pass", "fail", "running", "pending")
+export const PrCheckStatus = Schema.Literal(
+  "pass",
+  "fail",
+  "running",
+  "pending"
+)
 export type PrCheckStatus = Schema.Schema.Type<typeof PrCheckStatus>
 
 /**
@@ -1098,8 +1247,8 @@ export type PrCheckStatus = Schema.Schema.Type<typeof PrCheckStatus>
  *
  * Deliberately NOT the full `PullRequest`. This is polled for every session with
  * a PR, on a timer, forever — so it carries only what the row renders, and its
-   * API read asks only for lifecycle/check fields. Anything richer belongs in
-   * the Pull Request tab, which is fetched once, on demand, for one session.
+ * API read asks only for lifecycle/check fields. Anything richer belongs in
+ * the Pull Request tab, which is fetched once, on demand, for one session.
  */
 export const SessionPrStatus = Schema.Struct({
   state: PrState,
@@ -1117,11 +1266,20 @@ export const SessionPrStatus = Schema.Struct({
 export type SessionPrStatus = Schema.Schema.Type<typeof SessionPrStatus>
 
 /** How a reviewer/timeline review resolved. "pending" = requested, not yet done. */
-export const PrReviewKind = Schema.Literal("commented", "approved", "changes_requested", "pending")
+export const PrReviewKind = Schema.Literal(
+  "commented",
+  "approved",
+  "changes_requested",
+  "pending"
+)
 export type PrReviewKind = Schema.Schema.Type<typeof PrReviewKind>
 
 /** The kind of review a composer submits back to GitHub. */
-export const ReviewSubmitKind = Schema.Literal("comment", "approve", "request-changes")
+export const ReviewSubmitKind = Schema.Literal(
+  "comment",
+  "approve",
+  "request-changes"
+)
 export type ReviewSubmitKind = Schema.Schema.Type<typeof ReviewSubmitKind>
 
 /** The strategy the GitHub merge API uses when merging a pull request. */
@@ -1174,7 +1332,9 @@ export const GitHubAppInstallation = Schema.Struct({
   status: Schema.Literal("active", "suspended"),
   suspendedAt: Schema.NullOr(Schema.String)
 })
-export type GitHubAppInstallation = Schema.Schema.Type<typeof GitHubAppInstallation>
+export type GitHubAppInstallation = Schema.Schema.Type<
+  typeof GitHubAppInstallation
+>
 
 /** Renderer-safe connection view. No user, refresh, or installation token fields. */
 export const GitHubAppConnectionStatus = Schema.Struct({
@@ -1184,7 +1344,9 @@ export const GitHubAppConnectionStatus = Schema.Struct({
   installations: Schema.Array(GitHubAppInstallation),
   lastRefreshedAt: Schema.NullOr(Schema.String)
 })
-export type GitHubAppConnectionStatus = Schema.Schema.Type<typeof GitHubAppConnectionStatus>
+export type GitHubAppConnectionStatus = Schema.Schema.Type<
+  typeof GitHubAppConnectionStatus
+>
 
 /** Installation-aware mode shown by onboarding, Settings, and recovery states. */
 export const GitHubConnectionMode = Schema.Literal(
@@ -1195,7 +1357,9 @@ export const GitHubConnectionMode = Schema.Literal(
   "suspended",
   "error"
 )
-export type GitHubConnectionMode = Schema.Schema.Type<typeof GitHubConnectionMode>
+export type GitHubConnectionMode = Schema.Schema.Type<
+  typeof GitHubConnectionMode
+>
 
 /**
  * Renderer-facing GitHub App state. This deliberately remains separate from
@@ -1219,7 +1383,9 @@ export const GitHubRepositoryAccess = Schema.Struct({
   accountLogin: Schema.NullOr(Schema.String),
   reason: Schema.String
 })
-export type GitHubRepositoryAccess = Schema.Schema.Type<typeof GitHubRepositoryAccess>
+export type GitHubRepositoryAccess = Schema.Schema.Type<
+  typeof GitHubRepositoryAccess
+>
 
 /** Authorization the desktop main process can exchange with the configured relay. */
 export const GitHubDesktopGrantClaims = Schema.Struct({
@@ -1232,18 +1398,28 @@ export const GitHubDesktopGrantClaims = Schema.Struct({
   expiresAt: Schema.Number,
   grantId: Schema.String
 })
-export type GitHubDesktopGrantClaims = Schema.Schema.Type<typeof GitHubDesktopGrantClaims>
+export type GitHubDesktopGrantClaims = Schema.Schema.Type<
+  typeof GitHubDesktopGrantClaims
+>
 
 export const GitHubDesktopGrantResponse = Schema.Struct({
   relayUrl: Schema.String,
   grant: Schema.String,
   claims: GitHubDesktopGrantClaims
 })
-export type GitHubDesktopGrantResponse = Schema.Schema.Type<typeof GitHubDesktopGrantResponse>
+export type GitHubDesktopGrantResponse = Schema.Schema.Type<
+  typeof GitHubDesktopGrantResponse
+>
 
 /** Server-owned lifecycle for one exact local-session to pull-request relay route. */
-export const GitHubSessionRouteState = Schema.Literal("active", "archived", "removed")
-export type GitHubSessionRouteState = Schema.Schema.Type<typeof GitHubSessionRouteState>
+export const GitHubSessionRouteState = Schema.Literal(
+  "active",
+  "archived",
+  "removed"
+)
+export type GitHubSessionRouteState = Schema.Schema.Type<
+  typeof GitHubSessionRouteState
+>
 
 /**
  * Renderer-safe route metadata. `sessionId` never enters relay registration or
@@ -1294,7 +1470,9 @@ export const GitHubRelayEventName = Schema.Literal(
   "check_suite",
   "status"
 )
-export type GitHubRelayEventName = Schema.Schema.Type<typeof GitHubRelayEventName>
+export type GitHubRelayEventName = Schema.Schema.Type<
+  typeof GitHubRelayEventName
+>
 
 /** Renderer-safe, versioned event produced only after webhook verification. */
 export const GitHubRelayEvent = Schema.Struct({
@@ -1341,8 +1519,13 @@ export const GitHubRelayEvent = Schema.Struct({
 })
 export type GitHubRelayEvent = Schema.Schema.Type<typeof GitHubRelayEvent>
 
-export const GitHubFeedbackOutboxStatus = Schema.Literal("pending", "dispatched")
-export type GitHubFeedbackOutboxStatus = Schema.Schema.Type<typeof GitHubFeedbackOutboxStatus>
+export const GitHubFeedbackOutboxStatus = Schema.Literal(
+  "pending",
+  "dispatched"
+)
+export type GitHubFeedbackOutboxStatus = Schema.Schema.Type<
+  typeof GitHubFeedbackOutboxStatus
+>
 
 /** Durable exact-session instruction written before any conversation dispatch. */
 export const GitHubFeedbackOutboxEntry = Schema.Struct({
@@ -1356,10 +1539,18 @@ export const GitHubFeedbackOutboxEntry = Schema.Struct({
   createdAt: Schema.String,
   dispatchedAt: Schema.NullOr(Schema.String)
 })
-export type GitHubFeedbackOutboxEntry = Schema.Schema.Type<typeof GitHubFeedbackOutboxEntry>
+export type GitHubFeedbackOutboxEntry = Schema.Schema.Type<
+  typeof GitHubFeedbackOutboxEntry
+>
 
-export const GitHubFeedbackClaimStatus = Schema.Literal("pending", "dispatched", "rejected")
-export type GitHubFeedbackClaimStatus = Schema.Schema.Type<typeof GitHubFeedbackClaimStatus>
+export const GitHubFeedbackClaimStatus = Schema.Literal(
+  "pending",
+  "dispatched",
+  "rejected"
+)
+export type GitHubFeedbackClaimStatus = Schema.Schema.Type<
+  typeof GitHubFeedbackClaimStatus
+>
 
 /** One relay frame awaiting durable renderer routing and cursor acknowledgement. */
 export const GitHubRelayDelivery = Schema.Struct({
@@ -1377,16 +1568,26 @@ export const GitHubRelayConnectionUpdate = Schema.Struct({
   installationId: Schema.NullOr(Schema.String),
   relaySessionId: Schema.NullOr(Schema.String),
   sessionId: Schema.NullOr(Schema.String),
-  mode: Schema.Literal("connecting", "connected", "reconnecting", "error", "stopped"),
+  mode: Schema.Literal(
+    "connecting",
+    "connected",
+    "reconnecting",
+    "error",
+    "stopped"
+  ),
   error: Schema.NullOr(Schema.String)
 })
-export type GitHubRelayConnectionUpdate = Schema.Schema.Type<typeof GitHubRelayConnectionUpdate>
+export type GitHubRelayConnectionUpdate = Schema.Schema.Type<
+  typeof GitHubRelayConnectionUpdate
+>
 
 export const GitHubRelayStreamMessage = Schema.Union(
   GitHubRelayDelivery,
   GitHubRelayConnectionUpdate
 )
-export type GitHubRelayStreamMessage = Schema.Schema.Type<typeof GitHubRelayStreamMessage>
+export type GitHubRelayStreamMessage = Schema.Schema.Type<
+  typeof GitHubRelayStreamMessage
+>
 
 /** Rate-limit metadata captured from every GitHub API response. */
 export const GitHubRateLimit = Schema.Struct({
@@ -1662,7 +1863,12 @@ export type ReviewComment = Schema.Schema.Type<typeof ReviewComment>
  * judges below the bar, which reads as a recall regression. Filtering is the
  * UI's job, which is why this field exists.
  */
-export const ReviewSeverity = Schema.Literal("critical", "major", "minor", "nit")
+export const ReviewSeverity = Schema.Literal(
+  "critical",
+  "major",
+  "minor",
+  "nit"
+)
 export type ReviewSeverity = Schema.Schema.Type<typeof ReviewSeverity>
 
 /**
@@ -1788,6 +1994,8 @@ export type AdversarialReview = Schema.Schema.Type<typeof AdversarialReview>
 
 /** Parameters for creating a new session. */
 export const CreateSessionInput = Schema.Struct({
+  /** Paired execution device. Omitted means this desktop. */
+  environmentId: Schema.optional(Schema.String),
   /** Absolute path to the origin repo. */
   repoPath: Schema.String,
   /** The repo's folder name, used for grouping + the worktree directory. */
@@ -1818,6 +2026,8 @@ export type CreateSessionInput = Schema.Schema.Type<typeof CreateSessionInput>
  * update the PR directly. Title + base come from the PR itself.
  */
 export const CreateSessionFromPrInput = Schema.Struct({
+  /** Paired execution device. Omitted means this desktop. */
+  environmentId: Schema.optional(Schema.String),
   /** Absolute path to the origin repo. */
   repoPath: Schema.String,
   /** The repo's folder name, used for grouping + the worktree directory. */
@@ -1832,7 +2042,9 @@ export const CreateSessionFromPrInput = Schema.Struct({
     baseRefName: Schema.String
   })
 })
-export type CreateSessionFromPrInput = Schema.Schema.Type<typeof CreateSessionFromPrInput>
+export type CreateSessionFromPrInput = Schema.Schema.Type<
+  typeof CreateSessionFromPrInput
+>
 
 /**
  * Parameters for creating a session from a GitHub issue. Unlike
@@ -1841,6 +2053,8 @@ export type CreateSessionFromPrInput = Schema.Schema.Type<typeof CreateSessionFr
  * links the issue, and seeds the task from the issue title + body.
  */
 export const CreateSessionFromIssueInput = Schema.Struct({
+  /** Paired execution device. Omitted means this desktop. */
+  environmentId: Schema.optional(Schema.String),
   /** Absolute path to the origin repo. */
   repoPath: Schema.String,
   /** The repo's folder name, used for grouping + the worktree directory. */
@@ -1865,7 +2079,9 @@ export const CreateSessionFromIssueInput = Schema.Struct({
   /** Automations to enable on the new session. */
   automations: IssueAutomations
 })
-export type CreateSessionFromIssueInput = Schema.Schema.Type<typeof CreateSessionFromIssueInput>
+export type CreateSessionFromIssueInput = Schema.Schema.Type<
+  typeof CreateSessionFromIssueInput
+>
 
 // ── Terminal ─────────────────────────────────────────────────────────────────
 

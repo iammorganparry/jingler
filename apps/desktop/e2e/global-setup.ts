@@ -7,6 +7,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 export const DESKTOP_ROOT = resolve(here, "..")
 export const MAIN_ENTRY = resolve(DESKTOP_ROOT, "out/main/index.js")
 const REPO_ROOT = resolve(DESKTOP_ROOT, "../..")
+export const DEVICE_AGENT_ENTRY = resolve(REPO_ROOT, "apps/device-agent/dist/jingler-device.mjs")
 const GITHUB_ISSUES_PLUGIN_ROOT = resolve(REPO_ROOT, "plugins/github-issues")
 const GITHUB_ISSUES_PLUGIN_ENTRIES = [
   resolve(GITHUB_ISSUES_PLUGIN_ROOT, "dist/ui.js"),
@@ -33,7 +34,17 @@ export default function globalSetup(): void {
     buildBundledPlugins()
   }
   if (reuseBuild && existsSync(MAIN_ENTRY)) {
+    if (!existsSync(DEVICE_AGENT_ENTRY)) {
+      execFileSync("pnpm", ["--filter", "@jingler/device-agent", "build"], {
+        cwd: REPO_ROOT,
+        stdio: "inherit"
+      })
+    }
     return
   }
+  execFileSync("pnpm", ["--filter", "@jingler/device-agent", "build"], {
+    cwd: REPO_ROOT,
+    stdio: "inherit"
+  })
   execSync("pnpm exec electron-vite build", { cwd: DESKTOP_ROOT, stdio: "inherit" })
 }

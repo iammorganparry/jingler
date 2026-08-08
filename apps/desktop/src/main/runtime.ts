@@ -14,6 +14,9 @@ import {
   ConfigService,
   ContextManager,
   DiscoveryService,
+  EnvironmentService,
+  RemoteBootstrapService,
+  RemoteSessionService,
   GitHubApi,
   GitHubAuth,
   GitHubEventStore,
@@ -51,7 +54,9 @@ import { PlaintextSecretStoreLive, SecretStoreLive } from "./secret-store.js"
 // e2e selects a plaintext file store (no OS keychain prompts under Playwright);
 // every real build uses the keychain-backed store.
 const SecretStoreLayer =
-  process.env.JINGLER_SECRET_STORE === "memory" ? PlaintextSecretStoreLive : SecretStoreLive
+  process.env.JINGLER_SECRET_STORE === "memory"
+    ? PlaintextSecretStoreLive
+    : SecretStoreLive
 
 /**
  * The per-session JSON stores under `~/jingler`. Independent peers — each needs
@@ -84,9 +89,8 @@ const HarnessLayers = Layer.mergeAll(
   ContextManager.Default
 )
 
-const AssetLayer: Layer.Layer<AssetService, never, never> = AssetService.Default.pipe(
-  Layer.provide(NodeContext.layer)
-)
+const AssetLayer: Layer.Layer<AssetService, never, never> =
+  AssetService.Default.pipe(Layer.provide(NodeContext.layer))
 
 // Later `Layer.provide`s satisfy the requirements of earlier ones, so the leaf
 // dependencies (paths, dialog, Node platform) come last.
@@ -94,18 +98,22 @@ const RpcServicesLayer = RpcServerLive.pipe(
   // provideMerge: the RPC handlers consume DiscoveryService AND the main process
   // reaches the same instance to warm the model cache at startup (index.ts).
   Layer.provideMerge(DiscoveryService.Default),
+  Layer.provide(
+    RemoteSessionService.Default.pipe(
+      Layer.provideMerge(
+        EnvironmentService.Default.pipe(
+          Layer.provide(RemoteBootstrapService.Default)
+        )
+      )
+    )
+  ),
   // AuthService requires SecretStore, satisfied by SecretStoreLive (merged below).
   Layer.provide(AuthService.Default),
   // Merged into one stage to stay inside `pipe`'s 20-argument limit. AssetService
   // captures the command executor used by its NUL-safe repository listing, so its
   // platform dependencies are provided at construction. Reusing NodeContext.layer
   // keeps Effect's memoized platform instance shared with the final app layer.
-  Layer.provide(
-    Layer.mergeAll(
-      WorkspaceService.Default,
-      AssetLayer
-    )
-  ),
+  Layer.provide(Layer.mergeAll(WorkspaceService.Default, AssetLayer)),
   // Before SessionStore so the stores below satisfy the daemon's requirements —
   // a stage is provided-to by everything that follows it.
   // Merged so startup recovery can mark interrupted canonical plan revisions

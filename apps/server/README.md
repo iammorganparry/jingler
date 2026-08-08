@@ -128,6 +128,8 @@ See `.env.example`. Core production variables and optional integration variables
 | `MEMORY_WORKER_SERVICE_SECRET` | Rotating Next.js-to-Worker credential; must equal the Worker's `MEMORY_SERVICE_SECRET`. |
 | `MEMORY_REQUEST_TIMEOUT_MS` | Bounded private-service timeout (default `5000`). |
 | `CRON_SECRET` | Vercel Cron bearer for `/api/cron/github-outbox`. Required in production; generate at least 32 random bytes. |
+| `DEVICE_RELAY_URL` | Device relay origin; production is `https://device-relay.jingler.dev`. |
+| `DEVICE_RELAY_SIGNING_SECRET` | HMAC key for short-lived device grants. Must equal the Worker's secret and must not reuse BetterAuth or another relay key. |
 
 A social provider is only enabled when both its id + secret are set, so dev works
 with magic links alone.
@@ -250,6 +252,16 @@ excluded from `pnpm test` (and CI), which has no Postgres.
 The desktop sign-in flow is covered by Playwright e2e in
 `apps/desktop/e2e/auth.spec.ts` (`pnpm --filter @jingler/desktop e2e`), against an
 offline fake auth backend.
+
+## Paired-device authorization
+
+Authenticated `/devices` routes derive the owner from the validated BetterAuth
+session and mint narrowly-scoped relay grants; callers never supply an
+authoritative user id. Device agents authenticate separately through signed,
+single-use challenges. The desktop bearer is neither forwarded to the relay nor
+returned to the agent. Pairing, deployment, key rotation, revocation, and
+recovery are documented in [Remote environments](../../docs/remote-environments.md)
+and [the relay runbook](../device-relay/README.md).
 
 ## Deploying to Vercel
 

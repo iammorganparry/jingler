@@ -3,7 +3,7 @@ import type { DragEvent, ReactNode } from "react"
 import { motion } from "motion/react"
 import { SPRING } from "../lib/motion.js"
 import { SESSION_DND_MIME } from "../app/split-layout.js"
-import type { SessionPrStatus, Session, SessionActivity } from "@jingler/core"
+import type { Environment, SessionPrStatus, Session, SessionActivity } from "@jingler/core"
 import { activityLabel, displayStatusOf, persistentOf } from "@jingler/core"
 import {
   Archive,
@@ -57,6 +57,7 @@ function RepoMark({ repo, owner }: { readonly repo: string; readonly owner?: str
 /** A session row for the sidebar list. Active state gets the blue ring. */
 export function SessionRow({
   session,
+  environment,
   repoOwner,
   activity,
   prState,
@@ -71,6 +72,7 @@ export function SessionRow({
   className
 }: {
   session: Session
+  environment?: Environment
   /** GitHub owner login resolved from this session's repository origin. */
   repoOwner?: string
   /**
@@ -314,7 +316,7 @@ export function SessionRow({
     activeStartedAt !== null && !Number.isNaN(activeStartedAt)
       ? compactAge(activeStartedAt, now)
       : null
-  const executionLocation = session.executionLocation ?? "local"
+  const executionLocation = session.environmentId ? "cloud" : (session.executionLocation ?? "local")
   return withMenu(
     // The motion element is a WRAPPER rather than the row itself because
     // `motion.div` claims `onDragStart` for its own pan gesture, whose signature
@@ -415,12 +417,17 @@ export function SessionRow({
             </span>
           )}
           <div className="flex-1" />
+          {environment && (
+            <span data-testid={`session-environment-${session.id}`} className="max-w-[96px] truncate text-dim" title={`${environment.name} · ${environment.state}`}>
+              {environment.name}{environment.state === "online" ? "" : ` · ${environment.state}`}
+            </span>
+          )}
           {(session.diff.added > 0 || session.diff.removed > 0) && (
             <DiffStat added={session.diff.added} removed={session.diff.removed} />
           )}
           <span
             data-testid={`session-location-${session.id}`}
-            title={executionLocation === "cloud" ? "Cloud session" : "Local session"}
+            title={environment ? `Environment: ${environment.name} · ${environment.state}` : session.environmentId ? `Environment: ${session.environmentId}` : executionLocation === "cloud" ? "Cloud session" : "Local session"}
             className="flex size-4 flex-none items-center justify-center text-dim"
           >
             {executionLocation === "cloud" ? <Cloud size={12} /> : <Monitor size={12} />}

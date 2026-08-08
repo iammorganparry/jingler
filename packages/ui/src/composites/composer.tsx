@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import type {
   Attachment,
   CliKind,
+  Environment,
   PermissionMode,
   ProviderModels,
   ReasoningEffort,
@@ -153,6 +154,10 @@ export function Composer({
   onStop,
   branch,
   repo,
+  environments = [],
+  environmentId,
+  environmentPending = false,
+  onSetEnvironment,
   cli,
   model,
   catalog = [],
@@ -193,6 +198,10 @@ export function Composer({
   branch?: string
   /** Repository name backing this session — shown at the composer's bottom-left. */
   repo?: string
+  environments?: ReadonlyArray<Environment>
+  environmentId?: string
+  environmentPending?: boolean
+  onSetEnvironment?: (environmentId?: string) => void
   /** Seed the draft once on mount (e.g. a task prefilled from a linked issue). */
   initialValue?: string
   /**
@@ -741,6 +750,23 @@ export function Composer({
               />
               <span className="jingler-mode-toggle__label">Jingler</span>
             </button>
+          )}
+          {onSetEnvironment && (
+            <ChipMenu
+              value={environmentId ?? "__local__"}
+              options={[
+                { value: "__local__", label: "Local" },
+                ...environments.map((environment) => ({
+                  value: environment.id,
+                  label: `${environment.name}${environment.state === "online" ? "" : ` · ${environment.state}`}`
+                }))
+              ]}
+              onSelect={(value) => onSetEnvironment(value === "__local__" ? undefined : value)}
+              disabled={busy || environmentPending}
+              appearance="quiet"
+              ariaLabel="Execution environment"
+              className="max-w-[150px]"
+            />
           )}
           {modelValue.length > 0 && (
           <ChipMenu

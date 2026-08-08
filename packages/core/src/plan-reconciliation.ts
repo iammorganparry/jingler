@@ -49,6 +49,7 @@ export const planStageSemanticFingerprint = (stage: PlanPrdStage): string =>
     diagrams: stage.diagrams.map((diagram) => ({ id: diagram.id, source: diagram.source })),
     notes: stage.notes,
     walkthrough: stage.walkthrough ?? [],
+    callPathDiff: stage.callPathDiff ?? null,
     acceptance: stage.acceptance.map((criterion) => ({
       id: criterion.id,
       text: criterion.text,

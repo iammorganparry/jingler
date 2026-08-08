@@ -1839,6 +1839,8 @@ export class TeamVault {
           pages: yield* this.loadPages(snapshot),
           sourceCount: snapshot.sources.length,
           revisions: snapshot.revisions,
+          proposals: snapshot.proposals,
+          events: snapshot.events,
           heads: snapshot.heads,
           retrievals,
           sessionRetrievals: snapshot.sessionRetrievals

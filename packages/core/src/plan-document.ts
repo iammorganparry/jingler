@@ -154,6 +154,20 @@ export const PlanDiagram = Schema.Struct({
 })
 export type PlanDiagram = Schema.Schema.Type<typeof PlanDiagram>
 
+/** One symbol in a planner-authored call path. */
+export const PlanCallPathFrame = Schema.Struct({
+  symbol: Schema.String,
+  path: Schema.optional(Schema.String)
+})
+export type PlanCallPathFrame = Schema.Schema.Type<typeof PlanCallPathFrame>
+
+/** Before/after call path for a stage whose runtime flow changes. */
+export const PlanCallPathDiff = Schema.Struct({
+  before: Schema.Array(PlanCallPathFrame),
+  after: Schema.Array(PlanCallPathFrame)
+})
+export type PlanCallPathDiff = Schema.Schema.Type<typeof PlanCallPathDiff>
+
 /**
  * A prose block. `kind` is the discriminant the renderer's generative-UI map
  * keys on. Inline formatting inside `text`/list items/cells is a constrained
@@ -367,6 +381,8 @@ export const PlanPrdStage = Schema.Struct({
    * empty list without changing the persisted shape of historical documents.
    */
   walkthrough: Schema.optional(Schema.Array(PlanBlock)),
+  /** Missing when a stage does not change a meaningful runtime call path. */
+  callPathDiff: Schema.optional(PlanCallPathDiff),
   acceptance: Schema.Array(PlanAcceptance),
   dependencies: Schema.optional(Schema.Array(Schema.String)),
   complexity: Schema.optional(PlanStageComplexity),

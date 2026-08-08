@@ -87,6 +87,23 @@ const normalizePlan = (candidate: Record<string, unknown>): PlanPrd =>
           .filter((diagram) => diagram.source.trim().length > 0),
         notes: asArray(s.notes),
         walkthrough: asArray(s.walkthrough),
+        callPathDiff:
+          s.callPathDiff !== null && typeof s.callPathDiff === "object"
+            ? {
+                before: asRecords(asRecord(s.callPathDiff).before)
+                  .map((frame) => ({
+                    symbol: asString(frame.symbol),
+                    path: asString(frame.path) || undefined
+                  }))
+                  .filter((frame) => frame.symbol.length > 0),
+                after: asRecords(asRecord(s.callPathDiff).after)
+                  .map((frame) => ({
+                    symbol: asString(frame.symbol),
+                    path: asString(frame.path) || undefined
+                  }))
+                  .filter((frame) => frame.symbol.length > 0)
+              }
+            : undefined,
         acceptance: asRecords(s.acceptance).map((criterion, index) => ({
           id: asString(criterion.id) || `criterion-${index + 1}`,
           text: asString(criterion.text),
@@ -136,10 +153,9 @@ const planFromSource = (source: string): PlanPrd | null => {
   }
   return null
 }
-import { PlanArchitecture } from "./plan-architecture.js"
 import { PlanFloatingActions } from "./plan-floating-actions.js"
+import { PlanGuide } from "./plan-guide.js"
 import { PlanStepOutline } from "./plan-steps/plan-step-outline.js"
-import { PlanWalkthrough } from "./plan-walkthrough.js"
 import { PlanWorkflow } from "./plan-workflow.js"
 
 export type PlanEditorSyncState =
@@ -155,13 +171,12 @@ export type PlanEditorTransientState =
   | "validating"
   | "promoting"
 
-/** The four plan surfaces the operator can switch between. */
-export type PlanPage = "steps" | "walkthrough" | "architecture" | "workflow"
+/** The three cohesive plan surfaces the operator can switch between. */
+export type PlanPage = "steps" | "guide" | "workflow"
 
 const PLAN_PAGES: ReadonlyArray<{ value: PlanPage; label: string }> = [
   { value: "steps", label: "Steps" },
-  { value: "walkthrough", label: "Walkthrough" },
-  { value: "architecture", label: "Architecture" },
+  { value: "guide", label: "Guide" },
   { value: "workflow", label: "Workflow" }
 ]
 
@@ -184,6 +199,7 @@ export interface PlanEditorProps {
   onRetryWorker?: (agentId: string) => void
   /** One-shot stable stage id requested by the composer progress dock. */
   targetStageId?: string | null
+  revisionTarget?: { readonly stageId: string | null } | null
   onTargetStageConsumed?: () => void
   patch?: string
   knownFiles?: ReadonlySet<string>
@@ -201,21 +217,20 @@ export interface PlanEditorProps {
 }
 
 /**
- * The plan workspace body. The agent's canonical plan is presented across four
+ * The plan workspace body. The agent's canonical plan is presented across three
  * pages, switched with a segmented control:
  *
  * - **Steps** — a step-based outline (`PlanStepOutline`): one digestible card per
  *   stage with its changes, tasks and tests. While the plan is still streaming
  *   (or its HTML hasn't parsed to a projection yet) this falls back to the raw
  *   read-only document (`PlanDocView`) so composing plans still render live.
- * - **Walkthrough** — tutorial guidance, rationale, and code examples for every
- *   stage, linked directly from its Steps card.
- * - **Architecture** — prose sections + flow diagrams (`PlanArchitecture`).
+ * - **Guide** — document context, rationale, call-path diffs, examples, and
+ *   architecture grouped by stage and linked directly from its Steps card.
  * - **Workflow** — the dependency DAG on a react-flow canvas (`PlanWorkflow`);
  *   selecting a node jumps to Steps with that step highlighted.
  *
  * The operator approves / resumes / revises through `PlanFloatingActions`; they
- * no longer edit the prose in place. Comments overlay Steps and Walkthrough.
+ * no longer edit the prose in place. Comments overlay Steps and Guide.
  */
 export function PlanEditor({
   document: doc,
@@ -232,6 +247,7 @@ export function PlanEditor({
   onStopWorker,
   onRetryWorker,
   targetStageId,
+  revisionTarget,
   onTargetStageConsumed,
   patch = "",
   knownFiles,
@@ -284,10 +300,10 @@ export function PlanEditor({
     onTargetStageConsumed?.()
   }, [targetStageId, showOutline, onTargetStageConsumed])
 
-  // Scroll the selected stage into view on either linked, step-oriented page.
+  // Scroll the selected stage into view on either linked, stage-oriented page.
   useEffect(() => {
-    if ((page !== "steps" && page !== "walkthrough") || selectedStepId == null) return
-    const attribute = page === "steps" ? "data-step-id" : "data-walkthrough-step"
+    if ((page !== "steps" && page !== "guide") || selectedStepId == null) return
+    const attribute = page === "steps" ? "data-step-id" : "data-guide-stage"
     const el = bodyRef.current?.querySelector(`[${attribute}="${selectedStepId}"]`)
     el?.scrollIntoView({ block: "center", behavior: "smooth" })
   }, [page, selectedStepId, showOutline])
@@ -350,10 +366,11 @@ export function PlanEditor({
                       prd={projection}
                       selectedStepId={selectedStepId}
                       onSelectStep={setSelectedStepId}
-                      onOpenWalkthrough={(stageId) => {
+                      onOpenGuide={(stageId) => {
                         setSelectedStepId(stageId)
-                        setPage("walkthrough")
+                        setPage("guide")
                       }}
+                      revisingStageId={revisionTarget?.stageId}
                     />
                   </div>
                 </PlanWorkerControlsProvider>
@@ -364,10 +381,10 @@ export function PlanEditor({
             {!streaming && commentLayer}
           </div>
         )}
-        {page === "walkthrough" && (
+        {page === "guide" && (
           <div ref={setContainer} className="relative min-h-0 min-w-0 flex-1 overflow-auto pb-14">
             {projection ? (
-              <PlanWalkthrough
+              <PlanGuide
                 prd={projection}
                 selectedStageId={selectedStepId}
                 onOpenStep={(stageId) => {
@@ -375,27 +392,12 @@ export function PlanEditor({
                   setPage("steps")
                 }}
                 className="mx-auto w-full max-w-[760px]"
+                revisingStageId={revisionTarget?.stageId}
               />
             ) : (
-              <EmptyPage>No walkthrough yet.</EmptyPage>
+              <EmptyPage>No implementation guide yet.</EmptyPage>
             )}
             {!streaming && commentLayer}
-          </div>
-        )}
-        {page === "architecture" && (
-          <div className="min-h-0 min-w-0 flex-1 overflow-auto pb-14">
-            {projection ? (
-              <PlanArchitecture
-                prd={projection}
-                className="mx-auto w-full max-w-[760px]"
-                onOpenStage={(stageId) => {
-                  setSelectedStepId(stageId)
-                  setPage("steps")
-                }}
-              />
-            ) : (
-              <EmptyPage>No architecture notes yet.</EmptyPage>
-            )}
           </div>
         )}
         {page === "workflow" && (

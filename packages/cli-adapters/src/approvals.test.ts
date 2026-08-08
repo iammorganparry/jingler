@@ -57,6 +57,18 @@ describe("verdict", () => {
     // …unless the operator turned auto-run off.
     expect(verdict("plan", none, cmd("ls"), false)).toBe("gate")
   })
+
+  it("always approves bundled memory tools only for Jingler orchestration", () => {
+    const memorySearch: PermissionRequest = {
+      kind: "command",
+      tool: "mcp__jingler-memory__memory_search",
+      command: null,
+      target: null
+    }
+
+    expect(verdict("ask", none, memorySearch)).toBe("gate")
+    expect(verdict("ask", none, memorySearch, false, true)).toBe("allow")
+  })
 })
 
 describe("isAllowlisted", () => {

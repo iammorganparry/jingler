@@ -87,6 +87,7 @@ const STAGE_GRAMMAR = [
   '    "files": [{ "path", "change": "A"|"M"|"D" }],',
   '    "diagrams": [{ "id", "source" }], "notes": PlanBlock[],',
   '    "walkthrough": PlanBlock[],',
+  '    "callPathDiff"?: { "before": CallPathFrame[], "after": CallPathFrame[] },',
   '    "acceptance": [{ "id", "text",',
   '      "testReferences": [{ "path", "cases": string[] }],',
   '      "status": "pending", "evidence": null }],',
@@ -95,7 +96,8 @@ const STAGE_GRAMMAR = [
   '  A PlanBlock is one of { "kind":"prose","id","text" } |',
   '  { "kind":"heading","id","level":2|3|4,"text" } | { "kind":"list","id","ordered","items":string[] } |',
   '  { "kind":"code","id","language"?,"code" } | { "kind":"table","id","headers":string[],"rows":string[][] } |',
-  '  { "kind":"diagram","id","source" }.'
+  '  { "kind":"diagram","id","source" }.',
+  '  A CallPathFrame is { "symbol": string, "path"?: string }.'
 ].join("\n")
 
 /**
@@ -121,6 +123,7 @@ export const planJsonInstructions = (
     "Give every stage a detailed tasks list; new or revised tasks must start pending.",
     "Give every stage a tutorial-style walkthrough with short rationale paragraphs, implementation decisions,",
     "and focused code examples when code makes the intended approach clearer.",
+    "When a stage changes runtime flow, include callPathDiff with the concrete before/after symbol chain.",
     'Put every diagram in its owning stage\'s "diagrams" array (use [] when no diagram materially helps).',
     "Give every acceptance criterion concrete testReferences: a repository-relative test path",
     "and the exact named test cases that prove that criterion.",

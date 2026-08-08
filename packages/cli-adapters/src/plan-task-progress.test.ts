@@ -77,6 +77,31 @@ describe("plan task progress protocol", () => {
     ])
   })
 
+  it("parses adjacent markers without newlines and preserves following prose", () => {
+    const text =
+      "PLAN_TASK stage=S1 fingerprint=abc task=S1-T3 status=completed" +
+      "PLAN_TASK stage=S1 fingerprint=abc task=S1-T4 status=in-progress" +
+      "The registry tests now cover replay rejection."
+
+    expect(planTaskProgressFromText(text)).toEqual([
+      {
+        stageId: "S1",
+        stageFingerprint: "abc",
+        taskId: "S1-T3",
+        status: "completed"
+      },
+      {
+        stageId: "S1",
+        stageFingerprint: "abc",
+        taskId: "S1-T4",
+        status: "in-progress"
+      }
+    ])
+    expect(stripPlanTaskProgressProtocol(text)).toBe(
+      "The registry tests now cover replay rejection."
+    )
+  })
+
   it("removes complete and partial task protocol lines from visible prose", () => {
     expect(
       stripPlanTaskProgressProtocol(
