@@ -69,6 +69,8 @@ export interface ConversationPaneCtx {
   onOpenPlanReview: (stepId?: string) => void
   /** Open a repository path in this session's Files tab. */
   onOpenFile: (path: string) => void
+  /** Present the Files workspace without requiring a path to be selected. */
+  onSelectFiles: () => void
   /** Present the first renderable streamed draft using this pane's width. */
   onPlanDraftAvailable?: () => void
   /** The stage Plan Review should open at, until the one-shot target is consumed. */
@@ -367,6 +369,7 @@ function SessionPaneBody(props: SessionPaneProps) {
             props.onOpenFile?.(session.id, path)
             ctx.onSelectTab(BUILTIN_TAB.files)
           },
+          onSelectFiles: () => ctx.onSelectTab(BUILTIN_TAB.files),
           onPlanDraftAvailable: presentPlanDraft,
           planStepId: planStepTarget,
           onPlanStepSelected: () => setTarget(null),

@@ -29,7 +29,7 @@ import type { ActorRefFrom, SnapshotFrom } from "xstate"
 import { createActor } from "xstate"
 import { useSyncExternalStore } from "react"
 import type { ActivityPhase, Session, SessionActivity } from "@jingler/core"
-import { activityOf, latestPlan } from "@jingler/core"
+import { activityOf, agentFileActivityOf, latestPlan } from "@jingler/core"
 import { conversationMachine } from "./conversation-machine.js"
 import { setSessionActivity } from "./session-activity.js"
 import { setPlanPresent } from "./plan-presence.js"
@@ -41,6 +41,11 @@ import { createCoalescer } from "./coalesce.js"
 import type { NotifiableState } from "./notifier.js"
 import { notificationFor } from "./notifier.js"
 import { rpc } from "./rpc-client.js"
+import {
+  clearAgentFileActivityChat,
+  clearAgentFileActivitySession,
+  publishAgentFileActivity
+} from "./agent-file-activity.js"
 
 type ConversationActor = ActorRefFrom<typeof conversationMachine>
 type ConversationSnapshot = SnapshotFrom<typeof conversationMachine>
@@ -175,6 +180,15 @@ const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
 
   broadcastSharedPlan(key, snap)
   publishChatActivity(session.id, chatId, activity)
+  const fileActivities = [
+    agentFileActivityOf(snap.context.messages),
+    ...snap.context.subagents.map((subagent) => agentFileActivityOf([subagent.message]))
+  ].filter((candidate) => candidate !== null)
+  const activeFile =
+    fileActivities.findLast((candidate) => candidate.phase === "editing") ??
+    fileActivities.at(-1) ??
+    null
+  publishAgentFileActivity(session.id, chatId, activeFile)
   recomputeSession(session.id, snap)
   // Fire-and-forget, and deliberately last: a notification that fails must never
   // take the status stores down with it. Main decides whether this actually
@@ -317,6 +331,7 @@ export const disposeConversationActor = (sessionId: string): void => {
     forget(key)
   }
   delete chatActivities[sessionId]
+  clearAgentFileActivitySession(sessionId)
   sharedPlanBodies.delete(sessionId)
   setSessionActivity(sessionId, null)
   setPlanPresent(sessionId, false)
@@ -326,6 +341,7 @@ export const disposeConversationActor = (sessionId: string): void => {
 export const disposeChatActor = (sessionId: string, chatId: string): void => {
   const key = registryKey(sessionId, chatId)
   forget(key)
+  clearAgentFileActivityChat(sessionId, chatId)
   publishChatActivity(sessionId, chatId, null)
   recomputeSession(sessionId)
 }

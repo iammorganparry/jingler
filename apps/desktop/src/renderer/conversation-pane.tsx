@@ -43,6 +43,7 @@ import {
   shouldRecoverPendingPlanMessage
 } from "./plan-thread-dispatch.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
+import { useFileBrowser } from "./use-file-browser.js"
 import {
   clampedPlanSplitRatio,
   DEFAULT_PLAN_SPLIT_RATIO,
@@ -89,6 +90,7 @@ export function ConversationPane({
   onDelete,
   onInitialPromptConsumed,
   onOpenFile,
+  onSelectFiles,
   paneFocused = true
 }: {
   session: Session
@@ -122,6 +124,8 @@ export function ConversationPane({
    * Storybook and the component tests want.
    */
   onOpenFile?: (sessionId: string, path: string) => void
+  /** Present Files beside the conversation when follow mode is enabled here. */
+  onSelectFiles?: () => void
   /**
    * Whether this is the pane the operator is looking at. Only that pane's
    * composer takes the caret when the conversation opens.
@@ -132,6 +136,18 @@ export function ConversationPane({
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
   const convo = useConversation(session, activeChat.id)
+  const fileBrowser = useFileBrowser(session.id)
+  const toggleFollowAgent = useCallback(
+    (enabled: boolean) => {
+      if (enabled) {
+        fileBrowser.enableFollow()
+        onSelectFiles?.()
+      } else {
+        fileBrowser.disableFollow()
+      }
+    },
+    [fileBrowser.disableFollow, fileBrowser.enableFollow, onSelectFiles]
+  )
   const handledPlanDraftPresentation = useRef(0)
   useEffect(() => {
     if (
@@ -884,6 +900,8 @@ export function ConversationPane({
           jinglerMode={jinglerMode}
           jinglerModePending={jinglerModeMutation.isPending}
           onToggleJinglerMode={toggleJinglerMode}
+          followAgent={fileBrowser.followEnabled}
+          onToggleFollowAgent={toggleFollowAgent}
           archived={
             session.archived
               ? {

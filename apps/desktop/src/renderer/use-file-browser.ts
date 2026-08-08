@@ -73,6 +73,8 @@ export interface FileBrowserController {
   readonly viewMode: "diff" | "edit"
   readonly status: FileBrowserStatus
   readonly dirty: boolean
+  readonly followEnabled: boolean
+  readonly agentTargetPath: string | null
   readonly activate: () => void
   readonly open: (path: string) => void
   readonly close: (path: string) => void
@@ -85,6 +87,9 @@ export interface FileBrowserController {
   readonly cancelDiscard: () => void
   readonly startEdit: () => void
   readonly showDiff: () => void
+  readonly enableFollow: () => void
+  readonly disableFollow: () => void
+  readonly followAgentTarget: (path: string, eventId: string, completed: boolean) => void
 }
 
 export function useFileBrowser(sessionId: string): FileBrowserController {
@@ -102,6 +107,13 @@ export function useFileBrowser(sessionId: string): FileBrowserController {
   const cancelDiscard = useCallback(() => actor.send({ type: "CANCEL_DISCARD" }), [actor])
   const startEdit = useCallback(() => actor.send({ type: "START_EDIT" }), [actor])
   const showDiff = useCallback(() => actor.send({ type: "SHOW_DIFF" }), [actor])
+  const enableFollow = useCallback(() => actor.send({ type: "ENABLE_FOLLOW" }), [actor])
+  const disableFollow = useCallback(() => actor.send({ type: "DISABLE_FOLLOW" }), [actor])
+  const followAgentTarget = useCallback(
+    (path: string, eventId: string, completed: boolean) =>
+      actor.send({ type: "AGENT_TARGET", path, eventId, completed }),
+    [actor]
+  )
 
   const status: FileBrowserStatus = snapshot.matches({ document: "idle" })
     ? "idle"
@@ -147,6 +159,8 @@ export function useFileBrowser(sessionId: string): FileBrowserController {
     viewMode: snapshot.context.viewMode,
     status,
     dirty,
+    followEnabled: snapshot.matches({ follow: "enabled" }),
+    agentTargetPath: snapshot.context.agentTargetPath,
     activate,
     open,
     close,
@@ -158,6 +172,9 @@ export function useFileBrowser(sessionId: string): FileBrowserController {
     confirmDiscard,
     cancelDiscard,
     startEdit,
-    showDiff
+    showDiff,
+    enableFollow,
+    disableFollow,
+    followAgentTarget
   }
 }

@@ -227,6 +227,10 @@ export interface ConversationViewProps {
   jinglerModePending?: boolean
   /** Flip Jingler mode for the active chat; workspace config is its fallback. */
   onToggleJinglerMode?: (enabled: boolean) => void
+  /** Whether the session Files workspace follows this chat's agent mutations. */
+  followAgent?: boolean
+  /** Toggle follow mode; enabling may present Files beside the conversation. */
+  onToggleFollowAgent?: (enabled: boolean) => void
 }
 
 /** Count added/removed lines in a unified diff, ignoring the file headers. */
@@ -297,6 +301,8 @@ export function ConversationView({
   jinglerMode = true,
   jinglerModePending = false,
   onToggleJinglerMode,
+  followAgent = false,
+  onToggleFollowAgent,
   archived,
   initialDraft
 }: ConversationViewProps) {
@@ -656,6 +662,8 @@ export function ConversationView({
                 jinglerMode={jinglerMode}
                 jinglerModePending={jinglerModePending}
                 onToggleJinglerMode={onToggleJinglerMode}
+                followAgent={followAgent}
+                onToggleFollowAgent={onToggleFollowAgent}
                 reasoningEffort={reasoningEffort}
                 thinkingEnabled={thinkingEnabled}
                 onSetReasoning={onSetReasoning}

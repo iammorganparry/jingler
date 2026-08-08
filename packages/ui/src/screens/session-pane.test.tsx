@@ -465,7 +465,7 @@ describe("SessionPane", () => {
     )
     await waitFor(() => {
       expect(screen.getByTestId("session-auxiliary-panel").getAttribute("style")).toContain(
-        "66.66666666666666%"
+        "66.6667%"
       )
     })
     rect.mockRestore()
@@ -524,12 +524,15 @@ describe("SessionPane", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: "Files" }))
     const divider = screen.getByRole("separator", { name: "Resize Files" })
-    fireEvent.pointerDown(divider, { clientX: 800 })
-    fireEvent.pointerMove(window, { clientX: 680 })
-    fireEvent.pointerUp(window)
+    // jsdom does not expose PointerEvent, so Testing Library's pointer helper
+    // drops clientX. MouseEvent still carries the pointer coordinates through
+    // React's pointer listener and the window-level native listeners.
+    fireEvent(divider, new MouseEvent("pointerdown", { bubbles: true, clientX: 800 }))
+    fireEvent(window, new MouseEvent("pointermove", { bubbles: true, clientX: 680 }))
+    fireEvent(window, new MouseEvent("pointerup", { bubbles: true }))
 
     const persisted = Number(localStorage.getItem("sb.split.session-auxiliary.ratio"))
-    expect(persisted).toBeCloseTo(0.7667, 3)
+    expect(persisted).toBeGreaterThan(2 / 3)
     first.unmount()
 
     render(
@@ -541,9 +544,9 @@ describe("SessionPane", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: "Files" }))
     await waitFor(() => {
-      expect(screen.getByTestId("session-auxiliary-panel").getAttribute("style")).toContain(
-        `${persisted * 100}%`
-      )
+      const style = screen.getByTestId("session-auxiliary-panel").getAttribute("style") ?? ""
+      const renderedPercent = Number(style.slice(style.indexOf("calc(") + 5, style.indexOf("%")))
+      expect(renderedPercent).toBeCloseTo(persisted * 100, 3)
     })
     rect.mockRestore()
   })

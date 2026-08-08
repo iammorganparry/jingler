@@ -59,6 +59,13 @@ export interface FileBrowserContext {
   readonly failure: FileBrowserFailure | null
   readonly pendingDiscard: FileBrowserPendingDiscard | null
   readonly viewMode: "diff" | "edit"
+  readonly agentTargetPath: string | null
+  readonly pendingAgentTarget: {
+    readonly path: string
+    readonly eventId: string
+    readonly completed: boolean
+    readonly refreshRequested: boolean
+  } | null
 }
 
 export type FileBrowserEvent =
@@ -75,6 +82,15 @@ export type FileBrowserEvent =
   | { readonly type: "CANCEL_DISCARD" }
   | { readonly type: "START_EDIT" }
   | { readonly type: "SHOW_DIFF" }
+  | { readonly type: "ENABLE_FOLLOW" }
+  | { readonly type: "DISABLE_FOLLOW" }
+  | {
+      readonly type: "AGENT_TARGET"
+      readonly path: string
+      readonly eventId: string
+      readonly completed: boolean
+    }
+  | { readonly type: "TRY_PENDING_AGENT_TARGET" }
 
 const isTextPayload = (payload: AssetPayload): payload is AssetTextPayload => "text" in payload
 
@@ -209,6 +225,41 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
             }
           : {}
       ),
+      rememberAgentTarget: assign(({ event }) =>
+        event.type === "AGENT_TARGET"
+          ? {
+              agentTargetPath: event.path,
+              pendingAgentTarget: {
+                path: event.path,
+                eventId: event.eventId,
+                completed: event.completed,
+                refreshRequested: false
+              }
+            }
+          : {}
+      ),
+      selectPendingAgentTarget: assign(({ context }) => {
+        const path = context.pendingAgentTarget?.path
+        if (path === undefined) return {}
+        return {
+          openPaths: appendOpenPath(context.openPaths, path),
+          selectedPath: path,
+          payload: null,
+          draft: null,
+          failure: null,
+          pendingDiscard: null,
+          pendingAgentTarget: null,
+          viewMode: diffFirst(context.entries, path) ? ("diff" as const) : ("edit" as const)
+        }
+      }),
+      clearPendingAgentTarget: assign({ pendingAgentTarget: null }),
+      markAgentRefreshRequested: assign(({ context }) => ({
+        pendingAgentTarget:
+          context.pendingAgentTarget === null
+            ? null
+            : { ...context.pendingAgentTarget, refreshRequested: true }
+      })),
+      clearFollowTarget: assign({ agentTargetPath: null, pendingAgentTarget: null }),
       queueDiscard: assign(({ event }) => {
         if (event.type === "OPEN") {
           return {
@@ -311,7 +362,22 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       pendingCloseHasFallback: ({ context }) =>
         context.pendingDiscard?.type === "close" &&
         closeFallback(context.openPaths, context.pendingDiscard.path).selectedPath !== null,
-      pendingClose: ({ context }) => context.pendingDiscard?.type === "close"
+      pendingClose: ({ context }) => context.pendingDiscard?.type === "close",
+      pendingAgentTargetIsSelected: ({ context }) =>
+        context.pendingAgentTarget !== null &&
+        context.pendingAgentTarget.path === context.selectedPath,
+      pendingAgentTargetCanOpen: ({ context }) =>
+        context.pendingAgentTarget !== null &&
+        context.entries.some((entry) => entry.path === context.pendingAgentTarget?.path) &&
+        !(
+          context.payload !== null &&
+          isTextPayload(context.payload) &&
+          context.draft !== null &&
+          context.draft !== context.payload.text
+        ),
+      pendingAgentTargetNeedsRefresh: ({ context }) =>
+        context.pendingAgentTarget?.completed === true &&
+        !context.pendingAgentTarget.refreshRequested
     }
   }).createMachine({
     id: "fileBrowser",
@@ -329,9 +395,27 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       draft: null,
       failure: null,
       pendingDiscard: null,
-      viewMode: "edit"
+      viewMode: "edit",
+      agentTargetPath: null,
+      pendingAgentTarget: null
     }),
     states: {
+      follow: {
+        initial: "disabled",
+        states: {
+          disabled: {
+            on: { ENABLE_FOLLOW: "enabled" }
+          },
+          enabled: {
+            on: {
+              DISABLE_FOLLOW: { target: "disabled", actions: "clearFollowTarget" },
+              AGENT_TARGET: {
+                actions: ["rememberAgentTarget", raise({ type: "TRY_PENDING_AGENT_TARGET" })]
+              }
+            }
+          }
+        }
+      },
       tree: {
         initial: "loading",
         states: {
@@ -359,18 +443,24 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                   guard: ({ context }) => context.treeRefreshQueued,
                   target: "loading",
                   reenter: true,
-                  actions: assign({
-                    entries: ({ event }) => event.output,
-                    treeError: null,
-                    treeRefreshQueued: false
-                  })
+                  actions: [
+                    assign({
+                      entries: ({ event }) => event.output,
+                      treeError: null,
+                      treeRefreshQueued: false
+                    }),
+                    raise({ type: "TRY_PENDING_AGENT_TARGET" })
+                  ]
                 },
                 {
                   target: "ready",
-                  actions: assign({
-                    entries: ({ event }) => event.output,
-                    treeError: null
-                  })
+                  actions: [
+                    assign({
+                      entries: ({ event }) => event.output,
+                      treeError: null
+                    }),
+                    raise({ type: "TRY_PENDING_AGENT_TARGET" })
+                  ]
                 }
               ],
               onError: [
@@ -435,12 +525,18 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
         initial: "idle",
         on: {
           OPEN: [
-            { guard: "opensSelectedPath" },
-            { guard: "hasUnsavedDraft", actions: "queueDiscard" },
+            {
+              guard: "opensSelectedPath",
+              actions: raise({ type: "DISABLE_FOLLOW" })
+            },
+            {
+              guard: "hasUnsavedDraft",
+              actions: ["queueDiscard", raise({ type: "DISABLE_FOLLOW" })]
+            },
             {
               target: ".loading",
               reenter: true,
-              actions: "selectPath"
+              actions: ["selectPath", raise({ type: "DISABLE_FOLLOW" })]
             }
           ],
           CLOSE: [
@@ -485,7 +581,25 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
           SHOW_DIFF: { actions: assign({ viewMode: "diff" }) }
         },
         states: {
-          idle: {},
+          idle: {
+            on: {
+              TRY_PENDING_AGENT_TARGET: [
+                {
+                  guard: "pendingAgentTargetIsSelected",
+                  actions: "clearPendingAgentTarget"
+                },
+                {
+                  guard: "pendingAgentTargetCanOpen",
+                  target: "loading",
+                  actions: "selectPendingAgentTarget"
+                },
+                {
+                  guard: "pendingAgentTargetNeedsRefresh",
+                  actions: ["markAgentRefreshRequested", raise({ type: "REFRESH_TREE" })]
+                }
+              ]
+            }
+          },
           loading: {
             invoke: {
               src: "readFile",
@@ -497,27 +611,33 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                 {
                   guard: ({ event }) => isTextPayload(event.output),
                   target: "ready.clean",
-                  actions: assign({
-                    entries: ({ context, event }) =>
-                      withOpenedPath(context.entries, event.output.path),
-                    payload: ({ event }) => event.output,
-                    draft: ({ event }) => (isTextPayload(event.output) ? event.output.text : null),
-                    failure: null,
-                    pendingDiscard: null,
-                    viewMode: ({ context }) => context.viewMode
-                  })
+                  actions: [
+                    assign({
+                      entries: ({ context, event }) =>
+                        withOpenedPath(context.entries, event.output.path),
+                      payload: ({ event }) => event.output,
+                      draft: ({ event }) => (isTextPayload(event.output) ? event.output.text : null),
+                      failure: null,
+                      pendingDiscard: null,
+                      viewMode: ({ context }) => context.viewMode
+                    }),
+                    raise({ type: "TRY_PENDING_AGENT_TARGET" })
+                  ]
                 },
                 {
                   target: "ready.readOnly",
-                  actions: assign({
-                    entries: ({ context, event }) =>
-                      withOpenedPath(context.entries, event.output.path),
-                    payload: ({ event }) => event.output,
-                    draft: null,
-                    failure: null,
-                    pendingDiscard: null,
-                    viewMode: "edit"
-                  })
+                  actions: [
+                    assign({
+                      entries: ({ context, event }) =>
+                        withOpenedPath(context.entries, event.output.path),
+                      payload: ({ event }) => event.output,
+                      draft: null,
+                      failure: null,
+                      pendingDiscard: null,
+                      viewMode: "edit"
+                    }),
+                    raise({ type: "TRY_PENDING_AGENT_TARGET" })
+                  ]
                 }
               ],
               onError: [
@@ -551,6 +671,21 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
             states: {
               clean: {
                 on: {
+                  TRY_PENDING_AGENT_TARGET: [
+                    {
+                      guard: "pendingAgentTargetIsSelected",
+                      actions: "clearPendingAgentTarget"
+                    },
+                    {
+                      guard: "pendingAgentTargetCanOpen",
+                      target: "#fileBrowser.document.loading",
+                      actions: "selectPendingAgentTarget"
+                    },
+                    {
+                      guard: "pendingAgentTargetNeedsRefresh",
+                      actions: ["markAgentRefreshRequested", raise({ type: "REFRESH_TREE" })]
+                    }
+                  ],
                   EDIT: [
                     { guard: "editMatchesLoaded", actions: "editDraft" },
                     {
@@ -563,6 +698,21 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
               },
               saved: {
                 on: {
+                  TRY_PENDING_AGENT_TARGET: [
+                    {
+                      guard: "pendingAgentTargetIsSelected",
+                      actions: "clearPendingAgentTarget"
+                    },
+                    {
+                      guard: "pendingAgentTargetCanOpen",
+                      target: "#fileBrowser.document.loading",
+                      actions: "selectPendingAgentTarget"
+                    },
+                    {
+                      guard: "pendingAgentTargetNeedsRefresh",
+                      actions: ["markAgentRefreshRequested", raise({ type: "REFRESH_TREE" })]
+                    }
+                  ],
                   EDIT: [
                     { guard: "editMatchesLoaded", actions: "editDraft" },
                     {
@@ -586,7 +736,25 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                   SAVE: "#fileBrowser.document.saving"
                 }
               },
-              readOnly: {}
+              readOnly: {
+                on: {
+                  TRY_PENDING_AGENT_TARGET: [
+                    {
+                      guard: "pendingAgentTargetIsSelected",
+                      actions: "clearPendingAgentTarget"
+                    },
+                    {
+                      guard: "pendingAgentTargetCanOpen",
+                      target: "#fileBrowser.document.loading",
+                      actions: "selectPendingAgentTarget"
+                    },
+                    {
+                      guard: "pendingAgentTargetNeedsRefresh",
+                      actions: ["markAgentRefreshRequested", raise({ type: "REFRESH_TREE" })]
+                    }
+                  ]
+                }
+              }
             }
           },
           saving: {
