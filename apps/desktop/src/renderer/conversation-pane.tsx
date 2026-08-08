@@ -169,7 +169,7 @@ export function ConversationPane({
       }
     }
   })
-  const fileBrowser = useFileBrowser(session.id)
+  const fileBrowser = useFileBrowser(session.id, session.worktreePath)
   const toggleFollowAgent = useCallback(
     (enabled: boolean) => {
       if (enabled) {

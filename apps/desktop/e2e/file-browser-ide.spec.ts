@@ -75,6 +75,11 @@ test("opens the session repository beside chat and edits a file through Pierre",
 
   await expect(appShell(window)).toBeVisible()
   await filesTab(window).click()
+  await expect(
+    window.locator(
+      '[data-jingler-pierre-file-tree][aria-label="Repository files"] [role="treeitem"]'
+    ).first()
+  ).toBeVisible({ timeout: 15_000 })
   const split = window.getByTestId("session-auxiliary-split")
   const chat = window.getByTestId("session-auxiliary-chat")
   await expect(split).toBeVisible()

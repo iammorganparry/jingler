@@ -8,7 +8,10 @@ import { Cause, Option, Runtime } from "effect"
 import { assign, fromPromise, raise, setup } from "xstate"
 
 export interface FileBrowserApi {
-  readonly list: (sessionId: string) => Promise<ReadonlyArray<AssetFileEntry>>
+  readonly list: (
+    sessionId: string,
+    worktreePath?: string
+  ) => Promise<ReadonlyArray<AssetFileEntry>>
   readonly diff: (sessionId: string) => Promise<string>
   readonly read: (sessionId: string, path: string) => Promise<AssetPayload>
   readonly write: (
@@ -21,6 +24,7 @@ export interface FileBrowserApi {
 
 export interface FileBrowserInput {
   readonly sessionId: string
+  readonly worktreePath?: string
 }
 
 export type FileBrowserPendingDiscard =
@@ -47,6 +51,7 @@ export type FileBrowserFailure =
 
 export interface FileBrowserContext {
   readonly sessionId: string
+  readonly worktreePath?: string
   readonly entries: ReadonlyArray<AssetFileEntry>
   readonly treeError: string | null
   readonly treeRefreshQueued: boolean
@@ -186,8 +191,12 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       input: {} as FileBrowserInput
     },
     actors: {
-      listFiles: fromPromise(({ input }: { input: { readonly sessionId: string } }) =>
-        api.list(input.sessionId)
+      listFiles: fromPromise(
+        ({
+          input
+        }: {
+          input: { readonly sessionId: string; readonly worktreePath?: string }
+        }) => api.list(input.sessionId, input.worktreePath)
       ),
       loadDiff: fromPromise(({ input }: { input: { readonly sessionId: string } }) =>
         api.diff(input.sessionId)
@@ -384,6 +393,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
     type: "parallel",
     context: ({ input }) => ({
       sessionId: input.sessionId,
+      ...(input.worktreePath === undefined ? {} : { worktreePath: input.worktreePath }),
       entries: [],
       treeError: null,
       treeRefreshQueued: false,
@@ -437,7 +447,12 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
             },
             invoke: {
               src: "listFiles",
-              input: ({ context }) => ({ sessionId: context.sessionId }),
+              input: ({ context }) => ({
+                sessionId: context.sessionId,
+                ...(context.worktreePath === undefined
+                  ? {}
+                  : { worktreePath: context.worktreePath })
+              }),
               onDone: [
                 {
                   // A view activation can overlap the actor's speculative first

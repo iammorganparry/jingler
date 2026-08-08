@@ -47,7 +47,7 @@ export function FileBrowserQuickOpen({
   onOpenChange,
   onOpenPath
 }: FileBrowserQuickOpenProps) {
-  const browser = useFileBrowser(session.id)
+  const browser = useFileBrowser(session.id, session.worktreePath)
   return (
     <FileQuickOpen
       open={open}
@@ -66,7 +66,7 @@ export function FileBrowserQuickOpen({
 
 /** Renderer-owned binding from a session's persistent actor to the Files tab. */
 export function FileBrowserView({ session, onSendReference }: FileBrowserViewProps) {
-  const browser = useFileBrowser(session.id)
+  const browser = useFileBrowser(session.id, session.worktreePath)
   const agentFileActivity = useAgentFileActivity(session.id, session.activeChatId)
   const rootRef = useRef<HTMLDivElement>(null)
   const [selection, setSelection] = useState<JinglerLineSelection | null>(null)

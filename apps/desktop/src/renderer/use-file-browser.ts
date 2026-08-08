@@ -10,22 +10,30 @@ import {
   type FileBrowserPendingDiscard
 } from "./file-browser-machine.js"
 import { rpc } from "./rpc-client.js"
+import { listRepositoryFiles } from "./repository-file-list.js"
 
 export type FileBrowserActor = ActorRefFrom<FileBrowserMachine>
 
 const api: FileBrowserApi = {
-  list: rpc.assetList,
+  list: (sessionId, worktreePath) =>
+    listRepositoryFiles(rpc, sessionId, worktreePath),
   diff: rpc.sessionsDiff,
   read: rpc.assetRead,
   write: rpc.assetWrite
 }
 const actors = new Map<string, FileBrowserActor>()
 
-const getFileBrowserActor = (sessionId: string): FileBrowserActor => {
+const getFileBrowserActor = (
+  sessionId: string,
+  worktreePath?: string
+): FileBrowserActor => {
   const existing = actors.get(sessionId)
   if (existing !== undefined) return existing
   const actor = createActor(createFileBrowserMachine(api), {
-    input: { sessionId }
+    input: {
+      sessionId,
+      ...(worktreePath === undefined ? {} : { worktreePath })
+    }
   })
   actor.start()
   actors.set(sessionId, actor)
@@ -92,8 +100,14 @@ export interface FileBrowserController {
   readonly followAgentTarget: (path: string, eventId: string, completed: boolean) => void
 }
 
-export function useFileBrowser(sessionId: string): FileBrowserController {
-  const actor = useMemo(() => getFileBrowserActor(sessionId), [sessionId])
+export function useFileBrowser(
+  sessionId: string,
+  worktreePath?: string
+): FileBrowserController {
+  const actor = useMemo(
+    () => getFileBrowserActor(sessionId, worktreePath),
+    [sessionId, worktreePath]
+  )
   const snapshot = useSelector(actor, (state) => state)
   const activate = useCallback(() => actor.send({ type: "VIEW_ACTIVATED" }), [actor])
   const open = useCallback((path: string) => actor.send({ type: "OPEN", path }), [actor])
