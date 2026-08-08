@@ -20,17 +20,12 @@ const base: Environment = {
 }
 const dialog = {
   open: false,
-  state: "choosing" as const,
-  method: null,
+  state: "configuring" as const,
   values: {
-    backendUrl: "",
-    pendingDeviceId: "",
-    pairingCode: "",
     host: ""
   },
   hosts: [],
   onClose: vi.fn(),
-  onChoose: vi.fn(),
   onEdit: vi.fn(),
   onSelectHost: vi.fn(),
   onSubmit: vi.fn(),

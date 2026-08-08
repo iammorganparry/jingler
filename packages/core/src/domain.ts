@@ -97,15 +97,6 @@ export const SshHost = Schema.Struct({
 })
 export type SshHost = Schema.Schema.Type<typeof SshHost>
 
-export const PairLinkEnvironmentInput = Schema.Struct({
-  backendUrl: Schema.String,
-  pendingDeviceId: Schema.String,
-  pairingCode: Schema.String
-})
-export type PairLinkEnvironmentInput = Schema.Schema.Type<
-  typeof PairLinkEnvironmentInput
->
-
 export const PairSshEnvironmentInput = Schema.Struct({
   host: Schema.String,
   username: Schema.optional(Schema.String),

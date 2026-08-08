@@ -4229,7 +4229,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     EnvironmentService.suggestHosts().pipe(
       Effect.map((hosts) => hosts.map((host) => ({ ...host }))),
     ),
-  "Environment.pairLink": (input) => EnvironmentService.pairLink(input),
   "Environment.pairSsh": (input) => EnvironmentService.pairSsh(input),
   "Environment.rename": ({ deviceId, name }) =>
     EnvironmentService.rename(deviceId, name),

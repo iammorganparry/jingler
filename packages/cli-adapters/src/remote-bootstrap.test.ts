@@ -104,6 +104,43 @@ describe("remote agent installation", () => {
     })
     expect(calls[0]).toMatchObject({ args: expect.not.arrayContaining(["-p"]) })
   })
+
+  it("explains passwordless SSH requirements when upload or activation authentication fails", async () => {
+    const denied = { exitCode: 255, stdout: "", stderr: "Permission denied (publickey)." }
+    const upload = await Effect.runPromiseExit(
+      installAndBootstrapRemoteDevice(
+        {
+          host: "clive.local",
+          relayUrl: "https://relay.example.test",
+          agentBundlePath: "/Applications/Jingler/device-agent/jingler-device.mjs"
+        },
+        runner(denied, [])
+      )
+    )
+    const activation = await Effect.runPromiseExit(
+      activateRemoteDevice(
+        {
+          host: "clive.local",
+          subject: "user-one",
+          deviceId: "device-one",
+          serverUrl: "https://api.jingler.dev"
+        },
+        runner(denied, [])
+      )
+    )
+    expect(Exit.isFailure(upload) && upload.cause.toString()).toContain(
+      "ssh clive.local works without a password"
+    )
+    expect(Exit.isFailure(upload) && upload.cause.toString()).toContain(
+      "User and IdentityFile"
+    )
+    expect(Exit.isFailure(activation) && activation.cause.toString()).toContain(
+      "ssh clive.local works without a password"
+    )
+    expect(Exit.isFailure(activation) && activation.cause.toString()).toContain(
+      "User and IdentityFile"
+    )
+  })
 })
 
 describe("remote bootstrap", () => {
@@ -227,6 +264,9 @@ describe("remote bootstrap", () => {
       )
     )
     expect(Exit.isFailure(auth) && auth.cause.toString()).toContain("authentication")
+    expect(Exit.isFailure(auth) && auth.cause.toString()).toContain(
+      "ssh clive.local works without a password"
+    )
     expect(Exit.isFailure(incompatible) && incompatible.cause.toString()).toContain("incompatible")
   })
 

@@ -13,7 +13,6 @@ export const useEnvironments = () => {
   const api = useMemo(
     () => ({
       suggestHosts: rpc.environmentsSuggestHosts,
-      pairLink: rpc.environmentsPairLink,
       pairSsh: rpc.environmentsPairSsh
     }),
     []

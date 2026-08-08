@@ -23,13 +23,12 @@ collects a password. Public Git services are excluded from host suggestions.
 
 ## User workflow
 
-Open **Settings → Devices → Add environment**, then choose:
-
-- **SSH** to select a concrete host from `~/.ssh/config`/`known_hosts`, upload or
-  install the bundled agent and its managed Node runtime, register a persistent
-  user service, and claim its result; or
-- **Remote link** to enter a pending device id and code from an already-running
-  agent using the same account-server origin.
+Open **Settings → Devices → Add environment**, then select or enter an SSH host.
+Jingler passes the value to OpenSSH unchanged, uploads or installs the bundled
+agent and its managed Node runtime, registers a persistent user service, and
+claims the result. The host must already connect without a password. When the
+remote username or key is not a local default, add a `Host` entry with `User`
+and `IdentityFile` to `~/.ssh/config` before connecting it in Jingler.
 
 Choose the environment when creating a session or from the composer. The
 sidebar shows the persisted choice. A pristine session can be re-provisioned in
@@ -59,7 +58,7 @@ credentials.
 
 ```bash
 pnpm --filter @jingler/device-agent build
-pnpm --filter @jingler/desktop e2e -- remote-environments.spec.ts
+pnpm --filter @jingler/desktop exec playwright test e2e/remote-environments.spec.ts
 ```
 
 Deployment order is relay → server grant endpoints → desktop/agent bundle →

@@ -199,7 +199,6 @@ describe("RemoteSessionService envelopes", () => {
         return Effect.succeed(response)
       },
       discovery: () => Effect.never,
-      pairLink: () => Effect.never,
       pairSsh: () => Effect.never,
       rename: () => Effect.never,
       revoke: () => Effect.never
@@ -294,7 +293,7 @@ describe("RemoteSessionService envelopes", () => {
           subject: "user_subject", deviceId: "device_clive", sessionId,
           deviceGeneration: 1, issuedAt: 1, expiresAt: 9999999999, grantId: "grant_concurrent_abcdefghijklmnop" }
       }),
-      discovery: () => Effect.never, pairLink: () => Effect.never, pairSsh: () => Effect.never,
+      discovery: () => Effect.never, pairSsh: () => Effect.never,
       rename: () => Effect.never, revoke: () => Effect.never
     }
     const services = RemoteSessionService.Default.pipe(Layer.provide(Layer.mergeAll(

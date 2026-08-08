@@ -8,12 +8,8 @@ import {
 
 const props: EnvironmentDialogProps = {
   open: true,
-  state: "choosing",
-  method: null,
+  state: "configuring",
   values: {
-    backendUrl: "",
-    pendingDeviceId: "",
-    pairingCode: "",
     host: ""
   },
   hosts: [
@@ -26,7 +22,6 @@ const props: EnvironmentDialogProps = {
     }
   ],
   onClose: vi.fn(),
-  onChoose: vi.fn(),
   onEdit: vi.fn(),
   onSelectHost: vi.fn(),
   onSubmit: vi.fn(),
@@ -35,15 +30,16 @@ const props: EnvironmentDialogProps = {
 afterEach(cleanup)
 
 describe("EnvironmentDialog", () => {
-  it("switches between Remote link and SSH onboarding", () => {
+  it("opens directly into SSH onboarding", () => {
     render(<EnvironmentDialog {...props} />)
-    fireEvent.click(screen.getByRole("button", { name: /Remote link/i }))
-    fireEvent.click(screen.getByRole("button", { name: /^SSH/i }))
-    expect(props.onChoose).toHaveBeenNthCalledWith(1, "remote-link")
-    expect(props.onChoose).toHaveBeenNthCalledWith(2, "ssh")
+    expect(screen.getByLabelText("SSH host or alias")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /Remote link/i })).toBeNull()
+    expect(screen.queryByLabelText("Backend host")).toBeNull()
+    expect(screen.queryByLabelText("Device ID")).toBeNull()
+    expect(screen.queryByLabelText("Pairing code")).toBeNull()
   })
   it("renders suggested SSH hosts and selects clive.local", () => {
-    render(<EnvironmentDialog {...props} method="ssh" state="configuring" />)
+    render(<EnvironmentDialog {...props} />)
     fireEvent.click(screen.getByText("clive.local"))
     expect(props.onSelectHost).toHaveBeenCalledWith(props.hosts[0])
     expect(screen.queryByLabelText("Username")).toBeNull()
@@ -54,7 +50,7 @@ describe("EnvironmentDialog", () => {
   })
   it("disables submission until the selected method is valid", () => {
     const view = render(
-      <EnvironmentDialog {...props} method="ssh" state="configuring" />
+      <EnvironmentDialog {...props} />
     )
     expect(
       screen
@@ -64,8 +60,6 @@ describe("EnvironmentDialog", () => {
     view.rerender(
       <EnvironmentDialog
         {...props}
-        method="ssh"
-        state="configuring"
         values={{ ...props.values, host: "clive.local" }}
       />
     )
