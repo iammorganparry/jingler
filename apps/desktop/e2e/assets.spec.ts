@@ -99,7 +99,7 @@ const selectTreePath = async (window: Page, path: string): Promise<void> => {
   await search.press("Enter")
 }
 
-test("routes every transcript file gesture to Files and keeps Preview browser-only", async ({
+test("routes every transcript file gesture to Files and keeps Browser separate", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -144,13 +144,11 @@ test("routes every transcript file gesture to Files and keeps Preview browser-on
   await conversationTab(window).click()
   await expect(window.getByTitle("Open ignored.md")).toHaveCount(0)
 
-  // The internet browser is a separate dock, with its own address bar and no
-  // file-tab close chrome. Opening it does not replace the session tab model.
-  const preview = window.getByRole("button", { name: "Preview", exact: true })
-  if ((await preview.getAttribute("aria-pressed")) !== "true") await preview.click()
+  // The internet browser is a separate session tab, with its own address bar
+  // and no file-tab close chrome. Opening it does not replace the file pills.
+  await window.getByRole("button", { name: "Browser", exact: true }).click()
   const browser = window.getByLabel("Browser preview")
   await expect(browser.getByLabel("Preview URL")).toBeVisible()
-  await expect(browser.getByText("Browser", { exact: true })).toBeVisible()
   await expect(browser.getByRole("button", { name: /^Close .+\.(md|csv|ts)$/ })).toHaveCount(0)
 })
 
@@ -324,7 +322,7 @@ test("switches a changed file between diff and edit and saves the edited revisio
   )
 })
 
-test("forwards selected current-buffer lines to the active chat with Cmd-Shift-J", async ({
+test("forwards selected current-buffer lines to the active chat with Cmd-J", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -350,7 +348,7 @@ test("forwards selected current-buffer lines to the active chat with Cmd-Shift-J
   await expect(lines.first()).toBeVisible()
   await lines.first().click({ position: { x: 6, y: 6 } })
   await lines.nth(1).click({ modifiers: ["Shift"], position: { x: 6, y: 6 } })
-  await window.keyboard.press("Meta+Shift+j")
+  await window.keyboard.press("Meta+j")
 
   await expect(conversationTab(window)).toHaveAttribute("aria-current", "page")
   await expect(

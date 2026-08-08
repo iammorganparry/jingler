@@ -26,6 +26,8 @@ export interface AssetBrowserProps {
   readonly onSelectPath: (path: string) => void
   /** Native PDFs are disabled while a tree sheet or divider covers/moves the canvas. */
   readonly renderCanvas: (nativeAvailable: boolean) => ReactNode
+  /** Optional workspace-level controls above every asset canvas. */
+  readonly toolbar?: ReactNode
   readonly className?: string
 }
 
@@ -42,6 +44,7 @@ export function AssetBrowser({
   onRetryTree,
   onSelectPath,
   renderCanvas,
+  toolbar,
   className
 }: AssetBrowserProps) {
   const [containerRef, width] = useContainerWidth()
@@ -157,6 +160,11 @@ export function AssetBrowser({
         ) : null}
 
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          {toolbar !== undefined ? (
+            <div className="flex h-8 flex-none items-center border-b border-line bg-panel px-2">
+              {toolbar}
+            </div>
+          ) : null}
           {!roomy ? (
             <button
               type="button"

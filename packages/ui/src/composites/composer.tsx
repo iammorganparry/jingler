@@ -17,7 +17,16 @@ import {
   Separator as DropdownMenuSeparator,
   Trigger as DropdownMenuTrigger
 } from "@radix-ui/react-dropdown-menu"
-import { ArrowUp, FolderGit2, GitBranch, ImagePlus, Plus, Sparkles, Square } from "lucide-react"
+import {
+  ArrowUp,
+  FolderGit2,
+  GitBranch,
+  ImagePlus,
+  Plus,
+  Radio,
+  Sparkles,
+  Square
+} from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { downscaleImage } from "../lib/image-downscale.js"
 import { reasoningEffortsFor } from "../lib/reasoning-options.js"
@@ -154,6 +163,8 @@ export function Composer({
   jinglerMode = false,
   jinglerModePending = false,
   onToggleJinglerMode,
+  followAgent = false,
+  onToggleFollowAgent,
   reasoningEffort,
   thinkingEnabled,
   onSetReasoning,
@@ -228,6 +239,10 @@ export function Composer({
   jinglerModePending?: boolean
   /** Flip Jingler mode for the active chat; workspace config is its fallback. */
   onToggleJinglerMode?: (enabled: boolean) => void
+  /** Whether Files is following mutations from this chat's active agent. */
+  followAgent?: boolean
+  /** Toggle the session file browser's shared agent-follow mode. */
+  onToggleFollowAgent?: (enabled: boolean) => void
   /** Per-session thinking strength; absent preserves the harness default. */
   reasoningEffort?: ReasoningEffort
   thinkingEnabled?: boolean
@@ -679,6 +694,24 @@ export function Composer({
               </DropdownMenuContent>
             </DropdownMenuPortal>
           </DropdownMenuRoot>
+          {onToggleFollowAgent !== undefined && (
+            <Button
+              type="button"
+              variant={followAgent ? "secondary" : "ghost"}
+              size="icon"
+              className="size-8 flex-none"
+              aria-label="Follow agent"
+              aria-pressed={followAgent}
+              title={
+                followAgent
+                  ? "Stop following files edited by this chat's agent"
+                  : "Follow files edited by this chat's agent"
+              }
+              onClick={() => onToggleFollowAgent(!followAgent)}
+            >
+              <Radio size={15} aria-hidden />
+            </Button>
+          )}
           {showJinglerToggle && (
             <button
               type="button"

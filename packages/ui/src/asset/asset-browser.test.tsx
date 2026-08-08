@@ -33,6 +33,28 @@ afterEach(() => {
 })
 
 describe("AssetBrowser", () => {
+  it("renders an accessible theme-token-based Follow agent control", () => {
+    render(
+      <AssetBrowser
+        sessionId="s1"
+        entries={[]}
+        selectedPath={null}
+        onSelectPath={() => {}}
+        toolbar={
+          <button type="button" aria-pressed="true" className="text-blue hover:bg-hover">
+            Follow agent
+          </button>
+        }
+        renderCanvas={() => <div>canvas</div>}
+      />
+    )
+
+    const follow = screen.getByRole("button", { name: "Follow agent" })
+    expect(follow.getAttribute("aria-pressed")).toBe("true")
+    expect(follow.className).toContain("text-blue")
+    expect(follow.className).not.toMatch(/#[0-9a-f]{3,8}/i)
+  })
+
   it("keeps one Pierre tree model while paths, status, and active tabs change", async () => {
     const onSelectPath = vi.fn()
     const entries: AssetFileEntry[] = [

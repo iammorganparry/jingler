@@ -10,6 +10,7 @@ import {
   StreamEvent,
   Subagent,
   activityOf,
+  agentFileActivityOf,
   displayStatusOf,
   REVIEWER_AGENT_ID,
   addPlanComment,
@@ -998,7 +999,11 @@ describe("activityOf", () => {
     parts
   })
 
-  const tool = (name: string, target: string | null, status: "running" | "success" = "running") =>
+  const tool = (
+    name: string,
+    target: string | null,
+    status: "running" | "success" | "error" = "running"
+  ) =>
     ({
       _tag: "Tool" as const,
       tool: { id: `t_${name}`, name, target, status, meta: null, diff: null, preview: null }
@@ -1071,6 +1076,83 @@ describe("activityOf", () => {
       { kind: "reading", verb: "Reading", target: "conversation.ts" }
     )
     expect(activityOf([turn(tool("Edit", "src/auth/session.ts"))], "running")?.kind).toBe("editing")
+    expect(activityOf([turn(tool("Update", "src/auth/session.ts"))], "running")).toStrictEqual({
+      kind: "editing",
+      verb: "Editing",
+      target: "session.ts"
+    })
+  })
+
+  it("derives full-path file activity for edit, write, update, and multi-edit tools", () => {
+    expect(
+      agentFileActivityOf(
+        [turn(tool("Edit", "packages/core/src/conversation.ts"))],
+        "running"
+      )
+    ).toEqual({
+      eventId: "t_Edit",
+      path: "packages/core/src/conversation.ts",
+      phase: "editing"
+    })
+    expect(
+      agentFileActivityOf([turn(tool("Write", "src/new-file.ts", "success"))], "settling")
+    ).toEqual({
+      eventId: "t_Write",
+      path: "src/new-file.ts",
+      phase: "completed"
+    })
+    expect(
+      agentFileActivityOf(
+        [turn(tool("Update", "src/updated-file.ts", "success"))],
+        "settling"
+      )
+    ).toEqual({
+      eventId: "t_Update",
+      path: "src/updated-file.ts",
+      phase: "completed"
+    })
+    expect(
+      agentFileActivityOf([turn(tool("MultiEdit", "src/multi.ts"))], "running")
+    ).toEqual({ eventId: "t_MultiEdit", path: "src/multi.ts", phase: "editing" })
+  })
+
+  it("keeps following a running edit when a later parallel read starts", () => {
+    expect(
+      agentFileActivityOf(
+        [turn(tool("Edit", "src/active.ts"), tool("Read", "src/context.ts"))],
+        "running"
+      )
+    ).toEqual({
+      eventId: "t_Edit",
+      path: "src/active.ts",
+      phase: "editing"
+    })
+  })
+
+  it("does not replay completed or failed mutations after the run becomes idle", () => {
+    expect(
+      agentFileActivityOf([turn(tool("Write", "src/old.ts", "success"))], "idle")
+    ).toBeNull()
+    expect(
+      agentFileActivityOf([turn(tool("Edit", "src/failed.ts", "error"))], "running")
+    ).toBeNull()
+  })
+
+  it("does not replay a completed mutation from an earlier assistant turn", () => {
+    expect(
+      agentFileActivityOf(
+        [
+          turn(tool("Edit", "src/old.ts", "success")),
+          turn({ _tag: "Text", text: "Starting a new task" })
+        ],
+        "running"
+      )
+    ).toBeNull()
+  })
+
+  it("ignores non-mutation tools when deriving agent file activity", () => {
+    expect(agentFileActivityOf([turn(tool("Read", "src/a.ts"))], "running")).toBeNull()
+    expect(agentFileActivityOf([turn(tool("Bash", "pnpm test"))], "running")).toBeNull()
   })
 
   it("names sub-agent spawns as delegating", () => {

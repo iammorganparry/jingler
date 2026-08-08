@@ -7,7 +7,7 @@ import type {
   ReasoningEffort,
   StreamEvent
 } from "@jingler/core"
-import { CliExecError, defaultPlan } from "@jingler/core"
+import { CliExecError, defaultPlan, isFileMutationTool } from "@jingler/core"
 import type {
   McpServerConfig,
   PermissionMode as SdkPermissionMode,
@@ -50,8 +50,7 @@ const strOf = (v: unknown): string | null => (typeof v === "string" ? v : null)
 const numOf = (v: unknown): number => (typeof v === "number" ? v : 0)
 
 /** Tools that write to disk — gated as "edit" and carry a diff peek. */
-const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit", "Update"])
-export const isEditTool = (name: string): boolean => EDIT_TOOLS.has(name)
+export const isEditTool = isFileMutationTool
 
 /**
  * Interactive tools surfaced via dedicated UI (the plan card / question card),
