@@ -1438,6 +1438,50 @@ export const scriptedRun =
         return
       }
 
+      // A nested sub-agent mutation for the Files workspace's opt-in follow
+      // coverage. The child is deliberately two levels below the main agent so
+      // the Electron test proves follow observes descendants, rather than only
+      // the main transcript or direct children.
+      if (spec.prompt.includes("[[subagent-edit-preview]]")) {
+        const parent = `toolu_parent_${sessionId}`
+        const child = `toolu_child_${sessionId}`
+        yield* emit({
+          _tag: "SubagentStarted",
+          id: parent,
+          name: "Explore",
+          description: "Delegate the file update",
+          parentId: null
+        })
+        yield* emit({
+          _tag: "SubagentStarted",
+          id: child,
+          name: "general-purpose",
+          description: "Update the delegated file",
+          parentId: parent
+        })
+        yield* emit({
+          _tag: "ToolStart",
+          id: "subagent-edit-1",
+          name: "Edit",
+          target: "src/delegated.ts",
+          agentId: child
+        })
+        yield* pause
+        yield* emit({
+          _tag: "ToolEnd",
+          id: "subagent-edit-1",
+          status: "success",
+          meta: null,
+          diff: { added: 1, removed: 0 },
+          preview: "+export const delegated = true",
+          agentId: child
+        })
+        yield* emit({ _tag: "SubagentEnded", id: child, status: "done" })
+        yield* emit({ _tag: "SubagentEnded", id: parent, status: "done" })
+        yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        return
+      }
+
       // Models the older/partial Codex file-change shape that reports a
       // successful Edit without diff metadata. The Electron regression creates
       // this file after the initial workspace listing, then proves the ToolEnd

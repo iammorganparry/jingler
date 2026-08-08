@@ -22,8 +22,8 @@ import {
   FolderGit2,
   GitBranch,
   ImagePlus,
+  MousePointer2,
   Plus,
-  Radio,
   Sparkles,
   Square
 } from "lucide-react"
@@ -695,11 +695,12 @@ export function Composer({
             </DropdownMenuPortal>
           </DropdownMenuRoot>
           {onToggleFollowAgent !== undefined && (
-            <Button
+            <button
               type="button"
-              variant={followAgent ? "secondary" : "ghost"}
-              size="icon"
-              className="size-8 flex-none"
+              className={cn(
+                "jingler-mode-toggle inline-flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors active:scale-[0.96]",
+                followAgent ? "is-active" : "text-muted-foreground hover:text-text"
+              )}
               aria-label="Follow agent"
               aria-pressed={followAgent}
               title={
@@ -709,8 +710,12 @@ export function Composer({
               }
               onClick={() => onToggleFollowAgent(!followAgent)}
             >
-              <Radio size={15} aria-hidden />
-            </Button>
+              <MousePointer2
+                size={15}
+                aria-hidden
+                className="jingler-mode-toggle__mark"
+              />
+            </button>
           )}
           {showJinglerToggle && (
             <button

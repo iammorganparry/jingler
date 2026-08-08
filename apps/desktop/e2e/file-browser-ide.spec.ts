@@ -212,6 +212,14 @@ test("follows the selected chat agent through edited and newly created files", a
   await expect(window.getByTestId("session-auxiliary-split")).toBeVisible()
   await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
+  await expect(composerFollow).toHaveClass(/is-active/)
+  await expect(composerFollow.locator("svg")).toHaveClass(/lucide-mouse-pointer-2/)
+  const workspaceFollow = window
+    .getByTestId("asset-browser")
+    .getByRole("button", { name: "Follow agent", exact: true })
+  await expect(workspaceFollow).toHaveAttribute("aria-pressed", "true")
+  await expect(workspaceFollow).toHaveClass(/is-active/)
+  await expect(workspaceFollow.locator("svg")).toHaveClass(/lucide-mouse-pointer-2/)
 
   // Prove the initial repository scan has settled before creating this file.
   // The scripted agent then reports the mutation only after the file exists,
@@ -247,4 +255,36 @@ test("follows the selected chat agent through edited and newly created files", a
 
   await selectTreePath(window, "src/other.ts")
   await expect(composerFollow).toHaveAttribute("aria-pressed", "false")
+})
+
+test("follows a nested sub-agent edit for the selected chat", async ({ launchApp }) => {
+  const { window, repoPath } = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: seedRepository,
+    sessions: ({ repoPath }) => [session(repoPath)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  writeFileSync(join(repoPath, "src", "delegated.ts"), "export const delegated = true\n")
+
+  const composerFollow = window
+    .getByTestId("composer")
+    .getByRole("button", { name: "Follow agent", exact: true })
+  await composerFollow.click()
+  await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
+
+  const composer = window.getByPlaceholder("Message Codex…")
+  await composer.fill("[[subagent-edit-preview]] Delegate this file update.")
+  await composer.press("Enter")
+
+  await expect(window.getByRole("textbox", { name: "src/delegated.ts" })).toBeVisible({
+    timeout: 20_000
+  })
+  await expect(
+    window
+      .getByTestId("file-tab-src/delegated.ts")
+      .getByRole("button", { name: "src/delegated.ts", exact: true })
+  ).toHaveAttribute("aria-current", "page")
+  await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 })
